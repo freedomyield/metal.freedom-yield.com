@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>リファレンスアーキテクチャ — Freedom Yield Metal</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="小規模で透明性のある Metal Blockchain validator の技術リファレンス: 2 ホストトポロジ、片方向のデータフロー、鍵の分離、運用判断の背景にある原則。">
+<link rel="canonical" href="https://metal.freedom-yield.com/ja/reference-architecture/">
+<link rel="alternate" hreflang="en" href="https://metal.freedom-yield.com/reference-architecture/">
+<link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/reference-architecture/">
+<link rel="alternate" hreflang="x-default" href="https://metal.freedom-yield.com/reference-architecture/">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#07080c">
+<meta name="color-scheme" content="dark">
+<script defer src="/assets/main.js"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
+<script defer src="/assets/gtag-init.js"></script>
+</head>
+<body>
+<a href="#main" class="skip-link">メイン本文へスキップ</a>
+
+<nav class="topnav">
+	<div class="topnav-inner">
+		<a href="/ja/" class="brand">Freedom Yield · Metal</a>
+		<details class="nav-menu">
+			<summary class="nav-toggle" aria-label="メニュー開閉">
+				<span class="hamburger-icon" aria-hidden="true"></span>
+			</summary>
+			<div class="nav">
+				<a href="/ja/#status">状態</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">概要</button>
+					<div class="nav-dropdown-menu">
+						<a href="/ja/#about">概要</a>
+						<a href="/ja/#roadmap">展望</a>
+					</div>
+				</div>
+				<a href="/ja/#delegate" data-ga-event="delegate_cta_click" data-ga-param-position="nav">委任</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">検証</button>
+					<div class="nav-dropdown-menu">
+						<a href="/ja/data/">公開データ</a>
+						<a href="/ja/journal/">運用日誌</a>
+						<a href="/ja/network/">ネットワーク</a>
+						<a href="/ja/continuity/">事業継続性</a>
+						<a href="/jurisdiction/">管轄</a>
+						<a href="/ja/incidents/" data-ga-event="nav_click" data-ga-param-target="incidents">インシデント</a>
+						<a href="/commitments/">コミットメント</a>
+						<a href="/risk-disclosure/">リスク開示</a>
+						<a href="/ja/selection-evidence/">選定エビデンス</a>
+						<a href="/ja/subnet-readiness/">Subnet 適性</a>
+						<a href="/ja/reference-architecture/" aria-current="page">リファレンスアーキテクチャ</a>
+						<a href="/ja/pledge/">Pledge</a>
+					</div>
+				</div>
+				<a href="/reference-architecture/" class="nav-lang" data-ga-event="language_switch" data-ga-param-to="en">EN</a>
+			</div>
+		</details>
+	</div>
+</nav>
+
+<header class="hero hero--simple">
+	<div class="container">
+		<p class="hero-eyebrow">運用の組み立て方</p>
+		<h1>リファレンスアーキテクチャ</h1>
+		<p class="hero-lead">
+			小規模な validator は小さく作るべきです。本ページでは、Freedom Yield が現在稼働している
+			トポロジ・データフロー・運用原則を記述します。目的は二つ — 評価者に技術的な一次資料を提供すること、
+			そして他の小規模運用者が参考にできるパターンを文書化すること。具体的なプロバイダ・IP・ホストパス は
+			意図的に開示しません。価値はパターンそのものにあります。
+		</p>
+	</div>
+</header>
+
+<main id="main" class="container">
+
+	<section class="card">
+		<h2>2 ホストトポロジ</h2>
+		<p>本運用は 2 つの分離された商用 VPS インスタンス上で稼働しています。それぞれ役割・到達性プロファイル・障害時の影響範囲が異なります。</p>
+		<details class="data-example" open>
+			<summary>トポロジ図</summary>
+			<pre><code>┌────────────────────────────────┐        ┌───────────────────────────────┐
+│  Validator host  (APAC region) │        │  Web host  (Japan region)     │
+│                                │        │                               │
+│  metalgo (Metal mainnet)       │        │  Caddy (HTTPS, CSP)           │
+│  cron-based monitoring         │        │  Static public site           │
+│  retry-with-backoff push       │        │  /api/*.json from validator   │
+│                                │        │                               │
+│  inbound: 9651 (peers only)    │        │  inbound: 80/443 (public)     │
+│  outbound: → web host (push)   │        │  inbound: 22 (operator only)  │
+└────────────────┬───────────────┘        └────────────────▲──────────────┘
+                 │                                         │
+                 │  one-way push (forced-command wrapper)  │
+                 └─────────────────────────────────────────┘</code></pre>
+		</details>
+		<p>2 つのホストはサイジングが異なります。Validator host は単一ネットワークの <code>metalgo</code> ワークロード + 十分なマージン用にサイジング、 Web host は静的配信 + validator host から書き込まれる小サイズの JSON ファイル用にサイジング。</p>
+	</section>
+
+	<section class="card">
+		<h2>なぜ 2 ホストに分けたのか</h2>
+		<p>この分離は本構成における最も重大なアーキテクチャ判断であり、機能追加よりも先に存在します。理由は 3 つ:</p>
+		<ol>
+			<li><strong>Validator uptime が KPI</strong> — web 側障害(DDoS、CDN 問題、web サーバクラッシュ)が <code>metalgo</code> のコンセンサスシグナルに影響してはいけません。公開サイトを同一マシン上でホストすると両者が結合します。分離すれば結合は切れます。</li>
+			<li><strong>攻撃面の分離</strong> — Validator host が公開インターネットに出すのは P2P トラフィックのみ。SSH は世界の大部分に対して閉じており、 web トラフィックは全く配信しません。Web host は 80/443 を出す明らかなターゲットですが、 そこが侵害されても validator の鍵材料には到達しません。</li>
+			<li><strong>容量の隔離</strong> — 公開サイト側のトラフィックスパイクが <code>metalgo</code> から CPU を奪うことはありません。Subnet 拡張が公開サイトの容量を奪うこともありません。</li>
+		</ol>
+	</section>
+
+	<section class="card">
+		<h2>Validator host の役割</h2>
+		<ul>
+			<li><code>metalgo</code> が P2P ポートに bind。Staking key はローカルに保管され、他プロセスから読まれることはない。</li>
+			<li>Cron 駆動のヘルスチェックを短い間隔で実施: peer 数・validator 状態・disk pressure・log 異常。</li>
+			<li>Cron 駆動のデータ生成: validator state・peer 地理情報・uptime 履歴・fee-market サマリ・cycle ledger。出力は小さい JSON / JSONL で atomic に書き込み。</li>
+			<li>専用 SSH key と forced-command wrapper で web host への outbound-only push。Wrapper はファイル名を allowlist で検証してから atomic <code>mv</code>。</li>
+			<li>Web host の SSH ポートは恒常的な brute-force ノイズに晒されており、 正当な push が偶発的に random-drop に巻き込まれることがあります。Retry-with-backoff(短い再試行 2 回 + 指数バックオフ)で観測された失敗率をカバー。</li>
+			<li>ローカルの append-only 永続化ストリーム(JSONL): uptime・gini・peer 変化・fee market・node health。これらが長期 audit trail のソース。</li>
+		</ul>
+		<p>Validator host 側の runbook は公開リポジトリにあります:</p>
+		<ul>
+			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/DISASTER_RECOVERY.md" rel="noopener noreferrer"><code>docs/DISASTER_RECOVERY.md</code></a></li>
+			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md" rel="noopener noreferrer"><code>docs/KEY_ROTATION.md</code></a></li>
+			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/VALIDATOR_RENEWAL.md" rel="noopener noreferrer"><code>docs/VALIDATOR_RENEWAL.md</code></a></li>
+			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/INCIDENT_RESPONSE.md" rel="noopener noreferrer"><code>docs/INCIDENT_RESPONSE.md</code></a></li>
+		</ul>
+	</section>
+
+	<section class="card">
+		<h2>Web host の役割</h2>
+		<ul>
+			<li>Caddy が静的サイトを配信。自動 HTTPS・HSTS・厳格な <code>Content-Security-Policy</code>(<code>default-src 'none'</code> をベースに各 directive ごとに narrow allowlist)。</li>
+			<li>Web フレームワークなし、アプリケーションサーバなし、DB なし — 面積は意図的に最小化。</li>
+			<li><code>/api/*</code> の公開 JSON エンドポイントは validator host の push wrapper によって書き込まれます。Web host は validator key 材料を持たず、 validator data を自前で生成することはできません。</li>
+			<li>GitHub Actions が SSH + rsync で site shell の変更を反映。Deploy の rsync は <code>--delete</code> を使うため、 runtime 生成の API feed が消されないよう個別ファイルの exclude list を維持しています。</li>
+		</ul>
+	</section>
+
+	<section class="card">
+		<h2>片方向のデータフロー</h2>
+		<p>全てのデータは validator host から web host に流れます。Web host から validator host への read access はありません。Push チャネルは以下を使用:</p>
+		<ul>
+			<li>専用 ed25519 SSH key、 wrapper を起動する以外の権限なし。</li>
+			<li>Web host 側の forced-command wrapper がファイル名を allowlist で検証(固有ファイル名 + hex-token <code>.ics</code> パターン)。</li>
+			<li>受信時に JSON を検証、 atomic <code>mv</code> で公開 web root に配置。</li>
+			<li>Strict host key checking — <code>StrictHostKeyChecking=no</code> は使用しない。</li>
+		</ul>
+		<p>Push key が侵害されても、 攻撃者は allowlist にマッチするファイル名で、 特定 destination ディレクトリに、 wrapper の content-type チェック通過後にしか書き込めません。横移動は不可能です。</p>
+	</section>
+
+	<section class="card">
+		<h2>鍵の分離</h2>
+		<p>3 種類の鍵カテゴリ、 それぞれ別の場所で別の理由で保管:</p>
+		<dl class="data-meta">
+			<dt>Validator staking + BLS 鍵</dt><dd>Validator host にのみ保管。Rotation runbook に従いホスト外に暗号化バックアップ。コンセンサス用にのみ <code>metalgo</code> が使用。</dd>
+			<dt>Operator identity 鍵</dt><dd>専用 ed25519、 operator の local ワークステーションにのみ保管。<code>ssh-keygen -Y</code> で off-chain identity manifest を署名するために使用。Validator host・web host のいずれにも置きません。スキーマと検証手順は <a href="/api/identity.example.json"><code>/api/identity.example.json</code></a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer"><code>docs/IDENTITY_VERIFICATION.md</code></a> に記載。</dd>
+			<dt>Push 鍵</dt><dd>Validator host → web host、 ed25519、 forced-command wrapper にスコープ。Wrapper の allowlist から逸脱不可。</dd>
+		</dl>
+		<p>Validator の signing key を off-chain 署名や外部認証に再利用することはありません。これは絶対遵守 — 運用上の署名対象ごとに、 その用途専用の鍵を用意します。</p>
+	</section>
+
+	<section class="card">
+		<h2>監視・アラート・永続化</h2>
+		<ul>
+			<li>Cron ベースのスケジュールチェックを短い間隔で実施。失敗は operator にモバイル push 通知。</li>
+			<li>Append-only 永続化ストリーム(JSONL): uptime サンプル・gini 履歴・peer 変化・fee market 履歴・node-health サンプル を記録。これらが長期 audit trail。</li>
+			<li>Daily digest 通知が wallet 残高・peer 数・cycle ヘルスをサマリ送信。14 日 retention で通知ノイズを抑制。</li>
+			<li>外部 API 呼び出し(RPC・explorer)は数分〜数十分の TTL キャッシュを使用 — Cron 頻度 ≠ API 呼び出し頻度。</li>
+		</ul>
+	</section>
+
+	<section class="card">
+		<h2>本ページが「ではない」もの</h2>
+		<p>本ページはコピー&ペースト可能なデプロイガイド、 完全な config ダンプ、 他運用者に同じプロバイダや同じ仕様を採用するよう推奨する文書、 すべての runbook の網羅記述、 のいずれでもありません。 構造上のリファレンス — 原則・トポロジ・ホスト間 invariant — を示すものです。 具体的なプロバイダ・IP・ホスト名・ポート・パス・認証情報は本サーフェスには意図的に載せていません。 類似パターンを採用する運用者は、 fresh な脅威モデルに基づき独自に判断してください。</p>
+	</section>
+
+</main>
+
+<footer class="site-footer">
+	<div class="container">
+		<div class="footer-grid">
+			<div class="footer-brand">
+				<h3>Freedom Yield · Metal</h3>
+				<p>Long-horizon validator on Metal Blockchain. Transparent uptime, public audit trail.</p>
+			</div>
+			<nav class="footer-col" aria-label="Validator">
+				<h4>Validator</h4>
+				<ul>
+					<li><a href="/ja/#status">状態</a></li>
+					<li><a href="/ja/#about">概要</a></li>
+					<li><a href="/ja/#track-record">実績</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Delegation">
+				<h4>Delegation</h4>
+				<ul>
+					<li><a href="/ja/#delegate">委任</a></li>
+					<li><a href="/ja/#calculator">報酬</a></li>
+					<li><a href="/ja/#faq">FAQ</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Network">
+				<h4>Network</h4>
+				<ul>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">Explorer ↗</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Support">
+				<h4>Support</h4>
+				<ul>
+					<li><a href="/ja/selection-evidence/">選定エビデンス</a></li>
+					<li><a href="/ja/subnet-readiness/">Subnet 適性</a></li>
+					<li><a href="/ja/reference-architecture/" aria-current="page">リファレンスアーキテクチャ</a></li>
+					<li><a href="/risk-disclosure/">リスク開示</a></li>
+					<li><a href="mailto:bp@freedom-yield.com">問い合わせ</a></li>
+				</ul>
+			</nav>
+		</div>
+		<hr class="footer-divider">
+		<p class="footer-disclaimer"><strong>免責事項:</strong> Freedom Yield は Metal Blockchain 上で運用される独立した third-party validator です。Metallicus Inc. または Metal Blockchain Foundation との提携・支援・後援・運営関係はありません。すべての商標は各保有者に帰属します。</p>
+		<div class="footer-bottom">
+			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain</a>.</p>
+			<p>© 2026 Freedom Yield · Metal validator</p>
+		</div>
+	</div>
+</footer>
+</body>
+</html>
