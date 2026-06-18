@@ -150,6 +150,7 @@ jobs:
             --exclude='public/api/uptime-recent.json' \
             --exclude='public/api/uptime-cycles.json' \
             --exclude='public/api/peers.json' \
+            --exclude='public/api/evidence.json' \
             --exclude='public/calendar/' \
             ./ "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/"
 
