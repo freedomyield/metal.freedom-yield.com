@@ -151,6 +151,13 @@ jobs:
             --exclude='public/api/uptime-cycles.json' \
             --exclude='public/api/peers.json' \
             --exclude='public/api/evidence.json' \
+            --exclude='public/api/fee-market.json' \
+            --exclude='public/api/fee-market-history.jsonl' \
+            --exclude='public/api/node-health-recent.json' \
+            --exclude='public/api/peers-changes.json' \
+            --exclude='public/api/peers-gini.json' \
+            --exclude='public/api/peers-gini-history.jsonl' \
+            --exclude='public/api/peers-history-index.json' \
             --exclude='public/calendar/' \
             ./ "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/"
 
