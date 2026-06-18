@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Transparent Validator Pledge — Freedom Yield Metal</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="An open, CC0-licensed minimum disclosure standard for blockchain validator operators. Five articles covering uptime, incidents, fee stability, decommission notice, and identity. Anyone can adopt or fork.">
+<link rel="canonical" href="https://metal.freedom-yield.com/pledge/">
+<link rel="alternate" hreflang="en" href="https://metal.freedom-yield.com/pledge/">
+<link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/pledge/">
+<link rel="alternate" hreflang="x-default" href="https://metal.freedom-yield.com/pledge/">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#07080c">
+<meta name="color-scheme" content="dark">
+<script defer src="/assets/main.js"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
+<script defer src="/assets/gtag-init.js"></script>
+</head>
+<body>
+<a href="#main" class="skip-link">Skip to main content</a>
+
+<nav class="topnav">
+	<div class="topnav-inner">
+		<a href="/" class="brand">Freedom Yield · Metal</a>
+		<details class="nav-menu">
+			<summary class="nav-toggle" aria-label="Open / close menu">
+				<span class="hamburger-icon" aria-hidden="true"></span>
+			</summary>
+			<div class="nav">
+				<a href="/#status">Status</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">About</button>
+					<div class="nav-dropdown-menu">
+						<a href="/#about">About</a>
+						<a href="/#roadmap">Roadmap</a>
+					</div>
+				</div>
+				<a href="/#delegate" data-ga-event="delegate_cta_click" data-ga-param-position="nav">Delegate</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">Verify</button>
+					<div class="nav-dropdown-menu">
+						<a href="/data/">Open data</a>
+						<a href="/journal/">Cycle journal</a>
+						<a href="/network/">Network</a>
+						<a href="/continuity/">Continuity</a>
+						<a href="/jurisdiction/">Jurisdiction</a>
+						<a href="/incidents/" data-ga-event="nav_click" data-ga-param-target="incidents">Incidents</a>
+						<a href="/commitments/">Commitments</a>
+						<a href="/risk-disclosure/">Risk disclosure</a>
+						<a href="/selection-evidence/">Selection evidence</a>
+						<a href="/pledge/" aria-current="page">Pledge</a>
+					</div>
+				</div>
+				<a href="/ja/pledge/" class="nav-lang" data-ga-event="language_switch" data-ga-param-to="ja">JA</a>
+			</div>
+		</details>
+	</div>
+</nav>
+
+<header class="hero hero--simple">
+	<div class="container">
+		<p class="hero-eyebrow">Open standard</p>
+		<h1>Transparent Validator Pledge</h1>
+		<p class="hero-lead">
+			A minimum disclosure standard for blockchain validator operators, released into the public domain under CC0.
+			Five articles covering uptime, incidents, fee stability, decommission notice, and identity.
+			Any validator on any chain can adopt it, modify it, or fork it. Freedom Yield publishes it as a specimen and a proposing party — not as an authority.
+		</p>
+	</div>
+</header>
+
+<main id="main" class="container">
+
+	<section class="card">
+		<h2>What it is</h2>
+		<p>
+			A short, public-domain text describing the minimum artifacts a validator can publish to make itself evaluable
+			by delegators and reviewers without ad-hoc back-and-forth. It is a baseline, not a ceiling.
+		</p>
+	</section>
+
+	<section class="card">
+		<h2>Why</h2>
+		<p>
+			Every reviewer of every validator ends up asking the same handful of questions — uptime history, incident handling,
+			fee stability, exit notice, who is on the other side. A shared minimum-disclosure pattern reduces friction for
+			reviewers and creates fewer surprises during selection. Anonymous operation remains a valid choice; the Pledge is
+			for validators who have chosen a public stance.
+		</p>
+	</section>
+
+	<section class="card">
+		<h2>The five articles</h2>
+		<ul>
+			<li><strong>Article 1 — Uptime track record.</strong> A machine-readable record of uptime by cycle, cross-checkable on chain.</li>
+			<li><strong>Article 2 — Incident transparency.</strong> A log of operational incidents with date, severity, impact, root cause, and resolution.</li>
+			<li><strong>Article 3 — Fee stability.</strong> Current fee published; changes announced in advance with a defined notice period.</li>
+			<li><strong>Article 4 — Decommission notice.</strong> A pre-committed minimum lead time for any decision to stop operating.</li>
+			<li><strong>Article 5 — Identity disclosure standard.</strong> Brand identity, stable contact, and jurisdiction at country granularity — no more is required.</li>
+		</ul>
+		<p>
+			Full text:
+			<a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/TRANSPARENT_VALIDATOR_PLEDGE.md" rel="noopener noreferrer">docs/TRANSPARENT_VALIDATOR_PLEDGE.md ↗</a>
+		</p>
+	</section>
+
+	<section class="card">
+		<h2>Freedom Yield as specimen</h2>
+		<p>
+			Freedom Yield adopts the Pledge and publishes the following mapping. Other adopters may map differently — there is no required URL layout.
+		</p>
+		<ul>
+			<li><strong>Article 1 — Uptime track record:</strong> <a href="/journal/">/journal/</a> + <a href="/api/uptime-cycles.json">/api/uptime-cycles.json</a></li>
+			<li><strong>Article 2 — Incident transparency:</strong> <a href="/incidents/">/incidents/</a> + <a href="/api/incidents.json">/api/incidents.json</a></li>
+			<li><strong>Article 3 — Fee stability:</strong> <a href="/commitments/">/commitments/</a> (§ Fee policy) + <a href="/api/validator.json">/api/validator.json</a></li>
+			<li><strong>Article 4 — Decommission notice:</strong> <a href="/commitments/">/commitments/</a> (§ Decommission notice) — 90 days</li>
+			<li><strong>Article 5 — Identity disclosure:</strong> <a href="/jurisdiction/">/jurisdiction/</a> + brand "Freedom Yield" + <a href="mailto:bp@freedom-yield.com">bp@freedom-yield.com</a></li>
+		</ul>
+	</section>
+
+	<section class="card">
+		<h2>License</h2>
+		<p>
+			The Pledge is released into the public domain under <strong>CC0 1.0 Universal</strong>. No attribution required.
+			Forks, derivatives, and translations are all permitted. There is no central registry; adoption is signaled at the adopter's own URL.
+		</p>
+	</section>
+
+	<section class="card">
+		<h2>Adopting it</h2>
+		<ul>
+			<li>Publish a compliance statement on a stable URL on your own site, declaring which version of the Pledge you adhere to.</li>
+			<li>Optionally publish a machine-readable adoption manifest (suggested filename <code>/api/pledge-adoption.json</code>) following the schema sketch in the standard text.</li>
+			<li>Link your compliance URL from your repository's README so reviewers can find it.</li>
+		</ul>
+	</section>
+
+	<section class="card">
+		<h2>Contributing</h2>
+		<p>
+			Improvements, translations, and forks are welcome via pull requests. Maintainer authority is purely editorial; any
+			disagreement that cannot be resolved editorially may be resolved by forking.
+		</p>
+		<ul>
+			<li>Repository: <a href="https://github.com/freedomyield/metal.freedom-yield.com" rel="noopener noreferrer">github.com/freedomyield/metal.freedom-yield.com ↗</a></li>
+			<li>Standard text: <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/TRANSPARENT_VALIDATOR_PLEDGE.md" rel="noopener noreferrer">docs/TRANSPARENT_VALIDATOR_PLEDGE.md ↗</a></li>
+		</ul>
+		<p>The Pledge belongs to no one. Use it however helps.</p>
+	</section>
+
+</main>
+
+<footer class="site-footer">
+	<div class="container">
+		<div class="footer-grid">
+			<div class="footer-brand">
+				<h3>Freedom Yield · Metal</h3>
+				<p>Long-horizon validator on Metal Blockchain. Transparent uptime, public audit trail.</p>
+			</div>
+			<nav class="footer-col" aria-label="Validator">
+				<h4>Validator</h4>
+				<ul>
+					<li><a href="/#status">Status</a></li>
+					<li><a href="/#about">About</a></li>
+					<li><a href="/#track-record">Track record</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Delegation">
+				<h4>Delegation</h4>
+				<ul>
+					<li><a href="/#delegate">Delegate</a></li>
+					<li><a href="/#calculator">Rewards</a></li>
+					<li><a href="/#faq">FAQ</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Network">
+				<h4>Network</h4>
+				<ul>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">Explorer ↗</a></li>
+
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Support">
+				<h4>Support</h4>
+				<ul>
+					<li><a href="/data/">Open data</a></li>
+					<li><a href="/journal/">Cycle journal</a></li>
+					<li><a href="/continuity/">Continuity</a></li>
+					<li><a href="/jurisdiction/">Jurisdiction</a></li>
+					<li><a href="/incidents/">Incidents</a></li>
+					<li><a href="mailto:bp@freedom-yield.com">Contact</a></li>
+				</ul>
+			</nav>
+		</div>
+		<hr class="footer-divider">
+		<p class="footer-disclaimer"><strong>Disclaimer:</strong> Freedom Yield is an independent, third-party validator operating on Metal Blockchain. It is not affiliated with, endorsed by, sponsored by, or operated by Metallicus Inc. or the Metal Blockchain Foundation. All trademarks are the property of their respective owners.</p>
+		<div class="footer-bottom">
+			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain</a>.</p>
+			<p>© 2026 Freedom Yield · Metal validator</p>
+		</div>
+	</div>
+</footer>
+</body>
+</html>

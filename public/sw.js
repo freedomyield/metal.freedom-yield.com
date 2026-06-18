@@ -6,7 +6,7 @@
 //   - Versioned cache name; old caches deleted on activate.
 "use strict";
 
-const CACHE_VERSION = "v113-selection-evidence";
+const CACHE_VERSION = "v114-network";
 const SHELL_CACHE = "shell-" + CACHE_VERSION;
 const DATA_CACHE = "data-" + CACHE_VERSION;
 
@@ -15,6 +15,7 @@ const SHELL_ASSETS = [
 	"/ja/",
 	"/styles.css",
 	"/assets/main.js",
+	"/assets/network.js",
 	"/assets/logo.svg",
 	"/assets/icon-192.png",
 	"/assets/icon-512.png",

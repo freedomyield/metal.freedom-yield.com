@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ネットワーク観測 — Freedom Yield Metal</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="Metal Blockchain validator セット全体に関する公開・中立的な観察情報。ランキング・推奨・批判ではなく、on-chain データから導いた集計のみ。">
+<link rel="canonical" href="https://metal.freedom-yield.com/ja/network/">
+<link rel="alternate" hreflang="en" href="https://metal.freedom-yield.com/network/">
+<link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/network/">
+<link rel="alternate" hreflang="x-default" href="https://metal.freedom-yield.com/network/">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#07080c">
+<meta name="color-scheme" content="dark">
+<script defer src="/assets/main.js"></script>
+<script defer src="/assets/network.js"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
+<script defer src="/assets/gtag-init.js"></script>
+</head>
+<body>
+<a href="#main" class="skip-link">メイン本文へスキップ</a>
+
+<nav class="topnav">
+	<div class="topnav-inner">
+		<a href="/ja/" class="brand">Freedom Yield · Metal</a>
+		<details class="nav-menu">
+			<summary class="nav-toggle" aria-label="メニュー開閉">
+				<span class="hamburger-icon" aria-hidden="true"></span>
+			</summary>
+			<div class="nav">
+				<a href="/ja/#status">状態</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">概要</button>
+					<div class="nav-dropdown-menu">
+						<a href="/ja/#about">概要</a>
+						<a href="/ja/#roadmap">展望</a>
+					</div>
+				</div>
+				<a href="/ja/#delegate" data-ga-event="delegate_cta_click" data-ga-param-position="nav">委任</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">検証</button>
+					<div class="nav-dropdown-menu">
+						<a href="/ja/data/">公開データ</a>
+						<a href="/ja/journal/">運用日誌</a>
+						<a href="/ja/network/" aria-current="page">ネットワーク</a>
+						<a href="/ja/continuity/">事業継続性</a>
+						<a href="/ja/jurisdiction/">日本拠点姿勢</a>
+						<a href="/ja/incidents/" data-ga-event="nav_click" data-ga-param-target="incidents">インシデント</a>
+						<a href="/ja/commitments/">Commitment</a>
+						<a href="/ja/risk-disclosure/">リスク開示</a>
+						<a href="/ja/selection-evidence/">選定エビデンス</a>
+					</div>
+				</div>
+				<a href="/network/" class="nav-lang" data-ga-event="language_switch" data-ga-param-to="en">EN</a>
+			</div>
+		</details>
+	</div>
+</nav>
+
+<header class="hero hero--simple">
+	<div class="container">
+		<p class="hero-eyebrow">観測</p>
+		<h1>ネットワーク観測</h1>
+		<p class="hero-lead">
+			本ページは Metal validator セット全体に関する公開・中立的な観察情報です。
+			ランキングでも、推奨でも、特定運用者の批判でもありません。
+		</p>
+		<p class="note">
+			出典: <code data-field="source">/api/peers.json</code> · 観測時刻
+			<span data-field="generatedAt">—</span> · 集計対象 active validator 数:
+			<span data-field="totalValidators">—</span>
+		</p>
+	</div>
+</header>
+
+<main id="main" class="container">
+
+	<section class="card">
+		<h2>ネットワーク規模</h2>
+		<p>
+			本ページ生成時点の Metal Blockchain primary network 上の active validator 数です。
+			本ノードの local <code>metalgo</code> が <code>platform.getCurrentValidators</code> を
+			叩いて得た値で、導出チェーンの全容は <a href="/ja/data/">公開データ</a> ページに記載しています。
+		</p>
+		<dl class="kv">
+			<dt>Active validator 数</dt><dd><span data-field="totalValidators">—</span></dd>
+			<dt>観測時刻</dt><dd><span data-field="generatedAt">—</span></dd>
+			<dt>出典 JSON</dt><dd><a href="/api/peers.json"><code>/api/peers.json</code></a>(top-level <code>summary.active_count</code>)</dd>
+		</dl>
+	</section>
+
+	<section class="card">
+		<h2>手数料分布</h2>
+		<p>
+			active validator が delegation fee の各帯にどう分布しているかを、
+			<a href="/api/peers.json"><code>/api/peers.json</code></a> の各 validator の
+			<code>delegation_fee_pct</code> から導いた集計です。<code>2.0%</code> 帯はプロトコル最低値
+			(チェーンが許容する最小)で、他の帯は運用者が設定した値を観測しやすい区切りでグルーピング
+			したものです。
+		</p>
+		<dl class="kv">
+			<dt>2.0% ちょうど(プロトコル最低値)</dt><dd><span data-field="fee_2">—</span></dd>
+			<dt>&gt;2% 〜 5%</dt><dd><span data-field="fee_2_5">—</span></dd>
+			<dt>5% 〜 10%</dt><dd><span data-field="fee_5_10">—</span></dd>
+			<dt>&gt;10%</dt><dd><span data-field="fee_10p">—</span></dd>
+		</dl>
+		<p class="note">
+			バケット境界は観測のためのもので、評価軸ではありません。手数料は on-chain 登録 tx の
+			パラメータであって、品質を示すシグナルではない点にご注意ください。
+		</p>
+	</section>
+
+	<section class="card">
+		<h2>Self-stake 分布</h2>
+		<p>
+			active validator が self-stake の各帯にどう分布しているかを、
+			<a href="/api/peers.json"><code>/api/peers.json</code></a> の各 validator の
+			<code>self_stake_metal</code> から導いた集計です。最下帯の下限 2k METAL は、
+			プロトコル上 validator として登録するために必要な self-stake の最小値です。
+		</p>
+		<dl class="kv">
+			<dt>2k–10k METAL</dt><dd><span data-field="stake_2_10k">—</span></dd>
+			<dt>10k–100k METAL</dt><dd><span data-field="stake_10_100k">—</span></dd>
+			<dt>100k–1M METAL</dt><dd><span data-field="stake_100k_1m">—</span></dd>
+			<dt>1M+ METAL</dt><dd><span data-field="stake_1m_plus">—</span></dd>
+		</dl>
+		<p class="note">
+			Self-stake のサイズは運用者の資本配分の結果であり、validator の稼働実績とは独立です。
+			バケットは「どこに分布しているか」を示すもので、ランクではありません。
+		</p>
+	</section>
+
+	<section class="card">
+		<h2>Freedom Yield の位置</h2>
+		<p>
+			本 validator が上記 2 つの分布のどこに位置するかです。下記のフィールドは
+			<a href="/api/validator.json"><code>/api/validator.json</code></a> から第三者が
+			ライブで検証できる on-chain 値と同一です。
+		</p>
+		<dl class="kv">
+			<dt>NodeID</dt><dd><code data-field="self_nodeId">—</code></dd>
+			<dt>現在の手数料</dt><dd><span data-field="self_fee">—</span></dd>
+			<dt>現在の self-stake</dt><dd><span data-field="self_stake">—</span></dd>
+			<dt>手数料バケット</dt><dd><span data-field="self_feeBucket">—</span></dd>
+			<dt>Stake バケット</dt><dd><span data-field="self_stakeBucket">—</span></dd>
+			<dt>ライブ検証</dt><dd><a href="/api/validator.json"><code>/api/validator.json</code></a></dd>
+		</dl>
+	</section>
+
+	<section class="card">
+		<h2>出典と限界</h2>
+		<ul>
+			<li><strong>データ出典:</strong> 本ノードの validator host 上の local <code>metalgo</code> を <code>platform.getCurrentValidators</code> で問い合わせ、<code>scripts/peer-validators.sh</code> が <a href="/api/peers.json"><code>/api/peers.json</code></a> として書き出しています。</li>
+			<li><strong>更新頻度:</strong> 1 日 1 回。</li>
+			<li><strong>古さ:</strong> 観測値は最大 24 時間前のものになり得ます。各セクションは観測時刻をインラインで表示しています。</li>
+			<li><strong>公開していない情報:</strong> IP アドレス、geo-IP 属性、運用者の個人情報は含めません。on-chain で確認できる識別子(NodeID)と on-chain 数値フィールド(stake / fee / uptime%)のみを掲載します。</li>
+			<li><strong>追加の分析 feed は今後接続予定</strong> — 以下のエンドポイントはパイプライン上は存在しますが、現時点では public 配信していません:
+				<ul>
+					<li><a href="/api/peers-gini.json"><code>/api/peers-gini.json</code></a> — <span data-field="feed_gini">未配信(後日接続予定)</span></li>
+					<li><a href="/api/fee-market.json"><code>/api/fee-market.json</code></a> — <span data-field="feed_fee_market">未配信(後日接続予定)</span></li>
+					<li><a href="/api/peers-changes.json"><code>/api/peers-changes.json</code></a> — <span data-field="feed_changes">未配信(後日接続予定)</span></li>
+				</ul>
+			</li>
+			<li><strong>比較や評価は含めない:</strong> 上記バケットは単純な数値軸上のどこに validator が位置しているかを示すものです。特定運用者の品質評価ではなく、そのように読まれるべきでもありません。</li>
+		</ul>
+	</section>
+
+</main>
+
+<footer class="site-footer">
+	<div class="container">
+		<div class="footer-grid">
+			<div class="footer-brand">
+				<h3>Freedom Yield · Metal</h3>
+				<p>Metal Blockchain の long-horizon validator。透明な uptime 開示、公開監査証跡。</p>
+			</div>
+			<nav class="footer-col" aria-label="バリデータ">
+				<h4>バリデータ</h4>
+				<ul>
+					<li><a href="/ja/#status">ステータス</a></li>
+					<li><a href="/ja/#about">概要</a></li>
+					<li><a href="/ja/#track-record">実績</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="委任">
+				<h4>委任</h4>
+				<ul>
+					<li><a href="/ja/#delegate">委任する</a></li>
+					<li><a href="/ja/#calculator">報酬計算</a></li>
+					<li><a href="/ja/#faq">FAQ</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="ネットワーク">
+				<h4>ネットワーク</h4>
+				<ul>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">Explorer ↗</a></li>
+
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="サポート">
+				<h4>サポート</h4>
+				<ul>
+					<li><a href="/ja/data/">公開データ</a></li>
+					<li><a href="/ja/network/" aria-current="page">ネットワーク</a></li>
+					<li><a href="/ja/journal/">運用日誌</a></li>
+					<li><a href="/ja/continuity/">事業継続性</a></li>
+					<li><a href="/ja/jurisdiction/">日本拠点姿勢</a></li>
+					<li><a href="/ja/incidents/">インシデント</a></li>
+					<li><a href="mailto:bp@freedom-yield.com">お問い合わせ</a></li>
+				</ul>
+			</nav>
+		</div>
+		<hr class="footer-divider">
+		<p class="footer-disclaimer"><strong>免責事項:</strong> Freedom Yield は Metal Blockchain 上で稼働する独立した第三者バリデータです。Metallicus 社および Metal Blockchain Foundation の関連会社・提携先・出資先・公式運営者ではありません。各商標は各権利者に帰属します。</p>
+		<div class="footer-bottom">
+			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain</a>.</p>
+			<p>© 2026 Freedom Yield · Metal validator</p>
+		</div>
+	</div>
+</footer>
+</body>
+</html>

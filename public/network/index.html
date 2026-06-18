@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Network observatory — Freedom Yield Metal</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="Public, neutral observations about the Metal Blockchain validator set. Not a ranking, endorsement, or criticism — just aggregate counts derived from on-chain data.">
+<link rel="canonical" href="https://metal.freedom-yield.com/network/">
+<link rel="alternate" hreflang="en" href="https://metal.freedom-yield.com/network/">
+<link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/network/">
+<link rel="alternate" hreflang="x-default" href="https://metal.freedom-yield.com/network/">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#07080c">
+<meta name="color-scheme" content="dark">
+<script defer src="/assets/main.js"></script>
+<script defer src="/assets/network.js"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
+<script defer src="/assets/gtag-init.js"></script>
+</head>
+<body>
+<a href="#main" class="skip-link">Skip to main content</a>
+
+<nav class="topnav">
+	<div class="topnav-inner">
+		<a href="/" class="brand">Freedom Yield · Metal</a>
+		<details class="nav-menu">
+			<summary class="nav-toggle" aria-label="Open / close menu">
+				<span class="hamburger-icon" aria-hidden="true"></span>
+			</summary>
+			<div class="nav">
+				<a href="/#status">Status</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">About</button>
+					<div class="nav-dropdown-menu">
+						<a href="/#about">About</a>
+						<a href="/#roadmap">Roadmap</a>
+					</div>
+				</div>
+				<a href="/#delegate" data-ga-event="delegate_cta_click" data-ga-param-position="nav">Delegate</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">Verify</button>
+					<div class="nav-dropdown-menu">
+						<a href="/data/">Open data</a>
+						<a href="/journal/">Cycle journal</a>
+						<a href="/network/" aria-current="page">Network</a>
+						<a href="/continuity/">Continuity</a>
+						<a href="/jurisdiction/">Jurisdiction</a>
+						<a href="/incidents/" data-ga-event="nav_click" data-ga-param-target="incidents">Incidents</a>
+						<a href="/commitments/">Commitments</a>
+						<a href="/risk-disclosure/">Risk disclosure</a>
+						<a href="/selection-evidence/">Selection evidence</a>
+					</div>
+				</div>
+				<a href="/ja/network/" class="nav-lang" data-ga-event="language_switch" data-ga-param-to="ja">JA</a>
+			</div>
+		</details>
+	</div>
+</nav>
+
+<header class="hero hero--simple">
+	<div class="container">
+		<p class="hero-eyebrow">Observatory</p>
+		<h1>Network observatory</h1>
+		<p class="hero-lead">
+			This page provides public, neutral observations about the Metal validator set. It is not a
+			ranking, endorsement, or criticism of any operator.
+		</p>
+		<p class="note">
+			Source: <code data-field="source">/api/peers.json</code> · Observed at
+			<span data-field="generatedAt">—</span> · Active validators counted:
+			<span data-field="totalValidators">—</span>.
+		</p>
+	</div>
+</header>
+
+<main id="main" class="container">
+
+	<section class="card">
+		<h2>Network size</h2>
+		<p>
+			Active validator count on the Metal Blockchain primary network at the time this page was
+			generated. The value comes from <code>platform.getCurrentValidators</code> as observed by
+			this node's local <code>metalgo</code>; see <a href="/data/">Open data</a> for the full
+			derivation chain.
+		</p>
+		<dl class="kv">
+			<dt>Active validators</dt><dd><span data-field="totalValidators">—</span></dd>
+			<dt>Observed at</dt><dd><span data-field="generatedAt">—</span></dd>
+			<dt>Source JSON</dt><dd><a href="/api/peers.json"><code>/api/peers.json</code></a> (top-level <code>summary.active_count</code>)</dd>
+		</dl>
+	</section>
+
+	<section class="card">
+		<h2>Fee distribution</h2>
+		<p>
+			How many active validators sit in each delegation-fee band, derived from each validator's
+			<code>delegation_fee_pct</code> in <a href="/api/peers.json"><code>/api/peers.json</code></a>.
+			The <code>2.0%</code> band is the protocol floor (the minimum the chain allows); the other
+			bands are observation-friendly groupings of operator-chosen rates.
+		</p>
+		<dl class="kv">
+			<dt>2.0% exact (protocol floor)</dt><dd><span data-field="fee_2">—</span></dd>
+			<dt>&gt;2% to 5%</dt><dd><span data-field="fee_2_5">—</span></dd>
+			<dt>5% to 10%</dt><dd><span data-field="fee_5_10">—</span></dd>
+			<dt>&gt;10%</dt><dd><span data-field="fee_10p">—</span></dd>
+		</dl>
+		<p class="note">
+			Bucket boundaries are observational, not evaluative. A validator's fee is a parameter of
+			the on-chain registration tx, not a quality signal.
+		</p>
+	</section>
+
+	<section class="card">
+		<h2>Stake distribution buckets</h2>
+		<p>
+			How many active validators sit in each self-stake band, derived from each validator's
+			<code>self_stake_metal</code> in <a href="/api/peers.json"><code>/api/peers.json</code></a>.
+			The lower bound of the first bucket (2k METAL) is the protocol's minimum self-stake to
+			register as a validator.
+		</p>
+		<dl class="kv">
+			<dt>2k–10k METAL</dt><dd><span data-field="stake_2_10k">—</span></dd>
+			<dt>10k–100k METAL</dt><dd><span data-field="stake_10_100k">—</span></dd>
+			<dt>100k–1M METAL</dt><dd><span data-field="stake_100k_1m">—</span></dd>
+			<dt>1M+ METAL</dt><dd><span data-field="stake_1m_plus">—</span></dd>
+		</dl>
+		<p class="note">
+			Self-stake size reflects operator capital allocation and is independent of how a validator
+			actually performs. The buckets describe where validators sit, not how they rank.
+		</p>
+	</section>
+
+	<section class="card">
+		<h2>Freedom Yield position</h2>
+		<p>
+			Where this validator sits in the two distributions above. The numbers below are the same
+			fields a third party can read from <a href="/api/validator.json"><code>/api/validator.json</code></a>
+			for live verification.
+		</p>
+		<dl class="kv">
+			<dt>NodeID</dt><dd><code data-field="self_nodeId">—</code></dd>
+			<dt>Current fee</dt><dd><span data-field="self_fee">—</span></dd>
+			<dt>Current self-stake</dt><dd><span data-field="self_stake">—</span></dd>
+			<dt>Fee bucket</dt><dd><span data-field="self_feeBucket">—</span></dd>
+			<dt>Stake bucket</dt><dd><span data-field="self_stakeBucket">—</span></dd>
+			<dt>Live verification</dt><dd><a href="/api/validator.json"><code>/api/validator.json</code></a></dd>
+		</dl>
+	</section>
+
+	<section class="card">
+		<h2>Source &amp; limitations</h2>
+		<ul>
+			<li><strong>Data source:</strong> local <code>metalgo</code> on this node's validator host, queried via <code>platform.getCurrentValidators</code> by <code>scripts/peer-validators.sh</code>; written out as <a href="/api/peers.json"><code>/api/peers.json</code></a>.</li>
+			<li><strong>Refresh cadence:</strong> daily.</li>
+			<li><strong>Staleness:</strong> the observation can be up to ~24 hours old. Each section labels its observation time inline.</li>
+			<li><strong>What's not exposed:</strong> no IP addresses, no geo-IP attribution, no operator personal data. Only on-chain identifiers (NodeID) and on-chain numeric fields (stake, fee, uptime%) appear here.</li>
+			<li><strong>Additional analytic feeds are still being wired</strong> — these endpoints exist in the data pipeline but are not yet publicly served:
+				<ul>
+					<li><a href="/api/peers-gini.json"><code>/api/peers-gini.json</code></a> — <span data-field="feed_gini">not yet available</span></li>
+					<li><a href="/api/fee-market.json"><code>/api/fee-market.json</code></a> — <span data-field="feed_fee_market">not yet available</span></li>
+					<li><a href="/api/peers-changes.json"><code>/api/peers-changes.json</code></a> — <span data-field="feed_changes">not yet available</span></li>
+				</ul>
+			</li>
+			<li><strong>No comparison or assessment:</strong> the buckets above describe where validators sit on simple numeric axes. They are not a quality assessment of any operator and should not be read as such.</li>
+		</ul>
+	</section>
+
+</main>
+
+<footer class="site-footer">
+	<div class="container">
+		<div class="footer-grid">
+			<div class="footer-brand">
+				<h3>Freedom Yield · Metal</h3>
+				<p>Long-horizon validator on Metal Blockchain. Transparent uptime, public audit trail.</p>
+			</div>
+			<nav class="footer-col" aria-label="Validator">
+				<h4>Validator</h4>
+				<ul>
+					<li><a href="/#status">Status</a></li>
+					<li><a href="/#about">About</a></li>
+					<li><a href="/#track-record">Track record</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Delegation">
+				<h4>Delegation</h4>
+				<ul>
+					<li><a href="/#delegate">Delegate</a></li>
+					<li><a href="/#calculator">Rewards</a></li>
+					<li><a href="/#faq">FAQ</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Network">
+				<h4>Network</h4>
+				<ul>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">Explorer ↗</a></li>
+
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Support">
+				<h4>Support</h4>
+				<ul>
+					<li><a href="/data/">Open data</a></li>
+					<li><a href="/network/" aria-current="page">Network</a></li>
+					<li><a href="/journal/">Cycle journal</a></li>
+					<li><a href="/continuity/">Continuity</a></li>
+					<li><a href="/jurisdiction/">Jurisdiction</a></li>
+					<li><a href="/incidents/">Incidents</a></li>
+					<li><a href="mailto:bp@freedom-yield.com">Contact</a></li>
+				</ul>
+			</nav>
+		</div>
+		<hr class="footer-divider">
+		<p class="footer-disclaimer"><strong>Disclaimer:</strong> Freedom Yield is an independent, third-party validator operating on Metal Blockchain. It is not affiliated with, endorsed by, sponsored by, or operated by Metallicus Inc. or the Metal Blockchain Foundation. All trademarks are the property of their respective owners.</p>
+		<div class="footer-bottom">
+			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain</a>.</p>
+			<p>© 2026 Freedom Yield · Metal validator</p>
+		</div>
+	</div>
+</footer>
+</body>
+</html>
