@@ -1,8 +1,8 @@
 {
-	"_comment": "Schema example for /api/validator.json. The real file is generated at runtime by scripts/node-info.sh against a live metalgo node and is gitignored. This example documents the expected shape.",
-	"phase": 0,
-	"mode": "tahoe-testnet",
-	"network": "tahoe",
+	"_comment": "Schema example for /api/validator.json. The real file is generated at runtime by scripts/node-info.sh against a live metalgo mainnet node and is gitignored. This example documents the expected shape and field types; values shown here are placeholders.",
+	"phase": 2,
+	"mode": "mainnet",
+	"network": "metal-mainnet",
 	"nodeId": "NodeID-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
 	"bootstrap": {
 		"pChain": true,
@@ -13,7 +13,7 @@
 		"self": null,
 		"totalReceived": null,
 		"unit": "METAL",
-		"_note": "self = 自己 stake(mainnet では 2,000 固定方針)、totalReceived = 委任受入合計、max_weight = 5 × self(プロトコル仕様)。Tahoe testnet 最小 1 METAL"
+		"_note": "self = operator self-stake. totalReceived = total delegated stake. max_weight = 5 × self (protocol rule)."
 	},
 	"uptime": {
 		"network": null,
@@ -21,12 +21,12 @@
 		"source": "self-reported",
 		"sampleSize": 0,
 		"samples": [],
-		"_note": "network = 外部 RPC からの uptime 評価値の中央値(ピア観測の真値)。self = 自ノード自身に問い合わせた値(プロトコル仕様で常に ~100% を返すため参考のみ)。source = 'external-median' なら network はピア観測、'self-reported' なら外部 RPC 不通で自値フォールバック。報酬閾値 80%"
+		"_note": "network = median uptime as observed by external RPCs (peer-observed truth). self = the node's own response (always ~100% by protocol; reference only). source = 'external-median' when network is peer-observed; 'self-reported' when external RPC unavailable and self value is the fallback. Reward threshold: 80%."
 	},
 	"delegationFee": {
 		"percent": null,
-		"_note": "プロトコル下限 2%、超過分は operator-chosen"
+		"_note": "Protocol minimum 2%; the operator's chosen rate may be higher."
 	},
-	"explorer": "https://tahoe.metalscan.io/",
+	"explorer": "https://explorer.metalblockchain.org/",
 	"observedAt": "1970-01-01T00:00:00Z"
 }

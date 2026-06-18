@@ -8,6 +8,10 @@
 #   self-describing JSON file. Designed to be consumed by automated due-diligence tooling
 #   on the reviewer side — one fetch, one parse, the whole evidence index.
 #
+# Schema:
+#   See public/api/evidence.example.json for the committed schema example.
+#   schema_version is incremented when the field shape changes.
+#
 # Dependencies:
 #   jq only. No curl, no python. No new runtime dependencies.
 #
@@ -15,56 +19,95 @@
 #   public/api/validator.json — live state, written every 5 minutes by scripts/node-info.sh.
 #
 # Output:
-#   public/api/evidence.json — gitignored runtime artefact (see public/api/evidence.example.json
-#   for the schema). Atomic write: same-directory tmp file + mv.
+#   public/api/evidence.json — gitignored runtime artefact.
+#   Atomic write: same-directory tmp file + jq round-trip validation + mv.
+#   On any failure, the existing evidence.json is left untouched.
 #
 # Cron cadence:
-#   Daily. The static parts change rarely and the live parts (node_id / self_stake / fee /
-#   status) are already refreshed every 5 min into validator.json — running this once per
-#   day is sufficient and well below any notion of "polite" load.
+#   Daily. Most live state changes propagate via /api/validator.json (5-min cadence);
+#   this manifest is a slow-moving evidence index, not real-time telemetry.
+#
+# Staleness handling:
+#   - If validator.json has no observed timestamp, or it cannot be parsed,
+#     validator_status is reported as "unknown" + stale_input_warning: true.
+#   - If now - observed_at > 3600s (1 hour), same: "unknown" + stale_input_warning: true.
+#   - Only when input is fresh do we report "active" / "inactive".
 #
 # Constraints (Constitution v0.1):
 #   §4.2 C1   — No provider/region names in inputs or outputs.
 #   §4.1      — No SSH paths, no host paths, no IPs, no credentials.
-#   feedback_validator_operation_first — NO direct metalgo queries here. We only
-#               re-read validator.json, which is the single canonical local artefact.
+#   feedback_validator_operation_first — NO direct metalgo queries here.
+#               We only re-read validator.json, the canonical local artefact.
 #   feedback_polite_external_access    — NO external API calls. Everything is local.
 set -euo pipefail
 
 REPO_BASE="${REPO_BASE:-$(cd "$(dirname "$0")/.." && pwd)}"
 VALIDATOR_JSON="${REPO_BASE}/public/api/validator.json"
 OUT="${REPO_BASE}/public/api/evidence.json"
+STALE_THRESHOLD_SEC=3600
 
 if [[ ! -r "${VALIDATOR_JSON}" ]]; then
 	echo "ERROR: ${VALIDATOR_JSON} not readable. Run scripts/node-info.sh first." >&2
 	exit 1
 fi
 
-# Extract dynamic fields from validator.json.
-#   - node_id:               .nodeId (string) or null.
-#   - self_stake_metal:      .stake.self (number) or null.
-#   - delegation_fee_percent .delegationFee.percent (number) or null.
-#   - validator_status:      derived — "active" if nodeId present AND stake.self > 0
-#                            AND all bootstrap chains true; otherwise "inactive".
+# Validate that validator.json is parseable before we trust any field.
+if ! jq -e . "${VALIDATOR_JSON}" >/dev/null 2>&1; then
+	echo "ERROR: ${VALIDATOR_JSON} is not valid JSON; refusing to generate evidence.json." >&2
+	exit 1
+fi
+
+# Extract dynamic fields. Empty string means "absent" downstream.
 NODE_ID=$(jq -r '.nodeId // empty' "${VALIDATOR_JSON}")
 SELF_STAKE=$(jq -r '.stake.self // empty' "${VALIDATOR_JSON}")
 FEE_PCT=$(jq -r '.delegationFee.percent // empty' "${VALIDATOR_JSON}")
 P_BOOT=$(jq -r '.bootstrap.pChain // false' "${VALIDATOR_JSON}")
 X_BOOT=$(jq -r '.bootstrap.xChain // false' "${VALIDATOR_JSON}")
 C_BOOT=$(jq -r '.bootstrap.cChain // false' "${VALIDATOR_JSON}")
+OBSERVED_AT=$(jq -r '.observedAt // empty' "${VALIDATOR_JSON}")
 
-VALIDATOR_STATUS="inactive"
-if [[ -n "${NODE_ID}" && -n "${SELF_STAKE}" && "${SELF_STAKE}" != "null" \
-	&& "${P_BOOT}" == "true" && "${X_BOOT}" == "true" && "${C_BOOT}" == "true" ]]; then
-	# Only flag active when stake is strictly positive.
-	if awk -v v="${SELF_STAKE}" 'BEGIN { exit !(v + 0 > 0) }'; then
-		VALIDATOR_STATUS="active"
+# Staleness determination.
+#   - observed_at missing or unparseable → unknown + stale_input_warning.
+#   - now - observed_at > STALE_THRESHOLD_SEC → unknown + stale_input_warning.
+#   - otherwise → use the active/inactive derivation.
+STALE_WARNING="false"
+VALIDATOR_STATUS="unknown"
+
+if [[ -n "${OBSERVED_AT}" ]]; then
+	# date -d works on GNU date (Linux); fall back to BSD date (-j -f) if needed.
+	OBS_EPOCH=$(date -d "${OBSERVED_AT}" +%s 2>/dev/null \
+		|| date -j -f "%Y-%m-%dT%H:%M:%SZ" "${OBSERVED_AT}" +%s 2>/dev/null \
+		|| echo "")
+	if [[ -n "${OBS_EPOCH}" ]]; then
+		NOW_EPOCH=$(date -u +%s)
+		AGE_SEC=$((NOW_EPOCH - OBS_EPOCH))
+		if (( AGE_SEC > STALE_THRESHOLD_SEC )) || (( AGE_SEC < -STALE_THRESHOLD_SEC )); then
+			STALE_WARNING="true"
+			VALIDATOR_STATUS="unknown"
+		else
+			# Fresh input — derive active/inactive.
+			VALIDATOR_STATUS="inactive"
+			if [[ -n "${NODE_ID}" && -n "${SELF_STAKE}" && "${SELF_STAKE}" != "null" \
+				&& "${P_BOOT}" == "true" && "${X_BOOT}" == "true" && "${C_BOOT}" == "true" ]]; then
+				if awk -v v="${SELF_STAKE}" 'BEGIN { exit !(v + 0 > 0) }'; then
+					VALIDATOR_STATUS="active"
+				fi
+			fi
+		fi
+	else
+		# observed_at could not be parsed.
+		STALE_WARNING="true"
+		VALIDATOR_STATUS="unknown"
 	fi
+else
+	# observed_at missing entirely.
+	STALE_WARNING="true"
+	VALIDATOR_STATUS="unknown"
 fi
 
-LAST_UPDATED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+GENERATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-# Compose the manifest. Use jq so numeric/null typing is correct and the output is valid JSON.
+# Atomic write: same-directory tmp + jq validation + mv.
 TMP="$(dirname "${OUT}")/.evidence.json.tmp.$$"
 trap 'rm -f "${TMP}"' EXIT
 
@@ -73,9 +116,12 @@ jq -n \
 	--arg status "${VALIDATOR_STATUS}" \
 	--arg self_stake "${SELF_STAKE}" \
 	--arg fee_pct "${FEE_PCT}" \
-	--arg last_updated "${LAST_UPDATED}" \
+	--arg observed_at "${OBSERVED_AT}" \
+	--arg generated_at "${GENERATED_AT}" \
+	--argjson stale_warning "${STALE_WARNING}" \
 	'{
-		_comment: "Machine-readable evidence manifest for Freedom Yield Metal Blockchain validator. Generated by scripts/gen-evidence.sh from validator.json + static project config. The runtime file is gitignored; this example documents the schema.",
+		_comment: "Machine-readable evidence manifest for Freedom Yield Metal Blockchain validator. Generated by scripts/gen-evidence.sh from validator.json + static project config. The runtime file is gitignored; the committed evidence.example.json documents the schema.",
+		schema_version: 1,
 		brand: "Freedom Yield",
 		network: "metal-mainnet",
 		node_id: (if $node_id == "" then null else $node_id end),
@@ -84,7 +130,7 @@ jq -n \
 		delegation_fee_percent: (if $fee_pct == "" or $fee_pct == "null" then null else ($fee_pct | tonumber) end),
 		public_pages: {
 			status: "https://metal.freedom-yield.com/",
-			uptime: "https://metal.freedom-yield.com/uptime/",
+			journal: "https://metal.freedom-yield.com/journal/",
 			incidents: "https://metal.freedom-yield.com/incidents/",
 			commitments: "https://metal.freedom-yield.com/commitments/",
 			risk_disclosure: "https://metal.freedom-yield.com/risk-disclosure/",
@@ -99,11 +145,20 @@ jq -n \
 			incident_disclosure_sla_hours: 24
 		},
 		explorer_url: "https://explorer.metalblockchain.org/",
-		last_updated: $last_updated
+		generated_at: $generated_at,
+		validator_state_observed_at: (if $observed_at == "" then null else $observed_at end),
+		stale_input_warning: $stale_warning
 	}' > "${TMP}"
+
+# Round-trip validation: parse the tmp file. If anything is wrong, fail loud and leave the
+# existing OUT untouched.
+if ! jq -e . "${TMP}" >/dev/null 2>&1; then
+	echo "ERROR: generated evidence.json is invalid JSON; refusing to publish." >&2
+	exit 2
+fi
 
 mv "${TMP}" "${OUT}"
 chmod 644 "${OUT}"
 trap - EXIT
 
-echo "Wrote ${OUT} (status=${VALIDATOR_STATUS}, node_id=${NODE_ID:-<empty>})"
+echo "Wrote ${OUT} (status=${VALIDATOR_STATUS}, stale=${STALE_WARNING}, node_id=${NODE_ID:-<empty>})"

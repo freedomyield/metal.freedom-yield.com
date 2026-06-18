@@ -30,10 +30,15 @@ set -euo pipefail
 # Resolve repository root from script location if REPO_BASE is not set.
 REPO_BASE="${REPO_BASE:-$(cd "$(dirname "$0")/.." && pwd)}"
 
-FILENAME="${1:?usage: $0 <validator.json|peer-geo.json|<16-64hex>.ics>}"
+FILENAME="${1:?usage: $0 <validator.json|peer-geo.json|evidence.json|<16-64hex>.ics>}"
 
+# IMPORTANT: the web host runs an independent forced-command wrapper that
+# also enforces its own allowlist (operator-local, out of this repo).
+# Adding a filename here is only HALF the change — the operator must also
+# add the same filename to the forced-command wrapper allowlist before
+# pushes will succeed. See the cron registration runbook for details.
 case "$FILENAME" in
-  validator.json|peer-geo.json|uptime-recent.json|uptime-cycles.json|peers.json|peers-changes.json|peers-gini.json|peers-gini-history.jsonl|peers-history-index.json|fee-market.json|fee-market-history.jsonl|node-health-recent.json)
+  validator.json|peer-geo.json|uptime-recent.json|uptime-cycles.json|peers.json|peers-changes.json|peers-gini.json|peers-gini-history.jsonl|peers-history-index.json|fee-market.json|fee-market-history.jsonl|node-health-recent.json|evidence.json)
     SOURCE="${REPO_BASE:-/path/to/your/repo}/public/api/${FILENAME}"
     ;;
   schedule.ics)
