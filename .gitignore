@@ -52,6 +52,19 @@ public/api/uptime-cycles.json
 public/api/peer-geo.json
 public/api/server-status.json
 public/api/peers.json
+# cycle-history.jsonl は uptime-cycles.json + incidents.json から join 生成(scripts/gen-cycle-history.sh)
+# schema は public/api/cycle-history.example.jsonl を参照
+public/api/cycle-history.jsonl
+# fee-market 履歴 — Hetzner で生成 + push、 集計と append-only history
+public/api/fee-market.json
+public/api/fee-market-history.jsonl
+# node-health 周期サンプリング — Hetzner で生成 + push
+public/api/node-health-recent.json
+# peers 動的解析 — Hetzner で生成 + push (Gini / 変動 / 履歴インデックス)
+public/api/peers-changes.json
+public/api/peers-gini.json
+public/api/peers-gini-history.jsonl
+public/api/peers-history-index.json
 # calendar/*.ics は gen-renewal-ics.sh が生成、ファイル名に private token が
 # 入るので絶対コミットしない(public 化前提リポ、token は private URL の要)
 public/calendar/
