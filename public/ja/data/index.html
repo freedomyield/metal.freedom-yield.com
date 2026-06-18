@@ -168,6 +168,24 @@
 			</details>
 		</article>
 
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>cycle-history.jsonl(準備中)</h3>
+				<span class="data-tag">GET · JSONL · 予定</span>
+			</header>
+			<p>Cycle 単位の audit packet。1 行 = 1 JSON オブジェクト、 時系列順、 <code>uptime-cycles.json</code> と <code>incidents.json</code> を join して各クローズ済 cycle に該当インシデント ID をペアリング。自動 due-diligence ツールが line-by-line で消費する前提の設計。</p>
+			<dl class="data-meta">
+				<dt>予定 URL</dt><dd><code>/api/cycle-history.jsonl</code></dd>
+				<dt>スキーマ(公開済)</dt><dd><a href="/api/cycle-history.example.jsonl"><code>/api/cycle-history.example.jsonl</code></a></dd>
+				<dt>生成スクリプト</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/scripts/gen-cycle-history.sh" rel="noopener noreferrer"><code>scripts/gen-cycle-history.sh</code></a></dd>
+				<dt>状態</dt><dd>準備中。 runtime 起動は evidence feed cron 安定確認後 (詳細 <a href="/ja/selection-evidence/">/ja/selection-evidence/</a>)</dd>
+			</dl>
+			<details class="data-example">
+				<summary>リクエスト例(スキーマプレビュー向け)</summary>
+				<pre><code>curl -s https://metal.freedom-yield.com/api/cycle-history.example.jsonl | jq -c '{cycle_n, final_uptime_pct, incidents_in_cycle_count, cycle_status}'</code></pre>
+			</details>
+		</article>
+
 	</section>
 
 	<section class="card data-group">
@@ -379,6 +397,29 @@ curl -s "https://metal.freedom-yield.com/api/peers-history/peers-${YDAY}.json.gz
 				<dt>URL</dt><dd><a href="/api/validator-directory.json"><code>/api/validator-directory.json</code></a></dd>
 				<dt>更新</dt><dd>稀 — 自 validator のメタデータが変わった時のみ</dd>
 				</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>identity.json(準備中)</h3>
+				<span class="data-tag">GET · JSON · 予定 · 署名付</span>
+			</header>
+			<p>運用者専用 ed25519 identity key で署名された operator identity manifest。signing key は validator の BLS / staking key と独立。検証は <code>ssh-keygen -Y verify</code> を namespace <code>freedom-yield/validator-identity</code> で実行。</p>
+			<dl class="data-meta">
+				<dt>予定 URL</dt><dd><code>/api/identity.json</code>(+ <code>/api/identity.json.sig</code>)</dd>
+				<dt>スキーマ(公開済)</dt><dd><a href="/api/identity.example.json"><code>/api/identity.example.json</code></a></dd>
+				<dt>検証手順</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer"><code>docs/IDENTITY_VERIFICATION.md</code></a></dd>
+				<dt>状態</dt><dd>準備中。 runtime 起動は operator 側の鍵生成後 (詳細 <a href="/ja/selection-evidence/">/ja/selection-evidence/</a>)</dd>
+			</dl>
+			<details class="data-example">
+				<summary>検証(live 化後)</summary>
+				<pre><code>curl -sSO https://metal.freedom-yield.com/api/identity.json
+curl -sSO https://metal.freedom-yield.com/api/identity.json.sig
+curl -sSO https://metal.freedom-yield.com/.well-known/operator-identity.pub
+echo "freedom-yield $(cat operator-identity.pub)" &gt; allowed_signers
+ssh-keygen -Y verify -f allowed_signers -I freedom-yield \
+  -n freedom-yield/validator-identity -s identity.json.sig &lt; identity.json</code></pre>
+			</details>
 		</article>
 	</section>
 
