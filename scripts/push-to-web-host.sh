@@ -8,6 +8,7 @@
 #   uptime-recent.json   → /public/api/uptime-recent.json (JSON-validated)
 #   uptime-cycles.json   → /public/api/uptime-cycles.json (JSON-validated)
 #   peers.json           → /public/api/peers.json         (JSON-validated)
+#   evidence.json        → /public/api/evidence.json      (JSON-validated)
 #   <16-64 hex>.ics      → /public/calendar/<name>.ics    (ICS-validated)
 #
 # Background:

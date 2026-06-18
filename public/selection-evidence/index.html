@@ -182,10 +182,12 @@
 				<h3>Identity binding (in progress)</h3>
 				<span class="data-tag">in progress</span>
 			</header>
-			<p>A signed identity manifest at <a href="/api/identity.json"><code>/api/identity.json</code></a> is in development. When published, a dedicated operator identity key, independent of the validator's signing keys, will sign the JSON via <code>ssh-keygen -Y</code>. The public key will be served at <code>/.well-known/operator-identity.pub</code> and optionally pinned in DNS TXT. NodeID binding is anchored via the public validator registration record and the operator-controlled site. Currently labelled "in progress".</p>
+			<p>A signed identity manifest is being prepared. It will use a dedicated operator identity key, independent of the validator's signing keys. Verification will use OpenSSH signatures with the namespace <code>validator-identity</code>. The validator's signing keys will not be used for this process. The schema is published in advance at <a href="/api/identity.example.json"><code>/api/identity.example.json</code></a>; the verification procedure is documented in <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer"><code>docs/IDENTITY_VERIFICATION.md</code></a>.</p>
 			<dl class="data-meta">
-				<dt>Status</dt><dd>In progress — not yet live</dd>
-				<dt>Target URL</dt><dd><code>/api/identity.json</code></dd>
+				<dt>Status</dt><dd>In preparation — schema and verification docs published; manifest not yet live</dd>
+				<dt>Schema</dt><dd><code>/api/identity.example.json</code></dd>
+				<dt>Planned manifest</dt><dd><code>/api/identity.json</code></dd>
+				<dt>Planned signature</dt><dd><code>/api/identity.json.sig</code></dd>
 			</dl>
 		</article>
 

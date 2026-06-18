@@ -182,10 +182,12 @@
 				<h3>アイデンティティ署名(進行中)</h3>
 				<span class="data-tag">進行中</span>
 			</header>
-			<p><a href="/api/identity.json"><code>/api/identity.json</code></a> として署名付きアイデンティティマニフェストを準備中です。公開時には validator の signing key とは独立した運用者専用 identity key で <code>ssh-keygen -Y</code> により JSON を署名します。公開鍵は <code>/.well-known/operator-identity.pub</code> で配信し、必要に応じて DNS TXT にも pin します。NodeID との結びつきは、公開 validator 登録レコードと運用者が管理するサイトを通じて anchor します。現状は「進行中」の表示です。</p>
+			<p>署名付きアイデンティティマニフェストを準備中です。validator の signing key とは独立した運用者専用 identity key を使用します。検証には namespace <code>validator-identity</code> の OpenSSH signature を使います。この過程で validator の signing key は使用しません。スキーマは事前公開しており <a href="/api/identity.example.json"><code>/api/identity.example.json</code></a> で参照できます。検証手順は <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer"><code>docs/IDENTITY_VERIFICATION.md</code></a> に記載しています。</p>
 			<dl class="data-meta">
-				<dt>状態</dt><dd>進行中 — 未公開</dd>
-				<dt>予定 URL</dt><dd><code>/api/identity.json</code></dd>
+				<dt>状態</dt><dd>準備中 — schema と検証手順を公開済み、 manifest 本体は未公開</dd>
+				<dt>スキーマ</dt><dd><code>/api/identity.example.json</code></dd>
+				<dt>予定 manifest</dt><dd><code>/api/identity.json</code></dd>
+				<dt>予定 signature</dt><dd><code>/api/identity.json.sig</code></dd>
 			</dl>
 		</article>
 

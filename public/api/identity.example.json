@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "brand": "Freedom Yield",
+  "node_id": "NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v",
+  "network": "metal-mainnet",
+  "site": "https://metal.freedom-yield.com/",
+  "operator_identity_pubkey_fingerprint_sha256": "<sha256-fingerprint-hex>",
+  "operator_identity_pubkey_url": "https://metal.freedom-yield.com/.well-known/operator-identity.pub",
+  "key_iat": "2026-06-18T00:00:00Z",
+  "key_exp": "2027-06-18T00:00:00Z",
+  "revoked": false,
+  "verification": {
+    "method": "ssh-keygen -Y verify",
+    "namespace": "validator-identity",
+    "principal": "freedom-yield",
+    "signature_url": "https://metal.freedom-yield.com/api/identity.json.sig"
+  },
+  "generated_at": "2026-06-18T00:00:00Z"
+}
