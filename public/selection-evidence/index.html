@@ -180,7 +180,7 @@
 				<h3>Identity binding (in progress)</h3>
 				<span class="data-tag">in progress</span>
 			</header>
-			<p>A signed identity manifest at <a href="/api/identity.json"><code>/api/identity.json</code></a> is in development. When published, a dedicated operator identity key, independent of the validator's signing keys, will sign the JSON. The binding to the NodeID will be anchored through the public validator registration record and the operator-controlled site. Currently labelled "in progress".</p>
+			<p>A signed identity manifest at <a href="/api/identity.json"><code>/api/identity.json</code></a> is in development. When published, a dedicated operator identity key, independent of the validator's signing keys, will sign the JSON via <code>ssh-keygen -Y</code>. The public key will be served at <code>/.well-known/operator-identity.pub</code> and optionally pinned in DNS TXT. NodeID binding is anchored via the public validator registration record and the operator-controlled site. Currently labelled "in progress".</p>
 			<dl class="data-meta">
 				<dt>Status</dt><dd>In progress — not yet live</dd>
 				<dt>Target URL</dt><dd><code>/api/identity.json</code></dd>
