@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Subnet readiness — Freedom Yield Metal</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="Honest scorecard of what this Metal Blockchain validator currently has, currently lacks, and could provision on request — across eight axes a subnet operator or institutional evaluator typically cares about.">
+<link rel="canonical" href="https://metal.freedom-yield.com/subnet-readiness/">
+<link rel="alternate" hreflang="en" href="https://metal.freedom-yield.com/subnet-readiness/">
+<link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/subnet-readiness/">
+<link rel="alternate" hreflang="x-default" href="https://metal.freedom-yield.com/subnet-readiness/">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#07080c">
+<meta name="color-scheme" content="dark">
+<script defer src="/assets/main.js"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
+<script defer src="/assets/gtag-init.js"></script>
+</head>
+<body>
+<a href="#main" class="skip-link">Skip to main content</a>
+
+<nav class="topnav">
+	<div class="topnav-inner">
+		<a href="/" class="brand">Freedom Yield · Metal</a>
+		<details class="nav-menu">
+			<summary class="nav-toggle" aria-label="Open / close menu">
+				<span class="hamburger-icon" aria-hidden="true"></span>
+			</summary>
+			<div class="nav">
+				<a href="/#status">Status</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">About</button>
+					<div class="nav-dropdown-menu">
+						<a href="/#about">About</a>
+						<a href="/#roadmap">Roadmap</a>
+					</div>
+				</div>
+				<a href="/#delegate" data-ga-event="delegate_cta_click" data-ga-param-position="nav">Delegate</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">Verify</button>
+					<div class="nav-dropdown-menu">
+						<a href="/data/">Open data</a>
+						<a href="/journal/">Cycle journal</a>
+						<a href="/network/">Network</a>
+						<a href="/continuity/">Continuity</a>
+						<a href="/jurisdiction/">Jurisdiction</a>
+						<a href="/incidents/" data-ga-event="nav_click" data-ga-param-target="incidents">Incidents</a>
+						<a href="/commitments/">Commitments</a>
+						<a href="/risk-disclosure/">Risk disclosure</a>
+						<a href="/selection-evidence/">Selection evidence</a>
+						<a href="/subnet-readiness/" aria-current="page">Subnet readiness</a>
+						<a href="/pledge/">Pledge</a>
+					</div>
+				</div>
+				<a href="/ja/subnet-readiness/" class="nav-lang" data-ga-event="language_switch" data-ga-param-to="ja">JA</a>
+			</div>
+		</details>
+	</div>
+</nav>
+
+<header class="hero hero--simple">
+	<div class="container">
+		<p class="hero-eyebrow">Honest scorecard</p>
+		<h1>Subnet readiness</h1>
+		<p class="hero-lead">
+			This page enumerates, on eight axes, what this validator currently has, what it currently lacks, and
+			what could be provisioned on request. The format is intentionally blunt: items not yet pre-provisioned
+			are labelled as such, and items requiring bilateral discussion are labelled as such. The intent is to
+			give a subnet operator or an institutional evaluator a single page that reflects current state without
+			inflation.
+		</p>
+	</div>
+</header>
+
+<main id="main" class="container">
+
+	<section class="card data-group">
+		<h2>Readiness scorecard</h2>
+		<p class="data-group-lead">Eight axes. Each one names a category, states the current posture, and points at the artifact that backs it.</p>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>Network identity &amp; status</h3>
+				<span class="data-tag">active</span>
+			</header>
+			<p>Active validator on Metal Blockchain primary network. Cycles since 2026-05-19, continuous to date.</p>
+			<dl class="data-meta">
+				<dt>NodeID</dt><dd><code>NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v</code></dd>
+				<dt>Live state</dt><dd><a href="/api/validator.json"><code>/api/validator.json</code></a></dd>
+				<dt>Cycle history</dt><dd><a href="/journal/">/journal/</a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>Compute headroom for additional metalgo</h3>
+				<span class="data-tag">not pre-provisioned</span>
+			</header>
+			<p>Subnet validation typically requires an additional <code>metalgo</code> process and dedicated CPU/RAM/disk. The current single-VPS deployment does not reserve spare capacity for a subnet. Provisioning a separate subnet-validation host is feasible with reasonable notice, but it is not pre-built. This is a deliberate honesty: small validator, no idle inventory.</p>
+			<dl class="data-meta">
+				<dt>Current posture</dt><dd>Single VPS sized for primary network only</dd>
+				<dt>On invitation</dt><dd>Operator can provision a dedicated subnet-validation host</dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>Jurisdiction &amp; time-zone coverage</h3>
+				<span class="data-tag">ready</span>
+			</header>
+			<p>Operator jurisdiction is Japan. APAC business-hours coverage. Public surface and operational communication are fully bilingual (EN/JA), structurally parallel, updated in the same commit.</p>
+			<dl class="data-meta">
+				<dt>Disclosure</dt><dd><a href="/jurisdiction/">/jurisdiction/</a></dd>
+				<dt>Coverage</dt><dd>APAC time-zone primary; bilingual EN/JA surface</dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>KYC / compliance posture</h3>
+				<span class="data-tag">bilateral on request</span>
+			</header>
+			<p>This validator does not perform KYC at the validator layer; delegation is permissionless on the primary network. Counterparties (banks, regulated funds, similar regulated entities) requiring KYC or compliance attestation must perform bilateral due diligence with the operator. This page is not a compliance attestation.</p>
+			<dl class="data-meta">
+				<dt>Validator-layer KYC</dt><dd>Not performed (permissionless primary network)</dd>
+				<dt>Counterparty path</dt><dd>Bilateral due diligence, on request</dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>Key custody</h3>
+				<span class="data-tag">self-custodied</span>
+			</header>
+			<p>Self-custodied ed25519 staking key on a single dedicated validator host. Encrypted backups maintained off-host per a documented backup policy. No third-party custody. No shared key material. The operator identity key (used for off-chain signed manifests) is a separate dedicated key, held off the validator host entirely.</p>
+			<dl class="data-meta">
+				<dt>Staking key</dt><dd>Self-custodied, encrypted backups off-host</dd>
+				<dt>Identity key</dt><dd>Separate dedicated ed25519, off validator host</dd>
+				<dt>Rotation runbook</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md" rel="noopener noreferrer"><code>docs/KEY_ROTATION.md</code></a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>Network-grade infrastructure</h3>
+				<span class="data-tag">honest disclosure</span>
+			</header>
+			<p>Single-VPS deployment on a commercial host. Validator workload and public web are segregated to separate hosts, so a public-web outage does not affect validator uptime. Single-region; no multi-region failover. The recovery model is documented at <a href="/continuity/">/continuity/</a>; it is recovery, not avoidance.</p>
+			<dl class="data-meta">
+				<dt>Validator workload</dt><dd>Single dedicated VPS</dd>
+				<dt>Public web</dt><dd>Separate VPS, segregated from validator uptime path</dd>
+				<dt>Multi-region failover</dt><dd>Not implemented (recovery model documented instead)</dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>Operational coverage</h3>
+				<span class="data-tag">honest disclosure</span>
+			</header>
+			<p>Single operator. APAC time-zone primary. Incident response procedure is documented and version-controlled. Single-person operational risk is explicitly disclosed on the risk-disclosure page; it is not minimised here.</p>
+			<dl class="data-meta">
+				<dt>Operator count</dt><dd>1</dd>
+				<dt>Incident response</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/INCIDENT_RESPONSE.md" rel="noopener noreferrer"><code>docs/INCIDENT_RESPONSE.md</code></a></dd>
+				<dt>Risk disclosure</dt><dd><a href="/risk-disclosure/">/risk-disclosure/</a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>Subnet pilot readiness</h3>
+				<span class="data-tag">bilateral on request</span>
+			</header>
+			<p>If invited to a subnet pilot, the operator can stand up a dedicated subnet-validation host on reasonable notice. The specific shape of any pilot — capacity sizing, response-time SLA, subnet-specific compliance, custody framework, communication cadence — is by necessity a bilateral conversation. This page does not pre-commit to any of those; it confirms willingness and structural feasibility.</p>
+			<dl class="data-meta">
+				<dt>Capacity provisioning</dt><dd>Feasible on reasonable notice</dd>
+				<dt>Pilot terms</dt><dd>Bilateral discussion</dd>
+				<dt>Inquiry</dt><dd><a href="mailto:bp@freedom-yield.com">bp@freedom-yield.com</a></dd>
+			</dl>
+		</article>
+
+	</section>
+
+	<section class="card">
+		<h2>What this page is not</h2>
+		<p>This is not a compliance attestation, a regulatory disclosure, a bid for a specific subnet, or a representation that any particular evaluation framework has been satisfied. It is a one-page candid statement of what the current operation has, lacks, and could provision on request. The cross-linked artifacts (<a href="/selection-evidence/">selection-evidence</a>, <a href="/risk-disclosure/">risk-disclosure</a>, <a href="/commitments/">commitments</a>, <a href="/jurisdiction/">jurisdiction</a>, <a href="/continuity/">continuity</a>) are the verifiable substance.</p>
+	</section>
+
+</main>
+
+<footer class="site-footer">
+	<div class="container">
+		<div class="footer-grid">
+			<div class="footer-brand">
+				<h3>Freedom Yield · Metal</h3>
+				<p>Long-horizon validator on Metal Blockchain. Transparent uptime, public audit trail.</p>
+			</div>
+			<nav class="footer-col" aria-label="Validator">
+				<h4>Validator</h4>
+				<ul>
+					<li><a href="/#status">Status</a></li>
+					<li><a href="/#about">About</a></li>
+					<li><a href="/#track-record">Track record</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Delegation">
+				<h4>Delegation</h4>
+				<ul>
+					<li><a href="/#delegate">Delegate</a></li>
+					<li><a href="/#calculator">Rewards</a></li>
+					<li><a href="/#faq">FAQ</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Network">
+				<h4>Network</h4>
+				<ul>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">Explorer ↗</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Support">
+				<h4>Support</h4>
+				<ul>
+					<li><a href="/selection-evidence/">Selection evidence</a></li>
+					<li><a href="/subnet-readiness/" aria-current="page">Subnet readiness</a></li>
+					<li><a href="/commitments/">Commitments</a></li>
+					<li><a href="/risk-disclosure/">Risk disclosure</a></li>
+					<li><a href="mailto:bp@freedom-yield.com">Contact</a></li>
+				</ul>
+			</nav>
+		</div>
+		<hr class="footer-divider">
+		<p class="footer-disclaimer"><strong>Disclaimer:</strong> Freedom Yield is an independent, third-party validator operating on Metal Blockchain. It is not affiliated with, endorsed by, sponsored by, or operated by Metallicus Inc. or the Metal Blockchain Foundation. All trademarks are the property of their respective owners.</p>
+		<div class="footer-bottom">
+			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain</a>.</p>
+			<p>© 2026 Freedom Yield · Metal validator</p>
+		</div>
+	</div>
+</footer>
+</body>
+</html>

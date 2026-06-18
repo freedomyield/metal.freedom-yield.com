@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Subnet 適性スコアカード — Freedom Yield Metal</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="本 Metal Blockchain validator の現状能力・現状不足・要請があれば対応可能な範囲を、subnet operator や institutional 評価者が確認する 8 軸でストレートに公開するスコアカード。">
+<link rel="canonical" href="https://metal.freedom-yield.com/ja/subnet-readiness/">
+<link rel="alternate" hreflang="en" href="https://metal.freedom-yield.com/subnet-readiness/">
+<link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/subnet-readiness/">
+<link rel="alternate" hreflang="x-default" href="https://metal.freedom-yield.com/subnet-readiness/">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#07080c">
+<meta name="color-scheme" content="dark">
+<script defer src="/assets/main.js"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
+<script defer src="/assets/gtag-init.js"></script>
+</head>
+<body>
+<a href="#main" class="skip-link">メイン本文へスキップ</a>
+
+<nav class="topnav">
+	<div class="topnav-inner">
+		<a href="/ja/" class="brand">Freedom Yield · Metal</a>
+		<details class="nav-menu">
+			<summary class="nav-toggle" aria-label="メニュー開閉">
+				<span class="hamburger-icon" aria-hidden="true"></span>
+			</summary>
+			<div class="nav">
+				<a href="/ja/#status">状態</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">概要</button>
+					<div class="nav-dropdown-menu">
+						<a href="/ja/#about">概要</a>
+						<a href="/ja/#roadmap">展望</a>
+					</div>
+				</div>
+				<a href="/ja/#delegate" data-ga-event="delegate_cta_click" data-ga-param-position="nav">委任</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">検証</button>
+					<div class="nav-dropdown-menu">
+						<a href="/ja/data/">公開データ</a>
+						<a href="/ja/journal/">運用日誌</a>
+						<a href="/ja/network/">ネットワーク</a>
+						<a href="/ja/continuity/">事業継続性</a>
+						<a href="/jurisdiction/">管轄</a>
+						<a href="/ja/incidents/" data-ga-event="nav_click" data-ga-param-target="incidents">インシデント</a>
+						<a href="/commitments/">コミットメント</a>
+						<a href="/risk-disclosure/">リスク開示</a>
+						<a href="/ja/selection-evidence/">選定エビデンス</a>
+						<a href="/ja/subnet-readiness/" aria-current="page">Subnet 適性</a>
+						<a href="/ja/pledge/">Pledge</a>
+					</div>
+				</div>
+				<a href="/subnet-readiness/" class="nav-lang" data-ga-event="language_switch" data-ga-param-to="en">EN</a>
+			</div>
+		</details>
+	</div>
+</nav>
+
+<header class="hero hero--simple">
+	<div class="container">
+		<p class="hero-eyebrow">直視的スコアカード</p>
+		<h1>Subnet 適性</h1>
+		<p class="hero-lead">
+			本ページでは、当 validator の現状能力・現状不足・要請があれば対応可能な範囲を、8 つの軸で意図的に率直に開示します。
+			まだ事前構築していない項目は「未事前構築」、bilateral な協議が必要な項目は「要協議」と明示します。
+			subnet operator や institutional 評価者が当 validator の現状を 1 ページで把握できる artifact を、
+			誇張なく整備することが目的です。
+		</p>
+	</div>
+</header>
+
+<main id="main" class="container">
+
+	<section class="card data-group">
+		<h2>適性スコアカード</h2>
+		<p class="data-group-lead">8 軸。各軸でカテゴリ名・現状ポスチャ・裏付けとなる artifact を一行で示します。</p>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>ネットワークアイデンティティと状態</h3>
+				<span class="data-tag">稼働中</span>
+			</header>
+			<p>Metal Blockchain primary network の active validator。2026-05-19 以降の cycle を継続中。</p>
+			<dl class="data-meta">
+				<dt>NodeID</dt><dd><code>NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v</code></dd>
+				<dt>ライブ状態</dt><dd><a href="/api/validator.json"><code>/api/validator.json</code></a></dd>
+				<dt>Cycle 履歴</dt><dd><a href="/ja/journal/">/ja/journal/</a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>追加 metalgo 用の計算リソース余剰</h3>
+				<span class="data-tag">未事前構築</span>
+			</header>
+			<p>Subnet 検証には、別途 <code>metalgo</code> プロセスと専用 CPU/RAM/disk が通常必要です。現状の単一 VPS 構成は primary network 専用にサイジングされており、subnet 用に遊休容量を予約していません。subnet 検証用ホストの新規プロビジョニングは合理的な事前通知があれば対応可能ですが、事前構築はしていません。小規模 validator として遊休在庫を抱えない、という意図的な honest 開示です。</p>
+			<dl class="data-meta">
+				<dt>現在のポスチャ</dt><dd>Primary network 専用にサイジングされた単一 VPS</dd>
+				<dt>招聘時の対応</dt><dd>subnet 検証用専用ホストを別途プロビジョニング可能</dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>管轄とタイムゾーンカバー</h3>
+				<span class="data-tag">対応済</span>
+			</header>
+			<p>運用者の管轄は日本。APAC ビジネスアワーをカバー。公開サイトおよび運用コミュニケーションは EN/JA 完全バイリンガルで、構造的に並行し、同一 commit で更新します。</p>
+			<dl class="data-meta">
+				<dt>開示</dt><dd><a href="/jurisdiction/">/jurisdiction/</a></dd>
+				<dt>カバー</dt><dd>APAC タイムゾーン中心、EN/JA バイリンガル surface</dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>KYC / コンプライアンスポスチャ</h3>
+				<span class="data-tag">要請に応じ bilateral</span>
+			</header>
+			<p>本 validator は validator 層で KYC を実施しません(primary network のパーミッションレス delegation)。KYC やコンプライアンス attestation を必要とするカウンターパーティ(銀行・規制対象ファンド・類似の規制対象事業者)は、運用者と bilateral にデューデリジェンスを実施してください。本ページは compliance attestation ではありません。</p>
+			<dl class="data-meta">
+				<dt>Validator 層 KYC</dt><dd>未実施(permissionless primary network)</dd>
+				<dt>カウンターパーティの経路</dt><dd>要請に応じた bilateral due diligence</dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>鍵の保管</h3>
+				<span class="data-tag">自己保管</span>
+			</header>
+			<p>専用 validator ホスト上の ed25519 staking key は自己保管。バックアップ方針に従いホスト外に暗号化保管。第三者保管なし、共有鍵材料なし。Off-chain 署名済 manifest 用の operator identity key は別の専用鍵で、validator ホスト上には一切置かない設計。</p>
+			<dl class="data-meta">
+				<dt>Staking key</dt><dd>自己保管、ホスト外に暗号化バックアップ</dd>
+				<dt>Identity key</dt><dd>専用 ed25519、validator ホスト外</dd>
+				<dt>Rotation runbook</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md" rel="noopener noreferrer"><code>docs/KEY_ROTATION.md</code></a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>ネットワーク等級インフラ</h3>
+				<span class="data-tag">直視的開示</span>
+			</header>
+			<p>商用ホスト上の単一 VPS 構成。Validator ワークロードと公開 web は別ホストに分離しており、公開 web の障害は validator の uptime に影響しません。シングルリージョン、マルチリージョン failover なし。復旧モデルは <a href="/ja/continuity/">/ja/continuity/</a> に記載 — 障害の「回避」ではなく「復旧」モデルです。</p>
+			<dl class="data-meta">
+				<dt>Validator ワークロード</dt><dd>専用単一 VPS</dd>
+				<dt>公開 web</dt><dd>別 VPS、validator uptime 経路から分離</dd>
+				<dt>マルチリージョン failover</dt><dd>未実装(復旧モデルで代替記載)</dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>運用カバー</h3>
+				<span class="data-tag">直視的開示</span>
+			</header>
+			<p>単独運用者。APAC タイムゾーン中心。インシデント対応手順は文書化されバージョン管理されています。単独運用者リスクはリスク開示ページで明示的に開示しており、本ページで軽視しません。</p>
+			<dl class="data-meta">
+				<dt>運用者人数</dt><dd>1</dd>
+				<dt>インシデント対応</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/INCIDENT_RESPONSE.md" rel="noopener noreferrer"><code>docs/INCIDENT_RESPONSE.md</code></a></dd>
+				<dt>リスク開示</dt><dd><a href="/risk-disclosure/">/risk-disclosure/</a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>Subnet pilot 受入適性</h3>
+				<span class="data-tag">要請に応じ bilateral</span>
+			</header>
+			<p>Subnet pilot 招聘があれば、運用者は合理的な事前通知のもとで subnet 検証専用ホストを立ち上げ可能です。pilot の具体的な形(容量サイジング・応答時間 SLA・subnet 固有のコンプライアンス・カストディフレーム・コミュニケーション頻度)は必然的に bilateral 協議です。本ページではそれらを事前確約しません — 受入意思と構造的実現可能性のみ確認します。</p>
+			<dl class="data-meta">
+				<dt>容量プロビジョニング</dt><dd>合理的な事前通知で対応可能</dd>
+				<dt>Pilot 条件</dt><dd>bilateral 協議</dd>
+				<dt>問い合わせ</dt><dd><a href="mailto:bp@freedom-yield.com">bp@freedom-yield.com</a></dd>
+			</dl>
+		</article>
+
+	</section>
+
+	<section class="card">
+		<h2>本ページが「ではない」もの</h2>
+		<p>本ページは compliance attestation、規制開示、特定 subnet への入札、特定の評価フレームワークを満たしたという表明、のいずれでもありません。現在の運用が「何を持っており、何を持たず、要請があれば何を準備できるか」を 1 ページで率直に述べたものです。検証可能な実体は、相互リンクしている各 artifact(<a href="/selection-evidence/">selection evidence</a>・<a href="/risk-disclosure/">リスク開示</a>・<a href="/commitments/">コミットメント</a>・<a href="/jurisdiction/">管轄</a>・<a href="/ja/continuity/">事業継続性</a>)にあります。</p>
+	</section>
+
+</main>
+
+<footer class="site-footer">
+	<div class="container">
+		<div class="footer-grid">
+			<div class="footer-brand">
+				<h3>Freedom Yield · Metal</h3>
+				<p>Long-horizon validator on Metal Blockchain. Transparent uptime, public audit trail.</p>
+			</div>
+			<nav class="footer-col" aria-label="Validator">
+				<h4>Validator</h4>
+				<ul>
+					<li><a href="/ja/#status">状態</a></li>
+					<li><a href="/ja/#about">概要</a></li>
+					<li><a href="/ja/#track-record">実績</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Delegation">
+				<h4>Delegation</h4>
+				<ul>
+					<li><a href="/ja/#delegate">委任</a></li>
+					<li><a href="/ja/#calculator">報酬</a></li>
+					<li><a href="/ja/#faq">FAQ</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Network">
+				<h4>Network</h4>
+				<ul>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">Explorer ↗</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Support">
+				<h4>Support</h4>
+				<ul>
+					<li><a href="/ja/selection-evidence/">選定エビデンス</a></li>
+					<li><a href="/ja/subnet-readiness/" aria-current="page">Subnet 適性</a></li>
+					<li><a href="/commitments/">コミットメント</a></li>
+					<li><a href="/risk-disclosure/">リスク開示</a></li>
+					<li><a href="mailto:bp@freedom-yield.com">問い合わせ</a></li>
+				</ul>
+			</nav>
+		</div>
+		<hr class="footer-divider">
+		<p class="footer-disclaimer"><strong>免責事項:</strong> Freedom Yield は Metal Blockchain 上で運用される独立した third-party validator です。Metallicus Inc. または Metal Blockchain Foundation との提携・支援・後援・運営関係はありません。すべての商標は各保有者に帰属します。</p>
+		<div class="footer-bottom">
+			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain</a>.</p>
+			<p>© 2026 Freedom Yield · Metal validator</p>
+		</div>
+	</div>
+</footer>
+</body>
+</html>
