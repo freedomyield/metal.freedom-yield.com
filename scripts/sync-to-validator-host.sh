@@ -52,6 +52,7 @@ rsync -rtvz${DRY_RUN} --inplace \
   -e "ssh -i ${VALIDATOR_HOST_KEY}" \
   --exclude='__pycache__/' \
   --exclude='*.pyc' \
+  --exclude='operator-local/' \
   "${LOCAL_PATH}" \
   "${VALIDATOR_HOST_USER}@${VALIDATOR_HOST}:${REMOTE_PATH}"
 

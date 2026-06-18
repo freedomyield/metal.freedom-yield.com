@@ -1,0 +1,76 @@
+name: verify-identity-manifest
+
+# Verify the signed operator identity manifest at every push / PR.
+#
+# Skip-gracefully behaviour:
+#   The live artifacts (operator-identity.pub, identity.json, identity.json.sig)
+#   may not exist yet during the Phase 1 preparation window. When any of them
+#   is missing, the job exits 0 with a "not yet live — skipping" message instead
+#   of failing the build. Once all three are present, verification becomes
+#   strict — a bad signature fails the build.
+#
+# Security:
+#   - This workflow MUST NOT have access to the operator's private key.
+#   - Verification uses only the committed public key + manifest + detached
+#     signature. No secrets needed.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "public/api/identity.json"
+      - "public/api/identity.json.sig"
+      - "public/.well-known/operator-identity.pub"
+      - ".github/workflows/verify-identity.yml"
+  pull_request:
+    paths:
+      - "public/api/identity.json"
+      - "public/api/identity.json.sig"
+      - "public/.well-known/operator-identity.pub"
+      - ".github/workflows/verify-identity.yml"
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ssh-keygen version
+        run: ssh-keygen -V 2>&1 || ssh -V
+
+      - name: verify ssh signature (skip if not yet live)
+        working-directory: public
+        run: |
+          set -eu
+          PUB=".well-known/operator-identity.pub"
+          JSON="api/identity.json"
+          SIG="api/identity.json.sig"
+
+          missing=0
+          for f in "$PUB" "$JSON" "$SIG"; do
+            if [ ! -f "$f" ]; then
+              echo "missing: $f"
+              missing=1
+            fi
+          done
+
+          if [ "$missing" -ne 0 ]; then
+            echo ""
+            echo "Identity manifest not yet live — skipping verification."
+            echo "This is expected during Phase 1 preparation."
+            exit 0
+          fi
+
+          # All three present — strict verification.
+          jq -e empty "$JSON" >/dev/null
+
+          ALLOWED="$(mktemp)"
+          printf '%s %s\n' "freedom-yield" "$(cat "$PUB")" > "$ALLOWED"
+
+          ssh-keygen -Y verify \
+            -f "$ALLOWED" \
+            -I "freedom-yield" \
+            -n "freedom-yield/validator-identity" \
+            -s "$SIG" < "$JSON"

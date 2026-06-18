@@ -4,7 +4,7 @@ This directory is reserved for well-known resources served at `https://metal.fre
 
 ## Planned resources
 
-- `operator-identity.pub` — the OpenSSH-format ed25519 public key used to verify `/api/identity.json` via `ssh-keygen -Y verify` with namespace `validator-identity`.
+- `operator-identity.pub` — the OpenSSH-format ed25519 public key used to verify `/api/identity.json` via `ssh-keygen -Y verify` with namespace `freedom-yield/validator-identity` and principal `freedom-yield`.
 
 ## Current status
 

@@ -182,7 +182,7 @@
 				<h3>Identity binding (in progress)</h3>
 				<span class="data-tag">in progress</span>
 			</header>
-			<p>A signed identity manifest is being prepared. It will use a dedicated operator identity key, independent of the validator's signing keys. Verification will use OpenSSH signatures with the namespace <code>validator-identity</code>. The validator's signing keys will not be used for this process. The schema is published in advance at <a href="/api/identity.example.json"><code>/api/identity.example.json</code></a>; the verification procedure is documented in <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer"><code>docs/IDENTITY_VERIFICATION.md</code></a>.</p>
+			<p>A signed identity manifest is being prepared. It will use a dedicated operator identity key (ed25519), independent of the validator's <code>staker.key</code> and BLS <code>signer.key</code>. Verification will use OpenSSH signatures with the namespace <code>freedom-yield/validator-identity</code>. The validator's signing keys will not be used for this process. The schema is published in advance at <a href="/api/identity.example.json"><code>/api/identity.example.json</code></a>; the verification procedure is documented in <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer"><code>docs/IDENTITY_VERIFICATION.md</code></a>.</p>
 			<dl class="data-meta">
 				<dt>Status</dt><dd>In preparation — schema and verification docs published; manifest not yet live</dd>
 				<dt>Schema</dt><dd><code>/api/identity.example.json</code></dd>
