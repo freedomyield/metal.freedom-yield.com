@@ -63,14 +63,17 @@ esac
 # Host must be supplied out-of-band so the IP is never committed to the
 # public repo. Two acceptable sources (env wins):
 #   1. WEB_HOST env var, e.g. WEB_HOST=<deploy_user>@203.0.113.11
-#   2. /etc/<your-namespace>/web-host file (whitespace-stripped contents)
+#   2. WEB_HOST_FILE env var pointing at an operator-local file
+#      (default: /etc/<your-namespace>/web-host — operators set this path)
 # Operator runbook is in operator-local notes.
-HOST_FILE="/etc/<your-namespace>/web-host"
+HOST_FILE="${WEB_HOST_FILE:-/etc/<your-namespace>/web-host}"
 if [ -z "${WEB_HOST:-}" ] && [ -f "$HOST_FILE" ]; then
   WEB_HOST=$(tr -d "[:space:]" < "$HOST_FILE")
 fi
 : "${WEB_HOST:?WEB_HOST env var or ${HOST_FILE} is required}"
-KEY="${HOME}/.ssh/web_push"
+# SSH key path is operator-local; expose via env so the script doesn't bake
+# in a specific file name.
+KEY="${WEB_PUSH_KEY:-${HOME}/.ssh/web_push}"
 TARGET="${WEB_HOST}"
 
 [ -f "$SOURCE" ] || { echo "ERROR: source not found: $SOURCE" >&2; exit 1; }
