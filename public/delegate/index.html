@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Delegate to Freedom Yield — Metal Blockchain</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="How to delegate METAL to Freedom Yield's Metal Blockchain validator. No slashing, principal protected, 14-day to 1-year lock.">
+<link rel="canonical" href="https://metal.freedom-yield.com/delegate/">
+<link rel="alternate" hreflang="en" href="https://metal.freedom-yield.com/delegate/">
+<link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/delegate/">
+<link rel="stylesheet" href="/styles.css">
+<script defer src="/assets/main.js"></script>
+<meta name="theme-color" content="#07080c">
+<meta name="color-scheme" content="dark">
+<script type="application/ld+json">
+{
+	"@context": "https://schema.org",
+	"@type": "HowTo",
+	"name": "How to delegate METAL to Freedom Yield",
+	"description": "Step-by-step instructions for delegating METAL on Metal Blockchain to the Freedom Yield validator.",
+	"step": [
+		{ "@type": "HowToStep", "name": "Get METAL", "text": "Acquire METAL on an exchange or P2P." },
+		{ "@type": "HowToStep", "name": "Open Metal Wallet", "text": "https://wallet.metalblockchain.org/ and import or create a wallet." },
+		{ "@type": "HowToStep", "name": "Send delegation tx", "text": "Earn → Add Delegator, choose Freedom Yield's NodeID, set lock period (14d–1y)." }
+	]
+}
+</script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
+<script defer src="/assets/gtag-init.js"></script>
+</head>
+<body>
+<nav class="topnav">
+	<div class="topnav-inner">
+		<a href="/" class="brand">Freedom Yield · Metal</a>
+		<div class="nav">
+			<a href="/about-metal/">About</a>
+			<a href="/delegate/">Delegate</a>
+			<a href="/incidents/">Incidents</a>
+			<a href="/ja/delegate/" class="nav-lang">JA</a>
+		</div>
+	</div>
+</nav>
+
+<main id="main" class="container">
+	<header class="hero">
+		<p class="hero-eyebrow">Delegation</p>
+		<h1>Delegate to Freedom Yield</h1>
+		<p class="hero-lead">
+			The validator node is bootstrapped on <strong>mainnet</strong> and preparing for registration.
+			Delegation opens once the AddValidator transaction is broadcast and uptime is established
+			(<a href="/about-metal/">background</a>).
+		</p>
+		<p class="hero-status">Status: <span class="badge badge-warn">Mainnet bootstrap — preparing registration</span></p>
+	</header>
+
+	<section class="card">
+		<h2>What you will see when delegation opens</h2>
+		<dl class="kv">
+			<dt>NodeID</dt><dd><code data-field="nodeId">—</code></dd>
+			<dt>Self-stake</dt><dd data-field="selfStake">—</dd>
+			<dt>Delegators</dt><dd data-field="delegatorCount">—</dd>
+			<dt>Received</dt><dd data-field="receivedCombined">—</dd>
+			<dt>Network uptime score</dt><dd data-field="uptime">—</dd>
+			<dt>Delegation fee</dt><dd data-field="delegationFee">Planned: 3% (one tier above 2% protocol floor)</dd>
+		</dl>
+	</section>
+
+	<section class="card">
+		<h2>Why these numbers matter (and the hardware does not)</h2>
+		<p>
+			On Snowman consensus, hardware above the official minimum (8 vCPU / 16 GiB) does not increase rewards.
+			What matters for delegators is:
+		</p>
+		<ul>
+			<li><strong>Self-stake</strong> — how much skin we have in the game (intentionally small; live value in the home-page status card)</li>
+			<li><strong>Uptime score</strong> — what the rest of the network thinks of our availability (must stay above 80% for rewards)</li>
+			<li><strong>Delegation fee</strong> — the cut we keep from delegator rewards (protocol minimum 2%, we set 3%)</li>
+			<li><strong>Incident history</strong> — transparency about past outages and how we handled them (see <a href="/incidents/">incidents</a>)</li>
+		</ul>
+	</section>
+
+	<section class="card">
+		<h2>Risk profile</h2>
+		<h3>No slashing</h3>
+		<p>
+			Avalanche family chains do not slash stakes. The worst case is "no rewards for this staking period."
+			Your principal (the METAL you delegated) is <strong>always returned</strong> when the end time arrives,
+			regardless of our uptime.
+		</p>
+		<h3>Lock period</h3>
+		<p>
+			Delegation locks your tokens from <strong>14 days minimum to 1 year maximum</strong>. You cannot withdraw early.
+			During the lock period your METAL is at price-risk in the market.
+		</p>
+		<h3>Single-operator risk</h3>
+		<p>
+			Our validator is a single node. If the host fails and we cannot recover within the staking period,
+			you would miss rewards for that period. Diversifying across multiple validators is good practice.
+		</p>
+	</section>
+
+	<section class="card">
+		<h2>How to delegate (when live)</h2>
+		<ol>
+			<li>Acquire METAL on a supported exchange or P2P.</li>
+			<li>Open <a href="https://wallet.metalblockchain.org/" rel="noopener">Metal Wallet</a>, create or import a wallet.</li>
+			<li>Move tokens to P-Chain (cross-chain transfer from X-Chain).</li>
+			<li>Choose "Earn" → "Add Delegator". Paste our NodeID (shown above when live).</li>
+			<li>Set the lock period (14d–1y). Confirm and send.</li>
+			<li>After the start time you can verify the delegation on <a href="https://explorer.metalblockchain.org/" rel="noopener">explorer.metalblockchain.org</a>.</li>
+		</ol>
+		<p class="note">
+			More detail in our internal runbook <code>docs/TAHOE_PIPELINE.md</code> (same flow on Tahoe testnet, free via faucet).
+		</p>
+	</section>
+
+	<section class="card">
+		<h2>Questions?</h2>
+		<p>Email <a href="mailto:bp@freedom-yield.com">bp@freedom-yield.com</a>. We answer within 48 hours (JST business days).</p>
+	</section>
+</main>
+
+<footer class="site-footer">
+	<div class="container">
+		<p>Contact: <a href="mailto:bp@freedom-yield.com">bp@freedom-yield.com</a></p>
+		<p class="footer-disclaimer"><strong>Disclaimer:</strong> Freedom Yield is an independent, third-party validator operating on Metal Blockchain. It is not affiliated with, endorsed by, sponsored by, or operated by Metallicus Inc. or the Metal Blockchain Foundation. All trademarks are the property of their respective owners.</p>
+	</div>
+</footer>
+</body>
+</html>

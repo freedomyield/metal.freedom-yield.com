@@ -1,0 +1,37 @@
+# Behind reverse proxy mode — 既存の host nginx が
+# metal.freedom-yield.com の TLS 終端 + Host ベースルーティングを担う構成
+# (two-host topology)。
+#
+# このoverride を使うとき:
+#   - 80 / 443 を bind しない(host port は使わない)
+#   - Caddy は 127.0.0.1:${BEHIND_PROXY_PORT:-8085} のみで plain HTTP 受け
+#   - TLS / Let's Encrypt は前段が処理(ACME_EMAIL は不要)
+#   - DOMAIN=:80(Caddy は Host にマッチさせず port 80 で listen)
+#
+# 起動(本番 web host VPS):
+#   docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml up -d
+#   (-f を明示することで docker-compose.override.yml は読まれない)
+#
+# host nginx 側の reverse proxy 設定は docs/DEPLOY_SETUP.md 参照。
+
+services:
+  caddy:
+    ports:
+      - "127.0.0.1:${BEHIND_PROXY_PORT:-8085}:80"
+    environment:
+      - DOMAIN=:80
+      # 前段が TLS を終端するので ACME 関連は無効
+      - ACME_EMAIL=behind-proxy@invalid.local
+      # ops dashboard (Caddyfile の :8443 ブロック) は本モードでは host port を
+      # bind しないので外部から到達不可。ただし Caddyfile parse 通すため basic_auth
+      # の hash 部分には valid な bcrypt 形式が必要。
+      #
+      # ここに置いている hash の平文はランダム生成して即破棄したもの(誰も知らない)。
+      # → ① port 未 bind  ② 認証も常に失敗  の二重で dead code 化。
+      # docker-compose の変数展開を抑止するため $ を $$ にエスケープ。
+      - OPS_BASIC_AUTH_HASH=$$2a$$14$$DummyDeprecatedHashNeverUsedXXXXXXXXXXXXXXXX
+      
+      
+      
+      
+      

@@ -1,0 +1,698 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Freedom Yield — Metal Blockchain バリデータ</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="Freedom Yield は Metal Blockchain(Metallicus 製 Layer-0、Avalanche fork)で validator を運営しています。長期的なネットワーク参加と稼働実績の公開を方針としています。">
+<link rel="canonical" href="https://metal.freedom-yield.com/ja/">
+<link rel="alternate" hreflang="en" href="https://metal.freedom-yield.com/">
+<link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/">
+<link rel="alternate" hreflang="x-default" href="https://metal.freedom-yield.com/">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/assets/vendor/leaflet/leaflet.css">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+<meta name="theme-color" content="#faf7f2">
+<meta name="color-scheme" content="light">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="FY Metal">
+
+<!-- Open Graph -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Freedom Yield · Metal">
+<meta property="og:title" content="Freedom Yield — Metal Blockchain バリデータ候補者">
+<meta property="og:description" content="Metal Blockchain(Metallicus 製 Layer-0)で validator を運営。長期参加・稼働実績公開。">
+<meta property="og:url" content="https://metal.freedom-yield.com/ja/">
+<meta property="og:image" content="https://metal.freedom-yield.com/assets/og.svg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="ja_JP">
+<meta property="og:locale:alternate" content="en_US">
+
+<!-- Twitter -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Freedom Yield — Metal Blockchain バリデータ">
+<meta name="twitter:description" content="長期参加と稼働実績の公開。">
+<meta name="twitter:image" content="https://metal.freedom-yield.com/assets/og.svg">
+
+<script defer src="/assets/main.js"></script>
+<script defer src="/assets/vendor/leaflet/leaflet.js"></script>
+<script defer src="/assets/peer-map.js"></script>
+<script type="module" src="/assets/hero-3d/main.js"></script>
+<script type="module" src="/assets/bg-3d.js"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
+<script defer src="/assets/gtag-init.js"></script>
+</head>
+<body>
+<a href="#main" class="skip-link">本文へ</a>
+<canvas class="bg-canvas" aria-hidden="true"></canvas>
+
+<nav class="topnav">
+	<div class="topnav-inner">
+		<a href="/ja/" class="brand">Freedom Yield · Metal</a>
+		<details class="nav-menu">
+			<summary class="nav-toggle" aria-label="メニューを開く / 閉じる">
+				<span class="hamburger-icon" aria-hidden="true"></span>
+			</summary>
+			<div class="nav">
+				<a href="#status">状態</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">概要</button>
+					<div class="nav-dropdown-menu">
+						<a href="#about">概要</a>
+						<a href="#roadmap">展望</a>
+					</div>
+				</div>
+				<a href="#delegate" data-ga-event="delegate_cta_click" data-ga-param-position="nav">委任</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">検証</button>
+					<div class="nav-dropdown-menu">
+						<a href="/ja/data/">公開データ</a>
+						<a href="/ja/journal/">運用日誌</a>
+						<a href="/ja/continuity/">事業継続性</a>
+						<a href="/ja/incidents/" data-ga-event="nav_click" data-ga-param-target="incidents">インシデント</a>
+					</div>
+				</div>
+				<a href="/" class="nav-lang" data-ga-event="language_switch" data-ga-param-to="en">EN</a>
+			</div>
+		</details>
+	</div>
+</nav>
+
+<header class="hero">
+	<canvas class="hero-canvas" aria-hidden="true"></canvas>
+	<div class="hero-bg-fallback" aria-hidden="true"></div>
+	<div class="container">
+		<p class="hero-eyebrow">Mainnet active</p>
+		<h1>Validator on Metal Blockchain</h1>
+		<p class="hero-lead">
+			Freedom Yield は <strong>Metal Blockchain</strong>(Metallicus 製の Layer-0、Avalanche fork)で
+			validator として登録・<strong>mainnet</strong> で稼働中。
+		</p>
+		<div class="hero-stats">
+			<div class="hero-stat">
+				<span class="hero-stat-value" data-field="uptime">—</span>
+				<span class="hero-stat-label">ネットワーク uptime</span>
+			</div>
+			<div class="hero-stat">
+				<span class="hero-stat-value"><span data-field="daysServing">—</span></span>
+				<span class="hero-stat-label">稼働日数</span>
+			</div>
+			<div class="hero-stat">
+				<span class="hero-stat-value"><span data-field="selfStake">—</span></span>
+				<span class="hero-stat-label">自己 stake</span>
+			</div>
+		</div>
+		<p class="hero-status">現状: <span class="badge badge-ok">Validator 稼働中</span></p>
+	</div>
+	<a class="hero-scroll-cue" href="#status" aria-label="次のセクションへスクロール">
+		<span class="hero-scroll-cue-icon">
+			<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+		</span>
+	</a>
+</header>
+
+<main id="main" class="container">
+	<section id="status" class="card reveal">
+		<h2>現在の状態</h2>
+		<dl class="kv">
+			<dt>フェーズ</dt><dd>mainnet active</dd>
+			<dt>ネットワーク</dt><dd data-field="network">—</dd>
+			<dt>NodeID</dt><dd><code data-field="nodeId">—</code> <a data-field="explorerLink" data-ga-event="explorer_link_click" href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">explorer で確認 ↗</a></dd>
+			<dt>Bootstrap (P/X/C)</dt><dd><span data-field="bootstrap-p">—</span> / <span data-field="bootstrap-x">—</span> / <span data-field="bootstrap-c">—</span></dd>
+			<dt>自己 stake</dt><dd data-field="selfStake">—</dd>
+			<dt>委任件数</dt><dd data-field="delegatorCount">—</dd>
+			<dt>受入合計</dt><dd data-field="receivedCombined">—</dd>
+			<dt>Uptime(ネットワーク評価値)</dt><dd data-field="uptime">—</dd>
+			<dt>Delegation fee</dt><dd data-field="delegationFee">予定 3% (プロトコル下限 2% の一つ上)</dd>
+			<dt>期間終了</dt><dd><span data-field="endTime">—</span> <span data-field="daysRemaining" class="badge"></span></dd>
+			<dt>観測時刻</dt><dd data-field="observedAt">—</dd>
+		</dl>
+		<p class="install-row" hidden data-field="installRow">
+			<button type="button" class="btn" data-action="install">アプリとしてインストール</button>
+			<span class="note-inline">ホーム画面に追加すると 1 タップで開けます。</span>
+		</p>
+		<p class="note">
+			実値は <code>/assets/main.js</code> が <code>/api/validator.json</code> を fetch して反映します。
+			<code>metalgo --network-id=mainnet</code> を <code>scripts/node-info.sh</code> で照会して JSON を更新します。
+			JavaScript 無効時は "—" のまま(graceful degradation)。
+			Self-stake / delegation 値は AddValidator tx 発行後に反映します。
+		</p>
+	</section>
+
+	<figure class="atmosphere-band" aria-hidden="true">
+		<img src="/assets/photos/circuit-board.jpg" alt="" loading="lazy" decoding="async">
+		<div class="atmosphere-band-tint" aria-hidden="true"></div>
+		<figcaption class="atmosphere-band-caption">
+			<div class="atmosphere-band-overline">
+				<span>第 I 章</span>
+				<span class="atmosphere-band-overline-rule" aria-hidden="true"></span>
+				<span>Operator</span>
+			</div>
+			<div class="atmosphere-band-title">About this validator</div>
+			<p class="atmosphere-band-lede">誰が運用し、どんな規律でチェーン上に留めているのか。</p>
+		</figcaption>
+	</figure>
+
+	<section id="about" class="card reveal">
+		<figure class="card-figure" aria-hidden="true">
+			<img src="/assets/photos/focused-work.jpg" alt="" loading="lazy" decoding="async">
+		</figure>
+		<h2>このバリデータについて</h2>
+		<p>
+			日本拠点で Metallicus エコシステムに参加しています。
+		</p>
+
+		<h3>運用方針</h3>
+		<p>
+			Snowman consensus ではサーバスペックは <strong>合否判定型</strong>です — 公式最小を満たせば
+			それ以上のマシンを動かしても報酬は増えません。当方は公式最小ラインで運用し、
+			ハードに使うはずだったコストを <strong>uptime / 監視 / インシデント対応</strong>に振り向けます:
+		</p>
+		<ul>
+			<li>異常検知の push 通知体制(container / disk / memory / peer / validator 脱落)</li>
+			<li>期間更新締切のリマインダー(T−7 日 / 前日 / 当日 / 10 分前 — urgent は最後の 1 通のみ)</li>
+			<li>運用サマリを 1 日複数回プッシュ</li>
+			<li>四半期ごとの災害復旧ドリル(暗号化バックアップ + NodeID 再現性検証)</li>
+		</ul>
+		<p>
+			自己 stake は意図的に小さく抑えています(現時点でネットワーク内では小規模側)。利回りを追わず、
+			受入枠は各サイクルで漸進的に拡大していく方針です。現値はステータスカードに表示中、
+			<a href="/api/validator.json"><code>/api/validator.json</code></a> から live で取得しています。
+		</p>
+		<p>
+			peer-set の full snapshot、validator 集中度の履歴、fee market のパーセンタイル、incident timeline、
+			renewal calendar 本体 ── 運用の生データをオープンに公開しています。一覧は
+			<a href="/data/">/data/</a> にあります。
+		</p>
+
+		<h3>インフラ</h3>
+		<ul>
+			<li>Metallicus 公式最小推奨を余裕で上回る production-grade VPS</li>
+			<li>NVMe-class ローカルストレージ(ネットワークファイルシステムは validator hot path で使用しない)</li>
+			<li>Port 9651/TCP のみ inbound 公開、他は遮断</li>
+			<li>本サイトとは別ホストで運用(障害分離)</li>
+		</ul>
+		<p class="note">
+			補足: バリデータと end user との距離は委任者の体験に影響しません。
+			region 選定の理由は「ピア群への RTT」と「運用者 SSH の応答性」であって、
+			委任者の操作が遅くなることはありません。
+		</p>
+	</section>
+
+	<section id="why" class="split-section reveal">
+		<div class="split-bg" aria-hidden="true">
+			<div class="split-bg-photo"><img src="/assets/photos/metropolis.jpg" alt="" loading="lazy" decoding="async"></div>
+			<div class="split-bg-pane"></div>
+		</div>
+		<div class="split-section-inner">
+			<h2 class="split-section-title">選ばれる理由</h2>
+			<div class="feature-block">
+				<ul class="feature-grid">
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 5 5 19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/></svg>
+						<h3>委任手数料 3%</h3>
+						<p>プロトコル下限 2% の 1 つ上。予測可能な手数料、突発的な引き上げはありません。</p>
+					</li>
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>
+						<h3>能動的な監視体制</h3>
+						<p>24/7 uptime 監視、コンテナ / disk / peer 異常の自動 push 通知、期間更新の前倒し対応。</p>
+					</li>
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
+						<h3>長期参加方針</h3>
+						<p>短期の規模拡大ではなく、長期サイクルにわたる継続性を重視します。</p>
+					</li>
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.5 8 8 9 4.5-1 8-4.5 8-9V6l-8-3z"/><path d="m9 12 2 2 4-4"/></svg>
+						<h3>スラッシングなし</h3>
+						<p>Metal Blockchain にはスラッシングがありません。ダウンタイム時のペナルティは報酬ゼロのみ。委任元本がプロトコルで毀損されることはありません。</p>
+					</li>
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+						<h3>透明な実績</h3>
+						<p>本ページの全数値はノードから live 取得。状態 JSON は <code>/api/validator.json</code> で公開しています。</p>
+					</li>
+			</ul>
+			</div>
+		</div>
+	</section>
+
+	<figure class="atmosphere-band" aria-hidden="true">
+		<img src="/assets/photos/datacenter-aisle.jpg" alt="" loading="lazy" decoding="async">
+		<div class="atmosphere-band-tint" aria-hidden="true"></div>
+		<figcaption class="atmosphere-band-caption">
+			<div class="atmosphere-band-overline">
+				<span>第 II 章</span>
+				<span class="atmosphere-band-overline-rule" aria-hidden="true"></span>
+				<span>Network</span>
+			</div>
+			<div class="atmosphere-band-title">One node among many</div>
+			<p class="atmosphere-band-lede">票を交わすバリデータ群と、私たちを支える広いメッシュ。</p>
+		</figcaption>
+	</figure>
+
+	<section id="network" class="card card-network reveal">
+		<h2>みんなのおかげ — 横のつながり</h2>
+		<p>
+			Metal Blockchain は世界中のバリデータが協調して支える分散ネットワークです。
+			現時点で <strong data-field="totalValidators">~200</strong> の独立オペレータがブロックごとに投票しています。
+			当方のノードもその 1 つ、それ以上でも以下でもありません。
+			Snowman consensus は多様性で強くなる設計で、他バリデータがいなければ私たちも機能しません。
+		</p>
+		<div id="peer-map" class="peer-map" role="img" aria-label="現在ピアリング中のバリデータの世界分布"></div>
+		<p class="peer-map-caption">
+			<span class="legend">
+				<span><span class="legend-dot legend-dot--self"></span>当方のノード</span>
+				<span><span class="legend-dot legend-dot--peer"></span>ピアノード</span>
+			</span>
+			<span data-peer-map-status>ピア位置を読み込み中…</span>
+		</p>
+
+		<figure class="validator-trend" data-validator-trend hidden>
+			<figcaption class="validator-trend-cap">
+				<span class="validator-trend-label">稼働中バリデータ数の推移</span>
+				<span class="validator-trend-current">
+					<strong data-field="validatorTrendCount">—</strong>
+					<span class="validator-trend-current-unit">本日</span>
+				</span>
+			</figcaption>
+			<svg class="validator-trend-svg" data-validator-trend-svg role="img" aria-label="Metal Blockchain の稼働中バリデータ数の時系列" preserveAspectRatio="none"></svg>
+			<p class="validator-trend-note">
+				仮に当方の 1 ノードが落ちても、他に <strong data-field="validatorTrendPeers">~200</strong> 件の独立バリデータが投票を続けます。
+				Snowman consensus は supermajority で成立し、特定の一台に依存しません。
+				小規模オペレータへの委任が安全な理由はここにあります。
+			</p>
+		</figure>
+
+		<p class="note">
+			現在 <strong data-field="liveTotalNetwork">—</strong> 件のピアに接続中。
+			Metal Blockchain はオペレータ集団の共有財産です。誠実に動くバリデータが増えるほど、チェーン全体が信頼できる委任先になります。
+			<em>みんなのおかげ</em>。
+		</p>
+	</section>
+
+	<figure class="atmosphere-band" aria-hidden="true">
+		<img src="/assets/photos/data-center.jpg" alt="" loading="lazy" decoding="async">
+		<div class="atmosphere-band-tint" aria-hidden="true"></div>
+		<figcaption class="atmosphere-band-caption">
+			<div class="atmosphere-band-overline">
+				<span>第 III 章</span>
+				<span class="atmosphere-band-overline-rule" aria-hidden="true"></span>
+				<span>Operations</span>
+			</div>
+			<div class="atmosphere-band-title">Track record</div>
+			<p class="atmosphere-band-lede">数字で測った実績と、委任の経済性。</p>
+		</figcaption>
+	</figure>
+
+	<div class="services-grid reveal">
+		<section id="track-record" class="card service-card">
+			<div class="service-card-banner service-card-banner--record"><span>Track Record</span></div>
+			<div class="service-card-body">
+				<h2>Track record</h2>
+				<dl class="kv">
+					<dt>バリデータ稼働開始</dt><dd data-field="validatorSince">—</dd>
+					<dt>稼働日数</dt><dd><span data-field="daysServing">—</span> 日</dd>
+					<dt>現期間の uptime</dt><dd data-field="uptime">—</dd>
+					<dt>委任件数</dt><dd data-field="delegatorCount">—</dd>
+					<dt>委任受入合計</dt><dd data-field="totalStake">—</dd>
+				</dl>
+
+				<div class="cycle-history" data-cycle-history>
+					<div class="cycle-history-header">
+						<div class="cycle-history-overline">
+							<span>サイクル別履歴</span>
+							<span class="cycle-history-rule" aria-hidden="true"></span>
+							<span>監査証跡</span>
+						</div>
+						<p class="cycle-history-lede">各 validation 期間は終了時に最終 uptime と explorer リンクと共にここに刻まれます。第三者が explorer で数字を直接検証できます。</p>
+					</div>
+					<div class="cycle-chart" data-cycle-chart aria-label="サイクル別 uptime チャート">
+						<p class="note">チャートを読み込み中…</p>
+					</div>
+					<div data-cycle-history-body>
+						<p class="note">cycle 履歴を読み込み中…</p>
+					</div>
+				</div>
+
+				<p class="note">
+					稼働中のノードから live 値を取得。サイクル行は各期間終了時に追記。ソース JSON は <a href="/api/uptime-cycles.json"><code>/api/uptime-cycles.json</code></a>。
+				</p>
+			</div>
+		</section>
+
+		<section id="calculator" class="card service-card">
+			<div class="service-card-banner service-card-banner--calc"><span>Rewards</span></div>
+			<div class="service-card-body">
+				<h2>Reward calculator</h2>
+				<p class="service-card-lead">本バリデータに委任した場合の期待報酬を、ロック期間別に試算します。</p>
+
+				<div class="calc-inputs">
+					<div class="calc-input">
+						<label for="calc-amount">委任額</label>
+						<div class="calc-input-field">
+							<input id="calc-amount" type="number" min="25" max="3000000" step="100" value="10000" data-calc="amount" inputmode="numeric">
+							<span class="calc-input-unit" aria-hidden="true">METAL</span>
+						</div>
+					</div>
+					<div class="calc-input">
+						<label for="calc-period">ロック期間</label>
+						<div class="calc-input-field calc-input-field--select">
+							<select id="calc-period" data-calc="period">
+								<option value="14">2 週間</option>
+								<option value="30">1 ヶ月</option>
+								<option value="90">3 ヶ月</option>
+								<option value="180" selected>6 ヶ月</option>
+								<option value="365">1 年</option>
+							</select>
+						</div>
+					</div>
+				</div>
+
+				<div class="calc-result">
+					<div class="calc-result-label">期待報酬 · uptime 95%</div>
+					<div class="calc-result-value">
+						<span class="num" data-field="calc-expected">—</span>
+						<span class="unit">METAL</span>
+					</div>
+					<div class="calc-result-range" role="group" aria-label="報酬レンジ">
+						<div class="range-anchor">
+							<div class="range-anchor-label">uptime 80%</div>
+							<div class="range-anchor-value">
+								<span class="num" data-field="calc-lowEnd">—</span>
+								<span class="unit">METAL</span>
+							</div>
+						</div>
+						<span class="range-line" aria-hidden="true"></span>
+						<div class="range-anchor range-anchor--right">
+							<div class="range-anchor-label">uptime 100%</div>
+							<div class="range-anchor-value">
+								<span class="num" data-field="calc-highEnd">—</span>
+								<span class="unit">METAL</span>
+							</div>
+						</div>
+					</div>
+				</div>
+
+				<dl class="calc-meta">
+					<div><dt>APY</dt><dd data-field="calc-apy">—</dd></div>
+					<div><dt>期間</dt><dd data-field="calc-period">—</dd></div>
+					<div><dt>手数料</dt><dd>3%</dd></div>
+				</dl>
+
+				<details class="calc-formula">
+					<summary class="nav-dropdown-toggle">計算式と支払いルール</summary>
+					<p>報酬 = 元本 × APY × (lock 日数 / 365) × uptime factor × (1 − 3% 手数料)。<strong>uptime 80% 未満ではネットワークから報酬が一切発生しない</strong>ため、80% の値が「現実的な最悪値」です。</p>
+				</details>
+			</div>
+		</section>
+
+		<section id="delegate" class="card service-card">
+			<div class="service-card-banner service-card-banner--delegate"><span>Delegate</span></div>
+			<div class="service-card-body">
+				<h2>Delegating to us</h2>
+				<p>委任の正式受付は <strong>14 日連続 uptime 達成後</strong> に開始します。上記の実績欄で現在の uptime を確認できます。
+				受付開始時には本ページに step-by-step ガイドを公開します。</p>
+				<h3>ネットワーク全体の要件</h3>
+				<ul>
+					<li>最低委任額: 25 METAL</li>
+					<li>ロック期間: 2 週間〜1 年</li>
+					<li>スラッシングなし — ダウンタイム時のペナルティは報酬ゼロのみ</li>
+					<li>選択期間中は資金ロック、報酬は期間満了時に解放</li>
+				</ul>
+			</div>
+		</section>
+	</div>
+
+	<section id="cadence" class="card cadence reveal">
+		<h2>運営サイクル</h2>
+		<p class="cadence-lede">本バリデータは 1 ヶ月単位で validation 期間を回しています。各サイクルの更新タイミングを公開し、次回 on-chain rollover がいつかを delegator がいつでも把握 + validator entry と突合できる状態を維持しています。</p>
+
+		<div class="cadence-events">
+			<div class="cadence-events-overline">
+				<span>直近の予定</span>
+				<span class="cadence-events-rule" aria-hidden="true"></span>
+				<span data-cadence-window>on-chain endTime から自動算出</span>
+			</div>
+			<ol class="cadence-list" data-cadence-list>
+				<li class="cadence-event cadence-event--loading"><span class="note">予定を読み込み中…</span></li>
+			</ol>
+		</div>
+
+		<div class="cadence-monthly">
+			<div class="cadence-events-overline">
+				<span>月次ビュー</span>
+				<span class="cadence-events-rule" aria-hidden="true"></span>
+				<span>今後 3 ヶ月</span>
+			</div>
+			<div class="cadence-calendar" data-cadence-grid></div>
+		</div>
+
+
+		<div class="cadence-past">
+			<div class="cadence-events-overline">
+				<span>過去の cycle</span>
+				<span class="cadence-events-rule" aria-hidden="true"></span>
+				<span data-cadence-past-stat>on-chain 検証可能</span>
+			</div>
+			<ol class="cadence-past-list" data-cadence-past-list>
+				<li class="cadence-past-item cadence-past-item--loading"><span class="note">cycle 履歴を読み込み中…</span></li>
+			</ol>
+		</div>
+
+		<div class="cadence-subscribe">
+			<a class="cadence-cta" href="https://calendar.google.com/calendar/u/0/r?cid=https%3A%2F%2Fmetal.freedom-yield.com%2Fcalendar%2Fschedule.ics" target="_blank" rel="noopener">
+				<span class="cadence-cta-icon" aria-hidden="true">
+					<svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+						<rect x="3" y="5" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.6"/>
+						<path d="M3 9h18M8 3v4M16 3v4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+					</svg>
+				</span>
+				<span class="cadence-cta-text">
+					<span class="cadence-cta-prompt">Google カレンダーに追加</span>
+					<span class="cadence-cta-sub">ワンクリックで Google Calendar に subscribe。</span>
+				</span>
+				<span class="cadence-cta-arrow" aria-hidden="true">→</span>
+			</a>
+			<p class="cadence-subscribe-alt">
+				他の iCalendar アプリ用 URL:
+				<code class="cadence-ics-url">https://metal.freedom-yield.com/calendar/schedule.ics</code>
+			</p>
+		</div>
+	</section>
+
+	<section id="roadmap" class="card roadmap reveal">
+		<header class="roadmap-header">
+			<p class="roadmap-eyebrow">今後の展望</p>
+			<h2>ロードマップ</h2>
+			<p class="roadmap-lead">validator は終わりのあるプロジェクトではなく、長期間の規律です。約束していること、今後の判断軸を明示します。</p>
+		</header>
+		<ol class="roadmap-list">
+			<li class="roadmap-item roadmap-item--current">
+				<span class="roadmap-dot" aria-hidden="true"></span>
+				<p class="roadmap-period">2026-05 → 2027-05 <span class="roadmap-status roadmap-status--current">進行中</span></p>
+				<h3 class="roadmap-title">Phase 1 — 積み増し</h3>
+				<p class="roadmap-body">12 か月 × 月次 cycle で運用。各 cycle で tx 投入 → ~30 日間稼働 → 再登録。外部資金の段階的 deploy で self-stake を ~3,000 METAL ずつ積み増し、cycle ごとに監査トレース(uptime ledger / incidents / cadence)を公開。委任獲得は積極追求せず、来れば lucky。1 年後に確実に残るもの: 12 cycle 完走実績と公開された監査トレース。</p>
+			</li>
+			<li class="roadmap-item roadmap-item--milestone">
+				<span class="roadmap-dot" aria-hidden="true"></span>
+				<p class="roadmap-period">2027-05 <span class="roadmap-status roadmap-status--milestone">判断点</span></p>
+				<h3 class="roadmap-title">Phase 2 review</h3>
+				<p class="roadmap-body">12 cycle 完走 + 12 か月の監査トレース蓄積。この時点で再判断: cycle 期間を延ばすか? 委任獲得を本格化するか? 判断は今 roadmap に書いた線ではなく、1 年間蓄積した事実ベースで行います。</p>
+			</li>
+			<li class="roadmap-item roadmap-item--future">
+				<span class="roadmap-dot" aria-hidden="true"></span>
+				<p class="roadmap-period">期限なし <span class="roadmap-status roadmap-status--future">Long-term</span></p>
+				<h3 class="roadmap-title">Beyond Phase 2</h3>
+				<p class="roadmap-body">Metal Blockchain ecosystem の進化に合わせて継続的に貢献。validator 運営に終わりはなく、約束できるのは operational quality の継続だけ。</p>
+			</li>
+		</ol>
+	</section>
+
+	<figure class="atmosphere-band" aria-hidden="true">
+		<img src="/assets/photos/dark-code.jpg" alt="" loading="lazy" decoding="async">
+		<div class="atmosphere-band-tint" aria-hidden="true"></div>
+		<figcaption class="atmosphere-band-caption">
+			<div class="atmosphere-band-overline">
+				<span>第 IV 章</span>
+				<span class="atmosphere-band-overline-rule" aria-hidden="true"></span>
+				<span>Trust</span>
+			</div>
+			<div class="atmosphere-band-title">FAQ</div>
+			<p class="atmosphere-band-lede">どのバリデータに対しても問うべき質問への、率直な回答。</p>
+		</figcaption>
+	</figure>
+
+	<section id="faq" class="card reveal">
+		<h2>よくある質問</h2>
+		<div class="faq-grid">
+			<details class="faq-card">
+				<summary class="nav-dropdown-toggle">
+					<span class="faq-card-meta"><span class="faq-card-num">01</span><span class="faq-card-category">運用</span></span>
+					<span class="faq-card-question">バリデータがオフラインになったら?</span>
+					<span class="faq-card-marker" aria-hidden="true"></span>
+				</summary>
+				<div class="faq-card-body">
+					<p>ネットワーク評価値 uptime が 80% を下回ると、その期間の報酬(バリデータ + 委任者ともに)はゼロになります。ただし <strong>元本が削られる(スラッシング)ことはありません</strong>。委任した METAL はバリデータ挙動に関わらず期間満了時に必ず戻ります。</p>
+				</div>
+			</details>
+			<details class="faq-card">
+				<summary class="nav-dropdown-toggle">
+					<span class="faq-card-meta"><span class="faq-card-num">02</span><span class="faq-card-category">経済</span></span>
+					<span class="faq-card-question">ロック期間はどのくらいですか?</span>
+					<span class="faq-card-marker" aria-hidden="true"></span>
+				</summary>
+				<div class="faq-card-body">
+					<p>14 日〜1 年の範囲で自由に選択できます。期間が長いほど APY がわずかに高くなります。ただし委任期間は本バリデータの残り期間を超えることはできません。</p>
+				</div>
+			</details>
+			<details class="faq-card">
+				<summary class="nav-dropdown-toggle">
+					<span class="faq-card-meta"><span class="faq-card-num">03</span><span class="faq-card-category">経済</span></span>
+					<span class="faq-card-question">報酬の支払いタイミングは?</span>
+					<span class="faq-card-marker" aria-hidden="true"></span>
+				</summary>
+				<div class="faq-card-body">
+					<p>選択した lock 期間の終了時に、元本と報酬が一括で P-Chain の指定アドレスに解放されます。途中での部分支払いはありません。</p>
+				</div>
+			</details>
+			<details class="faq-card">
+				<summary class="nav-dropdown-toggle">
+					<span class="faq-card-meta"><span class="faq-card-num">04</span><span class="faq-card-category">経済</span></span>
+					<span class="faq-card-question">途中で委任を取り消せますか?</span>
+					<span class="faq-card-marker" aria-hidden="true"></span>
+				</summary>
+				<div class="faq-card-body">
+					<p>できません。Metal Blockchain の委任は不可逆です。委任時に指定した期間が最終確定値になります。</p>
+				</div>
+			</details>
+			<details class="faq-card">
+				<summary class="nav-dropdown-toggle">
+					<span class="faq-card-meta"><span class="faq-card-num">05</span><span class="faq-card-category">経済</span></span>
+					<span class="faq-card-question">3% の手数料は他バリデータと比べて?</span>
+					<span class="faq-card-marker" aria-hidden="true"></span>
+				</summary>
+				<div class="faq-card-body">
+					<p>プロトコル下限 2%、稼働中のバリデータは 2〜10% に分布。当方は下限の 1 つ上(3%)を採用、運用コストを反映しつつ運用負荷に見合った価格設定としています。</p>
+				</div>
+			</details>
+			<details class="faq-card">
+				<summary class="nav-dropdown-toggle">
+					<span class="faq-card-meta"><span class="faq-card-num">06</span><span class="faq-card-category">運用</span></span>
+					<span class="faq-card-question">委任中にバリデータの期間が終了したら?</span>
+					<span class="faq-card-marker" aria-hidden="true"></span>
+				</summary>
+				<div class="faq-card-body">
+					<p>プロトコルはバリデータの残期間を超える委任を受け付けません。委任可能なのはバリデータの残期間まで。当方は期間切れ前に必ず再登録するため、実質的なリスクではありません。</p>
+				</div>
+			</details>
+			<details class="faq-card">
+				<summary class="nav-dropdown-toggle">
+					<span class="faq-card-meta"><span class="faq-card-num">07</span><span class="faq-card-category">信頼</span></span>
+					<span class="faq-card-question">コードは公開されていますか?</span>
+					<span class="faq-card-marker" aria-hidden="true"></span>
+				</summary>
+				<div class="faq-card-body">
+					<p>はい。本サイト、監視スクリプト、災害復旧手順、バリデータ更新 runbook はすべて public Git リポジトリで管理しており、運用の中身を全部閲覧・監査できます。</p>
+				</div>
+			</details>
+		</div>
+	</section>
+
+	<section id="acknowledgments" class="card acknowledgments reveal">
+		<h2>感謝</h2>
+		<p>
+			ひとりで動くバリデータはありません。以下の存在に感謝します:
+		</p>
+		<ul>
+			<li>
+				<strong>Metallicus</strong>
+				<span>Metal Blockchain と XPR Network を設計・保守するチーム。彼らのプロトコル設計と継続的なメンテナンスなくして当方も存在しません。</span>
+			</li>
+			<li>
+				<strong>avalanchego / metalgo のオープンソース貢献者</strong>
+				<span>当方が動かしている consensus client は世界中のエンジニアによる長年の共同作業。upstream の commit はすべて当方のノードにも届きます。</span>
+			</li>
+			<li>
+				<strong>~200 の同業バリデータ</strong>
+				<span>誠実に動くオペレータが増えるほどチェーン全体が信頼できる委任先になります。当方の uptime スコアは彼らの投票で決まり、彼らのスコアも当方の投票で決まります。</span>
+			</li>
+			<li>
+				<strong>公式 bootstrap ノード</strong>
+				<span>起動時に最初に接続するピア群。Metallicus と信頼できるコミュニティオペレータが運営しています。</span>
+			</li>
+			<li>
+				<strong>あらゆるバリデータを選ぶ delegator</strong>
+				<span>当方以外を選ぶ方も含めて。ステーキングが多数のバリデータに分散される方が、少数に集中するよりネットワーク全体の健全性が高くなります。</span>
+			</li>
+			<li>
+				<strong>Avalanche エコシステム全体</strong>
+				<span>Metal Blockchain は Avalanche の consensus 革新・ツール・セキュリティ研究を継承しています。当方が直接支払っていない研究成果の恩恵を受けています。</span>
+			</li>
+		</ul>
+		<p class="note">
+			競争でなく協調。 <em>みんなのおかげ。</em>
+		</p>
+	</section>
+</main>
+
+<footer class="site-footer">
+	<div class="container">
+		<div class="footer-grid">
+			<div class="footer-brand">
+				<h3>Freedom Yield · Metal</h3>
+				<p>Metal Blockchain 上で長期視点のバリデータを運営。透明な uptime、誇張なし、地道な稼働継続。</p>
+			</div>
+			<nav class="footer-col" aria-label="バリデータ">
+				<h4>バリデータ</h4>
+				<ul>
+					<li><a href="#status">ステータス</a></li>
+					<li><a href="#about">概要</a></li>
+					<li><a href="#track-record">実績</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="委任">
+				<h4>委任</h4>
+				<ul>
+					<li><a href="#delegate">委任する</a></li>
+					<li><a href="#calculator">報酬計算</a></li>
+					<li><a href="#faq">よくある質問</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="ネットワーク">
+				<h4>ネットワーク</h4>
+				<ul>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">エクスプローラ ↗</a></li>
+
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="サポート">
+				<h4>サポート</h4>
+				<ul>
+					<li><a href="/ja/data/">公開データ</a></li>
+					<li><a href="/ja/journal/">運用日誌</a></li>
+					<li><a href="/ja/continuity/">事業継続性</a></li>
+					<li><a href="/ja/incidents/">インシデント</a></li>
+					<li><a href="#acknowledgments">感謝</a></li>
+					<li><a href="mailto:bp@freedom-yield.com">お問い合わせ</a></li>
+				</ul>
+			</nav>
+		</div>
+		<hr class="footer-divider">
+		<p class="footer-disclaimer"><strong>免責事項:</strong> Freedom Yield は Metal Blockchain 上で稼働する独立した第三者バリデータです。Metallicus 社および Metal Blockchain Foundation の関連会社・提携先・出資先・公式運営者ではありません。各商標は各権利者に帰属します。</p>
+		<div class="footer-bottom">
+			<p><a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain</a> を支える validator として運営しています。</p>
+			<p>© 2026 Freedom Yield · Metal validator</p>
+		</div>
+	</div>
+</footer>
+
+</body>
+</html>

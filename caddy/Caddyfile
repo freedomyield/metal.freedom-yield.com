@@ -1,0 +1,167 @@
+# グローバル設定
+{
+	# 本番では .env の ACME_EMAIL を使用。dev では .invalid を使うので ACME は走らない
+	email {$ACME_EMAIL:dev@example.invalid}
+
+	# Caddy は host nginx の背後にいるので X-Forwarded-For から real client IP を読む
+	# 必要がある。private_ranges は 127/8 + 10/8 + 172.16/12 + 192.168/16 等を内包。
+	# これがないと {client_ip} が常に 127.0.0.1 を返し、rate_limit が機能しない。
+	servers {
+		trusted_proxies static private_ranges
+	}
+
+	# rate_limit プラグイン(github.com/mholt/caddy-ratelimit)の execute order を
+	# basic_auth より先に固定。BasicAuth challenge を撃たれる前にブロックできる。
+	order rate_limit before basic_auth
+}
+
+# サイト設定
+# - 本番: DOMAIN=metal.freedom-yield.com → 自動 HTTPS(Let's Encrypt)
+# - dev : DOMAIN=:80 → port 80 で HTTP のみ(localhost:8080 にマップ)
+{$DOMAIN} {
+	encode zstd gzip
+	root * /srv
+
+	# ── Rate limit(per client IP)──────────────────────────────────
+	# 前段に edge CDN がいるとはいえ、bypass や直 origin 攻撃に備えて
+	# Caddy 側でも quota を設ける。3 zone:
+	#   global    — 通常ユーザの bursty な閲覧は許容、爆撃は遮断
+	#   api       — /api/*.json への scraping attack を抑える
+	# events / window 数字は調整可能。429 で reject、Caddy log 残る。
+	rate_limit {
+		zone global {
+			key    {client_ip}
+			events 300
+			window 1m
+		}
+		zone api_json {
+			match {
+				path /api/*
+			}
+			key    {client_ip}
+			events 90
+			window 1m
+		}
+	}
+
+	# ops 専用パスは public サイトでは 403(SSH トンネル経由のみアクセス可)
+	# /ops, /ops/, /ops/anything, /api/server-status.json をすべて遮断
+	@ops_paths path /ops /ops/* /api/server-status.json
+	respond @ops_paths 403
+
+	# /api/*.json は短キャッシュ(validator status / incidents は更新頻度高)
+	@api path /api/*
+	header @api Cache-Control "public, max-age=120, must-revalidate"
+
+	# /calendar/*.ics — Validator renewal schedule (iCalendar).
+	# Token-named files (private URL until publicly announced); served as
+	# text/calendar so Google Calendar can subscribe and auto-refresh.
+	# Moderate cache(1h)since the source regenerates daily on validator host.
+	@calendar path /calendar/*.ics
+	header @calendar {
+		Content-Type "text/calendar; charset=utf-8"
+		Cache-Control "public, max-age=3600, must-revalidate"
+	}
+
+	# 画像・アイコン・マニフェストは長めキャッシュ
+	@long_assets path /assets/*.png /assets/*.svg /assets/*.jpg /assets/*.webp /assets/*.woff2 /favicon.ico /manifest.json
+	header @long_assets Cache-Control "public, max-age=86400, stale-while-revalidate=604800"
+
+	# CSS / JS は中キャッシュ + revalidate
+	@code path /styles.css /assets/*.css /assets/*.js
+	header @code Cache-Control "public, max-age=3600, must-revalidate"
+
+	# HTML は no-cache(常に最新を確認、ETag で 304 で済む)
+	@html path /*.html / /*/
+	header @html Cache-Control "no-cache, must-revalidate"
+
+	# ヘルスチェック(コンテナhealthcheck用)
+	@health path /health
+	respond @health "ok" 200
+
+	# セキュリティヘッダ(HSTSはHTTPでは無視されるのでdevでも実害なし)
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		# Tighter than the previous strict-origin-when-cross-origin: never
+		# leak the referrer header off-site, matching the noindex stance.
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "geolocation=(), camera=(), microphone=(), payment=(), usb=()"
+		# Server-side index suppression on EVERY response (defense in depth
+		# alongside per-page <meta name="robots"> and /robots.txt Disallow).
+		# Crawlers that fetch URLs without parsing HTML (or that ignore
+		# meta tags) still see noindex via header.
+		X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
+		# CSP: default-src 'none' ベースで、必要なリソース種別だけ明示的に許可(deny-by-default)
+		# - worker-src 'self': PWA service worker (/sw.js) を許可
+		# - connect-src: Metal Blockchain API(P-Chain info / explorer 経由の validator 情報取得用) + Google Analytics 計測
+		# - script-src/img-src: Google Analytics 4 (gtag.js) を許可
+		# - 将来 connect-src を広げる場合は本ファイルに追記し、Caddy reload
+		Content-Security-Policy "default-src 'none'; script-src 'self' https://www.googletagmanager.com; style-src 'self'; img-src 'self' data: https://www.googletagmanager.com https://www.google-analytics.com https://*.google-analytics.com https://tile.openstreetmap.org https://*.tile.openstreetmap.org; font-src 'self'; connect-src 'self' https://api.metalblockchain.org https://explorer.metalblockchain.org https://www.google-analytics.com https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com; manifest-src 'self'; worker-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+		-Server
+	}
+
+	# 本処理: 静的ファイル配信
+	file_server
+
+	# エラー時のカスタムページ(/ja/* なら /ja/404.html、それ以外は /404.html)
+	# 注意: handle 同士は mutually exclusive。最初に match した方だけ実行される
+	handle_errors {
+		@ja_path path_regexp ^/ja(/.*)?$
+		handle @ja_path {
+			rewrite * /ja/404.html
+			file_server
+		}
+		handle {
+			rewrite * /404.html
+			file_server
+		}
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
+
+# ops dashboard — accessible ONLY via SSH tunnel:
+#   ssh -L 8443:localhost:8443 -i ~/.ssh/<your_validator_host_key> root@<vps>
+#   browser → http://localhost:8443
+#
+# Defense-in-depth:
+#   1. docker port mapping binds 127.0.0.1:8443 on the VPS (NOT 0.0.0.0)
+#   2. SSH key auth on the tunnel layer
+#   3. BasicAuth on Caddy
+# Plain HTTP is fine inside the SSH tunnel — encryption is already there.
+:8443 {
+	root * /srv
+
+	basic_auth {
+		operator {$OPS_BASIC_AUTH_HASH}
+	}
+
+	# Slightly more lenient cache for the operator-facing dashboard
+	@api path /api/*
+	header @api Cache-Control "no-store"
+
+	# Ops dashboard entry point
+	@ops_root path /
+	rewrite @ops_root /ops/index.html
+
+	file_server
+
+	header {
+		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		# CSP: tighter than public — no external connects, only self
+		Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+		-Server
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

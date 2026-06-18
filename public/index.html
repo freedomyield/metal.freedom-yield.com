@@ -1,0 +1,698 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Freedom Yield — Metal Blockchain Validator</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="Freedom Yield operates a validator on Metal Blockchain (Layer-0 by Metallicus, Avalanche fork). Long-horizon participation with transparent uptime reporting.">
+<link rel="canonical" href="https://metal.freedom-yield.com/">
+<link rel="alternate" hreflang="en" href="https://metal.freedom-yield.com/">
+<link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/">
+<link rel="alternate" hreflang="x-default" href="https://metal.freedom-yield.com/">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/assets/vendor/leaflet/leaflet.css">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+<meta name="theme-color" content="#faf7f2">
+<meta name="color-scheme" content="light">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="FY Metal">
+
+<!-- Open Graph -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Freedom Yield · Metal">
+<meta property="og:title" content="Freedom Yield — Metal Blockchain Validator">
+<meta property="og:description" content="Long-horizon validator on Metal Blockchain (Layer-0 by Metallicus). Transparent uptime, public audit trail.">
+<meta property="og:url" content="https://metal.freedom-yield.com/">
+<meta property="og:image" content="https://metal.freedom-yield.com/assets/og.svg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="en_US">
+<meta property="og:locale:alternate" content="ja_JP">
+
+<!-- Twitter -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Freedom Yield — Metal Blockchain Validator">
+<meta name="twitter:description" content="Long-horizon validator. Transparent uptime.">
+<meta name="twitter:image" content="https://metal.freedom-yield.com/assets/og.svg">
+
+<script defer src="/assets/main.js"></script>
+<script defer src="/assets/vendor/leaflet/leaflet.js"></script>
+<script defer src="/assets/peer-map.js"></script>
+<script type="module" src="/assets/hero-3d/main.js"></script>
+<script type="module" src="/assets/bg-3d.js"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
+<script defer src="/assets/gtag-init.js"></script>
+</head>
+<body>
+<a href="#main" class="skip-link">Skip to main content</a>
+<canvas class="bg-canvas" aria-hidden="true"></canvas>
+
+<nav class="topnav">
+	<div class="topnav-inner">
+		<a href="/" class="brand">Freedom Yield · Metal</a>
+		<details class="nav-menu">
+			<summary class="nav-toggle" aria-label="Open / close menu">
+				<span class="hamburger-icon" aria-hidden="true"></span>
+			</summary>
+			<div class="nav">
+				<a href="#status">Status</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">About</button>
+					<div class="nav-dropdown-menu">
+						<a href="#about">About</a>
+						<a href="#roadmap">Roadmap</a>
+					</div>
+				</div>
+				<a href="#delegate" data-ga-event="delegate_cta_click" data-ga-param-position="nav">Delegate</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">Verify</button>
+					<div class="nav-dropdown-menu">
+						<a href="/data/">Open data</a>
+						<a href="/journal/">Cycle journal</a>
+						<a href="/continuity/">Continuity</a>
+						<a href="/incidents/" data-ga-event="nav_click" data-ga-param-target="incidents">Incidents</a>
+					</div>
+				</div>
+				<a href="/ja/" class="nav-lang" data-ga-event="language_switch" data-ga-param-to="ja">JA</a>
+			</div>
+		</details>
+	</div>
+</nav>
+
+<header class="hero">
+	<canvas class="hero-canvas" aria-hidden="true"></canvas>
+	<div class="hero-bg-fallback" aria-hidden="true"></div>
+	<div class="container">
+		<p class="hero-eyebrow">Mainnet active</p>
+		<h1>Validator on Metal Blockchain</h1>
+		<p class="hero-lead">
+			Freedom Yield operates a registered validator on <strong>Metal Blockchain</strong> (Layer-0 by Metallicus,
+			an Avalanche fork). Staked and live on <strong>mainnet</strong>.
+		</p>
+		<div class="hero-stats">
+			<div class="hero-stat">
+				<span class="hero-stat-value" data-field="uptime">—</span>
+				<span class="hero-stat-label">network uptime</span>
+			</div>
+			<div class="hero-stat">
+				<span class="hero-stat-value"><span data-field="daysServing">—</span></span>
+				<span class="hero-stat-label">days serving</span>
+			</div>
+			<div class="hero-stat">
+				<span class="hero-stat-value"><span data-field="selfStake">—</span></span>
+				<span class="hero-stat-label">self-stake</span>
+			</div>
+		</div>
+		<p class="hero-status">Status: <span class="badge badge-ok">Validator active</span></p>
+	</div>
+	<a class="hero-scroll-cue" href="#status" aria-label="Scroll to next section">
+		<span class="hero-scroll-cue-icon">
+			<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+		</span>
+	</a>
+</header>
+
+<main id="main" class="container">
+	<section id="status" class="card reveal">
+		<h2>Current status</h2>
+		<dl class="kv">
+			<dt>Phase</dt><dd>mainnet active</dd>
+			<dt>Network</dt><dd data-field="network">—</dd>
+			<dt>NodeID</dt><dd><code data-field="nodeId">—</code> <a data-field="explorerLink" data-ga-event="explorer_link_click" href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">view on explorer ↗</a></dd>
+			<dt>Bootstrap (P/X/C)</dt><dd><span data-field="bootstrap-p">—</span> / <span data-field="bootstrap-x">—</span> / <span data-field="bootstrap-c">—</span></dd>
+			<dt>Self-stake</dt><dd data-field="selfStake">—</dd>
+			<dt>Delegators</dt><dd data-field="delegatorCount">—</dd>
+			<dt>Received</dt><dd data-field="receivedCombined">—</dd>
+			<dt>Uptime (network view)</dt><dd data-field="uptime">—</dd>
+			<dt>Delegation fee</dt><dd data-field="delegationFee">Planned: 3% (one tier above 2% protocol floor)</dd>
+			<dt>Period ends</dt><dd><span data-field="endTime">—</span> <span data-field="daysRemaining" class="badge"></span></dd>
+			<dt>Observed at</dt><dd data-field="observedAt">—</dd>
+		</dl>
+		<p class="install-row" hidden data-field="installRow">
+			<button type="button" class="btn" data-action="install">Install as app</button>
+			<span class="note-inline">Add this page to your home screen for one-tap access.</span>
+		</p>
+		<p class="note">
+			Live values are loaded by <code>/assets/main.js</code> from <code>/api/validator.json</code>,
+			which is refreshed by <code>scripts/node-info.sh</code> against the local
+			<code>metalgo --network-id=mainnet</code> instance.
+			If JavaScript is disabled the "—" placeholders remain (graceful degradation).
+			Self-stake and delegation values populate once the AddValidator transaction is broadcast.
+		</p>
+	</section>
+
+	<figure class="atmosphere-band" aria-hidden="true">
+		<img src="/assets/photos/circuit-board.jpg" alt="" loading="lazy" decoding="async">
+		<div class="atmosphere-band-tint" aria-hidden="true"></div>
+		<figcaption class="atmosphere-band-caption">
+			<div class="atmosphere-band-overline">
+				<span>Chapter I</span>
+				<span class="atmosphere-band-overline-rule" aria-hidden="true"></span>
+				<span>Operator</span>
+			</div>
+			<div class="atmosphere-band-title">About this validator</div>
+			<p class="atmosphere-band-lede">Who runs the node, and the discipline behind keeping it on the chain.</p>
+		</figcaption>
+	</figure>
+
+	<section id="about" class="card reveal">
+		<figure class="card-figure" aria-hidden="true">
+			<img src="/assets/photos/focused-work.jpg" alt="" loading="lazy" decoding="async">
+		</figure>
+		<h2>About this validator</h2>
+		<p>
+			A Japan-based operator that has been participating in the Metallicus ecosystem.
+		</p>
+
+		<h3>Operating principle</h3>
+		<p>
+			On Snowman consensus, server specs are <strong>pass/fail</strong> — running larger machines does not earn
+			more rewards. We operate at the official minimum and put the effort that would otherwise go into hardware
+			into <strong>uptime, monitoring, and incident response</strong>:
+		</p>
+		<ul>
+			<li>Push-based anomaly detection (container status, disk, memory, peer count, validator drop)</li>
+			<li>Renewal-deadline alerts at T−7 days, T−1 day, T−0 day, and T−10 minutes (only the last carries urgent priority)</li>
+			<li>Daily status digest pushed to the operator at a fixed multi-time cadence</li>
+			<li>Disaster-recovery procedure verified by quarterly drills (encrypted backup, NodeID reproducibility)</li>
+		</ul>
+		<p>
+			Self-stake is intentionally small — currently on the lower end of the network. We deliberately do not chase
+			yield by scaling our own commitment; capacity grows incrementally each renewal cycle. The live amount is in
+			the status card above, served from <a href="/api/validator.json"><code>/api/validator.json</code></a>.
+		</p>
+		<p>
+			The raw building blocks of operations are published openly — full peer-set snapshots,
+			validator-concentration history, fee-market percentiles, incident timelines, the renewal
+			calendar. The catalog lives at <a href="/data/">/data/</a>.
+		</p>
+
+		<h3>Infrastructure</h3>
+		<ul>
+			<li>Production-grade VPS comfortably above the official Metallicus minimum recommendation</li>
+			<li>NVMe-class local storage for chain data (no network filesystems on the validator's hot path)</li>
+			<li>Port 9651/TCP exposed for staking, all other inbound restricted</li>
+			<li>Independent host from this public website (failure isolation)</li>
+		</ul>
+		<p class="note">
+			Note: validator-to-end-user latency does not affect delegators. Region choice is about peer RTT and operator SSH,
+			not your experience.
+		</p>
+	</section>
+
+	<section id="why" class="split-section reveal">
+		<div class="split-bg" aria-hidden="true">
+			<div class="split-bg-photo"><img src="/assets/photos/metropolis.jpg" alt="" loading="lazy" decoding="async"></div>
+			<div class="split-bg-pane"></div>
+		</div>
+		<div class="split-section-inner">
+			<h2 class="split-section-title">Why delegate to us</h2>
+			<div class="feature-block">
+				<ul class="feature-grid">
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 5 5 19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/></svg>
+						<h3>3% delegation fee</h3>
+						<p>One tier above the 2% protocol floor. Predictable take rate, no surprise hikes.</p>
+					</li>
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>
+						<h3>Active monitoring</h3>
+						<p>24/7 uptime probes, automated push alerts for container / disk / peer count anomalies, period-renewal guardrails.</p>
+					</li>
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
+						<h3>Long-horizon participation</h3>
+						<p>The focus is on continuity over many cycles, not on short-term scaling.</p>
+					</li>
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.5 8 8 9 4.5-1 8-4.5 8-9V6l-8-3z"/><path d="m9 12 2 2 4-4"/></svg>
+						<h3>No slashing on the network</h3>
+						<p>Metal Blockchain has no slashing. The downside of a downtime event is missed rewards — your principal is never at protocol risk.</p>
+					</li>
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+						<h3>Transparent track record</h3>
+						<p>Every metric on this page is fetched live from the validator. The status JSON is open at <code>/api/validator.json</code>.</p>
+					</li>
+			</ul>
+			</div>
+		</div>
+	</section>
+
+	<figure class="atmosphere-band" aria-hidden="true">
+		<img src="/assets/photos/datacenter-aisle.jpg" alt="" loading="lazy" decoding="async">
+		<div class="atmosphere-band-tint" aria-hidden="true"></div>
+		<figcaption class="atmosphere-band-caption">
+			<div class="atmosphere-band-overline">
+				<span>Chapter II</span>
+				<span class="atmosphere-band-overline-rule" aria-hidden="true"></span>
+				<span>Network</span>
+			</div>
+			<div class="atmosphere-band-title">One node among many</div>
+			<p class="atmosphere-band-lede">The validators we vote with, and the mesh that backs us up.</p>
+		</figcaption>
+	</figure>
+
+	<section id="network" class="card card-network reveal">
+		<h2>One node among many</h2>
+		<p>
+			Metal Blockchain runs on a worldwide cooperative of validators — at the time of writing,
+			<strong data-field="totalValidators">~200</strong> independent operators take turns voting on every block.
+			Our node is one of them, no more, no less. Snowman consensus rewards diversity, not dominance:
+			the network is more resilient because of every other operator, not in spite of them.
+		</p>
+		<div id="peer-map" class="peer-map" role="img" aria-label="Map of validators that our node is currently peered with"></div>
+		<p class="peer-map-caption">
+			<span class="legend">
+				<span><span class="legend-dot legend-dot--self"></span>our node</span>
+				<span><span class="legend-dot legend-dot--peer"></span>peer node</span>
+			</span>
+			<span data-peer-map-status>Loading peer locations…</span>
+		</p>
+
+		<figure class="validator-trend" data-validator-trend hidden>
+			<figcaption class="validator-trend-cap">
+				<span class="validator-trend-label">Validators online over time</span>
+				<span class="validator-trend-current">
+					<strong data-field="validatorTrendCount">—</strong>
+					<span class="validator-trend-current-unit">today</span>
+				</span>
+			</figcaption>
+			<svg class="validator-trend-svg" data-validator-trend-svg role="img" aria-label="Number of independent Metal Blockchain validators over time" preserveAspectRatio="none"></svg>
+			<p class="validator-trend-note">
+				Even if our single node goes offline, <strong data-field="validatorTrendPeers">~200</strong> other
+				independent validators continue voting. Snowman consensus needs a supermajority — not us specifically.
+				That's what makes delegating to a small operator safe.
+			</p>
+		</figure>
+
+		<p class="note">
+			We are currently connected to <strong data-field="liveTotalNetwork">—</strong> peers in real time.
+			The Metal Blockchain belongs to its operators collectively — every validator that runs honestly makes
+			the chain a better place to delegate to. <em>みんなのおかげ</em>.
+		</p>
+	</section>
+
+	<figure class="atmosphere-band" aria-hidden="true">
+		<img src="/assets/photos/data-center.jpg" alt="" loading="lazy" decoding="async">
+		<div class="atmosphere-band-tint" aria-hidden="true"></div>
+		<figcaption class="atmosphere-band-caption">
+			<div class="atmosphere-band-overline">
+				<span>Chapter III</span>
+				<span class="atmosphere-band-overline-rule" aria-hidden="true"></span>
+				<span>Operations</span>
+			</div>
+			<div class="atmosphere-band-title">Track record</div>
+			<p class="atmosphere-band-lede">What we've delivered, in numbers — and the math behind delegating to us.</p>
+		</figcaption>
+	</figure>
+
+	<div class="services-grid reveal">
+		<section id="track-record" class="card service-card">
+			<div class="service-card-banner service-card-banner--record"><span>Track Record</span></div>
+			<div class="service-card-body">
+				<h2>Track record</h2>
+				<dl class="kv">
+					<dt>Validator since</dt><dd data-field="validatorSince">—</dd>
+					<dt>Days serving</dt><dd><span data-field="daysServing">—</span> days</dd>
+					<dt>Current period uptime</dt><dd data-field="uptime">—</dd>
+					<dt>Delegators</dt><dd data-field="delegatorCount">—</dd>
+					<dt>Stake received from delegators</dt><dd data-field="totalStake">—</dd>
+				</dl>
+
+				<div class="cycle-history" data-cycle-history>
+					<div class="cycle-history-header">
+						<div class="cycle-history-overline">
+							<span>Per-cycle history</span>
+							<span class="cycle-history-rule" aria-hidden="true"></span>
+							<span>Audit trail</span>
+						</div>
+						<p class="cycle-history-lede">Each validation period closes here with its final uptime and a link to the on-chain validator entry. Anyone can verify these numbers against the explorer.</p>
+					</div>
+					<div class="cycle-chart" data-cycle-chart aria-label="Per-cycle uptime chart">
+						<p class="note">Loading chart…</p>
+					</div>
+					<div data-cycle-history-body>
+						<p class="note">Loading cycle history…</p>
+					</div>
+				</div>
+
+				<p class="note">
+					Real-time values come from the running node. Per-cycle rows are written when each validation period closes; the source JSON is at <a href="/api/uptime-cycles.json"><code>/api/uptime-cycles.json</code></a>.
+				</p>
+			</div>
+		</section>
+
+		<section id="calculator" class="card service-card">
+			<div class="service-card-banner service-card-banner--calc"><span>Rewards</span></div>
+			<div class="service-card-body">
+				<h2>Reward calculator</h2>
+				<p class="service-card-lead">Estimate what delegating to this validator would earn over your chosen lock period.</p>
+
+				<div class="calc-inputs">
+					<div class="calc-input">
+						<label for="calc-amount">Delegation amount</label>
+						<div class="calc-input-field">
+							<input id="calc-amount" type="number" min="25" max="3000000" step="100" value="10000" data-calc="amount" inputmode="numeric">
+							<span class="calc-input-unit" aria-hidden="true">METAL</span>
+						</div>
+					</div>
+					<div class="calc-input">
+						<label for="calc-period">Lock period</label>
+						<div class="calc-input-field calc-input-field--select">
+							<select id="calc-period" data-calc="period">
+								<option value="14">2 weeks</option>
+								<option value="30">1 month</option>
+								<option value="90">3 months</option>
+								<option value="180" selected>6 months</option>
+								<option value="365">1 year</option>
+							</select>
+						</div>
+					</div>
+				</div>
+
+				<div class="calc-result">
+					<div class="calc-result-label">Expected reward · 95% uptime</div>
+					<div class="calc-result-value">
+						<span class="num" data-field="calc-expected">—</span>
+						<span class="unit">METAL</span>
+					</div>
+					<div class="calc-result-range" role="group" aria-label="Reward range">
+						<div class="range-anchor">
+							<div class="range-anchor-label">At 80%</div>
+							<div class="range-anchor-value">
+								<span class="num" data-field="calc-lowEnd">—</span>
+								<span class="unit">METAL</span>
+							</div>
+						</div>
+						<span class="range-line" aria-hidden="true"></span>
+						<div class="range-anchor range-anchor--right">
+							<div class="range-anchor-label">At 100%</div>
+							<div class="range-anchor-value">
+								<span class="num" data-field="calc-highEnd">—</span>
+								<span class="unit">METAL</span>
+							</div>
+						</div>
+					</div>
+				</div>
+
+				<dl class="calc-meta">
+					<div><dt>APY</dt><dd data-field="calc-apy">—</dd></div>
+					<div><dt>Duration</dt><dd data-field="calc-period">—</dd></div>
+					<div><dt>Fee</dt><dd>3%</dd></div>
+				</dl>
+
+				<details class="calc-formula">
+					<summary class="nav-dropdown-toggle">Formula &amp; payment rules</summary>
+					<p>Reward = principal × APY × (lock days / 365) × uptime factor × (1 − 3% fee). <strong>Below 80% uptime the network pays no reward at all</strong>, so the 80% line marks the worst meaningful case.</p>
+				</details>
+			</div>
+		</section>
+
+		<section id="delegate" class="card service-card">
+			<div class="service-card-banner service-card-banner--delegate"><span>Delegate</span></div>
+			<div class="service-card-body">
+				<h2>Delegating to us</h2>
+				<p>Delegation will be formally opened once the validator achieves <strong>14 consecutive days of uptime</strong>. Track the
+				current uptime above. When ready, this page will publish a step-by-step delegation guide.</p>
+				<h3>Minimum requirements (network-wide)</h3>
+				<ul>
+					<li>Minimum delegation: 25 METAL</li>
+					<li>Lock period: 2 weeks to 1 year</li>
+					<li>No slashing — penalty for downtime is reward loss only</li>
+					<li>Funds lock for the chosen duration; rewards are released at period end</li>
+				</ul>
+			</div>
+		</section>
+	</div>
+
+	<section id="cadence" class="card cadence reveal">
+		<h2>Operating cadence</h2>
+		<p class="cadence-lede">Each validation period is one month. The renewal moments are published openly so delegators always know when the next on-chain rollover happens and can verify against the validator entry.</p>
+
+		<div class="cadence-events">
+			<div class="cadence-events-overline">
+				<span>Next events</span>
+				<span class="cadence-events-rule" aria-hidden="true"></span>
+				<span data-cadence-window>Computed from on-chain endTime</span>
+			</div>
+			<ol class="cadence-list" data-cadence-list>
+				<li class="cadence-event cadence-event--loading"><span class="note">Loading next events…</span></li>
+			</ol>
+		</div>
+
+		<div class="cadence-monthly">
+			<div class="cadence-events-overline">
+				<span>Monthly view</span>
+				<span class="cadence-events-rule" aria-hidden="true"></span>
+				<span>Next 3 months</span>
+			</div>
+			<div class="cadence-calendar" data-cadence-grid></div>
+		</div>
+
+
+		<div class="cadence-past">
+			<div class="cadence-events-overline">
+				<span>Past cycles</span>
+				<span class="cadence-events-rule" aria-hidden="true"></span>
+				<span data-cadence-past-stat>Verified on-chain</span>
+			</div>
+			<ol class="cadence-past-list" data-cadence-past-list>
+				<li class="cadence-past-item cadence-past-item--loading"><span class="note">Loading past cycles…</span></li>
+			</ol>
+		</div>
+
+		<div class="cadence-subscribe">
+			<a class="cadence-cta" href="https://calendar.google.com/calendar/u/0/r?cid=https%3A%2F%2Fmetal.freedom-yield.com%2Fcalendar%2Fschedule.ics" target="_blank" rel="noopener">
+				<span class="cadence-cta-icon" aria-hidden="true">
+					<svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+						<rect x="3" y="5" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.6"/>
+						<path d="M3 9h18M8 3v4M16 3v4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+					</svg>
+				</span>
+				<span class="cadence-cta-text">
+					<span class="cadence-cta-prompt">Add to Google Calendar</span>
+					<span class="cadence-cta-sub">One-click subscribe via Google Calendar.</span>
+				</span>
+				<span class="cadence-cta-arrow" aria-hidden="true">→</span>
+			</a>
+			<p class="cadence-subscribe-alt">
+				Or paste into any iCalendar app:
+				<code class="cadence-ics-url">https://metal.freedom-yield.com/calendar/schedule.ics</code>
+			</p>
+		</div>
+	</section>
+
+	<section id="roadmap" class="card roadmap reveal">
+		<header class="roadmap-header">
+			<p class="roadmap-eyebrow">What's next</p>
+			<h2>Roadmap</h2>
+			<p class="roadmap-lead">A validator is a long-horizon discipline, not a project with a finish line. Here's what we've committed to, and how we decide what comes next.</p>
+		</header>
+		<ol class="roadmap-list">
+			<li class="roadmap-item roadmap-item--current">
+				<span class="roadmap-dot" aria-hidden="true"></span>
+				<p class="roadmap-period">2026-05 → 2027-05 <span class="roadmap-status roadmap-status--current">In progress</span></p>
+				<h3 class="roadmap-title">Phase 1 — Accumulation</h3>
+				<p class="roadmap-body">Twelve monthly cycles. Each cycle: file the tx, run for ~30 days, renew. Self-stake grows incrementally as external capital is deployed (~3,000 METAL per cycle). Audit traces — uptime ledger, incidents, cadence — are published every cycle. Delegations are not actively pursued; the focus is operational discipline and record-keeping. Whether or not delegations arrive, the year produces what matters most: twelve cycle completions and a public track record.</p>
+			</li>
+			<li class="roadmap-item roadmap-item--milestone">
+				<span class="roadmap-dot" aria-hidden="true"></span>
+				<p class="roadmap-period">2027-05 <span class="roadmap-status roadmap-status--milestone">Decision point</span></p>
+				<h3 class="roadmap-title">Phase 2 review</h3>
+				<p class="roadmap-body">Twelve cycle completions, twelve months of audit trace. At this point we reassess: extend cycle duration? Begin to actively accept delegations? The judgment is made from a year of evidence, not from a line drawn today.</p>
+			</li>
+			<li class="roadmap-item roadmap-item--future">
+				<span class="roadmap-dot" aria-hidden="true"></span>
+				<p class="roadmap-period">Open-ended <span class="roadmap-status roadmap-status--future">Long-term</span></p>
+				<h3 class="roadmap-title">Beyond Phase 2</h3>
+				<p class="roadmap-body">Continue contributing within the Metal Blockchain ecosystem as it evolves. Validator operation has no fixed finish line; the only durable commitment is to operational quality and to staying useful as the network changes around it.</p>
+			</li>
+		</ol>
+	</section>
+
+	<figure class="atmosphere-band" aria-hidden="true">
+		<img src="/assets/photos/dark-code.jpg" alt="" loading="lazy" decoding="async">
+		<div class="atmosphere-band-tint" aria-hidden="true"></div>
+		<figcaption class="atmosphere-band-caption">
+			<div class="atmosphere-band-overline">
+				<span>Chapter IV</span>
+				<span class="atmosphere-band-overline-rule" aria-hidden="true"></span>
+				<span>Trust</span>
+			</div>
+			<div class="atmosphere-band-title">FAQ</div>
+			<p class="atmosphere-band-lede">Honest answers to the questions you should be asking any validator.</p>
+		</figcaption>
+	</figure>
+
+	<section id="faq" class="card reveal">
+		<h2>FAQ</h2>
+		<div class="faq-grid">
+			<details class="faq-card">
+				<summary class="nav-dropdown-toggle">
+					<span class="faq-card-meta"><span class="faq-card-num">01</span><span class="faq-card-category">Operations</span></span>
+					<span class="faq-card-question">What happens if the validator goes offline?</span>
+					<span class="faq-card-marker" aria-hidden="true"></span>
+				</summary>
+				<div class="faq-card-body">
+					<p>If our node falls below 80% network-observed uptime over a period, the entire period's reward (for both the validator and its delegators) is forfeited. There is <strong>no slashing of principal</strong> — your delegated METAL is always returned when the lock period ends, regardless of validator behavior.</p>
+				</div>
+			</details>
+			<details class="faq-card">
+				<summary class="nav-dropdown-toggle">
+					<span class="faq-card-meta"><span class="faq-card-num">02</span><span class="faq-card-category">Economics</span></span>
+					<span class="faq-card-question">How long is the lock period?</span>
+					<span class="faq-card-marker" aria-hidden="true"></span>
+				</summary>
+				<div class="faq-card-body">
+					<p>You choose: anywhere from 14 days to 1 year. Longer periods earn slightly higher APY. Your delegation period cannot exceed the validator's remaining period.</p>
+				</div>
+			</details>
+			<details class="faq-card">
+				<summary class="nav-dropdown-toggle">
+					<span class="faq-card-meta"><span class="faq-card-num">03</span><span class="faq-card-category">Economics</span></span>
+					<span class="faq-card-question">When are rewards paid?</span>
+					<span class="faq-card-marker" aria-hidden="true"></span>
+				</summary>
+				<div class="faq-card-body">
+					<p>At the end of your chosen lock period, principal and rewards are released together to your reward address on the P-Chain. There are no intermediate payouts.</p>
+				</div>
+			</details>
+			<details class="faq-card">
+				<summary class="nav-dropdown-toggle">
+					<span class="faq-card-meta"><span class="faq-card-num">04</span><span class="faq-card-category">Economics</span></span>
+					<span class="faq-card-question">Can I withdraw my delegation early?</span>
+					<span class="faq-card-marker" aria-hidden="true"></span>
+				</summary>
+				<div class="faq-card-body">
+					<p>No. Metal Blockchain delegations are non-revocable. The duration you select at delegation time is final.</p>
+				</div>
+			</details>
+			<details class="faq-card">
+				<summary class="nav-dropdown-toggle">
+					<span class="faq-card-meta"><span class="faq-card-num">05</span><span class="faq-card-category">Economics</span></span>
+					<span class="faq-card-question">How is the 3% fee compared to other validators?</span>
+					<span class="faq-card-marker" aria-hidden="true"></span>
+				</summary>
+				<div class="faq-card-body">
+					<p>2% is the protocol floor; most active validators sit at 2–10%. We chose 3% — one tier above the floor — pricing the operational effort honestly.</p>
+				</div>
+			</details>
+			<details class="faq-card">
+				<summary class="nav-dropdown-toggle">
+					<span class="faq-card-meta"><span class="faq-card-num">06</span><span class="faq-card-category">Operations</span></span>
+					<span class="faq-card-question">What if your validator's period ends mid-delegation?</span>
+					<span class="faq-card-marker" aria-hidden="true"></span>
+				</summary>
+				<div class="faq-card-body">
+					<p>The protocol forbids accepting a delegation that would outlast the validator. You'll only be able to delegate up to the validator's remaining period. We re-register on time, so this is a soft constraint, not a real risk.</p>
+				</div>
+			</details>
+			<details class="faq-card">
+				<summary class="nav-dropdown-toggle">
+					<span class="faq-card-meta"><span class="faq-card-num">07</span><span class="faq-card-category">Trust</span></span>
+					<span class="faq-card-question">Is your code open?</span>
+					<span class="faq-card-marker" aria-hidden="true"></span>
+				</summary>
+				<div class="faq-card-body">
+					<p>Yes. This entire site, the monitoring scripts, the disaster-recovery procedure, and the validator's renewal runbook all live in a public Git repository so you can audit how the operation is run.</p>
+				</div>
+			</details>
+		</div>
+	</section>
+
+	<section id="acknowledgments" class="card acknowledgments reveal">
+		<h2>Thanks to</h2>
+		<p>
+			No validator runs alone. We are grateful to:
+		</p>
+		<ul>
+			<li>
+				<strong>Metallicus</strong>
+				<span>The team building Metal Blockchain and XPR Network. Without their protocol design and ongoing maintenance, none of this exists.</span>
+			</li>
+			<li>
+				<strong>The avalanchego / metalgo contributors</strong>
+				<span>The open-source consensus client we run is a years-long collaboration across many engineers worldwide. Every commit upstream lands in our node.</span>
+			</li>
+			<li>
+				<strong>~200 fellow validators</strong>
+				<span>Every operator who runs honestly makes the chain a better place to delegate to. Our uptime score literally depends on their votes — and theirs on ours.</span>
+			</li>
+			<li>
+				<strong>The official bootstrap nodes</strong>
+				<span>The first peers we connect to on startup, every time. Run by Metallicus and trusted community operators.</span>
+			</li>
+			<li>
+				<strong>Delegators who choose any validator</strong>
+				<span>Including the ones who don't choose us. A diversified delegation set across many validators is healthier for the network than one with all the stake on a handful of nodes.</span>
+			</li>
+			<li>
+				<strong>The wider Avalanche ecosystem</strong>
+				<span>Metal Blockchain inherits the consensus innovation, tooling, and security research from Avalanche. We benefit from work we didn't pay for.</span>
+			</li>
+		</ul>
+		<p class="note">
+			Cooperation over competition. <em>みんなのおかげ.</em>
+		</p>
+	</section>
+</main>
+
+<footer class="site-footer">
+	<div class="container">
+		<div class="footer-grid">
+			<div class="footer-brand">
+				<h3>Freedom Yield · Metal</h3>
+				<p>Long-horizon validator on Metal Blockchain. Transparent uptime, public audit trail.</p>
+			</div>
+			<nav class="footer-col" aria-label="Validator">
+				<h4>Validator</h4>
+				<ul>
+					<li><a href="#status">Status</a></li>
+					<li><a href="#about">About</a></li>
+					<li><a href="#track-record">Track record</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Delegation">
+				<h4>Delegation</h4>
+				<ul>
+					<li><a href="#delegate">Delegate</a></li>
+					<li><a href="#calculator">Rewards</a></li>
+					<li><a href="#faq">FAQ</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Network">
+				<h4>Network</h4>
+				<ul>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">Explorer ↗</a></li>
+
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Support">
+				<h4>Support</h4>
+				<ul>
+					<li><a href="/data/">Open data</a></li>
+					<li><a href="/journal/">Cycle journal</a></li>
+					<li><a href="/continuity/">Continuity</a></li>
+					<li><a href="/incidents/">Incidents</a></li>
+					<li><a href="#acknowledgments">Acknowledgments</a></li>
+					<li><a href="mailto:bp@freedom-yield.com">Contact</a></li>
+				</ul>
+			</nav>
+		</div>
+		<hr class="footer-divider">
+		<p class="footer-disclaimer"><strong>Disclaimer:</strong> Freedom Yield is an independent, third-party validator operating on Metal Blockchain. It is not affiliated with, endorsed by, sponsored by, or operated by Metallicus Inc. or the Metal Blockchain Foundation. All trademarks are the property of their respective owners.</p>
+		<div class="footer-bottom">
+			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain</a>.</p>
+			<p>© 2026 Freedom Yield · Metal validator</p>
+		</div>
+	</div>
+</footer>
+
+</body>
+</html>

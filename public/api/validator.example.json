@@ -1,0 +1,32 @@
+{
+	"_comment": "Schema example for /api/validator.json. The real file is generated at runtime by scripts/node-info.sh against a live metalgo node and is gitignored. This example documents the expected shape.",
+	"phase": 0,
+	"mode": "tahoe-testnet",
+	"network": "tahoe",
+	"nodeId": "NodeID-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+	"bootstrap": {
+		"pChain": true,
+		"xChain": true,
+		"cChain": true
+	},
+	"stake": {
+		"self": null,
+		"totalReceived": null,
+		"unit": "METAL",
+		"_note": "self = 自己 stake(mainnet では 2,000 固定方針)、totalReceived = 委任受入合計、max_weight = 5 × self(プロトコル仕様)。Tahoe testnet 最小 1 METAL"
+	},
+	"uptime": {
+		"network": null,
+		"self": null,
+		"source": "self-reported",
+		"sampleSize": 0,
+		"samples": [],
+		"_note": "network = 外部 RPC からの uptime 評価値の中央値(ピア観測の真値)。self = 自ノード自身に問い合わせた値(プロトコル仕様で常に ~100% を返すため参考のみ)。source = 'external-median' なら network はピア観測、'self-reported' なら外部 RPC 不通で自値フォールバック。報酬閾値 80%"
+	},
+	"delegationFee": {
+		"percent": null,
+		"_note": "プロトコル下限 2%、超過分は operator-chosen"
+	},
+	"explorer": "https://tahoe.metalscan.io/",
+	"observedAt": "1970-01-01T00:00:00Z"
+}

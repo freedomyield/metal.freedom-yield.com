@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Metal Blockchain について — Freedom Yield</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="Metal Blockchain は Metallicus 製の Layer-0 チェーン、Avalanche fork。permissionless validator + 5× 委任レバ。">
+<link rel="canonical" href="https://metal.freedom-yield.com/ja/about-metal/">
+<link rel="alternate" hreflang="en" href="https://metal.freedom-yield.com/about-metal/">
+<link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/about-metal/">
+<link rel="stylesheet" href="/styles.css">
+<meta name="theme-color" content="#07080c">
+<meta name="color-scheme" content="dark">
+<script type="application/ld+json">
+{
+	"@context": "https://schema.org",
+	"@type": "TechArticle",
+	"headline": "Metal Blockchain について",
+	"description": "Metal Blockchain(Metallicus 製 Layer-0、Avalanche fork)と validator の仕組み解説。",
+	"author": { "@type": "Organization", "name": "Freedom Yield" },
+	"inLanguage": "ja"
+}
+</script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
+<script defer src="/assets/gtag-init.js"></script>
+</head>
+<body>
+<nav class="topnav">
+	<div class="topnav-inner">
+		<a href="/ja/" class="brand">Freedom Yield · Metal</a>
+		<div class="nav">
+			<a href="/ja/about-metal/">概要</a>
+			<a href="/ja/delegate/">委任</a>
+			<a href="/ja/incidents/">インシデント</a>
+			<a href="/about-metal/" class="nav-lang">EN</a>
+		</div>
+	</div>
+</nav>
+
+<main id="main" class="container">
+	<header class="hero">
+		<p class="hero-eyebrow">背景</p>
+		<h1>About Metal Blockchain</h1>
+		<p class="hero-lead">
+			Metal Blockchain は <strong>Metallicus</strong> 製の <strong>Layer-0 チェーン</strong>(XPR Network = Layer-1 と同じ親会社)。
+			Avalanche fork で、コンセンサスは <em>Snowman</em>。<strong>permissionless validator</strong> で、最小 stake を満たせば
+			誰でもバリデータになれます。
+		</p>
+	</header>
+
+	<section class="card">
+		<h2>XPR Network との違い</h2>
+		<dl class="kv">
+			<dt>XPR Network</dt><dd>Layer-1、Block Producer の consortium 制、既存 BP の multisig 承認が必要</dd>
+			<dt>Metal Blockchain</dt><dd>Layer-0、permissionless、stake ベース。Foundation 議席は最大 5 名の選出制</dd>
+		</dl>
+		<p>
+			両チェーンは Metallicus が運営し、相互接続もされています。
+		</p>
+	</section>
+
+	<section class="card">
+		<h2>バリデーションの仕組み</h2>
+		<h3>1. 誰でも参加可能(2,000 METAL から)</h3>
+		<p>
+			プロトコル最小 self stake は 2,000 METAL。XPR と違い既存 validator からの承認は不要です。
+			staking key をローカルで生成、"Add Validator" tx を P-Chain に送信、start time 到達で active 入り。
+		</p>
+		<h3>2. 報酬は uptime ドリブン、性能競争ではない</h3>
+		<p>
+			Snowman は PoW のような速度競争ではありません。ピアから到達でき、正しく投票していれば、
+			公式最小(8 vCPU / 16 GiB)を超えるハードを使っても報酬は増えません。
+			<strong>性能で殴っても収益は伸びない</strong>のがこのチェーンの特性です。
+		</p>
+		<h3>3. 自己 stake が受入枠を決める</h3>
+		<p>
+			最大 stake weight は <code>min(3M METAL, 5 × self_stake)</code>。自己 stake 2,000 → 最大 weight 10,000
+			(うち委任受入可能枠は 8,000)。この上限は「運用者の skin in the game と受入可能な委任量を整合させる」
+			ためのプロトコル仕様であり、成長目標ではありません。
+		</p>
+		<h3>4. スラッシングなし</h3>
+		<p>
+			Avalanche family にはスラッシング(stake 没収)がありません。ダウンタイム時の最悪は「報酬ゼロ」。
+			自己 stake も委任 stake も <strong>end time に必ず返却</strong>される(uptime に関係なく)。
+			delegator のリスクは「機会費用(逸失利益)」のみ、元本毀損ではありません。
+		</p>
+	</section>
+
+	<section class="card">
+		<h2>関連リンク</h2>
+		<ul>
+			<li>公式ドキュメント — <a href="https://docs.metalblockchain.org/" rel="noopener">docs.metalblockchain.org</a></li>
+			<li>Block explorer (mainnet) — <a href="https://explorer.metalblockchain.org/" rel="noopener">explorer.metalblockchain.org</a></li>
+			<li>Block explorer (Tahoe testnet) — <a href="https://tahoe.metalscan.io/" rel="noopener">tahoe.metalscan.io</a></li>
+			<li>Tahoe testnet faucet — <a href="https://faucet.metalblockchain.org/" rel="noopener">faucet.metalblockchain.org</a></li>
+			<li>Metal Wallet — <a href="https://wallet.metalblockchain.org/" rel="noopener">wallet.metalblockchain.org</a></li>
+		</ul>
+	</section>
+</main>
+
+<footer class="site-footer">
+	<div class="container">
+		<p>連絡先: <a href="mailto:bp@freedom-yield.com">bp@freedom-yield.com</a></p>
+		<p class="footer-disclaimer"><strong>免責事項:</strong> Freedom Yield は Metal Blockchain 上で稼働する独立した第三者バリデータです。Metallicus 社および Metal Blockchain Foundation の関連会社・提携先・出資先・公式運営者ではありません。各商標は各権利者に帰属します。</p>
+	</div>
+</footer>
+</body>
+</html>

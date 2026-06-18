@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Freedom Yield に委任する — Metal Blockchain</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="Freedom Yield の Metal Blockchain validator への METAL 委任手順。スラッシングなし、元本保証、14 日〜1 年ロック。">
+<link rel="canonical" href="https://metal.freedom-yield.com/ja/delegate/">
+<link rel="alternate" hreflang="en" href="https://metal.freedom-yield.com/delegate/">
+<link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/delegate/">
+<link rel="stylesheet" href="/styles.css">
+<script defer src="/assets/main.js"></script>
+<meta name="theme-color" content="#07080c">
+<meta name="color-scheme" content="dark">
+<script type="application/ld+json">
+{
+	"@context": "https://schema.org",
+	"@type": "HowTo",
+	"name": "Freedom Yield に METAL を委任する方法",
+	"description": "Metal Blockchain で Freedom Yield validator に委任する手順。",
+	"inLanguage": "ja"
+}
+</script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
+<script defer src="/assets/gtag-init.js"></script>
+</head>
+<body>
+<nav class="topnav">
+	<div class="topnav-inner">
+		<a href="/ja/" class="brand">Freedom Yield · Metal</a>
+		<div class="nav">
+			<a href="/ja/about-metal/">概要</a>
+			<a href="/ja/delegate/">委任</a>
+			<a href="/ja/incidents/">インシデント</a>
+			<a href="/delegate/" class="nav-lang">EN</a>
+		</div>
+	</div>
+</nav>
+
+<main id="main" class="container">
+	<header class="hero">
+		<p class="hero-eyebrow">委任</p>
+		<h1>Delegate to Freedom Yield</h1>
+		<p class="hero-lead">
+			Validator ノードは <strong>mainnet</strong> で bootstrap 完了、validator 登録を準備中です。
+			委任受付は AddValidator tx の発行と uptime 確立後に開始します
+			(<a href="/ja/about-metal/">背景</a>)。
+		</p>
+		<p class="hero-status">現状: <span class="badge badge-warn">Mainnet bootstrap — 登録準備中</span></p>
+	</header>
+
+	<section class="card">
+		<h2>委任開始時に表示される情報</h2>
+		<dl class="kv">
+			<dt>NodeID</dt><dd><code data-field="nodeId">—</code></dd>
+			<dt>自己 stake</dt><dd data-field="selfStake">—</dd>
+			<dt>委任件数</dt><dd data-field="delegatorCount">—</dd>
+			<dt>受入合計</dt><dd data-field="receivedCombined">—</dd>
+			<dt>ネットワーク uptime 評価値</dt><dd data-field="uptime">—</dd>
+			<dt>Delegation fee</dt><dd data-field="delegationFee">予定 3% (プロトコル下限 2% の一つ上)</dd>
+		</dl>
+	</section>
+
+	<section class="card">
+		<h2>これらの値が重要で、ハードウェアは重要ではない理由</h2>
+		<p>
+			Snowman コンセンサスでは、公式最小(8 vCPU / 16 GiB)を超えるハードを使っても報酬は増えません。
+			委任者にとって本当に重要なのは:
+		</p>
+		<ul>
+			<li><strong>自己 stake</strong> — 運営者の skin in the game(意図的に小さく抑える方針、現値はトップページのステータスカード)</li>
+			<li><strong>uptime 評価値</strong> — ネットワークから見た稼働率(80% 以上維持で報酬発生)</li>
+			<li><strong>Delegation fee</strong> — 委任報酬から運営者が取る割合(下限 2%、当方は 3% 設定)</li>
+			<li><strong>インシデント履歴</strong> — 過去の障害と対応の透明性(<a href="/ja/incidents/">incidents</a> 参照)</li>
+		</ul>
+	</section>
+
+	<section class="card">
+		<h2>リスクプロファイル</h2>
+		<h3>スラッシングなし</h3>
+		<p>
+			Avalanche family にはスラッシング(stake 没収)がありません。最悪でも「この期間の報酬がゼロ」。
+			委任元本(委任した METAL)は uptime に関係なく <strong>end time に必ず返却</strong>されます。
+		</p>
+		<h3>ロック期間</h3>
+		<p>
+			委任は <strong>最短 14 日、最長 1 年</strong>のロックです。途中で引き出すことはできません。
+			ロック期間中は市場価格リスクにさらされます。
+		</p>
+		<h3>単一運営者リスク</h3>
+		<p>
+			当方のバリデータは 1 ノード構成です。ホストが死んで staking 期間内に復旧できない場合、
+			その期間の報酬を失います。複数の validator に分散することを推奨します。
+		</p>
+	</section>
+
+	<section class="card">
+		<h2>委任手順(本番開始後)</h2>
+		<ol>
+			<li>取引所 or P2P で METAL を取得</li>
+			<li><a href="https://wallet.metalblockchain.org/" rel="noopener">Metal Wallet</a> を開いて wallet を作成 or インポート</li>
+			<li>tokens を P-Chain に移動(X-Chain → P-Chain のクロスチェーン送金)</li>
+			<li>"Earn" → "Add Delegator" を選択、当方の NodeID を貼り付け</li>
+			<li>ロック期間 (14d〜1y) を設定、送信</li>
+			<li>start time 到達後、<a href="https://explorer.metalblockchain.org/" rel="noopener">explorer.metalblockchain.org</a> で委任を確認</li>
+		</ol>
+		<p class="note">
+			詳細はリポ内 runbook <code>docs/TAHOE_PIPELINE.md</code> 参照(Tahoe でも faucet 経由で同じ手順を無料で練習可)。
+		</p>
+	</section>
+
+	<section class="card">
+		<h2>問い合わせ</h2>
+		<p><a href="mailto:bp@freedom-yield.com">bp@freedom-yield.com</a> に email。48 時間以内に返信(JST 営業日)。</p>
+	</section>
+</main>
+
+<footer class="site-footer">
+	<div class="container">
+		<p>連絡先: <a href="mailto:bp@freedom-yield.com">bp@freedom-yield.com</a></p>
+		<p class="footer-disclaimer"><strong>免責事項:</strong> Freedom Yield は Metal Blockchain 上で稼働する独立した第三者バリデータです。Metallicus 社および Metal Blockchain Foundation の関連会社・提携先・出資先・公式運営者ではありません。各商標は各権利者に帰属します。</p>
+	</div>
+</footer>
+</body>
+</html>

@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Continuity — Freedom Yield Metal</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="Plain answers to what happens if X — operator unavailability, key loss, network forks, web outages. What delegators recover, when, and how.">
+<link rel="canonical" href="https://metal.freedom-yield.com/continuity/">
+<link rel="alternate" hreflang="en" href="https://metal.freedom-yield.com/continuity/">
+<link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/continuity/">
+<link rel="alternate" hreflang="x-default" href="https://metal.freedom-yield.com/continuity/">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#07080c">
+<meta name="color-scheme" content="dark">
+<script defer src="/assets/main.js"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
+<script defer src="/assets/gtag-init.js"></script>
+</head>
+<body>
+<a href="#main" class="skip-link">Skip to main content</a>
+
+<nav class="topnav">
+	<div class="topnav-inner">
+		<a href="/" class="brand">Freedom Yield · Metal</a>
+		<details class="nav-menu">
+			<summary class="nav-toggle" aria-label="Open / close menu">
+				<span class="hamburger-icon" aria-hidden="true"></span>
+			</summary>
+			<div class="nav">
+				<a href="/#status">Status</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">About</button>
+					<div class="nav-dropdown-menu">
+						<a href="/#about">About</a>
+						<a href="/#roadmap">Roadmap</a>
+					</div>
+				</div>
+				<a href="/#delegate" data-ga-event="delegate_cta_click" data-ga-param-position="nav">Delegate</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">Verify</button>
+					<div class="nav-dropdown-menu">
+						<a href="/data/">Open data</a>
+						<a href="/journal/">Cycle journal</a>
+						<a href="/continuity/" aria-current="page">Continuity</a>
+						<a href="/incidents/" data-ga-event="nav_click" data-ga-param-target="incidents">Incidents</a>
+					</div>
+				</div>
+				<a href="/ja/continuity/" class="nav-lang" data-ga-event="language_switch" data-ga-param-to="ja">JA</a>
+			</div>
+		</details>
+	</div>
+</nav>
+
+<header class="hero hero--simple">
+	<div class="container">
+		<p class="hero-eyebrow">What if…</p>
+		<h1>Continuity</h1>
+		<p class="hero-lead">
+			Plain answers to the scenarios that should worry anyone considering a long-term delegation: operator
+			unavailability, key loss, network events, web outages. What's recoverable, what's not, and the time it takes.
+			Written conservatively — the actual day is rarely worse than the page says.
+		</p>
+	</div>
+</header>
+
+<main id="main" class="container">
+
+	<section class="card continuity-tldr">
+		<h2>TL;DR for delegators</h2>
+		<ul class="continuity-tldr-list">
+			<li><strong>No slashing on Metal Blockchain.</strong> Delegated stake is never burned or seized. Worst case is foregone rewards for one cycle.</li>
+			<li><strong>Delegations unlock automatically when the cycle ends.</strong> Even if every piece of infrastructure on our side disappeared today, the P-Chain returns delegated METAL to delegators on schedule. The validator's existence is not required for that.</li>
+			<li><strong>Self-stake recovery is on us, not delegators.</strong> Operator key loss affects the operator's own stake only.</li>
+			<li><strong>Status is independently verifiable.</strong> If this site is down, query <a href="/data/"><code>api.metalblockchain.org</code></a> directly — same data, no middleman.</li>
+		</ul>
+	</section>
+
+	<section class="card">
+		<h2>Validator-side scenarios</h2>
+
+		<article class="continuity-scenario">
+			<h3>metalgo process crash or VM reboot</h3>
+			<p>Handled. <code>metalgo</code> runs under systemd with <code>Restart=on-failure</code>; the host comes back from a reboot to a running validator in under 90 seconds. Uptime% on the P-Chain only ticks down if downtime is reported by enough peers across more than a few minutes of consensus voting, so a one-shot restart is typically invisible in the public number.</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>Hardware / hosting-provider outage</h3>
+			<p>The validator runs on a validator host production-grade VPS instance. A regional validator host outage of more than a few minutes would show up as a measurable uptime% dip. Self-stake and accrued rewards are unaffected — the validator simply reconnects when the host comes back. Persistent failure (provider-side data loss) is recoverable from staker-key backups; see the operator section below.</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>Disk fill, RAM pressure, peer count collapse</h3>
+			<p>Monitored continuously. A separate alert pipeline (ntfy → operator phone) fires on disk &gt; 85%, RAM &gt; 90%, peer count &lt; ~50, or <code>metalgo</code> process absence. Most events are resolved before public uptime% would notice.</p>
+		</article>
+	</section>
+
+	<section class="card">
+		<h2>Operator-side scenarios</h2>
+
+		<article class="continuity-scenario">
+			<h3>Operator is unavailable when a cycle closes</h3>
+			<p>The renewal transaction is filed two days before the period end. If the operator becomes unable to file it, the validator simply expires at <code>endTime</code>. Self-stake and any unclaimed rewards return to the operator's P-Chain address. Active delegations from that cycle return to their delegators automatically — no operator action required. The validator can be re-registered later from a fresh <code>AddPermissionlessValidatorTx</code> once the operator is available again, or never. Nothing is destroyed by absence.</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>Staker key loss or compromise</h3>
+			<p>The BLS staker key is backed up in three locations, two of which are geographically separated from the operator. Loss of all three would mean the validator becomes permanently inactive at the next period boundary — but the corresponding self-stake on the P-Chain still returns to the reward address (a separate wallet key whose security model is independent). A compromised staker key cannot move funds, only sign blocks; the worst outcome is impersonation of the node identity until period end.</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>Reward address (wallet) key loss</h3>
+			<p>This is the only failure mode where self-stake could be unrecoverable. The reward address is a Metal Wallet web wallet (24-word mnemonic on the Avalanche derivation), with the seed backed up in a separate offline location from the staker keys. The two key materials never sit on the same medium.</p>
+		</article>
+	</section>
+
+	<section class="card">
+		<h2>Network-side scenarios</h2>
+
+		<article class="continuity-scenario">
+			<h3>Metal Blockchain hard fork or upgrade</h3>
+			<p>We follow Metallicus' canonical guidance — the validator runs the version the Foundation publishes for the active mainnet. Forks are signalled in advance with a coordinated upgrade window; the validator is upgraded inside that window or, if downtime is unavoidable, after it. Uptime% impact would be documented in the <a href="/incidents/">incident log</a> and reflected in the next <a href="/journal/">cycle journal</a> entry.</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>P-Chain halt or consensus issue</h3>
+			<p>Outside operator control. We monitor for it, but the response is the same as every other validator's: wait for canonical guidance from Metallicus / the Metal Foundation, apply the prescribed remediation. No special operator-side action is possible during the halt itself.</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>Subnet validation joining</h3>
+			<p>Phase 1 is mainnet-only. Joining a subnet is a deliberate decision that would be announced in the <a href="/#roadmap">roadmap</a> and explained in the journal before any tx is filed. Subnet participation does not affect existing mainnet delegations.</p>
+		</article>
+	</section>
+
+	<section class="card">
+		<h2>Web &amp; transparency-side scenarios</h2>
+
+		<article class="continuity-scenario">
+			<h3>This website is down</h3>
+			<p>The web host (web host) and the validator host (validator host) are completely independent. A web outage has zero effect on the validator. During an outage, anyone can query <code>api.metalblockchain.org</code> directly for the same validator state this site displays — see the <a href="/data/">Open data</a> page for the exact RPC method and filters.</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>Domain expiration or DNS compromise</h3>
+			<p>Domain renewal is autopay'd well in advance of expiry; status is on the operator's monthly review checklist. The validator's existence is on-chain — the domain is just a presentation layer. If <code>metal.freedom-yield.com</code> ever stops resolving, the NodeID still validates blocks; only the public dashboard goes dark.</p>
+		</article>
+	</section>
+
+	<section class="card continuity-bottom-line">
+		<h2>The bottom line</h2>
+		<p>
+			Avalanche-derived chains (Metal included) were designed so that <strong>delegator funds are safe even when the validator
+			operator behaves badly or vanishes entirely</strong>. The P-Chain returns delegated stake on schedule; there is no slashing
+			that could harm a delegator's principal. The worst credible outcome of "Freedom Yield disappears tomorrow" is a single cycle's
+			rewards foregone, which on the operating cadence we run is approximately one calendar month.
+		</p>
+		<p>
+			What we add on top of that protocol-level safety: a public audit trail (incidents, journal, open data), a documented
+			recovery model with backups in three independent locations, and the explicit commitment that decisions which would affect
+			delegators are announced before they're executed — never after.
+		</p>
+	</section>
+
+</main>
+
+<footer class="site-footer">
+	<div class="container">
+		<div class="footer-grid">
+			<div class="footer-brand">
+				<h3>Freedom Yield · Metal</h3>
+				<p>Long-horizon validator on Metal Blockchain. Transparent uptime, public audit trail.</p>
+			</div>
+			<nav class="footer-col" aria-label="Validator">
+				<h4>Validator</h4>
+				<ul>
+					<li><a href="/#status">Status</a></li>
+					<li><a href="/#about">About</a></li>
+					<li><a href="/#track-record">Track record</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Delegation">
+				<h4>Delegation</h4>
+				<ul>
+					<li><a href="/#delegate">Delegate</a></li>
+					<li><a href="/#calculator">Rewards</a></li>
+					<li><a href="/#faq">FAQ</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Network">
+				<h4>Network</h4>
+				<ul>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">Explorer ↗</a></li>
+
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Support">
+				<h4>Support</h4>
+				<ul>
+					<li><a href="/data/">Open data</a></li>
+					<li><a href="/journal/">Cycle journal</a></li>
+					<li><a href="/continuity/" aria-current="page">Continuity</a></li>
+					<li><a href="/incidents/">Incidents</a></li>
+					<li><a href="mailto:bp@freedom-yield.com">Contact</a></li>
+				</ul>
+			</nav>
+		</div>
+		<hr class="footer-divider">
+		<p class="footer-disclaimer"><strong>Disclaimer:</strong> Freedom Yield is an independent, third-party validator operating on Metal Blockchain. It is not affiliated with, endorsed by, sponsored by, or operated by Metallicus Inc. or the Metal Blockchain Foundation. All trademarks are the property of their respective owners.</p>
+		<div class="footer-bottom">
+			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain</a>.</p>
+			<p>© 2026 Freedom Yield · Metal validator</p>
+		</div>
+	</div>
+</footer>
+</body>
+</html>

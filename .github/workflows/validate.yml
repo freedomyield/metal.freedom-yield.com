@@ -1,0 +1,140 @@
+name: Validate
+
+# PR と main 以外への push、および手動発火で走る軽量チェック群。
+# main の push は deploy ワークフロー側で扱う。
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+  workflow_dispatch:
+
+jobs:
+  json:
+    name: JSON syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate all JSON
+        run: |
+          set -e
+          fail=0
+          while IFS= read -r f; do
+            echo "→ $f"
+            if ! jq empty "$f" 2>/dev/null; then
+              echo "::error file=$f::invalid JSON"
+              fail=1
+            fi
+          done < <(find public -name '*.json' -not -path '*/api/build.json' -not -path '*/api/validator.json')
+          # JSON-LD blocks embedded in HTML
+          while IFS= read -r f; do
+            python3 - "$f" <<'PY' || { echo "::error file=$f::invalid JSON-LD block"; fail=1; }
+          import json, re, sys
+          src = open(sys.argv[1]).read()
+          for m in re.finditer(r'<script type="application/ld\+json">(.+?)</script>', src, re.S):
+              try:
+                  json.loads(m.group(1))
+              except Exception as e:
+                  print("JSON-LD error:", e); sys.exit(1)
+          PY
+          done < <(find public -name '*.html')
+          [ $fail -eq 0 ]
+
+  caddy:
+    name: Caddyfile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Caddyfile
+        run: |
+          docker run --rm \
+            -v "$PWD/caddy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            -e DOMAIN=metal.freedom-yield.com \
+            -e ACME_EMAIL=ci@example.com \
+            caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile
+
+  compose:
+    name: docker compose configs
+    runs-on: ubuntu-latest
+    env:
+      ACME_EMAIL: ci@example.com
+      DOMAIN: metal.freedom-yield.com
+      METAL_NETWORK: tahoe
+      METAL_PUBLIC_IP: 192.0.2.1
+    steps:
+      - uses: actions/checkout@v4
+      - name: site dev (override)
+        run: docker compose -f docker-compose.yml -f docker-compose.override.yml config --quiet
+      - name: site prod
+        run: docker compose -f docker-compose.yml -f docker-compose.prod.yml config --quiet
+      - name: metalgo local
+        run: docker compose -f docker-compose.metalgo.yml config --quiet
+      - name: metalgo prod
+        run: docker compose -f docker-compose.metalgo.yml -f docker-compose.metalgo.prod.yml config --quiet
+
+  html:
+    name: HTML quick lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check HTML files have <title>, lang, and viewport
+        run: |
+          set -e
+          fail=0
+          for f in $(find public -name '*.html'); do
+            grep -q '<title>' "$f" || { echo "::error file=$f::missing <title>"; fail=1; }
+            grep -q '<html lang=' "$f" || { echo "::error file=$f::missing lang attribute"; fail=1; }
+            grep -q 'name="viewport"' "$f" || { echo "::error file=$f::missing viewport meta"; fail=1; }
+            grep -q 'rel="canonical"' "$f" || { echo "::warning file=$f::missing canonical link"; }
+          done
+          [ $fail -eq 0 ]
+
+  links:
+    name: Internal link check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check that internal links resolve to existing files
+        run: |
+          set -e
+          fail=0
+          for f in $(find public -name '*.html'); do
+            # extract href values starting with / (internal only), strip query/fragment
+            for href in $(grep -oE 'href="(/[^"#?]+)' "$f" | sed -E 's/href="//'); do
+              # / → /index.html, /foo/ → /foo/index.html, /foo.html → /foo.html
+              if [ "$href" = "/" ]; then
+                target="public/index.html"
+              elif [[ "$href" == */ ]]; then
+                target="public${href}index.html"
+              else
+                target="public${href}"
+              fi
+              if [ ! -e "$target" ]; then
+                echo "::error file=$f::broken internal link $href (expected $target)"
+                fail=1
+              fi
+            done
+          done
+          [ $fail -eq 0 ]
+
+  shellcheck:
+    name: Shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck on scripts/ and .githooks/
+        run: |
+          # shellcheck is preinstalled on ubuntu-latest
+          find scripts .githooks -type f \( -name '*.sh' -o -path '.githooks/*' \) -print -exec shellcheck -x {} +
+
+  secret-scan:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run gitleaks against full history
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

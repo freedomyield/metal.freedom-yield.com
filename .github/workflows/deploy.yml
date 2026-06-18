@@ -1,0 +1,170 @@
+name: Deploy site to VPS
+
+# 必要な GitHub Secrets:
+#   SSH_HOST     - VPS の IP or ホスト名
+#   SSH_USER     - SSH ユーザー(例: <deploy_user>)
+#   SSH_KEY      - 秘密鍵(OpenSSH PEM 形式、改行込みでそのまま貼り付け)
+#   SSH_PORT     - SSH ポート(任意、未設定なら 22)
+#   DEPLOY_PATH  - VPS 上のリポジトリパス(例: <deploy_path>)
+#
+# 必要な Repository Variable(secrets ではなく variables):
+#   DEPLOY_ENABLED=true - これが true になるまで全 job が skip される
+#                         (VPS 契約前は未設定にしておく、CI が赤くならない)
+#
+# 設定場所:
+#   Settings → Secrets and variables → Actions
+#   - "Secrets" タブで SSH_* / DEPLOY_PATH を登録
+#   - "Variables" タブで DEPLOY_ENABLED=true を設定
+#
+# 詳細は docs/DEPLOY_SETUP.md を参照
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'README.md'
+      - 'README.ja.md'
+      - '.gitignore'
+      - 'CLAUDE.md'
+      - 'docs/**'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # VPS 未契約期間は DEPLOY_ENABLED=true を設定せず、job ごと skip する(CI 失敗扱いにしない)
+    if: ${{ vars.DEPLOY_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+    steps:
+      - name: Verify required secrets
+        env:
+          _SSH_HOST: ${{ secrets.SSH_HOST }}
+          _SSH_USER: ${{ secrets.SSH_USER }}
+          _SSH_KEY: ${{ secrets.SSH_KEY }}
+          _DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          missing=()
+          [ -n "$_SSH_HOST" ]    || missing+=("SSH_HOST")
+          [ -n "$_SSH_USER" ]    || missing+=("SSH_USER")
+          [ -n "$_SSH_KEY" ]     || missing+=("SSH_KEY")
+          [ -n "$_DEPLOY_PATH" ] || missing+=("DEPLOY_PATH")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::missing required GitHub Secrets: ${missing[*]}"
+            echo "::error::see docs/DEPLOY_SETUP.md and set them at https://github.com/$GITHUB_REPOSITORY/settings/secrets/actions"
+            exit 1
+          fi
+          # SSH_KEY 以外はトリム(改行混入の事故対策)、SSH_KEY は改行を保持
+          echo "SSH_HOST=$(printf '%s' "$_SSH_HOST" | xargs)"       >> $GITHUB_ENV
+          echo "SSH_USER=$(printf '%s' "$_SSH_USER" | xargs)"       >> $GITHUB_ENV
+          echo "DEPLOY_PATH=$(printf '%s' "$_DEPLOY_PATH" | xargs)" >> $GITHUB_ENV
+          echo "✓ all required secrets are set"
+
+      - uses: actions/checkout@v4
+
+      - name: Cache-bust assets URL with current commit hash
+        # edge CDN PoP / browser cache 対策。
+        # HTML が直接参照する各 JS / CSS の URL に commit hash を付与する。
+        # 各エントリポイントを忘れずに列挙すること(prior oversights)
+        run: |
+          SHORT_SHA="${GITHUB_SHA:0:8}"
+          # JS は <script src="..."> なので src= で検出
+          for asset in "assets/main.js" "assets/hero-3d/main.js" "assets/bg-3d.js"; do
+            find public -name "*.html" -exec \
+              sed -i -E "s|src=\"/${asset}[^\"]*\"|src=\"/${asset}?v=${SHORT_SHA}\"|g" \
+              {} +
+            N=$(grep -rl "${asset}?v=${SHORT_SHA}" public/ | wc -l | tr -d ' ')
+            echo "${N} HTML files reference /${asset}?v=${SHORT_SHA}"
+          done
+          # CSS は <link rel="stylesheet" href="..."> なので href= で検出
+          for asset in "styles.css"; do
+            find public -name "*.html" -exec \
+              sed -i -E "s|href=\"/${asset}[^\"]*\"|href=\"/${asset}?v=${SHORT_SHA}\"|g" \
+              {} +
+            N=$(grep -rl "${asset}?v=${SHORT_SHA}" public/ | wc -l | tr -d ' ')
+            echo "${N} HTML files reference /${asset}?v=${SHORT_SHA}"
+          done
+
+          # ESM 内の relative import('./x.js') にも cache-bust 付与。
+          # main.js だけ HTML から ?v= 付きで読まれても、main.js 内の
+          # `import { X } from './x.js'` は CDN cache に hit して古い
+          # ものが返る事故が起きる(prior cache-version oversight)。
+          # hero-3d は ESM module 群なのでここで一括 rewrite する。
+          for js in public/assets/hero-3d/*.js; do
+            # `from './foo.js';` → `from './foo.js?v=SHA';`
+            # 既に ?v= が付いている場合は SHA だけ差し替え
+            sed -i -E "s|from '\./([a-zA-Z0-9._-]+\.js)(\?v=[a-zA-Z0-9]+)?'|from './\1?v=${SHORT_SHA}'|g" "$js"
+          done
+          NJS=$(grep -l "?v=${SHORT_SHA}" public/assets/hero-3d/*.js 2>/dev/null | wc -l | tr -d ' ')
+          echo "${NJS} hero-3d JS files have relative imports cache-busted to ?v=${SHORT_SHA}"
+
+      - name: Set up SSH key
+        env:
+          _SSH_KEY: ${{ secrets.SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          # CR 除去(CRLF で貼り付けられた場合の事故対策)、改行は保持
+          printf '%s' "$_SSH_KEY" | tr -d '\r' > ~/.ssh/id_deploy
+          [ -z "$(tail -c 1 ~/.ssh/id_deploy)" ] || echo "" >> ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -p "$SSH_PORT" "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Ensure deploy path exists
+        run: |
+          ssh -i ~/.ssh/id_deploy -p "$SSH_PORT" -o StrictHostKeyChecking=no \
+            "$SSH_USER@$SSH_HOST" \
+            "mkdir -p '$DEPLOY_PATH'"
+
+      - name: Rsync site to VPS
+        # --inplace は必須。Caddyfile の bind-mount は単一ファイル mount で
+        # 起動時の inode に pin される。--inplace で既存 inode に上書きしないと
+        # コンテナは古い Caddyfile を読み続ける
+        #
+        # scripts/ は validator host (validator host) でのみ cron 実行されるもので、
+        # web host (web host) では実行 path が無く dead code になるため除外。
+        # 万一 web host に存在すると、誤って cron に仕込まれた時に node-info.sh が
+        # 空 JSON を出力して validator.json を上書きする等の事故になりうる。
+        # 物理的に存在しないことで防ぐ。
+        run: |
+          rsync -rltvz --delete --inplace \
+            -e "ssh -i ~/.ssh/id_deploy -p $SSH_PORT -o StrictHostKeyChecking=no" \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='.githooks/' \
+            --exclude='.claude/' \
+            --exclude='node_modules/' \
+            --exclude='.env' \
+            --exclude='caddy/data/' \
+            --exclude='caddy/config/' \
+            --exclude='metalgo/data/' \
+            --exclude='metalgo/config/' \
+            --exclude='scripts/' \
+            --exclude='public/api/validator.json' \
+            --exclude='public/api/server-status.json' \
+            --exclude='public/api/peer-geo.json' \
+            --exclude='public/api/uptime-recent.json' \
+            --exclude='public/api/uptime-cycles.json' \
+            --exclude='public/api/peers.json' \
+            --exclude='public/calendar/' \
+            ./ "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/"
+
+      - name: Bring up / reload Caddy on VPS
+        run: |
+          ssh -i ~/.ssh/id_deploy -p "$SSH_PORT" -o StrictHostKeyChecking=no \
+            "$SSH_USER@$SSH_HOST" \
+            "cd '$DEPLOY_PATH' && \
+             docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml up -d --remove-orphans --build && \
+             docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml exec -T caddy caddy reload --config /etc/caddy/Caddyfile && \
+             sleep 2 && \
+             curl -fsS -o /dev/null http://127.0.0.1:8085/health"
+
+      - name: Public health check
+        run: |
+          sleep 3
+          curl -fsS -o /dev/null https://metal.freedom-yield.com/health \
+            || echo "::warning::public health check failed; check DNS / edge CDN routing"

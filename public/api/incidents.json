@@ -1,0 +1,5 @@
+{
+	"_comment": "Operator-maintained incident log. Schema per entry: id (yyyy-mm-dd-NN), date (ISO 8601), title, severity (info|minor|major|critical), summary, impact, resolution, durationMinutes (optional)",
+	"validatorSince": "2026-05-19",
+	"incidents": []
+}

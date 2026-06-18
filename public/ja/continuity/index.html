@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>事業継続性 — Freedom Yield Metal</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="運用者不在 / 鍵紛失 / ネットワーク fork / web 障害 — 各シナリオで何が起きるか、何が回収可能か、所要時間。">
+<link rel="canonical" href="https://metal.freedom-yield.com/ja/continuity/">
+<link rel="alternate" hreflang="en" href="https://metal.freedom-yield.com/continuity/">
+<link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/continuity/">
+<link rel="alternate" hreflang="x-default" href="https://metal.freedom-yield.com/continuity/">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#07080c">
+<meta name="color-scheme" content="dark">
+<script defer src="/assets/main.js"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
+<script defer src="/assets/gtag-init.js"></script>
+</head>
+<body>
+<a href="#main" class="skip-link">メイン本文へスキップ</a>
+
+<nav class="topnav">
+	<div class="topnav-inner">
+		<a href="/ja/" class="brand">Freedom Yield · Metal</a>
+		<details class="nav-menu">
+			<summary class="nav-toggle" aria-label="メニュー開閉">
+				<span class="hamburger-icon" aria-hidden="true"></span>
+			</summary>
+			<div class="nav">
+				<a href="/ja/#status">状態</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">概要</button>
+					<div class="nav-dropdown-menu">
+						<a href="/ja/#about">概要</a>
+						<a href="/ja/#roadmap">展望</a>
+					</div>
+				</div>
+				<a href="/ja/#delegate" data-ga-event="delegate_cta_click" data-ga-param-position="nav">委任</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">検証</button>
+					<div class="nav-dropdown-menu">
+						<a href="/ja/data/">公開データ</a>
+						<a href="/ja/journal/">運用日誌</a>
+						<a href="/ja/continuity/" aria-current="page">事業継続性</a>
+						<a href="/ja/incidents/" data-ga-event="nav_click" data-ga-param-target="incidents">インシデント</a>
+					</div>
+				</div>
+				<a href="/continuity/" class="nav-lang" data-ga-event="language_switch" data-ga-param-to="en">EN</a>
+			</div>
+		</details>
+	</div>
+</nav>
+
+<header class="hero hero--simple">
+	<div class="container">
+		<p class="hero-eyebrow">What if…</p>
+		<h1>Continuity</h1>
+		<p class="hero-lead">
+			長期委任を検討する人が気になるシナリオへの率直な回答: 運用者不在 / 鍵紛失 / ネットワーク event / web 障害。
+			何が回収可能で何が不可能か、所要時間はどれくらいか。
+			保守的に書いてあるので、実際の日はこのページが言うより悪くなることはまずありません。
+		</p>
+	</div>
+</header>
+
+<main id="main" class="container">
+
+	<section class="card continuity-tldr">
+		<h2>委任者向け TL;DR</h2>
+		<ul class="continuity-tldr-list">
+			<li><strong>Metal Blockchain には slashing がありません。</strong>委任 stake が焼失したり没収されたりすることはありません。最悪でも 1 cycle 分の報酬が得られないだけです。</li>
+			<li><strong>cycle 終了時に委任は自動的に解除されます。</strong>仮に今日、こちら側のインフラが全部消えても、P-Chain は委任 METAL を予定通り委任者に返却します。validator 本体の存在は必要条件ではありません。</li>
+			<li><strong>self-stake 回収は運用者側の責任。</strong>運用者の鍵紛失が委任者の資金に影響することはありません。</li>
+			<li><strong>状態は誰でも独立検証可能。</strong>このサイトが落ちていても、<a href="/ja/data/"><code>api.metalblockchain.org</code></a> に直接問い合わせれば同じデータが取れます。中間者なし。</li>
+		</ul>
+	</section>
+
+	<section class="card">
+		<h2>validator 側のシナリオ</h2>
+
+		<article class="continuity-scenario">
+			<h3>metalgo プロセスのクラッシュ / VM 再起動</h3>
+			<p>対応済。<code>metalgo</code> は systemd の <code>Restart=on-failure</code> で起動、ホスト再起動後 90 秒以内に validator が再稼働します。P-Chain 上の uptime% が落ちるのは、十分な数の peer が一定時間以上の downtime を観測 + 合意投票が動いた場合のみなので、一発の再起動は public 数値上はほぼ見えません。</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>ハードウェア / ホスティング provider 障害</h3>
+			<p>validator は validator host production-grade VPS で稼働しています。数分以上の validator host リージョン障害は uptime% に観測可能な凹みとして現れます。self-stake と累積報酬は影響を受けません — ホストが復帰すれば validator は再接続します。永続的な障害(provider 側のデータ消失)は staker key バックアップから復旧可能(下記運用者セクション参照)。</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>disk 満杯 / RAM 圧迫 / peer 数崩壊</h3>
+			<p>常時監視。別系統のアラートパイプライン(ntfy → 運用者の端末)が disk &gt; 85% / RAM &gt; 90% / peer 数 &lt; ~50 / <code>metalgo</code> プロセス消失で発火します。多くの event は public uptime% が気付く前に解消されます。</p>
+		</article>
+	</section>
+
+	<section class="card">
+		<h2>運用者側のシナリオ</h2>
+
+		<article class="continuity-scenario">
+			<h3>cycle クローズ時に運用者が不在</h3>
+			<p>再登録 tx は期間終了の 2 日前に投入する運用です。運用者が tx を投入できなくなれば、validator は <code>endTime</code> で素直に失効します。self-stake と未請求報酬は運用者の P-Chain アドレスに戻ります。その cycle にあった委任は自動的に各委任者に返却されます — 運用者のアクション不要。validator は運用者が動けるようになってから新規 <code>AddPermissionlessValidatorTx</code> で再登録するか、もしくは二度と再登録しないかは自由です。不在によって何かが破壊されることはありません。</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>staker key の紛失 / 漏洩</h3>
+			<p>BLS staker key は 3 箇所に backup され、うち 2 箇所は運用者から地理的に分離されています。3 箇所全てを失った場合は、次の期間境界で validator が恒久的に inactive になりますが、対応する self-stake は P-Chain 上で reward address に返却されます(reward address の鍵管理は staker key とは独立した別系統です)。staker key の漏洩で資金が動かされることはなく、最悪でも期間終了まで node identity の impersonation が可能になるだけです。</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>reward address(wallet)の鍵紛失</h3>
+			<p>self-stake が回収不能になる唯一のシナリオです。reward address は Metal Wallet web 版 wallet(24 語 Avalanche 派生)で、seed は staker key とは別のオフライン媒体に保管されています。両者は同じ媒体に同居しません。</p>
+		</article>
+	</section>
+
+	<section class="card">
+		<h2>ネットワーク側のシナリオ</h2>
+
+		<article class="continuity-scenario">
+			<h3>Metal Blockchain の hard fork / アップグレード</h3>
+			<p>Metallicus の canonical 指示に従います — validator は Foundation が mainnet 用に publish したバージョンを動かします。fork は事前に upgrade window つきで signal されるので、その window 内、もしくはやむを得ず downtime が発生する場合は window 後にアップグレードします。uptime% への影響は <a href="/ja/incidents/">incident log</a> に記録、次の <a href="/ja/journal/">cycle journal</a> entry にも反映されます。</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>P-Chain の halt / 合意異常</h3>
+			<p>運用者の制御外。監視はしていますが、対応は他の validator と同じ — Metallicus / Metal Foundation の canonical 指示を待ち、指示通りに remediation を適用します。halt 中に運用者側で取れる特別なアクションはありません。</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>subnet への validation 参加</h3>
+			<p>Phase 1 は mainnet のみです。subnet 参加は <a href="/ja/#roadmap">roadmap</a> で事前告知し、journal で経緯を説明してから tx を投入する deliberate な判断です。subnet 参加が既存 mainnet 委任に影響することはありません。</p>
+		</article>
+	</section>
+
+	<section class="card">
+		<h2>Web / 透明性側のシナリオ</h2>
+
+		<article class="continuity-scenario">
+			<h3>このサイトが落ちている時</h3>
+			<p>Web ホスト(web host)と validator ホスト(validator host)は完全に独立しています。web 障害は validator にゼロ影響です。障害中も、誰でも <code>api.metalblockchain.org</code> を直接叩けば本サイトと同じ validator state が取得できます — 具体的な RPC method / filter は <a href="/ja/data/">公開データ</a> ページ参照。</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>domain 失効 / DNS 侵害</h3>
+			<p>domain 更新は失効よりかなり前に autopay で更新されます。状態は運用者の月次レビューチェックリスト項目です。validator は on-chain で存在しているので、domain は表示レイヤーに過ぎません。<code>metal.freedom-yield.com</code> が resolve しなくなっても、NodeID は引き続きブロックを validate し続け、public dashboard だけが見えなくなります。</p>
+		</article>
+	</section>
+
+	<section class="card continuity-bottom-line">
+		<h2>結論</h2>
+		<p>
+			Avalanche 派生チェーン(Metal を含む)は、<strong>運用者が悪意ある行動をしても、姿を消しても、委任者の資金は安全</strong>に
+			設計されています。P-Chain は委任 stake を予定通り返却し、委任者の元本に害を及ぼす slashing は存在しません。
+			「Freedom Yield が明日消える」シナリオの最悪結果でも、1 cycle 分の報酬を取り損ねるだけ — 今の運用ペースでは
+			約 1 ヶ月分です。
+		</p>
+		<p>
+			その protocol-level の安全に加えて当方が上乗せするもの: 公開された監査トレース(incidents / journal / open data)、
+			3 箇所の独立 backup を持つ documented な recovery model、そして委任者に影響する判断は実行前に告知する明示的なコミット(事後告知はしない)。
+		</p>
+	</section>
+
+</main>
+
+<footer class="site-footer">
+	<div class="container">
+		<div class="footer-grid">
+			<div class="footer-brand">
+				<h3>Freedom Yield · Metal</h3>
+				<p>Metal Blockchain の long-horizon validator。透明な uptime 開示、マーケティング無し — ただ灯りを点け続けるだけ。</p>
+			</div>
+			<nav class="footer-col" aria-label="バリデータ">
+				<h4>バリデータ</h4>
+				<ul>
+					<li><a href="/ja/#status">ステータス</a></li>
+					<li><a href="/ja/#about">概要</a></li>
+					<li><a href="/ja/#track-record">実績</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="委任">
+				<h4>委任</h4>
+				<ul>
+					<li><a href="/ja/#delegate">委任する</a></li>
+					<li><a href="/ja/#calculator">報酬計算</a></li>
+					<li><a href="/ja/#faq">FAQ</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="ネットワーク">
+				<h4>ネットワーク</h4>
+				<ul>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">Explorer ↗</a></li>
+
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="サポート">
+				<h4>サポート</h4>
+				<ul>
+					<li><a href="/ja/data/">公開データ</a></li>
+					<li><a href="/ja/journal/">運用日誌</a></li>
+					<li><a href="/ja/continuity/" aria-current="page">事業継続性</a></li>
+					<li><a href="/ja/incidents/">インシデント</a></li>
+					<li><a href="mailto:bp@freedom-yield.com">お問い合わせ</a></li>
+				</ul>
+			</nav>
+		</div>
+		<hr class="footer-divider">
+		<p class="footer-disclaimer"><strong>免責事項:</strong> Freedom Yield は Metal Blockchain 上で稼働する独立した第三者バリデータです。Metallicus 社および Metal Blockchain Foundation の関連会社・提携先・出資先・公式運営者ではありません。各商標は各権利者に帰属します。</p>
+		<div class="footer-bottom">
+			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain</a>.</p>
+			<p>© 2026 Freedom Yield · Metal validator</p>
+		</div>
+	</div>
+</footer>
+</body>
+</html>

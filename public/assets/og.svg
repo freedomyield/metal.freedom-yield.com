@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-label="Freedom Yield — Metal Blockchain Validator">
+	<defs>
+		<linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+			<stop offset="0%" stop-color="#07080c"/>
+			<stop offset="100%" stop-color="#111421"/>
+		</linearGradient>
+		<linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+			<stop offset="0%" stop-color="#76e4be"/>
+			<stop offset="100%" stop-color="#6db5ff"/>
+		</linearGradient>
+	</defs>
+
+	<rect width="1200" height="630" fill="url(#bg)"/>
+
+	<!-- Logo -->
+	<g transform="translate(80,100)">
+		<rect width="100" height="100" rx="18" ry="18" fill="#07080c" stroke="url(#accent)" stroke-width="3"/>
+		<path d="M25 78 V 35 L 50 60 L 75 35 V 78" fill="none" stroke="url(#accent)" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"/>
+		<circle cx="50" cy="22" r="5" fill="url(#accent)"/>
+	</g>
+
+	<!-- Title -->
+	<text x="210" y="170" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="38" font-weight="600" fill="#e6e9f2">Freedom Yield</text>
+	<text x="210" y="210" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="22" fill="#8b91a4">Metal Blockchain Validator</text>
+
+	<!-- Tagline -->
+	<text x="80" y="370" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="56" font-weight="600" fill="#e6e9f2">Open infrastructure.</text>
+	<text x="80" y="440" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="56" font-weight="600" fill="url(#accent)">Public uptime.</text>
+
+	<!-- URL -->
+	<text x="80" y="550" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="22" fill="#8b91a4">metal.freedom-yield.com</text>
+</svg>

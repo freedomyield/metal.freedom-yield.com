@@ -1,0 +1,145 @@
+# 本番サイトの uptime 監視(Phase 1 以降で有効化)
+#
+# 30 分ごとに https://metal.freedom-yield.com/ を叩き、
+# - HTTP 200 + 必須コンテンツ
+# - TLS 証明書の有効期限 7 日以上
+# - /api/validator.json が valid JSON で必須キーを持つ
+# を確認する。失敗で workflow が red になり、GitHub から email 通知が飛ぶ。
+#
+# DEPLOY_ENABLED variable が true でない間(= VPS 未契約期間)は全 job skip。
+# サイト本番稼働開始時に DEPLOY_ENABLED=true にすると自動で監視が走り始める。
+
+name: Uptime check
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'    # 30 分ごと(UTC)、Actions 分数の節約
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: ${{ vars.DEPLOY_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      SITE_URL: https://metal.freedom-yield.com/
+      SITE_HOST: metal.freedom-yield.com
+      EXPECTED_TOKEN: Freedom Yield
+    steps:
+      - name: Verify HTTPS root returns 200 with expected content
+        run: |
+          set -euo pipefail
+
+          echo "::group::HEAD ${SITE_URL}"
+          status=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 -I "$SITE_URL")
+          echo "status: $status"
+          echo "::endgroup::"
+
+          if [ "$status" != "200" ]; then
+            echo "::error::Expected HTTP 200, got $status"
+            exit 1
+          fi
+
+          echo "::group::GET body content check"
+          body=$(curl -sS --max-time 15 "$SITE_URL")
+          if ! echo "$body" | grep -q "$EXPECTED_TOKEN"; then
+            echo "::error::Body missing expected token '$EXPECTED_TOKEN' — site may be defaced or returning stale page"
+            exit 1
+          fi
+          echo "Body contains expected token."
+          echo "::endgroup::"
+
+      - name: Verify TLS certificate is not near expiry
+        run: |
+          set -euo pipefail
+          end=$(echo | openssl s_client -servername "$SITE_HOST" -connect "${SITE_HOST}:443" 2>/dev/null \
+                | openssl x509 -noout -enddate \
+                | sed 's/notAfter=//')
+          end_epoch=$(date -d "$end" +%s)
+          now_epoch=$(date +%s)
+          days_left=$(( (end_epoch - now_epoch) / 86400 ))
+          echo "Certificate expires in $days_left day(s) ($end)"
+          if [ "$days_left" -lt 7 ]; then
+            echo "::error::Certificate expires in $days_left day(s) — Caddy auto-renew may have failed"
+            exit 1
+          fi
+
+      - name: Verify /api/validator.json is valid JSON with required keys
+        run: |
+          set -euo pipefail
+          json=$(curl -sS --max-time 15 "${SITE_URL}api/validator.json")
+          echo "::group::validator.json"
+          echo "$json" | jq .
+          echo "::endgroup::"
+
+          # required: phase / network / observedAt (NodeID 等は phase によって null OK)
+          for key in phase network observedAt; do
+            if ! echo "$json" | jq -e ".${key}" > /dev/null; then
+              echo "::error::validator.json missing required key: ${key}"
+              exit 1
+            fi
+          done
+
+          # observedAt が 24 時間以内かを軽くチェック(stale データの検出)
+          observed=$(echo "$json" | jq -r '.observedAt')
+          if [ "$observed" != "null" ] && [ -n "$observed" ]; then
+            obs_epoch=$(date -d "$observed" +%s 2>/dev/null || echo 0)
+            now_epoch=$(date +%s)
+            age_hours=$(( (now_epoch - obs_epoch) / 3600 ))
+            if [ "$obs_epoch" -gt 0 ] && [ "$age_hours" -gt 24 ]; then
+              echo "::warning::validator.json observedAt is ${age_hours}h old — node-info.sh may not be refreshing"
+            else
+              echo "validator.json age: ${age_hours}h (fresh)"
+            fi
+          fi
+
+      - name: Note validator period status
+        run: |
+          set -euo pipefail
+          # Report on remaining validator period. Aligned with ntfy alert
+          # cadence (check-anomalies.sh): T-7 / T-1 / T-0 / T-10min are
+          # heads-up moments, not job failures. Only a sustained post-expiry
+          # gap (validator entry stays missing across cycles) should fail
+          # the workflow; the natural ~minutes-long gap at renewal time
+          # is expected operational state.
+          json=$(curl -sS --max-time 15 "${SITE_URL}api/validator.json")
+          end_time=$(echo "$json" | jq -r '.endTime // empty')
+
+          if [ -z "$end_time" ] || [ "$end_time" = "null" ]; then
+            echo "::notice::endTime not present in validator.json — validator may not be registered yet"
+            exit 0
+          fi
+
+          now_epoch=$(date +%s)
+          days_left=$(( (end_time - now_epoch) / 86400 ))
+          seconds_left=$(( end_time - now_epoch ))
+          end_human=$(date -d "@${end_time}" -u +'%Y-%m-%d %H:%M UTC')
+          end_date_jst=$(TZ=Asia/Tokyo date -d "@${end_time}" '+%Y-%m-%d')
+          end_time_jst=$(TZ=Asia/Tokyo date -d "@${end_time}" '+%H:%M JST')
+          day_before_jst=$(TZ=Asia/Tokyo date -d "@$((end_time - 86400))" '+%Y-%m-%d')
+          week_before_jst=$(TZ=Asia/Tokyo date -d "@$((end_time - 7*86400))" '+%Y-%m-%d')
+          today_jst=$(TZ=Asia/Tokyo date '+%Y-%m-%d')
+          echo "Validator period ends ${end_human} (${days_left} day(s) left)"
+          echo "  today JST=${today_jst}  T-7=${week_before_jst}  T-1=${day_before_jst}  T-0=${end_date_jst}"
+
+          if [ "$days_left" -lt -1 ]; then
+            # > 24h past endTime with no renewal visible = real problem
+            echo "::error::Validator period expired more than 24h ago (${end_human}) and renewal not visible — investigate"
+            exit 1
+          elif [ "$seconds_left" -le 0 ]; then
+            # Within ~24h of endTime: natural renewal gap, just a notice
+            echo "::notice::Validator period just ended (${end_human}) — renewal window active"
+          elif [ "$seconds_left" -le 600 ]; then
+            echo "::notice::T-10min — old stake unlocks at ${end_time_jst}"
+          elif [ "$today_jst" = "$end_date_jst" ]; then
+            echo "::notice::Today is the end-of-period day (${end_date_jst} JST, endTime ${end_time_jst})"
+          elif [ "$today_jst" = "$day_before_jst" ]; then
+            echo "::notice::Tomorrow is the end-of-period day (${end_date_jst} JST, endTime ${end_time_jst})"
+          elif [ "$today_jst" = "$week_before_jst" ]; then
+            echo "::notice::One week until end of period (${end_date_jst} JST)"
+          elif [ "$days_left" -le 14 ]; then
+            echo "::notice::Validator period expires in ${days_left} day(s) — bookmark docs/VALIDATOR_RENEWAL.md"
+          fi

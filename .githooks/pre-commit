@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Pre-commit hook: secret 検査(gitleaks + fallback grep)
+#
+# 有効化:
+#   git config core.hooksPath .githooks
+#
+# 推奨:
+#   brew install gitleaks   # macOS
+#   go install github.com/gitleaks/gitleaks/v8@latest
+#
+# fallback の grep は gitleaks が無くても効くようにしてある(セキュリティ第一)
+
+set -eo pipefail
+
+BLOCKED=0
+
+# 1. gitleaks があれば走らせる(staged のみ)
+if command -v gitleaks >/dev/null 2>&1; then
+	if ! gitleaks protect --staged --redact --verbose 2>&1; then
+		echo
+		echo "ERROR: gitleaks が秘密値を検出しました"
+		echo "  対処: 内容を確認、誤検知なら .gitleaks.toml で除外。--no-verify は使わない"
+		BLOCKED=1
+	fi
+else
+	echo "INFO: gitleaks 未インストール (推奨: brew install gitleaks)。fallback grep で簡易検査します"
+fi
+
+# 2. fallback grep — gitleaks の有無にかかわらず常に走る(セーフティネット)
+STAGED_DIFF=$(git diff --cached -U0 || true)
+
+# (a) PEM/OpenSSH 秘密鍵ブロック
+if echo "${STAGED_DIFF}" | grep -qE 'BEGIN (PRIVATE|RSA|EC|OPENSSH|DSA|ENCRYPTED)'; then
+	echo "ERROR: 秘密鍵ブロック(-----BEGIN ... PRIVATE KEY-----)が staged 変更内に含まれています"
+	BLOCKED=1
+fi
+
+# (b) AWS access key 形式
+if echo "${STAGED_DIFF}" | grep -qE '\bAKIA[0-9A-Z]{16}\b|\bASIA[0-9A-Z]{16}\b'; then
+	echo "ERROR: AWS access key らしき文字列を検出"
+	BLOCKED=1
+fi
+
+# (c) GitHub PAT / token 形式
+if echo "${STAGED_DIFF}" | grep -qE '\bghp_[A-Za-z0-9]{36,}\b|\bgho_[A-Za-z0-9]{36,}\b|\bghs_[A-Za-z0-9]{36,}\b|\bgithub_pat_[A-Za-z0-9_]{40,}\b'; then
+	echo "ERROR: GitHub token らしき文字列を検出"
+	BLOCKED=1
+fi
+
+# (d) .env や key ファイルが誤って staged されてないか
+if git diff --cached --name-only | grep -qE '(^|/)\.env$|(^|/)\.env\.local$|(^|/)\.env\.production$|(^|/)staker\.key$|(^|/)signer\.key$|\.pem$|\.p12$|\.pfx$'; then
+	echo "ERROR: 秘密ファイル(.env / staker.key / signer.key / *.pem 等)が staged"
+	BLOCKED=1
+fi
+
+# (e) BIP39 mnemonic らしき行(12-24 単語) — 警告のみ(誤検知が多いため)
+if echo "${STAGED_DIFF}" | grep -qE '^\+.*\b([a-z]{3,12}[[:space:]]+){11,23}[a-z]{3,12}\b'; then
+	echo "WARN: 12-24 単語の連続を検出。mnemonic/seed phrase でないか確認してください(誤検知の可能性あり、ブロックはしません)"
+fi
+
+if [[ "${BLOCKED}" -ne 0 ]]; then
+	echo
+	echo "Commit を中止します。問題箇所を修正してから再度 git commit してください"
+	exit 1
+fi
+
+exit 0

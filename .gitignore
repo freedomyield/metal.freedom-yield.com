@@ -1,0 +1,61 @@
+# ---- Secrets (絶対にコミットしない) ----
+# validator/staking 用 private key(metalgo の典型ファイル名)
+*.priv*
+staker.*
+signer.*
+# 一般的な秘密鍵 / 証明書(拡張子で識別、ドキュメントを誤って捕捉しない)
+# 注意: macOS は case-insensitive FS なので `*key*` のような名前マッチは大文字も拾う → 拡張子のみで識別
+*.key
+*.pem
+*.crt
+*.cer
+*.p12
+*.pfx
+*.jks
+# 環境変数 / dotenv
+.env
+.env.*
+!.env.example
+
+# ---- ランタイム生成データ (秘密鍵を含む可能性) ----
+# Caddy: 本番では Let's Encrypt の秘密鍵をここに書く
+caddy/data/
+caddy/config/
+# metalgo: chain DB + staking key(本リポでは named volume を使うので普通は不要、bind mount にしたとき用)
+metalgo/data/
+metalgo/config/
+
+# ---- OS / editor cruft ----
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/
+
+# ---- Build / cache ----
+node_modules/
+dist/
+.cache/
+*.log
+
+# ---- Runtime-generated site data ----
+# api/validator.json は live metalgo から生成する動的データ(scripts/node-info.sh)
+# schema は public/api/validator.example.json を参照
+public/api/validator.json
+# uptime track record — Hetzner で生成 + push、ローカル開発時のみ
+# placeholder を置くことがあるが、コミットはしない(動的データ)
+public/api/uptime-recent.json
+public/api/uptime-cycles.json
+public/api/peer-geo.json
+public/api/server-status.json
+public/api/peers.json
+# calendar/*.ics は gen-renewal-ics.sh が生成、ファイル名に private token が
+# 入るので絶対コミットしない(public 化前提リポ、token は private URL の要)
+public/calendar/
+
+# ---- Local-only artifacts ----
+# CI/CD で deploy 時に生成、コミット不要
+public/api/build.json
+# ローカルの Claude Code 等の状態(誤コミット防止)
+.claude/
+.local/

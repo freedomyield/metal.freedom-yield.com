@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Open data — Freedom Yield Metal</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="Every public endpoint that backs the Freedom Yield Metal validator site. Verify any claim yourself with curl.">
+<link rel="canonical" href="https://metal.freedom-yield.com/data/">
+<link rel="alternate" hreflang="en" href="https://metal.freedom-yield.com/data/">
+<link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/data/">
+<link rel="alternate" hreflang="x-default" href="https://metal.freedom-yield.com/data/">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#07080c">
+<meta name="color-scheme" content="dark">
+<script defer src="/assets/main.js"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
+<script defer src="/assets/gtag-init.js"></script>
+</head>
+<body>
+<a href="#main" class="skip-link">Skip to main content</a>
+
+<nav class="topnav">
+	<div class="topnav-inner">
+		<a href="/" class="brand">Freedom Yield · Metal</a>
+		<details class="nav-menu">
+			<summary class="nav-toggle" aria-label="Open / close menu">
+				<span class="hamburger-icon" aria-hidden="true"></span>
+			</summary>
+			<div class="nav">
+				<a href="/#status">Status</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">About</button>
+					<div class="nav-dropdown-menu">
+						<a href="/#about">About</a>
+						<a href="/#roadmap">Roadmap</a>
+					</div>
+				</div>
+				<a href="/#delegate" data-ga-event="delegate_cta_click" data-ga-param-position="nav">Delegate</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">Verify</button>
+					<div class="nav-dropdown-menu">
+						<a href="/data/" aria-current="page">Open data</a>
+						<a href="/journal/">Cycle journal</a>
+						<a href="/continuity/">Continuity</a>
+						<a href="/incidents/" data-ga-event="nav_click" data-ga-param-target="incidents">Incidents</a>
+					</div>
+				</div>
+				<a href="/ja/data/" class="nav-lang" data-ga-event="language_switch" data-ga-param-to="ja">JA</a>
+			</div>
+		</details>
+	</div>
+</nav>
+
+<header class="hero hero--simple">
+	<div class="container">
+		<p class="hero-eyebrow">Transparency</p>
+		<h1>Open data</h1>
+		<p class="hero-lead">
+			Every claim on this site comes from one of the endpoints below. Each one is publicly readable —
+			verify anything yourself with <code>curl</code>, an iCalendar app, or your tool of choice.
+			Nothing here requires authentication.
+		</p>
+	</div>
+</header>
+
+<main id="main" class="container">
+
+	<section class="card data-group">
+		<h2>Validator state</h2>
+		<p class="data-group-lead">Live identity, stake, uptime, and bootstrap status of the node itself.</p>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>validator.json</h3>
+				<span class="data-tag">GET · JSON</span>
+			</header>
+			<p>Live validator identity, stake, uptime%, and P/X/C-Chain bootstrap status. The single source of truth that the home page status card reads from.</p>
+			<dl class="data-meta">
+				<dt>URL</dt><dd><a href="/api/validator.json"><code>/api/validator.json</code></a></dd>
+				<dt>Updated</dt><dd>Every 5 minutes — written by <code>scripts/node-info.sh</code> from local <code>metalgo</code> and the canonical P-Chain RPC</dd>
+				<dt>Schema</dt><dd>Self-documenting: top-level <code>_comment</code> describes how each field is derived</dd>
+			</dl>
+			<details class="data-example">
+				<summary>Example request</summary>
+				<pre><code>curl -s https://metal.freedom-yield.com/api/validator.json | jq</code></pre>
+			</details>
+		</article>
+
+	</section>
+
+	<section class="card data-group">
+		<h2>Uptime &amp; track record</h2>
+		<p class="data-group-lead">The audit trail. Daily samples for ~90 days, plus closed-cycle history that accumulates indefinitely.</p>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>uptime-recent.json</h3>
+				<span class="data-tag">GET · JSON</span>
+			</header>
+			<p>Rolling 90-day window of daily uptime samples. Each entry: observed-at timestamp, uptime%, peer count, bootstrap status, validator period bounds.</p>
+			<dl class="data-meta">
+				<dt>URL</dt><dd><a href="/api/uptime-recent.json"><code>/api/uptime-recent.json</code></a></dd>
+				<dt>Updated</dt><dd>Daily at 09:10 JST</dd>
+				<dt>Retention</dt><dd>Rolling 90 days; older entries roll into the cycles file below</dd>
+			</dl>
+			<details class="data-example">
+				<summary>Example request</summary>
+				<pre><code>curl -s https://metal.freedom-yield.com/api/uptime-recent.json | jq '.entries[0]'</code></pre>
+			</details>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>uptime-cycles.json</h3>
+				<span class="data-tag">GET · JSON</span>
+			</header>
+			<p>Each closed validation period appears as one row: on-chain start/end timestamps, final uptime%, tx ID, and an explorer URL for independent audit. The long-horizon record that grows ~12 entries per year while the monthly-cycle plan runs.</p>
+			<dl class="data-meta">
+				<dt>URL</dt><dd><a href="/api/uptime-cycles.json"><code>/api/uptime-cycles.json</code></a></dd>
+				<dt>Updated</dt><dd>On cycle close (~once per month during the current phase)</dd>
+				<dt>Audit</dt><dd>Each row links to <a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">explorer.metalblockchain.org</a> for tx verification</dd>
+			</dl>
+			<details class="data-example">
+				<summary>Example request</summary>
+				<pre><code>curl -s https://metal.freedom-yield.com/api/uptime-cycles.json | jq '.cycles | length'</code></pre>
+			</details>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>incidents.json</h3>
+				<span class="data-tag">GET · JSON</span>
+			</header>
+			<p>Operator-maintained incident log. Each entry: id, ISO 8601 date, severity (info / minor / major / critical), title, summary, impact, and resolution. An empty array is not a hidden list — it means no operational anomalies have occurred.</p>
+			<dl class="data-meta">
+				<dt>URL</dt><dd><a href="/api/incidents.json"><code>/api/incidents.json</code></a></dd>
+				<dt>Updated</dt><dd>Manually, within 24 hours of any incident</dd>
+				<dt>Schema</dt><dd>Documented inline in the file's <code>_comment</code> field</dd>
+			</dl>
+			<details class="data-example">
+				<summary>Example request</summary>
+				<pre><code>curl -s https://metal.freedom-yield.com/api/incidents.json | jq</code></pre>
+			</details>
+		</article>
+
+	</section>
+
+	<section class="card data-group">
+		<h2>Network</h2>
+		<p class="data-group-lead">Public, anonymised view of the wider validator network as seen from this node.</p>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>peer-geo.json</h3>
+				<span class="data-tag">GET · JSON</span>
+			</header>
+			<p>Geographic distribution of peer validators currently in this node's peer set. Each entry: NodeID, lat/lng, country, city, country code. NodeIDs are already on-chain public; no IPs are exposed.</p>
+			<dl class="data-meta">
+				<dt>URL</dt><dd><a href="/api/peer-geo.json"><code>/api/peer-geo.json</code></a></dd>
+				<dt>Updated</dt><dd>Hourly (TTL cache to be polite to upstream geo APIs)</dd>
+				<dt>Used by</dt><dd>The world map on the home page <code>#network</code> section</dd>
+			</dl>
+			<details class="data-example">
+				<summary>Example request</summary>
+				<pre><code>curl -s https://metal.freedom-yield.com/api/peer-geo.json | jq '.totalPeers'</code></pre>
+			</details>
+		</article>
+
+	</section>
+
+	<section class="card data-group">
+		<h2>Network observability (time-series)</h2>
+		<p class="data-group-lead">
+			Append-only daily samples of the Metal Blockchain validator set — concentration, fee distribution,
+			and turnover. Derived from <code>platform.getCurrentValidators</code> on this node's local <code>metalgo</code>,
+			so the source is the same authoritative RPC the chain itself uses. These series start in May 2026 and grow
+			indefinitely; preview files trim to the last 24–30 entries for chart rendering, history files keep every sample.
+		</p>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>peers-gini.json</h3>
+				<span class="data-tag">GET · JSON · preview</span>
+			</header>
+			<p>Last 24 daily samples of validator-set concentration. Each entry: <code>ts</code>, <code>gini</code> (stake Gini coefficient, 0 = perfectly even, 1 = single-validator monopoly), <code>top10_share</code> (fraction of total stake held by top 10 validators), <code>metallicus_share</code> (fraction held by validators identifiable as Metallicus-operated), <code>validator_count</code> (number of active validators that day).</p>
+			<dl class="data-meta">
+				<dt>URL</dt><dd><a href="/api/peers-gini.json"><code>/api/peers-gini.json</code></a></dd>
+				<dt>Updated</dt><dd>Daily at 13:00 JST (04:00 UTC)</dd>
+				<dt>Retention</dt><dd>Last 24 entries for in-page rendering. Full history below.</dd>
+			</dl>
+			<details class="data-example">
+				<summary>Example request</summary>
+				<pre><code>curl -s https://metal.freedom-yield.com/api/peers-gini.json | jq '.entries[-1]'</code></pre>
+			</details>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>peers-gini-history.jsonl</h3>
+				<span class="data-tag">GET · JSONL · full</span>
+			</header>
+			<p>Append-only line-delimited JSON mirror of the full Gini / top-10 / Metallicus share / validator count history. One JSON object per line. Use this for long-window analyses or charting beyond the 24-entry preview. Same schema as <code>peers-gini.json</code> entries.</p>
+			<dl class="data-meta">
+				<dt>URL</dt><dd><a href="/api/peers-gini-history.jsonl"><code>/api/peers-gini-history.jsonl</code></a></dd>
+				<dt>Updated</dt><dd>Daily at 13:00 JST (04:00 UTC), appended only</dd>
+				<dt>Retention</dt><dd>Keep-forever. Growth: ~150 bytes/day ≈ 55 KB/year.</dd>
+			</dl>
+			<details class="data-example">
+				<summary>Example request</summary>
+				<pre><code>curl -s https://metal.freedom-yield.com/api/peers-gini-history.jsonl | tail -7 | jq -s '[.[] | .validator_count] | {min: min, max: max, last: .[-1]}'</code></pre>
+			</details>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>fee-market.json</h3>
+				<span class="data-tag">GET · JSON · preview</span>
+			</header>
+			<p>Last 30 daily samples of the validator delegation-fee distribution across the active set. Each entry: <code>ts</code>, <code>n</code> (validator count), <code>mean</code>, percentiles <code>p10/p25/p50/p75/p90</code>, <code>max</code>, <code>self_fee_pct</code> (this node's fee), <code>self_percentile</code> (where this node sits in the distribution, 0–1). Use to answer "where does my fee sit in the market?" without scraping every validator individually.</p>
+			<dl class="data-meta">
+				<dt>URL</dt><dd><a href="/api/fee-market.json"><code>/api/fee-market.json</code></a></dd>
+				<dt>Updated</dt><dd>Daily at 13:00 JST (04:00 UTC)</dd>
+				<dt>Retention</dt><dd>Last 30 entries. Full history below.</dd>
+			</dl>
+			<details class="data-example">
+				<summary>Example request</summary>
+				<pre><code>curl -s https://metal.freedom-yield.com/api/fee-market.json | jq '.entries[-1] | {p10, p50, p90, self_fee_pct, self_percentile}'</code></pre>
+			</details>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>fee-market-history.jsonl</h3>
+				<span class="data-tag">GET · JSONL · full</span>
+			</header>
+			<p>Append-only mirror of the full fee-market history. Same schema as <code>fee-market.json</code> entries. Use for fee compression / dispersion analysis over long windows — especially relevant after <a href="https://build.avax.network/docs/acps/176-dynamic-evm-gas-limit-and-price-discovery-updates" rel="noopener noreferrer">ACP-176 (Fortuna, 2026-05)</a> introduced validator-configurable gas-target preferences.</p>
+			<dl class="data-meta">
+				<dt>URL</dt><dd><a href="/api/fee-market-history.jsonl"><code>/api/fee-market-history.jsonl</code></a></dd>
+				<dt>Updated</dt><dd>Daily at 13:00 JST (04:00 UTC), appended only</dd>
+				<dt>Retention</dt><dd>Keep-forever. Growth: ~180 bytes/day ≈ 65 KB/year.</dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>peers-changes.json</h3>
+				<span class="data-tag">GET · JSON</span>
+			</header>
+			<p>Most recent diff of the active-validator set: NodeIDs that joined since the previous snapshot, NodeIDs that departed, and (where known to this node's directory) the operator name + self-stake for joiners. Use to watch validator turnover without diffing two full snapshots yourself.</p>
+			<dl class="data-meta">
+				<dt>URL</dt><dd><a href="/api/peers-changes.json"><code>/api/peers-changes.json</code></a></dd>
+				<dt>Updated</dt><dd>Daily at 13:00 JST (04:00 UTC). Replaces (not appends).</dd>
+				<dt>Schema</dt><dd><code>{ generated_at, had_previous_snapshot, new_count, departed_count, new: [{node_id, name?, self_stake_metal}], departed: [{node_id}] }</code></dd>
+			</dl>
+			<details class="data-example">
+				<summary>Example request</summary>
+				<pre><code>curl -s https://metal.freedom-yield.com/api/peers-changes.json | jq '{new_count, departed_count}'</code></pre>
+			</details>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>peers-history-index.json</h3>
+				<span class="data-tag">GET · JSON · index</span>
+			</header>
+			<p>Index of daily full-set validator snapshots, each gzipped (~28 KB / day). Entries list <code>date</code>, <code>filename</code>, <code>size_bytes</code>. Snapshots themselves live at <code>/api/peers-history/&lt;filename&gt;</code> and contain every active validator on that day (NodeID, stake, fee, uptime, delegators list). Use this when you need the actual per-validator state on a specific historical date, not just aggregates.</p>
+			<dl class="data-meta">
+				<dt>URL</dt><dd><a href="/api/peers-history-index.json"><code>/api/peers-history-index.json</code></a></dd>
+				<dt>Snapshot URL</dt><dd><code>/api/peers-history/peers-YYYY-MM-DD.json.gz</code></dd>
+				<dt>Updated</dt><dd>Daily at 13:00 JST (04:00 UTC)</dd>
+				<dt>Retention</dt><dd>Keep-forever. Growth: ~28 KB/day ≈ 10 MB/year.</dd>
+			</dl>
+			<details class="data-example">
+				<summary>Example: fetch yesterday's full snapshot</summary>
+				<pre><code>YDAY=$(date -u -v-1d +%Y-%m-%d)  # Linux: date -u -d 'yesterday' +%F
+curl -s "https://metal.freedom-yield.com/api/peers-history/peers-${YDAY}.json.gz" | gunzip | jq '.validators | length'</code></pre>
+			</details>
+		</article>
+
+	</section>
+
+	<section class="card data-group">
+		<h2>Schedule</h2>
+		<p class="data-group-lead">Upcoming renewal events as iCalendar feeds you can subscribe to.</p>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>schedule.ics</h3>
+				<span class="data-tag">GET · iCalendar</span>
+			</header>
+			<p>Public iCalendar feed of upcoming validator-renewal events. Subscribe in Google Calendar, Apple Calendar, or any iCal-compatible app to receive alerts when the next cycle renews.</p>
+			<dl class="data-meta">
+				<dt>URL</dt><dd><a href="/calendar/schedule.ics"><code>/calendar/schedule.ics</code></a></dd>
+				<dt>Updated</dt><dd>Daily at 09:00 JST</dd>
+				<dt>Subscribe</dt><dd>Paste the URL into your calendar app's "Add by URL" form. One-click Google subscribe is on the <a href="/#cadence">Operating cadence</a> section of the home page.</dd>
+			</dl>
+			<details class="data-example">
+				<summary>Inspect</summary>
+				<pre><code>curl -s https://metal.freedom-yield.com/calendar/schedule.ics | head -40</code></pre>
+			</details>
+		</article>
+
+	</section>
+
+	<section class="card data-group">
+		<h2>Upstream canonical sources</h2>
+		<p class="data-group-lead">Everything above is derived from these. If our data ever conflicts with these, trust these.</p>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>Metal Blockchain P-Chain RPC</h3>
+				<span class="data-tag">POST · JSON-RPC</span>
+			</header>
+			<p>The authoritative source for validator set, stake, uptime, and delegation data. Our <code>validator.json</code> reads from here every 5 minutes.</p>
+			<dl class="data-meta">
+				<dt>URL</dt><dd><a href="https://api.metalblockchain.org/ext/bc/P" rel="noopener noreferrer"><code>https://api.metalblockchain.org/ext/bc/P</code></a></dd>
+				<dt>Maintained by</dt><dd>Metallicus / Metal Foundation</dd>
+				<dt>Method we use</dt><dd><code>platform.getCurrentValidators</code> filtered by our NodeID</dd>
+			</dl>
+			<details class="data-example">
+				<summary>Example request</summary>
+				<pre><code>curl -s -X POST -H "content-type:application/json" \
+  --data '{"jsonrpc":"2.0","id":1,"method":"platform.getCurrentValidators","params":{"subnetID":"11111111111111111111111111111111LpoYY"}}' \
+  https://api.metalblockchain.org/ext/bc/P \
+  | jq '.result.validators[] | select(.nodeID=="NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v")'</code></pre>
+			</details>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>Metal Blockchain Explorer</h3>
+				<span class="data-tag">Web · HTML</span>
+			</header>
+			<p>Block / tx / validator browser. Use this to independently audit any tx referenced from <code>uptime-cycles.json</code>.</p>
+			<dl class="data-meta">
+				<dt>URL</dt><dd><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer"><code>https://explorer.metalblockchain.org/</code></a></dd>
+				<dt>Our NodeID</dt><dd><code>NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v</code></dd>
+			</dl>
+		</article>
+
+	</section>
+
+	<section class="card data-group">
+		<h2>Self-identity metadata</h2>
+		<p class="data-group-lead">This validator's own publishable identity information.</p>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>validator-directory.json</h3>
+				<span class="data-tag">GET · JSON</span>
+			</header>
+			<p>A small JSON file containing this validator's own <code>NodeID → { name, url, type }</code> entry. The chain itself doesn't expose websites or display names, so this file lets the public site link the NodeID to a human-readable identity.</p>
+			<dl class="data-meta">
+				<dt>URL</dt><dd><a href="/api/validator-directory.json"><code>/api/validator-directory.json</code></a></dd>
+				<dt>Updated</dt><dd>Rarely — only when this validator's own metadata changes</dd>
+				</dl>
+		</article>
+	</section>
+
+	<section class="card data-policy">
+		<h2>Use freely, cache politely</h2>
+		<p>
+			All endpoints are unauthenticated and CORS-permitted for public read. There is no rate limit
+			enforced today, but please be polite — set a sensible TTL on your client (15+ minutes is fine for
+			most use cases) so a busy day doesn't accidentally hammer the origin. If you build something on top
+			of this data, drop us a note at <a href="mailto:bp@freedom-yield.com">bp@freedom-yield.com</a> —
+			we love seeing what people do with it.
+		</p>
+		<p class="data-policy-note">
+			No SLA. No uptime guarantee for the endpoints themselves — only for the validator they describe.
+			If an endpoint serves stale data after an extended outage, the canonical sources above are the
+			ground truth.
+		</p>
+	</section>
+
+</main>
+
+<footer class="site-footer">
+	<div class="container">
+		<div class="footer-grid">
+			<div class="footer-brand">
+				<h3>Freedom Yield · Metal</h3>
+				<p>Long-horizon validator on Metal Blockchain. Transparent uptime, public audit trail.</p>
+			</div>
+			<nav class="footer-col" aria-label="Validator">
+				<h4>Validator</h4>
+				<ul>
+					<li><a href="/#status">Status</a></li>
+					<li><a href="/#about">About</a></li>
+					<li><a href="/#track-record">Track record</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Delegation">
+				<h4>Delegation</h4>
+				<ul>
+					<li><a href="/#delegate">Delegate</a></li>
+					<li><a href="/#calculator">Rewards</a></li>
+					<li><a href="/#faq">FAQ</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Network">
+				<h4>Network</h4>
+				<ul>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">Explorer ↗</a></li>
+
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Support">
+				<h4>Support</h4>
+				<ul>
+					<li><a href="/data/" aria-current="page">Open data</a></li>
+					<li><a href="/journal/">Cycle journal</a></li>
+					<li><a href="/continuity/">Continuity</a></li>
+					<li><a href="/incidents/">Incidents</a></li>
+					<li><a href="/#acknowledgments">Acknowledgments</a></li>
+					<li><a href="mailto:bp@freedom-yield.com">Contact</a></li>
+				</ul>
+			</nav>
+		</div>
+		<hr class="footer-divider">
+		<p class="footer-disclaimer"><strong>Disclaimer:</strong> Freedom Yield is an independent, third-party validator operating on Metal Blockchain. It is not affiliated with, endorsed by, sponsored by, or operated by Metallicus Inc. or the Metal Blockchain Foundation. All trademarks are the property of their respective owners.</p>
+		<div class="footer-bottom">
+			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain</a>.</p>
+			<p>© 2026 Freedom Yield · Metal validator</p>
+		</div>
+	</div>
+</footer>
+</body>
+</html>

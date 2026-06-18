@@ -1,0 +1,19 @@
+# Gitleaks config — extends defaults with project-specific allow rules.
+# Public repo plan — false positives must be documented here, not silenced
+# with --no-verify.
+
+title = "metal.freedom-yield.com gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Project-level allowlist"
+# Path-based: scripts/dr-drill.sh embeds SHA-256 integrity fingerprints of
+# staker key files (see header comment in dr-drill.sh). The hashes are
+# irreversible, public-safe, and exist to detect backup tampering. The
+# script contains no real secrets — gitleaks high-entropy heuristics fire
+# on the hex strings.
+paths = [
+  '''scripts/dr-drill\.sh''',
+]

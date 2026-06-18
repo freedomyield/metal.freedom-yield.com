@@ -1,0 +1,53 @@
+# Metal Blockchain validator 候補者サイト(共通定義)
+#
+# 役割分担(重要):
+#   - 本リポ = ブラウザで閲覧する側(静的サイト、Caddy 配信)
+#   - validator 本体(metalgo プロセス、port 9651/TCP)は別マシン(別マシンで管理)で別管理
+#     ※ ローカル開発時のみ docker-compose.metalgo.yml で Tahoe testnet ノードを立てて検証
+#
+# 環境別の設定は override 経由で適用:
+#   - ローカル開発: docker-compose.override.yml(`docker compose up` で自動読込)
+#   - 本番VPS    : docker-compose.prod.yml(-f で明示) ※ 後続フェーズで追加
+
+name: site
+
+services:
+  caddy:
+    # Custom image — caddy:2-alpine + mholt/caddy-ratelimit plugin built
+    # via xcaddy. See caddy/Dockerfile. deploy.yml passes --build so the
+    # image is rebuilt when caddy/Dockerfile or Caddyfile changes.
+    build:
+      context: ./caddy
+    image: caddy-static:local
+    container_name: caddy-static
+    restart: unless-stopped
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./public:/srv:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    # ハードニング:
+    # - root FS は read-only
+    # - /tmp は tmpfs(Caddy 内部の一時利用)
+    # - 全 capability を drop し、port 80/443 を bind するための NET_BIND_SERVICE のみ付与
+    # - no-new-privileges で setuid 経由の権限昇格を禁止
+    read_only: true
+    tmpfs:
+      - /tmp:rw,size=16m,mode=1777
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    # 静的配信なので軽量に制限
+    mem_limit: 256m
+    cpus: 1.0
+    # healthcheck は意図的に外している:Caddyfile の {$DOMAIN} block は Host header が
+    # 設定ドメイン(metal.freedom-yield.com)と一致しないと 404、wget で localhost を叩くと
+    # mismatch + HTTPS リダイレクトでさらに複雑になる。生死は restart: unless-stopped と
+    # 外部からの実 URL アクセスで監視する
+
+volumes:
+  caddy_data:
+  caddy_config:

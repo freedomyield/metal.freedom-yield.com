@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cycle journal — Freedom Yield Metal</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="Chronological log of every validation cycle — start/end dates, final uptime, on-chain tx, and operator notes.">
+<link rel="canonical" href="https://metal.freedom-yield.com/journal/">
+<link rel="alternate" hreflang="en" href="https://metal.freedom-yield.com/journal/">
+<link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/journal/">
+<link rel="alternate" hreflang="x-default" href="https://metal.freedom-yield.com/journal/">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#07080c">
+<meta name="color-scheme" content="dark">
+<script defer src="/assets/main.js"></script>
+<script defer src="/assets/journal.js"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
+<script defer src="/assets/gtag-init.js"></script>
+</head>
+<body>
+<a href="#main" class="skip-link">Skip to main content</a>
+
+<nav class="topnav">
+	<div class="topnav-inner">
+		<a href="/" class="brand">Freedom Yield · Metal</a>
+		<details class="nav-menu">
+			<summary class="nav-toggle" aria-label="Open / close menu">
+				<span class="hamburger-icon" aria-hidden="true"></span>
+			</summary>
+			<div class="nav">
+				<a href="/#status">Status</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">About</button>
+					<div class="nav-dropdown-menu">
+						<a href="/#about">About</a>
+						<a href="/#roadmap">Roadmap</a>
+					</div>
+				</div>
+				<a href="/#delegate" data-ga-event="delegate_cta_click" data-ga-param-position="nav">Delegate</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">Verify</button>
+					<div class="nav-dropdown-menu">
+						<a href="/data/">Open data</a>
+						<a href="/journal/" aria-current="page">Cycle journal</a>
+						<a href="/continuity/">Continuity</a>
+						<a href="/incidents/" data-ga-event="nav_click" data-ga-param-target="incidents">Incidents</a>
+					</div>
+				</div>
+				<a href="/ja/journal/" class="nav-lang" data-ga-event="language_switch" data-ga-param-to="ja">JA</a>
+			</div>
+		</details>
+	</div>
+</nav>
+
+<header class="hero hero--simple">
+	<div class="container">
+		<p class="hero-eyebrow">Operational record</p>
+		<h1>Cycle journal</h1>
+		<p class="hero-lead">
+			Each closed validation period appears here as one entry: on-chain dates, final uptime, the renewal tx, and a short
+			operator note about how the cycle went. The list grows by ~12 entries per year while the monthly-cycle plan runs.
+			Source: <a href="/api/uptime-cycles.json"><code>/api/uptime-cycles.json</code></a>.
+		</p>
+	</div>
+</header>
+
+<main id="main" class="container">
+
+	<section class="card journal-summary" data-journal-summary>
+		<dl class="kv">
+			<dt>Validator since</dt><dd>2026-05-19</dd>
+			<dt>Cycles closed</dt><dd data-field="cycleCount">—</dd>
+			<dt>Median uptime across cycles</dt><dd data-field="medianUptime">—</dd>
+			<dt>Source</dt><dd><a href="/api/uptime-cycles.json"><code>/api/uptime-cycles.json</code></a></dd>
+		</dl>
+	</section>
+
+	<section class="card journal-list-card">
+		<h2>Closed cycles</h2>
+		<ol class="journal-list" data-journal-list aria-live="polite">
+			<li class="journal-loading" data-journal-loading>Loading…</li>
+		</ol>
+		<template data-journal-template>
+			<li class="journal-entry">
+				<header class="journal-entry-head">
+					<span class="journal-cycle-n"></span>
+					<span class="journal-period"></span>
+				</header>
+				<dl class="journal-meta">
+					<dt>Final uptime</dt><dd class="journal-uptime"></dd>
+					<dt>Duration</dt><dd class="journal-duration"></dd>
+					<dt>On-chain audit</dt><dd><a class="journal-explorer" rel="noopener noreferrer">Explorer ↗</a></dd>
+				</dl>
+				<p class="journal-notes"></p>
+			</li>
+		</template>
+		<p class="journal-empty" data-journal-empty hidden>
+			No cycles have closed yet. The current cycle's endTime is shown on the <a href="/#status">home page status card</a>;
+			its entry will land here within 24 hours of close.
+		</p>
+	</section>
+
+	<section class="card journal-about">
+		<h2>About this record</h2>
+		<p>
+			This page is the long-horizon ledger. Each entry corresponds to one closed <code>AddPermissionlessValidatorTx</code>
+			cycle on the Metal Blockchain P-Chain. <strong>Once written, entries are not edited</strong> — if a mistake is
+			discovered, a correction is appended as the next cycle's note, and the original stays as the immutable record.
+		</p>
+		<p>
+			Operator notes are intentionally short — what happened, what was learned, what changed for next cycle. They are
+			not a marketing channel; they are the part of the audit trail a tx ID alone can't carry.
+		</p>
+	</section>
+
+</main>
+
+<footer class="site-footer">
+	<div class="container">
+		<div class="footer-grid">
+			<div class="footer-brand">
+				<h3>Freedom Yield · Metal</h3>
+				<p>Long-horizon validator on Metal Blockchain. Transparent uptime, public audit trail.</p>
+			</div>
+			<nav class="footer-col" aria-label="Validator">
+				<h4>Validator</h4>
+				<ul>
+					<li><a href="/#status">Status</a></li>
+					<li><a href="/#about">About</a></li>
+					<li><a href="/#track-record">Track record</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Delegation">
+				<h4>Delegation</h4>
+				<ul>
+					<li><a href="/#delegate">Delegate</a></li>
+					<li><a href="/#calculator">Rewards</a></li>
+					<li><a href="/#faq">FAQ</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Network">
+				<h4>Network</h4>
+				<ul>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">Explorer ↗</a></li>
+
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Support">
+				<h4>Support</h4>
+				<ul>
+					<li><a href="/data/">Open data</a></li>
+					<li><a href="/journal/" aria-current="page">Cycle journal</a></li>
+					<li><a href="/continuity/">Continuity</a></li>
+					<li><a href="/incidents/">Incidents</a></li>
+					<li><a href="mailto:bp@freedom-yield.com">Contact</a></li>
+				</ul>
+			</nav>
+		</div>
+		<hr class="footer-divider">
+		<p class="footer-disclaimer"><strong>Disclaimer:</strong> Freedom Yield is an independent, third-party validator operating on Metal Blockchain. It is not affiliated with, endorsed by, sponsored by, or operated by Metallicus Inc. or the Metal Blockchain Foundation. All trademarks are the property of their respective owners.</p>
+		<div class="footer-bottom">
+			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain</a>.</p>
+			<p>© 2026 Freedom Yield · Metal validator</p>
+		</div>
+	</div>
+</footer>
+</body>
+</html>

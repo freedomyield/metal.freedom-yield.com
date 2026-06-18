@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>About Metal Blockchain — Freedom Yield</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="Metal Blockchain is a Layer-0 by Metallicus, an Avalanche fork with a permissionless validator set and 5× delegation leverage.">
+<link rel="canonical" href="https://metal.freedom-yield.com/about-metal/">
+<link rel="alternate" hreflang="en" href="https://metal.freedom-yield.com/about-metal/">
+<link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/about-metal/">
+<link rel="stylesheet" href="/styles.css">
+<meta name="theme-color" content="#07080c">
+<meta name="color-scheme" content="dark">
+<script type="application/ld+json">
+{
+	"@context": "https://schema.org",
+	"@type": "TechArticle",
+	"headline": "About Metal Blockchain",
+	"description": "Overview of Metal Blockchain (Layer-0 by Metallicus, Avalanche fork) and how validation works.",
+	"author": { "@type": "Organization", "name": "Freedom Yield" },
+	"inLanguage": "en"
+}
+</script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
+<script defer src="/assets/gtag-init.js"></script>
+</head>
+<body>
+<nav class="topnav">
+	<div class="topnav-inner">
+		<a href="/" class="brand">Freedom Yield · Metal</a>
+		<div class="nav">
+			<a href="/about-metal/">About</a>
+			<a href="/delegate/">Delegate</a>
+			<a href="/incidents/">Incidents</a>
+			<a href="/ja/about-metal/" class="nav-lang">JA</a>
+		</div>
+	</div>
+</nav>
+
+<main id="main" class="container">
+	<header class="hero">
+		<p class="hero-eyebrow">Background</p>
+		<h1>About Metal Blockchain</h1>
+		<p class="hero-lead">
+			Metal Blockchain is a <strong>Layer-0 chain</strong> by <strong>Metallicus</strong>, the same parent company
+			behind XPR Network (Layer-1). It is an Avalanche fork using <em>Snowman</em> consensus, with a
+			<strong>permissionless validator set</strong> — anyone with the minimum stake can become a validator.
+		</p>
+	</header>
+
+	<section class="card">
+		<h2>How it differs from XPR Network</h2>
+		<dl class="kv">
+			<dt>XPR Network</dt><dd>Layer-1, consortium of Block Producers, approval by multisig of existing BPs</dd>
+			<dt>Metal Blockchain</dt><dd>Layer-0, permissionless, stake-based; Foundation council has up to 5 elected members</dd>
+		</dl>
+		<p>
+			Both chains are operated by Metallicus and are cross-chain connected.
+		</p>
+	</section>
+
+	<section class="card">
+		<h2>How validation works</h2>
+		<h3>1. Anyone can validate (with 2,000 METAL)</h3>
+		<p>
+			The protocol minimum self-stake is 2,000 METAL. There is no need to obtain prior approval from existing validators
+			(unlike XPR's consortium model). A staking key is generated locally, an "Add Validator" transaction is sent to
+			the P-Chain, and after the start time the node enters the active set.
+		</p>
+		<h3>2. Rewards are uptime-driven, not throughput-driven</h3>
+		<p>
+			Snowman consensus is not a speed race like PoW. As long as the node is reachable by enough peers and votes
+			correctly, the rewards are the same regardless of hardware muscle above the official minimum (8 vCPU / 16 GiB).
+			<strong>Faster hardware does not earn more.</strong>
+		</p>
+		<h3>3. Self-stake determines delegation capacity</h3>
+		<p>
+			Maximum stake weight is <code>min(3M METAL, 5 × self_stake)</code>. So 2,000 self-stake → max 10,000 weight
+			(of which 8,000 can be received as delegations). The cap exists to align operator skin-in-the-game
+			with how much delegation they can accept; it is a protocol property, not a growth target.
+		</p>
+		<h3>4. No slashing</h3>
+		<p>
+			Avalanche family chains have no slashing. The worst case for downtime is "no rewards for the staking period."
+			Both self-stake and delegated stake are <strong>returned at end time</strong>, regardless of uptime.
+			The risk delegators take is opportunity cost (missed yield), not loss of principal.
+		</p>
+	</section>
+
+	<section class="card">
+		<h2>Key links</h2>
+		<ul>
+			<li>Official docs — <a href="https://docs.metalblockchain.org/" rel="noopener">docs.metalblockchain.org</a></li>
+			<li>Block explorer (mainnet) — <a href="https://explorer.metalblockchain.org/" rel="noopener">explorer.metalblockchain.org</a></li>
+			<li>Block explorer (Tahoe testnet) — <a href="https://tahoe.metalscan.io/" rel="noopener">tahoe.metalscan.io</a></li>
+			<li>Tahoe testnet faucet — <a href="https://faucet.metalblockchain.org/" rel="noopener">faucet.metalblockchain.org</a></li>
+			<li>Metal Wallet — <a href="https://wallet.metalblockchain.org/" rel="noopener">wallet.metalblockchain.org</a></li>
+		</ul>
+	</section>
+</main>
+
+<footer class="site-footer">
+	<div class="container">
+		<p>Contact: <a href="mailto:bp@freedom-yield.com">bp@freedom-yield.com</a></p>
+		<p class="footer-disclaimer"><strong>Disclaimer:</strong> Freedom Yield is an independent, third-party validator operating on Metal Blockchain. It is not affiliated with, endorsed by, sponsored by, or operated by Metallicus Inc. or the Metal Blockchain Foundation. All trademarks are the property of their respective owners.</p>
+	</div>
+</footer>
+</body>
+</html>

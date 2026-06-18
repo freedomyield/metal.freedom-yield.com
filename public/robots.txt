@@ -1,0 +1,3 @@
+# Current crawl policy.
+User-agent: *
+Disallow: /

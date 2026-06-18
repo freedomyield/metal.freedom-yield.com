@@ -1,0 +1,57 @@
+# Metal Blockchain Tahoe testnet node(ローカル開発用)
+#
+# 役割:
+#   - Tahoe (public testnet) に参加する metalgo ノード
+#   - サイト本体(caddy)とは独立。`docker compose -f docker-compose.metalgo.yml up -d` で別個に起動
+#   - ローカル PC で動かす想定。port 9651 を公開しない場合は「同期 + API は使える、ピアからは見えない」状態
+#     (パイプライン検証には十分。本物の validator にするには validator host SG 等で port 9651 を開ける)
+#
+# 起動:   docker compose -f docker-compose.metalgo.yml up -d
+# ログ:   docker compose -f docker-compose.metalgo.yml logs -f
+# 停止:   docker compose -f docker-compose.metalgo.yml down
+# 情報:   curl -X POST --data '{"jsonrpc":"2.0","id":1,"method":"info.getNodeID"}' -H 'content-type:application/json' http://localhost:9650/ext/info
+#
+# 同期完了の目安:
+#   curl ... info.isBootstrapped で P/X/C-Chain すべて true になれば OK
+
+name: metalgo-stack
+
+services:
+  metalgo:
+    image: metalblockchain/metalgo:latest
+    container_name: metalgo-testnet
+    restart: unless-stopped
+    # network=tahoe で公開 testnet に参加。HTTP API は 0.0.0.0 で listen させ、ホスト localhost からのみアクセス可
+    # --http-host=0.0.0.0 はコンテナ内のリスナー設定で、外部公開は ports セクションで制御する
+    command:
+      - /metalgo/build/metalgo
+      - --network-id=tahoe
+      - --http-host=0.0.0.0
+      - --http-port=9650
+      - --staking-port=9651
+      - --log-level=info
+      - --data-dir=/data
+    ports:
+      # 9650 (HTTP API): ホストの localhost のみ
+      - "127.0.0.1:9650:9650"
+      # 9651 (P2P staking): bind 先を env で切替
+      # - ローカル開発(default): 127.0.0.1 のみ。LAN 内端末からも見えない
+      # - VPS 本番: .env で METAL_STAKING_BIND=0.0.0.0 にして公開
+      # ローカルで 127.0.0.1 bind だと NAT 越え以前にピア到達不可、uptime 評価ゼロが正常
+      - "${METAL_STAKING_BIND:-127.0.0.1}:9651:9651"
+    volumes:
+      - metalgo_data:/data
+    # 公式最小は 16GB RAM / 8 vCPU だが、Tahoe testnet は state が小さいので緩めで開始
+    # 同期できなければ徐々に上げる
+    mem_limit: 4g
+    cpus: 2.0
+    # healthcheck は意図的に外している:metalgo image に wget/curl が無く、内部から API を
+    # 叩く堅牢な方法がないため。生死は restart: unless-stopped(prod) と外部 scripts/node-info.sh
+    # で監視する方針。
+    # image 内の HEALTHCHECK directive(wget ベース)を **明示的に無効化** — disable しないと
+    # docker は image 定義を継承し、"unhealthy" ラベルが付き続ける(false alarm)。
+    healthcheck:
+      disable: true
+
+volumes:
+  metalgo_data:

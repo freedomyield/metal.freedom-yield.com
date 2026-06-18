@@ -1,0 +1,54 @@
+# VPS 本番用 metalgo オーバーライド
+#
+# Phase 1(Tahoe testnet)と Phase 2(mainnet)の両方で同じファイルを使い、
+# .env で network 切替を制御する設計。
+#
+# 起動:
+#   docker compose -f docker-compose.metalgo.yml -f docker-compose.metalgo.prod.yml up -d
+#
+# .env に必要な値(VPS 上の .env、deploy 対象外):
+#   METAL_NETWORK         = "tahoe" (Phase 1) または "mainnet" (Phase 2)
+#   METAL_PUBLIC_IP       = VPS の public IPv4(必須、ピア到達用)
+#   METAL_STAKING_BIND    = "0.0.0.0" (VPS 本番では必須、port 9651 を公開)
+#   METAL_IMAGE_TAG       = pin したい image tag(例: "v1.13.5")、未設定なら "latest"
+#   METALGO_DATA_PATH     = (任意) 追加 storage volume を bind mount したい場合のホストパス
+#                            例: /mnt/data-volume/metalgo
+#                            未設定なら named volume
+#   METAL_MEM_LIMIT       = (任意) "16g" 等。未設定なら 16g
+#   METAL_CPUS            = (任意) "8.0" 等。未設定なら 8.0
+#
+# 注意:
+#   - command は base の docker-compose.metalgo.yml から完全置換される(docker compose
+#     の command は配列単位で override)。base の --network-id=tahoe 固定が
+#     ここで env 制御可能になる
+#   - HTTP API(9650)は 127.0.0.1 のまま(外部公開しない)
+#   - port 9651 の 0.0.0.0 公開は base 側で METAL_STAKING_BIND を 0.0.0.0 に
+#     することで実現(ports 配列の二重定義を避ける)
+
+services:
+  metalgo:
+    image: metalblockchain/metalgo:${METAL_IMAGE_TAG:-latest}
+    # Phase 1(tahoe)/ Phase 2(mainnet) で名前を変えて混在事故を防ぐ
+    container_name: metalgo-${METAL_NETWORK:-mainnet}
+    # base の command を完全置換し、--public-ip を追加
+    command:
+      - /metalgo/build/metalgo
+      - --network-id=${METAL_NETWORK:?METAL_NETWORK is required (tahoe or mainnet)}
+      - --public-ip=${METAL_PUBLIC_IP:?METAL_PUBLIC_IP is required for VPS prod deployment}
+      # 127.0.0.1 にすると Docker port forward (host:127.0.0.1:9650 → container:9650) が
+      # 通らず Connection reset になる。外部公開の制限は base 側の ports mapping
+      # ("127.0.0.1:9650:9650") で行うので、ここはコンテナ内 0.0.0.0 で OK
+      - --http-host=0.0.0.0
+      - --http-port=9650
+      - --staking-port=9651
+      - --log-level=info
+      - --data-dir=/data
+    # データ永続化: METALGO_DATA_PATH が設定されていれば bind mount、
+    # 未設定なら named volume にフォールバック
+    volumes:
+      - ${METALGO_DATA_PATH:-metalgo_data}:/data
+    # 公式最小: 8 vCPU / 16 GiB RAM
+    mem_limit: ${METAL_MEM_LIMIT:-16g}
+    cpus: ${METAL_CPUS:-8.0}
+    # healthcheck は base 側で外している(理由は base コメント参照)
+    restart: unless-stopped

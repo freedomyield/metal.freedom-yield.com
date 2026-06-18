@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Incidents — Freedom Yield Metal</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="Transparent incident history for the Freedom Yield Metal Blockchain validator. SEV classification, post-mortems, and remediation actions.">
+<link rel="canonical" href="https://metal.freedom-yield.com/incidents/">
+<link rel="alternate" hreflang="en" href="https://metal.freedom-yield.com/incidents/">
+<link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/incidents/">
+<link rel="alternate" hreflang="x-default" href="https://metal.freedom-yield.com/incidents/">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#07080c">
+<meta name="color-scheme" content="dark">
+<script defer src="/assets/main.js"></script>
+<script defer src="/assets/incidents.js"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
+<script defer src="/assets/gtag-init.js"></script>
+</head>
+<body>
+<a href="#main" class="skip-link">Skip to main content</a>
+
+<nav class="topnav">
+	<div class="topnav-inner">
+		<a href="/" class="brand">Freedom Yield · Metal</a>
+		<details class="nav-menu">
+			<summary class="nav-toggle" aria-label="Open / close menu">
+				<span class="hamburger-icon" aria-hidden="true"></span>
+			</summary>
+			<div class="nav">
+				<a href="/#status">Status</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">About</button>
+					<div class="nav-dropdown-menu">
+						<a href="/#about">About</a>
+						<a href="/#roadmap">Roadmap</a>
+					</div>
+				</div>
+				<a href="/#delegate" data-ga-event="delegate_cta_click" data-ga-param-position="nav">Delegate</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">Verify</button>
+					<div class="nav-dropdown-menu">
+						<a href="/data/">Open data</a>
+						<a href="/journal/">Cycle journal</a>
+						<a href="/continuity/">Continuity</a>
+						<a href="/incidents/" aria-current="page" data-ga-event="nav_click" data-ga-param-target="incidents">Incidents</a>
+					</div>
+				</div>
+				<a href="/ja/incidents/" class="nav-lang" data-ga-event="language_switch" data-ga-param-to="ja">JA</a>
+			</div>
+		</details>
+	</div>
+</nav>
+
+<header class="hero hero--simple">
+	<div class="container">
+		<p class="hero-eyebrow">Public incident log</p>
+		<h1>Incidents</h1>
+		<p class="hero-lead">
+			Every operational anomaly that affects this validator is recorded here, with cause and resolution.
+			An empty list is not a hidden list — the source JSON is at <a href="/api/incidents.json"><code>/api/incidents.json</code></a>.
+		</p>
+	</div>
+</header>
+
+<main id="main" class="container">
+	<section class="card">
+		<h2>Summary</h2>
+		<dl class="kv">
+			<dt>Validator since</dt><dd data-field="validatorSince">—</dd>
+			<dt>Total incidents recorded</dt><dd data-field="incidentCount">—</dd>
+			<dt>Last incident</dt><dd data-field="lastIncident">—</dd>
+		</dl>
+	</section>
+
+	<section class="card">
+		<h2>SEV classification (what to expect)</h2>
+		<dl class="kv">
+			<dt>Critical</dt><dd>Key compromise, validator down ≥ 24 h, delegator fund impact. Disclosed within 15 minutes.</dd>
+			<dt>Major</dt><dd>Site down, metalgo down ≥ 4 h, uptime score &lt; 80%. Disclosed within 30 minutes.</dd>
+			<dt>Minor</dt><dd>TLS expiry warning, deploy failures, transient performance degradation. Disclosed within 2 hours.</dd>
+			<dt>Info</dt><dd>Configuration change, planned maintenance, single-page rendering issue. Disclosed by next business day.</dd>
+		</dl>
+		<p class="note">Full procedure: <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/INCIDENT_RESPONSE.md">docs/INCIDENT_RESPONSE.md</a>.</p>
+	</section>
+
+	<section class="card">
+		<h2>Log</h2>
+		<div data-field="incidentList">
+			<p class="note">Loading…</p>
+		</div>
+	</section>
+
+	<section class="card">
+		<h2>Reporting an incident</h2>
+		<p>
+			Spotted an anomaly we missed? Email <a href="mailto:bp@freedom-yield.com">bp@freedom-yield.com</a>
+			with a timestamp and what you observed. Security vulnerabilities are handled per our
+			<a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/SECURITY.md">SECURITY.md</a>
+			(coordinated disclosure, default 90-day embargo).
+		</p>
+	</section>
+</main>
+
+<footer class="site-footer">
+	<div class="container">
+		<div class="footer-grid">
+			<div class="footer-brand">
+				<h3>Freedom Yield · Metal</h3>
+				<p>Long-horizon validator on Metal Blockchain. Transparent uptime, public audit trail.</p>
+			</div>
+			<nav class="footer-col" aria-label="Validator">
+				<h4>Validator</h4>
+				<ul>
+					<li><a href="/#status">Status</a></li>
+					<li><a href="/#about">About</a></li>
+					<li><a href="/#track-record">Track record</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Delegation">
+				<h4>Delegation</h4>
+				<ul>
+					<li><a href="/#delegate">Delegate</a></li>
+					<li><a href="/#calculator">Rewards</a></li>
+					<li><a href="/#faq">FAQ</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Network">
+				<h4>Network</h4>
+				<ul>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">Explorer ↗</a></li>
+
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Support">
+				<h4>Support</h4>
+				<ul>
+					<li><a href="/data/">Open data</a></li>
+					<li><a href="/journal/">Cycle journal</a></li>
+					<li><a href="/continuity/">Continuity</a></li>
+					<li><a href="/incidents/" aria-current="page">Incidents</a></li>
+					<li><a href="/#acknowledgments">Acknowledgments</a></li>
+					<li><a href="mailto:bp@freedom-yield.com">Contact</a></li>
+				</ul>
+			</nav>
+		</div>
+		<hr class="footer-divider">
+		<p class="footer-disclaimer"><strong>Disclaimer:</strong> Freedom Yield is an independent, third-party validator operating on Metal Blockchain. It is not affiliated with, endorsed by, sponsored by, or operated by Metallicus Inc. or the Metal Blockchain Foundation. All trademarks are the property of their respective owners.</p>
+		<div class="footer-bottom">
+			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain</a>.</p>
+			<p>© 2026 Freedom Yield · Metal validator</p>
+		</div>
+	</div>
+</footer>
+</body>
+</html>

@@ -1,0 +1,3220 @@
+/* Metal Blockchain validator site — Phase 0 minimal styles
+ * inline style="..." 禁止(CSP style-src 'self')。utility class はここに定義する
+ * utility classes inline below
+ */
+
+/* Self-hosted Montserrat (Latin subset, variable weights 100–900).
+ * Brand font for the validator site. JA characters fall back to
+ * Hiragino Kaku Gothic ProN / Yu Gothic / Noto Sans JP. One woff2
+ * file (Google's variable subset) serves every weight from Thin to
+ * Black, so the hero h1 can sit at 200 (Thin) for the wide-tracked
+ * uppercase treatment while body copy uses 400/500. */
+@font-face {
+	font-family: "Montserrat";
+	font-style: normal;
+	font-weight: 100 900;
+	font-display: swap;
+	src: url("/assets/fonts/montserrat.woff2") format("woff2");
+	unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+:root {
+	/* Light theme — warm cream + mint (light theme baseline)
+	 * Previous palette was a dark/cyber feel; the user wanted a more
+	 * approachable look that doesn't lean on the "crypto = dark mode"
+	 * cliché. Cream bg + white cards + slate text feels friendly while
+	 * keeping the mint accent for brand continuity. */
+	--bg: #faf7f2;          /* page bg — warm cream */
+	--bg-card: #ffffff;     /* card bg — pure white */
+	--fg: #1f2937;          /* primary text — dark slate */
+	--fg-muted: #5b6577;    /* secondary text — soft slate gray */
+	--accent: #10b386;      /* primary accent — deeper mint (AA on white) */
+	--accent-2: #2563eb;    /* link accent — slate blue (AA on cream) */
+	--border: #e5e1d8;      /* warm gray border */
+	--warn-bg: #fef3c7;     /* warm amber pill */
+	--warn-fg: #92400e;     /* amber-700 text */
+	--ok-bg: #d1f4e3;       /* mint pill */
+	--ok-fg: #065f46;       /* mint-800 text */
+
+	/* Layout — matched to metalblockchain.org (max-width 1200px, side
+	 * padding 24px, 80–120 px vertical section padding). */
+	--maxw: 1100px;
+	--radius: 12px;
+	--space-1: 0.5rem;
+	--space-2: 1rem;
+	--space-3: 1.5rem;
+	--space-4: 2rem;
+	--space-5: 3rem;
+	--space-6: 5rem;
+	--space-7: 7.5rem;
+
+	/* Type scale (px values mirror the upstream framer tokens).
+	 * Body 14–16, h3 24, h2 36, h1 48, hero 64. */
+	--fs-caption: 0.75rem;     /* 12 */
+	--fs-body:    0.95rem;     /* 15 */
+	--fs-lead:    1.125rem;    /* 18 */
+	--fs-h3:      1.5rem;      /* 24 */
+	--fs-h2:      2.25rem;     /* 36 */
+	--fs-h1:      3rem;        /* 48 */
+	--fs-hero:    4rem;        /* 64 */
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+	margin: 0;
+	padding: 0;
+	color: var(--fg);
+	/* Montserrat 500 body, JA gothic fallbacks. */
+	font-family: "Montserrat", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Noto Sans JP", -apple-system, BlinkMacSystemFont, sans-serif;
+	font-weight: 500;
+	font-size: var(--fs-body);
+	line-height: 1.55;
+	letter-spacing: 0.01em;
+	-webkit-font-smoothing: antialiased;
+}
+/* Background lives on <html> ONLY. If body had its own background the
+ * fixed `.bg-canvas` at z-index:-1 would paint underneath body's bg
+ * and disappear — which is exactly what was happening on production. */
+html { background: var(--bg); }
+body { background: transparent; }
+/* Suppress horizontal scrollbar caused by `width: 100vw` on .split-section
+ * and .atmosphere-band when the page has a vertical scrollbar (vw counts
+ * scrollbar width, so 100vw is wider than the visible content area).
+ * `clip` is preferable to `hidden` because it does not establish a new
+ * scrolling context — `position: sticky` on the topnav keeps working. */
+html { overflow-x: clip; }
+/* Anchor link jump (#status, #about 等) で sticky topnav に隠されないよう
+ * scroll するときに上に余白を取る。topnav の実測高さは ~60px(padding
+ * 1.125rem × 2 + 文字 22px + border 1px)なので 5rem(80px)で安全余裕。
+ * scroll-behavior: smooth はジャンプ感を緩和。
+ *
+ * `scroll-padding-top` は html(scroll container)に付けると全ての anchor
+ * scroll に効く。個別の id に scroll-margin-top を付ける方式より一箇所で
+ * 完結し、新セクション追加時の付け忘れが起きない。 */
+html {
+	scroll-padding-top: 5rem;
+	scroll-behavior: smooth;
+}
+
+/* Heading defaults — sizes match the upstream framer token bundle.
+ * Letter-spacing tightens as the size grows (—.04em on big headlines),
+ * line-height contracts (110% display, 120% h1, 130% h2/h3). */
+h1, h2, h3, h4 {
+	font-family: "Montserrat", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Noto Sans JP", sans-serif;
+	color: var(--fg);
+	margin: 0 0 1rem;
+}
+h1 { font-size: var(--fs-h1); font-weight: 700; line-height: 1.1;  letter-spacing: -0.03em; }
+h2 { font-size: var(--fs-h2); font-weight: 600; line-height: 1.2;  letter-spacing: -0.02em; }
+h3 { font-size: var(--fs-h3); font-weight: 600; line-height: 1.3;  letter-spacing: -0.01em; }
+h4 { font-size: 1.125rem;     font-weight: 600; line-height: 1.4;  letter-spacing: 0; }
+p  { line-height: 1.6; margin: 0 0 1rem; }
+.eyebrow,
+small,
+.note-inline { font-size: var(--fs-caption); letter-spacing: 0.1em; text-transform: uppercase; }
+
+a { color: var(--accent-2); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+code {
+	background: var(--bg-card);
+	padding: 0.1em 0.4em;
+	border-radius: 4px;
+	font-size: 0.9em;
+}
+
+.container {
+	max-width: var(--maxw);
+	margin: 0 auto;
+	padding: 0 var(--space-3);   /* 24px sides, matches upstream */
+}
+
+/* Kinetic page background — a fixed-viewport canvas that holds a slow
+ * particle field. Sits BEHIND every other element (z-index -1) and is
+ * hidden while the user is on the hero (the hero has its own busier
+ * scene; running both at once would be wasteful and visually noisy).
+ * bg-3d.js toggles `.is-visible` based on hero visibility. */
+.bg-canvas {
+	position: fixed;
+	top: 0;
+	left: 0;
+	width: 100vw;
+	height: 100vh;
+	z-index: -1;
+	pointer-events: none;
+	opacity: 0;
+	transition: opacity 0.6s ease;
+	display: block;
+}
+.bg-canvas.is-visible {
+	opacity: 1;
+}
+
+/* Atmospheric photo band — full-viewport-width section divider with a
+ * large title set in Playfair Display. The photo is sharp edge-to-edge
+ * (no gradient blur into the page bg); only a soft dark gradient sits
+ * over the bottom half so the white title text stays legible. */
+.atmosphere-band {
+	position: relative;
+	left: 50%;
+	margin-left: -50vw;
+	margin-right: -50vw;
+	width: 100vw;
+	max-width: 100vw;
+	/* Compact-but-substantial: keeps the photo a "spread" without
+	 * dominating the viewport. Editorial reference 4:3-ish at desktop. */
+	height: clamp(420px, 52vh, 560px);
+	margin-top: 3rem;
+	margin-bottom: 0;
+	overflow: hidden;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	/* padding-bottom shifts the centered caption upward inside the band,
+	 * leaving the lower zone visually free for the next card's overlap.
+	 * The <img> uses position:absolute and ignores this padding, so the
+	 * photo still fills edge-to-edge. */
+	padding-bottom: clamp(5rem, 10vh, 8rem);
+}
+/* Next-sibling overlap: lift the next element into the photo via
+ * negative margin-top so the card edge sits inside the band — the
+ * overlap is the brand "stitching" between photo and content.
+ * Pulled back from -10rem to -6rem now that the band caption carries
+ * three layers (overline + title + lede); -10rem was clipping the
+ * lede before the eye reached it. */
+.atmosphere-band + * {
+	position: relative;
+	z-index: 2;
+	margin-top: -6rem;
+}
+.atmosphere-band img {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	display: block;
+	/* Slow Ken-Burns drift so the band feels alive without distracting.
+	 * Each band loops on its own timeline (44s, alternating direction)
+	 * and is GPU-composited. Reduced-motion users opt out below. */
+	animation: ken-burns 44s ease-in-out infinite alternate;
+	will-change: transform;
+	transform-origin: center;
+}
+@keyframes ken-burns {
+	from { transform: scale(1.0)  translate3d(0, 0, 0); }
+	to   { transform: scale(1.08) translate3d(-1.2%, -0.8%, 0); }
+}
+.atmosphere-band:nth-of-type(2n) img { animation-direction: alternate-reverse; animation-duration: 56s; }
+.atmosphere-band:nth-of-type(3n) img { animation-duration: 38s; }
+@media (prefers-reduced-motion: reduce) {
+	.atmosphere-band img { animation: none; }
+}
+/* Rainbow tint overlay — a dedicated <div class="atmosphere-band-tint">
+ * sits over the photo (not a ::after pseudo, so it's inspectable and
+ * scriptable). Multi-stop gradient with mid-opacity colour stops
+ * gives the photo a "filtered through rainbow glass" feel without
+ * destroying the underlying detail. z-index 1 so it sits above the
+ * <img> but below the <figcaption>. */
+.atmosphere-band-tint {
+	position: absolute;
+	inset: 0;
+	z-index: 1;
+	pointer-events: none;
+	background: linear-gradient(
+		120deg,
+		rgba(220, 50, 60, 0.48)   0%,
+		rgba(225, 110, 40, 0.45) 18%,
+		rgba(220, 180, 40, 0.42) 35%,
+		rgba(60, 170, 90, 0.45)  52%,
+		rgba(40, 110, 200, 0.51) 70%,
+		rgba(110, 50, 170, 0.57) 88%,
+		rgba(80, 30, 130, 0.63) 100%
+	);
+	mix-blend-mode: multiply;
+}
+/* Editorial chapter cover: a stack of overline → title → lede sitting over
+ * the filtered photo. The overline carries chapter index + theme word so
+ * each band reads like a magazine spread. Subtle vertical hairlines flank
+ * the title to give the typography a "framed" feel without boxing it in. */
+.atmosphere-band-caption {
+	position: relative;
+	z-index: 2;
+	padding: 0 var(--space-3);
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: clamp(0.85rem, 1.6vw, 1.4rem);
+	color: #ffffff;
+	text-shadow: 0 2px 22px rgba(0, 0, 0, 0.55);
+	max-width: 56rem;
+	width: 100%;
+	margin: 0;
+}
+.atmosphere-band-overline {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.95rem;
+	font-family: "Montserrat", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Noto Sans JP", sans-serif;
+	font-weight: 600;
+	font-size: clamp(0.7rem, 1vw, 0.78rem);
+	letter-spacing: 0.32em;
+	text-transform: uppercase;
+	color: rgba(255, 255, 255, 0.92);
+	white-space: nowrap;
+}
+.atmosphere-band-overline-rule {
+	display: inline-block;
+	width: clamp(1.5rem, 4vw, 2.5rem);
+	height: 1px;
+	background: rgba(255, 255, 255, 0.65);
+}
+.atmosphere-band-title {
+	position: relative;
+	z-index: 2;
+	margin: 0;
+	font-family: "Montserrat", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Noto Sans JP", system-ui, sans-serif;
+	/* Editorial display weight: Thin/Extra-light for visual lightness,
+	 * uppercase for editorial gravity, open tracking for breathing room. */
+	font-weight: 200;
+	font-size: clamp(2.25rem, 6vw, 4.5rem);
+	line-height: 1.05;
+	letter-spacing: 0.045em;
+	text-transform: uppercase;
+	text-align: center;
+	color: #ffffff;
+}
+.atmosphere-band-lede {
+	margin: 0;
+	font-family: "Montserrat", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Noto Sans JP", sans-serif;
+	font-weight: 400;
+	font-size: clamp(0.95rem, 1.45vw, 1.125rem);
+	line-height: 1.55;
+	letter-spacing: 0.015em;
+	max-width: 38rem;
+	color: rgba(255, 255, 255, 0.93);
+	text-align: center;
+}
+@media (max-width: 768px) {
+	/* Shorter band height + tighter bottom padding so the photo doesn't
+	 * dominate the viewport on phones. Range tuned for ~640-900 tall
+	 * mobile viewports to land ~22-30% of viewport height. */
+	.atmosphere-band {
+		height: clamp(220px, 30vh, 280px);
+		padding-bottom: clamp(1.5rem, 4vh, 2.5rem);
+	}
+	.atmosphere-band-caption {
+		padding: 0 1rem;       /* tighter than the desktop var(--space-3) */
+		gap: 0.7rem;
+	}
+	.atmosphere-band-overline { letter-spacing: 0.18em; }
+	/* Heavier title weight on mobile — desktop's Thin (200) sub-pixel
+	 * renders too feathery on phone DPI. Medium (500) matches the hero
+	 * h1 treatment for type consistency. */
+	.atmosphere-band-title {
+		font-weight: 500;
+		font-size: clamp(1.4rem, 6vw, 2rem);
+		letter-spacing: 0.01em;
+		line-height: 1.15;
+		overflow-wrap: anywhere;
+		word-break: normal;
+		max-width: 100%;
+	}
+	.atmosphere-band-lede {
+		font-size: clamp(0.82rem, 3.4vw, 1rem);
+		max-width: 100%;
+	}
+}
+@media (max-width: 420px) {
+	.atmosphere-band-overline {
+		gap: 0.5rem;
+		letter-spacing: 0.14em;
+	}
+	.atmosphere-band-overline-rule { width: 0.85rem; }
+}
+
+.skip-link {
+	position: absolute;
+	left: -9999px;
+	top: auto;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+}
+.skip-link:focus {
+	left: 1rem;
+	top: 1rem;
+	width: auto;
+	height: auto;
+	background: var(--bg-card);
+	padding: 0.5rem 1rem;
+	border-radius: 6px;
+}
+
+/* nav */
+.topnav {
+	border-bottom: 1px solid var(--border);
+	background: rgba(250, 247, 242, 0.88);
+	backdrop-filter: blur(8px) saturate(1.2);
+	position: sticky;
+	top: 0;
+	z-index: 10;
+}
+.topnav-inner {
+	max-width: var(--maxw);
+	margin: 0 auto;
+	padding: 1.125rem var(--space-3);
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-3);
+	flex-wrap: wrap;
+}
+.brand {
+	font-weight: 600;
+	font-size: 0.95rem;
+	letter-spacing: -0.01em;
+	color: var(--fg);
+}
+.nav {
+	display: flex;
+	gap: var(--space-3);
+	align-items: center;
+	flex-wrap: wrap;
+}
+.nav a { color: var(--fg-muted); font-size: var(--fs-body); font-weight: 500; letter-spacing: 0.005em; }
+.nav a:hover { color: var(--fg); text-decoration: none; }
+
+/* Nav category dropdown — <div> + <button> (no <details>! Chromium's
+ * <details> closed state forcibly hides children via content-visibility
+ * regardless of CSS, breaking pure :hover-to-open). Desktop: pure CSS
+ * :hover. Mobile: JS toggle via .is-open class. */
+.nav-dropdown {
+	position: relative;
+}
+.nav-dropdown > .nav-dropdown-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.2rem;
+	cursor: pointer;
+	color: var(--fg-muted);
+	font-size: var(--fs-body);
+	font-weight: 500;
+	letter-spacing: 0.005em;
+	user-select: none;
+	-webkit-tap-highlight-color: transparent;
+	outline: none;
+	background: none;
+	border: none;
+	padding: 0;
+	font-family: inherit;
+}
+.nav-dropdown > .nav-dropdown-toggle::after {
+	content: "▾";
+	font-size: 0.65em;
+	opacity: 0.55;
+	margin-left: 0.1rem;
+	transition: transform 0.15s ease;
+}
+.nav-dropdown > .nav-dropdown-toggle:hover,
+.nav-dropdown.is-open > .nav-dropdown-toggle,
+.nav-dropdown:hover > .nav-dropdown-toggle {
+	color: var(--fg);
+}
+.nav-dropdown:hover > .nav-dropdown-toggle::after,
+.nav-dropdown.is-open > .nav-dropdown-toggle::after {
+	opacity: 0.85;
+	transform: translateY(1px);
+}
+.nav-dropdown > .nav-dropdown-toggle:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+	border-radius: 4px;
+}
+.nav-dropdown-menu {
+	position: absolute;
+	top: calc(100% + 0.5rem);
+	left: 0;
+	background: var(--bg-card);
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	padding: 0.4rem 0;
+	min-width: 180px;
+	box-shadow: 0 6px 22px rgba(31, 41, 55, 0.10);
+	z-index: 20;
+}
+.nav-dropdown-menu a {
+	display: block;
+	padding: 0.4rem 1rem;
+	color: var(--fg-muted);
+	font-size: var(--fs-body);
+	text-decoration: none;
+	white-space: nowrap;
+}
+.nav-dropdown-menu a:hover {
+	color: var(--fg);
+	background: rgba(31, 41, 55, 0.04);
+}
+.nav-dropdown-menu a[aria-current="page"] {
+	color: var(--accent);
+	font-weight: 600;
+}
+@media (min-width: 769px) {
+	/* Desktop: pure CSS :hover. Cursor on .nav-dropdown (summary or
+	 * the absolutely-positioned menu — both are descendants) keeps
+	 * :hover true and menu visible. Bridge ::before below summary
+	 * prevents a flicker if cursor crosses the 0.5rem gap. */
+	.nav-dropdown > .nav-dropdown-menu {
+		display: none;
+	}
+	.nav-dropdown:hover > .nav-dropdown-menu {
+		display: block;
+	}
+	.nav-dropdown > .nav-dropdown-toggle::before {
+		content: "";
+		position: absolute;
+		top: 100%;
+		left: 0;
+		width: 100%;
+		height: 0.6rem;
+	}
+}
+@media (max-width: 768px) {
+	/* In hamburger menu (vertical), turn dropdowns into inline accordions */
+	.nav-dropdown { width: 100%; }
+	.nav-dropdown > .nav-dropdown-toggle {
+		padding: 0.6rem 0.8rem;
+		text-align: left;
+		width: 100%;
+	}
+	.nav-dropdown > .nav-dropdown-menu { display: none; }
+	.nav-dropdown.is-open > .nav-dropdown-menu { display: block; }
+	.nav-dropdown-menu {
+		position: static;
+		border: none;
+		box-shadow: none;
+		background: none;
+		padding: 0.2rem 0 0.4rem 1.1rem;
+		min-width: 0;
+		border-left: 2px solid var(--border);
+		margin: 0.1rem 0.5rem 0.3rem 1.1rem;
+	}
+	.nav-dropdown-menu a { padding: 0.5rem 0.6rem; }
+}
+.nav-lang {
+	border: 1px solid var(--border);
+	padding: 0.3rem 0.65rem;
+	border-radius: 999px;       /* pill, matches upstream button radii */
+	font-size: var(--fs-caption);
+	letter-spacing: 0.05em;
+}
+
+/* Hamburger menu (SP only)
+ * <details class="nav-menu"> をラッパに使い、JS 不要で開閉。
+ * desktop: summary を hide、.nav を inline flex で表示(従来通り)。
+ * SP    : summary を hamburger アイコン化、.nav は details[open] 時のみ
+ *         ドロップダウン表示。 */
+/* `>` で direct child に絞る — nav-dropdown 内の summary までヒットすると
+ * desktop で dropdown trigger が消えるバグになる */
+.nav-menu > summary {
+	display: none;       /* desktop では非表示 */
+}
+/* Desktop: force the .nav links visible even though they sit inside a
+ * closed <details>. Browsers hide non-summary <details> children when
+ * the element is closed; this explicit author rule overrides that so
+ * the desktop nav doesn't depend on the hamburger being toggled. */
+@media (min-width: 769px) {
+	.nav-menu .nav {
+		display: flex;
+	}
+}
+@media (max-width: 768px) {
+	.nav-menu {
+		position: relative;
+		list-style: none;
+	}
+	/* `>` で direct child のハンバーガー summary だけに適用 — nested
+	 * nav-dropdown 内の summary には独自スタイルを適用させる */
+	.nav-menu > summary {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 40px;
+		height: 40px;
+		cursor: pointer;
+		border-radius: 8px;
+		list-style: none;
+		-webkit-tap-highlight-color: transparent;
+	}
+	/* Remove default disclosure triangle on all engines */
+	.nav-menu > summary::-webkit-details-marker { display: none; }
+	.nav-menu > summary::marker { content: ""; }
+	.nav-menu > summary:hover { background: rgba(0, 0, 0, 0.04); }
+
+	/* 3-line hamburger icon, drawn purely with CSS pseudo-elements */
+	.hamburger-icon,
+	.hamburger-icon::before,
+	.hamburger-icon::after {
+		display: block;
+		width: 22px;
+		height: 2px;
+		background: var(--fg);
+		border-radius: 1px;
+		transition: transform 0.18s ease, opacity 0.18s ease;
+	}
+	.hamburger-icon { position: relative; }
+	.hamburger-icon::before,
+	.hamburger-icon::after {
+		content: "";
+		position: absolute;
+		left: 0;
+	}
+	.hamburger-icon::before { top: -7px; }
+	.hamburger-icon::after  { top:  7px; }
+	/* Open state: morph to X */
+	.nav-menu[open] .hamburger-icon { background: transparent; }
+	.nav-menu[open] .hamburger-icon::before { top: 0; transform: rotate(45deg); }
+	.nav-menu[open] .hamburger-icon::after  { top: 0; transform: rotate(-45deg); }
+
+	/* Default: nav hidden on SP */
+	.nav-menu .nav { display: none; }
+
+	/* Open: nav as dropdown panel */
+	.nav-menu[open] .nav {
+		display: flex;
+		flex-direction: column;
+		align-items: stretch;
+		gap: 0;
+		position: absolute;
+		top: calc(100% + 0.5rem);
+		right: 0;
+		min-width: 200px;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		padding: 0.5rem;
+		box-shadow: 0 4px 14px rgba(31, 41, 55, 0.08);
+		z-index: 11;
+	}
+	.nav-menu[open] .nav a {
+		padding: 0.6rem 0.8rem;
+		border-radius: 6px;
+	}
+	.nav-menu[open] .nav a:hover {
+		background: rgba(0, 0, 0, 0.04);
+	}
+	/* nav-lang は SP の dropdown 内では border 邪魔なので消して通常 link 風に */
+	.nav-menu[open] .nav .nav-lang {
+		border: none;
+		padding: 0.6rem 0.8rem;
+		border-radius: 6px;
+	}
+}
+
+/* hero — full viewport width, isolated stacking context for bg layer */
+.hero {
+	border-bottom: 1px solid var(--border);
+	/* Full-viewport "first view". Two changes from the prior layout to
+	 * make height behaviour rock-solid on mobile (the previous version
+	 * was JS-timing-dependent and jumped on iOS URL-bar transitions):
+	 *
+	 *  1. --topnav-h is fixed at 3.75rem (matches the actual rendered
+	 *     topnav: 1.125rem padding × 2 + 1.5rem line + 1px border ≈
+	 *     61px ≈ 3.8rem). main.js still measures and updates it on
+	 *     resize so multi-row nav scenarios still get the right value,
+	 *     but the CSS no longer depends on JS for the first paint.
+	 *
+	 *  2. justify-content: flex-start (was: center). Centering with
+	 *     min-height means content slides up/down as the viewport
+	 *     resizes (e.g. iOS URL bar collapse). Top-aligned content
+	 *     sits at a fixed offset that never moves.
+	 *
+	 * 100dvh handles the mobile chrome UI collapse natively; 100vh is
+	 * the pre-Safari-15.4 fallback declared first. */
+	min-height: calc(100vh - var(--topnav-h, 3.75rem));
+	min-height: calc(100dvh - var(--topnav-h, 3.75rem));
+	padding: var(--space-5) 0 var(--space-7);
+	position: relative;
+	overflow: hidden;
+	isolation: isolate;
+	width: 100%;
+	display: flex;
+	flex-direction: column;
+	justify-content: flex-start;
+}
+/* Sub-page hero (incidents / about-metal / delegate) — Unsplash photo
+ * sits on the right half via ::after, masked into the background by a
+ * left-to-right brand-color gradient so the heading/lead on the left
+ * stays fully readable. Page-specific modifier classes
+ * (.hero--photo-incidents etc.) set the image URL; main.js applies the
+ * class based on URL path. Hidden on narrow screens where text takes
+ * the full width. */
+.hero.hero--simple {
+	position: relative;
+	/* Sub-page hero is content-driven, NOT 100vh — the main hero's flex
+	 * + 100vh sizing is for the landing page first-view only. Reverting
+	 * here keeps sub-pages compact and lets the photo + gradient
+	 * ::after work as designed (short, right-side fade). */
+	min-height: auto;
+	display: block;
+	padding: var(--space-6) 0 var(--space-5);
+	isolation: auto;
+	overflow: hidden;
+}
+.hero.hero--simple::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	z-index: 0;
+	pointer-events: none;
+	background-image:
+		linear-gradient(90deg,
+			rgba(245, 239, 226, 1) 0%,
+			rgba(245, 239, 226, 0.96) 28%,
+			rgba(245, 239, 226, 0.75) 52%,
+			rgba(245, 239, 226, 0.35) 80%,
+			rgba(245, 239, 226, 0.15) 100%),
+		var(--hero-photo, none);
+	background-size: auto, cover;
+	background-position: 0 0, center right;
+	background-repeat: no-repeat, no-repeat;
+}
+.hero--photo-incidents   { --hero-photo: url("/assets/hero-images/incidents.jpg"); }
+.hero--photo-about-metal { --hero-photo: url("/assets/hero-images/about-metal.jpg"); }
+.hero--photo-delegate    { --hero-photo: url("/assets/hero-images/delegate.jpg"); }
+.hero--photo-data        { --hero-photo: url("/assets/hero-images/data.jpg"); }
+.hero--photo-journal     { --hero-photo: url("/assets/hero-images/journal.jpg"); }
+.hero--photo-continuity  { --hero-photo: url("/assets/hero-images/continuity.jpg"); }
+.hero.hero--simple .container {
+	position: relative;
+	z-index: 1;
+	pointer-events: auto;
+}
+@media (max-width: 768px) {
+	.hero.hero--simple::after {
+		background-image:
+			linear-gradient(180deg,
+				rgba(245, 239, 226, 0.85) 0%,
+				rgba(245, 239, 226, 0.95) 100%),
+			var(--hero-photo, none);
+		background-position: 0 0, center;
+	}
+}
+.hero .container {
+	position: relative;
+	z-index: 1;
+	/* Let clicks pass through the text container to the canvas behind.
+	 * The hero text is decorative — no links/buttons live inside this
+	 * block (the nav lives in <header.site-header> above). Without this,
+	 * a smart-contract cube rendered *behind* the heading is unclickable
+	 * because the text container would intercept the mouse event. The
+	 * trade-off is that the hero heading/paragraph can no longer be
+	 * selected with the cursor, which is acceptable for a decorative
+	 * hero (other body sections remain selectable). */
+	pointer-events: none;
+}
+/* Future-proofing: if a link or button is ever added inside the hero
+ * text body, re-enable pointer events on just that element. */
+.hero .container a,
+.hero .container button {
+	pointer-events: auto;
+}
+/* Hero 3D canvas — full-bleed, behind content. Three.js scene renders here.
+ * pointer-events: auto so click / dblclick / mousemove on empty hero area
+ * route to the canvas. The text container at z-index 1 still captures its
+ * own clicks (links etc), so this doesn't break navigation.
+ *
+ * touch-action: pan-y — on mobile, vertical pans are reserved for native
+ * page scroll. The 3D controls.js calls ev.preventDefault() on touchmove
+ * to handle drag-rotate, which would block page scroll without this hint.
+ * With pan-y, the browser intercepts vertical gestures before JS sees them,
+ * so:
+ *   ・縦スワイプ  → ページ垂直スクロール(JS 介在せず)
+ *   ・タップ      → click イベント発火 → cube クリック動作
+ *   ・横スワイプ  → JS が drag-rotate として処理
+ *   ・ピンチ      → JS が pinch-zoom として処理
+ */
+.hero-canvas {
+	position: absolute;
+	inset: 0;
+	z-index: 0;
+	width: 100%;
+	height: 100%;
+	pointer-events: auto;
+	cursor: pointer;
+	display: block;
+	touch-action: pan-y;
+}
+/* SP layout: hero-canvas は SP でも有効化。
+ * (歴史的に hide していた理由 ① controls.js の wheel preventDefault で
+ * scroll block / ② cube cluster が text を遮蔽 — の 2 つが両方解消済:
+ * ① wheel は desktop のみ、touch は direction detection で vertical-
+ * dominant gesture を native scroll 解放、加えて .hero-scroll-cue で
+ * 明示的迂回路提供。② .hero-eyebrow/h1/lead 等が white panel 化済、
+ * busy な 3D 背景下でも text が読める)。
+ * fallback gradient は canvas 描画と二重になるので引き続き SP で hide。 */
+@media (max-width: 768px) {
+	.hero-bg-fallback { display: none; }
+	/* SP hero is 100dvh + flex-centered, so explicit padding override is
+	 * not needed — content centers regardless. Just ensure bottom padding
+	 * still clears the scroll-cue (which is taller now). */
+	.hero {
+		padding: var(--space-5) 0 7rem;
+	}
+}
+/* Fallback / progressive enhancement: a static gradient + radial halos sit
+ * behind the canvas. If JS is disabled or Three.js fails to init, the
+ * gradient is still visible. */
+.hero-bg-fallback {
+	position: absolute;
+	inset: 0;
+	z-index: -1;
+	pointer-events: none;
+	background:
+		radial-gradient(ellipse at 15% 55%, rgba(16, 179, 134, 0.08), transparent 55%),
+		radial-gradient(ellipse at 78% 50%, rgba(37, 99, 235, 0.06), transparent 60%),
+		linear-gradient(135deg, #f5efe2 0%, #f7f2e6 50%, #ecf1ef 100%);
+}
+/* Subtle vignette so cubes don't smack into the next section's edge */
+.hero::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	z-index: 0;
+	pointer-events: none;
+	background: linear-gradient(180deg, transparent 0%, transparent 70%, rgba(250, 247, 242, 0.9) 100%);
+}
+.hero-eyebrow {
+	/* upstream framer caption style — 12px / 500 / 0.1em tracking */
+	color: var(--accent);
+	font-size: var(--fs-caption);
+	font-weight: 500;
+	text-transform: uppercase;
+	letter-spacing: 0.1em;
+	margin: 0 0 var(--space-2);
+}
+/* Apple-style text panels — each hero text block sits in its own
+ * near-white box, sized to its content. Visually separates the focal
+ * pieces from the busy 3D-cube canvas behind without changing the type
+ * treatment. width: fit-content so each box hugs its widest line. */
+.hero-eyebrow,
+.hero h1,
+.hero-lead,
+.hero-status,
+.hero-stat {
+	background: rgba(255, 255, 255, 0.95);
+	width: fit-content;
+	max-width: 100%;
+}
+.hero-eyebrow { padding: 0.4em 0.75em; }
+.hero h1       { padding: 0.05em 0.35em 0.15em; }
+.hero-lead     { padding: 0.55em 0.85em; }
+.hero-status   { padding: 0.4em 0.75em; }
+.hero-stat     { padding: 0.55em 0.8em; }
+
+/* Scroll cue — anchor link at bottom-center of the 100vh hero. The
+ * 3D canvas captures wheel events, so the cue is the primary way to
+ * advance past the first view. Mint-accent fill, white chevron, and a
+ * fade between two shades with a growing glow ring make it the most
+ * obvious affordance on the page. Inner .icon span carries the
+ * animations so the outer anchor's translateX(-50%) centering isn't
+ * fought over by the keyframes. */
+.hero-scroll-cue {
+	position: absolute;
+	bottom: var(--space-4);
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 3;
+	color: #ffffff;
+	text-decoration: none;
+	pointer-events: auto;
+}
+.hero-scroll-cue-icon {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 60px;
+	height: 60px;
+	background: var(--accent);
+	border-radius: 50%;
+	box-shadow:
+		0 6px 18px rgba(16, 179, 134, 0.40),
+		0 0 0 8px rgba(16, 179, 134, 0.10);
+	animation:
+		scroll-cue-bounce 2.4s ease-in-out infinite,
+		scroll-cue-glow 3.2s ease-in-out infinite;
+	transition: transform 0.18s ease;
+}
+.hero-scroll-cue:hover .hero-scroll-cue-icon,
+.hero-scroll-cue:focus-visible .hero-scroll-cue-icon {
+	/* Hover pauses the colour pulse and locks in the brighter state */
+	animation-play-state: paused, paused;
+	background: #0d9b6e;
+	box-shadow:
+		0 10px 28px rgba(16, 179, 134, 0.55),
+		0 0 0 14px rgba(16, 179, 134, 0.22);
+}
+.hero-scroll-cue-icon svg {
+	width: 28px;
+	height: 28px;
+}
+.hero-scroll-cue-icon svg path {
+	stroke-width: 2.6;
+}
+@keyframes scroll-cue-bounce {
+	0%, 100% { transform: translateY(0); }
+	50%      { transform: translateY(6px); }
+}
+@keyframes scroll-cue-glow {
+	0%, 100% {
+		background: var(--accent);
+		box-shadow:
+			0 6px 18px rgba(16, 179, 134, 0.40),
+			0 0 0 6px  rgba(16, 179, 134, 0.10);
+	}
+	50% {
+		background: #0a8f64;
+		box-shadow:
+			0 10px 28px rgba(16, 179, 134, 0.58),
+			0 0 0 16px  rgba(16, 179, 134, 0.18);
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.hero-scroll-cue-icon { animation: none; }
+}
+@media (max-width: 768px) {
+	.hero-scroll-cue { bottom: var(--space-3); }
+	.hero-scroll-cue-icon { width: 52px; height: 52px; }
+	.hero-scroll-cue-icon svg { width: 24px; height: 24px; }
+}
+.hero h1 {
+	/* "BLOCKCHAIN FOR BANKING." 風の treatment: Montserrat Medium +
+	 * uppercase + open tracking。300/200 は細すぎて読みづらかった
+	 * ので 500 に。広い字間で brand voice は保ちつつ可読性確保。 */
+	font-size: clamp(2rem, 5.5vw, var(--fs-hero));
+	font-weight: 500;
+	line-height: 1.05;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	margin: 0 0 var(--space-3);
+}
+.hero-lead {
+	color: var(--fg-muted);
+	max-width: 640px;
+	margin: 0 0 var(--space-3);
+	font-size: var(--fs-lead);
+	line-height: 1.5;
+}
+.hero-status {
+	margin: 0;
+	font-size: var(--fs-body);
+	color: var(--fg-muted);
+}
+
+.hero-stats {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+	gap: 1rem 1.5rem;
+	margin: 1.5rem 0 1.25rem;
+	padding: 1rem 0;
+}
+.hero-stat {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+}
+.hero-stat-value {
+	font-size: 2rem;            /* ~32px, between upstream's h3 and h2 */
+	font-weight: 700;
+	color: var(--accent);
+	line-height: 1.05;
+	letter-spacing: -0.03em;
+}
+.hero-stat-label {
+	font-size: 0.85rem;
+	color: var(--fg-muted);
+	margin-top: 0.15rem;
+}
+
+.badge {
+	display: inline-block;
+	padding: 0.15rem 0.6rem;
+	border-radius: 999px;
+	font-size: 0.85rem;
+	font-weight: 600;
+}
+.badge-warn { background: var(--warn-bg); color: var(--warn-fg); }
+.badge-ok { background: var(--ok-bg); color: var(--ok-fg); }
+
+/* card — sits on cream bg with subtle elevation */
+.card {
+	background: var(--bg-card);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	/* Padding matched to upstream's 24px box rhythm + slight extra on
+	 * the bottom so wrap-around margins don't collide. */
+	padding: var(--space-4) var(--space-4) var(--space-3);
+	margin: var(--space-5) 0;
+	box-shadow: 0 1px 2px rgba(31, 41, 55, 0.04), 0 4px 14px rgba(31, 41, 55, 0.04);
+}
+
+/* In-card photo — narrow banner at the top of a card showing people
+ * working. Bleeds to the card edges (negative margins) so it reads as
+ * an integrated header rather than a thumbnail. */
+.card-figure {
+	margin: calc(var(--space-4) * -1) calc(var(--space-4) * -1) var(--space-4);
+	border-radius: var(--radius) var(--radius) 0 0;
+	overflow: hidden;
+	aspect-ratio: 21 / 8;
+	background: var(--bg);
+}
+.card-figure img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	display: block;
+}
+/* Card-internal headings — slightly smaller than the page-level scale
+ * so a card title doesn't compete with the hero h1. */
+.card h2 {
+	margin-top: 0;
+	margin-bottom: var(--space-3);
+	font-size: var(--fs-h3);   /* 24px */
+	font-weight: 600;
+	letter-spacing: -0.01em;
+}
+.card h3 {
+	margin-top: var(--space-3);
+	margin-bottom: var(--space-1);
+	font-size: 1.0625rem;       /* 17px */
+	font-weight: 600;
+	letter-spacing: 0;
+	color: var(--accent);
+}
+.card ul {
+	padding-left: 1.25rem;
+}
+.card li {
+	margin: 0.3rem 0;
+}
+
+.note {
+	color: var(--fg-muted);
+	font-size: 0.92rem;
+	border-left: 3px solid var(--border);
+	padding-left: 0.75rem;
+	margin: 1rem 0 0.25rem;
+}
+
+/* definition list (status table) */
+.kv {
+	display: grid;
+	grid-template-columns: max-content 1fr;
+	gap: 0.5rem 1.5rem;
+	margin: 0;
+}
+.kv dt { color: var(--fg-muted); }
+.kv dd {
+	margin: 0;
+	/* grid item の暗黙 min-width: auto を解除して長い値(NodeID 等)が
+	 * column 内で折り返せるようにする。これが無いと dd が intrinsic 幅
+	 * を維持し、card 全体が viewport をはみ出す。 */
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+.kv dd code {
+	/* NodeID-yyPv... のような長い ASCII 連続文字列は word-break 無しでは
+	 * 折り返されない。break-all で任意位置改行を許可。 */
+	word-break: break-all;
+}
+/* SP では label/value を縦積みにして横幅を稼ぐ。NodeID 等が複数行に
+ * 折り返されても card がはみ出さない。 */
+@media (max-width: 480px) {
+	.kv {
+		grid-template-columns: 1fr;
+		gap: 0.25rem 0;
+	}
+	.kv dt { margin-top: 0.5rem; }
+	.kv dt:first-of-type { margin-top: 0; }
+}
+
+/* PWA install row */
+.install-row {
+	margin: 1rem 0 0;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.6rem;
+}
+/* `display: flex` overrides the UA `[hidden] { display: none }` rule —
+ * restore it explicitly so the row stays hidden until beforeinstallprompt
+ * fires (and stays hidden forever on iOS, which doesn't fire that event). */
+.install-row[hidden] { display: none; }
+.btn {
+	display: inline-block;
+	padding: 0.45rem 0.9rem;
+	border-radius: 8px;
+	border: 1px solid var(--border);
+	background: var(--bg-card);
+	color: var(--fg);
+	font-size: 0.92rem;
+	font-weight: 600;
+	cursor: pointer;
+	font-family: inherit;
+}
+.btn:hover { border-color: var(--accent, #6db5ff); }
+.btn:focus-visible { outline: 2px solid var(--accent, #6db5ff); outline-offset: 2px; }
+.note-inline {
+	color: var(--fg-muted);
+	font-size: 0.88rem;
+}
+
+/* ────────────────────────── Footer — editorial closing spread
+ * The page ends here. Treat the footer as the final beat: a thin
+ * rainbow band along the top (echoes the atmosphere-band gradient),
+ * generous vertical breathing room, and a hairline-divided trio of
+ * navigation columns. The closing line acknowledges upstream without
+ * marketing itself.
+ *
+ * The cream page background carries through (no dark slab) so the
+ * footer reads as a quiet outro, not a brand-mood reset. */
+.site-footer {
+	position: relative;
+	margin-top: var(--space-7);
+	padding: var(--space-5) 0 var(--space-4);
+	color: var(--fg-muted);
+	font-size: var(--fs-body);
+	background: linear-gradient(180deg, transparent 0%, rgba(229, 225, 216, 0.25) 100%);
+}
+/* Thin rainbow band on the top edge — the same colour stops the
+ * atmosphere-band-tint uses, drawn as a 2px strip so the closing
+ * carries the brand language one last time. */
+.site-footer::before {
+	content: "";
+	position: absolute;
+	left: 0;
+	right: 0;
+	top: 0;
+	height: 2px;
+	background: linear-gradient(
+		90deg,
+		#dc323c   0%,
+		#e16e28  18%,
+		#dcb428  35%,
+		#3caa5a  52%,
+		#286ec8  70%,
+		#6e32aa  88%,
+		#501e82 100%
+	);
+	opacity: 0.85;
+}
+.footer-grid {
+	display: grid;
+	grid-template-columns: 1.6fr repeat(4, 1fr);
+	gap: var(--space-4);
+	margin-bottom: var(--space-4);
+}
+.footer-brand h3 {
+	font-family: "Montserrat", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Noto Sans JP", sans-serif;
+	font-size: 1.125rem;
+	font-weight: 300;
+	letter-spacing: 0.01em;
+	margin: 0 0 var(--space-1);
+	color: var(--fg);
+}
+.footer-brand h3::before {
+	content: "";
+	display: inline-block;
+	width: 0.55rem;
+	height: 0.55rem;
+	border-radius: 50%;
+	background: var(--accent);
+	margin-right: 0.55rem;
+	vertical-align: 0.05em;
+	box-shadow: 0 0 0 3px rgba(16, 179, 134, 0.18);
+}
+.footer-brand p {
+	margin: 0;
+	font-size: var(--fs-body);
+	line-height: 1.6;
+	max-width: 320px;
+	color: var(--fg-muted);
+}
+.footer-col h4 {
+	margin: 0 0 var(--space-2);
+	font-size: var(--fs-caption);
+	font-weight: 600;
+	color: var(--fg);
+	letter-spacing: 0.14em;
+	text-transform: uppercase;
+}
+.footer-col ul {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 0.55rem;
+}
+.footer-col a {
+	color: var(--fg-muted);
+	font-size: var(--fs-body);
+	transition: color 0.15s ease, padding-left 0.15s ease;
+	display: inline-block;
+}
+.footer-col a:hover {
+	color: var(--accent);
+	text-decoration: none;
+	padding-left: 0.35rem;
+}
+.footer-divider {
+	border: 0;
+	border-top: 1px solid var(--border);
+	margin: var(--space-4) 0 var(--space-3);
+}
+.footer-disclaimer {
+	margin: 0 0 var(--space-3);
+	padding: var(--space-3);
+	border: 1px solid var(--border);
+	border-radius: 4px;
+	font-size: var(--fs-caption);
+	line-height: 1.6;
+	color: var(--fg-muted);
+}
+.footer-disclaimer strong {
+	color: var(--fg);
+	letter-spacing: 0.04em;
+}
+.footer-bottom {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-2);
+	text-align: left;
+	font-size: var(--fs-caption);
+	letter-spacing: 0.06em;
+	color: var(--fg-muted);
+}
+.footer-bottom p { margin: 0; }
+.footer-bottom a {
+	color: var(--fg-muted);
+	border-bottom: 1px solid transparent;
+	transition: color 0.15s ease, border-color 0.15s ease;
+}
+.footer-bottom a:hover {
+	color: var(--accent);
+	text-decoration: none;
+	border-bottom-color: var(--accent);
+}
+@media (max-width: 900px) {
+	.footer-grid { grid-template-columns: repeat(2, 1fr); }
+	.footer-brand { grid-column: 1 / -1; }
+}
+@media (max-width: 540px) {
+	.footer-grid { grid-template-columns: 1fr; }
+	.footer-bottom { flex-direction: column; align-items: flex-start; }
+}
+
+/* ────────────────────────── services-grid
+ * Asymmetric layout for track-record / calculator / delegate:
+ *   row 1 — Track record spans full width (the KV table breathes)
+ *   row 2 — Calculator + Delegate split 50/50
+ * Each card has a gradient brand banner header (CSS only, no image
+ * requests) above its existing body content. */
+.services-grid {
+	display: grid;
+	grid-template-columns: repeat(2, 1fr);
+	gap: var(--space-3);
+	margin: var(--space-5) 0;
+	align-items: start;
+}
+.services-grid > .service-card:first-child {
+	grid-column: 1 / -1;
+}
+/* The full-width first card needs a much flatter banner (16:9 would
+ * be ~620 px tall at 1100 px wide). 5:1 keeps it postcard-style. */
+.services-grid > .service-card:first-child .service-card-banner {
+	aspect-ratio: 5 / 1;
+}
+/* Spread the KV table across two columns inside the wide first card
+ * so the small dl doesn't drown in horizontal whitespace. */
+.services-grid > .service-card:first-child .service-card-body .kv {
+	grid-template-columns: max-content 1fr max-content 1fr;
+}
+@media (max-width: 720px) {
+	.services-grid > .service-card:first-child .service-card-body .kv {
+		grid-template-columns: max-content 1fr;
+	}
+}
+.services-grid > .service-card {
+	margin: 0;
+}
+.service-card {
+	overflow: hidden;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+}
+.service-card-banner {
+	aspect-ratio: 16 / 9;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	position: relative;
+	color: #fff;
+	font-family: "Montserrat", sans-serif;
+	font-weight: 700;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	font-size: 1rem;
+	text-align: center;
+	padding: 0 var(--space-3);
+}
+.service-card-banner::before {
+	/* Thematic photo layer (rewards = smiling person, delegate = network
+	 * graph, track-record = candlestick chart). Sits BELOW the dotted
+	 * pattern and ABOVE the gradient. mix-blend-mode + low opacity keep
+	 * the gradient dominant — the photo reads as texture, not subject. */
+	content: "";
+	position: absolute;
+	inset: 0;
+	background-image: var(--banner-photo, none);
+	background-size: cover;
+	background-position: center;
+	opacity: 0.22;
+	mix-blend-mode: overlay;
+	pointer-events: none;
+	z-index: 0;
+}
+.service-card-banner::after {
+	/* subtle dotted grid overlay so the gradient feels structured */
+	content: "";
+	position: absolute;
+	inset: 0;
+	background-image: radial-gradient(rgba(255,255,255,0.07) 1px, transparent 1px);
+	background-size: 18px 18px;
+	pointer-events: none;
+	z-index: 1;
+}
+.service-card-banner > span {
+	position: relative;
+	z-index: 2;
+}
+.service-card-banner--record   { background: linear-gradient(135deg, #0f172a 0%, #1e293b 55%, #0d9b6e 130%); --banner-photo: url("/assets/hero-images/track-record.jpg"); }
+.service-card-banner--calc     { background: linear-gradient(135deg, #1f2937 0%, #312e81 100%); --banner-photo: url("/assets/hero-images/rewards.jpg"); }
+.service-card-banner--delegate { background: linear-gradient(135deg, #064e3b 0%, #134e4a 60%, #1f2937 100%); --banner-photo: url("/assets/hero-images/delegate-band.jpg"); }
+.service-card-body {
+	padding: var(--space-4) var(--space-4) var(--space-3);
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+}
+.service-card-body h2 {
+	/* Editorial section heading — Thin weight + tight tracking + a
+	 * short accent hairline below so the h2 feels deliberate rather
+	 * than functional. Matches the .card > h2 treatment so service
+	 * cards and plain cards share the same heading language. */
+	margin: 0 0 var(--space-3);
+	font-size: var(--fs-h3);
+	color: var(--fg);
+	font-weight: 300;
+	letter-spacing: -0.015em;
+	line-height: 1.15;
+	position: relative;
+	padding-bottom: 0.85rem;
+}
+.service-card-body h2::after {
+	content: "";
+	position: absolute;
+	left: 0;
+	bottom: 0;
+	width: 2.75rem;
+	height: 2px;
+	background: linear-gradient(90deg, var(--accent), rgba(16, 179, 134, 0.18));
+	border-radius: 2px;
+}
+
+/* Plain card section headings — same editorial treatment as
+ * service-card-body h2. Ensure compound classes like .card.acknowledgments
+ * pick it up too. */
+.card > h2 {
+	font-weight: 300;
+	letter-spacing: -0.015em;
+	line-height: 1.15;
+	position: relative;
+	padding-bottom: 0.85rem;
+	margin: 0 0 var(--space-3);
+}
+.card > h2::after {
+	content: "";
+	position: absolute;
+	left: 0;
+	bottom: 0;
+	width: 2.75rem;
+	height: 2px;
+	background: linear-gradient(90deg, var(--accent), rgba(16, 179, 134, 0.18));
+	border-radius: 2px;
+}
+@media (max-width: 900px) {
+	.services-grid { grid-template-columns: 1fr; }
+}
+
+.muted { color: var(--fg-muted); }
+
+/* ────────────────────────── peer-map (Leaflet)
+ * Live map of every node we're peered with — see /assets/peer-map.js.
+ * Container is the same width as the parent card; height clamps for
+ * a wide-but-not-overwhelming aspect. Tile layer is set to slight
+ * desaturation so the cream theme stays calm. */
+.peer-map {
+	height: clamp(280px, 50vh, 480px);
+	width: 100%;
+	border-radius: var(--radius);
+	overflow: hidden;
+	border: 1px solid var(--border);
+	background: #eef2f7;
+}
+.peer-map-tile {
+	filter: saturate(0.6) brightness(1.02);
+}
+.peer-map-caption {
+	margin-top: var(--space-2);
+	color: var(--fg-muted);
+	font-size: var(--fs-caption);
+	letter-spacing: 0.02em;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-2);
+	flex-wrap: wrap;
+}
+.peer-map-caption .legend {
+	display: inline-flex;
+	gap: var(--space-3);
+	align-items: center;
+}
+.peer-map-caption .legend-dot {
+	display: inline-block;
+	width: 10px;
+	height: 10px;
+	border-radius: 999px;
+	margin-right: 0.4em;
+	vertical-align: middle;
+}
+.peer-map-caption .legend-dot--self { background: #10b386; }
+.peer-map-caption .legend-dot--peer { background: #94a3b8; }
+
+/* ────────────────────────── validator-trend (inline SVG line chart)
+ * Time-series of the active validator count, drawn from
+ * /api/peers-gini-history.jsonl. Sits inside .card-network, below the
+ * peer-map, to back the narrative "if our single node goes down, ~200
+ * others still vote." Subtle styling so it reads as evidence, not as
+ * a marketing dashboard. */
+.validator-trend {
+	margin: var(--space-3) 0 var(--space-2);
+	padding: var(--space-2);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	background: var(--bg);
+}
+.validator-trend-cap {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: var(--space-2);
+	margin: 0 0 var(--space-1);
+	font-size: var(--fs-caption);
+	color: var(--fg-muted);
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+}
+.validator-trend-current {
+	color: var(--fg);
+	letter-spacing: 0;
+	text-transform: none;
+}
+.validator-trend-current strong {
+	font-size: var(--fs-h3);
+	font-weight: 600;
+	color: var(--accent);
+	margin-right: 0.3em;
+}
+.validator-trend-current-unit {
+	color: var(--fg-muted);
+	font-size: var(--fs-caption);
+}
+.validator-trend-svg {
+	display: block;
+	width: 100%;
+	height: clamp(140px, 22vh, 200px);
+	overflow: visible;
+}
+.validator-trend-svg .vt-area { fill: var(--accent); opacity: 0.12; }
+.validator-trend-svg .vt-line { fill: none; stroke: var(--accent); stroke-width: 1.75; stroke-linejoin: round; stroke-linecap: round; }
+.validator-trend-svg .vt-dot-last { fill: var(--accent); }
+.validator-trend-svg .vt-grid { stroke: var(--border); stroke-width: 1; stroke-dasharray: 2 4; }
+.validator-trend-svg .vt-tick { fill: var(--fg-muted); font-size: 10px; font-family: var(--font-body, system-ui, sans-serif); }
+.validator-trend-note {
+	margin: var(--space-1) 0 0;
+	font-size: var(--fs-caption);
+	color: var(--fg-muted);
+	line-height: 1.5;
+}
+.validator-trend-note strong {
+	color: var(--fg);
+	font-weight: 600;
+}
+
+/* legacy grid-3 (kept for backwards-compat if used elsewhere) */
+.grid-3 {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+	gap: var(--space-2);
+	margin: var(--space-2) 0 0;
+}
+.feature {
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	padding: var(--space-3);
+	background: var(--bg-card);
+}
+.feature h3 {
+	margin: 0 0 0.4rem;
+	font-size: var(--fs-h3);
+}
+.feature p {
+	margin: 0;
+	color: var(--fg-muted);
+	font-size: var(--fs-body);
+	line-height: 1.5;
+}
+
+/* ────────────────────────── split-section + carousel
+ * Pattern lifted from metalblockchain.org's "Private. Compliant. Secure."
+ * block: the section escapes the centered container to fill the full
+ * viewport width, two absolute panes split the bg (left photo, right
+ * tinted pane), and the actual content (title + card carousel) sits
+ * on top via z-index. On narrow viewports the photo pane collapses
+ * to a top stripe so the carousel still gets full width below. */
+.split-section {
+	position: relative;
+	left: 50%;
+	margin-left: -50vw;
+	margin-right: -50vw;
+	width: 100vw;
+	max-width: 100vw;
+	padding: var(--space-6) 0;
+	overflow: hidden;
+	background: var(--bg);
+}
+.split-bg {
+	position: absolute;
+	inset: 0;
+	z-index: 0;
+	pointer-events: none;
+}
+.split-bg-photo {
+	position: absolute;
+	inset: 0;
+	right: 50%;
+	overflow: hidden;
+}
+.split-bg-photo img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	display: block;
+}
+.split-bg-pane {
+	position: absolute;
+	inset: 0;
+	left: 50%;
+	background:
+		linear-gradient(135deg, #eef3fc 0%, #f6f3ec 100%);
+}
+.split-section-inner {
+	position: relative;
+	z-index: 1;
+	max-width: var(--maxw);
+	margin: 0 auto;
+	padding: 0 var(--space-3);
+}
+.split-section-title {
+	font-size: var(--fs-h2);
+	font-weight: 600;
+	color: var(--fg);
+	letter-spacing: -0.025em;
+	line-height: 1.15;
+	margin: 0 0 var(--space-4);
+	text-align: right;
+	max-width: 50%;
+	margin-left: auto;
+}
+@media (max-width: 820px) {
+	.split-bg-photo { right: 0; bottom: 65%; }
+	.split-bg-pane  { left: 0; top: 35%; }
+	.split-section-title { max-width: none; text-align: left; }
+}
+
+/* Card grid — all features visible at once (3 columns, 2 rows for
+ * 6 cards). Replaces an earlier carousel design after the user said
+ * they wanted to "show everything at once". Cards float over both
+ * split-bg panes. */
+.feature-grid {
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	gap: var(--space-3);
+	list-style: none;
+	padding: 0;
+	margin: 0;
+}
+.feature-card {
+	background: var(--bg-card);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	padding: var(--space-4);
+	box-shadow: 0 1px 2px rgba(31, 41, 55, 0.04), 0 6px 18px rgba(31, 41, 55, 0.06);
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.feature-card:hover {
+	transform: translateY(-3px);
+	box-shadow: 0 4px 12px rgba(31, 41, 55, 0.08), 0 12px 28px rgba(31, 41, 55, 0.1);
+}
+.feature-card-icon {
+	width: 38px;
+	height: 38px;
+	color: var(--accent);
+	margin-bottom: var(--space-1);
+}
+.feature-card h3 {
+	margin: 0;
+	font-size: var(--fs-h3);
+	color: var(--fg);
+	font-weight: 600;
+	letter-spacing: -0.01em;
+}
+.feature-card p {
+	margin: 0;
+	color: var(--fg-muted);
+	font-size: var(--fs-body);
+	line-height: 1.55;
+}
+@media (max-width: 820px) {
+	.feature-grid { grid-template-columns: 1fr; }
+}
+@media (min-width: 821px) and (max-width: 1100px) {
+	.feature-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ────────────────────────── Operating cadence — public schedule
+ * Editorial section showing the next 3-4 renewal events plus a CTA to
+ * subscribe via Google Calendar (or any iCalendar app). The list is
+ * computed client-side from validator.json's endTime so it stays in
+ * sync without a dedicated server endpoint.
+ *
+ * Events use a 2-column row layout: icon left, body right. The "in N
+ * days" relative line + the absolute JST datetime give both quick-scan
+ * and precise reads. */
+.cadence-lede {
+	margin: 0 0 var(--space-3);
+	color: var(--fg-muted);
+	font-size: var(--fs-lead);
+	line-height: 1.6;
+	max-width: 56rem;
+}
+.cadence-events {
+	margin: var(--space-3) 0;
+}
+
+/* Monthly calendar grid — current month + next 2, computed client-side
+ * from validator.json's endTime. Pure DOM, no Google Calendar embed
+ * (owner identity would leak from Google's metadata). */
+.cadence-monthly { margin: var(--space-4) 0 var(--space-3); }
+.cadence-calendar {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+	gap: var(--space-3);
+	margin-top: 0.75rem;
+}
+.cad-month {
+	background: rgba(255, 255, 255, 0.6);
+	border: 1px solid var(--border, rgba(31, 41, 55, 0.12));
+	border-radius: 10px;
+	padding: 0.85rem 0.85rem 1rem;
+}
+.cad-month-head {
+	font-family: "Montserrat", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Noto Sans JP", sans-serif;
+	font-weight: 600;
+	font-size: 0.95rem;
+	color: var(--fg, #1f2937);
+	margin-bottom: 0.6rem;
+}
+.cad-month-grid {
+	display: grid;
+	grid-template-columns: repeat(7, 1fr);
+	gap: 2px;
+}
+.cad-cell {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: flex-start;
+	aspect-ratio: 1;
+	font-size: 0.78rem;
+	font-variant-numeric: tabular-nums;
+	color: var(--fg, #1f2937);
+	padding: 2px 0 0;
+}
+.cad-cell--dow {
+	aspect-ratio: auto;
+	font-size: 0.7rem;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	color: var(--fg-muted, #5b6577);
+	text-transform: uppercase;
+	padding-bottom: 0.3rem;
+}
+.cad-cell--empty {
+	visibility: hidden;
+}
+.cad-cell--day {
+	background: rgba(0, 0, 0, 0.015);
+	border-radius: 4px;
+	color: var(--fg, #1f2937);
+}
+.cad-cell--today {
+	background: rgba(16, 179, 134, 0.10);
+	outline: 1px solid var(--accent, #10b386);
+}
+.cad-cell--renewal {
+	background: rgba(40, 110, 200, 0.10);
+}
+.cad-cell-date {
+	font-weight: 500;
+}
+.cad-cell-marks {
+	margin-top: 1px;
+	display: inline-flex;
+	gap: 1px;
+	line-height: 1;
+}
+.cad-mark {
+	font-size: 0.82rem;
+	line-height: 1;
+}
+.cad-legend {
+	grid-column: 1 / -1;
+	display: inline-flex;
+	flex-wrap: wrap;
+	gap: 0.9rem;
+	margin-top: 0.4rem;
+	font-size: 0.78rem;
+	color: var(--fg-muted, #5b6577);
+}
+.cad-legend-item {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3rem;
+}
+@media (max-width: 600px) {
+	.cad-cell { font-size: 0.72rem; }
+	.cad-mark { font-size: 0.72rem; }
+}
+.cadence-events-overline {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.75rem;
+	font-family: "Montserrat", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Noto Sans JP", sans-serif;
+	font-weight: 600;
+	font-size: var(--fs-caption);
+	letter-spacing: 0.16em;
+	text-transform: uppercase;
+	color: var(--fg-muted);
+	margin-bottom: var(--space-2);
+}
+.cadence-events-rule {
+	display: inline-block;
+	width: 1.5rem;
+	height: 1px;
+	background: var(--border);
+}
+.cadence-list {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: var(--space-2);
+}
+@media (max-width: 720px) {
+	.cadence-list { grid-template-columns: 1fr; }
+}
+.cadence-event {
+	display: grid;
+	grid-template-columns: 2.5rem 1fr;
+	gap: var(--space-2);
+	align-items: start;
+	padding: var(--space-2);
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	background: linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.35));
+	transition: border-color 0.2s ease, box-shadow 0.25s ease, transform 0.2s ease;
+}
+.cadence-event:hover {
+	border-color: rgba(16, 179, 134, 0.35);
+	box-shadow: 0 4px 18px rgba(31, 41, 55, 0.04);
+	transform: translateY(-1px);
+}
+.cadence-event--loading,
+.cadence-event--idle {
+	grid-template-columns: 1fr;
+	border-style: dashed;
+	background: linear-gradient(180deg, rgba(16, 179, 134, 0.02), transparent);
+}
+.cadence-event-icon {
+	font-size: 1.5rem;
+	line-height: 1;
+	padding-top: 0.15rem;
+}
+.cadence-event-body {
+	min-width: 0;
+}
+.cadence-event-head {
+	display: flex;
+	align-items: baseline;
+	gap: 0.75rem;
+	flex-wrap: wrap;
+	margin-bottom: 0.4rem;
+}
+.cadence-event-title {
+	font-size: 1.0625rem;
+	font-weight: 600;
+	color: var(--fg);
+	letter-spacing: -0.005em;
+}
+.cadence-event-rel {
+	font-size: var(--fs-caption);
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--accent);
+}
+.cadence-event-when {
+	font-variant-numeric: tabular-nums;
+	font-size: var(--fs-body);
+	color: var(--fg);
+	font-weight: 500;
+	margin-bottom: 0.35rem;
+}
+.cadence-event-note {
+	font-size: 0.85rem;
+	color: var(--fg-muted);
+	line-height: 1.5;
+}
+
+/* Past cycles — proven-execution log under Next events. Same data
+ * the cycle chart uses, but the angle here is "did the operator
+ * stick to the schedule" rather than "what was the uptime number".
+ * Each row is more compact than upcoming-event cards (single line
+ * of meta) since the focus is "cycle N completed cleanly". */
+.cadence-past {
+	margin: var(--space-3) 0 0;
+	padding-top: var(--space-3);
+	border-top: 1px solid var(--border);
+}
+.cadence-past-list {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 0.65rem;
+}
+.cadence-past-item {
+	display: grid;
+	grid-template-columns: 1.75rem 1fr;
+	gap: 0.85rem;
+	align-items: start;
+	padding: 0.75rem var(--space-2);
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	background: linear-gradient(180deg, rgba(255, 255, 255, 0.65), rgba(255, 255, 255, 0.3));
+	transition: border-color 0.15s ease, box-shadow 0.2s ease;
+}
+.cadence-past-item:hover {
+	border-color: rgba(16, 179, 134, 0.3);
+	box-shadow: 0 3px 14px rgba(31, 41, 55, 0.04);
+}
+.cadence-past-item--loading,
+.cadence-past-item--idle {
+	grid-template-columns: 1fr;
+	border-style: dashed;
+	background: linear-gradient(180deg, rgba(16, 179, 134, 0.02), transparent);
+}
+.cadence-past-item--ok .cadence-past-status {
+	color: var(--accent);
+	background: rgba(16, 179, 134, 0.1);
+}
+.cadence-past-item--warn .cadence-past-status {
+	color: #dc323c;
+	background: rgba(220, 50, 60, 0.1);
+}
+.cadence-past-status {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 1.75rem;
+	height: 1.75rem;
+	border-radius: 50%;
+	font-weight: 700;
+	font-size: 0.95rem;
+	line-height: 1;
+}
+.cadence-past-body { min-width: 0; }
+.cadence-past-head {
+	display: flex;
+	align-items: baseline;
+	gap: 0.85rem;
+	flex-wrap: wrap;
+	margin-bottom: 0.2rem;
+}
+.cadence-past-cycle {
+	font-weight: 600;
+	color: var(--fg);
+	letter-spacing: -0.005em;
+	font-size: 1rem;
+}
+.cadence-past-when {
+	font-variant-numeric: tabular-nums;
+	color: var(--fg);
+	font-weight: 500;
+	font-size: 0.95rem;
+}
+.cadence-past-meta {
+	display: flex;
+	align-items: baseline;
+	gap: 0.55rem;
+	flex-wrap: wrap;
+	font-size: 0.85rem;
+	color: var(--fg-muted);
+	font-variant-numeric: tabular-nums;
+}
+.cadence-past-meta strong {
+	color: var(--fg);
+	font-weight: 600;
+}
+.cadence-past-sep { color: var(--border); }
+.cadence-past-audit {
+	color: var(--accent);
+	font-size: var(--fs-caption);
+	font-weight: 600;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	border-bottom: 1px solid transparent;
+	transition: border-color 0.15s ease;
+}
+.cadence-past-audit:hover {
+	border-bottom-color: var(--accent);
+	text-decoration: none;
+}
+.cadence-past-more {
+	padding: 0.5rem 0 0;
+	text-align: center;
+}
+
+/* Subscribe CTA — high-contrast button with calendar icon, alt copy
+ * below for users who paste into non-Google iCal apps. */
+.cadence-subscribe {
+	margin: var(--space-3) 0 0;
+	padding-top: var(--space-3);
+	border-top: 1px solid var(--border);
+}
+.cadence-cta {
+	display: inline-grid;
+	grid-template-columns: auto 1fr auto;
+	align-items: center;
+	gap: 1.25rem;
+	padding: 1rem 1.5rem 1rem 1.25rem;
+	border: 1px solid var(--border);
+	border-radius: 14px;
+	background: var(--bg-card);
+	color: var(--fg);
+	text-decoration: none;
+	transition: border-color 0.2s ease, box-shadow 0.25s ease, transform 0.2s ease;
+	max-width: 32rem;
+	width: 100%;
+}
+.cadence-cta:hover {
+	border-color: var(--accent);
+	box-shadow: 0 8px 24px rgba(16, 179, 134, 0.12);
+	transform: translateY(-1px);
+	text-decoration: none;
+}
+.cadence-cta-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 2.25rem;
+	height: 2.25rem;
+	border-radius: 50%;
+	background: rgba(16, 179, 134, 0.08);
+	color: var(--accent);
+	transition: background 0.2s ease, color 0.2s ease;
+}
+.cadence-cta:hover .cadence-cta-icon {
+	background: var(--accent);
+	color: #fff;
+}
+.cadence-cta-text {
+	display: flex;
+	flex-direction: column;
+	gap: 0.15rem;
+	line-height: 1.3;
+	min-width: 0;
+}
+.cadence-cta-prompt {
+	font-weight: 600;
+	font-size: 1.0625rem;
+	color: var(--fg);
+	letter-spacing: -0.005em;
+}
+.cadence-cta-sub {
+	font-size: var(--fs-caption);
+	color: var(--fg-muted);
+	letter-spacing: 0.02em;
+}
+.cadence-cta-arrow {
+	color: var(--accent);
+	font-size: 1.25rem;
+	transition: transform 0.25s ease;
+}
+.cadence-cta:hover .cadence-cta-arrow { transform: translateX(4px); }
+
+.cadence-subscribe-alt {
+	margin: var(--space-2) 0 0;
+	color: var(--fg-muted);
+	font-size: 0.88rem;
+	line-height: 1.5;
+}
+.cadence-ics-url {
+	display: inline-block;
+	margin-top: 0.3rem;
+	padding: 0.25rem 0.55rem;
+	background: rgba(31, 41, 55, 0.04);
+	border-radius: 6px;
+	font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+	font-size: 0.82rem;
+	color: var(--fg);
+	word-break: break-all;
+}
+
+/* ────────────────────────── Roadmap
+ * Vertical rail + dots: editorial, institutional, low-promise. Three
+ * milestones (Phase 1 / Phase 2 review / Long-term). Filled dot for
+ * current + decision-point milestones, outline dot for open-ended
+ * future. The rail line uses the mint accent at low opacity so it
+ * reads as connective tissue rather than a UI primitive. */
+.roadmap-header {
+	max-width: 44rem;
+	margin-bottom: var(--space-4);
+}
+.roadmap-eyebrow {
+	color: var(--accent);
+	font-size: var(--fs-caption);
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.16em;
+	margin: 0 0 var(--space-1);
+}
+.roadmap-lead {
+	color: var(--fg-muted);
+	font-size: var(--fs-lead);
+	line-height: 1.5;
+	margin: var(--space-2) 0 0;
+}
+.roadmap-list {
+	position: relative;
+	list-style: none;
+	padding: 0;
+	margin: 0;
+}
+.roadmap-list::before {
+	content: "";
+	position: absolute;
+	left: 9px;
+	top: 10px;
+	bottom: 10px;
+	width: 2px;
+	background: var(--accent);
+	opacity: 0.28;
+	border-radius: 1px;
+}
+.roadmap-item {
+	position: relative;
+	padding: 0 0 var(--space-4) calc(var(--space-3) + 12px);
+}
+.roadmap-item:last-child { padding-bottom: 0; }
+.roadmap-dot {
+	position: absolute;
+	left: 0;
+	top: 4px;
+	width: 20px;
+	height: 20px;
+	border-radius: 50%;
+	box-sizing: border-box;
+	background: var(--bg-card, #ffffff);
+	border: 2px solid var(--accent);
+}
+.roadmap-item--current .roadmap-dot,
+.roadmap-item--milestone .roadmap-dot {
+	background: var(--accent);
+	box-shadow: 0 0 0 4px rgba(16, 179, 134, 0.12);
+}
+.roadmap-item--current .roadmap-dot::after {
+	/* Subtle pulse to mark the actively-running phase */
+	content: "";
+	position: absolute;
+	inset: -4px;
+	border-radius: 50%;
+	border: 2px solid var(--accent);
+	opacity: 0.55;
+	animation: roadmap-pulse 2.6s ease-out infinite;
+}
+@keyframes roadmap-pulse {
+	0%   { transform: scale(1);   opacity: 0.55; }
+	100% { transform: scale(1.9); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+	.roadmap-item--current .roadmap-dot::after { animation: none; }
+}
+.roadmap-period {
+	margin: 0 0 0.25rem;
+	color: var(--fg-muted);
+	font-size: 0.82rem;
+	font-weight: 500;
+	letter-spacing: 0.05em;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.5rem;
+}
+.roadmap-status {
+	display: inline-block;
+	padding: 0.12rem 0.55rem;
+	border-radius: 999px;
+	font-size: 0.72rem;
+	font-weight: 600;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+}
+.roadmap-status--current   { background: var(--ok-bg);   color: var(--ok-fg); }
+.roadmap-status--milestone { background: var(--warn-bg); color: var(--warn-fg); }
+.roadmap-status--future    { background: rgba(31, 41, 55, 0.06); color: var(--fg-muted); }
+.roadmap-title {
+	margin: 0 0 0.5rem;
+	font-size: clamp(1.1rem, 1.6vw, 1.35rem);
+	font-weight: 600;
+	letter-spacing: 0.005em;
+	color: var(--fg);
+}
+.roadmap-body {
+	margin: 0;
+	color: var(--fg-muted);
+	line-height: 1.65;
+	font-size: var(--fs-body);
+}
+@media (max-width: 768px) {
+	.roadmap-item { padding-left: calc(var(--space-3) + 6px); }
+	.roadmap-list::before { left: 7px; }
+	.roadmap-dot { width: 16px; height: 16px; top: 5px; }
+}
+
+/* ────────────────────────── Open data page (/data/)
+ * Endpoint catalogue: each public URL gets a card with description,
+ * meta (url / update freq / source), and a collapsed <details>
+ * example. The point is verifiability — every claim on the rest of the
+ * site is sourced from one of the entries on this page. */
+.data-group + .data-group { margin-top: var(--space-4); }
+.data-group-lead {
+	color: var(--fg-muted);
+	margin: 0 0 var(--space-3);
+	font-size: var(--fs-body);
+}
+.data-endpoint {
+	border-top: 1px solid var(--border);
+	padding: var(--space-3) 0 0;
+	margin: 0;
+}
+.data-endpoint:first-of-type {
+	border-top: none;
+	padding-top: 0;
+}
+.data-endpoint + .data-endpoint { margin-top: var(--space-2); }
+.data-endpoint-head {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: var(--space-2);
+	flex-wrap: wrap;
+	margin-bottom: 0.4rem;
+}
+.data-endpoint-head h3 {
+	margin: 0;
+	font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+	font-size: 1.05rem;
+	font-weight: 600;
+	color: var(--fg);
+	letter-spacing: -0.01em;
+}
+.data-tag {
+	font-size: 0.72rem;
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--accent);
+	background: rgba(16, 179, 134, 0.08);
+	padding: 0.15rem 0.55rem;
+	border-radius: 999px;
+}
+.data-endpoint > p {
+	color: var(--fg-muted);
+	line-height: 1.55;
+	margin: 0 0 var(--space-2);
+}
+.data-meta {
+	display: grid;
+	grid-template-columns: minmax(7rem, max-content) 1fr;
+	gap: 0.4rem var(--space-2);
+	margin: 0 0 var(--space-2);
+	font-size: 0.92rem;
+}
+.data-meta dt {
+	font-weight: 500;
+	color: var(--fg-muted);
+}
+.data-meta dd {
+	margin: 0;
+	color: var(--fg);
+	line-height: 1.5;
+}
+.data-meta dd code {
+	background: rgba(31, 41, 55, 0.04);
+	padding: 0.05rem 0.35rem;
+	border-radius: 4px;
+	font-size: 0.88em;
+}
+@media (max-width: 540px) {
+	.data-meta { grid-template-columns: 1fr; gap: 0.1rem; }
+	.data-meta dt { margin-top: 0.4rem; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; }
+}
+.data-example {
+	margin: var(--space-2) 0 0;
+	border-top: 1px dashed var(--border);
+	padding-top: var(--space-2);
+}
+.data-example > summary {
+	cursor: pointer;
+	font-size: 0.85rem;
+	font-weight: 500;
+	color: var(--fg-muted);
+	letter-spacing: 0.02em;
+	user-select: none;
+}
+.data-example > summary:hover { color: var(--fg); }
+.data-example[open] > summary { color: var(--fg); margin-bottom: 0.6rem; }
+.data-example pre {
+	background: #0f172a;
+	color: #e2e8f0;
+	padding: 0.85rem 1rem;
+	border-radius: 8px;
+	font-size: 0.82rem;
+	line-height: 1.55;
+	overflow-x: auto;
+	margin: 0.4rem 0 0;
+}
+.data-example pre code {
+	font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+	/* Reset the global code-pill styling (cream background + dark text)
+	 * which otherwise renders unreadable inside the dark navy pre block. */
+	background: transparent;
+	color: inherit;
+	padding: 0;
+	border-radius: 0;
+	font-size: inherit;
+}
+.data-policy { margin-top: var(--space-4); }
+.data-policy p { color: var(--fg-muted); line-height: 1.6; }
+.data-policy-note {
+	font-size: 0.88rem;
+	border-left: 3px solid var(--accent);
+	padding-left: 0.85rem;
+	color: var(--fg-muted);
+	background: rgba(16, 179, 134, 0.04);
+	padding: 0.55rem 0.85rem;
+	border-radius: 0 6px 6px 0;
+}
+
+/* ────────────────────────── Cycle journal (/journal/)
+ * Chronological ledger of closed validation periods. Each entry is one
+ * cycle: cycle number + date range + meta dl (uptime / duration /
+ * explorer) + a paragraph for the operator note. Newest first. */
+.journal-summary { margin-bottom: var(--space-4); }
+.journal-list {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+}
+.journal-loading {
+	color: var(--fg-muted);
+	font-size: 0.9rem;
+	padding: var(--space-2) 0;
+}
+.journal-loading--error {
+	color: var(--warn-fg);
+}
+.journal-empty {
+	color: var(--fg-muted);
+	line-height: 1.6;
+	padding: var(--space-3);
+	background: rgba(16, 179, 134, 0.04);
+	border-left: 3px solid var(--accent);
+	border-radius: 0 6px 6px 0;
+	margin: var(--space-3) 0 0;
+}
+.journal-entry {
+	padding: var(--space-3) 0;
+	border-top: 1px solid var(--border);
+}
+.journal-entry:first-child {
+	border-top: none;
+	padding-top: var(--space-2);
+}
+.journal-entry-head {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: var(--space-2);
+	flex-wrap: wrap;
+	margin-bottom: var(--space-2);
+}
+.journal-cycle-n {
+	font-family: "Montserrat", sans-serif;
+	font-weight: 600;
+	font-size: 1.15rem;
+	letter-spacing: 0.01em;
+	color: var(--fg);
+}
+.journal-period {
+	font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+	font-size: 0.88rem;
+	color: var(--fg-muted);
+	letter-spacing: 0.02em;
+}
+.journal-meta {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+	gap: 0.4rem var(--space-3);
+	margin: 0 0 var(--space-2);
+	font-size: 0.92rem;
+}
+.journal-meta dt {
+	font-size: 0.75rem;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	color: var(--fg-muted);
+	margin-bottom: 0.1rem;
+}
+.journal-meta dd {
+	margin: 0;
+	color: var(--fg);
+	font-weight: 500;
+}
+.journal-meta dd a {
+	color: var(--accent);
+	font-weight: 500;
+}
+.journal-notes {
+	margin: 0;
+	color: var(--fg);
+	line-height: 1.65;
+	font-size: 0.95rem;
+	padding: 0.7rem 0.95rem;
+	background: rgba(31, 41, 55, 0.025);
+	border-left: 3px solid var(--accent);
+	border-radius: 0 6px 6px 0;
+	white-space: pre-wrap;
+}
+.journal-notes--empty {
+	color: var(--fg-muted);
+	font-style: italic;
+	border-left-color: var(--border);
+	background: none;
+	padding-left: 0;
+}
+.journal-about p {
+	color: var(--fg-muted);
+	line-height: 1.65;
+}
+.journal-about p + p { margin-top: var(--space-2); }
+
+/* ────────────────────────── Continuity (/continuity/)
+ * Plain-language scenario writeups. Each scenario is its own <article>
+ * with an h3 + body. TL;DR card at top summarises the four most
+ * important facts for delegators. Bottom-line card closes the page
+ * with the protocol-level safety statement. */
+.continuity-tldr {
+	border-left: 4px solid var(--accent);
+}
+.continuity-tldr h2 { margin-top: 0; }
+.continuity-tldr-list {
+	margin: var(--space-2) 0 0;
+	padding-left: 1.2rem;
+}
+.continuity-tldr-list li {
+	color: var(--fg);
+	line-height: 1.65;
+	margin: 0.4rem 0;
+}
+.continuity-tldr-list li strong {
+	color: var(--accent);
+	font-weight: 600;
+}
+.continuity-scenario {
+	padding: var(--space-3) 0;
+	border-top: 1px solid var(--border);
+}
+.continuity-scenario:first-of-type {
+	border-top: none;
+	padding-top: 0;
+}
+.continuity-scenario h3 {
+	margin: 0 0 0.5rem;
+	font-size: 1.1rem;
+	font-weight: 600;
+	color: var(--fg);
+	letter-spacing: 0.005em;
+}
+.continuity-scenario p {
+	margin: 0;
+	color: var(--fg-muted);
+	line-height: 1.7;
+}
+.continuity-bottom-line {
+	background: rgba(16, 179, 134, 0.04);
+	border: 1px solid rgba(16, 179, 134, 0.18);
+}
+.continuity-bottom-line p {
+	color: var(--fg);
+	line-height: 1.7;
+}
+.continuity-bottom-line p + p { margin-top: var(--space-2); }
+.continuity-bottom-line strong { color: var(--accent); }
+
+/* ────────────────────────── Per-cycle history table
+ * Long-horizon track record: each closed validation period appears as
+ * a row with on-chain dates, final uptime %, and an explorer link.
+ * Designed for 10-20 years of accumulation — clean, scannable, audit-
+ * forward. Empty state speaks plainly ("first row lands when the cycle
+ * closes") rather than apologising. */
+.cycle-history {
+	margin: var(--space-3) 0 var(--space-2);
+	padding-top: var(--space-3);
+	border-top: 1px solid var(--border);
+}
+.cycle-history-header {
+	margin-bottom: var(--space-2);
+}
+.cycle-history-overline {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.75rem;
+	font-family: "Montserrat", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Noto Sans JP", sans-serif;
+	font-weight: 600;
+	font-size: var(--fs-caption);
+	letter-spacing: 0.16em;
+	text-transform: uppercase;
+	color: var(--fg-muted);
+	margin-bottom: 0.6rem;
+}
+.cycle-history-rule {
+	display: inline-block;
+	width: 1.5rem;
+	height: 1px;
+	background: var(--border);
+}
+.cycle-history-lede {
+	margin: 0;
+	color: var(--fg-muted);
+	font-size: var(--fs-body);
+	line-height: 1.6;
+	max-width: 44rem;
+}
+.cycle-history-empty {
+	margin: var(--space-2) 0 0;
+	padding: var(--space-2) var(--space-3);
+	border: 1px dashed var(--border);
+	border-radius: 10px;
+	color: var(--fg-muted);
+	font-size: var(--fs-body);
+	line-height: 1.6;
+	background: linear-gradient(180deg, rgba(16, 179, 134, 0.025), transparent);
+}
+
+/* SVG cycle chart — pure SVG (no library), CSP-clean.
+ * Container is a card-like surface so the chart reads as its own
+ * artefact above the table. The SVG itself uses viewBox for fluid
+ * scaling. Bars rendered by main.js; CSS here just frames the chart
+ * and styles the caption. */
+.cycle-chart {
+	margin: var(--space-2) 0 var(--space-3);
+	padding: var(--space-3) var(--space-3) var(--space-2);
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	background: linear-gradient(180deg, rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.25));
+	overflow-x: auto;
+}
+.cycle-chart-svg {
+	display: block;
+	width: 100%;
+	height: auto;
+	max-width: 100%;
+	font-variant-numeric: tabular-nums;
+}
+.cycle-chart-svg .cycle-bar rect {
+	transition: opacity 0.15s ease;
+}
+.cycle-chart-svg .cycle-bar:hover rect { opacity: 0.85; }
+.cycle-chart-caption {
+	margin: 0.4rem 0 0;
+	font-size: var(--fs-caption);
+	color: var(--fg-muted);
+	letter-spacing: 0.04em;
+	line-height: 1.5;
+}
+
+.cycle-table {
+	width: 100%;
+	border-collapse: collapse;
+	margin-top: var(--space-2);
+	font-variant-numeric: tabular-nums;
+}
+.cycle-table thead th {
+	font-size: var(--fs-caption);
+	font-weight: 600;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	color: var(--fg-muted);
+	text-align: left;
+	padding: 0 0.75rem 0.75rem;
+	border-bottom: 1px solid var(--border);
+}
+.cycle-table thead th:first-child { padding-left: 0; width: 3rem; }
+.cycle-table thead th:nth-child(3) { text-align: right; }
+.cycle-table thead th:last-child   { text-align: right; padding-right: 0; }
+.cycle-table tbody tr {
+	border-bottom: 1px solid var(--border);
+	transition: background 0.15s ease;
+}
+.cycle-table tbody tr:hover { background: rgba(16, 179, 134, 0.03); }
+.cycle-table tbody tr:last-child { border-bottom: none; }
+.cycle-table tbody th,
+.cycle-table tbody td {
+	padding: 0.85rem 0.75rem;
+	font-size: var(--fs-body);
+	vertical-align: middle;
+}
+.cycle-table tbody th:first-child { padding-left: 0; }
+.cycle-table tbody td:last-child  { padding-right: 0; text-align: right; }
+.cycle-num {
+	font-weight: 600;
+	color: var(--fg);
+	letter-spacing: -0.005em;
+}
+.cycle-period {
+	color: var(--fg);
+	font-weight: 500;
+	letter-spacing: -0.005em;
+}
+.cycle-duration {
+	display: block;
+	margin-top: 0.15rem;
+	font-size: var(--fs-caption);
+	color: var(--fg-muted);
+	letter-spacing: 0.02em;
+	font-weight: 500;
+}
+.cycle-uptime {
+	text-align: right;
+}
+.cycle-uptime .num {
+	font-weight: 600;
+	color: var(--fg);
+	font-size: 1.0625rem;
+}
+.cycle-audit a {
+	color: var(--accent);
+	font-size: var(--fs-caption);
+	font-weight: 600;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	border-bottom: 1px solid transparent;
+	transition: border-color 0.15s ease;
+}
+.cycle-audit a:hover {
+	border-bottom-color: var(--accent);
+	text-decoration: none;
+}
+
+@media (max-width: 600px) {
+	.cycle-table thead th:nth-child(2) { display: none; }
+	.cycle-table tbody td.cycle-period { font-size: 0.85rem; }
+}
+
+/* ────────────────────────── Reward calculator
+ * High-end financial UI: deliberate type hierarchy, tabular nums for digit
+ * alignment, hero number paired with a muted unit pill, range visualisation
+ * for the worst/best uptime scenarios, and a small footer with the
+ * assumptions. The formula is tucked into a <details> so the calm result
+ * panel stays the focal point. Card lives in `.service-card` so .service-
+ * card-lead / -body provide the outer spacing. */
+
+.service-card-lead {
+	margin: 0 0 var(--space-3);
+	color: var(--fg-muted);
+	font-size: var(--fs-body);
+	line-height: 1.6;
+}
+
+.calc-inputs {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: var(--space-2);
+	margin: 0 0 var(--space-3);
+}
+.calc-input label {
+	display: block;
+	font-size: var(--fs-caption);
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--fg-muted);
+	font-weight: 600;
+	margin: 0 0 0.45rem;
+}
+.calc-input-field {
+	position: relative;
+}
+.calc-input-field input[type="number"] {
+	width: 100%;
+	padding: 0.7rem 4.25rem 0.7rem 0.95rem;
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	background: var(--bg-card);
+	color: var(--fg);
+	font-family: inherit;
+	font-size: 1.0625rem;
+	font-weight: 500;
+	font-variant-numeric: tabular-nums;
+	box-sizing: border-box;
+	transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.calc-input-unit {
+	position: absolute;
+	right: 0.95rem;
+	top: 50%;
+	transform: translateY(-50%);
+	color: var(--fg-muted);
+	font-size: 0.78rem;
+	letter-spacing: 0.06em;
+	pointer-events: none;
+	font-weight: 600;
+}
+.calc-input-field--select select {
+	width: 100%;
+	padding: 0.7rem 2.5rem 0.7rem 0.95rem;
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	background-color: var(--bg-card);
+	color: var(--fg);
+	font-family: inherit;
+	font-size: 1.0625rem;
+	font-weight: 500;
+	box-sizing: border-box;
+	cursor: pointer;
+	appearance: none;
+	-webkit-appearance: none;
+	/* Inline SVG chevron — single source, no extra request. Stroke uses
+	 * --fg-muted hex equivalent so it follows the muted color. */
+	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%235b6577' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+	background-repeat: no-repeat;
+	background-position: right 0.95rem center;
+	transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.calc-input-field input[type="number"]:focus,
+.calc-input-field--select select:focus {
+	outline: none;
+	border-color: var(--accent);
+	box-shadow: 0 0 0 3px rgba(16, 179, 134, 0.16);
+}
+
+/* Result panel — calm centered surface, hero number gets all the room. */
+.calc-result {
+	position: relative;
+	border: 1px solid var(--border);
+	border-radius: 16px;
+	padding: var(--space-4) var(--space-3) var(--space-3);
+	background:
+		radial-gradient(ellipse at top, rgba(16, 179, 134, 0.05), transparent 70%),
+		linear-gradient(180deg, rgba(16, 179, 134, 0.02), rgba(16, 179, 134, 0));
+	text-align: center;
+}
+.calc-result-label {
+	font-size: var(--fs-caption);
+	letter-spacing: 0.14em;
+	text-transform: uppercase;
+	color: var(--fg-muted);
+	font-weight: 600;
+}
+.calc-result-value {
+	margin: 0.7rem 0 var(--space-4);
+	display: inline-flex;
+	align-items: baseline;
+	gap: 0.55rem;
+	font-variant-numeric: tabular-nums;
+}
+.calc-result-value .num {
+	font-size: clamp(2.5rem, 5.5vw, 3.25rem);
+	font-weight: 300;
+	letter-spacing: -0.035em;
+	color: var(--fg);
+	line-height: 1;
+}
+.calc-result-value .unit {
+	font-size: 0.95rem;
+	font-weight: 600;
+	color: var(--fg-muted);
+	letter-spacing: 0.06em;
+}
+.calc-result-range {
+	display: grid;
+	grid-template-columns: 1fr auto 1fr;
+	align-items: center;
+	gap: var(--space-2);
+	padding-top: var(--space-3);
+	border-top: 1px solid var(--border);
+	font-variant-numeric: tabular-nums;
+}
+.range-anchor {
+	display: flex;
+	flex-direction: column;
+	gap: 0.25rem;
+	text-align: left;
+}
+.range-anchor--right {
+	text-align: right;
+	align-items: flex-end;
+}
+.range-anchor-label {
+	font-size: var(--fs-caption);
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--fg-muted);
+	font-weight: 600;
+}
+.range-anchor-value {
+	display: inline-flex;
+	align-items: baseline;
+	gap: 0.35rem;
+	white-space: nowrap;
+}
+.range-anchor-value .num {
+	font-size: 1.0625rem;
+	font-weight: 600;
+	color: var(--fg);
+	letter-spacing: -0.005em;
+}
+.range-anchor-value .unit {
+	font-size: 0.72rem;
+	color: var(--fg-muted);
+	letter-spacing: 0.06em;
+	font-weight: 600;
+}
+.range-line {
+	width: 100%;
+	height: 1px;
+	background: linear-gradient(90deg, transparent 0%, var(--border) 30%, var(--border) 70%, transparent 100%);
+	min-width: 1.5rem;
+	align-self: center;
+}
+
+/* Assumptions row — inline pills separated by hairline dividers. */
+.calc-meta {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0 var(--space-3);
+	margin: var(--space-3) 0 var(--space-1);
+	font-variant-numeric: tabular-nums;
+}
+.calc-meta > div {
+	display: inline-flex;
+	align-items: baseline;
+	gap: 0.5rem;
+	position: relative;
+	padding: 0.25rem 0;
+}
+.calc-meta > div:not(:last-child)::after {
+	content: "";
+	position: absolute;
+	right: calc(var(--space-3) * -0.5);
+	top: 50%;
+	transform: translateY(-50%);
+	width: 1px;
+	height: 0.85rem;
+	background: var(--border);
+}
+.calc-meta dt {
+	font-size: var(--fs-caption);
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--fg-muted);
+	font-weight: 600;
+	margin: 0;
+}
+.calc-meta dd {
+	margin: 0;
+	font-size: var(--fs-body);
+	font-weight: 600;
+	color: var(--fg);
+	letter-spacing: -0.005em;
+}
+
+/* Formula / payment rules — collapsed by default; opens to a small body. */
+.calc-formula {
+	margin-top: var(--space-2);
+	border-top: 1px solid var(--border);
+	padding-top: var(--space-2);
+}
+.calc-formula summary {
+	font-size: var(--fs-caption);
+	letter-spacing: 0.1em;
+	text-transform: uppercase;
+	color: var(--fg-muted);
+	cursor: pointer;
+	font-weight: 600;
+	padding: 0.25rem 0;
+	list-style: none;
+	user-select: none;
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+}
+.calc-formula summary::-webkit-details-marker { display: none; }
+.calc-formula summary::before {
+	content: "+";
+	display: inline-block;
+	width: 1em;
+	text-align: center;
+	color: var(--fg-muted);
+	transition: transform 0.15s ease;
+	font-weight: 400;
+}
+.calc-formula[open] summary::before { content: "−"; }
+.calc-formula summary:hover { color: var(--fg); }
+.calc-formula p {
+	margin: 0.6rem 0 0;
+	color: var(--fg-muted);
+	font-size: var(--fs-body);
+	line-height: 1.65;
+}
+.calc-formula p strong {
+	color: var(--fg);
+	font-weight: 600;
+}
+
+@media (max-width: 560px) {
+	.calc-inputs { grid-template-columns: 1fr; }
+	.calc-result { padding: var(--space-3) var(--space-2) var(--space-2); }
+	.calc-result-range {
+		grid-template-columns: 1fr;
+		gap: var(--space-2);
+	}
+	.range-anchor, .range-anchor--right {
+		text-align: center;
+		align-items: center;
+	}
+	.range-line { display: none; }
+	.calc-meta { gap: 0; flex-direction: column; }
+	.calc-meta > div:not(:last-child)::after { display: none; }
+}
+
+/* Network map section */
+.card-network {
+	position: relative;
+	overflow: hidden;
+}
+.card-network::before {
+	content: "";
+	position: absolute;
+	inset: -1px;
+	background: radial-gradient(circle at 75% 50%, rgba(16, 179, 134, 0.06), transparent 60%);
+	pointer-events: none;
+	z-index: 0;
+}
+.card-network > * {
+	position: relative;
+	z-index: 1;
+}
+.map-wrap {
+	margin: 1.25rem 0;
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	overflow: hidden;
+	background: var(--bg-card);
+}
+.network-map {
+	display: block;
+	width: 100%;
+	height: auto;
+	max-height: 420px;
+	object-fit: contain;
+}
+.map-wrap figcaption {
+	padding: 0.5rem 1rem 0.75rem;
+	font-size: 0.85rem;
+	color: var(--fg-muted);
+	border-top: 1px solid var(--border);
+	background: rgba(31, 41, 55, 0.04);
+}
+
+/* ────────────────────────── Acknowledgments — tribute grid
+ * Two-column grid of tribute cards. Each card has a small accent dot
+ * (drawing from the rainbow band gradient) and a name + description
+ * pair. The lead paragraph above the grid keeps its narrative voice. */
+.acknowledgments > p:first-of-type,
+.acknowledgments .acknowledgments-lede {
+	margin: 0 0 var(--space-3);
+	color: var(--fg-muted);
+	font-size: var(--fs-lead);
+	line-height: 1.6;
+}
+.acknowledgments ul {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+	display: grid;
+	grid-template-columns: repeat(2, 1fr);
+	gap: var(--space-2);
+}
+@media (max-width: 720px) {
+	.acknowledgments ul { grid-template-columns: 1fr; }
+}
+.acknowledgments li {
+	position: relative;
+	padding: var(--space-2) var(--space-2) var(--space-2) calc(var(--space-2) + 1rem);
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	background: linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.3));
+	transition: border-color 0.2s ease, box-shadow 0.25s ease, transform 0.2s ease;
+}
+.acknowledgments li:hover {
+	border-color: rgba(16, 179, 134, 0.35);
+	box-shadow: 0 6px 20px rgba(31, 41, 55, 0.04);
+	transform: translateY(-1px);
+}
+.acknowledgments li::before {
+	/* tiny rainbow swatch (vertical) at the left edge — drawn at the
+	 * same colour stops as the atmosphere bands to keep the brand
+	 * language consistent. */
+	content: "";
+	position: absolute;
+	left: 0.7rem;
+	top: 0.95rem;
+	bottom: 0.95rem;
+	width: 2px;
+	border-radius: 2px;
+	background: linear-gradient(180deg, #dc323c 0%, #3caa5a 50%, #6e32aa 100%);
+	opacity: 0.75;
+}
+.acknowledgments li strong {
+	display: block;
+	color: var(--fg);
+	font-weight: 600;
+	font-size: 1rem;
+	letter-spacing: -0.005em;
+	margin-bottom: 0.4rem;
+}
+.acknowledgments li span {
+	display: block;
+	color: var(--fg-muted);
+	font-size: 0.9rem;
+	line-height: 1.6;
+	margin: 0;
+}
+
+/* Reveal-on-scroll (paired with IntersectionObserver in main.js) */
+.reveal {
+	opacity: 0;
+	transform: translateY(20px);
+	transition: opacity 0.6s ease-out, transform 0.6s ease-out;
+}
+.reveal.in-view {
+	opacity: 1;
+	transform: translateY(0);
+}
+@media (prefers-reduced-motion: reduce) {
+	.reveal, .reveal.in-view {
+		opacity: 1;
+		transform: none;
+		transition: none;
+	}
+	/* Disable all transforms + transitions that move things on hover,
+	 * scroll, or state change. Keyboard / motion-sensitive users still
+	 * get colour shifts (border / box-shadow) so feedback isn't lost. */
+	*, *::before, *::after {
+		animation-duration: 0.001ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.001ms !important;
+		scroll-behavior: auto !important;
+	}
+	.faq-card:hover,
+	.faq-card[open],
+	.cadence-event:hover,
+	.cadence-past-item:hover,
+	.acknowledgments li:hover,
+	.cadence-cta:hover {
+		transform: none !important;
+	}
+}
+
+/* Live freshness indicator on Status / Observed at field — a small
+ * dot whose colour + animation telegraphs how fresh the rendered data
+ * is. Three states: fresh (<15 min, mint pulsing), ageing (<1h, amber
+ * static), stale (>1h, grey static). The pulse is GPU-cheap and the
+ * reduced-motion media query already disables animations site-wide. */
+.live-dot {
+	display: inline-block;
+	width: 0.6rem;
+	height: 0.6rem;
+	border-radius: 50%;
+	margin-right: 0.45rem;
+	vertical-align: 0.05em;
+	background: #5b6577;
+	box-shadow: 0 0 0 0 rgba(91, 101, 119, 0);
+}
+.live-dot--fresh {
+	background: var(--accent);
+	box-shadow: 0 0 0 0 rgba(16, 179, 134, 0.6);
+	animation: live-pulse 2s ease-out infinite;
+}
+.live-dot--ageing { background: #d97706; }
+.live-dot--stale  { background: #9ca3af; }
+@keyframes live-pulse {
+	0%   { box-shadow: 0 0 0 0   rgba(16, 179, 134, 0.55); }
+	70%  { box-shadow: 0 0 0 8px rgba(16, 179, 134, 0);    }
+	100% { box-shadow: 0 0 0 0   rgba(16, 179, 134, 0);    }
+}
+.live-rel {
+	color: var(--fg-muted);
+	font-size: 0.85em;
+	letter-spacing: 0.02em;
+	margin-left: 0.15rem;
+}
+
+/* Global keyboard focus indicator — :focus-visible activates only on
+ * keyboard navigation (not mouse clicks), so the design stays calm for
+ * pointer users while remaining clearly navigable via Tab + Enter.
+ * Author rule sits late in the cascade so it overrides any earlier
+ * outline:none that was added for mouse-focus aesthetics. */
+:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 3px;
+	border-radius: 4px;
+}
+/* Interactive elements that have their own focus background / border
+ * (form inputs already styled in .calc-input-field) — skip the ring. */
+.calc-input-field input[type="number"]:focus-visible,
+.calc-input-field--select select:focus-visible {
+	outline: none;
+}
+
+/* Incidents */
+.incident {
+	border-top: 1px solid var(--border);
+	padding-top: 1rem;
+	margin-top: 1rem;
+}
+.incident:first-of-type {
+	border-top: none;
+	padding-top: 0;
+	margin-top: 0;
+}
+.incident h3 {
+	margin: 0 0 0.4rem;
+	font-size: 1.05rem;
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	flex-wrap: wrap;
+}
+
+/* ────────────────────────── FAQ card grid
+ * Two-column responsive grid of <details> cards. Each card has a category
+ * label + sequential number above the question, and a circular +/× marker
+ * on the right that rotates to confirm the open state. Open card gets an
+ * accent-tinted border + soft elevation so the eye locks onto it.
+ *
+ * Open animation: <details> has no native height transition (it just
+ * toggles open between hidden / shown). We don't fake one — keeping the
+ * markup semantic and the open state instant is a deliberate trade for
+ * accessibility and zero-JS simplicity. */
+.faq-grid {
+	display: grid;
+	grid-template-columns: repeat(2, 1fr);
+	gap: var(--space-2);
+	margin: var(--space-3) 0 0;
+}
+@media (max-width: 760px) {
+	.faq-grid { grid-template-columns: 1fr; }
+}
+
+.faq-card {
+	background: linear-gradient(180deg, rgba(255, 255, 255, 0.7) 0%, rgba(255, 255, 255, 0.35) 100%);
+	border: 1px solid var(--border);
+	border-radius: 14px;
+	padding: 0;
+	transition: border-color 0.2s ease, box-shadow 0.25s ease, background 0.25s ease, transform 0.2s ease;
+}
+.faq-card:hover {
+	border-color: rgba(16, 179, 134, 0.35);
+	box-shadow: 0 6px 24px rgba(31, 41, 55, 0.04);
+	transform: translateY(-1px);
+}
+.faq-card[open] {
+	background: var(--bg-card);
+	border-color: rgba(16, 179, 134, 0.55);
+	box-shadow: 0 10px 32px rgba(16, 179, 134, 0.08);
+	transform: translateY(-1px);
+}
+
+.faq-card summary {
+	list-style: none;
+	cursor: pointer;
+	padding: var(--space-3) var(--space-3) var(--space-2);
+	display: grid;
+	grid-template-columns: 1fr auto;
+	grid-template-rows: auto auto;
+	gap: 0.65rem 1rem;
+	align-items: start;
+	user-select: none;
+	position: relative;
+}
+.faq-card summary::-webkit-details-marker { display: none; }
+
+.faq-card-meta {
+	grid-column: 1;
+	grid-row: 1;
+	display: inline-flex;
+	align-items: center;
+	gap: 0.7rem;
+	font-size: var(--fs-caption);
+	font-weight: 600;
+	letter-spacing: 0.14em;
+	text-transform: uppercase;
+}
+.faq-card-num {
+	font-variant-numeric: tabular-nums;
+	color: var(--accent);
+	letter-spacing: 0.06em;
+	position: relative;
+	padding-right: 0.7rem;
+}
+.faq-card-num::after {
+	content: "";
+	position: absolute;
+	right: 0;
+	top: 50%;
+	transform: translateY(-50%);
+	width: 1px;
+	height: 0.7rem;
+	background: var(--border);
+}
+.faq-card-category {
+	color: var(--fg-muted);
+}
+
+.faq-card-question {
+	grid-column: 1;
+	grid-row: 2;
+	font-size: 1.0625rem;
+	font-weight: 600;
+	color: var(--fg);
+	line-height: 1.45;
+	letter-spacing: -0.005em;
+}
+.faq-card-marker {
+	grid-column: 2;
+	grid-row: 1 / span 2;
+	align-self: center;
+	width: 1.8rem;
+	height: 1.8rem;
+	border: 1px solid var(--border);
+	border-radius: 50%;
+	position: relative;
+	flex-shrink: 0;
+	transition: background 0.25s ease, border-color 0.2s ease, transform 0.3s ease;
+}
+.faq-card-marker::before,
+.faq-card-marker::after {
+	content: "";
+	position: absolute;
+	background: var(--fg-muted);
+	transition: background 0.2s ease, opacity 0.2s ease;
+}
+.faq-card-marker::before {
+	left: 28%;
+	right: 28%;
+	top: 50%;
+	height: 1.5px;
+	margin-top: -0.75px;
+}
+.faq-card-marker::after {
+	top: 28%;
+	bottom: 28%;
+	left: 50%;
+	width: 1.5px;
+	margin-left: -0.75px;
+}
+.faq-card[open] .faq-card-marker {
+	background: var(--accent);
+	border-color: var(--accent);
+	transform: rotate(180deg);
+}
+.faq-card[open] .faq-card-marker::before,
+.faq-card[open] .faq-card-marker::after {
+	background: #ffffff;
+}
+.faq-card[open] .faq-card-marker::after {
+	opacity: 0;
+}
+
+.faq-card-body {
+	padding: 0 var(--space-3) var(--space-3);
+	color: var(--fg-muted);
+	line-height: 1.7;
+	font-size: var(--fs-body);
+	/* Soft top hairline so the answer reads as a separate beat from the
+	 * question header. Uses linear-gradient with transparent ends to
+	 * avoid hard edges against the rounded card. */
+	border-top: 1px solid transparent;
+	background-image: linear-gradient(to bottom, transparent 0, transparent 0);
+}
+.faq-card[open] .faq-card-body {
+	padding-top: 0.25rem;
+}
+.faq-card-body p { margin: 0; }
+.faq-card-body p + p { margin-top: 0.65rem; }
+.faq-card-body strong { color: var(--fg); font-weight: 600; }
