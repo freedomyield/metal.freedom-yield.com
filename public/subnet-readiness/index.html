@@ -149,11 +149,12 @@
 				<h3>Network-grade infrastructure</h3>
 				<span class="data-tag">honest disclosure</span>
 			</header>
-			<p>Single-VPS deployment on a commercial host. Validator workload and public web are segregated to separate hosts, so a public-web outage does not affect validator uptime. Single-region; no multi-region failover. The recovery model is documented at <a href="/continuity/">/continuity/</a>; it is recovery, not avoidance.</p>
+			<p>Single-VPS deployment on a commercial host. Validator workload and public web are segregated to separate hosts, so a public-web outage does not affect validator uptime. Single-region; no multi-region failover. The recovery model is documented at <a href="/continuity/">/continuity/</a>; it is recovery, not avoidance. The full topology, push direction, and key-separation principles are laid out at <a href="/reference-architecture/">/reference-architecture/</a>.</p>
 			<dl class="data-meta">
 				<dt>Validator workload</dt><dd>Single dedicated VPS</dd>
 				<dt>Public web</dt><dd>Separate VPS, segregated from validator uptime path</dd>
 				<dt>Multi-region failover</dt><dd>Not implemented (recovery model documented instead)</dd>
+				<dt>Topology details</dt><dd><a href="/reference-architecture/">/reference-architecture/</a></dd>
 			</dl>
 		</article>
 

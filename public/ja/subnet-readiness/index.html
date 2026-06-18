@@ -148,11 +148,12 @@
 				<h3>ネットワーク等級インフラ</h3>
 				<span class="data-tag">直視的開示</span>
 			</header>
-			<p>商用ホスト上の単一 VPS 構成。Validator ワークロードと公開 web は別ホストに分離しており、公開 web の障害は validator の uptime に影響しません。シングルリージョン、マルチリージョン failover なし。復旧モデルは <a href="/ja/continuity/">/ja/continuity/</a> に記載 — 障害の「回避」ではなく「復旧」モデルです。</p>
+			<p>商用ホスト上の単一 VPS 構成。Validator ワークロードと公開 web は別ホストに分離しており、公開 web の障害は validator の uptime に影響しません。シングルリージョン、マルチリージョン failover なし。復旧モデルは <a href="/ja/continuity/">/ja/continuity/</a> に記載 — 障害の「回避」ではなく「復旧」モデルです。トポロジ全体・データフロー方向・鍵分離原則は <a href="/ja/reference-architecture/">/ja/reference-architecture/</a> に詳述。</p>
 			<dl class="data-meta">
 				<dt>Validator ワークロード</dt><dd>専用単一 VPS</dd>
 				<dt>公開 web</dt><dd>別 VPS、validator uptime 経路から分離</dd>
 				<dt>マルチリージョン failover</dt><dd>未実装(復旧モデルで代替記載)</dd>
+				<dt>トポロジ詳細</dt><dd><a href="/ja/reference-architecture/">/ja/reference-architecture/</a></dd>
 			</dl>
 		</article>
 

@@ -76,7 +76,7 @@
 
 	<section class="card data-group">
 		<h2>エビデンス索引</h2>
-		<p class="data-group-lead">10 項目。各項目は第三者が直接読める成果物を指しています。</p>
+		<p class="data-group-lead">12 項目。各項目は第三者が直接読める成果物を指しています。</p>
 
 		<article class="data-endpoint">
 			<header class="data-endpoint-head">
@@ -187,6 +187,30 @@
 			<p>現状の運用が「何を持っており、何を持たず、要請があれば何を準備できるか」を 8 軸で率直に開示するスコアカード。計算リソース余剰・鍵保管・KYC ポスチャ・運用カバー・subnet pilot 受入適性等を含みます。</p>
 			<dl class="data-meta">
 				<dt>ページ</dt><dd><a href="/ja/subnet-readiness/">/ja/subnet-readiness/</a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>リファレンスアーキテクチャ</h3>
+				<span class="data-tag">topology</span>
+			</header>
+			<p>2 ホストトポロジ、 forced-command wrapper + allowlist による片方向データフロー、 3 鍵分離(staking / operator identity / push)。 運用判断の背景にある原則と、 ホスト別の runbook を一箇所からたどれます。</p>
+			<dl class="data-meta">
+				<dt>ページ</dt><dd><a href="/ja/reference-architecture/">/ja/reference-architecture/</a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>Cycle 単位 audit packet(準備中)</h3>
+				<span class="data-tag">準備中</span>
+			</header>
+			<p><code>/api/cycle-history.jsonl</code> として JSONL フィードを準備中です。各行が 1 つのクローズ済 cycle で、 <code>/api/uptime-cycles.json</code> と <code>/api/incidents.json</code> を join し、 読者が line-by-line で audit packet を stream 処理できる形式です。 スキーマは事前公開しており <a href="/api/cycle-history.example.jsonl"><code>/api/cycle-history.example.jsonl</code></a> で参照可能。生成スクリプトは公開リポジトリ内 <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/scripts/gen-cycle-history.sh" rel="noopener noreferrer"><code>scripts/gen-cycle-history.sh</code></a>。</p>
+			<dl class="data-meta">
+				<dt>状態</dt><dd>準備中 — schema と生成 script を公開済み、 runtime JSONL は未公開</dd>
+				<dt>スキーマ</dt><dd><code>/api/cycle-history.example.jsonl</code></dd>
+				<dt>予定 feed</dt><dd><code>/api/cycle-history.jsonl</code></dd>
 			</dl>
 		</article>
 
