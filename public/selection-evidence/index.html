@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Selection evidence — Freedom Yield Metal</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="Evaluator-facing evidence index for Freedom Yield as a Metal Blockchain validator. Each claim links to the verifiable artifact backing it.">
+<link rel="canonical" href="https://metal.freedom-yield.com/selection-evidence/">
+<link rel="alternate" hreflang="en" href="https://metal.freedom-yield.com/selection-evidence/">
+<link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/selection-evidence/">
+<link rel="alternate" hreflang="x-default" href="https://metal.freedom-yield.com/selection-evidence/">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#07080c">
+<meta name="color-scheme" content="dark">
+<script defer src="/assets/main.js"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
+<script defer src="/assets/gtag-init.js"></script>
+</head>
+<body>
+<a href="#main" class="skip-link">Skip to main content</a>
+
+<nav class="topnav">
+	<div class="topnav-inner">
+		<a href="/" class="brand">Freedom Yield · Metal</a>
+		<details class="nav-menu">
+			<summary class="nav-toggle" aria-label="Open / close menu">
+				<span class="hamburger-icon" aria-hidden="true"></span>
+			</summary>
+			<div class="nav">
+				<a href="/#status">Status</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">About</button>
+					<div class="nav-dropdown-menu">
+						<a href="/#about">About</a>
+						<a href="/#roadmap">Roadmap</a>
+					</div>
+				</div>
+				<a href="/#delegate" data-ga-event="delegate_cta_click" data-ga-param-position="nav">Delegate</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">Verify</button>
+					<div class="nav-dropdown-menu">
+						<a href="/data/">Open data</a>
+						<a href="/journal/">Cycle journal</a>
+						<a href="/continuity/">Continuity</a>
+						<a href="/incidents/" data-ga-event="nav_click" data-ga-param-target="incidents">Incidents</a>
+						<a href="/selection-evidence/" aria-current="page">Selection evidence</a>
+					</div>
+				</div>
+				<a href="/ja/selection-evidence/" class="nav-lang" data-ga-event="language_switch" data-ga-param-to="ja">JA</a>
+			</div>
+		</details>
+	</div>
+</nav>
+
+<header class="hero hero--simple">
+	<div class="container">
+		<p class="hero-eyebrow">Due-diligence index</p>
+		<h1>Selection evidence</h1>
+		<p class="hero-lead">
+			This page is an evidence index for parties evaluating Freedom Yield as a validator candidate.
+			Each row links to the verifiable artifact backing the claim. The intent is to make internal
+			evaluation cheap by gathering the canonical sources in one place. The page intentionally adds
+			no context, comparison, or argumentation — only the evidence.
+		</p>
+	</div>
+</header>
+
+<main id="main" class="container">
+
+	<section class="card data-group">
+		<h2>Evidence index</h2>
+		<p class="data-group-lead">Nine topics. Each one points at the artifact a third party can read directly.</p>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>Active mainnet validator</h3>
+				<span class="data-tag">on-chain</span>
+			</header>
+			<p>Registered, staked, and producing on Metal Blockchain mainnet.</p>
+			<dl class="data-meta">
+				<dt>NodeID</dt><dd><code>NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v</code></dd>
+				<dt>Explorer</dt><dd><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">explorer.metalblockchain.org</a></dd>
+				<dt>Live state</dt><dd><a href="/api/validator.json"><code>/api/validator.json</code></a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>Uptime history</h3>
+				<span class="data-tag">audit trail</span>
+			</header>
+			<p>Closed-cycle ledger plus the machine-readable history that backs it.</p>
+			<dl class="data-meta">
+				<dt>Ledger</dt><dd><a href="/journal/">/journal/</a> (cycle journal)</dd>
+				<dt>Data</dt><dd><a href="/api/uptime-cycles.json"><code>/api/uptime-cycles.json</code></a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>Incident transparency</h3>
+				<span class="data-tag">audit trail</span>
+			</header>
+			<p>Operator-maintained incident log. An empty list is not a curated list.</p>
+			<dl class="data-meta">
+				<dt>Page</dt><dd><a href="/incidents/">/incidents/</a></dd>
+				<dt>Data</dt><dd><a href="/api/incidents.json"><code>/api/incidents.json</code></a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>Operator continuity</h3>
+				<span class="data-tag">schedule</span>
+			</header>
+			<p>Renewal cadence and the cycle history that documents it. A token-protected iCalendar feed of upcoming renewal events exists and can be shared on request; the public site links to the cycle history below.</p>
+			<dl class="data-meta">
+				<dt>Cycle history</dt><dd><a href="/journal/">/journal/</a></dd>
+				<dt>Continuity model</dt><dd><a href="/continuity/">/continuity/</a></dd>
+				<dt>Renewal calendar</dt><dd>Private iCalendar feed (token URL not published)</dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>Jurisdiction posture</h3>
+				<span class="data-tag">disclosure</span>
+			</header>
+			<p>Operator jurisdiction statement, time-zone coverage, bilingual surface.</p>
+			<dl class="data-meta">
+				<dt>Page</dt><dd><a href="/jurisdiction/">/jurisdiction/</a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>Non-custodial posture + commitments</h3>
+				<span class="data-tag">disclosure</span>
+			</header>
+			<p>Explicit operator commitments and the matching risk disclosure. The two pages are meant to be read together.</p>
+			<dl class="data-meta">
+				<dt>Commitments</dt><dd><a href="/commitments/">/commitments/</a></dd>
+				<dt>Risk disclosure</dt><dd><a href="/risk-disclosure/">/risk-disclosure/</a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>Operational documentation</h3>
+				<span class="data-tag">public repo</span>
+			</header>
+			<p>Constitution, operating model, and runbooks live in the public repository.</p>
+			<dl class="data-meta">
+				<dt>Constitution</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md" rel="noopener noreferrer"><code>docs/CONSTITUTION.md</code></a></dd>
+				<dt>Operating model</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/OPERATING_MODEL.md" rel="noopener noreferrer"><code>docs/OPERATING_MODEL.md</code></a></dd>
+				<dt>Incident response</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/INCIDENT_RESPONSE.md" rel="noopener noreferrer"><code>docs/INCIDENT_RESPONSE.md</code></a></dd>
+				<dt>Key rotation</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md" rel="noopener noreferrer"><code>docs/KEY_ROTATION.md</code></a></dd>
+				<dt>Disaster recovery</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/DISASTER_RECOVERY.md" rel="noopener noreferrer"><code>docs/DISASTER_RECOVERY.md</code></a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>Machine-readable data</h3>
+				<span class="data-tag">JSON</span>
+			</header>
+			<p>The live state file, the evidence manifest, and the full catalog of public endpoints.</p>
+			<dl class="data-meta">
+				<dt>Live validator state</dt><dd><a href="/api/validator.json"><code>/api/validator.json</code></a></dd>
+				<dt>Evidence manifest</dt><dd><a href="/api/evidence.json"><code>/api/evidence.json</code></a></dd>
+				<dt>Full catalog</dt><dd><a href="/data/">/data/</a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>Identity binding (in progress)</h3>
+				<span class="data-tag">in progress</span>
+			</header>
+			<p>A signed identity manifest at <a href="/api/identity.json"><code>/api/identity.json</code></a> is in development. When published, the validator's BLS key will sign the JSON, binding the site, the NodeID, and the operator. Currently labelled "in progress".</p>
+			<dl class="data-meta">
+				<dt>Status</dt><dd>In progress — not yet live</dd>
+				<dt>Target URL</dt><dd><code>/api/identity.json</code></dd>
+			</dl>
+		</article>
+
+	</section>
+
+</main>
+
+<footer class="site-footer">
+	<div class="container">
+		<div class="footer-grid">
+			<div class="footer-brand">
+				<h3>Freedom Yield · Metal</h3>
+				<p>Long-horizon validator on Metal Blockchain. Transparent uptime, public audit trail.</p>
+			</div>
+			<nav class="footer-col" aria-label="Validator">
+				<h4>Validator</h4>
+				<ul>
+					<li><a href="/#status">Status</a></li>
+					<li><a href="/#about">About</a></li>
+					<li><a href="/#track-record">Track record</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Delegation">
+				<h4>Delegation</h4>
+				<ul>
+					<li><a href="/#delegate">Delegate</a></li>
+					<li><a href="/#calculator">Rewards</a></li>
+					<li><a href="/#faq">FAQ</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Network">
+				<h4>Network</h4>
+				<ul>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">Explorer ↗</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Support">
+				<h4>Support</h4>
+				<ul>
+					<li><a href="/data/">Open data</a></li>
+					<li><a href="/journal/">Cycle journal</a></li>
+					<li><a href="/continuity/">Continuity</a></li>
+					<li><a href="/incidents/">Incidents</a></li>
+					<li><a href="/selection-evidence/" aria-current="page">Selection evidence</a></li>
+					<li><a href="mailto:bp@freedom-yield.com">Contact</a></li>
+				</ul>
+			</nav>
+		</div>
+		<hr class="footer-divider">
+		<p class="footer-disclaimer"><strong>Disclaimer:</strong> Freedom Yield is an independent, third-party validator operating on Metal Blockchain. It is not affiliated with, endorsed by, sponsored by, or operated by Metallicus Inc. or the Metal Blockchain Foundation. All trademarks are the property of their respective owners.</p>
+		<div class="footer-bottom">
+			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain</a>.</p>
+			<p>© 2026 Freedom Yield · Metal validator</p>
+		</div>
+	</div>
+</footer>
+</body>
+</html>

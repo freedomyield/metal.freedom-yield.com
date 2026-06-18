@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>選定エビデンス — Freedom Yield Metal</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="Freedom Yield を Metal Blockchain validator 候補として評価する関係者向けのエビデンス索引。各主張は検証可能な成果物にリンクしています。">
+<link rel="canonical" href="https://metal.freedom-yield.com/ja/selection-evidence/">
+<link rel="alternate" hreflang="en" href="https://metal.freedom-yield.com/selection-evidence/">
+<link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/selection-evidence/">
+<link rel="alternate" hreflang="x-default" href="https://metal.freedom-yield.com/selection-evidence/">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#07080c">
+<meta name="color-scheme" content="dark">
+<script defer src="/assets/main.js"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
+<script defer src="/assets/gtag-init.js"></script>
+</head>
+<body>
+<a href="#main" class="skip-link">メイン本文へスキップ</a>
+
+<nav class="topnav">
+	<div class="topnav-inner">
+		<a href="/ja/" class="brand">Freedom Yield · Metal</a>
+		<details class="nav-menu">
+			<summary class="nav-toggle" aria-label="メニュー開閉">
+				<span class="hamburger-icon" aria-hidden="true"></span>
+			</summary>
+			<div class="nav">
+				<a href="/ja/#status">状態</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">概要</button>
+					<div class="nav-dropdown-menu">
+						<a href="/ja/#about">概要</a>
+						<a href="/ja/#roadmap">展望</a>
+					</div>
+				</div>
+				<a href="/ja/#delegate" data-ga-event="delegate_cta_click" data-ga-param-position="nav">委任</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">検証</button>
+					<div class="nav-dropdown-menu">
+						<a href="/ja/data/">公開データ</a>
+						<a href="/ja/journal/">運用日誌</a>
+						<a href="/ja/continuity/">事業継続性</a>
+						<a href="/ja/incidents/" data-ga-event="nav_click" data-ga-param-target="incidents">インシデント</a>
+						<a href="/ja/selection-evidence/" aria-current="page">選定エビデンス</a>
+					</div>
+				</div>
+				<a href="/selection-evidence/" class="nav-lang" data-ga-event="language_switch" data-ga-param-to="en">EN</a>
+			</div>
+		</details>
+	</div>
+</nav>
+
+<header class="hero hero--simple">
+	<div class="container">
+		<p class="hero-eyebrow">デューデリジェンス索引</p>
+		<h1>選定エビデンス</h1>
+		<p class="hero-lead">
+			本ページは、Freedom Yield を validator 候補として評価される関係者向けのエビデンス索引です。
+			各行は主張を裏付ける検証可能な成果物へのリンクで構成されています。
+			関連する一次資料を一箇所に集約することで、内部評価のコストを下げることが目的です。
+			文脈の説明・比較・主張は意図的に加えていません — エビデンスのみを並べます。
+		</p>
+	</div>
+</header>
+
+<main id="main" class="container">
+
+	<section class="card data-group">
+		<h2>エビデンス索引</h2>
+		<p class="data-group-lead">9 項目。各項目は第三者が直接読める成果物を指しています。</p>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>Active mainnet validator</h3>
+				<span class="data-tag">on-chain</span>
+			</header>
+			<p>Metal Blockchain mainnet 上で登録・stake 済みかつ稼働中。</p>
+			<dl class="data-meta">
+				<dt>NodeID</dt><dd><code>NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v</code></dd>
+				<dt>Explorer</dt><dd><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">explorer.metalblockchain.org</a></dd>
+				<dt>ライブ状態</dt><dd><a href="/api/validator.json"><code>/api/validator.json</code></a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>Uptime 履歴</h3>
+				<span class="data-tag">audit trail</span>
+			</header>
+			<p>クローズ済 cycle 単位の台帳と、それを裏付ける機械可読の履歴データ。</p>
+			<dl class="data-meta">
+				<dt>台帳</dt><dd><a href="/ja/journal/">/ja/journal/</a>(運用日誌)</dd>
+				<dt>データ</dt><dd><a href="/api/uptime-cycles.json"><code>/api/uptime-cycles.json</code></a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>インシデント透明性</h3>
+				<span class="data-tag">audit trail</span>
+			</header>
+			<p>運用者が維持しているインシデントログ。空配列は隠している配列ではなく、本当に空という意味です。</p>
+			<dl class="data-meta">
+				<dt>ページ</dt><dd><a href="/ja/incidents/">/ja/incidents/</a></dd>
+				<dt>データ</dt><dd><a href="/api/incidents.json"><code>/api/incidents.json</code></a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>運用継続性</h3>
+				<span class="data-tag">schedule</span>
+			</header>
+			<p>renewal のリズムと、それを記録する cycle 履歴。今後の renewal イベントを配信するトークン付き iCalendar feed が存在し、要請に応じて共有可能です。公開サイト上では下記の cycle 履歴をリンクします。</p>
+			<dl class="data-meta">
+				<dt>Cycle 履歴</dt><dd><a href="/ja/journal/">/ja/journal/</a></dd>
+				<dt>事業継続モデル</dt><dd><a href="/ja/continuity/">/ja/continuity/</a></dd>
+				<dt>renewal calendar</dt><dd>非公開 iCalendar feed(トークン URL は本ページには掲載しません)</dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>管轄に関する開示</h3>
+				<span class="data-tag">disclosure</span>
+			</header>
+			<p>運用者の管轄、タイムゾーンカバー、バイリンガル対応面の開示。</p>
+			<dl class="data-meta">
+				<dt>ページ</dt><dd><a href="/jurisdiction/">/jurisdiction/</a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>非保管型ポスチャと運用コミットメント</h3>
+				<span class="data-tag">disclosure</span>
+			</header>
+			<p>運用者の明示的コミットメントと対応するリスク開示。2 つのページは併読を前提に書かれています。</p>
+			<dl class="data-meta">
+				<dt>コミットメント</dt><dd><a href="/commitments/">/commitments/</a></dd>
+				<dt>リスク開示</dt><dd><a href="/risk-disclosure/">/risk-disclosure/</a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>運用ドキュメント</h3>
+				<span class="data-tag">public repo</span>
+			</header>
+			<p>Constitution・operating model・runbook は公開リポジトリにあります。</p>
+			<dl class="data-meta">
+				<dt>Constitution</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md" rel="noopener noreferrer"><code>docs/CONSTITUTION.md</code></a></dd>
+				<dt>Operating model</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/OPERATING_MODEL.md" rel="noopener noreferrer"><code>docs/OPERATING_MODEL.md</code></a></dd>
+				<dt>Incident response</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/INCIDENT_RESPONSE.md" rel="noopener noreferrer"><code>docs/INCIDENT_RESPONSE.md</code></a></dd>
+				<dt>Key rotation</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md" rel="noopener noreferrer"><code>docs/KEY_ROTATION.md</code></a></dd>
+				<dt>Disaster recovery</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/DISASTER_RECOVERY.md" rel="noopener noreferrer"><code>docs/DISASTER_RECOVERY.md</code></a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>機械可読データ</h3>
+				<span class="data-tag">JSON</span>
+			</header>
+			<p>ライブ状態ファイル、エビデンスマニフェスト、公開エンドポイントの全カタログ。</p>
+			<dl class="data-meta">
+				<dt>ライブ validator 状態</dt><dd><a href="/api/validator.json"><code>/api/validator.json</code></a></dd>
+				<dt>エビデンスマニフェスト</dt><dd><a href="/api/evidence.json"><code>/api/evidence.json</code></a></dd>
+				<dt>全カタログ</dt><dd><a href="/ja/data/">/ja/data/</a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>アイデンティティ署名(進行中)</h3>
+				<span class="data-tag">進行中</span>
+			</header>
+			<p><a href="/api/identity.json"><code>/api/identity.json</code></a> として署名付きアイデンティティマニフェストを準備中です。公開時には validator の BLS 鍵で JSON を署名し、サイト・NodeID・運用者を結びつけます。現状は「進行中」の表示です。</p>
+			<dl class="data-meta">
+				<dt>状態</dt><dd>進行中 — 未公開</dd>
+				<dt>予定 URL</dt><dd><code>/api/identity.json</code></dd>
+			</dl>
+		</article>
+
+	</section>
+
+</main>
+
+<footer class="site-footer">
+	<div class="container">
+		<div class="footer-grid">
+			<div class="footer-brand">
+				<h3>Freedom Yield · Metal</h3>
+				<p>Metal Blockchain の long-horizon validator。透明な uptime 開示、マーケティング無し — ただ灯りを点け続けるだけ。</p>
+			</div>
+			<nav class="footer-col" aria-label="バリデータ">
+				<h4>バリデータ</h4>
+				<ul>
+					<li><a href="/ja/#status">ステータス</a></li>
+					<li><a href="/ja/#about">概要</a></li>
+					<li><a href="/ja/#track-record">実績</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="委任">
+				<h4>委任</h4>
+				<ul>
+					<li><a href="/ja/#delegate">委任する</a></li>
+					<li><a href="/ja/#calculator">報酬計算</a></li>
+					<li><a href="/ja/#faq">FAQ</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="ネットワーク">
+				<h4>ネットワーク</h4>
+				<ul>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">Explorer ↗</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="サポート">
+				<h4>サポート</h4>
+				<ul>
+					<li><a href="/ja/data/">公開データ</a></li>
+					<li><a href="/ja/journal/">運用日誌</a></li>
+					<li><a href="/ja/continuity/">事業継続性</a></li>
+					<li><a href="/ja/incidents/">インシデント</a></li>
+					<li><a href="/ja/selection-evidence/" aria-current="page">選定エビデンス</a></li>
+					<li><a href="mailto:bp@freedom-yield.com">お問い合わせ</a></li>
+				</ul>
+			</nav>
+		</div>
+		<hr class="footer-divider">
+		<p class="footer-disclaimer"><strong>免責事項:</strong> Freedom Yield は Metal Blockchain 上で稼働する独立した第三者バリデータです。Metallicus 社および Metal Blockchain Foundation の関連会社・提携先・出資先・公式運営者ではありません。各商標は各権利者に帰属します。</p>
+		<div class="footer-bottom">
+			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain</a>.</p>
+			<p>© 2026 Freedom Yield · Metal validator</p>
+		</div>
+	</div>
+</footer>
+</body>
+</html>

@@ -42,6 +42,9 @@ dist/
 # api/validator.json は live metalgo から生成する動的データ(scripts/node-info.sh)
 # schema は public/api/validator.example.json を参照
 public/api/validator.json
+# api/evidence.json は validator.json + 静的 config から日次生成(scripts/gen-evidence.sh)
+# schema は public/api/evidence.example.json を参照
+public/api/evidence.json
 # uptime track record — Hetzner で生成 + push、ローカル開発時のみ
 # placeholder を置くことがあるが、コミットはしない(動的データ)
 public/api/uptime-recent.json

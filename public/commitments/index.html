@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operator commitments — Freedom Yield Metal</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="Nine explicit commitments the operator of this Metal Blockchain validator holds itself to — renewal transparency, incident disclosure, non-custodial operation, decommission notice, and more.">
+<link rel="canonical" href="https://metal.freedom-yield.com/commitments/">
+<link rel="alternate" hreflang="en" href="https://metal.freedom-yield.com/commitments/">
+<link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/commitments/">
+<link rel="alternate" hreflang="x-default" href="https://metal.freedom-yield.com/commitments/">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#07080c">
+<meta name="color-scheme" content="dark">
+<script defer src="/assets/main.js"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
+<script defer src="/assets/gtag-init.js"></script>
+</head>
+<body>
+<a href="#main" class="skip-link">Skip to main content</a>
+
+<nav class="topnav">
+	<div class="topnav-inner">
+		<a href="/" class="brand">Freedom Yield · Metal</a>
+		<details class="nav-menu">
+			<summary class="nav-toggle" aria-label="Open / close menu">
+				<span class="hamburger-icon" aria-hidden="true"></span>
+			</summary>
+			<div class="nav">
+				<a href="/#status">Status</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">About</button>
+					<div class="nav-dropdown-menu">
+						<a href="/#about">About</a>
+						<a href="/#roadmap">Roadmap</a>
+					</div>
+				</div>
+				<a href="/#delegate" data-ga-event="delegate_cta_click" data-ga-param-position="nav">Delegate</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">Verify</button>
+					<div class="nav-dropdown-menu">
+						<a href="/data/">Open data</a>
+						<a href="/journal/">Cycle journal</a>
+						<a href="/continuity/">Continuity</a>
+						<a href="/jurisdiction/">Jurisdiction</a>
+						<a href="/incidents/" data-ga-event="nav_click" data-ga-param-target="incidents">Incidents</a>
+						<a href="/commitments/" aria-current="page">Commitments</a>
+						<a href="/risk-disclosure/">Risk disclosure</a>
+						<a href="/selection-evidence/">Selection evidence</a>
+					</div>
+				</div>
+				<a href="/ja/commitments/" class="nav-lang" data-ga-event="language_switch" data-ga-param-to="ja">JA</a>
+			</div>
+		</details>
+	</div>
+</nav>
+
+<header class="hero hero--simple">
+	<div class="container">
+		<p class="hero-eyebrow">What we hold ourselves to</p>
+		<h1>Operator commitments</h1>
+		<p class="hero-lead">
+			Nine explicit commitments — written so that breaking any of them is observable from the outside. These are not
+			aspirational marketing statements; each is a behaviour a third party can audit by reading this site, the on-chain
+			record, and the public repository.
+		</p>
+	</div>
+</header>
+
+<main id="main" class="container">
+
+	<section class="card">
+		<h2>The nine commitments</h2>
+
+		<article class="continuity-scenario">
+			<h3>1. Renewal transparency</h3>
+			<p>Every monthly cycle's <code>AddPermissionlessValidatorTx</code> ID is published with an explorer link on the
+			<a href="/journal/">cycle journal</a>. Each entry includes period start / end, self-stake amount, fee, and the
+			canonical explorer URL — so anyone can reconstruct the full renewal history from the public site without trusting
+			any number rendered here.</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>2. Public incident disclosure</h3>
+			<p>Every SEV-1 / SEV-2 incident is documented on the <a href="/incidents/">incidents page</a> with timeline, root
+			cause, and impact within 24 hours of resolution. The underlying JSON at <a href="/api/incidents.json"><code>/api/incidents.json</code></a>
+			is the source of truth — an empty list means an empty list, not a curated one.</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>3. Non-custodial operation</h3>
+			<p>Delegations remain in delegators' wallets at all times. The operator can never withdraw, transfer, or freeze
+			delegated METAL. The Avalanche-derived P-Chain protocol returns delegated stake to its owner at cycle end
+			regardless of operator action or inaction.</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>4. No inflated infrastructure claims</h3>
+			<p>Production-grade VPS that meets the Metallicus minimum recommendation. No "institutional-ready", "multi-region",
+			"enterprise SLA", or "subnet operator" claims that exceed delivered reality. Current capacity is documented in
+			<a href="/continuity/">continuity</a> and <a href="/risk-disclosure/">risk disclosure</a>.</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>5. Validator health first</h3>
+			<p>When observability, UX polish, or new features would compete with <code>metalgo</code> health for resources,
+			the validator process wins. Documented in <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md">docs/CONSTITUTION.md</a>
+			§2. In practice this means non-essential dashboards are degraded or paused before <code>metalgo</code> is ever
+			constrained.</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>6. Web / validator separation</h3>
+			<p>The validator host and the public web host are independent. A web outage does not affect <code>metalgo</code>
+			uptime; a validator outage does not break the public site. Each side can be observed and recovered without touching
+			the other — see <a href="/continuity/">continuity</a> for the full scenario walkthrough.</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>7. No retail campaign focus</h3>
+			<p>No SEO push, no growth content, no paid acquisition. The audience is institutional readers performing due
+			diligence, not retail delegators chasing yield. This page being <code>noindex</code> is consistent with that —
+			search engines are not the distribution channel.</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>8. Reasonable decommission notice policy</h3>
+			<p>If this operator stops running the validator, a public notice is committed with at least 90 days advance
+			lead time so delegators can rebalance. The notice appears on this site and as a commit in the public repository,
+			both of which are timestamped and externally observable.</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>9. Security-sensitive information is not publicly exposed</h3>
+			<p>Host paths, IP addresses, SSH credentials, BasicAuth hashes, ntfy topics, and similar are classified SECRET
+			under <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md">docs/CONSTITUTION.md</a>
+			§4.1 and never appear in the public repository, site content, issues, or commit messages. Public surfaces show
+			validator state, not the infrastructure that produces it.</p>
+		</article>
+	</section>
+
+	<section class="card">
+		<h2>Reference</h2>
+		<p>The constitutional document these commitments derive from is published at
+		<a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md">docs/CONSTITUTION.md</a>
+		in the public repository. The companion to this page — what the operator does <em>not</em> claim and the limits a
+		reasonable evaluator should know — is the <a href="/risk-disclosure/">risk disclosure</a>.</p>
+	</section>
+
+</main>
+
+<footer class="site-footer">
+	<div class="container">
+		<div class="footer-grid">
+			<div class="footer-brand">
+				<h3>Freedom Yield · Metal</h3>
+				<p>Long-horizon validator on Metal Blockchain. Transparent uptime, public audit trail.</p>
+			</div>
+			<nav class="footer-col" aria-label="Validator">
+				<h4>Validator</h4>
+				<ul>
+					<li><a href="/#status">Status</a></li>
+					<li><a href="/#about">About</a></li>
+					<li><a href="/#track-record">Track record</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Delegation">
+				<h4>Delegation</h4>
+				<ul>
+					<li><a href="/#delegate">Delegate</a></li>
+					<li><a href="/#calculator">Rewards</a></li>
+					<li><a href="/#faq">FAQ</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Network">
+				<h4>Network</h4>
+				<ul>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">Explorer ↗</a></li>
+
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Support">
+				<h4>Support</h4>
+				<ul>
+					<li><a href="/data/">Open data</a></li>
+					<li><a href="/journal/">Cycle journal</a></li>
+					<li><a href="/continuity/">Continuity</a></li>
+					<li><a href="/incidents/">Incidents</a></li>
+					<li><a href="/commitments/" aria-current="page">Commitments</a></li>
+					<li><a href="/risk-disclosure/">Risk disclosure</a></li>
+					<li><a href="mailto:bp@freedom-yield.com">Contact</a></li>
+				</ul>
+			</nav>
+		</div>
+		<hr class="footer-divider">
+		<p class="footer-disclaimer"><strong>Disclaimer:</strong> Freedom Yield is an independent, third-party validator operating on Metal Blockchain. It is not affiliated with, endorsed by, sponsored by, or operated by Metallicus Inc. or the Metal Blockchain Foundation. All trademarks are the property of their respective owners.</p>
+		<div class="footer-bottom">
+			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain</a>.</p>
+			<p>© 2026 Freedom Yield · Metal validator</p>
+		</div>
+	</div>
+</footer>
+</body>
+</html>

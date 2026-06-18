@@ -45,7 +45,11 @@
 						<a href="/ja/data/" aria-current="page">公開データ</a>
 						<a href="/ja/journal/">運用日誌</a>
 						<a href="/ja/continuity/">事業継続性</a>
+						<a href="/ja/jurisdiction/">日本拠点姿勢</a>
 						<a href="/ja/incidents/" data-ga-event="nav_click" data-ga-param-target="incidents">インシデント</a>
+						<a href="/ja/commitments/">Commitment</a>
+						<a href="/ja/risk-disclosure/">リスク開示</a>
+						<a href="/ja/selection-evidence/">選定エビデンス</a>
 					</div>
 				</div>
 				<a href="/data/" class="nav-lang" data-ga-event="language_switch" data-ga-param-to="en">EN</a>
@@ -85,6 +89,23 @@
 			<details class="data-example">
 				<summary>リクエスト例</summary>
 				<pre><code>curl -s https://metal.freedom-yield.com/api/validator.json | jq</code></pre>
+			</details>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>evidence.json</h3>
+				<span class="data-tag">GET · JSON</span>
+			</header>
+			<p>機械可読な evidence manifest — ライブの validator state、プロジェクトの static な commitments、公開ページ一覧を 1 つの JSON にまとめたもの。機関投資家・評価者側の自動 due diligence ツールから一発で読み取れるよう設計しています。</p>
+			<dl class="data-meta">
+				<dt>URL</dt><dd><a href="/api/evidence.json"><code>/api/evidence.json</code></a></dd>
+				<dt>更新</dt><dd>毎日(<code>scripts/gen-evidence.sh</code> が <code>validator.json</code> + 静的 config から書き出し)</dd>
+				<dt>スキーマ</dt><dd>ファイル先頭の <code>_comment</code> に manifest 構造を記載</dd>
+			</dl>
+			<details class="data-example">
+				<summary>リクエスト例</summary>
+				<pre><code>curl -s https://metal.freedom-yield.com/api/evidence.json | jq</code></pre>
 			</details>
 		</article>
 
@@ -411,6 +432,7 @@ curl -s "https://metal.freedom-yield.com/api/peers-history/peers-${YDAY}.json.gz
 					<li><a href="/ja/data/" aria-current="page">公開データ</a></li>
 					<li><a href="/ja/journal/">運用日誌</a></li>
 					<li><a href="/ja/continuity/">事業継続性</a></li>
+					<li><a href="/ja/jurisdiction/">日本拠点姿勢</a></li>
 					<li><a href="/ja/incidents/">インシデント</a></li>
 					<li><a href="/ja/#acknowledgments">謝辞</a></li>
 					<li><a href="mailto:bp@freedom-yield.com">お問い合わせ</a></li>

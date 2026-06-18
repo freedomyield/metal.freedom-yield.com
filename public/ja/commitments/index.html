@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>運用者の commitment — Freedom Yield Metal</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="Metal Blockchain validator 運用者が自らに課す 9 つの明示的 commitment — 再登録の透明性、incident 開示、non-custodial 運用、廃止予告、その他。">
+<link rel="canonical" href="https://metal.freedom-yield.com/ja/commitments/">
+<link rel="alternate" hreflang="en" href="https://metal.freedom-yield.com/commitments/">
+<link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/commitments/">
+<link rel="alternate" hreflang="x-default" href="https://metal.freedom-yield.com/commitments/">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#07080c">
+<meta name="color-scheme" content="dark">
+<script defer src="/assets/main.js"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
+<script defer src="/assets/gtag-init.js"></script>
+</head>
+<body>
+<a href="#main" class="skip-link">メイン本文へスキップ</a>
+
+<nav class="topnav">
+	<div class="topnav-inner">
+		<a href="/ja/" class="brand">Freedom Yield · Metal</a>
+		<details class="nav-menu">
+			<summary class="nav-toggle" aria-label="メニュー開閉">
+				<span class="hamburger-icon" aria-hidden="true"></span>
+			</summary>
+			<div class="nav">
+				<a href="/ja/#status">状態</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">概要</button>
+					<div class="nav-dropdown-menu">
+						<a href="/ja/#about">概要</a>
+						<a href="/ja/#roadmap">展望</a>
+					</div>
+				</div>
+				<a href="/ja/#delegate" data-ga-event="delegate_cta_click" data-ga-param-position="nav">委任</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">検証</button>
+					<div class="nav-dropdown-menu">
+						<a href="/ja/data/">公開データ</a>
+						<a href="/ja/journal/">運用日誌</a>
+						<a href="/ja/continuity/">事業継続性</a>
+						<a href="/ja/jurisdiction/">日本拠点姿勢</a>
+						<a href="/ja/incidents/" data-ga-event="nav_click" data-ga-param-target="incidents">インシデント</a>
+						<a href="/ja/commitments/" aria-current="page">Commitment</a>
+						<a href="/ja/risk-disclosure/">リスク開示</a>
+						<a href="/ja/selection-evidence/">選定エビデンス</a>
+					</div>
+				</div>
+				<a href="/commitments/" class="nav-lang" data-ga-event="language_switch" data-ga-param-to="en">EN</a>
+			</div>
+		</details>
+	</div>
+</nav>
+
+<header class="hero hero--simple">
+	<div class="container">
+		<p class="hero-eyebrow">運用者が自らに課すもの</p>
+		<h1>運用者の commitment</h1>
+		<p class="hero-lead">
+			9 つの明示的な commitment — いずれも破った場合、外部から観測可能な形で書かれている。願望としての marketing 文ではなく、
+			本サイト・on-chain の記録・公開リポジトリを読めば第三者が監査できる behaviour として記述する。
+		</p>
+	</div>
+</header>
+
+<main id="main" class="container">
+
+	<section class="card">
+		<h2>9 つの commitment</h2>
+
+		<article class="continuity-scenario">
+			<h3>1. 再登録の透明性</h3>
+			<p>毎月の cycle 毎に発行される <code>AddPermissionlessValidatorTx</code> の ID は、explorer link 付きで
+			<a href="/ja/journal/">運用日誌</a> に公開する。各 entry には期間 start / end、self-stake 額、手数料、canonical な
+			explorer URL を含む。これにより、本サイト上の表示値を信用せずとも、第三者が公開情報のみから再登録の全履歴を再構成できる。</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>2. インシデントの公開開示</h3>
+			<p>全ての SEV-1 / SEV-2 incident は、解決から 24 時間以内に <a href="/ja/incidents/">incident ページ</a> に
+			timeline / root cause / impact を記載する。実体は <a href="/api/incidents.json"><code>/api/incidents.json</code></a>
+			の JSON。empty list は「隠した list」ではなく、文字通り該当 event がないことを意味する。</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>3. Non-custodial 運用</h3>
+			<p>委任 stake は常に委任者の wallet に残る。運用者が委任 METAL を引き出す・移動する・凍結することはいかなる場面でも不可能。
+			Avalanche 派生の P-Chain protocol は、運用者の action 有無に関わらず cycle 終了時に委任 stake を所有者へ返却する。</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>4. インフラについて誇張しない</h3>
+			<p>Metallicus 推奨 minimum spec を満たす production-grade VPS で稼働する。実体を超える「institutional-ready」
+			「multi-region」「enterprise SLA」「subnet operator」等の主張はしない。現在の capacity は <a href="/ja/continuity/">事業継続性</a>
+			と <a href="/ja/risk-disclosure/">リスク開示</a> に文書化する。</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>5. validator 健全性を最優先</h3>
+			<p>観測機能 / UX 改善 / 新機能と <code>metalgo</code> の健全性が resource 上で競合する場合、validator プロセスを優先する。
+			<a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md">docs/CONSTITUTION.md</a>
+			§2 に明文化。実運用上は、<code>metalgo</code> を制約する前に補助的な dashboard を degrade / 一時停止する。</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>6. Web と validator の分離</h3>
+			<p>validator ホストと public web ホストは独立。web 障害は <code>metalgo</code> uptime に影響せず、validator 障害は
+			public site を壊さない。両側はそれぞれ独立に観測・復旧でき、片方を触らずにもう片方を扱える — シナリオ別の動作は
+			<a href="/ja/continuity/">事業継続性</a> 参照。</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>7. 個人向け marketing をしない</h3>
+			<p>SEO push / growth content / 有料獲得は行わない。読者層は due diligence を行う institutional reader であり、利回りを
+			追う個人委任者ではない。本ページが <code>noindex</code> なのは、検索エンジンが配信チャネルではないという方針と整合する。</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>8. 廃止時の合理的事前予告</h3>
+			<p>本運用者が validator 運営を停止する場合、委任者が再配分できるよう少なくとも 90 日前に公開予告を commit する。
+			予告は本サイトおよび public repository への commit として現れ、いずれも timestamp 付きで外部から観測可能である。</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>9. セキュリティ機微情報を公開しない</h3>
+			<p>ホストの path、IP、SSH credential、BasicAuth hash、ntfy topic 等は <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md">docs/CONSTITUTION.md</a>
+			§4.1 で SECRET 分類とし、public リポジトリ / サイトコンテンツ / issue / commit message に一切出さない。public surface に
+			現れるのは validator の state であって、それを生む infrastructure ではない。</p>
+		</article>
+	</section>
+
+	<section class="card">
+		<h2>参照</h2>
+		<p>これらの commitment の根拠となる憲章相当の文書は public repository の
+		<a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md">docs/CONSTITUTION.md</a>
+		にある。本ページと対になる文書 — 運用者が <em>主張しない</em> こと、合理的評価者が知るべき limit — は
+		<a href="/ja/risk-disclosure/">リスク開示</a> である。</p>
+	</section>
+
+</main>
+
+<footer class="site-footer">
+	<div class="container">
+		<div class="footer-grid">
+			<div class="footer-brand">
+				<h3>Freedom Yield · Metal</h3>
+				<p>Metal Blockchain の long-horizon validator。透明な uptime 開示、マーケティング無し — ただ灯りを点け続けるだけ。</p>
+			</div>
+			<nav class="footer-col" aria-label="バリデータ">
+				<h4>バリデータ</h4>
+				<ul>
+					<li><a href="/ja/#status">ステータス</a></li>
+					<li><a href="/ja/#about">概要</a></li>
+					<li><a href="/ja/#track-record">実績</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="委任">
+				<h4>委任</h4>
+				<ul>
+					<li><a href="/ja/#delegate">委任する</a></li>
+					<li><a href="/ja/#calculator">報酬計算</a></li>
+					<li><a href="/ja/#faq">FAQ</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="ネットワーク">
+				<h4>ネットワーク</h4>
+				<ul>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">Explorer ↗</a></li>
+
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="サポート">
+				<h4>サポート</h4>
+				<ul>
+					<li><a href="/ja/data/">公開データ</a></li>
+					<li><a href="/ja/journal/">運用日誌</a></li>
+					<li><a href="/ja/continuity/">事業継続性</a></li>
+					<li><a href="/ja/jurisdiction/">日本拠点姿勢</a></li>
+					<li><a href="/ja/incidents/">インシデント</a></li>
+					<li><a href="/ja/commitments/" aria-current="page">Commitment</a></li>
+					<li><a href="/ja/risk-disclosure/">リスク開示</a></li>
+					<li><a href="mailto:bp@freedom-yield.com">お問い合わせ</a></li>
+				</ul>
+			</nav>
+		</div>
+		<hr class="footer-divider">
+		<p class="footer-disclaimer"><strong>免責事項:</strong> Freedom Yield は Metal Blockchain 上で稼働する独立した第三者バリデータです。Metallicus 社および Metal Blockchain Foundation の関連会社・提携先・出資先・公式運営者ではありません。各商標は各権利者に帰属します。</p>
+		<div class="footer-bottom">
+			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain</a>.</p>
+			<p>© 2026 Freedom Yield · Metal validator</p>
+		</div>
+	</div>
+</footer>
+</body>
+</html>

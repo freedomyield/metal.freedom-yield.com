@@ -28,6 +28,11 @@ Pure chain-level operations. Point them at your local `metalgo` HTTP API and you
 **Env:** `METALGO_API` (default `http://localhost:9650`), `OWN_NODE_ID` (auto-detected via `info.getNodeID` if unset).
 **Cron:** every 5 minutes.
 
+### `scripts/gen-evidence.sh`
+**Purpose:** Build a machine-readable evidence manifest (`public/api/evidence.json`) for institutional readers. Combines live state from `validator.json` with static project commitments and public-page URLs into a single self-describing JSON.
+**Dependencies:** `jq`. Reads `public/api/validator.json`.
+**Cron:** daily.
+
 ### `scripts/peer-validators.sh`
 **Purpose:** Snapshot the full Metal validator set from your local `metalgo`'s P-Chain RPC into `public/api/peers.json`. Includes per-validator rows + network summary + operator clusters (NodeIDs sharing the same reward owner).
 **Dependencies:** `curl`, `jq`.
