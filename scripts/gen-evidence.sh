@@ -135,7 +135,12 @@ jq -n \
 			commitments: "https://metal.freedom-yield.com/commitments/",
 			risk_disclosure: "https://metal.freedom-yield.com/risk-disclosure/",
 			jurisdiction: "https://metal.freedom-yield.com/jurisdiction/",
+			continuity: "https://metal.freedom-yield.com/continuity/",
+			network: "https://metal.freedom-yield.com/network/",
 			selection_evidence: "https://metal.freedom-yield.com/selection-evidence/",
+			subnet_readiness: "https://metal.freedom-yield.com/subnet-readiness/",
+			reference_architecture: "https://metal.freedom-yield.com/reference-architecture/",
+			pledge: "https://metal.freedom-yield.com/pledge/",
 			data_catalog: "https://metal.freedom-yield.com/data/"
 		},
 		operator_commitments: {
