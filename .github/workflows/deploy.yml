@@ -158,6 +158,7 @@ jobs:
             --exclude='public/api/peers-gini.json' \
             --exclude='public/api/peers-gini-history.jsonl' \
             --exclude='public/api/peers-history-index.json' \
+            --exclude='public/api/cycle-history.jsonl' \
             --exclude='public/calendar/' \
             ./ "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/"
 

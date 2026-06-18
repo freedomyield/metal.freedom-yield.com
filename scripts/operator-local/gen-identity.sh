@@ -13,7 +13,7 @@
 #
 # What this helper does:
 #   1. Composes identity.json from a pinned schema (matches public/api/identity.example.json).
-#   2. Validates JSON with `jq -e empty`.
+#   2. Validates JSON with `jq empty`.
 #   3. Signs with `ssh-keygen -Y sign` using namespace freedom-yield/validator-identity.
 #   4. Self-verifies with `ssh-keygen -Y verify` before publishing.
 #   5. Atomically places identity.json and identity.json.sig in public/api/.
@@ -176,8 +176,10 @@ jq -n \
 		generated_at: $generated_at
 	}' > "${TMP_JSON}"
 
-# Validate the JSON we just wrote.
-jq -e empty "${TMP_JSON}" >/dev/null
+# Validate the JSON we just wrote. (`jq empty` exits 0 on valid parse, non-zero
+# on parse error. Do NOT use `jq -e empty` — the `empty` filter produces no
+# output, and `-e` reads that as "no result" and returns exit code 4.)
+jq empty "${TMP_JSON}" >/dev/null
 
 # ---- 5. Sign with ssh-keygen -Y sign. ---------------------------------------
 
