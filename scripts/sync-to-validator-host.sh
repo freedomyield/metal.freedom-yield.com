@@ -15,7 +15,10 @@
 #                   hardcoded so the repo can stay public-safe)
 #   VALIDATOR_HOST_KEY   — SSH private key (default: ~/.ssh/<your_validator_host_key>)
 #   VALIDATOR_HOST_USER  — SSH user (default: root)
-#   REMOTE_PATH   — target directory (default: ${REPO_BASE:-/path/to/your/repo}/scripts/)
+#   REMOTE_PATH   — target directory on the validator host
+#                   (default: /home/deploy/metal.freedom-yield.com/scripts/)
+#                   The script refuses to run if REMOTE_PATH looks like a
+#                   local Mac path or a placeholder; see the guard below.
 #
 # Behaviour:
 #   - rsync only the scripts/ directory (not public/, not caddy/, not docker-compose/*).
@@ -30,7 +33,20 @@ REPO_BASE="${REPO_BASE:-$(cd "$(dirname "$0")/.." && pwd)}"
 : "${VALIDATOR_HOST:?VALIDATOR_HOST env var is required (e.g. VALIDATOR_HOST=203.0.113.11 ./scripts/sync-to-validator-host.sh)}"
 : "${VALIDATOR_HOST_KEY:=$HOME/.ssh/<your_validator_host_key>}"
 : "${VALIDATOR_HOST_USER:=root}"
-: "${REMOTE_PATH:=${REPO_BASE:-/path/to/your/repo}/scripts/}"
+: "${REMOTE_PATH:=/home/deploy/metal.freedom-yield.com/scripts/}"
+
+# Refuse if REMOTE_PATH looks like a Mac local path or a placeholder.
+# This guards against the previous default chain that resolved REMOTE_PATH
+# to "${REPO_BASE}/scripts/" — REPO_BASE always auto-resolves to the local
+# repo root, so the old default tried to mkdir Mac paths on the remote.
+case "${REMOTE_PATH}" in
+  /path/to/your/repo/*|"${HOME}"/*|/Users/*)
+    echo "ERROR: REMOTE_PATH looks like a placeholder or local Mac path: ${REMOTE_PATH}" >&2
+    echo "       Expected a path on the validator host, e.g." >&2
+    echo "       /home/deploy/metal.freedom-yield.com/scripts/" >&2
+    exit 64
+    ;;
+esac
 
 [ -f "$VALIDATOR_HOST_KEY" ] || { echo "ERROR: SSH key not found: $VALIDATOR_HOST_KEY" >&2; exit 1; }
 
