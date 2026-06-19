@@ -49,3 +49,12 @@ A clean run prints `OK` and nothing else.
   3 Merkle logic without touching the real operator identity key (which
   is still HOLD pending Task #25 / D11 Phase 3 and Task #28 cron auto-
   fire gates).
+
+## Phase 5 runbook
+
+The end-to-end procedure for generating the real operator identity
+key, signing the live `identity.json`, and publishing the three Phase 5
+surfaces is in [`docs/OPERATOR_IDENTITY_SETUP.md`](../../docs/OPERATOR_IDENTITY_SETUP.md).
+That runbook covers prerequisites (including the Task #28 cron auto-fire
+gate), command-by-command execution, live verification, rollback, and
+the Phase 5 → Phase 6 hand-off.

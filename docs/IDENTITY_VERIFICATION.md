@@ -2,6 +2,8 @@
 
 This document describes how to verify the operator identity manifest published by Freedom Yield Metal.
 
+> Companion runbook for the **operator side** (key generation, signing, publication, rollback) is in [`OPERATOR_IDENTITY_SETUP.md`](./OPERATOR_IDENTITY_SETUP.md). This document covers the **verifier side**.
+
 ## Key model (read first)
 
 The identity manifest is signed with a **dedicated ed25519 operator identity key**. Specifically:
