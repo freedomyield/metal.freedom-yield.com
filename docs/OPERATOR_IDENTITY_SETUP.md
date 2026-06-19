@@ -1,5 +1,10 @@
 # Operator identity key — setup runbook (Phase 5)
 
+> At execution time, prefer the compact one-page action list:
+> [`PHASE5_CHECKLIST.md`](./PHASE5_CHECKLIST.md). This document is the
+> teaching reference — read it once for context, then run from the
+> checklist on the day.
+
 This is the operator-side runbook for Phase 5 of the
 [`project_merkle_dag_identity_anchor_design`](./IDENTITY_VERIFICATION.md)
 flow. It walks through generating the dedicated operator identity key

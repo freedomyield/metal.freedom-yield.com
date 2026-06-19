@@ -55,6 +55,11 @@ A clean run prints `OK` and nothing else.
 The end-to-end procedure for generating the real operator identity
 key, signing the live `identity.json`, and publishing the three Phase 5
 surfaces is in [`docs/OPERATOR_IDENTITY_SETUP.md`](../../docs/OPERATOR_IDENTITY_SETUP.md).
-That runbook covers prerequisites (including the Task #28 cron auto-fire
-gate), command-by-command execution, live verification, rollback, and
-the Phase 5 → Phase 6 hand-off.
+That runbook is the teaching reference: read it once for context.
+
+At execution time, run from the compact one-page checklist instead:
+[`docs/PHASE5_CHECKLIST.md`](../../docs/PHASE5_CHECKLIST.md). It carries
+the cron-stability gate checks (sections A1-A3), command-by-command
+copy-paste blocks, the password-manager metadata template, the
+synthetic dry-run, live verification, rollback, and the symptom-keyed
+failure decision tree.
