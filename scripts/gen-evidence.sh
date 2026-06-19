@@ -149,6 +149,20 @@ jq -n \
 			decommission_notice_days: 90,
 			incident_disclosure_sla_hours: 24
 		},
+		in_preparation_artifacts: {
+			identity_manifest: {
+				planned_url: "https://metal.freedom-yield.com/api/identity.json",
+				planned_signature_url: "https://metal.freedom-yield.com/api/identity.json.sig",
+				planned_pubkey_url: "https://metal.freedom-yield.com/.well-known/operator-identity.pub",
+				schema_url: "https://metal.freedom-yield.com/api/identity.example.json",
+				format_guide_url: "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md"
+			},
+			cycle_history_jsonl: {
+				planned_url: "https://metal.freedom-yield.com/api/cycle-history.jsonl",
+				schema_url: "https://metal.freedom-yield.com/api/cycle-history.example.jsonl",
+				format_guide_url: "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CYCLE_HISTORY.md"
+			}
+		},
 		explorer_url: "https://explorer.metalblockchain.org/",
 		generated_at: $generated_at,
 		validator_state_observed_at: (if $observed_at == "" then null else $observed_at end),

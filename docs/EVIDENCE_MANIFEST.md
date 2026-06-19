@@ -20,6 +20,7 @@ Live. The runtime file is generated daily on the validator host by `scripts/gen-
 | `delegation_fee_percent` | number | snapshot from live `validator.json` |
 | `public_pages` | object | map of stable public-page slugs to their canonical URLs (see below) |
 | `operator_commitments` | object | the same unilateral commitments listed at `/commitments/` |
+| `in_preparation_artifacts` | object | map of slugs to artefacts that are not yet live but whose schema is published — see below |
 | `explorer_url` | string | upstream explorer entry point |
 | `generated_at` | ISO 8601 UTC | when the manifest was written |
 | `validator_state_observed_at` | ISO 8601 UTC | when the underlying `validator.json` was last refreshed |
@@ -42,6 +43,22 @@ The `public_pages` object lists the discovery surface for an automated reviewer.
 - `data_catalog`
 
 A consumer should treat `public_pages` as the authoritative discovery list: any new public page added to the operator's surface will appear here in the same daily cadence.
+
+## In-preparation artifacts
+
+The `in_preparation_artifacts` object surfaces artefacts whose **schema is published** but whose **runtime URL is not yet live**. It exists so an automated reviewer can discover what is coming without having to read prose anywhere. Each entry carries:
+
+- `planned_url` — where the live artefact will be served.
+- `schema_url` — the live schema preview (always reachable today).
+- `format_guide_url` — the docs companion explaining the schema and intended consumption.
+- (where applicable) `planned_signature_url`, `planned_pubkey_url` — for artefacts that come with detached signatures.
+
+Current entries:
+
+- `identity_manifest` — the dedicated-ed25519-signed identity binding documented at `docs/IDENTITY_VERIFICATION.md`.
+- `cycle_history_jsonl` — the cycle-by-cycle audit packet documented at `docs/CYCLE_HISTORY.md`.
+
+When an in-preparation artefact goes live, its entry moves out of `in_preparation_artifacts` and (for page-like artefacts) into `public_pages`. The `_comment` field is updated to call out the change so a diffing consumer sees the migration explicitly.
 
 ## How it is generated
 
