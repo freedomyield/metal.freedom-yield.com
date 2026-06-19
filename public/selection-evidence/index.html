@@ -171,11 +171,13 @@
 				<h3>Machine-readable data</h3>
 				<span class="data-tag">JSON</span>
 			</header>
-			<p>The live state file, the evidence manifest, and the full catalog of public endpoints.</p>
+			<p>The live state file, the evidence manifest, the full catalog of public endpoints, and formal JSON Schemas for each runtime contract.</p>
 			<dl class="data-meta">
 				<dt>Live validator state</dt><dd><a href="/api/validator.json"><code>/api/validator.json</code></a></dd>
 				<dt>Evidence manifest</dt><dd><a href="/api/evidence.json"><code>/api/evidence.json</code></a></dd>
 				<dt>Manifest format guide</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/EVIDENCE_MANIFEST.md" rel="noopener noreferrer"><code>docs/EVIDENCE_MANIFEST.md</code></a></dd>
+				<dt>Formal contracts (live)</dt><dd><a href="/api/evidence.schema.v1.json"><code>/api/evidence.schema.v1.json</code></a> · <a href="/api/validator.schema.v1.json"><code>/api/validator.schema.v1.json</code></a> · <a href="/api/identity.schema.v1.json"><code>/api/identity.schema.v1.json</code></a> · <a href="/api/cycle-history.schema.v1.json"><code>/api/cycle-history.schema.v1.json</code></a></dd>
+				<dt>Schema versioning</dt><dd>v1 contracts are stable within-version. Breaking changes are published to a new <code>*.schema.v2.json</code> URL; v1 remains reachable for at least 18 months after v2 publication.</dd>
 				<dt>Full catalog</dt><dd><a href="/data/">/data/</a></dd>
 			</dl>
 		</article>
@@ -244,12 +246,19 @@
 				<h3>Identity binding (in preparation)</h3>
 				<span class="data-tag">in preparation</span>
 			</header>
-			<p>A signed identity manifest is being prepared. It will use a dedicated operator identity key (ed25519), independent of the validator's <code>staker.key</code> and BLS <code>signer.key</code>. Verification will use OpenSSH signatures with the namespace <code>freedom-yield/validator-identity</code>. The validator's signing keys will not be used for this process. The schema is published in advance at <a href="/api/identity.example.json"><code>/api/identity.example.json</code></a>; the verification procedure is documented in <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer"><code>docs/IDENTITY_VERIFICATION.md</code></a>.</p>
+			<p>A signed identity manifest is being prepared. It uses a dedicated operator identity key (ed25519), independent of the validator's <code>staker.key</code> and BLS <code>signer.key</code>. Verification uses OpenSSH signatures with namespace <code>freedom-yield/validator-identity</code>. The validator's signing keys will not be used for this process.</p>
+			<p>The design is a four-layer Merkle DAG anchor. The on-chain <code>AddPermissionlessValidatorTx</code> memo at the next renewal cycle will embed the SHA-256 of the published <code>.pub</code> file bytes; that fingerprint anchors the signed <code>identity.json</code> to the validator's NodeID. The manifest itself carries an <code>artifact_manifest</code> map (each <code>/api/</code> leaf URL paired with its content SHA-256 and, where applicable, its formal schema URL and schema SHA-256) and an <code>artifact_root</code> field that is the binary SHA-256 Merkle root over those leaves in alphabetical key order. A consumer can fetch the manifest, recompute the root from the live leaves, and verify the whole bound set against the operator signature in one pass.</p>
+			<p>The formal contract for this manifest is live at <a href="/api/identity.schema.v1.json"><code>/api/identity.schema.v1.json</code></a>; a worked-out example matching that shape is at <a href="/api/identity.example.json"><code>/api/identity.example.json</code></a>. The seven-step end-to-end verification recipe (chain memo → fingerprint match → signature → leaf hashes → recomputed Merkle root → schema validation) is in <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer"><code>docs/IDENTITY_VERIFICATION.md</code></a>. The operator-side setup runbook is in <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/OPERATOR_IDENTITY_SETUP.md" rel="noopener noreferrer"><code>docs/OPERATOR_IDENTITY_SETUP.md</code></a>.</p>
 			<dl class="data-meta">
-				<dt>Status</dt><dd>In preparation — schema and verification docs published; manifest not yet live</dd>
-				<dt>Schema</dt><dd><code>/api/identity.example.json</code></dd>
+				<dt>Status</dt><dd>In preparation — formal schema, verification recipe, operator runbook, and Merkle-DAG generator all live; runtime <code>identity.json</code> publication gated on internal cron-stability checkpoint</dd>
+				<dt>Formal schema (live)</dt><dd><a href="/api/identity.schema.v1.json"><code>/api/identity.schema.v1.json</code></a></dd>
+				<dt>Worked example</dt><dd><a href="/api/identity.example.json"><code>/api/identity.example.json</code></a></dd>
+				<dt>Verifier procedure</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer"><code>docs/IDENTITY_VERIFICATION.md</code></a> (seven-step recipe)</dd>
+				<dt>Operator runbook</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/OPERATOR_IDENTITY_SETUP.md" rel="noopener noreferrer"><code>docs/OPERATOR_IDENTITY_SETUP.md</code></a></dd>
+				<dt>Generator script</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/scripts/operator-local/gen-identity.sh" rel="noopener noreferrer"><code>scripts/operator-local/gen-identity.sh</code></a></dd>
 				<dt>Planned manifest</dt><dd><code>/api/identity.json</code></dd>
 				<dt>Planned signature</dt><dd><code>/api/identity.json.sig</code></dd>
+				<dt>Planned pubkey</dt><dd><code>/.well-known/operator-identity.pub</code></dd>
 				<dt>Machine-readable discovery</dt><dd><a href="/api/evidence.json"><code>/api/evidence.json</code></a> → <code>.in_preparation_artifacts.identity_manifest</code></dd>
 			</dl>
 		</article>
