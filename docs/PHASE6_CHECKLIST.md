@@ -65,9 +65,15 @@ can read it during the wallet UI step (do not type it from memory).
 
 Cycle 2 ends at this moment. Within roughly the next 5 minutes, the
 operator composes the cycle 3 `AddPermissionlessValidatorTx` from the
-existing wallet (Wallet 2 — Metal Wallet web). See
-[`reference_metal_wallet_web_ui`](../README.md) memory note for the
-form layout reminder.
+existing wallet (Wallet 2 — Metal Wallet web). Quick reminders about
+the Add Validator form layout (verified against the live UI):
+
+- **BLS Proof of Possession** is split into two separate fields:
+  `publicKey` and `signature`. Paste each into its matching field.
+- **Start Date** has no input — it is auto-set to submission time +
+  5 minutes.
+- **End Date** is a date picker; set it for the next renewal cycle's
+  boundary using the renewal calendar.
 
 ```text
 B1. Open Metal Wallet web → Add Validator.
