@@ -1,3 +1,160 @@
-# Current crawl policy.
+# Current crawl policy: closed.
+#
+# This site is published for institutional readers who arrive at a specific
+# URL — not for search-engine discovery. Indexing is suppressed at three
+# layers (defense in depth):
+#   1. <meta name="robots" content="noindex, nofollow"> on every HTML page
+#   2. X-Robots-Tag: noindex, nofollow, noarchive, nosnippet on every response
+#   3. robots.txt Disallow for the wildcard and for every major
+#      search / AI crawler we are aware of (this file)
+#
+# The explicit per-bot Disallow lines exist because Cloudflare may inject an
+# "Allow: /" against User-agent: * higher up in the file. Specific User-agent
+# rules take precedence over the wildcard per the robots.txt specification,
+# so the per-bot entries make our intent unambiguous regardless of any CDN
+# managed-content injection.
+#
+# If the operator decides to open the site to search engines (e.g., after a
+# Metallicus public announcement), the steps are: remove or flip this file,
+# remove the X-Robots-Tag in caddy/Caddyfile, and update each page's
+# meta robots tag. Until that decision is made, all three layers stay on.
+
+# ---- Major general-purpose search crawlers ---------------------------------
+User-agent: Googlebot
+Disallow: /
+
+User-agent: Googlebot-Image
+Disallow: /
+
+User-agent: Googlebot-News
+Disallow: /
+
+User-agent: Googlebot-Video
+Disallow: /
+
+User-agent: Bingbot
+Disallow: /
+
+User-agent: Slurp
+Disallow: /
+
+User-agent: DuckDuckBot
+Disallow: /
+
+User-agent: Baiduspider
+Disallow: /
+
+User-agent: YandexBot
+Disallow: /
+
+User-agent: Sogou
+Disallow: /
+
+User-agent: facebookexternalhit
+Disallow: /
+
+User-agent: Twitterbot
+Disallow: /
+
+User-agent: LinkedInBot
+Disallow: /
+
+# ---- AI training / retrieval crawlers --------------------------------------
+User-agent: GPTBot
+Disallow: /
+
+User-agent: ChatGPT-User
+Disallow: /
+
+User-agent: OAI-SearchBot
+Disallow: /
+
+User-agent: ClaudeBot
+Disallow: /
+
+User-agent: Claude-Web
+Disallow: /
+
+User-agent: anthropic-ai
+Disallow: /
+
+User-agent: PerplexityBot
+Disallow: /
+
+User-agent: Perplexity-User
+Disallow: /
+
+User-agent: Google-Extended
+Disallow: /
+
+User-agent: Applebot
+Disallow: /
+
+User-agent: Applebot-Extended
+Disallow: /
+
+User-agent: Meta-ExternalAgent
+Disallow: /
+
+User-agent: meta-externalagent
+Disallow: /
+
+User-agent: Bytespider
+Disallow: /
+
+User-agent: CCBot
+Disallow: /
+
+User-agent: cohere-ai
+Disallow: /
+
+User-agent: Diffbot
+Disallow: /
+
+User-agent: FacebookBot
+Disallow: /
+
+User-agent: YouBot
+Disallow: /
+
+User-agent: Amazonbot
+Disallow: /
+
+User-agent: AwarioRssBot
+Disallow: /
+
+User-agent: AwarioSmartBot
+Disallow: /
+
+User-agent: DataForSeoBot
+Disallow: /
+
+User-agent: ImagesiftBot
+Disallow: /
+
+User-agent: Mistralbot
+Disallow: /
+
+User-agent: omgili
+Disallow: /
+
+User-agent: omgilibot
+Disallow: /
+
+User-agent: peer39_crawler
+Disallow: /
+
+User-agent: SemrushBot
+Disallow: /
+
+User-agent: Timpibot
+Disallow: /
+
+User-agent: Webzio-Extended
+Disallow: /
+
+# ---- Wildcard (last) -------------------------------------------------------
+# Final catch-all. Crawlers that didn't match a specific rule above must
+# treat this as the binding rule.
 User-agent: *
 Disallow: /
