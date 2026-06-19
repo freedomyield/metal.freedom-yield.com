@@ -72,9 +72,27 @@ ssh-keygen -l -f ~/.ssh/freedom-yield-operator-identity.pub
 ```
 
 The second command prints `<bits> SHA256:<base64> <comment> (ED25519)`.
-Record the `SHA256:…` fingerprint — this is the value that will appear
-as `operator_identity_pubkey_fingerprint` in the manifest and that the
-chain-anchor memo will commit to at Phase 6.
+Record the `SHA256:…` value — this is the **manifest fingerprint** and
+will appear as `operator_identity_pubkey_fingerprint` in
+`identity.json`. It hashes the SSH wire-format key blob, not the
+`.pub` file bytes.
+
+The **chain-anchor memo** at Phase 6 commits to a *different* hash
+of the same key: the SHA-256 of the published `.pub` file bytes,
+which is what
+[`IDENTITY_VERIFICATION.md`](./IDENTITY_VERIFICATION.md) Step 3 has
+the verifier recompute. Compute and record it now so you have it
+ready for Phase 6:
+
+```sh
+shasum -a 256 ~/.ssh/freedom-yield-operator-identity.pub
+```
+
+The two hashes commit to the same key via different byte sequences
+(wire-format blob vs. file bytes) and give an evaluator two
+independent cross-checks. Do not confuse them: the ssh-keygen
+`SHA256:<base64>` value goes in the manifest field, and the
+`shasum -a 256 .pub` hex value goes in the chain memo.
 
 ## Step 2 — Dry-run with the synthetic-key harness
 
@@ -264,22 +282,51 @@ republish whenever the underlying issue is resolved.
 Phase 5 leaves `chain_anchor.tx_id` as the all-zeros placeholder. To
 move to Phase 6 at the next renewal cycle:
 
-1. Compose the next-cycle `AddPermissionlessValidatorTx` in the
+1. **Pre-flight byte-level snapshot of the published `.pub`.** The
+   chain-memo hash is `shasum -a 256` of the `.pub` file bytes, so
+   the operator side and the verifier side must agree on the exact
+   byte sequence (trailing newline, comment, line endings). Before
+   composing the memo, snapshot the file as the verifier will fetch
+   it:
+   ```sh
+   curl -sS https://metal.freedom-yield.com/.well-known/operator-identity.pub \
+     | tee /tmp/operator-identity.pub | wc -c
+   xxd /tmp/operator-identity.pub | tail -1
+   shasum -a 256 /tmp/operator-identity.pub
+   ```
+   Compare with the local file:
+   ```sh
+   wc -c ~/.ssh/freedom-yield-operator-identity.pub
+   xxd ~/.ssh/freedom-yield-operator-identity.pub | tail -1
+   shasum -a 256 ~/.ssh/freedom-yield-operator-identity.pub
+   ```
+   The byte counts, last-line `xxd` rows, and `shasum` values must
+   all match between the live URL and the local file. If they differ,
+   the web host has altered the bytes (CRLF rewrite, trailing-newline
+   strip, etc.); fix the published file before continuing or the
+   chain anchor will be unverifiable.
+2. Compose the next-cycle `AddPermissionlessValidatorTx` in the
    Metal Wallet web UI as usual.
-2. In the memo field, embed `identity-v1:sha256:<fingerprint-bytes>`,
-   where `<fingerprint-bytes>` is the 32-byte (64-hex) SHA-256 of the
-   public key file bytes (`shasum -a 256
-   ~/.ssh/freedom-yield-operator-identity.pub`). The `SHA256:<base64>`
-   form printed by `ssh-keygen -l -f` is the same hash in a different
-   encoding; for memo embedding use the hex form to fit the on-chain
-   serialisation conventions documented in the schema description.
-3. After the tx commits, re-run `gen-identity.sh` with the `tx_id`
+3. In the memo field, embed `identity-v1:sha256:<HEX64>`, where
+   `<HEX64>` is the lowercase hex output of `shasum -a 256` against
+   the published `.pub` file bytes (the value the verifier-side
+   recipe at [`IDENTITY_VERIFICATION.md`](./IDENTITY_VERIFICATION.md)
+   Step 3 will recompute and compare).
+
+   **Important:** this is *not* the `SHA256:<base64>` value that
+   `ssh-keygen -l -f` printed at Step 1. That value hashes the SSH
+   wire-format key blob and lives in the manifest's
+   `operator_identity_pubkey_fingerprint` field. The chain memo hashes
+   the `.pub` file bytes themselves. Two distinct hashes commit to
+   the same key via different byte sequences — that asymmetry is
+   intentional and gives evaluators two cross-checkable bindings.
+4. After the tx commits, re-run `gen-identity.sh` with the `tx_id`
    override:
    ```sh
    export OPERATOR_IDENTITY_KEY=~/.ssh/freedom-yield-operator-identity
    export CHAIN_ANCHOR_TX_ID=<the new tx_id, 64-hex>
    bash scripts/operator-local/gen-identity.sh
    ```
-4. Commit + push the updated `identity.json` and `identity.json.sig`.
+5. Commit + push the updated `identity.json` and `identity.json.sig`.
    The `chain_anchor` block now carries the real `tx_id` and the
    verifier can complete Step 1 of the seven-step recipe end-to-end.

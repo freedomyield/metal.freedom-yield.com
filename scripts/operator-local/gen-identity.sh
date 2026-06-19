@@ -52,6 +52,14 @@
 #                           memo carries the identity fingerprint. Default:
 #                           sixty-four zeros = "not yet bound" placeholder.
 #                           Override only at Phase 6 (post next-cycle renewal).
+#                           The memo content itself is `identity-v1:sha256:<HEX64>`
+#                           where <HEX64> = `shasum -a 256` of the published
+#                           `.pub` file bytes (verifier recipe Step 3). This is
+#                           NOT the SSH wire-format `SHA256:<base64>` value that
+#                           ssh-keygen -l -f prints; that value populates the
+#                           manifest's operator_identity_pubkey_fingerprint
+#                           field. See docs/OPERATOR_IDENTITY_SETUP.md
+#                           "Phase 5 to Phase 6 hand-off" for the full mechanics.
 #   CHAIN_ANCHOR_EXPLORER   explorer URL pointing at CHAIN_ANCHOR_TX_ID.
 #                           Default: composed from CHAIN_ANCHOR_TX_ID against
 #                           the canonical explorer host.
