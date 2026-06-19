@@ -6,6 +6,10 @@ This document describes the per-cycle audit packet that Freedom Yield publishes 
 
 In preparation. The schema, generator, and infrastructure plumbing (push allowlist, deploy exclude) are committed. Activation as a cron job is gated on the `/api/evidence.json` cron stability check; the JSONL goes live with its first scheduled run after that gate passes.
 
+## Machine-readable discovery
+
+While preparation is in flight, an automated reviewer can discover this feed entirely from `/api/evidence.json` (documented at `docs/EVIDENCE_MANIFEST.md`). The `in_preparation_artifacts.cycle_history_jsonl` object lists, in one place: the planned `cycle-history.jsonl` URL, the schema preview at `/api/cycle-history.example.jsonl`, and the link back to this document. The entry collapses out of `in_preparation_artifacts` once the cron starts emitting the runtime feed.
+
 ## Why JSONL, not JSON
 
 JSON wraps records in an array. JSONL writes each record on its own line, terminated by `\n`. For a strictly append-only audit log that grows by one row per closed cycle, JSONL is operationally friendlier:

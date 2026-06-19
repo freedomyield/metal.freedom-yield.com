@@ -18,13 +18,17 @@ This separation is intentional. The operator identity key is a thin, dedicated k
 A single signature does not by itself prove control of the validator. NodeID binding is established by the **collective evidence** across:
 
 - `/api/identity.json` — signed identity manifest (this document's subject)
-- `/api/evidence.json` — machine-readable selection-evidence manifest
+- `/api/evidence.json` — machine-readable selection-evidence manifest, documented at `docs/EVIDENCE_MANIFEST.md`
 - `/api/validator.json` — live validator state
 - The validator registration record on the public explorer (`https://explorer.metalblockchain.org/`)
 - The operator-controlled site at `https://metal.freedom-yield.com/`
 - *(Future)* The `AddPermissionlessValidatorTx` memo at the next renewal cycle, embedding the SHA-256 fingerprint of the operator identity public key.
 
 An evaluator should not treat any single artifact as conclusive. The whole set agreeing is the evidence.
+
+## Machine-readable discovery
+
+While preparation is in flight, an automated reviewer can discover this manifest entirely from `/api/evidence.json`. The `in_preparation_artifacts.identity_manifest` object lists, in one place: the planned `identity.json` URL, the signature URL, the operator public-key URL, the schema preview at `/api/identity.example.json`, and the link back to this document. The same object collapses out of `in_preparation_artifacts` and the runtime URLs go live in `public_pages` (or remain in a small `signed_artifacts` block, TBD) when activation completes.
 
 ## Verification procedure
 
