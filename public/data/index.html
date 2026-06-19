@@ -91,7 +91,8 @@
 			<dl class="data-meta">
 				<dt>URL</dt><dd><a href="/api/validator.json"><code>/api/validator.json</code></a></dd>
 				<dt>Updated</dt><dd>Every 5 minutes — written by <code>scripts/node-info.sh</code> from local <code>metalgo</code> and the canonical P-Chain RPC</dd>
-				<dt>Schema</dt><dd>Self-documenting: top-level <code>_comment</code> describes how each field is derived</dd>
+				<dt>Example</dt><dd><a href="/api/validator.example.json"><code>/api/validator.example.json</code></a></dd>
+				<dt>Formal schema</dt><dd><a href="/api/validator.schema.v1.json"><code>/api/validator.schema.v1.json</code></a> — draft 2020-12, additive-only within v1</dd>
 			</dl>
 			<details class="data-example">
 				<summary>Example request</summary>
@@ -108,7 +109,8 @@
 			<dl class="data-meta">
 				<dt>URL</dt><dd><a href="/api/evidence.json"><code>/api/evidence.json</code></a></dd>
 				<dt>Updated</dt><dd>Daily — written by <code>scripts/gen-evidence.sh</code> from <code>validator.json</code> + static project config</dd>
-				<dt>Schema</dt><dd>Self-documenting: top-level <code>_comment</code> describes the manifest layout</dd>
+				<dt>Example</dt><dd><a href="/api/evidence.example.json"><code>/api/evidence.example.json</code></a></dd>
+				<dt>Formal schema</dt><dd><a href="/api/evidence.schema.v1.json"><code>/api/evidence.schema.v1.json</code></a> — draft 2020-12, additive-only within v1</dd>
 			</dl>
 			<details class="data-example">
 				<summary>Example request</summary>
@@ -181,7 +183,8 @@
 			<p>Cycle-by-cycle audit packet. One JSON object per line, chronological, joining <code>uptime-cycles.json</code> with <code>incidents.json</code> so each closed cycle is paired with the incident IDs that fell inside it. Designed for line-by-line consumption by automated due-diligence tooling.</p>
 			<dl class="data-meta">
 				<dt>Planned URL</dt><dd><code>/api/cycle-history.jsonl</code></dd>
-				<dt>Schema (live now)</dt><dd><a href="/api/cycle-history.example.jsonl"><code>/api/cycle-history.example.jsonl</code></a></dd>
+				<dt>Example (live now)</dt><dd><a href="/api/cycle-history.example.jsonl"><code>/api/cycle-history.example.jsonl</code></a></dd>
+				<dt>Formal schema (live now)</dt><dd><a href="/api/cycle-history.schema.v1.json"><code>/api/cycle-history.schema.v1.json</code></a> — draft 2020-12, additive-only within v1</dd>
 				<dt>Generator</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/scripts/gen-cycle-history.sh" rel="noopener noreferrer"><code>scripts/gen-cycle-history.sh</code></a></dd>
 				<dt>Status</dt><dd>In preparation; runtime activation gated on the evidence-feed cron stability check (see <a href="/selection-evidence/">/selection-evidence/</a>)</dd>
 			</dl>
@@ -412,7 +415,8 @@ curl -s "https://metal.freedom-yield.com/api/peers-history/peers-${YDAY}.json.gz
 			<p>Operator identity manifest, signed by a dedicated ed25519 operator identity key. The signing key is independent of the validator's BLS / staking keys. The accompanying detached signature is verified with <code>ssh-keygen -Y verify</code> using namespace <code>freedom-yield/validator-identity</code>.</p>
 			<dl class="data-meta">
 				<dt>Planned URL</dt><dd><code>/api/identity.json</code> (+ <code>/api/identity.json.sig</code>)</dd>
-				<dt>Schema (live now)</dt><dd><a href="/api/identity.example.json"><code>/api/identity.example.json</code></a></dd>
+				<dt>Example (live now)</dt><dd><a href="/api/identity.example.json"><code>/api/identity.example.json</code></a></dd>
+				<dt>Formal schema (live now)</dt><dd><a href="/api/identity.schema.v1.json"><code>/api/identity.schema.v1.json</code></a> — draft 2020-12, includes artifact_manifest + artifact_root Merkle DAG hub</dd>
 				<dt>Verification procedure</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer"><code>docs/IDENTITY_VERIFICATION.md</code></a></dd>
 				<dt>Status</dt><dd>In preparation; runtime activation gated on operator-side key generation (see <a href="/selection-evidence/">/selection-evidence/</a>)</dd>
 			</dl>

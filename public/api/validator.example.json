@@ -4,7 +4,7 @@
 	"phase": 2,
 	"mode": "mainnet",
 	"network": "metal-mainnet",
-	"nodeId": "NodeID-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+	"nodeId": "NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v",
 	"bootstrap": {
 		"pChain": true,
 		"xChain": true,

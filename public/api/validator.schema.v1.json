@@ -1,0 +1,109 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://metal.freedom-yield.com/api/validator.schema.v1.json",
+	"title": "Freedom Yield Metal — Validator State v1",
+	"description": "Formal contract for /api/validator.json. The runtime file is generated every five minutes by scripts/node-info.sh against the live metalgo node's RPC. This schema is the authoritative shape v1; breaking changes (removed required field, narrowed enum, changed type, restricted pattern) require a new major version published at /api/validator.schema.v2.json. The v1 URL stays reachable for at least 18 months after v2 publication.",
+	"x-issued-at": "2026-06-19T00:00:00Z",
+	"x-stability": "additive-only-within-v1",
+	"type": "object",
+	"required": [
+		"schema_version",
+		"phase",
+		"mode",
+		"network",
+		"nodeId",
+		"observedAt"
+	],
+	"additionalProperties": true,
+	"properties": {
+		"_comment": {
+			"type": "string",
+			"description": "Human-readable note on how the file is generated; informational only."
+		},
+		"$schema": {
+			"type": "string",
+			"format": "uri"
+		},
+		"schema_version": {
+			"type": "integer",
+			"const": 1
+		},
+		"phase": {
+			"type": "integer",
+			"description": "Operational phase indicator. Phase 1 = mainnet operation, Phase 0 = test/unknown."
+		},
+		"mode": {
+			"type": "string",
+			"enum": ["mainnet", "tahoe-testnet", "unknown"],
+			"description": "Operating mode derived from the local metalgo's reported network name."
+		},
+		"network": {
+			"type": "string",
+			"enum": ["metal-mainnet", "metal-tahoe-testnet"],
+			"description": "Canonical network label."
+		},
+		"nodeId": {
+			"type": "string",
+			"pattern": "^NodeID-[A-Za-z0-9]{32}$"
+		},
+		"bootstrap": {
+			"type": "object",
+			"required": ["pChain", "xChain", "cChain"],
+			"additionalProperties": true,
+			"properties": {
+				"pChain": { "type": "boolean" },
+				"xChain": { "type": "boolean" },
+				"cChain": { "type": "boolean" }
+			}
+		},
+		"stake": {
+			"type": "object",
+			"additionalProperties": true,
+			"properties": {
+				"self": { "type": ["number", "null"], "minimum": 0 },
+				"totalReceived": { "type": ["number", "null"], "minimum": 0 },
+				"delegatorCount": { "type": ["integer", "null"], "minimum": 0 },
+				"unit": { "type": "string", "const": "METAL" }
+			}
+		},
+		"uptime": {
+			"type": "object",
+			"additionalProperties": true,
+			"properties": {
+				"network": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+				"self": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+				"source": { "type": "string" },
+				"sampleSize": { "type": "integer", "minimum": 0 },
+				"samples": { "type": "array" }
+			}
+		},
+		"delegationFee": {
+			"type": "object",
+			"additionalProperties": true,
+			"properties": {
+				"percent": { "type": ["number", "null"], "minimum": 0, "maximum": 100 }
+			}
+		},
+		"networkSize": {
+			"type": "object",
+			"additionalProperties": true,
+			"properties": {
+				"totalValidators": { "type": ["integer", "null"], "minimum": 0 }
+			}
+		},
+		"startTime": {
+			"type": ["string", "integer", "null"]
+		},
+		"endTime": {
+			"type": ["string", "integer", "null"]
+		},
+		"explorer": {
+			"type": "string",
+			"format": "uri"
+		},
+		"observedAt": {
+			"type": "string",
+			"format": "date-time"
+		}
+	}
+}

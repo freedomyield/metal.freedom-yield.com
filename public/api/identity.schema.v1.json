@@ -1,0 +1,165 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://metal.freedom-yield.com/api/identity.schema.v1.json",
+	"title": "Freedom Yield Metal — Operator Identity Manifest v1",
+	"description": "Formal contract for /api/identity.json. The runtime manifest is generated and signed by scripts/operator-local/gen-identity.sh on the operator's local Mac, NEVER on the validator host or web host. Verification uses ssh-keygen -Y verify with namespace freedom-yield/validator-identity. Companion docs: docs/IDENTITY_VERIFICATION.md. This schema is the authoritative shape v1; breaking changes require a new major version at /api/identity.schema.v2.json. The v1 URL stays reachable for at least 18 months after v2 publication.",
+	"x-issued-at": "2026-06-19T00:00:00Z",
+	"x-stability": "additive-only-within-v1",
+	"x-format-guide": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md",
+	"type": "object",
+	"required": [
+		"schema_version",
+		"brand",
+		"node_id",
+		"network",
+		"site",
+		"operator_identity_pubkey_url",
+		"operator_identity_pubkey_fingerprint",
+		"key_iat",
+		"key_exp",
+		"revoked",
+		"verification",
+		"generated_at"
+	],
+	"additionalProperties": true,
+	"properties": {
+		"_comment": {
+			"type": "string"
+		},
+		"$schema": {
+			"type": "string",
+			"format": "uri"
+		},
+		"schema_version": {
+			"type": "integer",
+			"const": 1
+		},
+		"brand": {
+			"type": "string",
+			"const": "Freedom Yield"
+		},
+		"node_id": {
+			"type": "string",
+			"pattern": "^NodeID-[A-Za-z0-9]{32}$"
+		},
+		"node_id_authority": {
+			"type": "string",
+			"format": "uri",
+			"description": "Authoritative explorer URL where the NodeID's registration can be cross-checked."
+		},
+		"network": {
+			"type": "string",
+			"enum": ["metal-mainnet"]
+		},
+		"site": {
+			"type": "string",
+			"format": "uri",
+			"description": "Canonical site URL the operator controls."
+		},
+		"operator_identity_pubkey_url": {
+			"type": "string",
+			"format": "uri",
+			"description": "URL where the operator identity ed25519 public key is published (typically /.well-known/operator-identity.pub)."
+		},
+		"operator_identity_pubkey_fingerprint": {
+			"type": "string",
+			"description": "OpenSSH SHA-256 fingerprint of the operator identity public key, e.g., 'SHA256:abc123…'. A consumer can compute the same fingerprint via 'ssh-keygen -l -f operator-identity.pub' and compare."
+		},
+		"key_iat": {
+			"type": "string",
+			"format": "date-time",
+			"description": "When this operator identity key was issued (became authoritative)."
+		},
+		"key_exp": {
+			"type": "string",
+			"format": "date-time",
+			"description": "Recommended expiry; operator-declared, NOT cryptographically enforced. Consumers may treat as policy."
+		},
+		"revoked": {
+			"type": "boolean",
+			"description": "true iff this key is no longer authoritative for the brand+node_id. When true, revoked_at + revocation_reason SHOULD be populated."
+		},
+		"revoked_at": {
+			"type": ["string", "null"],
+			"description": "ISO 8601 UTC; null when revoked=false."
+		},
+		"revocation_reason": {
+			"type": ["string", "null"]
+		},
+		"verification": {
+			"type": "object",
+			"required": ["method", "namespace", "principal", "signature_url"],
+			"additionalProperties": true,
+			"properties": {
+				"method": {
+					"type": "string",
+					"const": "ssh-keygen -Y verify"
+				},
+				"minimum_openssh_version": {
+					"type": "string"
+				},
+				"namespace": {
+					"type": "string",
+					"const": "freedom-yield/validator-identity"
+				},
+				"principal": {
+					"type": "string",
+					"const": "freedom-yield"
+				},
+				"signature_url": {
+					"type": "string",
+					"format": "uri"
+				}
+			}
+		},
+		"artifact_manifest": {
+			"type": "object",
+			"description": "Merkle DAG hub: each entry binds a leaf artifact's URL to its content sha256, and (where applicable) its schema URL and schema sha256. A consumer fetches each entry's url, computes sha256(content), and compares to entry.sha256. Additive: new artifacts may appear in this map within v1.",
+			"additionalProperties": {
+				"type": "object",
+				"required": ["url", "sha256"],
+				"additionalProperties": true,
+				"properties": {
+					"url": {
+						"type": "string",
+						"format": "uri"
+					},
+					"sha256": {
+						"type": "string",
+						"pattern": "^[a-f0-9]{64}$",
+						"description": "Hex-encoded SHA-256 of the artifact's raw bytes as published."
+					},
+					"schema_url": {
+						"type": "string",
+						"format": "uri"
+					},
+					"schema_sha256": {
+						"type": "string",
+						"pattern": "^[a-f0-9]{64}$"
+					}
+				}
+			}
+		},
+		"artifact_root": {
+			"type": "string",
+			"pattern": "^[a-f0-9]{64}$",
+			"description": "SHA-256 Merkle root computed over artifact_manifest entries: leaves are each entry.sha256, ordered alphabetically by key, odd counts duplicate the last leaf, parents are SHA-256(left || right) as raw bytes, hex-encoded at the root."
+		},
+		"chain_anchor": {
+			"type": "object",
+			"description": "Reference to the on-chain anchor that binds this manifest's identity key to the validator's NodeID. Populated when the operator has embedded the identity public-key fingerprint in an AddPermissionlessValidatorTx memo.",
+			"additionalProperties": true,
+			"properties": {
+				"chain": { "type": "string", "enum": ["metal-mainnet"] },
+				"tx_type": { "type": "string", "enum": ["AddPermissionlessValidatorTx"] },
+				"tx_id": { "type": "string" },
+				"memo_prefix": { "type": "string", "const": "identity-v1:sha256:" },
+				"explorer_url": { "type": "string", "format": "uri" }
+			}
+		},
+		"generated_at": {
+			"type": "string",
+			"format": "date-time"
+		}
+	}
+}

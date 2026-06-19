@@ -3,7 +3,7 @@
 	"schema_version": 1,
 	"brand": "Freedom Yield",
 	"network": "metal-mainnet",
-	"node_id": "NodeID-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+	"node_id": "NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v",
 	"validator_status": "active",
 	"self_stake_metal": null,
 	"delegation_fee_percent": null,

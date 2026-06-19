@@ -90,7 +90,8 @@
 			<dl class="data-meta">
 				<dt>URL</dt><dd><a href="/api/validator.json"><code>/api/validator.json</code></a></dd>
 				<dt>更新</dt><dd>5 分ごと(<code>scripts/node-info.sh</code> がローカル <code>metalgo</code> + canonical P-Chain RPC から書き出し)</dd>
-				<dt>スキーマ</dt><dd>ファイル先頭の <code>_comment</code> に各フィールドの導出ルールを記載</dd>
+				<dt>例示</dt><dd><a href="/api/validator.example.json"><code>/api/validator.example.json</code></a></dd>
+				<dt>Formal schema</dt><dd><a href="/api/validator.schema.v1.json"><code>/api/validator.schema.v1.json</code></a> — draft 2020-12、 v1 内 additive-only</dd>
 			</dl>
 			<details class="data-example">
 				<summary>リクエスト例</summary>
@@ -107,7 +108,8 @@
 			<dl class="data-meta">
 				<dt>URL</dt><dd><a href="/api/evidence.json"><code>/api/evidence.json</code></a></dd>
 				<dt>更新</dt><dd>毎日(<code>scripts/gen-evidence.sh</code> が <code>validator.json</code> + 静的 config から書き出し)</dd>
-				<dt>スキーマ</dt><dd>ファイル先頭の <code>_comment</code> に manifest 構造を記載</dd>
+				<dt>例示</dt><dd><a href="/api/evidence.example.json"><code>/api/evidence.example.json</code></a></dd>
+				<dt>Formal schema</dt><dd><a href="/api/evidence.schema.v1.json"><code>/api/evidence.schema.v1.json</code></a> — draft 2020-12、 v1 内 additive-only</dd>
 			</dl>
 			<details class="data-example">
 				<summary>リクエスト例</summary>
@@ -180,7 +182,8 @@
 			<p>Cycle 単位の audit packet。1 行 = 1 JSON オブジェクト、 時系列順、 <code>uptime-cycles.json</code> と <code>incidents.json</code> を join して各クローズ済 cycle に該当インシデント ID をペアリング。自動 due-diligence ツールが line-by-line で消費する前提の設計。</p>
 			<dl class="data-meta">
 				<dt>予定 URL</dt><dd><code>/api/cycle-history.jsonl</code></dd>
-				<dt>スキーマ(公開済)</dt><dd><a href="/api/cycle-history.example.jsonl"><code>/api/cycle-history.example.jsonl</code></a></dd>
+				<dt>例示(公開済)</dt><dd><a href="/api/cycle-history.example.jsonl"><code>/api/cycle-history.example.jsonl</code></a></dd>
+				<dt>Formal schema(公開済)</dt><dd><a href="/api/cycle-history.schema.v1.json"><code>/api/cycle-history.schema.v1.json</code></a> — draft 2020-12、 v1 内 additive-only</dd>
 				<dt>生成スクリプト</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/scripts/gen-cycle-history.sh" rel="noopener noreferrer"><code>scripts/gen-cycle-history.sh</code></a></dd>
 				<dt>状態</dt><dd>準備中。 runtime 起動は evidence feed cron 安定確認後 (詳細 <a href="/ja/selection-evidence/">/ja/selection-evidence/</a>)</dd>
 			</dl>
@@ -411,7 +414,8 @@ curl -s "https://metal.freedom-yield.com/api/peers-history/peers-${YDAY}.json.gz
 			<p>運用者専用 ed25519 identity key で署名された operator identity manifest。signing key は validator の BLS / staking key と独立。検証は <code>ssh-keygen -Y verify</code> を namespace <code>freedom-yield/validator-identity</code> で実行。</p>
 			<dl class="data-meta">
 				<dt>予定 URL</dt><dd><code>/api/identity.json</code>(+ <code>/api/identity.json.sig</code>)</dd>
-				<dt>スキーマ(公開済)</dt><dd><a href="/api/identity.example.json"><code>/api/identity.example.json</code></a></dd>
+				<dt>例示(公開済)</dt><dd><a href="/api/identity.example.json"><code>/api/identity.example.json</code></a></dd>
+				<dt>Formal schema(公開済)</dt><dd><a href="/api/identity.schema.v1.json"><code>/api/identity.schema.v1.json</code></a> — draft 2020-12、 artifact_manifest + artifact_root の Merkle DAG hub 含む</dd>
 				<dt>検証手順</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer"><code>docs/IDENTITY_VERIFICATION.md</code></a></dd>
 				<dt>状態</dt><dd>準備中。 runtime 起動は operator 側の鍵生成後 (詳細 <a href="/ja/selection-evidence/">/ja/selection-evidence/</a>)</dd>
 			</dl>

@@ -1,0 +1,119 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://metal.freedom-yield.com/api/evidence.schema.v1.json",
+	"title": "Freedom Yield Metal — Evidence Manifest v1",
+	"description": "Formal contract for /api/evidence.json. The runtime file is generated daily by scripts/gen-evidence.sh from /api/validator.json + static project config. This schema is the authoritative shape v1; breaking changes (removed required field, narrowed enum, changed type, restricted pattern) require a new major version published at /api/evidence.schema.v2.json. The v1 URL stays reachable for at least 18 months after v2 publication. Companion docs: docs/EVIDENCE_MANIFEST.md.",
+	"x-issued-at": "2026-06-19T00:00:00Z",
+	"x-stability": "additive-only-within-v1",
+	"x-format-guide": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/EVIDENCE_MANIFEST.md",
+	"type": "object",
+	"required": [
+		"schema_version",
+		"brand",
+		"network",
+		"node_id",
+		"validator_status",
+		"generated_at",
+		"validator_state_observed_at",
+		"stale_input_warning"
+	],
+	"additionalProperties": true,
+	"properties": {
+		"_comment": {
+			"type": "string",
+			"description": "Human-readable note on how the file is generated; informational only."
+		},
+		"$schema": {
+			"type": "string",
+			"format": "uri",
+			"description": "Self-reference to this schema's URL. Optional; recommended for tooling that auto-discovers schemas."
+		},
+		"schema_version": {
+			"type": "integer",
+			"const": 1,
+			"description": "Schema major version. v1 stays at 1; bump to 2 requires a new schema file at a new URL."
+		},
+		"brand": {
+			"type": "string",
+			"const": "Freedom Yield"
+		},
+		"network": {
+			"type": "string",
+			"enum": ["metal-mainnet"],
+			"description": "Canonical network label; broader than the raw RPC name (which is just 'mainnet')."
+		},
+		"node_id": {
+			"type": "string",
+			"pattern": "^NodeID-[A-Za-z0-9]{32}$",
+			"description": "On-chain NodeID identifier on Metal Blockchain P-Chain."
+		},
+		"validator_status": {
+			"type": "string",
+			"enum": ["active", "unknown"],
+			"description": "'active' iff the underlying validator.json's observedAt is within the freshness threshold; 'unknown' when stale or unobservable."
+		},
+		"self_stake_metal": {
+			"type": ["integer", "null"],
+			"minimum": 0,
+			"description": "Operator self-stake in METAL; null when not yet observable."
+		},
+		"delegation_fee_percent": {
+			"type": ["number", "null"],
+			"minimum": 0,
+			"maximum": 100,
+			"description": "Delegation fee percentage; null when not yet observable."
+		},
+		"public_pages": {
+			"type": "object",
+			"description": "Map of stable page slug to canonical URL. Additive: new pages may appear in this map within v1 without bumping schema_version.",
+			"additionalProperties": {
+				"type": "string",
+				"format": "uri"
+			}
+		},
+		"operator_commitments": {
+			"type": "object",
+			"description": "Mirror of /commitments/ as machine-readable booleans / integers.",
+			"additionalProperties": true,
+			"properties": {
+				"non_custodial": { "type": "boolean" },
+				"renewal_transparency": { "type": "boolean" },
+				"decommission_notice_days": { "type": "integer", "minimum": 0 },
+				"incident_disclosure_sla_hours": { "type": "integer", "minimum": 0 }
+			}
+		},
+		"in_preparation_artifacts": {
+			"type": "object",
+			"description": "Artifacts whose schema is published but whose runtime URL is not yet live. Each entry MUST carry planned_url + schema_url + format_guide_url. Additional URL flavours (signature / pubkey) MAY appear for signed artifacts.",
+			"additionalProperties": {
+				"type": "object",
+				"required": ["planned_url", "schema_url", "format_guide_url"],
+				"additionalProperties": true,
+				"properties": {
+					"planned_url": { "type": "string", "format": "uri" },
+					"planned_signature_url": { "type": "string", "format": "uri" },
+					"planned_pubkey_url": { "type": "string", "format": "uri" },
+					"schema_url": { "type": "string", "format": "uri" },
+					"format_guide_url": { "type": "string", "format": "uri" }
+				}
+			}
+		},
+		"explorer_url": {
+			"type": "string",
+			"format": "uri"
+		},
+		"generated_at": {
+			"type": "string",
+			"format": "date-time",
+			"description": "When this manifest was written."
+		},
+		"validator_state_observed_at": {
+			"type": ["string", "null"],
+			"description": "Source validator.json's observedAt timestamp (ISO 8601 UTC), or null when unobservable. NOT constrained to date-time format because null is allowed."
+		},
+		"stale_input_warning": {
+			"type": "boolean",
+			"description": "true iff validator.json's observedAt is older than the freshness threshold. A consumer SHOULD gate on this before reading fields that depend on validator state."
+		}
+	}
+}
