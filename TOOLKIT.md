@@ -33,6 +33,11 @@ Pure chain-level operations. Point them at your local `metalgo` HTTP API and you
 **Dependencies:** `jq`. Reads `public/api/validator.json`.
 **Cron:** daily.
 
+### `scripts/gen-cycle-history.sh`
+**Purpose:** Emit a per-cycle audit packet (`public/api/cycle-history.jsonl`) — one closed cycle per JSON line, joining `uptime-cycles.json` with `incidents.json` so each cycle is paired with the incident IDs that fell inside its window. Deterministic and idempotent.
+**Dependencies:** `jq`. Reads `public/api/uptime-cycles.json` + `public/api/incidents.json`.
+**Cron:** daily (gated on the evidence-feed cron stability check before activation).
+
 ### `scripts/peer-validators.sh`
 **Purpose:** Snapshot the full Metal validator set from your local `metalgo`'s P-Chain RPC into `public/api/peers.json`. Includes per-validator rows + network summary + operator clusters (NodeIDs sharing the same reward owner).
 **Dependencies:** `curl`, `jq`.
