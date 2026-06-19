@@ -11,6 +11,7 @@ This repository contains:
 - **The public website** (`public/`) — landing page, validator status, delegate info, incident history, open data catalog. EN at `/`, JA at `/ja/`. Served by Caddy locally; deployed to the web host via GitHub Actions.
 - **Operational scripts** (`scripts/`) — `node-info.sh` / `peer-validators.sh` / `notify.sh` / `dr-drill.sh` and friends. These run on the validator host to feed the public JSON endpoints, push anomaly alerts, exercise DR. See [TOOLKIT.md](TOOLKIT.md) for what's reusable for other Metal validators.
 - **Runbooks** (`docs/`) — incident response, key rotation, disaster recovery, validator host setup, mainnet migration, validator renewal, security layers.
+- **Manifest format guides** (`docs/`) — [`EVIDENCE_MANIFEST.md`](docs/EVIDENCE_MANIFEST.md) (live), [`CYCLE_HISTORY.md`](docs/CYCLE_HISTORY.md), [`IDENTITY_VERIFICATION.md`](docs/IDENTITY_VERIFICATION.md), and [`TRANSPARENT_VALIDATOR_PLEDGE.md`](docs/TRANSPARENT_VALIDATOR_PLEDGE.md). Schema, generation pipeline, and consumption commands for the public JSON / JSONL surfaces under `/api/`.
 - **A local Tahoe testnet metalgo node** (`docker-compose.metalgo.yml`) for pipeline verification without spending real money.
 
 The production validator (`metalgo` running on its own dedicated VPS with port 9651 public) is a separate concern. This repo only describes and documents it.

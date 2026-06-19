@@ -9,6 +9,7 @@
 - **公開ウェブサイト** (`public/`) — landing / validator status / delegate 案内 / incident 履歴 / open data カタログ。EN は `/`、JA は `/ja/`。ローカルでは Caddy で配信、本番は GitHub Actions で web host へ deploy。
 - **運用スクリプト群** (`scripts/`) — `node-info.sh` / `peer-validators.sh` / `notify.sh` / `dr-drill.sh` 等。validator host 上で動き、公開 JSON エンドポイント生成、anomaly alert、DR ドリル等を担う。他 Metal validator が再利用できるものについては [TOOLKIT.md](TOOLKIT.md) 参照。
 - **Runbook** (`docs/`) — incident response、key rotation、disaster recovery、validator host setup、mainnet 移行、validator renewal、security layers。
+- **Manifest format guide** (`docs/`) — [`EVIDENCE_MANIFEST.md`](docs/EVIDENCE_MANIFEST.md)(live)、[`CYCLE_HISTORY.md`](docs/CYCLE_HISTORY.md)、[`IDENTITY_VERIFICATION.md`](docs/IDENTITY_VERIFICATION.md)、[`TRANSPARENT_VALIDATOR_PLEDGE.md`](docs/TRANSPARENT_VALIDATOR_PLEDGE.md)。`/api/` 配下の公開 JSON / JSONL surface のスキーマ、生成パイプライン、消費方法を記述。
 - **ローカル Tahoe testnet metalgo ノード** (`docker-compose.metalgo.yml`) — 本番 METAL を使わずに pipeline を検証するため。
 
 本番 validator (`metalgo` が専用 VPS で動作、port 9651 公開) はこのリポジトリとは別の懸念事項です。このリポジトリは validator を**説明と documentation のみ**します。
