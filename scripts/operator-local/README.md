@@ -31,6 +31,21 @@ A clean run prints `OK` and nothing else.
 ## Contents
 
 - `gen-identity.sh` — composes and signs `public/api/identity.json` with
-  the operator's local ed25519 key. Never reads validator keys. Refuses
-  to run on production hosts. See `docs/IDENTITY_VERIFICATION.md` for the
-  signing model and verification procedure.
+  the operator's local ed25519 key. Probes each leaf artifact URL,
+  computes its content sha256, and binds the set under
+  `artifact_manifest` + `artifact_root` (SHA-256 Merkle root, alphabetical
+  key order, odd-duplicate, raw bytes). `chain_anchor.tx_id` defaults to
+  an all-zeros placeholder; pass `CHAIN_ANCHOR_TX_ID=<64-hex>` only at
+  Phase 6 once the renewal-cycle tx memo has embedded the fingerprint.
+  Never reads validator keys. Refuses to run on production hosts. See
+  `docs/IDENTITY_VERIFICATION.md` for the signing model and the seven-
+  step end-to-end verification procedure.
+
+- `test-gen-identity.sh` — synthetic-key test harness. Generates a
+  throwaway ed25519 key in a tmp dir, runs `gen-identity.sh` against a
+  fake `REPO_ROOT`, re-fetches every leaf and recomputes the Merkle
+  root independently, then verifies the signature against the synthetic
+  pubkey. Output never lands in the real repo. Use this to confirm Phase
+  3 Merkle logic without touching the real operator identity key (which
+  is still HOLD pending Task #25 / D11 Phase 3 and Task #28 cron auto-
+  fire gates).

@@ -12,11 +12,17 @@
 #   is never shipped to the validator host or web host. Verify with --dry-run.
 #
 # What this helper does:
-#   1. Composes identity.json from a pinned schema (matches public/api/identity.example.json).
-#   2. Validates JSON with `jq empty`.
-#   3. Signs with `ssh-keygen -Y sign` using namespace freedom-yield/validator-identity.
-#   4. Self-verifies with `ssh-keygen -Y verify` before publishing.
-#   5. Atomically places identity.json and identity.json.sig in public/api/.
+#   1. Probes each artifact URL (curl) and computes content sha256.
+#   2. Computes the SHA-256 Merkle root over the artifact_manifest leaves
+#      (alphabetical key order, odd-duplicate, raw-bytes binary tree —
+#      matches the algorithm documented in identity.schema.v1.json).
+#   3. Composes identity.json with artifact_manifest + artifact_root +
+#      chain_anchor (chain_anchor.tx_id defaults to all-zeros placeholder
+#      until Phase 6 embed; override via CHAIN_ANCHOR_TX_ID env).
+#   4. Validates JSON with `jq empty`.
+#   5. Signs with `ssh-keygen -Y sign` using namespace freedom-yield/validator-identity.
+#   6. Self-verifies with `ssh-keygen -Y verify` before publishing.
+#   7. Atomically places identity.json and identity.json.sig in public/api/.
 #
 # What this helper does NOT do:
 #   - It does not generate the ed25519 key. Generate it on the operator Mac:
@@ -40,6 +46,15 @@
 #   KEY_IAT                 issued-at ISO-8601 UTC (default: now).
 #   KEY_EXP                 expiry ISO-8601 UTC (default: KEY_IAT + 365 days).
 #   PRINCIPAL               allowed_signers principal (default: freedom-yield).
+#   ARTIFACT_BASE           URL prefix for leaf artifacts (default:
+#                           https://metal.freedom-yield.com).
+#   CHAIN_ANCHOR_TX_ID      P-Chain tx_id (64-hex) of the AddValidator tx whose
+#                           memo carries the identity fingerprint. Default:
+#                           sixty-four zeros = "not yet bound" placeholder.
+#                           Override only at Phase 6 (post next-cycle renewal).
+#   CHAIN_ANCHOR_EXPLORER   explorer URL pointing at CHAIN_ANCHOR_TX_ID.
+#                           Default: composed from CHAIN_ANCHOR_TX_ID against
+#                           the canonical explorer host.
 #
 # Usage:
 #   export OPERATOR_IDENTITY_KEY=~/.ssh/freedom_yield_operator
@@ -130,6 +145,190 @@ case "${FP}" in
 		;;
 esac
 
+# ---- 3.5. Build artifact_manifest + Merkle root + chain_anchor. -------------
+#
+# Probe each leaf artifact + its companion schema (where applicable). Skip
+# 4xx/5xx leaves (e.g., cycle-history.jsonl is HOLD until Task #28 / D10 gate
+# clears) — they will be picked up automatically once they go live, and the
+# Merkle root will change accordingly.
+
+ARTIFACT_BASE="${ARTIFACT_BASE:-https://metal.freedom-yield.com}"
+
+# Portable sha256: macOS ships `shasum`, Linux usually ships both; prefer
+# `shasum -a 256` for cross-platform behaviour.
+sha256_of_stdin() {
+	if command -v shasum >/dev/null 2>&1; then
+		shasum -a 256 | awk '{print $1}'
+	elif command -v sha256sum >/dev/null 2>&1; then
+		sha256sum | awk '{print $1}'
+	else
+		echo "ERROR: neither shasum nor sha256sum is installed" >&2
+		exit 1
+	fi
+}
+
+# Merkle root over hex sha256 leaves read from stdin (one per line, already
+# in the desired alphabetical-key order). Output: 64-hex root on stdout.
+#
+# Convention (must match identity.schema.v1.json description and
+# docs/IDENTITY_VERIFICATION.md Step 6):
+#   - odd counts duplicate the LAST leaf at each level
+#   - parent = SHA-256( raw_bytes(left) || raw_bytes(right) )
+#   - single-leaf input returns that leaf unchanged
+compute_merkle_root() {
+	local cur nxt left right parent count
+	cur="$(mktemp -t merkle.XXXXXX)"
+	nxt="$(mktemp -t merkle.XXXXXX)"
+	cat > "${cur}"
+
+	count="$(wc -l < "${cur}" | tr -d ' ')"
+	if [ "${count}" -eq 0 ]; then
+		rm -f "${cur}" "${nxt}"
+		echo "ERROR: compute_merkle_root received no leaves on stdin" >&2
+		return 1
+	fi
+
+	while [ "${count}" -gt 1 ]; do
+		# Duplicate last leaf if odd.
+		if [ $((count % 2)) -eq 1 ]; then
+			tail -n 1 "${cur}" >> "${cur}"
+		fi
+
+		: > "${nxt}"
+		while IFS= read -r left && IFS= read -r right; do
+			parent="$(
+				{ printf '%s' "${left}"  | xxd -r -p
+				  printf '%s' "${right}" | xxd -r -p
+				} | sha256_of_stdin
+			)"
+			printf '%s\n' "${parent}" >> "${nxt}"
+		done < "${cur}"
+
+		mv "${nxt}" "${cur}"
+		nxt="$(mktemp -t merkle.XXXXXX)"
+		count="$(wc -l < "${cur}" | tr -d ' ')"
+	done
+
+	cat "${cur}"
+	rm -f "${cur}" "${nxt}"
+}
+
+# Leaf catalog: <key>|<url>|<schema_url>
+# Empty <schema_url> = no formal schema yet (manifest entry without schema_url
+# is honest about that state; see identity.schema.v1.json artifact_manifest
+# description "(where applicable)").
+LEAF_CATALOG="evidence_json|${ARTIFACT_BASE}/api/evidence.json|${ARTIFACT_BASE}/api/evidence.schema.v1.json
+validator_json|${ARTIFACT_BASE}/api/validator.json|${ARTIFACT_BASE}/api/validator.schema.v1.json
+cycle_history_jsonl|${ARTIFACT_BASE}/api/cycle-history.jsonl|${ARTIFACT_BASE}/api/cycle-history.schema.v1.json
+uptime_cycles_json|${ARTIFACT_BASE}/api/uptime-cycles.json|
+incidents_json|${ARTIFACT_BASE}/api/incidents.json|"
+
+LEAVES_TMP="$(mktemp -t leaves.XXXXXX)"      # sorted leaf body
+MANIFEST_TMP="$(mktemp -t manifest.XXXXXX)"  # incremental manifest JSON
+printf '%s' '{}' > "${MANIFEST_TMP}"
+
+while IFS='|' read -r LEAF_KEY LEAF_URL LEAF_SCHEMA_URL; do
+	[ -z "${LEAF_KEY}" ] && continue
+
+	# Probe leaf URL.
+	LEAF_CODE="$(curl -sSLI -o /dev/null -w "%{http_code}" "${LEAF_URL}")"
+	if [ "${LEAF_CODE}" != "200" ]; then
+		echo "  skip ${LEAF_KEY}: HTTP ${LEAF_CODE} at ${LEAF_URL}" >&2
+		continue
+	fi
+
+	# Fetch + sha256 of leaf body.
+	LEAF_BODY="$(mktemp -t leaf.XXXXXX)"
+	if ! curl -sSLf -o "${LEAF_BODY}" "${LEAF_URL}"; then
+		rm -f "${LEAF_BODY}"
+		echo "  skip ${LEAF_KEY}: fetch failed at ${LEAF_URL}" >&2
+		continue
+	fi
+	LEAF_SHA="$(sha256_of_stdin < "${LEAF_BODY}")"
+	rm -f "${LEAF_BODY}"
+
+	# Optional schema probe + sha256.
+	LEAF_SCHEMA_SHA=""
+	if [ -n "${LEAF_SCHEMA_URL}" ]; then
+		SCHEMA_CODE="$(curl -sSLI -o /dev/null -w "%{http_code}" "${LEAF_SCHEMA_URL}")"
+		if [ "${SCHEMA_CODE}" = "200" ]; then
+			SCHEMA_BODY="$(mktemp -t schema.XXXXXX)"
+			curl -sSLf -o "${SCHEMA_BODY}" "${LEAF_SCHEMA_URL}"
+			LEAF_SCHEMA_SHA="$(sha256_of_stdin < "${SCHEMA_BODY}")"
+			rm -f "${SCHEMA_BODY}"
+		else
+			echo "  warn ${LEAF_KEY}: schema URL HTTP ${SCHEMA_CODE}; dropping schema fields for this leaf" >&2
+			LEAF_SCHEMA_URL=""
+		fi
+	fi
+
+	# Record sorted leaf line (key + sha256), and merge into manifest JSON.
+	printf '%s\t%s\n' "${LEAF_KEY}" "${LEAF_SHA}" >> "${LEAVES_TMP}"
+
+	if [ -n "${LEAF_SCHEMA_URL}" ]; then
+		jq --arg key "${LEAF_KEY}" \
+		   --arg url "${LEAF_URL}" \
+		   --arg sha "${LEAF_SHA}" \
+		   --arg surl "${LEAF_SCHEMA_URL}" \
+		   --arg ssha "${LEAF_SCHEMA_SHA}" \
+		   '.[$key] = {url: $url, sha256: $sha, schema_url: $surl, schema_sha256: $ssha}' \
+		   "${MANIFEST_TMP}" > "${MANIFEST_TMP}.next"
+	else
+		jq --arg key "${LEAF_KEY}" \
+		   --arg url "${LEAF_URL}" \
+		   --arg sha "${LEAF_SHA}" \
+		   '.[$key] = {url: $url, sha256: $sha}' \
+		   "${MANIFEST_TMP}" > "${MANIFEST_TMP}.next"
+	fi
+	mv "${MANIFEST_TMP}.next" "${MANIFEST_TMP}"
+done <<EOF
+${LEAF_CATALOG}
+EOF
+
+# Require at least one leaf so the Merkle tree is well-defined.
+if [ ! -s "${LEAVES_TMP}" ]; then
+	echo "ERROR: no live leaves found at ${ARTIFACT_BASE}/api/* — refusing to publish empty artifact_manifest." >&2
+	rm -f "${LEAVES_TMP}" "${MANIFEST_TMP}"
+	exit 3
+fi
+
+# Merkle root over leaves sorted alphabetically by key.
+ARTIFACT_ROOT="$(sort -t '	' -k1,1 "${LEAVES_TMP}" | awk -F'\t' '{print $2}' | compute_merkle_root)"
+case "${ARTIFACT_ROOT}" in
+	*[!a-f0-9]*|"") echo "ERROR: computed artifact_root is not 64-hex: ${ARTIFACT_ROOT}" >&2; exit 4 ;;
+esac
+if [ "${#ARTIFACT_ROOT}" -ne 64 ]; then
+	echo "ERROR: computed artifact_root is not 64 chars: ${ARTIFACT_ROOT}" >&2
+	exit 4
+fi
+
+ARTIFACT_MANIFEST_JSON="$(cat "${MANIFEST_TMP}")"
+rm -f "${LEAVES_TMP}" "${MANIFEST_TMP}"
+
+# Chain anchor: default to all-zeros placeholder ("not yet bound"); override
+# via CHAIN_ANCHOR_TX_ID env at Phase 6 once the renewal tx is on-chain.
+ZEROS_64="0000000000000000000000000000000000000000000000000000000000000000"
+CHAIN_ANCHOR_TX_ID="${CHAIN_ANCHOR_TX_ID:-${ZEROS_64}}"
+case "${CHAIN_ANCHOR_TX_ID}" in
+	*[!a-f0-9]*) echo "ERROR: CHAIN_ANCHOR_TX_ID must be lowercase 64-hex." >&2; exit 5 ;;
+esac
+if [ "${#CHAIN_ANCHOR_TX_ID}" -ne 64 ]; then
+	echo "ERROR: CHAIN_ANCHOR_TX_ID must be exactly 64 hex chars." >&2
+	exit 5
+fi
+CHAIN_ANCHOR_EXPLORER="${CHAIN_ANCHOR_EXPLORER:-https://explorer.metalblockchain.org/tx/${CHAIN_ANCHOR_TX_ID}}"
+
+CHAIN_ANCHOR_JSON="$(jq -n \
+	--arg tx_id "${CHAIN_ANCHOR_TX_ID}" \
+	--arg explorer "${CHAIN_ANCHOR_EXPLORER}" \
+	'{
+		chain: "metal-mainnet",
+		tx_type: "AddPermissionlessValidatorTx",
+		tx_id: $tx_id,
+		memo_prefix: "identity-v1:sha256:",
+		explorer_url: $explorer
+	}')"
+
 # ---- 4. Compose identity.json into a tmp file. ------------------------------
 
 TMP_JSON="$(mktemp -t identity.XXXXXX)"
@@ -151,6 +350,9 @@ jq -n \
 	--arg principal "${PRINCIPAL}" \
 	--arg namespace "${NAMESPACE}" \
 	--arg generated_at "${NOW_UTC}" \
+	--argjson artifact_manifest "${ARTIFACT_MANIFEST_JSON}" \
+	--arg artifact_root "${ARTIFACT_ROOT}" \
+	--argjson chain_anchor "${CHAIN_ANCHOR_JSON}" \
 	'{
 		_comment: $comment,
 		schema_version: 1,
@@ -173,6 +375,9 @@ jq -n \
 			principal: $principal,
 			signature_url: "https://metal.freedom-yield.com/api/identity.json.sig"
 		},
+		artifact_manifest: $artifact_manifest,
+		artifact_root: $artifact_root,
+		chain_anchor: $chain_anchor,
 		generated_at: $generated_at
 	}' > "${TMP_JSON}"
 
@@ -212,12 +417,21 @@ chmod 644 "${OUT_JSON}" "${OUT_SIG}"
 trap - EXIT
 rm -f "${ALLOWED}"
 
+LEAF_COUNT="$(jq -r '.artifact_manifest | length' "${OUT_JSON}")"
+
 echo "✓ wrote ${OUT_JSON}"
 echo "✓ wrote ${OUT_SIG}"
-echo "  fingerprint: ${FP}"
-echo "  namespace:   ${NAMESPACE}"
-echo "  principal:   ${PRINCIPAL}"
-echo "  iat / exp:   ${KEY_IAT} / ${KEY_EXP}"
+echo "  fingerprint:     ${FP}"
+echo "  namespace:       ${NAMESPACE}"
+echo "  principal:       ${PRINCIPAL}"
+echo "  iat / exp:       ${KEY_IAT} / ${KEY_EXP}"
+echo "  leaves bound:    ${LEAF_COUNT}"
+echo "  artifact_root:   ${ARTIFACT_ROOT}"
+if [ "${CHAIN_ANCHOR_TX_ID}" = "${ZEROS_64}" ]; then
+	echo "  chain_anchor:    placeholder (all-zeros) — bind at Phase 6 (next renewal)"
+else
+	echo "  chain_anchor:    ${CHAIN_ANCHOR_TX_ID}"
+fi
 echo ""
 echo "Next steps (manual):"
 echo "  1. If not done yet, copy the public key into the repo:"
@@ -226,3 +440,8 @@ echo "  2. git add public/api/identity.json public/api/identity.json.sig \\"
 echo "             public/.well-known/operator-identity.pub"
 echo "  3. Review the diff and commit."
 echo "  4. After deploy, verify the live URLs with the command in docs/IDENTITY_VERIFICATION.md."
+echo ""
+echo "⚠ HOLD reminder: per project_merkle_dag_identity_anchor_design memory,"
+echo "  identity.json + .sig + operator-identity.pub publish (git add / commit)"
+echo "  is gated on Task #28 cron auto-fire PASS + Task #25 D11 Phase 3."
+echo "  Do not commit these files until both gates clear."
