@@ -206,7 +206,7 @@
 				<h3>Cycle 単位 audit packet(準備中)</h3>
 				<span class="data-tag">準備中</span>
 			</header>
-			<p><code>/api/cycle-history.jsonl</code> として JSONL フィードを準備中です。各行が 1 つのクローズ済 cycle で、 <code>/api/uptime-cycles.json</code> と <code>/api/incidents.json</code> を join し、 読者が line-by-line で audit packet を stream 処理できる形式です。 スキーマは事前公開しており <a href="/api/cycle-history.example.jsonl"><code>/api/cycle-history.example.jsonl</code></a> で参照可能。生成スクリプトは公開リポジトリ内 <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/scripts/gen-cycle-history.sh" rel="noopener noreferrer"><code>scripts/gen-cycle-history.sh</code></a>。</p>
+			<p><code>/api/cycle-history.jsonl</code> として JSONL フィードを準備中です。各行が 1 つのクローズ済 cycle で、 <code>/api/uptime-cycles.json</code> と <code>/api/incidents.json</code> を join し、 読者が line-by-line で audit packet を stream 処理できる形式です。 スキーマは事前公開しており <a href="/api/cycle-history.example.jsonl"><code>/api/cycle-history.example.jsonl</code></a> で参照可能。生成スクリプトは公開リポジトリ内 <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/scripts/gen-cycle-history.sh" rel="noopener noreferrer"><code>scripts/gen-cycle-history.sh</code></a>、 フォーマットと消費方法は <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CYCLE_HISTORY.md" rel="noopener noreferrer"><code>docs/CYCLE_HISTORY.md</code></a> に記載。</p>
 			<dl class="data-meta">
 				<dt>状態</dt><dd>準備中 — schema と生成 script を公開済み、 runtime JSONL は未公開</dd>
 				<dt>スキーマ</dt><dd><code>/api/cycle-history.example.jsonl</code></dd>
