@@ -15,9 +15,13 @@ Total wall-clock estimate: **~12 minutes** if everything is healthy.
 Three checks. **All three must pass** before key generation. If any
 fails, stop and investigate. Do not start Step 1.
 
+Set `HETZNER_VALIDATOR_HOST` from the password manager before running
+section A. The literal validator-host address is intentionally not
+checked into the repository.
+
 ```sh
 # A1. Cron fired cleanly at the scheduled time (01:30 UTC).
-ssh -i ~/.ssh/REDACTED root@203.0.113.10 \
+ssh -i ~/.ssh/REDACTED "root@${HETZNER_VALIDATOR_HOST:?set HETZNER_VALIDATOR_HOST first}" \
   'tail -20 /home/deploy/metal.freedom-yield.com/logs/gen-evidence.log'
 # Expect a recent block ending: === metal-evidence end <ts> rc=0 ===
 
@@ -78,7 +82,7 @@ value. Losing either is recoverable but expensive.
 ## C. Synthetic dry-run (Step 2, ~1 min)
 
 ```sh
-cd ~/htdocs/01_PROJECTS/metal.freedom-yield.com
+cd <repo-root>     # the local checkout of metal.freedom-yield.com
 bash scripts/operator-local/test-gen-identity.sh
 ```
 
