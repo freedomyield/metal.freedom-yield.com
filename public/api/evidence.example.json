@@ -19,6 +19,8 @@
 		"selection_evidence": "https://metal.freedom-yield.com/selection-evidence/",
 		"subnet_readiness": "https://metal.freedom-yield.com/subnet-readiness/",
 		"reference_architecture": "https://metal.freedom-yield.com/reference-architecture/",
+		"subnet_pilot": "https://metal.freedom-yield.com/subnet-pilot/",
+		"inquiry": "https://metal.freedom-yield.com/inquiry/",
 		"pledge": "https://metal.freedom-yield.com/pledge/",
 		"data_catalog": "https://metal.freedom-yield.com/data/"
 	},
