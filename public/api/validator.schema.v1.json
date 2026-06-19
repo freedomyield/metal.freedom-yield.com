@@ -5,6 +5,8 @@
 	"description": "Formal contract for /api/validator.json. The runtime file is generated every five minutes by scripts/node-info.sh against the live metalgo node's RPC. This schema is the authoritative shape v1; breaking changes (removed required field, narrowed enum, changed type, restricted pattern) require a new major version published at /api/validator.schema.v2.json. The v1 URL stays reachable for at least 18 months after v2 publication.",
 	"x-issued-at": "2026-06-19T00:00:00Z",
 	"x-stability": "additive-only-within-v1",
+	"x-format-guide": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/TOOLKIT.md#scriptsnode-infosh",
+	"x-format-guide-note": "validator.json does not have a dedicated docs/*.md companion because the runtime file is largely self-documenting via its top-level _comment field and the per-field descriptions in this schema. The generator script's purpose, dependencies, and cadence are catalogued in TOOLKIT.md.",
 	"type": "object",
 	"required": [
 		"schema_version",

@@ -143,16 +143,19 @@
 		"artifact_root": {
 			"type": "string",
 			"pattern": "^[a-f0-9]{64}$",
-			"description": "SHA-256 Merkle root computed over artifact_manifest entries: leaves are each entry.sha256, ordered alphabetically by key, odd counts duplicate the last leaf, parents are SHA-256(left || right) as raw bytes, hex-encoded at the root."
+			"description": "SHA-256 Merkle root computed over artifact_manifest entries: leaves are each entry.sha256, ordered alphabetically by key, odd counts duplicate the last leaf, parents are SHA-256(left || right) as raw bytes, hex-encoded at the root. In identity.example.json this field is set to all-zeros (sixty-four '0' characters) to indicate the schema-only preview state; the production runtime identity.json carries the real 64-hex Merkle root after gen-identity.sh computes it from the live artifact bytes."
 		},
 		"chain_anchor": {
 			"type": "object",
-			"description": "Reference to the on-chain anchor that binds this manifest's identity key to the validator's NodeID. Populated when the operator has embedded the identity public-key fingerprint in an AddPermissionlessValidatorTx memo.",
+			"description": "Reference to the on-chain anchor that binds this manifest's identity key to the validator's NodeID. Populated when the operator has embedded the identity public-key fingerprint in an AddPermissionlessValidatorTx memo (see Phase 6 in project_merkle_dag_identity_anchor_design memory). In identity.example.json the tx_id field is set to all-zeros (sixty-four '0' characters) to indicate that no chain anchor has been embedded yet; production runtime identity.json carries the real 64-hex transaction ID of the cycle whose AddValidator tx carries the fingerprint in its memo. A consumer that sees the placeholder should treat chain_anchor as 'not yet bound' and trust the manifest only at the off-chain layer (ssh-keygen -Y verify level).",
 			"additionalProperties": true,
 			"properties": {
 				"chain": { "type": "string", "enum": ["metal-mainnet"] },
 				"tx_type": { "type": "string", "enum": ["AddPermissionlessValidatorTx"] },
-				"tx_id": { "type": "string" },
+				"tx_id": {
+					"type": "string",
+					"description": "P-Chain transaction ID (64-hex) of the AddValidator tx whose memo carries the identity fingerprint. All-zeros in the schema example = placeholder pending Phase 6 embed."
+				},
 				"memo_prefix": { "type": "string", "const": "identity-v1:sha256:" },
 				"explorer_url": { "type": "string", "format": "uri" }
 			}
