@@ -6,7 +6,7 @@
 //   - Versioned cache name; old caches deleted on activate.
 "use strict";
 
-const CACHE_VERSION = "v121-ja-jurisdiction-fix";
+const CACHE_VERSION = "v122-jurisdiction-completeness";
 const SHELL_CACHE = "shell-" + CACHE_VERSION;
 const DATA_CACHE = "data-" + CACHE_VERSION;
 
