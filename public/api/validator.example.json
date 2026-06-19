@@ -1,5 +1,6 @@
 {
 	"_comment": "Schema example for /api/validator.json. The real file is generated at runtime by scripts/node-info.sh against a live metalgo mainnet node and is gitignored. This example documents the expected shape and field types; values shown here are placeholders.",
+	"schema_version": 1,
 	"phase": 2,
 	"mode": "mainnet",
 	"network": "metal-mainnet",

@@ -307,6 +307,7 @@ esac
 cat > "${OUT}" <<EOF
 {
 	"_comment": "${COMMENT_PREFIX}. NodeID etc. are live from local metalgo. stake は P-Chain platform.getCurrentValidators から、登録後にのみ値が入る。Updated by scripts/node-info.sh.",
+	"schema_version": 1,
 	"phase": ${PHASE},
 	"mode": "${MODE}",
 	"network": "${NETWORK_NAME}",
