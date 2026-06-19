@@ -84,7 +84,7 @@
 		},
 		"in_preparation_artifacts": {
 			"type": "object",
-			"description": "Artifacts whose schema is published but whose runtime URL is not yet live. Each entry MUST carry planned_url + schema_url + format_guide_url. Additional URL flavours (signature / pubkey) MAY appear for signed artifacts.",
+			"description": "Artifacts whose preview is published but whose runtime URL is not yet live. Each entry MUST carry planned_url + schema_url + format_guide_url. Additional URL flavours (signature / pubkey / formal_schema_url / operator_guide_url) MAY appear when those companions are live.",
 			"additionalProperties": {
 				"type": "object",
 				"required": ["planned_url", "schema_url", "format_guide_url"],
@@ -93,8 +93,26 @@
 					"planned_url": { "type": "string", "format": "uri" },
 					"planned_signature_url": { "type": "string", "format": "uri" },
 					"planned_pubkey_url": { "type": "string", "format": "uri" },
-					"schema_url": { "type": "string", "format": "uri" },
-					"format_guide_url": { "type": "string", "format": "uri" }
+					"schema_url": {
+						"type": "string",
+						"format": "uri",
+						"description": "Preview URL — typically an *.example.json showing the runtime shape with sample values. Required."
+					},
+					"formal_schema_url": {
+						"type": "string",
+						"format": "uri",
+						"description": "Live URL to the formal JSON Schema (draft 2020-12), when published. Optional. Lets a consumer fetch the schema and validate the runtime file with one ajv invocation once the artifact is live."
+					},
+					"format_guide_url": {
+						"type": "string",
+						"format": "uri",
+						"description": "Human-readable manifest format guide / verification recipe. Required."
+					},
+					"operator_guide_url": {
+						"type": "string",
+						"format": "uri",
+						"description": "Operator-side setup runbook, when one exists. Optional."
+					}
 				}
 			}
 		},

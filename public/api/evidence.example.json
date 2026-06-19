@@ -36,11 +36,14 @@
 			"planned_signature_url": "https://metal.freedom-yield.com/api/identity.json.sig",
 			"planned_pubkey_url": "https://metal.freedom-yield.com/.well-known/operator-identity.pub",
 			"schema_url": "https://metal.freedom-yield.com/api/identity.example.json",
-			"format_guide_url": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md"
+			"formal_schema_url": "https://metal.freedom-yield.com/api/identity.schema.v1.json",
+			"format_guide_url": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md",
+			"operator_guide_url": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/OPERATOR_IDENTITY_SETUP.md"
 		},
 		"cycle_history_jsonl": {
 			"planned_url": "https://metal.freedom-yield.com/api/cycle-history.jsonl",
 			"schema_url": "https://metal.freedom-yield.com/api/cycle-history.example.jsonl",
+			"formal_schema_url": "https://metal.freedom-yield.com/api/cycle-history.schema.v1.json",
 			"format_guide_url": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CYCLE_HISTORY.md"
 		}
 	},
