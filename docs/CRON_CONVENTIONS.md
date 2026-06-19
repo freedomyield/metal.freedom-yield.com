@@ -1,0 +1,120 @@
+# Cron file conventions
+
+This document captures the conventions every `/etc/cron.d/metal-*` file in this project must follow. It exists because a single non-compliant cron file caused the 2026-06-19 01:30 UTC `metal-evidence` failure: the redirect pointed at `/var/log/gen-evidence.log` where the `deploy` user had no create permission, and bash rejected the redirect before `push-to-web-host.sh` could run.
+
+## Required rules
+
+### 1. Log path MUST be project-local
+
+```
+GOOD:  >> /home/deploy/metal.freedom-yield.com/logs/<name>.log 2>&1
+BAD:   >> /var/log/<name>.log 2>&1
+```
+
+`/var/log/` is owned by `root:syslog`, mode `0755`. The `deploy` user is not in the `syslog` group, so it cannot create new files there. Existing logs under `/var/log/` (e.g. `node-info.log`, `server-status.log`) work only because root pre-created them and chowned to `deploy`. New cron entries MUST NOT depend on that one-time setup — they MUST log under the project's `logs/` directory, which is owned by `deploy:deploy` with mode `0775`.
+
+If the project's `logs/` directory does not yet exist, the cron-installer creates it first:
+
+```sh
+sudo -u deploy mkdir -p /home/deploy/metal.freedom-yield.com/logs
+sudo -u deploy touch    /home/deploy/metal.freedom-yield.com/logs/<name>.log
+```
+
+### 2. Wrap the work in a compound, redirect the compound
+
+```
+GOOD:  { ...stuff... } >> /home/deploy/.../logs/<name>.log 2>&1
+BAD:   ...stuff... >> /home/deploy/.../logs/<name>.log 2>&1
+```
+
+Without the braces, the redirect attaches only to the last `simple command` in the chain (POSIX shell rule). Earlier commands' stdout is discarded by cron (mailed to the operator, but there's no MTA on this host). The braces are an explicit grouping so every command in the chain shares the log target.
+
+### 3. Emit start / end markers and capture rc
+
+```
+30 1 * * * deploy { \
+    echo "=== <name> start $(date -u +\%FT\%TZ) ==="; \
+    cd <repo> && bash scripts/<step1>.sh && bash scripts/<step2>.sh; \
+    rc=$?; \
+    echo "=== <name> end $(date -u +\%FT\%TZ) rc=$rc ==="; \
+} >> /home/deploy/.../logs/<name>.log 2>&1
+```
+
+The start / end lines make every cron run visually obvious in the log. `rc=$?` captures the exit status of the last command in the chain (which, because of `&&`, is either the first failure or the final success). Together they make a future audit answer "did the 2026-06-30 firing complete?" in one `grep`.
+
+### 4. Escape `%` in cron files
+
+Cron treats unescaped `%` as a newline-of-input separator. Inside the command, `\%` makes cron preserve `%` literally so the shell can run `date -u +\%FT\%TZ`. Bare `%` will silently truncate the command at that character.
+
+### 5. Set `SHELL=/bin/bash`, `PATH`, and project-specific env vars at the top
+
+```
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+WEB_PUSH_KEY=/home/deploy/.ssh/<key>
+WEB_HOST_FILE=/etc/freedom-yield/<host-file>
+```
+
+cron's default environment is intentionally minimal. Set what your script needs. The values land in the spawned shell's environment (not as shell-local assignments), so children inherit them. Without explicit `SHELL`, cron defaults to `/bin/sh`, which lacks bash features (the `{ ... }` compound works in both, but `$()`, `$RANDOM`, etc., differ).
+
+## Worked example: `/etc/cron.d/metal-evidence`
+
+This is the file that exists today, post-fix:
+
+```cron
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+WEB_PUSH_KEY=/home/deploy/.ssh/<key>
+WEB_HOST_FILE=/etc/freedom-yield/<host-file>
+30 1 * * * deploy { \
+    echo "=== metal-evidence start $(date -u +\%FT\%TZ) ==="; \
+    cd /home/deploy/metal.freedom-yield.com && \
+        bash scripts/gen-evidence.sh && \
+        bash scripts/push-to-web-host.sh evidence.json; \
+    rc=$?; \
+    echo "=== metal-evidence end $(date -u +\%FT\%TZ) rc=$rc ==="; \
+} >> /home/deploy/metal.freedom-yield.com/logs/gen-evidence.log 2>&1
+```
+
+(The file as installed is one logical line; the line continuations above are for readability.)
+
+## Before installing a new cron file
+
+Run the pre-flight linter against the file you intend to install:
+
+```sh
+scripts/check-cron-file.sh /tmp/proposed-cron-file
+```
+
+The linter checks rules 1, 2, 3, 4, 5 above and refuses files that violate them. Install only after the linter passes:
+
+```sh
+sudo cp -a /etc/cron.d/<name> /root/<name>.cron.bak.$(date -u +\%Y\%m\%dT\%H\%M\%SZ)
+sudo cp /tmp/proposed-cron-file /etc/cron.d/<name>
+sudo chmod 0644 /etc/cron.d/<name>
+sudo systemctl reload cron 2>/dev/null  # optional; cron auto-reloads on next minute
+```
+
+## After installing
+
+Run the cron-equivalent body manually as `deploy` with a clean environment to confirm the fix:
+
+```sh
+sudo -u deploy env -i \
+    SHELL=/bin/bash \
+    PATH=/usr/local/bin:/usr/bin:/bin \
+    HOME=/home/deploy \
+    LOGNAME=deploy \
+    USER=deploy \
+    <ALL_PROJECT_ENV_VARS> \
+    bash -c '<exact-command-body-from-cron-file>'
+echo "manual_rc=$?"
+```
+
+A `manual_rc=0` plus a fresh entry in the log file proves the chain works end-to-end. The next scheduled cron firing should reproduce the same result.
+
+## Related lessons
+
+- `scripts/operator-local/gen-identity.sh` validates JSON with `jq empty`, not `jq -e empty` — the `empty` filter produces no output, so `-e` returns exit 4 on valid JSON.
+- `scripts/sync-to-validator-host.sh` refuses to run if `REMOTE_PATH` looks like a local macOS path; the old default chain resolved to `${LOCAL_REPO_ROOT}/scripts/` and tried to mkdir that on the validator host.
+- `.github/workflows/deploy.yml` rsync `--delete` requires every runtime-generated `public/api/*.json` to be individually excluded; otherwise each main-branch push wipes them off the web host.

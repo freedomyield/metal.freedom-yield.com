@@ -33,6 +33,11 @@ Pure chain-level operations. Point them at your local `metalgo` HTTP API and you
 **Dependencies:** `jq`. Reads `public/api/validator.json`.
 **Cron:** daily.
 
+### `scripts/check-cron-file.sh`
+**Purpose:** Pre-flight linter for `/etc/cron.d/metal-*` files. Validates the rules at `docs/CRON_CONVENTIONS.md` so a non-compliant cron file is caught before installation rather than at the next firing. Refuses files that would repeat the 2026-06-19 01:30 UTC `metal-evidence` failure (redirect to `/var/log/...` that the `deploy` user cannot create).
+**Dependencies:** `bash`, `grep`. `grep -P` (perl-compatible) for the bare-`%` check; falls back to a manual-review note if absent.
+**Cron:** never — invoked manually by the operator before installing or editing any `/etc/cron.d/metal-*` file.
+
 ### `scripts/gen-cycle-history.sh`
 **Purpose:** Emit a per-cycle audit packet (`public/api/cycle-history.jsonl`) — one closed cycle per JSON line, joining `uptime-cycles.json` with `incidents.json` so each cycle is paired with the incident IDs that fell inside its window. Deterministic and idempotent.
 **Dependencies:** `jq`. Reads `public/api/uptime-cycles.json` + `public/api/incidents.json`.
