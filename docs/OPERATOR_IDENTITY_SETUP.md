@@ -1,8 +1,11 @@
 # Operator identity key — setup runbook (Phase 5)
 
-> At execution time, prefer the compact one-page action list:
-> [`PHASE5_CHECKLIST.md`](./PHASE5_CHECKLIST.md). This document is the
-> teaching reference — read it once for context, then run from the
+> At execution time, prefer the compact one-page action list for the
+> phase you are about to run:
+> [`PHASE5_CHECKLIST.md`](./PHASE5_CHECKLIST.md) for the signed-
+> manifest publish, [`PHASE6_CHECKLIST.md`](./PHASE6_CHECKLIST.md) for
+> the per-cycle chain-anchor embed. This document is the teaching
+> reference — read it once for context, then run from the matching
 > checklist on the day.
 
 This is the operator-side runbook for Phase 5 of the

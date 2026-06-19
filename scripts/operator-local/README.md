@@ -57,9 +57,11 @@ key, signing the live `identity.json`, and publishing the three Phase 5
 surfaces is in [`docs/OPERATOR_IDENTITY_SETUP.md`](../../docs/OPERATOR_IDENTITY_SETUP.md).
 That runbook is the teaching reference: read it once for context.
 
-At execution time, run from the compact one-page checklist instead:
-[`docs/PHASE5_CHECKLIST.md`](../../docs/PHASE5_CHECKLIST.md). It carries
-the cron-stability gate checks (sections A1-A3), command-by-command
-copy-paste blocks, the password-manager metadata template, the
-synthetic dry-run, live verification, rollback, and the symptom-keyed
-failure decision tree.
+At execution time, run from the compact one-page checklists instead:
+[`docs/PHASE5_CHECKLIST.md`](../../docs/PHASE5_CHECKLIST.md) for the
+signed-manifest publish, and
+[`docs/PHASE6_CHECKLIST.md`](../../docs/PHASE6_CHECKLIST.md) for the
+per-cycle chain-anchor embed at each renewal. Both carry the
+section-keyed gate checks, command-by-command copy-paste blocks,
+live verification, rollback, and symptom-keyed failure decision
+trees.

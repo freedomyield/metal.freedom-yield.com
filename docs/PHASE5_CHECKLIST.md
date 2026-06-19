@@ -200,3 +200,8 @@ once the underlying issue is resolved.
 Update `docs/OPERATOR_IDENTITY_SETUP.md` Phase 5 → Phase 6 hand-off
 section with the actual landing date so the next runbook reader sees
 "Phase 5 landed YYYY-MM-DD, Phase 6 fires at next renewal cycle".
+
+The Phase 6 (per-cycle chain-anchor embed) execution checklist is at
+[`PHASE6_CHECKLIST.md`](./PHASE6_CHECKLIST.md). It runs at every
+renewal cycle once Phase 5 has landed — first execution scheduled for
+2026-07-04 13:00 JST.
