@@ -21,6 +21,38 @@ Phase 6 has no validator-host gate — it depends only on Phase 5
 already being live and the operator's regular cycle-end renewal
 operation. If Phase 5 has not landed, do not run Phase 6.
 
+## Rehearsal harness (run any time before renewal)
+
+Before the renewal moment, rehearse the full Phase 5 → Phase 6
+transition with synthetic data as many times as needed:
+
+```sh
+bash scripts/operator-local/test-phase6-mock.sh
+```
+
+The mock:
+
+- generates a throwaway ed25519 key in `/tmp` (real operator key
+  never touched)
+- runs `gen-identity.sh` once with default placeholder `chain_anchor`
+  (= Phase 5 shape) and once with `CHAIN_ANCHOR_TX_ID` set to a
+  visibly-fake "deadbeef" 64-hex value (= Phase 6 shape)
+- asserts the transition mutates only `chain_anchor.tx_id` and
+  `chain_anchor.explorer_url` — `node_id`, manifest fingerprint, and
+  `artifact_root` must all stay identical across the re-run
+- re-verifies the Phase 6 signature with `ssh-keygen -Y verify`
+- walks the verifier-side seven-step recipe with the mock data and
+  prints what an evaluator would see
+- prints a side-by-side visual diff of the `chain_anchor` block
+  before and after, plus the two distinct hash forms (manifest
+  fingerprint = SHA256:base64 vs. chain memo binding hash = 64-hex)
+  so the operator can drill the f7aca55 distinction
+
+Re-run until the output shape is familiar. The exit code is 0 only
+when all transition assertions pass and the signature verifies; non-
+zero means the Phase 6 flow has regressed and the real renewal
+moment is not safe to attempt yet.
+
 ## A. Pre-flight (1–2 days before renewal)
 
 ```sh

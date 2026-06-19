@@ -41,14 +41,24 @@ A clean run prints `OK` and nothing else.
   `docs/IDENTITY_VERIFICATION.md` for the signing model and the seven-
   step end-to-end verification procedure.
 
-- `test-gen-identity.sh` — synthetic-key test harness. Generates a
-  throwaway ed25519 key in a tmp dir, runs `gen-identity.sh` against a
-  fake `REPO_ROOT`, re-fetches every leaf and recomputes the Merkle
-  root independently, then verifies the signature against the synthetic
-  pubkey. Output never lands in the real repo. Use this to confirm Phase
-  3 Merkle logic without touching the real operator identity key (which
-  is still HOLD pending Task #25 / D11 Phase 3 and Task #28 cron auto-
-  fire gates).
+- `test-gen-identity.sh` — synthetic-key test harness for Phase 3
+  Merkle DAG logic. Generates a throwaway ed25519 key in a tmp dir,
+  runs `gen-identity.sh` against a fake `REPO_ROOT`, re-fetches every
+  leaf and recomputes the Merkle root independently, then verifies
+  the signature against the synthetic pubkey. Output never lands in
+  the real repo.
+
+- `test-phase6-mock.sh` — end-to-end rehearsal harness for the
+  Phase 5 → Phase 6 transition (chain-anchor embed at renewal cycle).
+  Runs `gen-identity.sh` twice, once with the default placeholder
+  `chain_anchor` and once with `CHAIN_ANCHOR_TX_ID` set to a
+  visibly-fake mock value, then asserts the diff between the two
+  outputs is exactly the `chain_anchor.tx_id` + `explorer_url` flip
+  and nothing else. Prints the side-by-side visual, the seven-step
+  verifier walkthrough on mock data, and the two-hash-forms drill.
+  Used as the Phase 6 rehearsal before the real 2026-07-04 13:00 JST
+  renewal moment so the operator can verify the output shape without
+  touching the chain.
 
 ## Phase 5 runbook
 
