@@ -276,11 +276,15 @@ TOTAL_RECEIVED_JSON=$(json_num_or_null "${TOTAL_RECEIVED}")
 START_TIME_JSON=$(json_num_or_null "${START_TIME:-null}")
 END_TIME_JSON=$(json_num_or_null "${END_TIME:-null}")
 
-# network 名から phase / mode / explorer URL を決める
+# network 名から phase / mode / explorer URL を決める。
+# NETWORK_NAME はローカル metalgo RPC から返る raw 名(mainnet / tahoe / etc)、
+# NETWORK_LABEL は公開 JSON に出す canonical 名(metal-mainnet 等で
+# evidence/identity/cycle-history と統一)。 RPC 戻り値は内部分岐にのみ使う。
 case "${NETWORK_NAME}" in
 	mainnet)
 		PHASE=1
 		MODE="mainnet"
+		NETWORK_LABEL="metal-mainnet"
 		EXPLORER="https://explorer.metalblockchain.org/"
 		COMMENT_PREFIX="Phase 1 — mainnet operation. NodeID is the live validator identity"
 		STAKE_NOTE="self = 自己 stake、totalReceived = 委任受入合計、max_weight = 5 × self。mainnet 最小 2,000 METAL"
@@ -289,6 +293,7 @@ case "${NETWORK_NAME}" in
 	tahoe)
 		PHASE=0
 		MODE="tahoe-testnet"
+		NETWORK_LABEL="metal-tahoe-testnet"
 		EXPLORER="https://tahoe.metalscan.io/"
 		COMMENT_PREFIX="Phase 0 — Tahoe testnet pipeline check"
 		STAKE_NOTE="self = 自己 stake、totalReceived = 委任受入合計、max_weight = 5 × self。Tahoe testnet 最小 1 METAL"
@@ -297,6 +302,7 @@ case "${NETWORK_NAME}" in
 	*)
 		PHASE=0
 		MODE="unknown"
+		NETWORK_LABEL="metal-${NETWORK_NAME}"
 		EXPLORER="https://explorer.metalblockchain.org/"
 		COMMENT_PREFIX="Unknown network ${NETWORK_NAME}"
 		STAKE_NOTE="self = 自己 stake、totalReceived = 委任受入合計、max_weight = 5 × self"
@@ -310,7 +316,7 @@ cat > "${OUT}" <<EOF
 	"schema_version": 1,
 	"phase": ${PHASE},
 	"mode": "${MODE}",
-	"network": "${NETWORK_NAME}",
+	"network": "${NETWORK_LABEL}",
 	"nodeId": ${NODE_ID_JSON},
 	"bootstrap": {
 		"pChain": ${P_BOOT},
