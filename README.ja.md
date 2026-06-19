@@ -104,4 +104,4 @@ Metal Blockchain validator を運用中 / 検討中の方は、[TOOLKIT.md](TOOL
 
 ## 連絡先
 
-bp@freedom-yield.com
+info@metal.freedom-yield.com

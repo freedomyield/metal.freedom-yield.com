@@ -118,4 +118,4 @@ Current operating posture is monthly cycle re-registration with a small delegati
 
 ## Contact
 
-bp@freedom-yield.com
+info@metal.freedom-yield.com

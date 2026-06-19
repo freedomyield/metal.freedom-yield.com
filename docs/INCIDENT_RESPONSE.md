@@ -23,7 +23,7 @@
 | VPS provider console | 課金・traffic 超過・サーバ状態 | 設定で email アラート |
 | `metalgo health` API | P/X/C-Chain bootstrap 状態 | 自前 cron で監視 |
 | `info.uptime` API | 自分の validator のネットワーク評価値 | 自前 cron で 80% 割れ警告 |
-| メール受信 | `bp@freedom-yield.com` 宛 | email forwarding service 経由 |
+| メール受信 | `info@metal.freedom-yield.com` 宛 | email forwarding service 経由 |
 
 ## 3. 障害種別ごとの対応
 

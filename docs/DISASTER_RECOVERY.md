@@ -88,7 +88,7 @@ bash <deploy_path>/scripts/vps-bootstrap.sh
 cd <deploy_path>
 cat > .env <<EOF
 DOMAIN=metal.freedom-yield.com
-ACME_EMAIL=bp@freedom-yield.com
+ACME_EMAIL=info@metal.freedom-yield.com
 EOF
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 

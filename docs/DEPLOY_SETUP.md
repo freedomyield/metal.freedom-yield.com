@@ -74,7 +74,7 @@ mkdir -p <deploy_path>
 ```sh
 cat > <deploy_path>/.env <<'EOF'
 DOMAIN=metal.freedom-yield.com
-ACME_EMAIL=bp@freedom-yield.com
+ACME_EMAIL=info@metal.freedom-yield.com
 EOF
 chmod 600 <deploy_path>/.env
 ```

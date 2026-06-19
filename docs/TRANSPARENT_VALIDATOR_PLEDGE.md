@@ -111,7 +111,7 @@ The Freedom Yield Metal validator adopts the Pledge. Mapping of Pledge articles 
 | 2. Incident transparency | `/incidents/` + `/api/incidents.json` |
 | 3. Fee stability | `/commitments/` (§ Fee policy) + `/api/validator.json` |
 | 4. Decommission notice | `/commitments/` (§ Decommission notice) — 90 days |
-| 5. Identity disclosure | `/jurisdiction/` + brand identity "Freedom Yield" + `bp@freedom-yield.com` |
+| 5. Identity disclosure | `/jurisdiction/` + brand identity "Freedom Yield" + `info@metal.freedom-yield.com` |
 
 The Freedom Yield specimen is one possible shape. Other adopters may map differently — there is no required URL layout.
 
