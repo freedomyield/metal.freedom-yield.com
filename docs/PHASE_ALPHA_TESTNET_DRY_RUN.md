@@ -155,12 +155,30 @@ ssh "${VALIDATOR_SSH_HOST}" 'sudo install -m 0600 -o deploy -g deploy \
     sudo shred -u '"${TEST_CONFIG_DIR}"'/anchor.k1.key.incoming'
 shred -u "${ANCHOR_KEY_TMP}"
 
-# Write the sink + chain + quantity config files.
+# Write the account + sink + chain + quantity config files. The
+# `xpr-account` file is REQUIRED (audit-C/F-E2 removed the implicit
+# 'freedomyield' fallback). For the testnet rehearsal it MUST contain
+# ${TEST_ACCOUNT} (= the throwaway test account from Step 1), NOT
+# 'freedomyield' — broadcasting the rehearsal from the production
+# account is exactly what the audit forced this config split to
+# prevent.
 ssh "${VALIDATOR_SSH_HOST}" "sudo -u deploy bash -c \"
-  printf '%s' '${TEST_SINK}'  > '${TEST_CONFIG_DIR}/anchor-sink' && \
-  printf '%s' 'proton-test'    > '${TEST_CONFIG_DIR}/xpr-chain' && \
-  printf '%s' '0.0001 XPR'     > '${TEST_CONFIG_DIR}/xpr-quantity' && \
-  chmod 0600 '${TEST_CONFIG_DIR}'/anchor-sink '${TEST_CONFIG_DIR}'/xpr-chain '${TEST_CONFIG_DIR}'/xpr-quantity \
+  printf '%s' '${TEST_ACCOUNT}' > '${TEST_CONFIG_DIR}/xpr-account' && \
+  printf '%s' '${TEST_SINK}'    > '${TEST_CONFIG_DIR}/anchor-sink'  && \
+  printf '%s' 'proton-test'      > '${TEST_CONFIG_DIR}/xpr-chain'    && \
+  printf '%s' '0.0001 XPR'       > '${TEST_CONFIG_DIR}/xpr-quantity' && \
+  chmod 0600 '${TEST_CONFIG_DIR}'/xpr-account '${TEST_CONFIG_DIR}'/anchor-sink '${TEST_CONFIG_DIR}'/xpr-chain '${TEST_CONFIG_DIR}'/xpr-quantity \
+\""
+
+# Mainnet-leak guard (= explicit assertion that the rehearsal will NOT
+# broadcast from 'freedomyield'). Run BEFORE Step 6 invokes the signer.
+ssh "${VALIDATOR_SSH_HOST}" "sudo -u deploy bash -c \"
+  cfg_account=\\\"\$(head -n 1 '${TEST_CONFIG_DIR}/xpr-account' | tr -d '\\n\\r\\t ')\\\"
+  if [ \\\"\$cfg_account\\\" = 'freedomyield' ]; then
+    echo 'ERROR: testnet xpr-account is freedomyield (= production account); refusing to proceed' >&2
+    exit 1
+  fi
+  echo \\\"OK testnet xpr-account = \$cfg_account (not 'freedomyield')\\\"
 \""
 
 # Import the test key into proton-cli (= note the chain context).
@@ -296,6 +314,44 @@ The operator is then cleared to authorize the mainnet first
 inscription at cycle 3 start. The mainnet broadcast uses the same
 script and the same shape; only the chain context, the sink account
 name, and the keystored key differ.
+
+## Proton-cli output observation gates (= audit-B/L-3 / audit-C #5)
+
+`scripts/sign-anchor-event.sh` currently extracts the on-chain
+`tx_id`, `block_num`, and `block_time` from `proton-cli` output via
+multi-pattern grep with an RPC-history fallback. The audit
+intentionally did NOT prescribe a change to the parser before a
+testnet rehearsal verified the actual `proton-cli` output shape on
+the operator's installed version. The rehearsal Step 6 (= the
+non-`--dry-run` invocation) is where that verification happens.
+
+During the rehearsal the operator MUST capture, in addition to the
+PASS / FAIL of the cross-check (Step 7) and the AJV validation
+(Step 8), the following observations. Mainnet activation is BLOCKED
+until each is satisfied:
+
+| # | Observation | Action on failure |
+|---|---|---|
+| O1 | The actual `proton-cli` command that produced the broadcast (= `${PROTON_ARGS[@]}` value from `scripts/sign-anchor-event.sh` at run time). | None; this is the input to all subsequent observations. Save the full argv. |
+| O2 | The exit code of the `proton` invocation (= `$?`). | If non-zero, the broadcast failed; investigate before any mainnet step. |
+| O3 | The raw stdout AND stderr of the `proton` invocation, with `${PVT_K1_*}` / `${ANCHOR_KEY_TMP}` / any host path or SSH-key-path strings redacted (per Constitution §4.1 S7-S9). Save to `/tmp/testnet-proton.{stdout,stderr}.log` for after-the-fact analysis. | None; the redacted logs are the artifact future debugging will use. |
+| O4 | Does the installed `proton-cli` version expose a `--json` output flag for the `action` subcommand? Test: `proton action --help` (or version-specific equivalent) and grep for `--json`. | If YES, FOLLOW-UP work item: replace the grep-pattern `tx_id` parser in `sign-anchor-event.sh` with `jq -e .transaction_id`. NOT done in the rehearsal itself; flagged for a separate audit-tracked commit before mainnet. |
+| O5 | The canonical field name for the transaction id in the raw stdout. The current parser tries (in order) `transaction_id:`, `transaction id:`, JSON `"transaction_id"`, and bare 64-hex. Document which pattern matched for this `proton-cli` version. | If a NEW pattern is needed (= none of the four matched), the parser MUST be updated before any mainnet broadcast. |
+| O6 | The grep-extracted `tx_id` matches `^[a-f0-9]{64}$` exactly (= 64 lowercase hex characters, no whitespace, no prefix, no suffix). | If NOT 64 lowercase hex, BLOCK mainnet. The transaction id parser drift would cause the receipt to point at the wrong transaction (or no transaction). |
+| O7 | The grep extracted EXACTLY ONE `tx_id` candidate. If `proton-cli` output contains multiple 64-hex strings (e.g., references to historical transactions), the current `head -n 1` policy picks the first, which may not be the broadcast one. | If multiple candidates appear, BLOCK mainnet and update the parser to be context-aware (= match within the "transaction confirmed" stanza, not file-wide). |
+| O8 | The RPC-history fallback URL (= `https://api-xprnetwork-test.saltant.io/v1/history/get_transaction` for testnet; the mainnet analog for production) returns HTTP 200 with a JSON body containing both `block_num` AND `block_time` when queried with the captured `tx_id`. | If RPC fallback fails AND `proton-cli` get_transaction is also absent, the signer's fail-closed exit code 4 (audit-C/F-E4) will fire on mainnet too; document the operator workaround before proceeding. |
+| O9 | The `anchor.block_time` in the composed receipt matches the value returned by the RPC `get_transaction` (= the chain-derived value), NOT the local clock at the time of rehearsal. Compare with: `jq -r .anchor.block_time /tmp/testnet-anchor-receipt.json` vs. the same field from the explorer's view of the transaction. | If they disagree, the signer's fail-closed path was NOT exercised (= a code path was missed); BLOCK mainnet. |
+| O10 | The receipt is NOT published until O1-O9 all pass. Specifically, do not run `mv /tmp/testnet-anchor-receipt.json public/api/anchor-receipt.json` or any analog until the cross-check in Step 7 has confirmed the chain-side transaction matches the receipt. | None; this is the gate, not an observation. The audit explicitly forbids publishing a receipt before transaction status is confirmed. |
+
+After the rehearsal PASSes O1-O9 AND Steps 7-8, the operator records
+a brief note in the rehearsal log capturing:
+
+- `proton-cli` version (= `proton --version`).
+- Which pattern from O5 matched.
+- Whether O4 unlocks the parser-replacement follow-up.
+
+These three datapoints feed the separate follow-up commit (= post-
+rehearsal parser hardening) that mainnet activation requires.
 
 ## Phase β note
 
