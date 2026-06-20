@@ -145,7 +145,9 @@ Verifier check, given an `anchor-receipt.json`:
 | `/api/identity.json.sig` | Detached signature | Output of `ssh-keygen -Y sign -n freedom-yield/validator-identity`. |
 | `/api/identity-history.jsonl` | identity_branch leaf source | JSONL, one line per identity key entry, sorted by `key_seq`. **NEW in Phase α.** |
 | `/api/cycle-history.jsonl` | cycles_branch leaf source | JSONL, one line per closed cycle, sorted by `cycle_n`. **Existing; extended with `signed_by_key_seq` + `signed_by_pubkey_fingerprint`.** |
-| `/api/cycles-history.json` | DAG summary | One JSON object. Contains `identity_branch_root`, `cycles_branch_root`, `dag_root_hash`, leaf counts, source URLs, generated_at. **NEW in Phase α.** (Naming chosen to match the design memory; the trailing `s` distinguishes this summary doc from the existing per-line leaf source `cycle-history.jsonl`.) |
+| `/api/cycles-history.json` | DAG summary | One JSON object. Contains `identity_branch_root`, `cycles_branch_root`, `dag_root_hash`, leaf counts, source URLs, generated_at. **NEW in Phase α.** |
+
+**Naming convention** (read this before grepping for `cycle`): files ending in `.jsonl` are **leaf sources** (one leaf per line, append-only within a schema version). Files ending in `.json` are **DAG snapshots or signed manifests** (one JSON object per file, regenerated each `gen-identity.sh` run). The singular `cycle-history.jsonl` is the leaf source for cycles_branch; the plural `cycles-history.json` is the DAG snapshot that summarises the branch root. Do not confuse them.
 | `/api/anchor-receipt.json` | A-chain inscribe receipt | Document 2 per the brief. Contains `dag_root_hash`, A-chain `tx_id`, block height / timestamp, memo verbatim, signing account + permission. **NEW in Phase α.** |
 | `/.well-known/operator-identity.pub` | Current operator identity public key | One-line OpenSSH `ssh-ed25519 …` form. Stable URL across rotations. Historical keys at `/.well-known/operator-identity.v<key_seq>.pub` if the operator chooses to preserve them. |
 
