@@ -1,0 +1,20 @@
+{
+  "_comment": "Test fixture: leaf_count is missing entirely. Used to verify the driver does not crash on missing field AND does not invent a cycle_n value.",
+  "schema_version": 1,
+  "dag_root_hash": "9999999999999999999999999999999999999999999999999999999999999999",
+  "branches": {
+    "identity": {
+      "leaf_source_url": "https://metal.freedom-yield.com/api/identity-history.jsonl",
+      "leaf_source_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "leaf_count": 1,
+      "branch_root": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "cycles": {
+      "leaf_source_url": "https://metal.freedom-yield.com/api/cycle-history.jsonl",
+      "leaf_source_sha256": "",
+      "branch_root": "9999999999999999999999999999999999999999999999999999999999999999"
+    }
+  },
+  "identity_url": "https://metal.freedom-yield.com/api/identity.json",
+  "generated_at": "2026-06-21T00:00:00Z"
+}

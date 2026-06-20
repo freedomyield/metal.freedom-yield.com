@@ -1,0 +1,24 @@
+{
+  "_comment": "Test fixture: 2 closed cycles in cycles_branch. Used by tests/post-anchor-event/test-trigger-reference.sh to verify M-1 fix (= driver MUST NOT derive cycle_n from leaf_count).",
+  "schema_version": 1,
+  "dag_root_hash": "1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff",
+  "branches": {
+    "identity": {
+      "leaf_source_url": "https://metal.freedom-yield.com/api/identity-history.jsonl",
+      "leaf_source_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "leaf_source_schema_url": "https://metal.freedom-yield.com/api/identity-history.schema.v1.json",
+      "leaf_count": 1,
+      "branch_root": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "cycles": {
+      "leaf_source_url": "https://metal.freedom-yield.com/api/cycle-history.jsonl",
+      "leaf_source_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "leaf_source_schema_url": "https://metal.freedom-yield.com/api/cycle-history.schema.v1.json",
+      "leaf_count": 2,
+      "branch_root": "2222222222222222222222222222222222222222222222222222222222222222"
+    }
+  },
+  "identity_url": "https://metal.freedom-yield.com/api/identity.json",
+  "anchor_receipt_url": "https://metal.freedom-yield.com/api/anchor-receipt.json",
+  "generated_at": "2026-06-21T00:00:00Z"
+}

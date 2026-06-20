@@ -1,0 +1,21 @@
+{
+  "_comment": "Test fixture: 5 closed cycles. Used to verify the driver does not derive cycle_n = 5 (or 6) from leaf_count.",
+  "schema_version": 1,
+  "dag_root_hash": "5555555555555555555555555555555555555555555555555555555555555555",
+  "branches": {
+    "identity": {
+      "leaf_source_url": "https://metal.freedom-yield.com/api/identity-history.jsonl",
+      "leaf_source_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "leaf_count": 1,
+      "branch_root": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "cycles": {
+      "leaf_source_url": "https://metal.freedom-yield.com/api/cycle-history.jsonl",
+      "leaf_source_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "leaf_count": 5,
+      "branch_root": "5555555555555555555555555555555555555555555555555555555555555555"
+    }
+  },
+  "identity_url": "https://metal.freedom-yield.com/api/identity.json",
+  "generated_at": "2026-06-21T00:00:00Z"
+}

@@ -42,7 +42,40 @@
 #   7  state-file update failed
 #
 # Usage:
-#   post-anchor-event.sh --event-type <cyclestart|cycleend|idrotate> [--force] [--dry-run]
+#   post-anchor-event.sh --event-type <cyclestart|cycleend|idrotate>
+#                        [--cycle-n N] [--key-seq K]
+#                        [--force] [--dry-run]
+#
+# Canonical sources for the optional trigger_reference fields
+# (= M-1 fix per audit 2026-06-21):
+#
+#   --cycle-n N   integer >= 1, the canonical cycle number this event
+#                 pertains to. Used for cyclestart and cycleend events.
+#                 If absent, the receipt OMITS cycle_n entirely — the
+#                 driver does NOT derive cycle_n from any branch summary
+#                 (branches.cycles.leaf_count is "closed cycles", not
+#                 "current target cycle", and using it would publish
+#                 incorrect metadata under any race condition between
+#                 gen-cycle-history's append and this driver's run).
+#   --key-seq K   integer >= 1, the canonical operator-identity key_seq
+#                 this event pertains to. Used for idrotate events.
+#                 If absent, the receipt OMITS key_seq entirely.
+#
+#   For the four event types the canonical source is:
+#     cyclestart : caller passes --cycle-n explicitly. There is no
+#                  on-chain or in-artifact source available at start
+#                  time because the new cycle is not yet recorded in
+#                  cycle-history.jsonl (= it only logs CLOSED cycles).
+#     cycleend   : caller passes --cycle-n explicitly. After
+#                  gen-cycle-history has appended the closing entry,
+#                  the new last line of cycle-history.jsonl carries the
+#                  cycle_n; the operator MAY read it manually and pass
+#                  it via --cycle-n. The driver does not race against
+#                  gen-cycle-history by reading the file itself.
+#     idrotate   : caller passes --key-seq explicitly. cycle_n does not
+#                  apply.
+#     manual / recovery : neither --cycle-n nor --key-seq is set;
+#                  trigger_reference is omitted entirely.
 #
 # Config (in /etc/freedom-yield/, same family as sign-anchor-event.sh):
 #   anchor-sink, xpr-chain, xpr-quantity (consumed by sign-anchor-event.sh)
@@ -51,6 +84,17 @@
 #   /var/lib/freedom-yield/last-anchored-root
 #     One line containing the dag_root_hash most recently anchored on
 #     chain. Used for the idempotency check at step 3.
+#
+# Test-time env overrides (= keep production paths unchanged):
+#   ANCHOR_SIGNER    path to the signer script. Default:
+#                    $(dirname $0)/sign-anchor-event.sh. Test harnesses
+#                    set this to a stub that emits a synthetic receipt
+#                    fragment without invoking proton-cli.
+#   PUBLIC_BASE      base URL for fetching cycles-history.json. Default
+#                    https://metal.freedom-yield.com. Tests may use a
+#                    file:// URL pointing at a fixture directory.
+#   FY_STATE_DIR     directory holding last-anchored-root. Default
+#                    /var/lib/freedom-yield. Tests use a temp dir.
 #
 # Log: /home/deploy/metal.freedom-yield.com/logs/post-anchor-event.log
 #   per docs/CRON_CONVENTIONS.md. The caller (cron / watcher) is expected
@@ -62,12 +106,22 @@ set -euo pipefail
 EVENT_TYPE=""
 FORCE=0
 DRY_RUN=0
+CYCLE_N=""
+KEY_SEQ=""
 while [ "$#" -gt 0 ]; do
 	case "$1" in
 		--event-type)
 			[ "$#" -ge 2 ] || { echo "ERROR: --event-type requires a value" >&2; exit 1; }
 			EVENT_TYPE="$2"; shift 2 ;;
 		--event-type=*) EVENT_TYPE="${1#*=}"; shift ;;
+		--cycle-n)
+			[ "$#" -ge 2 ] || { echo "ERROR: --cycle-n requires a value" >&2; exit 1; }
+			CYCLE_N="$2"; shift 2 ;;
+		--cycle-n=*) CYCLE_N="${1#*=}"; shift ;;
+		--key-seq)
+			[ "$#" -ge 2 ] || { echo "ERROR: --key-seq requires a value" >&2; exit 1; }
+			KEY_SEQ="$2"; shift 2 ;;
+		--key-seq=*) KEY_SEQ="${1#*=}"; shift ;;
 		--force)        FORCE=1; shift ;;
 		--dry-run)      DRY_RUN=1; shift ;;
 		--help|-h)
@@ -84,10 +138,40 @@ case "${EVENT_TYPE}" in
 	*)  echo "ERROR: invalid --event-type '${EVENT_TYPE}'" >&2; exit 1 ;;
 esac
 
+# Validate CYCLE_N if provided: must be a positive integer.
+if [ -n "${CYCLE_N}" ]; then
+	case "${CYCLE_N}" in
+		*[!0-9]*|"") echo "ERROR: --cycle-n must be a non-negative integer (got '${CYCLE_N}')" >&2; exit 1 ;;
+		0|0*)         echo "ERROR: --cycle-n must be >= 1 (got '${CYCLE_N}')" >&2; exit 1 ;;
+	esac
+fi
+
+# Validate KEY_SEQ if provided: must be a positive integer.
+if [ -n "${KEY_SEQ}" ]; then
+	case "${KEY_SEQ}" in
+		*[!0-9]*|"") echo "ERROR: --key-seq must be a non-negative integer (got '${KEY_SEQ}')" >&2; exit 1 ;;
+		0|0*)         echo "ERROR: --key-seq must be >= 1 (got '${KEY_SEQ}')" >&2; exit 1 ;;
+	esac
+fi
+
+# --cycle-n applies only to cyclestart / cycleend; --key-seq applies only
+# to idrotate. Reject mismatch loudly rather than silently dropping the
+# input (= caller mental-model check).
+case "${EVENT_TYPE}" in
+	cyclestart|cycleend)
+		if [ -n "${KEY_SEQ}" ]; then
+			echo "ERROR: --key-seq is not valid for event_type '${EVENT_TYPE}' (use --cycle-n)" >&2; exit 1
+		fi ;;
+	idrotate)
+		if [ -n "${CYCLE_N}" ]; then
+			echo "ERROR: --cycle-n is not valid for event_type 'idrotate' (use --key-seq)" >&2; exit 1
+		fi ;;
+esac
+
 # -------- paths --------
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
-SIGNER="${SCRIPT_DIR}/sign-anchor-event.sh"
+SIGNER="${ANCHOR_SIGNER:-${SCRIPT_DIR}/sign-anchor-event.sh}"
 PUSHER="${SCRIPT_DIR}/push-to-web-host.sh"
 STATE_DIR="${FY_STATE_DIR:-/var/lib/freedom-yield}"
 STATE_FILE="${STATE_DIR}/last-anchored-root"
@@ -128,11 +212,11 @@ LAST_ANCHORED=""
 [ -r "${STATE_FILE}" ] && LAST_ANCHORED="$(tr -d '\n\r\t ' < "${STATE_FILE}" || true)"
 
 if [ "${FORCE}" -eq 0 ] && [ "${LAST_ANCHORED}" = "${DAG_ROOT_HASH}" ]; then
-	echo "no-op: dag_root_hash unchanged since last anchor (${DAG_ROOT_HASH:0:12}…)"
+	echo "no-op: dag_root_hash unchanged since last anchor (${DAG_ROOT_HASH:0:12}…)" >&2
 	exit 2
 fi
 
-echo "anchoring event_type=${EVENT_TYPE} dag_root_hash=${DAG_ROOT_HASH}"
+echo "anchoring event_type=${EVENT_TYPE} dag_root_hash=${DAG_ROOT_HASH}" >&2
 
 # -------- invoke signer --------
 FRAG_TMP="$(mktemp -t anchor-frag.XXXXXX)"
@@ -161,22 +245,39 @@ case "${NETWORK_TAG}" in
 esac
 EXPLORER_URL="${EXPLORER_BASE}/transaction/${TX_ID}"
 
-# Trigger reference: pull cycle_n from cycles-history.json if present
-# (= populated by gen-identity.sh future enhancements). For Phase α the
-# field is informational.
-TRIGGER_CYCLE_N="$(jq -r '.branches.cycles.leaf_count // empty' "${CYCLES_TMP}")"
+# Build trigger_reference ONLY from canonical caller input (--cycle-n or
+# --key-seq). We do NOT derive cycle_n from branches.cycles.leaf_count or
+# any other branch summary; leaf_count is "closed cycles" not "current
+# target cycle", and any derivation rule (e.g. leaf_count+1) would publish
+# incorrect metadata under any race condition between gen-cycle-history's
+# append and this driver's run. See M-1 audit fix 2026-06-21.
+TRIGGER_REF_JSON="null"
+case "${EVENT_TYPE}" in
+	cyclestart|cycleend)
+		if [ -n "${CYCLE_N}" ]; then
+			TRIGGER_REF_JSON="$(jq -n --argjson c "${CYCLE_N}" '{cycle_n: $c}')"
+		fi ;;
+	idrotate)
+		if [ -n "${KEY_SEQ}" ]; then
+			TRIGGER_REF_JSON="$(jq -n --argjson k "${KEY_SEQ}" '{key_seq: $k}')"
+		fi ;;
+esac
 
-RECEIPT_TMP="$(mktemp -t anchor-receipt.XXXXXX)"
+# AJV CLI selects its parser by file extension; the temp file MUST end in
+# `.json` or AJV treats the bytes as not-JSON and reports "Unexpected token".
+RECEIPT_TMP_BASE="$(mktemp -t anchor-receipt.XXXXXX)"
+RECEIPT_TMP="${RECEIPT_TMP_BASE}.json"
+mv "${RECEIPT_TMP_BASE}" "${RECEIPT_TMP}"
 jq -n \
-	--argjson frag        "$(cat "${FRAG_TMP}")" \
-	--arg dag_root_hash   "${DAG_ROOT_HASH}" \
-	--arg expl            "${EXPLORER_URL}" \
-	--arg cycles_url      "${PUBLIC_BASE}/api/cycles-history.json" \
-	--arg identity_url    "${PUBLIC_BASE}/api/identity.json" \
-	--arg event_type      "${EVENT_TYPE}" \
-	--arg trigger_cycle_n "${TRIGGER_CYCLE_N}" \
-	--arg generated_at    "${NOW_UTC}" \
-	'{
+	--argjson frag         "$(cat "${FRAG_TMP}")" \
+	--arg dag_root_hash    "${DAG_ROOT_HASH}" \
+	--arg expl             "${EXPLORER_URL}" \
+	--arg cycles_url       "${PUBLIC_BASE}/api/cycles-history.json" \
+	--arg identity_url     "${PUBLIC_BASE}/api/identity.json" \
+	--arg event_type       "${EVENT_TYPE}" \
+	--argjson trigger_ref  "${TRIGGER_REF_JSON}" \
+	--arg generated_at     "${NOW_UTC}" \
+	'({
 		_comment: "A-chain anchor receipt — generated by scripts/post-anchor-event.sh per docs/MERKLE_DAG_SPEC.md §6.",
 		"$schema": "https://metal.freedom-yield.com/api/anchor-receipt.schema.v1.json",
 		schema_version: 1,
@@ -191,11 +292,10 @@ jq -n \
 			elif $event_type == "idrotate"   then "identity_rotation"
 			else "manual" end
 		),
-		trigger_reference: (
-			if $trigger_cycle_n == "" then {} else {cycle_n: ($trigger_cycle_n | tonumber)} end
-		),
 		generated_at: $generated_at
-	}' > "${RECEIPT_TMP}"
+	})
+	+ (if $trigger_ref == null then {} else {trigger_reference: $trigger_ref} end)' \
+	> "${RECEIPT_TMP}"
 
 if ! jq empty "${RECEIPT_TMP}" >/dev/null 2>&1; then
 	echo "ERROR: composed receipt is not valid JSON" >&2; exit 5
@@ -207,11 +307,13 @@ fi
 if command -v npx >/dev/null 2>&1; then
 	SCHEMA_LOCAL="${REPO_ROOT}/public/api/anchor-receipt.schema.v1.json"
 	if [ -r "${SCHEMA_LOCAL}" ]; then
-		if ! npx --yes -p ajv-cli@5.0.0 -p ajv-formats@3.0.1 ajv validate \
-			--strict=false -c=ajv-formats --spec=draft2020 \
-			-s "${SCHEMA_LOCAL}" -d "${RECEIPT_TMP}" >/dev/null 2>&1
-		then
+		AJV_ERR="$(npx --yes -p ajv-cli@5.0.0 -p ajv-formats@3.0.1 ajv validate \
+			--strict=false --all-errors -c=ajv-formats --spec=draft2020 \
+			-s "${SCHEMA_LOCAL}" -d "${RECEIPT_TMP}" 2>&1)" || AJV_RC=$?
+		if [ "${AJV_RC:-0}" -ne 0 ]; then
 			echo "ERROR: composed receipt failed AJV validation against ${SCHEMA_LOCAL}" >&2
+			echo "ERROR: AJV detail (truncated to 20 lines):" >&2
+			printf '%s\n' "${AJV_ERR}" | head -n 20 >&2
 			exit 5
 		fi
 	fi
@@ -220,9 +322,10 @@ fi
 # -------- atomic local commit + push to web host --------
 LOCAL_PUBLISH="${REPO_ROOT}/public/api/anchor-receipt.json"
 if [ "${DRY_RUN}" -eq 1 ]; then
-	echo "DRY-RUN: would atomically install ${RECEIPT_TMP} → ${LOCAL_PUBLISH} and push"
-	echo "DRY-RUN: receipt content (first 60 lines):"
-	head -n 60 "${RECEIPT_TMP}" >&2
+	# Emit the composed receipt JSON on stdout (= test harnesses parse it
+	# directly). Status messages go to stderr to keep stdout machine-readable.
+	echo "DRY-RUN: would atomically install at ${LOCAL_PUBLISH} and push via push-to-web-host.sh" >&2
+	cat "${RECEIPT_TMP}"
 else
 	# Atomic local commit (same dir → POSIX-atomic mv).
 	if ! mv "${RECEIPT_TMP}" "${LOCAL_PUBLISH}"; then
@@ -251,9 +354,9 @@ if [ "${DRY_RUN}" -eq 0 ]; then
 	mv "${STATE_FILE}.new" "${STATE_FILE}"
 fi
 
-echo "✓ anchored: tx_id=${TX_ID}"
-echo "  network:     ${NETWORK_TAG}"
-echo "  explorer:    ${EXPLORER_URL}"
-echo "  event_type:  ${EVENT_TYPE}"
-echo "  dag_root:    ${DAG_ROOT_HASH}"
-echo "  receipt:     ${PUBLIC_BASE}/api/anchor-receipt.json"
+echo "✓ anchored: tx_id=${TX_ID}" >&2
+echo "  network:     ${NETWORK_TAG}" >&2
+echo "  explorer:    ${EXPLORER_URL}" >&2
+echo "  event_type:  ${EVENT_TYPE}" >&2
+echo "  dag_root:    ${DAG_ROOT_HASH}" >&2
+echo "  receipt:     ${PUBLIC_BASE}/api/anchor-receipt.json" >&2
