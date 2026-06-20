@@ -1,0 +1,13 @@
+{
+  "vector_name": "v01-single-leaf",
+  "description": "identity_branch with one leaf. branch_root equals the single leaf hash (no pairing).",
+  "leaf_count": 1,
+  "branch_root": "4b3713828445a4441038fc86fd7af479733effda59169f00e1f1926c5f947439",
+  "leaf_hashes_in_order": [
+    "4b3713828445a4441038fc86fd7af479733effda59169f00e1f1926c5f947439"
+  ],
+  "proof_for_leaf_index": 0,
+  "proof_sibling_hashes": [],
+  "proof_target_leaf_hash": "4b3713828445a4441038fc86fd7af479733effda59169f00e1f1926c5f947439",
+  "proof_reverify": true
+}
