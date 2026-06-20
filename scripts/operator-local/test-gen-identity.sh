@@ -5,17 +5,22 @@
 #
 # Generates a throwaway ed25519 key in a tmp dir, runs gen-identity.sh against
 # a fake REPO_ROOT skeleton, then independently re-verifies the artifact_root
-# the script computed. Used to confirm Phase 3 Merkle DAG logic is correct
+# the script computed. Used to confirm artifact_root computation is correct
 # WITHOUT touching the real operator identity key or the real repo's
 # public/api/identity.json.
 #
 # Why this exists:
-#   - Phase 3 (Merkle DAG computation) must be testable now, but the real
-#     operator identity key (Task #25 / D11 Phase 3) is still HOLD pending
-#     Task #28 cron auto-fire confirmation.
+#   - Merkle-rooted artifact manifest computation must be testable now, but
+#     the real operator identity key (Task #25 / D11 Phase 3) is still HOLD
+#     pending Task #28 cron auto-fire confirmation.
 #   - Producing a real signed identity.json here would risk leaking
 #     synthetic-key-signed bytes into public/api/.
 #   - This harness routes everything through /tmp and prints PASS/FAIL only.
+#
+# Pre-commit validation policy: ALL schema validations in this script use the
+# LOCAL revised schema at canonical-repo public/api/identity.schema.v1.json.
+# We do NOT fetch the live URL — pre-deploy, the live URL still serves the
+# pre-revision content and would not exercise the revised contract.
 #
 # Usage:
 #   bash scripts/operator-local/test-gen-identity.sh
@@ -24,6 +29,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REAL_REPO="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+LOCAL_SCHEMA="${REAL_REPO}/public/api/identity.schema.v1.json"
+LOCAL_EXAMPLE="${REAL_REPO}/public/api/identity.example.json"
+
+# Pinned AJV combination. Versions empirically verified to compile draft-2020-12,
+# validate documents, and enforce uri / date-time format checks. Update both
+# values in one place if changing.
+AJV_CLI_VERSION="5.0.0"
+AJV_FORMATS_VERSION="3.0.1"
 
 TEST_ROOT="$(mktemp -d -t fy-test-gen-identity.XXXXXX)"
 trap 'rm -rf "${TEST_ROOT}"' EXIT
@@ -36,7 +49,57 @@ ssh-keygen -t ed25519 -N "" -C "synthetic-test-key DO-NOT-USE" -f "${SYN_KEY}" -
 FAKE_REPO="${TEST_ROOT}/fake-repo"
 mkdir -p "${FAKE_REPO}/public/api"
 
+HAS_ERROR=0
+
+# Helper: pinned AJV command as a bash array. Reused for compile + validate so
+# the version pins and flags cannot drift across invocations.
+AJV_CMD=(
+	npx --yes --quiet
+	--package "ajv-cli@${AJV_CLI_VERSION}"
+	--package "ajv-formats@${AJV_FORMATS_VERSION}"
+	ajv
+)
+
+if ! command -v npx >/dev/null 2>&1; then
+	echo "FAIL: npx not installed; pinned AJV is mandatory for this test." >&2
+	echo "      Install Node.js + npm, then re-run." >&2
+	exit 1
+fi
+
+# 0. Compile local revised schema (mandatory).
+echo "=== 0. compile local revised schema (mandatory) ==="
+if "${AJV_CMD[@]}" compile \
+		--spec=draft2020 \
+		--strict=false \
+		-c=ajv-formats \
+		-s "${LOCAL_SCHEMA}" >/dev/null 2>&1; then
+	echo "  OK   ${LOCAL_SCHEMA##*/} compiles cleanly (ajv-cli@${AJV_CLI_VERSION} + ajv-formats@${AJV_FORMATS_VERSION})"
+else
+	echo "  FAIL ${LOCAL_SCHEMA##*/} does NOT compile:" >&2
+	"${AJV_CMD[@]}" compile --spec=draft2020 --strict=false -c=ajv-formats \
+		-s "${LOCAL_SCHEMA}" >&2 || true
+	HAS_ERROR=1
+fi
+
+# 1. Validate LOCAL example against LOCAL revised schema (mandatory).
+echo
+echo "=== 1. validate LOCAL example against LOCAL revised schema (mandatory) ==="
+if "${AJV_CMD[@]}" validate \
+		--spec=draft2020 \
+		--strict=false \
+		-c=ajv-formats \
+		-s "${LOCAL_SCHEMA}" \
+		-d "${LOCAL_EXAMPLE}" >/dev/null 2>&1; then
+	echo "  OK   ${LOCAL_EXAMPLE##*/} validates against revised schema"
+else
+	echo "  FAIL ${LOCAL_EXAMPLE##*/} does NOT validate:" >&2
+	"${AJV_CMD[@]}" validate --spec=draft2020 --strict=false -c=ajv-formats \
+		-s "${LOCAL_SCHEMA}" -d "${LOCAL_EXAMPLE}" >&2 || true
+	HAS_ERROR=1
+fi
+
 # 3. Run gen-identity.sh against the fake repo + synthetic key.
+echo
 echo "=== running gen-identity.sh against synthetic key + fake repo ==="
 OPERATOR_IDENTITY_KEY="${SYN_KEY}" \
 REPO_ROOT="${FAKE_REPO}" \
@@ -52,10 +115,19 @@ if [ ! -f "${OUT_JSON}" ] || [ ! -f "${OUT_SIG}" ]; then
 	exit 1
 fi
 
+# 3.5. Assert NO chain_anchor field in the output (removed 2026-06-20).
+echo
+echo "=== 3.5. assert no chain_anchor field in output ==="
+if [ "$(jq -r 'has("chain_anchor")' "${OUT_JSON}")" = "false" ]; then
+	echo "  OK   identity.json has no chain_anchor field"
+else
+	echo "  FAIL identity.json still carries chain_anchor field" >&2
+	HAS_ERROR=1
+fi
+
 # 4. Independently re-fetch each leaf in the manifest and re-hash.
 echo
 echo "=== independent re-hash of each leaf in artifact_manifest ==="
-HAS_ERROR=0
 KEYS="$(jq -r '.artifact_manifest | keys[]' "${OUT_JSON}" | sort)"
 for k in ${KEYS}; do
 	url="$(jq -r --arg k "${k}" '.artifact_manifest[$k].url' "${OUT_JSON}")"
@@ -117,7 +189,7 @@ rm -f "${INDEP_LEAVES}"
 # 6. ssh-keygen -Y verify against synthetic pubkey.
 echo
 echo "=== ssh-keygen -Y verify against synthetic key ==="
-ALLOWED="$(mktemp -t allowed.XXXXXX)"
+ALLOWED="$(mktemp -t allowed_signers.XXXXXX)"
 printf 'freedom-yield %s\n' "$(cat "${SYN_KEY}.pub")" > "${ALLOWED}"
 if ssh-keygen -Y verify \
 		-f "${ALLOWED}" \
@@ -131,34 +203,91 @@ else
 fi
 rm -f "${ALLOWED}"
 
-# 7. Validate output against the live identity schema v1 (ajv if available).
+# 7. Validate synthetic gen-identity output against LOCAL revised schema (mandatory).
+#    Pre-commit test uses LOCAL revised schema, NEVER the live URL — the live
+#    URL still serves the pre-revision content until deploy.
 echo
-echo "=== schema validation against live identity.schema.v1.json ==="
-SCHEMA_TMP="$(mktemp -t identity-schema.XXXXXX)"
-curl -sSLf "https://metal.freedom-yield.com/api/identity.schema.v1.json" -o "${SCHEMA_TMP}"
-if command -v ajv >/dev/null 2>&1; then
-	if ajv validate \
-			--spec=draft2020 \
-			--strict=false \
-			-c=ajv-formats \
-			-s "${SCHEMA_TMP}" \
-			-d "${OUT_JSON}" >/dev/null 2>&1; then
-		echo "  OK   identity.json validates against live identity.schema.v1.json (ajv)"
-	else
-		echo "  FAIL schema validation failed:" >&2
-		ajv validate --spec=draft2020 --strict=false -c=ajv-formats \
-			-s "${SCHEMA_TMP}" -d "${OUT_JSON}" >&2 || true
-		HAS_ERROR=1
-	fi
+echo "=== 7. validate synthetic output against LOCAL revised schema (mandatory) ==="
+if "${AJV_CMD[@]}" validate \
+		--spec=draft2020 \
+		--strict=false \
+		-c=ajv-formats \
+		-s "${LOCAL_SCHEMA}" \
+		-d "${OUT_JSON}" >/dev/null 2>&1; then
+	echo "  OK   synthetic identity.json validates against revised schema"
 else
-	echo "  SKIP ajv not installed; install with 'npm i -g ajv-cli ajv-formats' for full schema check"
+	echo "  FAIL synthetic identity.json does NOT validate:" >&2
+	"${AJV_CMD[@]}" validate --spec=draft2020 --strict=false -c=ajv-formats \
+		-s "${LOCAL_SCHEMA}" -d "${OUT_JSON}" >&2 || true
+	HAS_ERROR=1
 fi
-rm -f "${SCHEMA_TMP}"
+
+# 8. Retired-env test: set CHAIN_ANCHOR_TX_ID, expect ERROR + exit 6,
+#    expect NO output file (script exits before main work).
+echo
+echo "=== 8. retired-env test (CHAIN_ANCHOR_TX_ID set, expect ERROR + exit 6) ==="
+ENV_TEST_REPO="${TEST_ROOT}/env-test-repo"
+ENV_TEST_STDOUT="${TEST_ROOT}/env-test-stdout"
+ENV_TEST_STDERR="${TEST_ROOT}/env-test-stderr"
+mkdir -p "${ENV_TEST_REPO}/public/api"
+
+ENV_RC=0
+if CHAIN_ANCHOR_TX_ID="deadbeefcafebabe1234567890abcdef0123456789abcdefdeadbeef12345678" \
+   OPERATOR_IDENTITY_KEY="${SYN_KEY}" \
+   REPO_ROOT="${ENV_TEST_REPO}" \
+   KEY_IAT="2026-06-19T00:00:00Z" \
+   KEY_EXP="2027-06-19T00:00:00Z" \
+   bash "${SCRIPT_DIR}/gen-identity.sh" \
+       >"${ENV_TEST_STDOUT}" 2>"${ENV_TEST_STDERR}"; then
+	ENV_RC=0
+else
+	ENV_RC=$?
+fi
+
+if [ "${ENV_RC}" -eq 6 ]; then
+	echo "  OK   exit code 6 (retired env detected, no output produced)"
+else
+	echo "  FAIL expected exit 6, got ${ENV_RC}" >&2
+	HAS_ERROR=1
+fi
+
+if grep -q "CHAIN_ANCHOR_TX_ID is set but was retired" "${ENV_TEST_STDERR}"; then
+	echo "  OK   ERROR line emitted on stderr"
+else
+	echo "  FAIL retired-env ERROR line missing on stderr" >&2
+	echo "       --- stderr was: ---" >&2
+	cat "${ENV_TEST_STDERR}" >&2 || true
+	HAS_ERROR=1
+fi
+
+if grep -q "unset CHAIN_ANCHOR_TX_ID CHAIN_ANCHOR_EXPLORER" "${ENV_TEST_STDERR}"; then
+	echo "  OK   unset hint emitted on stderr"
+else
+	echo "  FAIL unset hint missing on stderr" >&2
+	HAS_ERROR=1
+fi
+
+if [ -f "${ENV_TEST_REPO}/public/api/identity.json" ]; then
+	echo "  FAIL output file created despite ERROR exit" >&2
+	HAS_ERROR=1
+else
+	echo "  OK   no output file created"
+fi
+
+if [ -f "${ENV_TEST_REPO}/public/api/identity.json.sig" ]; then
+	echo "  FAIL signature file created despite ERROR exit" >&2
+	HAS_ERROR=1
+else
+	echo "  OK   no signature file created"
+fi
 
 echo
 if [ "${HAS_ERROR}" -eq 0 ]; then
-	echo "PASS: gen-identity.sh Phase 3 Merkle DAG output is internally consistent"
-	echo "      (leaves re-hash match, Merkle root reproducible, signature verifies)"
+	echo "PASS: gen-identity.sh artifact_root computation is internally consistent"
+	echo "      (revised schema compiles; example validates; synthetic output"
+	echo "       validates; no chain_anchor field; leaves re-hash match; Merkle"
+	echo "       root reproducible; signature verifies; retired env produces"
+	echo "       ERROR + exit 6 with no output)"
 	exit 0
 else
 	echo "FAIL: see errors above" >&2

@@ -16,9 +16,7 @@
 #   2. Computes the SHA-256 Merkle root over the artifact_manifest leaves
 #      (alphabetical key order, odd-duplicate, raw-bytes binary tree —
 #      matches the algorithm documented in identity.schema.v1.json).
-#   3. Composes identity.json with artifact_manifest + artifact_root +
-#      chain_anchor (chain_anchor.tx_id defaults to all-zeros placeholder
-#      until Phase 6 embed; override via CHAIN_ANCHOR_TX_ID env).
+#   3. Composes identity.json with artifact_manifest + artifact_root.
 #   4. Validates JSON with `jq empty`.
 #   5. Signs with `ssh-keygen -Y sign` using namespace freedom-yield/validator-identity.
 #   6. Self-verifies with `ssh-keygen -Y verify` before publishing.
@@ -48,21 +46,6 @@
 #   PRINCIPAL               allowed_signers principal (default: freedom-yield).
 #   ARTIFACT_BASE           URL prefix for leaf artifacts (default:
 #                           https://metal.freedom-yield.com).
-#   CHAIN_ANCHOR_TX_ID      P-Chain tx_id (64-hex) of the AddValidator tx whose
-#                           memo carries the identity fingerprint. Default:
-#                           sixty-four zeros = "not yet bound" placeholder.
-#                           Override only at Phase 6 (post next-cycle renewal).
-#                           The memo content itself is `identity-v1:sha256:<HEX64>`
-#                           where <HEX64> = `shasum -a 256` of the published
-#                           `.pub` file bytes (verifier recipe Step 3). This is
-#                           NOT the SSH wire-format `SHA256:<base64>` value that
-#                           ssh-keygen -l -f prints; that value populates the
-#                           manifest's operator_identity_pubkey_fingerprint
-#                           field. See docs/OPERATOR_IDENTITY_SETUP.md
-#                           "Phase 5 to Phase 6 hand-off" for the full mechanics.
-#   CHAIN_ANCHOR_EXPLORER   explorer URL pointing at CHAIN_ANCHOR_TX_ID.
-#                           Default: composed from CHAIN_ANCHOR_TX_ID against
-#                           the canonical explorer host.
 #
 # Usage:
 #   export OPERATOR_IDENTITY_KEY=~/.ssh/freedom_yield_operator
@@ -91,6 +74,31 @@ if [[ -d /home/deploy ]] && id deploy >/dev/null 2>&1; then
 	echo "REFUSE: detected 'deploy' user — refusing to run on what looks like a server." >&2
 	exit 99
 fi
+
+# ---- 1.5. Retired env guard. -----------------------------------------------
+#
+# The CHAIN_ANCHOR_TX_ID and CHAIN_ANCHOR_EXPLORER environment variables
+# were retired 2026-06-20 when the P-Chain memo anchor model was abandoned
+# (the current Avalanche / Metal protocol rules forbid non-empty memos on
+# AddPermissionlessValidatorTx). See docs/IDENTITY_SCHEMA_CHANGELOG.md.
+#
+# If either variable is set in the environment when gen-identity.sh is
+# invoked, the operator's mental model still expects an anchored output.
+# Continuing silently would risk publishing a manifest under a misperceived
+# shape. Halt before any output is produced and ask the operator to unset
+# the retired variables.
+for retired_env in CHAIN_ANCHOR_TX_ID CHAIN_ANCHOR_EXPLORER; do
+	if [ -n "${!retired_env:-}" ]; then
+		echo "ERROR: ${retired_env} is set but was retired 2026-06-20." >&2
+		echo "       The P-Chain memo anchor model was abandoned because the" >&2
+		echo "       current protocol rules forbid non-empty memos on" >&2
+		echo "       AddPermissionlessValidatorTx. See" >&2
+		echo "       docs/IDENTITY_SCHEMA_CHANGELOG.md. To proceed:" >&2
+		echo "         unset CHAIN_ANCHOR_TX_ID CHAIN_ANCHOR_EXPLORER" >&2
+		echo "       then re-run." >&2
+		exit 6
+	fi
+done
 
 # ---- 2. Resolve inputs. -----------------------------------------------------
 
@@ -153,7 +161,7 @@ case "${FP}" in
 		;;
 esac
 
-# ---- 3.5. Build artifact_manifest + Merkle root + chain_anchor. -------------
+# ---- 3.5. Build artifact_manifest + artifact_root. --------------------------
 #
 # Probe each leaf artifact + its companion schema (where applicable). Skip
 # 4xx/5xx leaves (e.g., cycle-history.jsonl is HOLD until Task #28 / D10 gate
@@ -313,30 +321,6 @@ fi
 ARTIFACT_MANIFEST_JSON="$(cat "${MANIFEST_TMP}")"
 rm -f "${LEAVES_TMP}" "${MANIFEST_TMP}"
 
-# Chain anchor: default to all-zeros placeholder ("not yet bound"); override
-# via CHAIN_ANCHOR_TX_ID env at Phase 6 once the renewal tx is on-chain.
-ZEROS_64="0000000000000000000000000000000000000000000000000000000000000000"
-CHAIN_ANCHOR_TX_ID="${CHAIN_ANCHOR_TX_ID:-${ZEROS_64}}"
-case "${CHAIN_ANCHOR_TX_ID}" in
-	*[!a-f0-9]*) echo "ERROR: CHAIN_ANCHOR_TX_ID must be lowercase 64-hex." >&2; exit 5 ;;
-esac
-if [ "${#CHAIN_ANCHOR_TX_ID}" -ne 64 ]; then
-	echo "ERROR: CHAIN_ANCHOR_TX_ID must be exactly 64 hex chars." >&2
-	exit 5
-fi
-CHAIN_ANCHOR_EXPLORER="${CHAIN_ANCHOR_EXPLORER:-https://explorer.metalblockchain.org/tx/${CHAIN_ANCHOR_TX_ID}}"
-
-CHAIN_ANCHOR_JSON="$(jq -n \
-	--arg tx_id "${CHAIN_ANCHOR_TX_ID}" \
-	--arg explorer "${CHAIN_ANCHOR_EXPLORER}" \
-	'{
-		chain: "metal-mainnet",
-		tx_type: "AddPermissionlessValidatorTx",
-		tx_id: $tx_id,
-		memo_prefix: "identity-v1:sha256:",
-		explorer_url: $explorer
-	}')"
-
 # ---- 4. Compose identity.json into a tmp file. ------------------------------
 
 TMP_JSON="$(mktemp -t identity.XXXXXX)"
@@ -360,7 +344,6 @@ jq -n \
 	--arg generated_at "${NOW_UTC}" \
 	--argjson artifact_manifest "${ARTIFACT_MANIFEST_JSON}" \
 	--arg artifact_root "${ARTIFACT_ROOT}" \
-	--argjson chain_anchor "${CHAIN_ANCHOR_JSON}" \
 	'{
 		_comment: $comment,
 		schema_version: 1,
@@ -385,7 +368,6 @@ jq -n \
 		},
 		artifact_manifest: $artifact_manifest,
 		artifact_root: $artifact_root,
-		chain_anchor: $chain_anchor,
 		generated_at: $generated_at
 	}' > "${TMP_JSON}"
 
@@ -435,11 +417,6 @@ echo "  principal:       ${PRINCIPAL}"
 echo "  iat / exp:       ${KEY_IAT} / ${KEY_EXP}"
 echo "  leaves bound:    ${LEAF_COUNT}"
 echo "  artifact_root:   ${ARTIFACT_ROOT}"
-if [ "${CHAIN_ANCHOR_TX_ID}" = "${ZEROS_64}" ]; then
-	echo "  chain_anchor:    placeholder (all-zeros) — bind at Phase 6 (next renewal)"
-else
-	echo "  chain_anchor:    ${CHAIN_ANCHOR_TX_ID}"
-fi
 echo ""
 echo "Next steps (manual):"
 echo "  1. If not done yet, copy the public key into the repo:"
