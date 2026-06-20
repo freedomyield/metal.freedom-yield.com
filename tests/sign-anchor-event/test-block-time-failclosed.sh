@@ -28,6 +28,9 @@ trap 'rm -rf "${TMP}"' EXIT
 
 CONFIG_DIR="${TMP}/etc"
 mkdir -p "${CONFIG_DIR}"
+# audit-C/F-E2: xpr-account is now a required config (no 'freedomyield'
+# default). Use a synthetic test account for this regression suite.
+printf '%s' 'fytest1'     > "${CONFIG_DIR}/xpr-account"
 printf '%s' 'fyldsink'    > "${CONFIG_DIR}/anchor-sink"
 printf '%s' 'proton-test' > "${CONFIG_DIR}/xpr-chain"
 

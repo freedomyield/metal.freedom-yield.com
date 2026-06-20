@@ -117,12 +117,13 @@
 							"properties": {
 								"actor": {
 									"type": "string",
-									"const": "freedomyield"
+									"pattern": "^[a-z1-5.]{1,12}$",
+									"description": "Antelope/EOSIO account name of the signer. For production mainnet receipts this is the operator-controlled 'freedomyield' account; for testnet rehearsal receipts (= docs/PHASE_ALPHA_TESTNET_DRY_RUN.md) this is the throwaway test account. The schema accepts both shapes via the XPR account pattern rather than a const so the same schema URL validates mainnet AND testnet receipts. Cross-account binding (= 'is this really the operator?') is established off-schema: identity.json's signed manifest names the operator brand and binds it to the anchor permission lineage; the on-chain explorer cross-check (IDENTITY_VERIFICATION.md §8) confirms the action's signer matches what the receipt declares."
 								},
 								"permission": {
 									"type": "string",
 									"const": "anchor",
-									"description": "Narrow child permission scoped via linkauth to inscribe-class actions only. Compromise of the anchor key cannot move tokens, change permissions, or deploy contracts; it can only re-broadcast an anchor with a different root, which an evaluator's chain-of-trust check would reject as soon as the operator publishes a contradicting signed identity.json."
+									"description": "Narrow child permission scoped via linkauth to inscribe-class actions only. Compromise of the anchor key cannot move tokens, change permissions, or deploy contracts; it can only re-broadcast an anchor with a different root, which an evaluator's chain-of-trust check would reject as soon as the operator publishes a contradicting signed identity.json. The PERMISSION NAME (= 'anchor') is an operator convention applied to both mainnet and testnet rehearsals; const is preserved here because changing the permission name across environments would break the receipt's authority chain claim."
 								}
 							},
 							"description": "Phase α: required (= the singular {actor, permission} signer). Phase β: optional (= a parallel `authorization` array is used instead, mirroring the Antelope/EOSIO action.authorization shape)."

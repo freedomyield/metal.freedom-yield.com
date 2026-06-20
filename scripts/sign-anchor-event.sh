@@ -54,13 +54,25 @@
 #                      testnet rehearsal.
 #
 # Environment / config files (validator-host conventions, /etc/freedom-yield/):
-#   anchor.k1.key      private key for freedomyield@anchor, mode 0600 deploy:deploy
-#                      (= T-7 §B3 deploy artifact). Not re-read here; proton-cli
-#                      keystore (§B4) holds the working copy.
+#   anchor.k1.key      private key for ${XPR_ACCOUNT}@anchor, mode 0600
+#                      deploy:deploy (= T-7 §B3 deploy artifact). Not re-read
+#                      here; proton-cli keystore (§B4) holds the working copy.
+#   xpr-account        single-line file containing the operator-controlled XPR
+#                      account name that holds the anchor permission AND
+#                      sources the eosio.token::transfer broadcast. NO default
+#                      — the script fails closed if the file is missing, empty,
+#                      multi-line, has invalid characters, or is longer than
+#                      12 chars (per audit-C/F-E2). The literal "freedomyield"
+#                      fallback was removed because the same script runs the
+#                      testnet rehearsal with a throwaway test account.
+#                      Mainnet: contains 'freedomyield'.
+#                      Testnet: contains the rehearsal test account name
+#                      (see docs/PHASE_ALPHA_TESTNET_DRY_RUN.md).
 #   anchor-sink        single-line file containing the sink account name (= the
 #                      receiver of the eosio.token::transfer; required because
 #                      eosio.token rejects self-transfer per BLOCK-1). Operator-
 #                      chosen account name, matches XPR pattern ^[a-z1-5.]{1,12}$.
+#                      MUST NOT equal the value of xpr-account.
 #   xpr-chain          single-line file containing "proton" (mainnet) or
 #                      "proton-test" (testnet). Default: "proton". Selecting
 #                      proton-test routes broadcasts to the testnet RPC, used by
@@ -154,6 +166,40 @@ read_config() {
 	fi
 }
 
+# XPR_ACCOUNT — operator-controlled account name. Strict, no default.
+# Per audit-C/F-E2 the literal 'freedomyield' fallback was removed so that
+# the same script runs both mainnet and testnet rehearsal without the
+# rehearsal accidentally broadcasting from the production account.
+XPR_ACCOUNT_FILE="${CONFIG_DIR}/xpr-account"
+if [ ! -r "${XPR_ACCOUNT_FILE}" ]; then
+	echo "ERROR: required config ${XPR_ACCOUNT_FILE} missing or unreadable" >&2
+	exit 2
+fi
+XPR_ACCOUNT_LINES="$(wc -l < "${XPR_ACCOUNT_FILE}" | tr -d ' ')"
+# Allow exactly 0 newlines (= single-line file ending without LF) OR
+# exactly 1 newline (= single line with trailing LF). Reject ≥2 newlines.
+case "${XPR_ACCOUNT_LINES}" in
+	0|1) ;;
+	*)
+		echo "ERROR: ${XPR_ACCOUNT_FILE} must contain exactly one line (got ${XPR_ACCOUNT_LINES} newlines)" >&2; exit 2 ;;
+esac
+XPR_ACCOUNT="$(head -n 1 "${XPR_ACCOUNT_FILE}" | tr -d '\r\n\t ')"
+if [ -z "${XPR_ACCOUNT}" ]; then
+	echo "ERROR: ${XPR_ACCOUNT_FILE} is empty (or whitespace only)" >&2; exit 2
+fi
+# Validate the XPR account name char-set with an LC_ALL=C-safe tr-based
+# check. The shell case-statement pattern `*[!a-z1-5.]*` is locale-
+# dependent: under en_US.UTF-8 / ja_JP.UTF-8 it collation-matches
+# uppercase letters via a-z, silently letting 'FreeDomYield' through.
+# Using `LC_ALL=C tr -d` guarantees ASCII-only character class semantics.
+XPR_ACCOUNT_ILLEGAL="$(printf '%s' "${XPR_ACCOUNT}" | LC_ALL=C tr -d 'a-z1-5.')"
+if [ -n "${XPR_ACCOUNT_ILLEGAL}" ]; then
+	echo "ERROR: xpr-account '${XPR_ACCOUNT}' contains characters outside [a-z1-5.] (XPR account pattern); illegal chars: '${XPR_ACCOUNT_ILLEGAL}'" >&2; exit 2
+fi
+if [ "${#XPR_ACCOUNT}" -lt 1 ] || [ "${#XPR_ACCOUNT}" -gt 12 ]; then
+	echo "ERROR: xpr-account length must be 1..12 chars (got ${#XPR_ACCOUNT})" >&2; exit 2
+fi
+
 SINK="$(read_config anchor-sink)"
 CHAIN="$(read_config xpr-chain proton)"
 # xpr-quantity: optional config file in CONFIG_DIR. Default "0.0001 XPR".
@@ -166,14 +212,19 @@ else
 	QUANTITY="0.0001 XPR"
 fi
 
-case "${SINK}" in
-	*[!a-z1-5.]*|"") echo "ERROR: sink '${SINK}' does not match XPR account pattern ^[a-z1-5.]{1,12}$" >&2; exit 2 ;;
-esac
+if [ -z "${SINK}" ]; then
+	echo "ERROR: sink is empty" >&2; exit 2
+fi
+# Locale-safe ASCII char-class validation (see XPR_ACCOUNT for rationale).
+SINK_ILLEGAL="$(printf '%s' "${SINK}" | LC_ALL=C tr -d 'a-z1-5.')"
+if [ -n "${SINK_ILLEGAL}" ]; then
+	echo "ERROR: sink '${SINK}' does not match XPR account pattern ^[a-z1-5.]{1,12}$; illegal chars: '${SINK_ILLEGAL}'" >&2; exit 2
+fi
 if [ "${#SINK}" -lt 1 ] || [ "${#SINK}" -gt 12 ]; then
 	echo "ERROR: sink length must be 1..12 chars (got ${#SINK})" >&2; exit 2
 fi
-if [ "${SINK}" = "freedomyield" ]; then
-	echo "ERROR: sink MUST NOT equal 'freedomyield' (eosio.token::transfer rejects self-transfer at contract level, BLOCK-1)" >&2; exit 2
+if [ "${SINK}" = "${XPR_ACCOUNT}" ]; then
+	echo "ERROR: sink MUST NOT equal xpr-account ('${XPR_ACCOUNT}') — eosio.token::transfer rejects self-transfer at contract level (BLOCK-1, eosio.token.cpp L99 'cannot transfer to self')" >&2; exit 2
 fi
 
 case "${CHAIN}" in
@@ -191,7 +242,7 @@ fi
 # -------- build action --------
 MEMO="fyid1:${DAG_ROOT}"
 ACTION_DATA_JSON="$(jq -nc \
-	--arg from "freedomyield" \
+	--arg from "${XPR_ACCOUNT}" \
 	--arg to   "${SINK}" \
 	--arg qty  "${QUANTITY}" \
 	--arg memo "${MEMO}" \
@@ -205,7 +256,7 @@ BROADCAST_OUT="$(mktemp -t signanchor.XXXXXX)"
 BROADCAST_ERR="$(mktemp -t signanchor.XXXXXX)"
 trap 'rm -f "${BROADCAST_OUT}" "${BROADCAST_ERR}"' EXIT
 
-PROTON_ARGS=(action eosio.token transfer "${ACTION_DATA_JSON}" "freedomyield@anchor")
+PROTON_ARGS=(action eosio.token transfer "${ACTION_DATA_JSON}" "${XPR_ACCOUNT}@anchor")
 if [ "${DRY_RUN}" -eq 1 ]; then
 	PROTON_ARGS+=(--dry-run)
 fi
@@ -318,6 +369,7 @@ jq -n \
 	--arg memo         "${MEMO}" \
 	--arg sink         "${SINK}" \
 	--arg quantity     "${QUANTITY}" \
+	--arg xpr_account  "${XPR_ACCOUNT}" \
 	'{
 		tx_id: $tx_id,
 		block_num: $block_num,
@@ -329,10 +381,10 @@ jq -n \
 		inscribe_action: {
 			account: "eosio.token",
 			name: "transfer",
-			from: "freedomyield",
+			from: $xpr_account,
 			to: $sink,
 			quantity: $quantity,
 			memo: $memo,
-			permission: {actor: "freedomyield", permission: "anchor"}
+			permission: {actor: $xpr_account, permission: "anchor"}
 		}
 	}'

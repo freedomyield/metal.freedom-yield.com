@@ -51,6 +51,9 @@ chmod 755 "${STUB_BIN}/proton"
 # Common fixture: anchor-sink so signer can reach the action build step.
 FIXTURE_DIR="${TMP}/fixture"
 mkdir -p "${FIXTURE_DIR}"
+# audit-C/F-E2: xpr-account is now required config; write a synthetic
+# test account so the signer's strict validation passes.
+printf 'fytest1' > "${FIXTURE_DIR}/xpr-account"
 printf 'fyldsink' > "${FIXTURE_DIR}/anchor-sink"
 printf 'proton'   > "${FIXTURE_DIR}/xpr-chain"
 
