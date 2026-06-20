@@ -125,6 +125,86 @@ else
 	HAS_ERROR=1
 fi
 
+# 3.6. Assert Phase α DAG additive fields are present on identity.json.
+# Added 2026-06-21 per docs/MERKLE_DAG_SPEC.md §4 and identity.schema.v1.json
+# 2026-06-21 additive revision (see docs/IDENTITY_SCHEMA_CHANGELOG.md).
+echo
+echo "=== 3.6. assert Phase α DAG fields on identity.json ==="
+for field in dag_root_hash cycles_history_url anchor_receipt_url; do
+	if [ "$(jq -r --arg f "${field}" 'has($f)')" = "true" ] \
+	   && [ -n "$(jq -r --arg f "${field}" '.[$f] // ""' "${OUT_JSON}")" ]; then
+		# Use grep -q with single-quoted positional for the has() check.
+		:
+	fi
+	val="$(jq -r --arg f "${field}" '.[$f] // ""' "${OUT_JSON}")"
+	if [ -n "${val}" ]; then
+		echo "  OK   ${field} present: ${val}"
+	else
+		echo "  FAIL ${field} missing from identity.json" >&2
+		HAS_ERROR=1
+	fi
+done
+
+# dag_root_hash specifically must be 64-hex.
+DAG_ROOT="$(jq -r '.dag_root_hash // ""' "${OUT_JSON}")"
+case "${DAG_ROOT}" in
+	*[!a-f0-9]*) echo "  FAIL dag_root_hash is not all-hex: ${DAG_ROOT}" >&2; HAS_ERROR=1 ;;
+	*)
+		if [ "${#DAG_ROOT}" -ne 64 ]; then
+			echo "  FAIL dag_root_hash is ${#DAG_ROOT} chars, expected 64" >&2; HAS_ERROR=1
+		else
+			echo "  OK   dag_root_hash is 64-hex"
+		fi
+		;;
+esac
+
+# 3.7. Assert cycles-history.json sibling was produced.
+echo
+echo "=== 3.7. assert cycles-history.json sibling output ==="
+OUT_CYCLES_HISTORY="${FAKE_REPO}/public/api/cycles-history.json"
+if [ ! -f "${OUT_CYCLES_HISTORY}" ]; then
+	echo "  FAIL gen-identity.sh did not produce cycles-history.json" >&2
+	HAS_ERROR=1
+else
+	if jq empty "${OUT_CYCLES_HISTORY}" >/dev/null 2>&1; then
+		CY_DAG="$(jq -r '.dag_root_hash // ""' "${OUT_CYCLES_HISTORY}")"
+		if [ "${CY_DAG}" = "${DAG_ROOT}" ] && [ -n "${CY_DAG}" ]; then
+			echo "  OK   cycles-history.json present + dag_root_hash matches identity.json"
+		else
+			echo "  FAIL cycles-history.json dag_root_hash does not match identity.json" >&2
+			HAS_ERROR=1
+		fi
+	else
+		echo "  FAIL cycles-history.json is not valid JSON" >&2
+		HAS_ERROR=1
+	fi
+fi
+
+# 3.8. Assert identity-history.jsonl was bootstrapped on first run.
+echo
+echo "=== 3.8. assert identity-history.jsonl bootstrap ==="
+OUT_ID_HIST="${FAKE_REPO}/public/api/identity-history.jsonl"
+if [ ! -s "${OUT_ID_HIST}" ]; then
+	echo "  FAIL gen-identity.sh did not bootstrap identity-history.jsonl" >&2
+	HAS_ERROR=1
+else
+	LINE_COUNT="$(wc -l < "${OUT_ID_HIST}" | tr -d ' ')"
+	if [ "${LINE_COUNT}" -ge 1 ]; then
+		# First line must parse as JSON with key_seq=1.
+		FIRST_LINE="$(head -n 1 "${OUT_ID_HIST}")"
+		if printf '%s' "${FIRST_LINE}" | jq empty >/dev/null 2>&1 \
+			&& [ "$(printf '%s' "${FIRST_LINE}" | jq -r '.key_seq // ""')" = "1" ]; then
+			echo "  OK   identity-history.jsonl bootstrapped with key_seq=1"
+		else
+			echo "  FAIL identity-history.jsonl first line is not key_seq=1 JSON: ${FIRST_LINE}" >&2
+			HAS_ERROR=1
+		fi
+	else
+		echo "  FAIL identity-history.jsonl is empty" >&2
+		HAS_ERROR=1
+	fi
+fi
+
 # 4. Independently re-fetch each leaf in the manifest and re-hash.
 echo
 echo "=== independent re-hash of each leaf in artifact_manifest ==="
