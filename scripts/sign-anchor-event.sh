@@ -156,10 +156,10 @@ read_config() {
 
 SINK="$(read_config anchor-sink)"
 CHAIN="$(read_config xpr-chain proton)"
-QUANTITY_RAW="$(read_config xpr-quantity '0.0001 XPR')"
-# xpr-quantity needs the space restored — read_config strips whitespace.
-QUANTITY="${QUANTITY_RAW%XPR} XPR"
-# Normalize: re-derive from raw with care.
+# xpr-quantity: optional config file in CONFIG_DIR. Default "0.0001 XPR".
+# Read the raw first line, preserving the internal space in the EOSIO asset
+# form (e.g. "0.0001 XPR"); strip trailing whitespace only. read_config is
+# not used here because it would strip the internal space.
 if [ -r "${CONFIG_DIR}/xpr-quantity" ]; then
 	QUANTITY="$(head -n 1 "${CONFIG_DIR}/xpr-quantity" | sed -e 's/[[:space:]]*$//')"
 else

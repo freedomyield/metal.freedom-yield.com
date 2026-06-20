@@ -26,9 +26,9 @@ sha256_of_stdin() {
 	fi
 }
 
-# Inlined copy of scripts/operator-local/gen-identity.sh::compute_merkle_root
-# (lines 186-230, sha-pinned to the spec). If the canonical function
-# changes, this copy must be updated in lockstep.
+# Inlined copy of the compute_merkle_root function from
+# scripts/operator-local/gen-identity.sh, kept in sync with the spec.
+# If the canonical function changes, this copy must be updated in lockstep.
 compute_merkle_root() {
 	local cur nxt left right parent count
 	cur="$(mktemp -t merkle.XXXXXX)"

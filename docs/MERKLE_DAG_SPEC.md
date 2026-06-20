@@ -24,17 +24,48 @@ Each branch is an independent Merkle tree. The DAG root combines the two branch 
 
 ## 2. Leaf canonical form
 
-Each leaf is a **single line of a JSONL document published at a stable URL under `/api/`**. The leaf's bytes are exactly the bytes the operator serves at that line position, **including the trailing newline `\n` if the line is followed by another line, and excluding any trailing newline on the final line**.
+Each leaf corresponds to a **non-empty record in a JSONL document** published at a stable URL under `/api/`. The leaf input is the record's content bytes followed by exactly one LF (`0x0a`) byte, including for the final record.
+
+### 2.0 Normative leaf hash formula
+
+```
+leaf_hash = SHA-256( UTF-8(record) || 0x0a )
+```
+
+Where:
+
+- `record` is the **canonical compact JSON bytes** of one JSONL line (no leading or trailing whitespace, no internal pretty-print whitespace, deterministic key order as produced by `jq -c` or an equivalent serializer). The record does NOT include the LF terminator.
+- `||` denotes byte concatenation.
+- `0x0a` is the LF (line feed) byte, appended exactly once.
+- The LF is appended for every record, including the final record. It is not part of `record` itself.
+
+### 2.1 Canonical JSONL file form
+
+- Every record is terminated by exactly one LF (`0x0a`).
+- The final record is also terminated by LF — the file ends with `0x0a`.
+- CRLF (`0x0d 0x0a`) is **forbidden** as a record terminator. A verifier MAY canonicalize CRLF to LF before processing, or MAY reject the document; the operator's emitter MUST produce LF-only files.
+- Blank lines (= consecutive LFs that would produce an empty record between them) are **not leaves**. A verifier MUST skip blank lines when enumerating records.
+- The file is hashed **per-record**, not as a whole — there is no whole-file hash in the DAG construction.
+
+### 2.2 Verifier procedure
 
 An evaluator verifies a leaf by:
 
 1. Fetching the JSONL document with `curl -sSLf`.
-2. Splitting on `\n` (each non-empty resulting element is one leaf).
-3. Computing `SHA-256(leaf_bytes_as_served)` for each.
+2. Reading the served raw bytes (no decode, no re-parse for canonicalization).
+3. Enumerating records by LF (`0x0a`) boundary: each non-empty byte sequence between LFs is one record. The trailing LF on the final record is a record boundary, not a "missing" final newline.
+4. For each non-empty record, computing `SHA-256( record_bytes || 0x0a )` where `record_bytes` are the bytes of that record without trailing LF, and a single LF is appended once before hashing.
 
-This is identical in spirit to the existing `artifact_manifest.<key>.sha256` field, which is `SHA-256(artifact_body_as_served)`. We do not introduce a new canonical encoding — we hash the operator-published bytes verbatim.
+The verifier MUST NOT:
 
-**Implication for the operator:** the `gen-*.sh` scripts must emit JSONL with stable line ordering and no trailing whitespace; pretty-printing or re-formatting after publication would invalidate the leaf hashes. The publication pipeline treats `*.jsonl` files as **byte-for-byte append-only** within a schema version.
+- JSON-parse the record and re-serialize it before hashing — different JSON serializers produce different bytes for the same logical value.
+- Strip, add, or alter whitespace inside the record. The record's canonical compact form is fixed at publication time.
+- Replace LF with CRLF, CRLF with LF (for hashing purposes), or omit the trailing LF.
+- Append additional bytes beyond the single LF (no double-newline, no trailing spaces).
+
+This is conceptually analogous to the existing `artifact_manifest.<key>.sha256` field (`SHA-256(artifact_body_as_served)`), but uses an explicit per-record encoding rather than a whole-file encoding so that the operator can append records over time without invalidating previously-anchored leaves.
+
+**Implication for the operator:** the `gen-*.sh` scripts emit JSONL via `jq -c` (= canonical compact JSON, deterministic key order) and terminate every record — including the final record — with a single LF. Pretty-printing, re-serialization, key-order changes, CRLF substitution, or trailing-LF removal after publication change the per-record hashes and invalidate the DAG root. The publication pipeline treats `*.jsonl` files as **byte-for-byte append-only** within a schema version.
 
 ### 2.1 identity-history.jsonl leaf shape
 
@@ -74,7 +105,7 @@ Cross-ref integrity check (verifier-side):
 
 ## 3. Merkle tree construction (per branch)
 
-Identical to the existing implementation in `scripts/operator-local/gen-identity.sh` lines 186–230 (`compute_merkle_root`). For each branch:
+Identical to the existing implementation in the `compute_merkle_root` shell function in `scripts/operator-local/gen-identity.sh`. For each branch:
 
 1. **Leaves**: take each line's `SHA-256(leaf_bytes_as_served)` in the order the lines appear in the JSONL document.
    - identity_branch leaves are ordered by `key_seq` ascending (= file order, since lines are append-only by `key_seq`).
@@ -178,5 +209,5 @@ Cases covered: 1-leaf branch (= single leaf, root = leaf), 2-leaf branch, 3-leaf
 ## See also
 
 - `docs/IDENTITY_SCHEMA_CHANGELOG.md` — design history of `identity.schema.v1.json` including the 2026-06-20 retirement of the prior P-Chain memo binding.
-- `scripts/operator-local/gen-identity.sh` lines 186–230 — the reference Merkle root implementation reused by both branches.
+- `compute_merkle_root` shell function in `scripts/operator-local/gen-identity.sh` — the reference Merkle root implementation reused by both branches.
 - Sibling-project Merkle implementation `truthmark.io/scrapers/xpr/merkle.py` (= the `compute_merkle_root_from_hashes` function therein) — bit-for-bit equivalent to ours; useful as an independent reference for verifier implementations. It is out-of-tree relative to this repository and not redistributed here; an evaluator who has access to that project may consult it directly.

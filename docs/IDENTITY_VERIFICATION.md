@@ -105,7 +105,7 @@ done < identity-history.jsonl > identity-leaves.txt
 
 Then build the Merkle root over `identity-leaves.txt` following the construction in [`MERKLE_DAG_SPEC.md`](./MERKLE_DAG_SPEC.md) §3: at each level, duplicate the last leaf if the count is odd; pair adjacent leaves; `parent = SHA-256( raw_bytes(left) || raw_bytes(right) )` where the inputs are 32-byte raw digests (not the 64-char hex strings); the single remaining hex digest is `identity_branch_root`.
 
-The shell construction is implemented portably in `scripts/operator-local/gen-identity.sh::compute_merkle_root` (lines 186–230) and a Python equivalent is in `truthmark.io/scrapers/xpr/merkle.py::compute_merkle_root_from_hashes`. A verifier MAY reuse either.
+The shell construction is implemented portably in `scripts/operator-local/gen-identity.sh::compute_merkle_root` and a Python equivalent is in `truthmark.io/scrapers/xpr/merkle.py::compute_merkle_root_from_hashes`. A verifier MAY reuse either.
 
 Assert: the computed value equals `cycles-history.json.branches.identity.branch_root`.
 
