@@ -272,15 +272,40 @@ else
 		BLOCK_NUM="${BLOCK_NUM:-$(printf '%s' "${RPC_OUT}" | jq -r '.block_num // empty')}"
 		BLOCK_TIME="${BLOCK_TIME:-$(printf '%s' "${RPC_OUT}" | jq -r '.block_time // empty')}"
 	fi
-	# Normalize block_time to RFC3339 UTC with a 'Z' suffix.
+	# Fail-closed per audit-C/F-E4: if EITHER block_num OR block_time
+	# is unobtainable from on-chain sources after BOTH proton-cli
+	# get_transaction AND the RPC fallback have been tried, we MUST
+	# NOT fabricate the value from the local clock — doing so would
+	# publish a receipt whose block_time is operator-derived rather
+	# than chain-derived, falsely implying on-chain confirmation. The
+	# audit requires that the receipt be withheld and the state file
+	# NOT updated; the caller (= scripts/post-anchor-event.sh) will
+	# inherit the non-zero exit and retry on the next cron tick.
+	#
+	# (If the operator separately needs to record the operator clock
+	# at observation time, that goes in a distinct `observed_at` field
+	# — never inside block_time. The schema would need an additive
+	# extension for that; not done here.)
+	if [ -z "${BLOCK_NUM:-}" ]; then
+		echo "ERROR: block_num could not be derived from proton-cli get_transaction or RPC fallback for tx_id=${TX_ID}." >&2
+		echo "ERROR: receipt withheld (= no partial publish, no state update). Retry next tick." >&2
+		exit 4
+	fi
+	case "${BLOCK_NUM}" in
+		*[!0-9]*) echo "ERROR: derived block_num is non-numeric: ${BLOCK_NUM}" >&2; exit 4 ;;
+	esac
+
+	if [ -z "${BLOCK_TIME:-}" ]; then
+		echo "ERROR: block_time could not be derived from proton-cli get_transaction or RPC fallback for tx_id=${TX_ID}." >&2
+		echo "ERROR: receipt withheld (= no local-clock fabrication, no partial publish, no state update). Retry next tick." >&2
+		exit 4
+	fi
+	# Normalize block_time to RFC3339 UTC with a 'Z' suffix when the chain
+	# returned a non-Z-terminated form. The value MUST have originated
+	# from the chain (= the only way we got past the empty-check above).
 	case "${BLOCK_TIME}" in
-		"") BLOCK_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)" ;;
 		*Z) ;;
 		*)  BLOCK_TIME="${BLOCK_TIME}Z" ;;
-	esac
-	# Normalize block_num to integer; fall back to 0 if not derivable.
-	case "${BLOCK_NUM}" in
-		*[!0-9]*|"") BLOCK_NUM=0 ;;
 	esac
 fi
 
