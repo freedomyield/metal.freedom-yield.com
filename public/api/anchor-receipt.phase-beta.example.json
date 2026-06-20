@@ -1,0 +1,41 @@
+{
+	"_comment": "Synthetic Phase β receipt example for /api/anchor-receipt.schema.v1.json with anchor.method == 'phase_beta_sc_inscribe'. This file is NOT a snapshot of any production inscription — all hex strings, tx_ids, block numbers, and timestamps are synthetic placeholders. Demonstrates the Phase β shape (= freedomyield::inscribe smart-contract action) where the inscribe_action carries `data` (six structured fields per scripts/operator-local/contract/freedomyield-anchor.spec.md §2.1) and `authorization` (Antelope action.authorization array) instead of the Phase α `from`/`to`/`quantity`/`memo`/`permission` shape. Phase β does NOT use eosio.token::transfer; the from/to/quantity/memo fields are omitted. See /api/anchor-receipt.example.json for the Phase α shape.",
+	"$schema": "https://metal.freedom-yield.com/api/anchor-receipt.schema.v1.json",
+	"schema_version": 1,
+	"dag_root_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+	"memo": "fyid1:0000000000000000000000000000000000000000000000000000000000000000",
+	"anchor": {
+		"chain": "metal-a-chain",
+		"network": "xpr-mainnet",
+		"method": "phase_beta_sc_inscribe",
+		"tx_id": "0000000000000000000000000000000000000000000000000000000000000000",
+		"block_num": 1,
+		"block_time": "1970-01-01T00:00:00Z",
+		"explorer_url": "https://explorer.xprnetwork.org/transaction/0000000000000000000000000000000000000000000000000000000000000000",
+		"inscribe_action": {
+			"account": "freedomyield",
+			"name": "inscribe",
+			"data": {
+				"cycle_id": 7,
+				"event_type": "cyclestart",
+				"root_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+				"prev_root": "1111111111111111111111111111111111111111111111111111111111111111",
+				"leaf_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+				"payload": "{\"cycle_n\":7,\"start_iso\":\"1970-01-01T00:00:00Z\",\"node_id\":\"NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v\"}"
+			},
+			"authorization": [
+				{
+					"actor": "freedomyield",
+					"permission": "anchor"
+				}
+			]
+		}
+	},
+	"cycles_history_url": "https://metal.freedom-yield.com/api/cycles-history.json",
+	"identity_url": "https://metal.freedom-yield.com/api/identity.json",
+	"trigger_event": "cycle_start",
+	"trigger_reference": {
+		"cycle_n": 7
+	},
+	"generated_at": "1970-01-01T00:00:00Z"
+}

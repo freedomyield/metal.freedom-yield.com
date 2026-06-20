@@ -89,11 +89,57 @@ sink account at first inscription.
 - The three sibling schemas are at new `$id` URLs; they do not affect
   the binding of `/api/identity.schema.v1.json`.
 
+### IC-3 incorporation (anchor-receipt Phase β shape, same-day extension)
+
+After the initial publication of `anchor-receipt.schema.v1.json`, the
+IC-3 deliverable from the on-chain track (= `scripts/operator-local/contract/freedomyield-anchor.spec.md`
+§8 ABI fragment, lives on `phase-alpha-onchain`) landed. The
+anchor-receipt schema was extended in-place (same baseline revision,
+no x-issued-at change) with:
+
+- New optional properties in `anchor.inscribe_action`:
+  - `data` — six-field structured payload for Phase β
+    (`cycle_id`, `event_type`, `root_hash`, `prev_root`,
+    `leaf_hash`, `payload`), each constrained per the contract
+    spec.
+  - `authorization` — Antelope action.authorization array of
+    `{actor, permission}` pairs (Phase β uses
+    `authorization[0] = {actor: 'freedomyield', permission: 'anchor'}`).
+- Method-discriminated `if/then/else` blocks at the `anchor` object
+  level that re-add the Phase α required list
+  (`from`/`to`/`quantity`/`memo`/`permission`) when
+  `method == "phase_alpha_token_transfer"` and add the Phase β
+  required list (`data`/`authorization`) when
+  `method == "phase_beta_sc_inscribe"`. The unconditional
+  `inscribe_action.required` was relaxed from seven fields to two
+  (`account`, `name`) so that the discriminator dispatch can apply
+  the correct, non-overlapping requirements per method without a
+  single document needing to satisfy both shapes.
+- Existing Phase α documents continue to validate: the
+  `phase_alpha_token_transfer` arm of the if/then/else re-imposes
+  the same seven required fields the previous schema imposed
+  unconditionally.
+- Phase β documents now validate (= newly admissible), demonstrating
+  the additive expansion.
+- A new sibling example file `public/api/anchor-receipt.phase-beta.example.json`
+  was added to document the Phase β shape concretely; the original
+  `anchor-receipt.example.json` continues to demonstrate the
+  Phase α shape.
+
+Negative-test confirmation: a document with `method = phase_alpha_token_transfer`
+but missing `from` is correctly rejected by the dispatched
+requirement (verified at commit time).
+
 ### Related (this revision)
 
 - `docs/MERKLE_DAG_SPEC.md` — canonical spec for the two-branch
   Merkle DAG, leaf canonical encoding, tree construction, and
   A-chain memo binding (`fyid1:<dag_root_hash>`).
+- `scripts/operator-local/contract/freedomyield-anchor.spec.md`
+  (lives on `phase-alpha-onchain` branch as of 2026-06-21) —
+  Phase β `freedomyield::inscribe` action specification whose §8
+  ABI fragment is the source for the `anchor.inscribe_action.data`
+  structure in the IC-3 extension above.
 - `project_merkle_dag_identity_anchor_design` memory — Phase α / β
   design memo (operator-side).
 - `project_phase_alpha_coordination_log` memory — Phase α

@@ -58,7 +58,7 @@
 				"method": {
 					"type": "string",
 					"enum": ["phase_alpha_token_transfer", "phase_beta_sc_inscribe"],
-					"description": "Discriminator for which on-chain mechanism was used. Phase α uses the minimum-cost eosio.token::transfer with the memo carrying the binding. Phase β uses a dedicated freedomyield::inscribe action. Both forms produce equivalent commitment to dag_root_hash via the memo field; the discriminator lets verifier tooling know which on-chain action shape to read."
+					"description": "Discriminator for which on-chain mechanism was used. Phase α uses the minimum-cost eosio.token::transfer with the memo carrying the binding (action shape: account/name/from/to/quantity/memo/permission). Phase β uses a dedicated freedomyield::inscribe smart-contract action with a six-field typed payload (action shape: account/name/data/authorization). The if/then/else blocks in this schema dispatch inscribe_action.required on this discriminator so a single receipt schema cleanly covers both eras. See scripts/operator-local/contract/freedomyield-anchor.spec.md for the Phase β action specification."
 				},
 				"tx_id": {
 					"type": "string",
@@ -80,7 +80,7 @@
 				},
 				"inscribe_action": {
 					"type": "object",
-					"required": ["account", "name", "from", "to", "quantity", "memo", "permission"],
+					"required": ["account", "name"],
 					"additionalProperties": true,
 					"properties": {
 						"account": {
@@ -89,26 +89,26 @@
 						},
 						"name": {
 							"type": "string",
-							"description": "Action name. For phase_alpha_token_transfer: 'transfer'. For phase_beta_sc_inscribe: 'inscribe' (final action name confirmed via IC-3 by C3)."
+							"description": "Action name. For phase_alpha_token_transfer: 'transfer'. For phase_beta_sc_inscribe: 'inscribe'."
 						},
 						"from": {
 							"type": "string",
 							"pattern": "^[a-z1-5.]{1,12}$",
-							"description": "Source XPR account. Phase α: 'freedomyield' (the operator-controlled account holding the anchor permission)."
+							"description": "Phase α only. Source XPR account = 'freedomyield' (the operator-controlled account holding the anchor permission). Omitted in Phase β SC inscribe receipts (the freedomyield::inscribe action has no from/to semantics)."
 						},
 						"to": {
 							"type": "string",
 							"pattern": "^[a-z1-5.]{1,12}$",
-							"description": "Destination XPR account. MUST NOT equal 'from' — the XPRNetwork eosio.token contract rejects self-transfer at the contract level ('cannot transfer to self', eosio.token.cpp L99). The destination is a separate sink account distinct from 'freedomyield'; the specific sink name is operator-chosen (see docs/MERKLE_DAG_SPEC.md §6 and the Phase α design memo)."
+							"description": "Phase α only. Destination XPR account. MUST NOT equal 'from' — the XPRNetwork eosio.token contract rejects self-transfer at the contract level ('cannot transfer to self', eosio.token.cpp L99). The destination is a separate sink account distinct from 'freedomyield'; the specific sink name is operator-chosen (see docs/MERKLE_DAG_SPEC.md §6 and the Phase α design memo). Omitted in Phase β receipts."
 						},
 						"quantity": {
 							"type": "string",
-							"description": "XPR asset quantity in the standard EOSIO string form, e.g. '0.0001 XPR'. The minimum on-chain quantity allowed by the eosio.token contract for Phase α self-anchoring."
+							"description": "Phase α only. XPR asset quantity in the standard EOSIO string form, e.g. '0.0001 XPR'. The minimum on-chain quantity allowed by the eosio.token contract for Phase α self-anchoring. Omitted in Phase β receipts."
 						},
 						"memo": {
 							"type": "string",
 							"pattern": "^fyid1:[a-f0-9]{64}$",
-							"description": "MUST equal the top-level memo field. Repeated here for direct visual cross-check against the explorer's view of the action."
+							"description": "Phase α only. MUST equal the top-level memo field. Repeated here for direct visual cross-check against the explorer's view of the action. Omitted in Phase β receipts (the binding is in data.root_hash instead)."
 						},
 						"permission": {
 							"type": "object",
@@ -124,11 +124,98 @@
 									"const": "anchor",
 									"description": "Narrow child permission scoped via linkauth to inscribe-class actions only. Compromise of the anchor key cannot move tokens, change permissions, or deploy contracts; it can only re-broadcast an anchor with a different root, which an evaluator's chain-of-trust check would reject as soon as the operator publishes a contradicting signed identity.json."
 								}
+							},
+							"description": "Phase α: required (= the singular {actor, permission} signer). Phase β: optional (= a parallel `authorization` array is used instead, mirroring the Antelope/EOSIO action.authorization shape)."
+						},
+						"data": {
+							"type": "object",
+							"required": ["cycle_id", "event_type", "root_hash", "prev_root", "leaf_hash", "payload"],
+							"additionalProperties": true,
+							"properties": {
+								"cycle_id": {
+									"type": "integer",
+									"minimum": 1,
+									"description": "P-Chain cycle number this inscription pertains to. uint32_t at the contract level."
+								},
+								"event_type": {
+									"type": "string",
+									"enum": ["cyclestart", "cycleend", "idrotate"],
+									"description": "Antelope name-typed enum. Constrained by the contract via check() in the inscribe action body."
+								},
+								"root_hash": {
+									"type": "string",
+									"pattern": "^[a-f0-9]{64}$",
+									"description": "64-hex SHA-256. Equals the top-level dag_root_hash for this inscription."
+								},
+								"prev_root": {
+									"type": "string",
+									"pattern": "^[a-f0-9]{64}$",
+									"description": "64-hex. The most recently accepted root_hash, fetched from the contract's `roots` table at inscription time. For the first Phase β inscription (= genesis) this is 64 zero characters '0000...0000'; the contract enforces this via the genesis check."
+								},
+								"leaf_hash": {
+									"type": "string",
+									"pattern": "^[a-f0-9]{64}$",
+									"description": "64-hex. The specific leaf being asserted in this event (= the cycle-start leaf hash for cyclestart, the identity-history leaf hash for idrotate). The contract does NOT validate this hash against the root; off-chain verifiers do so."
+								},
+								"payload": {
+									"type": "string",
+									"maxLength": 256,
+									"description": "Optional structured metadata (JSON-encoded), UTF-8, up to 256 bytes (= contract-enforced, matches Phase α memo limit). MAY be empty string."
+								}
+							},
+							"description": "Phase β only. The structured action payload of freedomyield::inscribe. Six fields per scripts/operator-local/contract/freedomyield-anchor.spec.md §2.1. Omitted in Phase α receipts."
+						},
+						"authorization": {
+							"type": "array",
+							"minItems": 1,
+							"items": {
+								"type": "object",
+								"required": ["actor", "permission"],
+								"additionalProperties": false,
+								"properties": {
+									"actor": {
+										"type": "string",
+										"pattern": "^[a-z1-5.]{1,12}$"
+									},
+									"permission": {
+										"type": "string",
+										"pattern": "^[a-z1-5.]{1,12}$"
+									}
+								}
+							},
+							"description": "Phase β only. Antelope/EOSIO-style action.authorization. For phase_beta_sc_inscribe: authorization[0] = {actor: 'freedomyield', permission: 'anchor'}. Omitted in Phase α receipts (the singular `permission` field is used instead)."
+						}
+					}
+				}
+			},
+			"allOf": [
+				{
+					"if": {
+						"properties": { "method": { "const": "phase_alpha_token_transfer" } },
+						"required": ["method"]
+					},
+					"then": {
+						"properties": {
+							"inscribe_action": {
+								"required": ["account", "name", "from", "to", "quantity", "memo", "permission"]
+							}
+						}
+					}
+				},
+				{
+					"if": {
+						"properties": { "method": { "const": "phase_beta_sc_inscribe" } },
+						"required": ["method"]
+					},
+					"then": {
+						"properties": {
+							"inscribe_action": {
+								"required": ["account", "name", "data", "authorization"]
 							}
 						}
 					}
 				}
-			}
+			]
 		},
 		"cycles_history_url": {
 			"type": "string",
