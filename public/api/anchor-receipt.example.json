@@ -1,0 +1,35 @@
+{
+	"_comment": "Synthetic schema example for /api/anchor-receipt.schema.v1.json. This file is NOT a snapshot of any production inscription — it is a fixed demonstration of the schema's shape. All hex strings, tx_ids, block numbers, sink-account names, and timestamps shown here are synthetic placeholders that document field formats only; they do not refer to any real on-chain transaction, account, or moment in time. The placeholder sink name 'fyldsink' is one of the candidates under operator judgment per project_phase_alpha_coordination_log.md (judgment #1); the production receipt will substitute the operator-selected name. Production runtime receipt is published at /api/anchor-receipt.json by scripts/post-anchor-event.sh on the validator host. See docs/MERKLE_DAG_SPEC.md.",
+	"$schema": "https://metal.freedom-yield.com/api/anchor-receipt.schema.v1.json",
+	"schema_version": 1,
+	"dag_root_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+	"memo": "fyid1:0000000000000000000000000000000000000000000000000000000000000000",
+	"anchor": {
+		"chain": "metal-a-chain",
+		"network": "xpr-mainnet",
+		"method": "phase_alpha_token_transfer",
+		"tx_id": "0000000000000000000000000000000000000000000000000000000000000000",
+		"block_num": 1,
+		"block_time": "1970-01-01T00:00:00Z",
+		"explorer_url": "https://explorer.xprnetwork.org/transaction/0000000000000000000000000000000000000000000000000000000000000000",
+		"inscribe_action": {
+			"account": "eosio.token",
+			"name": "transfer",
+			"from": "freedomyield",
+			"to": "fyldsink",
+			"quantity": "0.0001 XPR",
+			"memo": "fyid1:0000000000000000000000000000000000000000000000000000000000000000",
+			"permission": {
+				"actor": "freedomyield",
+				"permission": "anchor"
+			}
+		}
+	},
+	"cycles_history_url": "https://metal.freedom-yield.com/api/cycles-history.json",
+	"identity_url": "https://metal.freedom-yield.com/api/identity.json",
+	"trigger_event": "cycle_start",
+	"trigger_reference": {
+		"cycle_n": 3
+	},
+	"generated_at": "1970-01-01T00:00:00Z"
+}

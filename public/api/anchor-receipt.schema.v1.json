@@ -1,0 +1,158 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://metal.freedom-yield.com/api/anchor-receipt.schema.v1.json",
+	"title": "Freedom Yield Metal — A-chain Anchor Receipt v1",
+	"description": "Formal contract for /api/anchor-receipt.json. The receipt republishes the most recent Metal A-chain (PulseVM / XPRNetwork) inscription that anchors a Merkle DAG root committed by /api/identity.json and summarised by /api/cycles-history.json. The receipt is a content-addressed pointer: an evaluator may independently look up the receipt's tx_id on a public XPR explorer and assert memo == \"fyid1:\" + dag_root_hash. The receipt is regenerated each time a new inscription is broadcast (= cycle start, cycle end, or identity key rotation). Method discriminator: the anchor.method enum identifies whether the inscription is the Phase α minimal form (= eosio.token::transfer) or the Phase β dedicated form (= freedomyield::inscribe smart-contract action). Companion design: docs/MERKLE_DAG_SPEC.md. Schema stability: additive-only within v1; breaking changes go to /api/anchor-receipt.schema.v2.json and the v1 URL stays reachable for at least 18 months.",
+	"x-issued-at": "2026-06-21T00:00:00Z",
+	"x-stability": "additive-only-within-v1",
+	"x-baseline-revision": "2026-06-21-phase-alpha-initial",
+	"x-format-guide": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/MERKLE_DAG_SPEC.md",
+	"type": "object",
+	"required": [
+		"schema_version",
+		"dag_root_hash",
+		"memo",
+		"anchor",
+		"cycles_history_url",
+		"identity_url",
+		"generated_at"
+	],
+	"additionalProperties": true,
+	"properties": {
+		"_comment": {
+			"type": "string"
+		},
+		"$schema": {
+			"type": "string",
+			"format": "uri"
+		},
+		"schema_version": {
+			"type": "integer",
+			"const": 1
+		},
+		"dag_root_hash": {
+			"type": "string",
+			"pattern": "^[a-f0-9]{64}$",
+			"description": "The 64-hex SHA-256 DAG root being anchored. Equals identity.json.dag_root_hash and cycles-history.json.dag_root_hash for the same publication moment."
+		},
+		"memo": {
+			"type": "string",
+			"pattern": "^fyid1:[a-f0-9]{64}$",
+			"description": "The exact memo string carried by the on-chain inscription. MUST equal 'fyid1:' + dag_root_hash. The 'fyid1:' prefix (Freedom Yield identity, format version 1) lets future on-chain parsers distinguish our inscriptions and lets us migrate to 'fyid2:' without colliding with intervening unrelated memos."
+		},
+		"anchor": {
+			"type": "object",
+			"required": ["chain", "network", "method", "tx_id", "block_num", "block_time", "explorer_url", "inscribe_action"],
+			"additionalProperties": true,
+			"properties": {
+				"chain": {
+					"type": "string",
+					"const": "metal-a-chain",
+					"description": "Metal Blockchain A-chain (= PulseVM / XPRNetwork). One of the four chains of the Primary Network."
+				},
+				"network": {
+					"type": "string",
+					"enum": ["xpr-mainnet", "xpr-testnet"],
+					"description": "xpr-mainnet for production receipts; xpr-testnet appears only in dry-run example data."
+				},
+				"method": {
+					"type": "string",
+					"enum": ["phase_alpha_token_transfer", "phase_beta_sc_inscribe"],
+					"description": "Discriminator for which on-chain mechanism was used. Phase α uses the minimum-cost eosio.token::transfer with the memo carrying the binding. Phase β uses a dedicated freedomyield::inscribe action. Both forms produce equivalent commitment to dag_root_hash via the memo field; the discriminator lets verifier tooling know which on-chain action shape to read."
+				},
+				"tx_id": {
+					"type": "string",
+					"pattern": "^[a-f0-9]{64}$",
+					"description": "64-hex XPRNetwork transaction id."
+				},
+				"block_num": {
+					"type": "integer",
+					"minimum": 1
+				},
+				"block_time": {
+					"type": "string",
+					"format": "date-time"
+				},
+				"explorer_url": {
+					"type": "string",
+					"format": "uri",
+					"description": "Public XPRNetwork explorer URL pointing at the inscribing transaction. Independent verifier MUST be able to load this URL and read back the same tx_id, memo, action account, action name, and signer permission."
+				},
+				"inscribe_action": {
+					"type": "object",
+					"required": ["account", "name", "from", "to", "quantity", "memo", "permission"],
+					"additionalProperties": true,
+					"properties": {
+						"account": {
+							"type": "string",
+							"description": "On-chain contract account that owns the action. For phase_alpha_token_transfer: 'eosio.token'. For phase_beta_sc_inscribe: 'freedomyield'."
+						},
+						"name": {
+							"type": "string",
+							"description": "Action name. For phase_alpha_token_transfer: 'transfer'. For phase_beta_sc_inscribe: 'inscribe' (final action name confirmed via IC-3 by C3)."
+						},
+						"from": {
+							"type": "string",
+							"pattern": "^[a-z1-5.]{1,12}$",
+							"description": "Source XPR account. Phase α: 'freedomyield' (the operator-controlled account holding the anchor permission)."
+						},
+						"to": {
+							"type": "string",
+							"pattern": "^[a-z1-5.]{1,12}$",
+							"description": "Destination XPR account. MUST NOT equal 'from' — the XPRNetwork eosio.token contract rejects self-transfer at the contract level ('cannot transfer to self', eosio.token.cpp L99). The destination is a separate sink account distinct from 'freedomyield'; the specific sink name is operator-chosen (see docs/MERKLE_DAG_SPEC.md §6 and the Phase α design memo)."
+						},
+						"quantity": {
+							"type": "string",
+							"description": "XPR asset quantity in the standard EOSIO string form, e.g. '0.0001 XPR'. The minimum on-chain quantity allowed by the eosio.token contract for Phase α self-anchoring."
+						},
+						"memo": {
+							"type": "string",
+							"pattern": "^fyid1:[a-f0-9]{64}$",
+							"description": "MUST equal the top-level memo field. Repeated here for direct visual cross-check against the explorer's view of the action."
+						},
+						"permission": {
+							"type": "object",
+							"required": ["actor", "permission"],
+							"additionalProperties": false,
+							"properties": {
+								"actor": {
+									"type": "string",
+									"const": "freedomyield"
+								},
+								"permission": {
+									"type": "string",
+									"const": "anchor",
+									"description": "Narrow child permission scoped via linkauth to inscribe-class actions only. Compromise of the anchor key cannot move tokens, change permissions, or deploy contracts; it can only re-broadcast an anchor with a different root, which an evaluator's chain-of-trust check would reject as soon as the operator publishes a contradicting signed identity.json."
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"cycles_history_url": {
+			"type": "string",
+			"format": "uri",
+			"description": "URL of /api/cycles-history.json — the DAG snapshot whose root this receipt anchors. The DAG snapshot in turn references the leaf source JSONL documents."
+		},
+		"identity_url": {
+			"type": "string",
+			"format": "uri",
+			"description": "URL of /api/identity.json — the signed manifest that carries the operator's commitment to this dag_root_hash via its additive dag_root_hash field. The receipt and the signed manifest cross-reference each other."
+		},
+		"trigger_event": {
+			"type": "string",
+			"enum": ["cycle_start", "cycle_end", "identity_rotation", "manual"],
+			"description": "What caused this anchor to be broadcast. Informational; the on-chain inscription is the canonical commitment regardless."
+		},
+		"trigger_reference": {
+			"type": "object",
+			"description": "Optional structured pointer to the triggering on-chain or off-chain event (e.g., the cycle_n that started, the key_seq that rotated). Additive shape; consumers MAY ignore.",
+			"additionalProperties": true
+		},
+		"generated_at": {
+			"type": "string",
+			"format": "date-time"
+		}
+	}
+}

@@ -1,5 +1,5 @@
 {
-	"_comment": "Synthetic schema example for /api/identity.schema.v1.json. This file is NOT a snapshot of any production identity — it is a fixed demonstration of the schema's shape. All sha256, fingerprint, and timestamp values shown here are synthetic placeholders that document field formats only; they do not refer to any real artifact, key, or moment in time. Production runtime identity is published at /api/identity.json by scripts/operator-local/gen-identity.sh on the operator's local Mac (signed with the operator identity ed25519 key; the validator's staker.key / BLS signer.key are not used). No P-Chain anchor: the prior memo-binding design was abandoned 2026-06-20. See docs/IDENTITY_SCHEMA_CHANGELOG.md.",
+	"_comment": "Synthetic schema example for /api/identity.schema.v1.json. This file is NOT a snapshot of any production identity — it is a fixed demonstration of the schema's shape. All sha256, fingerprint, hash, and timestamp values shown here are synthetic placeholders that document field formats only; they do not refer to any real artifact, key, or moment in time. Production runtime identity is published at /api/identity.json by scripts/operator-local/gen-identity.sh on the operator's local Mac (signed with the operator identity ed25519 key; the validator's staker.key / BLS signer.key are not used). Phase α A-chain Merkle DAG anchor fields (dag_root_hash, cycles_history_url, anchor_receipt_url) added 2026-06-21 per docs/MERKLE_DAG_SPEC.md. See docs/IDENTITY_SCHEMA_CHANGELOG.md.",
 	"schema_version": 1,
 	"brand": "Freedom Yield",
 	"node_id": "NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v",
@@ -49,5 +49,8 @@
 		}
 	},
 	"artifact_root": "0000000000000000000000000000000000000000000000000000000000000000",
+	"dag_root_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+	"cycles_history_url": "https://metal.freedom-yield.com/api/cycles-history.json",
+	"anchor_receipt_url": "https://metal.freedom-yield.com/api/anchor-receipt.json",
 	"generated_at": "1970-01-01T00:00:00Z"
 }

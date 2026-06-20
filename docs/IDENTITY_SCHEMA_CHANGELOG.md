@@ -7,6 +7,98 @@ schema v1 and the rationale for any future major version bump. It is
 not a chain-anchored attestation and not equivalent to an external
 append-only log: see the retention note below.
 
+## 2026-06-21 — Phase α additive: Merkle DAG anchor fields
+
+### Summary
+
+Three additive properties were added to `/api/identity.schema.v1.json`,
+and three new sibling schemas were published, to support the Phase α
+A-chain Merkle DAG anchor specified in `docs/MERKLE_DAG_SPEC.md`. No
+fields were removed; no `required` list was changed; the `$id`,
+`schema_version` `const`, `x-stability`, and `x-baseline-revision`
+values are unchanged. The revision is **additive within v1**.
+
+### What changed in /api/identity.schema.v1.json
+
+| Property | Type | Status |
+| --- | --- | --- |
+| `dag_root_hash` | 64-hex pattern | added (additive, optional) |
+| `cycles_history_url` | URI | added (additive, optional) |
+| `anchor_receipt_url` | URI | added (additive, optional) |
+
+The `artifact_root` field's description was expanded with a note
+clarifying that `artifact_root` and `dag_root_hash` coexist within
+v1 and commit to different evidentiary corpora (current-set vs
+cumulative-DAG). No type, pattern, or semantics of `artifact_root`
+itself was changed.
+
+`x-issued-at` was advanced to `2026-06-21T00:00:00Z`. The
+`x-baseline-revision` value remained `"2026-06-20-pre-production-correction"`
+because additive field additions do not introduce a new baseline; the
+2026-06-21 revision continues to honor the additive-only stability
+contract established by the prior baseline.
+
+### What changed in /api/cycle-history.schema.v1.json
+
+Two additive optional properties were added:
+
+| Property | Type | Status |
+| --- | --- | --- |
+| `signed_by_key_seq` | integer ≥ 1 | added (additive, optional) |
+| `signed_by_pubkey_fingerprint` | `^SHA256:[A-Za-z0-9+/=]+$` | added (additive, optional) |
+
+These fields bind each cycle leaf to the operator-identity key
+authoritative at the cycle's `start_iso`. The schema `description`
+was extended to reference `docs/MERKLE_DAG_SPEC.md §2.2`.
+`x-issued-at` was advanced to `2026-06-21T00:00:00Z`. The
+`required` list was not changed; operators SHOULD include these
+fields for `cycle_n >= 3` (= first cycle after Phase α activation),
+but the schema tolerates their absence on earlier cycle leaves.
+
+### New sibling schemas published
+
+| Schema | Purpose |
+| --- | --- |
+| `/api/anchor-receipt.schema.v1.json` | A-chain inscription receipt. Republishes the most recent A-chain transaction anchoring a `dag_root_hash`, including `tx_id`, `block_num`, `block_time`, `explorer_url`, and the structured `inscribe_action` (account / name / from / to / quantity / memo / permission). Discriminator `anchor.method` distinguishes Phase α (`phase_alpha_token_transfer`) from Phase β (`phase_beta_sc_inscribe`). |
+| `/api/cycles-history.schema.v1.json` | Merkle DAG snapshot. Publishes both branch roots (`identity_branch_root`, `cycles_branch_root`), their combination `dag_root_hash`, and pointers to the leaf source JSONL documents. Naming distinction: `cycles-history.json` (plural) is the snapshot; `cycle-history.jsonl` (singular) is the per-cycle leaf source. |
+| `/api/identity-history.schema.v1.json` | Per-line schema for `/api/identity-history.jsonl`. Each line represents one operator-identity ed25519 key entry, keyed by monotone `key_seq`. Append-only within v1; serves as the leaf source for the identity branch of the DAG. |
+
+All three new schemas declare `x-stability: "additive-only-within-v1"`,
+`x-issued-at: "2026-06-21T00:00:00Z"`, and
+`x-baseline-revision: "2026-06-21-phase-alpha-initial"`.
+
+### Anchor mechanism note (BLOCK-1 awareness)
+
+The Phase α `anchor.inscribe_action.to` field is required to be
+distinct from `from` because XPRNetwork's `eosio.token::transfer`
+rejects self-transfer at the contract level
+(`check( from != to, "cannot transfer to self" )`,
+`eosio.token.cpp` line 99). The schema is shape-stable regardless of
+which specific sink account the operator chooses; the schema's
+`to` field is constrained only by the XPR account-name pattern
+(`^[a-z1-5.]{1,12}$`). The example file uses a placeholder sink
+name; the production receipt will substitute the operator-selected
+sink account at first inscription.
+
+### Why this is additive, not a v2 bump
+
+- All new properties are optional; documents valid against the prior
+  schema remain valid against this revision.
+- No existing field's type, pattern, enum, or `const` was narrowed.
+- `required` was not extended.
+- The three sibling schemas are at new `$id` URLs; they do not affect
+  the binding of `/api/identity.schema.v1.json`.
+
+### Related (this revision)
+
+- `docs/MERKLE_DAG_SPEC.md` — canonical spec for the two-branch
+  Merkle DAG, leaf canonical encoding, tree construction, and
+  A-chain memo binding (`fyid1:<dag_root_hash>`).
+- `project_merkle_dag_identity_anchor_design` memory — Phase α / β
+  design memo (operator-side).
+- `project_phase_alpha_coordination_log` memory — Phase α
+  cross-Claude coordination state.
+
 ## 2026-06-20 — schema v1 pre-production correction
 
 ### Summary

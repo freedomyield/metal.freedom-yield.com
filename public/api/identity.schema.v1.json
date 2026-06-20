@@ -2,8 +2,8 @@
 	"$schema": "https://json-schema.org/draft/2020-12/schema",
 	"$id": "https://metal.freedom-yield.com/api/identity.schema.v1.json",
 	"title": "Freedom Yield Metal — Operator Identity Manifest v1",
-	"description": "Formal contract for /api/identity.json. Revised 2026-06-20 as a pre-production correction; see docs/IDENTITY_SCHEMA_CHANGELOG.md for the full history. The model is an operator-signed artifact snapshot WITHOUT a P-Chain anchor (the prior P-Chain memo binding was abandoned because the current Avalanche / Metal protocol rules forbid non-empty memos on AddPermissionlessValidatorTx). The runtime manifest is generated and signed by scripts/operator-local/gen-identity.sh on the operator's local Mac, NEVER on the validator host or web host. Verification uses ssh-keygen -Y verify with namespace freedom-yield/validator-identity. Companion /api/identity.example.json is a synthetic schema example, NOT a production snapshot. Companion design changelog: docs/IDENTITY_SCHEMA_CHANGELOG.md. The schema URL is a stable discovery endpoint; consumers that need immutable schema semantics SHOULD pin the schema document SHA-256 or the repository commit (see CHANGELOG). A future breaking change will use a new major-version schema URL; retention and deprecation policy for superseded schema versions will be documented when such a version is introduced.",
-	"x-issued-at": "2026-06-20T00:00:00Z",
+	"description": "Formal contract for /api/identity.json. Revised 2026-06-20 as a pre-production correction; further extended 2026-06-21 with additive Merkle DAG anchor fields (dag_root_hash, cycles_history_url, anchor_receipt_url) for Phase α A-chain anchoring per docs/MERKLE_DAG_SPEC.md. See docs/IDENTITY_SCHEMA_CHANGELOG.md for the full history. The model is an operator-signed artifact snapshot. The runtime manifest is generated and signed by scripts/operator-local/gen-identity.sh on the operator's local Mac, NEVER on the validator host or web host. Verification uses ssh-keygen -Y verify with namespace freedom-yield/validator-identity. Companion /api/identity.example.json is a synthetic schema example, NOT a production snapshot. Companion design changelog: docs/IDENTITY_SCHEMA_CHANGELOG.md. The schema URL is a stable discovery endpoint; consumers that need immutable schema semantics SHOULD pin the schema document SHA-256 or the repository commit (see CHANGELOG). A future breaking change will use a new major-version schema URL; retention and deprecation policy for superseded schema versions will be documented when such a version is introduced.",
+	"x-issued-at": "2026-06-21T00:00:00Z",
 	"x-stability": "additive-only-within-v1",
 	"x-baseline-revision": "2026-06-20-pre-production-correction",
 	"x-format-guide": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md",
@@ -144,7 +144,22 @@
 		"artifact_root": {
 			"type": "string",
 			"pattern": "^[a-f0-9]{64}$",
-			"description": "SHA-256 Merkle root computed over artifact_manifest entries: leaves are each entry.sha256, ordered alphabetically by key, odd counts duplicate the last leaf, parents are SHA-256(left || right) as raw bytes, hex-encoded at the root. In identity.example.json this field is set to all-zeros (sixty-four '0' characters) to indicate the schema-only preview state; the production runtime identity.json carries the real 64-hex Merkle root after gen-identity.sh computes it from the live artifact bytes."
+			"description": "SHA-256 Merkle root computed over artifact_manifest entries: leaves are each entry.sha256, ordered alphabetically by key, odd counts duplicate the last leaf, parents are SHA-256(left || right) as raw bytes, hex-encoded at the root. In identity.example.json this field is set to all-zeros (sixty-four '0' characters) to indicate the schema-only preview state; the production runtime identity.json carries the real 64-hex Merkle root after gen-identity.sh computes it from the live artifact bytes. NOTE: artifact_root commits to the CURRENT set of published artifacts; dag_root_hash (additive field, see below) commits to the CUMULATIVE Merkle DAG of identity-key history and validation-cycle history. Both roots coexist within v1; they serve different evidentiary purposes and are independently verifiable."
+		},
+		"dag_root_hash": {
+			"type": "string",
+			"pattern": "^[a-f0-9]{64}$",
+			"description": "ADDITIVE (Phase α, 2026-06-21). 64-hex SHA-256(raw_bytes(identity_branch_root) || raw_bytes(cycles_branch_root)). The value anchored on Metal A-chain via memo 'fyid1:<dag_root_hash>'. MUST equal cycles-history.json.dag_root_hash and anchor-receipt.json.dag_root_hash for the same publication moment. Construction is specified in docs/MERKLE_DAG_SPEC.md and is bit-for-bit equivalent to the existing compute_merkle_root shell function at scripts/operator-local/gen-identity.sh L186-230 applied to the per-branch leaf hashes, then combined per MERKLE_DAG_SPEC.md §4. Absent on identity.json publications produced before Phase α activation."
+		},
+		"cycles_history_url": {
+			"type": "string",
+			"format": "uri",
+			"description": "ADDITIVE (Phase α, 2026-06-21). URL of /api/cycles-history.json — the Merkle DAG snapshot summarising the two branch roots whose combination is dag_root_hash. Lets verifiers discover the DAG breakdown without parsing identity.json's flat fields."
+		},
+		"anchor_receipt_url": {
+			"type": "string",
+			"format": "uri",
+			"description": "ADDITIVE (Phase α, 2026-06-21). URL of /api/anchor-receipt.json — the most recent A-chain inscription receipt anchoring this dag_root_hash. MAY be absent between the moment a new dag_root_hash is computed and the moment its anchoring inscription confirms on-chain."
 		},
 		"generated_at": {
 			"type": "string",
