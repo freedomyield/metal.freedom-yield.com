@@ -247,13 +247,13 @@
 				<span class="data-tag">準備中</span>
 			</header>
 			<p>署名付きアイデンティティマニフェストを準備中です。validator の <code>staker.key</code> および BLS <code>signer.key</code> とは独立した運用者専用 identity key(ed25519)を使用します。検証には namespace <code>freedom-yield/validator-identity</code> の OpenSSH signature を使います。この過程で validator の signing key は使用しません。</p>
-			<p>設計は 4 層 Merkle DAG anchor 方式です。次回 renewal cycle の <code>AddPermissionlessValidatorTx</code> memo に、 公開済 <code>.pub</code> file bytes の SHA-256 を埋め込み、 この fingerprint が署名付き <code>identity.json</code> を validator NodeID に anchor します。 manifest 本体は <code>artifact_manifest</code> map(各 <code>/api/</code> leaf URL を content SHA-256 と、 該当する場合は正式 schema URL + schema SHA-256 と紐付け)と、 leaf を alphabetical key 順に並べた binary SHA-256 Merkle root である <code>artifact_root</code> field を持ちます。 consumer は manifest を fetch し、 live leaf から root を再計算し、 bind された全 set を 1 回の pass で operator signature に対して検証できます。</p>
-			<p>本 manifest の正式契約は <a href="/api/identity.schema.v1.json"><code>/api/identity.schema.v1.json</code></a> として live。 同 shape の worked example は <a href="/api/identity.example.json"><code>/api/identity.example.json</code></a>。 7 段階 end-to-end 検証 recipe(chain memo → fingerprint 一致 → 署名 → leaf hashes → Merkle root 再計算 → schema validation)は <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer"><code>docs/IDENTITY_VERIFICATION.md</code></a>。 運用者側 setup runbook は <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/OPERATOR_IDENTITY_SETUP.md" rel="noopener noreferrer"><code>docs/OPERATOR_IDENTITY_SETUP.md</code></a>。</p>
+			<p>オペレーターidentity証拠は、署名済みartifact snapshot方式へ改訂中です。以前予定していたP-Chain memoによる紐付けは使用しません。</p>
+			<p>正式 schema は <a href="/api/identity.schema.v1.json"><code>/api/identity.schema.v1.json</code></a>、 worked example は <a href="/api/identity.example.json"><code>/api/identity.example.json</code></a> にあります。 verifier と operator 向け文書はモデル改訂と並行して更新されます。</p>
 			<dl class="data-meta">
-				<dt>状態</dt><dd>準備中 — 正式 schema、 検証 recipe、 運用者 runbook、 Merkle-DAG generator すべて live。 runtime <code>identity.json</code> 公開は内部の cron 安定性 checkpoint を gate に保留中</dd>
+				<dt>状態</dt><dd>準備中 — schemaとoperator側generatorは公開済みです。 runtime <code>identity.json</code> は内部運用確認をgateとして未公開です。 従来のP-Chain memo方式は廃止しました。</dd>
 				<dt>正式 schema(live)</dt><dd><a href="/api/identity.schema.v1.json"><code>/api/identity.schema.v1.json</code></a></dd>
 				<dt>worked example</dt><dd><a href="/api/identity.example.json"><code>/api/identity.example.json</code></a></dd>
-				<dt>verifier 手順</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer"><code>docs/IDENTITY_VERIFICATION.md</code></a>(7 段階 recipe)</dd>
+				<dt>verifier 手順</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer"><code>docs/IDENTITY_VERIFICATION.md</code></a>(改訂中)</dd>
 				<dt>運用者 runbook</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/OPERATOR_IDENTITY_SETUP.md" rel="noopener noreferrer"><code>docs/OPERATOR_IDENTITY_SETUP.md</code></a></dd>
 				<dt>生成 script</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/scripts/operator-local/gen-identity.sh" rel="noopener noreferrer"><code>scripts/operator-local/gen-identity.sh</code></a></dd>
 				<dt>予定 manifest</dt><dd><code>/api/identity.json</code></dd>

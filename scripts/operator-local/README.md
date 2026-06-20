@@ -34,10 +34,8 @@ A clean run prints `OK` and nothing else.
   the operator's local ed25519 key. Probes each leaf artifact URL,
   computes its content sha256, and binds the set under
   `artifact_manifest` + `artifact_root` (SHA-256 Merkle root, alphabetical
-  key order, odd-duplicate, raw bytes). `chain_anchor.tx_id` defaults to
-  an all-zeros placeholder; pass `CHAIN_ANCHOR_TX_ID=<64-hex>` only at
-  Phase 6 once the renewal-cycle tx memo has embedded the fingerprint.
-  Never reads validator keys. Refuses to run on production hosts. See
+  key order, odd-duplicate, raw bytes). Never reads validator keys.
+  Refuses to run on production hosts. See
   `docs/IDENTITY_VERIFICATION.md` for the signing model and the seven-
   step end-to-end verification procedure.
 
@@ -48,18 +46,6 @@ A clean run prints `OK` and nothing else.
   the signature against the synthetic pubkey. Output never lands in
   the real repo.
 
-- `test-phase6-mock.sh` — end-to-end rehearsal harness for the
-  Phase 5 → Phase 6 transition (chain-anchor embed at renewal cycle).
-  Runs `gen-identity.sh` twice, once with the default placeholder
-  `chain_anchor` and once with `CHAIN_ANCHOR_TX_ID` set to a
-  visibly-fake mock value, then asserts the diff between the two
-  outputs is exactly the `chain_anchor.tx_id` + `explorer_url` flip
-  and nothing else. Prints the side-by-side visual, the seven-step
-  verifier walkthrough on mock data, and the two-hash-forms drill.
-  Used as the Phase 6 rehearsal before the real 2026-07-04 13:00 JST
-  renewal moment so the operator can verify the output shape without
-  touching the chain.
-
 ## Phase 5 runbook
 
 The end-to-end procedure for generating the real operator identity
@@ -69,9 +55,6 @@ That runbook is the teaching reference: read it once for context.
 
 At execution time, run from the compact one-page checklists instead:
 [`docs/PHASE5_CHECKLIST.md`](../../docs/PHASE5_CHECKLIST.md) for the
-signed-manifest publish, and
-[`docs/PHASE6_CHECKLIST.md`](../../docs/PHASE6_CHECKLIST.md) for the
-per-cycle chain-anchor embed at each renewal. Both carry the
-section-keyed gate checks, command-by-command copy-paste blocks,
-live verification, rollback, and symptom-keyed failure decision
-trees.
+signed-manifest publish. It carries the section-keyed gate checks,
+command-by-command copy-paste blocks, live verification, rollback, and
+symptom-keyed failure decision trees.

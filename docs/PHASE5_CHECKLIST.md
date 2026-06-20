@@ -55,12 +55,6 @@ ls -l ~/.ssh/freedom-yield-operator-identity*
 # Goes into operator_identity_pubkey_fingerprint in identity.json.
 ssh-keygen -l -f ~/.ssh/freedom-yield-operator-identity.pub
 # Output shape: "256 SHA256:<44-char base64> <comment> (ED25519)"
-
-# B4. Record the CHAIN MEMO BINDING HASH (= shasum of .pub file bytes).
-# Used at Phase 6 in the AddValidator memo: identity-v1:sha256:<HEX64>.
-# This is a DIFFERENT value from B3 — do not confuse them.
-shasum -a 256 ~/.ssh/freedom-yield-operator-identity.pub
-# Output shape: "<64 lowercase hex>  <path>"
 ```
 
 **Password manager entry** — create immediately after B1, store all of:
@@ -71,13 +65,11 @@ shasum -a 256 ~/.ssh/freedom-yield-operator-identity.pub
 | Issued | today's date (ISO 8601) |
 | Passphrase | the secret you just typed |
 | Manifest fingerprint (SHA256:base64) | output of B3 |
-| Chain memo binding hash (64-hex) | output of B4 |
 | Private key path | `~/.ssh/freedom-yield-operator-identity` |
 | Comment field | `freedom-yield-operator-identity` |
 
-Both hash forms must be saved. Phase 6 (next renewal cycle) needs the
-B4 value and the manifest signature on identity.json claims the B3
-value. Losing either is recoverable but expensive.
+The B3 value must be saved (the manifest signature on identity.json
+claims it). Loss is recoverable but expensive — store securely.
 
 ## C. Synthetic dry-run (Step 2, ~1 min)
 
@@ -194,14 +186,3 @@ once the underlying issue is resolved.
 | F1: GitHub Actions red | Read job log; common cause is allowlist drift, fix and push again — do NOT amend |
 | F2: `FAIL fingerprint` | Live `.pub` was rewritten by web host. Compare bytes, fix nginx mime + push again |
 | F2: `FAIL signature` | Live `identity.json` or `.sig` was rewritten. Same diagnosis — bytes drift |
-
-## After Phase 5 lands
-
-Update `docs/OPERATOR_IDENTITY_SETUP.md` Phase 5 → Phase 6 hand-off
-section with the actual landing date so the next runbook reader sees
-"Phase 5 landed YYYY-MM-DD, Phase 6 fires at next renewal cycle".
-
-The Phase 6 (per-cycle chain-anchor embed) execution checklist is at
-[`PHASE6_CHECKLIST.md`](./PHASE6_CHECKLIST.md). It runs at every
-renewal cycle once Phase 5 has landed — first execution scheduled for
-2026-07-04 13:00 JST.

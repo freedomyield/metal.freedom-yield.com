@@ -97,6 +97,12 @@ It is also not a complete operational log. It records closed cycles only — in-
 - Append-only conceptually, regenerated wholly in practice. The generator re-derives the file from sources on every run; the result remains byte-identical to the previous run unless an input changed.
 - Schema version is pinned at `1`. Any breaking change increments `schema_version` and is announced in the cycle journal.
 
+## Current state (2026-06-20)
+
+Cycle 2 is scheduled to end at its P-Chain-defined end time on 2026-07-04. The next renewal transaction is operator-executed and may be committed before or after that exact boundary. A delay does not extend cycle 2: the cycle's end is set by the P-Chain ledger when cycle 2 was registered, and the closed-cycle row is appended only after the cycle's end is observed on chain — separately from when (or whether) the next renewal transaction is committed. The closed-cycle audit packet therefore contains only cycle 1 during the cycle 2 active window; that is the expected steady state.
+
+The P-Chain ledger is authoritative for cycle boundaries and validator transactions. `scripts/gen-cycle-history.sh` is the canonical generator of the published closed-cycle JSONL from its declared source artifacts. Operator-maintained `notes` are appended to a closed row after the generator emits it; manual notes never replace generator output.
+
 ## Related artifacts
 
 - `/api/uptime-cycles.json` — canonical per-cycle uptime ledger (the primary source).
