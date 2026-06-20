@@ -284,3 +284,277 @@ republish whenever the underlying issue is resolved.
   care about the MIME type — `ssh-keygen` parses the body — but if
   you find the response surprising, check the web host's `mime.types`
   for an explicit mapping. There is no requirement to add one.
+
+---
+
+# A-chain anchor account — permission setup (Phase α)
+
+> This section is operationally distinct from the Phase 5 operator
+> identity ed25519 setup above: different chain (Metal A-chain =
+> PulseVM / XPRNetwork), different key family (EOSIO K1 secp256k1 +
+> WebAuth P-256), different tooling (`proton-cli` / webauth.com). The
+> `freedomyield` XPR account is the on-chain anchor for the Merkle DAG
+> identity model; permission structure follows the design in
+> `project_merkle_dag_identity_anchor_design.md`.
+>
+> Phase α scope is **additive only**: a new narrow `anchor` permission
+> is added as a child of `active`. Owner rotation and active tightening
+> are deferred to Phase β.
+
+## A1. Current state (live-verified 2026-06-20, XPR mainnet)
+
+Read-only verification via the public chain RPC
+(`https://api-xprnetwork-main.saltant.io/v1/chain/get_account` with
+`{"account_name":"freedomyield"}`) returns:
+
+| field | value |
+| --- | --- |
+| `account_name` | `freedomyield` |
+| `created` | `2026-04-09T05:43:36 UTC` |
+| `owner` permission | threshold=1, keys=[`EOS6w1ufdiYuZs9Q...` (K1)] |
+| `active` permission | threshold=1, keys=[`EOS6w1ufdiYuZs9Q...` (K1), `PUB_WA_3hftgAoXi...` (WebAuth)], parent=`owner` |
+| `last_code_update` | unset (no contract deployed) |
+
+The `PUB_WA_` prefix indicates a WebAuth (P-256) credential registered
+on `active`. The current owner key is a K1; whether the operator holds
+the corresponding private key is a coord-log Decision (see
+`project_phase_alpha_coordination_log.md` Decision #2).
+
+## A2. Target state (Phase α minimal)
+
+```
+freedomyield
+├── owner    (unchanged from A1; rotation deferred to Phase β)
+├── active   (unchanged from A1)
+└── anchor   (NEW, parent=active, threshold=1,
+             keys=[PUB_K1_<anchor_pubkey>])
+    └── linkauth: eosio.token::transfer  (Phase α automated broadcast)
+```
+
+Rationale:
+
+- Phase α adds **only** what is needed for automated anchor broadcast.
+- `anchor` is a child of `active`, so the existing active signers
+  (WebAuth biometric, optionally the K1) can authorize its creation
+  without touching the owner permission.
+- Narrowing `anchor` via `linkauth` to `eosio.token::transfer` limits
+  the blast radius if the validator-host-stored `anchor` private key
+  is compromised: it can sign transfers from `freedomyield`, but
+  cannot change permissions, deploy contracts, or sign other system
+  actions.
+- Owner rotation to WebAuth-only and any active-permission tightening
+  are explicitly Phase β work (see A9).
+
+## A3. Prerequisites
+
+- `proton-cli` 0.1.98+ installed on the operator Mac
+  (verify: `proton --version`).
+- `freedomyield@active` signing capability — one of:
+  - WebAuth biometric via `webauth.com` or Proton wallet app (uses
+    the existing `PUB_WA_3hftgAo...` credential on `active`). No
+    K1 private key required.
+  - The K1 private key for `EOS6w1ufdiYuZs9Q...` imported via
+    `proton key:add`. Subject to Decision #2 in
+    `project_phase_alpha_coordination_log.md`.
+- A receiver account for Phase α broadcasts (Decision #1 in the
+  coord-log; placeholder `<sink_account>` below until naming is
+  confirmed by the operator). Self-transfer is forbidden by
+  `eosio.token::transfer` at contract level
+  (`from != to` check in `XPRNetwork/proton.contracts/contracts/`
+  `eosio.token/src/eosio.token.cpp` line 99), so a second account is
+  unavoidable.
+- The testnet rehearsal (A5) MUST complete with PASS before any
+  mainnet step is executed (A6 / A7).
+- No mainnet step in this section is to be executed without explicit
+  operator approval per Constitution §5.
+
+## A4. Generate the anchor K1 keypair (operator Mac, offline)
+
+The `anchor` key is a fresh K1 (secp256k1) keypair, NOT WebAuth and
+NOT reused from any existing key on `freedomyield`.
+
+```sh
+proton key:generate
+# Output (record both):
+#   Private key: PVT_K1_...      ← store in Dashlane only
+#   Public key:  PUB_K1_...      ← used below as <anchor_pubkey>
+```
+
+Constraints:
+
+- Run on the operator Mac, outside any cloud-synced directory
+  (no iCloud / Dropbox / Google Drive path).
+- The private key MUST be stored ONLY in Dashlane on the Mac side.
+  It MUST NOT be committed to any repository, written to any cloud
+  sync, pasted into any AI chat, or held in any password manager
+  outside Dashlane.
+- The Mac-side copy is transient: after the validator-host deploy
+  (T-2, separate section below), the Mac copy is shredded and only
+  the Dashlane backup + the validator-host live copy remain.
+- The corresponding public key is PUBLIC and may be copied freely.
+
+## A5. Testnet rehearsal (mandatory before any mainnet step)
+
+```sh
+# Switch CLI to proton-test (= XPR testnet).
+proton chain:set proton-test
+
+# Generate a throwaway test key and provision a test account
+# (operator: signup via webauth.com testnet or proton testnet faucet).
+# The test account name is local-only; do not name it after the
+# planned production sink or any brand identifier.
+
+# Reproduce A6 + A7 + A8 against the test account.
+# All three steps MUST PASS, with explorer-visible permission and
+# linkauth, before any mainnet command is issued.
+
+# Switch CLI back to mainnet only after the testnet PASS is recorded.
+proton chain:set proton
+```
+
+The testnet PASS is part of the IC-2 deliverable (C3 → C1 by
+2026-06-30 per `project_phase_alpha_coordination_log.md`).
+
+## A6. Add the `anchor` permission as a child of `active`
+
+This action requires `freedomyield@active`. The current active has
+both a K1 key and a WebAuth credential; either is sufficient (single
+key threshold).
+
+**Path 1 — sign with WebAuth via the wallet UI:**
+
+The action must be composed in `webauth.com` or the Proton wallet
+app, because `proton-cli` does not sign with `PUB_WA_` credentials.
+The action payload to compose is the `eosio` system contract
+`updateauth` action, with the JSON payload shown in Path 2 below.
+
+**Path 2 — sign with the K1 private key via `proton-cli`:**
+
+Requires the K1 private key for `EOS6w1ufdiYuZs9Q...` to be present
+in the local `proton-cli` keystore (`proton key:add` first).
+
+```sh
+proton action eosio updateauth '{
+  "account": "freedomyield",
+  "permission": "anchor",
+  "parent": "active",
+  "auth": {
+    "threshold": 1,
+    "keys": [
+      {"key": "PUB_K1_<anchor_pubkey from A4>", "weight": 1}
+    ],
+    "accounts": [],
+    "waits": []
+  }
+}' freedomyield@active
+```
+
+Expected: the CLI returns the transaction id; the chain accepts the
+action; the new `anchor` permission appears under `freedomyield` in
+the next account read.
+
+## A7. Link the `anchor` permission to `eosio.token::transfer`
+
+```sh
+proton action eosio linkauth '{
+  "account": "freedomyield",
+  "code": "eosio.token",
+  "type": "transfer",
+  "requirement": "anchor"
+}' freedomyield@active
+```
+
+Effect: for actions where `from = freedomyield` on `eosio.token::transfer`,
+the chain accepts `freedomyield@anchor` as sufficient authorization
+(in addition to the default `freedomyield@active`). No other
+`eosio.token` action and no other contract action is reached by this
+linkauth.
+
+`<action>` is restricted to `transfer` deliberately; omitting it
+would link `anchor` to ALL actions of `eosio.token`, which would
+unnecessarily widen `anchor`'s authority.
+
+**Phase β preview** (not executed in Phase α): when the
+`freedomyield::inscribe` action is deployed (T-4 SC spec), an
+additional `linkauth` will be issued:
+
+```
+{"account":"freedomyield","code":"freedomyield",
+ "type":"inscribe","requirement":"anchor"}
+```
+
+This will give `anchor` the authority to call the SC inscribe action
+without touching the `eosio.token::transfer` linkauth installed in
+this Phase α step.
+
+## A8. Post-mainnet verification
+
+```sh
+# Re-read the account; expect the new `anchor` permission to appear
+# under `freedomyield.permissions`, parent=active, with the
+# <anchor_pubkey> from A4 as the sole key.
+curl -sS -X POST -H 'Content-Type: application/json' \
+  --data '{"json":true,"account_name":"freedomyield"}' \
+  https://api-xprnetwork-main.saltant.io/v1/chain/get_account \
+  | jq '.permissions[] | select(.perm_name=="anchor")'
+
+# Linkauth verification: a dry-run transfer signed by anchor should
+# be accepted by chain rules (replace <sink_account> with the
+# confirmed sink name; <root_hash> is any 64-hex placeholder for the
+# verification dry-run).
+proton action eosio.token transfer '{
+  "from": "freedomyield",
+  "to": "<sink_account>",
+  "quantity": "0.0001 XPR",
+  "memo": "fyid1:<root_hash>"
+}' freedomyield@anchor --dry-run
+```
+
+Expected: the dry-run reports the action as well-formed and accepts
+`freedomyield@anchor` as the required authorization. No actual
+broadcast occurs with `--dry-run`.
+
+A successful mainnet broadcast of the same action (without
+`--dry-run`) is the Phase α automated-anchor path; production use
+is wired via `scripts/operator-local/sign-anchor-event.sh` (T-3) and
+`scripts/post-anchor-event.sh` (C1 T-3 / T-4).
+
+## A9. Phase β preview (deferred, NOT executed in Phase α)
+
+Phase β items are intentionally out of scope for the Phase α
+deadline (2026-07-04 cycle 3 start). They are listed here so the
+operator knows what is deliberately deferred and what will require
+attention later.
+
+- **Owner rotation**: replace `owner=[EOS6w1u...]` with
+  `owner=[PUB_WA_...]` (WebAuth-only cold key). Requires the
+  CURRENT owner K1 private key to sign the owner-change action
+  (EOSIO rule: `updateauth owner` requires the current owner's
+  signature). Blocked on coord-log Decision #2.
+- **Active tightening**: if the K1 `EOS6w1u...` on active is no
+  longer needed after owner rotation, remove it from active so the
+  only active signer is the WebAuth credential.
+- **SC deploy on `freedomyield`**: the contract spec is C3 T-4
+  deliverable (`scripts/operator-local/contract/`
+  `freedomyield-anchor.spec.md`). Deploy is Phase β; the contract is
+  NOT deployed during Phase α.
+- **Additional linkauth for `freedomyield::inscribe`**: see A7
+  Phase β preview block.
+- **Optional sink-account hardening**: e.g. multisig on the sink, a
+  no-op contract on the sink that ignores or logs incoming transfers,
+  etc. The minimal Phase α sink is a plain account with default
+  permissions, sufficient to satisfy `eosio.token::transfer`'s
+  `is_account(to)` check.
+
+## A10. Anchor key validator host deploy
+
+The procedure to transfer the `PUB_K1_<anchor_pubkey>` private half
+from the Mac to the validator host at `/etc/freedom-yield/...`, set
+mode `0600 deploy:deploy`, and configure backup and rotation is
+C3 T-2 and ships in a separate doc section (to be appended below
+this one in a subsequent commit on the same `phase-alpha-onchain`
+branch). Until T-2 lands, the anchor private key remains on the
+operator Mac in the Dashlane-backed transient state described in
+A4.
+
+
