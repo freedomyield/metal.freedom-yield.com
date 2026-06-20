@@ -548,13 +548,244 @@ attention later.
 
 ## A10. Anchor key validator host deploy
 
-The procedure to transfer the `PUB_K1_<anchor_pubkey>` private half
-from the Mac to the validator host at `/etc/freedom-yield/...`, set
-mode `0600 deploy:deploy`, and configure backup and rotation is
-C3 T-2 and ships in a separate doc section (to be appended below
-this one in a subsequent commit on the same `phase-alpha-onchain`
-branch). Until T-2 lands, the anchor private key remains on the
-operator Mac in the Dashlane-backed transient state described in
-A4.
+See section **B** below. Until B is executed, the anchor private key
+remains on the operator Mac in the Dashlane-backed transient state
+described in A4. The mainnet `eosio.token::transfer` broadcast (= the
+production Phase α inscription) cannot run from the validator host
+until B is complete.
+
+---
+
+# B. Validator-host deploy of the `anchor` private key (Phase α)
+
+> **Authorization gate**: every command in this section affects the
+> validator host. Per Constitution §5, validator-host changes are
+> operator-approved and operator-executed. The AI side (C2 acting as
+> drafter) produces this runbook; the operator executes. No step in
+> this section is a default-allowed AI action.
+>
+> **Sequencing gate**: A6 + A7 + A8 (= mainnet permission install and
+> linkauth) MUST complete and verify on chain before B is executed.
+> A misconfigured permission combined with a deployed key creates a
+> bricked anchor pipeline that takes another mainnet round-trip to
+> recover.
+
+## B1. Deploy target
+
+| field | value | note |
+| --- | --- | --- |
+| host role | validator host | Constitution §5: distinct from the web host. Reached via the operator's documented SSH path (see operator's private SSH-access note). |
+| OS user that runs the anchor pipeline | `deploy` | Matches the convention used by other Phase α / β cron-driven scripts on the validator host (e.g. `metal-watch-validators` uses the same user). |
+| directory | `/etc/freedom-yield/` | Established convention; the existing per-host config files (`/etc/freedom-yield/web-host`, `/etc/freedom-yield/validator-host`, `/etc/freedom-yield/ntfy-topic`, etc.) all live here. |
+| key file path | `/etc/freedom-yield/anchor.k1.key` | Active anchor private key (PVT_K1_…). One file, one key, no rotation generations stored side-by-side here. |
+| previous-key archive path | `/etc/freedom-yield/anchor.k1.key.<key_seq>.retired` | After rotation; see B6. |
+| file mode | `0600` | Read+write owner only. |
+| file owner / group | `deploy:deploy` | Matches the OS user that runs the anchor pipeline. |
+
+The path family `/etc/freedom-yield/` is referenced from
+`docs/CRON_CONVENTIONS.md`, `scripts/operator-local/gen-identity.sh`,
+and existing public scripts; using it for the anchor key is
+consistent and does not introduce a new convention.
+
+## B2. Prerequisites on the validator host
+
+The operator confirms or installs:
+
+- `proton-cli` 0.1.98+ (verify: `proton --version`).
+- `jq` (already a Phase 1+ requirement for the existing JSON-handling
+  scripts).
+- `curl` (already present).
+- The `deploy` user exists and runs the anchor-driving cron entries.
+- `/etc/freedom-yield/` exists, owner `root:root`, mode `0755` (= the
+  established convention for the per-host config dir).
+- Outbound network egress to `api-xprnetwork-main.saltant.io` (and to
+  the operator's preferred secondary XPR mainnet RPC; the script in
+  C3 T-3 lets the operator pin the endpoint).
+
+If any prerequisite is missing the operator installs it before B3.
+
+## B3. Transfer the private key from Mac to validator host
+
+The transfer is one-shot and uses the operator's existing
+SSH-to-validator-host path. The exact SSH invocation depends on the
+operator's `~/.ssh/config` and is documented in the operator's
+private SSH-access note (= classified SECRET per Constitution §4.1
+S7, deliberately not reproduced in this public document).
+
+On the operator Mac:
+
+```sh
+# 1. Read the anchor private key from Dashlane into a transient file
+#    in a NON-cloud-synced directory (see A4).
+ANCHOR_KEY_TMP="$(mktemp -t anchor.k1.XXXXXX)"
+# Paste the PVT_K1_... value into this file; ensure no trailing whitespace.
+# The file contains ONE line:  PVT_K1_<base58>
+
+# 2. Push to the validator host with restrictive transient permissions.
+scp -p "${ANCHOR_KEY_TMP}" \
+    "${VALIDATOR_SSH_HOST}:/etc/freedom-yield/anchor.k1.key.incoming"
+#    └─ VALIDATOR_SSH_HOST is the operator's host alias from ~/.ssh/config.
+#       Do NOT inline the host or IP in any committed script per Constitution §4.1 S8.
+
+# 3. Atomic install + harden mode/owner via a single remote sudo step.
+ssh "${VALIDATOR_SSH_HOST}" 'sudo install -m 0600 -o deploy -g deploy \
+    /etc/freedom-yield/anchor.k1.key.incoming \
+    /etc/freedom-yield/anchor.k1.key && \
+    sudo shred -u /etc/freedom-yield/anchor.k1.key.incoming'
+
+# 4. Shred the local Mac copy.
+shred -u "${ANCHOR_KEY_TMP}"
+```
+
+The `install -m 0600 -o deploy -g deploy` step makes the placement
+atomic (= the file is fully owned and mode-restricted before any
+other process could observe it in a permissive state). The
+`shred -u` calls overwrite then unlink the source files on both
+sides. The original Dashlane copy remains as the operator's
+backup-of-record.
+
+## B4. Import the key into `proton-cli` on the validator host
+
+```sh
+ssh "${VALIDATOR_SSH_HOST}" 'sudo -u deploy bash -c "
+  proton chain:set proton
+  proton key:add \$(sudo cat /etc/freedom-yield/anchor.k1.key)
+  proton key:list
+"'
+```
+
+Expected output: the new `PUB_K1_<anchor_pubkey>` appears in
+`proton key:list`. The CLI keystore is per-OS-user; only `deploy`
+holds it.
+
+`proton key:add` stores the key in `~/.proton/keys` (or equivalent
+per the CLI version). The `/etc/freedom-yield/anchor.k1.key` file is
+retained as the canonical source for re-import after CLI reset.
+
+## B5. Self-test from the validator host
+
+```sh
+ssh "${VALIDATOR_SSH_HOST}" 'sudo -u deploy bash -c "
+  proton action eosio.token transfer '\''{
+    \"from\": \"freedomyield\",
+    \"to\": \"<sink_account>\",
+    \"quantity\": \"0.0001 XPR\",
+    \"memo\": \"fyid1:0000000000000000000000000000000000000000000000000000000000000000\"
+  }'\'' freedomyield@anchor --dry-run
+"'
+```
+
+Expected: the dry-run reports the action as well-formed and accepts
+`freedomyield@anchor` as the required authorization. No actual
+broadcast occurs.
+
+If the dry-run fails with "permission not found" or "missing required
+authorization", revisit A6 / A7 — the permission install or linkauth
+did not propagate as expected. Do NOT proceed to a live broadcast
+until the dry-run is clean.
+
+## B6. Rotation (= replace the validator-host anchor key)
+
+When the operator decides to rotate the anchor key (= routine cadence,
+or in response to a suspected exposure), the procedure is:
+
+```sh
+# 1. Generate a new anchor K1 keypair on the operator Mac (per A4).
+proton key:generate    # captures PUB_K1_<new>; PVT_K1_<new> to Dashlane
+
+# 2. From the operator Mac, sign updateauth replacing the old pubkey
+#    on the freedomyield@anchor permission. Either signing path
+#    (WebAuth or K1) from A6 may be used; freedomyield@active is the
+#    required authorization.
+proton action eosio updateauth '{
+  "account": "freedomyield",
+  "permission": "anchor",
+  "parent": "active",
+  "auth": {
+    "threshold": 1,
+    "keys": [{"key": "PUB_K1_<new>", "weight": 1}],
+    "accounts": [],
+    "waits": []
+  }
+}' freedomyield@active
+
+# 3. Verify on chain that anchor.keys[] now contains only PUB_K1_<new>.
+curl -sS -X POST -H 'Content-Type: application/json' \
+  --data '{"json":true,"account_name":"freedomyield"}' \
+  https://api-xprnetwork-main.saltant.io/v1/chain/get_account \
+  | jq '.permissions[] | select(.perm_name=="anchor")'
+
+# 4. Re-execute B3 with the new private key, atomically replacing
+#    /etc/freedom-yield/anchor.k1.key. Before installing, rename the
+#    existing file to /etc/freedom-yield/anchor.k1.key.<old_key_seq>.retired
+#    (chmod 000) for 30 days as a recovery hedge, then shred.
+ssh "${VALIDATOR_SSH_HOST}" 'sudo -u root bash -c "
+  mv /etc/freedom-yield/anchor.k1.key \
+     /etc/freedom-yield/anchor.k1.key.\$(date +%s).retired && \
+  chmod 000 /etc/freedom-yield/anchor.k1.key.*.retired
+"'
+
+# 5. Re-execute B4 (proton key:add for the new key).
+# 6. proton key:remove PUB_K1_<old> from the CLI keystore on the
+#    validator host.
+# 7. Self-test (B5) with the new key. Once clean, the rotation is
+#    complete; the linkauth from A7 carries over (it references the
+#    permission name 'anchor', not a specific pubkey).
+```
+
+A successful rotation does not regenerate `identity-history.jsonl`'s
+operator identity key entry (= those are independent ed25519 keys);
+it does NOT change `dag_root_hash`. The anchor inscription pipeline
+keeps running uninterrupted from the next event.
+
+If the rotation is triggered by suspected exposure of the old key,
+the operator should additionally:
+
+- Broadcast an immediate inscription with the new key to establish
+  the rotation event on chain (= `event_type` is informational at
+  the Phase α memo level; Phase β SC adds a dedicated `idrotate`
+  event).
+- Note the rotation in the operator's incident log.
+
+## B7. Backup-of-record and recovery
+
+The single source of truth for the anchor private key over time is
+**Dashlane**. The `/etc/freedom-yield/anchor.k1.key` file on the
+validator host is a live runtime copy, regenerable from Dashlane via
+B3 + B4. There is no second backup of the key:
+
+- Not on the operator's other devices.
+- Not in any cloud-synced directory.
+- Not in any repository, encrypted or otherwise.
+- Not in the operator's email or messaging history.
+
+Recovery scenarios:
+
+- **Validator host wipe + restore**: re-execute B3 + B4 from
+  Dashlane. The on-chain permission is unaffected; the anchor
+  inscription pipeline resumes on the next event.
+- **Operator Mac wipe**: Dashlane sync restores the key on the new
+  Mac; B6 (rotation) is OPTIONAL — only required if the operator
+  judges the Mac wipe might have leaked the key. Otherwise the
+  Dashlane-restored key remains usable.
+- **Dashlane account compromise**: this is a CRITICAL incident.
+  Execute B6 (rotation) immediately on a clean device with a fresh
+  proton-cli keystore; assume the old anchor key is in adversary
+  hands and the linkauth scope (= eosio.token::transfer with
+  `from = freedomyield`) is exploitable until the rotation lands.
+  Note that the linkauth scope is intentionally narrow: the
+  adversary cannot move tokens out of `freedomyield` arbitrarily,
+  cannot change permissions, and cannot deploy contracts.
+
+## B8. What B does NOT change
+
+- The operator identity ed25519 key on the operator Mac
+  (= Phase 5 / Phase 6 key, used for `ssh-keygen -Y sign` on
+  `identity.json`) is untouched.
+- The validator's `staker.key` and BLS `signer.key` are untouched.
+- The `freedomyield@owner` and `freedomyield@active` permissions on
+  XPR mainnet are untouched (Phase β work; see A9).
+- The web host has no awareness of the anchor key and never receives
+  it (per Constitution §5: unidirectional data flow validator → web).
 
 

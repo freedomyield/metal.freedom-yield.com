@@ -119,7 +119,7 @@ At Phase α start, both branches have ≥ 1 leaf (identity-history has at least 
 
 ## 6. A-chain anchor binding (Phase α)
 
-Phase α uses an `eosio.token::transfer` transaction on Metal A-chain (PulseVM / XPRNetwork), signed by the narrow `freedomyield@anchor` permission. The minimum-cost form is a self-transfer of an arbitrarily small token amount; the memo carries the binding.
+Phase α uses an `eosio.token::transfer` transaction on Metal A-chain (PulseVM / XPRNetwork), signed by the narrow `freedomyield@anchor` permission. The minimum-cost form is a transfer of an arbitrarily small token amount (e.g. `0.0001 XPR`) from `freedomyield` to a **dedicated sink account distinct from `freedomyield`**; the memo carries the binding. Self-transfer (`from == to`) is rejected at the `eosio.token` contract level (`XPRNetwork/proton.contracts/contracts/eosio.token/src/eosio.token.cpp` line 99: `check( from != to, "cannot transfer to self" )`), so a second account is unavoidable. The specific sink account name is operator-chosen; see `docs/OPERATOR_IDENTITY_SETUP.md` §A3 for the placement constraint.
 
 ```
 memo = "fyid1:" + lowercase_hex(dag_root_hash)
@@ -179,4 +179,4 @@ Cases covered: 1-leaf branch (= single leaf, root = leaf), 2-leaf branch, 3-leaf
 
 - `docs/IDENTITY_SCHEMA_CHANGELOG.md` — design history of `identity.schema.v1.json` including the 2026-06-20 retirement of the prior P-Chain memo binding.
 - `scripts/operator-local/gen-identity.sh` lines 186–230 — the reference Merkle root implementation reused by both branches.
-- `/Users/admin/htdocs/01_PROJECTS/truthmark.io/scrapers/xpr/merkle.py` — sibling project's Merkle implementation, bit-for-bit equivalent to ours; useful as an independent reference for verifier implementations.
+- Sibling-project Merkle implementation `truthmark.io/scrapers/xpr/merkle.py` (= the `compute_merkle_root_from_hashes` function therein) — bit-for-bit equivalent to ours; useful as an independent reference for verifier implementations. It is out-of-tree relative to this repository and not redistributed here; an evaluator who has access to that project may consult it directly.

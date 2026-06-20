@@ -71,4 +71,4 @@ Commit the resulting vector file changes together with the spec amendment so the
 - [`docs/MERKLE_DAG_SPEC.md`](../../docs/MERKLE_DAG_SPEC.md) — canonical spec.
 - [`docs/IDENTITY_VERIFICATION.md`](../../docs/IDENTITY_VERIFICATION.md) — verifier-side recipe (uses these vectors implicitly via §3–§5).
 - `scripts/operator-local/gen-identity.sh` lines 186–230 — production shell implementation of `compute_merkle_root`.
-- `/Users/admin/htdocs/01_PROJECTS/truthmark.io/scrapers/xpr/merkle.py` — sibling-project independent reference (bit-for-bit equivalent).
+- Sibling-project independent reference (= the `compute_merkle_root_from_hashes` function in `truthmark.io/scrapers/xpr/merkle.py`, out-of-tree relative to this repository, not redistributed here). Bit-for-bit equivalent to the production shell implementation.
