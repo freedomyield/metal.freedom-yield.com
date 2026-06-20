@@ -41,8 +41,9 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-NOTIFY="$ROOT/scripts/notify.sh"
-STATE_DIR=/var/lib/<your-namespace>
+NOTIFY="${NOTIFY:-$ROOT/scripts/notify.sh}"
+: "${ANOMALY_STATE_DIR:?ANOMALY_STATE_DIR is required}"
+STATE_DIR="$ANOMALY_STATE_DIR"
 STATE_FILE=$STATE_DIR/anomaly-state.json
 STATUS_JSON="$ROOT/public/api/server-status.json"
 VALIDATOR_JSON="$ROOT/public/api/validator.json"
