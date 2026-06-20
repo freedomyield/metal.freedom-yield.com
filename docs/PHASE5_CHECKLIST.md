@@ -98,7 +98,7 @@ Expected tail:
   namespace:       freedom-yield/validator-identity
   principal:       freedom-yield
   iat / exp:       <today> / <today+365d>
-  leaves bound:    5     (or 4 if cycle-history.jsonl still 404)
+  artifact leaves:      <count>           # depends on which leaves resolve 200 OK
   artifact_root:   <64-hex>
   identity_branch_root: <64-hex> (= 1 leaf on first run after Phase α activation)
   cycles_branch_root:   <64-hex> (= live count from /api/cycle-history.jsonl)
@@ -183,7 +183,7 @@ once the underlying issue is resolved.
 | A2: `generated_at` is yesterday or older | Stop. cron silently failed; investigate |
 | A3: `formal_schema_url` is `null` | Stop. Hetzner sync of `gen-evidence.sh` is stale |
 | C: `test-gen-identity.sh` FAIL | Stop. Toolchain issue; see `OPERATOR_IDENTITY_SETUP.md` pitfalls |
-| D: leaves bound 0 | Web host transiently down. Wait 5 min, retry |
+| D: artifact leaves 0 | All probed leaves returned non-200. Wait 5 min and retry; if persistent, check web host and `ARTIFACT_BASE` |
 | D: fingerprint ≠ B3 | Wrong key path picked up. Re-export OPERATOR_IDENTITY_KEY |
 | E2: `wc -l` ≠ 1 or first 13 bytes ≠ `ssh-ed25519 ` | You copied the wrong file. Stop, re-copy the `.pub` half |
 | F1: GitHub Actions red | Read job log; common cause is allowlist drift, fix and push again — do NOT amend |
