@@ -1,12 +1,34 @@
-# Operator identity key — setup runbook (Phase 5)
+# Operator identity key — setup runbook (Phase 5 + Phase α)
 
+> **Status note (2026-06-21)**: this document teaches the off-chain
+> ed25519 operator-identity flow originally introduced as Phase 5.
+> The downstream **chain anchor** was redesigned 2026-06-20 / 21:
+> the prior "P-Chain memo at Phase 6" model was retired (forbidden by
+> Metal mainnet Durango protocol rules) and replaced by the **Phase α
+> A-chain Merkle DAG anchor** documented in
+> [`MERKLE_DAG_SPEC.md`](./MERKLE_DAG_SPEC.md). Section **B** of this
+> document covers the validator-host deploy of the Phase α anchor key;
+> [`PHASE_ALPHA_TESTNET_DRY_RUN.md`](./PHASE_ALPHA_TESTNET_DRY_RUN.md)
+> is the rehearsal runbook before the first mainnet inscription.
+>
+> When sections below reference "Phase 6 chain-anchor memo", interpret
+> as: the inscription is now performed by `scripts/post-anchor-event.sh`
+> on the validator host, signing an `eosio.token::transfer` on Metal
+> A-chain (= PulseVM / XPRNetwork) with memo `fyid1:<dag_root_hash>`
+> using `freedomyield@anchor`. The hash committed on chain is
+> `dag_root_hash` (= a DAG roll-up of the operator identity-key
+> history and the validation-cycle history), not a single per-cycle
+> artifact hash.
+>
 > At execution time, prefer the compact one-page action list for the
 > phase you are about to run:
 > [`PHASE5_CHECKLIST.md`](./PHASE5_CHECKLIST.md) for the signed-
-> manifest publish, [`PHASE6_CHECKLIST.md`](./PHASE6_CHECKLIST.md) for
-> the per-cycle chain-anchor embed. This document is the teaching
-> reference — read it once for context, then run from the matching
-> checklist on the day.
+> manifest publish. The historical
+> `PHASE6_CHECKLIST.md` (= retired P-Chain memo flow) is superseded
+> by [`PHASE_ALPHA_TESTNET_DRY_RUN.md`](./PHASE_ALPHA_TESTNET_DRY_RUN.md)
+> + section B below. This document is the teaching reference — read
+> it once for context, then run from the matching checklist on the
+> day.
 
 This is the operator-side runbook for Phase 5 of the
 [`project_merkle_dag_identity_anchor_design`](./IDENTITY_VERIFICATION.md)
@@ -85,12 +107,17 @@ will appear as `operator_identity_pubkey_fingerprint` in
 `identity.json`. It hashes the SSH wire-format key blob, not the
 `.pub` file bytes.
 
-The **chain-anchor memo** at Phase 6 commits to a *different* hash
-of the same key: the SHA-256 of the published `.pub` file bytes,
-which is what
-[`IDENTITY_VERIFICATION.md`](./IDENTITY_VERIFICATION.md) Step 3 has
-the verifier recompute. Compute and record it now so you have it
-ready for Phase 6:
+**Historical note (= for context only)**: the prior "Phase 6 chain-
+anchor memo" was designed to commit to a different hash of the same
+key (SHA-256 of the published `.pub` bytes) on the Metal P-Chain.
+That design was retired 2026-06-20 — Metal mainnet Durango forbids
+non-empty memos on AddPermissionlessValidatorTx. The replacement is
+the Phase α A-chain Merkle DAG anchor (= `fyid1:<dag_root_hash>` memo
+on `eosio.token::transfer` signed by `freedomyield@anchor`), which
+commits to a hash over the cumulative identity-key history AND the
+validation-cycle history (= a strictly broader commitment than the
+single-key hash). The `.pub` byte hash is still useful as an
+out-of-band fingerprint cross-check; compute and record it now:
 
 ```sh
 shasum -a 256 ~/.ssh/freedom-yield-operator-identity.pub
@@ -144,13 +171,20 @@ Expected tail (your `fingerprint` and `artifact_root` will differ):
   iat / exp:       <today> / <today+365d>
   leaves bound:    <count>           # 5 if cycle-history.jsonl is live, else 4
   artifact_root:   <64-hex>
-  chain_anchor:    placeholder (all-zeros) — bind at Phase 6 (next renewal)
+  identity_branch_root: <64-hex>   (= identity-history.jsonl Merkle root)
+  cycles_branch_root:   <64-hex>   (= cycle-history.jsonl Merkle root)
+  dag_root_hash:        <64-hex>   (= SHA-256(raw(id_root)||raw(cy_root)))
+  anchor memo:          fyid1:<dag_root_hash>     (Phase α A-chain inscription)
 ```
 
-The `chain_anchor` is intentionally left as the all-zeros placeholder
-at Phase 5. Phase 6 (the next renewal cycle) overwrites it with the
-real `tx_id` once the renewal `AddPermissionlessValidatorTx` carries
-the fingerprint in its memo.
+Once Phase α activates, `dag_root_hash` is inscribed on Metal A-chain
+(= PulseVM / XPRNetwork) via `scripts/post-anchor-event.sh`. Before
+that, the field is computed and emitted but the on-chain inscription
+has not yet occurred (= `/api/anchor-receipt.json` is absent or stale).
+The historical `chain_anchor: all-zeros placeholder — bind at Phase 6`
+text was removed when the P-Chain memo design was retired
+([`IDENTITY_SCHEMA_CHANGELOG.md`](./IDENTITY_SCHEMA_CHANGELOG.md)
+2026-06-20 entry).
 
 ## Step 4 — Copy the public key into the repo
 
@@ -192,8 +226,9 @@ feat(identity): Phase 5 — publish signed operator identity manifest
 Adds the operator identity manifest produced by gen-identity.sh:
 
   - public/api/identity.json — operator identity + artifact_manifest +
-    artifact_root (Merkle root over <N> leaves) + chain_anchor with
-    all-zeros placeholder (Phase 6 fills tx_id at next renewal).
+    artifact_root (Merkle root over <N> leaves) + dag_root_hash
+    (Phase α A-chain Merkle DAG anchor; chain inscription is performed
+    separately by scripts/post-anchor-event.sh on the validator host).
   - public/api/identity.json.sig — detached signature produced by
     ssh-keygen -Y sign with namespace freedom-yield/validator-identity.
   - public/.well-known/operator-identity.pub — public half of the

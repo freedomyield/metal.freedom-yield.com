@@ -243,22 +243,27 @@
 
 		<article class="data-endpoint">
 			<header class="data-endpoint-head">
-				<h3>Identity binding (in preparation)</h3>
+				<h3>Identity binding (Phase α Merkle DAG anchor)</h3>
 				<span class="data-tag">in preparation</span>
 			</header>
-			<p>A signed identity manifest is being prepared. It uses a dedicated operator identity key (ed25519), independent of the validator's <code>staker.key</code> and BLS <code>signer.key</code>. Verification uses OpenSSH signatures with namespace <code>freedom-yield/validator-identity</code>. The validator's signing keys will not be used for this process.</p>
-			<p>Operator identity evidence is being revised to use an operator-signed artifact snapshot. The previously planned P-Chain memo binding will not be used.</p>
-			<p>The formal schema is live at <a href="/api/identity.schema.v1.json"><code>/api/identity.schema.v1.json</code></a>; a worked example is at <a href="/api/identity.example.json"><code>/api/identity.example.json</code></a>. Verifier and operator documentation are being updated in step with the model revision.</p>
+			<p>A signed identity manifest is produced by a dedicated operator identity key (ed25519), independent of the validator's <code>staker.key</code> and BLS <code>signer.key</code>. Verification uses OpenSSH signatures with namespace <code>freedom-yield/validator-identity</code>. The validator's signing keys are not used for this process.</p>
+			<p>The identity model is a two-branch Merkle DAG: <code>identity_branch</code> (= history of operator identity keys) and <code>cycles_branch</code> (= history of closed validation cycles). The two branch roots combine into a single <code>dag_root_hash</code> that is inscribed on Metal A-chain (= PulseVM / XPRNetwork) by a narrow <code>freedomyield@anchor</code> permission, with on-chain memo <code>fyid1:&lt;dag_root_hash&gt;</code>. The prior P-Chain memo design (retired 2026-06-20) was incompatible with current Metal mainnet Durango protocol rules.</p>
+			<p>The verifier procedure is a nine-step recipe (signature → fingerprint → per-branch Merkle root → DAG combination → on-chain explorer cross-check → cross-reference integrity). Independent reference implementations: a portable shell function inside <code>gen-identity.sh</code> and a Python reference under <code>tests/identity-verification-vectors/</code>, with bit-for-bit equivalence pinned by an automated test script. Five synthetic test vectors are published so an auditor can implement and validate a third-language verifier.</p>
 			<dl class="data-meta">
-				<dt>Status</dt><dd>In preparation — schema and operator-side generator are published; runtime <code>identity.json</code> remains gated on internal operational checks. The former P-Chain memo design has been retired.</dd>
-				<dt>Formal schema (live)</dt><dd><a href="/api/identity.schema.v1.json"><code>/api/identity.schema.v1.json</code></a></dd>
-				<dt>Worked example</dt><dd><a href="/api/identity.example.json"><code>/api/identity.example.json</code></a></dd>
-				<dt>Verifier procedure</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer"><code>docs/IDENTITY_VERIFICATION.md</code></a> (under revision)</dd>
+				<dt>Status</dt><dd>In preparation — schemas, spec, recipe, and test vectors are live; runtime <code>identity.json</code> and <code>anchor-receipt.json</code> activate at the next cycle start (2026-07-04).</dd>
+				<dt>Construction spec</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/MERKLE_DAG_SPEC.md" rel="noopener noreferrer"><code>docs/MERKLE_DAG_SPEC.md</code></a></dd>
+				<dt>Verifier procedure</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer"><code>docs/IDENTITY_VERIFICATION.md</code></a> (= nine-step recipe)</dd>
+				<dt>Audit entry point</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/PHASE_ALPHA_AUDIT_HANDOFF.md" rel="noopener noreferrer"><code>docs/PHASE_ALPHA_AUDIT_HANDOFF.md</code></a></dd>
 				<dt>Operator runbook</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/OPERATOR_IDENTITY_SETUP.md" rel="noopener noreferrer"><code>docs/OPERATOR_IDENTITY_SETUP.md</code></a></dd>
-				<dt>Generator script</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/scripts/operator-local/gen-identity.sh" rel="noopener noreferrer"><code>scripts/operator-local/gen-identity.sh</code></a></dd>
-				<dt>Planned manifest</dt><dd><code>/api/identity.json</code></dd>
-				<dt>Planned signature</dt><dd><code>/api/identity.json.sig</code></dd>
-				<dt>Planned pubkey</dt><dd><code>/.well-known/operator-identity.pub</code></dd>
+				<dt>Identity schema</dt><dd><a href="/api/identity.schema.v1.json"><code>/api/identity.schema.v1.json</code></a> + <a href="/api/identity.example.json"><code>example</code></a></dd>
+				<dt>DAG snapshot schema</dt><dd><a href="/api/cycles-history.schema.v1.json"><code>/api/cycles-history.schema.v1.json</code></a> + <a href="/api/cycles-history.example.json"><code>example</code></a></dd>
+				<dt>Anchor receipt schema</dt><dd><a href="/api/anchor-receipt.schema.v1.json"><code>/api/anchor-receipt.schema.v1.json</code></a> + <a href="/api/anchor-receipt.example.json"><code>example</code></a></dd>
+				<dt>Identity-history leaf schema</dt><dd><a href="/api/identity-history.schema.v1.json"><code>/api/identity-history.schema.v1.json</code></a> + <a href="/api/identity-history.example.jsonl"><code>example</code></a></dd>
+				<dt>Test vectors</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/tree/main/tests/identity-verification-vectors" rel="noopener noreferrer"><code>tests/identity-verification-vectors/</code></a></dd>
+				<dt>Planned manifest</dt><dd><code>/api/identity.json</code> + <code>/api/identity.json.sig</code></dd>
+				<dt>Planned DAG snapshot</dt><dd><code>/api/cycles-history.json</code></dd>
+				<dt>Planned anchor receipt</dt><dd><code>/api/anchor-receipt.json</code></dd>
+				<dt>Operator pubkey</dt><dd><code>/.well-known/operator-identity.pub</code></dd>
 				<dt>Machine-readable discovery</dt><dd><a href="/api/evidence.json"><code>/api/evidence.json</code></a> → <code>.in_preparation_artifacts.identity_manifest</code></dd>
 			</dl>
 		</article>

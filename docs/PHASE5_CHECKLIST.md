@@ -100,7 +100,10 @@ Expected tail:
   iat / exp:       <today> / <today+365d>
   leaves bound:    5     (or 4 if cycle-history.jsonl still 404)
   artifact_root:   <64-hex>
-  chain_anchor:    placeholder (all-zeros) — bind at Phase 6 (next renewal)
+  identity_branch_root: <64-hex> (= 1 leaf on first run after Phase α activation)
+  cycles_branch_root:   <64-hex> (= live count from /api/cycle-history.jsonl)
+  dag_root_hash:        <64-hex> (= chain-anchored via Phase α A-chain memo "fyid1:<hash>")
+  anchor memo:          fyid1:<dag_root_hash>     (consumed by post-anchor-event)
 ```
 
 If `fingerprint` shown does not match your B3 record, stop and
