@@ -50,6 +50,78 @@ VALIDATOR_JSON="$ROOT/public/api/validator.json"
 NODE_ID="${NODE_ID:-NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v}"
 METALGO_API="${METALGO_API:-http://localhost:9650}"
 
+# === 4B.5.1: K-1 + K-2 gate thresholds (env overridable) ===================
+MAX_AGE_SEC="${MAX_AGE_SEC:-600}"
+FUTURE_SKEW_MAX_SEC="${FUTURE_SKEW_MAX_SEC:-60}"
+
+# === 4B.5.1 K-1: input syntax + schema gate ================================
+# Exit code:
+#   2  STATUS_JSON missing / unreadable / invalid JSON / required fields missing / wrong type
+# Side effects: stderr only; no state mutation; no notify call.
+validate_status_json() {
+  if [ ! -f "$STATUS_JSON" ]; then
+    echo "[K-1] STATUS_JSON missing: $STATUS_JSON" >&2; return 2
+  fi
+  if [ ! -r "$STATUS_JSON" ]; then
+    echo "[K-1] STATUS_JSON unreadable: $STATUS_JSON" >&2; return 2
+  fi
+  if ! jq empty "$STATUS_JSON" >/dev/null 2>&1; then
+    echo "[K-1] STATUS_JSON not valid JSON" >&2; return 2
+  fi
+  if ! jq -e '
+      (.observedAt|type=="string") and ((.observedAt|length)>0)
+      and (.metalgo|type=="object")
+      and (.metalgo.containerStatus|type=="string") and ((.metalgo.containerStatus|length)>0)
+      and (.metalgo.peerCount|type=="number")
+      and (.caddy|type=="object")
+      and (.caddy.containerStatus|type=="string") and ((.caddy.containerStatus|length)>0)
+      and (.host.cpu.usedPercent|type=="number")
+      and (.host.memory.usedPercent|type=="number")
+      and (.host.disk.usedPercent|type=="number")
+    ' "$STATUS_JSON" >/dev/null 2>&1; then
+    echo "[K-1] STATUS_JSON missing required fields or wrong types" >&2; return 2
+  fi
+  return 0
+}
+
+# === 4B.5.1 K-2: freshness gate ============================================
+# Spec (boundary):
+#   - age = now_utc - observedAt_utc  (positive when input is in the past)
+#   - accept iff:  -FUTURE_SKEW_MAX_SEC <= age <= MAX_AGE_SEC
+#       i.e. age=MAX_AGE_SEC is ACCEPT, age=MAX_AGE_SEC+1 is REJECT
+#            future_skew=FUTURE_SKEW_MAX_SEC is ACCEPT, +1 is REJECT
+#   - parse failure → exit 2 (= input invalid)
+#   - stale (age > MAX_AGE_SEC) or future skew (> FUTURE_SKEW_MAX_SEC) → exit 3
+# Side effects: stderr only (logs computed age); no state mutation; no notify call.
+validate_freshness() {
+  local obs obs_epoch now age
+  obs=$(jq -r '.observedAt' "$STATUS_JSON" 2>/dev/null)
+  obs_epoch=$(date -u -d "$obs" +%s 2>/dev/null)
+  if [ -z "$obs_epoch" ] || ! [[ "$obs_epoch" =~ ^[0-9]+$ ]]; then
+    echo "[K-2] observedAt parse failed: '$obs'" >&2
+    return 2
+  fi
+  now=$(date -u +%s)
+  age=$(( now - obs_epoch ))
+  echo "[K-2] age=${age}s (now=${now} obs_epoch=${obs_epoch} max=${MAX_AGE_SEC} skew_max=${FUTURE_SKEW_MAX_SEC})" >&2
+  if [ "$age" -lt 0 ]; then
+    local skew=$(( -age ))
+    if [ "$skew" -gt "$FUTURE_SKEW_MAX_SEC" ]; then
+      echo "[K-2] observedAt in future by ${skew}s > ${FUTURE_SKEW_MAX_SEC}s" >&2
+      return 3
+    fi
+  elif [ "$age" -gt "$MAX_AGE_SEC" ]; then
+    echo "[K-2] observedAt stale: age=${age}s > ${MAX_AGE_SEC}s" >&2
+    return 3
+  fi
+  return 0
+}
+
+validate_status_json; K1RC=$?
+if [ "$K1RC" -ne 0 ]; then exit "$K1RC"; fi
+validate_freshness; K2RC=$?
+if [ "$K2RC" -ne 0 ]; then exit "$K2RC"; fi
+
 # === init / read state ================================================
 mkdir -p "$STATE_DIR" 2>/dev/null || true
 if [ ! -f "$STATE_FILE" ]; then
@@ -88,22 +160,15 @@ notify() {
 }
 
 # === container statuses ===============================================
-if [ -f "$STATUS_JSON" ]; then
-  METALGO=$(jq -r '.metalgo.containerStatus // "unknown"' "$STATUS_JSON")
-  CADDY=$(jq -r '.caddy.containerStatus // "unknown"' "$STATUS_JSON")
-  DISK_PCT=$(jq -r '.host.disk.usedPercent // 0' "$STATUS_JSON")
-  DISK_TOTAL_KB=$(jq -r '.host.disk.totalKB // 0' "$STATUS_JSON")
-  DISK_USED_KB=$(jq -r '.host.disk.usedKB // 0' "$STATUS_JSON")
-  MEM_PCT=$(jq -r '.host.memory.usedPercent // 0' "$STATUS_JSON")
-  MEM_TOTAL_KB=$(jq -r '.host.memory.totalKB // 0' "$STATUS_JSON")
-  MEM_USED_KB=$(jq -r '.host.memory.usedKB // 0' "$STATUS_JSON")
-  PEERS=$(jq -r '.metalgo.peerCount // 0' "$STATUS_JSON")
-else
-  METALGO="unknown"; CADDY="unknown"
-  DISK_PCT=0; DISK_TOTAL_KB=0; DISK_USED_KB=0
-  MEM_PCT=0; MEM_TOTAL_KB=0; MEM_USED_KB=0
-  PEERS=0
-fi
+METALGO=$(jq -r '.metalgo.containerStatus // "unknown"' "$STATUS_JSON")
+CADDY=$(jq -r '.caddy.containerStatus // "unknown"' "$STATUS_JSON")
+DISK_PCT=$(jq -r '.host.disk.usedPercent // 0' "$STATUS_JSON")
+DISK_TOTAL_KB=$(jq -r '.host.disk.totalKB // 0' "$STATUS_JSON")
+DISK_USED_KB=$(jq -r '.host.disk.usedKB // 0' "$STATUS_JSON")
+MEM_PCT=$(jq -r '.host.memory.usedPercent // 0' "$STATUS_JSON")
+MEM_TOTAL_KB=$(jq -r '.host.memory.totalKB // 0' "$STATUS_JSON")
+MEM_USED_KB=$(jq -r '.host.memory.usedKB // 0' "$STATUS_JSON")
+PEERS=$(jq -r '.metalgo.peerCount // 0' "$STATUS_JSON")
 
 # helper: KB → human-readable
 kb_to_gb() { awk -v k="$1" 'BEGIN{printf "%.1f", k/1024/1024}'; }
