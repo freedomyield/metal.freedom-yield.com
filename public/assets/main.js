@@ -209,15 +209,24 @@
 	}
 
 	// service worker 登録(PWA installability)
-	// + seamless update: 新 SW が activate 後 clients.claim() で controlling SW が
-	// 切り替わった瞬間に自動 reload する。これがないと既存タブは新 SW で controlled
-	// になっても、 表示中の HTML は旧 SW の cache 由来のままで、 visitor が手動
-	// reload するまで新 shell に切り替わらない (= 2026-06-22 nav redesign 後に
-	// この visualization 抜けが顕在化、 reference_sw_cache_invalidation 参照)。
+	// + seamless update: 既存タブが controlling SW を新版に乗り換えた瞬間に
+	// 自動 reload する。これがないと visitor は手動 reload するまで旧 shell
+	// が見え続ける (= 2026-06-22 nav redesign 後に visualization 抜けが顕在化、
+	// reference_sw_cache_invalidation 参照)。
+	// 注意: 初回 install の controllerchange (= controller が null から最初の SW
+	// に切り替わるイベント) では reload しない。 reload するとブラウザが SW
+	// install を再実行 → 無限 reload ループ。 既に controlling SW が存在する状態
+	// での swap のみ reload 対象。
 	function registerSW() {
 		if (!("serviceWorker" in navigator)) return;
+		var hadController = !!navigator.serviceWorker.controller;
 		var refreshed = false;
 		navigator.serviceWorker.addEventListener("controllerchange", function () {
+			if (!hadController) {
+				// 初回 install 完了の controllerchange — reload しない
+				hadController = true;
+				return;
+			}
 			if (refreshed) return;
 			refreshed = true;
 			window.location.reload();
