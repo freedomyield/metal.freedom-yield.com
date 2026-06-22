@@ -55,10 +55,12 @@ set -euo pipefail
 
 # ---- 1. Refuse to run anywhere except the operator's local Mac. -------------
 
-# Hostname guard.
+# Hostname guard. Match production-shaped hostnames by role / lifecycle,
+# not by provider-name. Defense in depth: the filesystem + deploy-user
+# guards below catch hosts whose hostnames do not match these patterns.
 HN="$(hostname -s 2>/dev/null || hostname)"
 case "$HN" in
-	*validator*|*hetzner*|*sin1*|*web*|*xserver*|*-prod*|*deploy*)
+	*validator*|*web*|*-prod*|*deploy*)
 		echo "REFUSE: gen-identity.sh on production-looking host '$HN'." >&2
 		echo "        This script must only run on the operator's local Mac." >&2
 		exit 99

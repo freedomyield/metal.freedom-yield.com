@@ -138,8 +138,8 @@ reason) plus the in-repo policy here together form a two-layer record.
   constraints.
 - `reference_cf_bot_fight_api` — historical observation of Cloudflare's
   bot scoring blocking `/api/*`.
-- `reference_xserver_topology` — DNS authoritative on Cloudflare, vhost
-  layout.
+- web-host topology reference (= internal memory) — DNS authoritative on
+  Cloudflare, vhost layout.
 - `feedback_no_retail_marketing` — confirms the audience is institutional
   / evaluator, not retail.
 - `feedback_smallness_as_asset` — confirms automated tooling / data feed

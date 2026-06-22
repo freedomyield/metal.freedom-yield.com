@@ -15,13 +15,13 @@ Total wall-clock estimate: **~12 minutes** if everything is healthy.
 Three checks. **All three must pass** before key generation. If any
 fails, stop and investigate. Do not start Step 1.
 
-Set `HETZNER_VALIDATOR_HOST` from the password manager before running
+Set `VALIDATOR_HOST` from the password manager before running
 section A. The literal validator-host address is intentionally not
 checked into the repository.
 
 ```sh
 # A1. Cron fired cleanly at the scheduled time (01:30 UTC).
-ssh -i ~/.ssh/REDACTED "root@${HETZNER_VALIDATOR_HOST:?set HETZNER_VALIDATOR_HOST first}" \
+ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
   'tail -20 /home/deploy/metal.freedom-yield.com/logs/gen-evidence.log'
 # Expect a recent block ending: === metal-evidence end <ts> rc=0 ===
 
@@ -30,7 +30,7 @@ curl -sS https://metal.freedom-yield.com/api/evidence.json | jq -r .generated_at
 # Expect a timestamp from today (within the last few hours).
 
 # A3. Live evidence.json carries the new in_preparation field
-# (= Hetzner gen-evidence.sh sync from 8ec1887 landed correctly).
+# (= validator-host gen-evidence.sh sync from 8ec1887 landed correctly).
 curl -sS https://metal.freedom-yield.com/api/evidence.json \
   | jq -r '.in_preparation_artifacts.identity_manifest.formal_schema_url'
 # Expect: https://metal.freedom-yield.com/api/identity.schema.v1.json
@@ -186,7 +186,7 @@ once the underlying issue is resolved.
 | --- | --- |
 | A1: `rc=` not 0, or no recent block | Stop. Read the log, fix the cron, defer Phase 5 |
 | A2: `generated_at` is yesterday or older | Stop. cron silently failed; investigate |
-| A3: `formal_schema_url` is `null` | Stop. Hetzner sync of `gen-evidence.sh` is stale |
+| A3: `formal_schema_url` is `null` | Stop. validator-host sync of `gen-evidence.sh` is stale |
 | C: `test-gen-identity.sh` FAIL | Stop. Toolchain issue; see `OPERATOR_IDENTITY_SETUP.md` pitfalls |
 | D: artifact leaves 0 | All probed leaves returned non-200. Wait 5 min and retry; if persistent, check web host and `ARTIFACT_BASE` |
 | D: fingerprint ≠ B3 | Wrong key path picked up. Re-export OPERATOR_IDENTITY_KEY |
