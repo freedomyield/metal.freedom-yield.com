@@ -8,7 +8,7 @@ In preparation. The schema, generator, and infrastructure plumbing (push allowli
 
 ## Machine-readable discovery
 
-While preparation is in flight, an automated reviewer can discover this feed entirely from `/api/evidence.json` (documented at `docs/EVIDENCE_MANIFEST.md`). The `in_preparation_artifacts.cycle_history_jsonl` object lists, in one place: the planned `cycle-history.jsonl` URL, the schema preview at `/api/cycle-history.example.jsonl`, and the link back to this document. The entry collapses out of `in_preparation_artifacts` once the cron starts emitting the runtime feed.
+An automated reviewer can discover this feed entirely from `/api/evidence.json` (documented at `docs/EVIDENCE_MANIFEST.md`). Since the runtime feed went live on 2026-06-22, the `live_artifacts.cycle_history_jsonl` object lists, in one place: the live `cycle-history.jsonl` URL, the schema preview at `/api/cycle-history.example.jsonl`, the formal JSON Schema at `/api/cycle-history.schema.v1.json`, and the link back to this document. (The entry sat under `in_preparation_artifacts` prior to 2026-06-22 and moved to `live_artifacts` in commit `6b20b56`.)
 
 ## Why JSONL, not JSON
 

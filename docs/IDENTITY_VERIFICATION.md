@@ -38,7 +38,7 @@ An evaluator should not treat any single artifact as conclusive. The whole set a
 
 ## Machine-readable discovery
 
-While preparation is in flight, an automated reviewer can discover the manifest set entirely from `/api/evidence.json`. The `in_preparation_artifacts.identity_manifest` object lists the planned URLs in one place. Once Phase α activates, the runtime URLs go live in `public_pages` (or in a small `signed_artifacts` block) and `in_preparation_artifacts` collapses out.
+An automated reviewer can discover the manifest set entirely from `/api/evidence.json`. Since Phase α activated on 2026-06-22, the `live_artifacts.identity_manifest` object lists every live URL in one place: `url`, `signature_url`, `pubkey_url`, `schema_url`, `formal_schema_url`, `format_guide_url`, `operator_guide_url`, and `cross_reference_url` (= `/api/cycles-history.json`, the DAG snapshot the manifest is folded into). The companion `live_artifacts.cycle_history_jsonl` entry covers the cycle audit packet. The `in_preparation_artifacts` block still exists for artifacts not yet live — currently `anchor_receipt`, which goes live at cycle 3 start on 2026-07-04 13:00 JST.
 
 ## Verification procedure (nine steps)
 

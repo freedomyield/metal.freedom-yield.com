@@ -12,8 +12,9 @@
 #
 #   A1. The most recent gen-evidence.log block ends with `rc=0`.
 #   A2. /api/evidence.json's generated_at is within the last 24 hours.
-#   A3. /api/evidence.json carries the enriched in_preparation_artifacts
-#       field formal_schema_url (= commit 8ec1887 effect propagated).
+#   A3. /api/evidence.json carries the live_artifacts.identity_manifest
+#       entry with formal_schema_url + operator_guide_url (= post-6b20b56
+#       shape where identity_manifest is live, not in_preparation).
 #
 # Output: one ntfy push with a 3-line PASS/FAIL summary. Priority is
 # `default` when all three pass and `high` when any fails — Android DND
@@ -87,8 +88,8 @@ fi
 A3_RESULT="FAIL"
 A3_DETAIL="fetch failed"
 if [ -s "${EVIDENCE_TMP}" ]; then
-	FORMAL_URL=$(jq -r '.in_preparation_artifacts.identity_manifest.formal_schema_url // empty' "${EVIDENCE_TMP}" 2>/dev/null)
-	OP_URL=$(jq -r '.in_preparation_artifacts.identity_manifest.operator_guide_url // empty' "${EVIDENCE_TMP}" 2>/dev/null)
+	FORMAL_URL=$(jq -r '.live_artifacts.identity_manifest.formal_schema_url // empty' "${EVIDENCE_TMP}" 2>/dev/null)
+	OP_URL=$(jq -r '.live_artifacts.identity_manifest.operator_guide_url // empty' "${EVIDENCE_TMP}" 2>/dev/null)
 	if [ -n "${FORMAL_URL}" ] && [ -n "${OP_URL}" ]; then
 		A3_RESULT="PASS"
 		A3_DETAIL="formal_schema_url + operator_guide_url present"
@@ -97,7 +98,7 @@ if [ -s "${EVIDENCE_TMP}" ]; then
 	elif [ -n "${OP_URL}" ]; then
 		A3_DETAIL="operator_guide_url ok, formal_schema_url missing"
 	else
-		A3_DETAIL="both new fields missing (pre-8ec1887 shape)"
+		A3_DETAIL="both fields missing (pre-6b20b56 shape, identity_manifest still under in_preparation_artifacts?)"
 	fi
 fi
 

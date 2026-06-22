@@ -29,10 +29,11 @@ ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HO
 curl -sS https://metal.freedom-yield.com/api/evidence.json | jq -r .generated_at
 # Expect a timestamp from today (within the last few hours).
 
-# A3. Live evidence.json carries the new in_preparation field
-# (= validator-host gen-evidence.sh sync from 8ec1887 landed correctly).
+# A3. Live evidence.json carries the live_artifacts.identity_manifest
+# entry with formal_schema_url (= post-6b20b56 shape where the manifest
+# moved out of in_preparation_artifacts when Phase α went live).
 curl -sS https://metal.freedom-yield.com/api/evidence.json \
-  | jq -r '.in_preparation_artifacts.identity_manifest.formal_schema_url'
+  | jq -r '.live_artifacts.identity_manifest.formal_schema_url'
 # Expect: https://metal.freedom-yield.com/api/identity.schema.v1.json
 ```
 
