@@ -8,8 +8,8 @@
   "site": "https://metal.freedom-yield.com/",
   "operator_identity_pubkey_url": "https://metal.freedom-yield.com/.well-known/operator-identity.pub",
   "operator_identity_pubkey_fingerprint": "SHA256:rQZNC53Jdp3Cgi0XXbFT+aLWOtB8eS0Iv6jQ7KazvIY",
-  "key_iat": "2026-06-22T09:57:28Z",
-  "key_exp": "2027-06-22T09:57:28Z",
+  "key_iat": "2026-06-22T06:28:51Z",
+  "key_exp": "2027-06-22T06:28:51Z",
   "revoked": false,
   "revoked_at": null,
   "revocation_reason": null,
@@ -29,7 +29,7 @@
     },
     "validator_json": {
       "url": "https://metal.freedom-yield.com/api/validator.json",
-      "sha256": "63640d2f9f0300fd64d2ea16be8b7c605f23f483eeae94bc81655bd2a74aa912",
+      "sha256": "af2ff0924ecf21ff59a3074ef075777c11c775bd0afbb558d3c82f07fbef6988",
       "schema_url": "https://metal.freedom-yield.com/api/validator.schema.v1.json",
       "schema_sha256": "6bc5d50d2fcf8dc6485b09ce96df53eca649e71ea9831ddf64abc00d62650c1f"
     },
@@ -48,9 +48,9 @@
       "sha256": "4bdf09a9a215397d22478e02669a8709b0fd2c9cb9c8424e7dc69434d3f61a29"
     }
   },
-  "artifact_root": "0e61a404a3739f660d5adb8743021f891207a55a6bc3790df5e5a03edff2cbc8",
+  "artifact_root": "90d0d0b00e0f2c1dfc9ea4ce0cc16692f4715813a7920f252ad352cb5b91b661",
   "dag_root_hash": "0bd4e667dcb7397c655ad4bccdef282b76d8a98cde4b67a8396790bcd07d3bb4",
   "cycles_history_url": "https://metal.freedom-yield.com/api/cycles-history.json",
   "anchor_receipt_url": "https://metal.freedom-yield.com/api/anchor-receipt.json",
-  "generated_at": "2026-06-22T09:57:28Z"
+  "generated_at": "2026-06-22T10:52:33Z"
 }

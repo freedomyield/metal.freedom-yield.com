@@ -2,7 +2,13 @@
 
 This document is the audit evidence for the **second-pass regeneration** of the Phase α operator identity manifest, performed after `/api/cycle-history.jsonl` went live (= D10 activation). The first-pass publication (Phase 5, 2026-06-22 morning) carried an empty `cycles_branch` because no `cycle-history.jsonl` runtime feed existed yet; this regeneration folds the inaugural cycle (cycle 1, closed 2026-06-04) into the `cycles_branch` and updates `dag_root_hash` accordingly.
 
-This is **revision 2** of the report. Revision 1 was reviewed by an independent auditor who surfaced two HIGH-severity findings, one MEDIUM, and two LOW. All five findings are addressed in §§ noted below and in the post-audit `5be6…` lineage commit chain. The revision is published as a forward commit so that the audit trail (= what was claimed, what was wrong, what was corrected) is itself preserved on-chain (git history) and verifiable.
+This is **revision 3** of the report.
+
+- **Revision 1** (commit `8ef5f33`) was the initial publication of the execution evidence.
+- **Revision 2** (commit `b8bcd72`) addressed five findings from the first independent audit: HIGH-2 (cycle-history drift in selection-evidence), MEDIUM-1 (JSON path notation errors), LOW-1 (delegate-page surface miscount), LOW-2 (§6.3 grep coverage miscount). HIGH-1 (= `identity.json.key_iat` overwrite on regen) was acknowledged but remained OPEN pending operator judgment on a three-option fix.
+- **Revision 3** (this commit, alongside the third-pass identity regeneration) closes HIGH-1. The independent auditor reviewed rev-2 and signed off with three cosmetic observations (Obs-1/2/3), which were addressed in commit `9c1932f`. The re-audit also reviewed the proposed `gen-identity.sh` improvement and recommended five follow-on items (F1–F5); F1+F2+F3 were committed in `0b0dd79` (script-only), and the third-pass regeneration on the operator's local Mac produced the corrected manifest now reflected in the post-state below. F4 (regression-test fixtures + `jq` malformed-line tolerance) and the genuine key-rotation workflow remain explicitly deferred — see §8.
+
+Each revision is published as a forward commit so that the audit trail (= what was claimed, what was wrong, what was corrected) is itself preserved on-chain (git history) and verifiable.
 
 Companion docs:
 
@@ -20,13 +26,13 @@ Companion docs:
 | Trigger | D10 (cycle-history runtime feed) went live on `metal.freedom-yield.com` earlier this day, exposing one closed cycle (cycle 1) as a single JSONL line |
 | Performer | Operator (= `operator`) on local Mac, per `gen-identity.sh` §1 production-host refusal guard |
 | Date / time of execution | 2026-06-22T09:57:28Z (UTC) = 2026-06-22 18:57:28 JST |
-| Public commits produced | `5be649a` (manifest regen + propagation), `8aec993` (CI verifier hotfix), and the post-audit drift fix + report-rev-2 commit recorded here |
+| Public commits produced | `5be649a` (2nd-pass regen + propagation), `8aec993` (CI hotfix), `8ef5f33` (rev-1 report), `b8bcd72` (rev-2 + drift fix), `9c1932f` (cosmetic Obs-1/2/3), `0b0dd79` (gen-identity HIGH-1 root-cause fix, script-only), and this commit (= 3rd-pass regen result + rev-3 report) |
 | Deploy outcome | GitHub Actions: `Deploy site to VPS` run 27945337701 — success |
 | Verifier CI outcome | GitHub Actions: `verify-identity-manifest` run 27945337707 — success (after `8aec993` hotfix) |
 
 Out of scope (= explicitly **not** done in this execution):
 
-- Operator identity key rotation in the strict sense (= no new `identity-history.jsonl` entry, `key_seq` remains 1). **Important caveat surfaced by the audit:** the regeneration nonetheless overwrote `identity.json.key_iat` to the regen-time wallclock, which diverges from `identity-history.jsonl[key_seq=1].key_iat`. This is a gen-identity.sh defect tracked in §8 (HIGH-1) and remains open at the time of this report.
+- Operator identity key rotation in the strict sense (= no new `identity-history.jsonl` entry, `key_seq` remains 1). **In revisions 1 and 2 this scope claim was contradicted by an implementation defect** (= `identity.json.key_iat` was overwritten on every regeneration by `NOW_UTC` instead of being preserved from the ledger). The defect was tracked as HIGH-1, the script was fixed in commit `0b0dd79`, and the third-pass regeneration produced a manifest in which `key_iat` correctly equals the ledger value. HIGH-1 is **CLOSED** as of revision 3; see §8 for the resolution detail.
 - On-chain anchor inscription on Metal A-chain (= scheduled to fire automatically at cycle 2 → cycle 3 transition, 2026-07-04 13:00 JST, by a cron-driven `watch-anchor-events.sh`)
 - Schema version bump (`schema_version` remains `1` on all artifacts)
 - Public delegate-page status correction (= separate concern, deferred to a future commit, see §8)
@@ -94,16 +100,16 @@ Field paths below use the **actual JSON structure** of each artifact (= verified
    - `public/ja/selection-evidence/index.html`: equivalent JA updates with matching status text.
    - This report (`docs/PHASE5_REGEN_EXECUTION_2026-06-22.md`) rewritten as revision 2: §2 + §4 JSON paths corrected, §6.3 honestly enumerates all 11 stale matches and which were drift vs intentional, §8 adds HIGH-1, LOW-1 corrected to "2 surfaces (paragraph + hero badge)".
 
-## 4. Post-state (= state at the live edge after deploy + audit-driven drift fix)
+## 4. Post-state (= state at the live edge after deploy + audit-driven drift fix + third-pass regen)
 
 | Field | Value |
 |---|---|
-| `identity.json.dag_root_hash` | `0bd4e667dcb7397c655ad4bccdef282b76d8a98cde4b67a8396790bcd07d3bb4` |
-| `identity.json.artifact_root` | `0e61a404a3739f660d5adb8743021f891207a55a6bc3790df5e5a03edff2cbc8` |
-| `identity.json.generated_at` | `2026-06-22T09:57:28Z` |
-| `identity.json.key_iat` | `2026-06-22T09:57:28Z` ⚠ **diverges** from `identity-history.jsonl[key_seq=1].key_iat = 2026-06-22T06:28:51Z` (HIGH-1, open) |
+| `identity.json.dag_root_hash` | `0bd4e667dcb7397c655ad4bccdef282b76d8a98cde4b67a8396790bcd07d3bb4` (unchanged across 2nd and 3rd pass; key_iat correction does not feed branch roots) |
+| `identity.json.artifact_root` | `90d0d0b00e0f2c1dfc9ea4ce0cc16692f4715813a7920f252ad352cb5b91b661` (= 3rd-pass value; `evidence_json` + `validator_json` + `uptime_cycles_json` + `incidents_json` + `identity_history` leaf sha256s recomputed during the 3rd-pass `gen-identity.sh` run, reflecting natural drift of the underlying live JSON artifacts between 2nd and 3rd pass) |
+| `identity.json.generated_at` | `2026-06-22T10:52:33Z` (= 3rd-pass execution moment, JST 19:52:33) |
+| `identity.json.key_iat` | `2026-06-22T06:28:51Z` ✅ **matches** `identity-history.jsonl[key_seq=1].key_iat` (HIGH-1 RESOLVED) |
 | `identity-history.jsonl[key_seq=1].key_iat` | `2026-06-22T06:28:51Z` (unchanged, authoritative) |
-| `identity.json.key_exp` | `2027-06-22T09:57:28Z` (1-year rotation deadline computed from `key_iat`; therefore also drifted relative to a key_iat-grounded calendar of 2027-06-22T06:28:51Z) |
+| `identity.json.key_exp` | `2027-06-22T06:28:51Z` (= key_iat + 365 days, recomputed from the corrected key_iat) |
 | `identity.json.operator_identity_pubkey_fingerprint` | `SHA256:rQZNC53Jdp3Cgi0XXbFT+aLWOtB8eS0Iv6jQ7KazvIY` (= **unchanged** from first-pass; same ed25519 key, no rotation) |
 | `cycles-history.json.branches.cycles.leaf_source_sha256` | `3170d1405f411d3840b3c59684b6fd16f2bd52f46acd997de993171eb3ead60f` |
 | `cycles-history.json.branches.cycles.leaf_count` | `1` |
@@ -128,7 +134,7 @@ Field paths below are the **corrected** paths. An auditor reproducing these comm
 | V6 | JA selection-evidence identity status text | grep on live HTML | `状態</dt><dd>Active — identity.json + identity.json.sig は 2026-06-22(Phase 5 publication)以降 live` | ✅ |
 | V7 | EN selection-evidence cycle audit packet status (post-audit drift fix) | grep on live HTML | `<span class="data-tag">live (1 cycle closed)</span>` present | ✅ (after revision-2 commit deploys) |
 | V8 | JA selection-evidence cycle audit packet status (post-audit drift fix) | grep on live HTML | `<span class="data-tag">live(1 cycle closed)</span>` present | ✅ (after revision-2 commit deploys) |
-| V9 | key_iat ↔ identity-history.jsonl divergence (HIGH-1 reproducibility check) | `diff <(jq -r .key_iat identity.json) <(jq -r 'select(.key_seq==1) \| .key_iat' identity-history.jsonl)` | should be **empty**; currently **non-empty** | ❌ divergence reproducible, see §8 |
+| V9 | key_iat ↔ identity-history.jsonl divergence (HIGH-1 resolution check) | `diff <(jq -r .key_iat identity.json) <(jq -r 'select(.key_seq==1) \| .key_iat' identity-history.jsonl)` | should be **empty** | ✅ both values = `2026-06-22T06:28:51Z`; divergence resolved after 3rd-pass regen and the `0b0dd79` script fix |
 | V10 | CI workflow pass on the verified commit | `gh run view 27945337707` | success | ✅ |
 | V11 | Edge cache freshness | `curl -I .../api/identity.json` → check `last-modified` | `last-modified` advanced past 06:28:51 GMT | `Mon, 22 Jun 2026 10:11:09 GMT` at rev-1 deploy time ✅ (= the invariant is the inequality; subsequent deploys touch the file's mtime via rsync without content change, so observed values continue to advance) |
 
@@ -193,7 +199,11 @@ The on-chain anchor receipt (`/api/anchor-receipt.json`) and the corresponding M
 
 ## 8. Open items (= surfaced and deferred; remain open at the time of this report)
 
-### HIGH-1 (open): `identity.json.key_iat` overwritten on regen instead of being read from `identity-history.jsonl`
+### HIGH-1 (RESOLVED in revision 3): `identity.json.key_iat` overwritten on regen instead of being read from `identity-history.jsonl`
+
+**Resolution.** The defect was fixed in commit `0b0dd79` (script-only) by adding a new §2.5 to `scripts/operator-local/gen-identity.sh` that looks up `identity-history.jsonl` for an active entry whose pubkey fingerprint matches the current key and reuses its `key_iat` / `key_exp` byte-for-byte. A defense-in-depth gate (§4.5, F3) was added immediately before signing: if the resolved `KEY_IAT` ever diverges from the ledger's active entry, the script exits 8 with a remediation message rather than producing a divergent manifest. The third-pass regeneration on the operator's local Mac then produced a fresh `identity.json` (`generated_at = 2026-06-22T10:52:33Z`) in which `key_iat = 2026-06-22T06:28:51Z` matches the ledger byte-for-byte. V9 in §5 is now PASS. The historical record below documents the original defect for reference.
+
+**Historical (= the defect as observed in rev-1 and rev-2 of this report).**
 
 **Symptom.** `identity.json.key_iat = 2026-06-22T09:57:28Z` (= regen wallclock), while `identity-history.jsonl[key_seq=1].key_iat = 2026-06-22T06:28:51Z` (= true issuance moment of the current ed25519 operator identity key). A third-party auditor cross-referencing the two will see them disagree even though no rotation occurred. This violates the semantic the field name carries (`key_iat` = "key issued at").
 
