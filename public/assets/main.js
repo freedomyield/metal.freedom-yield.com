@@ -209,8 +209,19 @@
 	}
 
 	// service worker 登録(PWA installability)
+	// + seamless update: 新 SW が activate 後 clients.claim() で controlling SW が
+	// 切り替わった瞬間に自動 reload する。これがないと既存タブは新 SW で controlled
+	// になっても、 表示中の HTML は旧 SW の cache 由来のままで、 visitor が手動
+	// reload するまで新 shell に切り替わらない (= 2026-06-22 nav redesign 後に
+	// この visualization 抜けが顕在化、 reference_sw_cache_invalidation 参照)。
 	function registerSW() {
 		if (!("serviceWorker" in navigator)) return;
+		var refreshed = false;
+		navigator.serviceWorker.addEventListener("controllerchange", function () {
+			if (refreshed) return;
+			refreshed = true;
+			window.location.reload();
+		});
 		navigator.serviceWorker.register("/sw.js").catch(function () {
 			// SW 登録失敗時は静かに諦める(サイト本体には影響なし)
 		});

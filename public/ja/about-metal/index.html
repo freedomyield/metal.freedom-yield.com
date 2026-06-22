@@ -37,13 +37,7 @@
 				<a href="/ja/#status">状態</a>
 				<a href="/ja/selection-evidence/">選定エビデンス</a>
 				<a href="/ja/delegate/" data-ga-event="delegate_cta_click" data-ga-param-position="nav">委任</a>
-				<div class="nav-dropdown">
-					<button type="button" class="nav-dropdown-toggle">概要</button>
-					<div class="nav-dropdown-menu">
-						<a href="/ja/#about">概要</a>
-						<a href="/ja/#roadmap">展望</a>
-					</div>
-				</div>
+				<a href="/ja/about-metal/">概要</a>
 				<a href="/about-metal/" class="nav-lang" data-ga-event="language_switch" data-ga-param-to="en">EN</a>
 			</div>
 		</details>
@@ -108,6 +102,34 @@
 			<li>Tahoe testnet faucet — <a href="https://faucet.metalblockchain.org/" rel="noopener">faucet.metalblockchain.org</a></li>
 			<li>Metal Wallet — <a href="https://wallet.metalblockchain.org/" rel="noopener">wallet.metalblockchain.org</a></li>
 		</ul>
+	</section>
+
+	<section id="roadmap" class="card roadmap">
+		<header class="roadmap-header">
+			<p class="roadmap-eyebrow">今後の展望</p>
+			<h2>ロードマップ</h2>
+			<p class="roadmap-lead">validator は終わりのあるプロジェクトではなく、長期間の規律です。約束していること、今後の判断軸を明示します。</p>
+		</header>
+		<ol class="roadmap-list">
+			<li class="roadmap-item roadmap-item--current">
+				<span class="roadmap-dot" aria-hidden="true"></span>
+				<p class="roadmap-period">2026-05 → 2027-05 <span class="roadmap-status roadmap-status--current">進行中</span></p>
+				<h3 class="roadmap-title">Phase 1 — 積み増し</h3>
+				<p class="roadmap-body">12 か月 × 月次 cycle で運用。各 cycle で tx 投入 → ~30 日間稼働 → 再登録。外部資金の段階的 deploy で self-stake を ~3,000 METAL ずつ積み増し、cycle ごとに監査トレース(uptime ledger / incidents / cadence)を公開。委任獲得は積極追求せず、来れば lucky。1 年後に確実に残るもの: 12 cycle 完走実績と公開された監査トレース。</p>
+			</li>
+			<li class="roadmap-item roadmap-item--milestone">
+				<span class="roadmap-dot" aria-hidden="true"></span>
+				<p class="roadmap-period">2027-05 <span class="roadmap-status roadmap-status--milestone">判断点</span></p>
+				<h3 class="roadmap-title">Phase 2 review</h3>
+				<p class="roadmap-body">12 cycle 完走 + 12 か月の監査トレース蓄積。この時点で再判断: cycle 期間を延ばすか? 委任獲得を本格化するか? 判断は今 roadmap に書いた線ではなく、1 年間蓄積した事実ベースで行います。</p>
+			</li>
+			<li class="roadmap-item roadmap-item--future">
+				<span class="roadmap-dot" aria-hidden="true"></span>
+				<p class="roadmap-period">期限なし <span class="roadmap-status roadmap-status--future">Long-term</span></p>
+				<h3 class="roadmap-title">Beyond Phase 2</h3>
+				<p class="roadmap-body">Metal Blockchain ecosystem の進化に合わせて継続的に貢献。validator 運営に終わりはなく、約束できるのは operational quality の継続だけ。</p>
+			</li>
+		</ol>
 	</section>
 </main>
 
