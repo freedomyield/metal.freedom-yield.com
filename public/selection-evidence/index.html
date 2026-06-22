@@ -231,15 +231,16 @@
 
 		<article class="data-endpoint">
 			<header class="data-endpoint-head">
-				<h3>Cycle-by-cycle audit packet (in preparation)</h3>
-				<span class="data-tag">in preparation</span>
+				<h3>Cycle-by-cycle audit packet</h3>
+				<span class="data-tag">live (1 cycle closed)</span>
 			</header>
-			<p>A JSONL feed at <code>/api/cycle-history.jsonl</code> is in preparation. Each line will be one closed cycle, joining <code>/api/uptime-cycles.json</code> with <code>/api/incidents.json</code> so a reader can stream the full audit packet line-by-line. The schema is published in advance at <a href="/api/cycle-history.example.jsonl"><code>/api/cycle-history.example.jsonl</code></a>; the generator script lives at <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/scripts/gen-cycle-history.sh" rel="noopener noreferrer"><code>scripts/gen-cycle-history.sh</code></a> and the format / consumption guide is at <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CYCLE_HISTORY.md" rel="noopener noreferrer"><code>docs/CYCLE_HISTORY.md</code></a>.</p>
+			<p>A JSONL feed at <code>/api/cycle-history.jsonl</code> is live and currently contains one closed cycle (cycle 1, closed 2026-06-04, 100% uptime over 14 recorded days). Each line is one closed cycle, joining <code>/api/uptime-cycles.json</code> with <code>/api/incidents.json</code> so a reader can stream the full audit packet line-by-line. The schema is published at <a href="/api/cycle-history.example.jsonl"><code>/api/cycle-history.example.jsonl</code></a>; the generator script lives at <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/scripts/gen-cycle-history.sh" rel="noopener noreferrer"><code>scripts/gen-cycle-history.sh</code></a> and the format / consumption guide is at <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CYCLE_HISTORY.md" rel="noopener noreferrer"><code>docs/CYCLE_HISTORY.md</code></a>. New leaf lines are appended at each cycle close by an operator-host cron (<code>metal-cycle-history</code>, 5-min tick); each leaf is also folded into the <code>cycles_branch</code> of the Phase α Merkle DAG and signed into <code>/api/identity.json</code> via <code>gen-identity.sh</code>.</p>
 			<dl class="data-meta">
-				<dt>Status</dt><dd>In preparation — schema and generator published; runtime JSONL not yet live</dd>
+				<dt>Status</dt><dd>Live — runtime JSONL serving since 2026-06-22; 1 leaf currently published (cycle 1)</dd>
 				<dt>Schema</dt><dd><code>/api/cycle-history.example.jsonl</code></dd>
-				<dt>Planned feed</dt><dd><code>/api/cycle-history.jsonl</code></dd>
-				<dt>Machine-readable discovery</dt><dd><a href="/api/evidence.json"><code>/api/evidence.json</code></a> → <code>.in_preparation_artifacts.cycle_history_jsonl</code></dd>
+				<dt>Live feed</dt><dd><a href="/api/cycle-history.jsonl"><code>/api/cycle-history.jsonl</code></a></dd>
+				<dt>Cross-reference</dt><dd>Folded into <a href="/api/cycles-history.json"><code>/api/cycles-history.json</code></a> <code>.branches.cycles.leaf_source_sha256</code> (= sha256 of the served JSONL bytes)</dd>
+				<dt>Machine-readable discovery</dt><dd><a href="/api/evidence.json"><code>/api/evidence.json</code></a> → <code>.in_preparation_artifacts.cycle_history_jsonl</code> (= discovery key still in <code>in_preparation_artifacts</code> namespace pending evidence.json runtime publication; the feed itself is live)</dd>
 			</dl>
 		</article>
 

@@ -231,15 +231,16 @@
 
 		<article class="data-endpoint">
 			<header class="data-endpoint-head">
-				<h3>Cycle 単位 audit packet(準備中)</h3>
-				<span class="data-tag">準備中</span>
+				<h3>Cycle 単位 audit packet</h3>
+				<span class="data-tag">live(1 cycle closed)</span>
 			</header>
-			<p><code>/api/cycle-history.jsonl</code> として JSONL フィードを準備中です。各行が 1 つのクローズ済 cycle で、 <code>/api/uptime-cycles.json</code> と <code>/api/incidents.json</code> を join し、 読者が line-by-line で audit packet を stream 処理できる形式です。 スキーマは事前公開しており <a href="/api/cycle-history.example.jsonl"><code>/api/cycle-history.example.jsonl</code></a> で参照可能。生成スクリプトは公開リポジトリ内 <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/scripts/gen-cycle-history.sh" rel="noopener noreferrer"><code>scripts/gen-cycle-history.sh</code></a>、 フォーマットと消費方法は <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CYCLE_HISTORY.md" rel="noopener noreferrer"><code>docs/CYCLE_HISTORY.md</code></a> に記載。</p>
+			<p><code>/api/cycle-history.jsonl</code> は live で、 現在 1 つのクローズ済 cycle(cycle 1、 2026-06-04 close、 14 日間で 100% uptime)を含みます。 各行が 1 つのクローズ済 cycle で、 <code>/api/uptime-cycles.json</code> と <code>/api/incidents.json</code> を join し、 読者が line-by-line で audit packet を stream 処理できる形式。 schema は <a href="/api/cycle-history.example.jsonl"><code>/api/cycle-history.example.jsonl</code></a>、 生成スクリプトは <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/scripts/gen-cycle-history.sh" rel="noopener noreferrer"><code>scripts/gen-cycle-history.sh</code></a>、 フォーマットと消費方法は <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CYCLE_HISTORY.md" rel="noopener noreferrer"><code>docs/CYCLE_HISTORY.md</code></a> に記載。 各 cycle close 時点で operator host 上の cron(<code>metal-cycle-history</code>、 5 分 tick)が新 leaf 行を append、 同時に Phase α Merkle DAG の <code>cycles_branch</code> に折り込まれ <code>gen-identity.sh</code> 経由で <code>/api/identity.json</code> に sign-in されます。</p>
 			<dl class="data-meta">
-				<dt>状態</dt><dd>準備中 — schema と生成 script を公開済み、 runtime JSONL は未公開</dd>
+				<dt>状態</dt><dd>Live — runtime JSONL は 2026-06-22 以降配信中、 現在 1 leaf 公開(cycle 1)</dd>
 				<dt>スキーマ</dt><dd><code>/api/cycle-history.example.jsonl</code></dd>
-				<dt>予定 feed</dt><dd><code>/api/cycle-history.jsonl</code></dd>
-				<dt>機械可読 discovery</dt><dd><a href="/api/evidence.json"><code>/api/evidence.json</code></a> → <code>.in_preparation_artifacts.cycle_history_jsonl</code></dd>
+				<dt>live feed</dt><dd><a href="/api/cycle-history.jsonl"><code>/api/cycle-history.jsonl</code></a></dd>
+				<dt>cross-reference</dt><dd><a href="/api/cycles-history.json"><code>/api/cycles-history.json</code></a> の <code>.branches.cycles.leaf_source_sha256</code> に折り込まれる(= 配信 JSONL の sha256)</dd>
+				<dt>機械可読 discovery</dt><dd><a href="/api/evidence.json"><code>/api/evidence.json</code></a> → <code>.in_preparation_artifacts.cycle_history_jsonl</code>(= discovery key は evidence.json runtime publication 待ちで <code>in_preparation_artifacts</code> namespace のまま、 feed 本体は live)</dd>
 			</dl>
 		</article>
 
