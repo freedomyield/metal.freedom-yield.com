@@ -64,7 +64,10 @@ jobs:
           fi
 
           # All three present — strict verification.
-          jq -e empty "$JSON" >/dev/null
+          # NOTE: use `jq empty`, NOT `jq -e empty`. The `empty` filter produces
+          # no output, and `-e` reads "no result" as exit code 4 even on valid
+          # JSON. See gen-identity.sh §4 for the same fix.
+          jq empty "$JSON" >/dev/null
 
           ALLOWED="$(mktemp)"
           printf '%s %s\n' "freedom-yield" "$(cat "$PUB")" > "$ALLOWED"
