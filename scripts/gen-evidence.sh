@@ -151,21 +151,31 @@ jq -n \
 			decommission_notice_days: 90,
 			incident_disclosure_sla_hours: 24
 		},
-		in_preparation_artifacts: {
+		live_artifacts: {
 			identity_manifest: {
-				planned_url: "https://metal.freedom-yield.com/api/identity.json",
-				planned_signature_url: "https://metal.freedom-yield.com/api/identity.json.sig",
-				planned_pubkey_url: "https://metal.freedom-yield.com/.well-known/operator-identity.pub",
+				url: "https://metal.freedom-yield.com/api/identity.json",
+				signature_url: "https://metal.freedom-yield.com/api/identity.json.sig",
+				pubkey_url: "https://metal.freedom-yield.com/.well-known/operator-identity.pub",
 				schema_url: "https://metal.freedom-yield.com/api/identity.example.json",
 				formal_schema_url: "https://metal.freedom-yield.com/api/identity.schema.v1.json",
 				format_guide_url: "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md",
-				operator_guide_url: "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/OPERATOR_IDENTITY_SETUP.md"
+				operator_guide_url: "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/OPERATOR_IDENTITY_SETUP.md",
+				cross_reference_url: "https://metal.freedom-yield.com/api/cycles-history.json"
 			},
 			cycle_history_jsonl: {
-				planned_url: "https://metal.freedom-yield.com/api/cycle-history.jsonl",
+				url: "https://metal.freedom-yield.com/api/cycle-history.jsonl",
 				schema_url: "https://metal.freedom-yield.com/api/cycle-history.example.jsonl",
 				formal_schema_url: "https://metal.freedom-yield.com/api/cycle-history.schema.v1.json",
 				format_guide_url: "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CYCLE_HISTORY.md"
+			}
+		},
+		in_preparation_artifacts: {
+			anchor_receipt: {
+				planned_url: "https://metal.freedom-yield.com/api/anchor-receipt.json",
+				schema_url: "https://metal.freedom-yield.com/api/anchor-receipt.example.json",
+				formal_schema_url: "https://metal.freedom-yield.com/api/anchor-receipt.schema.v1.json",
+				format_guide_url: "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md",
+				operator_guide_url: "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/PHASE_ALPHA_AUDIT_HANDOFF.md"
 			}
 		},
 		explorer_url: "https://explorer.metalblockchain.org/",

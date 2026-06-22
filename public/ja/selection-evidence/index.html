@@ -240,7 +240,7 @@
 				<dt>スキーマ</dt><dd><code>/api/cycle-history.example.jsonl</code></dd>
 				<dt>live feed</dt><dd><a href="/api/cycle-history.jsonl"><code>/api/cycle-history.jsonl</code></a></dd>
 				<dt>cross-reference</dt><dd><a href="/api/cycles-history.json"><code>/api/cycles-history.json</code></a> の <code>.branches.cycles.leaf_source_sha256</code> に折り込まれる(= 配信 JSONL の sha256)</dd>
-				<dt>機械可読 discovery</dt><dd><a href="/api/evidence.json"><code>/api/evidence.json</code></a> → <code>.in_preparation_artifacts.cycle_history_jsonl</code>(= discovery key は evidence.json runtime publication 待ちで <code>in_preparation_artifacts</code> namespace のまま、 feed 本体は live)</dd>
+				<dt>機械可読 discovery</dt><dd><a href="/api/evidence.json"><code>/api/evidence.json</code></a> → <code>.live_artifacts.cycle_history_jsonl</code></dd>
 			</dl>
 		</article>
 
@@ -269,7 +269,7 @@
 				<dt>live identity-history</dt><dd><a href="/api/identity-history.jsonl"><code>/api/identity-history.jsonl</code></a>(= 運用者 identity key rotation log、 現 <code>key_seq=1</code>)</dd>
 				<dt>scheduled anchor receipt</dt><dd><code>/api/anchor-receipt.json</code>(= cycle 3 start での初回 broadcast 予定、 2026-07-04 13:00 JST)</dd>
 				<dt>運用者 pubkey</dt><dd><a href="/.well-known/operator-identity.pub"><code>/.well-known/operator-identity.pub</code></a></dd>
-				<dt>機械可読 discovery</dt><dd><a href="/api/evidence.json"><code>/api/evidence.json</code></a> → <code>.in_preparation_artifacts.identity_manifest</code>(= discovery key は evidence.json runtime publication 待ちで <code>in_preparation_artifacts</code> namespace のまま、 manifest 本体は live)</dd>
+				<dt>機械可読 discovery</dt><dd><a href="/api/evidence.json"><code>/api/evidence.json</code></a> → <code>.live_artifacts.identity_manifest</code></dd>
 			</dl>
 		</article>
 

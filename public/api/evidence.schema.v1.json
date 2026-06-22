@@ -82,9 +82,52 @@
 				"incident_disclosure_sla_hours": { "type": "integer", "minimum": 0 }
 			}
 		},
+		"live_artifacts": {
+			"type": "object",
+			"description": "Artifacts whose runtime URL is live and served from this site. Each entry MUST carry url + schema_url. Additional URL flavours (signature_url / pubkey_url / formal_schema_url / format_guide_url / operator_guide_url / cross_reference_url) MAY appear when those companions exist. Added 2026-06-22 (additive within schema_version 1) once the Phase α identity manifest and the cycle-history JSONL went live.",
+			"additionalProperties": {
+				"type": "object",
+				"required": ["url", "schema_url"],
+				"additionalProperties": true,
+				"properties": {
+					"url": {
+						"type": "string",
+						"format": "uri",
+						"description": "Live runtime URL. Required."
+					},
+					"signature_url": { "type": "string", "format": "uri" },
+					"pubkey_url": { "type": "string", "format": "uri" },
+					"schema_url": {
+						"type": "string",
+						"format": "uri",
+						"description": "Preview URL — typically an *.example.json showing the runtime shape with sample values. Required."
+					},
+					"formal_schema_url": {
+						"type": "string",
+						"format": "uri",
+						"description": "Live URL to the formal JSON Schema (draft 2020-12), when published. Optional."
+					},
+					"format_guide_url": {
+						"type": "string",
+						"format": "uri",
+						"description": "Human-readable manifest format guide / verification recipe."
+					},
+					"operator_guide_url": {
+						"type": "string",
+						"format": "uri",
+						"description": "Operator-side setup runbook, when one exists."
+					},
+					"cross_reference_url": {
+						"type": "string",
+						"format": "uri",
+						"description": "URL of a related live artifact whose state this artifact is folded into or relies on (e.g. identity_manifest cross-references cycles-history.json)."
+					}
+				}
+			}
+		},
 		"in_preparation_artifacts": {
 			"type": "object",
-			"description": "Artifacts whose preview is published but whose runtime URL is not yet live. Each entry MUST carry planned_url + schema_url + format_guide_url. Additional URL flavours (signature / pubkey / formal_schema_url / operator_guide_url) MAY appear when those companions are live.",
+			"description": "Artifacts whose preview is published but whose runtime URL is not yet live. Each entry MUST carry planned_url + schema_url + format_guide_url. Additional URL flavours (signature / pubkey / formal_schema_url / operator_guide_url) MAY appear when those companions are live. When the artifact's runtime URL goes live, the entry moves to live_artifacts.",
 			"additionalProperties": {
 				"type": "object",
 				"required": ["planned_url", "schema_url", "format_guide_url"],
