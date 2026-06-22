@@ -140,7 +140,7 @@
 			<dt>委任件数</dt><dd data-field="delegatorCount">—</dd>
 			<dt>受入合計</dt><dd data-field="receivedCombined">—</dd>
 			<dt>Uptime(ネットワーク評価値)</dt><dd data-field="uptime">—</dd>
-			<dt>Delegation fee</dt><dd data-field="delegationFee">予定 3% (プロトコル下限 2% の一つ上)</dd>
+			<dt>Delegation fee</dt><dd data-field="delegationFee">3% (プロトコル下限 2% の一つ上)</dd>
 			<dt>期間終了</dt><dd><span data-field="endTime">—</span> <span data-field="daysRemaining" class="badge"></span></dd>
 			<dt>観測時刻</dt><dd data-field="observedAt">—</dd>
 		</dl>
@@ -152,7 +152,7 @@
 			実値は <code>/assets/main.js</code> が <code>/api/validator.json</code> を fetch して反映します。
 			<code>metalgo --network-id=mainnet</code> を <code>scripts/node-info.sh</code> で照会して JSON を更新します。
 			JavaScript 無効時は "—" のまま(graceful degradation)。
-			Self-stake / delegation 値は AddValidator tx 発行後に反映します。
+			Self-stake / delegation 値は 2026-05-19 の AddValidator tx 発行以降ライブで反映されます。
 		</p>
 	</section>
 
