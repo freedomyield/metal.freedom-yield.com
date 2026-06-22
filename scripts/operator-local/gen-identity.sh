@@ -119,6 +119,10 @@ REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 OUT_DIR="${REPO_ROOT}/public/api"
 OUT_JSON="${OUT_DIR}/identity.json"
 OUT_SIG="${OUT_DIR}/identity.json.sig"
+# ID_HISTORY_FILE is referenced from §2 (KEY_IAT / KEY_EXP resolution),
+# §3.6 (Merkle DAG branch building + bootstrap path), and §5-prime
+# (self-check before signing). Single source of truth here.
+ID_HISTORY_FILE="${OUT_DIR}/identity-history.jsonl"
 
 [[ -d "${OUT_DIR}" ]] || { echo "ERROR: ${OUT_DIR} not found — wrong REPO_ROOT?" >&2; exit 1; }
 
@@ -140,23 +144,13 @@ PRINCIPAL="${PRINCIPAL:-freedom-yield}"
 NAMESPACE="freedom-yield/validator-identity"
 
 NOW_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-KEY_IAT="${KEY_IAT:-${NOW_UTC}}"
-if [[ -z "${KEY_EXP:-}" ]]; then
-	# LC_ALL=C forces POSIX locale so date does not emit a localized fallback
-	# (= ja_JP would emit "2027年 6月22日 火曜日 ..." if the explicit +fmt
-	# is not applied for any reason). -u placed BEFORE -f because macOS BSD
-	# date treats -u as an option flag that must precede positional args.
-	if LC_ALL=C date -u -j -v+365d +%Y-%m-%dT%H:%M:%SZ >/dev/null 2>&1; then
-		# BSD date (macOS).
-		KEY_EXP="$(LC_ALL=C date -u -j -v+365d -f "%Y-%m-%dT%H:%M:%SZ" "${KEY_IAT}" +%Y-%m-%dT%H:%M:%SZ)"
-	else
-		# GNU date (Linux).
-		KEY_EXP="$(LC_ALL=C date -u -d "${KEY_IAT} +365 days" +%Y-%m-%dT%H:%M:%SZ)"
-	fi
-fi
 
 # ---- 3. Compute the SHA256:base64 SSH fingerprint. --------------------------
 # ssh-keygen -l -f <pub> emits:  "<bits> SHA256:<base64> <comment> (ED25519)"
+# This block was moved up from after §2 (= where it sat in the original
+# layout) so the fingerprint is available to the §2 KEY_IAT / KEY_EXP
+# ledger-lookup logic below. Early format validation also catches a
+# corrupt pubkey before the ledger lookup runs (which uses ${FP}).
 FP_LINE="$(ssh-keygen -l -f "${OPERATOR_IDENTITY_KEY}.pub")"
 FP="$(printf '%s\n' "${FP_LINE}" | awk '{print $2}')"
 case "${FP}" in
@@ -166,6 +160,55 @@ case "${FP}" in
 		exit 1
 		;;
 esac
+
+# ---- 2.5. Resolve KEY_IAT / KEY_EXP from the ledger. ------------------------
+# Semantics: key_iat = "issued at *the key*", NOT "manifest reissue moment".
+# Therefore on a regeneration the value must come from the existing ledger
+# entry for this exact pubkey, not from the regen wallclock. This fixes the
+# HIGH-1 finding from the 2026-06-22 audit (= identity.json.key_iat drifted
+# on every gen-identity.sh re-run, diverging from identity-history.jsonl).
+#
+# Resolution order: explicit env override > ledger match > NOW_UTC.
+#   - env override: operator-forced (e.g. genuine key rotation prep).
+#   - ledger match: pubkey matches a non-revoked entry; reuse its key_iat
+#     and key_exp byte-for-byte so the manifest cannot diverge from the
+#     ledger.
+#   - NOW_UTC: first-time bootstrap, OR a genuinely new key whose entry
+#     is about to be appended to the ledger (= rotation case).
+LEDGER_KEY_IAT=""
+LEDGER_KEY_EXP=""
+if [ -f "${ID_HISTORY_FILE}" ]; then
+	# Find the latest non-revoked ledger entry whose fingerprint matches.
+	# `tail -n 1` handles the (out-of-spec) case where multiple active
+	# entries share the same fingerprint by preferring the most recent.
+	# `// empty` keeps jq quiet under `set -u` if a field is missing.
+	LEDGER_MATCH="$(jq -c --arg fp "${FP}" '
+		select(.revoked == false and .operator_identity_pubkey_fingerprint == $fp)
+	' "${ID_HISTORY_FILE}" 2>/dev/null | tail -n 1)"
+	if [ -n "${LEDGER_MATCH}" ]; then
+		LEDGER_KEY_IAT="$(printf '%s' "${LEDGER_MATCH}" | jq -r '.key_iat // empty')"
+		LEDGER_KEY_EXP="$(printf '%s' "${LEDGER_MATCH}" | jq -r '.key_exp // empty')"
+	fi
+fi
+
+KEY_IAT="${KEY_IAT:-${LEDGER_KEY_IAT:-${NOW_UTC}}}"
+if [[ -z "${KEY_EXP:-}" ]]; then
+	if [ -n "${LEDGER_KEY_EXP}" ] && [ "${KEY_IAT}" = "${LEDGER_KEY_IAT}" ]; then
+		# Reuse ledger's key_exp verbatim — guarantees byte-for-byte
+		# identity with the published identity-history.jsonl entry.
+		KEY_EXP="${LEDGER_KEY_EXP}"
+	# LC_ALL=C forces POSIX locale so date does not emit a localized fallback
+	# (= ja_JP would emit "2027年 6月22日 火曜日 ..." if the explicit +fmt
+	# is not applied for any reason). -u placed BEFORE -f because macOS BSD
+	# date treats -u as an option flag that must precede positional args.
+	elif LC_ALL=C date -u -j -v+365d +%Y-%m-%dT%H:%M:%SZ >/dev/null 2>&1; then
+		# BSD date (macOS).
+		KEY_EXP="$(LC_ALL=C date -u -j -v+365d -f "%Y-%m-%dT%H:%M:%SZ" "${KEY_IAT}" +%Y-%m-%dT%H:%M:%SZ)"
+	else
+		# GNU date (Linux).
+		KEY_EXP="$(LC_ALL=C date -u -d "${KEY_IAT} +365 days" +%Y-%m-%dT%H:%M:%SZ)"
+	fi
+fi
 
 # ---- 3.5. Build artifact_manifest + artifact_root. --------------------------
 #
@@ -348,7 +391,8 @@ rm -f "${LEAVES_TMP}" "${MANIFEST_TMP}"
 NULL_BRANCH_HASH="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 # Bootstrap identity-history.jsonl if absent (= first Phase α run).
-ID_HISTORY_FILE="${OUT_DIR}/identity-history.jsonl"
+# (ID_HISTORY_FILE is defined once at the top of the script alongside
+# OUT_JSON / OUT_SIG; see §2.)
 if [ ! -f "${ID_HISTORY_FILE}" ]; then
 	echo "  bootstrap: ${ID_HISTORY_FILE} not present; writing key_seq=1 line" >&2
 	# Single canonical line via jq -c (compact + sorted not enforced; the
@@ -546,6 +590,34 @@ jq -n \
 # on parse error. Do NOT use `jq -e empty` — the `empty` filter produces no
 # output, and `-e` reads that as "no result" and returns exit code 4.)
 jq empty "${TMP_JSON}" >/dev/null
+
+# ---- 4.5. Self-check: payload must not diverge from the ledger. -------------
+# Defense-in-depth gate against the HIGH-1 finding from the 2026-06-22 audit
+# (= KEY_IAT silently re-derived from NOW_UTC on non-rotation regen,
+# producing an identity.json whose key_iat disagreed with the published
+# identity-history.jsonl). If §2 / §2.5 ever regress, this gate catches it
+# before the signature is produced rather than after publication.
+#
+# Outcomes:
+#   - ledger has an active entry for ${FP} and its key_iat matches: pass
+#   - ledger has no active entry for ${FP}: pass (= rotation / bootstrap)
+#   - ledger has an active entry but its key_iat ≠ ${KEY_IAT}: refuse
+if [ -f "${ID_HISTORY_FILE}" ]; then
+	LEDGER_ACTIVE_IAT="$(jq -r --arg fp "${FP}" '
+		select(.revoked == false and .operator_identity_pubkey_fingerprint == $fp)
+		| .key_iat
+	' "${ID_HISTORY_FILE}" 2>/dev/null | tail -n 1)"
+	if [ -n "${LEDGER_ACTIVE_IAT}" ] && [ "${KEY_IAT}" != "${LEDGER_ACTIVE_IAT}" ]; then
+		echo "ERROR: KEY_IAT=${KEY_IAT} diverges from ledger active entry for ${FP}:" >&2
+		echo "       ledger says key_iat=${LEDGER_ACTIVE_IAT}" >&2
+		echo "       Refusing to sign — this would reproduce the HIGH-1 divergence." >&2
+		echo "       To proceed with a genuine rotation, append a new key_seq=N+1" >&2
+		echo "       entry to ${ID_HISTORY_FILE} first (and supersede the old)." >&2
+		echo "       To force-override without a rotation, run with explicit" >&2
+		echo "       KEY_IAT=<value> matching your intent." >&2
+		exit 8
+	fi
+fi
 
 # ---- 5. Sign with ssh-keygen -Y sign. ---------------------------------------
 
