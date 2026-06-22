@@ -179,11 +179,16 @@ LEDGER_KEY_IAT=""
 LEDGER_KEY_EXP=""
 if [ -f "${ID_HISTORY_FILE}" ]; then
 	# Find the latest non-revoked ledger entry whose fingerprint matches.
-	# `tail -n 1` handles the (out-of-spec) case where multiple active
-	# entries share the same fingerprint by preferring the most recent.
-	# `// empty` keeps jq quiet under `set -u` if a field is missing.
-	LEDGER_MATCH="$(jq -c --arg fp "${FP}" '
-		select(.revoked == false and .operator_identity_pubkey_fingerprint == $fp)
+	# `-R` reads the file line-by-line as raw strings, `(fromjson? // empty)`
+	# parses each line and silently skips malformed JSONL lines (= the
+	# robustness improvement requested by re-audit F4; without this, jq
+	# dies on the first parse error and the lookup falls through to
+	# NOW_UTC, where the §4.5 self-check then refuses to sign as a safe
+	# fail-loud). `tail -n 1` handles the (out-of-spec) case where multiple
+	# active entries share the same fingerprint by preferring the most recent.
+	LEDGER_MATCH="$(jq -Rc --arg fp "${FP}" '
+		(fromjson? // empty)
+		| select(.revoked == false and .operator_identity_pubkey_fingerprint == $fp)
 	' "${ID_HISTORY_FILE}" 2>/dev/null | tail -n 1)"
 	if [ -n "${LEDGER_MATCH}" ]; then
 		LEDGER_KEY_IAT="$(printf '%s' "${LEDGER_MATCH}" | jq -r '.key_iat // empty')"
@@ -603,8 +608,9 @@ jq empty "${TMP_JSON}" >/dev/null
 #   - ledger has no active entry for ${FP}: pass (= rotation / bootstrap)
 #   - ledger has an active entry but its key_iat ≠ ${KEY_IAT}: refuse
 if [ -f "${ID_HISTORY_FILE}" ]; then
-	LEDGER_ACTIVE_IAT="$(jq -r --arg fp "${FP}" '
-		select(.revoked == false and .operator_identity_pubkey_fingerprint == $fp)
+	LEDGER_ACTIVE_IAT="$(jq -Rr --arg fp "${FP}" '
+		(fromjson? // empty)
+		| select(.revoked == false and .operator_identity_pubkey_fingerprint == $fp)
 		| .key_iat
 	' "${ID_HISTORY_FILE}" 2>/dev/null | tail -n 1)"
 	if [ -n "${LEDGER_ACTIVE_IAT}" ] && [ "${KEY_IAT}" != "${LEDGER_ACTIVE_IAT}" ]; then
