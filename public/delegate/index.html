@@ -33,12 +33,24 @@
 <nav class="topnav">
 	<div class="topnav-inner">
 		<a href="/" class="brand">Freedom Yield · Metal</a>
-		<div class="nav">
-			<a href="/about-metal/">About</a>
-			<a href="/delegate/">Delegate</a>
-			<a href="/incidents/">Incidents</a>
-			<a href="/ja/delegate/" class="nav-lang">JA</a>
-		</div>
+		<details class="nav-menu">
+			<summary class="nav-toggle" aria-label="Open / close menu">
+				<span class="hamburger-icon" aria-hidden="true"></span>
+			</summary>
+			<div class="nav">
+				<a href="/#status">Status</a>
+				<a href="/selection-evidence/">Selection evidence</a>
+				<a href="/delegate/" data-ga-event="delegate_cta_click" data-ga-param-position="nav">Delegate</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">About</button>
+					<div class="nav-dropdown-menu">
+						<a href="/#about">About</a>
+						<a href="/#roadmap">Roadmap</a>
+					</div>
+				</div>
+				<a href="/ja/delegate/" class="nav-lang" data-ga-event="language_switch" data-ga-param-to="ja">JA</a>
+			</div>
+		</details>
 	</div>
 </nav>
 
@@ -126,8 +138,61 @@
 
 <footer class="site-footer">
 	<div class="container">
-		<p>Contact: <a href="mailto:info@metal.freedom-yield.com">info@metal.freedom-yield.com</a></p>
+		<div class="footer-grid">
+			<div class="footer-brand">
+				<h3>Freedom Yield · Metal</h3>
+				<p>Long-horizon validator on Metal Blockchain. Transparent uptime, public audit trail.</p>
+			</div>
+			<nav class="footer-col" aria-label="For institutions">
+				<h4>For institutions</h4>
+				<ul>
+					<li><a href="/selection-evidence/">Selection evidence</a></li>
+					<li><a href="/commitments/">Commitments</a></li>
+					<li><a href="/risk-disclosure/">Risk disclosure</a></li>
+					<li><a href="/jurisdiction/">Jurisdiction</a></li>
+					<li><a href="/subnet-readiness/">Subnet readiness</a></li>
+					<li><a href="/reference-architecture/">Reference architecture</a></li>
+					<li><a href="/subnet-pilot/">Subnet pilot</a></li>
+					<li><a href="/pledge/">Pledge</a></li>
+					<li><a href="/security-posture/">Security posture</a></li>
+					<li><a href="/decommission/">Decommission</a></li>
+					<li><a href="/inquiry/">Inquiry</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="For delegators">
+				<h4>For delegators</h4>
+				<ul>
+					<li><a href="/delegate/">Delegate</a></li>
+					<li><a href="/#status">Status</a></li>
+					<li><a href="/continuity/">Continuity</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="For engineers">
+				<h4>For engineers</h4>
+				<ul>
+					<li><a href="/verify/">Identity verify</a></li>
+					<li><a href="/data/">Open data</a></li>
+					<li><a href="/journal/">Cycle journal</a></li>
+					<li><a href="/network/">Network</a></li>
+					<li><a href="/incidents/">Incidents</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Resources">
+				<h4>Resources</h4>
+				<ul>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">Explorer ↗</a></li>
+					<li><a href="#acknowledgments">Acknowledgments</a></li>
+					<li><a href="mailto:info@metal.freedom-yield.com">Contact</a></li>
+				</ul>
+			</nav>
+		</div>
+		<hr class="footer-divider">
 		<p class="footer-disclaimer"><strong>Disclaimer:</strong> Freedom Yield is an independent, third-party validator operating on Metal Blockchain. It is not affiliated with, endorsed by, sponsored by, or operated by Metallicus Inc. or the Metal Blockchain Foundation. All trademarks are the property of their respective owners.</p>
+		<div class="footer-bottom">
+			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain</a>.</p>
+			<p>© 2026 Freedom Yield · Metal validator</p>
+		</div>
 	</div>
 </footer>
 </body>

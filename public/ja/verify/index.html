@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>アイデンティティ検証 — Freedom Yield Metal</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="Freedom Yield の Phase α アイデンティティマニフェスト、 cycle audit packet、 監査者が必要とする runtime feed の検証エントリー。">
+<link rel="canonical" href="https://metal.freedom-yield.com/ja/verify/">
+<link rel="alternate" hreflang="en" href="https://metal.freedom-yield.com/verify/">
+<link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/verify/">
+<link rel="alternate" hreflang="x-default" href="https://metal.freedom-yield.com/verify/">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#07080c">
+<meta name="color-scheme" content="dark">
+<script defer src="/assets/main.js"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
+<script defer src="/assets/gtag-init.js"></script>
+</head>
+<body>
+<a href="#main" class="skip-link">本文へスキップ</a>
+
+<nav class="topnav">
+	<div class="topnav-inner">
+		<a href="/ja/" class="brand">Freedom Yield · Metal</a>
+		<details class="nav-menu">
+			<summary class="nav-toggle" aria-label="メニューを開く / 閉じる">
+				<span class="hamburger-icon" aria-hidden="true"></span>
+			</summary>
+			<div class="nav">
+				<a href="/ja/#status">状態</a>
+				<a href="/ja/selection-evidence/">選定エビデンス</a>
+				<a href="/ja/delegate/" data-ga-event="delegate_cta_click" data-ga-param-position="nav">委任</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">概要</button>
+					<div class="nav-dropdown-menu">
+						<a href="/ja/#about">概要</a>
+						<a href="/ja/#roadmap">展望</a>
+					</div>
+				</div>
+				<a href="/verify/" class="nav-lang" data-ga-event="language_switch" data-ga-param-to="en">EN</a>
+			</div>
+		</details>
+	</div>
+</nav>
+
+<header class="hero hero--simple">
+	<div class="container">
+		<p class="hero-eyebrow">技術者向けエントリー</p>
+		<h1>アイデンティティ検証</h1>
+		<p class="hero-lead">
+			Freedom Yield は、 暗号署名された運用者アイデンティティマニフェストと Merkle DAG の監査パケットを公開しています。 独立した検証者は <code>curl</code> / <code>jq</code> / <code>ssh-keygen -Y verify</code> だけで、 公開アーティファクトから全 claim を再現可能 — プロジェクト固有のツールは不要です。
+			本ページは、 その監査のための単一エントリーポイントです。
+		</p>
+	</div>
+</header>
+
+<main id="main" class="container">
+
+	<section class="card">
+		<h2>クイックスタート (60 秒)</h2>
+		<p>ライブのアイデンティティマニフェストが、 公開された運用者公開鍵で署名されていることを確認します:</p>
+		<pre><code>TMP=$(mktemp -d)
+curl -sS https://metal.freedom-yield.com/.well-known/operator-identity.pub > "$TMP/pub"
+curl -sS https://metal.freedom-yield.com/api/identity.json                 > "$TMP/json"
+curl -sS https://metal.freedom-yield.com/api/identity.json.sig             > "$TMP/sig"
+printf 'freedom-yield %s\n' "$(cat "$TMP/pub")" > "$TMP/allowed"
+ssh-keygen -Y verify -f "$TMP/allowed" \
+  -I freedom-yield \
+  -n freedom-yield/validator-identity \
+  -s "$TMP/sig" &lt; "$TMP/json"
+# 期待値: Good "freedom-yield/validator-identity" signature for freedom-yield with ED25519 key SHA256:rQZNC53Jdp…</code></pre>
+		<p class="note">OpenSSH 8.0+ 必須 (<code>ssh-keygen -Y</code> サブコマンドは 2019-04 から)。 macOS 11+ / モダン Linux / Windows OpenSSH 8.0+ で動作。</p>
+	</section>
+
+	<section class="card data-group">
+		<h2>ライブ アーティファクト</h2>
+		<p class="data-group-lead">Phase α の 5 アーティファクトは全て live、 本ドメインから配信中。 それぞれ独立に fetch 可能で、 合わせて self-describing な監査パケットを構成します。</p>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>署名済みアイデンティティマニフェスト</h3>
+				<span class="data-tag">live</span>
+			</header>
+			<p>運用者アイデンティティ、 fingerprint、 bound artifact set、 Merkle DAG root hash を含みます。 ed25519 OpenSSH 鍵で署名 (公開鍵は <code>/.well-known/operator-identity.pub</code>)。</p>
+			<dl class="data-meta">
+				<dt>マニフェスト</dt><dd><a href="/api/identity.json"><code>/api/identity.json</code></a></dd>
+				<dt>署名</dt><dd><a href="/api/identity.json.sig"><code>/api/identity.json.sig</code></a></dd>
+				<dt>公開鍵</dt><dd><a href="/.well-known/operator-identity.pub"><code>/.well-known/operator-identity.pub</code></a></dd>
+				<dt>スキーマ</dt><dd><a href="/api/identity.schema.v1.json"><code>/api/identity.schema.v1.json</code></a> + <a href="/api/identity.example.json">example</a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>Merkle DAG snapshot</h3>
+				<span class="data-tag">live</span>
+			</header>
+			<p>(i) 運用者 identity-key history、 (ii) クローズ済みバリデーションサイクルの 2 枝 DAG。 2 つの branch root が結合した <code>dag_root_hash</code> は、 マニフェスト側の値とバイト一致しなければなりません。</p>
+			<dl class="data-meta">
+				<dt>snapshot</dt><dd><a href="/api/cycles-history.json"><code>/api/cycles-history.json</code></a></dd>
+				<dt>Identity-history leaf log</dt><dd><a href="/api/identity-history.jsonl"><code>/api/identity-history.jsonl</code></a></dd>
+				<dt>スキーマ</dt><dd><a href="/api/cycles-history.schema.v1.json"><code>/api/cycles-history.schema.v1.json</code></a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>Cycle audit packet</h3>
+				<span class="data-tag">live(1 cycle closed)</span>
+			</header>
+			<p>append-only JSONL feed。 1 行 = 1 クローズ済 cycle、 uptime + incidents + stake 数値を join。 各 leaf 行の sha256 は Merkle DAG の cycles_branch に折り込まれます。</p>
+			<dl class="data-meta">
+				<dt>feed</dt><dd><a href="/api/cycle-history.jsonl"><code>/api/cycle-history.jsonl</code></a></dd>
+				<dt>スキーマ</dt><dd><a href="/api/cycle-history.schema.v1.json"><code>/api/cycle-history.schema.v1.json</code></a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>on-chain anchor receipt</h3>
+				<span class="data-tag">scheduled</span>
+			</header>
+			<p>各 cycle transition で、 運用者は現在の <code>dag_root_hash</code> を Metal A-chain (PulseVM / XPRNetwork) に narrow 権限 <code>metalfreedom@anchor</code> で memo <code>fyid1:&lt;dag_root_hash&gt;</code> として刻みます。 receipt JSON は audit-side の inscription index。</p>
+			<dl class="data-meta">
+				<dt>receipt</dt><dd><code>/api/anchor-receipt.json</code> (= cycle 3 start = 2026-07-04 13:00 JST で初回 broadcast 予定)</dd>
+				<dt>スキーマ</dt><dd><a href="/api/anchor-receipt.schema.v1.json"><code>/api/anchor-receipt.schema.v1.json</code></a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>エビデンスマニフェスト</h3>
+				<span class="data-tag">live</span>
+			</header>
+			<p>全 live アーティファクト + 運用者 commitments の機械可読 index。 1 fetch + 1 parse で全 audit surface にアクセス可能。</p>
+			<dl class="data-meta">
+				<dt>マニフェスト</dt><dd><a href="/api/evidence.json"><code>/api/evidence.json</code></a></dd>
+				<dt>discovery</dt><dd><code>.live_artifacts.identity_manifest</code> · <code>.live_artifacts.cycle_history_jsonl</code> · <code>.in_preparation_artifacts.anchor_receipt</code></dd>
+				<dt>スキーマ</dt><dd><a href="/api/evidence.schema.v1.json"><code>/api/evidence.schema.v1.json</code></a></dd>
+			</dl>
+		</article>
+	</section>
+
+	<section class="card">
+		<h2>完全検証手順 (9 step)</h2>
+		<p>signature → fingerprint → per-branch Merkle root → DAG combination → on-chain explorer cross-check → cross-reference integrity の完全な recipe は、 リポジトリに再現可能な runbook として公開されています。</p>
+		<dl class="kv">
+			<dt>verifier recipe</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer"><code>docs/IDENTITY_VERIFICATION.md</code></a></dd>
+			<dt>Merkle DAG spec</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/MERKLE_DAG_SPEC.md" rel="noopener noreferrer"><code>docs/MERKLE_DAG_SPEC.md</code></a></dd>
+			<dt>test vectors</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/tree/main/tests/identity-verification-vectors" rel="noopener noreferrer"><code>tests/identity-verification-vectors/</code></a> (Python リファレンス実装付き 5 個の合成 vector、 shell verifier と bit-for-bit クロスチェック)</dd>
+			<dt>直近の実行レポート</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/PHASE5_REGEN_EXECUTION_2026-06-22.md" rel="noopener noreferrer"><code>docs/PHASE5_REGEN_EXECUTION_2026-06-22.md</code></a> (= 2026-06-22 二巡目再生成の監査 trail、 V1–V11 検証マトリクス付き)</dd>
+		</dl>
+	</section>
+
+	<section class="card">
+		<h2>その他の技術者向け surface</h2>
+		<ul>
+			<li><a href="/ja/data/">公開データ</a> — 公開 JSON エンドポイントのカタログ (アーティファクト 1 件 = 1 row)</li>
+			<li><a href="/ja/journal/">運用日誌</a> — 人間可読のクローズ済 cycle ledger</li>
+			<li><a href="/ja/network/">ネットワーク</a> — node software / region / metalgo configuration posture</li>
+			<li><a href="/ja/incidents/">インシデント</a> — 運用者が維持する incident log</li>
+			<li><a href="/ja/reference-architecture/">リファレンスアーキテクチャ</a> — 完全な deployment topology</li>
+		</ul>
+	</section>
+
+</main>
+
+<footer class="site-footer">
+	<div class="container">
+		<div class="footer-grid">
+			<div class="footer-brand">
+				<h3>Freedom Yield · Metal</h3>
+				<p>Metal Blockchain 上で長期視点のバリデータを運営。透明な uptime、誇張なし、地道な稼働継続。</p>
+			</div>
+			<nav class="footer-col" aria-label="機関向け">
+				<h4>機関向け</h4>
+				<ul>
+					<li><a href="/ja/selection-evidence/">選定エビデンス</a></li>
+					<li><a href="/ja/commitments/">Commitment</a></li>
+					<li><a href="/ja/risk-disclosure/">リスク開示</a></li>
+					<li><a href="/ja/jurisdiction/">日本拠点姿勢</a></li>
+					<li><a href="/ja/subnet-readiness/">Subnet 適性</a></li>
+					<li><a href="/ja/reference-architecture/">リファレンスアーキテクチャ</a></li>
+					<li><a href="/ja/subnet-pilot/">Subnet pilot</a></li>
+					<li><a href="/ja/pledge/">Pledge</a></li>
+					<li><a href="/ja/security-posture/">セキュリティ姿勢</a></li>
+					<li><a href="/ja/decommission/">Decommission</a></li>
+					<li><a href="/ja/inquiry/">問い合わせ</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="委任者向け">
+				<h4>委任者向け</h4>
+				<ul>
+					<li><a href="/ja/delegate/">委任する</a></li>
+					<li><a href="/ja/#status">状態</a></li>
+					<li><a href="/ja/continuity/">事業継続性</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="技術者向け">
+				<h4>技術者向け</h4>
+				<ul>
+					<li><a href="/ja/verify/">アイデンティティ検証</a></li>
+					<li><a href="/ja/data/">公開データ</a></li>
+					<li><a href="/ja/journal/">運用日誌</a></li>
+					<li><a href="/ja/network/">ネットワーク</a></li>
+					<li><a href="/ja/incidents/">インシデント</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="関連">
+				<h4>関連</h4>
+				<ul>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">エクスプローラ ↗</a></li>
+					<li><a href="#acknowledgments">感謝</a></li>
+					<li><a href="mailto:info@metal.freedom-yield.com">お問い合わせ</a></li>
+				</ul>
+			</nav>
+		</div>
+		<hr class="footer-divider">
+		<p class="footer-disclaimer"><strong>免責事項:</strong> Freedom Yield は Metal Blockchain 上で稼働する独立した第三者バリデータです。Metallicus 社および Metal Blockchain Foundation の関連会社・提携先・出資先・公式運営者ではありません。各商標は各権利者に帰属します。</p>
+		<div class="footer-bottom">
+			<p><a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain</a> を支える validator として運営しています。</p>
+			<p>© 2026 Freedom Yield · Metal validator</p>
+		</div>
+	</div>
+</footer>
+
+</body>
+</html>

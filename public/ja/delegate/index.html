@@ -29,12 +29,24 @@
 <nav class="topnav">
 	<div class="topnav-inner">
 		<a href="/ja/" class="brand">Freedom Yield · Metal</a>
-		<div class="nav">
-			<a href="/ja/about-metal/">概要</a>
-			<a href="/ja/delegate/">委任</a>
-			<a href="/ja/incidents/">インシデント</a>
-			<a href="/delegate/" class="nav-lang">EN</a>
-		</div>
+		<details class="nav-menu">
+			<summary class="nav-toggle" aria-label="メニューを開く / 閉じる">
+				<span class="hamburger-icon" aria-hidden="true"></span>
+			</summary>
+			<div class="nav">
+				<a href="/ja/#status">状態</a>
+				<a href="/ja/selection-evidence/">選定エビデンス</a>
+				<a href="/ja/delegate/" data-ga-event="delegate_cta_click" data-ga-param-position="nav">委任</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">概要</button>
+					<div class="nav-dropdown-menu">
+						<a href="/ja/#about">概要</a>
+						<a href="/ja/#roadmap">展望</a>
+					</div>
+				</div>
+				<a href="/delegate/" class="nav-lang" data-ga-event="language_switch" data-ga-param-to="en">EN</a>
+			</div>
+		</details>
 	</div>
 </nav>
 
@@ -121,8 +133,61 @@
 
 <footer class="site-footer">
 	<div class="container">
-		<p>連絡先: <a href="mailto:info@metal.freedom-yield.com">info@metal.freedom-yield.com</a></p>
+		<div class="footer-grid">
+			<div class="footer-brand">
+				<h3>Freedom Yield · Metal</h3>
+				<p>Metal Blockchain 上で長期視点のバリデータを運営。透明な uptime、誇張なし、地道な稼働継続。</p>
+			</div>
+			<nav class="footer-col" aria-label="機関向け">
+				<h4>機関向け</h4>
+				<ul>
+					<li><a href="/ja/selection-evidence/">選定エビデンス</a></li>
+					<li><a href="/ja/commitments/">Commitment</a></li>
+					<li><a href="/ja/risk-disclosure/">リスク開示</a></li>
+					<li><a href="/ja/jurisdiction/">日本拠点姿勢</a></li>
+					<li><a href="/ja/subnet-readiness/">Subnet 適性</a></li>
+					<li><a href="/ja/reference-architecture/">リファレンスアーキテクチャ</a></li>
+					<li><a href="/ja/subnet-pilot/">Subnet pilot</a></li>
+					<li><a href="/ja/pledge/">Pledge</a></li>
+					<li><a href="/ja/security-posture/">セキュリティ姿勢</a></li>
+					<li><a href="/ja/decommission/">Decommission</a></li>
+					<li><a href="/ja/inquiry/">問い合わせ</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="委任者向け">
+				<h4>委任者向け</h4>
+				<ul>
+					<li><a href="/ja/delegate/">委任する</a></li>
+					<li><a href="/ja/#status">状態</a></li>
+					<li><a href="/ja/continuity/">事業継続性</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="技術者向け">
+				<h4>技術者向け</h4>
+				<ul>
+					<li><a href="/ja/verify/">アイデンティティ検証</a></li>
+					<li><a href="/ja/data/">公開データ</a></li>
+					<li><a href="/ja/journal/">運用日誌</a></li>
+					<li><a href="/ja/network/">ネットワーク</a></li>
+					<li><a href="/ja/incidents/">インシデント</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="関連">
+				<h4>関連</h4>
+				<ul>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">エクスプローラ ↗</a></li>
+					<li><a href="#acknowledgments">感謝</a></li>
+					<li><a href="mailto:info@metal.freedom-yield.com">お問い合わせ</a></li>
+				</ul>
+			</nav>
+		</div>
+		<hr class="footer-divider">
 		<p class="footer-disclaimer"><strong>免責事項:</strong> Freedom Yield は Metal Blockchain 上で稼働する独立した第三者バリデータです。Metallicus 社および Metal Blockchain Foundation の関連会社・提携先・出資先・公式運営者ではありません。各商標は各権利者に帰属します。</p>
+		<div class="footer-bottom">
+			<p><a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain</a> を支える validator として運営しています。</p>
+			<p>© 2026 Freedom Yield · Metal validator</p>
+		</div>
 	</div>
 </footer>
 </body>

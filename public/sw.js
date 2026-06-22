@@ -6,7 +6,7 @@
 //   - Versioned cache name; old caches deleted on activate.
 "use strict";
 
-const CACHE_VERSION = "v128-delegate-fact-correction";
+const CACHE_VERSION = "v129-nav-redesign-3-user-segments";
 const SHELL_CACHE = "shell-" + CACHE_VERSION;
 const DATA_CACHE = "data-" + CACHE_VERSION;
 
