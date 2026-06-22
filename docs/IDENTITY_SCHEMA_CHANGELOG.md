@@ -7,6 +7,65 @@ schema v1 and the rationale for any future major version bump. It is
 not a chain-anchored attestation and not equivalent to an external
 append-only log: see the retention note below.
 
+## 2026-06-22 — Phase 5 pre-execution doc + .gitignore fixes (audit GAP-1 + GAP-3)
+
+### Summary
+
+Three small pre-Phase-5 fixes, triggered by an independent audit review
+of the Phase 5 execution plan:
+
+1. **GAP-1 (medium)**: `scripts/operator-local/gen-identity.sh` post-run
+   "Next steps" message (lines 594-595) was inconsistent with the
+   actual five files the script produces. The next-steps text listed
+   only three (`identity.json`, `identity.json.sig`,
+   `operator-identity.pub`) and silently omitted
+   `cycles-history.json` + `identity-history.jsonl`. If an operator
+   followed the on-screen guidance verbatim, the omitted two files
+   would not be staged, and Phase α `post-anchor-event.sh` would 404
+   on its `cycles-history.json` fetch. The HOLD reminder block at
+   lines 599-602 had the same gap. Both blocks updated to list five
+   files explicitly.
+
+2. **GAP-1 (medium, cont.)**: `docs/PHASE5_CHECKLIST.md` Section E4
+   carried the same 3-file `git add` command. Updated to five files
+   with an inline comment explaining that the extra two are required
+   by Phase α (deploy ownership matrix + verifier branch-root
+   recompute).
+
+3. **GAP-3 (medium)**: `.gitignore` claimed (via the Phase 5 audit
+   report §4.5) to protect the operator identity ed25519 private key
+   from accidental commit "via extension blocks", but the actual
+   `.gitignore` patterns are `*.key` / `*.pem` / etc. — the operator
+   identity file
+   (`~/.ssh/freedom-yield-operator-identity`, no extension) would not
+   match. The real protection is path-based (key lives outside the
+   repo at `~/.ssh/`). Added explicit `.gitignore` patterns for
+   `freedom-yield-operator-identity` and
+   `freedom-yield-operator-identity.pub` as a defense-in-depth safety
+   net against operator copy-paste error. The `.pub` published to the
+   web is renamed to `public/.well-known/operator-identity.pub` during
+   copy, so it does not match the newly-added patterns.
+
+### What changed
+
+| File | Change |
+| --- | --- |
+| `.gitignore` | added explicit `freedom-yield-operator-identity` + `.pub` patterns |
+| `scripts/operator-local/gen-identity.sh` | Next-steps message (line 594) + HOLD reminder (line 599) updated to list 5 files |
+| `docs/PHASE5_CHECKLIST.md` | Section E4 `git add` extended to 5 files with rationale comment |
+
+### What did NOT change
+
+- No schema constraint changed
+- No script behaviour changed (= the 5-file output already happened; only the on-screen guidance text changed)
+- No on-chain action taken
+- No operator key material involved
+
+### Migration impact
+
+None. These are pre-Phase-5 doc + .gitignore hardening; no live
+artifact references any of the changed text.
+
 ## 2026-06-22 — Production account names confirmed: operator `metalfreedom` + sink `fyhistory`
 
 ### Summary

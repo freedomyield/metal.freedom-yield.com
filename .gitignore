@@ -12,6 +12,10 @@ signer.*
 *.p12
 *.pfx
 *.jks
+# operator identity ed25519 key (no extension → would not match *.key)
+# The .pub goes into public/.well-known/operator-identity.pub via rename, not by this name.
+freedom-yield-operator-identity
+freedom-yield-operator-identity.pub
 # 環境変数 / dotenv
 .env
 .env.*

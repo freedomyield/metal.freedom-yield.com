@@ -127,10 +127,15 @@ git status
 git diff -- public/api/identity.json | head -40
 
 # E4. Stage and commit.
+# All five files produced by gen-identity.sh plus the .pub copy must be
+# staged. cycles-history.json + identity-history.jsonl are required for
+# Phase α (deploy ownership matrix + verifier branch-root recompute).
 git add public/api/identity.json \
         public/api/identity.json.sig \
+        public/api/cycles-history.json \
+        public/api/identity-history.jsonl \
         public/.well-known/operator-identity.pub
-git commit -m "feat(identity): Phase 5 — publish signed operator identity manifest"
+git commit -m "feat(identity): Phase 5 — publish signed operator identity manifest + Phase α DAG artifacts"
 ```
 
 ## F. Deploy and live-verify (Steps 6–7, ~3 min)
