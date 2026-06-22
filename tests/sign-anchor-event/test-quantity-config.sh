@@ -54,7 +54,7 @@ mkdir -p "${FIXTURE_DIR}"
 # audit-C/F-E2: xpr-account is now required config; write a synthetic
 # test account so the signer's strict validation passes.
 printf 'fytest1' > "${FIXTURE_DIR}/xpr-account"
-printf 'fyldsink' > "${FIXTURE_DIR}/anchor-sink"
+printf 'fyhistory' > "${FIXTURE_DIR}/anchor-sink"
 printf 'proton'   > "${FIXTURE_DIR}/xpr-chain"
 
 DAG="$(printf '0%.0s' {1..64})"

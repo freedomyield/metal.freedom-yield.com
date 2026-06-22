@@ -19,7 +19,7 @@
 The rehearsal passes when ALL of the following are observable in a
 single end-to-end run:
 
-1. A test `freedomyield`-style account exists on XPR testnet with the
+1. A test `metalfreedom`-style account exists on XPR testnet with the
    same three-permission shape (`owner` + `active` + `anchor`).
 2. The `anchor` permission has a `linkauth` to `eosio.token::transfer`.
 3. `scripts/sign-anchor-event.sh cyclestart <hex>` (no `--dry-run`)
@@ -41,7 +41,7 @@ The rehearsal fails on any of:
 - The receipt JSON parses but the explorer cannot find the `tx_id`.
 - The memo on the explorer does not equal `fyid1:<hex>`.
 - The signer permission shown on the explorer is not
-  `freedomyield-style@anchor`.
+  `metalfreedom-style@anchor`.
 
 A failure halts the mainnet activation; the cause is diagnosed and
 the rehearsal is re-run before mainnet proceeds.
@@ -65,7 +65,7 @@ the rehearsal is re-run before mainnet proceeds.
 proton chain:set proton-test
 
 # Create a fresh test account name. The name MUST NOT collide with the
-# mainnet 'freedomyield' account; it MUST NOT include a brand identifier.
+# mainnet 'metalfreedom' account; it MUST NOT include a brand identifier.
 # Suggested form: a deterministic but anonymous name like 'fytestNNN'
 # where NNN is a random three-digit suffix. Length 1..12, chars [a-z1-5.].
 
@@ -157,9 +157,9 @@ shred -u "${ANCHOR_KEY_TMP}"
 
 # Write the account + sink + chain + quantity config files. The
 # `xpr-account` file is REQUIRED (audit-C/F-E2 removed the implicit
-# 'freedomyield' fallback). For the testnet rehearsal it MUST contain
+# 'metalfreedom' fallback). For the testnet rehearsal it MUST contain
 # ${TEST_ACCOUNT} (= the throwaway test account from Step 1), NOT
-# 'freedomyield' — broadcasting the rehearsal from the production
+# 'metalfreedom' — broadcasting the rehearsal from the production
 # account is exactly what the audit forced this config split to
 # prevent.
 ssh "${VALIDATOR_SSH_HOST}" "sudo -u deploy bash -c \"
@@ -171,14 +171,14 @@ ssh "${VALIDATOR_SSH_HOST}" "sudo -u deploy bash -c \"
 \""
 
 # Mainnet-leak guard (= explicit assertion that the rehearsal will NOT
-# broadcast from 'freedomyield'). Run BEFORE Step 6 invokes the signer.
+# broadcast from 'metalfreedom'). Run BEFORE Step 6 invokes the signer.
 ssh "${VALIDATOR_SSH_HOST}" "sudo -u deploy bash -c \"
   cfg_account=\\\"\$(head -n 1 '${TEST_CONFIG_DIR}/xpr-account' | tr -d '\\n\\r\\t ')\\\"
-  if [ \\\"\$cfg_account\\\" = 'freedomyield' ]; then
-    echo 'ERROR: testnet xpr-account is freedomyield (= production account); refusing to proceed' >&2
+  if [ \\\"\$cfg_account\\\" = 'metalfreedom' ]; then
+    echo 'ERROR: testnet xpr-account is metalfreedom (= production account); refusing to proceed' >&2
     exit 1
   fi
-  echo \\\"OK testnet xpr-account = \$cfg_account (not 'freedomyield')\\\"
+  echo \\\"OK testnet xpr-account = \$cfg_account (not 'metalfreedom')\\\"
 \""
 
 # Import the test key into proton-cli (= note the chain context).
@@ -355,10 +355,10 @@ rehearsal parser hardening) that mainnet activation requires.
 
 ## Phase β note
 
-When Phase β is activated (= the `freedomyield::inscribe` SC is
-deployed per `scripts/operator-local/contract/freedomyield-anchor.spec.md`),
+When Phase β is activated (= the `metalfreedom::inscribe` SC is
+deployed per `scripts/operator-local/contract/metalfreedom-anchor.spec.md`),
 this rehearsal extends with a step that exercises the SC action via
-`proton action freedomyield inscribe '{...}' freedomyield@anchor` and
+`proton action metalfreedom inscribe '{...}' metalfreedom@anchor` and
 asserts the resulting receipt has
 `anchor.method == "phase_beta_sc_inscribe"`. The Phase α steps remain
 valid as the fallback path while Phase β stabilizes.
@@ -373,6 +373,6 @@ valid as the fallback path while Phase β stabilizes.
   the rehearsal validates against.
 - `docs/MERKLE_DAG_SPEC.md` §6 — A-chain anchor binding and
   BLOCK-1 (`from != to`) discipline.
-- `scripts/operator-local/contract/freedomyield-anchor.spec.md` —
+- `scripts/operator-local/contract/metalfreedom-anchor.spec.md` —
   Phase β SC inscribe spec (= the next-phase target of this same
   rehearsal pattern).

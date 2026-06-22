@@ -15,7 +15,7 @@
 > as: the inscription is now performed by `scripts/post-anchor-event.sh`
 > on the validator host, signing an `eosio.token::transfer` on Metal
 > A-chain (= PulseVM / XPRNetwork) with memo `fyid1:<dag_root_hash>`
-> using `freedomyield@anchor`. The hash committed on chain is
+> using `metalfreedom@anchor`. The hash committed on chain is
 > `dag_root_hash` (= a DAG roll-up of the operator identity-key
 > history and the validation-cycle history), not a single per-cycle
 > artifact hash.
@@ -113,7 +113,7 @@ key (SHA-256 of the published `.pub` bytes) on the Metal P-Chain.
 That design was retired 2026-06-20 — Metal mainnet Durango forbids
 non-empty memos on AddPermissionlessValidatorTx. The replacement is
 the Phase α A-chain Merkle DAG anchor (= `fyid1:<dag_root_hash>` memo
-on `eosio.token::transfer` signed by `freedomyield@anchor`), which
+on `eosio.token::transfer` signed by `metalfreedom@anchor`), which
 commits to a hash over the cumulative identity-key history AND the
 validation-cycle history (= a strictly broader commitment than the
 single-key hash). The `.pub` byte hash is still useful as an
@@ -328,7 +328,7 @@ republish whenever the underlying issue is resolved.
 > identity ed25519 setup above: different chain (Metal A-chain =
 > PulseVM / XPRNetwork), different key family (EOSIO K1 secp256k1 +
 > WebAuth P-256), different tooling (`proton-cli` / webauth.com). The
-> `freedomyield` XPR account is the on-chain anchor for the Merkle DAG
+> `metalfreedom` XPR account is the on-chain anchor for the Merkle DAG
 > identity model; permission structure follows the design in
 > `project_merkle_dag_identity_anchor_design.md`.
 >
@@ -340,11 +340,11 @@ republish whenever the underlying issue is resolved.
 
 Read-only verification via the public chain RPC
 (`https://api-xprnetwork-main.saltant.io/v1/chain/get_account` with
-`{"account_name":"freedomyield"}`) returns:
+`{"account_name":"metalfreedom"}`) returns:
 
 | field | value |
 | --- | --- |
-| `account_name` | `freedomyield` |
+| `account_name` | `metalfreedom` |
 | `created` | `2026-04-09T05:43:36 UTC` |
 | `owner` permission | threshold=1, keys=[`EOS6w1ufdiYuZs9Q...` (K1)] |
 | `active` permission | threshold=1, keys=[`EOS6w1ufdiYuZs9Q...` (K1), `PUB_WA_3hftgAoXi...` (WebAuth)], parent=`owner` |
@@ -358,7 +358,7 @@ the corresponding private key is a coord-log Decision (see
 ## A2. Target state (Phase α minimal)
 
 ```
-freedomyield
+metalfreedom
 ├── owner    (unchanged from A1; rotation deferred to Phase β)
 ├── active   (unchanged from A1)
 └── anchor   (NEW, parent=active, threshold=1,
@@ -374,7 +374,7 @@ Rationale:
   without touching the owner permission.
 - Narrowing `anchor` via `linkauth` to `eosio.token::transfer` limits
   the blast radius if the validator-host-stored `anchor` private key
-  is compromised: it can sign transfers from `freedomyield`, but
+  is compromised: it can sign transfers from `metalfreedom`, but
   cannot change permissions, deploy contracts, or sign other system
   actions.
 - Owner rotation to WebAuth-only and any active-permission tightening
@@ -384,7 +384,7 @@ Rationale:
 
 - `proton-cli` 0.1.98+ installed on the operator Mac
   (verify: `proton --version`).
-- `freedomyield@active` signing capability — one of:
+- `metalfreedom@active` signing capability — one of:
   - WebAuth biometric via `webauth.com` or Proton wallet app (uses
     the existing `PUB_WA_3hftgAo...` credential on `active`). No
     K1 private key required.
@@ -406,7 +406,7 @@ Rationale:
 ## A4. Generate the anchor K1 keypair (operator Mac, offline)
 
 The `anchor` key is a fresh K1 (secp256k1) keypair, NOT WebAuth and
-NOT reused from any existing key on `freedomyield`.
+NOT reused from any existing key on `metalfreedom`.
 
 ```sh
 proton key:generate
@@ -452,7 +452,7 @@ The testnet PASS is part of the IC-2 deliverable (C3 → C1 by
 
 ## A6. Add the `anchor` permission as a child of `active`
 
-This action requires `freedomyield@active`. The current active has
+This action requires `metalfreedom@active`. The current active has
 both a K1 key and a WebAuth credential; either is sufficient (single
 key threshold).
 
@@ -470,7 +470,7 @@ in the local `proton-cli` keystore (`proton key:add` first).
 
 ```sh
 proton action eosio updateauth '{
-  "account": "freedomyield",
+  "account": "metalfreedom",
   "permission": "anchor",
   "parent": "active",
   "auth": {
@@ -481,27 +481,27 @@ proton action eosio updateauth '{
     "accounts": [],
     "waits": []
   }
-}' freedomyield@active
+}' metalfreedom@active
 ```
 
 Expected: the CLI returns the transaction id; the chain accepts the
-action; the new `anchor` permission appears under `freedomyield` in
+action; the new `anchor` permission appears under `metalfreedom` in
 the next account read.
 
 ## A7. Link the `anchor` permission to `eosio.token::transfer`
 
 ```sh
 proton action eosio linkauth '{
-  "account": "freedomyield",
+  "account": "metalfreedom",
   "code": "eosio.token",
   "type": "transfer",
   "requirement": "anchor"
-}' freedomyield@active
+}' metalfreedom@active
 ```
 
-Effect: for actions where `from = freedomyield` on `eosio.token::transfer`,
-the chain accepts `freedomyield@anchor` as sufficient authorization
-(in addition to the default `freedomyield@active`). No other
+Effect: for actions where `from = metalfreedom` on `eosio.token::transfer`,
+the chain accepts `metalfreedom@anchor` as sufficient authorization
+(in addition to the default `metalfreedom@active`). No other
 `eosio.token` action and no other contract action is reached by this
 linkauth.
 
@@ -510,11 +510,11 @@ would link `anchor` to ALL actions of `eosio.token`, which would
 unnecessarily widen `anchor`'s authority.
 
 **Phase β preview** (not executed in Phase α): when the
-`freedomyield::inscribe` action is deployed (T-4 SC spec), an
+`metalfreedom::inscribe` action is deployed (T-4 SC spec), an
 additional `linkauth` will be issued:
 
 ```
-{"account":"freedomyield","code":"freedomyield",
+{"account":"metalfreedom","code":"metalfreedom",
  "type":"inscribe","requirement":"anchor"}
 ```
 
@@ -526,10 +526,10 @@ this Phase α step.
 
 ```sh
 # Re-read the account; expect the new `anchor` permission to appear
-# under `freedomyield.permissions`, parent=active, with the
+# under `metalfreedom.permissions`, parent=active, with the
 # <anchor_pubkey> from A4 as the sole key.
 curl -sS -X POST -H 'Content-Type: application/json' \
-  --data '{"json":true,"account_name":"freedomyield"}' \
+  --data '{"json":true,"account_name":"metalfreedom"}' \
   https://api-xprnetwork-main.saltant.io/v1/chain/get_account \
   | jq '.permissions[] | select(.perm_name=="anchor")'
 
@@ -538,15 +538,15 @@ curl -sS -X POST -H 'Content-Type: application/json' \
 # confirmed sink name; <root_hash> is any 64-hex placeholder for the
 # verification dry-run).
 proton action eosio.token transfer '{
-  "from": "freedomyield",
+  "from": "metalfreedom",
   "to": "<sink_account>",
   "quantity": "0.0001 XPR",
   "memo": "fyid1:<root_hash>"
-}' freedomyield@anchor --dry-run
+}' metalfreedom@anchor --dry-run
 ```
 
 Expected: the dry-run reports the action as well-formed and accepts
-`freedomyield@anchor` as the required authorization. No actual
+`metalfreedom@anchor` as the required authorization. No actual
 broadcast occurs with `--dry-run`.
 
 A successful mainnet broadcast of the same action (without
@@ -569,11 +569,11 @@ attention later.
 - **Active tightening**: if the K1 `EOS6w1u...` on active is no
   longer needed after owner rotation, remove it from active so the
   only active signer is the WebAuth credential.
-- **SC deploy on `freedomyield`**: the contract spec is C3 T-4
+- **SC deploy on `metalfreedom`**: the contract spec is C3 T-4
   deliverable (`scripts/operator-local/contract/`
-  `freedomyield-anchor.spec.md`). Deploy is Phase β; the contract is
+  `metalfreedom-anchor.spec.md`). Deploy is Phase β; the contract is
   NOT deployed during Phase α.
-- **Additional linkauth for `freedomyield::inscribe`**: see A7
+- **Additional linkauth for `metalfreedom::inscribe`**: see A7
   Phase β preview block.
 - **Optional sink-account hardening**: e.g. multisig on the sink, a
   no-op contract on the sink that ignores or logs incoming transfers,
@@ -702,16 +702,16 @@ retained as the canonical source for re-import after CLI reset.
 ```sh
 ssh "${VALIDATOR_SSH_HOST}" 'sudo -u deploy bash -c "
   proton action eosio.token transfer '\''{
-    \"from\": \"freedomyield\",
+    \"from\": \"metalfreedom\",
     \"to\": \"<sink_account>\",
     \"quantity\": \"0.0001 XPR\",
     \"memo\": \"fyid1:0000000000000000000000000000000000000000000000000000000000000000\"
-  }'\'' freedomyield@anchor --dry-run
+  }'\'' metalfreedom@anchor --dry-run
 "'
 ```
 
 Expected: the dry-run reports the action as well-formed and accepts
-`freedomyield@anchor` as the required authorization. No actual
+`metalfreedom@anchor` as the required authorization. No actual
 broadcast occurs.
 
 If the dry-run fails with "permission not found" or "missing required
@@ -729,11 +729,11 @@ or in response to a suspected exposure), the procedure is:
 proton key:generate    # captures PUB_K1_<new>; PVT_K1_<new> to Dashlane
 
 # 2. From the operator Mac, sign updateauth replacing the old pubkey
-#    on the freedomyield@anchor permission. Either signing path
-#    (WebAuth or K1) from A6 may be used; freedomyield@active is the
+#    on the metalfreedom@anchor permission. Either signing path
+#    (WebAuth or K1) from A6 may be used; metalfreedom@active is the
 #    required authorization.
 proton action eosio updateauth '{
-  "account": "freedomyield",
+  "account": "metalfreedom",
   "permission": "anchor",
   "parent": "active",
   "auth": {
@@ -742,11 +742,11 @@ proton action eosio updateauth '{
     "accounts": [],
     "waits": []
   }
-}' freedomyield@active
+}' metalfreedom@active
 
 # 3. Verify on chain that anchor.keys[] now contains only PUB_K1_<new>.
 curl -sS -X POST -H 'Content-Type: application/json' \
-  --data '{"json":true,"account_name":"freedomyield"}' \
+  --data '{"json":true,"account_name":"metalfreedom"}' \
   https://api-xprnetwork-main.saltant.io/v1/chain/get_account \
   | jq '.permissions[] | select(.perm_name=="anchor")'
 
@@ -807,9 +807,9 @@ Recovery scenarios:
   Execute B6 (rotation) immediately on a clean device with a fresh
   proton-cli keystore; assume the old anchor key is in adversary
   hands and the linkauth scope (= eosio.token::transfer with
-  `from = freedomyield`) is exploitable until the rotation lands.
+  `from = metalfreedom`) is exploitable until the rotation lands.
   Note that the linkauth scope is intentionally narrow: the
-  adversary cannot move tokens out of `freedomyield` arbitrarily,
+  adversary cannot move tokens out of `metalfreedom` arbitrarily,
   cannot change permissions, and cannot deploy contracts.
 
 ## B8. What B does NOT change
@@ -818,7 +818,7 @@ Recovery scenarios:
   (= Phase 5 / Phase 6 key, used for `ssh-keygen -Y sign` on
   `identity.json`) is untouched.
 - The validator's `staker.key` and BLS `signer.key` are untouched.
-- The `freedomyield@owner` and `freedomyield@active` permissions on
+- The `metalfreedom@owner` and `metalfreedom@active` permissions on
   XPR mainnet are untouched (Phase β work; see A9).
 - The web host has no awareness of the anchor key and never receives
   it (per Constitution §5: unidirectional data flow validator → web).

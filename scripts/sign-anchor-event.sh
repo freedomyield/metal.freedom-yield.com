@@ -9,16 +9,16 @@
 # /api/anchor-receipt.json.
 #
 # Phase α uses the cheapest form: eosio.token::transfer signed by
-# freedomyield@anchor, with the memo "fyid1:<dag_root_hash>". Phase β
-# replaces this with a freedomyield::inscribe smart-contract action
-# (see scripts/operator-local/contract/freedomyield-anchor.spec.md).
+# metalfreedom@anchor, with the memo "fyid1:<dag_root_hash>". Phase β
+# replaces this with a metalfreedom::inscribe smart-contract action
+# (see scripts/operator-local/contract/metalfreedom-anchor.spec.md).
 # This script handles Phase α only; the Phase β path is left as a
 # documented hook below and is owned by Phase β implementation work.
 #
 # Authority chain:
 #   ed25519 operator identity key (Mac) → signed /api/identity.json
 #     → carries dag_root_hash
-#       → freedomyield@anchor (validator host, K1 via proton-cli)
+#       → metalfreedom@anchor (validator host, K1 via proton-cli)
 #         → eosio.token::transfer memo = fyid1:<dag_root_hash>
 #           → on-chain receipt = /api/anchor-receipt.json
 #
@@ -62,10 +62,10 @@
 #                      sources the eosio.token::transfer broadcast. NO default
 #                      — the script fails closed if the file is missing, empty,
 #                      multi-line, has invalid characters, or is longer than
-#                      12 chars (per audit-C/F-E2). The literal "freedomyield"
+#                      12 chars (per audit-C/F-E2). The literal "metalfreedom"
 #                      fallback was removed because the same script runs the
 #                      testnet rehearsal with a throwaway test account.
-#                      Mainnet: contains 'freedomyield'.
+#                      Mainnet: contains 'metalfreedom'.
 #                      Testnet: contains the rehearsal test account name
 #                      (see docs/PHASE_ALPHA_TESTNET_DRY_RUN.md).
 #   anchor-sink        single-line file containing the sink account name (= the
@@ -93,11 +93,11 @@
 #     "inscribe_action": {
 #       "account": "eosio.token",
 #       "name": "transfer",
-#       "from": "freedomyield",
+#       "from": "metalfreedom",
 #       "to": "<sink>",
 #       "quantity": "<quantity>",
 #       "memo": "fyid1:<dag_root_hash>",
-#       "permission": {"actor": "freedomyield", "permission": "anchor"}
+#       "permission": {"actor": "metalfreedom", "permission": "anchor"}
 #     }
 #   }
 
@@ -167,7 +167,7 @@ read_config() {
 }
 
 # XPR_ACCOUNT — operator-controlled account name. Strict, no default.
-# Per audit-C/F-E2 the literal 'freedomyield' fallback was removed so that
+# Per audit-C/F-E2 the literal 'metalfreedom' fallback was removed so that
 # the same script runs both mainnet and testnet rehearsal without the
 # rehearsal accidentally broadcasting from the production account.
 XPR_ACCOUNT_FILE="${CONFIG_DIR}/xpr-account"

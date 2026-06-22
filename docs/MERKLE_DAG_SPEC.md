@@ -150,7 +150,7 @@ At Phase α start, both branches have ≥ 1 leaf (identity-history has at least 
 
 ## 6. A-chain anchor binding (Phase α)
 
-Phase α uses an `eosio.token::transfer` transaction on Metal A-chain (PulseVM / XPRNetwork), signed by the narrow `freedomyield@anchor` permission. The minimum-cost form is a transfer of an arbitrarily small token amount (e.g. `0.0001 XPR`) from `freedomyield` to a **dedicated sink account distinct from `freedomyield`**; the memo carries the binding. Self-transfer (`from == to`) is rejected at the `eosio.token` contract level (`XPRNetwork/proton.contracts/contracts/eosio.token/src/eosio.token.cpp` line 99: `check( from != to, "cannot transfer to self" )`), so a second account is unavoidable. The specific sink account name is operator-chosen; see `docs/OPERATOR_IDENTITY_SETUP.md` §A3 for the placement constraint.
+Phase α uses an `eosio.token::transfer` transaction on Metal A-chain (PulseVM / XPRNetwork), signed by the narrow `metalfreedom@anchor` permission. The minimum-cost form is a transfer of an arbitrarily small token amount (e.g. `0.0001 XPR`) from `metalfreedom` to a **dedicated sink account distinct from `metalfreedom`**; the memo carries the binding. Self-transfer (`from == to`) is rejected at the `eosio.token` contract level (`XPRNetwork/proton.contracts/contracts/eosio.token/src/eosio.token.cpp` line 99: `check( from != to, "cannot transfer to self" )`), so a second account is unavoidable. The specific sink account name is operator-chosen; see `docs/OPERATOR_IDENTITY_SETUP.md` §A3 for the placement constraint.
 
 ```
 memo = "fyid1:" + lowercase_hex(dag_root_hash)
@@ -159,14 +159,14 @@ memo = "fyid1:" + lowercase_hex(dag_root_hash)
 
 The memo prefix `fyid1:` (= "Freedom Yield identity, format version 1") lets future on-chain parsers distinguish our inscriptions and lets us migrate to `fyid2:` if a breaking change is ever needed without colliding with intervening unrelated memos.
 
-Phase β SHALL move to a dedicated `freedomyield::inscribe` smart-contract action; the memo format is retained as the canonical commitment form so that the Phase α corpus remains verifiable after migration.
+Phase β SHALL move to a dedicated `metalfreedom::inscribe` smart-contract action; the memo format is retained as the canonical commitment form so that the Phase α corpus remains verifiable after migration.
 
 Verifier check, given an `anchor-receipt.json`:
 
 1. Look up `tx_id` on a public XPR explorer.
 2. Read the action's `memo` field.
 3. Assert `memo == "fyid1:" + dag_root_hash` from the receipt.
-4. Assert the action's signer permission is `freedomyield@anchor` (or, in Phase β, `freedomyield@anchor` invoking `freedomyield::inscribe`).
+4. Assert the action's signer permission is `metalfreedom@anchor` (or, in Phase β, `metalfreedom@anchor` invoking `metalfreedom::inscribe`).
 
 ## 7. Document set
 
@@ -202,7 +202,7 @@ Cases covered: 1-leaf branch (= single leaf, root = leaf), 2-leaf branch, 3-leaf
 
 ## 10. Open items for the rest of Phase α
 
-- **IC-3 (C3 → C2, deadline 2026-06-23):** confirm Phase β `freedomyield::inscribe` action signature so `anchor-receipt.schema.v1.json` can declare a stable `inscribe_action` block (currently captured as `eosio.token::transfer` for Phase α; Phase β additive fields will live alongside).
+- **IC-3 (C3 → C2, deadline 2026-06-23):** confirm Phase β `metalfreedom::inscribe` action signature so `anchor-receipt.schema.v1.json` can declare a stable `inscribe_action` block (currently captured as `eosio.token::transfer` for Phase α; Phase β additive fields will live alongside).
 - **C1 (gen-identity.sh extension):** consume `/api/identity-history.jsonl` and `/api/cycle-history.jsonl`, compute the two branch roots via the existing `compute_merkle_root` shell function (= already implements §3), concatenate raw bytes per §4, emit `dag_root_hash` into `identity.json` as an additive field.
 - **C2 (T-4):** rewrite `docs/IDENTITY_VERIFICATION.md` into a 9-step recipe that walks an evaluator from `identity.json` through `dag_root_hash` to the A-chain explorer cross-check. Cite this document for byte-level rules.
 

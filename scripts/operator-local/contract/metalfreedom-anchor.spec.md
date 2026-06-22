@@ -1,10 +1,10 @@
-# `freedomyield::anchor` — Phase β smart-contract specification draft
+# `metalfreedom::anchor` — Phase β smart-contract specification draft
 
 > **Status**: design draft for Phase β. **NOT deployed in Phase α.**
 > The Phase α anchor uses `eosio.token::transfer` with a memo of the
 > form `fyid1:<dag_root_hash>` and does not require a contract. This
 > document specifies the Phase β replacement: a custom contract on
-> `freedomyield` (the existing XPR account) exposing an `inscribe`
+> `metalfreedom` (the existing XPR account) exposing an `inscribe`
 > action backed by anti-replay-checked tables.
 >
 > **Scope**: C3 T-4 deliverable, the IC-3 handoff to C2 (anchor-receipt
@@ -23,8 +23,8 @@
 
 ## 1. Purpose
 
-`freedomyield::anchor` (= the future contract code deployed at the
-`freedomyield` XPR account) replaces the Phase α `eosio.token::transfer`
+`metalfreedom::anchor` (= the future contract code deployed at the
+`metalfreedom` XPR account) replaces the Phase α `eosio.token::transfer`
 memo anchor with a typed, queryable, anti-replay-checked alternative.
 
 Three improvements over Phase α:
@@ -71,15 +71,15 @@ ACTION inscribe(
 ### 2.2 Authorization
 
 The action requires `require_auth(get_self())` (= the contract account
-itself), which is `freedomyield`. Combined with the Phase α / Phase β
+itself), which is `metalfreedom`. Combined with the Phase α / Phase β
 permission setup at `docs/OPERATOR_IDENTITY_SETUP.md` § A6-A7, the
 chain-side rule chain is:
 
-- `freedomyield::inscribe` requires `freedomyield@active` by default.
-- `linkauth(freedomyield, anchor, freedomyield, inscribe)` (= Phase β
+- `metalfreedom::inscribe` requires `metalfreedom@active` by default.
+- `linkauth(metalfreedom, anchor, metalfreedom, inscribe)` (= Phase β
   follow-up to the Phase α `linkauth eosio.token transfer anchor`)
-  narrows the requirement to `freedomyield@anchor`.
-- `freedomyield@anchor` is held by the validator-host-stored K1 key
+  narrows the requirement to `metalfreedom@anchor`.
+- `metalfreedom@anchor` is held by the validator-host-stored K1 key
   (see `docs/OPERATOR_IDENTITY_SETUP.md` § A4, T-2 deploy doc).
 
 A leaked `anchor` key can therefore only call `inscribe` and the
@@ -88,7 +88,7 @@ modify permissions, or move XPR balance through other actions.
 
 ## 3. Tables
 
-Three tables, all scoped by `get_self()` (= `freedomyield`).
+Three tables, all scoped by `get_self()` (= `metalfreedom`).
 
 ### 3.1 `cycles`
 
@@ -168,7 +168,7 @@ The `inscribe` action body enforces the following checks; any failure
 returns an assertion error and the transaction is rejected:
 
 1. **Authorization**: `require_auth(get_self())` succeeds (= signer
-   holds `freedomyield@active` or, via linkauth, `freedomyield@anchor`).
+   holds `metalfreedom@active` or, via linkauth, `metalfreedom@anchor`).
 2. **Event type allowlist**: `event_type` ∈ `{"cyclestart"_n,
    "cycleend"_n, "idrotate"_n}`; otherwise assert.
 3. **Cycle monotonicity** (event-type-conditional):
@@ -229,14 +229,14 @@ An off-chain verifier can confirm the chain integrity by:
 ## 6. Action invocation example (Phase β)
 
 ```sh
-proton action freedomyield inscribe '{
+proton action metalfreedom inscribe '{
   "cycle_id": 3,
   "event_type": "cyclestart",
   "root_hash":  "<64-hex dag_root_hash for cycle 3 start>",
   "prev_root":  "<64-hex dag_root_hash from previous inscribe, or 64 zeros for genesis>",
   "leaf_hash":  "<64-hex leaf hash of the cycle-3-start leaf in the cycles branch>",
   "payload":    "{\"cycle_n\":3,\"start_iso\":\"2026-07-04T04:00:00Z\",\"node_id\":\"NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v\"}"
-}' freedomyield@anchor
+}' metalfreedom@anchor
 ```
 
 Returns: transaction id (64-hex). The transaction trace contains the
@@ -252,11 +252,11 @@ the resulting `cycles`, `roots`, `leaves` table rows are visible via
             anchor.tx_id
             anchor.dag_root_hash (= root_hash inscribed)
 3. Query proton chain: get_transaction(anchor.tx_id)
-   → action.account == "freedomyield"
+   → action.account == "metalfreedom"
    → action.name == "inscribe"
    → action.data.root_hash == anchor.dag_root_hash
    → action.data.payload (= optional metadata)
-4. Optionally: get_table_rows(scope="freedomyield", code="freedomyield",
+4. Optionally: get_table_rows(scope="metalfreedom", code="metalfreedom",
    table="cycles", lower_bound=anchor.cycles_id, limit=1) and assert
    prev_root linkage backward to genesis.
 5. Confirm /api/cycles-history.json's dag_root_hash matches
@@ -303,10 +303,10 @@ C2's `/api/anchor-receipt.schema.v1.json`
 `anchor.inscribe_action` block should mirror the `inscribe` struct
 above when `anchor.method == "phase_beta_sc_inscribe"`. Specifically:
 
-- `anchor.inscribe_action.account` (= "freedomyield")
+- `anchor.inscribe_action.account` (= "metalfreedom")
 - `anchor.inscribe_action.name` (= "inscribe")
 - `anchor.inscribe_action.data` (= the six-field struct above)
-- `anchor.inscribe_action.authorization[0].actor` (= "freedomyield")
+- `anchor.inscribe_action.authorization[0].actor` (= "metalfreedom")
 - `anchor.inscribe_action.authorization[0].permission` (= "anchor")
 
 (IC-3 deliverable: C3 confirms this struct; C2 finalizes the schema
@@ -317,7 +317,7 @@ above when `anchor.method == "phase_beta_sc_inscribe"`. Specifically:
 | ID | Question | Owner |
 | --- | --- | --- |
 | Q1 | Should the contract emit an inline `eosio.token::transfer` of `0.0001 XPR` to the sink as a paired "ledger receipt", or is the `inscribe` action sufficient on its own? | operator + C3 in Phase β |
-| Q2 | RAM cost of three tables — is `freedomyield` account RAM sufficient, or should the operator pre-purchase additional RAM? | C3 measurement during testnet rehearsal |
+| Q2 | RAM cost of three tables — is `metalfreedom` account RAM sufficient, or should the operator pre-purchase additional RAM? | C3 measurement during testnet rehearsal |
 | Q3 | Should `payload` be a typed struct (e.g. `inscribe_payload` with named fields) instead of a free-form string, to enforce shape at consensus level? | trade-off: rigidity vs forward-compatibility |
 | Q4 | Should `cycleend` carry a final uptime / delegator-count field that `cyclestart` does not? Or should `payload` carry that and the action remain symmetric? | C2 schema review |
 | Q5 | Should the contract expose a read-only `getlast` action for verifiers, or rely solely on table reads? | low priority; tables are queryable as-is |
@@ -346,7 +346,7 @@ above when `anchor.method == "phase_beta_sc_inscribe"`. Specifically:
   Phase β `eosio.token::transfer`-independence.
 - `docs/MERKLE_DAG_SPEC.md` (C2 deliverable) — canonical DAG
   construction; `root_hash` here is the `dag_root_hash` defined there.
-- `docs/OPERATOR_IDENTITY_SETUP.md` § A1-A10 (C3 T-1) — `freedomyield`
+- `docs/OPERATOR_IDENTITY_SETUP.md` § A1-A10 (C3 T-1) — `metalfreedom`
   permission setup whose `anchor` permission is the signer for this
   action.
 - `/api/anchor-receipt.schema.v1.json` (C2 deliverable) — public

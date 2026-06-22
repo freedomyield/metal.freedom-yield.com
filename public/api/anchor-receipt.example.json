@@ -1,5 +1,5 @@
 {
-	"_comment": "Synthetic schema example for /api/anchor-receipt.schema.v1.json. This file is NOT a snapshot of any production inscription — it is a fixed demonstration of the schema's shape. All hex strings, tx_ids, block numbers, sink-account names, and timestamps shown here are synthetic placeholders that document field formats only; they do not refer to any real on-chain transaction, account, or moment in time. The placeholder sink name 'fyldsink' is one of the candidates under operator judgment per project_phase_alpha_coordination_log.md (judgment #1); the production receipt will substitute the operator-selected name. Production runtime receipt is published at /api/anchor-receipt.json by scripts/post-anchor-event.sh on the validator host. See docs/MERKLE_DAG_SPEC.md.",
+	"_comment": "Synthetic schema example for /api/anchor-receipt.schema.v1.json. This file is NOT a snapshot of any production inscription — it is a fixed demonstration of the schema's shape. All hex strings, tx_ids, block numbers, and timestamps shown here are synthetic placeholders that document field formats only; they do not refer to any real on-chain transaction or moment in time. The operator XPR account 'metalfreedom' and the sink account 'fyhistory' are the confirmed production names on Metal A-chain mainnet (= the runtime receipt will carry exactly these values); only the time-varying fields (tx_id, block_num, block_time, dag_root_hash, hashes) are synthetic. Production runtime receipt is published at /api/anchor-receipt.json by scripts/post-anchor-event.sh on the validator host. See docs/MERKLE_DAG_SPEC.md.",
 	"$schema": "https://metal.freedom-yield.com/api/anchor-receipt.schema.v1.json",
 	"schema_version": 1,
 	"dag_root_hash": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -15,12 +15,12 @@
 		"inscribe_action": {
 			"account": "eosio.token",
 			"name": "transfer",
-			"from": "freedomyield",
-			"to": "fyldsink",
+			"from": "metalfreedom",
+			"to": "fyhistory",
 			"quantity": "0.0001 XPR",
 			"memo": "fyid1:0000000000000000000000000000000000000000000000000000000000000000",
 			"permission": {
-				"actor": "freedomyield",
+				"actor": "metalfreedom",
 				"permission": "anchor"
 			}
 		}

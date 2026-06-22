@@ -2,7 +2,7 @@
 	"$schema": "https://json-schema.org/draft/2020-12/schema",
 	"$id": "https://metal.freedom-yield.com/api/anchor-receipt.schema.v1.json",
 	"title": "Freedom Yield Metal — A-chain Anchor Receipt v1",
-	"description": "Formal contract for /api/anchor-receipt.json. The receipt republishes the most recent Metal A-chain (PulseVM / XPRNetwork) inscription that anchors a Merkle DAG root committed by /api/identity.json and summarised by /api/cycles-history.json. The receipt is a content-addressed pointer: an evaluator may independently look up the receipt's tx_id on a public XPR explorer and assert memo == \"fyid1:\" + dag_root_hash. The receipt is regenerated each time a new inscription is broadcast (= cycle start, cycle end, or identity key rotation). Method discriminator: the anchor.method enum identifies whether the inscription is the Phase α minimal form (= eosio.token::transfer) or the Phase β dedicated form (= freedomyield::inscribe smart-contract action). Companion design: docs/MERKLE_DAG_SPEC.md. Schema stability: additive-only within v1; breaking changes go to /api/anchor-receipt.schema.v2.json and the v1 URL stays reachable for at least 18 months.",
+	"description": "Formal contract for /api/anchor-receipt.json. The receipt republishes the most recent Metal A-chain (PulseVM / XPRNetwork) inscription that anchors a Merkle DAG root committed by /api/identity.json and summarised by /api/cycles-history.json. The receipt is a content-addressed pointer: an evaluator may independently look up the receipt's tx_id on a public XPR explorer and assert memo == \"fyid1:\" + dag_root_hash. The receipt is regenerated each time a new inscription is broadcast (= cycle start, cycle end, or identity key rotation). Method discriminator: the anchor.method enum identifies whether the inscription is the Phase α minimal form (= eosio.token::transfer) or the Phase β dedicated form (= metalfreedom::inscribe smart-contract action). Companion design: docs/MERKLE_DAG_SPEC.md. Schema stability: additive-only within v1; breaking changes go to /api/anchor-receipt.schema.v2.json and the v1 URL stays reachable for at least 18 months.",
 	"x-issued-at": "2026-06-21T00:00:00Z",
 	"x-stability": "additive-only-within-v1",
 	"x-baseline-revision": "2026-06-21-phase-alpha-initial",
@@ -58,7 +58,7 @@
 				"method": {
 					"type": "string",
 					"enum": ["phase_alpha_token_transfer", "phase_beta_sc_inscribe"],
-					"description": "Discriminator for which on-chain mechanism was used. Phase α uses the minimum-cost eosio.token::transfer with the memo carrying the binding (action shape: account/name/from/to/quantity/memo/permission). Phase β uses a dedicated freedomyield::inscribe smart-contract action with a six-field typed payload (action shape: account/name/data/authorization). The if/then/else blocks in this schema dispatch inscribe_action.required on this discriminator so a single receipt schema cleanly covers both eras. See scripts/operator-local/contract/freedomyield-anchor.spec.md for the Phase β action specification."
+					"description": "Discriminator for which on-chain mechanism was used. Phase α uses the minimum-cost eosio.token::transfer with the memo carrying the binding (action shape: account/name/from/to/quantity/memo/permission). Phase β uses a dedicated metalfreedom::inscribe smart-contract action with a six-field typed payload (action shape: account/name/data/authorization). The if/then/else blocks in this schema dispatch inscribe_action.required on this discriminator so a single receipt schema cleanly covers both eras. See scripts/operator-local/contract/metalfreedom-anchor.spec.md for the Phase β action specification."
 				},
 				"tx_id": {
 					"type": "string",
@@ -85,7 +85,7 @@
 					"properties": {
 						"account": {
 							"type": "string",
-							"description": "On-chain contract account that owns the action. For phase_alpha_token_transfer: 'eosio.token'. For phase_beta_sc_inscribe: 'freedomyield'."
+							"description": "On-chain contract account that owns the action. For phase_alpha_token_transfer: 'eosio.token'. For phase_beta_sc_inscribe: 'metalfreedom'."
 						},
 						"name": {
 							"type": "string",
@@ -94,12 +94,12 @@
 						"from": {
 							"type": "string",
 							"pattern": "^[a-z1-5.]{1,12}$",
-							"description": "Phase α only. Source XPR account = 'freedomyield' (the operator-controlled account holding the anchor permission). Omitted in Phase β SC inscribe receipts (the freedomyield::inscribe action has no from/to semantics)."
+							"description": "Phase α only. Source XPR account = 'metalfreedom' (the operator-controlled account holding the anchor permission). Omitted in Phase β SC inscribe receipts (the metalfreedom::inscribe action has no from/to semantics)."
 						},
 						"to": {
 							"type": "string",
 							"pattern": "^[a-z1-5.]{1,12}$",
-							"description": "Phase α only. Destination XPR account. MUST NOT equal 'from' — the XPRNetwork eosio.token contract rejects self-transfer at the contract level ('cannot transfer to self', eosio.token.cpp L99). The destination is a separate sink account distinct from 'freedomyield'; the specific sink name is operator-chosen (see docs/MERKLE_DAG_SPEC.md §6 and the Phase α design memo). Omitted in Phase β receipts."
+							"description": "Phase α only. Destination XPR account. MUST NOT equal 'from' — the XPRNetwork eosio.token contract rejects self-transfer at the contract level ('cannot transfer to self', eosio.token.cpp L99). The destination is a separate sink account distinct from 'metalfreedom'; the specific sink name is operator-chosen (see docs/MERKLE_DAG_SPEC.md §6 and the Phase α design memo). Omitted in Phase β receipts."
 						},
 						"quantity": {
 							"type": "string",
@@ -118,7 +118,7 @@
 								"actor": {
 									"type": "string",
 									"pattern": "^[a-z1-5.]{1,12}$",
-									"description": "Antelope/EOSIO account name of the signer. For production mainnet receipts this is the operator-controlled 'freedomyield' account; for testnet rehearsal receipts (= docs/PHASE_ALPHA_TESTNET_DRY_RUN.md) this is the throwaway test account. The schema accepts both shapes via the XPR account pattern rather than a const so the same schema URL validates mainnet AND testnet receipts. Cross-account binding (= 'is this really the operator?') is established off-schema: identity.json's signed manifest names the operator brand and binds it to the anchor permission lineage; the on-chain explorer cross-check (IDENTITY_VERIFICATION.md §8) confirms the action's signer matches what the receipt declares."
+									"description": "Antelope/EOSIO account name of the signer. For production mainnet receipts this is the operator-controlled 'metalfreedom' account; for testnet rehearsal receipts (= docs/PHASE_ALPHA_TESTNET_DRY_RUN.md) this is the throwaway test account. The schema accepts both shapes via the XPR account pattern rather than a const so the same schema URL validates mainnet AND testnet receipts. Cross-account binding (= 'is this really the operator?') is established off-schema: identity.json's signed manifest names the operator brand and binds it to the anchor permission lineage; the on-chain explorer cross-check (IDENTITY_VERIFICATION.md §8) confirms the action's signer matches what the receipt declares."
 								},
 								"permission": {
 									"type": "string",
@@ -164,7 +164,7 @@
 									"description": "Optional structured metadata (JSON-encoded), UTF-8, up to 256 bytes (= contract-enforced, matches Phase α memo limit). MAY be empty string."
 								}
 							},
-							"description": "Phase β only. The structured action payload of freedomyield::inscribe. Six fields per scripts/operator-local/contract/freedomyield-anchor.spec.md §2.1. Omitted in Phase α receipts."
+							"description": "Phase β only. The structured action payload of metalfreedom::inscribe. Six fields per scripts/operator-local/contract/metalfreedom-anchor.spec.md §2.1. Omitted in Phase α receipts."
 						},
 						"authorization": {
 							"type": "array",
@@ -184,7 +184,7 @@
 									}
 								}
 							},
-							"description": "Phase β only. Antelope/EOSIO-style action.authorization. For phase_beta_sc_inscribe: authorization[0] = {actor: 'freedomyield', permission: 'anchor'}. Omitted in Phase α receipts (the singular `permission` field is used instead)."
+							"description": "Phase β only. Antelope/EOSIO-style action.authorization. For phase_beta_sc_inscribe: authorization[0] = {actor: 'metalfreedom', permission: 'anchor'}. Omitted in Phase α receipts (the singular `permission` field is used instead)."
 						}
 					}
 				}

@@ -6,10 +6,10 @@
 #   - multi-line (≥2 newlines) → fail-closed exit 2
 #   - invalid chars (uppercase, digit 0/6-9, hyphen) → fail-closed exit 2
 #   - length > 12 → fail-closed exit 2
-#   - mainnet value 'freedomyield' (12 chars) → accepted; receipt carries it
+#   - mainnet value 'metalfreedom' (12 chars) → accepted; receipt carries it
 #   - testnet throwaway 'fytest1' (7 chars) → accepted; receipt carries it
 #   - receipt's inscribe_action.from + .permission.actor BOTH equal xpr-account
-#   - proton CLI is invoked with ${XPR_ACCOUNT}@anchor (= NOT hardcoded freedomyield@anchor)
+#   - proton CLI is invoked with ${XPR_ACCOUNT}@anchor (= NOT hardcoded metalfreedom@anchor)
 #
 # All cases run with --dry-run. Proton CLI is stubbed via PATH override
 # so no real network call happens.
@@ -59,7 +59,7 @@ DAG="0000000000000000000000000000000000000000000000000000000000000000"
 write_baseline_config() {
 	local dir="$1"
 	mkdir -p "${dir}"
-	printf '%s' 'fyldsink'    > "${dir}/anchor-sink"
+	printf '%s' 'fyhistory'    > "${dir}/anchor-sink"
 	printf '%s' 'proton-test' > "${dir}/xpr-chain"
 }
 
@@ -108,7 +108,7 @@ rm -f "$(printf '%s' "${RESULT}" | sed -n '2p')" "${ERR_FILE}"
 # -------- Case C: multi-line file --------
 echo "=== Case C: xpr-account multi-line → fail-closed ==="
 CFG_C="${TMP}/cfg-c"; write_baseline_config "${CFG_C}"
-printf 'freedomyield\nfytest1\n' > "${CFG_C}/xpr-account"
+printf 'metalfreedom\nfytest1\n' > "${CFG_C}/xpr-account"
 RESULT="$(run_signer "${CFG_C}")"
 RC="$(printf '%s' "${RESULT}" | sed -n '1p')"
 ERR_FILE="$(printf '%s' "${RESULT}" | sed -n '3p')"
@@ -149,10 +149,10 @@ else
 fi
 rm -f "$(printf '%s' "${RESULT}" | sed -n '2p')" "${ERR_FILE}"
 
-# -------- Case F: mainnet 'freedomyield' → receipt carries it --------
-echo "=== Case F: mainnet 'freedomyield' (12 chars) → accepted, receipt carries it ==="
+# -------- Case F: mainnet 'metalfreedom' → receipt carries it --------
+echo "=== Case F: mainnet 'metalfreedom' (12 chars) → accepted, receipt carries it ==="
 CFG_F="${TMP}/cfg-f"; write_baseline_config "${CFG_F}"
-printf 'freedomyield' > "${CFG_F}/xpr-account"
+printf 'metalfreedom' > "${CFG_F}/xpr-account"
 : > "${LAST_AUTH_LOG}"
 RESULT="$(run_signer "${CFG_F}")"
 RC="$(printf '%s' "${RESULT}" | sed -n '1p')"
@@ -162,7 +162,7 @@ if [ "${RC}" = "0" ] && jq empty "${OUT_FILE}" >/dev/null 2>&1; then
 	FROM="$(jq -r .inscribe_action.from "${OUT_FILE}")"
 	ACTOR="$(jq -r .inscribe_action.permission.actor "${OUT_FILE}")"
 	AUTH="$(tail -n 1 "${LAST_AUTH_LOG}")"
-	if [ "${FROM}" = "freedomyield" ] && [ "${ACTOR}" = "freedomyield" ] && [ "${AUTH}" = "AUTH=freedomyield@anchor" ]; then
+	if [ "${FROM}" = "metalfreedom" ] && [ "${ACTOR}" = "metalfreedom" ] && [ "${AUTH}" = "AUTH=metalfreedom@anchor" ]; then
 		echo "  PASS F mainnet receipt: from=${FROM}, actor=${ACTOR}, proton auth=${AUTH}"; PASS=$((PASS+1))
 	else
 		echo "  FAIL F mainnet mismatch: from=${FROM}, actor=${ACTOR}, auth=${AUTH}"; FAIL=$((FAIL+1))
@@ -172,8 +172,8 @@ else
 fi
 rm -f "${OUT_FILE}" "${ERR_FILE}"
 
-# -------- Case G: testnet 'fytest1' → receipt carries it, NOT freedomyield --------
-echo "=== Case G: testnet 'fytest1' → receipt carries throwaway, NOT freedomyield ==="
+# -------- Case G: testnet 'fytest1' → receipt carries it, NOT metalfreedom --------
+echo "=== Case G: testnet 'fytest1' → receipt carries throwaway, NOT metalfreedom ==="
 CFG_G="${TMP}/cfg-g"; write_baseline_config "${CFG_G}"
 printf 'fytest1' > "${CFG_G}/xpr-account"
 : > "${LAST_AUTH_LOG}"
@@ -184,10 +184,10 @@ if [ "${RC}" = "0" ] && jq empty "${OUT_FILE}" >/dev/null 2>&1; then
 	FROM="$(jq -r .inscribe_action.from "${OUT_FILE}")"
 	ACTOR="$(jq -r .inscribe_action.permission.actor "${OUT_FILE}")"
 	AUTH="$(tail -n 1 "${LAST_AUTH_LOG}")"
-	if [ "${FROM}" = "fytest1" ] && [ "${ACTOR}" = "fytest1" ] && [ "${AUTH}" = "AUTH=fytest1@anchor" ] && ! grep -q 'freedomyield' "${OUT_FILE}"; then
-		echo "  PASS G testnet receipt: from=${FROM}, actor=${ACTOR}, proton auth=${AUTH}; no 'freedomyield' literal"; PASS=$((PASS+1))
+	if [ "${FROM}" = "fytest1" ] && [ "${ACTOR}" = "fytest1" ] && [ "${AUTH}" = "AUTH=fytest1@anchor" ] && ! grep -q 'metalfreedom' "${OUT_FILE}"; then
+		echo "  PASS G testnet receipt: from=${FROM}, actor=${ACTOR}, proton auth=${AUTH}; no 'metalfreedom' literal"; PASS=$((PASS+1))
 	else
-		echo "  FAIL G testnet mismatch or freedomyield leak: from=${FROM}, actor=${ACTOR}, auth=${AUTH}"; FAIL=$((FAIL+1))
+		echo "  FAIL G testnet mismatch or metalfreedom leak: from=${FROM}, actor=${ACTOR}, auth=${AUTH}"; FAIL=$((FAIL+1))
 	fi
 else
 	echo "  FAIL G rc=${RC}"; FAIL=$((FAIL+1))

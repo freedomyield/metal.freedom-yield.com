@@ -22,10 +22,10 @@ jq -n --arg dag "${DAG_ROOT}" '{
 	inscribe_action: {
 		account: "eosio.token",
 		name: "transfer",
-		from: "freedomyield",
-		to: "fyldsink",
+		from: "metalfreedom",
+		to: "fyhistory",
 		quantity: "0.0001 XPR",
 		memo: ("fyid1:" + $dag),
-		permission: {actor: "freedomyield", permission: "anchor"}
+		permission: {actor: "metalfreedom", permission: "anchor"}
 	}
 }'

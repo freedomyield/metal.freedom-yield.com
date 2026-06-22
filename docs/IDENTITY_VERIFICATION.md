@@ -13,7 +13,7 @@ The identity manifest is signed with a **dedicated ed25519 operator identity key
 - The signing key is **not** any private key used by the `metalgo` process.
 - The operator identity key is generated, held, and rotated on the operator's local Mac — not on the validator host or the web host. CI never receives the private key.
 
-A separate `freedomyield@anchor` key (XPRNetwork K1 / EOSIO format) lives on the validator host and signs A-chain inscriptions only. It is scoped via `linkauth` to inscribe-class actions, so a compromise of the anchor key cannot move tokens, change permissions, or deploy contracts. The signing key and the anchor key are independent; the chain of trust binds them through `identity.json`'s `operator_identity_pubkey_fingerprint` (signed by the operator identity key) and `anchor-receipt.json`'s `anchor.inscribe_action.permission.actor` (= `freedomyield`, with the `anchor` permission).
+A separate `metalfreedom@anchor` key (XPRNetwork K1 / EOSIO format) lives on the validator host and signs A-chain inscriptions only. It is scoped via `linkauth` to inscribe-class actions, so a compromise of the anchor key cannot move tokens, change permissions, or deploy contracts. The signing key and the anchor key are independent; the chain of trust binds them through `identity.json`'s `operator_identity_pubkey_fingerprint` (signed by the operator identity key) and `anchor-receipt.json`'s `anchor.inscribe_action.permission.actor` (= `metalfreedom`, with the `anchor` permission).
 
 This separation is intentional. Each key has one job; reuse for off-chain manifest signing or for unrelated on-chain actions is excluded by design.
 
@@ -164,17 +164,17 @@ On the explorer entry, assert all of:
 
 | Field | Expected |
 |---|---|
-| action `account` | `eosio.token` (Phase α) or `freedomyield` (Phase β) |
+| action `account` | `eosio.token` (Phase α) or `metalfreedom` (Phase β) |
 | action `name` | `transfer` (Phase α) or `inscribe` (Phase β) |
 | action `memo` | exactly `fyid1:<DAG_ROOT>` (70 chars total, lowercase hex) |
-| signer permission | `freedomyield@anchor` |
-| `from` | `freedomyield` (Phase α `eosio.token::transfer`) |
+| signer permission | `metalfreedom@anchor` |
+| `from` | `metalfreedom` (Phase α `eosio.token::transfer`) |
 | `to` | NOT equal to `from`; matches `anchor-receipt.json.anchor.inscribe_action.to` |
 | block_num / block_time | matches receipt fields |
 
 The `from != to` invariant is forced by the XPRNetwork `eosio.token` contract (`eosio.token.cpp` L99 `check( from != to, "cannot transfer to self" )`) and is therefore observable on every Phase α receipt.
 
-The signer permission is the binding that ties the on-chain action to `freedomyield@anchor`. If the action was signed by `freedomyield@active` or `freedomyield@owner` instead, the receipt is not honoring the narrow-permission discipline declared by the operator and the evaluator SHOULD flag it.
+The signer permission is the binding that ties the on-chain action to `metalfreedom@anchor`. If the action was signed by `metalfreedom@active` or `metalfreedom@owner` instead, the receipt is not honoring the narrow-permission discipline declared by the operator and the evaluator SHOULD flag it.
 
 ### Step 9 — Cross-reference integrity (cycles ↔ identity)
 
@@ -199,7 +199,7 @@ If the previous key is to be marked revoked, an interim `identity.json` may be p
 
 `ssh-keygen -Y verify` does **not** check `key_iat` / `key_exp`. These are operator-declared lifetime metadata; consumers MAY enforce them as policy.
 
-The validator's on-chain signing keys (staker / BLS) are unaffected by operator identity key rotation; they have no relationship to this manifest. The `freedomyield@anchor` key is independent and rotates on its own schedule, via `freedomyield@active` invoking `updateauth anchor`.
+The validator's on-chain signing keys (staker / BLS) are unaffected by operator identity key rotation; they have no relationship to this manifest. The `metalfreedom@anchor` key is independent and rotates on its own schedule, via `metalfreedom@active` invoking `updateauth anchor`.
 
 ## Why a Merkle DAG anchor rather than just a signed manifest
 
@@ -207,7 +207,7 @@ A signed manifest alone proves only that the operator (= holder of the identity 
 
 The anchor does not prevent the operator from publishing a new, contradicting DAG later; it commits the operator to a specific history at a specific time, and lets evaluators detect contradictions trivially (= the prior on-chain memo is still there, pointing to a different root).
 
-The on-chain mechanism for Phase α is an `eosio.token::transfer` with the binding in the `memo` field. Phase β replaces this with a dedicated `freedomyield::inscribe` smart-contract action; both forms produce equivalent commitment to `dag_root_hash` via the memo field, and the `anchor-receipt.json.anchor.method` discriminator lets verifier tooling know which on-chain action shape to read.
+The on-chain mechanism for Phase α is an `eosio.token::transfer` with the binding in the `memo` field. Phase β replaces this with a dedicated `metalfreedom::inscribe` smart-contract action; both forms produce equivalent commitment to `dag_root_hash` via the memo field, and the `anchor-receipt.json.anchor.method` discriminator lets verifier tooling know which on-chain action shape to read.
 
 ## Why not BLS / staking key for the off-chain signature?
 
