@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>廃止予告ポリシー — Freedom Yield Metal</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="本 Metal Blockchain validator の廃止予告ポリシー: 最低 90 日前の公開予告、 site + repository commit の二重 channel、 外部観測可能。 廃止に該当する事象と該当しない事象の区別も記載。">
+<link rel="canonical" href="https://metal.freedom-yield.com/ja/decommission/">
+<link rel="alternate" hreflang="en" href="https://metal.freedom-yield.com/decommission/">
+<link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/decommission/">
+<link rel="alternate" hreflang="x-default" href="https://metal.freedom-yield.com/decommission/">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#07080c">
+<meta name="color-scheme" content="dark">
+<script defer src="/assets/main.js"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
+<script defer src="/assets/gtag-init.js"></script>
+</head>
+<body>
+<a href="#main" class="skip-link">メイン本文へスキップ</a>
+
+<nav class="topnav">
+	<div class="topnav-inner">
+		<a href="/ja/" class="brand">Freedom Yield · Metal</a>
+		<details class="nav-menu">
+			<summary class="nav-toggle" aria-label="メニュー開閉">
+				<span class="hamburger-icon" aria-hidden="true"></span>
+			</summary>
+			<div class="nav">
+				<a href="/ja/#status">状態</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">概要</button>
+					<div class="nav-dropdown-menu">
+						<a href="/ja/#about">概要</a>
+						<a href="/ja/#roadmap">展望</a>
+					</div>
+				</div>
+				<a href="/ja/#delegate" data-ga-event="delegate_cta_click" data-ga-param-position="nav">委任</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">検証</button>
+					<div class="nav-dropdown-menu">
+						<a href="/ja/data/">公開データ</a>
+						<a href="/ja/journal/">運用日誌</a>
+						<a href="/ja/network/">ネットワーク</a>
+						<a href="/ja/continuity/">事業継続性</a>
+						<a href="/ja/jurisdiction/">日本拠点姿勢</a>
+						<a href="/ja/incidents/" data-ga-event="nav_click" data-ga-param-target="incidents">インシデント</a>
+						<a href="/ja/commitments/">Commitment</a>
+						<a href="/ja/risk-disclosure/">リスク開示</a>
+						<a href="/ja/selection-evidence/">選定エビデンス</a>
+						<a href="/ja/subnet-readiness/">Subnet 適性</a>
+						<a href="/ja/reference-architecture/">リファレンスアーキテクチャ</a>
+						<a href="/ja/subnet-pilot/">Subnet pilot</a>
+						<a href="/ja/inquiry/">問い合わせ</a>
+						<a href="/ja/pledge/">Pledge</a>
+					</div>
+				</div>
+				<a href="/decommission/" class="nav-lang" data-ga-event="language_switch" data-ga-param-to="en">EN</a>
+			</div>
+		</details>
+	</div>
+</nav>
+
+<header class="hero hero--simple">
+	<div class="container">
+		<p class="hero-eyebrow">運用者が停止する場合</p>
+		<h1>廃止予告ポリシー</h1>
+		<p class="hero-lead">
+			本 validator が運営停止に至る場合、 委任者が再配分できる時間を確保するため十分に事前に公開予告する方針。
+			予告は本サイトと public repository の commit に同時に現れ、 両者とも外部から観測可能で timestamp 付き。
+			本ページはこのポリシー自体、 適用範囲、 そして「廃止に含めないもの」 を記述する。
+		</p>
+		<p class="hero-lead"><strong>現在の状態: 廃止の予定なし。 以下のポリシーは dormant。</strong></p>
+	</div>
+</header>
+
+<main id="main" class="container">
+
+	<section class="card">
+		<h2>最低 lead time</h2>
+		<p>本運用者が validator 運営を停止すると決定した場合、 validator が参加する最終 cycle の <strong>少なくとも 90 日前</strong> までに公開廃止予告を commit する。 90 日 floor は運用者の unilateral commitment であり、 規制 / 契約義務ではない。 ただしこの commitment は観測可能である: 予告は timestamp 付きの 2 surface に同時に現れ(下記参照)、 90 日 floor からの逸脱は予告 timestamp と最終 cycle の <code>endTime</code> を比較すれば外部から visible になる。</p>
+		<p>本 commitment は <a href="/ja/commitments/">運用者 commitment ページ</a> の #8 として記録し、 <a href="/ja/pledge/">Transparent Validator Pledge</a> Article 4 に mapping する。</p>
+	</section>
+
+	<section class="card">
+		<h2>予告の現れ方</h2>
+		<p>廃止予告は同じ window 内で独立な 2 surface に公開される:</p>
+		<dl class="data-meta">
+			<dt>本サイト</dt><dd>本ページと top page に目立つ banner、 さらに <a href="/ja/journal/">運用日誌</a> に dated entry を追加する。 site は人間可読 surface。</dd>
+			<dt>public repository</dt><dd>本ページ等の公開 artifact 内容を修正する commit。 commit message は <code>chore(decommission): notice — final cycle &lt;N&gt;, target end &lt;ISO date&gt;</code> 形式で tag。 commit は機械可読 surface、 author timestamp は外部検証可能。</dd>
+		</dl>
+		<p>両 surface には以下が記載される: validator が完走する最終 cycle 番号、 同 cycle の target <code>endTime</code>、 運用者として開示可能な範囲の rationale、 現委任者に推奨される action。 予告は委任者に本サイト上での action を求めない — 再配分の各 step は委任者の wallet 内で on-chain に実行される。</p>
+	</section>
+
+	<section class="card">
+		<h2>なぜ 90 日か</h2>
+		<p>90 日 floor は、 typical な委任者の attention cycle に対し十分な幅となるよう選択した:</p>
+		<ul>
+			<li>Avalanche 派生 P-Chain protocol は、 運用者 action の有無に関わらず cycle 終了時に委任 stake を所有者へ返却する。 廃止 window 中に slashing risk はない。</li>
+			<li>validator surface を月次で確認する委任者は、 validator 停止前に少なくとも 3 cycle 分予告を目にできる。</li>
+			<li>別 validator への再委任には現委任期間の終了待ち(typically 数週間)が必要。 90 日でこの window に十分余裕がある。</li>
+			<li>委任者が institutional の場合、 90 日 window は大半の社内 change management cadence(board 通知、 signoff、 treasury 再配分、 監査証跡)と整合する。</li>
+		</ul>
+		<p>Transparent Validator Pledge は「validator が大規模 / institutional 委任を host する場合はより長く」 と suggest する。 institutional 規模を host する運用者は notice をその分延長することになる。 90 日 commitment は floor であって ceiling ではない。</p>
+	</section>
+
+	<section class="card">
+		<h2>廃止に該当するもの / しないもの</h2>
+		<p>廃止に隣接する事象がいくつかあるが、 これらは <strong>廃止ではない</strong> ため 90 日予告の trigger とならない:</p>
+		<dl class="data-meta">
+			<dt>Cycle end</dt><dd>毎月の cycle 終了は normal operation。 運用者が同じ NodeID で新 cycle を再登録、 委任者は連続サービスを受ける。 履歴は <a href="/ja/journal/">運用日誌</a>。</dd>
+			<dt>インシデント由来のダウンタイム</dt><dd>SEV-1 / SEV-2 incident は <a href="/ja/incidents/">incidents</a> 下で扱う downtime event。 同じ NodeID で復旧、 廃止ではない。</dd>
+			<dt>計画的 key rotation</dt><dd>新 NodeID を伴う scheduled rotation は事前文書化された continuity event。 廃止扱いではない。 手順は <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md"><code>docs/KEY_ROTATION.md</code></a>。</dd>
+			<dt>Host 移行</dt><dd>同じ NodeID を維持しつつ validator host を入れ替えるのは <a href="/ja/continuity/">事業継続性</a> ページに記載の continuity event。 廃止ではない。</dd>
+			<dt>Fee / self-stake 変更</dt><dd>fee policy 変更は commitment 階の event で、 別の notice protocol を持つ(commitment #1, fee stability)。 運用者が同時に廃止も決定しない限り、 本ページの 90 日予告は trigger しない。</dd>
+		</dl>
+		<p>廃止予告を trigger する唯一の条件は: <em>運用者が本 NodeID 上で本 validator の運営を停止する決定をし、 後継 cycle の計画がない場合</em>。</p>
+	</section>
+
+	<section class="card">
+		<h2>本 commitment が documentation のどこに存在するか</h2>
+		<ul>
+			<li><a href="/ja/commitments/">運用者 commitment</a> — commitment #8(unilateral commitment 本体)。</li>
+			<li><a href="/ja/pledge/">Transparent Validator Pledge</a> — Article 4(本 commitment が mapping する open standard)。</li>
+			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/TRANSPARENT_VALIDATOR_PLEDGE.md">docs/TRANSPARENT_VALIDATOR_PLEDGE.md</a> — Pledge 全文 + Freedom Yield specimen mapping。</li>
+			<li><a href="/ja/continuity/">事業継続性</a> — 廃止と明示的に区別される隣接 event(host 移行、 incident response 等)。</li>
+		</ul>
+	</section>
+
+	<section class="card">
+		<h2>本ページが「ではない」もの</h2>
+		<p>本ページは契約上の SLA ではない。 特定管轄の法令下の規制開示でもない。 外部から観測可能であるが、 enforce するのは運用者自身の discipline であって外部 authority ではない、 unilateral commitment。 unilateral commitment より強い保証を必要とする評価者は、 本ページを複数の input の 1 つとして扱うべきで、 唯一の input としては扱うべきでない。</p>
+		<p>本ページは exit signal でもない。 執筆時点で <strong>廃止の予定はない</strong>。 ポリシーを事前に文書化するのは、 仮に発動する場合に発動 mechanism が既知 / 検証可能であるようにするため。</p>
+	</section>
+
+</main>
+
+<footer class="site-footer">
+	<div class="container">
+		<div class="footer-grid">
+			<div class="footer-brand">
+				<h3>Freedom Yield · Metal</h3>
+				<p>Metal Blockchain の long-horizon validator。透明な uptime 開示、公開監査証跡。</p>
+			</div>
+			<nav class="footer-col" aria-label="バリデータ">
+				<h4>バリデータ</h4>
+				<ul>
+					<li><a href="/ja/#status">ステータス</a></li>
+					<li><a href="/ja/#about">概要</a></li>
+					<li><a href="/ja/#track-record">実績</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="委任">
+				<h4>委任</h4>
+				<ul>
+					<li><a href="/ja/#delegate">委任する</a></li>
+					<li><a href="/ja/#calculator">報酬計算</a></li>
+					<li><a href="/ja/#faq">FAQ</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="ネットワーク">
+				<h4>ネットワーク</h4>
+				<ul>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">Explorer ↗</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="サポート">
+				<h4>サポート</h4>
+				<ul>
+					<li><a href="/ja/commitments/">Commitment</a></li>
+					<li><a href="/ja/continuity/">事業継続性</a></li>
+					<li><a href="/ja/inquiry/">問い合わせ</a></li>
+					<li><a href="mailto:info@metal.freedom-yield.com">お問い合わせ</a></li>
+				</ul>
+			</nav>
+		</div>
+		<hr class="footer-divider">
+		<p class="footer-disclaimer"><strong>免責事項:</strong> Freedom Yield は Metal Blockchain 上で稼働する独立した第三者バリデータです。Metallicus 社および Metal Blockchain Foundation の関連会社・提携先・出資先・公式運営者ではありません。各商標は各権利者に帰属します。</p>
+		<div class="footer-bottom">
+			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain</a>.</p>
+			<p>© 2026 Freedom Yield · Metal validator</p>
+		</div>
+	</div>
+</footer>
+</body>
+</html>

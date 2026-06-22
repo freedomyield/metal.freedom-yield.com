@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Decommission policy — Freedom Yield Metal</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="The decommission notice policy of this Metal Blockchain validator: at least 90 days advance notice, dual-channel (site + repository commit), externally observable. Includes what does and does not count as a decommission.">
+<link rel="canonical" href="https://metal.freedom-yield.com/decommission/">
+<link rel="alternate" hreflang="en" href="https://metal.freedom-yield.com/decommission/">
+<link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/decommission/">
+<link rel="alternate" hreflang="x-default" href="https://metal.freedom-yield.com/decommission/">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#07080c">
+<meta name="color-scheme" content="dark">
+<script defer src="/assets/main.js"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
+<script defer src="/assets/gtag-init.js"></script>
+</head>
+<body>
+<a href="#main" class="skip-link">Skip to main content</a>
+
+<nav class="topnav">
+	<div class="topnav-inner">
+		<a href="/" class="brand">Freedom Yield · Metal</a>
+		<details class="nav-menu">
+			<summary class="nav-toggle" aria-label="Open / close menu">
+				<span class="hamburger-icon" aria-hidden="true"></span>
+			</summary>
+			<div class="nav">
+				<a href="/#status">Status</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">About</button>
+					<div class="nav-dropdown-menu">
+						<a href="/#about">About</a>
+						<a href="/#roadmap">Roadmap</a>
+					</div>
+				</div>
+				<a href="/#delegate" data-ga-event="delegate_cta_click" data-ga-param-position="nav">Delegate</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">Verify</button>
+					<div class="nav-dropdown-menu">
+						<a href="/data/">Open data</a>
+						<a href="/journal/">Cycle journal</a>
+						<a href="/network/">Network</a>
+						<a href="/continuity/">Continuity</a>
+						<a href="/jurisdiction/">Jurisdiction</a>
+						<a href="/incidents/" data-ga-event="nav_click" data-ga-param-target="incidents">Incidents</a>
+						<a href="/commitments/">Commitments</a>
+						<a href="/risk-disclosure/">Risk disclosure</a>
+						<a href="/selection-evidence/">Selection evidence</a>
+						<a href="/subnet-readiness/">Subnet readiness</a>
+						<a href="/reference-architecture/">Reference architecture</a>
+						<a href="/subnet-pilot/">Subnet pilot</a>
+						<a href="/inquiry/">Inquiry</a>
+						<a href="/pledge/">Pledge</a>
+					</div>
+				</div>
+				<a href="/ja/decommission/" class="nav-lang" data-ga-event="language_switch" data-ga-param-to="ja">JA</a>
+			</div>
+		</details>
+	</div>
+</nav>
+
+<header class="hero hero--simple">
+	<div class="container">
+		<p class="hero-eyebrow">If the operator ever stops</p>
+		<h1>Decommission policy</h1>
+		<p class="hero-lead">
+			If this validator is ever going to stop operating, the policy is to publish notice well in advance so that
+			delegators have time to rebalance. The notice would appear simultaneously on this site and as a commit in the
+			public repository — both externally observable, both timestamped. This page describes the policy itself,
+			what it covers, and what it explicitly does not cover.
+		</p>
+		<p class="hero-lead"><strong>Current status: no decommission planned. The policy below is dormant.</strong></p>
+	</div>
+</header>
+
+<main id="main" class="container">
+
+	<section class="card">
+		<h2>Minimum lead time</h2>
+		<p>If this operator decides to stop running the validator, a public decommission notice is committed <strong>at least 90 days</strong> before the final cycle the validator will participate in. The 90-day floor is a unilateral operator commitment, not a regulatory or contractual obligation — but the commitment is observable, because the notice would appear in two timestamped places at once (see below), and any departure from the 90-day floor would itself be visible by comparing the notice timestamp to the final cycle's <code>endTime</code>.</p>
+		<p>This commitment is recorded as commitment #8 on the <a href="/commitments/">operator commitments page</a> and is mapped to Article 4 of the <a href="/pledge/">Transparent Validator Pledge</a>.</p>
+	</section>
+
+	<section class="card">
+		<h2>How the notice would appear</h2>
+		<p>A decommission notice would be published on two independent surfaces in the same window:</p>
+		<dl class="data-meta">
+			<dt>This site</dt><dd>A prominent banner on this page and on the home page, plus a dated entry in the <a href="/journal/">cycle journal</a>. The site is the human-readable surface.</dd>
+			<dt>The public repository</dt><dd>A commit modifying the content of this page (and any related public artifacts) with a commit message tagged <code>chore(decommission): notice — final cycle &lt;N&gt;, target end &lt;ISO date&gt;</code>. The commit is the machine-readable surface, and its author timestamp is externally verifiable.</dd>
+		</dl>
+		<p>Both surfaces would carry: the final cycle number the validator will complete, the target <code>endTime</code> for that cycle, the rationale at the level the operator can disclose, and the recommended action for current delegators. The notice never asks delegators to take action through this site — every reallocation step is performed in the delegator's own wallet on chain.</p>
+	</section>
+
+	<section class="card">
+		<h2>Why 90 days</h2>
+		<p>The 90-day floor is chosen so that the typical delegator's cycle of attention is wide enough to catch the notice:</p>
+		<ul>
+			<li>The Avalanche-derived P-Chain protocol returns delegated stake to its owner at cycle end regardless of operator action; there is no slashing risk during a decommission window.</li>
+			<li>A delegator who checks the validator surface monthly will see the notice for at least three cycles before the validator stops.</li>
+			<li>Re-delegating to a different validator requires the delegator to wait for their current delegation period to end — typically a few weeks. 90 days gives comfortable headroom for that.</li>
+			<li>If a delegator is institutional, the 90-day window aligns with most internal change-management cadences (board notice, signoff, treasury reallocation, audit trail).</li>
+		</ul>
+		<p>The Transparent Validator Pledge suggests "longer if the validator hosts large or institutional delegations" — an operator hosting a sizable institutional position would extend the notice accordingly. The 90-day commitment is a floor, not a ceiling.</p>
+	</section>
+
+	<section class="card">
+		<h2>What does and does not count as a decommission</h2>
+		<p>Several events look adjacent to a decommission but are <strong>not</strong> a decommission and do not trigger the 90-day notice:</p>
+		<dl class="data-meta">
+			<dt>Cycle end</dt><dd>The monthly cycle ending is normal operation. The operator re-registers a new cycle on the same NodeID; delegators see continuous service. Cycle history is on the <a href="/journal/">cycle journal</a>.</dd>
+			<dt>Incident-driven downtime</dt><dd>A SEV-1 or SEV-2 incident is a downtime event handled under <a href="/incidents/">incidents</a>. The validator is restored on the same NodeID; this is not a decommission.</dd>
+			<dt>Planned key rotation</dt><dd>A scheduled rotation that produces a new NodeID is treated as a continuity event documented in advance, not as a decommission. The runbook is at <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md"><code>docs/KEY_ROTATION.md</code></a>.</dd>
+			<dt>Host migration</dt><dd>Replacing the underlying validator host while keeping the same NodeID is a continuity event documented on <a href="/continuity/">continuity</a>. Not a decommission.</dd>
+			<dt>Fee or self-stake change</dt><dd>A fee policy change is a commitment-level event with its own notice protocol (commitment #1, fee stability). It does not trigger this page's 90-day notice unless the operator also decides to exit.</dd>
+		</dl>
+		<p>The single condition that triggers a decommission notice is: <em>the operator has decided to stop running this validator on this NodeID, with no successor cycle planned</em>.</p>
+	</section>
+
+	<section class="card">
+		<h2>Where this commitment lives in the documentation</h2>
+		<ul>
+			<li><a href="/commitments/">Operator commitments</a> — commitment #8 (the unilateral commitment).</li>
+			<li><a href="/pledge/">Transparent Validator Pledge</a> — Article 4 (the open standard this commitment maps to).</li>
+			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/TRANSPARENT_VALIDATOR_PLEDGE.md">docs/TRANSPARENT_VALIDATOR_PLEDGE.md</a> — the full Pledge text including the Freedom Yield specimen mapping.</li>
+			<li><a href="/continuity/">Continuity</a> — adjacent events (host migration, incident response) that are explicitly distinguished from a decommission.</li>
+		</ul>
+	</section>
+
+	<section class="card">
+		<h2>What this page is not</h2>
+		<p>This page is not a contractual SLA. It is not a regulatory disclosure under any specific jurisdiction's law. It is a unilateral operator commitment — observable from outside, but enforced by the operator's own discipline, not by an external authority. An evaluator who needs a stronger guarantee than a unilateral commitment should treat this as one input among several, not as the only input.</p>
+		<p>The page is also not an exit signal. <strong>No decommission is planned</strong> at the time of writing. The policy is documented in advance precisely so that, if it ever activates, the activation mechanism is already known and verifiable.</p>
+	</section>
+
+</main>
+
+<footer class="site-footer">
+	<div class="container">
+		<div class="footer-grid">
+			<div class="footer-brand">
+				<h3>Freedom Yield · Metal</h3>
+				<p>Long-horizon validator on Metal Blockchain. Transparent uptime, public audit trail.</p>
+			</div>
+			<nav class="footer-col" aria-label="Validator">
+				<h4>Validator</h4>
+				<ul>
+					<li><a href="/#status">Status</a></li>
+					<li><a href="/#about">About</a></li>
+					<li><a href="/#track-record">Track record</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Delegation">
+				<h4>Delegation</h4>
+				<ul>
+					<li><a href="/#delegate">Delegate</a></li>
+					<li><a href="/#calculator">Rewards</a></li>
+					<li><a href="/#faq">FAQ</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Network">
+				<h4>Network</h4>
+				<ul>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">Explorer ↗</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Support">
+				<h4>Support</h4>
+				<ul>
+					<li><a href="/commitments/">Commitments</a></li>
+					<li><a href="/continuity/">Continuity</a></li>
+					<li><a href="/inquiry/">Inquiry</a></li>
+					<li><a href="mailto:info@metal.freedom-yield.com">Contact</a></li>
+				</ul>
+			</nav>
+		</div>
+		<hr class="footer-divider">
+		<p class="footer-disclaimer"><strong>Disclaimer:</strong> Freedom Yield is an independent, third-party validator operating on Metal Blockchain. It is not affiliated with, endorsed by, sponsored by, or operated by Metallicus Inc. or the Metal Blockchain Foundation. All trademarks are the property of their respective owners.</p>
+		<div class="footer-bottom">
+			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain</a>.</p>
+			<p>© 2026 Freedom Yield · Metal validator</p>
+		</div>
+	</div>
+</footer>
+</body>
+</html>
