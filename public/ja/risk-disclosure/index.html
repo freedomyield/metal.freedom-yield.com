@@ -128,6 +128,17 @@
 			規制対象ファンド、同等の規制対象 entity 等)は、独立の bilateral due diligence を実施する必要がある。本ページは
 			compliance attestation ではなく、本サイトの記述は attestation として解されるものではない。</p>
 		</article>
+
+		<article class="continuity-scenario">
+			<h3>8. 単一運用者依存</h3>
+			<p>本 validator は単一の個人によって運用されている。職務分掌は無く、 on-call rotation チーム / 独立 change-approval
+			board / 組織的な意思決定冗長性は存在しない。 Constitution および Operating Model で「AI が提案、 operator が承認、
+			operator が実行、 AI が検証」という pattern を定義しているが、 最終承認と最終実行の権限は同一人物である。 日本の
+			営業時間外の応答時間は best-effort であり、 guaranteed ではない。 renewal 時に operator が応答不可になった場合、
+			validator は current cycle 終了時に自然に validator set から離脱し、 委任された stake は no-slashing 仕様により
+			自動的に返却される (continuity ページ参照)。 つまり validator 自体は operator 不在による元本損失リスクを孕まないが、
+			operator の継続的応答に依存する評価者は本制約を考慮されたい。</p>
+		</article>
 	</section>
 
 	<section class="card">
