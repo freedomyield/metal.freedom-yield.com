@@ -117,7 +117,7 @@ It is also not a frozen artefact. The `public_pages` map and the `operator_commi
 
 - `/api/validator.json` — live validator state, source of stake / uptime / fee fields (refreshed every five minutes).
 - `/api/cycle-history.jsonl` (in preparation) — append-only cycle audit packet documented at `docs/CYCLE_HISTORY.md`.
-- `/api/identity.json` (in preparation) — signed identity manifest documented at `docs/IDENTITY_VERIFICATION.md`.
+- `/api/identity.json` — signed operator identity manifest (= live since Phase 5, 2026-06-22) documented at `docs/IDENTITY_VERIFICATION.md`. Companion artifacts: `/api/identity.json.sig`, `/api/cycles-history.json`, `/api/identity-history.jsonl`, `/.well-known/operator-identity.pub`.
 - `/data/` — human-readable open-data catalog with one row per public endpoint.
 - `/selection-evidence/` — evaluator-facing evidence index that links the manifest alongside other artefacts.
 - `scripts/gen-evidence.sh` — the generator, committed in the public repository.

@@ -246,13 +246,14 @@
 		<article class="data-endpoint">
 			<header class="data-endpoint-head">
 				<h3>Identity binding (Phase α Merkle DAG anchor)</h3>
-				<span class="data-tag">in preparation</span>
+				<span class="data-tag">live (manifest) · scheduled (anchor)</span>
 			</header>
 			<p>A signed identity manifest is produced by a dedicated operator identity key (ed25519), independent of the validator's <code>staker.key</code> and BLS <code>signer.key</code>. Verification uses OpenSSH signatures with namespace <code>freedom-yield/validator-identity</code>. The validator's signing keys are not used for this process.</p>
 			<p>The identity model is a two-branch Merkle DAG: <code>identity_branch</code> (= history of operator identity keys) and <code>cycles_branch</code> (= history of closed validation cycles). The two branch roots combine into a single <code>dag_root_hash</code> that is inscribed on Metal A-chain (= PulseVM / XPRNetwork) by a narrow <code>metalfreedom@anchor</code> permission, with on-chain memo <code>fyid1:&lt;dag_root_hash&gt;</code>. The prior P-Chain memo design (retired 2026-06-20) was incompatible with current Metal mainnet Durango protocol rules.</p>
 			<p>The verifier procedure is a nine-step recipe (signature → fingerprint → per-branch Merkle root → DAG combination → on-chain explorer cross-check → cross-reference integrity). Independent reference implementations: a portable shell function inside <code>gen-identity.sh</code> and a Python reference under <code>tests/identity-verification-vectors/</code>, with bit-for-bit equivalence pinned by an automated test script. Five synthetic test vectors are published so an auditor can implement and validate a third-language verifier.</p>
+			<p><strong>Snapshot + rotation cadence.</strong> <code>identity.json</code> is a signed snapshot of operator state at the moment of issue, not a heartbeat. Anchor receipts at cycle transitions <em>reaffirm</em> the same commitment until the operator publishes an updated manifest. The intended update triggers are: (1) annual rotation of the ed25519 operator identity key (next: 2027-06-22), (2) addition of a new artifact to the bound set, (3) material policy change. A <code>dag_root_hash</code> that does not change across multiple cycles is by design — it means the operator has not asserted any new commitment in that window. Industry analogues: Certificate Transparency log (= append-only, root extends with new entries), DNSSEC zone signing (= periodic re-sign with documented cadence), long-lived OpenSSH keys with rotation policy. There is no Metal-ecosystem-standard pattern for validator identity binding; this surface is novel.</p>
 			<dl class="data-meta">
-				<dt>Status</dt><dd>In preparation — schemas, spec, recipe, and test vectors are live; runtime <code>identity.json</code> and <code>anchor-receipt.json</code> activate at the next cycle start (2026-07-04).</dd>
+				<dt>Status</dt><dd>Active — <code>identity.json</code> + <code>identity.json.sig</code> live since 2026-06-22 (Phase 5 publication). On-chain anchor receipt activates automatically at cycle 2 → cycle 3 transition (2026-07-04 13:00 JST).</dd>
 				<dt>Construction spec</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/MERKLE_DAG_SPEC.md" rel="noopener noreferrer"><code>docs/MERKLE_DAG_SPEC.md</code></a></dd>
 				<dt>Verifier procedure</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer"><code>docs/IDENTITY_VERIFICATION.md</code></a> (= nine-step recipe)</dd>
 				<dt>Audit entry point</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/PHASE_ALPHA_AUDIT_HANDOFF.md" rel="noopener noreferrer"><code>docs/PHASE_ALPHA_AUDIT_HANDOFF.md</code></a></dd>
@@ -262,10 +263,11 @@
 				<dt>Anchor receipt schema</dt><dd><a href="/api/anchor-receipt.schema.v1.json"><code>/api/anchor-receipt.schema.v1.json</code></a> + <a href="/api/anchor-receipt.example.json"><code>example</code></a></dd>
 				<dt>Identity-history leaf schema</dt><dd><a href="/api/identity-history.schema.v1.json"><code>/api/identity-history.schema.v1.json</code></a> + <a href="/api/identity-history.example.jsonl"><code>example</code></a></dd>
 				<dt>Test vectors</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/tree/main/tests/identity-verification-vectors" rel="noopener noreferrer"><code>tests/identity-verification-vectors/</code></a></dd>
-				<dt>Planned manifest</dt><dd><code>/api/identity.json</code> + <code>/api/identity.json.sig</code></dd>
-				<dt>Planned DAG snapshot</dt><dd><code>/api/cycles-history.json</code></dd>
-				<dt>Planned anchor receipt</dt><dd><code>/api/anchor-receipt.json</code></dd>
-				<dt>Operator pubkey</dt><dd><code>/.well-known/operator-identity.pub</code></dd>
+				<dt>Live manifest</dt><dd><a href="/api/identity.json"><code>/api/identity.json</code></a> + <a href="/api/identity.json.sig"><code>/api/identity.json.sig</code></a></dd>
+				<dt>Live DAG snapshot</dt><dd><a href="/api/cycles-history.json"><code>/api/cycles-history.json</code></a></dd>
+				<dt>Live identity-history</dt><dd><a href="/api/identity-history.jsonl"><code>/api/identity-history.jsonl</code></a> (= operator identity key rotation log; currently <code>key_seq=1</code>)</dd>
+				<dt>Scheduled anchor receipt</dt><dd><code>/api/anchor-receipt.json</code> (= first broadcast at cycle 3 start, 2026-07-04 13:00 JST)</dd>
+				<dt>Operator pubkey</dt><dd><a href="/.well-known/operator-identity.pub"><code>/.well-known/operator-identity.pub</code></a></dd>
 				<dt>Machine-readable discovery</dt><dd><a href="/api/evidence.json"><code>/api/evidence.json</code></a> → <code>.in_preparation_artifacts.identity_manifest</code></dd>
 			</dl>
 		</article>

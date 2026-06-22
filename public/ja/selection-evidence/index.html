@@ -246,13 +246,14 @@
 		<article class="data-endpoint">
 			<header class="data-endpoint-head">
 				<h3>アイデンティティ署名(Phase α Merkle DAG anchor)</h3>
-				<span class="data-tag">準備中</span>
+				<span class="data-tag">live(manifest)· scheduled(anchor)</span>
 			</header>
 			<p>署名付きアイデンティティマニフェストは、 validator の <code>staker.key</code> および BLS <code>signer.key</code> とは独立した運用者専用 identity key(ed25519)で生成されます。 検証には namespace <code>freedom-yield/validator-identity</code> の OpenSSH signature を使います。 validator の signing key はこの過程で一切使用しません。</p>
 			<p>identity モデルは 2 枝の Merkle DAG です: <code>identity_branch</code>(= 運用者 identity key の履歴)と <code>cycles_branch</code>(= 完了した validation cycle の履歴)。 両 branch root は <code>dag_root_hash</code> として 1 つに結合され、 限定権限 <code>metalfreedom@anchor</code> によって Metal A-chain(= PulseVM / XPRNetwork)に on-chain memo <code>fyid1:&lt;dag_root_hash&gt;</code> として刻まれます。 旧 P-Chain memo 方式(2026-06-20 撤回)は現行 Metal mainnet Durango の protocol rule と非互換でした。</p>
 			<p>verifier 手順は 9 step recipe です(signature → fingerprint → 各 branch Merkle root → DAG 結合 → on-chain explorer cross-check → cross-reference integrity)。 独立した参照実装が 2 種あります: portable shell 関数(<code>gen-identity.sh</code> 内)と Python 参照(<code>tests/identity-verification-vectors/</code> 下)、 自動 test script で bit-for-bit 一致を pinning。 合成テストベクトル 5 件を公開しているので、 監査者は第三言語で verifier を独自実装して照合できます。</p>
+			<p><strong>snapshot + rotation cadence の方針</strong>。 <code>identity.json</code> は発行時点の運用者状態の署名済 snapshot であり、 heartbeat ではありません。 cycle transition 時の anchor receipt は同じ commitment を <em>reaffirm</em> し、 運用者が更新版 manifest を公開するまで同じ <code>dag_root_hash</code> を刻み続けます。 更新トリガは: (1) ed25519 運用者 identity key の年次 rotation(次回 2027-06-22)、 (2) bound set への新 artifact 追加、 (3) 重要 policy 変更、 の 3 点です。 複数 cycle にわたって <code>dag_root_hash</code> が変化しないのは設計通りで、 「該当期間に運用者は新たな commitment を主張していない」ことを意味します。 業界類似事例: Certificate Transparency log(= append-only、 root は新エントリで拡張)、 DNSSEC zone signing(= 定期 re-sign + 公開 cadence)、 long-lived OpenSSH 鍵 + rotation policy。 Metal エコシステム内で validator identity binding の標準 pattern は未定であり、 本面は novel です。</p>
 			<dl class="data-meta">
-				<dt>状態</dt><dd>準備中 — schema / spec / recipe / test vectors は live。 runtime <code>identity.json</code> と <code>anchor-receipt.json</code> は次 cycle start(2026-07-04)に activate 予定。</dd>
+				<dt>状態</dt><dd>Active — <code>identity.json</code> + <code>identity.json.sig</code> は 2026-06-22(Phase 5 publication)以降 live。 on-chain anchor receipt は cycle 2 → cycle 3 transition(2026-07-04 13:00 JST)で自動的に activate。</dd>
 				<dt>構造仕様</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/MERKLE_DAG_SPEC.md" rel="noopener noreferrer"><code>docs/MERKLE_DAG_SPEC.md</code></a></dd>
 				<dt>verifier 手順</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer"><code>docs/IDENTITY_VERIFICATION.md</code></a>(= 9 step recipe)</dd>
 				<dt>監査エントリ</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/PHASE_ALPHA_AUDIT_HANDOFF.md" rel="noopener noreferrer"><code>docs/PHASE_ALPHA_AUDIT_HANDOFF.md</code></a></dd>
@@ -262,10 +263,11 @@
 				<dt>anchor receipt schema</dt><dd><a href="/api/anchor-receipt.schema.v1.json"><code>/api/anchor-receipt.schema.v1.json</code></a> + <a href="/api/anchor-receipt.example.json"><code>example</code></a></dd>
 				<dt>identity-history leaf schema</dt><dd><a href="/api/identity-history.schema.v1.json"><code>/api/identity-history.schema.v1.json</code></a> + <a href="/api/identity-history.example.jsonl"><code>example</code></a></dd>
 				<dt>test vectors</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/tree/main/tests/identity-verification-vectors" rel="noopener noreferrer"><code>tests/identity-verification-vectors/</code></a></dd>
-				<dt>予定 manifest</dt><dd><code>/api/identity.json</code> + <code>/api/identity.json.sig</code></dd>
-				<dt>予定 DAG snapshot</dt><dd><code>/api/cycles-history.json</code></dd>
-				<dt>予定 anchor receipt</dt><dd><code>/api/anchor-receipt.json</code></dd>
-				<dt>運用者 pubkey</dt><dd><code>/.well-known/operator-identity.pub</code></dd>
+				<dt>live manifest</dt><dd><a href="/api/identity.json"><code>/api/identity.json</code></a> + <a href="/api/identity.json.sig"><code>/api/identity.json.sig</code></a></dd>
+				<dt>live DAG snapshot</dt><dd><a href="/api/cycles-history.json"><code>/api/cycles-history.json</code></a></dd>
+				<dt>live identity-history</dt><dd><a href="/api/identity-history.jsonl"><code>/api/identity-history.jsonl</code></a>(= 運用者 identity key rotation log、 現 <code>key_seq=1</code>)</dd>
+				<dt>scheduled anchor receipt</dt><dd><code>/api/anchor-receipt.json</code>(= cycle 3 start での初回 broadcast 予定、 2026-07-04 13:00 JST)</dd>
+				<dt>運用者 pubkey</dt><dd><a href="/.well-known/operator-identity.pub"><code>/.well-known/operator-identity.pub</code></a></dd>
 				<dt>機械可読 discovery</dt><dd><a href="/api/evidence.json"><code>/api/evidence.json</code></a> → <code>.in_preparation_artifacts.identity_manifest</code></dd>
 			</dl>
 		</article>
