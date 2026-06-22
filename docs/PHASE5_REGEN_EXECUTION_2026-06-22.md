@@ -130,7 +130,7 @@ Field paths below are the **corrected** paths. An auditor reproducing these comm
 | V8 | JA selection-evidence cycle audit packet status (post-audit drift fix) | grep on live HTML | `<span class="data-tag">live(1 cycle closed)</span>` present | ✅ (after revision-2 commit deploys) |
 | V9 | key_iat ↔ identity-history.jsonl divergence (HIGH-1 reproducibility check) | `diff <(jq -r .key_iat identity.json) <(jq -r 'select(.key_seq==1) \| .key_iat' identity-history.jsonl)` | should be **empty**; currently **non-empty** | ❌ divergence reproducible, see §8 |
 | V10 | CI workflow pass on the verified commit | `gh run view 27945337707` | success | ✅ |
-| V11 | Edge cache freshness | `curl -I .../api/identity.json` → check `last-modified` | `last-modified` advanced past 06:28:51 GMT | `Mon, 22 Jun 2026 10:11:09 GMT` ✅ |
+| V11 | Edge cache freshness | `curl -I .../api/identity.json` → check `last-modified` | `last-modified` advanced past 06:28:51 GMT | `Mon, 22 Jun 2026 10:11:09 GMT` at rev-1 deploy time ✅ (= the invariant is the inequality; subsequent deploys touch the file's mtime via rsync without content change, so observed values continue to advance) |
 
 The full nine-step verifier recipe (`IDENTITY_VERIFICATION.md`) also applies. V1–V11 above are a regen-specific subset, with V9 added to make the HIGH-1 finding reproducible by future auditors.
 
@@ -148,6 +148,8 @@ The `jq -e empty` trap meant `verify-identity-manifest` would have failed for **
 
 The first-pass commit declared identity manifest "live" in `identity.json` but left some surrounding surfaces describing it as "(in preparation)". Revision 1 of this report claimed only three stale matches remained and that they were all intentional retention. The independent audit demonstrated that this enumeration was wrong; the actual breakdown across `public/selection-evidence/index.html` + `public/ja/selection-evidence/index.html` was:
 
+> **Note on line numbers.** EN and JA line numbers in the table below are at **revision-1 commit time** (= immediately before the rev-2 drift-fix commit `b8bcd72`). The rev-2 commit added one new `<dt>Cross-reference</dt>` row inside the cycle audit packet section, which shifted rows 6 onward by **+1** at the live edge (= row 6 is currently at line 243, row 7 is currently at line 272, etc.). An auditor running `grep -n` against the live file today should add 1 to lines ≥ 242 to reproduce the rev-1 snapshot.
+
 | # | Location | EN line | JA line | State at revision-1 time | Disposition in revision-2 commit |
 |---|---|---|---|---|---|
 | 1 | Cycle audit packet h3 | 234 | 234 | drift bug | **fixed** ("(in preparation)" / "(準備中)" suffix removed) |
@@ -156,7 +158,7 @@ The first-pass commit declared identity manifest "live" in `identity.json` but l
 | 4 | Cycle audit packet `<dt>Status</dt>` JA | — | 239 | drift bug | **fixed** ("Live — runtime JSONL serving since 2026-06-22") |
 | 5 | Cycle audit packet `<dt>Planned feed</dt>` | 241 | 241 | drift bug | **fixed** (`<dt>Live feed</dt>` linking the live URL) |
 | 6 | Cycle audit packet `<dt>Machine-readable discovery</dt>` | 242 | 242 | stale path pending evidence.json | **deferred with inline note** (see §8) |
-| 7 | Identity binding `<dt>Machine-readable discovery</dt>` | 271 | 271 | stale path pending evidence.json | **deferred with inline note** (see §8) |
+| 7 | Identity binding `<dt>Machine-readable discovery</dt>` | 271 | 271 | stale path pending evidence.json | **deferred with inline note** (added in the post-sign-off cosmetic commit; see §8) |
 | 8 | DR drill row | 412 | 412 | intentional retention (genuinely 未実施) | retained |
 | 9 | Formal exit runbook row | 433 | 433 | intentional retention (genuinely 未公開) | retained |
 
