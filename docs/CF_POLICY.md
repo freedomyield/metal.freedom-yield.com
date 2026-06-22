@@ -140,7 +140,7 @@ reason) plus the in-repo policy here together form a two-layer record.
   bot scoring blocking `/api/*`.
 - web-host topology reference (= internal memory) — DNS authoritative on
   Cloudflare, vhost layout.
-- `feedback_no_retail_marketing` — confirms the audience is institutional
-  / evaluator, not retail.
-- `feedback_smallness_as_asset` — confirms automated tooling / data feed
-  is the differentiator.
+- audience-discipline feedback (= internal memory) — confirms the audience
+  is institutional / evaluator, not retail.
+- positioning-discipline feedback (= internal memory) — confirms
+  automated tooling / data feed is the differentiator.
