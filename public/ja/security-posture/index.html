@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>セキュリティ姿勢 — Freedom Yield Metal</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="本 Metal Blockchain validator の多層防御、 validator key の取り扱い、 情報分類、 脆弱性報告窓口の評価者向け要約。 公開リポジトリの根拠文書(CONSTITUTION / SECURITY_LAYERS / KEY_ROTATION / SECURITY)へのリンク付き。">
+<link rel="canonical" href="https://metal.freedom-yield.com/ja/security-posture/">
+<link rel="alternate" hreflang="en" href="https://metal.freedom-yield.com/security-posture/">
+<link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/security-posture/">
+<link rel="alternate" hreflang="x-default" href="https://metal.freedom-yield.com/security-posture/">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#07080c">
+<meta name="color-scheme" content="dark">
+<script defer src="/assets/main.js"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
+<script defer src="/assets/gtag-init.js"></script>
+</head>
+<body>
+<a href="#main" class="skip-link">メイン本文へスキップ</a>
+
+<nav class="topnav">
+	<div class="topnav-inner">
+		<a href="/ja/" class="brand">Freedom Yield · Metal</a>
+		<details class="nav-menu">
+			<summary class="nav-toggle" aria-label="メニュー開閉">
+				<span class="hamburger-icon" aria-hidden="true"></span>
+			</summary>
+			<div class="nav">
+				<a href="/ja/#status">状態</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">概要</button>
+					<div class="nav-dropdown-menu">
+						<a href="/ja/#about">概要</a>
+						<a href="/ja/#roadmap">展望</a>
+					</div>
+				</div>
+				<a href="/ja/#delegate" data-ga-event="delegate_cta_click" data-ga-param-position="nav">委任</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">検証</button>
+					<div class="nav-dropdown-menu">
+						<a href="/ja/data/">公開データ</a>
+						<a href="/ja/journal/">運用日誌</a>
+						<a href="/ja/network/">ネットワーク</a>
+						<a href="/ja/continuity/">事業継続性</a>
+						<a href="/ja/jurisdiction/">日本拠点姿勢</a>
+						<a href="/ja/incidents/" data-ga-event="nav_click" data-ga-param-target="incidents">インシデント</a>
+						<a href="/ja/commitments/">Commitment</a>
+						<a href="/ja/risk-disclosure/">リスク開示</a>
+						<a href="/ja/selection-evidence/">選定エビデンス</a>
+						<a href="/ja/subnet-readiness/">Subnet 適性</a>
+						<a href="/ja/reference-architecture/">リファレンスアーキテクチャ</a>
+						<a href="/ja/subnet-pilot/">Subnet pilot</a>
+						<a href="/ja/inquiry/">問い合わせ</a>
+						<a href="/ja/pledge/">Pledge</a>
+					</div>
+				</div>
+				<a href="/security-posture/" class="nav-lang" data-ga-event="language_switch" data-ga-param-to="en">EN</a>
+			</div>
+		</details>
+	</div>
+</nav>
+
+<header class="hero hero--simple">
+	<div class="container">
+		<p class="hero-eyebrow">運用者のセキュリティ姿勢</p>
+		<h1>セキュリティ姿勢</h1>
+		<p class="hero-lead">
+			本 validator が多層防御、 validator key の保管、 情報分類、 脆弱性報告窓口をどう設計しているかの要約。
+			評価者向けの synthesis であり、 根拠は public repository の
+			<a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md">CONSTITUTION</a> /
+			<a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/SECURITY_LAYERS.md">SECURITY_LAYERS</a> /
+			<a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md">KEY_ROTATION</a> /
+			<a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/SECURITY.md">SECURITY</a>
+			側にある(これらの文書が常に最終的に優越する)。
+		</p>
+	</div>
+</header>
+
+<main id="main" class="container">
+
+	<section class="card">
+		<h2>多層防御</h2>
+		<p>公開 web 側は外側から 4 つの層で保護される。 具体的な threshold や provider の詳細は公開せず、 運用者側 documentation 内で管理する。 ここでは評価者が typically 必要とする categorical な形だけを示す。</p>
+		<dl class="data-meta">
+			<dt>Edge 層(CDN)</dt><dd>常時 L3 / L4 DDoS 自動緩和、 IP reputation filtering、 静的 asset の edge cache、 HTTPS 終端。 IP 単位の rate limiting も本層で active。 攻撃継続時の rule 強化手順は <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/SECURITY_LAYERS.md"><code>docs/SECURITY_LAYERS.md</code></a> の runbook 参照。</dd>
+			<dt>Application gateway</dt><dd>Caddy reverse proxy が IP / endpoint 単位の quota を in-memory で enforce。 quota 超過は <code>429 Too Many Requests</code>。 edge CDN forwarded IP を honour する設定。</dd>
+			<dt>Host network</dt><dd>web host 側 provider-managed firewall と TLS terminator が edge と application gateway の間に挟まる。 上流層で吸収しきれない攻撃には provider-side DDoS 緩和を escalation channel として利用可。</dd>
+			<dt>OS / SSH</dt><dd>標準 hardening。 validator 側で標準 web / SSH ポートのみを host firewall で開放、 両 host で SSH daemon に <code>fail2ban</code>、 SSH は公開鍵のみ(password 認証無効)。 運用者 dashboard は認証背後、 password 由来 credential は high-cost hash で保管。</dd>
+		</dl>
+		<p class="note">具体的な rule 数値、 ポート allowlist、 blocklist source、 認証 credential の保管 path は SECRET / CONFIDENTIAL(下記)に分類され、 本ページには意図的に出さない。</p>
+	</section>
+
+	<section class="card">
+		<h2>Validator key の取り扱い</h2>
+		<p>validator は <code>metalgo</code> で稼働し、 その staking dir 配下の 3 file が identity と signing の中核。 私有部分の repository commit は constitution で禁止(<a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md">CONSTITUTION §3.3</a>)、 <code>.gitignore</code> でも該当拡張子を二重に block する。</p>
+		<dl class="data-meta">
+			<dt><code>staker.crt</code></dt><dd>公開 X.509 証明書。 hash が NodeID の元。 公開可、 explorer に出る。</dd>
+			<dt><code>staker.key</code></dt><dd>staking 私鍵。 host の暗号化 volume 外には絶対に出ない。 SECRET 分類(S1)。</dd>
+			<dt><code>signer.key</code></dt><dd>BLS 署名私鍵。 <code>staker.key</code> と同じ扱い。</dd>
+		</dl>
+		<p>backup は off-host で暗号化保管し、 独立した複数 location に置く。 full path を公開 artifact に書くことはない。 rotation 戦略は Avalanche 由来の制約(active な validation 期間中に key 差し替えると NodeID が変わって stake 無効化)に従い、 cycle 境界に合わせる。 漏洩対応手順(ノード停止 → 該当 backup の特定と破棄 → 新 NodeID 立ち上げ → incident entry 公開)は runbook に文書化済。</p>
+		<p>Avalanche 派生 P-Chain には validator 側不正動作に対する slashing がない。 active 期間中に <code>staker.key</code> を盗まれた場合の最悪影響は逸失利益の window であって、 運用者 / 委任者の元本毀損ではない。</p>
+		<p class="note">完全な backup 手順、 on-disk path、 暗号化 tooling の specifics、 運用者 workstation 上の key 配置は SECRET 分類で、 運用者側 runbook にのみ存在する。</p>
+	</section>
+
+	<section class="card">
+		<h2>情報分類</h2>
+		<p>本 validator に紐づく item は <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md">Constitution §4</a> 定義の 3 階層のいずれかに必ず属する。 分類不明瞭な item は、 より制限的な扱いを適用する(decision rule)。</p>
+		<dl class="data-meta">
+			<dt>SECRET</dt><dd>開示により validator の攻撃可能性 / 可操作性が変わる item: validator 私鍵、 全 wallet seed と passphrase、 運用者 dashboard credential、 SSH credential と key path、 具体的 host IP / hostname、 ntfy topic 識別子、 third-party API token 等。 公開 surface に一切現れない。</dd>
+			<dt>CONFIDENTIAL</dt><dd>bearer secret ではないが、 開示が攻撃面 / 運用予測可能性を形作る item: 役割別 cloud provider 名、 hardware 仕様詳細、 監視 tool 名、 on-call 時間帯、 運用者管理 path 配下の内部 directory 構造等。 default は do-not-publish、 categorical reference は許容。</dd>
+			<dt>PUBLIC</dt><dd>brand 名、 NodeID と Proof of Possession、 self-stake 額、 fee、 委任者数、 cycle 関連 tx ID、 管轄(国レベル)、 公開 site endpoint、 categorical な architecture 言及(two-host 分離、 自動 deploy、 監視 discipline)。</dd>
+		</dl>
+		<p>decision rule、 階層別の完全な item list、 reclassification 手続きは Constitution に詳述。 実務上もっとも重要な rule は上記の「迷ったら制限的扱い」 のみ。</p>
+	</section>
+
+	<section class="card">
+		<h2>脆弱性報告</h2>
+		<p>repo の top-level <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/SECURITY.md"><code>SECURITY.md</code></a> に報告 channel と coordinated disclosure policy を記載:</p>
+		<dl class="data-meta">
+			<dt>Channel</dt><dd><a href="mailto:bp@freedom-yield.com">bp@freedom-yield.com</a> 宛 email。 公開 GitHub issue は明示的に脆弱性報告の channel ではない。</dd>
+			<dt>Acknowledgement target</dt><dd>日本の営業日ベースで 48 時間以内。</dd>
+			<dt>Triage target</dt><dd>7 日以内に severity assessment と指標的 fix timeline を返す。</dd>
+			<dt>Disclosure model</dt><dd>default 90 日 embargo の coordinated disclosure。 上流調整が必要な場合は相互合意で延長可。</dd>
+		</dl>
+		<p>In scope: 本 repo の code / 構成、 production deploy、 本 site に NodeID 掲載済の validator 自体。 Out of scope: 上流 <code>metalgo</code>(<a href="https://github.com/MetalBlockchain/metalgo/security" rel="noopener noreferrer">MetalBlockchain/metalgo</a> に直接報告)、 edge / host provider の問題(各 vendor 直接)、 単純 traffic flood DoS(edge 層で吸収)、 影響実証なしの best practice 提案。</p>
+	</section>
+
+	<section class="card">
+		<h2>本ページが「ではない」もの</h2>
+		<p>本ページは運用者の自己適用 discipline を要約したもの。 SOC 2 attestation でも、 何らかの規制 framework 下の certification でも、 契約上のセキュリティ保証でもない。 運用者は規制 accreditation を主張しない。 公開する verifiable artifact を、 評価者が自身の framework に入力する材料として提供するに留まる。</p>
+		<p>本ページは exhaustive でもない。 具体的な defense threshold、 完全な運用者側手順、 CONFIDENTIAL infrastructure 詳細は意図的に公開 web から外す。 個別のより深い詳細が bilateral に必要な評価者は <a href="/ja/inquiry/">問い合わせ surface</a> から連絡可能 — 該当 item は分類に応じた confidentiality 姿勢で議論する。</p>
+	</section>
+
+	<section class="card">
+		<h2>関連</h2>
+		<ul>
+			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md">docs/CONSTITUTION.md</a> — 最上位文書。 SECRET / CONFIDENTIAL / PUBLIC 完全 table を含む。</li>
+			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/SECURITY_LAYERS.md">docs/SECURITY_LAYERS.md</a> — 4 層 defense、 攻撃時 runbook、 検証 checklist。</li>
+			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md">docs/KEY_ROTATION.md</a> — validator key の rotation / 漏洩対応手順。</li>
+			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/SECURITY.md">SECURITY.md</a> — 脆弱性報告 policy。</li>
+			<li><a href="/ja/commitments/">運用者 commitment</a> — セキュリティ機微情報の非公開 commitment(#9)を含む。</li>
+			<li><a href="/ja/risk-disclosure/">リスク開示</a> — 運用者が <em>主張しない</em> こと、 合理的評価者が知るべき limit。</li>
+		</ul>
+	</section>
+
+</main>
+
+<footer class="site-footer">
+	<div class="container">
+		<div class="footer-grid">
+			<div class="footer-brand">
+				<h3>Freedom Yield · Metal</h3>
+				<p>Metal Blockchain の long-horizon validator。透明な uptime 開示、公開監査証跡。</p>
+			</div>
+			<nav class="footer-col" aria-label="バリデータ">
+				<h4>バリデータ</h4>
+				<ul>
+					<li><a href="/ja/#status">ステータス</a></li>
+					<li><a href="/ja/#about">概要</a></li>
+					<li><a href="/ja/#track-record">実績</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="委任">
+				<h4>委任</h4>
+				<ul>
+					<li><a href="/ja/#delegate">委任する</a></li>
+					<li><a href="/ja/#calculator">報酬計算</a></li>
+					<li><a href="/ja/#faq">FAQ</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="ネットワーク">
+				<h4>ネットワーク</h4>
+				<ul>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">Explorer ↗</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="サポート">
+				<h4>サポート</h4>
+				<ul>
+					<li><a href="/ja/commitments/">Commitment</a></li>
+					<li><a href="/ja/risk-disclosure/">リスク開示</a></li>
+					<li><a href="/ja/inquiry/">問い合わせ</a></li>
+					<li><a href="mailto:info@metal.freedom-yield.com">お問い合わせ</a></li>
+				</ul>
+			</nav>
+		</div>
+		<hr class="footer-divider">
+		<p class="footer-disclaimer"><strong>免責事項:</strong> Freedom Yield は Metal Blockchain 上で稼働する独立した第三者バリデータです。Metallicus 社および Metal Blockchain Foundation の関連会社・提携先・出資先・公式運営者ではありません。各商標は各権利者に帰属します。</p>
+		<div class="footer-bottom">
+			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain</a>.</p>
+			<p>© 2026 Freedom Yield · Metal validator</p>
+		</div>
+	</div>
+</footer>
+</body>
+</html>

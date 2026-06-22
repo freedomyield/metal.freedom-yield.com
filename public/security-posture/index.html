@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Security posture — Freedom Yield Metal</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="How this Metal Blockchain validator approaches defense in depth, validator key handling, information classification, and vulnerability reporting — an evaluator-facing summary, with links to the underlying public documents.">
+<link rel="canonical" href="https://metal.freedom-yield.com/security-posture/">
+<link rel="alternate" hreflang="en" href="https://metal.freedom-yield.com/security-posture/">
+<link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/security-posture/">
+<link rel="alternate" hreflang="x-default" href="https://metal.freedom-yield.com/security-posture/">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#07080c">
+<meta name="color-scheme" content="dark">
+<script defer src="/assets/main.js"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
+<script defer src="/assets/gtag-init.js"></script>
+</head>
+<body>
+<a href="#main" class="skip-link">Skip to main content</a>
+
+<nav class="topnav">
+	<div class="topnav-inner">
+		<a href="/" class="brand">Freedom Yield · Metal</a>
+		<details class="nav-menu">
+			<summary class="nav-toggle" aria-label="Open / close menu">
+				<span class="hamburger-icon" aria-hidden="true"></span>
+			</summary>
+			<div class="nav">
+				<a href="/#status">Status</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">About</button>
+					<div class="nav-dropdown-menu">
+						<a href="/#about">About</a>
+						<a href="/#roadmap">Roadmap</a>
+					</div>
+				</div>
+				<a href="/#delegate" data-ga-event="delegate_cta_click" data-ga-param-position="nav">Delegate</a>
+				<div class="nav-dropdown">
+					<button type="button" class="nav-dropdown-toggle">Verify</button>
+					<div class="nav-dropdown-menu">
+						<a href="/data/">Open data</a>
+						<a href="/journal/">Cycle journal</a>
+						<a href="/network/">Network</a>
+						<a href="/continuity/">Continuity</a>
+						<a href="/jurisdiction/">Jurisdiction</a>
+						<a href="/incidents/" data-ga-event="nav_click" data-ga-param-target="incidents">Incidents</a>
+						<a href="/commitments/">Commitments</a>
+						<a href="/risk-disclosure/">Risk disclosure</a>
+						<a href="/selection-evidence/">Selection evidence</a>
+						<a href="/subnet-readiness/">Subnet readiness</a>
+						<a href="/reference-architecture/">Reference architecture</a>
+						<a href="/subnet-pilot/">Subnet pilot</a>
+						<a href="/inquiry/">Inquiry</a>
+						<a href="/pledge/">Pledge</a>
+					</div>
+				</div>
+				<a href="/ja/security-posture/" class="nav-lang" data-ga-event="language_switch" data-ga-param-to="ja">JA</a>
+			</div>
+		</details>
+	</div>
+</nav>
+
+<header class="hero hero--simple">
+	<div class="container">
+		<p class="hero-eyebrow">How the operator approaches security</p>
+		<h1>Security posture</h1>
+		<p class="hero-lead">
+			A summary of how this validator handles defense in depth, validator key custody, information classification,
+			and vulnerability reporting. This page is a synthesis for evaluators; the underlying public documents in the
+			repository (<a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md">Constitution</a>,
+			<a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/SECURITY_LAYERS.md">SECURITY_LAYERS</a>,
+			<a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md">KEY_ROTATION</a>,
+			<a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/SECURITY.md">SECURITY</a>) remain authoritative.
+		</p>
+	</div>
+</header>
+
+<main id="main" class="container">
+
+	<section class="card">
+		<h2>Defense in depth</h2>
+		<p>The public web side is protected in four categorical layers, outermost first. Specific tunings, thresholds, and provider details are kept off the public web and managed in operator-side documentation; what follows is the categorical shape an evaluator typically needs.</p>
+		<dl class="data-meta">
+			<dt>Edge layer (CDN)</dt><dd>Always-on L3 / L4 DDoS auto-mitigation, IP reputation filtering, edge caching for static assets, HTTPS termination. Per-IP rate limiting active at this layer. Tightening rules exist for sustained attack — see the runbook in <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/SECURITY_LAYERS.md"><code>docs/SECURITY_LAYERS.md</code></a>.</dd>
+			<dt>Application gateway</dt><dd>A Caddy reverse proxy enforces per-IP and per-endpoint quotas in memory. Requests over quota return <code>429 Too Many Requests</code>. The plugin honours the edge-CDN-forwarded client IP.</dd>
+			<dt>Host network</dt><dd>The web host's own provider-managed firewall and TLS terminator sit between the edge and the application gateway. Provider-side DDoS mitigation is available as an escalation channel if the upstream layers are overwhelmed.</dd>
+			<dt>OS / SSH</dt><dd>Standard hardening: a host firewall exposing only standard web and SSH ports on the validator side, <code>fail2ban</code> on the SSH daemon on both sides, public-key SSH only, password-based SSH disabled. Operator dashboards behind authentication; password-derived credentials use a high-cost hash.</dd>
+		</dl>
+		<p class="note">Concrete rule numbers, port allowlists, blocklist sources, and authentication credential storage paths are classified SECRET or CONFIDENTIAL (see below) and intentionally not exposed on this page.</p>
+	</section>
+
+	<section class="card">
+		<h2>Validator key handling</h2>
+		<p>The validator runs <code>metalgo</code>; three files in its staking directory drive identity and signing. The constitution forbids ever committing the private parts to the repository in any form (<a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md">CONSTITUTION §3.3</a>), and the <code>.gitignore</code> blocks the relevant extensions as a second line of defense.</p>
+		<dl class="data-meta">
+			<dt><code>staker.crt</code></dt><dd>Public X.509 certificate. Its hash is the source of the NodeID. Publishable; appears in the explorer.</dd>
+			<dt><code>staker.key</code></dt><dd>Private staking key. Never leaves the host's encrypted volume. Classified SECRET (S1).</dd>
+			<dt><code>signer.key</code></dt><dd>BLS private signing key. Same treatment as <code>staker.key</code>.</dd>
+		</dl>
+		<p>Backups are encrypted off-host, stored in independent locations, and never described by full path in any public artifact. The rotation strategy follows the Avalanche-derived constraint that an active validation period cannot have its underlying key swapped without invalidating the NodeID; rotation therefore aligns with cycle boundaries. The compromise-response procedure (stop the node, identify and destroy implicated backups, stand up a new NodeID, publish an incident entry) is documented in the runbook.</p>
+		<p>The Avalanche-derived P-Chain has no slashing for validator misbehaviour — the worst-case impact of a stolen <code>staker.key</code> during an active period is a window of foregone rewards, not principal loss for the operator or delegators.</p>
+		<p class="note">Full backup procedure, on-disk paths, encryption tooling specifics, and operator workstation key locations are classified SECRET and live in the operator-side runbook only.</p>
+	</section>
+
+	<section class="card">
+		<h2>Information classification</h2>
+		<p>Every item connected to this validator falls into one of three tiers defined in <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md">Constitution §4</a>. When an item's tier is unclear, the more restrictive treatment is applied.</p>
+		<dl class="data-meta">
+			<dt>SECRET</dt><dd>Items whose disclosure changes attackability or operability of the validator: validator private keys, all wallet seeds and passphrases, operator-dashboard credentials, SSH credentials and key paths, specific host IPs and hostnames, ntfy topic identifiers, third-party API tokens. Never appears anywhere public.</dd>
+			<dt>CONFIDENTIAL</dt><dd>Items whose disclosure shapes attack surface or operational predictability without being bearer secrets: cloud provider name per role, specific hardware spec, specific monitoring tools, on-call windows, internal directory structure under operator-controlled paths. Default is do-not-publish; aggregate categorical reference is permitted.</dd>
+			<dt>PUBLIC</dt><dd>Brand identity, NodeID and Proof of Possession, self-stake amount, fee, delegator count, cycle transaction IDs, jurisdictional country, public site endpoints, architecture statements at the categorical level (two-host separation, automated deploy, monitoring discipline).</dd>
+		</dl>
+		<p>The decision rule, the complete item list per tier, and the reclassification process are in the Constitution; the rule that matters most in practice is the one above — when in doubt, treat the item as more restrictive.</p>
+	</section>
+
+	<section class="card">
+		<h2>Vulnerability reporting</h2>
+		<p>The repository carries a top-level <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/SECURITY.md"><code>SECURITY.md</code></a> describing the reporting channel and coordinated disclosure policy:</p>
+		<dl class="data-meta">
+			<dt>Channel</dt><dd>Email to <a href="mailto:bp@freedom-yield.com">bp@freedom-yield.com</a>. Public GitHub issues are explicitly not the channel for vulnerability reports.</dd>
+			<dt>Acknowledgement target</dt><dd>Within 48 hours on Japan business days.</dd>
+			<dt>Triage target</dt><dd>Within 7 days, with severity assessment and an indicative fix timeline.</dd>
+			<dt>Disclosure model</dt><dd>Coordinated disclosure with a default 90-day embargo, extendable by mutual agreement if upstream coordination is required.</dd>
+		</dl>
+		<p>In scope: this repository's code and configuration, the production deployment, and the validator itself once its NodeID is on the site. Out of scope: upstream <code>metalgo</code> (report directly to <a href="https://github.com/MetalBlockchain/metalgo/security" rel="noopener noreferrer">MetalBlockchain/metalgo</a>), edge or host provider issues (report to those vendors), simple traffic-flood DoS (mitigated at the edge), and best-practice suggestions without demonstrable impact.</p>
+	</section>
+
+	<section class="card">
+		<h2>What this page is not</h2>
+		<p>This page is a summary of operator-applied discipline. It is not a SOC 2 attestation, a certification under any compliance regime, or a contractual security warranty. The operator does not claim regulatory accreditation; the operator publishes verifiable artifacts that an independent evaluator can use as input to their own framework.</p>
+		<p>The page is also not exhaustive. Specific defense thresholds, complete operator-side procedures, and CONFIDENTIAL infrastructure detail are intentionally absent from the public web. An evaluator who needs deeper detail bilaterally can use the <a href="/inquiry/">inquiry surface</a>; appropriate items will be discussed under a confidentiality posture matching their classification.</p>
+	</section>
+
+	<section class="card">
+		<h2>Related</h2>
+		<ul>
+			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md">docs/CONSTITUTION.md</a> — supreme reference, including the full SECRET / CONFIDENTIAL / PUBLIC tables.</li>
+			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/SECURITY_LAYERS.md">docs/SECURITY_LAYERS.md</a> — the four-layer defense, the under-attack runbook, and the verification checklist.</li>
+			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md">docs/KEY_ROTATION.md</a> — validator key rotation and compromise-response procedure.</li>
+			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/SECURITY.md">SECURITY.md</a> — vulnerability reporting policy.</li>
+			<li><a href="/commitments/">Operator commitments</a> — including the security-sensitive information non-exposure commitment (#9).</li>
+			<li><a href="/risk-disclosure/">Risk disclosure</a> — what the operator does <em>not</em> claim, and the limits a reasonable evaluator should know.</li>
+		</ul>
+	</section>
+
+</main>
+
+<footer class="site-footer">
+	<div class="container">
+		<div class="footer-grid">
+			<div class="footer-brand">
+				<h3>Freedom Yield · Metal</h3>
+				<p>Long-horizon validator on Metal Blockchain. Transparent uptime, public audit trail.</p>
+			</div>
+			<nav class="footer-col" aria-label="Validator">
+				<h4>Validator</h4>
+				<ul>
+					<li><a href="/#status">Status</a></li>
+					<li><a href="/#about">About</a></li>
+					<li><a href="/#track-record">Track record</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Delegation">
+				<h4>Delegation</h4>
+				<ul>
+					<li><a href="/#delegate">Delegate</a></li>
+					<li><a href="/#calculator">Rewards</a></li>
+					<li><a href="/#faq">FAQ</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Network">
+				<h4>Network</h4>
+				<ul>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">Explorer ↗</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Support">
+				<h4>Support</h4>
+				<ul>
+					<li><a href="/commitments/">Commitments</a></li>
+					<li><a href="/risk-disclosure/">Risk disclosure</a></li>
+					<li><a href="/inquiry/">Inquiry</a></li>
+					<li><a href="mailto:info@metal.freedom-yield.com">Contact</a></li>
+				</ul>
+			</nav>
+		</div>
+		<hr class="footer-divider">
+		<p class="footer-disclaimer"><strong>Disclaimer:</strong> Freedom Yield is an independent, third-party validator operating on Metal Blockchain. It is not affiliated with, endorsed by, sponsored by, or operated by Metallicus Inc. or the Metal Blockchain Foundation. All trademarks are the property of their respective owners.</p>
+		<div class="footer-bottom">
+			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain</a>.</p>
+			<p>© 2026 Freedom Yield · Metal validator</p>
+		</div>
+	</div>
+</footer>
+</body>
+</html>
