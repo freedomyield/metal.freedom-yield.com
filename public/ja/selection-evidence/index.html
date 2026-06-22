@@ -270,6 +270,175 @@
 
 	</section>
 
+	<section class="card" id="service-scope">
+		<h2>サービススコープ</h2>
+		<p>本サブセクションは、運用が「何をするか」「何をしないか」「責任境界はどこか」 を整理します。 内容は新規記述ではなく、 一次資料への索引です。</p>
+		<dl class="data-meta">
+			<dt>提供範囲</dt><dd>Constitution および operating model に記述された責任モデルに基づく、 Metal Blockchain mainnet validator の運用。</dd>
+			<dt>提供範囲外</dt><dd>delegator 資金の保管、 off-chain custody、 subnet 運用の事前 commitment、 validator として protocol が要求する範囲を超える smart contract 実行、 リンクされた surface 外のサービス全般。</dd>
+			<dt>責任境界</dt><dd>validator の可用性、 公開検証 surface、 identity manifest の署名 — 以下リンクの一次資料に従う。</dd>
+			<dt>参照 — Commitments</dt><dd><a href="/ja/commitments/">/ja/commitments/</a> — #3 (非保管型運用) および #4 (誇張インフラ主張をしない) を含む</dd>
+			<dt>参照 — 既知の制約</dt><dd><a href="/ja/risk-disclosure/">/ja/risk-disclosure/</a></dd>
+			<dt>参照 — Subnet 境界</dt><dd><a href="/ja/subnet-readiness/">/ja/subnet-readiness/</a></dd>
+			<dt>参照 — Constitution</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md" rel="noopener noreferrer"><code>docs/CONSTITUTION.md</code></a> §1 (Mission and Identity) + §8 (Scope Boundaries)</dd>
+		</dl>
+	</section>
+
+	<section class="card" id="governance">
+		<h2>ガバナンス</h2>
+		<p>意思決定の方法、 記録、 改定プロセス。 単一運用者であることは記録されており、 開示された control profile の前提として扱います — 隠す事項ではありません。</p>
+		<dl class="data-meta">
+			<dt>運用者構造</dt><dd>単一運用者。 staking + identity 材料の単独署名権限。 リスク開示 surface に明記。</dd>
+			<dt>意思決定の記録</dt><dd>公開リポジトリの単一目的 commit。 各 commit は「なぜ」を説明します。</dd>
+			<dt>改定プロセス</dt><dd>Constitution §9 — 改定は説明文付きの公開リポジトリへの commit。</dd>
+			<dt>参照 — Constitution</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md" rel="noopener noreferrer"><code>docs/CONSTITUTION.md</code></a> §9 (Amendment Process)</dd>
+			<dt>参照 — Operating model</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/OPERATING_MODEL.md" rel="noopener noreferrer"><code>docs/OPERATING_MODEL.md</code></a></dd>
+			<dt>参照 — リスク開示</dt><dd><a href="/ja/risk-disclosure/">/ja/risk-disclosure/</a></dd>
+			<dt>参照 — Commitments</dt><dd><a href="/ja/commitments/">/ja/commitments/</a> — #4 (誇張インフラ主張をしない) および #9 (security-sensitive 情報は公開しない) を含む</dd>
+		</dl>
+	</section>
+
+	<section class="card" id="operational-targets">
+		<h2>運用目標</h2>
+		<p>運用者側の明示目標。 これらは運用者が一方的に公開している commitment であり、 参照先で再現される一次資料 — 本ページで新規導入する数値や保証ではありません。</p>
+		<dl class="data-meta">
+			<dt>運用者 commitments</dt><dd><a href="/ja/commitments/">/ja/commitments/</a> — 10 項目、 各項目は (commitment / 根拠 / それが意味しないもの) の構成。</dd>
+			<dt>問い合わせ応答目標</dt><dd><a href="/ja/inquiry/">/ja/inquiry/</a> — 日本営業日 24 時間以内の初回応答目標 (commitment #10)。</dd>
+			<dt>インシデント対応</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/INCIDENT_RESPONSE.md" rel="noopener noreferrer"><code>docs/INCIDENT_RESPONSE.md</code></a> — 重要度 (SEV) 階梯、 障害種別分類、 種別ごとの対応手順。</dd>
+			<dt>renewal リズム</dt><dd><a href="/ja/journal/">/ja/journal/</a> — on-chain transaction リンク付きの cycle 履歴。</dd>
+		</dl>
+		<p>運用者は契約的な uptime SLA、 委任報酬の保証、 subnet 受入 commitment は公開しません。 理由はリスク開示を参照してください。</p>
+	</section>
+
+	<section class="card" id="dependencies-data">
+		<h2>依存関係とデータ</h2>
+		<p>運用が依存する外部サービス、 およびホスト間のデータフロー境界。 内容はリファレンスアーキテクチャに記述があり、 本サブセクションはそこへの索引です。</p>
+		<dl class="data-meta">
+			<dt>アーキテクチャ</dt><dd><a href="/ja/reference-architecture/">/ja/reference-architecture/</a> — 2 ホストトポロジ、 片方向 push、 3 鍵分離。</dd>
+			<dt>third-party 依存</dt><dd><a href="/ja/reference-architecture/#third-party-dependencies">/ja/reference-architecture/#third-party-dependencies</a> — service / 目的 / 障害影響 / 代替経路。</dd>
+			<dt>CDN + edge policy</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CF_POLICY.md" rel="noopener noreferrer"><code>docs/CF_POLICY.md</code></a> — 設定判断とその根拠。</dd>
+			<dt>データ custody</dt><dd>delegator 資金、 validator-signing 材料、 operator identity key のいずれも third-party 保管ではありません。 <a href="/ja/commitments/">/ja/commitments/</a> #3 (非保管型運用) を参照。</dd>
+		</dl>
+	</section>
+
+	<section class="card" id="materials-classification">
+		<h2>資料分類索引</h2>
+		<p>各カテゴリの資料がどう公開されているかを分類別に整理します。 「Public」 = 本サイトまたは公開リポジトリで直接読める。 「Available on request」 = 問い合わせ surface を通じ、 妥当な本人確認手続後に共有。 「Private / contractual」 = 契約関係の中でのみ共有。 「In preparation」 = schema や commitment は存在するが runtime artifact はまだ live でない。 「N/A」 = 本 validator 運用の scope 外。 「Not disclosed (security posture)」 = 抽象パターンは公開するが具体値は意図的に出さない。</p>
+		<table>
+			<thead>
+				<tr><th>資料</th><th>分類</th><th>所在 / 方法</th></tr>
+			</thead>
+			<tbody>
+				<tr><td>運用者 commitments</td><td>Public</td><td><a href="/ja/commitments/">/ja/commitments/</a></td></tr>
+				<tr><td>リスク開示</td><td>Public</td><td><a href="/ja/risk-disclosure/">/ja/risk-disclosure/</a></td></tr>
+				<tr><td>Subnet 適性スコアカード</td><td>Public</td><td><a href="/ja/subnet-readiness/">/ja/subnet-readiness/</a></td></tr>
+				<tr><td>リファレンスアーキテクチャ</td><td>Public</td><td><a href="/ja/reference-architecture/">/ja/reference-architecture/</a></td></tr>
+				<tr><td>Cycle uptime 履歴</td><td>Public</td><td><a href="/api/uptime-cycles.json"><code>/api/uptime-cycles.json</code></a> + <a href="/ja/journal/">/ja/journal/</a></td></tr>
+				<tr><td>インシデントログ</td><td>Public</td><td><a href="/api/incidents.json"><code>/api/incidents.json</code></a> + <a href="/ja/incidents/">/ja/incidents/</a></td></tr>
+				<tr><td>Constitution + operating model</td><td>Public</td><td>公開リポジトリ <code>docs/</code></td></tr>
+				<tr><td>インシデント対応 runbook</td><td>Public</td><td>公開リポジトリ <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/INCIDENT_RESPONSE.md" rel="noopener noreferrer"><code>docs/INCIDENT_RESPONSE.md</code></a></td></tr>
+				<tr><td>identity manifest + DAG schemas</td><td>Public (schema は live) / In preparation (runtime artifact)</td><td>schema は live、 runtime <code>/api/identity.json</code> + <code>/api/anchor-receipt.json</code> は次 cycle start (2026-07-04) に activate</td></tr>
+				<tr><td>詳細な事業継続性 / DR 手順</td><td>Available on request</td><td><a href="/ja/inquiry/">/ja/inquiry/</a> 経由 — 概要は <a href="/ja/continuity/">/ja/continuity/</a></td></tr>
+				<tr><td>Drill 報告書 + post-mortem</td><td>In preparation</td><td>フォーマットは <code>docs/INCIDENT_RESPONSE.md</code> §5 post-mortem テンプレート準拠。 初回 drill はまだ未実施</td></tr>
+				<tr><td>正式な外部監査報告書</td><td>In preparation</td><td>正式な外部監査はまだ実施していません</td></tr>
+				<tr><td>運用者 legal entity 名</td><td>Private / contractual</td><td>契約関係の中でのみ共有</td></tr>
+				<tr><td>運用者個人連絡先</td><td>Private / contractual</td><td>契約関係の中でのみ共有</td></tr>
+				<tr><td>具体的なプロバイダ名・IP・ホストパス・port</td><td>Not disclosed (security posture)</td><td>リファレンスアーキテクチャでは抽象化、 具体値は公開 surface に載せません</td></tr>
+				<tr><td>validator + identity + push 鍵材料</td><td>Private — 公開 surface には一切載せません</td><td>リファレンスアーキテクチャの 3 鍵分離に従う</td></tr>
+				<tr><td>他事業の資料</td><td>N/A</td><td>本 validator 運用の scope 外</td></tr>
+			</tbody>
+		</table>
+	</section>
+
+	<section class="card" id="control-matrix">
+		<h2>コントロール + エビデンス対応表</h2>
+		<p>コントロール領域ごとに 1 行: 現状のコントロールサマリ、 既存エビデンス、 現状ステータス、 honest に開示する既知の制約。 これは既存エビデンスへの索引であり、 新規 commitment は導入しません。</p>
+		<table>
+			<thead>
+				<tr><th>コントロール領域</th><th>現状コントロール</th><th>エビデンス</th><th>ステータス</th><th>既知の制約</th></tr>
+			</thead>
+			<tbody>
+				<tr>
+					<td>validator 可用性</td>
+					<td>日次モニタリング + cycle close 単位の uptime 公開</td>
+					<td><a href="/api/uptime-cycles.json"><code>/api/uptime-cycles.json</code></a> + <a href="/ja/journal/">/ja/journal/</a></td>
+					<td>Active</td>
+					<td>単一運用者、 日本営業時間外は staffed coverage なし</td>
+				</tr>
+				<tr>
+					<td>インシデント対応</td>
+					<td>SEV ベース runbook + 公開インシデントログ</td>
+					<td><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/INCIDENT_RESPONSE.md" rel="noopener noreferrer"><code>docs/INCIDENT_RESPONSE.md</code></a> + <a href="/ja/incidents/">/ja/incidents/</a></td>
+					<td>Active</td>
+					<td>外部 SOC は契約していません、 一次対応は運用者側</td>
+				</tr>
+				<tr>
+					<td>変更管理</td>
+					<td>単一目的の公開 commit + pre-commit secret scan</td>
+					<td>公開リポジトリの commit 履歴</td>
+					<td>Active</td>
+					<td>単一 committer、 multi-party review gate なし</td>
+				</tr>
+				<tr>
+					<td>鍵分離</td>
+					<td>3 鍵モデル (validator signing / operator identity / push)</td>
+					<td><a href="/ja/reference-architecture/">/ja/reference-architecture/</a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md" rel="noopener noreferrer"><code>docs/KEY_ROTATION.md</code></a></td>
+					<td>Active</td>
+					<td>3 カテゴリの鍵は単一運用者が保持</td>
+				</tr>
+				<tr>
+					<td>identity 検証</td>
+					<td>ed25519 署名付き identity manifest + Metal A-chain への Merkle DAG anchor (Phase α)</td>
+					<td><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer"><code>docs/IDENTITY_VERIFICATION.md</code></a> + <a href="/api/identity.example.json"><code>/api/identity.example.json</code></a> + <a href="/api/anchor-receipt.example.json"><code>/api/anchor-receipt.example.json</code></a></td>
+					<td>In preparation — schema・verifier recipe・test vectors は live、 runtime は 2026-07-04 に activate</td>
+					<td>Phase α は Metal A-chain への memo only、 smart contract inscription は Phase β</td>
+				</tr>
+				<tr>
+					<td>データ完全性</td>
+					<td>append-only 永続化 + allowlist 検証付き push + atomic write</td>
+					<td><a href="/ja/reference-architecture/">/ja/reference-architecture/</a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/EVIDENCE_MANIFEST.md" rel="noopener noreferrer"><code>docs/EVIDENCE_MANIFEST.md</code></a></td>
+					<td>Active</td>
+					<td>third-party witness なし、 完全性主張は運用者側のみ</td>
+				</tr>
+				<tr>
+					<td>バックアップ / 復旧</td>
+					<td>暗号化 off-host バックアップ + 鍵 rotation runbook + DR runbook</td>
+					<td><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/DISASTER_RECOVERY.md" rel="noopener noreferrer"><code>docs/DISASTER_RECOVERY.md</code></a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md" rel="noopener noreferrer"><code>docs/KEY_ROTATION.md</code></a></td>
+					<td>Active</td>
+					<td>定期 DR drill は準備中、 drill 報告書はまだなし</td>
+				</tr>
+				<tr>
+					<td>third-party 依存</td>
+					<td>識別済み、 代替可能、 鍵材料 custody なし</td>
+					<td><a href="/ja/reference-architecture/#third-party-dependencies">/ja/reference-architecture/#third-party-dependencies</a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CF_POLICY.md" rel="noopener noreferrer"><code>docs/CF_POLICY.md</code></a></td>
+					<td>Active</td>
+					<td>CDN は <code>CF_POLICY.md</code> に記載の設定で稼働、 一部の edge 側 opt-in は意図的に off</td>
+				</tr>
+				<tr>
+					<td>schema 安定性</td>
+					<td>JSON Schema v1 は version 内で安定、 breaking change は新 URL <code>*.schema.v2.json</code>、 v1 URL は v2 公開後最低 18 ヶ月 reachable</td>
+					<td><a href="/api/evidence.schema.v1.json"><code>/api/evidence.schema.v1.json</code></a> + 兄弟 schema</td>
+					<td>Active</td>
+					<td>単一 author の schema、 外部 schema registry なし</td>
+				</tr>
+				<tr>
+					<td>decommission</td>
+					<td>合理的な decommission notice commitment</td>
+					<td><a href="/ja/commitments/">/ja/commitments/</a> #8</td>
+					<td>Stated</td>
+					<td>詳細な正式 exit runbook は準備中</td>
+				</tr>
+				<tr>
+					<td>公開コミュニケーション</td>
+					<td>公的主張基準 + 日本営業日 24 時間以内の応答目標</td>
+					<td><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md" rel="noopener noreferrer"><code>docs/CONSTITUTION.md</code></a> §7 + <a href="/ja/inquiry/">/ja/inquiry/</a> + <a href="/ja/commitments/">/ja/commitments/</a> #10</td>
+					<td>Active</td>
+					<td>日本営業時間外は best-effort</td>
+				</tr>
+			</tbody>
+		</table>
+	</section>
+
 </main>
 
 <footer class="site-footer">
