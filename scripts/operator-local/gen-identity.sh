@@ -140,12 +140,16 @@ NAMESPACE="freedom-yield/validator-identity"
 NOW_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 KEY_IAT="${KEY_IAT:-${NOW_UTC}}"
 if [[ -z "${KEY_EXP:-}" ]]; then
-	if date -j -v+365d -u +%Y-%m-%dT%H:%M:%SZ >/dev/null 2>&1; then
+	# LC_ALL=C forces POSIX locale so date does not emit a localized fallback
+	# (= ja_JP would emit "2027年 6月22日 火曜日 ..." if the explicit +fmt
+	# is not applied for any reason). -u placed BEFORE -f because macOS BSD
+	# date treats -u as an option flag that must precede positional args.
+	if LC_ALL=C date -u -j -v+365d +%Y-%m-%dT%H:%M:%SZ >/dev/null 2>&1; then
 		# BSD date (macOS).
-		KEY_EXP="$(date -j -v+365d -f "%Y-%m-%dT%H:%M:%SZ" "${KEY_IAT}" -u +%Y-%m-%dT%H:%M:%SZ)"
+		KEY_EXP="$(LC_ALL=C date -u -j -v+365d -f "%Y-%m-%dT%H:%M:%SZ" "${KEY_IAT}" +%Y-%m-%dT%H:%M:%SZ)"
 	else
 		# GNU date (Linux).
-		KEY_EXP="$(date -u -d "${KEY_IAT} +365 days" +%Y-%m-%dT%H:%M:%SZ)"
+		KEY_EXP="$(LC_ALL=C date -u -d "${KEY_IAT} +365 days" +%Y-%m-%dT%H:%M:%SZ)"
 	fi
 fi
 
