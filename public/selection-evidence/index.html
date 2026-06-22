@@ -270,6 +270,175 @@
 
 	</section>
 
+	<section class="card" id="service-scope">
+		<h2>Service scope</h2>
+		<p>This sub-section answers what the operation does, what it does not do, and where the responsibility boundary sits. It is an index into the canonical sources; the substance lives in the linked pages and runbooks.</p>
+		<dl class="data-meta">
+			<dt>What is offered</dt><dd>Operation of a Metal Blockchain mainnet validator under the responsibility model described in the constitution and operating model.</dd>
+			<dt>What is not offered</dt><dd>Custody of delegator funds, off-chain custody services, pre-committed subnet operation, smart-contract execution beyond what the protocol requires of a validator, and any service outside the linked surface.</dd>
+			<dt>Responsibility boundary</dt><dd>Validator availability, public verification surface, and identity-manifest signing — per the linked sources below.</dd>
+			<dt>Source — Commitments</dt><dd><a href="/commitments/">/commitments/</a> — including #3 (non-custodial operation) and #4 (no inflated infrastructure claims)</dd>
+			<dt>Source — Known limitations</dt><dd><a href="/risk-disclosure/">/risk-disclosure/</a></dd>
+			<dt>Source — Subnet boundary</dt><dd><a href="/subnet-readiness/">/subnet-readiness/</a></dd>
+			<dt>Source — Constitution</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md" rel="noopener noreferrer"><code>docs/CONSTITUTION.md</code></a> §1 (Mission and Identity) + §8 (Scope Boundaries)</dd>
+		</dl>
+	</section>
+
+	<section class="card" id="governance">
+		<h2>Governance</h2>
+		<p>How decisions are made, recorded, and amended. The single-operator nature of the operation is documented and forms the basis of the disclosed control profile; it is not hidden.</p>
+		<dl class="data-meta">
+			<dt>Operator structure</dt><dd>Single operator. Sole signing authority over staking + identity material. Disclosed on the risk surface.</dd>
+			<dt>Decision record</dt><dd>Single-purpose commits in the public source repository. Each commit explains the why.</dd>
+			<dt>Amendment process</dt><dd>Constitution §9 — amendments are commits to the public repository with an explanatory message.</dd>
+			<dt>Source — Constitution</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md" rel="noopener noreferrer"><code>docs/CONSTITUTION.md</code></a> §9 (Amendment Process)</dd>
+			<dt>Source — Operating model</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/OPERATING_MODEL.md" rel="noopener noreferrer"><code>docs/OPERATING_MODEL.md</code></a></dd>
+			<dt>Source — Risk disclosure</dt><dd><a href="/risk-disclosure/">/risk-disclosure/</a></dd>
+			<dt>Source — Commitments</dt><dd><a href="/commitments/">/commitments/</a> — including #4 (no inflated infrastructure claims) and #9 (security-sensitive information is not publicly exposed)</dd>
+		</dl>
+	</section>
+
+	<section class="card" id="operational-targets">
+		<h2>Operational targets</h2>
+		<p>Stated operator-side targets. These are the unilateral commitments the operator has published; they are reproduced in the linked sources, not invented here.</p>
+		<dl class="data-meta">
+			<dt>Operator commitments</dt><dd><a href="/commitments/">/commitments/</a> — ten items, each one with the form (commitment, rationale, what it does not imply).</dd>
+			<dt>Inquiry response target</dt><dd><a href="/inquiry/">/inquiry/</a> — 24-hour first-response target on Japan business days (commitment #10).</dd>
+			<dt>Incident response</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/INCIDENT_RESPONSE.md" rel="noopener noreferrer"><code>docs/INCIDENT_RESPONSE.md</code></a> — severity (SEV) ladder, classification by failure type, and per-class response procedure.</dd>
+			<dt>Renewal cadence</dt><dd><a href="/journal/">/journal/</a> — cycle-by-cycle history with on-chain transaction links.</dd>
+		</dl>
+		<p>The operator does not publish a contractual uptime SLA, a delegation-reward guarantee, or a subnet-acceptance commitment. See risk disclosure for the reasoning.</p>
+	</section>
+
+	<section class="card" id="dependencies-data">
+		<h2>Dependencies &amp; data</h2>
+		<p>External services the operation relies on, and the data-flow boundaries between hosts. The substance lives in the reference architecture; this sub-section indexes into it.</p>
+		<dl class="data-meta">
+			<dt>Architecture</dt><dd><a href="/reference-architecture/">/reference-architecture/</a> — two-host topology, one-way push, three-key separation.</dd>
+			<dt>Third-party dependencies</dt><dd><a href="/reference-architecture/#third-party-dependencies">/reference-architecture/#third-party-dependencies</a> — service / purpose / failure impact / substitution path.</dd>
+			<dt>CDN + edge policy</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CF_POLICY.md" rel="noopener noreferrer"><code>docs/CF_POLICY.md</code></a> — configuration decisions and the rationale for each.</dd>
+			<dt>Data custody</dt><dd>No third party has custody of delegator funds, validator-signing material, or operator identity keys. See <a href="/commitments/">/commitments/</a> #3 (non-custodial operation).</dd>
+		</dl>
+	</section>
+
+	<section class="card" id="materials-classification">
+		<h2>Materials classification</h2>
+		<p>How each material category is published, by classification. "Public" means directly readable on this site or in the source repository; "Available on request" means the operator will share via the inquiry surface after a reasonable identification step; "Private / contractual" means the material is shared only inside a contractual relationship; "In preparation" means the artifact's schema or commitment exists but the runtime artifact is not yet live; "N/A" means out of scope of this validator operation; "Not disclosed (security posture)" means the abstract pattern is published but concrete values are intentionally absent.</p>
+		<table>
+			<thead>
+				<tr><th>Material</th><th>Classification</th><th>Where / how</th></tr>
+			</thead>
+			<tbody>
+				<tr><td>Operator commitments</td><td>Public</td><td><a href="/commitments/">/commitments/</a></td></tr>
+				<tr><td>Risk disclosure</td><td>Public</td><td><a href="/risk-disclosure/">/risk-disclosure/</a></td></tr>
+				<tr><td>Subnet-readiness scorecard</td><td>Public</td><td><a href="/subnet-readiness/">/subnet-readiness/</a></td></tr>
+				<tr><td>Reference architecture</td><td>Public</td><td><a href="/reference-architecture/">/reference-architecture/</a></td></tr>
+				<tr><td>Cycle uptime history</td><td>Public</td><td><a href="/api/uptime-cycles.json"><code>/api/uptime-cycles.json</code></a> + <a href="/journal/">/journal/</a></td></tr>
+				<tr><td>Incident log</td><td>Public</td><td><a href="/api/incidents.json"><code>/api/incidents.json</code></a> + <a href="/incidents/">/incidents/</a></td></tr>
+				<tr><td>Constitution + operating model</td><td>Public</td><td>Source repository <code>docs/</code></td></tr>
+				<tr><td>Incident response runbook</td><td>Public</td><td>Source repository <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/INCIDENT_RESPONSE.md" rel="noopener noreferrer"><code>docs/INCIDENT_RESPONSE.md</code></a></td></tr>
+				<tr><td>Identity manifest + DAG schemas</td><td>Public (schemas live) / In preparation (runtime artifacts)</td><td>Schemas live; runtime <code>/api/identity.json</code> + <code>/api/anchor-receipt.json</code> activate at the next cycle start (2026-07-04)</td></tr>
+				<tr><td>Detailed continuity / DR procedure</td><td>Available on request</td><td>Via <a href="/inquiry/">/inquiry/</a> — high-level model in <a href="/continuity/">/continuity/</a></td></tr>
+				<tr><td>Drill reports + post-mortems</td><td>In preparation</td><td>Format follows <code>docs/INCIDENT_RESPONSE.md</code> §5 post-mortem template; first drill not yet completed</td></tr>
+				<tr><td>Formal external audit reports</td><td>In preparation</td><td>No formal external audit has been performed yet</td></tr>
+				<tr><td>Operator legal entity</td><td>Private / contractual</td><td>Shared inside contractual engagement only</td></tr>
+				<tr><td>Operator personal contact details</td><td>Private / contractual</td><td>Shared inside contractual engagement only</td></tr>
+				<tr><td>Specific provider names, IPs, host paths, ports</td><td>Not disclosed (security posture)</td><td>Abstracted in reference architecture; concrete values are not on a public surface</td></tr>
+				<tr><td>Validator + identity + push key material</td><td>Private — never on a public surface</td><td>Per the three-key separation in reference architecture</td></tr>
+				<tr><td>Other-venture material</td><td>N/A</td><td>Out of scope of this validator operation</td></tr>
+			</tbody>
+		</table>
+	</section>
+
+	<section class="card" id="control-matrix">
+		<h2>Control + evidence mapping</h2>
+		<p>One row per control area. Each row records the current control summary, the existing evidence, the current status, and the honestly-stated known limitation. This is an index into existing evidence; it introduces no new commitments.</p>
+		<table>
+			<thead>
+				<tr><th>Control area</th><th>Current control</th><th>Evidence</th><th>Status</th><th>Known limitation</th></tr>
+			</thead>
+			<tbody>
+				<tr>
+					<td>Validator availability</td>
+					<td>Daily monitoring + closed-cycle uptime publication</td>
+					<td><a href="/api/uptime-cycles.json"><code>/api/uptime-cycles.json</code></a> + <a href="/journal/">/journal/</a></td>
+					<td>Active</td>
+					<td>Single operator; no staffed coverage outside Japan business hours</td>
+				</tr>
+				<tr>
+					<td>Incident response</td>
+					<td>SEV-based runbook + public incident log</td>
+					<td><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/INCIDENT_RESPONSE.md" rel="noopener noreferrer"><code>docs/INCIDENT_RESPONSE.md</code></a> + <a href="/incidents/">/incidents/</a></td>
+					<td>Active</td>
+					<td>No formal external SOC; first-line response is operator-side</td>
+				</tr>
+				<tr>
+					<td>Change control</td>
+					<td>Single-purpose public commits + pre-commit secret scan</td>
+					<td>Source repository commit history</td>
+					<td>Active</td>
+					<td>Single committer; no multi-party review gate</td>
+				</tr>
+				<tr>
+					<td>Key separation</td>
+					<td>Three-key model (validator signing / operator identity / push)</td>
+					<td><a href="/reference-architecture/">/reference-architecture/</a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md" rel="noopener noreferrer"><code>docs/KEY_ROTATION.md</code></a></td>
+					<td>Active</td>
+					<td>Sole operator possesses all three key categories</td>
+				</tr>
+				<tr>
+					<td>Identity verification</td>
+					<td>ed25519 signed identity manifest + Merkle DAG anchor on Metal A-chain (Phase α)</td>
+					<td><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer"><code>docs/IDENTITY_VERIFICATION.md</code></a> + <a href="/api/identity.example.json"><code>/api/identity.example.json</code></a> + <a href="/api/anchor-receipt.example.json"><code>/api/anchor-receipt.example.json</code></a></td>
+					<td>In preparation — schemas + verifier recipe + test vectors live; runtime activates 2026-07-04</td>
+					<td>Phase α is memo-only on Metal A-chain; smart-contract inscription is Phase β</td>
+				</tr>
+				<tr>
+					<td>Data integrity</td>
+					<td>Append-only persistence + allowlist-validated push + atomic write</td>
+					<td><a href="/reference-architecture/">/reference-architecture/</a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/EVIDENCE_MANIFEST.md" rel="noopener noreferrer"><code>docs/EVIDENCE_MANIFEST.md</code></a></td>
+					<td>Active</td>
+					<td>No third-party witness; integrity assertion is operator-side</td>
+				</tr>
+				<tr>
+					<td>Backup / recovery</td>
+					<td>Encrypted off-host backups + rotation runbook + disaster-recovery runbook</td>
+					<td><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/DISASTER_RECOVERY.md" rel="noopener noreferrer"><code>docs/DISASTER_RECOVERY.md</code></a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md" rel="noopener noreferrer"><code>docs/KEY_ROTATION.md</code></a></td>
+					<td>Active</td>
+					<td>Scheduled DR drill is in preparation; no drill report yet</td>
+				</tr>
+				<tr>
+					<td>Third-party dependencies</td>
+					<td>Identified, substitutable, no key-material custody</td>
+					<td><a href="/reference-architecture/#third-party-dependencies">/reference-architecture/#third-party-dependencies</a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CF_POLICY.md" rel="noopener noreferrer"><code>docs/CF_POLICY.md</code></a></td>
+					<td>Active</td>
+					<td>CDN runs at the published configuration documented in <code>CF_POLICY.md</code>; certain edge-side opt-ins are intentionally not enabled</td>
+				</tr>
+				<tr>
+					<td>Schema stability</td>
+					<td>JSON Schema v1 stable within version; breaking changes publish to a new <code>*.schema.v2.json</code> URL with v1 reachable for at least 18 months</td>
+					<td><a href="/api/evidence.schema.v1.json"><code>/api/evidence.schema.v1.json</code></a> + sibling schemas</td>
+					<td>Active</td>
+					<td>Single-author schemas; no external schema registry</td>
+				</tr>
+				<tr>
+					<td>Decommission</td>
+					<td>Reasonable decommission notice commitment</td>
+					<td><a href="/commitments/">/commitments/</a> #8</td>
+					<td>Stated</td>
+					<td>Detailed formal exit runbook is in preparation</td>
+				</tr>
+				<tr>
+					<td>Public communication</td>
+					<td>Public claims standard + 24-hour inquiry response target on Japan business days</td>
+					<td><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md" rel="noopener noreferrer"><code>docs/CONSTITUTION.md</code></a> §7 + <a href="/inquiry/">/inquiry/</a> + <a href="/commitments/">/commitments/</a> #10</td>
+					<td>Active</td>
+					<td>Outside Japan business hours the response is best-effort</td>
+				</tr>
+			</tbody>
+		</table>
+	</section>
+
 </main>
 
 <footer class="site-footer">
