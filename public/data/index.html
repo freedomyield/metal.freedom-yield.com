@@ -409,19 +409,20 @@ curl -s "https://metal.freedom-yield.com/api/peers-history/peers-${YDAY}.json.gz
 
 		<article class="data-endpoint">
 			<header class="data-endpoint-head">
-				<h3>identity.json (in preparation)</h3>
-				<span class="data-tag">GET · JSON · planned · signed</span>
+				<h3>identity.json</h3>
+				<span class="data-tag">GET · JSON · signed</span>
 			</header>
-			<p>Operator identity manifest, signed by a dedicated ed25519 operator identity key. The signing key is independent of the validator's BLS / staking keys. The accompanying detached signature is verified with <code>ssh-keygen -Y verify</code> using namespace <code>freedom-yield/validator-identity</code>.</p>
+			<p>Operator identity key-signed manifest bound to the declared Metal NodeID. Signed by a dedicated ed25519 operator identity key independent of the validator's BLS / staking keys. The accompanying detached signature is verified with <code>ssh-keygen -Y verify</code> using namespace <code>freedom-yield/validator-identity</code>.</p>
 			<dl class="data-meta">
-				<dt>Planned URL</dt><dd><code>/api/identity.json</code> (+ <code>/api/identity.json.sig</code>)</dd>
-				<dt>Example (live now)</dt><dd><a href="/api/identity.example.json"><code>/api/identity.example.json</code></a></dd>
-				<dt>Formal schema (live now)</dt><dd><a href="/api/identity.schema.v1.json"><code>/api/identity.schema.v1.json</code></a> — draft 2020-12, includes artifact_manifest + artifact_root Merkle DAG hub</dd>
+				<dt>URL</dt><dd><a href="/api/identity.json"><code>/api/identity.json</code></a> (+ <a href="/api/identity.json.sig"><code>/api/identity.json.sig</code></a>)</dd>
+				<dt>Public key</dt><dd><a href="/.well-known/operator-identity.pub"><code>/.well-known/operator-identity.pub</code></a> — ed25519, text/plain</dd>
+				<dt>Example</dt><dd><a href="/api/identity.example.json"><code>/api/identity.example.json</code></a></dd>
+				<dt>Formal schema</dt><dd><a href="/api/identity.schema.v1.json"><code>/api/identity.schema.v1.json</code></a> — draft 2020-12, includes artifact_manifest + artifact_root Merkle DAG hub</dd>
 				<dt>Verification procedure</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer"><code>docs/IDENTITY_VERIFICATION.md</code></a></dd>
-				<dt>Status</dt><dd>In preparation; runtime activation gated on operator-side key generation (see <a href="/selection-evidence/">/selection-evidence/</a>)</dd>
+				<dt>Status</dt><dd>Active — first published 2026-06-22 as part of Phase 5; rotation cadence ~1 year</dd>
 			</dl>
 			<details class="data-example">
-				<summary>Verification (once live)</summary>
+				<summary>Verification</summary>
 				<pre><code>curl -sSO https://metal.freedom-yield.com/api/identity.json
 curl -sSO https://metal.freedom-yield.com/api/identity.json.sig
 curl -sSO https://metal.freedom-yield.com/.well-known/operator-identity.pub

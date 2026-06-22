@@ -408,19 +408,20 @@ curl -s "https://metal.freedom-yield.com/api/peers-history/peers-${YDAY}.json.gz
 
 		<article class="data-endpoint">
 			<header class="data-endpoint-head">
-				<h3>identity.json(準備中)</h3>
-				<span class="data-tag">GET · JSON · 予定 · 署名付</span>
+				<h3>identity.json</h3>
+				<span class="data-tag">GET · JSON · 署名付</span>
 			</header>
-			<p>運用者専用 ed25519 identity key で署名された operator identity manifest。signing key は validator の BLS / staking key と独立。検証は <code>ssh-keygen -Y verify</code> を namespace <code>freedom-yield/validator-identity</code> で実行。</p>
+			<p>運用者専用 ed25519 identity key で署名された operator identity manifest(宣言された Metal NodeID に紐付け)。signing key は validator の BLS / staking key と独立。検証は <code>ssh-keygen -Y verify</code> を namespace <code>freedom-yield/validator-identity</code> で実行。</p>
 			<dl class="data-meta">
-				<dt>予定 URL</dt><dd><code>/api/identity.json</code>(+ <code>/api/identity.json.sig</code>)</dd>
-				<dt>例示(公開済)</dt><dd><a href="/api/identity.example.json"><code>/api/identity.example.json</code></a></dd>
-				<dt>Formal schema(公開済)</dt><dd><a href="/api/identity.schema.v1.json"><code>/api/identity.schema.v1.json</code></a> — draft 2020-12、 artifact_manifest + artifact_root の Merkle DAG hub 含む</dd>
+				<dt>URL</dt><dd><a href="/api/identity.json"><code>/api/identity.json</code></a>(+ <a href="/api/identity.json.sig"><code>/api/identity.json.sig</code></a>)</dd>
+				<dt>公開鍵</dt><dd><a href="/.well-known/operator-identity.pub"><code>/.well-known/operator-identity.pub</code></a> — ed25519、 text/plain</dd>
+				<dt>例示</dt><dd><a href="/api/identity.example.json"><code>/api/identity.example.json</code></a></dd>
+				<dt>Formal schema</dt><dd><a href="/api/identity.schema.v1.json"><code>/api/identity.schema.v1.json</code></a> — draft 2020-12、 artifact_manifest + artifact_root の Merkle DAG hub 含む</dd>
 				<dt>検証手順</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer"><code>docs/IDENTITY_VERIFICATION.md</code></a></dd>
-				<dt>状態</dt><dd>準備中。 runtime 起動は operator 側の鍵生成後 (詳細 <a href="/ja/selection-evidence/">/ja/selection-evidence/</a>)</dd>
+				<dt>状態</dt><dd>Active — Phase 5 として 2026-06-22 初回公開、 ローテーション目安 ~1 年</dd>
 			</dl>
 			<details class="data-example">
-				<summary>検証(live 化後)</summary>
+				<summary>検証</summary>
 				<pre><code>curl -sSO https://metal.freedom-yield.com/api/identity.json
 curl -sSO https://metal.freedom-yield.com/api/identity.json.sig
 curl -sSO https://metal.freedom-yield.com/.well-known/operator-identity.pub
