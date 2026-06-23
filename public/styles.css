@@ -3363,19 +3363,18 @@ code {
 
 
 /* Sticky TOC — horizontal scroll pill row that follows the user.
- * 2026-06-23 (v136→v139→v143):
+ * 2026-06-23 (v136→v139→v143→v144):
  *   v136: cream box 撤去 → article bleed regression
- *   v139: body --bg 同色 cream + backdrop-filter blur → hero 写真の上で
- *         panel として見えてしまう regression を operator が指摘
- *   v143: 背景完全撤去、 backdrop-filter blur のみで occlusion 確保。
- *         hero 写真の上では透明、 article card の上では blur で
- *         frosted-glass。 panel として visible にしないデザインに振り切り。 */
+ *   v139: cream + backdrop-filter blur → hero 写真の上で panel 化 regression
+ *   v143: 背景撤去、 backdrop-filter blur のみ frosted-glass → 写真がぼやけて
+ *         pill 自体も読みにくいと operator 指摘
+ *   v144: frosted-glass 撤回。 container は完全透明 (no bg / no filter)、
+ *         z-index 5 で content の上に層化。 pill 自体を solid 白 + dark text
+ *         で個別に可読性確保。 写真は pill の隙間からそのまま sharp に見える。 */
 .data-toc {
 	position: sticky;
 	top: calc(var(--topnav-h, 3.75rem) - 1px);
 	z-index: 5;
-	backdrop-filter: blur(12px);
-	-webkit-backdrop-filter: blur(12px);
 	margin: 0 calc(var(--space-3) * -1) var(--space-4);
 	padding: 0.55rem var(--space-3);
 	display: flex;
@@ -3394,10 +3393,11 @@ code {
 	font-size: 0.78rem;
 	font-weight: 500;
 	letter-spacing: 0.02em;
-	color: var(--fg-muted);
-	background: rgba(31, 41, 55, 0.04);
+	color: var(--fg);
+	background: #ffffff;
 	border-radius: 999px;
-	border: 1px solid transparent;
+	border: 1px solid var(--border);
+	box-shadow: 0 1px 2px rgba(31, 41, 55, 0.06);
 	text-decoration: none;
 	white-space: nowrap;
 	transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
