@@ -3363,17 +3363,17 @@ code {
 
 
 /* Sticky TOC — horizontal scroll pill row that follows the user.
- * 2026-06-23 (v136→v139): cream box が見えていたのは bg 色 (`#f7f2e6`) が body
- * の --bg (`#faf7f2`) と微妙にズレていたのが原因。 body --bg と完全一致の cream
- * + backdrop-filter にすることで:
- *   - cream body 上では完全に invisible (box 見えしない)
- *   - white card 上では soft な cream tint + blur で article を occlude
- * border は引き続き不要。 */
+ * 2026-06-23 (v136→v139→v143):
+ *   v136: cream box 撤去 → article bleed regression
+ *   v139: body --bg 同色 cream + backdrop-filter blur → hero 写真の上で
+ *         panel として見えてしまう regression を operator が指摘
+ *   v143: 背景完全撤去、 backdrop-filter blur のみで occlusion 確保。
+ *         hero 写真の上では透明、 article card の上では blur で
+ *         frosted-glass。 panel として visible にしないデザインに振り切り。 */
 .data-toc {
 	position: sticky;
 	top: calc(var(--topnav-h, 3.75rem) - 1px);
 	z-index: 5;
-	background: rgba(250, 247, 242, 0.92);
 	backdrop-filter: blur(12px);
 	-webkit-backdrop-filter: blur(12px);
 	margin: 0 calc(var(--space-3) * -1) var(--space-4);
