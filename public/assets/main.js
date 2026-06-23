@@ -1193,18 +1193,25 @@
 	// Nav dropdown: <div> + <button>, no <details>.
 	// Desktop (>=769px): pure CSS :hover opens menu. Click on the button
 	// toggles .is-open as a fallback for touch+desktop users.
-	// Mobile (<769px): only .is-open class controls open state (toggled
-	// by click). CSS doesn't apply :hover on mobile.
+	// Mobile (<769px): tap on .nav-dropdown-toggle opens / closes the
+	// dropdown panel via the .is-open class. The toggle is an <a> with a
+	// real href to the cluster hub page; on mobile we preventDefault so
+	// tap can be used to expand the dropdown without navigating.
+	// Desktop (>=769px): we DO NOT preventDefault — clicking the toggle
+	// follows the link to the hub page (= selection-evidence / data /
+	// delegate). The dropdown opens on :hover via pure CSS.
 	function wireNavDropdown() {
+		var desktopMql = window.matchMedia('(min-width: 769px)');
 		document.querySelectorAll(".nav-dropdown").forEach((dd) => {
 			const btn = dd.querySelector(":scope > .nav-dropdown-toggle");
 			if (!btn) return;
 			btn.addEventListener("click", (ev) => {
+				if (desktopMql.matches) return; // desktop: let the anchor navigate
 				ev.preventDefault();
 				dd.classList.toggle("is-open");
 			});
 		});
-		// Click anywhere outside an open dropdown closes it.
+		// Click anywhere outside an open dropdown closes it (mobile-only state).
 		document.addEventListener("click", (ev) => {
 			document.querySelectorAll(".nav-dropdown.is-open").forEach((dd) => {
 				if (!dd.contains(ev.target)) dd.classList.remove("is-open");
