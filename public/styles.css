@@ -3306,15 +3306,13 @@ code {
 	--cat-live:        #059669;  /* emerald */
 }
 
-/* Sticky TOC — horizontal scroll pill row that follows the user. */
+/* Sticky TOC — horizontal scroll pill row that follows the user.
+ * 2026-06-23: 背景 / border / backdrop-blur を撤去。 cream box が page
+ * 上で浮いて見える指摘を受け、 透過した素の sticky pill row に統一。 */
 .data-toc {
 	position: sticky;
 	top: calc(var(--topnav-h, 3.75rem) - 1px);
 	z-index: 5;
-	background: rgba(247, 242, 230, 0.92);
-	backdrop-filter: saturate(140%) blur(10px);
-	-webkit-backdrop-filter: saturate(140%) blur(10px);
-	border-bottom: 1px solid var(--border);
 	margin: 0 calc(var(--space-3) * -1) var(--space-4);
 	padding: 0.55rem var(--space-3);
 	display: flex;
