@@ -3310,7 +3310,7 @@ code {
  * under the hero. "Home > Current page" with subtle "›" separators.
  * Transparent, minimal, institutional-friendly. */
 .breadcrumb {
-	margin: 0 0 var(--space-3);
+	margin: var(--space-4) 0 var(--space-3);
 	font-size: 0.85rem;
 	color: var(--fg-muted);
 }
