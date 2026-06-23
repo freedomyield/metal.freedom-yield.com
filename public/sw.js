@@ -6,7 +6,7 @@
 //   - Versioned cache name; old caches deleted on activate.
 "use strict";
 
-const CACHE_VERSION = "v149-brand-logo-hawk";
+const CACHE_VERSION = "v150-anchor-history-scheduled";
 const SHELL_CACHE = "shell-" + CACHE_VERSION;
 const DATA_CACHE = "data-" + CACHE_VERSION;
 

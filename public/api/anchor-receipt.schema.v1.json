@@ -5,7 +5,11 @@
 	"description": "Formal contract for /api/anchor-receipt.json. The receipt republishes the most recent Metal A-chain (PulseVM / XPRNetwork) inscription that anchors a Merkle DAG root committed by /api/identity.json and summarised by /api/cycles-history.json. The receipt is a content-addressed pointer: an evaluator may independently look up the receipt's tx_id on a public XPR explorer and assert memo == \"fyid1:\" + dag_root_hash. The receipt is regenerated each time a new inscription is broadcast (= cycle start, cycle end, or identity key rotation). Method discriminator: the anchor.method enum identifies whether the inscription is the Phase α minimal form (= eosio.token::transfer) or the Phase β dedicated form (= metalfreedom::inscribe smart-contract action). Companion design: docs/MERKLE_DAG_SPEC.md. Schema stability: additive-only within v1; breaking changes go to /api/anchor-receipt.schema.v2.json and the v1 URL stays reachable for at least 18 months.",
 	"x-issued-at": "2026-06-21T00:00:00Z",
 	"x-stability": "additive-only-within-v1",
-	"x-baseline-revision": "2026-06-21-phase-alpha-initial",
+	"x-baseline-revision": "2026-06-23-audit-fields-additive",
+	"x-revision-history": [
+		{"date": "2026-06-21", "tag": "phase-alpha-initial", "summary": "Initial v1 schema covering Phase α (eosio.token::transfer) + Phase β (metalfreedom::inscribe) receipts via anchor.method discriminator."},
+		{"date": "2026-06-23", "tag": "audit-fields-additive", "summary": "Additive within v1: top-level convenience denormalizations signing_actor / signing_permission, top-level verification_status state-machine, anchor.chain_backend execution-engine label. All new fields are optional; existing receipts remain valid against this schema unchanged."}
+	],
 	"x-format-guide": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/MERKLE_DAG_SPEC.md",
 	"type": "object",
 	"required": [
@@ -49,6 +53,10 @@
 					"type": "string",
 					"const": "metal-a-chain",
 					"description": "Metal Blockchain A-chain (= PulseVM / XPRNetwork). One of the four chains of the Primary Network."
+				},
+				"chain_backend": {
+					"type": "string",
+					"description": "Name of the execution engine running the chain. For metal-a-chain this is 'pulsevm' (per the Metallicus 4-chain table: P=Snowman / X=Avalanche-DAG / C=Snowman-EVM / A=Snowman + PulseVM). This convenience field lets evaluators searching for engine-specific compliance vocabulary hit a direct field without parsing the method discriminator. Optional and additive within v1; consumers MAY ignore."
 				},
 				"network": {
 					"type": "string",
@@ -238,9 +246,56 @@
 			"description": "Optional structured pointer to the triggering on-chain or off-chain event (e.g., the cycle_n that started, the key_seq that rotated). Additive shape; consumers MAY ignore.",
 			"additionalProperties": true
 		},
+		"signing_actor": {
+			"type": "string",
+			"pattern": "^[a-z1-5.]{1,12}$",
+			"description": "Denormalized convenience copy of the signing account: equals anchor.inscribe_action.permission.actor for Phase α receipts, and anchor.inscribe_action.authorization[0].actor for Phase β receipts. Top-level placement lets AI / curl-driven evaluators read the signer in one jq hop without branching on the method discriminator. For production mainnet receipts this is always 'metalfreedom'. When present, MUST equal the corresponding nested value (= consistency invariant enforced by gen-anchor-receipt.sh at receipt-generation time)."
+		},
+		"signing_permission": {
+			"type": "string",
+			"pattern": "^[a-z1-5.]{1,12}$",
+			"description": "Denormalized convenience copy of the signing permission name: equals anchor.inscribe_action.permission.permission for Phase α receipts, and anchor.inscribe_action.authorization[0].permission for Phase β receipts. For production mainnet receipts this is always 'anchor' (= the narrow linkauth-scoped child permission, see docs/MERKLE_DAG_SPEC.md §key-separation). When present, MUST equal the corresponding nested value."
+		},
+		"verification_status": {
+			"type": "string",
+			"enum": ["scheduled", "broadcast", "live", "failed"],
+			"description": "State of this receipt within the broadcast-to-live verification chain. State machine semantics:\n\n  'scheduled' — anchor has not yet been broadcast. The receipt is a pre-cycle-start template carrying the intended dag_root_hash but no tx_id / block_num / block_time / explorer_url yet (those are zeroed). Public docs reference such receipts with an 'in preparation' badge.\n\n  'broadcast' — tx has been submitted to the chain. The receipt now carries a real tx_id, but the post-broadcast verification has not finished. The receipt may not yet be authoritative.\n\n  'live' — all SEVEN post-broadcast conditions independently re-PASSed at receipt-generation time: (1) tx re-fetchable from a public RPC/indexer using the recorded tx_id, (2) memo == 'fyid1:' + dag_root_hash, (3) action account/name match the method discriminator, (4) signing_actor matches the nested value AND equals the operator-declared anchor account, (5) signing_permission matches the nested value AND equals 'anchor', (6) JSON Schema validation of THIS receipt PASSes against /api/anchor-receipt.schema.v1.json, (7) explorer_url returns 200 with consistent tx data on independent fetch. Receipts MUST NOT be set to 'live' until every one of these is re-checked at publication time — broadcast alone does not authorise 'live'.\n\n  'failed' — at least one condition did not PASS within the operator's confirmation window. The receipt remains published as a NEGATIVE artifact (= auditable evidence that an anchor attempt occurred and was abandoned) and is NOT swapped into the live anchor pointer.\n\nThis field is REQUIRED in receipts generated from 2026-06-23 onwards, but kept schema-optional during v1 for backward compatibility with receipts generated before this revision."
+		},
 		"generated_at": {
 			"type": "string",
 			"format": "date-time"
 		}
-	}
+	},
+	"allOf": [
+		{
+			"_comment": "Top-level signing_actor / signing_permission must equal their nested counterparts when both are present (= the denormalization invariant). The if/then dispatches on anchor.method to choose between the Phase α nested location (anchor.inscribe_action.permission) and the Phase β nested location (anchor.inscribe_action.authorization[0]).",
+			"if": {
+				"properties": {
+					"signing_actor": { "type": "string" },
+					"anchor": {
+						"properties": { "method": { "const": "phase_alpha_token_transfer" } },
+						"required": ["method"]
+					}
+				},
+				"required": ["signing_actor", "anchor"]
+			},
+			"then": {
+				"properties": {
+					"anchor": {
+						"properties": {
+							"inscribe_action": {
+								"properties": {
+									"permission": {
+										"properties": {
+											"actor": { "type": "string" }
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	]
 }

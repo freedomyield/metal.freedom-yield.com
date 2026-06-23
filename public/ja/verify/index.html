@@ -164,10 +164,23 @@ ssh-keygen -Y verify -f "$TMP/allowed" \
 				<h3>on-chain anchor receipt</h3>
 				<span class="data-tag">scheduled</span>
 			</header>
-			<p>各 cycle transition で、 運用者は現在の <code>dag_root_hash</code> を Metal A-chain (PulseVM / XPRNetwork) に narrow 権限 <code>metalfreedom@anchor</code> で memo <code>fyid1:&lt;dag_root_hash&gt;</code> として刻みます。 receipt JSON は audit-side の inscription index。</p>
+			<p>各 cycle transition で、 運用者は現在の <code>dag_root_hash</code> を Metal A-chain (PulseVM / XPRNetwork) に narrow 権限 <code>metalfreedom@anchor</code> で memo <code>fyid1:&lt;dag_root_hash&gt;</code> として刻みます。 receipt JSON は audit-side の「最新 inscription を 1 件保持する」スナップショット。</p>
 			<dl class="data-meta">
 				<dt>receipt</dt><dd><code>/api/anchor-receipt.json</code> (= cycle 3 start = 2026-07-04 13:00 JST で初回 broadcast 予定)</dd>
 				<dt>スキーマ</dt><dd><a href="/api/anchor-receipt.schema.v1.json"><code>/api/anchor-receipt.schema.v1.json</code></a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>on-chain anchor history (append-only 台帳)</h3>
+				<span class="data-tag">scheduled</span>
+			</header>
+			<p>過去の anchor を <code>verification_status: live</code> まで到達したものだけ蓄積する JSONL ledger。 上の receipt は cycle 毎に上書きされるのに対し、本 ledger は 1 行も消えません。 検証者は genesis cycle までさかのぼって全 anchoring を再現でき、 各行の <code>dag_root_hash</code> を該当 identity / cycles ブランチに折り込めます。</p>
+			<dl class="data-meta">
+				<dt>ledger</dt><dd><code>/api/anchor-history.jsonl</code> (= cycle 3 start = 2026-07-04 13:00 JST、 7-PASS 検証通過後に初回 record を追記予定)</dd>
+				<dt>スキーマ</dt><dd><a href="/api/anchor-history.schema.v1.json"><code>/api/anchor-history.schema.v1.json</code></a></dd>
+				<dt>invariant</dt><dd>tx_id ユニーク · (cycle_n, event_type) ユニーク · cycle_n 非減少 · 既存行は byte-for-byte 保持 · ファイル末尾は LF</dd>
 			</dl>
 		</article>
 
@@ -179,7 +192,7 @@ ssh-keygen -Y verify -f "$TMP/allowed" \
 			<p>全 live アーティファクト + 運用者 commitments の機械可読 index。 1 fetch + 1 parse で全 audit surface にアクセス可能。</p>
 			<dl class="data-meta">
 				<dt>マニフェスト</dt><dd><a href="/api/evidence.json"><code>/api/evidence.json</code></a></dd>
-				<dt>discovery</dt><dd><code>.live_artifacts.identity_manifest</code> · <code>.live_artifacts.cycle_history_jsonl</code> · <code>.in_preparation_artifacts.anchor_receipt</code></dd>
+				<dt>discovery</dt><dd><code>.live_artifacts.identity_manifest</code> · <code>.live_artifacts.cycle_history_jsonl</code> · <code>.in_preparation_artifacts.anchor_receipt</code> · <code>.in_preparation_artifacts.anchor_history</code></dd>
 				<dt>スキーマ</dt><dd><a href="/api/evidence.schema.v1.json"><code>/api/evidence.schema.v1.json</code></a></dd>
 			</dl>
 		</article>

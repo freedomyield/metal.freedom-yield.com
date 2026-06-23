@@ -1,11 +1,12 @@
 {
-	"_comment": "Synthetic schema example for /api/anchor-receipt.schema.v1.json. This file is NOT a snapshot of any production inscription — it is a fixed demonstration of the schema's shape. All hex strings, tx_ids, block numbers, and timestamps shown here are synthetic placeholders that document field formats only; they do not refer to any real on-chain transaction or moment in time. The operator XPR account 'metalfreedom' and the sink account 'fyhistory' are the confirmed production names on Metal A-chain mainnet (= the runtime receipt will carry exactly these values); only the time-varying fields (tx_id, block_num, block_time, dag_root_hash, hashes) are synthetic. Production runtime receipt is published at /api/anchor-receipt.json by scripts/post-anchor-event.sh on the validator host. See docs/MERKLE_DAG_SPEC.md.",
+	"_comment": "Synthetic schema example for /api/anchor-receipt.schema.v1.json. This file is NOT a snapshot of any production inscription — it is a fixed demonstration of the schema's shape. All hex strings, tx_ids, block numbers, and timestamps shown here are synthetic placeholders that document field formats only; they do not refer to any real on-chain transaction or moment in time. The operator XPR account 'metalfreedom' and the sink account 'fyhistory' are the confirmed production names on Metal A-chain mainnet (= the runtime receipt will carry exactly these values); only the time-varying fields (tx_id, block_num, block_time, dag_root_hash, hashes) are synthetic. Production runtime receipt is published at /api/anchor-receipt.json by scripts/gen-anchor-receipt.sh on the validator host AFTER the seven-PASS verification chain completes (see verification_status field). 2026-06-23 update: this example carries the additive audit fields (chain_backend / signing_actor / signing_permission / verification_status). See docs/MERKLE_DAG_SPEC.md.",
 	"$schema": "https://metal.freedom-yield.com/api/anchor-receipt.schema.v1.json",
 	"schema_version": 1,
 	"dag_root_hash": "0000000000000000000000000000000000000000000000000000000000000000",
 	"memo": "fyid1:0000000000000000000000000000000000000000000000000000000000000000",
 	"anchor": {
 		"chain": "metal-a-chain",
+		"chain_backend": "pulsevm",
 		"network": "xpr-mainnet",
 		"method": "phase_alpha_token_transfer",
 		"tx_id": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -31,5 +32,8 @@
 	"trigger_reference": {
 		"cycle_n": 3
 	},
+	"signing_actor": "metalfreedom",
+	"signing_permission": "anchor",
+	"verification_status": "scheduled",
 	"generated_at": "1970-01-01T00:00:00Z"
 }

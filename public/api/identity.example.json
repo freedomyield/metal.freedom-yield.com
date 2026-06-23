@@ -52,5 +52,9 @@
 	"dag_root_hash": "0000000000000000000000000000000000000000000000000000000000000000",
 	"cycles_history_url": "https://metal.freedom-yield.com/api/cycles-history.json",
 	"anchor_receipt_url": "https://metal.freedom-yield.com/api/anchor-receipt.json",
+	"audit": {
+		"anchor_receipt": "https://metal.freedom-yield.com/api/anchor-receipt.json",
+		"anchor_history": "https://metal.freedom-yield.com/api/anchor-history.jsonl"
+	},
 	"generated_at": "1970-01-01T00:00:00Z"
 }

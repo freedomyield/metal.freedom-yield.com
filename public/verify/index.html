@@ -164,10 +164,23 @@ ssh-keygen -Y verify -f "$TMP/allowed" \
 				<h3>On-chain anchor receipt</h3>
 				<span class="data-tag">scheduled</span>
 			</header>
-			<p>At each cycle transition, the operator inscribes the current <code>dag_root_hash</code> on Metal A-chain (PulseVM / XPRNetwork) using a narrow <code>metalfreedom@anchor</code> permission, with memo <code>fyid1:&lt;dag_root_hash&gt;</code>. The receipt JSON is the audit-side index of those inscriptions.</p>
+			<p>At each cycle transition, the operator inscribes the current <code>dag_root_hash</code> on Metal A-chain (PulseVM / XPRNetwork) using a narrow <code>metalfreedom@anchor</code> permission, with memo <code>fyid1:&lt;dag_root_hash&gt;</code>. The receipt JSON is the always-latest audit-side index of the most recent inscription.</p>
 			<dl class="data-meta">
 				<dt>Receipt</dt><dd><code>/api/anchor-receipt.json</code> (= first broadcast scheduled for cycle 3 start, 2026-07-04 13:00 JST)</dd>
 				<dt>Schema</dt><dd><a href="/api/anchor-receipt.schema.v1.json"><code>/api/anchor-receipt.schema.v1.json</code></a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>On-chain anchor history (append-only ledger)</h3>
+				<span class="data-tag">scheduled</span>
+			</header>
+			<p>Append-only JSONL ledger covering every anchor that has reached <code>verification_status: live</code>. Independent of the always-latest receipt above: <code>anchor-receipt.json</code> rotates per cycle, <code>anchor-history.jsonl</code> accumulates. A verifier walks the ledger to retrace every prior anchoring back to the genesis cycle, then folds each line's <code>dag_root_hash</code> into the corresponding identity / cycles branch.</p>
+			<dl class="data-meta">
+				<dt>Ledger</dt><dd><code>/api/anchor-history.jsonl</code> (= first record appended at cycle 3 start, 2026-07-04 13:00 JST, after the seven-PASS verification chain)</dd>
+				<dt>Schema</dt><dd><a href="/api/anchor-history.schema.v1.json"><code>/api/anchor-history.schema.v1.json</code></a></dd>
+				<dt>Invariants</dt><dd>tx_id unique · (cycle_n, event_type) unique · cycle_n non-decreasing · existing lines byte-for-byte preserved · file terminates with LF</dd>
 			</dl>
 		</article>
 
@@ -179,7 +192,7 @@ ssh-keygen -Y verify -f "$TMP/allowed" \
 			<p>Machine-readable index of every live artifact + the public commitments. One fetch, one parse, the whole audit surface.</p>
 			<dl class="data-meta">
 				<dt>Manifest</dt><dd><a href="/api/evidence.json"><code>/api/evidence.json</code></a></dd>
-				<dt>Discovery</dt><dd><code>.live_artifacts.identity_manifest</code> · <code>.live_artifacts.cycle_history_jsonl</code> · <code>.in_preparation_artifacts.anchor_receipt</code></dd>
+				<dt>Discovery</dt><dd><code>.live_artifacts.identity_manifest</code> · <code>.live_artifacts.cycle_history_jsonl</code> · <code>.in_preparation_artifacts.anchor_receipt</code> · <code>.in_preparation_artifacts.anchor_history</code></dd>
 				<dt>Schema</dt><dd><a href="/api/evidence.schema.v1.json"><code>/api/evidence.schema.v1.json</code></a></dd>
 			</dl>
 		</article>

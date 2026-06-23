@@ -1,0 +1,130 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://metal.freedom-yield.com/api/anchor-history.schema.v1.json",
+	"title": "Freedom Yield Metal — A-chain Anchor History v1",
+	"description": "Formal contract for /api/anchor-history.jsonl. Each LINE of the JSONL file is a JSON object matching this schema; the file as a whole is an append-only, monotonically cycle_n-ordered ledger of every anchor that has reached verification_status == 'live'. Companion to /api/anchor-receipt.json (= the always-latest single record) and /api/identity.json (= the snapshot manifest pointing at this history). Role separation: anchor-receipt.json is the CURRENT anchor; anchor-history.jsonl is the FULL TIMELINE. Each history line preserves the persistent identity of an anchor (cycle_n, dag_root_hash, tx_id, explorer_url, block_num/time, signer) without the volatile pointer / regeneration metadata of the receipt. Append-only invariants are enforced by scripts/append-anchor-history.sh: tx_id duplicate rejection, cycle_n duplicate rejection, cycle_n monotonic increase, schema validation at line append time, and final-line LF guarantee. The history file is published to /api/anchor-history.jsonl ONLY AFTER the first live anchor exists — pre-deployment evidence.json marks this artifact as in_preparation. Companion design: docs/MERKLE_DAG_SPEC.md, project memory project_phase_alpha_anchor_completion_2026_07_04.",
+	"x-issued-at": "2026-06-23T00:00:00Z",
+	"x-stability": "additive-only-within-v1",
+	"x-baseline-revision": "2026-06-23-initial",
+	"x-revision-history": [
+		{"date": "2026-06-23", "tag": "initial", "summary": "Initial v1 schema for the append-only anchor history ledger introduced as part of the 2026-07-04 cycle-3 anchor completion."}
+	],
+	"x-line-encoding": "JSONL — UTF-8, one JSON object per line, lines terminated by LF (0x0A) including the final line, no trailing blank lines. Schema describes the per-line object shape; consumers MUST validate each line independently.",
+	"x-append-only-invariants": [
+		"tx_id is unique across all lines (= duplicate rejection at append time)",
+		"cycle_n + event_type pair is unique across all lines (= same cycle's same event cannot be appended twice)",
+		"cycle_n strictly non-decreasing across lines (= history reads in chain time)",
+		"existing lines are byte-for-byte immutable; the only legal write is appending a new line",
+		"file terminates with LF on the final line"
+	],
+	"x-format-guide": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/MERKLE_DAG_SPEC.md",
+	"type": "object",
+	"required": [
+		"schema_version",
+		"cycle_n",
+		"event_type",
+		"dag_root_hash",
+		"memo",
+		"network",
+		"chain",
+		"method",
+		"tx_id",
+		"block_num",
+		"block_time",
+		"explorer_url",
+		"signing_actor",
+		"signing_permission",
+		"verification_status",
+		"verified_at"
+	],
+	"additionalProperties": true,
+	"properties": {
+		"schema_version": {
+			"type": "integer",
+			"const": 1
+		},
+		"cycle_n": {
+			"type": "integer",
+			"minimum": 1,
+			"description": "The validator cycle this anchor pertains to. Append-only invariant: across the full file the (cycle_n, event_type) pair MUST be unique, and cycle_n MUST be non-decreasing line-to-line. A single cycle can carry up to three event_types (cyclestart, cycleend, idrotate) — that is the only legal repetition of cycle_n."
+		},
+		"event_type": {
+			"type": "string",
+			"enum": ["cyclestart", "cycleend", "idrotate", "manual"],
+			"description": "What triggered this anchor. Matches anchor-receipt's anchor.inscribe_action.data.event_type (Phase β) or trigger_event (Phase α). 'manual' is reserved for operator-initiated re-anchors outside the cycle automation; recorded for completeness but expected to be rare."
+		},
+		"dag_root_hash": {
+			"type": "string",
+			"pattern": "^[a-f0-9]{64}$",
+			"description": "64-hex SHA-256 of the DAG root at the moment of this anchor. The history line is the canonical persisted record of WHICH root was inscribed at WHICH cycle moment."
+		},
+		"memo": {
+			"type": "string",
+			"pattern": "^fyid1:[a-f0-9]{64}$",
+			"description": "On-chain memo carried by the inscription. MUST equal 'fyid1:' + dag_root_hash (= the memo equality invariant verified at receipt-generation time and re-asserted here)."
+		},
+		"network": {
+			"type": "string",
+			"enum": ["xpr-mainnet", "xpr-testnet"],
+			"description": "xpr-mainnet for production history entries; xpr-testnet appears only in example/test data."
+		},
+		"chain": {
+			"type": "string",
+			"const": "metal-a-chain",
+			"description": "Always 'metal-a-chain' (= the A-chain of the Metal Blockchain Primary Network)."
+		},
+		"chain_backend": {
+			"type": "string",
+			"description": "Execution engine label, mirrors anchor-receipt.anchor.chain_backend. For metal-a-chain this is 'pulsevm'. Optional — included for completeness when present in the receipt."
+		},
+		"method": {
+			"type": "string",
+			"enum": ["phase_alpha_token_transfer", "phase_beta_sc_inscribe"],
+			"description": "Discriminator inherited from the receipt. Lets a consumer filter the history to Phase α-era or Phase β-era anchors."
+		},
+		"tx_id": {
+			"type": "string",
+			"pattern": "^[a-f0-9]{64}$",
+			"description": "XPRNetwork transaction id of the inscribing tx. Append-only invariant: globally unique across the full file (= duplicate rejection at append time)."
+		},
+		"block_num": {
+			"type": "integer",
+			"minimum": 1,
+			"description": "Block number at which the inscribing tx was included on A-chain mainnet."
+		},
+		"block_time": {
+			"type": "string",
+			"format": "date-time",
+			"description": "Chain-side block time (ISO 8601). Note this is the on-chain time; verified_at below is the off-chain time at which the receipt was generated AFTER all seven PASS conditions completed."
+		},
+		"explorer_url": {
+			"type": "string",
+			"format": "uri",
+			"description": "Public XPRNetwork explorer URL pointing at this inscribing transaction. Deterministically generated from tx_id at receipt-generation time (= same tx_id always produces the same URL — see fixture #7 in the test plan)."
+		},
+		"signing_actor": {
+			"type": "string",
+			"pattern": "^[a-z1-5.]{1,12}$",
+			"description": "Antelope/EOSIO account that signed the inscribing action. For production mainnet entries this is always 'metalfreedom'. Equals anchor-receipt.signing_actor at the moment the history line was appended."
+		},
+		"signing_permission": {
+			"type": "string",
+			"pattern": "^[a-z1-5.]{1,12}$",
+			"description": "Permission name used for signing. For production mainnet entries this is always 'anchor' (= the narrow linkauth-scoped child permission, see docs/MERKLE_DAG_SPEC.md §key-separation)."
+		},
+		"verification_status": {
+			"type": "string",
+			"enum": ["live", "failed"],
+			"description": "Anchor history lines are ONLY appended for anchors that completed verification — verification_status is therefore restricted here to 'live' (= the seven PASS conditions all PASSed at receipt-generation time and again at append time) or 'failed' (= the anchor was attempted, broadcast, but did not pass within the operator's confirmation window — kept in history as a NEGATIVE auditable record). The 'scheduled' and 'broadcast' states from anchor-receipt.schema.v1.json are NOT valid here: an anchor in those states is in the receipt only, not yet in history."
+		},
+		"verified_at": {
+			"type": "string",
+			"format": "date-time",
+			"description": "Off-chain timestamp at which the seven PASS conditions completed and the history line was appended. Distinct from block_time (which is the chain-side time)."
+		},
+		"generated_by_script_version": {
+			"type": "string",
+			"description": "Optional. Identifier of the append-anchor-history.sh version that wrote this line (= git short SHA at append time). Lets a future auditor correlate behaviour with the script revision."
+		}
+	}
+}

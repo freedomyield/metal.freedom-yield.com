@@ -561,6 +561,7 @@ jq -n \
 	--arg dag_root_hash "${DAG_ROOT_HASH}" \
 	--arg cycles_history_url "https://metal.freedom-yield.com/api/cycles-history.json" \
 	--arg anchor_receipt_url "https://metal.freedom-yield.com/api/anchor-receipt.json" \
+	--arg anchor_history_url "https://metal.freedom-yield.com/api/anchor-history.jsonl" \
 	'{
 		_comment: $comment,
 		schema_version: 1,
@@ -588,6 +589,10 @@ jq -n \
 		dag_root_hash: $dag_root_hash,
 		cycles_history_url: $cycles_history_url,
 		anchor_receipt_url: $anchor_receipt_url,
+		audit: {
+			anchor_receipt: $anchor_receipt_url,
+			anchor_history: $anchor_history_url
+		},
 		generated_at: $generated_at
 	}' > "${TMP_JSON}"
 

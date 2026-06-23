@@ -37,6 +37,13 @@
       "formal_schema_url": "https://metal.freedom-yield.com/api/anchor-receipt.schema.v1.json",
       "format_guide_url": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md",
       "operator_guide_url": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/PHASE_ALPHA_AUDIT_HANDOFF.md"
+    },
+    "anchor_history": {
+      "planned_url": "https://metal.freedom-yield.com/api/anchor-history.jsonl",
+      "schema_url": "https://metal.freedom-yield.com/api/anchor-history.example.jsonl",
+      "formal_schema_url": "https://metal.freedom-yield.com/api/anchor-history.schema.v1.json",
+      "format_guide_url": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md",
+      "operator_guide_url": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/PHASE_ALPHA_AUDIT_HANDOFF.md"
     }
   },
   "explorer_url": "https://explorer.metalblockchain.org/",

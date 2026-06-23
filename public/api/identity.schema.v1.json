@@ -5,7 +5,24 @@
 	"description": "Formal contract for /api/identity.json. Revised 2026-06-20 as a pre-production correction; further extended 2026-06-21 with additive Merkle DAG anchor fields (dag_root_hash, cycles_history_url, anchor_receipt_url) for Phase α A-chain anchoring per docs/MERKLE_DAG_SPEC.md. See docs/IDENTITY_SCHEMA_CHANGELOG.md for the full history. The model is an operator-signed artifact snapshot. The runtime manifest is generated and signed by scripts/operator-local/gen-identity.sh on the operator's local Mac, NEVER on the validator host or web host. Verification uses ssh-keygen -Y verify with namespace freedom-yield/validator-identity. Companion /api/identity.example.json is a synthetic schema example, NOT a production snapshot. Companion design changelog: docs/IDENTITY_SCHEMA_CHANGELOG.md. The schema URL is a stable discovery endpoint; consumers that need immutable schema semantics SHOULD pin the schema document SHA-256 or the repository commit (see CHANGELOG). A future breaking change will use a new major-version schema URL; retention and deprecation policy for superseded schema versions will be documented when such a version is introduced.",
 	"x-issued-at": "2026-06-21T00:00:00Z",
 	"x-stability": "additive-only-within-v1",
-	"x-baseline-revision": "2026-06-20-pre-production-correction",
+	"x-baseline-revision": "2026-06-23-audit-pointer-additive",
+	"x-revision-history": [
+		{
+			"date": "2026-06-20",
+			"tag": "pre-production-correction",
+			"summary": "Pre-production correction baseline. Re-grounded the contract for /api/identity.json prior to first signed publication; established additive-only-within-v1 stability commitment."
+		},
+		{
+			"date": "2026-06-21",
+			"tag": "phase-alpha-anchor-additive",
+			"summary": "Additive within v1: Merkle DAG anchor fields dag_root_hash / cycles_history_url / anchor_receipt_url for Phase α A-chain anchoring per docs/MERKLE_DAG_SPEC.md. All new fields are optional; pre-Phase-α identity.json publications remain valid against this schema unchanged."
+		},
+		{
+			"date": "2026-06-23",
+			"tag": "audit-pointer-additive",
+			"summary": "Additive within v1: audit object grouping anchor_receipt + anchor_history URL pointers. audit holds plain URLs only; identity.json MUST NOT carry a hash of anchor-receipt.json or anchor-history.jsonl (= circular hash dependency avoided). When the legacy top-level anchor_receipt_url is present alongside audit.anchor_receipt, both URLs MUST be equal."
+		}
+	],
 	"x-format-guide": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md",
 	"type": "object",
 	"required": [
@@ -159,7 +176,25 @@
 		"anchor_receipt_url": {
 			"type": "string",
 			"format": "uri",
-			"description": "ADDITIVE (Phase α, 2026-06-21). URL of /api/anchor-receipt.json — the most recent A-chain inscription receipt anchoring this dag_root_hash. MAY be absent between the moment a new dag_root_hash is computed and the moment its anchoring inscription confirms on-chain."
+			"description": "ADDITIVE (Phase α, 2026-06-21). URL of /api/anchor-receipt.json — the most recent A-chain inscription receipt anchoring this dag_root_hash. MAY be absent between the moment a new dag_root_hash is computed and the moment its anchoring inscription confirms on-chain. From 2026-06-23 also exposed inside the additive `audit` object as `audit.anchor_receipt`; consumers MAY use either pointer (they MUST equal each other when both are present)."
+		},
+		"audit": {
+			"type": "object",
+			"description": "ADDITIVE (Phase α completion, 2026-06-23). Stable pointer object grouping the off-manifest evidence URLs. By keeping these as URL pointers, identity.json itself stays a rotation-driven snapshot (= no per-cycle churn of identity.json's signed bytes); the dynamic per-cycle artifacts live behind these stable URLs. Anti-pattern explicitly avoided: identity.json MUST NOT contain a hash of /api/anchor-receipt.json (or anchor-history.jsonl) because anchor-receipt.json itself references identity.json's dag_root_hash — that would create a circular hash dependency. The `audit` object holds plain URLs only.",
+			"required": ["anchor_receipt", "anchor_history"],
+			"additionalProperties": true,
+			"properties": {
+				"anchor_receipt": {
+					"type": "string",
+					"format": "uri",
+					"description": "URL of /api/anchor-receipt.json — the most recent live anchor's receipt. When present alongside the legacy top-level anchor_receipt_url, both URLs MUST be equal (= consistency invariant verified by gen-identity.sh)."
+				},
+				"anchor_history": {
+					"type": "string",
+					"format": "uri",
+					"description": "URL of /api/anchor-history.jsonl — the append-only ledger of every anchor that has reached verification_status == 'live'. Validated per-line against /api/anchor-history.schema.v1.json. MAY point at a not-yet-existing artifact between identity.json regeneration and the first live anchor; consumers should treat HTTP 404 as 'in preparation' in that window. See project memory project_phase_alpha_anchor_completion_2026_07_04 for the gated transition."
+				}
+			}
 		},
 		"generated_at": {
 			"type": "string",

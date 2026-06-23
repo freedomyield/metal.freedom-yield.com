@@ -6,6 +6,7 @@
 	"memo": "fyid1:0000000000000000000000000000000000000000000000000000000000000000",
 	"anchor": {
 		"chain": "metal-a-chain",
+		"chain_backend": "pulsevm",
 		"network": "xpr-mainnet",
 		"method": "phase_beta_sc_inscribe",
 		"tx_id": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -37,5 +38,8 @@
 	"trigger_reference": {
 		"cycle_n": 7
 	},
+	"signing_actor": "metalfreedom",
+	"signing_permission": "anchor",
+	"verification_status": "scheduled",
 	"generated_at": "1970-01-01T00:00:00Z"
 }
