@@ -55,15 +55,45 @@
 
 <main id="main" class="container">
 
-	<section class="card data-group">
+	<nav class="data-toc" aria-label="セクション">
+		<a href="#evidence-index">エビデンス索引 <span class="data-toc-count">14</span></a>
+		<a href="#service-scope">Service scope</a>
+		<a href="#governance">Governance</a>
+		<a href="#operational-targets">Operational targets</a>
+		<a href="#dependencies-data">Dependencies &amp; data</a>
+		<a href="#materials-classification">Materials</a>
+		<a href="#control-matrix">Control matrix</a>
+	</nav>
+
+	<div class="evidence-summary" role="group" aria-label="Evidence stats">
+		<div class="evidence-summary-card evidence-summary-card--total">
+			<span class="evidence-summary-num">14</span>
+			<span class="evidence-summary-label">Evidence 項目</span>
+		</div>
+		<div class="evidence-summary-card">
+			<span class="evidence-summary-num">11</span>
+			<span class="evidence-summary-label">Active / Live</span>
+		</div>
+		<div class="evidence-summary-card evidence-summary-card--in-prep">
+			<span class="evidence-summary-num">2</span>
+			<span class="evidence-summary-label">In preparation</span>
+		</div>
+		<div class="evidence-summary-card evidence-summary-card--audit">
+			<span class="evidence-summary-num">2</span>
+			<span class="evidence-summary-label">参照テーブル</span>
+		</div>
+	</div>
+
+	<section class="card data-group" id="evidence-index">
 		<figure class="card-figure" aria-hidden="true">
 			<img src="/assets/photos/dark-code.jpg" alt="" loading="lazy" decoding="async">
 		</figure>
 		<h2>エビデンス索引</h2>
 		<p class="data-group-lead">14 項目。各項目は第三者が直接読める成果物を指しています。</p>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--onchain">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007 0l3-3a5 5 0 00-7-7l-1 1"/><path d="M14 11a5 5 0 00-7 0l-3 3a5 5 0 007 7l1-1"/></svg></span>
 				<h3>Active mainnet validator</h3>
 				<span class="data-tag">on-chain</span>
 			</header>
@@ -75,8 +105,9 @@
 			</dl>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--audit">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
 				<h3>Uptime 履歴</h3>
 				<span class="data-tag">audit trail</span>
 			</header>
@@ -87,8 +118,9 @@
 			</dl>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--audit">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
 				<h3>インシデント透明性</h3>
 				<span class="data-tag">audit trail</span>
 			</header>
@@ -99,8 +131,9 @@
 			</dl>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--schedule">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18M8 3v4M16 3v4"/></svg></span>
 				<h3>運用継続性</h3>
 				<span class="data-tag">schedule</span>
 			</header>
@@ -112,8 +145,9 @@
 			</dl>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--disclosure">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h4"/></svg></span>
 				<h3>管轄に関する開示</h3>
 				<span class="data-tag">disclosure</span>
 			</header>
@@ -123,8 +157,9 @@
 			</dl>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--disclosure">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h4"/></svg></span>
 				<h3>非保管型ポスチャと運用コミットメント</h3>
 				<span class="data-tag">disclosure</span>
 			</header>
@@ -135,8 +170,9 @@
 			</dl>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--docs">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg></span>
 				<h3>運用ドキュメント</h3>
 				<span class="data-tag">public repo</span>
 			</header>
@@ -150,8 +186,9 @@
 			</dl>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--code">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/></svg></span>
 				<h3>機械可読データ</h3>
 				<span class="data-tag">JSON</span>
 			</header>
@@ -166,8 +203,9 @@
 			</dl>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--disclosure">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h4"/></svg></span>
 				<h3>Subnet 適性スコアカード</h3>
 				<span class="data-tag">disclosure</span>
 			</header>
@@ -177,8 +215,9 @@
 			</dl>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--readiness">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21V4M4 4h13l-2 4 2 4H4"/></svg></span>
 				<h3>Subnet pilot 受入意思</h3>
 				<span class="data-tag">pull-only</span>
 			</header>
@@ -188,8 +227,9 @@
 			</dl>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--disclosure">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h4"/></svg></span>
 				<h3>問い合わせ surface(24 時間応答 target)</h3>
 				<span class="data-tag">disclosure</span>
 			</header>
@@ -200,8 +240,9 @@
 			</dl>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--topology">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v3M9 15l-3 2M15 15l3 2"/><circle cx="12" cy="12" r="2"/></svg></span>
 				<h3>リファレンスアーキテクチャ</h3>
 				<span class="data-tag">topology</span>
 			</header>
@@ -211,8 +252,9 @@
 			</dl>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--docs">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg></span>
 				<h3>Cycle 単位 audit packet</h3>
 				<span class="data-tag">live(1 cycle closed)</span>
 			</header>
@@ -226,8 +268,9 @@
 			</dl>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--docs">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg></span>
 				<h3>アイデンティティ署名(Phase α Merkle DAG anchor)</h3>
 				<span class="data-tag">live(manifest)· scheduled(anchor)</span>
 			</header>
@@ -257,6 +300,21 @@
 
 	</section>
 
+	
+	<figure class="atmosphere-band" aria-hidden="true">
+		<img src="/assets/photos/team-meeting.jpg" alt="" loading="lazy" decoding="async">
+		<div class="atmosphere-band-tint" aria-hidden="true"></div>
+		<figcaption class="atmosphere-band-caption">
+			<div class="atmosphere-band-overline">
+				<span>第 II 章</span>
+				<span class="atmosphere-band-overline-rule" aria-hidden="true"></span>
+				<span>Scope &amp; boundaries</span>
+			</div>
+			<div class="atmosphere-band-title">事業範囲と責務境界</div>
+			<p class="atmosphere-band-lede">何を提供し、 何を提供しない。 責務はどこまでか。</p>
+		</figcaption>
+	</figure>
+
 	<section class="card" id="service-scope">
 		<h2>サービススコープ</h2>
 		<p>本サブセクションは、運用が「何をするか」「何をしないか」「責任境界はどこか」 を整理します。 内容は新規記述ではなく、 一次資料への索引です。</p>
@@ -284,6 +342,21 @@
 			<dt>参照 — Commitments</dt><dd><a href="/ja/commitments/">/ja/commitments/</a> — #4 (誇張インフラ主張をしない) および #9 (security-sensitive 情報は公開しない) を含む</dd>
 		</dl>
 	</section>
+
+	
+	<figure class="atmosphere-band" aria-hidden="true">
+		<img src="/assets/photos/focused-work.jpg" alt="" loading="lazy" decoding="async">
+		<div class="atmosphere-band-tint" aria-hidden="true"></div>
+		<figcaption class="atmosphere-band-caption">
+			<div class="atmosphere-band-overline">
+				<span>第 III 章</span>
+				<span class="atmosphere-band-overline-rule" aria-hidden="true"></span>
+				<span>Operational targets</span>
+			</div>
+			<div class="atmosphere-band-title">数値目標と依存</div>
+			<p class="atmosphere-band-lede">公開された一方的 commitment と外部依存の整理。</p>
+		</figcaption>
+	</figure>
 
 	<section class="card" id="operational-targets">
 		<h2>運用目標</h2>
@@ -313,7 +386,7 @@
 		<div class="atmosphere-band-tint" aria-hidden="true"></div>
 		<figcaption class="atmosphere-band-caption">
 			<div class="atmosphere-band-overline">
-				<span>第 II 章</span>
+				<span>第 IV 章</span>
 				<span class="atmosphere-band-overline-rule" aria-hidden="true"></span>
 				<span>Disclosure</span>
 			</div>
@@ -325,28 +398,28 @@
 	<section class="card" id="materials-classification">
 		<h2>資料分類索引</h2>
 		<p>各カテゴリの資料がどう公開されているかを分類別に整理します。 「Public」 = 本サイトまたは公開リポジトリで直接読める。 「Available on request」 = 問い合わせ surface を通じ、 妥当な本人確認手続後に共有。 「Private / contractual」 = 契約関係の中でのみ共有。 「In preparation」 = schema や commitment は存在するが runtime artifact はまだ live でない。 「N/A」 = 本 validator 運用の scope 外。 「Not disclosed (security posture)」 = 抽象パターンは公開するが具体値は意図的に出さない。</p>
-		<table>
+		<table class="evidence-table">
 			<thead>
 				<tr><th>資料</th><th>分類</th><th>所在 / 方法</th></tr>
 			</thead>
 			<tbody>
-				<tr><td>運用者 commitments</td><td>Public</td><td><a href="/ja/commitments/">/ja/commitments/</a></td></tr>
-				<tr><td>リスク開示</td><td>Public</td><td><a href="/ja/risk-disclosure/">/ja/risk-disclosure/</a></td></tr>
-				<tr><td>Subnet 適性スコアカード</td><td>Public</td><td><a href="/ja/subnet-readiness/">/ja/subnet-readiness/</a></td></tr>
-				<tr><td>リファレンスアーキテクチャ</td><td>Public</td><td><a href="/ja/reference-architecture/">/ja/reference-architecture/</a></td></tr>
-				<tr><td>Cycle uptime 履歴</td><td>Public</td><td><a href="/api/uptime-cycles.json"><code>/api/uptime-cycles.json</code></a> + <a href="/ja/journal/">/ja/journal/</a></td></tr>
-				<tr><td>インシデントログ</td><td>Public</td><td><a href="/api/incidents.json"><code>/api/incidents.json</code></a> + <a href="/ja/incidents/">/ja/incidents/</a></td></tr>
-				<tr><td>Constitution + operating model</td><td>Public</td><td>公開リポジトリ <code>docs/</code></td></tr>
-				<tr><td>インシデント対応 runbook</td><td>Public</td><td>公開リポジトリ <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/INCIDENT_RESPONSE.md" rel="noopener noreferrer"><code>docs/INCIDENT_RESPONSE.md</code></a></td></tr>
+				<tr><td data-label="Material">運用者 commitments</td><td data-label="Classification"><span class="status-badge status-badge--public">Public</span></td><td data-label="Where / how"><a href="/ja/commitments/">/ja/commitments/</a></td></tr>
+				<tr><td data-label="Material">リスク開示</td><td data-label="Classification"><span class="status-badge status-badge--public">Public</span></td><td data-label="Where / how"><a href="/ja/risk-disclosure/">/ja/risk-disclosure/</a></td></tr>
+				<tr><td data-label="Material">Subnet 適性スコアカード</td><td data-label="Classification"><span class="status-badge status-badge--public">Public</span></td><td data-label="Where / how"><a href="/ja/subnet-readiness/">/ja/subnet-readiness/</a></td></tr>
+				<tr><td data-label="Material">リファレンスアーキテクチャ</td><td data-label="Classification"><span class="status-badge status-badge--public">Public</span></td><td data-label="Where / how"><a href="/ja/reference-architecture/">/ja/reference-architecture/</a></td></tr>
+				<tr><td data-label="Material">Cycle uptime 履歴</td><td data-label="Classification"><span class="status-badge status-badge--public">Public</span></td><td data-label="Where / how"><a href="/api/uptime-cycles.json"><code>/api/uptime-cycles.json</code></a> + <a href="/ja/journal/">/ja/journal/</a></td></tr>
+				<tr><td data-label="Material">インシデントログ</td><td data-label="Classification"><span class="status-badge status-badge--public">Public</span></td><td data-label="Where / how"><a href="/api/incidents.json"><code>/api/incidents.json</code></a> + <a href="/ja/incidents/">/ja/incidents/</a></td></tr>
+				<tr><td data-label="Material">Constitution + operating model</td><td data-label="Classification"><span class="status-badge status-badge--public">Public</span></td><td data-label="Where / how">公開リポジトリ <code>docs/</code></td></tr>
+				<tr><td data-label="Material">インシデント対応 runbook</td><td data-label="Classification"><span class="status-badge status-badge--public">Public</span></td><td data-label="Where / how">公開リポジトリ <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/INCIDENT_RESPONSE.md" rel="noopener noreferrer"><code>docs/INCIDENT_RESPONSE.md</code></a></td></tr>
 				<tr><td>identity manifest + DAG schemas</td><td>Public (schema は live) / In preparation (runtime artifact)</td><td>schema は live、 runtime <code>/api/identity.json</code> + <code>/api/anchor-receipt.json</code> は次 cycle start (2026-07-04) に activate</td></tr>
-				<tr><td>詳細な事業継続性 / DR 手順</td><td>Available on request</td><td><a href="/ja/inquiry/">/ja/inquiry/</a> 経由 — 概要は <a href="/ja/continuity/">/ja/continuity/</a></td></tr>
-				<tr><td>Drill 報告書 + post-mortem</td><td>In preparation</td><td>フォーマットは <code>docs/INCIDENT_RESPONSE.md</code> §5 post-mortem テンプレート準拠。 初回 drill はまだ未実施</td></tr>
-				<tr><td>正式な外部監査報告書</td><td>In preparation</td><td>正式な外部監査はまだ実施していません</td></tr>
-				<tr><td>運用者 legal entity 名</td><td>Private / contractual</td><td>契約関係の中でのみ共有</td></tr>
-				<tr><td>運用者個人連絡先</td><td>Private / contractual</td><td>契約関係の中でのみ共有</td></tr>
-				<tr><td>具体的なプロバイダ名・IP・ホストパス・port</td><td>Not disclosed (security posture)</td><td>リファレンスアーキテクチャでは抽象化、 具体値は公開 surface に載せません</td></tr>
+				<tr><td data-label="Material">詳細な事業継続性 / DR 手順</td><td data-label="Classification"><span class="status-badge status-badge--stated">Available on request</span></td><td data-label="Where / how"><a href="/ja/inquiry/">/ja/inquiry/</a> 経由 — 概要は <a href="/ja/continuity/">/ja/continuity/</a></td></tr>
+				<tr><td data-label="Material">Drill 報告書 + post-mortem</td><td data-label="Classification"><span class="status-badge status-badge--in-prep">In preparation</span></td><td data-label="Where / how">フォーマットは <code>docs/INCIDENT_RESPONSE.md</code> §5 post-mortem テンプレート準拠。 初回 drill はまだ未実施</td></tr>
+				<tr><td data-label="Material">正式な外部監査報告書</td><td data-label="Classification"><span class="status-badge status-badge--in-prep">In preparation</span></td><td data-label="Where / how">正式な外部監査はまだ実施していません</td></tr>
+				<tr><td data-label="Material">運用者 legal entity 名</td><td data-label="Classification"><span class="status-badge status-badge--private">Private / contractual</span></td><td data-label="Where / how">契約関係の中でのみ共有</td></tr>
+				<tr><td data-label="Material">運用者個人連絡先</td><td data-label="Classification"><span class="status-badge status-badge--private">Private / contractual</span></td><td data-label="Where / how">契約関係の中でのみ共有</td></tr>
+				<tr><td data-label="Material">具体的なプロバイダ名・IP・ホストパス・port</td><td data-label="Classification"><span class="status-badge status-badge--private">Not disclosed (security posture)</span></td><td data-label="Where / how">リファレンスアーキテクチャでは抽象化、 具体値は公開 surface に載せません</td></tr>
 				<tr><td>validator + identity + push 鍵材料</td><td>Private — 公開 surface には一切載せません</td><td>リファレンスアーキテクチャの 3 鍵分離に従う</td></tr>
-				<tr><td>他事業の資料</td><td>N/A</td><td>本 validator 運用の scope 外</td></tr>
+				<tr><td data-label="Material">他事業の資料</td><td data-label="Classification"><span class="status-badge status-badge--na">N/A</span></td><td data-label="Where / how">本 validator 運用の scope 外</td></tr>
 			</tbody>
 		</table>
 	</section>
@@ -354,39 +427,15 @@
 	<section class="card" id="control-matrix">
 		<h2>コントロール + エビデンス対応表</h2>
 		<p>コントロール領域ごとに 1 行: 現状のコントロールサマリ、 既存エビデンス、 現状ステータス、 honest に開示する既知の制約。 これは既存エビデンスへの索引であり、 新規 commitment は導入しません。</p>
-		<table>
+		<table class="evidence-table">
 			<thead>
 				<tr><th>コントロール領域</th><th>現状コントロール</th><th>エビデンス</th><th>ステータス</th><th>既知の制約</th></tr>
 			</thead>
 			<tbody>
-				<tr>
-					<td>validator 可用性</td>
-					<td>日次モニタリング + cycle close 単位の uptime 公開</td>
-					<td><a href="/api/uptime-cycles.json"><code>/api/uptime-cycles.json</code></a> + <a href="/ja/journal/">/ja/journal/</a></td>
-					<td>Active</td>
-					<td>単一運用者、 日本営業時間外は staffed coverage なし</td>
-				</tr>
-				<tr>
-					<td>インシデント対応</td>
-					<td>SEV ベース runbook + 公開インシデントログ</td>
-					<td><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/INCIDENT_RESPONSE.md" rel="noopener noreferrer"><code>docs/INCIDENT_RESPONSE.md</code></a> + <a href="/ja/incidents/">/ja/incidents/</a></td>
-					<td>Active</td>
-					<td>外部 SOC は契約していません、 一次対応は運用者側</td>
-				</tr>
-				<tr>
-					<td>変更管理</td>
-					<td>単一目的の公開 commit + pre-commit secret scan</td>
-					<td>公開リポジトリの commit 履歴</td>
-					<td>Active</td>
-					<td>単一 committer、 multi-party review gate なし</td>
-				</tr>
-				<tr>
-					<td>鍵分離</td>
-					<td>3 鍵モデル (validator signing / operator identity / push)</td>
-					<td><a href="/ja/reference-architecture/">/ja/reference-architecture/</a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md" rel="noopener noreferrer"><code>docs/KEY_ROTATION.md</code></a></td>
-					<td>Active</td>
-					<td>3 カテゴリの鍵は単一運用者が保持</td>
-				</tr>
+				<tr><td data-label="Control area">validator 可用性</td><td data-label="Current control">日次モニタリング + cycle close 単位の uptime 公開</td><td data-label="Evidence"><a href="/api/uptime-cycles.json"><code>/api/uptime-cycles.json</code></a> + <a href="/ja/journal/">/ja/journal/</a></td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">単一運用者、 日本営業時間外は staffed coverage なし</td></tr>
+				<tr><td data-label="Control area">インシデント対応</td><td data-label="Current control">SEV ベース runbook + 公開インシデントログ</td><td data-label="Evidence"><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/INCIDENT_RESPONSE.md" rel="noopener noreferrer"><code>docs/INCIDENT_RESPONSE.md</code></a> + <a href="/ja/incidents/">/ja/incidents/</a></td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">外部 SOC は契約していません、 一次対応は運用者側</td></tr>
+				<tr><td data-label="Control area">変更管理</td><td data-label="Current control">単一目的の公開 commit + pre-commit secret scan</td><td data-label="Evidence">公開リポジトリの commit 履歴</td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">単一 committer、 multi-party review gate なし</td></tr>
+				<tr><td data-label="Control area">鍵分離</td><td data-label="Current control">3 鍵モデル (validator signing / operator identity / push)</td><td data-label="Evidence"><a href="/ja/reference-architecture/">/ja/reference-architecture/</a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md" rel="noopener noreferrer"><code>docs/KEY_ROTATION.md</code></a></td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">3 カテゴリの鍵は単一運用者が保持</td></tr>
 				<tr>
 					<td>identity 検証</td>
 					<td>ed25519 署名付き identity manifest + Metal A-chain への Merkle DAG anchor (Phase α)</td>
@@ -394,48 +443,12 @@
 					<td>In preparation — schema・verifier recipe・test vectors は live、 runtime は 2026-07-04 に activate</td>
 					<td>Phase α は Metal A-chain への memo only、 smart contract inscription は Phase β</td>
 				</tr>
-				<tr>
-					<td>データ完全性</td>
-					<td>append-only 永続化 + allowlist 検証付き push + atomic write</td>
-					<td><a href="/ja/reference-architecture/">/ja/reference-architecture/</a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/EVIDENCE_MANIFEST.md" rel="noopener noreferrer"><code>docs/EVIDENCE_MANIFEST.md</code></a></td>
-					<td>Active</td>
-					<td>third-party witness なし、 完全性主張は運用者側のみ</td>
-				</tr>
-				<tr>
-					<td>バックアップ / 復旧</td>
-					<td>暗号化 off-host バックアップ + 鍵 rotation runbook + DR runbook</td>
-					<td><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/DISASTER_RECOVERY.md" rel="noopener noreferrer"><code>docs/DISASTER_RECOVERY.md</code></a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md" rel="noopener noreferrer"><code>docs/KEY_ROTATION.md</code></a></td>
-					<td>Active</td>
-					<td>定期 DR drill は準備中、 drill 報告書はまだなし</td>
-				</tr>
-				<tr>
-					<td>third-party 依存</td>
-					<td>識別済み、 代替可能、 鍵材料 custody なし</td>
-					<td><a href="/ja/reference-architecture/#third-party-dependencies">/ja/reference-architecture/#third-party-dependencies</a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CF_POLICY.md" rel="noopener noreferrer"><code>docs/CF_POLICY.md</code></a></td>
-					<td>Active</td>
-					<td>CDN は <code>CF_POLICY.md</code> に記載の設定で稼働、 一部の edge 側 opt-in は意図的に off</td>
-				</tr>
-				<tr>
-					<td>schema 安定性</td>
-					<td>JSON Schema v1 は version 内で安定、 breaking change は新 URL <code>*.schema.v2.json</code>、 v1 URL は v2 公開後最低 18 ヶ月 reachable</td>
-					<td><a href="/api/evidence.schema.v1.json"><code>/api/evidence.schema.v1.json</code></a> + 兄弟 schema</td>
-					<td>Active</td>
-					<td>単一 author の schema、 外部 schema registry なし</td>
-				</tr>
-				<tr>
-					<td>decommission</td>
-					<td>合理的な decommission notice commitment</td>
-					<td><a href="/ja/commitments/">/ja/commitments/</a> #8</td>
-					<td>Stated</td>
-					<td>詳細な正式 exit runbook は準備中</td>
-				</tr>
-				<tr>
-					<td>公開コミュニケーション</td>
-					<td>公的主張基準 + 日本営業日 24 時間以内の応答目標</td>
-					<td><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md" rel="noopener noreferrer"><code>docs/CONSTITUTION.md</code></a> §7 + <a href="/ja/inquiry/">/ja/inquiry/</a> + <a href="/ja/commitments/">/ja/commitments/</a> #10</td>
-					<td>Active</td>
-					<td>日本営業時間外は best-effort</td>
-				</tr>
+				<tr><td data-label="Control area">データ完全性</td><td data-label="Current control">append-only 永続化 + allowlist 検証付き push + atomic write</td><td data-label="Evidence"><a href="/ja/reference-architecture/">/ja/reference-architecture/</a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/EVIDENCE_MANIFEST.md" rel="noopener noreferrer"><code>docs/EVIDENCE_MANIFEST.md</code></a></td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">third-party witness なし、 完全性主張は運用者側のみ</td></tr>
+				<tr><td data-label="Control area">バックアップ / 復旧</td><td data-label="Current control">暗号化 off-host バックアップ + 鍵 rotation runbook + DR runbook</td><td data-label="Evidence"><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/DISASTER_RECOVERY.md" rel="noopener noreferrer"><code>docs/DISASTER_RECOVERY.md</code></a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md" rel="noopener noreferrer"><code>docs/KEY_ROTATION.md</code></a></td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">定期 DR drill は準備中、 drill 報告書はまだなし</td></tr>
+				<tr><td data-label="Control area">third-party 依存</td><td data-label="Current control">識別済み、 代替可能、 鍵材料 custody なし</td><td data-label="Evidence"><a href="/ja/reference-architecture/#third-party-dependencies">/ja/reference-architecture/#third-party-dependencies</a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CF_POLICY.md" rel="noopener noreferrer"><code>docs/CF_POLICY.md</code></a></td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">CDN は <code>CF_POLICY.md</code> に記載の設定で稼働、 一部の edge 側 opt-in は意図的に off</td></tr>
+				<tr><td data-label="Control area">schema 安定性</td><td data-label="Current control">JSON Schema v1 は version 内で安定、 breaking change は新 URL <code>*.schema.v2.json</code>、 v1 URL は v2 公開後最低 18 ヶ月 reachable</td><td data-label="Evidence"><a href="/api/evidence.schema.v1.json"><code>/api/evidence.schema.v1.json</code></a> + 兄弟 schema</td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">単一 author の schema、 外部 schema registry なし</td></tr>
+				<tr><td data-label="Control area">decommission</td><td data-label="Current control">合理的な decommission notice commitment</td><td data-label="Evidence"><a href="/ja/commitments/">/ja/commitments/</a> #8</td><td data-label="Status"><span class="status-badge status-badge--stated">Stated</span></td><td data-label="Known limitation">詳細な正式 exit runbook は準備中</td></tr>
+				<tr><td data-label="Control area">公開コミュニケーション</td><td data-label="Current control">公的主張基準 + 日本営業日 24 時間以内の応答目標</td><td data-label="Evidence"><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md" rel="noopener noreferrer"><code>docs/CONSTITUTION.md</code></a> §7 + <a href="/ja/inquiry/">/ja/inquiry/</a> + <a href="/ja/commitments/">/ja/commitments/</a> #10</td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">日本営業時間外は best-effort</td></tr>
 			</tbody>
 		</table>
 	</section>

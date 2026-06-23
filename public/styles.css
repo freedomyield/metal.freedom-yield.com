@@ -3274,3 +3274,276 @@ code {
 .faq-card-body p { margin: 0; }
 .faq-card-body p + p { margin-top: 0.65rem; }
 .faq-card-body strong { color: var(--fg); font-weight: 600; }
+
+
+/* ─────────────────────────────────────────────────────────────────────
+ * selection-evidence v2 visual treatment
+ *
+ * The page is intentionally data-dense (~14 evidence articles + 4 dl.kv
+ * cards + 2 tables). Without per-row differentiation the result is a
+ * 17000px wall of identical grey. The classes below:
+ *   - Anchor a sticky horizontal pill TOC at the top of the main flow.
+ *   - Surface a 4-stat summary card before the article list.
+ *   - Color-code each .data-endpoint by its category (onchain / audit /
+ *     schedule / disclosure / docs / json / topology / readiness / live).
+ *   - Promote inline status text into coloured badges (active / live /
+ *     scheduled / stated / in-preparation).
+ *   - Re-skin the bottom tables so each row's status / classification
+ *     reads as a coloured tag rather than plain text.
+ * ───────────────────────────────────────────────────────────────────── */
+
+/* Category palette (CSS variables so the same colours are reused by
+ * left-border / tag / icon halo without re-declaring). */
+:root {
+	--cat-onchain:     #2563eb;  /* blue */
+	--cat-audit:       #10b386;  /* mint (=accent) */
+	--cat-schedule:    #8b5cf6;  /* violet */
+	--cat-disclosure:  #d97706;  /* amber */
+	--cat-docs:        #475569;  /* slate */
+	--cat-code:        #0ea5e9;  /* sky */
+	--cat-readiness:   #14b8a6;  /* teal */
+	--cat-topology:    #6366f1;  /* indigo */
+	--cat-live:        #059669;  /* emerald */
+}
+
+/* Sticky TOC — horizontal scroll pill row that follows the user. */
+.data-toc {
+	position: sticky;
+	top: calc(var(--topnav-h, 3.75rem) - 1px);
+	z-index: 5;
+	background: rgba(247, 242, 230, 0.92);
+	backdrop-filter: saturate(140%) blur(10px);
+	-webkit-backdrop-filter: saturate(140%) blur(10px);
+	border-bottom: 1px solid var(--border);
+	margin: 0 calc(var(--space-3) * -1) var(--space-4);
+	padding: 0.55rem var(--space-3);
+	display: flex;
+	gap: 0.4rem;
+	overflow-x: auto;
+	overflow-y: hidden;
+	scrollbar-width: none;
+}
+.data-toc::-webkit-scrollbar { display: none; }
+.data-toc a {
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3rem;
+	padding: 0.35rem 0.75rem;
+	font-size: 0.78rem;
+	font-weight: 500;
+	letter-spacing: 0.02em;
+	color: var(--fg-muted);
+	background: rgba(31, 41, 55, 0.04);
+	border-radius: 999px;
+	border: 1px solid transparent;
+	text-decoration: none;
+	white-space: nowrap;
+	transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.data-toc a:hover,
+.data-toc a:focus-visible {
+	background: rgba(16, 179, 134, 0.10);
+	color: var(--fg);
+	border-color: var(--accent);
+}
+.data-toc a .data-toc-count {
+	font-size: 0.7rem;
+	color: var(--fg-muted);
+	font-variant-numeric: tabular-nums;
+}
+
+/* Evidence summary — 4 stat cards above the article list. */
+.evidence-summary {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+	gap: 0.6rem;
+	margin: 0 0 var(--space-4);
+}
+.evidence-summary-card {
+	padding: 0.9rem 1rem;
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	border-left: 4px solid var(--cat-onchain);
+}
+.evidence-summary-card--audit       { border-left-color: var(--cat-audit); }
+.evidence-summary-card--in-prep     { border-left-color: var(--cat-disclosure); }
+.evidence-summary-card--total       { border-left-color: var(--accent); }
+.evidence-summary-num {
+	display: block;
+	font-size: 1.65rem;
+	font-weight: 700;
+	color: var(--fg);
+	line-height: 1.1;
+	font-variant-numeric: tabular-nums;
+}
+.evidence-summary-label {
+	display: block;
+	margin-top: 0.2rem;
+	font-size: 0.78rem;
+	color: var(--fg-muted);
+	letter-spacing: 0.02em;
+}
+
+/* Data-endpoint: left-border + icon column + spacing rework. */
+.data-endpoint {
+	position: relative;
+	border-top: none;
+	border-left: 3px solid var(--cat-docs);
+	background: rgba(31, 41, 55, 0.015);
+	padding: var(--space-3);
+	margin: 0 0 0.75rem !important;
+	border-radius: 0 10px 10px 0;
+	transition: background 0.15s ease;
+}
+.data-endpoint:first-of-type { padding-top: var(--space-3); }
+.data-endpoint:hover {
+	background: rgba(16, 179, 134, 0.04);
+}
+.data-endpoint--onchain    { border-left-color: var(--cat-onchain); }
+.data-endpoint--audit      { border-left-color: var(--cat-audit); }
+.data-endpoint--schedule   { border-left-color: var(--cat-schedule); }
+.data-endpoint--disclosure { border-left-color: var(--cat-disclosure); }
+.data-endpoint--docs       { border-left-color: var(--cat-docs); }
+.data-endpoint--code       { border-left-color: var(--cat-code); }
+.data-endpoint--readiness  { border-left-color: var(--cat-readiness); }
+.data-endpoint--topology   { border-left-color: var(--cat-topology); }
+.data-endpoint--live       { border-left-color: var(--cat-live); }
+
+.data-endpoint-head {
+	gap: 0.5rem var(--space-2);
+	margin-bottom: 0.5rem;
+}
+.data-endpoint-icon {
+	flex: 0 0 32px;
+	width: 32px;
+	height: 32px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 8px;
+	background: rgba(31, 41, 55, 0.06);
+	color: var(--cat-docs);
+}
+.data-endpoint--onchain    .data-endpoint-icon { color: var(--cat-onchain);    background: rgba(37, 99, 235, 0.10); }
+.data-endpoint--audit      .data-endpoint-icon { color: var(--cat-audit);      background: rgba(16, 179, 134, 0.10); }
+.data-endpoint--schedule   .data-endpoint-icon { color: var(--cat-schedule);   background: rgba(139, 92, 246, 0.10); }
+.data-endpoint--disclosure .data-endpoint-icon { color: var(--cat-disclosure); background: rgba(217, 119, 6, 0.10); }
+.data-endpoint--docs       .data-endpoint-icon { color: var(--cat-docs);       background: rgba(71, 85, 105, 0.10); }
+.data-endpoint--code       .data-endpoint-icon { color: var(--cat-code);       background: rgba(14, 165, 233, 0.10); }
+.data-endpoint--readiness  .data-endpoint-icon { color: var(--cat-readiness);  background: rgba(20, 184, 166, 0.10); }
+.data-endpoint--topology   .data-endpoint-icon { color: var(--cat-topology);   background: rgba(99, 102, 241, 0.10); }
+.data-endpoint--live       .data-endpoint-icon { color: var(--cat-live);       background: rgba(5, 150, 105, 0.10); }
+.data-endpoint-icon svg { width: 18px; height: 18px; }
+.data-endpoint-head h3 {
+	flex: 1 1 auto;
+	font-family: var(--font-body, system-ui, sans-serif);
+	font-size: 1.05rem;
+	letter-spacing: -0.005em;
+}
+
+/* Tag in tag-row, coloured per category. */
+.data-tag {
+	flex: 0 0 auto;
+}
+.data-endpoint--onchain    .data-tag { color: var(--cat-onchain);    background: rgba(37, 99, 235, 0.10); }
+.data-endpoint--audit      .data-tag { color: var(--cat-audit);      background: rgba(16, 179, 134, 0.10); }
+.data-endpoint--schedule   .data-tag { color: var(--cat-schedule);   background: rgba(139, 92, 246, 0.10); }
+.data-endpoint--disclosure .data-tag { color: var(--cat-disclosure); background: rgba(217, 119, 6, 0.10); }
+.data-endpoint--docs       .data-tag { color: var(--cat-docs);       background: rgba(71, 85, 105, 0.10); }
+.data-endpoint--code       .data-tag { color: var(--cat-code);       background: rgba(14, 165, 233, 0.10); }
+.data-endpoint--readiness  .data-tag { color: var(--cat-readiness);  background: rgba(20, 184, 166, 0.10); }
+.data-endpoint--topology   .data-tag { color: var(--cat-topology);   background: rgba(99, 102, 241, 0.10); }
+.data-endpoint--live       .data-tag { color: var(--cat-live);       background: rgba(5, 150, 105, 0.10); }
+
+/* Coloured status badges — replace inline plain-text "Active" / "Live" etc. */
+.status-badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3rem;
+	font-size: 0.78rem;
+	font-weight: 600;
+	letter-spacing: 0.02em;
+	padding: 0.15rem 0.55rem;
+	border-radius: 999px;
+	white-space: nowrap;
+}
+.status-badge::before {
+	content: "";
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: currentColor;
+}
+.status-badge--active     { color: var(--cat-audit);     background: rgba(16, 179, 134, 0.10); }
+.status-badge--live       { color: var(--cat-live);      background: rgba(5, 150, 105, 0.10); }
+.status-badge--scheduled  { color: var(--cat-schedule);  background: rgba(139, 92, 246, 0.10); }
+.status-badge--stated     { color: var(--cat-onchain);   background: rgba(37, 99, 235, 0.10); }
+.status-badge--in-prep    { color: var(--cat-disclosure);background: rgba(217, 119, 6, 0.10); }
+.status-badge--public     { color: var(--cat-audit);     background: rgba(16, 179, 134, 0.10); }
+.status-badge--private    { color: var(--cat-docs);      background: rgba(71, 85, 105, 0.10); }
+.status-badge--na         { color: var(--fg-muted);      background: rgba(31, 41, 55, 0.06); }
+
+/* Evidence-table — re-skin the bottom two tables. */
+.evidence-table {
+	width: 100%;
+	border-collapse: separate;
+	border-spacing: 0;
+	font-size: 0.92rem;
+	margin: var(--space-2) 0 0;
+}
+.evidence-table thead th {
+	position: sticky;
+	top: calc(var(--topnav-h, 3.75rem) + 2.6rem);
+	background: var(--bg);
+	text-align: left;
+	font-weight: 600;
+	color: var(--fg-muted);
+	font-size: 0.78rem;
+	letter-spacing: 0.05em;
+	text-transform: uppercase;
+	padding: 0.6rem 0.7rem;
+	border-bottom: 2px solid var(--border);
+}
+.evidence-table tbody td {
+	padding: 0.7rem;
+	border-bottom: 1px solid var(--border);
+	vertical-align: top;
+}
+.evidence-table tbody tr:nth-child(even) td { background: rgba(31, 41, 55, 0.02); }
+.evidence-table tbody tr:hover td { background: rgba(16, 179, 134, 0.04); }
+.evidence-table tbody td:first-child {
+	font-weight: 600;
+	color: var(--fg);
+}
+
+@media (max-width: 720px) {
+	.evidence-table, .evidence-table thead, .evidence-table tbody, .evidence-table tr, .evidence-table td {
+		display: block;
+		width: 100%;
+	}
+	.evidence-table thead { display: none; }
+	.evidence-table tbody tr {
+		margin: 0 0 0.55rem;
+		padding: 0.65rem 0.8rem;
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		background: var(--bg);
+	}
+	.evidence-table tbody tr:nth-child(even) td { background: transparent; }
+	.evidence-table tbody td {
+		padding: 0.25rem 0;
+		border: none;
+	}
+	.evidence-table tbody td::before {
+		content: attr(data-label);
+		display: block;
+		font-size: 0.7rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: var(--fg-muted);
+		margin-bottom: 0.15rem;
+	}
+}

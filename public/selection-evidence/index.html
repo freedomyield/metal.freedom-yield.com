@@ -55,15 +55,45 @@
 
 <main id="main" class="container">
 
-	<section class="card data-group">
+	<nav class="data-toc" aria-label="Sections">
+		<a href="#evidence-index">Evidence index <span class="data-toc-count">14</span></a>
+		<a href="#service-scope">Service scope</a>
+		<a href="#governance">Governance</a>
+		<a href="#operational-targets">Operational targets</a>
+		<a href="#dependencies-data">Dependencies &amp; data</a>
+		<a href="#materials-classification">Materials</a>
+		<a href="#control-matrix">Control matrix</a>
+	</nav>
+
+	<div class="evidence-summary" role="group" aria-label="Evidence stats">
+		<div class="evidence-summary-card evidence-summary-card--total">
+			<span class="evidence-summary-num">14</span>
+			<span class="evidence-summary-label">Evidence items</span>
+		</div>
+		<div class="evidence-summary-card">
+			<span class="evidence-summary-num">11</span>
+			<span class="evidence-summary-label">Active / Live</span>
+		</div>
+		<div class="evidence-summary-card evidence-summary-card--in-prep">
+			<span class="evidence-summary-num">2</span>
+			<span class="evidence-summary-label">In preparation</span>
+		</div>
+		<div class="evidence-summary-card evidence-summary-card--audit">
+			<span class="evidence-summary-num">2</span>
+			<span class="evidence-summary-label">Reference tables</span>
+		</div>
+	</div>
+
+	<section class="card data-group" id="evidence-index">
 		<figure class="card-figure" aria-hidden="true">
 			<img src="/assets/photos/dark-code.jpg" alt="" loading="lazy" decoding="async">
 		</figure>
 		<h2>Evidence index</h2>
 		<p class="data-group-lead">Fourteen topics. Each one points at the artifact a third party can read directly.</p>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--onchain">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007 0l3-3a5 5 0 00-7-7l-1 1"/><path d="M14 11a5 5 0 00-7 0l-3 3a5 5 0 007 7l1-1"/></svg></span>
 				<h3>Active mainnet validator</h3>
 				<span class="data-tag">on-chain</span>
 			</header>
@@ -75,8 +105,9 @@
 			</dl>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--audit">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
 				<h3>Uptime history</h3>
 				<span class="data-tag">audit trail</span>
 			</header>
@@ -87,8 +118,9 @@
 			</dl>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--audit">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
 				<h3>Incident transparency</h3>
 				<span class="data-tag">audit trail</span>
 			</header>
@@ -99,8 +131,9 @@
 			</dl>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--schedule">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18M8 3v4M16 3v4"/></svg></span>
 				<h3>Operator continuity</h3>
 				<span class="data-tag">schedule</span>
 			</header>
@@ -112,8 +145,9 @@
 			</dl>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--disclosure">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h4"/></svg></span>
 				<h3>Jurisdiction posture</h3>
 				<span class="data-tag">disclosure</span>
 			</header>
@@ -123,8 +157,9 @@
 			</dl>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--disclosure">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h4"/></svg></span>
 				<h3>Non-custodial posture + commitments</h3>
 				<span class="data-tag">disclosure</span>
 			</header>
@@ -135,8 +170,9 @@
 			</dl>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--docs">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg></span>
 				<h3>Operational documentation</h3>
 				<span class="data-tag">public repo</span>
 			</header>
@@ -150,8 +186,9 @@
 			</dl>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--code">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/></svg></span>
 				<h3>Machine-readable data</h3>
 				<span class="data-tag">JSON</span>
 			</header>
@@ -166,8 +203,9 @@
 			</dl>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--disclosure">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h4"/></svg></span>
 				<h3>Subnet-readiness scorecard</h3>
 				<span class="data-tag">disclosure</span>
 			</header>
@@ -177,8 +215,9 @@
 			</dl>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--readiness">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21V4M4 4h13l-2 4 2 4H4"/></svg></span>
 				<h3>Subnet pilot expression of interest</h3>
 				<span class="data-tag">pull-only</span>
 			</header>
@@ -188,8 +227,9 @@
 			</dl>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--disclosure">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h4"/></svg></span>
 				<h3>Inquiry surface (24-hour response target)</h3>
 				<span class="data-tag">disclosure</span>
 			</header>
@@ -200,8 +240,9 @@
 			</dl>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--topology">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v3M9 15l-3 2M15 15l3 2"/><circle cx="12" cy="12" r="2"/></svg></span>
 				<h3>Reference architecture</h3>
 				<span class="data-tag">topology</span>
 			</header>
@@ -211,14 +252,15 @@
 			</dl>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--live">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>
 				<h3>Cycle-by-cycle audit packet</h3>
 				<span class="data-tag">live (1 cycle closed)</span>
 			</header>
 			<p>A JSONL feed at <code>/api/cycle-history.jsonl</code> is live and currently contains one closed cycle (cycle 1, closed 2026-06-04, 100% uptime over 14 recorded days). Each line is one closed cycle, joining <code>/api/uptime-cycles.json</code> with <code>/api/incidents.json</code> so a reader can stream the full audit packet line-by-line. The schema is published at <a href="/api/cycle-history.example.jsonl"><code>/api/cycle-history.example.jsonl</code></a>; the generator script lives at <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/scripts/gen-cycle-history.sh" rel="noopener noreferrer"><code>scripts/gen-cycle-history.sh</code></a> and the format / consumption guide is at <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CYCLE_HISTORY.md" rel="noopener noreferrer"><code>docs/CYCLE_HISTORY.md</code></a>. New leaf lines are appended at each cycle close by an operator-host cron (<code>metal-cycle-history</code>, 5-min tick); each leaf is also folded into the <code>cycles_branch</code> of the Phase α Merkle DAG and signed into <code>/api/identity.json</code> via <code>gen-identity.sh</code>.</p>
 			<dl class="data-meta">
-				<dt>Status</dt><dd>Live — runtime JSONL serving since 2026-06-22; 1 leaf currently published (cycle 1)</dd>
+				<dt>Status</dt><dd><span class="status-badge status-badge--live">Live</span> — runtime JSONL serving since 2026-06-22; 1 leaf currently published (cycle 1)</dd>
 				<dt>Schema</dt><dd><code>/api/cycle-history.example.jsonl</code></dd>
 				<dt>Live feed</dt><dd><a href="/api/cycle-history.jsonl"><code>/api/cycle-history.jsonl</code></a></dd>
 				<dt>Cross-reference</dt><dd>Folded into <a href="/api/cycles-history.json"><code>/api/cycles-history.json</code></a> <code>.branches.cycles.leaf_source_sha256</code> (= sha256 of the served JSONL bytes)</dd>
@@ -226,8 +268,9 @@
 			</dl>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--live">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>
 				<h3>Identity binding (Phase α Merkle DAG anchor)</h3>
 				<span class="data-tag">live (manifest) · scheduled (anchor)</span>
 			</header>
@@ -236,7 +279,7 @@
 			<p>The verifier procedure is a nine-step recipe (signature → fingerprint → per-branch Merkle root → DAG combination → on-chain explorer cross-check → cross-reference integrity). Independent reference implementations: a portable shell function inside <code>gen-identity.sh</code> and a Python reference under <code>tests/identity-verification-vectors/</code>, with bit-for-bit equivalence pinned by an automated test script. Five synthetic test vectors are published so an auditor can implement and validate a third-language verifier.</p>
 			<p><strong>Snapshot + rotation cadence.</strong> <code>identity.json</code> is a signed snapshot of operator state at the moment of issue, not a heartbeat. Anchor receipts at cycle transitions <em>reaffirm</em> the same commitment until the operator publishes an updated manifest. The intended update triggers are: (1) annual rotation of the ed25519 operator identity key (next: 2027-06-22), (2) addition of a new artifact to the bound set, (3) material policy change. A <code>dag_root_hash</code> that does not change across multiple cycles is by design — it means the operator has not asserted any new commitment in that window. Industry analogues: Certificate Transparency log (= append-only, root extends with new entries), DNSSEC zone signing (= periodic re-sign with documented cadence), long-lived OpenSSH keys with rotation policy. There is no Metal-ecosystem-standard pattern for validator identity binding; this surface is novel.</p>
 			<dl class="data-meta">
-				<dt>Status</dt><dd>Active — <code>identity.json</code> + <code>identity.json.sig</code> live since 2026-06-22 (Phase 5 publication). On-chain anchor receipt activates automatically at cycle 2 → cycle 3 transition (2026-07-04 13:00 JST).</dd>
+				<dt>Status</dt><dd><span class="status-badge status-badge--active">Active</span> — <code>identity.json</code> + <code>identity.json.sig</code> live since 2026-06-22 (Phase 5 publication). On-chain anchor receipt activates automatically at cycle 2 → cycle 3 transition (2026-07-04 13:00 JST).</dd>
 				<dt>Construction spec</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/MERKLE_DAG_SPEC.md" rel="noopener noreferrer"><code>docs/MERKLE_DAG_SPEC.md</code></a></dd>
 				<dt>Verifier procedure</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer"><code>docs/IDENTITY_VERIFICATION.md</code></a> (= nine-step recipe)</dd>
 				<dt>Audit entry point</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/PHASE_ALPHA_AUDIT_HANDOFF.md" rel="noopener noreferrer"><code>docs/PHASE_ALPHA_AUDIT_HANDOFF.md</code></a></dd>
@@ -256,6 +299,21 @@
 		</article>
 
 	</section>
+
+	
+	<figure class="atmosphere-band" aria-hidden="true">
+		<img src="/assets/photos/team-meeting.jpg" alt="" loading="lazy" decoding="async">
+		<div class="atmosphere-band-tint" aria-hidden="true"></div>
+		<figcaption class="atmosphere-band-caption">
+			<div class="atmosphere-band-overline">
+				<span>Chapter II</span>
+				<span class="atmosphere-band-overline-rule" aria-hidden="true"></span>
+				<span>Scope &amp; boundaries</span>
+			</div>
+			<div class="atmosphere-band-title">Service scope &amp; boundaries</div>
+			<p class="atmosphere-band-lede">What is offered, what is not, and where the responsibility boundary sits.</p>
+		</figcaption>
+	</figure>
 
 	<section class="card" id="service-scope">
 		<h2>Service scope</h2>
@@ -285,6 +343,21 @@
 		</dl>
 	</section>
 
+	
+	<figure class="atmosphere-band" aria-hidden="true">
+		<img src="/assets/photos/focused-work.jpg" alt="" loading="lazy" decoding="async">
+		<div class="atmosphere-band-tint" aria-hidden="true"></div>
+		<figcaption class="atmosphere-band-caption">
+			<div class="atmosphere-band-overline">
+				<span>Chapter III</span>
+				<span class="atmosphere-band-overline-rule" aria-hidden="true"></span>
+				<span>Operational targets</span>
+			</div>
+			<div class="atmosphere-band-title">Targets &amp; dependencies</div>
+			<p class="atmosphere-band-lede">Stated unilateral commitments and the third-party surface they touch.</p>
+		</figcaption>
+	</figure>
+
 	<section class="card" id="operational-targets">
 		<h2>Operational targets</h2>
 		<p>Stated operator-side targets. These are the unilateral commitments the operator has published; they are reproduced in the linked sources, not invented here.</p>
@@ -313,7 +386,7 @@
 		<div class="atmosphere-band-tint" aria-hidden="true"></div>
 		<figcaption class="atmosphere-band-caption">
 			<div class="atmosphere-band-overline">
-				<span>Chapter II</span>
+				<span>Chapter IV</span>
 				<span class="atmosphere-band-overline-rule" aria-hidden="true"></span>
 				<span>Disclosure</span>
 			</div>
@@ -325,28 +398,28 @@
 	<section class="card" id="materials-classification">
 		<h2>Materials classification</h2>
 		<p>How each material category is published, by classification. "Public" means directly readable on this site or in the source repository; "Available on request" means the operator will share via the inquiry surface after a reasonable identification step; "Private / contractual" means the material is shared only inside a contractual relationship; "In preparation" means the artifact's schema or commitment exists but the runtime artifact is not yet live; "N/A" means out of scope of this validator operation; "Not disclosed (security posture)" means the abstract pattern is published but concrete values are intentionally absent.</p>
-		<table>
+		<table class="evidence-table">
 			<thead>
 				<tr><th>Material</th><th>Classification</th><th>Where / how</th></tr>
 			</thead>
 			<tbody>
-				<tr><td>Operator commitments</td><td>Public</td><td><a href="/commitments/">/commitments/</a></td></tr>
-				<tr><td>Risk disclosure</td><td>Public</td><td><a href="/risk-disclosure/">/risk-disclosure/</a></td></tr>
-				<tr><td>Subnet-readiness scorecard</td><td>Public</td><td><a href="/subnet-readiness/">/subnet-readiness/</a></td></tr>
-				<tr><td>Reference architecture</td><td>Public</td><td><a href="/reference-architecture/">/reference-architecture/</a></td></tr>
-				<tr><td>Cycle uptime history</td><td>Public</td><td><a href="/api/uptime-cycles.json"><code>/api/uptime-cycles.json</code></a> + <a href="/journal/">/journal/</a></td></tr>
-				<tr><td>Incident log</td><td>Public</td><td><a href="/api/incidents.json"><code>/api/incidents.json</code></a> + <a href="/incidents/">/incidents/</a></td></tr>
-				<tr><td>Constitution + operating model</td><td>Public</td><td>Source repository <code>docs/</code></td></tr>
-				<tr><td>Incident response runbook</td><td>Public</td><td>Source repository <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/INCIDENT_RESPONSE.md" rel="noopener noreferrer"><code>docs/INCIDENT_RESPONSE.md</code></a></td></tr>
-				<tr><td>Identity manifest + DAG schemas</td><td>Public (schemas live) / In preparation (runtime artifacts)</td><td>Schemas live; runtime <code>/api/identity.json</code> + <code>/api/anchor-receipt.json</code> activate at the next cycle start (2026-07-04)</td></tr>
-				<tr><td>Detailed continuity / DR procedure</td><td>Available on request</td><td>Via <a href="/inquiry/">/inquiry/</a> — high-level model in <a href="/continuity/">/continuity/</a></td></tr>
-				<tr><td>Drill reports + post-mortems</td><td>In preparation</td><td>Format follows <code>docs/INCIDENT_RESPONSE.md</code> §5 post-mortem template; first drill not yet completed</td></tr>
-				<tr><td>Formal external audit reports</td><td>In preparation</td><td>No formal external audit has been performed yet</td></tr>
-				<tr><td>Operator legal entity</td><td>Private / contractual</td><td>Shared inside contractual engagement only</td></tr>
-				<tr><td>Operator personal contact details</td><td>Private / contractual</td><td>Shared inside contractual engagement only</td></tr>
-				<tr><td>Specific provider names, IPs, host paths, ports</td><td>Not disclosed (security posture)</td><td>Abstracted in reference architecture; concrete values are not on a public surface</td></tr>
-				<tr><td>Validator + identity + push key material</td><td>Private — never on a public surface</td><td>Per the three-key separation in reference architecture</td></tr>
-				<tr><td>Other-venture material</td><td>N/A</td><td>Out of scope of this validator operation</td></tr>
+				<tr><td data-label="Material">Operator commitments</td><td data-label="Classification"><span class="status-badge status-badge--public">Public</span></td><td data-label="Where / how"><a href="/commitments/">/commitments/</a></td></tr>
+				<tr><td data-label="Material">Risk disclosure</td><td data-label="Classification"><span class="status-badge status-badge--public">Public</span></td><td data-label="Where / how"><a href="/risk-disclosure/">/risk-disclosure/</a></td></tr>
+				<tr><td data-label="Material">Subnet-readiness scorecard</td><td data-label="Classification"><span class="status-badge status-badge--public">Public</span></td><td data-label="Where / how"><a href="/subnet-readiness/">/subnet-readiness/</a></td></tr>
+				<tr><td data-label="Material">Reference architecture</td><td data-label="Classification"><span class="status-badge status-badge--public">Public</span></td><td data-label="Where / how"><a href="/reference-architecture/">/reference-architecture/</a></td></tr>
+				<tr><td data-label="Material">Cycle uptime history</td><td data-label="Classification"><span class="status-badge status-badge--public">Public</span></td><td data-label="Where / how"><a href="/api/uptime-cycles.json"><code>/api/uptime-cycles.json</code></a> + <a href="/journal/">/journal/</a></td></tr>
+				<tr><td data-label="Material">Incident log</td><td data-label="Classification"><span class="status-badge status-badge--public">Public</span></td><td data-label="Where / how"><a href="/api/incidents.json"><code>/api/incidents.json</code></a> + <a href="/incidents/">/incidents/</a></td></tr>
+				<tr><td data-label="Material">Constitution + operating model</td><td data-label="Classification"><span class="status-badge status-badge--public">Public</span></td><td data-label="Where / how">Source repository <code>docs/</code></td></tr>
+				<tr><td data-label="Material">Incident response runbook</td><td data-label="Classification"><span class="status-badge status-badge--public">Public</span></td><td data-label="Where / how">Source repository <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/INCIDENT_RESPONSE.md" rel="noopener noreferrer"><code>docs/INCIDENT_RESPONSE.md</code></a></td></tr>
+				<tr><td data-label="Material">Identity manifest + DAG schemas</td><td data-label="Classification"><span class="status-badge status-badge--in-prep">Public (schemas live) / In preparation (runtime artifacts)</span></td><td data-label="Where / how">Schemas live; runtime <code>/api/identity.json</code> + <code>/api/anchor-receipt.json</code> activate at the next cycle start (2026-07-04)</td></tr>
+				<tr><td data-label="Material">Detailed continuity / DR procedure</td><td data-label="Classification"><span class="status-badge status-badge--stated">Available on request</span></td><td data-label="Where / how">Via <a href="/inquiry/">/inquiry/</a> — high-level model in <a href="/continuity/">/continuity/</a></td></tr>
+				<tr><td data-label="Material">Drill reports + post-mortems</td><td data-label="Classification"><span class="status-badge status-badge--in-prep">In preparation</span></td><td data-label="Where / how">Format follows <code>docs/INCIDENT_RESPONSE.md</code> §5 post-mortem template; first drill not yet completed</td></tr>
+				<tr><td data-label="Material">Formal external audit reports</td><td data-label="Classification"><span class="status-badge status-badge--in-prep">In preparation</span></td><td data-label="Where / how">No formal external audit has been performed yet</td></tr>
+				<tr><td data-label="Material">Operator legal entity</td><td data-label="Classification"><span class="status-badge status-badge--private">Private / contractual</span></td><td data-label="Where / how">Shared inside contractual engagement only</td></tr>
+				<tr><td data-label="Material">Operator personal contact details</td><td data-label="Classification"><span class="status-badge status-badge--private">Private / contractual</span></td><td data-label="Where / how">Shared inside contractual engagement only</td></tr>
+				<tr><td data-label="Material">Specific provider names, IPs, host paths, ports</td><td data-label="Classification"><span class="status-badge status-badge--private">Not disclosed (security posture)</span></td><td data-label="Where / how">Abstracted in reference architecture; concrete values are not on a public surface</td></tr>
+				<tr><td data-label="Material">Validator + identity + push key material</td><td data-label="Classification"><span class="status-badge status-badge--private">Private — never on a public surface</span></td><td data-label="Where / how">Per the three-key separation in reference architecture</td></tr>
+				<tr><td data-label="Material">Other-venture material</td><td data-label="Classification"><span class="status-badge status-badge--na">N/A</span></td><td data-label="Where / how">Out of scope of this validator operation</td></tr>
 			</tbody>
 		</table>
 	</section>
@@ -354,39 +427,15 @@
 	<section class="card" id="control-matrix">
 		<h2>Control + evidence mapping</h2>
 		<p>One row per control area. Each row records the current control summary, the existing evidence, the current status, and the honestly-stated known limitation. This is an index into existing evidence; it introduces no new commitments.</p>
-		<table>
+		<table class="evidence-table">
 			<thead>
 				<tr><th>Control area</th><th>Current control</th><th>Evidence</th><th>Status</th><th>Known limitation</th></tr>
 			</thead>
 			<tbody>
-				<tr>
-					<td>Validator availability</td>
-					<td>Daily monitoring + closed-cycle uptime publication</td>
-					<td><a href="/api/uptime-cycles.json"><code>/api/uptime-cycles.json</code></a> + <a href="/journal/">/journal/</a></td>
-					<td>Active</td>
-					<td>Single operator; no staffed coverage outside Japan business hours</td>
-				</tr>
-				<tr>
-					<td>Incident response</td>
-					<td>SEV-based runbook + public incident log</td>
-					<td><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/INCIDENT_RESPONSE.md" rel="noopener noreferrer"><code>docs/INCIDENT_RESPONSE.md</code></a> + <a href="/incidents/">/incidents/</a></td>
-					<td>Active</td>
-					<td>No formal external SOC; first-line response is operator-side</td>
-				</tr>
-				<tr>
-					<td>Change control</td>
-					<td>Single-purpose public commits + pre-commit secret scan</td>
-					<td>Source repository commit history</td>
-					<td>Active</td>
-					<td>Single committer; no multi-party review gate</td>
-				</tr>
-				<tr>
-					<td>Key separation</td>
-					<td>Three-key model (validator signing / operator identity / push)</td>
-					<td><a href="/reference-architecture/">/reference-architecture/</a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md" rel="noopener noreferrer"><code>docs/KEY_ROTATION.md</code></a></td>
-					<td>Active</td>
-					<td>Sole operator possesses all three key categories</td>
-				</tr>
+				<tr><td data-label="Control area">Validator availability</td><td data-label="Current control">Daily monitoring + closed-cycle uptime publication</td><td data-label="Evidence"><a href="/api/uptime-cycles.json"><code>/api/uptime-cycles.json</code></a> + <a href="/journal/">/journal/</a></td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">Single operator; no staffed coverage outside Japan business hours</td></tr>
+				<tr><td data-label="Control area">Incident response</td><td data-label="Current control">SEV-based runbook + public incident log</td><td data-label="Evidence"><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/INCIDENT_RESPONSE.md" rel="noopener noreferrer"><code>docs/INCIDENT_RESPONSE.md</code></a> + <a href="/incidents/">/incidents/</a></td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">No formal external SOC; first-line response is operator-side</td></tr>
+				<tr><td data-label="Control area">Change control</td><td data-label="Current control">Single-purpose public commits + pre-commit secret scan</td><td data-label="Evidence">Source repository commit history</td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">Single committer; no multi-party review gate</td></tr>
+				<tr><td data-label="Control area">Key separation</td><td data-label="Current control">Three-key model (validator signing / operator identity / push)</td><td data-label="Evidence"><a href="/reference-architecture/">/reference-architecture/</a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md" rel="noopener noreferrer"><code>docs/KEY_ROTATION.md</code></a></td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">Sole operator possesses all three key categories</td></tr>
 				<tr>
 					<td>Identity verification</td>
 					<td>ed25519 signed identity manifest + Merkle DAG anchor on Metal A-chain (Phase α)</td>
@@ -394,48 +443,12 @@
 					<td>In preparation — schemas + verifier recipe + test vectors live; runtime activates 2026-07-04</td>
 					<td>Phase α is memo-only on Metal A-chain; smart-contract inscription is Phase β</td>
 				</tr>
-				<tr>
-					<td>Data integrity</td>
-					<td>Append-only persistence + allowlist-validated push + atomic write</td>
-					<td><a href="/reference-architecture/">/reference-architecture/</a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/EVIDENCE_MANIFEST.md" rel="noopener noreferrer"><code>docs/EVIDENCE_MANIFEST.md</code></a></td>
-					<td>Active</td>
-					<td>No third-party witness; integrity assertion is operator-side</td>
-				</tr>
-				<tr>
-					<td>Backup / recovery</td>
-					<td>Encrypted off-host backups + rotation runbook + disaster-recovery runbook</td>
-					<td><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/DISASTER_RECOVERY.md" rel="noopener noreferrer"><code>docs/DISASTER_RECOVERY.md</code></a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md" rel="noopener noreferrer"><code>docs/KEY_ROTATION.md</code></a></td>
-					<td>Active</td>
-					<td>Scheduled DR drill is in preparation; no drill report yet</td>
-				</tr>
-				<tr>
-					<td>Third-party dependencies</td>
-					<td>Identified, substitutable, no key-material custody</td>
-					<td><a href="/reference-architecture/#third-party-dependencies">/reference-architecture/#third-party-dependencies</a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CF_POLICY.md" rel="noopener noreferrer"><code>docs/CF_POLICY.md</code></a></td>
-					<td>Active</td>
-					<td>CDN runs at the published configuration documented in <code>CF_POLICY.md</code>; certain edge-side opt-ins are intentionally not enabled</td>
-				</tr>
-				<tr>
-					<td>Schema stability</td>
-					<td>JSON Schema v1 stable within version; breaking changes publish to a new <code>*.schema.v2.json</code> URL with v1 reachable for at least 18 months</td>
-					<td><a href="/api/evidence.schema.v1.json"><code>/api/evidence.schema.v1.json</code></a> + sibling schemas</td>
-					<td>Active</td>
-					<td>Single-author schemas; no external schema registry</td>
-				</tr>
-				<tr>
-					<td>Decommission</td>
-					<td>Reasonable decommission notice commitment</td>
-					<td><a href="/commitments/">/commitments/</a> #8</td>
-					<td>Stated</td>
-					<td>Detailed formal exit runbook is in preparation</td>
-				</tr>
-				<tr>
-					<td>Public communication</td>
-					<td>Public claims standard + 24-hour inquiry response target on Japan business days</td>
-					<td><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md" rel="noopener noreferrer"><code>docs/CONSTITUTION.md</code></a> §7 + <a href="/inquiry/">/inquiry/</a> + <a href="/commitments/">/commitments/</a> #10</td>
-					<td>Active</td>
-					<td>Outside Japan business hours the response is best-effort</td>
-				</tr>
+				<tr><td data-label="Control area">Data integrity</td><td data-label="Current control">Append-only persistence + allowlist-validated push + atomic write</td><td data-label="Evidence"><a href="/reference-architecture/">/reference-architecture/</a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/EVIDENCE_MANIFEST.md" rel="noopener noreferrer"><code>docs/EVIDENCE_MANIFEST.md</code></a></td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">No third-party witness; integrity assertion is operator-side</td></tr>
+				<tr><td data-label="Control area">Backup / recovery</td><td data-label="Current control">Encrypted off-host backups + rotation runbook + disaster-recovery runbook</td><td data-label="Evidence"><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/DISASTER_RECOVERY.md" rel="noopener noreferrer"><code>docs/DISASTER_RECOVERY.md</code></a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md" rel="noopener noreferrer"><code>docs/KEY_ROTATION.md</code></a></td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">Scheduled DR drill is in preparation; no drill report yet</td></tr>
+				<tr><td data-label="Control area">Third-party dependencies</td><td data-label="Current control">Identified, substitutable, no key-material custody</td><td data-label="Evidence"><a href="/reference-architecture/#third-party-dependencies">/reference-architecture/#third-party-dependencies</a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CF_POLICY.md" rel="noopener noreferrer"><code>docs/CF_POLICY.md</code></a></td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">CDN runs at the published configuration documented in <code>CF_POLICY.md</code>; certain edge-side opt-ins are intentionally not enabled</td></tr>
+				<tr><td data-label="Control area">Schema stability</td><td data-label="Current control">JSON Schema v1 stable within version; breaking changes publish to a new <code>*.schema.v2.json</code> URL with v1 reachable for at least 18 months</td><td data-label="Evidence"><a href="/api/evidence.schema.v1.json"><code>/api/evidence.schema.v1.json</code></a> + sibling schemas</td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">Single-author schemas; no external schema registry</td></tr>
+				<tr><td data-label="Control area">Decommission</td><td data-label="Current control">Reasonable decommission notice commitment</td><td data-label="Evidence"><a href="/commitments/">/commitments/</a> #8</td><td data-label="Status"><span class="status-badge status-badge--stated">Stated</span></td><td data-label="Known limitation">Detailed formal exit runbook is in preparation</td></tr>
+				<tr><td data-label="Control area">Public communication</td><td data-label="Current control">Public claims standard + 24-hour inquiry response target on Japan business days</td><td data-label="Evidence"><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md" rel="noopener noreferrer"><code>docs/CONSTITUTION.md</code></a> §7 + <a href="/inquiry/">/inquiry/</a> + <a href="/commitments/">/commitments/</a> #10</td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">Outside Japan business hours the response is best-effort</td></tr>
 			</tbody>
 		</table>
 	</section>
