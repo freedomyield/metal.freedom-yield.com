@@ -154,17 +154,44 @@ END_DATE_JST=$(TZ=Asia/Tokyo date -d "@$END_TIME" '+%m/%d %H:%M JST')
 # notify-evidence-health.sh used to push standalone at ~01:35 UTC).
 # Consolidating into the morning daily-status avoids the duplicate ntfy
 # observed 2026-06-23. Evening / night slots stay slim.
+#
+# Exit code of `--summary` carries pass/fail so we can escalate the morning
+# push to priority=high on any A1/A2/A3 FAIL (= the legacy standalone push
+# did this; without escalation a degraded evidence pipeline would only
+# surface as a body emoji, defeating Android DND bypass on `urgent`/`high`).
+# Empty stdout means the script itself errored out (jq missing, network
+# down, etc.) — show that explicitly so the operator never silently loses
+# the row.
 EVIDENCE_BLOCK=""
+EVIDENCE_RC=0
 if [ "$SLOT" = "morning" ]; then
   EVIDENCE_SCRIPT="$(dirname "$0")/notify-evidence-health.sh"
   if [ -x "$EVIDENCE_SCRIPT" ]; then
-    EVIDENCE_SUMMARY=$(bash "$EVIDENCE_SCRIPT" --summary 2>/dev/null || true)
-    if [ -n "$EVIDENCE_SUMMARY" ]; then
-      EVIDENCE_BLOCK="
+    set +e
+    EVIDENCE_SUMMARY=$(bash "$EVIDENCE_SCRIPT" --summary 2>/dev/null)
+    EVIDENCE_RC=$?
+    set -e
+    if [ -z "$EVIDENCE_SUMMARY" ]; then
+      EVIDENCE_SUMMARY="⚠ evidence health script error (rc=${EVIDENCE_RC})"
+      EVIDENCE_RC=2
+    fi
+    EVIDENCE_BLOCK="
 [Evidence health]
 ${EVIDENCE_SUMMARY}"
-    fi
   fi
+fi
+
+# Priority escalation: high when validator state is degraded (= OVERALL is
+# ⚠ 要確認 or worse) or when the morning evidence-pipeline check returned
+# non-zero. Otherwise default. urgent is reserved for separate alerters
+# (anomalies / metalgo down / validator drop) per
+# reference_ntfy_notifications.
+PRIO="default"
+case "$OVERALL" in
+  *⚠*|*❌*) PRIO="high" ;;
+esac
+if [ "${EVIDENCE_RC:-0}" -ne 0 ]; then
+  PRIO="high"
 fi
 
 # Multi-line body — ntfy Android renders \n as line break.
@@ -197,4 +224,4 @@ ${NODE_SHORT}${EVIDENCE_BLOCK}
 EOF
 )
 
-bash "$NOTIFY" default "${TITLE_PREFIX} ${DATE_JP}" "$BODY"
+bash "$NOTIFY" "$PRIO" "${TITLE_PREFIX} ${DATE_JP}" "$BODY"
