@@ -16,8 +16,11 @@
 <meta name="theme-color" content="#07080c">
 <meta name="color-scheme" content="dark">
 <script defer src="/assets/main.js"></script>
+<link rel="preconnect" href="https://www.googletagmanager.com" crossorigin>
+<link rel="dns-prefetch" href="https://www.googletagmanager.com">
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
 <script defer src="/assets/gtag-init.js"></script>
+<link rel="preload" as="image" href="/assets/photos/dark-code-960.webp" imagesrcset="/assets/photos/dark-code-480.webp 480w, /assets/photos/dark-code-960.webp 960w, /assets/photos/dark-code.webp 1600w" imagesizes="50vw">
 </head>
 <body>
 <a href="#main" class="skip-link">メイン本文へスキップ</a>
@@ -64,7 +67,7 @@
 
 	<section class="card">
 		<figure class="card-figure" aria-hidden="true">
-			<img src="/assets/photos/dark-code.webp" alt="" loading="lazy" decoding="async">
+			<img  src="/assets/photos/dark-code.webp" srcset="/assets/photos/dark-code-480.webp 480w, /assets/photos/dark-code-960.webp 960w, /assets/photos/dark-code.webp 1600w" sizes="(max-width: 600px) 100vw, (max-width: 1200px) 60vw, 800px" width="1600" height="1067" alt="" loading="lazy" decoding="async">
 		</figure>
 		<h2>最低 lead time</h2>
 		<p>本運用者が validator 運営を停止すると決定した場合、 validator が参加する最終 cycle の <strong>少なくとも 90 日前</strong> までに公開廃止予告を commit する。 90 日 floor は運用者の unilateral commitment であり、 規制 / 契約義務ではない。 ただしこの commitment は観測可能である: 予告は timestamp 付きの 2 surface に同時に現れ(下記参照)、 90 日 floor からの逸脱は予告 timestamp と最終 cycle の <code>endTime</code> を比較すれば外部から visible になる。</p>
