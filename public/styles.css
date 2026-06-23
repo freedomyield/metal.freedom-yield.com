@@ -2249,6 +2249,23 @@ code {
 	margin: 0 0 var(--space-2);
 	font-size: 0.92rem;
 }
+
+/* 2026-06-23: intro <p> の直後に <dl class="data-meta"> / .kv が並ぶ
+ * pattern (operational-targets / service-scope 等) で、 p の
+ * margin-bottom 16px だけだと gap が tight。 dl 系の上に space-3 を確保
+ * して、 TOP のセクション内 visual rhythm に揃える。
+ * 逆方向 (dl の下に p) も同様。 */
+.card p + .data-meta,
+.card p + .kv,
+.card p + dl,
+.card p + table,
+.card .data-meta + p,
+.card .kv + p,
+.card dl + p,
+.card table + p {
+	margin-top: var(--space-3);
+}
+
 .data-meta dt {
 	font-weight: 500;
 	color: var(--fg-muted);
