@@ -3404,8 +3404,8 @@ code {
 }
 .data-toc a:hover,
 .data-toc a:focus-visible {
-	background: rgba(16, 179, 134, 0.10);
-	color: var(--fg);
+	background: #ffffff;
+	color: var(--accent);
 	border-color: var(--accent);
 }
 .data-toc a .data-toc-count {

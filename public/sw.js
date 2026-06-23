@@ -6,7 +6,7 @@
 //   - Versioned cache name; old caches deleted on activate.
 "use strict";
 
-const CACHE_VERSION = "v145-sitemap-and-institutional-sidebar";
+const CACHE_VERSION = "v146-breadcrumb-hierarchy-and-toc-hover";
 const SHELL_CACHE = "shell-" + CACHE_VERSION;
 const DATA_CACHE = "data-" + CACHE_VERSION;
 
