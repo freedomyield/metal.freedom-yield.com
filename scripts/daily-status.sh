@@ -176,6 +176,7 @@ if [ "$SLOT" = "morning" ]; then
       EVIDENCE_RC=2
     fi
     EVIDENCE_BLOCK="
+
 [Evidence health]
 ${EVIDENCE_SUMMARY}"
   fi
