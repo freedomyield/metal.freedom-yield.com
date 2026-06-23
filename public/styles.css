@@ -3556,7 +3556,10 @@ code {
 }
 .evidence-table thead th {
 	position: sticky;
-	top: calc(var(--topnav-h, 3.75rem) + 2.6rem);
+	/* Pages that already render a sticky .data-toc pill row override this
+	 * via the --table-sticky-offset custom property below so the table
+	 * header lands just under the pills, not under the topnav. */
+	top: var(--table-sticky-offset, var(--topnav-h, 3.75rem));
 	background: var(--bg);
 	text-align: left;
 	font-weight: 600;
@@ -3566,6 +3569,12 @@ code {
 	text-transform: uppercase;
 	padding: 0.6rem 0.7rem;
 	border-bottom: 2px solid var(--border);
+	z-index: 4;
+}
+/* When a page hosts a sticky .data-toc above the table content, push
+ * the table sticky thead below the pill row so they don't overlap. */
+main:has(.data-toc) .evidence-table thead th {
+	--table-sticky-offset: calc(var(--topnav-h, 3.75rem) + 2.6rem);
 }
 .evidence-table tbody td {
 	padding: 0.7rem;

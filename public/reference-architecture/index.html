@@ -230,74 +230,20 @@
 	<section class="card" id="third-party-dependencies">
 		<h2>Third-party dependencies</h2>
 		<p>Production operation relies on the external services listed below. Each entry records purpose, what data the third party can access, the failure impact if that party goes away, and a substitution path. The pattern intentionally avoids any third party having custody of operator key material.</p>
-		<table>
+		<table class="evidence-table">
 			<thead>
 				<tr><th>Service</th><th>Purpose</th><th>Data access</th><th>Failure impact</th><th>Substitution</th></tr>
 			</thead>
 			<tbody>
-				<tr>
-					<td>Validator host provider</td>
-					<td>Hosts <code>metalgo</code> on a single-tenant VPS</td>
-					<td>Standard infrastructure access; no operator-supplied data beyond the running process and its state directory</td>
-					<td>Validator offline until restored from backup on a replacement host</td>
-					<td>Any IaaS offering a Linux VPS with provider firewall and stable IPv4. See <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/VALIDATOR_HOST_SETUP.md" rel="noopener noreferrer"><code>docs/VALIDATOR_HOST_SETUP.md</code></a>.</td>
-				</tr>
-				<tr>
-					<td>Web host provider</td>
-					<td>Hosts the static site and the runtime JSON endpoints written by the push wrapper</td>
-					<td>Static files + the push wrapper; no operator secret material; no validator key material</td>
-					<td>Public verification surface unavailable; validator unaffected</td>
-					<td>Any commercial host that supports static files and SSH-based <code>rsync</code> receive. See <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/DEPLOY_SETUP.md" rel="noopener noreferrer"><code>docs/DEPLOY_SETUP.md</code></a>.</td>
-				</tr>
-				<tr>
-					<td>CDN / edge proxy</td>
-					<td>Edge cache, DNS hosting, baseline DDoS mitigation, HTTPS termination at edge</td>
-					<td>Standard reverse-proxy role on public HTTP traffic</td>
-					<td>Edge cache degraded; origin still serves directly</td>
-					<td>Any CDN with reverse-proxy and DNS hosting. Current configuration decisions and the rationale for each are documented at <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CF_POLICY.md" rel="noopener noreferrer"><code>docs/CF_POLICY.md</code></a>.</td>
-				</tr>
-				<tr>
-					<td>Git hosting + CI</td>
-					<td>Public source repository + CI-driven deploy of site-shell changes</td>
-					<td>Public source code only; the deploy SSH key for the web host is held by CI as a repository secret</td>
-					<td>Deploys halt; manual <code>rsync</code> from the operator's workstation remains available</td>
-					<td>Any git host that supports SSH-based deploy keys and an Actions-equivalent runner.</td>
-				</tr>
-				<tr>
-					<td>Upstream Metal RPC endpoint</td>
-					<td>Network-state queries (peer list, fee market, validator set) used by the data-feed cron jobs</td>
-					<td>Public on-chain queries only; no key material transmitted</td>
-					<td>Live network-observatory feeds degrade; validator consensus path unaffected</td>
-					<td>Any reachable Metal RPC peer. Upstream consumers are documented in <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/EVIDENCE_MANIFEST.md" rel="noopener noreferrer"><code>docs/EVIDENCE_MANIFEST.md</code></a>.</td>
-				</tr>
-				<tr>
-					<td>Upstream Metal explorer</td>
-					<td>Block + transaction lookup for cross-verification (anchor receipts, <code>AddValidator</code> transactions)</td>
-					<td>Public on-chain queries only</td>
-					<td>Anchor-receipt cross-check links break for visitors; raw on-chain data remains queryable via any other explorer instance or direct RPC</td>
-					<td>Any Metal explorer instance.</td>
-				</tr>
-				<tr>
-					<td>Push notification service</td>
-					<td>Operator-side alerting for monitoring events and daily digests</td>
-					<td>Operator-side only; no delegator or visitor data; alert bodies contain operational summaries</td>
-					<td>Operator slower to notice incidents; visible state and incident log are unaffected</td>
-					<td>Any push-notification service with a topic-based publish API. Substitution patterns are documented in <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/TOOLKIT.md" rel="noopener noreferrer"><code>TOOLKIT.md</code></a>.</td>
-				</tr>
-				<tr>
-					<td>Operator password manager</td>
-					<td>Operator-side secret storage (backup passphrases, calendar tokens, dashboard credentials)</td>
-					<td>Operator-side only</td>
-					<td>Operator-side recovery becomes manual; public surface unaffected</td>
-					<td>Any password manager with offline export.</td>
-				</tr>
-				<tr>
-					<td>Domain registrar</td>
-					<td>DNS authority delegation for the public domain</td>
-					<td>None (public registration data)</td>
-					<td>DNS resolution fails until restored at the registrar level</td>
-					<td>Any ICANN-accredited registrar.</td>
-				</tr>
+				<tr><td data-label="Service">Validator host provider</td><td data-label="Purpose">Hosts <code>metalgo</code> on a single-tenant VPS</td><td data-label="Data access">Standard infrastructure access; no operator-supplied data beyond the running process and its state directory</td><td data-label="Failure impact">Validator offline until restored from backup on a replacement host</td><td data-label="Substitution">Any IaaS offering a Linux VPS with provider firewall and stable IPv4. See <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/VALIDATOR_HOST_SETUP.md" rel="noopener noreferrer"><code>docs/VALIDATOR_HOST_SETUP.md</code></a>.</td></tr>
+				<tr><td data-label="Service">Web host provider</td><td data-label="Purpose">Hosts the static site and the runtime JSON endpoints written by the push wrapper</td><td data-label="Data access">Static files + the push wrapper; no operator secret material; no validator key material</td><td data-label="Failure impact">Public verification surface unavailable; validator unaffected</td><td data-label="Substitution">Any commercial host that supports static files and SSH-based <code>rsync</code> receive. See <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/DEPLOY_SETUP.md" rel="noopener noreferrer"><code>docs/DEPLOY_SETUP.md</code></a>.</td></tr>
+				<tr><td data-label="Service">CDN / edge proxy</td><td data-label="Purpose">Edge cache, DNS hosting, baseline DDoS mitigation, HTTPS termination at edge</td><td data-label="Data access">Standard reverse-proxy role on public HTTP traffic</td><td data-label="Failure impact">Edge cache degraded; origin still serves directly</td><td data-label="Substitution">Any CDN with reverse-proxy and DNS hosting. Current configuration decisions and the rationale for each are documented at <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CF_POLICY.md" rel="noopener noreferrer"><code>docs/CF_POLICY.md</code></a>.</td></tr>
+				<tr><td data-label="Service">Git hosting + CI</td><td data-label="Purpose">Public source repository + CI-driven deploy of site-shell changes</td><td data-label="Data access">Public source code only; the deploy SSH key for the web host is held by CI as a repository secret</td><td data-label="Failure impact">Deploys halt; manual <code>rsync</code> from the operator's workstation remains available</td><td data-label="Substitution">Any git host that supports SSH-based deploy keys and an Actions-equivalent runner.</td></tr>
+				<tr><td data-label="Service">Upstream Metal RPC endpoint</td><td data-label="Purpose">Network-state queries (peer list, fee market, validator set) used by the data-feed cron jobs</td><td data-label="Data access">Public on-chain queries only; no key material transmitted</td><td data-label="Failure impact">Live network-observatory feeds degrade; validator consensus path unaffected</td><td data-label="Substitution">Any reachable Metal RPC peer. Upstream consumers are documented in <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/EVIDENCE_MANIFEST.md" rel="noopener noreferrer"><code>docs/EVIDENCE_MANIFEST.md</code></a>.</td></tr>
+				<tr><td data-label="Service">Upstream Metal explorer</td><td data-label="Purpose">Block + transaction lookup for cross-verification (anchor receipts, <code>AddValidator</code> transactions)</td><td data-label="Data access">Public on-chain queries only</td><td data-label="Failure impact">Anchor-receipt cross-check links break for visitors; raw on-chain data remains queryable via any other explorer instance or direct RPC</td><td data-label="Substitution">Any Metal explorer instance.</td></tr>
+				<tr><td data-label="Service">Push notification service</td><td data-label="Purpose">Operator-side alerting for monitoring events and daily digests</td><td data-label="Data access">Operator-side only; no delegator or visitor data; alert bodies contain operational summaries</td><td data-label="Failure impact">Operator slower to notice incidents; visible state and incident log are unaffected</td><td data-label="Substitution">Any push-notification service with a topic-based publish API. Substitution patterns are documented in <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/TOOLKIT.md" rel="noopener noreferrer"><code>TOOLKIT.md</code></a>.</td></tr>
+				<tr><td data-label="Service">Operator password manager</td><td data-label="Purpose">Operator-side secret storage (backup passphrases, calendar tokens, dashboard credentials)</td><td data-label="Data access">Operator-side only</td><td data-label="Failure impact">Operator-side recovery becomes manual; public surface unaffected</td><td data-label="Substitution">Any password manager with offline export.</td></tr>
+				<tr><td data-label="Service">Domain registrar</td><td data-label="Purpose">DNS authority delegation for the public domain</td><td data-label="Data access">None (public registration data)</td><td data-label="Failure impact">DNS resolution fails until restored at the registrar level</td><td data-label="Substitution">Any ICANN-accredited registrar.</td></tr>
 			</tbody>
 		</table>
 		<p>No third party has custody of operator key material, delegator funds, or validator-signing material. Each entry above has at least one documented substitution path, and the topology is designed so that the loss of any single non-validator-host dependency degrades the public verification surface rather than the validator itself.</p>
