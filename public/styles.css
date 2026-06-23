@@ -680,29 +680,29 @@ code {
 	background-position: 0 0, center right;
 	background-repeat: no-repeat, no-repeat;
 }
-.hero--photo-incidents    { --hero-photo: url("/assets/hero-images/incidents.jpg"); }
-.hero--photo-about-metal  { --hero-photo: url("/assets/hero-images/about-metal.jpg"); }
-.hero--photo-delegate     { --hero-photo: url("/assets/hero-images/delegate.jpg"); }
-.hero--photo-data         { --hero-photo: url("/assets/hero-images/data.jpg"); }
-.hero--photo-journal      { --hero-photo: url("/assets/hero-images/journal.jpg"); }
-.hero--photo-continuity   { --hero-photo: url("/assets/hero-images/continuity.jpg"); }
-.hero--photo-track-record { --hero-photo: url("/assets/hero-images/track-record.jpg"); }
-.hero--photo-rewards      { --hero-photo: url("/assets/hero-images/rewards.jpg"); }
+.hero--photo-incidents    { --hero-photo: url("/assets/hero-images/incidents.webp"); }
+.hero--photo-about-metal  { --hero-photo: url("/assets/hero-images/about-metal.webp"); }
+.hero--photo-delegate     { --hero-photo: url("/assets/hero-images/delegate.webp"); }
+.hero--photo-data         { --hero-photo: url("/assets/hero-images/data.webp"); }
+.hero--photo-journal      { --hero-photo: url("/assets/hero-images/journal.webp"); }
+.hero--photo-continuity   { --hero-photo: url("/assets/hero-images/continuity.webp"); }
+.hero--photo-track-record { --hero-photo: url("/assets/hero-images/track-record.webp"); }
+.hero--photo-rewards      { --hero-photo: url("/assets/hero-images/rewards.webp"); }
 /* Sub-pages that reuse the generic photo bank (no dedicated hero shot yet) */
-.hero--photo-selection    { --hero-photo: url("/assets/photos/dark-code.jpg"); }
-.hero--photo-network      { --hero-photo: url("/assets/photos/metropolis.jpg"); }
-.hero--photo-jurisdiction { --hero-photo: url("/assets/photos/datacenter-aisle.jpg"); }
-.hero--photo-security     { --hero-photo: url("/assets/photos/data-center.jpg"); }
-.hero--photo-commitments  { --hero-photo: url("/assets/photos/team-meeting.jpg"); }
-.hero--photo-pledge       { --hero-photo: url("/assets/photos/team-working.jpg"); }
-.hero--photo-verify       { --hero-photo: url("/assets/photos/focused-work.jpg"); }
-.hero--photo-subnet-readiness { --hero-photo: url("/assets/photos/circuit-board.jpg"); }
-.hero--photo-reference    { --hero-photo: url("/assets/photos/circuit-board.jpg"); }
-.hero--photo-subnet-pilot { --hero-photo: url("/assets/photos/metropolis.jpg"); }
-.hero--photo-decommission { --hero-photo: url("/assets/photos/dark-code.jpg"); }
-.hero--photo-risk         { --hero-photo: url("/assets/photos/dark-code.jpg"); }
-.hero--photo-inquiry      { --hero-photo: url("/assets/photos/team-meeting.jpg"); }
-.hero--photo-ops          { --hero-photo: url("/assets/photos/data-center.jpg"); }
+.hero--photo-selection    { --hero-photo: url("/assets/photos/dark-code.webp"); }
+.hero--photo-network      { --hero-photo: url("/assets/photos/metropolis.webp"); }
+.hero--photo-jurisdiction { --hero-photo: url("/assets/photos/datacenter-aisle.webp"); }
+.hero--photo-security     { --hero-photo: url("/assets/photos/data-center.webp"); }
+.hero--photo-commitments  { --hero-photo: url("/assets/photos/team-meeting.webp"); }
+.hero--photo-pledge       { --hero-photo: url("/assets/photos/team-working.webp"); }
+.hero--photo-verify       { --hero-photo: url("/assets/photos/focused-work.webp"); }
+.hero--photo-subnet-readiness { --hero-photo: url("/assets/photos/circuit-board.webp"); }
+.hero--photo-reference    { --hero-photo: url("/assets/photos/circuit-board.webp"); }
+.hero--photo-subnet-pilot { --hero-photo: url("/assets/photos/metropolis.webp"); }
+.hero--photo-decommission { --hero-photo: url("/assets/photos/dark-code.webp"); }
+.hero--photo-risk         { --hero-photo: url("/assets/photos/dark-code.webp"); }
+.hero--photo-inquiry      { --hero-photo: url("/assets/photos/team-meeting.webp"); }
+.hero--photo-ops          { --hero-photo: url("/assets/photos/data-center.webp"); }
 .hero.hero--simple .container {
 	position: relative;
 	z-index: 1;
@@ -1358,9 +1358,9 @@ code {
 	position: relative;
 	z-index: 2;
 }
-.service-card-banner--record   { background: linear-gradient(135deg, #0f172a 0%, #1e293b 55%, #0d9b6e 130%); --banner-photo: url("/assets/hero-images/track-record.jpg"); }
-.service-card-banner--calc     { background: linear-gradient(135deg, #1f2937 0%, #312e81 100%); --banner-photo: url("/assets/hero-images/rewards.jpg"); }
-.service-card-banner--delegate { background: linear-gradient(135deg, #064e3b 0%, #134e4a 60%, #1f2937 100%); --banner-photo: url("/assets/hero-images/delegate-band.jpg"); }
+.service-card-banner--record   { background: linear-gradient(135deg, #0f172a 0%, #1e293b 55%, #0d9b6e 130%); --banner-photo: url("/assets/hero-images/track-record.webp"); }
+.service-card-banner--calc     { background: linear-gradient(135deg, #1f2937 0%, #312e81 100%); --banner-photo: url("/assets/hero-images/rewards.webp"); }
+.service-card-banner--delegate { background: linear-gradient(135deg, #064e3b 0%, #134e4a 60%, #1f2937 100%); --banner-photo: url("/assets/hero-images/delegate-band.webp"); }
 .service-card-body {
 	padding: var(--space-4) var(--space-4) var(--space-3);
 	display: flex;
