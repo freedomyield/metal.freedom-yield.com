@@ -150,14 +150,33 @@ DATE_JP=$(TZ=Asia/Tokyo date '+%m/%d (%a)')
 NOW_JST=$(TZ=Asia/Tokyo date '+%Y-%m-%d %H:%M JST')
 END_DATE_JST=$(TZ=Asia/Tokyo date -d "@$END_TIME" '+%m/%d %H:%M JST')
 
-# Multi-line body — ntfy Android renders \n as line break
+# Morning slot also carries the evidence-pipeline health row (= what
+# notify-evidence-health.sh used to push standalone at ~01:35 UTC).
+# Consolidating into the morning daily-status avoids the duplicate ntfy
+# observed 2026-06-23. Evening / night slots stay slim.
+EVIDENCE_BLOCK=""
+if [ "$SLOT" = "morning" ]; then
+  EVIDENCE_SCRIPT="$(dirname "$0")/notify-evidence-health.sh"
+  if [ -x "$EVIDENCE_SCRIPT" ]; then
+    EVIDENCE_SUMMARY=$(bash "$EVIDENCE_SCRIPT" --summary 2>/dev/null || true)
+    if [ -n "$EVIDENCE_SUMMARY" ]; then
+      EVIDENCE_BLOCK="
+[Evidence health]
+${EVIDENCE_SUMMARY}"
+    fi
+  fi
+fi
+
+# Multi-line body — ntfy Android renders \n as line break.
+# Note: notify.sh auto-appends a single "[Uptime] XX.XXXX%" footer line to
+# every ntfy body. Do NOT duplicate Uptime here; the auto-appended footer
+# is the single source of truth for the headline number across all pushes.
 BODY=$(cat <<EOF
 ${OVERALL}
 取得時刻: ${NOW_JST}
 
 [Validator]
 Bootstrap: ${P_BOOT:0:1}/${X_BOOT:0:1}/${C_BOOT:0:1}
-Uptime: ${UPTIME}%
 Stake: ${SELF_STAKE} METAL
 受入合計: ${TOTAL_RECEIVED} METAL
 総 weight: ${TOTAL_WEIGHT_METAL} METAL (self + delegators)
@@ -174,7 +193,7 @@ metalgo: ${METALGO_S}
 caddy: ${CADDY_S}
 
 [NodeID]
-${NODE_SHORT}
+${NODE_SHORT}${EVIDENCE_BLOCK}
 EOF
 )
 

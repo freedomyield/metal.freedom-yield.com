@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
-# notify-evidence-health.sh — post-cron health check for /api/evidence.json
-# publication pipeline + ntfy push of the result.
+# notify-evidence-health.sh — health check for /api/evidence.json publication.
 #
-# Designed to fire ~5 minutes after the daily metal-evidence cron at
-# 01:30 UTC so the operator wakes up to a single ntfy push summarising
-# whether the cron auto-fire succeeded and whether the runtime
-# evidence.json carries the expected shape.
+# Two modes:
+#   bash notify-evidence-health.sh               → ntfy push (legacy/standalone)
+#   bash notify-evidence-health.sh --summary     → write 3-line summary to stdout
+#                                                   (= for composition into the
+#                                                   morning daily-status ntfy)
+#
+# Originally fired standalone at ~01:35 UTC every day, but that produced a
+# second ntfy push too close to the 00:00 UTC morning daily-status digest
+# (= duplicate cron output per user feedback 2026-06-23). The new flow has
+# daily-status.sh morning call this script with --summary and embed the
+# result, so the operator sees a single morning push containing both the
+# daily snapshot and the evidence-pipeline health row.
 #
 # What it checks (= PHASE5_CHECKLIST.md § A cron-stability gate, but
 # daily as ongoing health):
@@ -16,14 +23,19 @@
 #       entry with formal_schema_url + operator_guide_url (= post-6b20b56
 #       shape where identity_manifest is live, not in_preparation).
 #
-# Output: one ntfy push with a 3-line PASS/FAIL summary. Priority is
-# `default` when all three pass and `high` when any fails — Android DND
-# handles sleep-time silencing per memory reference_ntfy_notifications.
-#
-# Designed for cron use; no flags. Run after gen-evidence.sh has had
-# time to complete (suggest 5 min buffer).
+# Output (push mode): one ntfy push with a 3-line PASS/FAIL summary.
+#   Priority `default` when all three pass, `high` when any fails — Android
+#   DND handles sleep-time silencing per memory reference_ntfy_notifications.
+# Output (--summary mode): 3 lines on stdout, no ntfy call.
+#   Exit code 0 when 3/3 PASS, 1 otherwise (caller can branch on it if
+#   they want to escalate priority of the host push).
 
 set -euo pipefail
+
+MODE="push"
+case "${1:-}" in
+	--summary|--summary-only) MODE="summary" ;;
+esac
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOG_FILE="${ROOT}/logs/gen-evidence.log"
@@ -102,7 +114,26 @@ if [ -s "${EVIDENCE_TMP}" ]; then
 	fi
 fi
 
-# ---- Compose ntfy push ----
+# ---- Compose output ----
+MSG=$(cat <<EOF
+$(ok_or_x "${A1_RESULT}") A1 cron rc:   ${A1_DETAIL}
+$(ok_or_x "${A2_RESULT}") A2 fresh:     ${A2_DETAIL}
+$(ok_or_x "${A3_RESULT}") A3 enriched:  ${A3_DETAIL}
+EOF
+)
+
+if [ "${MODE}" = "summary" ]; then
+	# Embedding mode — print to stdout, no ntfy call. Exit code carries
+	# overall PASS/FAIL so the caller can branch.
+	printf '%s\n' "${MSG}"
+	if [ "${A1_RESULT}" = "PASS" ] && [ "${A2_RESULT}" = "PASS" ] && [ "${A3_RESULT}" = "PASS" ]; then
+		exit 0
+	else
+		exit 1
+	fi
+fi
+
+# Standalone push mode (legacy).
 if [ "${A1_RESULT}" = "PASS" ] && [ "${A2_RESULT}" = "PASS" ] && [ "${A3_RESULT}" = "PASS" ]; then
 	PRIO="default"
 	TITLE="evidence health: 3/3 PASS"
@@ -110,12 +141,5 @@ else
 	PRIO="high"
 	TITLE="evidence health: FAIL — see body"
 fi
-
-MSG=$(cat <<EOF
-$(ok_or_x "${A1_RESULT}") A1 cron rc:   ${A1_DETAIL}
-$(ok_or_x "${A2_RESULT}") A2 fresh:     ${A2_DETAIL}
-$(ok_or_x "${A3_RESULT}") A3 enriched:  ${A3_DETAIL}
-EOF
-)
 
 bash "${ROOT}/scripts/notify.sh" "${PRIO}" "${TITLE}" "${MSG}"
