@@ -1,12 +1,13 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-100 -100 200 200" role="img" aria-label="Freedom Yield Metal">
-	<!-- Three proton orbits, all in brand mint (CSS accent #10B386). -->
-	<g fill="none" stroke="#10B386" stroke-width="2.5" stroke-linecap="round">
-		<ellipse cx="0" cy="0" rx="90" ry="32" transform="rotate(22)"/>
-		<ellipse cx="0" cy="0" rx="90" ry="32" transform="rotate(-28)"/>
-		<ellipse cx="0" cy="0" rx="90" ry="32" transform="rotate(78)"/>
-	</g>
-	<!-- Central M mark in brand mint. Geometric letterform inspired by
-	     Montserrat 200, the project brand font. -->
-	<path d="M -36 30 L -36 -30 L 0 14 L 36 -30 L 36 30" fill="none" stroke="#10B386" stroke-width="10" stroke-linejoin="round" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Freedom Yield Metal">
+	<defs>
+		<linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+			<stop offset="0%" stop-color="#76e4be"/>
+			<stop offset="100%" stop-color="#6db5ff"/>
+		</linearGradient>
+	</defs>
+	<rect x="3" y="3" width="58" height="58" rx="10" ry="10" fill="#07080c" stroke="url(#g)" stroke-width="2"/>
+	<!-- "M" shape stylized as validator brackets -->
+	<path d="M16 46 V 22 L 32 38 L 48 22 V 46" fill="none" stroke="url(#g)" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+	<!-- chain dot -->
+	<circle cx="32" cy="14" r="3" fill="url(#g)"/>
 </svg>
