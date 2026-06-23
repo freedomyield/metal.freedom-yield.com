@@ -3831,3 +3831,153 @@ code {
 	font-size: 0.95rem;
 }
 .commitment-card p + p { margin-top: 0.4rem; }
+
+
+/* ─── Two-column layout for institutional cluster (selection-evidence
+ *     + 11 child pages) — 2026-06-23 (v145).
+ *
+ *     Desktop ≥ 769px:
+ *       sidebar 220px fixed | content fluid  (CSS grid)
+ *       sidebar sticky at top, content scrolls normally
+ *       <details> children always rendered (main.js force-opens)
+ *
+ *     Mobile < 768px:
+ *       sidebar stacks ABOVE content as a collapsible accordion
+ *       default closed (= small footprint, on-demand expand)
+ *       summary becomes the toggle, list collapses behind it
+ * ──────────────────────────────────────────────────────────────── */
+
+.layout-with-sidebar {
+	display: grid;
+	grid-template-columns: 220px 1fr;
+	gap: var(--space-4);
+	align-items: start;
+	margin-top: var(--space-3);
+}
+@media (max-width: 768px) {
+	.layout-with-sidebar {
+		display: block;
+	}
+}
+
+.section-sidebar {
+	position: sticky;
+	top: calc(var(--topnav-h, 3.75rem) + 1rem);
+	align-self: start;
+	padding: var(--space-2) 0 var(--space-3);
+}
+@media (max-width: 768px) {
+	.section-sidebar {
+		position: static;
+		padding: 0;
+		margin: 0 0 var(--space-3);
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		background: var(--bg-card);
+	}
+}
+
+.section-sidebar-details {
+	display: block;
+}
+.section-sidebar-summary {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.5rem;
+	cursor: pointer;
+	list-style: none;
+	padding: 0.75rem 0;
+}
+.section-sidebar-summary::-webkit-details-marker { display: none; }
+.section-sidebar-summary::marker { content: ""; }
+@media (max-width: 768px) {
+	.section-sidebar-summary {
+		padding: 0.85rem 1rem;
+	}
+}
+
+.section-sidebar-eyebrow {
+	font-size: 0.72rem;
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--accent);
+}
+
+/* Caret marker — visible only on mobile (= where the panel is collapsible).
+ * On desktop the panel is always open via JS so no marker needed. */
+.section-sidebar-summary::after {
+	content: "▾";
+	color: var(--fg-muted);
+	font-size: 0.8rem;
+	transition: transform 0.18s ease;
+	display: none;
+}
+@media (max-width: 768px) {
+	.section-sidebar-summary::after { display: inline-block; }
+}
+.section-sidebar-details[open] > .section-sidebar-summary::after {
+	transform: rotate(-180deg);
+}
+
+.section-sidebar-nav {
+	margin-top: 0.25rem;
+}
+@media (max-width: 768px) {
+	.section-sidebar-nav {
+		padding: 0 0.75rem 0.75rem;
+		border-top: 1px solid var(--border);
+		margin-top: 0;
+	}
+}
+
+.section-sidebar-list {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+	border-left: 2px solid var(--border);
+}
+@media (max-width: 768px) {
+	.section-sidebar-list {
+		border-left: none;
+		padding-top: 0.25rem;
+	}
+}
+
+.section-sidebar-list li { margin: 0; }
+
+.section-sidebar-list a {
+	display: block;
+	padding: 0.4rem 0.85rem;
+	color: var(--fg-muted);
+	text-decoration: none;
+	font-size: 0.9rem;
+	line-height: 1.35;
+	border-left: 2px solid transparent;
+	margin-left: -2px;
+	transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.section-sidebar-list a:hover,
+.section-sidebar-list a:focus-visible {
+	color: var(--fg);
+	background: rgba(31, 41, 55, 0.03);
+}
+.section-sidebar-list a[aria-current="page"] {
+	color: var(--accent);
+	border-left-color: var(--accent);
+	font-weight: 600;
+	background: rgba(16, 179, 134, 0.05);
+}
+@media (max-width: 768px) {
+	.section-sidebar-list a {
+		padding: 0.5rem 0.75rem;
+		border-radius: 6px;
+		margin-left: 0;
+		border-left: none;
+	}
+	.section-sidebar-list a[aria-current="page"] {
+		background: rgba(16, 179, 134, 0.1);
+		border-left: none;
+	}
+}

@@ -677,6 +677,25 @@
 		});
 	}
 
+	// Section sidebar (= institutional cluster navigation) — same
+	// open/closed-by-viewport pattern as wireHamburger above. Desktop
+	// (>=769px) force-opens the <details> so the nav list always renders;
+	// mobile leaves it closed by default for a small footprint.
+	function wireSectionSidebar() {
+		var details = document.querySelector('details.section-sidebar-details');
+		if (!details) return;
+		var desktopMql = window.matchMedia('(min-width: 769px)');
+		function syncOpenForViewport() {
+			details.open = desktopMql.matches;
+		}
+		syncOpenForViewport();
+		if (desktopMql.addEventListener) {
+			desktopMql.addEventListener('change', syncOpenForViewport);
+		} else if (desktopMql.addListener) {
+			desktopMql.addListener(syncOpenForViewport);
+		}
+	}
+
 	// Per-cycle uptime bar chart — pure SVG, no chart library.
 	// Y-axis zooms to 80-100% so day-to-day differences in the 95-99.9%
 	// range are visible. The 80% network reward threshold is drawn as a
@@ -1237,6 +1256,7 @@
 		wireParallax();
 		wireCarousels();
 		wireHamburger();
+		wireSectionSidebar();
 		tagSubHero();
 		measureTopnav();
 		window.addEventListener("resize", measureTopnav, { passive: true });

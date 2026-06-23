@@ -6,7 +6,7 @@
 //   - Versioned cache name; old caches deleted on activate.
 "use strict";
 
-const CACHE_VERSION = "v144-data-toc-solid-pills";
+const CACHE_VERSION = "v145-sitemap-and-institutional-sidebar";
 const SHELL_CACHE = "shell-" + CACHE_VERSION;
 const DATA_CACHE = "data-" + CACHE_VERSION;
 
