@@ -71,48 +71,97 @@
 		<p>
 			Freedom Yield is a small, transparent Metal Blockchain validator focused on public operational evidence rather than inflated capacity claims.
 		</p>
-		<dl class="kv">
-			<dt>NodeID</dt><dd><code data-field="nodeId">—</code></dd>
-			<dt>Self-stake</dt><dd data-field="selfStake">—</dd>
-			<dt>Delegators</dt><dd data-field="delegatorCount">—</dd>
-			<dt>Received</dt><dd data-field="receivedCombined">—</dd>
-			<dt>Network uptime score</dt><dd data-field="uptime">—</dd>
-			<dt>Delegation fee</dt><dd data-field="delegationFee">3% (one tier above 2% protocol floor)</dd>
-		</dl>
+		<div class="delegate-stat-grid" role="group" aria-label="Live validator stats">
+			<div class="delegate-stat delegate-stat--nodeid">
+				<span class="delegate-stat-label">NodeID</span>
+				<span class="delegate-stat-value"><code data-field="nodeId">—</code></span>
+			</div>
+			<div class="delegate-stat delegate-stat--stake">
+				<span class="delegate-stat-label">Self-stake</span>
+				<span class="delegate-stat-value" data-field="selfStake">—</span>
+			</div>
+			<div class="delegate-stat delegate-stat--delegators">
+				<span class="delegate-stat-label">Delegators</span>
+				<span class="delegate-stat-value" data-field="delegatorCount">—</span>
+			</div>
+			<div class="delegate-stat delegate-stat--received">
+				<span class="delegate-stat-label">Received</span>
+				<span class="delegate-stat-value" data-field="receivedCombined">—</span>
+			</div>
+			<div class="delegate-stat delegate-stat--uptime">
+				<span class="delegate-stat-label">Network uptime</span>
+				<span class="delegate-stat-value" data-field="uptime">—</span>
+			</div>
+			<div class="delegate-stat delegate-stat--fee">
+				<span class="delegate-stat-label">Delegation fee</span>
+				<span class="delegate-stat-value" data-field="delegationFee">3%</span>
+			</div>
+		</div>
 	</section>
 
-	<section class="card">
-		<h2>Why these numbers matter (and the hardware does not)</h2>
-		<p>
-			On Snowman consensus, hardware above the official minimum (8 vCPU / 16 GiB) does not increase rewards.
-			What matters for delegators is:
-		</p>
-		<ul>
-			<li><strong>Self-stake</strong> — how much skin we have in the game (intentionally small; live value in the home-page status card)</li>
-			<li><strong>Uptime score</strong> — what the rest of the network thinks of our availability (must stay above 80% for rewards)</li>
-			<li><strong>Delegation fee</strong> — the cut we keep from delegator rewards (protocol minimum 2%, we set 3%)</li>
-			<li><strong>Incident history</strong> — transparency about past outages and how we handled them (see <a href="/incidents/">incidents</a>)</li>
-		</ul>
+	<section class="split-section">
+		<div class="split-bg" aria-hidden="true">
+			<div class="split-bg-photo"><img src="/assets/photos/circuit-board.jpg" alt="" loading="lazy" decoding="async"></div>
+			<div class="split-bg-pane"></div>
+		</div>
+		<div class="split-section-inner">
+			<h2 class="split-section-title">Why these numbers matter (and the hardware does not)</h2>
+			<p>On Snowman consensus, hardware above the official minimum (8 vCPU / 16 GiB) does not increase rewards. What matters for delegators is:</p>
+			<div class="feature-block">
+				<ul class="feature-grid">
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.5 8 8 9 4.5-1 8-4.5 8-9V6l-8-3z"/></svg>
+						<h3>Self-stake</h3>
+						<p>How much skin we have in the game. Intentionally small; live value in the home-page status card.</p>
+					</li>
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>
+						<h3>Uptime score</h3>
+						<p>What the rest of the network thinks of our availability. Must stay above 80% for rewards.</p>
+					</li>
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 5 5 19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/></svg>
+						<h3>Delegation fee</h3>
+						<p>The cut we keep from delegator rewards. Protocol minimum 2%, we set 3% — predictable, no surprise hikes.</p>
+					</li>
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+						<h3>Incident history</h3>
+						<p>Transparency about past outages and how we handled them. See <a href="/incidents/">incidents</a>.</p>
+					</li>
+				</ul>
+			</div>
+		</div>
 	</section>
 
 	<section class="card">
 		<h2>Risk profile</h2>
-		<h3>No slashing</h3>
-		<p>
-			Avalanche family chains do not slash stakes. The worst case is "no rewards for this staking period."
-			Your principal (the METAL you delegated) is <strong>always returned</strong> when the end time arrives,
-			regardless of our uptime.
-		</p>
-		<h3>Lock period</h3>
-		<p>
-			Delegation locks your tokens from <strong>14 days minimum to 1 year maximum</strong>. You cannot withdraw early.
-			During the lock period your METAL is at price-risk in the market.
-		</p>
-		<h3>Single-operator risk</h3>
-		<p>
-			Our validator is a single node. If the host fails and we cannot recover within the staking period,
-			you would miss rewards for that period. Diversifying across multiple validators is good practice.
-		</p>
+		<div class="risk-card-grid">
+			<article class="risk-card risk-card--safe">
+				<div class="risk-card-head">
+					<span class="risk-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 4.5 3.5 8 8 9 4.5-1 8-4.5 8-9V6l-8-3z"/><path d="m9 12 2 2 4-4"/></svg></span>
+					<h3>No slashing</h3>
+				</div>
+				<span class="risk-card-badge">Principal safe</span>
+				<p>Avalanche family chains do not slash stakes. The worst case is "no rewards for this staking period." Your principal (the METAL you delegated) is <strong>always returned</strong> when the end time arrives, regardless of our uptime.</p>
+			</article>
+			<article class="risk-card risk-card--notice">
+				<div class="risk-card-head">
+					<span class="risk-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg></span>
+					<h3>Lock period</h3>
+				</div>
+				<span class="risk-card-badge">Notice</span>
+				<p>Delegation locks your tokens from <strong>14 days minimum to 1 year maximum</strong>. You cannot withdraw early. During the lock period your METAL is at price-risk in the market.</p>
+			</article>
+			<article class="risk-card risk-card--info">
+				<div class="risk-card-head">
+					<span class="risk-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg></span>
+					<h3>Single-operator risk</h3>
+				</div>
+				<span class="risk-card-badge">Diversify</span>
+				<p>Our validator is a single node. If the host fails and we cannot recover within the staking period, you would miss rewards for that period. Diversifying across multiple validators is good practice.</p>
+			</article>
+		</div>
 	</section>
 
 	<figure class="atmosphere-band" aria-hidden="true">
@@ -131,7 +180,7 @@
 
 	<section class="card">
 		<h2>How to delegate (when live)</h2>
-		<ol>
+		<ol class="step-flow">
 			<li>Acquire METAL on a supported exchange or P2P.</li>
 			<li>Open <a href="https://wallet.metalblockchain.org/" rel="noopener">Metal Wallet</a>, create or import a wallet.</li>
 			<li>Move tokens to P-Chain (cross-chain transfer from X-Chain).</li>

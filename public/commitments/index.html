@@ -60,80 +60,84 @@
 		</figure>
 		<h2>The ten commitments</h2>
 
-		<article class="continuity-scenario">
-			<h3>1. Renewal transparency</h3>
-			<p>Every monthly cycle's <code>AddPermissionlessValidatorTx</code> ID is published with an explorer link on the
+		<div class="commitment-grid">
+
+		<article class="commitment-card">
+				<h3>Renewal transparency</h3>
+				<p>Every monthly cycle's <code>AddPermissionlessValidatorTx</code> ID is published with an explorer link on the
 			<a href="/journal/">cycle journal</a>. Each entry includes period start / end, self-stake amount, fee, and the
 			canonical explorer URL — so anyone can reconstruct the full renewal history from the public site without trusting
 			any number rendered here.</p>
-		</article>
+			</article>
 
-		<article class="continuity-scenario">
-			<h3>2. Public incident disclosure</h3>
-			<p>Every SEV-1 / SEV-2 incident is documented on the <a href="/incidents/">incidents page</a> with timeline, root
+		<article class="commitment-card">
+				<h3>Public incident disclosure</h3>
+				<p>Every SEV-1 / SEV-2 incident is documented on the <a href="/incidents/">incidents page</a> with timeline, root
 			cause, and impact within 24 hours of resolution. The underlying JSON at <a href="/api/incidents.json"><code>/api/incidents.json</code></a>
 			is the source of truth — an empty list means an empty list, not a curated one.</p>
-		</article>
+			</article>
 
-		<article class="continuity-scenario">
-			<h3>3. Non-custodial operation</h3>
-			<p>Delegations remain in delegators' wallets at all times. The operator can never withdraw, transfer, or freeze
+		<article class="commitment-card">
+				<h3>Non-custodial operation</h3>
+				<p>Delegations remain in delegators' wallets at all times. The operator can never withdraw, transfer, or freeze
 			delegated METAL. The Avalanche-derived P-Chain protocol returns delegated stake to its owner at cycle end
 			regardless of operator action or inaction.</p>
-		</article>
+			</article>
 
-		<article class="continuity-scenario">
-			<h3>4. No inflated infrastructure claims</h3>
-			<p>Production-grade VPS that meets the Metallicus minimum recommendation. No "institutional-ready", "multi-region",
+		<article class="commitment-card">
+				<h3>No inflated infrastructure claims</h3>
+				<p>Production-grade VPS that meets the Metallicus minimum recommendation. No "institutional-ready", "multi-region",
 			"enterprise SLA", or "subnet operator" claims that exceed delivered reality. Current capacity is documented in
 			<a href="/continuity/">continuity</a> and <a href="/risk-disclosure/">risk disclosure</a>.</p>
-		</article>
+			</article>
 
-		<article class="continuity-scenario">
-			<h3>5. Validator health first</h3>
-			<p>When observability, UX polish, or new features would compete with <code>metalgo</code> health for resources,
+		<article class="commitment-card">
+				<h3>Validator health first</h3>
+				<p>When observability, UX polish, or new features would compete with <code>metalgo</code> health for resources,
 			the validator process wins. Documented in <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md">docs/CONSTITUTION.md</a>
 			§2. In practice this means non-essential dashboards are degraded or paused before <code>metalgo</code> is ever
 			constrained.</p>
-		</article>
+			</article>
 
-		<article class="continuity-scenario">
-			<h3>6. Web / validator separation</h3>
-			<p>The validator host and the public web host are independent. A web outage does not affect <code>metalgo</code>
+		<article class="commitment-card">
+				<h3>Web / validator separation</h3>
+				<p>The validator host and the public web host are independent. A web outage does not affect <code>metalgo</code>
 			uptime; a validator outage does not break the public site. Each side can be observed and recovered without touching
 			the other — see <a href="/continuity/">continuity</a> for the full scenario walkthrough.</p>
-		</article>
+			</article>
 
-		<article class="continuity-scenario">
-			<h3>7. No retail campaign focus</h3>
-			<p>No SEO push, no growth content, no paid acquisition. The audience is institutional readers performing due
+		<article class="commitment-card">
+				<h3>No retail campaign focus</h3>
+				<p>No SEO push, no growth content, no paid acquisition. The audience is institutional readers performing due
 			diligence, not retail delegators chasing yield. This page being <code>noindex</code> is consistent with that —
 			search engines are not the distribution channel.</p>
-		</article>
+			</article>
 
-		<article class="continuity-scenario">
-			<h3>8. Reasonable decommission notice policy</h3>
-			<p>If this operator stops running the validator, a public notice is committed with at least 90 days advance
+		<article class="commitment-card">
+				<h3>Reasonable decommission notice policy</h3>
+				<p>If this operator stops running the validator, a public notice is committed with at least 90 days advance
 			lead time so delegators can rebalance. The notice appears on this site and as a commit in the public repository,
 			both of which are timestamped and externally observable.</p>
-		</article>
+			</article>
 
-		<article class="continuity-scenario">
-			<h3>9. Security-sensitive information is not publicly exposed</h3>
-			<p>Host paths, IP addresses, SSH credentials, BasicAuth hashes, ntfy topics, and similar are classified SECRET
+		<article class="commitment-card">
+				<h3>Security-sensitive information is not publicly exposed</h3>
+				<p>Host paths, IP addresses, SSH credentials, BasicAuth hashes, ntfy topics, and similar are classified SECRET
 			under <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md">docs/CONSTITUTION.md</a>
 			§4.1 and never appear in the public repository, site content, issues, or commit messages. Public surfaces show
 			validator state, not the infrastructure that produces it.</p>
-		</article>
+			</article>
 
-		<article class="continuity-scenario">
-			<h3>10. 24-hour inquiry response target on business days</h3>
-			<p>Incoming inquiries to <a href="mailto:info@metal.freedom-yield.com">info@metal.freedom-yield.com</a> receive a first
+		<article class="commitment-card">
+				<h3>24-hour inquiry response target on business days</h3>
+				<p>Incoming inquiries to <a href="mailto:info@metal.freedom-yield.com">info@metal.freedom-yield.com</a> receive a first
 			response within 24 hours on Japan business days (excluding weekends and Japanese national holidays). The
 			first response either substantively answers the question or sets a clear bilateral next step; a single line
 			acknowledging receipt is not the target. The inquiry surface and the structured information requested are
 			documented on the <a href="/inquiry/">inquiry page</a> — no name or organisation is required to send one.</p>
-		</article>
+			</article>
+		</div>
+
 	</section>
 
 	<section class="card">

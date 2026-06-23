@@ -3547,3 +3547,226 @@ code {
 		margin-bottom: 0.15rem;
 	}
 }
+
+
+/* ─── delegate page — heavy redesign ────────────────────────────────── */
+
+.delegate-stat-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+	gap: 0.7rem;
+	margin: var(--space-3) 0 0;
+}
+.delegate-stat {
+	padding: 1rem 1.1rem;
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	border-left: 4px solid var(--accent);
+}
+.delegate-stat--nodeid    { border-left-color: var(--cat-onchain); }
+.delegate-stat--stake     { border-left-color: var(--cat-live); }
+.delegate-stat--delegators{ border-left-color: var(--cat-schedule); }
+.delegate-stat--received  { border-left-color: var(--cat-audit); }
+.delegate-stat--uptime    { border-left-color: var(--cat-readiness); }
+.delegate-stat--fee       { border-left-color: var(--cat-disclosure); }
+.delegate-stat-label {
+	display: block;
+	font-size: 0.72rem;
+	font-weight: 600;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--fg-muted);
+	margin-bottom: 0.3rem;
+}
+.delegate-stat-value {
+	display: block;
+	font-size: 1.25rem;
+	font-weight: 700;
+	color: var(--fg);
+	line-height: 1.2;
+	font-variant-numeric: tabular-nums;
+	word-break: break-all;
+}
+.delegate-stat-value code {
+	font-size: 0.88em;
+	background: rgba(31, 41, 55, 0.04);
+	padding: 0.05rem 0.35rem;
+	border-radius: 4px;
+}
+
+/* Risk cards — coloured per risk category. */
+.risk-card-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+	gap: 0.8rem;
+	margin: var(--space-3) 0 0;
+}
+.risk-card {
+	padding: 1.1rem 1.2rem;
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	border-top: 4px solid var(--cat-docs);
+}
+.risk-card--safe     { border-top-color: var(--cat-audit); }
+.risk-card--notice   { border-top-color: var(--cat-disclosure); }
+.risk-card--info     { border-top-color: var(--cat-onchain); }
+.risk-card-head {
+	display: flex;
+	align-items: center;
+	gap: 0.55rem;
+	margin: 0 0 0.45rem;
+}
+.risk-card-icon {
+	flex: 0 0 32px;
+	width: 32px;
+	height: 32px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 8px;
+	background: rgba(31, 41, 55, 0.06);
+	color: var(--cat-docs);
+}
+.risk-card--safe   .risk-card-icon { color: var(--cat-audit);      background: rgba(16, 179, 134, 0.10); }
+.risk-card--notice .risk-card-icon { color: var(--cat-disclosure); background: rgba(217, 119, 6, 0.10); }
+.risk-card--info   .risk-card-icon { color: var(--cat-onchain);    background: rgba(37, 99, 235, 0.10); }
+.risk-card-icon svg { width: 18px; height: 18px; }
+.risk-card-head h3 {
+	margin: 0;
+	font-size: 1.02rem;
+	font-weight: 600;
+}
+.risk-card p { margin: 0; color: var(--fg-muted); line-height: 1.55; font-size: 0.95rem; }
+.risk-card-badge {
+	display: inline-flex;
+	margin-bottom: 0.5rem;
+	padding: 0.15rem 0.55rem;
+	font-size: 0.72rem;
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	border-radius: 999px;
+	color: var(--cat-docs);
+	background: rgba(71, 85, 105, 0.10);
+}
+.risk-card--safe   .risk-card-badge { color: var(--cat-audit);      background: rgba(16, 179, 134, 0.10); }
+.risk-card--notice .risk-card-badge { color: var(--cat-disclosure); background: rgba(217, 119, 6, 0.10); }
+.risk-card--info   .risk-card-badge { color: var(--cat-onchain);    background: rgba(37, 99, 235, 0.10); }
+
+/* Step-flow — numbered visual flow for "How to delegate" etc. */
+.step-flow {
+	list-style: none;
+	padding: 0;
+	margin: var(--space-3) 0 0;
+	display: grid;
+	gap: 0.7rem;
+}
+.step-flow li {
+	position: relative;
+	padding: 0.9rem 1.1rem 0.9rem 3.6rem;
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	border-left: 3px solid var(--accent);
+	counter-increment: step-counter;
+	transition: background 0.15s ease, transform 0.15s ease;
+}
+.step-flow { counter-reset: step-counter; }
+.step-flow li:hover { background: rgba(16, 179, 134, 0.03); transform: translateX(2px); }
+.step-flow li::before {
+	content: counter(step-counter);
+	position: absolute;
+	top: 0.9rem;
+	left: 1rem;
+	width: 32px;
+	height: 32px;
+	border-radius: 50%;
+	background: var(--accent);
+	color: #fff;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	font-weight: 700;
+	font-size: 0.95rem;
+	font-variant-numeric: tabular-nums;
+}
+.step-flow li:nth-child(1)::before { background: var(--cat-onchain); }
+.step-flow li:nth-child(2)::before { background: var(--cat-code); }
+.step-flow li:nth-child(3)::before { background: var(--cat-schedule); }
+.step-flow li:nth-child(4)::before { background: var(--cat-disclosure); }
+.step-flow li:nth-child(5)::before { background: var(--cat-readiness); }
+.step-flow li:nth-child(6)::before { background: var(--cat-live); }
+
+/* ─── continuity page — scenario category cards ────────────────────── */
+
+.scenario-group--validator .continuity-scenario { border-left: 3px solid var(--cat-onchain); }
+.scenario-group--operator  .continuity-scenario { border-left: 3px solid var(--cat-disclosure); }
+.scenario-group--network   .continuity-scenario { border-left: 3px solid var(--cat-readiness); }
+.scenario-group--web       .continuity-scenario { border-left: 3px solid var(--cat-schedule); }
+.continuity-scenario {
+	background: rgba(31, 41, 55, 0.015);
+	border-radius: 0 10px 10px 0;
+	padding: 0.9rem 1.1rem;
+	margin: 0 0 0.6rem;
+}
+.continuity-scenario h3 {
+	margin: 0 0 0.3rem;
+	font-size: 1.02rem;
+	font-weight: 600;
+}
+.continuity-scenario p {
+	margin: 0;
+	color: var(--fg-muted);
+	line-height: 1.6;
+	font-size: 0.96rem;
+}
+
+/* ─── commitments — numbered commitment cards ──────────────────────── */
+
+.commitment-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+	gap: 0.85rem;
+	margin: var(--space-3) 0 0;
+	counter-reset: commit-counter;
+}
+.commitment-card {
+	position: relative;
+	padding: 1.05rem 1.2rem 1.05rem 4rem;
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	border-top: 3px solid var(--accent);
+	counter-increment: commit-counter;
+}
+.commitment-card::before {
+	content: "#" counter(commit-counter);
+	position: absolute;
+	top: 1.05rem;
+	left: 1.1rem;
+	width: 2.5rem;
+	font-weight: 700;
+	font-size: 0.95rem;
+	color: var(--accent);
+	font-variant-numeric: tabular-nums;
+}
+.commitment-card:nth-child(2n)::before { color: var(--cat-onchain); }
+.commitment-card:nth-child(3n)::before { color: var(--cat-disclosure); }
+.commitment-card:nth-child(2n) { border-top-color: var(--cat-onchain); }
+.commitment-card:nth-child(3n) { border-top-color: var(--cat-disclosure); }
+.commitment-card:nth-child(5n) { border-top-color: var(--cat-schedule); }
+.commitment-card:nth-child(7n) { border-top-color: var(--cat-readiness); }
+.commitment-card h3 {
+	margin: 0 0 0.3rem;
+	font-size: 1.02rem;
+	font-weight: 600;
+}
+.commitment-card p {
+	margin: 0;
+	color: var(--fg-muted);
+	line-height: 1.55;
+	font-size: 0.95rem;
+}
+.commitment-card p + p { margin-top: 0.4rem; }

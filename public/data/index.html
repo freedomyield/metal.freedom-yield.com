@@ -61,8 +61,9 @@
 		<h2>Validator state</h2>
 		<p class="data-group-lead">Live identity, stake, uptime, and bootstrap status of the node itself.</p>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--audit">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
 				<h3>validator.json</h3>
 				<span class="data-tag">GET · JSON</span>
 			</header>
@@ -79,8 +80,9 @@
 			</details>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--audit">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
 				<h3>evidence.json</h3>
 				<span class="data-tag">GET · JSON</span>
 			</header>
@@ -103,8 +105,9 @@
 		<h2>Uptime &amp; track record</h2>
 		<p class="data-group-lead">The audit trail. Daily samples for ~90 days, plus closed-cycle history that accumulates indefinitely.</p>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--audit">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
 				<h3>uptime-recent.json</h3>
 				<span class="data-tag">GET · JSON</span>
 			</header>
@@ -120,8 +123,9 @@
 			</details>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--audit">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
 				<h3>uptime-cycles.json</h3>
 				<span class="data-tag">GET · JSON</span>
 			</header>
@@ -137,8 +141,9 @@
 			</details>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--audit">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
 				<h3>incidents.json</h3>
 				<span class="data-tag">GET · JSON</span>
 			</header>
@@ -154,8 +159,9 @@
 			</details>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--disclosure">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h4"/></svg></span>
 				<h3>cycle-history.jsonl (in preparation)</h3>
 				<span class="data-tag">GET · JSONL · planned</span>
 			</header>
@@ -179,8 +185,9 @@
 		<h2>Network</h2>
 		<p class="data-group-lead">Public, anonymised view of the wider validator network as seen from this node.</p>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--audit">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
 				<h3>peer-geo.json</h3>
 				<span class="data-tag">GET · JSON</span>
 			</header>
@@ -207,8 +214,9 @@
 			indefinitely; preview files trim to the last 24–30 entries for chart rendering, history files keep every sample.
 		</p>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--code">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/></svg></span>
 				<h3>peers-gini.json</h3>
 				<span class="data-tag">GET · JSON · preview</span>
 			</header>
@@ -224,8 +232,9 @@
 			</details>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--live">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>
 				<h3>peers-gini-history.jsonl</h3>
 				<span class="data-tag">GET · JSONL · full</span>
 			</header>
@@ -241,8 +250,9 @@
 			</details>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--code">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/></svg></span>
 				<h3>fee-market.json</h3>
 				<span class="data-tag">GET · JSON · preview</span>
 			</header>
@@ -258,8 +268,9 @@
 			</details>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--live">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>
 				<h3>fee-market-history.jsonl</h3>
 				<span class="data-tag">GET · JSONL · full</span>
 			</header>
@@ -271,8 +282,9 @@
 			</dl>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--audit">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
 				<h3>peers-changes.json</h3>
 				<span class="data-tag">GET · JSON</span>
 			</header>
@@ -288,8 +300,9 @@
 			</details>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--schedule">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18M8 3v4M16 3v4"/></svg></span>
 				<h3>peers-history-index.json</h3>
 				<span class="data-tag">GET · JSON · index</span>
 			</header>
@@ -313,8 +326,9 @@ curl -s "https://metal.freedom-yield.com/api/peers-history/peers-${YDAY}.json.gz
 		<h2>Schedule</h2>
 		<p class="data-group-lead">Upcoming renewal events as iCalendar feeds you can subscribe to.</p>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--schedule">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18M8 3v4M16 3v4"/></svg></span>
 				<h3>schedule.ics</h3>
 				<span class="data-tag">GET · iCalendar</span>
 			</header>
@@ -336,8 +350,9 @@ curl -s "https://metal.freedom-yield.com/api/peers-history/peers-${YDAY}.json.gz
 		<h2>Upstream canonical sources</h2>
 		<p class="data-group-lead">Everything above is derived from these. If our data ever conflicts with these, trust these.</p>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--topology">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v3M9 15l-3 2M15 15l3 2"/><circle cx="12" cy="12" r="2"/></svg></span>
 				<h3>Metal Blockchain P-Chain RPC</h3>
 				<span class="data-tag">POST · JSON-RPC</span>
 			</header>
@@ -356,8 +371,9 @@ curl -s "https://metal.freedom-yield.com/api/peers-history/peers-${YDAY}.json.gz
 			</details>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--readiness">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21V4M4 4h13l-2 4 2 4H4"/></svg></span>
 				<h3>Metal Blockchain Explorer</h3>
 				<span class="data-tag">Web · HTML</span>
 			</header>
@@ -374,8 +390,9 @@ curl -s "https://metal.freedom-yield.com/api/peers-history/peers-${YDAY}.json.gz
 		<h2>Self-identity metadata</h2>
 		<p class="data-group-lead">This validator's own publishable identity information.</p>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--audit">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
 				<h3>validator-directory.json</h3>
 				<span class="data-tag">GET · JSON</span>
 			</header>
@@ -386,8 +403,9 @@ curl -s "https://metal.freedom-yield.com/api/peers-history/peers-${YDAY}.json.gz
 				</dl>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--onchain">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007 0l3-3a5 5 0 00-7-7l-1 1"/><path d="M14 11a5 5 0 00-7 0l-3 3a5 5 0 007 7l1-1"/></svg></span>
 				<h3>identity.json</h3>
 				<span class="data-tag">GET · JSON · signed</span>
 			</header>

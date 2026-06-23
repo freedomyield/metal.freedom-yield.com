@@ -60,8 +60,9 @@
 		<h2>Validator 状態</h2>
 		<p class="data-group-lead">ノード本体の identity・stake・uptime・bootstrap 状態をライブで返します。</p>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--audit">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
 				<h3>validator.json</h3>
 				<span class="data-tag">GET · JSON</span>
 			</header>
@@ -78,8 +79,9 @@
 			</details>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--audit">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
 				<h3>evidence.json</h3>
 				<span class="data-tag">GET · JSON</span>
 			</header>
@@ -102,8 +104,9 @@
 		<h2>Uptime &amp; 実績</h2>
 		<p class="data-group-lead">監査トレース。直近 90 日分の日次サンプル + 期間終了済 cycle の累積履歴(年間 ~12 件で増えます)。</p>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--audit">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
 				<h3>uptime-recent.json</h3>
 				<span class="data-tag">GET · JSON</span>
 			</header>
@@ -119,8 +122,9 @@
 			</details>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--audit">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
 				<h3>uptime-cycles.json</h3>
 				<span class="data-tag">GET · JSON</span>
 			</header>
@@ -136,8 +140,9 @@
 			</details>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--audit">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
 				<h3>incidents.json</h3>
 				<span class="data-tag">GET · JSON</span>
 			</header>
@@ -153,8 +158,9 @@
 			</details>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--docs">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg></span>
 				<h3>cycle-history.jsonl(準備中)</h3>
 				<span class="data-tag">GET · JSONL · 予定</span>
 			</header>
@@ -178,8 +184,9 @@
 		<h2>Network</h2>
 		<p class="data-group-lead">本ノードのピアセット内の peer validator の公開・匿名化されたビュー。</p>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--audit">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
 				<h3>peer-geo.json</h3>
 				<span class="data-tag">GET · JSON</span>
 			</header>
@@ -206,8 +213,9 @@
 			preview ファイルは描画用に最新 24〜30 件、history ファイルは全件を保持します。
 		</p>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--code">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/></svg></span>
 				<h3>peers-gini.json</h3>
 				<span class="data-tag">GET · JSON · preview</span>
 			</header>
@@ -223,8 +231,9 @@
 			</details>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--docs">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg></span>
 				<h3>peers-gini-history.jsonl</h3>
 				<span class="data-tag">GET · JSONL · 全件</span>
 			</header>
@@ -240,8 +249,9 @@
 			</details>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--code">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/></svg></span>
 				<h3>fee-market.json</h3>
 				<span class="data-tag">GET · JSON · preview</span>
 			</header>
@@ -257,8 +267,9 @@
 			</details>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--docs">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg></span>
 				<h3>fee-market-history.jsonl</h3>
 				<span class="data-tag">GET · JSONL · 全件</span>
 			</header>
@@ -270,8 +281,9 @@
 			</dl>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--audit">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
 				<h3>peers-changes.json</h3>
 				<span class="data-tag">GET · JSON</span>
 			</header>
@@ -287,8 +299,9 @@
 			</details>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--schedule">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18M8 3v4M16 3v4"/></svg></span>
 				<h3>peers-history-index.json</h3>
 				<span class="data-tag">GET · JSON · index</span>
 			</header>
@@ -312,8 +325,9 @@ curl -s "https://metal.freedom-yield.com/api/peers-history/peers-${YDAY}.json.gz
 		<h2>Schedule</h2>
 		<p class="data-group-lead">今後の renewal イベントを iCalendar feed で subscribe できます。</p>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--schedule">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18M8 3v4M16 3v4"/></svg></span>
 				<h3>schedule.ics</h3>
 				<span class="data-tag">GET · iCalendar</span>
 			</header>
@@ -335,8 +349,9 @@ curl -s "https://metal.freedom-yield.com/api/peers-history/peers-${YDAY}.json.gz
 		<h2>上流 canonical sources</h2>
 		<p class="data-group-lead">本サイト上の全データはこちらに由来します。万一 conflict した場合はこちらが正です。</p>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--topology">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v3M9 15l-3 2M15 15l3 2"/><circle cx="12" cy="12" r="2"/></svg></span>
 				<h3>Metal Blockchain P-Chain RPC</h3>
 				<span class="data-tag">POST · JSON-RPC</span>
 			</header>
@@ -355,8 +370,9 @@ curl -s "https://metal.freedom-yield.com/api/peers-history/peers-${YDAY}.json.gz
 			</details>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--readiness">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21V4M4 4h13l-2 4 2 4H4"/></svg></span>
 				<h3>Metal Blockchain Explorer</h3>
 				<span class="data-tag">Web · HTML</span>
 			</header>
@@ -373,8 +389,9 @@ curl -s "https://metal.freedom-yield.com/api/peers-history/peers-${YDAY}.json.gz
 		<h2>自 validator のアイデンティティメタデータ</h2>
 		<p class="data-group-lead">本 validator 自身の公開アイデンティティ情報。</p>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--audit">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
 				<h3>validator-directory.json</h3>
 				<span class="data-tag">GET · JSON</span>
 			</header>
@@ -385,8 +402,9 @@ curl -s "https://metal.freedom-yield.com/api/peers-history/peers-${YDAY}.json.gz
 				</dl>
 		</article>
 
-		<article class="data-endpoint">
+		<article class="data-endpoint data-endpoint--docs">
 			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg></span>
 				<h3>identity.json</h3>
 				<span class="data-tag">GET · JSON · 署名付</span>
 			</header>

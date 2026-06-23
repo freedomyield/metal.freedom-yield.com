@@ -67,47 +67,97 @@
 		<p>
 			Freedom Yield は、過大な運用能力を主張するのではなく、公開された運用証跡を重視する small-but-transparent な Metal Blockchain validator です。
 		</p>
-		<dl class="kv">
-			<dt>NodeID</dt><dd><code data-field="nodeId">—</code></dd>
-			<dt>自己 stake</dt><dd data-field="selfStake">—</dd>
-			<dt>委任件数</dt><dd data-field="delegatorCount">—</dd>
-			<dt>受入合計</dt><dd data-field="receivedCombined">—</dd>
-			<dt>ネットワーク uptime 評価値</dt><dd data-field="uptime">—</dd>
-			<dt>Delegation fee</dt><dd data-field="delegationFee">3% (プロトコル下限 2% の一つ上)</dd>
-		</dl>
+		<div class="delegate-stat-grid" role="group" aria-label="ライブ validator stats">
+			<div class="delegate-stat delegate-stat--nodeid">
+				<span class="delegate-stat-label">NodeID</span>
+				<span class="delegate-stat-value"><code data-field="nodeId">—</code></span>
+			</div>
+			<div class="delegate-stat delegate-stat--stake">
+				<span class="delegate-stat-label">自己 stake</span>
+				<span class="delegate-stat-value" data-field="selfStake">—</span>
+			</div>
+			<div class="delegate-stat delegate-stat--delegators">
+				<span class="delegate-stat-label">委任件数</span>
+				<span class="delegate-stat-value" data-field="delegatorCount">—</span>
+			</div>
+			<div class="delegate-stat delegate-stat--received">
+				<span class="delegate-stat-label">受入合計</span>
+				<span class="delegate-stat-value" data-field="receivedCombined">—</span>
+			</div>
+			<div class="delegate-stat delegate-stat--uptime">
+				<span class="delegate-stat-label">ネットワーク uptime</span>
+				<span class="delegate-stat-value" data-field="uptime">—</span>
+			</div>
+			<div class="delegate-stat delegate-stat--fee">
+				<span class="delegate-stat-label">Delegation fee</span>
+				<span class="delegate-stat-value" data-field="delegationFee">3%</span>
+			</div>
+		</div>
 	</section>
 
-	<section class="card">
-		<h2>これらの値が重要で、ハードウェアは重要ではない理由</h2>
-		<p>
-			Snowman コンセンサスでは、公式最小(8 vCPU / 16 GiB)を超えるハードを使っても報酬は増えません。
-			委任者にとって本当に重要なのは:
-		</p>
-		<ul>
-			<li><strong>自己 stake</strong> — 運営者の skin in the game(意図的に小さく抑える方針、現値はトップページのステータスカード)</li>
-			<li><strong>uptime 評価値</strong> — ネットワークから見た稼働率(80% 以上維持で報酬発生)</li>
-			<li><strong>Delegation fee</strong> — 委任報酬から運営者が取る割合(下限 2%、当方は 3% 設定)</li>
-			<li><strong>インシデント履歴</strong> — 過去の障害と対応の透明性(<a href="/ja/incidents/">incidents</a> 参照)</li>
-		</ul>
+	<section class="split-section">
+		<div class="split-bg" aria-hidden="true">
+			<div class="split-bg-photo"><img src="/assets/photos/circuit-board.jpg" alt="" loading="lazy" decoding="async"></div>
+			<div class="split-bg-pane"></div>
+		</div>
+		<div class="split-section-inner">
+			<h2 class="split-section-title">なぜこれらの値が重要で、ハードウェアは重要ではないか</h2>
+			<p>Snowman コンセンサスでは、公式最小(8 vCPU / 16 GiB)を超えるハードを使っても報酬は増えません。委任者にとって本当に重要なのは:</p>
+			<div class="feature-block">
+				<ul class="feature-grid">
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.5 8 8 9 4.5-1 8-4.5 8-9V6l-8-3z"/></svg>
+						<h3>自己 stake</h3>
+						<p>運営者の skin in the game。意図的に小さく抑える方針、現値はトップページのステータスカード。</p>
+					</li>
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>
+						<h3>Uptime 評価値</h3>
+						<p>ネットワークから見た稼働率。80% 以上維持で報酬発生。</p>
+					</li>
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 5 5 19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/></svg>
+						<h3>Delegation fee</h3>
+						<p>委任報酬から運営者が取る割合。プロトコル下限 2%、当方は 3% 設定 — 予測可能、突発的引き上げなし。</p>
+					</li>
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+						<h3>インシデント履歴</h3>
+						<p>過去の障害と対応の透明性。<a href="/ja/incidents/">incidents</a> 参照。</p>
+					</li>
+				</ul>
+			</div>
+		</div>
 	</section>
 
 	<section class="card">
 		<h2>リスクプロファイル</h2>
-		<h3>スラッシングなし</h3>
-		<p>
-			Avalanche family にはスラッシング(stake 没収)がありません。最悪でも「この期間の報酬がゼロ」。
-			委任元本(委任した METAL)は uptime に関係なく <strong>end time に必ず返却</strong>されます。
-		</p>
-		<h3>ロック期間</h3>
-		<p>
-			委任は <strong>最短 14 日、最長 1 年</strong>のロックです。途中で引き出すことはできません。
-			ロック期間中は市場価格リスクにさらされます。
-		</p>
-		<h3>単一運営者リスク</h3>
-		<p>
-			当方のバリデータは 1 ノード構成です。ホストが死んで staking 期間内に復旧できない場合、
-			その期間の報酬を失います。複数の validator に分散することを推奨します。
-		</p>
+		<div class="risk-card-grid">
+			<article class="risk-card risk-card--safe">
+				<div class="risk-card-head">
+					<span class="risk-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 4.5 3.5 8 8 9 4.5-1 8-4.5 8-9V6l-8-3z"/><path d="m9 12 2 2 4-4"/></svg></span>
+					<h3>スラッシングなし</h3>
+				</div>
+				<span class="risk-card-badge">元本保全</span>
+				<p>Avalanche family にはスラッシング(stake 没収)がありません。最悪でも「この期間の報酬がゼロ」。委任元本(委任した METAL)は uptime に関係なく <strong>end time に必ず返却</strong>されます。</p>
+			</article>
+			<article class="risk-card risk-card--notice">
+				<div class="risk-card-head">
+					<span class="risk-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg></span>
+					<h3>ロック期間</h3>
+				</div>
+				<span class="risk-card-badge">Notice</span>
+				<p>委任は <strong>最短 14 日、最長 1 年</strong>のロックです。途中で引き出すことはできません。ロック期間中は市場価格リスクにさらされます。</p>
+			</article>
+			<article class="risk-card risk-card--info">
+				<div class="risk-card-head">
+					<span class="risk-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg></span>
+					<h3>単一運営者リスク</h3>
+				</div>
+				<span class="risk-card-badge">分散推奨</span>
+				<p>当方のバリデータは 1 ノード構成です。ホストが死んで staking 期間内に復旧できない場合、その期間の報酬を失います。複数の validator に分散することを推奨します。</p>
+			</article>
+		</div>
 	</section>
 
 	<figure class="atmosphere-band" aria-hidden="true">
@@ -126,7 +176,7 @@
 
 	<section class="card">
 		<h2>委任手順(本番開始後)</h2>
-		<ol>
+		<ol class="step-flow">
 			<li>取引所 or P2P で METAL を取得</li>
 			<li><a href="https://wallet.metalblockchain.org/" rel="noopener">Metal Wallet</a> を開いて wallet を作成 or インポート</li>
 			<li>tokens を P-Chain に移動(X-Chain → P-Chain のクロスチェーン送金)</li>
