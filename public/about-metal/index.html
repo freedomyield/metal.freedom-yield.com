@@ -44,8 +44,8 @@
 	</div>
 </nav>
 
-<main id="main" class="container">
-	<header class="hero">
+<header class="hero hero--simple hero--photo-about-metal">
+	<div class="container">
 		<p class="hero-eyebrow">Background</p>
 		<h1>About Metal Blockchain</h1>
 		<p class="hero-lead">
@@ -53,9 +53,15 @@
 			behind XPR Network (Layer-1). It is an Avalanche fork using <em>Snowman</em> consensus, with a
 			<strong>permissionless validator set</strong> — anyone with the minimum stake can become a validator.
 		</p>
-	</header>
+	</div>
+</header>
+
+<main id="main" class="container">
 
 	<section class="card">
+		<figure class="card-figure" aria-hidden="true">
+			<img src="/assets/photos/circuit-board.jpg" alt="" loading="lazy" decoding="async">
+		</figure>
 		<h2>How it differs from XPR Network</h2>
 		<dl class="kv">
 			<dt>XPR Network</dt><dd>Layer-1, consortium of Block Producers, approval by multisig of existing BPs</dd>
@@ -66,42 +72,76 @@
 		</p>
 	</section>
 
-	<section class="card">
-		<h2>How validation works</h2>
-		<h3>1. Anyone can validate (with 2,000 METAL)</h3>
-		<p>
-			The protocol minimum self-stake is 2,000 METAL. There is no need to obtain prior approval from existing validators
-			(unlike XPR's consortium model). A staking key is generated locally, an "Add Validator" transaction is sent to
-			the P-Chain, and after the start time the node enters the active set.
-		</p>
-		<h3>2. Rewards are uptime-driven, not throughput-driven</h3>
-		<p>
-			Snowman consensus is not a speed race like PoW. As long as the node is reachable by enough peers and votes
-			correctly, the rewards are the same regardless of hardware muscle above the official minimum (8 vCPU / 16 GiB).
-			<strong>Faster hardware does not earn more.</strong>
-		</p>
-		<h3>3. Self-stake determines delegation capacity</h3>
-		<p>
-			Maximum stake weight is <code>min(3M METAL, 5 × self_stake)</code>. So 2,000 self-stake → max 10,000 weight
-			(of which 8,000 can be received as delegations). The cap exists to align operator skin-in-the-game
-			with how much delegation they can accept; it is a protocol property, not a growth target.
-		</p>
-		<h3>4. No slashing</h3>
-		<p>
-			Avalanche family chains have no slashing. The worst case for downtime is "no rewards for the staking period."
-			Both self-stake and delegated stake are <strong>returned at end time</strong>, regardless of uptime.
-			The risk delegators take is opportunity cost (missed yield), not loss of principal.
-		</p>
+	<figure class="atmosphere-band" aria-hidden="true">
+		<img src="/assets/photos/datacenter-aisle.jpg" alt="" loading="lazy" decoding="async">
+		<div class="atmosphere-band-tint" aria-hidden="true"></div>
+		<figcaption class="atmosphere-band-caption">
+			<div class="atmosphere-band-overline">
+				<span>Chapter I</span>
+				<span class="atmosphere-band-overline-rule" aria-hidden="true"></span>
+				<span>Protocol</span>
+			</div>
+			<div class="atmosphere-band-title">How validation works</div>
+			<p class="atmosphere-band-lede">Four mechanics that decide what a Metal Blockchain validator can do — and what it cannot.</p>
+		</figcaption>
+	</figure>
+
+	<section class="split-section">
+		<div class="split-bg" aria-hidden="true">
+			<div class="split-bg-photo"><img src="/assets/photos/dark-code.jpg" alt="" loading="lazy" decoding="async"></div>
+			<div class="split-bg-pane"></div>
+		</div>
+		<div class="split-section-inner">
+			<h2 class="split-section-title">How validation works</h2>
+			<div class="feature-block">
+				<ul class="feature-grid">
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 3 7l9 5 9-5-9-5z"/><path d="m3 17 9 5 9-5"/><path d="m3 12 9 5 9-5"/></svg>
+						<h3>1. Anyone can validate (2,000 METAL)</h3>
+						<p>The protocol minimum self-stake is 2,000 METAL. No prior approval from existing validators (unlike XPR's consortium model). A staking key is generated locally, an <em>Add Validator</em> transaction is sent to the P-Chain, and after the start time the node enters the active set.</p>
+					</li>
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
+						<h3>2. Uptime-driven rewards</h3>
+						<p>Snowman consensus is not a speed race. As long as the node is reachable by enough peers and votes correctly, rewards are the same regardless of hardware muscle above the official minimum (8 vCPU / 16 GiB). <strong>Faster hardware does not earn more.</strong></p>
+					</li>
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>
+						<h3>3. Self-stake → capacity</h3>
+						<p>Maximum stake weight is <code>min(3M METAL, 5 × self_stake)</code>. So 2,000 self-stake → max 10,000 weight (of which 8,000 can be received as delegations). The cap aligns operator skin-in-the-game with delegation acceptance.</p>
+					</li>
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.5 8 8 9 4.5-1 8-4.5 8-9V6l-8-3z"/><path d="m9 12 2 2 4-4"/></svg>
+						<h3>4. No slashing</h3>
+						<p>Avalanche family chains have no slashing. The worst case for downtime is "no rewards for the staking period." Both self-stake and delegated stake are <strong>returned at end time</strong>, regardless of uptime. The delegator risk is opportunity cost, not loss of principal.</p>
+					</li>
+				</ul>
+			</div>
+		</div>
 	</section>
+
+	<figure class="atmosphere-band" aria-hidden="true">
+		<img src="/assets/photos/metropolis.jpg" alt="" loading="lazy" decoding="async">
+		<div class="atmosphere-band-tint" aria-hidden="true"></div>
+		<figcaption class="atmosphere-band-caption">
+			<div class="atmosphere-band-overline">
+				<span>Chapter II</span>
+				<span class="atmosphere-band-overline-rule" aria-hidden="true"></span>
+				<span>References</span>
+			</div>
+			<div class="atmosphere-band-title">Where to dig deeper</div>
+			<p class="atmosphere-band-lede">Canonical sources for the protocol, explorers, and tooling.</p>
+		</figcaption>
+	</figure>
 
 	<section class="card">
 		<h2>Key links</h2>
-		<ul>
-			<li>Official docs — <a href="https://docs.metalblockchain.org/" rel="noopener">docs.metalblockchain.org</a></li>
-			<li>Block explorer (mainnet) — <a href="https://explorer.metalblockchain.org/" rel="noopener">explorer.metalblockchain.org</a></li>
-			<li>Block explorer (Tahoe testnet) — <a href="https://tahoe.metalscan.io/" rel="noopener">tahoe.metalscan.io</a></li>
-			<li>Tahoe testnet faucet — <a href="https://faucet.metalblockchain.org/" rel="noopener">faucet.metalblockchain.org</a></li>
-			<li>Metal Wallet — <a href="https://wallet.metalblockchain.org/" rel="noopener">wallet.metalblockchain.org</a></li>
+		<ul class="link-tile-grid">
+			<li><a class="link-tile" href="https://docs.metalblockchain.org/" rel="noopener"><span class="link-tile-label">Official docs</span><span class="link-tile-host">docs.metalblockchain.org ↗</span></a></li>
+			<li><a class="link-tile" href="https://explorer.metalblockchain.org/" rel="noopener"><span class="link-tile-label">Mainnet explorer</span><span class="link-tile-host">explorer.metalblockchain.org ↗</span></a></li>
+			<li><a class="link-tile" href="https://tahoe.metalscan.io/" rel="noopener"><span class="link-tile-label">Tahoe testnet explorer</span><span class="link-tile-host">tahoe.metalscan.io ↗</span></a></li>
+			<li><a class="link-tile" href="https://faucet.metalblockchain.org/" rel="noopener"><span class="link-tile-label">Tahoe testnet faucet</span><span class="link-tile-host">faucet.metalblockchain.org ↗</span></a></li>
+			<li><a class="link-tile" href="https://wallet.metalblockchain.org/" rel="noopener"><span class="link-tile-label">Metal Wallet</span><span class="link-tile-host">wallet.metalblockchain.org ↗</span></a></li>
 		</ul>
 	</section>
 

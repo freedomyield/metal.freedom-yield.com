@@ -44,8 +44,8 @@
 	</div>
 </nav>
 
-<main id="main" class="container">
-	<header class="hero">
+<header class="hero hero--simple hero--photo-about-metal">
+	<div class="container">
 		<p class="hero-eyebrow">背景</p>
 		<h1>About Metal Blockchain</h1>
 		<p class="hero-lead">
@@ -53,9 +53,15 @@
 			Avalanche fork で、コンセンサスは <em>Snowman</em>。<strong>permissionless validator</strong> で、最小 stake を満たせば
 			誰でもバリデータになれます。
 		</p>
-	</header>
+	</div>
+</header>
+
+<main id="main" class="container">
 
 	<section class="card">
+		<figure class="card-figure" aria-hidden="true">
+			<img src="/assets/photos/circuit-board.jpg" alt="" loading="lazy" decoding="async">
+		</figure>
 		<h2>XPR Network との違い</h2>
 		<dl class="kv">
 			<dt>XPR Network</dt><dd>Layer-1、Block Producer の consortium 制、既存 BP の multisig 承認が必要</dd>
@@ -66,41 +72,76 @@
 		</p>
 	</section>
 
-	<section class="card">
-		<h2>バリデーションの仕組み</h2>
-		<h3>1. 誰でも参加可能(2,000 METAL から)</h3>
-		<p>
-			プロトコル最小 self stake は 2,000 METAL。XPR と違い既存 validator からの承認は不要です。
-			staking key をローカルで生成、"Add Validator" tx を P-Chain に送信、start time 到達で active 入り。
-		</p>
-		<h3>2. 報酬は uptime ドリブン、性能競争ではない</h3>
-		<p>
-			Snowman は PoW のような速度競争ではありません。ピアから到達でき、正しく投票していれば、
-			公式最小(8 vCPU / 16 GiB)を超えるハードを使っても報酬は増えません。
-			<strong>性能で殴っても収益は伸びない</strong>のがこのチェーンの特性です。
-		</p>
-		<h3>3. 自己 stake が受入枠を決める</h3>
-		<p>
-			最大 stake weight は <code>min(3M METAL, 5 × self_stake)</code>。自己 stake 2,000 → 最大 weight 10,000
-			(うち委任受入可能枠は 8,000)。この上限は「運用者の skin in the game と受入可能な委任量を整合させる」
-			ためのプロトコル仕様であり、成長目標ではありません。
-		</p>
-		<h3>4. スラッシングなし</h3>
-		<p>
-			Avalanche family にはスラッシング(stake 没収)がありません。ダウンタイム時の最悪は「報酬ゼロ」。
-			自己 stake も委任 stake も <strong>end time に必ず返却</strong>される(uptime に関係なく)。
-			delegator のリスクは「機会費用(逸失利益)」のみ、元本毀損ではありません。
-		</p>
+	<figure class="atmosphere-band" aria-hidden="true">
+		<img src="/assets/photos/datacenter-aisle.jpg" alt="" loading="lazy" decoding="async">
+		<div class="atmosphere-band-tint" aria-hidden="true"></div>
+		<figcaption class="atmosphere-band-caption">
+			<div class="atmosphere-band-overline">
+				<span>第 I 章</span>
+				<span class="atmosphere-band-overline-rule" aria-hidden="true"></span>
+				<span>Protocol</span>
+			</div>
+			<div class="atmosphere-band-title">バリデーションの仕組み</div>
+			<p class="atmosphere-band-lede">Metal Blockchain validator にできること、できないことを決める 4 つの mechanic。</p>
+		</figcaption>
+	</figure>
+
+	<section class="split-section">
+		<div class="split-bg" aria-hidden="true">
+			<div class="split-bg-photo"><img src="/assets/photos/dark-code.jpg" alt="" loading="lazy" decoding="async"></div>
+			<div class="split-bg-pane"></div>
+		</div>
+		<div class="split-section-inner">
+			<h2 class="split-section-title">バリデーションの仕組み</h2>
+			<div class="feature-block">
+				<ul class="feature-grid">
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 3 7l9 5 9-5-9-5z"/><path d="m3 17 9 5 9-5"/><path d="m3 12 9 5 9-5"/></svg>
+						<h3>1. 誰でも参加可能(2,000 METAL から)</h3>
+						<p>プロトコル最小 self stake は 2,000 METAL。XPR と違い既存 validator からの承認は不要。staking key をローカル生成 → <em>Add Validator</em> tx を P-Chain に送信 → start time 到達で active 入り。</p>
+					</li>
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
+						<h3>2. 報酬は uptime ドリブン</h3>
+						<p>Snowman は速度競争ではない。ピアから到達でき正しく投票していれば、公式最小(8 vCPU / 16 GiB)を超えるハードでも報酬は増えない。<strong>性能で殴っても収益は伸びない</strong>のがこのチェーンの特性。</p>
+					</li>
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>
+						<h3>3. 自己 stake が受入枠を決める</h3>
+						<p>最大 stake weight = <code>min(3M METAL, 5 × self_stake)</code>。自己 stake 2,000 → 最大 weight 10,000(うち委任受入可能 8,000)。「skin in the game と受入量を整合」させるプロトコル仕様。</p>
+					</li>
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.5 8 8 9 4.5-1 8-4.5 8-9V6l-8-3z"/><path d="m9 12 2 2 4-4"/></svg>
+						<h3>4. スラッシングなし</h3>
+						<p>Avalanche family にはスラッシング(stake 没収)がない。ダウンタイム時の最悪は「報酬ゼロ」。自己 stake も委任 stake も <strong>end time に必ず返却</strong>(uptime 関係なく)。delegator のリスクは「機会費用」のみ。</p>
+					</li>
+				</ul>
+			</div>
+		</div>
 	</section>
+
+	<figure class="atmosphere-band" aria-hidden="true">
+		<img src="/assets/photos/metropolis.jpg" alt="" loading="lazy" decoding="async">
+		<div class="atmosphere-band-tint" aria-hidden="true"></div>
+		<figcaption class="atmosphere-band-caption">
+			<div class="atmosphere-band-overline">
+				<span>第 II 章</span>
+				<span class="atmosphere-band-overline-rule" aria-hidden="true"></span>
+				<span>References</span>
+			</div>
+			<div class="atmosphere-band-title">深堀り先</div>
+			<p class="atmosphere-band-lede">プロトコル仕様、explorer、ツール群の正規 source。</p>
+		</figcaption>
+	</figure>
 
 	<section class="card">
 		<h2>関連リンク</h2>
-		<ul>
-			<li>公式ドキュメント — <a href="https://docs.metalblockchain.org/" rel="noopener">docs.metalblockchain.org</a></li>
-			<li>Block explorer (mainnet) — <a href="https://explorer.metalblockchain.org/" rel="noopener">explorer.metalblockchain.org</a></li>
-			<li>Block explorer (Tahoe testnet) — <a href="https://tahoe.metalscan.io/" rel="noopener">tahoe.metalscan.io</a></li>
-			<li>Tahoe testnet faucet — <a href="https://faucet.metalblockchain.org/" rel="noopener">faucet.metalblockchain.org</a></li>
-			<li>Metal Wallet — <a href="https://wallet.metalblockchain.org/" rel="noopener">wallet.metalblockchain.org</a></li>
+		<ul class="link-tile-grid">
+			<li><a class="link-tile" href="https://docs.metalblockchain.org/" rel="noopener"><span class="link-tile-label">公式ドキュメント</span><span class="link-tile-host">docs.metalblockchain.org ↗</span></a></li>
+			<li><a class="link-tile" href="https://explorer.metalblockchain.org/" rel="noopener"><span class="link-tile-label">Mainnet explorer</span><span class="link-tile-host">explorer.metalblockchain.org ↗</span></a></li>
+			<li><a class="link-tile" href="https://tahoe.metalscan.io/" rel="noopener"><span class="link-tile-label">Tahoe testnet explorer</span><span class="link-tile-host">tahoe.metalscan.io ↗</span></a></li>
+			<li><a class="link-tile" href="https://faucet.metalblockchain.org/" rel="noopener"><span class="link-tile-label">Tahoe testnet faucet</span><span class="link-tile-host">faucet.metalblockchain.org ↗</span></a></li>
+			<li><a class="link-tile" href="https://wallet.metalblockchain.org/" rel="noopener"><span class="link-tile-label">Metal Wallet</span><span class="link-tile-host">wallet.metalblockchain.org ↗</span></a></li>
 		</ul>
 	</section>
 
