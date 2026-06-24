@@ -23,12 +23,25 @@ INIT="$REPO/scripts/anomaly-state-init.sh"
 TMP=$(mktemp -d)
 trap 'chmod -R u+rwX "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
 
+# When running as root with privilege-drop tests, the unprivileged user
+# must be able to traverse $TMP. mktemp -d creates dirs as 0700 root.
+if [ "$(id -u)" = "0" ]; then
+  chmod 0755 "$TMP"
+fi
+
 PASS=0
 FAIL=0
 SKIP=0
 FAILURES=()
 
 is_linux() { [ "$(uname)" = "Linux" ]; }
+is_root() { [ "$(id -u)" = "0" ]; }
+
+# Permission tests require an unprivileged file owner so chmod 0500 actually
+# blocks writes. As root those chmod-based tests would falsely succeed.
+# When running as root we drop privileges to UNPRIV_USER for those cases.
+UNPRIV_USER="${UNPRIV_TEST_USER:-deploy}"
+have_unpriv() { id "$UNPRIV_USER" >/dev/null 2>&1; }
 
 assert_rc() {
   local label="$1" expected="$2" actual="$3"
@@ -81,6 +94,23 @@ run_init() {
   echo $?
 }
 
+# run_init_as_unpriv — same as run_init, but drops to $UNPRIV_USER if we
+# are root. On macOS / non-root Linux the script runs in-process. The
+# unprivileged user must own (or be able to traverse) the chosen sandbox
+# paths. Caller is responsible for chown if root.
+run_init_as_unpriv() {
+  if is_root && have_unpriv; then
+    sudo -n -u "$UNPRIV_USER" env \
+      ANOMALY_STATE_DIR="$STATE_DIR" \
+      ANOMALY_LOCK_FILE="$LOCK_FILE" \
+      ANOMALY_CONTENTION_COUNTER="$COUNTER" \
+      bash "$INIT" "$@" 2>"$CASE_DIR/stderr" >"$CASE_DIR/stdout"
+    echo $?
+  else
+    run_init "$@"
+  fi
+}
+
 echo "=== C5-A argument validation (run-anywhere, no flock dependency) ==="
 
 # === T1: --confirm absent → exit 1, no state written ====================
@@ -120,28 +150,47 @@ assert_rc "T5: lock dir missing → exit 2"                              2 "$rc"
 assert_eq "T5: state file NOT written"                                  "no" "$state_exists"
 
 # === T6: bad lock dir permission (cannot open file for write) → exit 2 ==
-# On macOS chmod 0500 on dir still allows root to traverse; sub-tests run
-# as the operator user. We use a missing parent to force the open failure.
-new_env t6
-chmod 0500 "$LOCK_DIR"
-rc=$(run_init --confirm --baseline-status=running)
-chmod 0700 "$LOCK_DIR"   # restore so cleanup works
-# Expectation: exit 2 (file cannot be opened for write). On macOS/Linux
-# both, "exec 9>file" in a non-writable dir fails.
-assert_rc "T6: lock dir non-writable → exit 2 (open failure)"          2 "$rc"
+# Requires non-root: chmod 0500 doesn't constrain root. On root we drop to
+# UNPRIV_USER (= deploy) via run_init_as_unpriv and chown the sandbox so
+# the unprivileged user can read/traverse normally, then chmod 0500 to
+# block the lock-file open.
+if is_root && ! have_unpriv; then
+  skip "T6: lock dir non-writable (no unprivileged user available)"
+else
+  new_env t6
+  if is_root; then
+    chown -R "$UNPRIV_USER" "$CASE_DIR"
+  fi
+  chmod 0500 "$LOCK_DIR"
+  rc=$(run_init_as_unpriv --confirm --baseline-status=running)
+  chmod 0700 "$LOCK_DIR"   # restore so cleanup works
+  assert_rc "T6: lock dir non-writable → exit 2 (open failure)"          2 "$rc"
+fi
 
-# === T7: state dir non-writable for mktemp → mismatch path =============
-# Force mktemp inside STATE_DIR to fail by making STATE_DIR read-only AFTER
-# the script's own mkdir -p succeeds. This requires that flock returns ok,
-# so it's Linux-only.
-if is_linux; then
+# === T7: state dir non-writable for mktemp → exit 4 =====================
+# Linux + non-root required (root bypasses chmod). State dir must be
+# owned by the unprivileged user but rendered read-only AFTER any mkdir
+# the script attempts.
+if is_root && ! have_unpriv; then
+  skip "T7: state dir non-writable (no unprivileged user available)"
+elif ! is_linux; then
+  skip "T7: state dir non-writable → exit 4 (requires Linux flock)"
+else
   new_env t7
+  if is_root; then
+    # CASE_DIR needs deploy traversal (= mktemp creates 0700 root).
+    # LOCK_DIR owned by deploy so flock + lock file open succeed.
+    # STATE_DIR stays root-owned + 0500 so deploy cannot chmod nor
+    # write inside it. The init script's `chmod 0750 || true` is
+    # silently suppressed for non-owners, so mktemp in STATE_DIR
+    # fails → exit 4.
+    chmod 0755 "$CASE_DIR"
+    chown -R "$UNPRIV_USER" "$LOCK_DIR"
+  fi
   chmod 0500 "$STATE_DIR"
-  rc=$(run_init --confirm --baseline-status=running)
+  rc=$(run_init_as_unpriv --confirm --baseline-status=running)
   chmod 0700 "$STATE_DIR"
   assert_rc "T7: state dir non-writable → exit 4 (mktemp/state write fail)" 4 "$rc"
-else
-  skip "T7: state dir non-writable → exit 4"
 fi
 
 echo ""
@@ -149,19 +198,29 @@ echo "=== C5-A marker deletion ordering invariant ==="
 
 # === T8: marker deletion happens AFTER successful state write ===========
 # Invariant: missing-marker MUST NOT be removed if state write failed.
-# Simulate state write failure (= non-writable STATE_DIR) with marker
-# pre-placed. After failed init, marker must still be present.
-if is_linux; then
+# Linux + unprivileged-user required to make chmod effective.
+if is_root && ! have_unpriv; then
+  skip "T8: marker NOT removed when state write fails (no unprivileged user)"
+elif ! is_linux; then
+  skip "T8: marker NOT removed when state write fails (requires Linux flock)"
+else
   new_env t8
-  : > "$MARKER"   # pre-place marker
+  : > "$MARKER"
+  if is_root; then
+    chmod 0755 "$CASE_DIR"
+    chown -R "$UNPRIV_USER" "$LOCK_DIR"
+    # Marker is inside STATE_DIR which we leave owned by root. The
+    # marker is a regular file inside the (still-traversable) dir.
+    # deploy cannot remove it because deploy lacks write on STATE_DIR.
+    # Exactly the invariant we want to verify: even if init wanted to
+    # remove the marker, it couldn't because state write failed first.
+  fi
   chmod 0500 "$STATE_DIR"
-  rc=$(run_init --confirm --baseline-status=running)
+  rc=$(run_init_as_unpriv --confirm --baseline-status=running)
   chmod 0700 "$STATE_DIR"
   assert_rc "T8: state write fail → exit 4"                            4 "$rc"
   [ -f "$MARKER" ] && marker_state=present || marker_state=removed
   assert_eq "T8: state write fail → marker MUST STILL BE PRESENT (invariant)" "present" "$marker_state"
-else
-  skip "T8: marker NOT removed when state write fails"
 fi
 
 # === T9: marker removed only after state write succeeds =================
