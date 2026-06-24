@@ -189,26 +189,143 @@ if ! flock -n 9; then
 fi
 echo "[K-4] lock acquired" >&2
 
-# === init / read state ================================================
-mkdir -p "$STATE_DIR" 2>/dev/null || true
-if [ ! -f "$STATE_FILE" ]; then
-  cat > "$STATE_FILE" <<'EOF'
-{
-	"metalgo": "running",
-	"caddy": "running",
-	"disk": "ok",
-	"memory": "ok",
-	"peers": "ok",
-	"web": "ok",
-	"api_freshness": "ok",
-	"validator_present": "yes",
-	"last_known_end_time": null,
-	"delegator_count": null,
-	"delegator_total_nmetal": null,
-	"period_alert_sent": { "7": false, "1": false, "0": false, "10min": false }
-}
-EOF
+# === 4B.5.2 K-3.5: state-file presence + schema validation + SHA-256 dedup ===
+# See docs/MONITORING_OPS.md §5 for design rationale.
+#
+# Sub-cases and exit codes:
+#   - state dir missing                         -> exit 5 (structural)
+#   - state file missing, no missing-marker     -> create marker + best-effort notify + exit 7
+#   - state file missing, marker present        -> stderr log only + exit 7
+#   - state file invalid, new SHA-256           -> quarantine + best-effort notify + exit 4
+#   - state file invalid, recurring SHA-256     -> stderr log only + exit 4
+#
+# Bootstrap is NOT auto-performed here. The operator runs
+# scripts/anomaly-state-init.sh manually (= explicit, audited, single source
+# of truth for baseline state). The cron's job is detection, not provisioning.
+QUAR_DIR="${STATE_DIR}/quarantine"
+MISSING_MARKER="${STATE_DIR}/.missing-notified.marker"
+
+if [ ! -d "$STATE_DIR" ]; then
+  echo "[K-3.5] state dir missing: $STATE_DIR (run anomaly-state-init.sh); exit 5" >&2
+  exit 5
 fi
+
+if [ ! -f "$STATE_FILE" ]; then
+  if [ -f "$MISSING_MARKER" ]; then
+    echo "[K-3.5] state file still missing: $STATE_FILE (marker present, no new notify); exit 7" >&2
+    exit 7
+  fi
+  # First detection — best-effort notify + create marker. Marker creation
+  # and exit code do NOT depend on notify success.
+  if [ -x "$NOTIFY" ]; then
+    bash "$NOTIFY" high "anomaly state file missing" \
+      "$(printf 'state file が存在しません: %s\n対処: scripts/anomaly-state-init.sh --confirm --baseline-status=running を実行\n再消失時に再通知できるよう missing marker を %s に作成\n本 tick は K-3 transition 処理を行わず exit 7' \
+         "$STATE_FILE" "$MISSING_MARKER")" \
+      >/dev/null 2>&1 || true
+  fi
+  # Marker is durable record; notify result is independent.
+  : > "$MISSING_MARKER" 2>/dev/null || true
+  echo "[K-3.5] state file missing: $STATE_FILE (marker created at $MISSING_MARKER); exit 7" >&2
+  exit 7
+fi
+
+# State file exists — validate. Compute SHA-256 first so a corruption that
+# is structurally JSON but schema-noncompliant gets the same dedup treatment
+# as a corruption that is not parseable.
+quarantine_corrupt_state() {
+  local reason="$1"
+  local full_sha sha8 quar_target ts
+  full_sha=$(sha256sum "$STATE_FILE" 2>/dev/null | awk '{print $1}')
+  if [ -z "$full_sha" ] || [ ${#full_sha} -ne 64 ]; then
+    echo "[K-3.5] sha256sum failed for $STATE_FILE; exit 4" >&2
+    exit 4
+  fi
+  sha8="${full_sha:0:8}"
+  quar_target="${QUAR_DIR}/${full_sha}"
+
+  if [ -d "$quar_target" ]; then
+    # Recurrence (= identical bytes already quarantined). No new artefact, no
+    # new notify. Stderr only.
+    echo "[K-3.5] state corruption recurrence (reason=${reason}, sha8=${sha8}, full=${full_sha:0:16}...); no new quarantine, no new notify; original preserved; exit 4" >&2
+    exit 4
+  fi
+
+  # New corruption hash — create quarantine atomically (= mktemp dir, fill,
+  # then rename to deterministic target).
+  mkdir -p "$QUAR_DIR" 2>/dev/null || {
+    echo "[K-3.5] cannot create quarantine dir $QUAR_DIR; exit 4" >&2
+    exit 4
+  }
+  local stage
+  stage=$(mktemp -d -p "$QUAR_DIR" .stage.XXXXXX 2>/dev/null) || {
+    echo "[K-3.5] mktemp -d failed in $QUAR_DIR; exit 4" >&2
+    exit 4
+  }
+  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  cp -p "$STATE_FILE" "${stage}/state.json" 2>/dev/null || true
+  {
+    echo "reason=${reason}"
+    echo "first_seen_at_utc=${ts}"
+    echo "state_file_path=${STATE_FILE}"
+    echo "state_file_sha256=${full_sha}"
+    echo "state_file_sha8=${sha8}"
+    echo ""
+    echo "--- first 400 bytes of corrupt state ---"
+    head -c 400 "$STATE_FILE" 2>/dev/null
+    echo ""
+    echo ""
+    echo "--- jq parse/schema attempt ---"
+    jq -e . "$STATE_FILE" 2>&1 || true
+  } > "${stage}/diag.txt"
+  printf '%s\n' "$ts" > "${stage}/first-seen-at.txt"
+
+  if ! mv "$stage" "$quar_target" 2>/dev/null; then
+    rm -rf "$stage" 2>/dev/null || true
+    echo "[K-3.5] rename of staged quarantine to ${quar_target} failed; exit 4" >&2
+    exit 4
+  fi
+
+  # Best-effort notify. Result does NOT change exit code or the on-disk
+  # preservation: the durable record is the quarantine dir.
+  if [ -x "$NOTIFY" ]; then
+    bash "$NOTIFY" high "anomaly state corrupted (new hash)" \
+      "$(printf 'state file が schema 不適合 (reason=%s, sha8=%s)\n元 file は変更せず保持\n診断 dir: %s\n対処: 診断確認後、 scripts/anomaly-state-init.sh --confirm --baseline-status=<value> [--clear-quarantine] で再初期化\n本 tick は K-3 transition 処理を行わず exit 4' \
+         "$reason" "$sha8" "$quar_target")" \
+      >/dev/null 2>&1 || true
+  fi
+  echo "[K-3.5] new corruption (reason=${reason}, sha8=${sha8}) quarantined at ${quar_target}; original preserved; exit 4" >&2
+  exit 4
+}
+
+# JSON parse check.
+if ! jq -e . "$STATE_FILE" >/dev/null 2>&1; then
+  quarantine_corrupt_state "json-parse-fail"
+fi
+
+# Schema check: all required top-level fields with expected types.
+if ! jq -e '
+    (.metalgo|type=="string") and
+    (.caddy|type=="string") and
+    (.disk|type=="string") and
+    (.memory|type=="string") and
+    (.peers|type=="string") and
+    (.web|type=="string") and
+    (.api_freshness|type=="string") and
+    (.validator_present|type=="string") and
+    (has("last_known_end_time")) and
+    (has("delegator_count")) and
+    (has("delegator_total_nmetal")) and
+    (.period_alert_sent|type=="object") and
+    (.period_alert_sent|has("7")) and
+    (.period_alert_sent|has("1")) and
+    (.period_alert_sent|has("0")) and
+    (.period_alert_sent|has("10min"))
+  ' "$STATE_FILE" >/dev/null 2>&1; then
+  quarantine_corrupt_state "schema-mismatch"
+fi
+# K-3.5 PASS — state is parseable and schema-conformant. Existing in-process
+# state_get / state_set calls below operate on the validated file directly.
+# K-3 (candidate-state commit, C4) replaces those per-field writes.
 
 # helper: jq field reader
 state_get() { jq -r "$1" "$STATE_FILE" 2>/dev/null; }
