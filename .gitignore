@@ -41,6 +41,9 @@ node_modules/
 dist/
 .cache/
 *.log
+# Python (= scripts/ops/*.py, tests/ops/*.py)
+__pycache__/
+*.pyc
 
 # ---- Runtime-generated site data ----
 # api/validator.json は live metalgo から生成する動的データ(scripts/node-info.sh)
