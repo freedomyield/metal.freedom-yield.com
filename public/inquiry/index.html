@@ -141,6 +141,17 @@
 	</section>
 
 	<section class="card">
+		<h2>Faster paths for time-sensitive matters</h2>
+		<p>For matters relating to <strong>observable validator state</strong> (= a missed uptime tick, a slow C → P transfer, an unexpected delegation, an explorer anomaly), the fastest signal channels do not require contacting the operator at all:</p>
+		<ul>
+			<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">explorer.metalblockchain.org</a> — the canonical on-chain source. Faster than any email round-trip.</li>
+			<li><a href="/uptime/">/uptime/</a> + <a href="/peers/">/peers/</a> + <a href="/api/validator.json"><code>/api/validator.json</code></a> — live operator-facing mirrors. If the page shows the state, the operator is also seeing it.</li>
+		</ul>
+		<p>For matters that are <strong>reproducible public anomalies but not validator-state outages</strong> (= a schema break in a published artifact, a documentation defect, a verification recipe that does not reproduce on a clean machine), opening a <a href="https://github.com/freedomyield/metal.freedom-yield.com/issues" rel="noopener noreferrer">GitHub issue</a> is higher-bandwidth than email — it stays public, accumulates comments, and the operator's response is also publicly observable.</p>
+		<p class="note">Escalation is single-tier by design: there is no on-call rota, no paging tier, no secondary contact. Validator-host integrity is monitored by automated alerts independent of <code>info@</code>; an incoming inquiry will not be the first signal the operator receives about a real outage.</p>
+	</section>
+
+	<section class="card">
 		<h2>What this surface is for</h2>
 		<p>Questions where the operator can usefully reply at the validator surface:</p>
 		<ul>

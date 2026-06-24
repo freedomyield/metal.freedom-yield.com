@@ -28,7 +28,14 @@
     "non_custodial": true,
     "renewal_transparency": true,
     "decommission_notice_days": 90,
-    "incident_disclosure_sla_hours": 24
+    "incident_disclosure_sla_hours": 24,
+    "incident_sla": {
+      "detect_minutes_max": 30,
+      "acknowledge_hours_business": 2,
+      "acknowledge_hours_offhours": 8,
+      "status_update_cadence_hours": 4,
+      "resolve_or_escalate_hours": 24
+    }
   },
   "in_preparation_artifacts": {
     "anchor_receipt": {

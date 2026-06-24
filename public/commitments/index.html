@@ -145,6 +145,14 @@
 				<p>Every SEV-1 / SEV-2 incident is documented on the <a href="/incidents/">incidents page</a> with timeline, root
 			cause, and impact within 24 hours of resolution. The underlying JSON at <a href="/api/incidents.json"><code>/api/incidents.json</code></a>
 			is the source of truth — an empty list means an empty list, not a curated one.</p>
+				<p>The numeric response targets for an open incident are:</p>
+				<ul>
+					<li><strong>Detect</strong>: ≤ 30 minutes from event onset (= the validator-host cron polls metalgo every 5 minutes; the upper bound is six ticks).</li>
+					<li><strong>Acknowledge</strong>: ≤ 2 hours from detection on Japan business hours, ≤ 8 hours otherwise. An acknowledgement is an explicit <code>/incidents/</code> entry plus a <code>/api/incidents.json</code> update marking the incident open.</li>
+					<li><strong>Status update cadence</strong>: every 4 hours while the incident is open, until resolved.</li>
+					<li><strong>Resolve or escalate to disclosure</strong>: ≤ 24 hours (= aligned with the disclosure commitment above).</li>
+				</ul>
+				<p class="note">These are goodwill operational targets, not contractual SLAs. The validator-host's own integrity always takes precedence over the response cadence (see <em>Validator health first</em> below). The mirrored numeric values are at <a href="/api/evidence.json"><code>/api/evidence.json</code></a> under <code>.operator_commitments.incident_sla</code>.</p>
 			</article>
 
 		<article class="commitment-card">

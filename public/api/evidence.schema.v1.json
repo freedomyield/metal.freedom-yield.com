@@ -79,7 +79,39 @@
 				"non_custodial": { "type": "boolean" },
 				"renewal_transparency": { "type": "boolean" },
 				"decommission_notice_days": { "type": "integer", "minimum": 0 },
-				"incident_disclosure_sla_hours": { "type": "integer", "minimum": 0 }
+				"incident_disclosure_sla_hours": { "type": "integer", "minimum": 0 },
+				"incident_sla": {
+					"type": "object",
+					"description": "ADDITIVE (2026-06-24). Numeric incident-response targets refining the existing incident_disclosure_sla_hours. These are operator goodwill targets, not contractual SLAs; the validator-host's own integrity always takes precedence over response cadence. Mirror of the /commitments/ #2 'Public incident disclosure' card.",
+					"additionalProperties": true,
+					"properties": {
+						"detect_minutes_max": {
+							"type": "integer",
+							"minimum": 0,
+							"description": "Upper bound on time-to-detect from event onset, in minutes. Set by the validator-host cron poll cadence (= 5-minute ticks × 6 = 30 minutes)."
+						},
+						"acknowledge_hours_business": {
+							"type": "integer",
+							"minimum": 0,
+							"description": "Upper bound on time-to-acknowledge during Japan business hours, in hours. Acknowledgement = an explicit /incidents/ entry plus /api/incidents.json open-flag update."
+						},
+						"acknowledge_hours_offhours": {
+							"type": "integer",
+							"minimum": 0,
+							"description": "Upper bound on time-to-acknowledge outside Japan business hours, in hours."
+						},
+						"status_update_cadence_hours": {
+							"type": "integer",
+							"minimum": 0,
+							"description": "Maximum elapsed time between status updates while an incident is open, in hours."
+						},
+						"resolve_or_escalate_hours": {
+							"type": "integer",
+							"minimum": 0,
+							"description": "Upper bound from acknowledgement to either resolution OR escalation to public disclosure under incident_disclosure_sla_hours, whichever comes first."
+						}
+					}
+				}
 			}
 		},
 		"live_artifacts": {

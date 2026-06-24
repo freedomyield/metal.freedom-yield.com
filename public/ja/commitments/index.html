@@ -143,6 +143,14 @@
 				<p>全ての SEV-1 / SEV-2 incident は、解決から 24 時間以内に <a href="/ja/incidents/">incident ページ</a> に
 			timeline / root cause / impact を記載する。実体は <a href="/api/incidents.json"><code>/api/incidents.json</code></a>
 			の JSON。empty list は「隠した list」ではなく、文字通り該当 event がないことを意味する。</p>
+				<p>進行中 incident に対する応答 target 数値:</p>
+				<ul>
+					<li><strong>検知 (detect)</strong>: 発生から 30 分以内 (= validator-host の cron が metalgo を 5 分毎に poll、 上限 6 tick)</li>
+					<li><strong>初動 acknowledge</strong>: 検知から JP 営業時間内 2 時間以内、 営業時間外 8 時間以内。 ack は <code>/incidents/</code> への明示エントリ追加 + <code>/api/incidents.json</code> の open フラグ立て</li>
+					<li><strong>status update cadence</strong>: incident open 中は 4 時間毎に状況更新</li>
+					<li><strong>resolve または開示への escalate</strong>: 24 時間以内 (= 上記 disclosure commitment と整合)</li>
+				</ul>
+				<p class="note">これらは goodwill 運用 target であり、 契約上の SLA ではない。 validator-host 自身の健全性が常に応答 cadence より優先される (下記 <em>validator health first</em> 参照)。 機械可読数値は <a href="/api/evidence.json"><code>/api/evidence.json</code></a> の <code>.operator_commitments.incident_sla</code>。</p>
 			</article>
 
 		<article class="commitment-card">

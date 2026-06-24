@@ -140,6 +140,17 @@
 	</section>
 
 	<section class="card">
+		<h2>時間 sensitive な事項の速い経路</h2>
+		<p><strong>観測可能な validator state</strong> に関する事項(= uptime tick の欠落、 C → P 転送の遅延、 想定外の delegation、 explorer 上の anomaly 等)については、 運用者に連絡せずに済む最速 signal channel が既にあります:</p>
+		<ul>
+			<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">explorer.metalblockchain.org</a> — on-chain の canonical source。 email round-trip より速い。</li>
+			<li><a href="/ja/uptime/">/ja/uptime/</a> + <a href="/ja/peers/">/ja/peers/</a> + <a href="/api/validator.json"><code>/api/validator.json</code></a> — 運用者目線の live mirror。 page に出ている state は運用者にも同じく見えている。</li>
+		</ul>
+		<p><strong>再現可能な public anomaly だが validator outage ではない</strong>事項(= 公開 artifact の schema 違反、 documentation の defect、 clean machine で再現しない verification recipe 等)については、 <a href="https://github.com/freedomyield/metal.freedom-yield.com/issues" rel="noopener noreferrer">GitHub issue</a> を開くほうが email より bandwidth が高い ── public に残り、 comment が累積し、 運用者の応答も同じく public に観測される。</p>
+		<p class="note">escalation は意図的に single-tier。 on-call rota も pager tier も secondary contact も無い。 validator-host integrity は <code>info@</code> と独立した自動 alert で監視されており、 incoming inquiry が本物の outage の第一報になることはない。</p>
+	</section>
+
+	<section class="card">
 		<h2>本 surface の適切な質問</h2>
 		<p>運用者が本 validator surface で意味のある回答ができる質問:</p>
 		<ul>
