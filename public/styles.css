@@ -488,17 +488,37 @@ code {
 		text-align: left;
 		width: 100%;
 	}
-	.nav-dropdown > .nav-dropdown-menu { display: none; }
-	.nav-dropdown.is-open > .nav-dropdown-menu { display: block; }
-	.nav-dropdown-menu {
+	/* Accordion-style expansion — high-end ease-out-expo curve for the
+	 * "luxe" feel requested 2026-06-24. display:block is kept on so the
+	 * collapse / expand is driven by max-height + opacity + padding +
+	 * margin + border-color, all in a single coordinated transition. */
+	.nav-dropdown > .nav-dropdown-menu {
+		display: block;
 		position: static;
-		border: none;
-		box-shadow: none;
 		background: none;
-		padding: 0.2rem 0 0.4rem 1.1rem;
+		box-shadow: none;
 		min-width: 0;
-		border-left: 2px solid var(--border);
+		/* Collapsed state */
+		max-height: 0;
+		opacity: 0;
+		overflow: hidden;
+		padding: 0 0 0 1.1rem;
+		margin: 0 0.5rem 0 1.1rem;
+		border: none;
+		border-left: 2px solid transparent;
+		transition:
+			max-height 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+			opacity 0.3s ease-out,
+			padding 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+			margin 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+			border-left-color 0.3s ease-out;
+	}
+	.nav-dropdown.is-open > .nav-dropdown-menu {
+		max-height: 600px;
+		opacity: 1;
+		padding: 0.2rem 0 0.4rem 1.1rem;
 		margin: 0.1rem 0.5rem 0.3rem 1.1rem;
+		border-left-color: var(--border);
 	}
 	.nav-dropdown-menu a { padding: 0.5rem 0.6rem; }
 }
@@ -1085,8 +1105,10 @@ code {
 	word-break: break-all;
 }
 /* SP では label/value を縦積みにして横幅を稼ぐ。NodeID 等が複数行に
- * 折り返されても card がはみ出さない。 */
-@media (max-width: 480px) {
+ * 折り返されても card がはみ出さない。 2026-06-24: breakpoint を
+ * 480px → 768px に拡大、 中間幅 (= mobile landscape / small tablet)
+ * で dt が長く dd が圧迫されて 1 文字改行する崩れを解消。 */
+@media (max-width: 768px) {
 	.kv {
 		grid-template-columns: 1fr;
 		gap: 0.25rem 0;
@@ -1299,9 +1321,12 @@ code {
 .services-grid > .service-card:first-child .service-card-body .kv {
 	grid-template-columns: max-content 1fr max-content 1fr;
 }
-@media (max-width: 720px) {
+@media (max-width: 768px) {
+	/* 2026-06-24: SP では dt + dd を縦積みに揃える (general .kv rule と
+	 * 同じ breakpoint)。 specific selector の specificity が上で勝つので
+	 * ここに明示的に書き換え。 */
 	.services-grid > .service-card:first-child .service-card-body .kv {
-		grid-template-columns: max-content 1fr;
+		grid-template-columns: 1fr;
 	}
 }
 .services-grid > .service-card {
