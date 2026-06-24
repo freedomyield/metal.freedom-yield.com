@@ -9,9 +9,36 @@
 # Examples:
 #   bash notify.sh high "Validator renewal" "7 days left to re-AddValidator"
 #   bash notify.sh urgent "metalgo down" "container status: exited"
+#
+# Exit codes:
+#
+#   Default mode (NOTIFY_STRICT_EXIT unset or != "1"):
+#     0  success path, including non-2xx HTTP responses
+#        (= byte-identical to historical behaviour; existing callers
+#         observe no change)
+#     1  topic file missing/empty, OR curl-level fatal failure
+#        propagated by set -euo pipefail
+#
+#   Strict mode (NOTIFY_STRICT_EXIT=1):
+#     0  HTTP 2xx
+#     1  topic file missing/empty (= fatal, no retry)
+#     2  curl transport failure (= timeout, DNS, connection refused, ...)
+#     3  HTTP 4xx (excluding 429)
+#     4  HTTP 429 (= rate-limited; retryable)
+#     5  HTTP 5xx (= server error; retryable)
+#
+# Strict mode is opt-in. Existing callers (= check-anomalies.sh notify()
+# wrapper, daily-status.sh, notify-evidence-health.sh, the K-3.5
+# best-effort paths) do NOT set NOTIFY_STRICT_EXIT. The K-3 transition
+# processing in check-anomalies.sh (= commit C4) sets NOTIFY_STRICT_EXIT=1
+# to drive retry classification.
+#
+# See docs/MONITORING_NOTIFY_CALLERS.md (= C3a inventory) and
+# docs/MONITORING_OPS.md §6 for the surrounding K-3 design.
 set -euo pipefail
 
 TOPIC_FILE="${NTFY_TOPIC_FILE:-/etc/<your-namespace>/ntfy-topic}"
+STRICT="${NOTIFY_STRICT_EXIT:-0}"
 PRIO="${1:-default}"
 TITLE="${2:-Freedom Yield ops}"
 shift 2 || true
@@ -64,6 +91,51 @@ if [ -r "$VALIDATOR_JSON" ]; then
   fi
 fi
 
+if [ "$STRICT" = "1" ]; then
+  # Strict mode: capture both curl exit code and HTTP status. Bound the
+  # request with --max-time so a hung ntfy.sh server doesn't stall the
+  # cron tick (= the K-3 retry classifier treats curl failures as
+  # retryable transport errors).
+  #
+  # `set +e` around the capture so the non-zero curl exit doesn't trip
+  # the script-wide `set -e`. We classify the failure explicitly below.
+  set +e
+  HTTP_CODE=$(curl -sS -X POST "https://ntfy.sh/${TOPIC}" \
+    -H "Title: ${TITLE}" \
+    -H "Priority: ${PRIO}" \
+    -H "Tags: ${TAGS}" \
+    -d "$MSG" \
+    -o /dev/null \
+    --max-time 10 \
+    -w "%{http_code}" 2>/dev/null)
+  CURL_RC=$?
+  set -e
+
+  # Curl-level failure (= no HTTP exchange completed). Includes timeout,
+  # DNS, connection refused, TLS handshake fail.
+  if [ "$CURL_RC" -ne 0 ] || [ -z "$HTTP_CODE" ] || [ "$HTTP_CODE" = "000" ]; then
+    echo "notify.sh: transport failure (curl_rc=${CURL_RC}, http_code=${HTTP_CODE:-empty})" >&2
+    exit 2
+  fi
+
+  case "$HTTP_CODE" in
+    2*) echo "notify.sh: ntfy OK ${HTTP_CODE}" >&2; exit 0 ;;
+    429) echo "notify.sh: ntfy rate-limited ${HTTP_CODE}" >&2; exit 4 ;;
+    4*) echo "notify.sh: ntfy 4xx ${HTTP_CODE}" >&2; exit 3 ;;
+    5*) echo "notify.sh: ntfy 5xx ${HTTP_CODE}" >&2; exit 5 ;;
+    *)
+      # Any other status (= 1xx, 3xx, unknown) is treated as transport
+      # ambiguous and retryable.
+      echo "notify.sh: ntfy unexpected ${HTTP_CODE}" >&2
+      exit 2
+      ;;
+  esac
+fi
+
+# Default mode (= byte-identical to historical behaviour). curl's own exit
+# code propagates via set -euo pipefail; HTTP status is printed via -w but
+# does NOT affect the script exit. Existing callers (daily-status,
+# notify-evidence-health, K-3.5 best-effort paths) observe no change.
 curl -sS -X POST "https://ntfy.sh/${TOPIC}" \
   -H "Title: ${TITLE}" \
   -H "Priority: ${PRIO}" \
