@@ -663,7 +663,11 @@
 
 		// Mobile: close on link click + close on outside click. On
 		// desktop we skip these so the always-open nav stays open.
-		var links = details.querySelectorAll('.nav a');
+		// Exclude `.nav-dropdown-toggle` — those are <a> elements whose
+		// mobile click is supposed to expand the sub-menu (handled by
+		// wireNavDropdown); closing the hamburger here would hide the
+		// sub-menu we just opened.
+		var links = details.querySelectorAll('.nav a:not(.nav-dropdown-toggle)');
 		for (var i = 0; i < links.length; i++) {
 			links[i].addEventListener('click', function () {
 				if (!desktopMql.matches) details.open = false;
