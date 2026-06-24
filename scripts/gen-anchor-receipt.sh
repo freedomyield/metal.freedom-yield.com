@@ -175,7 +175,17 @@ fi
 
 # Block num + time from RPC (used in receipt body, regardless of pass status).
 BLOCK_NUM="$(jq -r '(.block_num // .traces[0].block_num // 1)' "${TMP_RPC}" 2>/dev/null || echo 1)"
-BLOCK_TIME="$(jq -r '(.block_time // .traces[0].block_time // "1970-01-01T00:00:00Z")' "${TMP_RPC}" 2>/dev/null || echo "1970-01-01T00:00:00Z")"
+BLOCK_TIME_RAW="$(jq -r '(.block_time // .traces[0].block_time // "1970-01-01T00:00:00Z")' "${TMP_RPC}" 2>/dev/null || echo "1970-01-01T00:00:00Z")"
+# Antelope / XPRNetwork RPC returns block_time as a naive ISO 8601 timestamp
+# (= no timezone suffix), which fails RFC 3339 `format: date-time` validation
+# in ajv. Block times are documented UTC, so append Z when no timezone
+# suffix is present.
+case "${BLOCK_TIME_RAW}" in
+	*Z|*+[0-9][0-9]:[0-9][0-9]|*-[0-9][0-9]:[0-9][0-9]|*+[0-9][0-9][0-9][0-9]|*-[0-9][0-9][0-9][0-9])
+		BLOCK_TIME="${BLOCK_TIME_RAW}" ;;
+	*)
+		BLOCK_TIME="${BLOCK_TIME_RAW}Z" ;;
+esac
 
 # ---- Compose the receipt body ---------------------------------------------
 
@@ -278,21 +288,30 @@ TMP_RECEIPT="$(mktemp -t receipt.XXXXXX).json"
 trap 'rm -f "${TMP_RPC}" "${TMP_RECEIPT}"' EXIT
 printf '%s\n' "${RECEIPT_JSON}" > "${TMP_RECEIPT}"
 
-if ! command -v ajv >/dev/null 2>&1; then
-	# Fall back to a presence-check using jq if ajv is not available.
-	if ! jq -e '
-		(.schema_version == 1)
-		and (.dag_root_hash | test("^[a-f0-9]{64}$"))
-		and (.memo | startswith("fyid1:"))
-		and (.anchor.tx_id | test("^[a-f0-9]{64}$"))
-		and (.anchor.explorer_url | startswith("http"))
-	' "${TMP_RECEIPT}" >/dev/null; then
-		FAILURES+=("pass6_schema_jq_smoke_failed")
-	fi
+# Resolve an ajv invocation: prefer the `ajv` binary if it is on PATH,
+# otherwise fall back to `npx -p ajv-cli -p ajv-formats ajv`. We do NOT
+# silently degrade to a jq smoke check, because a smoke check would let
+# real ajv-rejecting receipts (e.g. block_time in a non-RFC-3339 form)
+# pass through as verification_status="live" — exactly the failure mode
+# we just hit on the 2026-06-23 testnet rehearsal.
+AJV_INVOKE=()
+if command -v ajv >/dev/null 2>&1; then
+	AJV_INVOKE=(ajv)
+elif command -v npx >/dev/null 2>&1; then
+	AJV_INVOKE=(npx --yes -p ajv-cli@5.0.0 -p ajv-formats@3.0.1 ajv)
+fi
+if [ "${#AJV_INVOKE[@]}" -eq 0 ]; then
+	FAILURES+=("pass6_schema_validator_unavailable: ajv is not on PATH and npx is not available")
 else
-	if ! ajv validate --strict=false -s "${SCHEMA_PATH}" -d "${TMP_RECEIPT}" \
+	if ! "${AJV_INVOKE[@]}" validate --strict=false -s "${SCHEMA_PATH}" -d "${TMP_RECEIPT}" \
 			--spec=draft2020 -c ajv-formats >/dev/null 2>&1; then
-		FAILURES+=("pass6_schema_validation_failed: ajv rejected receipt against ${SCHEMA_PATH}")
+		# Re-run with --all-errors so the failure is informative (= the
+		# operator can see exactly what the receipt got wrong without
+		# manually re-invoking ajv).
+		AJV_ERR="$("${AJV_INVOKE[@]}" validate --strict=false --all-errors \
+			-s "${SCHEMA_PATH}" -d "${TMP_RECEIPT}" \
+			--spec=draft2020 -c ajv-formats 2>&1 | tr '\n' ' ' | head -c 600)"
+		FAILURES+=("pass6_schema_validation_failed: ${AJV_ERR}")
 	fi
 fi
 
@@ -308,14 +327,20 @@ fi
 if [ "${#FAILURES[@]}" -eq 0 ]; then
 	FINAL_STATUS="live"
 	EXIT_CODE=0
+	# Pre-compute the failures-JSON outside any subshell expansion of
+	# ${FAILURES[@]}. macOS bash 3.2 + `set -u` errors on `${arr[@]}`
+	# when arr is empty even though `${#arr[@]}` reports 0; the empty
+	# JSON array is the equivalent value with no array dereference.
+	FAILURES_JSON="[]"
 else
 	FINAL_STATUS="failed"
 	EXIT_CODE=4
+	FAILURES_JSON="$(printf '%s\n' "${FAILURES[@]}" | jq -R . | jq -s .)"
 fi
 
 FINAL_RECEIPT="$(jq \
 	--arg status "${FINAL_STATUS}" \
-	--argjson failures "$(printf '%s\n' "${FAILURES[@]}" | jq -R . | jq -s . 2>/dev/null || echo '[]')" \
+	--argjson failures "${FAILURES_JSON}" \
 	'.verification_status = $status
 	 | (if ($failures | length) > 0 then .failures = $failures else . end)
 	' "${TMP_RECEIPT}")"

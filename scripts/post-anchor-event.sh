@@ -240,7 +240,7 @@ EXPLORER_URL=""
 NETWORK_TAG="$(jq -r .network "${FRAG_TMP}")"
 case "${NETWORK_TAG}" in
 	xpr-mainnet)  EXPLORER_BASE="${EXPLORER_BASE_MAIN:-https://explorer.xprnetwork.org}" ;;
-	xpr-testnet)  EXPLORER_BASE="${EXPLORER_BASE_TEST:-https://explorer.xprnetwork-test.metallicus.com}" ;;
+	xpr-testnet)  EXPLORER_BASE="${EXPLORER_BASE_TEST:-https://testnet.explorer.xprnetwork.org}" ;;
 	*) EXPLORER_BASE="${EXPLORER_BASE_MAIN:-https://explorer.xprnetwork.org}" ;;
 esac
 EXPLORER_URL="${EXPLORER_BASE}/transaction/${TX_ID}"
@@ -367,14 +367,20 @@ else
 	# 'anchor-history.jsonl'; see push-to-web-host.sh.
 	HISTORY_APPENDER="${SCRIPT_DIR}/append-anchor-history.sh"
 	if [ -x "${HISTORY_APPENDER}" ]; then
-		HIST_CYCLE_N_ARGS=()
+		# Build the env command line without dereferencing an empty array
+		# (macOS bash 3.2 + `set -u` errors on `${arr[@]}` when arr is
+		# empty even though `${#arr[@]}` reports 0). The CYCLE_N=... arg
+		# is inlined directly when present.
+		HIST_RUN_CMD=(env)
 		if [ -n "${CYCLE_N}" ]; then
-			HIST_CYCLE_N_ARGS=(CYCLE_N="${CYCLE_N}")
+			HIST_RUN_CMD+=(CYCLE_N="${CYCLE_N}")
 		fi
-		if ! env "${HIST_CYCLE_N_ARGS[@]}" \
-				RECEIPT_PATH="${LOCAL_PUBLISH}" \
-				HISTORY_PATH="${REPO_ROOT}/public/api/anchor-history.jsonl" \
-				"${HISTORY_APPENDER}" >&2; then
+		HIST_RUN_CMD+=(
+			RECEIPT_PATH="${LOCAL_PUBLISH}"
+			HISTORY_PATH="${REPO_ROOT}/public/api/anchor-history.jsonl"
+			"${HISTORY_APPENDER}"
+		)
+		if ! "${HIST_RUN_CMD[@]}" >&2; then
 			echo "ERROR: append-anchor-history.sh refused to append the new line" >&2
 			exit 6
 		fi

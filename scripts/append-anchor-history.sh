@@ -166,22 +166,29 @@ TMP_LINE="$(mktemp -t historyline.XXXXXX).json"
 trap 'rm -f "${TMP_LINE}"' EXIT
 printf '%s' "${NEW_LINE}" > "${TMP_LINE}"
 
+# Resolve an ajv invocation: prefer the `ajv` binary if it is on PATH,
+# otherwise fall back to `npx -p ajv-cli -p ajv-formats ajv`. We do NOT
+# silently degrade to a jq smoke check — a smoke check would let real
+# schema-invalid lines (e.g. naive block_time without timezone) get
+# appended as if valid, which is exactly the regression that broke the
+# 2026-06-23 testnet rehearsal.
+AJV_INVOKE=()
 if command -v ajv >/dev/null 2>&1; then
-	if ! ajv validate --strict=false -s "${SCHEMA_PATH}" -d "${TMP_LINE}" \
-			--spec=draft2020 -c ajv-formats >/dev/null 2>&1; then
-		echo "REJECTED: schema_validation_failed ajv rejected new line against ${SCHEMA_PATH}" >&2
-		exit 3
-	fi
-else
-	if ! jq -e '
-		.schema_version == 1
-		and (.tx_id | test("^[a-f0-9]{64}$"))
-		and (.cycle_n >= 1)
-		and (.event_type | IN("cyclestart","cycleend","idrotate","manual"))
-	' "${TMP_LINE}" >/dev/null; then
-		echo "REJECTED: schema_smoke_failed jq fallback presence check rejected new line" >&2
-		exit 3
-	fi
+	AJV_INVOKE=(ajv)
+elif command -v npx >/dev/null 2>&1; then
+	AJV_INVOKE=(npx --yes -p ajv-cli@5.0.0 -p ajv-formats@3.0.1 ajv)
+fi
+if [ "${#AJV_INVOKE[@]}" -eq 0 ]; then
+	echo "REJECTED: schema_validator_unavailable ajv is not on PATH and npx is not available" >&2
+	exit 3
+fi
+if ! "${AJV_INVOKE[@]}" validate --strict=false -s "${SCHEMA_PATH}" -d "${TMP_LINE}" \
+		--spec=draft2020 -c ajv-formats >/dev/null 2>&1; then
+	AJV_ERR="$("${AJV_INVOKE[@]}" validate --strict=false --all-errors \
+		-s "${SCHEMA_PATH}" -d "${TMP_LINE}" \
+		--spec=draft2020 -c ajv-formats 2>&1 | tr '\n' ' ' | head -c 600)"
+	echo "REJECTED: schema_validation_failed ${AJV_ERR}" >&2
+	exit 3
 fi
 
 # ---- Atomic append: invariant (d) byte preservation + (e) final LF ------
