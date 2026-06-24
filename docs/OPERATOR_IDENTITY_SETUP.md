@@ -697,6 +697,55 @@ holds it.
 per the CLI version). The `/etc/freedom-yield/anchor.k1.key` file is
 retained as the canonical source for re-import after CLI reset.
 
+## B4.5. Wallet keystore password (= 32-character secret created during B4)
+
+`proton-cli` 0.1.98's `proton key:add` does not simply append the key
+bytes to a plaintext file. On its first invocation for a given OS user,
+it prompts to **create a wallet keystore** that wraps the K1 private key
+with a symmetric password. Every subsequent `proton key:unlock` (B5b)
+re-enters that password to decrypt the wrapper.
+
+This password is a separate secret from the `PVT_K1_…` private key
+itself. Both must be stored in Dashlane; either alone is insufficient
+to broadcast.
+
+### What to enter at the wallet-creation prompt
+
+When `proton key:add` (B4) runs for the first time, the operator must:
+
+1. Choose a **32-character** password. Use Dashlane's password
+   generator: length 32, default character set (no symbol-class
+   restrictions). 32 chars matches the operator-standard set elsewhere
+   in this project and gives the operator-Mac side a uniform
+   keystore-secret format.
+2. Enter the password at the prompt (no echo).
+3. Re-enter the password at the confirmation prompt.
+4. Save the password to Dashlane immediately, under a distinct entry
+   name from the `PVT_K1_…` entry. Suggested entry names:
+   - K1 private key: `metalfreedom anchor K1 (PVT_K1_)`
+   - Wallet keystore password: `metalfreedom anchor wallet (32-char keystore)`
+
+### Why two separate Dashlane entries
+
+Keeping the K1 private key and the wallet password in distinct entries
+makes the runbook unambiguous at B5b (= the 13:00 JST cycle-trigger
+window): "the 32-character keystore password from Dashlane" refers
+exactly to the second entry, not to the K1 private key. Single-entry
+storage tends to produce on-the-day confusion under time pressure.
+
+### Verification
+
+After B4 completes successfully, the operator can confirm the wallet
+exists and that the password is known by running B5b's
+`proton key:unlock` once during initial setup (= not waiting until cycle
+day). If `proton key:unlock` fails with "incorrect password", the
+operator has either mistyped the saved password in Dashlane, or
+`proton key:add` did not in fact prompt for a wallet password on this
+CLI version (older proton-cli builds store the key in plaintext under
+`~/.proton/keys` instead). In the plaintext-storage case, B5b is moot
+and the runbook can skip the unlock step on cycle day — but verifying
+which case applies before cycle day is mandatory.
+
 ## B5. Self-test from the validator host
 
 ```sh
@@ -723,10 +772,16 @@ until the dry-run is clean.
 
 `proton-cli` 0.1.98 stores the K1 anchor private key in an encrypted
 keystore on disk. Every `proton action ...` invocation requires the
-keystore to be **unlocked** before signing. Unlock state is per
-process-group / shell session and persists in memory only — there is
-no "unlock once, store decrypted to disk" mode without explicit
-operator action.
+keystore to be **unlocked** before signing.
+
+The unlock state is held by `proton-cli`'s on-host runtime layer
+(observed empirically: see §Persistence below). Once unlocked, it
+survives across SSH disconnects and cron-spawned child processes, and
+persists until the validator host reboots, `proton key:lock` is run,
+or the holding process is killed. The 2026-06-24 testnet rehearsal
+confirmed this: after the operator unlocked once in a TTY-attached
+shell, the cron-triggered broadcast completed in ~30 seconds despite
+running in a separate process group with no inherited shell state.
 
 When the cron-triggered `scripts/post-anchor-event.sh` invokes
 `scripts/sign-anchor-event.sh`, the underlying `proton action` call
@@ -745,10 +800,14 @@ Before each cycle transition broadcast (= each time
 MUST manually unlock the keystore on the validator host:
 
 ```sh
-ssh "${VALIDATOR_SSH_HOST}" 'sudo -u deploy proton key:unlock'
-# Enter the 32-character keystore password from Dashlane when
-# prompted. The TTY is yours; this is the one place the prompt
-# is satisfiable.
+ssh -t "${VALIDATOR_SSH_HOST}" 'sudo -u deploy proton key:unlock'
+# The -t flag forces remote PTY allocation so the password prompt has
+# a controlling terminal to read from. Without -t, the prompt cannot
+# be satisfied (it either errors out on /dev/tty open or echoes the
+# password to the local terminal in cleartext). Enter the 32-character
+# wallet keystore password from Dashlane when prompted (see B4.5 for
+# where this password came from). The TTY is yours; this is the one
+# place the prompt is satisfiable.
 ```
 
 Expected output: `Success: Unlocked wallet`.
@@ -758,6 +817,7 @@ Verify the unlocked state:
 ```sh
 ssh "${VALIDATOR_SSH_HOST}" 'sudo -u deploy proton key:list'
 # Expect every key tagged with `(unlocked)` rather than `(locked)`.
+# -t not needed here — key:list does not prompt for input.
 ```
 
 ### Persistence
@@ -781,23 +841,71 @@ If the cron triggers a broadcast with a locked keystore, the chain is:
 
 1. `post-anchor-event.sh` invokes `sign-anchor-event.sh`.
 2. `sign-anchor-event.sh` invokes `proton action ...`.
-3. `proton action` writes a password prompt to a stdin that the cron
-   environment has redirected to `/dev/null`.
-4. The process hangs indefinitely; no receipt is produced, no
-   `last-anchored-root` state file is updated, and the cycle's
-   anchor is missing on chain.
+3. The cron environment has no controlling terminal, so `proton
+   action`'s password prompt — which the CLI satisfies by opening
+   `/dev/tty` — cannot be answered. The call does not exit; the
+   process hangs indefinitely.
+4. No receipt is produced, no `last-anchored-root` state file is
+   updated, and the cycle's anchor is missing on chain.
 
-Detection: the absence of a fresh entry in `anchor-history.jsonl`
-within ~5 minutes of the cycle transition, combined with the
-presence of a long-running `node /usr/local/bin/proton action`
-process on the validator host, indicates the locked-keystore hang.
+**Pile-up under `*/5 * * * *` cadence.** `scripts/watch-anchor-events.sh`
+fires every 5 minutes with no `flock`, no `timeout`, no PID/self-check,
+and no concurrency guard — and it only writes
+`anchor-watcher-state.json` *after* the driver returns. While the first
+invocation is blocked on the password prompt, the state file still shows
+the pre-transition `is_present` value, so every subsequent 5-minute tick
+re-detects the same transition and starts a fresh hung pipeline on top
+of the previous one. The steady-state observation is therefore
+**N ≥ (minutes-since-hang / 5) + 1** stacked hangs, not a single one.
+The 2026-06-24 testnet rehearsal already saw N=2 within ~10 minutes.
 
-Recovery: kill the hung `proton` process, run `proton key:unlock`
-in a TTY, then re-trigger `post-anchor-event.sh` manually. The
-script is idempotent — the same `dag_root_hash` will be anchored
-on the second attempt without producing a duplicate inscription
-(the `last-anchored-root` state file remains unchanged because
-step 4 above did not update it).
+### Detection
+
+Within ~5 minutes of the expected cycle transition, check:
+
+```sh
+ssh "${VALIDATOR_SSH_HOST}" 'pgrep -af "proton action"'
+```
+
+A non-empty result (one or more entries) combined with the absence of
+a fresh line in `/api/anchor-history.jsonl` indicates the locked-keystore
+hang. The reported number of `proton action` entries grows by 1 every
+5 minutes until recovery, so the count is also a rough age indicator.
+
+Note: matching by the absolute interpreter path (e.g.
+`node /usr/local/bin/proton action`) is install-path-specific and
+fails under nvm, custom npm prefixes, yarn-global, or shell-wrapper
+installs. Use the substring match shown above.
+
+### Recovery
+
+```sh
+# 1. Enumerate the full pile of hung pipeline chains (typically N ≥ 2).
+ssh "${VALIDATOR_SSH_HOST}" 'pgrep -af "proton action"'
+ssh "${VALIDATOR_SSH_HOST}" 'pgrep -af anchor-event'
+ssh "${VALIDATOR_SSH_HOST}" 'pgrep -af watch-anchor-events'
+
+# 2. Kill every hung process across all three layers. Each cron tick
+#    spawned a watch → post-anchor-event → sign-anchor-event → proton
+#    chain, so killing only the leaf `proton` leaves the wrappers
+#    holding their wait() — and the next 5-minute tick spawns yet another
+#    chain on top.
+ssh "${VALIDATOR_SSH_HOST}" 'sudo -u deploy pkill -f "proton action"'
+ssh "${VALIDATOR_SSH_HOST}" 'sudo -u deploy pkill -f anchor-event'
+ssh "${VALIDATOR_SSH_HOST}" 'sudo -u deploy pkill -f watch-anchor-events'
+
+# 3. Unlock the keystore in a real TTY (see "Required pre-cycle step"
+#    above for why -t is mandatory).
+ssh -t "${VALIDATOR_SSH_HOST}" 'sudo -u deploy proton key:unlock'
+
+# 4. Re-trigger the broadcast manually.
+ssh "${VALIDATOR_SSH_HOST}" 'sudo -u deploy bash /home/deploy/metal.freedom-yield.com/scripts/post-anchor-event.sh'
+```
+
+The script is idempotent — the same `dag_root_hash` will be anchored on
+the manual re-run without producing a duplicate inscription, because
+the `last-anchored-root` state file was never updated by the hung
+chains (step 4 of the failure chain above never completed).
 
 ### Why this is not automated away
 
@@ -874,9 +982,18 @@ the operator should additionally:
 ## B7. Backup-of-record and recovery
 
 The single source of truth for the anchor private key over time is
-**Dashlane**. The `/etc/freedom-yield/anchor.k1.key` file on the
-validator host is a live runtime copy, regenerable from Dashlane via
-B3 + B4. There is no second backup of the key:
+**Dashlane**, in two distinct entries:
+
+1. The K1 anchor private key (`PVT_K1_…`), created in A4.
+2. The 32-character wallet keystore password, created in B4.5.
+
+Both are required to broadcast: the K1 key alone cannot sign because
+the on-host keystore wraps it; the wallet password alone cannot sign
+because it is only a wrapper for a key that is also stored separately.
+The `/etc/freedom-yield/anchor.k1.key` file on the validator host is a
+live runtime copy of (1), regenerable from Dashlane via B3 + B4 (and
+B4.5 re-establishes the wrapper). There is no second backup of either
+secret:
 
 - Not on the operator's other devices.
 - Not in any cloud-synced directory.
@@ -893,13 +1010,18 @@ Recovery scenarios:
   judges the Mac wipe might have leaked the key. Otherwise the
   Dashlane-restored key remains usable.
 - **Dashlane account compromise**: this is a CRITICAL incident.
-  Execute B6 (rotation) immediately on a clean device with a fresh
-  proton-cli keystore; assume the old anchor key is in adversary
-  hands and the linkauth scope (= eosio.token::transfer with
+  Both secrets — the K1 private key and the wallet keystore password
+  — are exposed; the adversary can decrypt and use the key on any
+  clean machine. Execute B6 (rotation) immediately on a clean device
+  with a fresh proton-cli keystore; assume the old anchor key is in
+  adversary hands and the linkauth scope (= eosio.token::transfer with
   `from = metalfreedom`) is exploitable until the rotation lands.
   Note that the linkauth scope is intentionally narrow: the
   adversary cannot move tokens out of `metalfreedom` arbitrarily,
-  cannot change permissions, and cannot deploy contracts.
+  cannot change permissions, and cannot deploy contracts. After
+  rotation, generate a new 32-character wallet password (per B4.5) and
+  save it to the new Dashlane account; do not reuse the compromised
+  password.
 
 ## B8. What B does NOT change
 
