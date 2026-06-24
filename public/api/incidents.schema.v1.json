@@ -1,0 +1,137 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://metal.freedom-yield.com/api/incidents.schema.v1.json",
+	"title": "Freedom Yield Metal — Incidents Audit Packet v1",
+	"description": "Formal contract for /api/incidents.json. Records operator-visible events affecting the validator host, the public web, the monitoring pipeline, or the on-chain validator entry. Three event categories are kept in one stream and distinguished by 'type': 'incident' (unintended condition), 'scheduled_maintenance' (planned operator work, announced ahead), 'drill' (deliberate exercise of a runbook). Severity classification uses the Critical/Major/Minor/Info taxonomy displayed on /incidents/; the SEV-1..4 mapping documented in docs/INCIDENT_RESPONSE.md is internal. potentiallyAffectedStart is null when undetermined; the separate potentiallyAffectedStartStatus enum distinguishes 'known' / 'undetermined' / 'not_applicable'. confirmedPauseWindowEnd is null while the window is still ongoing. resolutionDate is null while the event is open or under_remediation. Schema is additive-only-within-v1; breaking changes require /api/incidents.schema.v2.json. The v1 URL stays reachable for at least 18 months after v2 publication.",
+	"x-issued-at": "2026-06-24T00:00:00Z",
+	"x-stability": "additive-only-within-v1",
+	"x-companion-public-page": "https://metal.freedom-yield.com/incidents/",
+	"x-companion-format-guide": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/INCIDENT_RESPONSE.md",
+	"type": "object",
+	"required": ["validatorSince", "incidents"],
+	"additionalProperties": true,
+	"properties": {
+		"_comment": {
+			"type": "string",
+			"description": "Free-form human-readable preamble. Consumers MAY ignore."
+		},
+		"validatorSince": {
+			"type": "string",
+			"format": "date",
+			"pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+			"description": "ISO 8601 date when the validator went live on mainnet. Used by readers as a denominator for incident-rate calculations."
+		},
+		"incidents": {
+			"type": "array",
+			"description": "Append-only list. Existing entries SHOULD NOT be removed; entries can be updated in-place to advance status / add resolutionDate / link a postmortem. Order is newest-first by detectionDate per page rendering convention.",
+			"items": { "$ref": "#/$defs/incident" }
+		}
+	},
+	"$defs": {
+		"incident": {
+			"type": "object",
+			"required": [
+				"id",
+				"type",
+				"detectionDate",
+				"title",
+				"severity",
+				"status",
+				"summary",
+				"potentiallyAffectedStart",
+				"potentiallyAffectedStartStatus"
+			],
+			"additionalProperties": true,
+			"properties": {
+				"id": {
+					"type": "string",
+					"pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}$",
+					"description": "Stable identifier in YYYY-MM-DD-NN form. NN is a per-day sequence (01, 02, ...) so two events detected the same day each get a distinct id."
+				},
+				"type": {
+					"enum": ["incident", "scheduled_maintenance", "drill"],
+					"description": "Event category. 'incident' = unintended condition. 'scheduled_maintenance' = planned, announced ahead. 'drill' = deliberate runbook exercise."
+				},
+				"detectionDate": {
+					"type": "string",
+					"format": "date",
+					"pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+					"description": "ISO date when the operator first became aware of the condition (for incidents) or began the planned operation (for scheduled_maintenance / drill)."
+				},
+				"confirmedPauseWindowStart": {
+					"oneOf": [
+						{
+							"type": "string",
+							"format": "date-time",
+							"pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+						},
+						{ "type": "null" }
+					],
+					"description": "ISO 8601 UTC timestamp marking the start of a confirmed pause / unavailability window. Null when not applicable (e.g. event has no observable pause)."
+				},
+				"confirmedPauseWindowEnd": {
+					"oneOf": [
+						{
+							"type": "string",
+							"format": "date-time",
+							"pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+						},
+						{ "type": "null" }
+					],
+					"description": "ISO 8601 UTC timestamp marking the end of the confirmed pause window. Null while the window is still ongoing."
+				},
+				"potentiallyAffectedStart": {
+					"oneOf": [
+						{
+							"type": "string",
+							"format": "date",
+							"pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+						},
+						{ "type": "null" }
+					],
+					"description": "ISO date marking the earliest plausible start of impact. MUST be null when the start cannot be reconstructed from records reviewed; use the companion potentiallyAffectedStartStatus to disambiguate. Plain string sentinels like 'undetermined' are NOT permitted — use null + status."
+				},
+				"potentiallyAffectedStartStatus": {
+					"enum": ["known", "undetermined", "not_applicable"],
+					"description": "Disambiguates potentiallyAffectedStart=null. 'known' = the date in potentiallyAffectedStart is reliable. 'undetermined' = potentiallyAffectedStart is null because the start could not be reconstructed from records reviewed. 'not_applicable' = the event type has no notion of an affected-start (e.g. scheduled_maintenance with no impact)."
+				},
+				"resolutionDate": {
+					"oneOf": [
+						{
+							"type": "string",
+							"format": "date",
+							"pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+						},
+						{ "type": "null" }
+					],
+					"description": "ISO date when the event was marked resolved. Null while status is 'open' or 'under_remediation'."
+				},
+				"title": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Short human-readable headline. Rendered on /incidents/."
+				},
+				"severity": {
+					"enum": ["Critical", "Major", "Minor", "Info"],
+					"description": "Public severity class per /incidents/ taxonomy. Critical = key compromise or validator down 24h+. Major = site down or metalgo down 4h+. Minor = TLS warnings, transient degradation. Info = configuration change or planned maintenance. Internal SEV-1..4 mapping is documented in docs/INCIDENT_RESPONSE.md and is NOT exposed in this schema."
+				},
+				"status": {
+					"enum": ["open", "under_remediation", "resolved"],
+					"description": "Workflow status. 'open' = newly detected, not yet being actively remediated. 'under_remediation' = operator is working on it. 'resolved' = closed, no further action expected."
+				},
+				"summary": {
+					"type": "string",
+					"minLength": 1,
+					"description": "1-3 sentence human-readable summary suitable for rendering on /incidents/. SHOULD be hedged when the impact is not fully reconstructed (e.g. 'records reviewed do not indicate impact' rather than 'no impact occurred')."
+				},
+				"postmortemUrl": {
+					"oneOf": [
+						{ "type": "string", "format": "uri" },
+						{ "type": "null" }
+					],
+					"description": "Link to the technical postmortem. Null while the postmortem has not been published. URL is typically a docs/POSTMORTEM_*.md path on the public repo."
+				}
+			}
+		}
+	}
+}
