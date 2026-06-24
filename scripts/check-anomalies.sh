@@ -433,8 +433,9 @@ retryable_notify_rc() {
 #   returns !0 → caller MUST NOT mutate candidate (= ORIGINAL_STATE value
 #                stays, next cron run re-detects and re-attempts).
 # At most 2 attempts per call (= 1 initial + 1 in-run retry). No fixed
-# upper bound on lifetime duplicates across runs (= subject to ntfy.sh's
-# ~12h client-side history cache when delivery eventually succeeds).
+# upper bound on lifetime duplicates across runs. Delivery is at-least-once:
+# duplicates are possible (= ambiguous transport success, state-commit
+# failure after notify success), and not suppressed by this pipeline.
 notify_or_keep() {
   local prio="$1" title="$2" body="$3" rc
   attempt_notify "$prio" "$title" "$body"; rc=$?

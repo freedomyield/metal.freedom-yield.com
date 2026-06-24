@@ -233,9 +233,13 @@ This implies the candidate may end up with a heterogeneous mix of new and old fi
 There is **no fixed upper bound** on how many notifications a single event may produce over its lifetime. The correct way to state the bound:
 
 - **Per single cron run**: at most 2 attempts per transition (= 1 initial + 1 retry).
-- **Per event lifetime**: if a transition keeps failing across cron runs (= permanent notify failure each run), the same transition re-detects + re-attempts every 5 minutes. There is no in-script counter that caps the lifetime attempts. At-least-once delivery means there is also no guarantee against duplicates, and at-most-once is not provided.
+- **Per event lifetime**: if a transition keeps failing across cron runs (= permanent notify failure each run), the same transition re-detects + re-attempts every 5 minutes. There is no in-script counter that caps the lifetime attempts.
 
-Operator-side dedup is provided by ntfy.sh's own ~12-hour history cache (= identical message bodies appear once in the Android client over that window). This is not a script-level guarantee.
+Delivery semantics is **at-least-once**. Duplicates are possible and not suppressed by this pipeline. Specifically:
+
+- If notify returns success but the subsequent atomic state commit fails (= rc 8), the next cron run will re-detect the same transition and re-notify.
+- If notify ambiguously succeeds at the transport level but the message did not actually reach the operator device (= ntfy server-side failure window not exposed through HTTP status, or device-side dropped push), the field still advances in the candidate because the script observed HTTP 2xx.
+- Any client-side history-cache behaviour (= ntfy Android client, operator's mail filter, etc.) is **not** a duplicate-suppression guarantee provided by this pipeline. Operators should expect occasional duplicates and design escalation routines accordingly.
 
 ### 6.4 Atomic commit details
 
@@ -389,17 +393,186 @@ ls -la "$STATE_BASE/locks/"
 
 After this setup, the cron line in `/etc/cron.d/metal-anomalies` may be un-commented by the operator. The cron uses the same `ANOMALY_STATE_DIR=/var/lib/freedom-yield` env (= or whatever path the operator standardised).
 
-## 11. Resume-from-pause checklist (= operator-driven)
+## 11. Resume-from-pause checklist (= operator-driven, step-by-step)
 
-1. Confirm K-3.5, K-3, K-4 are implemented in `scripts/check-anomalies.sh` at the expected commit SHA.
-2. Confirm `scripts/anomaly-state-init.sh` exists and is executable.
-3. Run a dry-run on the validator host with the cron line still commented:
-   - `sudo -u deploy ANOMALY_STATE_DIR=/var/lib/freedom-yield bash scripts/check-anomalies.sh; echo "rc=$?"`
-   - Expect rc=0 in steady state, or rc 2/3/4/5/7 with clear stderr indicating the cause.
-4. Verify lock file is created and contention counter behaves (= run twice in quick succession; expect second invocation to skip).
-5. Run the operator-manual E2E single-transition test (= optional but recommended), confirm Android receives a TEST-prefixed push.
-6. Un-comment the cron line in `/etc/cron.d/metal-anomalies`.
-7. Mark the public incident `under_remediation → resolved` once 24 hours of clean cron behaviour are recorded.
+Each step lists the exact command, the expected output, and the abort criterion. If a step's expected output is not met, **stop and triage** rather than proceeding to the next step. The cron line in `/etc/cron.d/metal-anomalies` MUST stay commented through step 6.
+
+### Step 1 — confirm code base is at the expected commit SHA
+
+```bash
+cd /home/deploy/metal.freedom-yield.com
+git log -1 --format='%H %s'
+grep -c '^# === 4B.5.2 K-4:' scripts/check-anomalies.sh
+grep -c '^# === 4B.5.2 K-3.5:' scripts/check-anomalies.sh
+grep -c '^# === 4B.5.2 K-3:' scripts/check-anomalies.sh
+test -x scripts/anomaly-state-init.sh && echo "init: executable" || echo "init: NOT executable"
+```
+
+**Expected**:
+
+- `git log -1` shows a SHA at or after `6aa789b` (= C4 K-3 candidate-state).
+- Each `grep -c` returns `1` (= one section each for K-4, K-3.5, K-3).
+- `init: executable`.
+
+**Abort if**: any grep returns `0`, or init script not executable. Re-pull the code base or chmod +x the script.
+
+### Step 2 — confirm host setup is in place
+
+```bash
+ls -la /var/lib/freedom-yield/locks/ 2>&1
+stat -c '%U:%G %a' /var/lib/freedom-yield/locks 2>/dev/null
+stat -c '%U:%G %a' /var/lib/freedom-yield 2>/dev/null
+```
+
+**Expected**:
+
+- `/var/lib/freedom-yield/locks/` exists.
+- Both dirs owned by `deploy:deploy`. State dir permission `0750`, lock dir `0700`.
+
+**Abort if**: dir missing or wrong ownership. Run the §10 setup commands as root.
+
+### Step 3 — run the cron once dry, with the cron line still commented
+
+```bash
+sudo -u deploy \
+  ANOMALY_STATE_DIR=/var/lib/freedom-yield \
+  bash /home/deploy/metal.freedom-yield.com/scripts/check-anomalies.sh; \
+  echo "rc=$?"
+```
+
+**Expected one of**:
+
+- `rc=0` (= steady state, no transitions).
+- `rc=7` with stderr `[K-3.5] state file missing` (= state file has never been initialised, OR was removed during the maintenance window). Proceed to Step 4 (init).
+- `rc=4` with stderr `[K-3.5] new corruption` or `[K-3.5] state corruption recurrence` (= prior state file is corrupted). Inspect the quarantine dir before initialising.
+- `rc=3` with stderr `[K-2] observedAt stale` (= server-status.json is stale, fix the upstream cron first).
+- `rc=2` with stderr `[K-1]` (= server-status.json missing fields, fix upstream).
+
+**Abort if**:
+
+- `rc=5` (= lock dir missing or unopenable). Re-do Step 2.
+- `rc=8` (= state commit failure). Filesystem issue. Investigate before continuing.
+- Any unexpected stderr that doesn't match a documented gate.
+
+### Step 4 — initialise baseline state (= operator-driven, manual)
+
+Run only if Step 3 returned `rc=7` (= state file missing). If Step 3 returned `rc=4`, first inspect `/var/lib/freedom-yield/quarantine/*/diag.txt` to understand the corruption and decide whether to also pass `--clear-quarantine`.
+
+```bash
+# Dry run first — shows the plan, makes no changes.
+sudo -u deploy bash /home/deploy/metal.freedom-yield.com/scripts/anomaly-state-init.sh \
+  --baseline-status=running
+# Apply.
+sudo -u deploy bash /home/deploy/metal.freedom-yield.com/scripts/anomaly-state-init.sh \
+  --confirm --baseline-status=running
+sudo -u deploy jq . /var/lib/freedom-yield/anomaly-state.json | head -20
+ls /var/lib/freedom-yield/.missing-notified.marker 2>&1 | head -1
+```
+
+**Expected**:
+
+- Dry-run prints `Plan (no changes will be made without --confirm)` and exits non-zero.
+- Apply prints `[init] lock acquired`, `[init] baseline state written`, `=== init complete ===` and exits 0.
+- `jq .` shows the baseline with `metalgo: "running"`, `caddy: "running"`, etc.
+- `ls .missing-notified.marker` returns "No such file or directory" (= marker was removed or never existed).
+
+**Abort if**:
+
+- Apply step exits non-zero. Possible causes: lock held by another process (= exit 3, retry shortly), state write failure (= exit 4, investigate dir permissions), structural error (= exit 2 / 5).
+- Baseline JSON shows unexpected values.
+
+### Step 5 — re-run the cron and verify steady state
+
+```bash
+sudo -u deploy \
+  ANOMALY_STATE_DIR=/var/lib/freedom-yield \
+  bash /home/deploy/metal.freedom-yield.com/scripts/check-anomalies.sh; \
+  echo "rc=$?"
+```
+
+**Expected**:
+
+- `rc=0`.
+- stderr contains `[K-4] lock acquired` and either `[K-3] candidate == original (canonical); no commit, mtime preserved` OR `[K-3] committed candidate to ...` (depending on whether observations produced a real change).
+
+**Abort if**:
+
+- Non-zero exit. Re-triage per Step 3.
+
+### Step 6 — verify K-4 contention behaviour
+
+```bash
+# Acquire the lock in background, then immediately invoke the script.
+(
+  flock -x 200; sleep 5
+) 200>/var/lib/freedom-yield/locks/check-anomalies.lock &
+sleep 0.3
+sudo -u deploy \
+  ANOMALY_STATE_DIR=/var/lib/freedom-yield \
+  bash /home/deploy/metal.freedom-yield.com/scripts/check-anomalies.sh 2>&1 | head -3
+echo "rc=$?"
+wait
+cat /var/lib/freedom-yield/anomaly-contention-counter
+```
+
+**Expected**:
+
+- Stderr contains `[K-4-SKIP] previous run still holds lock`.
+- `rc=0`.
+- Counter is `1` (or one higher than its prior value if not freshly initialised).
+
+**Abort if**: stderr does NOT contain `[K-4-SKIP]`, or counter did not increment.
+
+### Step 7 — operator-manual E2E single-transition (optional, recommended)
+
+Pre-condition: operator has placed a test-only topic at `/etc/freedom-yield/ntfy-topic-test` (= distinct from production). Operator has subscribed to the test topic on Android.
+
+```bash
+# Push a TEST-prefixed message manually via notify.sh (default mode, against test topic).
+NTFY_TOPIC_FILE=/etc/freedom-yield/ntfy-topic-test \
+  bash /home/deploy/metal.freedom-yield.com/scripts/notify.sh \
+  default "TEST: resume verification $(date -u +%H%M%S)" "evt-$(openssl rand -hex 4) — operator E2E"
+```
+
+**Expected**: Operator's Android receives a notification within 30s, with TEST prefix and a unique event id.
+
+**Abort if**: push not received within 90s. Check ntfy.sh topic subscription, device DND, network.
+
+### Step 8 — un-comment the cron line
+
+```bash
+sudo cat /etc/cron.d/metal-anomalies
+# Operator manually edits /etc/cron.d/metal-anomalies to remove the leading '# ' on the cron line.
+# Then verify:
+sudo cat /etc/cron.d/metal-anomalies | grep -n 'check-anomalies'
+```
+
+**Expected**: the line begins with `*/5 * * * * deploy bash ...` (= no leading `#`).
+
+**Abort if**: comment removal failed. Re-edit.
+
+### Step 9 — observe two cron firings (= 10 minutes)
+
+```bash
+# Wait ~12 minutes after Step 8, then:
+tail -50 /var/log/anomalies.log
+sudo -u deploy stat -c '%y' /var/lib/freedom-yield/anomaly-state.json
+```
+
+**Expected**:
+
+- Log contains 2 cron firings (= one per 5-min tick).
+- Each firing logs `[K-4] lock acquired`, and either `[K-3] candidate == original` OR `[K-3] committed candidate`.
+- No `[K-1]`, `[K-2]`, `[K-3.5]`, `[K-4-SKIP]` lines (= unless an actual condition arose).
+
+**Abort if**:
+
+- Cron did not fire (= log unchanged): check `systemctl status cron`, journalctl for cron.
+- Repeated gate failures: re-pause the cron, re-triage.
+
+### Step 10 — resolve the public incident
+
+After 24 hours of clean cron behaviour (= no permanent-fail notifications, no quarantine, no contention counter growth beyond occasional benign skips), update the public `/incidents/` entry from `under_remediation → resolved` and add the resolution date.
 
 ## 12. Out of scope for the C0..C3a batch
 
