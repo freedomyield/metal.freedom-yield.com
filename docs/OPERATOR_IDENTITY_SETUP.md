@@ -839,13 +839,17 @@ expected.
 
 If the cron triggers a broadcast with a locked keystore, the chain is:
 
-1. `post-anchor-event.sh` invokes `sign-anchor-event.sh`.
-2. `sign-anchor-event.sh` invokes `proton action ...`.
-3. The cron environment has no controlling terminal, so `proton
+1. cron fires `scripts/watch-anchor-events.sh` (= the cron-driven
+   entry point, every 5 minutes) which polls metalgo and, on a
+   detected presence-transition, synchronously invokes
+   `scripts/post-anchor-event.sh`.
+2. `post-anchor-event.sh` invokes `scripts/sign-anchor-event.sh`.
+3. `sign-anchor-event.sh` invokes `proton action ...`.
+4. The cron environment has no controlling terminal, so `proton
    action`'s password prompt — which the CLI satisfies by opening
    `/dev/tty` — cannot be answered. The call does not exit; the
    process hangs indefinitely.
-4. No receipt is produced, no `last-anchored-root` state file is
+5. No receipt is produced, no `last-anchored-root` state file is
    updated, and the cycle's anchor is missing on chain.
 
 **Pile-up under `*/5 * * * *` cadence.** `scripts/watch-anchor-events.sh`
@@ -898,14 +902,47 @@ ssh "${VALIDATOR_SSH_HOST}" 'sudo -u deploy pkill -f watch-anchor-events'
 #    above for why -t is mandatory).
 ssh -t "${VALIDATOR_SSH_HOST}" 'sudo -u deploy proton key:unlock'
 
-# 4. Re-trigger the broadcast manually.
-ssh "${VALIDATOR_SSH_HOST}" 'sudo -u deploy bash /home/deploy/metal.freedom-yield.com/scripts/post-anchor-event.sh'
+# 4. Before re-broadcasting, confirm no earlier attempt actually
+#    landed on chain. The hang in step 4 of the failure chain above
+#    is normally pre-broadcast (proton action stalls at /dev/tty
+#    open BEFORE signing), but a chain that crashed AFTER signing
+#    but BEFORE `last-anchored-root` updated would leave a real
+#    inscription on chain. Re-broadcasting in that case produces a
+#    duplicate `fyid1:<dag_root_hash>` memo. Check first:
+ssh "${VALIDATOR_SSH_HOST}" "curl -sS -X POST \"\${XPR_RPC_BASE:-https://proton.eosusa.io}/v1/history/get_actions\" \
+    -H 'Content-Type: application/json' \
+    -d '{\"account_name\":\"metalfreedom\",\"pos\":-1,\"offset\":-50}' \
+    | jq '[.actions[] | select(.action_trace.act.data.memo // \"\" | startswith(\"fyid1:\"))] | .[0:5] | .[] | {tx: .action_trace.trx_id, memo: .action_trace.act.data.memo, time: .block_time}'"
+# If the table above already contains a row whose memo matches the
+# expected `fyid1:<dag_root_hash>` of THIS cycle, the broadcast
+# landed despite the hang. Update the state file manually instead of
+# re-broadcasting:
+#   ssh "${VALIDATOR_SSH_HOST}" 'sudo -u deploy bash -c "echo <dag_root_hash> > /var/lib/freedom-yield/last-anchored-root"'
+
+# 5. Re-trigger the broadcast manually. The script requires
+#    --event-type and (for cyclestart / cycleend) --cycle-n; both
+#    are documented in the script's header. For the 2026-07-04
+#    cycle 3 start specifically:
+ssh "${VALIDATOR_SSH_HOST}" 'sudo -u deploy bash /home/deploy/metal.freedom-yield.com/scripts/post-anchor-event.sh \
+    --event-type cyclestart --cycle-n 3'
+# For other event types use:
+#   --event-type cyclestart|cycleend|idrotate
+#   --cycle-n N   (required for cyclestart and cycleend, omit for idrotate)
+#   --key-seq K   (required for idrotate, omit for cyclestart/cycleend)
 ```
 
-The script is idempotent — the same `dag_root_hash` will be anchored on
-the manual re-run without producing a duplicate inscription, because
-the `last-anchored-root` state file was never updated by the hung
-chains (step 4 of the failure chain above never completed).
+For the **pre-broadcast hang** that B5b describes (= the steady-state
+failure mode where step 4 of the failure chain stalls at `/dev/tty`
+open BEFORE the signer ever signs), the re-run cannot produce a
+duplicate inscription because the chain has never seen this
+`dag_root_hash` — the hung process never reached the broadcast call.
+The state file being unchanged is what permits the retry (the
+`post-anchor-event.sh` idempotency gate at line 214 takes the no-op
+branch only when `last-anchored-root == dag_root_hash`), not what
+guarantees no duplicate. For post-broadcast failure modes (= broadcast
+landed but state file was not updated, e.g. SIGKILL between proton's
+return and the state-file write), the explicit on-chain check in
+step 4 above is the only safeguard.
 
 ### Why this is not automated away
 
@@ -1002,9 +1039,13 @@ secret:
 
 Recovery scenarios:
 
-- **Validator host wipe + restore**: re-execute B3 + B4 from
-  Dashlane. The on-chain permission is unaffected; the anchor
-  inscription pipeline resumes on the next event.
+- **Validator host wipe + restore**: re-execute B3 + B4 + B4.5 from
+  Dashlane, then run B5b before the next cron tick. The on-chain
+  permission is unaffected. The freshly imported keystore is in the
+  **locked** state until B5b's `proton key:unlock` runs — without
+  it, the first cron-triggered broadcast after recovery will hang
+  exactly as B5b's "Failure mode" subsection describes, and the
+  cycle's anchor will be silently missed.
 - **Operator Mac wipe**: Dashlane sync restores the key on the new
   Mac; B6 (rotation) is OPTIONAL — only required if the operator
   judges the Mac wipe might have leaked the key. Otherwise the
