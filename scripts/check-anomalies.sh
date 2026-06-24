@@ -122,6 +122,73 @@ if [ "$K1RC" -ne 0 ]; then exit "$K1RC"; fi
 validate_freshness; K2RC=$?
 if [ "$K2RC" -ne 0 ]; then exit "$K2RC"; fi
 
+# === 4B.5.2 K-4: non-blocking flock + contention counter ===================
+# Purpose: at most one check-anomalies.sh runs concurrently. A previous run
+# still in flight (= e.g. slow curl waiting for metalgo) makes the next 5-min
+# cron tick skip cleanly rather than pile up on the lock or trigger duplicate
+# notifications. See docs/MONITORING_OPS.md §4 for design rationale.
+#
+# Exit codes:
+#   0  lock acquired and (eventually) normal completion, OR contention skip
+#   5  structural error: lock dir missing or lock file cannot be opened
+#
+# Side effects:
+#   - Lock file is created on first open (= no operator pre-step needed
+#     beyond the one-time lock-dir creation).
+#   - Lock file is NEVER deleted by this script. flock holds the fd, not the
+#     file entry. State init/reset MUST also leave the lock file in place.
+#   - Contention counter is bumped on skip via a separately-locked write to
+#     a counter file. Counter bump failure does NOT abort the main pipeline
+#     (= observability is best-effort).
+LOCK_FILE="${ANOMALY_LOCK_FILE:-/var/lib/freedom-yield/locks/check-anomalies.lock}"
+LOCK_DIR="$(dirname "$LOCK_FILE")"
+CONTENTION_COUNTER="${ANOMALY_CONTENTION_COUNTER:-/var/lib/freedom-yield/anomaly-contention-counter}"
+
+bump_contention_counter() {
+  # Best-effort: failure to bump must NOT abort the cron's main job.
+  local counter_lock="${CONTENTION_COUNTER}.lock"
+  (
+    if ! exec 8>"$counter_lock"; then
+      echo "[K-4-COUNTER] cannot open counter lock $counter_lock; skipping bump" >&2
+      exit 0
+    fi
+    if ! flock -w 2 8; then
+      echo "[K-4-COUNTER] could not acquire counter lock within 2s; skipping bump" >&2
+      exit 0
+    fi
+    local cur=0
+    if [ -f "$CONTENTION_COUNTER" ]; then
+      cur=$(cat "$CONTENTION_COUNTER" 2>/dev/null || echo 0)
+      [[ "$cur" =~ ^[0-9]+$ ]] || cur=0
+    fi
+    local next=$(( cur + 1 ))
+    # Atomic write of the counter value.
+    local tmp
+    tmp=$(mktemp -p "$(dirname "$CONTENTION_COUNTER")" .counter.XXXXXX 2>/dev/null) || {
+      echo "[K-4-COUNTER] mktemp failed for counter dir; skipping bump" >&2
+      exit 0
+    }
+    printf '%s\n' "$next" > "$tmp"
+    mv "$tmp" "$CONTENTION_COUNTER" 2>/dev/null \
+      || { rm -f "$tmp"; echo "[K-4-COUNTER] rename to $CONTENTION_COUNTER failed; skipping bump" >&2; exit 0; }
+  ) || true
+}
+
+if [ ! -d "$LOCK_DIR" ]; then
+  echo "[K-4] lock dir missing: $LOCK_DIR (run anomaly-state-init.sh on a fresh host); exit 5" >&2
+  exit 5
+fi
+if ! exec 9>"$LOCK_FILE"; then
+  echo "[K-4] cannot open lock file: $LOCK_FILE; exit 5" >&2
+  exit 5
+fi
+if ! flock -n 9; then
+  echo "[K-4-SKIP] previous run still holds lock ($LOCK_FILE); incrementing contention counter; exit 0" >&2
+  bump_contention_counter
+  exit 0
+fi
+echo "[K-4] lock acquired" >&2
+
 # === init / read state ================================================
 mkdir -p "$STATE_DIR" 2>/dev/null || true
 if [ ! -f "$STATE_FILE" ]; then
