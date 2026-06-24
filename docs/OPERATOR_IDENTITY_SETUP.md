@@ -719,6 +719,95 @@ authorization", revisit A6 / A7 — the permission install or linkauth
 did not propagate as expected. Do NOT proceed to a live broadcast
 until the dry-run is clean.
 
+## B5b. Pre-cycle keystore unlock (= operational prerequisite for cron-triggered broadcasts)
+
+`proton-cli` 0.1.98 stores the K1 anchor private key in an encrypted
+keystore on disk. Every `proton action ...` invocation requires the
+keystore to be **unlocked** before signing. Unlock state is per
+process-group / shell session and persists in memory only — there is
+no "unlock once, store decrypted to disk" mode without explicit
+operator action.
+
+When the cron-triggered `scripts/post-anchor-event.sh` invokes
+`scripts/sign-anchor-event.sh`, the underlying `proton action` call
+will silently prompt for the keystore password if the keystore is
+locked. The cron environment has no TTY, so the prompt is never
+satisfied and the broadcast hangs indefinitely. This was observed in
+the 2026-06-24 testnet rehearsal (memo: `fyid1:c999…9c9`, tx
+`7ac64867…`): the first two invocations hung for >5 minutes each
+until `proton key:unlock` was run manually in a TTY-attached
+terminal, after which the broadcast completed in ~30 seconds.
+
+### Required pre-cycle step
+
+Before each cycle transition broadcast (= each time
+`scripts/post-anchor-event.sh` is expected to fire), the operator
+MUST manually unlock the keystore on the validator host:
+
+```sh
+ssh "${VALIDATOR_SSH_HOST}" 'sudo -u deploy proton key:unlock'
+# Enter the 32-character keystore password from Dashlane when
+# prompted. The TTY is yours; this is the one place the prompt
+# is satisfiable.
+```
+
+Expected output: `Success: Unlocked wallet`.
+
+Verify the unlocked state:
+
+```sh
+ssh "${VALIDATOR_SSH_HOST}" 'sudo -u deploy proton key:list'
+# Expect every key tagged with `(unlocked)` rather than `(locked)`.
+```
+
+### Persistence
+
+The keystore remains unlocked until:
+- The validator host reboots, or
+- `proton key:lock` is run, or
+- The proton-cli process group that holds the unlocked state is
+  killed.
+
+In practice on a long-lived validator host, the operator only needs
+to re-unlock after a reboot. For the **2026-07-04 cycle 3 start**
+specifically, the operator should `proton key:unlock` at any point
+between system boot and the cycle's 13:00 JST trigger window, and
+confirm via `proton key:list` immediately before the cron tick is
+expected.
+
+### Failure mode if the operator forgets
+
+If the cron triggers a broadcast with a locked keystore, the chain is:
+
+1. `post-anchor-event.sh` invokes `sign-anchor-event.sh`.
+2. `sign-anchor-event.sh` invokes `proton action ...`.
+3. `proton action` writes a password prompt to a stdin that the cron
+   environment has redirected to `/dev/null`.
+4. The process hangs indefinitely; no receipt is produced, no
+   `last-anchored-root` state file is updated, and the cycle's
+   anchor is missing on chain.
+
+Detection: the absence of a fresh entry in `anchor-history.jsonl`
+within ~5 minutes of the cycle transition, combined with the
+presence of a long-running `node /usr/local/bin/proton action`
+process on the validator host, indicates the locked-keystore hang.
+
+Recovery: kill the hung `proton` process, run `proton key:unlock`
+in a TTY, then re-trigger `post-anchor-event.sh` manually. The
+script is idempotent — the same `dag_root_hash` will be anchored
+on the second attempt without producing a duplicate inscription
+(the `last-anchored-root` state file remains unchanged because
+step 4 above did not update it).
+
+### Why this is not automated away
+
+A "store keystore password in a daemon" or "feed password from a
+config file" model is technically possible but expands the secret
+surface (= password lives in another file / service). For a single
+monthly cycle transition the manual unlock is cheaper than the
+operational complexity of automated key handling. Revisit if Phase
+β changes the cadence.
+
 ## B6. Rotation (= replace the validator-host anchor key)
 
 When the operator decides to rotate the anchor key (= routine cadence,
