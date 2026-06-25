@@ -7,13 +7,15 @@
 	"x-stability": "additive-only-within-v1",
 	"x-baseline-revision": "2026-06-23-initial",
 	"x-revision-history": [
-		{"date": "2026-06-23", "tag": "initial", "summary": "Initial v1 schema for the append-only anchor history ledger introduced as part of the 2026-07-04 cycle-3 anchor completion."}
+		{"date": "2026-06-23", "tag": "initial", "summary": "Initial v1 schema for the append-only anchor history ledger introduced as part of the 2026-07-04 cycle-3 anchor completion."},
+		{"date": "2026-06-25", "tag": "idrotate-conditional", "summary": "Per-event-type conditional required fields: idrotate entries carry key_seq (canonical reference for key-rotation events) and omit cycle_n; cyclestart/cycleend continue to carry cycle_n. Backward-compatible: existing cyclestart/cycleend entries still validate. Added key_seq property and allOf conditional. cycle_n removed from top-level required, replaced by event-type-discriminated requirement."}
 	],
 	"x-line-encoding": "JSONL — UTF-8, one JSON object per line, lines terminated by LF (0x0A) including the final line, no trailing blank lines. Schema describes the per-line object shape; consumers MUST validate each line independently.",
 	"x-append-only-invariants": [
 		"tx_id is unique across all lines (= duplicate rejection at append time)",
-		"cycle_n + event_type pair is unique across all lines (= same cycle's same event cannot be appended twice)",
-		"cycle_n strictly non-decreasing across lines (= history reads in chain time)",
+		"For cyclestart/cycleend: (cycle_n, event_type) pair is unique across all lines (= same cycle's same event cannot be appended twice)",
+		"For idrotate: (key_seq, 'idrotate') pair is unique across all lines (= same key rotation cannot be appended twice)",
+		"cycle_n strictly non-decreasing across lines that carry cycle_n (= idrotate entries do not participate in this check)",
 		"existing lines are byte-for-byte immutable; the only legal write is appending a new line",
 		"file terminates with LF on the final line"
 	],
@@ -21,7 +23,6 @@
 	"type": "object",
 	"required": [
 		"schema_version",
-		"cycle_n",
 		"event_type",
 		"dag_root_hash",
 		"memo",
@@ -37,6 +38,19 @@
 		"verification_status",
 		"verified_at"
 	],
+	"allOf": [
+		{
+			"if": {"properties": {"event_type": {"const": "idrotate"}}, "required": ["event_type"]},
+			"then": {
+				"required": ["key_seq"],
+				"description": "idrotate entries MUST carry key_seq; cycle_n is OPTIONAL for idrotate (idrotate's canonical reference is the key rotation index, not the cycle index)."
+			},
+			"else": {
+				"required": ["cycle_n"],
+				"description": "Non-idrotate entries (cyclestart, cycleend, manual) MUST carry cycle_n."
+			}
+		}
+	],
 	"additionalProperties": true,
 	"properties": {
 		"schema_version": {
@@ -46,7 +60,12 @@
 		"cycle_n": {
 			"type": "integer",
 			"minimum": 1,
-			"description": "The validator cycle this anchor pertains to. Append-only invariant: across the full file the (cycle_n, event_type) pair MUST be unique, and cycle_n MUST be non-decreasing line-to-line. A single cycle can carry up to three event_types (cyclestart, cycleend, idrotate) — that is the only legal repetition of cycle_n."
+			"description": "The validator cycle this anchor pertains to. Required for cyclestart/cycleend; OPTIONAL/OMITTED for idrotate (= idrotate is identified by key_seq, not cycle_n). Append-only invariants: among lines that carry cycle_n, the (cycle_n, event_type) pair MUST be unique, and cycle_n MUST be non-decreasing line-to-line."
+		},
+		"key_seq": {
+			"type": "integer",
+			"minimum": 1,
+			"description": "Operator-identity key rotation sequence number. Required for event_type=idrotate (= the canonical reference for which rotation this anchor records). Optional for other event types. Append-only invariant: for idrotate entries, (key_seq, 'idrotate') pair MUST be unique."
 		},
 		"event_type": {
 			"type": "string",

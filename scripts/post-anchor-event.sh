@@ -40,6 +40,15 @@
 #   5  receipt assembly or schema validation failed
 #   6  push to web host failed
 #   7  state-file update failed
+#   8  pending marker integrity violation (dag mismatch / corrupt /
+#      status=signing seen on restart) — operator intervention required
+#      (= chain query for memo fyid1:<dag_root_hash> needed to determine
+#       whether broadcast occurred before crash)
+#   9  signer timeout (= broadcast status uncertain — operator must
+#      verify chain state before retry)
+#  10  concurrent execution prevented (= another instance holds the
+#      flock; this is a normal cron / manual collision, no action needed —
+#      next tick will try again once the lock is released)
 #
 # Usage:
 #   post-anchor-event.sh --event-type <cyclestart|cycleend|idrotate>
@@ -163,8 +172,13 @@ case "${EVENT_TYPE}" in
 			echo "ERROR: --key-seq is not valid for event_type '${EVENT_TYPE}' (use --cycle-n)" >&2; exit 1
 		fi ;;
 	idrotate)
-		if [ -n "${CYCLE_N}" ]; then
-			echo "ERROR: --cycle-n is not valid for event_type 'idrotate' (use --key-seq)" >&2; exit 1
+		# idrotate requires --key-seq (= which rotation).
+		# --cycle-n is OPTIONAL for idrotate; if absent, derived later from
+		# the cycles-history.json branches.cycles.leaf_count (= the current
+		# in-progress cycle = leaf_count + 1). Caller may pass --cycle-n
+		# explicitly to override the derivation.
+		if [ -z "${KEY_SEQ}" ]; then
+			echo "ERROR: --key-seq is required for event_type 'idrotate'" >&2; exit 1
 		fi ;;
 esac
 
@@ -175,6 +189,14 @@ SIGNER="${ANCHOR_SIGNER:-${SCRIPT_DIR}/sign-anchor-event.sh}"
 PUSHER="${SCRIPT_DIR}/push-to-web-host.sh"
 STATE_DIR="${FY_STATE_DIR:-/var/lib/freedom-yield}"
 STATE_FILE="${STATE_DIR}/last-anchored-root"
+PENDING_FILE="${STATE_DIR}/anchor-pending.json"
+LOCK_FILE="${FY_LOCK_FILE:-${STATE_DIR}/post-anchor-event.lock}"
+# Signer timeout (= prevent cron hang when sign-anchor-event.sh's underlying
+# proton-cli call gets stuck — e.g., on a locked keystore, network stall,
+# or upstream RPC outage). Defaults chosen to be comfortably longer than a
+# normal signed broadcast (= ~30s) but well inside cron's 5-min cadence.
+SIGNER_TIMEOUT="${ANCHOR_SIGNER_TIMEOUT:-120}"
+SIGNER_KILL_AFTER="${ANCHOR_SIGNER_KILL_AFTER:-10}"
 
 if [ ! -x "${SIGNER}" ]; then
 	echo "ERROR: signer not executable: ${SIGNER}" >&2; exit 1
@@ -183,6 +205,22 @@ if [ ! -x "${PUSHER}" ]; then
 	echo "ERROR: pusher not executable: ${PUSHER}" >&2; exit 1
 fi
 [ -d "${STATE_DIR}" ] || mkdir -p "${STATE_DIR}"
+
+# -------- exclusive lock (= single-writer, flock-based) --------
+# Prevents concurrent execution of post-anchor-event.sh from cron (watcher
+# dispatch) and operator manual invocation racing on the same dag_root_hash.
+# Non-blocking: if another instance holds the lock, exit 10 immediately
+# (= the watcher's next tick will retry naturally; operator manual run will
+# see the explicit exit code and message). fd 200 stays open for the
+# script's lifetime so the lock auto-releases on exit (no stale-lock
+# problem from PID files; flock semantics are kernel-level).
+exec 200>"${LOCK_FILE}"
+if ! flock -n 200; then
+	OTHER_PID="$(fuser "${LOCK_FILE}" 2>/dev/null | tr -d ' ' || true)"
+	echo "ERROR: another post-anchor-event.sh instance holds the lock at ${LOCK_FILE} (holder pid=${OTHER_PID:-unknown})" >&2
+	echo "       exit 10 = concurrent execution prevention (normal cron/manual collision; retry naturally)" >&2
+	exit 10
+fi
 
 # -------- fetch cycles-history.json --------
 PUBLIC_BASE="${PUBLIC_BASE:-https://metal.freedom-yield.com}"
@@ -207,24 +245,161 @@ if [ "${#DAG_ROOT_HASH}" -ne 64 ]; then
 	echo "ERROR: dag_root_hash is not 64 chars: ${DAG_ROOT_HASH}" >&2; exit 3
 fi
 
-# -------- idempotency check --------
+# -------- resume detection (= 3-state partial-success recovery) --------
+# pending marker carries publish_status in {signing, broadcast, receipt_pushed}.
+# Resume rules:
+#   * signing       → FAIL-CLOSED (exit 8). Broadcast status is uncertain
+#                     because the signer was in-flight at the prior crash.
+#                     Operator MUST query the chain for memo
+#                     fyid1:<dag_root_hash> from anchor permission. If
+#                     broadcast found: manually update pending status to
+#                     broadcast and inject the signer_fragment (= tx_id,
+#                     block_num, block_time). If not found: rm the pending
+#                     marker — safe to rerun. We do NOT auto-retry: missing
+#                     an anchor is safer than double-broadcasting.
+#   * broadcast     → resume from receipt install (signer skipped).
+#   * receipt_pushed → resume from history append (signer + receipt push
+#                     both skipped).
+# Receipt-orphan recovery (= micro-window between receipt mv and pending
+# update from signing→broadcast): if no pending but LOCAL_PUBLISH receipt
+# exists with matching dag and state not finalized, reconstruct pending
+# at broadcast state and continue. The mv-before-update window is
+# bounded to a single mv + a single jq write, so this is rare in practice.
+RESUME_MODE=""
+PENDING_PUBLISH_STATUS=""
+
+if [ -r "${PENDING_FILE}" ]; then
+	if ! jq empty "${PENDING_FILE}" >/dev/null 2>&1; then
+		echo "ERROR: pending marker at ${PENDING_FILE} is not valid JSON" >&2
+		echo "       operator intervention required (inspect / repair / delete)" >&2
+		exit 8
+	fi
+	PENDING_DAG="$(jq -r '.dag_root_hash // empty' "${PENDING_FILE}")"
+	if [ "${PENDING_DAG}" != "${DAG_ROOT_HASH}" ]; then
+		echo "ERROR: pending marker dag_root_hash=${PENDING_DAG} != current cycles-history dag=${DAG_ROOT_HASH}" >&2
+		echo "       operator intervention required — chain state may have moved since pending broadcast" >&2
+		exit 8
+	fi
+	PENDING_EVENT="$(jq -r '.event_type // empty' "${PENDING_FILE}")"
+	if [ "${PENDING_EVENT}" != "${EVENT_TYPE}" ]; then
+		echo "ERROR: pending marker event_type=${PENDING_EVENT} != arg --event-type=${EVENT_TYPE}" >&2
+		exit 8
+	fi
+	PENDING_PUBLISH_STATUS="$(jq -r '.publish_status // empty' "${PENDING_FILE}")"
+	case "${PENDING_PUBLISH_STATUS}" in
+		signing)
+			echo "ERROR: pending marker shows publish_status=signing (= signer was in-flight at prior crash)" >&2
+			echo "       BROADCAST STATUS UNCERTAIN — refusing to auto-retry signer (= would risk double broadcast)" >&2
+			echo "       Operator recovery procedure:" >&2
+			echo "         (1) Query XPR explorer for any tx from the anchor permission with" >&2
+			echo "             memo='fyid1:${DAG_ROOT_HASH}' near the timestamp in ${PENDING_FILE}.created_at" >&2
+			echo "         (2) If broadcast found: edit ${PENDING_FILE} — set publish_status=broadcast and" >&2
+			echo "             populate signer_fragment with {tx_id, block_num, block_time, ...} from the chain tx." >&2
+			echo "             Then rerun this script (= resume will install receipt and complete publish)." >&2
+			echo "         (3) If not found: rm ${PENDING_FILE} — safe to rerun (= signer will be called fresh)." >&2
+			echo "       Missing an anchor is safer than double broadcasting." >&2
+			exit 8 ;;
+		broadcast|receipt_pushed)
+			RESUME_MODE="pending"
+			echo "RESUMING from pending marker: dag=${DAG_ROOT_HASH:0:12}… publish_status=${PENDING_PUBLISH_STATUS}" >&2 ;;
+		"")
+			echo "ERROR: pending marker has no publish_status field" >&2; exit 8 ;;
+		*)
+			echo "ERROR: pending marker has unknown publish_status='${PENDING_PUBLISH_STATUS}'" >&2; exit 8 ;;
+	esac
+elif [ -r "${REPO_ROOT}/public/api/anchor-receipt.json" ]; then
+	LOCAL_PUBLISH_PRECHECK="${REPO_ROOT}/public/api/anchor-receipt.json"
+	if jq empty "${LOCAL_PUBLISH_PRECHECK}" >/dev/null 2>&1; then
+		RECEIPT_DAG="$(jq -r '.dag_root_hash // empty' "${LOCAL_PUBLISH_PRECHECK}")"
+		LAST_ANCHORED_PRECHECK=""
+		[ -r "${STATE_FILE}" ] && LAST_ANCHORED_PRECHECK="$(tr -d '\n\r\t ' < "${STATE_FILE}" || true)"
+		if [ "${RECEIPT_DAG}" = "${DAG_ROOT_HASH}" ] && [ "${LAST_ANCHORED_PRECHECK}" != "${DAG_ROOT_HASH}" ]; then
+			RESUME_MODE="receipt"
+			echo "RECOVERING from orphaned receipt: dag=${DAG_ROOT_HASH:0:12}… (no pending, receipt exists, state not finalized)" >&2
+		fi
+	fi
+fi
+
+# -------- idempotency check (= skip if already fully finalized) --------
 LAST_ANCHORED=""
 [ -r "${STATE_FILE}" ] && LAST_ANCHORED="$(tr -d '\n\r\t ' < "${STATE_FILE}" || true)"
 
-if [ "${FORCE}" -eq 0 ] && [ "${LAST_ANCHORED}" = "${DAG_ROOT_HASH}" ]; then
+if [ -z "${RESUME_MODE}" ] && [ "${FORCE}" -eq 0 ] && [ "${LAST_ANCHORED}" = "${DAG_ROOT_HASH}" ]; then
 	echo "no-op: dag_root_hash unchanged since last anchor (${DAG_ROOT_HASH:0:12}…)" >&2
 	exit 2
 fi
 
-echo "anchoring event_type=${EVENT_TYPE} dag_root_hash=${DAG_ROOT_HASH}" >&2
-
-# -------- invoke signer --------
+# -------- invoke signer (skipped in RESUME_MODE) --------
 FRAG_TMP="$(mktemp -t anchor-frag.XXXXXX)"
-SIGNER_ARGS=("${EVENT_TYPE}" "${DAG_ROOT_HASH}")
-[ "${DRY_RUN}" -eq 1 ] && SIGNER_ARGS+=(--dry-run)
 
-if ! "${SIGNER}" "${SIGNER_ARGS[@]}" > "${FRAG_TMP}"; then
-	echo "ERROR: sign-anchor-event.sh failed" >&2; exit 4
+if [ -n "${RESUME_MODE}" ]; then
+	if [ "${RESUME_MODE}" = "pending" ]; then
+		jq -c '.signer_fragment' "${PENDING_FILE}" > "${FRAG_TMP}"
+		echo "  → signer SKIPPED (resumed from pending marker)" >&2
+	elif [ "${RESUME_MODE}" = "receipt" ]; then
+		jq -c '.anchor' "${REPO_ROOT}/public/api/anchor-receipt.json" > "${FRAG_TMP}"
+		echo "  → signer SKIPPED (recovered from orphaned receipt)" >&2
+	fi
+else
+	echo "anchoring event_type=${EVENT_TYPE} dag_root_hash=${DAG_ROOT_HASH}" >&2
+
+	# Write pending(status=signing) BEFORE invoking the signer. This is the
+	# in-flight marker that protects against the prior crash-point-2 risk:
+	# if this process dies anywhere between the signer call and the
+	# downstream pending(broadcast) update, the signing marker remains and
+	# the next run fail-closes (= exit 8) demanding operator chain query.
+	# Missing an anchor is safer than double-broadcasting.
+	if [ "${DRY_RUN}" -eq 0 ]; then
+		PENDING_TMP_NEW="${PENDING_FILE}.new"
+		NOW_PEND="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+		jq -n \
+			--arg dag "${DAG_ROOT_HASH}" \
+			--arg event "${EVENT_TYPE}" \
+			--arg cn "${CYCLE_N}" \
+			--arg ks "${KEY_SEQ}" \
+			--arg now "${NOW_PEND}" \
+			'{
+				schema_version: 1,
+				dag_root_hash: $dag,
+				event_type: $event,
+				cycle_n: (if $cn == "" then null else ($cn|tonumber) end),
+				key_seq: (if $ks == "" then null else ($ks|tonumber) end),
+				signer_fragment: null,
+				publish_status: "signing",
+				created_at: $now,
+				updated_at: $now
+			}' > "${PENDING_TMP_NEW}"
+		chmod 600 "${PENDING_TMP_NEW}"
+		if ! mv "${PENDING_TMP_NEW}" "${PENDING_FILE}"; then
+			echo "ERROR: failed to install signing-state pending marker at ${PENDING_FILE}" >&2; exit 7
+		fi
+	fi
+
+	SIGNER_ARGS=("${EVENT_TYPE}" "${DAG_ROOT_HASH}")
+	[ "${DRY_RUN}" -eq 1 ] && SIGNER_ARGS+=(--dry-run)
+
+	# Timeout-wrap signer to prevent cron hang on stuck proton-cli
+	# (e.g., locked keystore, network stall, upstream RPC outage).
+	# exit 124 = SIGTERM hit timeout; 137 = SIGKILL via --kill-after.
+	# NOTE: capture rc via ||$?= pattern, NOT `if ! cmd; then RC=$?`. The
+	# latter incorrectly yields RC=0 because $? inside `if !` then-block
+	# is the negation result, not the command's exit code.
+	SIGNER_RC=0
+	timeout --kill-after="${SIGNER_KILL_AFTER}" "${SIGNER_TIMEOUT}" "${SIGNER}" "${SIGNER_ARGS[@]}" > "${FRAG_TMP}" || SIGNER_RC=$?
+	if [ "${SIGNER_RC}" -ne 0 ]; then
+		case "${SIGNER_RC}" in
+			124|137)
+				echo "ERROR: sign-anchor-event.sh timed out (timeout=${SIGNER_TIMEOUT}s, kill-after=${SIGNER_KILL_AFTER}s, exit=${SIGNER_RC})" >&2
+				echo "       BROADCAST STATUS UNCERTAIN — operator MUST verify chain state before retry:" >&2
+				echo "         (1) Inspect XPR explorer for tx from anchor permission with memo fyid1:${DAG_ROOT_HASH}" >&2
+				echo "         (2) If broadcast found on chain: write pending marker manually so next run resumes" >&2
+				echo "         (3) If broadcast not found: safe to rerun (broadcast did not occur)" >&2
+				exit 9 ;;
+			*)
+				echo "ERROR: sign-anchor-event.sh failed (rc=${SIGNER_RC})" >&2
+				exit 4 ;;
+		esac
+	fi
 fi
 
 if ! jq empty "${FRAG_TMP}" >/dev/null 2>&1; then
@@ -258,6 +433,8 @@ case "${EVENT_TYPE}" in
 			TRIGGER_REF_JSON="$(jq -n --argjson c "${CYCLE_N}" '{cycle_n: $c}')"
 		fi ;;
 	idrotate)
+		# Per operator design: idrotate's canonical reference is key_seq only.
+		# cycle_n is NOT carried on idrotate trigger_reference.
 		if [ -n "${KEY_SEQ}" ]; then
 			TRIGGER_REF_JSON="$(jq -n --argjson k "${KEY_SEQ}" '{key_seq: $k}')"
 		fi ;;
@@ -349,13 +526,77 @@ else
 	chmod 644 "${LOCAL_PUBLISH}"
 	RECEIPT_TMP=""  # cleanup trap no longer needs to unlink the published file
 
+	# Transition pending marker to broadcast state (= receipt is locally
+	# installed; broadcast is confirmed). Three cases handled below:
+	#   (a) normal flow         : pending(signing) → pending(broadcast)
+	#                             with signer_fragment populated.
+	#   (b) RESUME_MODE=receipt : no pending exists (= micro-window crash
+	#                             between receipt mv and signing→broadcast
+	#                             update was orphaned). Build a fresh
+	#                             pending at broadcast state from the
+	#                             reconstructed signer fragment.
+	#   (c) RESUME_MODE=pending : pending already at broadcast or
+	#                             receipt_pushed. No update needed here.
+	if [ -r "${PENDING_FILE}" ]; then
+		CURRENT_PEND_STATUS="$(jq -r '.publish_status // empty' "${PENDING_FILE}")"
+		if [ "${CURRENT_PEND_STATUS}" = "signing" ]; then
+			PENDING_TMP_NEW="${PENDING_FILE}.new"
+			NOW_BC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+			jq --argjson frag "$(cat "${FRAG_TMP}")" \
+			   --arg now "${NOW_BC}" \
+			   '.signer_fragment = $frag | .publish_status = "broadcast" | .updated_at = $now' \
+			   "${PENDING_FILE}" > "${PENDING_TMP_NEW}"
+			chmod 600 "${PENDING_TMP_NEW}"
+			if ! mv "${PENDING_TMP_NEW}" "${PENDING_FILE}"; then
+				echo "ERROR: failed to update pending marker signing→broadcast at ${PENDING_FILE}" >&2; exit 7
+			fi
+		fi
+		# else: already broadcast or receipt_pushed, leave as-is
+	elif [ "${RESUME_MODE}" = "receipt" ]; then
+		PENDING_TMP_NEW="${PENDING_FILE}.new"
+		NOW_BC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+		jq -n \
+			--arg dag "${DAG_ROOT_HASH}" \
+			--arg event "${EVENT_TYPE}" \
+			--arg cn "${CYCLE_N}" \
+			--arg ks "${KEY_SEQ}" \
+			--argjson frag "$(cat "${FRAG_TMP}")" \
+			--arg now "${NOW_BC}" \
+			'{
+				schema_version: 1,
+				dag_root_hash: $dag,
+				event_type: $event,
+				cycle_n: (if $cn == "" then null else ($cn|tonumber) end),
+				key_seq: (if $ks == "" then null else ($ks|tonumber) end),
+				signer_fragment: $frag,
+				publish_status: "broadcast",
+				created_at: $now,
+				updated_at: $now
+			}' > "${PENDING_TMP_NEW}"
+		chmod 600 "${PENDING_TMP_NEW}"
+		if ! mv "${PENDING_TMP_NEW}" "${PENDING_FILE}"; then
+			echo "ERROR: failed to install pending marker at ${PENDING_FILE} (receipt recovery)" >&2; exit 7
+		fi
+	fi
+
 	# Push to web host (= push-to-web-host.sh reads from REPO_BASE/public/api/).
 	# Requires the web-host forced-command wrapper allowlist to include
 	# 'anchor-receipt.json'; see the comment block at the top of
 	# scripts/push-to-web-host.sh for the operator-side deployment note.
-	if ! "${PUSHER}" anchor-receipt.json; then
-		echo "ERROR: push-to-web-host.sh failed for anchor-receipt.json" >&2
-		exit 6
+	# Skip if pending marker already shows receipt_pushed (= resume from later step).
+	if [ "${PENDING_PUBLISH_STATUS}" != "receipt_pushed" ]; then
+		if ! "${PUSHER}" anchor-receipt.json; then
+			echo "ERROR: push-to-web-host.sh failed for anchor-receipt.json" >&2
+			exit 6
+		fi
+		# Atomic update pending marker → publish_status=receipt_pushed
+		PENDING_TMP_NEW="${PENDING_FILE}.new"
+		jq --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+			'.publish_status = "receipt_pushed" | .updated_at = $now' \
+			"${PENDING_FILE}" > "${PENDING_TMP_NEW}"
+		mv "${PENDING_TMP_NEW}" "${PENDING_FILE}"
+	else
+		echo "  → receipt push SKIPPED (resumed at receipt_pushed state)" >&2
 	fi
 
 	# -------- append to anchor-history.jsonl ledger --------
@@ -393,13 +634,15 @@ else
 	fi
 fi
 
-# -------- update state --------
+# -------- finalize: update last-anchored-root + delete pending marker --------
 if [ "${DRY_RUN}" -eq 0 ]; then
 	# Atomic write — write to .new then mv.
 	if ! printf '%s\n' "${DAG_ROOT_HASH}" > "${STATE_FILE}.new"; then
 		echo "ERROR: failed to write ${STATE_FILE}.new" >&2; exit 7
 	fi
 	mv "${STATE_FILE}.new" "${STATE_FILE}"
+	# Full publish completed — remove pending marker.
+	rm -f "${PENDING_FILE}"
 fi
 
 echo "✓ anchored: tx_id=${TX_ID}" >&2

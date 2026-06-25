@@ -87,10 +87,26 @@ EVENT_TYPE="${EVENT_TYPE:-${EVENT_TYPE_DEFAULT}}"
 
 CYCLE_N_DEFAULT="$(jq -r '(.trigger_reference.cycle_n // empty)' "${RECEIPT_PATH}")"
 CYCLE_N="${CYCLE_N:-${CYCLE_N_DEFAULT}}"
-if [ -z "${CYCLE_N}" ]; then
-	echo "ERROR: cycle_n missing (neither CYCLE_N env nor receipt.trigger_reference.cycle_n)" >&2
-	exit 1
-fi
+KEY_SEQ_DEFAULT="$(jq -r '(.trigger_reference.key_seq // empty)' "${RECEIPT_PATH}")"
+KEY_SEQ="${KEY_SEQ:-${KEY_SEQ_DEFAULT}}"
+
+# Per-event-type required-field validation. idrotate's canonical reference
+# is key_seq (not cycle_n); cyclestart/cycleend use cycle_n. manual is
+# operator-driven and may carry either or none.
+case "${EVENT_TYPE}" in
+	cyclestart|cycleend)
+		if [ -z "${CYCLE_N}" ]; then
+			echo "ERROR: cycle_n missing for event_type=${EVENT_TYPE} (neither CYCLE_N env nor receipt.trigger_reference.cycle_n)" >&2
+			exit 1
+		fi ;;
+	idrotate)
+		if [ -z "${KEY_SEQ}" ]; then
+			echo "ERROR: key_seq missing for event_type=idrotate (neither KEY_SEQ env nor receipt.trigger_reference.key_seq)" >&2
+			exit 1
+		fi ;;
+	manual)
+		: ;;
+esac
 
 if [ -z "${SCRIPT_VERSION:-}" ]; then
 	SCRIPT_VERSION="$(git -C "${REPO_ROOT}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
@@ -98,14 +114,18 @@ fi
 
 NOW_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
+# Build the history line per event-type shape:
+# - cyclestart/cycleend/manual: cycle_n included
+# - idrotate: key_seq included, cycle_n omitted (= idrotate canonical
+#   reference is key_seq; schema v1 cycle_n is per-event-type conditional)
 NEW_LINE_JSON="$(jq \
-	--argjson cycle_n "${CYCLE_N}" \
+	--arg cycle_n_raw "${CYCLE_N}" \
+	--arg key_seq_raw "${KEY_SEQ}" \
 	--arg event_type "${EVENT_TYPE}" \
 	--arg verified_at "${NOW_UTC}" \
 	--arg script_version "${SCRIPT_VERSION}" \
 	'{
 		schema_version: 1,
-		cycle_n: $cycle_n,
 		event_type: $event_type,
 		dag_root_hash: .dag_root_hash,
 		memo: .memo,
@@ -122,38 +142,66 @@ NEW_LINE_JSON="$(jq \
 		verification_status: .verification_status,
 		verified_at: $verified_at,
 		generated_by_script_version: $script_version
-	}' "${RECEIPT_PATH}")"
+	}
+	+ (if $cycle_n_raw == "" then {} else {cycle_n: ($cycle_n_raw | tonumber)} end)
+	+ (if $key_seq_raw == "" then {} else {key_seq: ($key_seq_raw | tonumber)} end)' "${RECEIPT_PATH}")"
 
 NEW_LINE="$(printf '%s' "${NEW_LINE_JSON}" | jq -c .)"
 NEW_TX_ID="$(printf '%s' "${NEW_LINE}" | jq -r .tx_id)"
 
 # ---- Invariant (a): tx_id globally unique --------------------------------
+#
+# Behavior change (2026-06-25, partial-success state machine):
+# tx_id duplicate is now treated as IDEMPOTENT SKIP (exit 0), not rejection.
+# This makes the script safe to invoke from post-anchor-event.sh's retry
+# path after a history-push failure: the same broadcast (= same tx_id) can
+# be re-presented for appending without producing a hard failure.
+# Note: invariant (b) below still catches the case where a DIFFERENT tx_id
+# is presented for the same (cycle_n, event_type), which is a real
+# integrity violation that should not be silently accepted.
 
 if [ -f "${HISTORY_PATH}" ] && [ -s "${HISTORY_PATH}" ]; then
 	if grep -q "\"tx_id\":\"${NEW_TX_ID}\"" "${HISTORY_PATH}"; then
-		echo "REJECTED: invariant_a_tx_id_duplicate tx_id=${NEW_TX_ID} already present" >&2
-		exit 2
+		echo "SKIPPED: tx_id=${NEW_TX_ID} already present in history (idempotent retry); no append needed"
+		exit 0
 	fi
 fi
 
-# ---- Invariant (b): (cycle_n, event_type) pair unique --------------------
+# ---- Invariant (b): per-event-type uniqueness ----------------------------
+# For cyclestart/cycleend: (cycle_n, event_type) pair unique.
+# For idrotate: (key_seq, "idrotate") pair unique (key_seq is canonical
+#   reference; cycle_n is omitted for idrotate entries).
+# For manual: skipped (operator records may legitimately repeat).
 
 if [ -f "${HISTORY_PATH}" ] && [ -s "${HISTORY_PATH}" ]; then
-	DUP="$(jq -Rr --arg cn "${CYCLE_N}" --arg et "${EVENT_TYPE}" '
-		(fromjson? // empty)
-		| select(.cycle_n == ($cn | tonumber) and .event_type == $et)
-		| .tx_id
-	' "${HISTORY_PATH}" 2>/dev/null | head -n 1)"
-	if [ -n "${DUP}" ]; then
-		echo "REJECTED: invariant_b_cycle_event_duplicate (cycle_n=${CYCLE_N}, event_type=${EVENT_TYPE}) already present with tx_id=${DUP}" >&2
-		exit 2
-	fi
+	case "${EVENT_TYPE}" in
+		cyclestart|cycleend)
+			DUP="$(jq -Rr --arg cn "${CYCLE_N}" --arg et "${EVENT_TYPE}" '
+				(fromjson? // empty)
+				| select((.cycle_n // null) == ($cn | tonumber) and .event_type == $et)
+				| .tx_id
+			' "${HISTORY_PATH}" 2>/dev/null | head -n 1)"
+			if [ -n "${DUP}" ]; then
+				echo "REJECTED: invariant_b_cycle_event_duplicate (cycle_n=${CYCLE_N}, event_type=${EVENT_TYPE}) already present with tx_id=${DUP}" >&2
+				exit 2
+			fi ;;
+		idrotate)
+			DUP="$(jq -Rr --arg ks "${KEY_SEQ}" '
+				(fromjson? // empty)
+				| select(.event_type == "idrotate" and (.key_seq // null) == ($ks | tonumber))
+				| .tx_id
+			' "${HISTORY_PATH}" 2>/dev/null | head -n 1)"
+			if [ -n "${DUP}" ]; then
+				echo "REJECTED: invariant_b_key_seq_duplicate (key_seq=${KEY_SEQ}, event_type=idrotate) already present with tx_id=${DUP}" >&2
+				exit 2
+			fi ;;
+	esac
 fi
 
-# ---- Invariant (c): cycle_n non-decreasing ------------------------------
-
-if [ -f "${HISTORY_PATH}" ] && [ -s "${HISTORY_PATH}" ]; then
-	LAST_CYCLE_N="$(jq -Rr 'fromjson? | .cycle_n' "${HISTORY_PATH}" 2>/dev/null | tail -n 1)"
+# ---- Invariant (c): cycle_n non-decreasing (entries with cycle_n only) --
+# idrotate entries have no cycle_n and are skipped from this check.
+if [ -f "${HISTORY_PATH}" ] && [ -s "${HISTORY_PATH}" ] && [ -n "${CYCLE_N}" ]; then
+	LAST_CYCLE_N="$(jq -Rr '(fromjson? // empty) | (.cycle_n // empty)' "${HISTORY_PATH}" 2>/dev/null | grep -E '^[0-9]+$' | tail -n 1)"
 	if [ -n "${LAST_CYCLE_N}" ] && [ "${CYCLE_N}" -lt "${LAST_CYCLE_N}" ]; then
 		echo "REJECTED: invariant_c_cycle_n_decreased new=${CYCLE_N} < last=${LAST_CYCLE_N}" >&2
 		exit 2

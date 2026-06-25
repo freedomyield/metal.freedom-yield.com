@@ -166,16 +166,29 @@ else
 		FAIL=$((FAIL + 1))
 	fi
 
-	# --- T6: tx_id duplicate is REJECTED (invariant a) -------------------
+	# --- T6: tx_id duplicate is IDEMPOTENT SKIP (invariant a v2) ---------
+	# Behavior changed 2026-06-25 (partial-success state machine): the
+	# same tx_id presented for re-append must succeed silently (exit 0)
+	# and produce ZERO new lines, NOT reject. This supports retry safety
+	# from post-anchor-event.sh after a history-push failure.
+	# A second-tx with the SAME (cycle_n, event_type) but DIFFERENT tx_id
+	# is still rejected — see T7.
+	LINES_BEFORE_T6="$(wc -l < "${HISTORY}" | tr -d ' ')"
 	if RECEIPT_PATH="${ROOT}/tests/anchor-history/fixtures/receipt-live-cycle3-start.json" \
 			HISTORY_PATH="${HISTORY}" \
 			SCHEMA_PATH="${API_DIR}/anchor-history.schema.v1.json" \
 			"${APPEND_SH}" >/dev/null 2>&1; then
-		echo "T6  FAIL  duplicate tx_id was accepted (invariant a broken)" >&2
-		FAIL=$((FAIL + 1))
+		LINES_AFTER_T6="$(wc -l < "${HISTORY}" | tr -d ' ')"
+		if [ "${LINES_AFTER_T6}" = "${LINES_BEFORE_T6}" ]; then
+			echo "T6  PASS  duplicate tx_id idempotent-skipped (invariant a v2; lines ${LINES_BEFORE_T6} → ${LINES_AFTER_T6})"
+			PASS=$((PASS + 1))
+		else
+			echo "T6  FAIL  duplicate tx_id silently appended (lines ${LINES_BEFORE_T6} → ${LINES_AFTER_T6})" >&2
+			FAIL=$((FAIL + 1))
+		fi
 	else
-		echo "T6  PASS  duplicate tx_id rejected (invariant a holds)"
-		PASS=$((PASS + 1))
+		echo "T6  FAIL  duplicate tx_id returned non-zero (expected exit 0 idempotent skip)" >&2
+		FAIL=$((FAIL + 1))
 	fi
 
 	# --- T7: (cycle_n, event_type) duplicate REJECTED (invariant b) ------
