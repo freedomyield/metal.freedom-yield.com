@@ -1,5 +1,20 @@
 {
-	"_comment": "Operator-maintained incident log. Schema per entry: id (yyyy-mm-dd-NN), date (ISO 8601), title, severity (info|minor|major|critical), summary, impact, resolution, durationMinutes (optional)",
+	"_comment": "Operator-maintained incident log. Per-entry shape conforms to /api/incidents.schema.v1.json.",
 	"validatorSince": "2026-05-19",
-	"incidents": []
+	"incidents": [
+		{
+			"id": "2026-06-24-01",
+			"type": "incident",
+			"detectionDate": "2026-06-24",
+			"confirmedPauseWindowEnd": "2026-06-24T11:20:02Z",
+			"potentiallyAffectedStart": null,
+			"potentiallyAffectedStartStatus": "undetermined",
+			"resolutionDate": "2026-06-24",
+			"title": "Anomaly monitoring maintenance pause and delayed resume",
+			"severity": "Minor",
+			"status": "resolved",
+			"summary": "On 2026-06-24, the auxiliary anomaly-monitoring cron pipeline failed to resume after an intentional maintenance pause because a runtime requirement and its cron environment were out of sync. The pipeline was restored at 2026-06-24T11:20:02Z and subsequently completed 13 hours of continuous validation with 157 successful scheduled runs. No effect on validator operation, the on-chain validator entry, delegations, or recorded uptime was identified in the records reviewed. This was an operational monitoring incident, not a validator service incident. A separate daily-status monitoring degradation remains open.",
+			"postmortemUrl": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/postmortems/2026-06-anomaly-monitoring-resume.md"
+		}
+	]
 }
