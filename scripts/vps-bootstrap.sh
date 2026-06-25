@@ -166,12 +166,13 @@ EOF
   chmod 644 /var/log/daily-status.log
   cat > /etc/logrotate.d/daily-status <<EOF
 /var/log/daily-status.log {
-  weekly
-  rotate 4
-  compress
+  daily
+  rotate 14
   missingok
   notifempty
-  create 644 $DEPLOY_USER $DEPLOY_USER
+  compress
+  delaycompress
+  create 0644 $DEPLOY_USER $DEPLOY_USER
 }
 EOF
   systemctl restart cron
