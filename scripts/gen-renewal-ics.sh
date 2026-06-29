@@ -16,6 +16,21 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# -------- cycle-gate (= cycle-affecting write 制御、 fail-closed) --------
+# Skip .ics regeneration when the gate is deferred or missing. The renewal
+# calendar embeds cycle endTime / reminder timestamps; rewriting during a
+# transition window risks publishing stale cycle metadata to subscribers.
+CYCLE_GATE_SCRIPT="${ROOT}/scripts/cycle-gate.sh"
+if [ ! -x "${CYCLE_GATE_SCRIPT}" ]; then
+	echo "[gen-renewal-ics] cycle-gate.sh missing or non-executable → skip (fail-closed)" >&2
+	exit 0
+fi
+if ! "${CYCLE_GATE_SCRIPT}" --side-effect=cycle-artifact-write; then
+	echo "[gen-renewal-ics] deferred by cycle-gate → skip .ics regeneration" >&2
+	exit 0
+fi
+
 VALIDATOR_JSON="${VALIDATOR_JSON:-$ROOT/public/api/validator.json}"
 OUT_DIR="$ROOT/public/calendar"
 TOKEN_FILE="${CALENDAR_TOKEN_FILE:-/etc/<your-namespace>/calendar-token}"

@@ -41,6 +41,24 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# -------- cycle-gate (= partial gate、 cycle-aware-notify only) --------
+# Host monitoring (= metalgo / caddy / disk / memory / peers / web probe)
+# always runs — those alerts are critical during cycle transitions too.
+# Only cycle-related alerts (= validator_present transition + period_alert
+# T-7 / T-1 / T-0 / T-10min) get suppressed when the gate is deferred.
+# This prevents false-positive "validator dropped" alerts during the
+# orchestrated transition window (= the EXPECTED_DROP heuristic at line
+# 638-641 already softens these, but the gate gives a clean kill switch).
+CYCLE_GATE_OK=1
+CYCLE_GATE_SCRIPT="${ROOT}/scripts/cycle-gate.sh"
+if [ ! -x "${CYCLE_GATE_SCRIPT}" ]; then
+	CYCLE_GATE_OK=0
+	echo "[check-anomalies] cycle-gate.sh missing or non-executable → cycle alerts suppressed (fail-closed)" >&2
+elif ! "${CYCLE_GATE_SCRIPT}" --side-effect=cycle-aware-notify; then
+	CYCLE_GATE_OK=0
+	echo "[check-anomalies] deferred by cycle-gate → cycle-related alerts suppressed for this tick" >&2
+fi
 NOTIFY="${NOTIFY:-$ROOT/scripts/notify.sh}"
 : "${ANOMALY_STATE_DIR:?ANOMALY_STATE_DIR is required}"
 STATE_DIR="$ANOMALY_STATE_DIR"
@@ -629,6 +647,9 @@ if [ "$RPC_VALID" = "1" ]; then
   # else: ORIG_DC == OBS, no transition, candidate unchanged (= original).
 
   # === transition: validator_present + tracking last_known_end_time ===
+  # cycle-gate wrap: skip cycle-related notifies when gate is deferred.
+  # See top-of-file CYCLE_GATE_OK initialization for rationale.
+  if [ "${CYCLE_GATE_OK}" = "1" ]; then
   ORIG_VAL=$(orig_get '.validator_present')
   ORIG_LAST_END=$(orig_get '.last_known_end_time')
   if [ -z "$OBS_VALIDATOR_END" ] || [ "$OBS_VALIDATOR_END" = "null" ]; then
@@ -711,6 +732,7 @@ if [ "$RPC_VALID" = "1" ]; then
         && candidate_set '.period_alert_sent["10min"]' 'true'
     fi
   fi
+  fi  # end: if CYCLE_GATE_OK == 1 (= validator_present + period_alert wrap)
 fi
 
 # === final atomic commit (= ≤ 1 per run, skipped when no change) ========

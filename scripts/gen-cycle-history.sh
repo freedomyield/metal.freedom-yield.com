@@ -46,6 +46,22 @@
 set -euo pipefail
 
 ROOT="${REPO_BASE:-$(cd "$(dirname "$0")/.." && pwd)}"
+
+# -------- cycle-gate (= cycle-affecting write 制御、 fail-closed) --------
+# Skip regeneration of cycle-history.jsonl when the gate is deferred or
+# missing/broken. cycle-history.jsonl bytes flow into dag_root_hash via
+# gen-identity.sh, so an unapproved rewrite during a transition window
+# would risk SC inscription integrity.
+CYCLE_GATE_SCRIPT="${ROOT}/scripts/cycle-gate.sh"
+if [ ! -x "${CYCLE_GATE_SCRIPT}" ]; then
+	echo "[gen-cycle-history] cycle-gate.sh missing or non-executable → skip (fail-closed)" >&2
+	exit 0
+fi
+if ! "${CYCLE_GATE_SCRIPT}" --side-effect=cycle-artifact-write; then
+	echo "[gen-cycle-history] deferred by cycle-gate → skip cycle-history.jsonl regeneration" >&2
+	exit 0
+fi
+
 UPTIME="${UPTIME_CYCLES_JSON:-${ROOT}/public/api/uptime-cycles.json}"
 INCIDENTS="${INCIDENTS_JSON:-${ROOT}/public/api/incidents.json}"
 OUT="${OUT_JSONL:-${ROOT}/public/api/cycle-history.jsonl}"

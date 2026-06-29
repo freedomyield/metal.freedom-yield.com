@@ -18,6 +18,25 @@ case "$SLOT" in
 esac
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# -------- cycle-gate (= digest skip 制御、 fail-closed) --------
+# Skip the entire digest push when the gate is deferred or missing.
+# The digest body includes cycle-related fields (= validator stake, period,
+# uptime); during a transition window the cycle data is in flux and a
+# digest would either confuse the operator or require complex conditional
+# rendering. Cleaner to skip the push entirely. Operator's transition-time
+# awareness comes from the explicit resume-after-cycle-start.sh flow, not
+# from periodic digest.
+CYCLE_GATE_SCRIPT="${ROOT}/scripts/cycle-gate.sh"
+if [ ! -x "${CYCLE_GATE_SCRIPT}" ]; then
+	echo "[daily-status] cycle-gate.sh missing or non-executable → skip digest push (fail-closed)" >&2
+	exit 0
+fi
+if ! "${CYCLE_GATE_SCRIPT}" --side-effect=cycle-aware-notify; then
+	echo "[daily-status] deferred by cycle-gate → skip digest push for this slot" >&2
+	exit 0
+fi
+
 NOTIFY="$ROOT/scripts/notify.sh"
 STATUS_JSON="$ROOT/public/api/server-status.json"
 VALIDATOR_JSON="$ROOT/public/api/validator.json"

@@ -42,6 +42,22 @@
 set -euo pipefail
 
 REPO_BASE="${REPO_BASE:-$(cd "$(dirname "$0")/.." && pwd)}"
+
+# -------- cycle-gate (= cycle-affecting write 制御、 fail-closed) --------
+# Skip regeneration of evidence.json when the gate is deferred or missing.
+# evidence.json is a leaf in identity.json's artifact_manifest (= part of
+# artifact_root); rewriting during a transition window would invalidate
+# the most recent operator-signed identity manifest until re-signed.
+CYCLE_GATE_SCRIPT="${REPO_BASE}/scripts/cycle-gate.sh"
+if [ ! -x "${CYCLE_GATE_SCRIPT}" ]; then
+	echo "[gen-evidence] cycle-gate.sh missing or non-executable → skip (fail-closed)" >&2
+	exit 0
+fi
+if ! "${CYCLE_GATE_SCRIPT}" --side-effect=cycle-artifact-write; then
+	echo "[gen-evidence] deferred by cycle-gate → skip evidence.json regeneration" >&2
+	exit 0
+fi
+
 VALIDATOR_JSON="${REPO_BASE}/public/api/validator.json"
 OUT="${REPO_BASE}/public/api/evidence.json"
 STALE_THRESHOLD_SEC=3600

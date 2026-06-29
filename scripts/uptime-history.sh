@@ -125,6 +125,23 @@ fi
 # Compare validator.json's period_end_unix with last seen in cycle state.
 # If different, the previous cycle has ended — close it out + append cycle
 # summary to uptime-cycles.json.
+
+# -------- cycle-gate (= partial gate, Job B only, fail-closed) --------
+# Job A (= daily snapshot append to uptime-history.jsonl) above is NOT gated.
+# Job B (= cycle boundary append to uptime-cycles.json) below IS gated.
+# uptime-cycles.json bytes flow into cycle-history.jsonl → dag_root_hash;
+# an unapproved cycle boundary append during a transition window would risk
+# SC inscription integrity. Skip Job B but keep Job A's daily snapshot.
+CYCLE_GATE_SCRIPT="${ROOT}/scripts/cycle-gate.sh"
+if [ ! -x "${CYCLE_GATE_SCRIPT}" ]; then
+	echo "[uptime-history] cycle-gate.sh missing or non-executable → skip Job B (fail-closed)" >&2
+	exit 0
+fi
+if ! "${CYCLE_GATE_SCRIPT}" --side-effect=cycle-artifact-write; then
+	echo "[uptime-history] deferred by cycle-gate → skip Job B (cycle boundary detection)" >&2
+	exit 0
+fi
+
 LAST_END=$(jq -r '.period_end_unix // empty' "$CYCLE_STATE")
 
 if [ -z "$LAST_END" ]; then

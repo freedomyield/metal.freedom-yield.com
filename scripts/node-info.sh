@@ -10,6 +10,25 @@ set -euo pipefail
 
 API="${METALGO_API:-http://localhost:9650}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# -------- cycle-gate (= cycle-affecting write 制御、 fail-closed) --------
+# Skip validator.json update when the gate is deferred or missing.
+# validator.json is a leaf in identity.json's artifact_manifest; an
+# unapproved rewrite during a transition window would (a) invalidate the
+# most recent operator-signed identity manifest until re-signed, and
+# (b) publish stale cycle metadata (endTime, stake, uptime) to web visitors.
+# resume-after-cycle-start.sh queries metalgo RPC directly (= not via this
+# script), so gate-deferred node-info does not block the resume flow.
+CYCLE_GATE_SCRIPT="${ROOT}/scripts/cycle-gate.sh"
+if [ ! -x "${CYCLE_GATE_SCRIPT}" ]; then
+	echo "[node-info] cycle-gate.sh missing or non-executable → skip (fail-closed)" >&2
+	exit 0
+fi
+if ! "${CYCLE_GATE_SCRIPT}" --side-effect=cycle-artifact-write; then
+	echo "[node-info] deferred by cycle-gate → skip validator.json update" >&2
+	exit 0
+fi
+
 OUT="${ROOT}/public/api/validator.json"
 
 rpc() {
