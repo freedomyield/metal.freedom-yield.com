@@ -4,6 +4,11 @@
 
 > 期限を逃すと validator が P-Chain から消える。同 NodeID で再登録可能だが、消失期間中の uptime はカウント不能、delegator もリセット。
 
+> **適用版バナー (2026-06-29 追加)**:
+> - **2026-07-04 cycle 3 開始 transition**: 本書の Step 1 〜 Step 3 + Phase α 11-step canonical (= `project_phase_alpha_anchor_completion_2026_07_04` memo) を使用。 本書は cycle 3 開始の完全な手順を含む。
+> - **~2026-08-04 以降の transition**: 本書末尾の **「新 SOP (= cycle-gate + resume 設計、 2026-08-04 以降適用)」** section を使用。 手動 cron disable/enable が廃止され、 operator の能動操作は wallet + passphrase + visual verify のみに縮小。
+> - 切替の根拠: `docs/CYCLE_GATE.md` 全文。
+
 ---
 
 ## 全体タイムライン(各サイクル)
@@ -209,8 +214,106 @@ cat public/api/validator.json | jq '.endTime, .stake.self'
 
 ---
 
+---
+
+## 新 SOP (= cycle-gate + resume 設計、 2026-08-04 以降適用)
+
+> **適用条件**: 2026-07-04 cycle 3 開始 transition を完走させ、 operator retrospective を経て本設計を deploy 済 (= T-7 完了済) であることが前提。 deploy 完了前の transition では本 section は適用せず、 上記 Step 1 〜 Step 3 を使用。
+
+### 設計概要
+
+2 component:
+
+- `scripts/cycle-gate.sh` (= passive): 各 cron が broadcast 直前に「現サイクルは operator 承認済か」 を問い合わせる
+- `scripts/resume-after-cycle-start.sh` (= active): 新サイクル開始確認 + state file 更新 + broadcast trigger + 7 条件 PASS 検証
+
+State file: `/var/lib/freedom-yield/cycle-gate-state.json` (= operator 承認済の cycle signature + dag_root_hash を保持)
+
+詳細仕様 + behavior matrix + rollback 手順は `docs/CYCLE_GATE.md` 参照。
+
+### 廃止される手動操作 (= 旧 11-step との差分)
+
+| 旧 step | 廃止理由 |
+|---|---|
+| 旧 step 2: `/etc/cron.d/metal-anchor-watch` 一時 disable | cycle-gate.sh が approval state を見て自動 defer、 cron 常時 enable で安全 |
+| 旧 step 12: 同 re-enable | 上記の対称で廃止 |
+| 旧 step 8: `uptime-history.sh` 手動 trigger | AI が resume orchestration 内で trigger |
+| 旧 step 9: `gen-cycle-history.sh` + push 手動 trigger | 同上 |
+| 旧 step 11: `post-anchor-event.sh` 手動 trigger | `resume-after-cycle-start.sh` 内部の Phase 3 で sync trigger |
+
+### operator の能動操作 (= 4 active actions のみ)
+
+[[feedback_ai_full_orchestration_default]] model α 前提。 operator は以下 4 アクションのみを能動的に実行、 残りは AI が orchestrate:
+
+| # | 操作 | 場所 | 入力 |
+|---|---|---|---|
+| 1 | AI に「cycle 切替お願い」 と依頼 | (= 任意の channel) | (= なし) |
+| 2 | wallet 操作 (= 集約 → 送金 → cross-chain → AddValidator → on-chain Committed 確認) | Metal Wallet web | stake 額 + duration + reward address |
+| 3 | 鍵 password / passphrase 入力 (= proton key:unlock + identity key 復号) | AI が立ち上げる TTY prompt | Dashlane に保管された 2 secret |
+| 4 | explorer URL を visual 確認 | XPR explorer (= AI が URL 報告) | (= 目視のみ) |
+
+### AI が裏で自走する技術 task (= operator から見えない)
+
+- ssh validator host: `uptime-history.sh` + `gen-cycle-history.sh` + `push-to-web-host.sh cycle-history.jsonl` を順次 trigger
+- Mac local: `bash scripts/operator-local/gen-identity.sh` (= operator passphrase prompt 発生時に 3 番目の active action)
+- Mac local: `git add` + `git commit` + `git push origin main`
+- `gh run watch` で GitHub Actions Deploy workflow 完了監視
+- ssh validator host: `bash scripts/resume-after-cycle-start.sh --apply` (= Phase 1 polling は attempt 1 で fresh data 発見、 Phase 2-5 同期実行)
+- Phase 5 summary を読取、 explorer URL を operator に報告
+
+### 緊急 fallback (= AI 不在時の operator 手動経路)
+
+AI が応答不能な場合、 operator は以下を手動実行:
+
+```sh
+# Mac で全部実行
+cd ~/htdocs/01_PROJECTS/metal.freedom-yield.com
+git pull origin main
+export OPERATOR_IDENTITY_KEY=~/.ssh/freedom_yield_operator
+bash scripts/operator-local/gen-identity.sh
+git add public/api/identity.json public/api/identity.json.sig \
+        public/api/cycles-history.json public/api/identity-history.jsonl \
+        public/.well-known/operator-identity.pub
+git commit -m "feat(identity): re-sign for new cycle"
+git push origin main
+
+# GitHub Actions Deploy 完了を待つ (= Actions tab 目視 or `gh run watch`)
+
+# Hetzner で resume-after-cycle-start.sh を 1 行で trigger
+ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
+    'sudo -u deploy bash /home/deploy/metal.freedom-yield.com/scripts/resume-after-cycle-start.sh --apply'
+
+# Phase 5 summary に explorer URL が出力される。 visually verify。
+```
+
+Phase 1 の identity.json polling は最大 10 分待ち、 deploy 完了 timing が不明でも安全に走る。
+
+### dry-run 経路
+
+承認前に Phase 1 の検証だけを行いたい場合:
+
+```sh
+ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
+    'sudo -u deploy bash /home/deploy/metal.freedom-yield.com/scripts/resume-after-cycle-start.sh --dry-run'
+```
+
+state file 書込 / broadcast / 7 条件 check は実行されず、 Phase 1 PASS のみ報告。
+
+### rollback (= 設計を一時無効化)
+
+3 段階、 軽い順:
+
+1. `rm /var/lib/freedom-yield/cycle-gate-state.json` → 次回 `resume-after-cycle-start.sh` まで gate 無効化 (= backward compat)
+2. `chmod -x /home/deploy/metal.freedom-yield.com/scripts/cycle-gate.sh` → gate consultation 完全無効化
+3. 全 commit revert → 旧 11-step に完全復帰
+
+詳細は `docs/CYCLE_GATE.md` の Rollback section 参照。
+
+---
+
 ## 関連
 
+- `docs/CYCLE_GATE.md` — 2-component 設計詳細 + state file schema + behavior matrix + rollback
 - `docs/MAINNET_REGISTRATION.md` — 初回登録時のチェックリスト
 - `docs/KEY_ROTATION.md` — 鍵運用
 - `docs/DISASTER_RECOVERY.md` — VPS 障害時の対応
