@@ -49,6 +49,11 @@
 #  10  concurrent execution prevented (= another instance holds the
 #      flock; this is a normal cron / manual collision, no action needed —
 #      next tick will try again once the lock is released)
+#  11  deferred by cycle-gate (= broadcast not approved under current
+#      cycle-gate-state.json; operator must run resume-after-cycle-start.sh
+#      to approve the new cycle. Backward compat preserved: when
+#      scripts/cycle-gate.sh is absent or non-executable, this code path
+#      is never reached and the script behaves as before.)
 #
 # Usage:
 #   post-anchor-event.sh --event-type <cyclestart|cycleend|idrotate>
@@ -99,6 +104,12 @@
 #                    $(dirname $0)/sign-anchor-event.sh. Test harnesses
 #                    set this to a stub that emits a synthetic receipt
 #                    fragment without invoking proton-cli.
+#   ANCHOR_PUSHER    path to the web-host pusher script. Default:
+#                    $(dirname $0)/push-to-web-host.sh. Test harnesses
+#                    set this to a no-op stub.
+#   ANCHOR_HISTORY_APPENDER  path to the history-appender script. Default:
+#                    $(dirname $0)/append-anchor-history.sh. Test harnesses
+#                    set this to a stub.
 #   PUBLIC_BASE      base URL for fetching cycles-history.json. Default
 #                    https://metal.freedom-yield.com. Tests may use a
 #                    file:// URL pointing at a fixture directory.
@@ -186,7 +197,7 @@ esac
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 SIGNER="${ANCHOR_SIGNER:-${SCRIPT_DIR}/sign-anchor-event.sh}"
-PUSHER="${SCRIPT_DIR}/push-to-web-host.sh"
+PUSHER="${ANCHOR_PUSHER:-${SCRIPT_DIR}/push-to-web-host.sh}"
 STATE_DIR="${FY_STATE_DIR:-/var/lib/freedom-yield}"
 STATE_FILE="${STATE_DIR}/last-anchored-root"
 PENDING_FILE="${STATE_DIR}/anchor-pending.json"
@@ -327,6 +338,33 @@ LAST_ANCHORED=""
 if [ -z "${RESUME_MODE}" ] && [ "${FORCE}" -eq 0 ] && [ "${LAST_ANCHORED}" = "${DAG_ROOT_HASH}" ]; then
 	echo "no-op: dag_root_hash unchanged since last anchor (${DAG_ROOT_HASH:0:12}…)" >&2
 	exit 2
+fi
+
+# -------- cycle-gate (= broadcast 制御、 IRREV 防止、 fail-closed) --------
+# Added per docs/CYCLE_GATE.md (2-component design). Consult the passive
+# gate before invoking the signer. If the gate returns deferred (= transition
+# window between cycle close and operator approval of new cycle), exit 11
+# distinctly from exit 2 (= no-op idempotency).
+# RESUME_MODE bypasses the gate (= mid-stream completion required for
+# consistency). --force also bypasses (= operator's explicit emergency
+# authority).
+# Fail-closed semantics (= 2026-06-29 Q3 fix per operator directive):
+# when scripts/cycle-gate.sh is absent or non-executable, treat as deferred
+# rather than backward-compat. Rationale: a missing / broken gate script
+# indicates an unintended failure mode (= deploy gap, accidental chmod), and
+# silently bypassing the gate would defeat the safety purpose. Exit 11 is
+# used uniformly so callers cannot distinguish "gate-broken" from
+# "gate-deferred" — both mean "do not broadcast".
+if [ -z "${RESUME_MODE}" ] && [ "${FORCE}" -eq 0 ]; then
+	CYCLE_GATE_SCRIPT="${SCRIPT_DIR}/cycle-gate.sh"
+	if [ ! -x "${CYCLE_GATE_SCRIPT}" ]; then
+		echo "ERROR: cycle-gate.sh missing or non-executable at ${CYCLE_GATE_SCRIPT} → fail-closed (deferred)" >&2
+		exit 11
+	fi
+	if ! "${CYCLE_GATE_SCRIPT}" --side-effect=broadcast; then
+		echo "deferred by cycle-gate: dag_root_hash=${DAG_ROOT_HASH:0:12}… not approved for broadcast" >&2
+		exit 11
+	fi
 fi
 
 # -------- invoke signer (skipped in RESUME_MODE) --------
@@ -606,7 +644,7 @@ else
 	# append step, the live receipt and the public ledger drift out of sync.
 	# Requires the web-host forced-command wrapper allowlist to include
 	# 'anchor-history.jsonl'; see push-to-web-host.sh.
-	HISTORY_APPENDER="${SCRIPT_DIR}/append-anchor-history.sh"
+	HISTORY_APPENDER="${ANCHOR_HISTORY_APPENDER:-${SCRIPT_DIR}/append-anchor-history.sh}"
 	if [ -x "${HISTORY_APPENDER}" ]; then
 		# Build the env command line without dereferencing an empty array
 		# (macOS bash 3.2 + `set -u` errors on `${arr[@]}` when arr is
