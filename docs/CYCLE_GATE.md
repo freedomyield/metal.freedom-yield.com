@@ -1,6 +1,8 @@
 # Cycle gate — 2-component cycle transition simplification
 
-> **Status**: design finalized 2026-06-29. **Not yet deployed**. Initial deployment is gated on completion of the 2026-07-04 cycle 3 transition using the existing 11-step runbook (= `project_phase_alpha_anchor_completion_2026_07_04` memo) and the operator retrospective that follows. First real application is the next cycle transition (= ~2026-08-04).
+> **Status (= 2026-06-29 15:09 JST)**: **DEPLOYED to production**. T-7 deploy completed with 5 commits (= b4d4cfe + 221ca87 + 457a4dd + 55d7a9e + aac4934), GitHub Actions deploy + Hetzner sync + cycle-gate-state.json initialized for current cycle 2 (= signature `NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v-1780560117`, dag `0bd4e667…`). First live application is **2026-07-04 cycle 3 transition** (= the originally pressure-source day the design was built for). See `docs/CYCLE_GATE_DAILY_OBSERVATION.md` for ongoing production state snapshots.
+>
+> The "2026-08-04 first transition" framing in earlier drafts of this doc was the AI implementer's incorrect interpretation; operator intent was always 2026-07-04 from the start. Inline references to "~2026-08-04" below are historical and reflect the now-corrected plan.
 
 ## What problem this solves
 
@@ -142,7 +144,7 @@ Backward compatibility is structural: when `scripts/cycle-gate.sh` is absent or 
 
 The `check-anomalies.sh` and `daily-status.sh` "optional gate" modifications proposed earlier were withdrawn after the T-1 read. The existing `EXPECTED_DROP` logic in `check-anomalies.sh` (line 638-651) already distinguishes the cycle-end-driven validator drop from a true unexpected drop, and `daily-status.sh` is pure observation (= no IRREV side effect). Neither benefits from gate consultation. Only `post-anchor-event.sh` is modified.
 
-## Operator runbook (= cycle transitions starting ~2026-08-04)
+## Operator runbook (= cycle transitions starting 2026-07-04 cycle 3)
 
 Under model α (= AI full orchestration; see `feedback_ai_full_orchestration_default` memo), the operator's runbook collapses to four active steps:
 
@@ -196,13 +198,13 @@ The tests cover the deterministic state-machine behavior. They do not cover:
 - Live identity.json signature verification (= would require a real ed25519 signing key; covered by the operator-Mac `gen-identity.sh` self-verify at signing time)
 - End-to-end A-chain broadcast through `proton-cli` (= covered by the operator's manual dry-run on the validator host before the first cycle 4 transition)
 
-Both are scheduled to be exercised once on the validator host as part of T-8 (= 2026-08-04 transition validation).
+Both are scheduled to be exercised once on the validator host as part of T-8 (= 2026-07-04 cycle 3 transition validation — first live use of the cycle-gate design).
 
 ## Constitution alignment
 
 - **§2 #1 validator health**: `cycle-gate.sh` hits metalgo RPC once per consultation (= same query as the existing `check-anomalies.sh` 5-minute tick, no incremental load). `resume-after-cycle-start.sh` runs at most once per cycle.
 - **§3.3**: neither script reads or writes any SECRET-class data. The `cycle-gate-state.json` contents are all publicly observable on chain.
-- **§5**: validator-host change; deployment is operator-approved. The implementation work in this document is fully read-only on production until T-7 (gated on 2026-07-04 completion + retrospective).
+- **§5**: validator-host change; deployment is operator-approved. T-7 deploy completed 2026-06-29 15:09 JST per operator authorization; cycle-gate is now active on the validator host.
 
 ## Related
 

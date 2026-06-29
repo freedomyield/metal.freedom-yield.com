@@ -2,6 +2,7 @@
 
 > **Generated**: 2026-06-29
 > **Scope**: T-RD2 of cycle-gate-resume design — expand cycle-gate.sh consultation from 1 cron (post-anchor-event.sh only) to **all 8 cycle-related crons**, fail-closed the gate-missing case (= Q3 fix), add `cycle-artifact-write` side-effect type, extend test suite.
+> **Status (= 2026-06-29 16:40 JST update)**: **T-7 deploy 完了済 2026-06-29 15:09 JST**。 本 audit doc 内の「T-7 deploy 着手の認可条件」 「T-7 deploy 時点で」 等の pending 表記は **historical reference**、 現在 truth は `docs/CYCLE_GATE_IMPLEMENTATION_AUDIT.md` 冒頭 banner。
 > **Trigger**: operator directive 2026-06-29 —「cycle系のcronを対象にして」「SC inscription 整合性 を最優先」「cycle-gate.sh が破損したら呼ぶ cron は skip」
 > **Predecessor audits**: `docs/CYCLE_GATE_IMPLEMENTATION_AUDIT.md` (T-1〜T-6) + `docs/CYCLE_GATE_T55_AUDIT.md` (T-5.5)
 

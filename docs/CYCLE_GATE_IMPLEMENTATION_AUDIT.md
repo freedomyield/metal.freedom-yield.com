@@ -2,8 +2,8 @@
 
 > **Generated**: 2026-06-29
 > **Scope**: T-1 through T-6 of `project_cycle_gate_resume_tasks` memo (= read + implement + test + document, without production deploy).
-> **Status**: T-1〜T-6 完了。 T-7 (= deploy) は **2026-07-04 cycle 3 開始 transition 完走後の operator retrospective を待つ** ため pending。 T-8 (= ~2026-08-04 次回 transition での実証) も同様 pending。
-> **Production state**: **無変更**。 全成果物は repo working tree に未 commit、 production に未配置。
+> **Status (= 2026-06-29 16:40 JST update)**: T-1〜T-6 完了 + **T-7 deploy DEPLOYED 2026-06-29 15:09 JST** + T-RD1 / T-RD2 / T-RD3 全完了。 T-8 (= 2026-07-04 cycle 3 開始 transition での初回 live 適用) は 5 日後予定。
+> **Production state (= 2026-06-29 16:40 JST update)**: scripts/ + state file Hetzner sync 済、 cycle-gate active、 定点観測 7 check 全 green。 deploy 経路は `docs/CYCLE_GATE_TRD2_AUDIT.md` + 第 7 ラウンド独立監査で verified。 過去 audit doc 内 「T-7 pending」 表記は **historical reference**、 現在 truth は本 banner。
 
 ## 1. 実施 task 一覧
 
@@ -16,8 +16,8 @@
 | T-5 | test suite 整備 (= 10 scenario) | ✅ 完了 | 10/10 PASS、 Python HTTP mock + bash test runner |
 | **T-5.5** | **追加 mock test 8 件 (= 未 cover Phase 2-5 + 統合)** | ✅ 完了 | **22/22 PASS** (= T1-T18 + 4 side-effect 検証)、 mock stub 4 件 + ed25519 test 鍵 + flock shim 追加 |
 | T-6 | docs 更新 + operator 認可 gate | ✅ AI 完了 / ⏳ operator 認可待ち | docs/CYCLE_GATE.md 213 行 新規、 docs/VALIDATOR_RENEWAL.md 修正済 (= 旧 SOP + 新 SOP 並記) |
-| T-7 | deploy | ⏳ 2026-07-04 完走後 | code 変更 + commit + push + Hetzner sync + state file 初期書込 |
-| T-8 | 2026-08-04 頃の次回 transition 実証 | ⏳ 2026-08-04 頃 | AI 主導 orchestrate で初回適用、 11-step 手動 disable/enable が発生しなかったことを記録 |
+| T-7 | deploy | ✅ **2026-06-29 15:09 JST 完了** | 5 commit + push + Hetzner sync + state file 初期書込 + 動作確認済 |
+| T-8 | 2026-07-04 cycle 3 開始 transition 初回 live 適用 | ⏳ 2026-07-04 13:00:27 JST | AI 主導 orchestrate (= model α)、 手動 cron disable/enable が発生しないことを記録 |
 
 ## 2. 成果物 一覧 (= 全 file path + 行数 + sha256)
 

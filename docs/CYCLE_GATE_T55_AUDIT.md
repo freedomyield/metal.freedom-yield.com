@@ -2,6 +2,7 @@
 
 > **Generated**: 2026-06-29
 > **Scope**: T-5.5 of `project_cycle_gate_resume_tasks` memo — addition of 8 mock test scenarios (T11-T18) to bring previously-uncovered Phase 2-5 logic + post-anchor-event ⇄ cycle-gate integration under deterministic verification before T-7 deploy.
+> **Status (= 2026-06-29 16:40 JST update)**: **T-7 deploy 完了済 2026-06-29 15:09 JST**。 本 audit doc 内の「T-7 deploy 着手の認可条件」 等の pending 表記は **historical reference**、 現在 truth は `docs/CYCLE_GATE_IMPLEMENTATION_AUDIT.md` 冒頭 banner。
 > **Trigger**: operator request 2026-06-29 to minimize "won't know until the day" risk by mocking everything mockable, not just the initial 10 scenarios.
 > **Predecessor audit**: `docs/CYCLE_GATE_IMPLEMENTATION_AUDIT.md` covers T-1 through T-6 + 3rd-round monitor BLOCKER resolution; this document covers only T-5.5 work.
 

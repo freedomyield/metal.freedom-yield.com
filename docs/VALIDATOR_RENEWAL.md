@@ -4,10 +4,10 @@
 
 > 期限を逃すと validator が P-Chain から消える。同 NodeID で再登録可能だが、消失期間中の uptime はカウント不能、delegator もリセット。
 
-> **適用版バナー (2026-06-29 追加)**:
-> - **2026-07-04 cycle 3 開始 transition**: 本書の Step 1 〜 Step 3 + Phase α 11-step canonical (= `project_phase_alpha_anchor_completion_2026_07_04` memo) を使用。 本書は cycle 3 開始の完全な手順を含む。
-> - **~2026-08-04 以降の transition**: 本書末尾の **「新 SOP (= cycle-gate + resume 設計、 2026-08-04 以降適用)」** section を使用。 手動 cron disable/enable が廃止され、 operator の能動操作は wallet + passphrase + visual verify のみに縮小。
-> - 切替の根拠: `docs/CYCLE_GATE.md` 全文。
+> **適用版バナー (2026-06-29 16:40 JST update)**:
+> - **2026-07-04 cycle 3 開始 transition + 以降全 transition**: 本書末尾の **「新 SOP (= cycle-gate + resume 設計、 2026-06-29 deployed)」** section を使用。 手動 cron disable/enable は廃止、 operator 能動操作は wallet + passphrase + visual verify のみ。
+> - **本書 Step 1 〜 Step 3 (= 旧 11-step) + Phase α canonical memo**: deploy 前の **歴史記録 / 緊急 rollback 時の fallback**。 cycle-gate state file rm + cycle-gate.sh chmod -x で旧 behavior に戻せる (= 3 段階 rollback 手順は `docs/CYCLE_GATE.md` Rollback section)。
+> - 切替の根拠: `docs/CYCLE_GATE.md` 全文。 cycle-gate は 2026-06-29 15:09 JST に T-7 deploy 完了済 + 第 7 ラウンド独立監査 PASS。
 
 ---
 
@@ -216,9 +216,9 @@ cat public/api/validator.json | jq '.endTime, .stake.self'
 
 ---
 
-## 新 SOP (= cycle-gate + resume 設計、 2026-08-04 以降適用)
+## 新 SOP (= cycle-gate + resume 設計、 2026-06-29 deployed、 2026-07-04 cycle 3 開始 transition から適用)
 
-> **適用条件**: 2026-07-04 cycle 3 開始 transition を完走させ、 operator retrospective を経て本設計を deploy 済 (= T-7 完了済) であることが前提。 deploy 完了前の transition では本 section は適用せず、 上記 Step 1 〜 Step 3 を使用。
+> **適用状況 (= 2026-06-29 16:40 JST update)**: ✅ **T-7 deploy 完了 2026-06-29 15:09 JST**、 production active。 2026-07-04 cycle 3 開始 transition (= 5 日後) から本 SOP を live で使用。 上記 Step 1 〜 Step 3 (= 旧 11-step) は historical reference + 緊急 rollback 時の fallback。
 
 ### 設計概要
 
