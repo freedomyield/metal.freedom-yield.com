@@ -203,6 +203,123 @@ shasum -a 256 scripts/cycle-gate.sh scripts/resume-after-cycle-start.sh \
 
 ---
 
+## snapshot #3 — 2026-06-30 13:52 JST (= 1 日経過後、 cron fix 着手前)
+
+> 第 9 ラウンド audit verdict (= clean) 後、 翌日の状態を re-capture。 5 daily cron の 4 件 (= daily-status / uptime-history / evidence / renewal-ics) の natural fire 後 verify 目的 + cycle-gate 平時動作確認。 本 snapshot は uptime-history.sh + gen-renewal-ics.sh の broken 状態 (= 2026-06-18 以来 12 日間停止) を public artifact として記録。
+
+### L1: Hetzner scripts/ sha256 (= snapshot #2 と完全一致確認)
+
+```
+4fd972d08649bb8a64652e5ab72455756cb7d14c90d915551c8952480b6e2875  cycle-gate.sh
+3bc5c85783b4e01951ec356af4f5f0b93c70b6d8c43762e0b1b11b8fc666836c  resume-after-cycle-start.sh
+c95519a9ac4b8238a158564580a65b6ee2f45d067b35f58b70d09b6d7f077dec  post-anchor-event.sh
+047ffd8a04ead41f786261e02727e1d24001258521685c6919012c9477b34e2a  gen-cycle-history.sh
+2086e9de1ec4f08b666ab6a3a211818f423a792f52da448e0cd295b6a174d586  uptime-history.sh
+7a25ca68df4822c0a05dfa0a99e8941d081f3bba0a53440337903f0fd1df2266  gen-evidence.sh
+238b1a8cb220cdde2c35868ab2856203d8febdaccd2284df3fec714da81954d5  gen-renewal-ics.sh
+3358bfd262ee7d36b2e2dea0570024e3ab0986c00a0477fecfb30120a1b06d7c  node-info.sh
+dce437ecfaefe9b2e4c6b33049e864a33de7a1e24304325320712fa4824890b9  check-anomalies.sh
+feb293b78237a9b6d1cf6bc44e389a1130c7de523ac5c6d35eb866eadb1c9b77  daily-status.sh
+```
+
+snapshot #2 と 1:1 完全一致 (= sync 不変、 cycle-gate deploy 後 改変なし)。
+
+### L2: cycle-gate-state.json (= sha256 + 内容、 snapshot #2 と完全一致)
+
+```
+8f824dcf69beb02a84c2202e964ae04b26e6c62533c14313caa977cb43c7b11b  /var/lib/freedom-yield/cycle-gate-state.json
+```
+
+content (= unchanged from snapshot #2):
+```json
+{"schemaVersion":1,"approved_cycle_signature":"NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v-1780560117","approved_dag_root_hash":"0bd4e667dcb7397c655ad4bccdef282b76d8a98cde4b67a8396790bcd07d3bb4","approved_at":"2026-06-29T06:10:19Z"}
+```
+
+### L3: 5 min cron tick (= 直近 fire)
+
+| cron / log | mtime |
+|---|---|
+| /var/log/anchor-watch.log | 2026-06-30 04:50:01 UTC = 13:50 JST |
+| /var/log/anomalies.log | 2026-06-30 04:50:02 UTC = 13:50 JST |
+| public/api/validator.json (= node-info 出力) | 2026-06-30 04:50:01 UTC = 13:50 JST |
+
+5 min cron tick 直近 2 分以内、 正常稼働。
+
+### L4: cycle-gate green markers 累計
+
+```
+grep -c "cycle-gate.*green" /var/log/anomalies.log
+58
+```
+
+snapshot #2 = 24 → snapshot #3 = 58 (= +34 件)。 約 22 時間経過 × 5 min cron (= check-anomalies) で 264 ticks 期待中 34 件 green markers = anomalies.sh の K-3.5 候補 state 変動時のみ gate consult する current behavior と整合。
+
+### L5: 異常 markers (= 全 log 横断、 expect 0)
+
+```
+/var/log/anomalies.log:0
+/var/log/anchor-watch.log:0
+/var/log/node-info.log:0
+/home/deploy/metal.freedom-yield.com/logs/cycle-history.log:0
+/home/deploy/metal.freedom-yield.com/logs/gen-evidence.log:0
+/home/deploy/metal.freedom-yield.com/logs/notify-evidence-health.log:0
+```
+
+合計 **0 件**、 cycle 2 中 / signature match で gate green 維持。
+
+### L6 + L7: evidence cron natural fire (= 6/30 10:30 JST = 01:30 UTC)
+
+```
+[cycle-gate] cycle-artifact-write → green (approved=NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v-1780560117)
+```
+
+cron schedule 通り natural fire + gate consultation + green return + evidence.json regen + push 成功。
+
+### L8: validator service health
+
+```
+metalgo: Up 5 weeks
+validator present: 1 (= NodeID-yyPv...)
+peer count: 248
+P-chain bootstrap: true
+X-chain bootstrap: true
+C-chain bootstrap: true
+```
+
+### L9: host resources
+
+```
+/dev/sda1       225G  4.5G  212G   3% /
+Mem:            30Gi   1.8Gi   25Gi   5.0Mi   4.1Gi   28Gi
+```
+
+### broken cron state record (= fix 着手前のベースライン)
+
+| cron | env header line | artifact mtime | 状態 |
+|---|---|---|---|
+| /etc/cron.d/metal-uptime-history | 0 (= UPTIME_STATE_DIR override 不在) | uptime-history.jsonl 2026-06-18 00:30 UTC | broken since 6/18 |
+| /etc/cron.d/metal-renewal-ics | 0 (= CALENDAR_TOKEN_FILE override 不在) | schedule.ics 2026-06-18 03:30 UTC | broken since 6/18 |
+
+operator 認可 7/4 blocker は **uptime-history.sh のみ**、 fix 着手は次節。 gen-renewal-ics.sh は 7/4 dependency 外 (= 別 issue queue)。
+
+### snapshot #3 capture timestamp
+
+`2026-06-30 13:52:53 JST` (= ssh capture moment)
+
+### 監査役 reproduce 手順 (= snapshot #2 と同一)
+
+```sh
+shasum -a 256 scripts/cycle-gate.sh scripts/resume-after-cycle-start.sh \
+              scripts/post-anchor-event.sh scripts/gen-cycle-history.sh \
+              scripts/uptime-history.sh scripts/gen-evidence.sh \
+              scripts/gen-renewal-ics.sh scripts/node-info.sh \
+              scripts/check-anomalies.sh scripts/daily-status.sh
+
+# → 本 snapshot #3 L1 の 10 件 sha256 と 1:1 完全一致 (= snapshot #2 と同値)
+```
+
+---
+
 ## snapshot 取得 schedule
 
 - **daily**: 09:00 JST + 17:00 JST に AI が自動 snapshot 取得 + 本 doc に append
