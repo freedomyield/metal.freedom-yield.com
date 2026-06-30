@@ -320,6 +320,94 @@ shasum -a 256 scripts/cycle-gate.sh scripts/resume-after-cycle-start.sh \
 
 ---
 
+## snapshot #4 — 2026-06-30 14:03 JST (= cron env fix 適用 + 手動同等実行後 verification)
+
+> 第 9 ラウンド audit clean + operator authorize により、 2026-06-30 13:54 JST に `/etc/cron.d/metal-uptime-history` へ `UPTIME_STATE_DIR=/var/lib/freedom-yield` env 1 行追加 (= backup `/root/metal-uptime-history.20260630T045453Z.bak` 取得済、 cron command line + mode/owner/group 不変)。 自然 fire (= 2026-07-01 09:30 JST) を待たず、 cron と同一処理を deploy user で 1 回手動実行して 14 point verify 完了。
+
+### snapshot #3 ↔ snapshot #4 差分
+
+| 項目 | snapshot #3 (= 13:52 JST) | snapshot #4 (= 14:03 JST) | 変化要因 |
+|---|---|---|---|
+| /etc/cron.d/metal-uptime-history sha256 | `5112ddc6117a8a10eb069f784e6239d145c6865bf45feae7190d35ea28ecfe9a` | `d30dd72a63fe0dff00176edaab5853c4ae3787bc69f1c04aa168ce0ee3baa782` | env 1 行追加 (= `UPTIME_STATE_DIR=/var/lib/freedom-yield`) |
+| /etc/cron.d/metal-uptime-history env header line | 0 | 1 | 同上 |
+| uptime-history.jsonl mtime | 2026-06-18 00:30:01 UTC | 2026-06-30 05:03:15 UTC | 手動 fire で本日 entry append |
+| uptime-history.jsonl size | 10368 bytes | 10731 bytes | +363 bytes (= 1 entry) |
+| uptime-history.jsonl lines | 29 | 30 | +1 (= 本日 entry) |
+| uptime-history.jsonl sha256 | `9459c1badc993e417756d647581397ccf682c02d734505f5f80d97c78f408be2` | `403cd6b9f1f67e2db402b15bb9daeaf12d5b3897abc33fa4471a02992e0ef7d8` | 同上 |
+| uptime-recent.json mtime | 2026-06-18 00:30:01 UTC | 2026-06-30 05:03:15 UTC | 再生成 |
+| uptime-recent.json size | 14568 bytes | 15074 bytes | +506 bytes |
+| uptime-recent.json sha256 | `f0877a6907e37c432dc12262c65cdeb7a21fa6c792b79f8150fa280dd9f92ecd` | `cbfb2d3bd17197cdf8bdf00033db6a83b23c213bb64f12d7b73d64610b3ace6e` | 再生成 |
+| uptime-cycles.json mtime / size / sha256 | 2026-06-04 08:28:35 UTC / 1011 / `cc63dc4b...` | **同一** | cycle 2 still active、 boundary 未越え → idempotent skip |
+| Xserver public uptime-recent.json last-modified | (pre-fix stale) | 2026-06-30 05:03:17 GMT | push 成功 |
+| Xserver public uptime-cycles.json last-modified | (pre-fix stale) | 2026-06-30 05:03:18 GMT | push 成功 |
+| cycle-gate-state.json sha256 | `8f824dcf...` | **同一** | 不変 (= signature match 維持) |
+| cycle-gate green markers (anomalies.log) | 58 | 60 | +2 (= 別 cron tick 累積、 fix と無関係) |
+| abnormal markers | 0 | 0 | 不変 |
+| metalgo | Up 5 weeks | Up 5 weeks | 不変 |
+| validator present / peers | 1 / 248 | 1 / 248 | 不変 |
+| L1 10 scripts sha256 | (snapshot #2 と完全一致) | (snapshot #2 + #3 と完全一致) | sync 不変 |
+
+### 手動実行 record
+
+```
+cd /home/deploy/metal.freedom-yield.com
+export UPTIME_STATE_DIR=/var/lib/freedom-yield
+set +e
+bash scripts/uptime-history.sh > /tmp/uptime-history.manual.stdout 2> /tmp/uptime-history.manual.stderr
+rc_history=$?
+[…push chain…]
+```
+
+実行 rc:
+```
+rc_history=0
+rc_push_recent=0
+rc_push_cycles=0
+```
+
+stdout (= operator 観測用、 cron と同一出力):
+```
+Appended daily entry for 2026-06-30 (period 1780560117 → 1783137627, uptime 99.9087%, self 5900 METAL, delegated 23600, fee 3.0000%)
+Wrote /home/deploy/metal.freedom-yield.com/public/api/uptime-recent.json (30 total master entries)
+Wrote /home/deploy/metal.freedom-yield.com/public/api/uptime-cycles.json (1 cycles)
+OK: wrote uptime-recent.json (15074 bytes)
+OK: wrote uptime-cycles.json (1011 bytes)
+```
+
+stderr (= cycle-gate consultation marker のみ、 ERROR / permission / placeholder なし):
+```
+[cycle-gate] cycle-artifact-write → green (approved=NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v-1780560117)
+```
+
+tmp file は secret-safe 確認後 削除済 (= grep `password|token|secret|key|private|hex40+` count 0)。
+
+### 14 point 検証結果
+
+```
+ 1. rc_history=0                                        ✅ PASS
+ 2. rc_push_recent=0                                    ✅ PASS
+ 3. rc_push_cycles=0                                    ✅ PASS
+ 4. stderr に ERROR / permission denied / placeholder    ✅ PASS (= 0 count)
+ 5. uptime-history.jsonl 正常更新                       ✅ PASS (mtime + lines + sha256 更新)
+ 6. 本日分 entry exactly 1                              ✅ PASS (= 2026-06-30 entry = 1)
+ 7. duplicate entry なし (= 私の run 起因)              ✅ PASS (= 唯一の dup は 2026-06-04 cycle 1→2 transition の自然な 2 entry、 period_end_unix 異なる pre-existing legitimate dup)
+ 8. uptime-recent.json 生成・push 成功                  ✅ PASS
+ 9. uptime-cycles.json 生成・push 成功                  ✅ PASS (= 内容不変で idempotent skip + push 成功)
+10. cycle close entry 欠落・重複なし                   ✅ PASS (= cycle 2 still active で close entry 0 件、 期待通り)
+11. public artifact 更新済                             ✅ PASS (= Xserver GET body size 15074 = local 完全一致、 last-modified 05:03 GMT)
+12. cycle-gate / anomaly 新規異常なし                  ✅ PASS (= abnormal 0 維持)
+13. metalgo 稼働状態 変化なし                          ✅ PASS (= Up 5 weeks / 1 validator / 248 peers)
+14. cron file env 1 行追加以外 変更なし                 ✅ PASS (= diff は env 1 行のみ、 owner=root group=root mode=644 不変)
+```
+
+全 14 PASS。 fix 効果が production cron と同一処理で実証された。
+
+### snapshot #4 capture timestamp
+
+`2026-06-30 14:03 JST` (= post-execution verification 完了時)
+
+---
+
 ## snapshot 取得 schedule
 
 - **daily**: 09:00 JST + 17:00 JST に AI が自動 snapshot 取得 + 本 doc に append
