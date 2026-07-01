@@ -453,10 +453,18 @@ FINAL_JSON="$(jq -n \
 	}')"
 
 # ---- verb discipline check ------------------------------------------
-if printf '%s' "$FINAL_JSON" | grep -qE '_target|_promised|_committed|_sla|_slo|_cadence|_guarantees|_ensures|_will_|_should_|_must_|_maintain|_pledged'; then
+# Obligation verbs are forbidden in observation output. Whitelist exception:
+# T-M-designed field names that carry an explicit "declared_by_operator" suffix
+# neutralize the obligation semantic (= declaration verb, not promise). Grep -E
+# lacks lookahead, so filter false positives via a post-grep -v chain.
+VERB_HITS="$(printf '%s' "$FINAL_JSON" \
+	| grep -nE '_target|_promised|_committed|_sla|_slo|_cadence|_guarantees|_ensures|_will_|_should_|_must_|_maintain|_pledged' \
+	| grep -vE 'subnet_targets_declared_by_operator' \
+	|| true)"
+if [ -n "$VERB_HITS" ]; then
 	echo "ERROR: obligation verb detected in output (verb discipline violation)" >&2
 	echo "--- offending lines ---" >&2
-	printf '%s' "$FINAL_JSON" | grep -nE '_target|_promised|_committed|_sla|_slo|_cadence|_guarantees|_ensures|_will_|_should_|_must_|_maintain|_pledged' >&2 || true
+	printf '%s\n' "$VERB_HITS" >&2
 	exit 5
 fi
 
