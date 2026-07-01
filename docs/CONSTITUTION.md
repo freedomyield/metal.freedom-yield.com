@@ -63,6 +63,18 @@ The following are forbidden without exception. Any of these is a **constitutiona
 - MUST NOT add or modify monetization channels (donations, paid services, retail marketing surfaces) without operator approval and conformance to [§7](#7-public-claims-and-disclosure-standard).
 - MUST NOT introduce refactors, abstractions, or "while I'm here" cleanup that were not explicitly requested. A bug fix fixes the bug.
 
+### 3.4 Broadcast prohibitions (mainnet-first ban)
+
+Any command or API call that causes a state-changing transaction to be accepted by a live blockchain — Metal P-Chain, Metal C-Chain, Metal X-Chain, Metal A-Chain (XPRNetwork/PulseVM), or any subnet — is a **broadcast**. Broadcasts are irreversible and permanently visible.
+
+- **MUST NOT start any new broadcast pipeline, script, tool, or command sequence on mainnet.** The first execution on **any** new mechanism — new CLI flag, new script path, new library version, new keypair, new memo scheme, new action shape, new signer — MUST be against a testnet or an equivalent throwaway environment. Only after the exact same pipeline has been successfully executed end-to-end on testnet may the operator authorize a mainnet run.
+- MUST NOT use mainnet as an exploratory or verification target. "Try it on mainnet to see what happens" is a constitutional violation, regardless of amount transferred or memo content. Testnet exists precisely to absorb mistakes.
+- MUST NOT invoke a broadcast-capable command (`proton action`, `proton transaction:push`, `cleos push_transaction`, RPC `push_transaction` / `issueTx` / `eth_sendRawTransaction`, or any equivalent) without: (a) explicit per-broadcast operator authorization naming the exact `{chain, actor, permission, action, memo, quantity}`; (b) a completed pre-flight check confirming `chain:get` matches the authorized chain; (c) a successful prior testnet execution of the same command shape.
+- MUST NOT rely on "the command will probably fail" as a substitute for authorization. If a broadcast-capable command is invoked, it MUST be assumed to succeed.
+- MUST NOT justify a mainnet broadcast by its small economic cost. The cost is not measured in fees; the cost is measured in permanent chain-state pollution and institutional-narrative damage.
+- The default execution chain for every new script MUST be testnet, set explicitly at the top of the script or by an unambiguous env var with a testnet default. Mainnet is opt-in only, at operator's per-invocation authorization.
+- Any file, script, or documentation that introduces a broadcast pathway MUST include, in its header, an explicit `# CHAIN: <testnet|mainnet>` marker declaring the intended target, and MUST default to testnet.
+
 ## 4. Information Hygiene
 
 This is the most strictly enforced chapter. The repository is **public**; Git history is permanent and unforgivable.
@@ -181,6 +193,7 @@ Any public claim — on the site, in `/api/*` endpoints, in social posts, in thi
 
 ## Changelog
 
+- **v0.2** — Added §3.4 Broadcast prohibitions (mainnet-first ban). Triggered by an AI-driven unauthorized mainnet A-chain broadcast on 2026-07-01T04:24Z during an exploratory investigation that was self-described as "testnet で試行" but was executed without any chain check. The event proved that "obvious" testnet-first discipline requires constitutional-level codification, not just operational memo. New rule: any new broadcast pipeline MUST first execute successfully on testnet; mainnet is opt-in only after per-invocation operator authorization.
 - **v0.1** — Applied public-repository tone and information-hygiene cleanup before publication.
 - **v0** — Initial draft. Establishes the ten chapters, the SECRET / CONFIDENTIAL / PUBLIC classification, and the operator-only amendment process.
 
