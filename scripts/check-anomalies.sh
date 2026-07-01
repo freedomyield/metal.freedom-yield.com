@@ -591,8 +591,13 @@ fi
 # a false-positive source. Under K-3 we explicitly detect RPC failure and
 # skip the validator/delegator/period transitions for the run, leaving
 # those candidate fields at their ORIGINAL_STATE values.
+# nodeIDs filter is REQUIRED (not just optimization): per
+# reference_metalgo_api_quirks, .delegators[] is omitted from the RPC
+# response unless the request is filtered by nodeIDs. T-B2-20260701
+# needs .delegators[].{txID,weight,endTime} to populate the delegator
+# lifecycle events feed for anchor observations_branch.
 VALIDATOR_RESP=$(curl -sS -X POST -H 'content-type:application/json' --max-time 5 \
-  --data '{"jsonrpc":"2.0","id":1,"method":"platform.getCurrentValidators","params":{}}' \
+  --data "$(jq -nc --arg id "$NODE_ID" '{jsonrpc:"2.0",id:1,method:"platform.getCurrentValidators",params:{nodeIDs:[$id]}}')" \
   "${METALGO_API}/ext/bc/P" 2>/dev/null)
 
 RPC_VALID=1
@@ -616,6 +621,14 @@ if [ "$RPC_VALID" = "1" ]; then
   OBS_DELEGATOR_TOTAL_NMETAL="${OBS_DELEGATOR_TOTAL_NMETAL:-0}"
   OBS_DELEGATOR_TOTAL_METAL=$(awk -v n="$OBS_DELEGATOR_TOTAL_NMETAL" 'BEGIN{printf "%.4f", n/1e9}' | sed -E 's/\.?0+$//')
 
+  # Delegator snapshot (= per-tx_id list) for T-B2-20260701 event feed.
+  # Feeds anchor observations_branch.delegator_lifecycle_events_in_cycle_observed
+  # via gen-anchor-source.sh reading /var/lib/freedom-yield/delegator-events.jsonl.
+  OBS_DELEGATORS_JSON=$(echo "$VALIDATOR_RESP" \
+    | jq -c --arg id "$NODE_ID" '[.result.validators[]? | select(.nodeID == $id) | .delegators[]? | {tx_id: .txID, weight_nmetal: (.weight | tostring), end_time: (.endTime | tostring)}]' \
+    2>/dev/null || echo '[]')
+  [ -z "$OBS_DELEGATORS_JSON" ] && OBS_DELEGATORS_JSON='[]'
+
   # === transition: delegator_count + delegator_total_nmetal (paired) ===
   # Two fields advance atomically (= either both move to OBS or both stay
   # at ORIGINAL). First-observation case (ORIG == null) is a bootstrap
@@ -624,7 +637,50 @@ if [ "$RPC_VALID" = "1" ]; then
   if [ "$ORIG_DC" = "null" ]; then
     candidate_set '.delegator_count' "$OBS_DELEGATOR_COUNT"
     candidate_set '.delegator_total_nmetal' "$OBS_DELEGATOR_TOTAL_NMETAL"
+    # T-B2 bootstrap: seed the delegator_snapshot without emitting events
+    # (= no baseline to diff against).
+    candidate_set '.delegator_snapshot' "$OBS_DELEGATORS_JSON"
   elif [ "$ORIG_DC" != "$OBS_DELEGATOR_COUNT" ]; then
+    # T-B2-20260701: emit lifecycle events into
+    # ${DELEGATOR_EVENTS_LOG:-/var/lib/freedom-yield/delegator-events.jsonl}
+    # for each added / removed delegator. Consumed by
+    # gen-anchor-source.sh at anchor time.
+    ORIG_DELEGATORS_JSON="$(orig_get '.delegator_snapshot')"
+    case "$ORIG_DELEGATORS_JSON" in
+      ""|null) ORIG_DELEGATORS_JSON='[]' ;;
+    esac
+    DELEGATOR_EVENTS_LOG="${DELEGATOR_EVENTS_LOG:-/var/lib/freedom-yield/delegator-events.jsonl}"
+    NOW_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    NOW_EPOCH="$(date +%s)"
+
+    # ADDED = current tx_ids − prev tx_ids
+    ADDED_JSON="$(jq -cn --argjson cur "$OBS_DELEGATORS_JSON" --argjson prev "$ORIG_DELEGATORS_JSON" \
+      '($prev | map(.tx_id)) as $pt | [$cur[] | select(.tx_id as $t | ($pt | index($t)) | not)]' 2>/dev/null || echo '[]')"
+    # REMOVED = prev tx_ids − current tx_ids (retains original weight_nmetal + end_time)
+    REMOVED_JSON="$(jq -cn --argjson cur "$OBS_DELEGATORS_JSON" --argjson prev "$ORIG_DELEGATORS_JSON" \
+      '($cur | map(.tx_id)) as $ct | [$prev[] | select(.tx_id as $t | ($ct | index($t)) | not)]' 2>/dev/null || echo '[]')"
+
+    # Append events append-only. Fail-open on log write error (= alert path
+    # remains authoritative; missing event log is a follow-up finding, not
+    # a broadcast blocker).
+    if [ -w "$(dirname "$DELEGATOR_EVENTS_LOG")" ] || [ -w "$DELEGATOR_EVENTS_LOG" ]; then
+      # started events
+      echo "$ADDED_JSON" | jq -cr --arg at "$NOW_ISO" --argjson epoch "$NOW_EPOCH" \
+        '.[] | {event_type:"started", observed_at:$at, observed_epoch:$epoch, delegator_tx_id:.tx_id, weight_nmetal:.weight_nmetal, observed_end_time:.end_time}' \
+        2>/dev/null | while IFS= read -r line; do
+          [ -n "$line" ] && printf '%s\n' "$line" >> "$DELEGATOR_EVENTS_LOG"
+        done
+      # ended events (actual_end_cause_observed = "unknown" for MVP; refine later)
+      echo "$REMOVED_JSON" | jq -cr --arg at "$NOW_ISO" --argjson epoch "$NOW_EPOCH" \
+        '.[] | {event_type:"ended", observed_at:$at, observed_epoch:$epoch, delegator_tx_id:.tx_id, weight_nmetal:.weight_nmetal, actual_end_cause_observed:"unknown"}' \
+        2>/dev/null | while IFS= read -r line; do
+          [ -n "$line" ] && printf '%s\n' "$line" >> "$DELEGATOR_EVENTS_LOG"
+        done
+    fi
+    # Update snapshot regardless of log write outcome so next tick diffs
+    # against the correct baseline.
+    candidate_set '.delegator_snapshot' "$OBS_DELEGATORS_JSON"
+
     SELF_STAKE=$(jq -r '.stake.self // 0' "$VALIDATOR_JSON" 2>/dev/null)
     CAPACITY_METAL=$(awk -v s="$SELF_STAKE" 'BEGIN{printf "%.0f", s*4}')
     TOTAL_WEIGHT_METAL=$(awk -v s="$SELF_STAKE" -v d="$OBS_DELEGATOR_TOTAL_METAL" 'BEGIN{printf "%.4f", s+d}' | sed -E 's/\.?0+$//')
@@ -643,6 +699,16 @@ if [ "$RPC_VALID" = "1" ]; then
         candidate_set '.delegator_total_nmetal' "$OBS_DELEGATOR_TOTAL_NMETAL"
       fi
     fi
+  fi
+  # T-B2-20260701 backfill: when delegator_count is unchanged but the
+  # stored snapshot doesn't reflect current tx_ids (= field freshly added,
+  # or first tick after nodeIDs-filter RPC upgrade populated .delegators[]),
+  # sync the snapshot. Canonical-form compare so jq whitespace doesn't
+  # trigger spurious updates.
+  CURR_SNAP="$(orig_get '.delegator_snapshot')"
+  case "$CURR_SNAP" in ""|null) CURR_SNAP='[]' ;; esac
+  if [ "$(printf '%s' "$CURR_SNAP" | jq -cS . 2>/dev/null)" != "$(printf '%s' "$OBS_DELEGATORS_JSON" | jq -cS . 2>/dev/null)" ]; then
+    candidate_set '.delegator_snapshot' "$OBS_DELEGATORS_JSON"
   fi
   # else: ORIG_DC == OBS, no transition, candidate unchanged (= original).
 
