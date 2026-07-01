@@ -1,0 +1,288 @@
+#!/usr/bin/env bash
+# bin/safe-broadcast — the ONLY sanctioned broadcast pathway on this repo.
+#
+# CHAIN: default testnet-a (Metal A-chain testnet via proton-test).
+#        Mainnet is opt-in only, with all four PRIME DIRECTIVE gates.
+# PRIME_DIRECTIVE: TESTNET-FIRST — this wrapper is the tier-2 mechanical
+#                  enforcement per docs/CONSTITUTION.md §3.4 and
+#                  memory/project_broadcast_enforcement_gate_plan.md.
+#
+# Every broadcast script in this repo MUST invoke this wrapper instead of
+# calling `proton transaction:push` / `proton action` / equivalents directly.
+# Direct calls are still caught by tier-1 broadcast-guard.sh, but the
+# tier-2 wrapper additionally verifies the four PRIME DIRECTIVE gates
+# for mainnet and produces an append-only audit log entry.
+#
+# Usage:
+#   bin/safe-broadcast --tx=<json-file> --chain=<testnet-a|mainnet-a>
+#                      [--testnet-tx-id=<64hex>]
+#                      [--dry-run-log=<log-file>]
+#                      [--operator-token=<file>]
+#                      [--non-interactive]
+#                      [--endpoint=<url>]
+#
+# Required:
+#   --tx=<json-file>              Path to transaction JSON containing actions[].
+#                                 File format: {"actions":[{...}, ...]}
+#   --chain=<testnet-a|mainnet-a> Target chain. Explicit mandatory (no default).
+#
+# Mainnet-only additional required:
+#   --testnet-tx-id=<64hex>       tx_id of a successful testnet broadcast of the
+#                                 identical shape. Wrapper resolves it against
+#                                 the testnet Hyperion endpoint and refuses if
+#                                 it cannot be found.
+#   --dry-run-log=<log-file>      Path to a prior `proton transaction:push
+#                                 --dry-run` log for this exact shape. Wrapper
+#                                 refuses if the file is missing or empty.
+#
+# Optional:
+#   --operator-token=<file>       Path to authorization token file.
+#                                 Default: /tmp/fyd-broadcast-token (tier-1 guard).
+#                                 5-minute TTL from mtime.
+#   --non-interactive             Skip the interactive confirmation prompt.
+#                                 In non-interactive mode, the token file mtime
+#                                 must be within the last 60 seconds (tighter TTL).
+#   --endpoint=<url>              Override proton RPC endpoint.
+#                                 Default: proton-cli current chain endpoint.
+#
+# Exit codes:
+#   0    broadcast succeeded, tx_id printed to stdout
+#   2    bad arg / usage error
+#   3    PRIME DIRECTIVE gate failed (testnet-tx-id / dry-run-log / chain / token)
+#   4    proton chain:get mismatch or command not found
+#   5    interactive confirmation aborted
+#   6    broadcast failed (chain rejected the tx or transport error)
+#   7    audit log write failed
+#
+# See also:
+#   docs/CONSTITUTION.md §3.4 + PRIME DIRECTIVE (top of file)
+#   scripts/broadcast-guard.sh (tier-1 hook)
+#   memory/project_broadcast_enforcement_gate_plan.md (tier design)
+
+set -u
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# ---- defaults ----
+TX_JSON_FILE=""
+CHAIN=""
+TESTNET_TX_ID=""
+DRY_RUN_LOG=""
+OPERATOR_TOKEN_FILE="${FYD_BROADCAST_TOKEN_FILE:-/tmp/fyd-broadcast-token}"
+INTERACTIVE=1
+CUSTOM_ENDPOINT=""
+
+# Audit log path (matches broadcast-guard.sh convention).
+AUDIT_LOG_PRIMARY="${FYD_BROADCAST_AUDIT_LOG:-/var/log/fyd-broadcast-audit.log}"
+AUDIT_LOG_FALLBACK="${HOME:-/tmp}/.fyd-broadcast-audit.log"
+
+usage() { sed -n '2,55p' "$0" | sed 's/^# \?//'; }
+
+# ---- arg parse ----
+for arg in "$@"; do
+	case "$arg" in
+		--tx=*)              TX_JSON_FILE="${arg#*=}" ;;
+		--chain=*)           CHAIN="${arg#*=}" ;;
+		--testnet-tx-id=*)   TESTNET_TX_ID="${arg#*=}" ;;
+		--dry-run-log=*)     DRY_RUN_LOG="${arg#*=}" ;;
+		--operator-token=*)  OPERATOR_TOKEN_FILE="${arg#*=}" ;;
+		--endpoint=*)        CUSTOM_ENDPOINT="${arg#*=}" ;;
+		--non-interactive)   INTERACTIVE=0 ;;
+		-h|--help)           usage; exit 0 ;;
+		*)                   echo "ERROR: unknown arg: $arg" >&2; usage; exit 2 ;;
+	esac
+done
+
+# ---- baseline validation ----
+if [ -z "$TX_JSON_FILE" ]; then
+	echo "ERROR: --tx=<json-file> required" >&2
+	usage
+	exit 2
+fi
+if [ ! -r "$TX_JSON_FILE" ]; then
+	echo "ERROR: tx file not readable: $TX_JSON_FILE" >&2
+	exit 2
+fi
+if ! command -v jq >/dev/null 2>&1; then
+	echo "ERROR: jq required" >&2
+	exit 2
+fi
+if ! jq -e '.actions | type == "array" and length > 0' "$TX_JSON_FILE" >/dev/null 2>&1; then
+	echo "ERROR: tx file must contain non-empty .actions array" >&2
+	exit 2
+fi
+
+case "$CHAIN" in
+	testnet-a|proton-test)  PROTON_CHAIN="proton-test"; IS_MAINNET=0 ;;
+	mainnet-a|proton)       PROTON_CHAIN="proton";      IS_MAINNET=1 ;;
+	"")  echo "ERROR: --chain=<testnet-a|mainnet-a> required" >&2; exit 2 ;;
+	*)   echo "ERROR: --chain must be testnet-a or mainnet-a, got: $CHAIN" >&2; exit 2 ;;
+esac
+
+if ! command -v proton >/dev/null 2>&1; then
+	echo "ERROR: proton CLI not found in PATH" >&2
+	exit 4
+fi
+
+# ---- PRIME DIRECTIVE gates (mainnet only) ----
+if [ "$IS_MAINNET" = "1" ]; then
+	# Gate 1: testnet-tx-id must be provided and shape-valid.
+	if [ -z "$TESTNET_TX_ID" ]; then
+		echo "ERROR (gate 1): mainnet requires --testnet-tx-id=<64hex> of a prior successful testnet broadcast of the identical shape" >&2
+		exit 3
+	fi
+	if ! echo "$TESTNET_TX_ID" | grep -qE '^[a-f0-9]{64}$'; then
+		echo "ERROR (gate 1): --testnet-tx-id must be 64-char hex, got: $TESTNET_TX_ID" >&2
+		exit 3
+	fi
+	# Attempt to resolve the tx on testnet. If resolution fails, refuse.
+	TESTNET_RPC="${XPR_TESTNET_RPC:-https://test.proton.eosusa.io}"
+	if command -v curl >/dev/null 2>&1; then
+		RESOLVE_JSON="$(curl -sSf --max-time 15 \
+			-X POST -H 'content-type:application/json' \
+			-d "{\"id\":\"${TESTNET_TX_ID}\"}" \
+			"${TESTNET_RPC}/v1/history/get_transaction" 2>/dev/null || echo '{}')"
+		if ! echo "$RESOLVE_JSON" | jq -e '.id == "'"${TESTNET_TX_ID}"'"' >/dev/null 2>&1; then
+			echo "ERROR (gate 1): could not resolve --testnet-tx-id ${TESTNET_TX_ID} against ${TESTNET_RPC}. Verify the shape actually ran on testnet first." >&2
+			exit 3
+		fi
+	else
+		echo "ERROR (gate 1): curl required to resolve testnet tx-id" >&2
+		exit 3
+	fi
+
+	# Gate 4: dry-run log must exist and be non-empty.
+	if [ -z "$DRY_RUN_LOG" ]; then
+		echo "ERROR (gate 4): mainnet requires --dry-run-log=<file> pointing to a prior --dry-run output for this shape" >&2
+		exit 3
+	fi
+	if [ ! -s "$DRY_RUN_LOG" ]; then
+		echo "ERROR (gate 4): dry-run log missing or empty: $DRY_RUN_LOG" >&2
+		exit 3
+	fi
+fi
+
+# Gate 2 (both testnet + mainnet): operator token must exist and be fresh.
+if [ ! -f "$OPERATOR_TOKEN_FILE" ]; then
+	echo "ERROR (gate 2): operator token missing: $OPERATOR_TOKEN_FILE" >&2
+	echo "                Operator must confirm and 'touch $OPERATOR_TOKEN_FILE' within TTL." >&2
+	exit 3
+fi
+# Portable mtime read.
+if TOKEN_MTIME="$(stat -c %Y "$OPERATOR_TOKEN_FILE" 2>/dev/null)"; then
+	:
+elif TOKEN_MTIME="$(stat -f %m "$OPERATOR_TOKEN_FILE" 2>/dev/null)"; then
+	:
+else
+	echo "ERROR (gate 2): cannot stat token file: $OPERATOR_TOKEN_FILE" >&2
+	exit 3
+fi
+NOW="$(date +%s)"
+AGE="$((NOW - TOKEN_MTIME))"
+# Non-interactive: tight 60s TTL. Interactive: standard 300s TTL.
+if [ "$INTERACTIVE" = "0" ]; then
+	MAX_AGE=60
+else
+	MAX_AGE=300
+fi
+if [ "$AGE" -ge "$MAX_AGE" ]; then
+	echo "ERROR (gate 2): operator token expired (${AGE}s > ${MAX_AGE}s max)" >&2
+	exit 3
+fi
+
+# Gate 3 (both testnet + mainnet): pre-flight chain:get.
+# proton-cli's chain command is interactive by default; use chain:set explicitly
+# then check the config-level current chain.
+proton chain:set "$PROTON_CHAIN" >/dev/null 2>&1 || {
+	echo "ERROR (gate 3): proton chain:set $PROTON_CHAIN failed" >&2
+	exit 4
+}
+# Validate the endpoint answers get_info and returns a plausible chain response.
+# We use the endpoint that proton-cli would use.
+CHAIN_INFO="$(proton chain:info 2>/dev/null || echo '')"
+if [ -z "$CHAIN_INFO" ] || ! echo "$CHAIN_INFO" | grep -qE 'chain_id|server_version|head_block'; then
+	echo "ERROR (gate 3): proton chain:info returned unexpected output; refusing to broadcast" >&2
+	echo "                Output was:" >&2
+	echo "$CHAIN_INFO" | head -20 >&2
+	exit 4
+fi
+
+# ---- interactive confirmation prompt (skip if --non-interactive) ----
+if [ "$INTERACTIVE" = "1" ]; then
+	echo "==================== BROADCAST CONFIRMATION ====================" >&2
+	echo "chain:        $CHAIN ($PROTON_CHAIN)" >&2
+	echo "tx JSON file: $TX_JSON_FILE" >&2
+	echo "action count: $(jq '.actions | length' "$TX_JSON_FILE")" >&2
+	echo "actions:" >&2
+	jq -r '.actions[] | "  \(.account)::\(.name)  authorization=\(.authorization | map("\(.actor)@\(.permission)") | join(","))  memo=\(.data.memo // "(no memo)")"' "$TX_JSON_FILE" >&2
+	if [ "$IS_MAINNET" = "1" ]; then
+		echo "MAINNET gates verified: testnet-tx-id=${TESTNET_TX_ID}" >&2
+		echo "                        dry-run-log=${DRY_RUN_LOG}" >&2
+	fi
+	echo "----------------------------------------------------------------" >&2
+	printf "Type 'BROADCAST %s' to confirm (any other input aborts): " "$CHAIN" >&2
+	IFS= read -r REPLY
+	if [ "$REPLY" != "BROADCAST $CHAIN" ]; then
+		echo "ABORTED: confirmation phrase did not match" >&2
+		exit 5
+	fi
+fi
+
+# ---- audit log entry BEFORE broadcast (= we log the intent, then the result) ----
+TS="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+INVOKER="${USER:-unknown}"
+TX_SHA256="$(jq -c . "$TX_JSON_FILE" | sha256sum | awk '{print $1}')"
+LOG_LINE_PRE="$(printf '%s\tinvoker=%s\twrapper=safe-broadcast\tphase=pre\tchain=%s\ttx_sha256=%s\ttestnet_txid=%s' \
+	"$TS" "$INVOKER" "$CHAIN" "$TX_SHA256" "${TESTNET_TX_ID:-none}")"
+
+AUDIT_TARGET="$AUDIT_LOG_PRIMARY"
+if ! ( : >> "$AUDIT_TARGET" ) 2>/dev/null; then
+	AUDIT_TARGET="$AUDIT_LOG_FALLBACK"
+fi
+if ! printf '%s\n' "$LOG_LINE_PRE" >> "$AUDIT_TARGET" 2>/dev/null; then
+	echo "ERROR (7): audit log write failed to $AUDIT_TARGET" >&2
+	exit 7
+fi
+
+# ---- actual broadcast ----
+# proton transaction:push accepts JSON on argv. broadcast-guard.sh (tier 1)
+# will intercept this call and check the same token file we already validated;
+# since the token is fresh, it will allow.
+BROADCAST_OUT="$(mktemp -t safe-broadcast.XXXXXX)"
+BROADCAST_ERR="$(mktemp -t safe-broadcast.XXXXXX)"
+trap 'rm -f "$BROADCAST_OUT" "$BROADCAST_ERR"' EXIT
+
+PROTON_ARGS=(transaction:push "$(cat "$TX_JSON_FILE")")
+if [ -n "$CUSTOM_ENDPOINT" ]; then
+	PROTON_ARGS+=(-u "$CUSTOM_ENDPOINT")
+fi
+
+BROADCAST_RC=0
+proton "${PROTON_ARGS[@]}" > "$BROADCAST_OUT" 2> "$BROADCAST_ERR" || BROADCAST_RC=$?
+
+# Extract tx_id.
+TX_ID="$(grep -oE '"transaction_id"[[:space:]]*:[[:space:]]*"[a-f0-9]{64}"' "$BROADCAST_OUT" \
+	| head -1 | grep -oE '[a-f0-9]{64}' | head -1 || true)"
+if [ -z "$TX_ID" ]; then
+	TX_ID="$(grep -oE '"id"[[:space:]]*:[[:space:]]*"[a-f0-9]{64}"' "$BROADCAST_OUT" \
+		| head -1 | grep -oE '[a-f0-9]{64}' | head -1 || true)"
+fi
+
+# ---- audit log entry POST broadcast ----
+LOG_LINE_POST="$(printf '%s\tinvoker=%s\twrapper=safe-broadcast\tphase=post\tchain=%s\ttx_sha256=%s\trc=%s\ttx_id=%s' \
+	"$TS" "$INVOKER" "$CHAIN" "$TX_SHA256" "$BROADCAST_RC" "${TX_ID:-none}")"
+printf '%s\n' "$LOG_LINE_POST" >> "$AUDIT_TARGET" 2>/dev/null || true
+
+# ---- report ----
+if [ "$BROADCAST_RC" -ne 0 ] || [ -z "$TX_ID" ]; then
+	echo "ERROR (6): broadcast failed (rc=$BROADCAST_RC, tx_id=${TX_ID:-empty})" >&2
+	echo "--- proton stderr (last 20 lines) ---" >&2
+	tail -20 "$BROADCAST_ERR" >&2 || true
+	echo "--- proton stdout (last 20 lines) ---" >&2
+	tail -20 "$BROADCAST_OUT" >&2 || true
+	exit 6
+fi
+
+# Print JUST the tx_id on stdout so callers can capture it cleanly.
+echo "$TX_ID"
+exit 0
