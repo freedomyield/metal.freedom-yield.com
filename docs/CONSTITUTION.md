@@ -1,10 +1,33 @@
 # Freedom Yield Validator — Constitution
 
-> **Status:** v0.1 (draft)
+> **Status:** v0.3 (draft)
 > **Scope:** Metal Blockchain mainnet validator operation under the "Freedom Yield" brand.
 > **Authority:** This document is the supreme reference for the project. All other documents (`OPERATING_MODEL.md`, runbooks, scripts, public copy) MUST conform to it.
 
 The key words **MUST**, **MUST NOT**, **SHALL**, **SHALL NOT**, **SHOULD**, **MAY** in this document are to be interpreted as described in RFC 2119.
+
+---
+
+# ⛔ PRIME DIRECTIVE — TESTNET-FIRST FOR ALL BROADCASTS ⛔
+
+**This directive supersedes every other section of this Constitution, every runbook, every AI-generated plan, every task list, every operator convenience, and every schedule. Any conflict is resolved in favor of this directive without exception.**
+
+**MUST NOT invoke, from any human or AI-driven session, any command or API call that broadcasts a transaction to any mainnet (Metal P-Chain, C-Chain, X-Chain, A-Chain/XPRNetwork, or any subnet) unless ALL of the following are simultaneously true:**
+
+1. The identical command shape — same actor, same permission, same action list, same memo scheme, same signer, same library version — has been successfully executed end-to-end on the corresponding testnet, and the resulting testnet tx has been observed and reviewed by the operator.
+2. The operator has explicitly authorized THIS SPECIFIC mainnet broadcast in the same turn or a directly-referenced prior turn, naming `{chain, actor, permission, action, memo, quantity}` verbatim.
+3. A pre-flight `chain:get` (or equivalent) has been executed and its output has been verified to match the authorized chain.
+4. Any `--dry-run` or offline-sign capability of the command has been exhausted, and the operator has reviewed the composed transaction JSON.
+
+**Rationale — burned into this Constitution on 2026-07-01T04:24Z:** On that date, an AI-driven exploratory session self-described as "testnet で試行" invoked `proton transaction:push` without a chain check and broadcast a live mainnet A-chain transaction (tx `997881e844befaf9c159c741988fe99e8ca566a52e539639ab83517b1f36100a`, memo `fyid1v1c2-test-single`). This single choice permanently polluted the anchor namespace of a project whose entire institutional narrative depended on the first broadcast being substantive. The economic cost was 0.0001 XPR; the narrative cost was total. Testnet exists precisely to absorb this class of mistake. Bypassing it, even inadvertently, is a project-level regression that no post-hoc discipline can undo.
+
+**Any AI session that reads this Constitution and proceeds to invoke a broadcast-capable command in violation of this Prime Directive is in constitutional violation of the highest order, regardless of what it or its user believed at the time. The correct behavior on ambiguity is: refuse, stop, ask.**
+
+**Any script, tool, or documentation that introduces a broadcast pathway MUST embed, in its first ten lines, an explicit `# PRIME_DIRECTIVE: TESTNET-FIRST` marker and MUST default to a testnet endpoint. Mainnet is opt-in only, per invocation, with operator authorization satisfying (1)–(4) above.**
+
+**This section is the first substantive content of the Constitution because a Constitution that does not prevent the specific failure that motivated its own amendment is worthless.**
+
+See also: [§3.4 Broadcast prohibitions](#34-broadcast-prohibitions-mainnet-first-ban) for enforcement detail, [`memory/feedback_no_unauthorized_broadcast.md`](../../../.claude/projects/-Users-admin-htdocs-01-PROJECTS-metal-freedom-yield-com/memory/feedback_no_unauthorized_broadcast.md) for the AI-side memo, and CLAUDE.md for the session-boot mention that MUST direct every new AI session to this section before any anchor-related work.
 
 ---
 
@@ -193,6 +216,7 @@ Any public claim — on the site, in `/api/*` endpoints, in social posts, in thi
 
 ## Changelog
 
+- **v0.3** — Elevated the testnet-first rule from §3.4 (one of many sub-sections) to a **PRIME DIRECTIVE** placed at the very top of the Constitution, before §0, in unmissable form. §3.4 retained as enforcement detail. Rationale: operator determined that a rule tucked inside §3.4 was insufficient deterrent for the class of error that motivated v0.2; the rule must be the first thing any human or AI reads in this document, and it must override every other section. Trigger: same 2026-07-01T04:24Z event as v0.2, but with the additional observation that the AI session had access to §3.4 in principle and still failed the discipline — codification alone is not enforcement; placement matters.
 - **v0.2** — Added §3.4 Broadcast prohibitions (mainnet-first ban). Triggered by an AI-driven unauthorized mainnet A-chain broadcast on 2026-07-01T04:24Z during an exploratory investigation that was self-described as "testnet で試行" but was executed without any chain check. The event proved that "obvious" testnet-first discipline requires constitutional-level codification, not just operational memo. New rule: any new broadcast pipeline MUST first execute successfully on testnet; mainnet is opt-in only after per-invocation operator authorization.
 - **v0.1** — Applied public-repository tone and information-hygiene cleanup before publication.
 - **v0** — Initial draft. Establishes the ten chapters, the SECRET / CONFIDENTIAL / PUBLIC classification, and the operator-only amendment process.
