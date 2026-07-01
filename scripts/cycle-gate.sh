@@ -105,6 +105,19 @@ if ! jq empty "${STATE_FILE}" >/dev/null 2>&1; then
 	echo "[cycle-gate] ERROR: state file at ${STATE_FILE} is not valid JSON → fail-closed (deferred)" >&2
 	exit 1
 fi
+# schemaVersion validation (T-9). A state file written under a different schema
+# could carry legacy semantics or use different field names, and consuming it
+# with the current jq paths could produce false-green decisions on stale state.
+# The current file schema is version 1; other values → fail-closed.
+STATE_SCHEMA_VERSION="$(jq -r '.schemaVersion // empty' "${STATE_FILE}")"
+if [ -z "${STATE_SCHEMA_VERSION}" ]; then
+	echo "[cycle-gate] ERROR: state file at ${STATE_FILE} missing schemaVersion → fail-closed (deferred)" >&2
+	exit 1
+fi
+if [ "${STATE_SCHEMA_VERSION}" != "1" ]; then
+	echo "[cycle-gate] ERROR: state file schemaVersion=${STATE_SCHEMA_VERSION} is not the expected 1 → fail-closed (deferred). Migrate the state file (resume-after-cycle-start.sh) before continuing." >&2
+	exit 1
+fi
 APPROVED_SIG="$(jq -r '.approved_cycle_signature // empty' "${STATE_FILE}")"
 APPROVED_DAG="$(jq -r '.approved_dag_root_hash // empty' "${STATE_FILE}")"
 if [ -z "${APPROVED_SIG}" ] || [ -z "${APPROVED_DAG}" ]; then

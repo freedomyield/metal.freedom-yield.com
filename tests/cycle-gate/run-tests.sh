@@ -182,6 +182,42 @@ FY_STATE_DIR="${STATE_DIR}" METALGO_RPC="http://127.0.0.1:1" FY_RPC_TIMEOUT=2 \
 assert_exit "T8 broadcast + state corrupt → deferred" 1 $?
 rm -rf "${STATE_DIR}"
 
+# ==== T8a: cycle-gate state file missing schemaVersion → fail-closed ====
+# T-9: a state file that parses as JSON but omits schemaVersion must be
+# rejected, otherwise a legacy/foreign state file could pass the JSON-valid
+# check and lead to a false-green decision on stale semantics.
+echo "[T8a] cycle-gate broadcast + state file missing schemaVersion → fail-closed deferred"
+STATE_DIR="$(mktemp -d -t cgstate.XXXXXX)"
+cat > "${STATE_DIR}/cycle-gate-state.json" <<'JSON'
+{
+  "approved_cycle_signature": "NodeID-TEST-1000",
+  "approved_dag_root_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "approved_at": "2026-07-01T00:00:00Z"
+}
+JSON
+FY_STATE_DIR="${STATE_DIR}" METALGO_RPC="http://127.0.0.1:1" FY_RPC_TIMEOUT=2 \
+	run_gate --side-effect=broadcast
+assert_exit "T8a broadcast + state missing schemaVersion → deferred" 1 $?
+rm -rf "${STATE_DIR}"
+
+# ==== T8b: cycle-gate state file with wrong schemaVersion → fail-closed ==
+# Same reasoning as T8a: a schemaVersion the current script doesn't know how
+# to consume must not be treated as green just because the JSON parses.
+echo "[T8b] cycle-gate broadcast + state file wrong schemaVersion → fail-closed deferred"
+STATE_DIR="$(mktemp -d -t cgstate.XXXXXX)"
+cat > "${STATE_DIR}/cycle-gate-state.json" <<'JSON'
+{
+  "schemaVersion": 2,
+  "approved_cycle_signature": "NodeID-TEST-1000",
+  "approved_dag_root_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "approved_at": "2026-07-01T00:00:00Z"
+}
+JSON
+FY_STATE_DIR="${STATE_DIR}" METALGO_RPC="http://127.0.0.1:1" FY_RPC_TIMEOUT=2 \
+	run_gate --side-effect=broadcast
+assert_exit "T8b broadcast + state schemaVersion=2 → deferred" 1 $?
+rm -rf "${STATE_DIR}"
+
 # ==== T9: resume idempotent skip ========================================
 echo "[T9] resume --dry-run + same cycle approved → idempotent exit 0"
 STATE_DIR="$(mktemp -d -t cgstate.XXXXXX)"
