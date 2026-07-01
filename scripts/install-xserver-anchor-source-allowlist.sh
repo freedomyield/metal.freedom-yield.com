@@ -90,24 +90,25 @@ ls -la "$BAK"
 
 echo
 echo "--- extending allowlist ---"
-# We target the same pattern used by Hetzner-side push-to-xserver.sh:
-#   ...node-health-recent.json)
-# and extend by appending the 3 new filenames before the closing paren.
-# If that exact terminator isn't present, we fall back to a broader
-# search for a case-statement closing paren after a .json literal
-# and print an error rather than guess.
-if grep -q 'node-health-recent\.json)' "$WRAPPER"; then
+# Approach: find any single line whose case-branch pattern contains
+# `validator.json` (the wrapper's canonical anchor-file marker) and is not
+# already extended. Insert `anchor-source.json|` at the start of the pattern
+# so that regardless of how the terminator is spelled on this particular
+# wrapper (originally we expected `node-health-recent.json)` from the
+# Hetzner-side twin script, but the observed Xserver shape terminates at
+# `evidence.json)`) the extension lands on the same case branch.
+#
+# We only add `anchor-source.json` here — `anchor-receipt.json` and
+# `anchor-history.jsonl` are typically already present on the Xserver
+# wrapper. If they are missing, the operator can extend manually or re-run
+# the Hetzner-side push (which will surface the specific rejection).
+if grep -q 'validator\.json[|)]' "$WRAPPER"; then
 	sed -i.tmp \
-		's/node-health-recent\.json)/node-health-recent.json|anchor-source.json|anchor-receipt.json|anchor-history.jsonl)/' \
+		's/validator\.json|/anchor-source.json|validator.json|/' \
 		"$WRAPPER"
 	rm -f "${WRAPPER}.tmp"
-elif grep -q 'validator\.json.*\.json)' "$WRAPPER"; then
-	echo "WARN: expected anchor pattern 'node-health-recent.json)' not found — the wrapper's allowlist looks different from the Hetzner-side script." >&2
-	echo "      Please review the wrapper manually and add anchor-source.json / anchor-receipt.json / anchor-history.jsonl to the case-statement allowlist." >&2
-	echo "      Backup preserved at $BAK; wrapper unchanged." >&2
-	exit 5
 else
-	echo "ERROR: cannot locate the case-statement allowlist in the wrapper. Manual review required." >&2
+	echo "ERROR: cannot locate a case-statement branch containing 'validator.json' in the wrapper. Manual review required." >&2
 	echo "      Backup preserved at $BAK; wrapper unchanged." >&2
 	exit 5
 fi
