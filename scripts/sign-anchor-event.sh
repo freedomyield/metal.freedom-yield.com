@@ -1,390 +1,356 @@
 #!/usr/bin/env bash
-# sign-anchor-event.sh — Phase α A-chain anchor signer (C2→C3 T-8).
+# sign-anchor-event.sh — HC-single 4-action pack anchor broadcaster.
 #
-# Called by scripts/post-anchor-event.sh (= C1 T-11) when a validator
-# transition is detected (cycle start / cycle end / identity rotation).
-# Builds, signs, and broadcasts the Metal A-chain (= XPRNetwork)
-# inscription that anchors the current dag_root_hash; emits a minimal
-# JSON receipt fragment that the caller consumes to assemble the public
-# /api/anchor-receipt.json.
+# CHAIN: default testnet-a (via --chain=testnet-a explicit). Mainnet is
+#        opt-in only per docs/CONSTITUTION.md PRIME DIRECTIVE.
+# PRIME_DIRECTIVE: TESTNET-FIRST — this script MUST NOT invoke proton
+#                  directly. It composes the 4-action tx JSON from
+#                  /api/anchor-source.json and delegates broadcast to
+#                  bin/safe-broadcast (tier-2 wrapper).
 #
-# Phase α uses the cheapest form: eosio.token::transfer signed by
-# metalfreedom@anchor, with the memo "fyid1:<dag_root_hash>". Phase β
-# replaces this with a metalfreedom::inscribe smart-contract action
-# (see scripts/operator-local/contract/metalfreedom-anchor.spec.md).
-# This script handles Phase α only; the Phase β path is left as a
-# documented hook below and is owned by Phase β implementation work.
+# 2026-07-01 rewrite: single-action "fyid1:<hash>" memo scheme replaced
+# with the 4-action pack scheme (memo prefix `fya<schema>c<cycle>-*`) per
+# memory/project_merkle_dag_identity_anchor_design_20260701.md. The
+# `fyid1v1c*` namespace is retired due to the mainnet accident tx
+# 997881e844befaf9c159c741988fe99e8ca566a52e539639ab83517b1f36100a
+# (memo `fyid1v1c2-test-single`) that permanently occupies it.
 #
 # Authority chain:
-#   ed25519 operator identity key (Mac) → signed /api/identity.json
-#     → carries dag_root_hash
+#   ed25519 operator identity key (Mac) → /api/identity.json
+#     → anchor-source.json (dag_root_computed + 3 branch roots)
 #       → metalfreedom@anchor (validator host, K1 via proton-cli)
-#         → eosio.token::transfer memo = fyid1:<dag_root_hash>
-#           → on-chain receipt = /api/anchor-receipt.json
+#         → bin/safe-broadcast (tier-2 gate)
+#           → proton transaction:push (4 eosio.token::transfer actions)
+#             → on-chain: 4 rows with memos fya<S>c<N>-{id,ob,ar}:<hex>
+#                         + fya<S>c<N>:<dag_root_hex>
+#               → /api/anchor-receipt.json (produced by gen-anchor-receipt.sh)
 #
 # Constitution alignment:
-#   - §2 #1 validator health is unaffected: this script runs in a
-#     subshell on the validator host but performs no blocking I/O
-#     against metalgo, does not write to metalgo's data dir, and
-#     fails closed (= no inscription is silently skipped without an
-#     stderr line that the cron wrapper will surface).
-#   - §3.3 operational: anchor private key path /etc/freedom-yield/
-#     anchor.k1.key requires mode 0600 owned deploy:deploy (= per
-#     docs/OPERATOR_IDENTITY_SETUP.md §B1).
-#   - §4.1 secrets: the anchor private key value is never printed,
-#     never logged, never echoed. The script reads it via proton-cli
-#     keystore (= pre-imported in §B4), not by re-reading the file.
-#   - §5: this script ships in scripts/ for validator-host execution;
-#     deployment to the validator host is operator-approved.
+#   - §2 #1 validator health: no blocking I/O against metalgo.
+#   - §3.3 operational: anchor key never printed / logged / echoed;
+#     proton-cli keystore holds the working copy (config §B4).
+#   - §3.4 PRIME DIRECTIVE: broadcast goes through bin/safe-broadcast
+#     which enforces all 4 gates. Direct `proton transaction:push`
+#     invocation is banned; if attempted, tier-1 broadcast-guard.sh
+#     blocks it and this script exits non-zero.
+#   - §5: ships in scripts/ for validator-host execution; deployment
+#     to the validator host is operator-approved.
 #
 # Exit codes:
 #   0  success — JSON receipt fragment on stdout
-#   1  usage error (bad args)
-#   2  config missing (sink / network / key not configured)
-#   3  proton-cli not installed or wrong version
-#   4  broadcast failure (network / chain rejected the action)
-#   5  receipt parse failure (proton-cli output shape unexpected)
+#   1  usage error
+#   2  anchor-source.json missing / invalid / dag_root mismatch
+#   3  config file missing (xpr-account / anchor-sink)
+#   4  bin/safe-broadcast missing or non-executable
+#   5  broadcast failed (safe-broadcast propagated non-zero)
+#   6  receipt shape assembly failed
 #
 # Usage:
-#   sign-anchor-event.sh <event_type> <dag_root_hash> [--dry-run]
-#     event_type     = cyclestart | cycleend | idrotate
-#     dag_root_hash  = 64 lowercase hex chars
-#     --dry-run      = compose and validate the action but do not broadcast.
-#                      Useful for the §B5 self-test and for the C2→C3 T-9
-#                      testnet rehearsal.
+#   sign-anchor-event.sh --chain=<testnet-a|mainnet-a>
+#                        [--anchor-source=<path>]
+#                        [--testnet-tx-id=<64hex>]
+#                        [--dry-run-log=<file>]
+#                        [--non-interactive]
 #
-# Environment / config files (validator-host conventions, /etc/freedom-yield/):
-#   anchor.k1.key      private key for ${XPR_ACCOUNT}@anchor, mode 0600
-#                      deploy:deploy (= T-7 §B3 deploy artifact). Not re-read
-#                      here; proton-cli keystore (§B4) holds the working copy.
-#   xpr-account        single-line file containing the operator-controlled XPR
-#                      account name that holds the anchor permission AND
-#                      sources the eosio.token::transfer broadcast. NO default
-#                      — the script fails closed if the file is missing, empty,
-#                      multi-line, has invalid characters, or is longer than
-#                      12 chars (per audit-C/F-E2). The literal "metalfreedom"
-#                      fallback was removed because the same script runs the
-#                      testnet rehearsal with a throwaway test account.
-#                      Mainnet: contains 'metalfreedom'.
-#                      Testnet: contains the rehearsal test account name
-#                      (see docs/PHASE_ALPHA_TESTNET_DRY_RUN.md).
-#   anchor-sink        single-line file containing the sink account name (= the
-#                      receiver of the eosio.token::transfer; required because
-#                      eosio.token rejects self-transfer per BLOCK-1). Operator-
-#                      chosen account name, matches XPR pattern ^[a-z1-5.]{1,12}$.
-#                      MUST NOT equal the value of xpr-account.
-#   xpr-chain          single-line file containing "proton" (mainnet) or
-#                      "proton-test" (testnet). Default: "proton". Selecting
-#                      proton-test routes broadcasts to the testnet RPC, used by
-#                      the T-9 dry-run rehearsal.
-#   xpr-quantity       single-line file containing the transfer quantity in
-#                      EOSIO asset form, e.g. "0.0001 XPR". Default:
-#                      "0.0001 XPR".
+# Required:
+#   --chain=<testnet-a|mainnet-a>   Target chain, mandatory.
 #
-# JSON receipt fragment on stdout (caller embeds into anchor-receipt.json):
+# Optional:
+#   --anchor-source=<path>          Default: public/api/anchor-source.json
+#   --testnet-tx-id=<64hex>         Passed through to safe-broadcast (mainnet only).
+#   --dry-run-log=<file>            Passed through to safe-broadcast (mainnet only).
+#   --non-interactive               Passed through to safe-broadcast.
+#   --dry-run                       Compose + emit tx JSON to stdout only.
+#                                   DOES NOT invoke safe-broadcast, so requires
+#                                   no operator token. Use for schema tests and
+#                                   for producing the --dry-run-log input to
+#                                   mainnet safe-broadcast.
+#
+# Config files (validator-host convention, /etc/freedom-yield/):
+#   xpr-account   XPR account name that holds the anchor permission.
+#                 Mainnet: metalfreedom (or the mainnet operator account).
+#                 Testnet: rehearsal test account (see PHASE_ALPHA_TESTNET_DRY_RUN.md).
+#   anchor-sink   sink account for eosio.token::transfer (BLOCK-1: != xpr-account).
+#   xpr-quantity  transfer quantity in EOSIO asset form (default "0.0001 XPR").
+#
+# JSON receipt fragment on stdout (consumed by gen-anchor-receipt.sh in T-D):
 #   {
 #     "tx_id": "<64-hex>",
-#     "block_num": <int>,
-#     "block_time": "<RFC3339 UTC>",
 #     "chain": "metal-a-chain",
-#     "network": "xpr-mainnet" | "xpr-testnet",
-#     "method": "phase_alpha_token_transfer",
-#     "memo": "fyid1:<dag_root_hash>",
-#     "inscribe_action": {
-#       "account": "eosio.token",
-#       "name": "transfer",
-#       "from": "metalfreedom",
-#       "to": "<sink>",
-#       "quantity": "<quantity>",
-#       "memo": "fyid1:<dag_root_hash>",
-#       "permission": {"actor": "metalfreedom", "permission": "anchor"}
-#     }
+#     "network": "testnet-a" | "mainnet-a",
+#     "method": "hc_single_4_action_pack",
+#     "schema_version": <int>,
+#     "cycle_number": <int>,
+#     "memo_prefix": "fya<S>c<N>",
+#     "actions": [
+#       {"branch": "identity",         "memo": "fya<S>c<N>-id:<hex>", "root_hex": "<hex>"},
+#       {"branch": "observations",     "memo": "fya<S>c<N>-ob:<hex>", "root_hex": "<hex>"},
+#       {"branch": "artifacts",        "memo": "fya<S>c<N>-ar:<hex>", "root_hex": "<hex>"},
+#       {"branch": "dag_root_summary", "memo": "fya<S>c<N>:<hex>",    "root_hex": "<hex>"}
+#     ],
+#     "authorization": {"actor": "<xpr-account>", "permission": "anchor"},
+#     "sink":     "<anchor-sink>",
+#     "quantity": "<xpr-quantity>"
 #   }
 
 set -euo pipefail
 
-# -------- arg parsing --------
-DRY_RUN=0
-EVENT_TYPE=""
-DAG_ROOT=""
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SAFE_BROADCAST="${REPO_ROOT}/bin/safe-broadcast"
 
-while [ "$#" -gt 0 ]; do
-	case "$1" in
-		--dry-run) DRY_RUN=1; shift ;;
-		--help|-h)
-			sed -n '1,/^set -euo pipefail$/p' "$0" >&2
-			exit 0
-			;;
-		-*) echo "ERROR: unknown flag $1" >&2; exit 1 ;;
-		*)
-			if [ -z "${EVENT_TYPE}" ]; then EVENT_TYPE="$1"
-			elif [ -z "${DAG_ROOT}" ];     then DAG_ROOT="$1"
-			else echo "ERROR: extra positional arg $1" >&2; exit 1; fi
-			shift
-			;;
+# -------- arg parsing --------
+CHAIN=""
+ANCHOR_SOURCE="${REPO_ROOT}/public/api/anchor-source.json"
+TESTNET_TX_ID=""
+DRY_RUN_LOG=""
+NON_INTERACTIVE=0
+DRY_RUN=0
+
+for arg in "$@"; do
+	case "$arg" in
+		--chain=*)           CHAIN="${arg#*=}" ;;
+		--anchor-source=*)   ANCHOR_SOURCE="${arg#*=}" ;;
+		--testnet-tx-id=*)   TESTNET_TX_ID="${arg#*=}" ;;
+		--dry-run-log=*)     DRY_RUN_LOG="${arg#*=}" ;;
+		--non-interactive)   NON_INTERACTIVE=1 ;;
+		--dry-run)           DRY_RUN=1 ;;
+		-h|--help)           sed -n '2,90p' "$0" | sed 's/^# \?//'; exit 0 ;;
+		*)                   echo "ERROR: unknown arg: $arg" >&2; exit 1 ;;
 	esac
 done
 
-if [ -z "${EVENT_TYPE}" ] || [ -z "${DAG_ROOT}" ]; then
-	echo "ERROR: usage: $0 <event_type> <dag_root_hash> [--dry-run]" >&2
+if [ -z "$CHAIN" ]; then
+	echo "ERROR: --chain=<testnet-a|mainnet-a> required" >&2
 	exit 1
 fi
-
-case "${EVENT_TYPE}" in
-	cyclestart|cycleend|idrotate) ;;
-	*)
-		echo "ERROR: event_type must be cyclestart|cycleend|idrotate, got '${EVENT_TYPE}'" >&2
-		exit 1
-		;;
+case "$CHAIN" in
+	testnet-a|mainnet-a) ;;
+	*) echo "ERROR: --chain must be testnet-a or mainnet-a, got: $CHAIN" >&2; exit 1 ;;
 esac
 
-case "${DAG_ROOT}" in
-	*[!a-f0-9]*|"")
-		echo "ERROR: dag_root_hash must be 64 lowercase hex chars, got '${DAG_ROOT}'" >&2
-		exit 1
-		;;
-esac
-if [ "${#DAG_ROOT}" -ne 64 ]; then
-	echo "ERROR: dag_root_hash must be exactly 64 chars (got ${#DAG_ROOT})" >&2
-	exit 1
+# -------- prerequisites --------
+if [ ! -r "$ANCHOR_SOURCE" ]; then
+	echo "ERROR: anchor-source.json not readable: $ANCHOR_SOURCE" >&2
+	exit 2
+fi
+if ! command -v jq >/dev/null 2>&1; then
+	echo "ERROR: jq required" >&2
+	exit 2
+fi
+if ! command -v sha256sum >/dev/null 2>&1; then
+	if command -v shasum >/dev/null 2>&1; then
+		sha256_pipe() { shasum -a 256 | awk '{print $1}'; }
+	else
+		echo "ERROR: sha256sum or shasum required" >&2
+		exit 2
+	fi
+else
+	sha256_pipe() { sha256sum | awk '{print $1}'; }
+fi
+if [ ! -x "$SAFE_BROADCAST" ]; then
+	echo "ERROR (4): bin/safe-broadcast missing or non-executable: $SAFE_BROADCAST" >&2
+	exit 4
+fi
+
+# -------- read anchor-source.json --------
+SCHEMA_VER="$(jq -r '.schema_version // 0' "$ANCHOR_SOURCE")"
+if [ "$SCHEMA_VER" -ne 1 ]; then
+	echo "ERROR (2): anchor-source.json schema_version must be 1, got: $SCHEMA_VER" >&2
+	exit 2
+fi
+
+CYCLE_NUM="$(jq -r '.observations_branch.cycle_number_observed // 0' "$ANCHOR_SOURCE")"
+if [ "$CYCLE_NUM" -lt 1 ]; then
+	echo "ERROR (2): observations_branch.cycle_number_observed must be >= 1, got: $CYCLE_NUM" >&2
+	exit 2
+fi
+
+DAG_ROOT="$(jq -r '.dag_root_computed // empty' "$ANCHOR_SOURCE")"
+if ! echo "$DAG_ROOT" | grep -qE '^[0-9a-f]{64}$'; then
+	echo "ERROR (2): dag_root_computed missing or malformed in anchor-source.json" >&2
+	exit 2
+fi
+
+# Compute per-branch canonical hashes (RFC-8785-ish: jq -cS = compact + sorted keys).
+IDENTITY_ROOT="$(jq -cS '.identity_branch' "$ANCHOR_SOURCE" | sha256_pipe)"
+OBSERVATIONS_ROOT="$(jq -cS '.observations_branch' "$ANCHOR_SOURCE" | sha256_pipe)"
+ARTIFACTS_ROOT="$(jq -cS '.artifacts_branch' "$ANCHOR_SOURCE" | sha256_pipe)"
+
+# Verify dag_root_computed matches the recomputation (belt + suspenders).
+COMPUTED_DAG="$(printf '%s%s%s' "$IDENTITY_ROOT" "$OBSERVATIONS_ROOT" "$ARTIFACTS_ROOT" | sha256_pipe)"
+if [ "$COMPUTED_DAG" != "$DAG_ROOT" ]; then
+	echo "ERROR (2): dag_root_computed mismatch — anchor-source.json is inconsistent" >&2
+	echo "         recomputed: $COMPUTED_DAG" >&2
+	echo "         file says:  $DAG_ROOT" >&2
+	exit 2
 fi
 
 # -------- config --------
 CONFIG_DIR="${FY_CONFIG_DIR:-/etc/freedom-yield}"
 
-read_config() {
-	local key="$1" default="${2:-}"
+read_config_strict() {
+	local key="$1"
 	local path="${CONFIG_DIR}/${key}"
-	if [ -r "${path}" ]; then
-		# tr -d to strip trailing newlines / whitespace
-		tr -d '\n\r\t ' < "${path}"
-	elif [ -n "${default}" ]; then
-		printf '%s' "${default}"
+	if [ ! -r "$path" ]; then
+		echo "ERROR (3): required config missing: $path" >&2
+		exit 3
+	fi
+	tr -d '\r\n\t ' < "$path"
+}
+
+read_config_default() {
+	local key="$1" default="$2"
+	local path="${CONFIG_DIR}/${key}"
+	if [ -r "$path" ]; then
+		head -n 1 "$path" | sed -e 's/[[:space:]]*$//'
 	else
-		echo "ERROR: required config ${path} missing or unreadable" >&2
-		exit 2
+		printf '%s' "$default"
 	fi
 }
 
-# XPR_ACCOUNT — operator-controlled account name. Strict, no default.
-# Per audit-C/F-E2 the literal 'metalfreedom' fallback was removed so that
-# the same script runs both mainnet and testnet rehearsal without the
-# rehearsal accidentally broadcasting from the production account.
-XPR_ACCOUNT_FILE="${CONFIG_DIR}/xpr-account"
-if [ ! -r "${XPR_ACCOUNT_FILE}" ]; then
-	echo "ERROR: required config ${XPR_ACCOUNT_FILE} missing or unreadable" >&2
-	exit 2
-fi
-XPR_ACCOUNT_LINES="$(wc -l < "${XPR_ACCOUNT_FILE}" | tr -d ' ')"
-# Allow exactly 0 newlines (= single-line file ending without LF) OR
-# exactly 1 newline (= single line with trailing LF). Reject ≥2 newlines.
-case "${XPR_ACCOUNT_LINES}" in
-	0|1) ;;
-	*)
-		echo "ERROR: ${XPR_ACCOUNT_FILE} must contain exactly one line (got ${XPR_ACCOUNT_LINES} newlines)" >&2; exit 2 ;;
-esac
-XPR_ACCOUNT="$(head -n 1 "${XPR_ACCOUNT_FILE}" | tr -d '\r\n\t ')"
-if [ -z "${XPR_ACCOUNT}" ]; then
-	echo "ERROR: ${XPR_ACCOUNT_FILE} is empty (or whitespace only)" >&2; exit 2
-fi
-# Validate the XPR account name char-set with an LC_ALL=C-safe tr-based
-# check. The shell case-statement pattern `*[!a-z1-5.]*` is locale-
-# dependent: under en_US.UTF-8 / ja_JP.UTF-8 it collation-matches
-# uppercase letters via a-z, silently letting 'FreeDomYield' through.
-# Using `LC_ALL=C tr -d` guarantees ASCII-only character class semantics.
-XPR_ACCOUNT_ILLEGAL="$(printf '%s' "${XPR_ACCOUNT}" | LC_ALL=C tr -d 'a-z1-5.')"
-if [ -n "${XPR_ACCOUNT_ILLEGAL}" ]; then
-	echo "ERROR: xpr-account '${XPR_ACCOUNT}' contains characters outside [a-z1-5.] (XPR account pattern); illegal chars: '${XPR_ACCOUNT_ILLEGAL}'" >&2; exit 2
-fi
-if [ "${#XPR_ACCOUNT}" -lt 1 ] || [ "${#XPR_ACCOUNT}" -gt 12 ]; then
-	echo "ERROR: xpr-account length must be 1..12 chars (got ${#XPR_ACCOUNT})" >&2; exit 2
-fi
-
-SINK="$(read_config anchor-sink)"
-CHAIN="$(read_config xpr-chain proton)"
-# xpr-quantity: optional config file in CONFIG_DIR. Default "0.0001 XPR".
-# Read the raw first line, preserving the internal space in the EOSIO asset
-# form (e.g. "0.0001 XPR"); strip trailing whitespace only. read_config is
-# not used here because it would strip the internal space.
-if [ -r "${CONFIG_DIR}/xpr-quantity" ]; then
-	QUANTITY="$(head -n 1 "${CONFIG_DIR}/xpr-quantity" | sed -e 's/[[:space:]]*$//')"
-else
-	QUANTITY="0.0001 XPR"
-fi
-
-if [ -z "${SINK}" ]; then
-	echo "ERROR: sink is empty" >&2; exit 2
-fi
-# Locale-safe ASCII char-class validation (see XPR_ACCOUNT for rationale).
-SINK_ILLEGAL="$(printf '%s' "${SINK}" | LC_ALL=C tr -d 'a-z1-5.')"
-if [ -n "${SINK_ILLEGAL}" ]; then
-	echo "ERROR: sink '${SINK}' does not match XPR account pattern ^[a-z1-5.]{1,12}$; illegal chars: '${SINK_ILLEGAL}'" >&2; exit 2
-fi
-if [ "${#SINK}" -lt 1 ] || [ "${#SINK}" -gt 12 ]; then
-	echo "ERROR: sink length must be 1..12 chars (got ${#SINK})" >&2; exit 2
-fi
-if [ "${SINK}" = "${XPR_ACCOUNT}" ]; then
-	echo "ERROR: sink MUST NOT equal xpr-account ('${XPR_ACCOUNT}') — eosio.token::transfer rejects self-transfer at contract level (BLOCK-1, eosio.token.cpp L99 'cannot transfer to self')" >&2; exit 2
-fi
-
-case "${CHAIN}" in
-	proton)      NETWORK_TAG="xpr-mainnet" ;;
-	proton-test) NETWORK_TAG="xpr-testnet" ;;
-	*) echo "ERROR: xpr-chain must be 'proton' or 'proton-test', got '${CHAIN}'" >&2; exit 2 ;;
-esac
-
-# -------- proton-cli --------
-if ! command -v proton >/dev/null 2>&1; then
-	echo "ERROR: proton-cli not installed (PATH=${PATH})" >&2
+XPR_ACCOUNT="$(read_config_strict xpr-account)"
+if [ -z "$XPR_ACCOUNT" ]; then
+	echo "ERROR (3): xpr-account is empty" >&2
 	exit 3
 fi
-
-# -------- build action --------
-MEMO="fyid1:${DAG_ROOT}"
-ACTION_DATA_JSON="$(jq -nc \
-	--arg from "${XPR_ACCOUNT}" \
-	--arg to   "${SINK}" \
-	--arg qty  "${QUANTITY}" \
-	--arg memo "${MEMO}" \
-	'{from: $from, to: $to, quantity: $qty, memo: $memo}')"
-
-# Switch chain context. Idempotent.
-proton chain:set "${CHAIN}" >/dev/null 2>&1 || true
-
-# -------- broadcast --------
-BROADCAST_OUT="$(mktemp -t signanchor.XXXXXX)"
-BROADCAST_ERR="$(mktemp -t signanchor.XXXXXX)"
-trap 'rm -f "${BROADCAST_OUT}" "${BROADCAST_ERR}"' EXIT
-
-PROTON_ARGS=(action eosio.token transfer "${ACTION_DATA_JSON}" "${XPR_ACCOUNT}@anchor")
-if [ "${DRY_RUN}" -eq 1 ]; then
-	PROTON_ARGS+=(--dry-run)
+SINK="$(read_config_strict anchor-sink)"
+if [ -z "$SINK" ]; then
+	echo "ERROR (3): anchor-sink is empty" >&2
+	exit 3
 fi
-
-if ! proton "${PROTON_ARGS[@]}" > "${BROADCAST_OUT}" 2> "${BROADCAST_ERR}"; then
-	echo "ERROR: proton broadcast failed (exit non-zero)" >&2
-	echo "ERROR stderr (truncated to 20 lines):" >&2
-	tail -n 20 "${BROADCAST_ERR}" >&2
-	exit 4
+if [ "$SINK" = "$XPR_ACCOUNT" ]; then
+	echo "ERROR (3): sink must not equal xpr-account (BLOCK-1: eosio.token rejects self-transfer)" >&2
+	exit 3
 fi
+QUANTITY="$(read_config_default xpr-quantity '0.0001 XPR')"
 
-# -------- extract tx_id --------
-# proton-cli prints a line containing the transaction id; the format varies
-# slightly across versions. Try several patterns. If --dry-run we expect no
-# tx_id (the action is not broadcast) and emit a sentinel.
-if [ "${DRY_RUN}" -eq 1 ]; then
-	TX_ID="dry-run-no-broadcast"
-	BLOCK_NUM=0
-	BLOCK_TIME="1970-01-01T00:00:00Z"
-else
-	# Try patterns in order:
-	#  - "transaction_id: <64-hex>"
-	#  - "transaction id: <64-hex>"
-	#  - JSON output: '"transaction_id":"<64-hex>"'
-	#  - Bare 64-hex on a line by itself (last-resort)
-	TX_ID="$(
-		grep -oE 'transaction[_ ]id["[:space:]:]+[a-f0-9]{64}' "${BROADCAST_OUT}" \
-			| head -n 1 \
-			| grep -oE '[a-f0-9]{64}' \
-			| head -n 1
-	)"
-	if [ -z "${TX_ID}" ]; then
-		TX_ID="$(grep -oE '^[a-f0-9]{64}$' "${BROADCAST_OUT}" | head -n 1 || true)"
-	fi
-	if [ -z "${TX_ID}" ]; then
-		echo "ERROR: could not extract tx_id from proton-cli output" >&2
-		echo "ERROR stdout (truncated to 20 lines):" >&2
-		tail -n 20 "${BROADCAST_OUT}" >&2
-		exit 5
-	fi
+# -------- memo prefix --------
+# Format: fya<schema>c<cycle>-<branch>:<hex>  or  fya<schema>c<cycle>:<hex>
+# fya = "freedom yield anchor". Schema major and cycle are numeric.
+# Pivoted from fyid1v1c<N> on 2026-07-01 to isolate from mainnet
+# accident tx memo fyid1v1c2-test-single.
+PREFIX="fya${SCHEMA_VER}c${CYCLE_NUM}"
 
-	# Follow up: query the chain for block_num + block_time. If proton-cli
-	# does not have a stable get_transaction subcommand we fall back to the
-	# RPC endpoint via curl. Both paths are documented; the operator picks
-	# whichever works for their proton-cli version.
-	if proton --help 2>&1 | grep -q 'get_transaction\|get:transaction'; then
-		BLOCK_NUM="$(proton get_transaction "${TX_ID}" 2>/dev/null \
-			| grep -oE '"block_num":[[:space:]]*[0-9]+' \
-			| head -n 1 \
-			| grep -oE '[0-9]+' || true)"
-		BLOCK_TIME="$(proton get_transaction "${TX_ID}" 2>/dev/null \
-			| grep -oE '"block_time":[[:space:]]*"[^"]*"' \
-			| head -n 1 \
-			| sed -E 's/.*"([^"]*)"/\1/' || true)"
-	fi
-	# Fallback: query a public XPR mainnet RPC. (Endpoint pinning is operator
-	# preference; we use the documented one from docs/OPERATOR_IDENTITY_SETUP.md A8.)
-	if [ -z "${BLOCK_NUM:-}" ] || [ -z "${BLOCK_TIME:-}" ]; then
-		RPC_BASE="${XPR_RPC_BASE:-https://api-xprnetwork-main.saltant.io}"
-		[ "${CHAIN}" = "proton-test" ] && RPC_BASE="${XPR_RPC_BASE:-https://api-xprnetwork-test.saltant.io}"
-		RPC_OUT="$(curl -sSf -X POST -H 'Content-Type: application/json' \
-			--data "$(jq -nc --arg id "${TX_ID}" '{id: $id}')" \
-			"${RPC_BASE}/v1/history/get_transaction" 2>/dev/null || echo '{}')"
-		BLOCK_NUM="${BLOCK_NUM:-$(printf '%s' "${RPC_OUT}" | jq -r '.block_num // empty')}"
-		BLOCK_TIME="${BLOCK_TIME:-$(printf '%s' "${RPC_OUT}" | jq -r '.block_time // empty')}"
-	fi
-	# Fail-closed per audit-C/F-E4: if EITHER block_num OR block_time
-	# is unobtainable from on-chain sources after BOTH proton-cli
-	# get_transaction AND the RPC fallback have been tried, we MUST
-	# NOT fabricate the value from the local clock — doing so would
-	# publish a receipt whose block_time is operator-derived rather
-	# than chain-derived, falsely implying on-chain confirmation. The
-	# audit requires that the receipt be withheld and the state file
-	# NOT updated; the caller (= scripts/post-anchor-event.sh) will
-	# inherit the non-zero exit and retry on the next cron tick.
-	#
-	# (If the operator separately needs to record the operator clock
-	# at observation time, that goes in a distinct `observed_at` field
-	# — never inside block_time. The schema would need an additive
-	# extension for that; not done here.)
-	if [ -z "${BLOCK_NUM:-}" ]; then
-		echo "ERROR: block_num could not be derived from proton-cli get_transaction or RPC fallback for tx_id=${TX_ID}." >&2
-		echo "ERROR: receipt withheld (= no partial publish, no state update). Retry next tick." >&2
-		exit 4
-	fi
-	case "${BLOCK_NUM}" in
-		*[!0-9]*) echo "ERROR: derived block_num is non-numeric: ${BLOCK_NUM}" >&2; exit 4 ;;
-	esac
+MEMO_ID="${PREFIX}-id:${IDENTITY_ROOT}"
+MEMO_OB="${PREFIX}-ob:${OBSERVATIONS_ROOT}"
+MEMO_AR="${PREFIX}-ar:${ARTIFACTS_ROOT}"
+MEMO_DG="${PREFIX}:${DAG_ROOT}"
 
-	if [ -z "${BLOCK_TIME:-}" ]; then
-		echo "ERROR: block_time could not be derived from proton-cli get_transaction or RPC fallback for tx_id=${TX_ID}." >&2
-		echo "ERROR: receipt withheld (= no local-clock fabrication, no partial publish, no state update). Retry next tick." >&2
-		exit 4
+# Sanity: each memo must fit under EOSIO 256-byte memo limit with margin.
+for m in "$MEMO_ID" "$MEMO_OB" "$MEMO_AR" "$MEMO_DG"; do
+	if [ "${#m}" -gt 200 ]; then
+		echo "ERROR (2): memo too long (${#m} > 200): $m" >&2
+		exit 2
 	fi
-	# Normalize block_time to RFC3339 UTC with a 'Z' suffix when the chain
-	# returned a non-Z-terminated form. The value MUST have originated
-	# from the chain (= the only way we got past the empty-check above).
-	case "${BLOCK_TIME}" in
-		*Z) ;;
-		*)  BLOCK_TIME="${BLOCK_TIME}Z" ;;
-	esac
-fi
+done
 
-# -------- emit receipt fragment --------
+# -------- compose 4-action tx JSON --------
+TX_FILE="$(mktemp -t sign-anchor-tx.XXXXXX)"
+trap 'rm -f "$TX_FILE"' EXIT
+
 jq -n \
-	--arg tx_id        "${TX_ID}" \
-	--argjson block_num "${BLOCK_NUM}" \
-	--arg block_time   "${BLOCK_TIME}" \
-	--arg network_tag  "${NETWORK_TAG}" \
-	--arg memo         "${MEMO}" \
-	--arg sink         "${SINK}" \
-	--arg quantity     "${QUANTITY}" \
-	--arg xpr_account  "${XPR_ACCOUNT}" \
+	--arg from "$XPR_ACCOUNT" \
+	--arg to "$SINK" \
+	--arg qty "$QUANTITY" \
+	--arg memo_id "$MEMO_ID" \
+	--arg memo_ob "$MEMO_OB" \
+	--arg memo_ar "$MEMO_AR" \
+	--arg memo_dg "$MEMO_DG" \
+	'{
+		actions: [
+			{account: "eosio.token", name: "transfer",
+			 authorization: [{actor: $from, permission: "anchor"}],
+			 data: {from: $from, to: $to, quantity: $qty, memo: $memo_id}},
+			{account: "eosio.token", name: "transfer",
+			 authorization: [{actor: $from, permission: "anchor"}],
+			 data: {from: $from, to: $to, quantity: $qty, memo: $memo_ob}},
+			{account: "eosio.token", name: "transfer",
+			 authorization: [{actor: $from, permission: "anchor"}],
+			 data: {from: $from, to: $to, quantity: $qty, memo: $memo_ar}},
+			{account: "eosio.token", name: "transfer",
+			 authorization: [{actor: $from, permission: "anchor"}],
+			 data: {from: $from, to: $to, quantity: $qty, memo: $memo_dg}}
+		]
+	}' > "$TX_FILE"
+
+# -------- --dry-run: emit tx JSON + composed memos, do NOT broadcast --------
+if [ "$DRY_RUN" = "1" ]; then
+	jq -n \
+		--arg chain "$CHAIN" \
+		--argjson schema_version "$SCHEMA_VER" \
+		--argjson cycle_number "$CYCLE_NUM" \
+		--arg prefix "$PREFIX" \
+		--arg id_root "$IDENTITY_ROOT" \
+		--arg ob_root "$OBSERVATIONS_ROOT" \
+		--arg ar_root "$ARTIFACTS_ROOT" \
+		--arg dag_root "$DAG_ROOT" \
+		--arg from "$XPR_ACCOUNT" \
+		--arg to "$SINK" \
+		--arg qty "$QUANTITY" \
+		--slurpfile tx "$TX_FILE" \
+		'{
+			dry_run: true,
+			target_chain: $chain,
+			schema_version: $schema_version,
+			cycle_number: $cycle_number,
+			memo_prefix: $prefix,
+			composed_memos: {
+				identity:         "\($prefix)-id:\($id_root)",
+				observations:     "\($prefix)-ob:\($ob_root)",
+				artifacts:        "\($prefix)-ar:\($ar_root)",
+				dag_root_summary: "\($prefix):\($dag_root)"
+			},
+			authorization: {actor: $from, permission: "anchor"},
+			sink: $to,
+			quantity: $qty,
+			tx: $tx[0]
+		}'
+	exit 0
+fi
+
+# -------- delegate to bin/safe-broadcast --------
+SAFE_ARGS=(--tx="$TX_FILE" --chain="$CHAIN")
+[ -n "$TESTNET_TX_ID" ]    && SAFE_ARGS+=(--testnet-tx-id="$TESTNET_TX_ID")
+[ -n "$DRY_RUN_LOG" ]      && SAFE_ARGS+=(--dry-run-log="$DRY_RUN_LOG")
+[ "$NON_INTERACTIVE" = "1" ] && SAFE_ARGS+=(--non-interactive)
+
+TX_ID=""
+BROADCAST_RC=0
+TX_ID="$(bash "$SAFE_BROADCAST" "${SAFE_ARGS[@]}")" || BROADCAST_RC=$?
+if [ "$BROADCAST_RC" -ne 0 ] || ! echo "$TX_ID" | grep -qE '^[a-f0-9]{64}$'; then
+	echo "ERROR (5): safe-broadcast failed (rc=$BROADCAST_RC, tx_id=${TX_ID:-empty})" >&2
+	exit 5
+fi
+
+# -------- emit JSON receipt fragment on stdout --------
+jq -n \
+	--arg tx_id "$TX_ID" \
+	--arg chain "$CHAIN" \
+	--argjson schema_version "$SCHEMA_VER" \
+	--argjson cycle_number "$CYCLE_NUM" \
+	--arg prefix "$PREFIX" \
+	--arg id_root "$IDENTITY_ROOT" \
+	--arg ob_root "$OBSERVATIONS_ROOT" \
+	--arg ar_root "$ARTIFACTS_ROOT" \
+	--arg dag_root "$DAG_ROOT" \
+	--arg from "$XPR_ACCOUNT" \
+	--arg to "$SINK" \
+	--arg qty "$QUANTITY" \
 	'{
 		tx_id: $tx_id,
-		block_num: $block_num,
-		block_time: $block_time,
 		chain: "metal-a-chain",
-		network: $network_tag,
-		method: "phase_alpha_token_transfer",
-		memo: $memo,
-		inscribe_action: {
-			account: "eosio.token",
-			name: "transfer",
-			from: $xpr_account,
-			to: $sink,
-			quantity: $quantity,
-			memo: $memo,
-			permission: {actor: $xpr_account, permission: "anchor"}
-		}
+		network: $chain,
+		method: "hc_single_4_action_pack",
+		schema_version: $schema_version,
+		cycle_number: $cycle_number,
+		memo_prefix: $prefix,
+		actions: [
+			{branch: "identity",         memo: "\($prefix)-id:\($id_root)",  root_hex: $id_root},
+			{branch: "observations",     memo: "\($prefix)-ob:\($ob_root)",  root_hex: $ob_root},
+			{branch: "artifacts",        memo: "\($prefix)-ar:\($ar_root)",  root_hex: $ar_root},
+			{branch: "dag_root_summary", memo: "\($prefix):\($dag_root)",    root_hex: $dag_root}
+		],
+		authorization: {actor: $from, permission: "anchor"},
+		sink: $to,
+		quantity: $qty
 	}'
