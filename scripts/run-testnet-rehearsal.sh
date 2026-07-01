@@ -108,11 +108,17 @@ done
 # ---- step 3: keystore unlock check + chain preflight ----
 step "3/9 keystore unlock + proton chain preflight"
 proton chain:set proton-test >/dev/null 2>&1 || fail "proton chain:set proton-test failed"
-CHAIN_INFO="$(proton chain:info 2>&1 | head -20)"
-if ! echo "$CHAIN_INFO" | grep -q chain_id; then
+# proton chain:info returns a pretty-printed JSON object (~22 lines).
+# The prior `head -20` truncated the trailing `}` and produced a "Unfinished
+# JSON term at EOF" parse error at step 3 during S9/S11 rehearsals. Capture
+# the full output, chain_id-check via grep (cheap presence test) and pull
+# head_block_num via jq on the full JSON.
+CHAIN_INFO="$(proton chain:info 2>&1)"
+if ! printf '%s' "$CHAIN_INFO" | grep -q chain_id; then
 	fail "proton chain:info testnet returned unexpected output; check RPC connectivity"
 fi
-echo "  chain:info OK — head_block_num=$(echo "$CHAIN_INFO" | jq -r .head_block_num)"
+HEAD_BLOCK_NUM="$(printf '%s' "$CHAIN_INFO" | jq -r '.head_block_num // "unparsed"' 2>/dev/null || echo unparsed)"
+echo "  chain:info OK — head_block_num=$HEAD_BLOCK_NUM"
 
 # Unlock probe: try to read the same account we'll sign with.
 # Fast timeout because a locked keystore hangs on any signing-adjacent op.

@@ -174,7 +174,7 @@
 							"observed_at": {
 								"type": "string",
 								"format": "date-time",
-								"description": "UTC ISO 8601 timestamp when we observed the event via our cron-driven RPC polling."
+								"description": "UTC ISO 8601 timestamp of the on-chain event as recorded by the P-chain protocol itself (start_time for 'started' events, end_time for 'ended' events), retrieved by our cron-driven RPC polling. Note: this is the chain-authoritative event time, not the wall-clock moment our poll first noticed it — the two can differ by up to one poll interval, but the P-chain-recorded value is the canonical anchor for evaluator cross-reference. Events preceding delegator_lifecycle_observation_window_started_at are outside our poll history entirely; those are omitted from this array (see the window field) rather than emitted with a P-chain event time we did not actually observe within the window."
 							},
 							"delegator_tx_id": {
 								"type": "string",

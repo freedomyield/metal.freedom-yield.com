@@ -24,7 +24,7 @@ Companion docs:
 |---|---|
 | Action | Re-run `scripts/operator-local/gen-identity.sh` with live `/api/cycle-history.jsonl` so that `cycles_branch` is populated and `dag_root_hash` reflects the canonical state |
 | Trigger | D10 (cycle-history runtime feed) went live on `metal.freedom-yield.com` earlier this day, exposing one closed cycle (cycle 1) as a single JSONL line |
-| Performer | Operator (= `operator`) on local Mac, per `gen-identity.sh` §1 production-host refusal guard |
+| Performer | Operator on their local Mac, per `gen-identity.sh` §1 production-host refusal guard |
 | Date / time of execution | 2026-06-22T09:57:28Z (UTC) = 2026-06-22 18:57:28 JST |
 | Public commits produced | `5be649a` (2nd-pass regen + propagation), `8aec993` (CI hotfix), `8ef5f33` (rev-1 report), `b8bcd72` (rev-2 + drift fix), `9c1932f` (cosmetic Obs-1/2/3), `0b0dd79` (gen-identity HIGH-1 root-cause fix, script-only), and this commit (= 3rd-pass regen result + rev-3 report) |
 | Deploy outcome | GitHub Actions: `Deploy site to VPS` run 27945337701 — success |
