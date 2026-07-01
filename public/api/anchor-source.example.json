@@ -1,0 +1,70 @@
+{
+	"_comment": "Example anchor-source.json shape. Placeholder hex values (all-zero) are used where real cryptographic output would appear at runtime. Real production values are populated by scripts/gen-anchor-source.sh at anchor time. Validates against anchor-source.schema.v1.json.",
+	"$schema": "https://metal.freedom-yield.com/api/anchor-source.schema.v1.json",
+	"schema_version": 1,
+	"computed_at": "2026-07-04T04:01:00Z",
+	"computed_by_script": "gen-anchor-source.sh v1.0",
+	"computed_from_git_commit": "0000000000000000000000000000000000000000",
+	"identity_branch": {
+		"operator_ed25519_pubkey_sha256_hex": "0000000000000000000000000000000000000000000000000000000000000000",
+		"operator_asserts_node_id": "NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v",
+		"prev_anchor_root": null,
+		"prev_anchor_tx": null,
+		"key_seq": 1,
+		"identity_history_root": "0000000000000000000000000000000000000000000000000000000000000000"
+	},
+	"observations_branch": {
+		"cycle_number_observed": 2,
+		"cycle_start_time_observed": "2026-06-04T07:17:46Z",
+		"cycle_end_time_observed": "2026-07-04T04:00:27Z",
+		"self_stake_observed_metal": 5900,
+		"self_stake_observed_nmetal": "5900000000000",
+		"fee_percent_observed_at_cycle_start": 3.0,
+		"delegator_lifecycle_events_in_cycle_observed": [
+			{
+				"event_type": "started",
+				"observed_at": "2026-06-04T09:29:05Z",
+				"delegator_tx_id": "2gCehhfrCZPBsAa1AFT6c8n3XniaNUBn6dFoFxB4Z59RYHCDWJ",
+				"weight_nmetal": "172000000000",
+				"observed_end_time": "2026-07-04T04:00:27Z"
+			},
+			{
+				"event_type": "started",
+				"observed_at": "2026-06-08T00:00:00Z",
+				"delegator_tx_id": "ExampleAddDelegatorTxIdForExternalDelegation000000000000",
+				"weight_nmetal": "23428000000000",
+				"observed_end_time": "2026-07-01T00:10:00Z"
+			},
+			{
+				"event_type": "ended",
+				"observed_at": "2026-07-01T00:10:00Z",
+				"delegator_tx_id": "ExampleAddDelegatorTxIdForExternalDelegation000000000000",
+				"weight_nmetal": "23428000000000",
+				"actual_end_cause_observed": "duration_expiry"
+			}
+		],
+		"delegator_snapshot_at_cycle_end": [
+			{
+				"tx_id": "2gCehhfrCZPBsAa1AFT6c8n3XniaNUBn6dFoFxB4Z59RYHCDWJ",
+				"weight_nmetal": "172000000000"
+			}
+		]
+	},
+	"artifacts_branch": {
+		"public_api_manifest_root": "0000000000000000000000000000000000000000000000000000000000000000",
+		"public_api_files_hashed": [
+			{"path": "cycles-history.json", "sha256": "0000000000000000000000000000000000000000000000000000000000000000"},
+			{"path": "evidence.json", "sha256": "0000000000000000000000000000000000000000000000000000000000000000"},
+			{"path": "identity-history.jsonl", "sha256": "0000000000000000000000000000000000000000000000000000000000000000"},
+			{"path": "identity.json", "sha256": "0000000000000000000000000000000000000000000000000000000000000000"},
+			{"path": "peer-geo.json", "sha256": "0000000000000000000000000000000000000000000000000000000000000000"},
+			{"path": "peers.json", "sha256": "0000000000000000000000000000000000000000000000000000000000000000"},
+			{"path": "uptime-cycles.json", "sha256": "0000000000000000000000000000000000000000000000000000000000000000"},
+			{"path": "uptime-recent.json", "sha256": "0000000000000000000000000000000000000000000000000000000000000000"},
+			{"path": "validator.json", "sha256": "0000000000000000000000000000000000000000000000000000000000000000"}
+		],
+		"period_uptime_observed_pct": 99.9103,
+		"period_incident_count_observed": 0
+	},
+	"dag_root_computed": "0000000000000000000000000000000000000000000000000000000000000000"
+}
