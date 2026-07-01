@@ -212,6 +212,22 @@
 							}
 						}
 					}
+				},
+				"evaluator_hints_declared_by_operator": {
+					"type": "array",
+					"description": "Optional. Self-descriptor tags the operator declares to aid subnet evaluators and delegators in discovery. Additive within v1. Values are semantic hints (e.g. 'pseudonymous', 'single-operator', 'no-kyc-available', 'asia-region'); not commitments. Verb: 'declared_by_operator' — declaration, not obligation. Consumers MAY use for filtering; MUST NOT interpret as SLA or contractual claim.",
+					"items": {
+						"type": "string",
+						"pattern": "^[a-z][a-z0-9-]{1,63}$"
+					}
+				},
+				"subnet_targets_declared_by_operator": {
+					"type": "array",
+					"description": "Optional. Subnet identifiers this operator declares interest in serving. Empty array = no explicit target (organic delegator flow only). Not a promise to serve, not an application submission — public declaration for evaluator discovery. Additive within v1.",
+					"items": {
+						"type": "string",
+						"pattern": "^[A-Za-z0-9._-]{1,64}$"
+					}
 				}
 			}
 		},

@@ -40,6 +40,8 @@ Three branches under one top-level object. Each branch is hashed as sorted-key c
 | `fee_percent_observed_at_cycle_start` | number | delegation fee observed at cycle start; not a promise for the next cycle |
 | `delegator_lifecycle_events_in_cycle_observed` | array | every started/ended event observed during the cycle (complete audit trail; hidden events impossible) |
 | `delegator_snapshot_at_cycle_end` | array | remaining delegators at cycle end (or at anchor time if still open) |
+| `evaluator_hints_declared_by_operator` | array of tag strings | optional; self-descriptor tags for subnet-evaluator discovery (e.g. `pseudonymous`, `single-operator`, `no-kyc-available`, `asia-region`). Declaration, not commitment |
+| `subnet_targets_declared_by_operator` | array of subnet identifiers | optional; subnets the operator declares interest in serving. Empty = no explicit target |
 
 Each element of `delegator_lifecycle_events_in_cycle_observed` has `event_type` (started or ended), `observed_at`, `delegator_tx_id`, `weight_nmetal`, and optionally `observed_end_time` (for started) or `actual_end_cause_observed` (for ended: duration_expiry, early_withdrawal, unknown).
 

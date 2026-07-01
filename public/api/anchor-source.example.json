@@ -48,7 +48,14 @@
 				"tx_id": "2gCehhfrCZPBsAa1AFT6c8n3XniaNUBn6dFoFxB4Z59RYHCDWJ",
 				"weight_nmetal": "172000000000"
 			}
-		]
+		],
+		"evaluator_hints_declared_by_operator": [
+			"pseudonymous",
+			"single-operator",
+			"no-kyc-available",
+			"asia-region"
+		],
+		"subnet_targets_declared_by_operator": []
 	},
 	"artifacts_branch": {
 		"public_api_manifest_root": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -66,5 +73,5 @@
 		"period_uptime_observed_pct": 99.9103,
 		"period_incident_count_observed": 0
 	},
-	"dag_root_computed": "efd1bd78dc20c7ba3b9e3838679f38757ce5273ed1f2d66f383943ef83ea329a"
+	"dag_root_computed": "46d43d6ab3d28b33e33f8323ff5f631903d30f61b09b48e355d8bedce45e1765"
 }

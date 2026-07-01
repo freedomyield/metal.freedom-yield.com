@@ -256,6 +256,22 @@ else
 	DELEGATOR_EVENTS="[]"
 fi
 
+# T-M-20260701: discoverability metadata for subnet evaluator search.
+# Optional configuration files (one entry per line, blank lines and lines
+# starting with '#' ignored). Absent files = empty arrays (= no-op).
+EVALUATOR_HINTS_FILE="${FY_CONFIG_DIR:-/etc/freedom-yield}/evaluator-hints"
+SUBNET_TARGETS_FILE="${FY_CONFIG_DIR:-/etc/freedom-yield}/subnet-targets"
+EVALUATOR_HINTS_JSON='[]'
+SUBNET_TARGETS_JSON='[]'
+if [ -r "$EVALUATOR_HINTS_FILE" ]; then
+	EVALUATOR_HINTS_JSON="$(grep -vE '^\s*(#|$)' "$EVALUATOR_HINTS_FILE" 2>/dev/null \
+		| jq -R . | jq -sc . 2>/dev/null || echo '[]')"
+fi
+if [ -r "$SUBNET_TARGETS_FILE" ]; then
+	SUBNET_TARGETS_JSON="$(grep -vE '^\s*(#|$)' "$SUBNET_TARGETS_FILE" 2>/dev/null \
+		| jq -R . | jq -sc . 2>/dev/null || echo '[]')"
+fi
+
 OBSERVATIONS_BRANCH="$(jq -n \
 	--argjson cycle_num "$CYCLE_NUMBER" \
 	--arg cycle_start "$CYCLE_START_ISO" \
@@ -265,6 +281,8 @@ OBSERVATIONS_BRANCH="$(jq -n \
 	--argjson fee_pct "$FEE_PCT_STR" \
 	--argjson events "$DELEGATOR_EVENTS" \
 	--argjson snapshot "$DELEGATORS_JSON" \
+	--argjson hints "$EVALUATOR_HINTS_JSON" \
+	--argjson targets "$SUBNET_TARGETS_JSON" \
 	'{
 		cycle_number_observed: $cycle_num,
 		cycle_start_time_observed: $cycle_start,
@@ -273,7 +291,9 @@ OBSERVATIONS_BRANCH="$(jq -n \
 		self_stake_observed_nmetal: $stake_nmetal,
 		fee_percent_observed_at_cycle_start: $fee_pct,
 		delegator_lifecycle_events_in_cycle_observed: $events,
-		delegator_snapshot_at_cycle_end: $snapshot
+		delegator_snapshot_at_cycle_end: $snapshot,
+		evaluator_hints_declared_by_operator: $hints,
+		subnet_targets_declared_by_operator: $targets
 	}')"
 
 # ---- artifacts_branch ------------------------------------------------
