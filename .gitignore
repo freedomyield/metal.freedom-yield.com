@@ -80,5 +80,8 @@ public/calendar/
 # CI/CD で deploy 時に生成、コミット不要
 public/api/build.json
 # ローカルの Claude Code 等の状態(誤コミット防止)
-.claude/
+# ただし settings.json は tier-1 PreToolUse hook 定義 = repo で共有 mandatory
+# (docs/CONSTITUTION.md PRIME DIRECTIVE + memory/project_broadcast_enforcement_gate_plan.md)
+.claude/*
+!.claude/settings.json
 .local/
