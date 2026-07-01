@@ -1,4 +1,22 @@
 #!/bin/bash
+# --- LEGACY GUARD (added 2026-07-01) ---
+# This test targets the pre-2026-07-01 anchor design (single-action
+# eosio.token::transfer with memo "fyid1:<hash>"). The 2026-07-01
+# revision replaced that with the HC-single 4-action pack (memo
+# prefix fya<S>c<N>-*). See docs/ANCHOR_SOURCE.md + memory/
+# project_merkle_dag_identity_anchor_design_20260701.md.
+#
+# The v2 pipeline has its own tests (tests/sign-anchor-event/,
+# tests/gen-anchor-receipt/, tests/append-anchor-history/,
+# tests/broadcast-guard/, tests/safe-broadcast/). Legacy tests
+# here are retained for git-history traceability but skipped by
+# default so run-all-tests.sh stays green under the new pipeline.
+#
+# To opt in and exercise the deprecated flow:  RUN_LEGACY_TESTS=1
+if [ "${RUN_LEGACY_TESTS:-0}" != "1" ]; then
+	echo "SKIP: legacy test — pre-2026-07-01 anchor design; set RUN_LEGACY_TESTS=1 to run"
+	exit 0
+fi
 # Regression suite for post-anchor-event.sh trigger_reference handling
 # (= M-1 follow-up: confirm cycle_n is NOT derived from
 # branches.cycles.leaf_count, and is set ONLY from canonical
