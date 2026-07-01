@@ -1,0 +1,115 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://metal.freedom-yield.com/api/anchor-receipt.schema.v2.json",
+	"title": "Freedom Yield Metal — A-chain Anchor Receipt v2 (HC-single 4-action pack)",
+	"description": "Formal contract for /api/anchor-receipt.json under the 2026-07-01 anchor design revision (see docs/ANCHOR_SOURCE.md + memory/project_merkle_dag_identity_anchor_design_20260701). v2 shifts the on-chain shape from a single eosio.token::transfer (memo 'fyid1:<dag_root>') to a 4-action pack in ONE transaction: three memos carrying per-branch canonical hashes (identity / observations / artifacts) plus a fourth memo carrying the composed dag_root as a summary. Memo prefix scheme: fya<S>c<N>-<branch>:<hex> and fya<S>c<N>:<hex>, pivoted from fyid1v1c* after the 2026-07-01 mainnet accident tx 997881e844befaf9c159c741988fe99e8ca566a52e539639ab83517b1f36100a permanently occupied the old namespace. The v1 schema (/api/anchor-receipt.schema.v1.json) remains reachable for at least 18 months from v2 publication for consumers of the pre-2026-07-01 receipts; v2 is the forward format. Companion generator: scripts/sign-anchor-event.sh + scripts/gen-anchor-receipt.sh.",
+	"x-issued-at": "2026-07-01T00:00:00Z",
+	"x-stability": "additive-only-within-v2",
+	"x-supersedes": "https://metal.freedom-yield.com/api/anchor-receipt.schema.v1.json",
+	"x-format-guide": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/ANCHOR_SOURCE.md",
+	"type": "object",
+	"required": [
+		"schema_version",
+		"schema_version_of_source",
+		"cycle_number",
+		"dag_root_hash",
+		"memo_prefix",
+		"anchor",
+		"anchor_source_url",
+		"generated_at"
+	],
+	"additionalProperties": true,
+	"properties": {
+		"_comment": {"type": "string"},
+		"$schema": {"type": "string", "format": "uri"},
+		"schema_version": {
+			"type": "integer", "const": 2,
+			"description": "Receipt schema major. v2 covers HC-single 4-action pack receipts."
+		},
+		"schema_version_of_source": {
+			"type": "integer", "minimum": 1,
+			"description": "schema_version of the anchor-source.json that produced this receipt."
+		},
+		"cycle_number": {
+			"type": "integer", "minimum": 1,
+			"description": "Freedom Yield internal cycle counter."
+		},
+		"dag_root_hash": {
+			"type": "string", "pattern": "^[a-f0-9]{64}$",
+			"description": "The 64-hex SHA-256 dag_root_computed being anchored."
+		},
+		"memo_prefix": {
+			"type": "string", "pattern": "^fya[0-9]+c[0-9]+$",
+			"description": "Format: fya<schema>c<cycle>. Example: 'fya1c3'."
+		},
+		"anchor": {
+			"type": "object",
+			"required": ["chain", "network", "method", "tx_id", "block_num", "block_time", "explorer_url", "actions", "authorization", "sink", "quantity"],
+			"additionalProperties": true,
+			"properties": {
+				"chain": {"type": "string", "const": "metal-a-chain"},
+				"chain_backend": {"type": "string"},
+				"network": {
+					"type": "string",
+					"enum": ["xpr-mainnet", "xpr-testnet", "mainnet-a", "testnet-a"]
+				},
+				"method": {
+					"type": "string", "const": "hc_single_4_action_pack"
+				},
+				"tx_id": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+				"block_num": {"type": "integer", "minimum": 1},
+				"block_time": {"type": "string", "format": "date-time"},
+				"explorer_url": {"type": "string", "format": "uri"},
+				"actions": {
+					"type": "array", "minItems": 4, "maxItems": 4,
+					"description": "Order (normative for verification): identity, observations, artifacts, dag_root_summary. dag_root_summary.root_hex MUST equal sha256(identity.root_hex || observations.root_hex || artifacts.root_hex).",
+					"items": {
+						"type": "object",
+						"required": ["branch", "memo", "root_hex"],
+						"additionalProperties": false,
+						"properties": {
+							"branch": {
+								"type": "string",
+								"enum": ["identity", "observations", "artifacts", "dag_root_summary"]
+							},
+							"memo": {"type": "string"},
+							"root_hex": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+						}
+					}
+				},
+				"authorization": {
+					"type": "object",
+					"required": ["actor", "permission"],
+					"additionalProperties": false,
+					"properties": {
+						"actor": {"type": "string", "pattern": "^[a-z1-5.]{1,12}$"},
+						"permission": {"type": "string", "pattern": "^[a-z1-5.]{1,12}$"}
+					}
+				},
+				"sink": {"type": "string", "pattern": "^[a-z1-5.]{1,12}$"},
+				"quantity": {"type": "string"}
+			}
+		},
+		"anchor_source_url": {"type": "string", "format": "uri"},
+		"anchor_source_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+		"prev_anchor_tx_id": {
+			"oneOf": [
+				{"type": "null"},
+				{"type": "string", "pattern": "^[a-f0-9]{64}$"}
+			]
+		},
+		"trigger_event": {
+			"type": "string",
+			"enum": ["cyclestart", "cycleend", "idrotate", "heartbeat", "manual"]
+		},
+		"signing_actor": {"type": "string", "pattern": "^[a-z1-5.]{1,12}$"},
+		"signing_permission": {"type": "string", "pattern": "^[a-z1-5.]{1,12}$"},
+		"verification_status": {
+			"type": "string",
+			"enum": ["scheduled", "live", "failed"]
+		},
+		"verified_at": {"type": "string", "format": "date-time"},
+		"generated_at": {"type": "string", "format": "date-time"},
+		"generated_by_script_version": {"type": "string"}
+	}
+}

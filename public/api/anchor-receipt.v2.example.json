@@ -1,0 +1,38 @@
+{
+	"_comment": "Synthetic schema example for /api/anchor-receipt.schema.v2.json (HC-single 4-action pack). All hex strings, tx_ids, block numbers, and timestamps are synthetic placeholders demonstrating field shape only; no real on-chain transaction is represented. The operator account 'metalfreedom' and sink 'fyhistory' are the production Metal A-chain mainnet names; time-varying fields are synthetic. Production runtime receipt is published at /api/anchor-receipt.json by scripts/gen-anchor-receipt.sh after the verification chain PASSes. See docs/ANCHOR_SOURCE.md.",
+	"$schema": "https://metal.freedom-yield.com/api/anchor-receipt.schema.v2.json",
+	"schema_version": 2,
+	"schema_version_of_source": 1,
+	"cycle_number": 3,
+	"dag_root_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	"memo_prefix": "fya1c3",
+	"anchor": {
+		"chain": "metal-a-chain",
+		"chain_backend": "pulsevm",
+		"network": "mainnet-a",
+		"method": "hc_single_4_action_pack",
+		"tx_id": "1111111111111111111111111111111111111111111111111111111111111111",
+		"block_num": 100000001,
+		"block_time": "2026-07-04T04:00:30Z",
+		"explorer_url": "https://explorer.xprnetwork.org/transaction/1111111111111111111111111111111111111111111111111111111111111111",
+		"actions": [
+			{"branch": "identity",         "memo": "fya1c3-id:1111111111111111111111111111111111111111111111111111111111111111", "root_hex": "1111111111111111111111111111111111111111111111111111111111111111"},
+			{"branch": "observations",     "memo": "fya1c3-ob:2222222222222222222222222222222222222222222222222222222222222222", "root_hex": "2222222222222222222222222222222222222222222222222222222222222222"},
+			{"branch": "artifacts",        "memo": "fya1c3-ar:3333333333333333333333333333333333333333333333333333333333333333", "root_hex": "3333333333333333333333333333333333333333333333333333333333333333"},
+			{"branch": "dag_root_summary", "memo": "fya1c3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "root_hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+		],
+		"authorization": {"actor": "metalfreedom", "permission": "anchor"},
+		"sink": "fyhistory",
+		"quantity": "0.0001 XPR"
+	},
+	"anchor_source_url": "https://metal.freedom-yield.com/api/anchor-source.json",
+	"anchor_source_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+	"prev_anchor_tx_id": null,
+	"trigger_event": "cyclestart",
+	"signing_actor": "metalfreedom",
+	"signing_permission": "anchor",
+	"verification_status": "live",
+	"verified_at": "2026-07-04T04:01:00Z",
+	"generated_at": "2026-07-04T04:01:00Z",
+	"generated_by_script_version": "gen-anchor-receipt.sh v2.0"
+}

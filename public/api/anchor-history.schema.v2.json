@@ -1,0 +1,91 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://metal.freedom-yield.com/api/anchor-history.schema.v2.json",
+	"title": "Freedom Yield Metal — A-chain Anchor History v2 (HC-single 4-action pack)",
+	"description": "Formal contract for /api/anchor-history.jsonl under the 2026-07-01 anchor design revision. Each LINE is one JSON object matching this schema. Append-only ledger of every anchor that reached verification_status == 'live'. v2 tracks HC-single 4-action pack receipts (memo prefix fya<S>c<N>-*), replacing v1's single-action fyid1:<hash> shape. v1 history file (if any) remains reachable for 18+ months. Companion generator: scripts/append-anchor-history.sh.",
+	"x-issued-at": "2026-07-01T00:00:00Z",
+	"x-stability": "additive-only-within-v2",
+	"x-supersedes": "https://metal.freedom-yield.com/api/anchor-history.schema.v1.json",
+	"x-line-encoding": "JSONL — UTF-8, one JSON object per line, lines terminated by LF (0x0A) including the final line, no trailing blank lines. Schema describes the per-line object shape; consumers MUST validate each line independently.",
+	"x-append-only-invariants": [
+		"tx_id is unique across all lines",
+		"(cycle_number, event_type) pair is unique for cyclestart/cycleend event_type",
+		"(key_seq, 'idrotate') pair is unique for idrotate event_type",
+		"cycle_number strictly non-decreasing across lines that carry it",
+		"block_num strictly non-decreasing across lines",
+		"prev_anchor_tx_id of line N equals tx_id of line N-1 (hash chain by tx reference; null only for genesis line)",
+		"existing lines are byte-for-byte immutable; only legal write is appending a new line",
+		"file terminates with LF on the final line"
+	],
+	"x-format-guide": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/ANCHOR_SOURCE.md",
+	"type": "object",
+	"required": [
+		"schema_version",
+		"event_type",
+		"dag_root_hash",
+		"memo_prefix",
+		"network",
+		"chain",
+		"method",
+		"tx_id",
+		"block_num",
+		"block_time",
+		"explorer_url",
+		"signing_actor",
+		"signing_permission",
+		"verification_status",
+		"prev_anchor_tx_id"
+	],
+	"additionalProperties": true,
+	"allOf": [
+		{
+			"if": {"properties": {"event_type": {"enum": ["cyclestart", "cycleend"]}}, "required": ["event_type"]},
+			"then": {"required": ["cycle_number"]}
+		},
+		{
+			"if": {"properties": {"event_type": {"const": "idrotate"}}, "required": ["event_type"]},
+			"then": {"required": ["key_seq"]}
+		}
+	],
+	"properties": {
+		"_comment": {"type": "string"},
+		"schema_version": {"type": "integer", "const": 2},
+		"event_type": {
+			"type": "string",
+			"enum": ["cyclestart", "cycleend", "idrotate", "heartbeat"]
+		},
+		"cycle_number": {
+			"type": "integer", "minimum": 1,
+			"description": "Present for cyclestart/cycleend. Absent for idrotate."
+		},
+		"key_seq": {
+			"type": "integer", "minimum": 1,
+			"description": "Present for idrotate. The identity key generation counter."
+		},
+		"dag_root_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+		"memo_prefix": {"type": "string", "pattern": "^fya[0-9]+c[0-9]+$"},
+		"network": {
+			"type": "string",
+			"enum": ["xpr-mainnet", "xpr-testnet", "mainnet-a", "testnet-a"]
+		},
+		"chain": {"type": "string", "const": "metal-a-chain"},
+		"chain_backend": {"type": "string"},
+		"method": {"type": "string", "const": "hc_single_4_action_pack"},
+		"tx_id": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+		"block_num": {"type": "integer", "minimum": 1},
+		"block_time": {"type": "string", "format": "date-time"},
+		"explorer_url": {"type": "string", "format": "uri"},
+		"signing_actor": {"type": "string", "pattern": "^[a-z1-5.]{1,12}$"},
+		"signing_permission": {"type": "string", "pattern": "^[a-z1-5.]{1,12}$"},
+		"verification_status": {"type": "string", "const": "live"},
+		"verified_at": {"type": "string", "format": "date-time"},
+		"prev_anchor_tx_id": {
+			"oneOf": [
+				{"type": "null"},
+				{"type": "string", "pattern": "^[a-f0-9]{64}$"}
+			],
+			"description": "tx_id of the previous line. Null for the genesis line. Enables hash-chain-by-tx traversal."
+		},
+		"generated_by_script_version": {"type": "string"}
+	}
+}
