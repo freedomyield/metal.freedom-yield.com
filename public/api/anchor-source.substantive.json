@@ -1,12 +1,11 @@
 {
   "$schema": "https://metal.freedom-yield.com/api/anchor-source.schema.v1.json",
-  "_comment": "cycle 2 predates event-capture feed activation (feed started 2026-07-01T06:02:00Z per T-B2 commit 9911171; deployment to Hetzner still pending as of this anchor). delegator_lifecycle_events_in_cycle_observed is [] because no lifecycle events occurred within the observation window (window ⊂ cycle end). First cycle with complete event trail = cycle 3 (start 2026-07-04).",
   "schema_version": 1,
-  "computed_at": "2026-07-01T08:22:35Z",
-  "computed_by_script": "manual-substantive-2026-07-01",
-  "computed_from_git_commit": "b0372383b5e4d96e882cc6b1d7f222bd43654ead",
+  "computed_at": "2026-07-01T10:35:19Z",
+  "computed_by_script": "gen-anchor-source.sh v1.0",
+  "computed_from_git_commit": "907835ef838ba72ae7f0f47911c2d9f13aebc787",
   "identity_branch": {
-    "operator_ed25519_pubkey_sha256_hex": "6ce2fc7d34318dfc7fcfcbfd1e29cca0f4d90d9a55226fb9a8a1e3a5a0ca5916",
+    "operator_ed25519_pubkey_sha256_hex": "fbe80f02216fe82d06e5ef5cf20e75f14df7e85c42dd068c00436c9e7d863ffe",
     "operator_asserts_node_id": "NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v",
     "prev_anchor_root": null,
     "prev_anchor_tx": null,
@@ -19,7 +18,7 @@
     "cycle_end_time_observed": "2026-07-04T04:00:27Z",
     "self_stake_observed_metal": 5900,
     "self_stake_observed_nmetal": "5900000000000",
-    "fee_percent_observed_at_cycle_start": 3.0,
+    "fee_percent_observed_at_cycle_start": 3,
     "delegator_lifecycle_observation_window_started_at": "2026-07-01T06:02:00Z",
     "delegator_lifecycle_events_in_cycle_observed": [],
     "delegator_snapshot_at_cycle_end": [
@@ -37,7 +36,7 @@
     "subnet_targets_declared_by_operator": []
   },
   "artifacts_branch": {
-    "public_api_manifest_root": "f2e2c6ba67d5456f1126c24eec2325a0fc8570a79a5a4d42d7f37f577076e5f8",
+    "public_api_manifest_root": "5b1cc7f7f2a1369443e2bffe7b6fe66a739811e59e8f255d2ca51678ca6ce970",
     "public_api_files_hashed": [
       {
         "path": "cycles-history.json",
@@ -57,7 +56,7 @@
       },
       {
         "path": "peer-geo.json",
-        "sha256": "0a71e79f4904b5fb6668b3e6ca0f8c8cdf7a72d8c0a45649fdf614e97a5b8bc9"
+        "sha256": "17ed43bb8f342114d7a357b15ada82a5825ede22a205a88cb11812d70be0c826"
       },
       {
         "path": "peers.json",
@@ -73,11 +72,11 @@
       },
       {
         "path": "validator.json",
-        "sha256": "1ef51559a51af0cbc00894548b47394e7a1b6bb1178f1d20b8e0549021980dc4"
+        "sha256": "735fc9a30eb17fbd2b6823b274991a7069abd7e329aa6e48c5b83e3c8959a674"
       }
     ],
-    "period_uptime_observed_pct": 99.9138,
+    "period_uptime_observed_pct": 99.9129,
     "period_incident_count_observed": 0
   },
-  "dag_root_computed": "03e11c41433b7be9fdcb168cf637bb2c4cbd1af3b1f79df9a43f53f1efef5efe"
+  "dag_root_computed": "ad7405814683fca7dc001f11ed9c031871f7e944235694ae1a11bd17fc653369"
 }
