@@ -41,7 +41,11 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SCRIPT_VERSION="2.0"
 
 RECEIPT=""
-HISTORY="${REPO_ROOT}/public/api/anchor-history.jsonl"
+# History file target. Env override (FYD_HISTORY_FILE) takes precedence
+# over the default repo path so tests and rehearsals can point at a tmp
+# file without polluting production data. --history=<path> arg overrides
+# both.
+HISTORY="${FYD_HISTORY_FILE:-${REPO_ROOT}/public/api/anchor-history.jsonl}"
 EVENT_TYPE=""
 KEY_SEQ=""
 

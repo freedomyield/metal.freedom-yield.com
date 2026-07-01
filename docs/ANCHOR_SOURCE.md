@@ -61,14 +61,24 @@ Standard SHA-256 binary tree. Leaves = raw file bytes hashed with SHA-256. Leaf 
 ## Dag root composition
 
 ```
-identity_root      = sha256(JSON canonical form of identity_branch)      # hex
-observations_root  = sha256(JSON canonical form of observations_branch)  # hex
-artifacts_root     = sha256(JSON canonical form of artifacts_branch)     # hex
+identity_root      = sha256(JSON canonical form of identity_branch)      # 64-char hex
+observations_root  = sha256(JSON canonical form of observations_branch)  # 64-char hex
+artifacts_root     = sha256(JSON canonical form of artifacts_branch)     # 64-char hex
 
 dag_root_computed  = sha256(identity_root ‖ observations_root ‖ artifacts_root)
 ```
 
-The generator uses `jq -cS` (compact + sorted keys) for the JSON canonical form. Verifiers can use any RFC 8785 or `jq -cS`-equivalent canonicalizer.
+**Concatenation semantics — normative:** the three per-branch roots are concatenated **as ASCII hex strings** (not as raw 32-byte binary values). That is, `sha256(id_root_hex_string || ob_root_hex_string || ar_root_hex_string)`, where `||` is byte concatenation of the 3×64 = **192 ASCII characters**. Verifiers who use `xxd -r -p` to convert each branch root to 32 raw bytes and then hash 96 raw bytes will get a **different** result — that is not the design.
+
+Reference implementation (bash):
+```sh
+ID=$(jq -cS .identity_branch     "$file" | sha256sum | awk '{print $1}')  # 64 hex chars
+OB=$(jq -cS .observations_branch "$file" | sha256sum | awk '{print $1}')
+AR=$(jq -cS .artifacts_branch    "$file" | sha256sum | awk '{print $1}')
+printf '%s%s%s' "$ID" "$OB" "$AR" | sha256sum | awk '{print $1}'         # dag_root_computed
+```
+
+The generator uses `jq -cS` (compact + sorted keys) for the JSON canonical form. Verifiers can use any RFC 8785 or `jq -cS`-equivalent canonicalizer that emits the same key ordering. The hex-string concat semantics is verified end-to-end against real testnet chain data on 2026-07-01 (memo 4 hex of tx `7b352b4a0b7c6202d14da51637c2a43791c1438d85ef43d7b7b45f17559839ea` matches the recomputed dag_root byte-for-byte).
 
 ## A-chain broadcast: HC-single 4-action pack
 
