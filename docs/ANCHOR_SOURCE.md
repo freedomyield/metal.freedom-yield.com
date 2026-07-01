@@ -74,10 +74,10 @@ One P-chain-side EOSIO transaction. Four `eosio.token::transfer` actions from `f
 
 ```
 tx (single Antelope transaction):
-  action 1: memo = "fyid1v1c<cycle>-id:<identity_root_hex>"
-  action 2: memo = "fyid1v1c<cycle>-ob:<observations_root_hex>"
-  action 3: memo = "fyid1v1c<cycle>-ar:<artifacts_root_hex>"
-  action 4: memo = "fyid1v1c<cycle>:<dag_root_computed_hex>"
+  action 1: memo = "fya1c<cycle>-id:<identity_root_hex>"
+  action 2: memo = "fya1c<cycle>-ob:<observations_root_hex>"
+  action 3: memo = "fya1c<cycle>-ar:<artifacts_root_hex>"
+  action 4: memo = "fya1c<cycle>:<dag_root_computed_hex>"
 ```
 
 `fyid` = Freedom Yield identity; `1` = anchor schema major; `v1` = schema version; `c<cycle>` = cycle number; suffix (`-id`, `-ob`, `-ar`, or absent = summary) picks the branch.
@@ -89,10 +89,10 @@ Hyperion queries:
 GET /v2/history/get_actions?account=freedomyield
 
 # all anchors filtered to schema v1
-GET /v2/history/get_actions?account=eosio.token&filter=eosio.token:transfer&data.memo=fyid1v1c*
+GET /v2/history/get_actions?account=eosio.token&filter=eosio.token:transfer&data.memo=fya1c*
 
 # cycle 3 anchor, all 4 actions
-GET /v2/history/get_actions?account=eosio.token&filter=eosio.token:transfer&data.memo=fyid1v1c3-*
+GET /v2/history/get_actions?account=eosio.token&filter=eosio.token:transfer&data.memo=fya1c3-*
 ```
 
 ## Reproducer commands (= third-party verification)
