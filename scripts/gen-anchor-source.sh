@@ -34,6 +34,13 @@ STATE_DIR="${ANOMALY_STATE_DIR:-/var/lib/freedom-yield}"
 # Local file fallback exists for offline dev + fully-air-gapped rehearsal.
 API_BASE_URL="${API_BASE_URL:-https://metal.freedom-yield.com/api}"
 
+# Operator identity pubkey URL. Semantic C (schema §identity_branch.operator_ed25519_pubkey_sha256_hex):
+# fetch the OpenSSH-format pubkey file, extract the base64 body (2nd whitespace-
+# separated token), base64-decode to the 51-byte RFC 4716 wire record, extract
+# the trailing 32 bytes (= raw ed25519 pubkey), and SHA-256 that. Evaluators
+# reproduce with `curl <URL> | awk '{print $2}' | base64 -d | tail -c 32 | sha256sum`.
+PUBKEY_URL="${PUBKEY_URL:-https://metal.freedom-yield.com/.well-known/operator-identity.pub}"
+
 VALIDATOR_JSON="${VALIDATOR_JSON:-${ROOT}/public/api/validator.json}"
 IDENTITY_JSON="${IDENTITY_JSON:-${ROOT}/public/api/identity.json}"
 IDENTITY_HISTORY_JSONL="${IDENTITY_HISTORY_JSONL:-${ROOT}/public/api/identity-history.jsonl}"
@@ -152,19 +159,54 @@ GIT_COMMIT="$(cd "$ROOT" && git rev-parse HEAD 2>/dev/null || echo "000000000000
 # ---- identity_branch -------------------------------------------------
 PLACEHOLDER_HASH="0000000000000000000000000000000000000000000000000000000000000000"
 
+# operator_ed25519_pubkey_sha256_hex (semantic C):
+# authoritative source is the public pubkey URL. The evaluator can
+# reproduce this from HTTPS-fetched pubkey. Local identity.json is NOT
+# authoritative for this field — it may cache a stale value or omit the
+# canonical form entirely. Fail-closed when URL unreachable (exit 4)
+# rather than silently emitting a placeholder that would poison the anchor.
+TMP_PUBKEY="$(mktemp -t fya-pubkey.XXXXXX)"
+trap 'rm -f "$TMP_PUBKEY"' EXIT
+if ! curl -sSf --max-time 15 "$PUBKEY_URL" -o "$TMP_PUBKEY" 2>/dev/null; then
+	echo "ERROR: cannot fetch operator pubkey from $PUBKEY_URL (semantic C requires reachable URL)" >&2
+	rm -f "$TMP_PUBKEY"
+	exit 4
+fi
+OPERATOR_PUBKEY_HEX="$(awk '{print $2}' "$TMP_PUBKEY" | base64 -d 2>/dev/null | tail -c 32 | "${SHA256_CMD[@]}" | awk '{print $1}')"
+if ! printf '%s' "$OPERATOR_PUBKEY_HEX" | grep -qE '^[0-9a-f]{64}$'; then
+	echo "ERROR: semantic C hash extraction from $PUBKEY_URL failed (got: '$OPERATOR_PUBKEY_HEX')" >&2
+	rm -f "$TMP_PUBKEY"
+	exit 5
+fi
+rm -f "$TMP_PUBKEY"
+
+# key_seq: default 1 unless identity.json exports it explicitly. In practice
+# key rotation would increment this via the identity manifest regeneration
+# workflow (out of scope for gen-anchor-source). Absent identity.json = 1.
 if [ -r "$IDENTITY_JSON" ]; then
-	OPERATOR_PUBKEY_HEX="$(jq -r --arg d "$PLACEHOLDER_HASH" '.operator_ed25519_pubkey_sha256_hex // $d' "$IDENTITY_JSON")"
 	KEY_SEQ="$(jq -r '.key_seq // 1' "$IDENTITY_JSON")"
 else
-	OPERATOR_PUBKEY_HEX="$PLACEHOLDER_HASH"
 	KEY_SEQ=1
 fi
 
-if [ -r "$IDENTITY_HISTORY_JSONL" ] && [ -s "$IDENTITY_HISTORY_JSONL" ]; then
+# identity_history_root: sha256 of the authoritative identity-history.jsonl
+# file. Same source-of-truth pattern as identity_branch pubkey — fetch the
+# public URL, fail-closed on unreachable. Local file is checked only as an
+# offline-dev fallback.
+IDENTITY_HISTORY_URL="${API_BASE_URL}/identity-history.jsonl"
+TMP_HIST="$(mktemp -t fya-idhist.XXXXXX)"
+trap 'rm -f "$TMP_PUBKEY" "$TMP_HIST"' EXIT
+if curl -sSf --max-time 15 "$IDENTITY_HISTORY_URL" -o "$TMP_HIST" 2>/dev/null && [ -s "$TMP_HIST" ]; then
+	IDENTITY_HISTORY_ROOT="$(sha256_file "$TMP_HIST")"
+elif [ -r "$IDENTITY_HISTORY_JSONL" ] && [ -s "$IDENTITY_HISTORY_JSONL" ]; then
 	IDENTITY_HISTORY_ROOT="$(sha256_file "$IDENTITY_HISTORY_JSONL")"
+	echo "WARN: identity-history.jsonl fetched from local repo (public URL unreachable): $IDENTITY_HISTORY_URL" >&2
 else
-	IDENTITY_HISTORY_ROOT="$PLACEHOLDER_HASH"
+	echo "ERROR: cannot fetch identity-history.jsonl from $IDENTITY_HISTORY_URL and no local fallback" >&2
+	rm -f "$TMP_PUBKEY" "$TMP_HIST"
+	exit 3
 fi
+rm -f "$TMP_HIST"
 
 # prev_anchor_root + prev_anchor_tx: read last row of anchor-history.jsonl
 PREV_ROOT_JQ="null"
