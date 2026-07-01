@@ -9,11 +9,16 @@ useDefault = true
 
 [allowlist]
 description = "Project-level allowlist"
-# Path-based: scripts/dr-drill.sh embeds SHA-256 integrity fingerprints of
-# staker key files (see header comment in dr-drill.sh). The hashes are
-# irreversible, public-safe, and exist to detect backup tampering. The
-# script contains no real secrets — gitleaks high-entropy heuristics fire
-# on the hex strings.
+# Path-based:
+#   - scripts/dr-drill.sh embeds SHA-256 integrity fingerprints of staker key
+#     files. The hashes are irreversible, public-safe, and exist to detect
+#     backup tampering.
+#   - public/api/anchor-source.*.json embed 64-char sha256 hex Merkle roots
+#     (identity/observations/artifacts branches + dag_root). These are hashes
+#     of the on-chain anchor payload, not secrets. Gitleaks high-entropy
+#     heuristics fire on the hex strings (see anchor-source.substantive.json
+#     manifest_root, false-positive on generic-api-key rule).
 paths = [
   '''scripts/dr-drill\.sh''',
+  '''public/api/anchor-source\.[^/]+\.json''',
 ]

@@ -52,7 +52,32 @@ set -u
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 REHEARSAL_CFG="${HOME}/freedom-yield-rehearsal-config"
-ANCHOR_SOURCE="${REPO_ROOT}/public/api/anchor-source.example.json"
+
+# Source pick order (highest to lowest):
+#   1. --source=<path> arg
+#   2. ANCHOR_SOURCE_OVERRIDE env
+#   3. public/api/anchor-source.substantive.json  ← real hashes (default)
+#   4. public/api/anchor-source.example.json      ← placeholder fallback
+# The substantive file exists once gen-anchor-source.sh has run (on Hetzner)
+# or when it's been composed manually with real identity + artifact hashes.
+# Rehearsing with the example file inscribes 0000... placeholders on-chain,
+# which is what happened in the 2026-07-01 pre-substantive rehearsal.
+ANCHOR_SOURCE_ARG=""
+for arg in "$@"; do
+	case "$arg" in
+		--source=*) ANCHOR_SOURCE_ARG="${arg#--source=}" ;;
+	esac
+done
+if [ -n "$ANCHOR_SOURCE_ARG" ]; then
+	ANCHOR_SOURCE="$ANCHOR_SOURCE_ARG"
+elif [ -n "${ANCHOR_SOURCE_OVERRIDE:-}" ]; then
+	ANCHOR_SOURCE="$ANCHOR_SOURCE_OVERRIDE"
+elif [ -r "${REPO_ROOT}/public/api/anchor-source.substantive.json" ]; then
+	ANCHOR_SOURCE="${REPO_ROOT}/public/api/anchor-source.substantive.json"
+else
+	ANCHOR_SOURCE="${REPO_ROOT}/public/api/anchor-source.example.json"
+fi
+
 TESTNET_RPC="${XPR_TESTNET_RPC:-https://test.proton.eosusa.io}"
 DRY_RUN_LOG="${HOME}/.fya-testnet-dryrun-log.json"
 TOKEN_FILE="/tmp/fyd-broadcast-token"
@@ -98,6 +123,27 @@ if ! timeout 5 proton account frdomyieltst >/dev/null 2>&1; then
 	exit 2
 fi
 echo "  keystore appears unlocked (frdomyieltst account read succeeded)"
+
+# ---- source visibility (audit trail: which file's hashes go on-chain) ----
+step "3.5/9 anchor-source file audit"
+echo "  path:              $ANCHOR_SOURCE"
+if [ ! -r "$ANCHOR_SOURCE" ]; then
+	fail "anchor-source file not readable: $ANCHOR_SOURCE"
+fi
+SRC_BASENAME="$(basename "$ANCHOR_SOURCE")"
+echo "  basename:          $SRC_BASENAME"
+SRC_ID_HEX="$(jq -r '.identity_branch.operator_ed25519_pubkey_sha256_hex' "$ANCHOR_SOURCE")"
+SRC_MFST="$(jq -r '.artifacts_branch.public_api_manifest_root' "$ANCHOR_SOURCE")"
+SRC_DAG="$(jq -r '.dag_root_computed' "$ANCHOR_SOURCE")"
+echo "  identity pubkey:   $SRC_ID_HEX"
+echo "  manifest root:     $SRC_MFST"
+echo "  dag_root_computed: $SRC_DAG"
+if [ "$SRC_ID_HEX" = "0000000000000000000000000000000000000000000000000000000000000000" ] \
+   || [ "$SRC_MFST" = "0000000000000000000000000000000000000000000000000000000000000000" ]; then
+	printf '\n  WARNING: anchor-source has placeholder hashes (0000...).\n'
+	printf '           This will inscribe placeholders on-chain.\n'
+	printf '           If this is not intentional, re-run with --source=<real-source.json>.\n\n'
+fi
 
 # ---- step 4: compose 4-action tx via sign-anchor-event.sh --dry-run ----
 step "4/9 compose 4-action testnet tx"
@@ -200,6 +246,12 @@ Details for the record:
   actor:               $(jq -r .authorization.actor "$DRY_RUN_LOG")
   sink:                $(jq -r .sink "$DRY_RUN_LOG")
   memo prefix:         $(jq -r .memo_prefix "$DRY_RUN_LOG")
+  anchor-source:       $ANCHOR_SOURCE
+  4 memos inscribed:
+    [1/id]  $(jq -r .composed_memos.identity        "$DRY_RUN_LOG")
+    [2/ob]  $(jq -r .composed_memos.observations    "$DRY_RUN_LOG")
+    [3/ar]  $(jq -r .composed_memos.artifacts       "$DRY_RUN_LOG")
+    [4/dag] $(jq -r .composed_memos.dag_root_summary "$DRY_RUN_LOG")
   dry-run log:         $DRY_RUN_LOG
   receipt:             $RECEIPT_OUT
   explorer URL:        https://testnet.protonscan.io/transaction/${TX_ID}
