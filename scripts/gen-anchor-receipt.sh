@@ -145,17 +145,46 @@ else
 fi
 
 # ---- gate 1: fetch tx by tx_id ----
-TX_JSON="$(curl -sSf --max-time 15 \
-	-X POST -H 'content-type:application/json' \
-	-d "{\"id\":\"${TX_ID}\"}" \
-	"${RPC}/v1/history/get_transaction" 2>/dev/null || echo '{}')"
+# Prefer Hyperion v2 (`/v2/history/get_actions?account=<actor>` + jq filter
+# by trx_id — the account-scoped query is the reliably-indexed path on
+# proton.eosusa.io / test.proton.eosusa.io). Fall back to EOSIO history
+# plugin v1 (`/v1/history/get_transaction`) for endpoints that don't run
+# Hyperion. Both paths produce the same normalized shape via jq below.
+TX_JSON_RAW=""
+TX_JSON=""
 
-if ! echo "$TX_JSON" | jq -e '.id == "'"${TX_ID}"'"' >/dev/null 2>&1; then
-	echo "ERROR (3): gate 1 — tx_id $TX_ID not resolvable at $RPC" >&2
+# --- try Hyperion v2 first ---
+HYPERION_JSON="$(curl -sSf --max-time 15 \
+	"${RPC}/v2/history/get_actions?account=${ACTOR}&limit=50&sort=desc" 2>/dev/null || echo '{}')"
+if echo "$HYPERION_JSON" | jq -e --arg tx "$TX_ID" '[.actions[]? | select(.trx_id == $tx)] | length > 0' >/dev/null 2>&1; then
+	# Normalize Hyperion shape → v1-shape actions[]
+	TX_JSON="$(echo "$HYPERION_JSON" | jq --arg tx "$TX_ID" '
+		{
+			id: $tx,
+			block_num: ([.actions[] | select(.trx_id == $tx)] | first | .block_num),
+			block_time: ([.actions[] | select(.trx_id == $tx)] | first | .timestamp),
+			actions: [.actions[] | select(.trx_id == $tx) | {act: {account: .act.account, name: .act.name, authorization: .act.authorization, data: {memo: .act.data.memo}}}]
+		}')"
+	FETCHED_ACTIONS_LEN="$(echo "$TX_JSON" | jq '.actions | length')"
+fi
+
+# --- fall back to v1 EOSIO history plugin ---
+if [ -z "$TX_JSON" ] || [ "${FETCHED_ACTIONS_LEN:-0}" -eq 0 ]; then
+	V1_JSON="$(curl -sSf --max-time 15 \
+		-X POST -H 'content-type:application/json' \
+		-d "{\"id\":\"${TX_ID}\"}" \
+		"${RPC}/v1/history/get_transaction" 2>/dev/null || echo '{}')"
+	if echo "$V1_JSON" | jq -e '.id == "'"${TX_ID}"'" and (.actions | length > 0)' >/dev/null 2>&1; then
+		TX_JSON="$V1_JSON"
+		FETCHED_ACTIONS_LEN="$(echo "$TX_JSON" | jq '.actions | length')"
+	fi
+fi
+
+if [ -z "$TX_JSON" ] || ! echo "$TX_JSON" | jq -e '.actions | length > 0' >/dev/null 2>&1; then
+	echo "ERROR (3): gate 1 — tx_id $TX_ID not resolvable at $RPC (tried Hyperion v2 + v1)" >&2
 	exit 3
 fi
 
-FETCHED_ACTIONS_LEN="$(echo "$TX_JSON" | jq '.actions | length')"
 if [ "$FETCHED_ACTIONS_LEN" -ne 4 ]; then
 	echo "ERROR (4): gate 2 — expected 4 actions, got: $FETCHED_ACTIONS_LEN" >&2
 	exit 4
