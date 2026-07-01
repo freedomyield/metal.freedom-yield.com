@@ -179,7 +179,7 @@ Observed values:
 | file size | `2782` bytes |
 | output sha256 | `1ee7b55ef72856e4ae032ca7cedb1d4546bfacf6d61b9778134532bcf0425c42` |
 | `computed_at` | `2026-07-01T03:57:35Z` |
-| `computed_from_git_commit` | `b10fac6975c79f66430871860183ae749a891657` (Hetzner-local HEAD; see note below on divergence) |
+| `computed_from_git_commit` | `b10fac6975c79f66430871860183ae749a891657` ~~(Hetzner git head; local main was at `a1476a2`, sync gap unrelated to T-B)~~ **REVISION 2026-07-01T04:07Z**: prior parenthetical "sync gap = behind" mis-interpreted the state; the SHA itself is the correct real capture, but Hetzner is diverged (not behind) — see Note below for the accurate description. |
 | `identity_branch.operator_asserts_node_id` | `NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v` |
 | `identity_branch.prev_anchor_root` | `null` (= genesis; no prior anchor broadcast yet) |
 | `observations_branch.cycle_number_observed` | `2` |
