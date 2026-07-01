@@ -272,29 +272,83 @@ if [ -r "$SUBNET_TARGETS_FILE" ]; then
 		| jq -R . | jq -sc . 2>/dev/null || echo '[]')"
 fi
 
-OBSERVATIONS_BRANCH="$(jq -n \
-	--argjson cycle_num "$CYCLE_NUMBER" \
-	--arg cycle_start "$CYCLE_START_ISO" \
-	--arg cycle_end "$CYCLE_END_ISO" \
-	--argjson stake_metal "$STAKE_METAL_STR" \
-	--arg stake_nmetal "$STAKE_NMETAL" \
-	--argjson fee_pct "$FEE_PCT_STR" \
-	--argjson events "$DELEGATOR_EVENTS" \
-	--argjson snapshot "$DELEGATORS_JSON" \
-	--argjson hints "$EVALUATOR_HINTS_JSON" \
-	--argjson targets "$SUBNET_TARGETS_JSON" \
-	'{
-		cycle_number_observed: $cycle_num,
-		cycle_start_time_observed: $cycle_start,
-		cycle_end_time_observed: $cycle_end,
-		self_stake_observed_metal: $stake_metal,
-		self_stake_observed_nmetal: $stake_nmetal,
-		fee_percent_observed_at_cycle_start: $fee_pct,
-		delegator_lifecycle_events_in_cycle_observed: $events,
-		delegator_snapshot_at_cycle_end: $snapshot,
-		evaluator_hints_declared_by_operator: $hints,
-		subnet_targets_declared_by_operator: $targets
-	}')"
+# S8-20260701: delegator lifecycle observation window boundary.
+# Config file contains a single ISO 8601 UTC timestamp (one line, no comment).
+# Represents when the operator's event-capture feed began emitting delegator
+# lifecycle events for this validator. Events with observed_at earlier than
+# this timestamp are outside the feed's window and NOT present in
+# delegator_lifecycle_events_in_cycle_observed. Absent config = field omitted
+# (evaluators must assume undefined = partial-observation risk).
+# See feed_started_at semantics in docs/ANCHOR_SOURCE.md.
+FEED_STARTED_AT_FILE="${FY_CONFIG_DIR:-/etc/freedom-yield}/delegator-feed-started-at"
+FEED_STARTED_AT=""
+if [ -r "$FEED_STARTED_AT_FILE" ]; then
+	FEED_STARTED_AT="$(head -1 "$FEED_STARTED_AT_FILE" | tr -d '[:space:]')"
+	if ! printf '%s' "$FEED_STARTED_AT" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'; then
+		echo "ERROR: $FEED_STARTED_AT_FILE contents not ISO 8601 UTC (YYYY-MM-DDTHH:MM:SSZ): '$FEED_STARTED_AT'" >&2
+		exit 2
+	fi
+else
+	echo "WARN: $FEED_STARTED_AT_FILE not present — delegator_lifecycle_observation_window_started_at will be omitted (partial-observation risk visible to evaluators)" >&2
+fi
+
+# Compose observations_branch. When FEED_STARTED_AT is non-empty, insert the
+# window field immediately before delegator_lifecycle_events_in_cycle_observed
+# so the field order in the composed JSON mirrors the schema property order.
+# jq -cS canonicalization sorts keys anyway, so field order is not
+# semantically load-bearing for hash computation, but human-readable ordering
+# is preserved for the pretty-printed output file.
+if [ -n "$FEED_STARTED_AT" ]; then
+	OBSERVATIONS_BRANCH="$(jq -n \
+		--argjson cycle_num "$CYCLE_NUMBER" \
+		--arg cycle_start "$CYCLE_START_ISO" \
+		--arg cycle_end "$CYCLE_END_ISO" \
+		--argjson stake_metal "$STAKE_METAL_STR" \
+		--arg stake_nmetal "$STAKE_NMETAL" \
+		--argjson fee_pct "$FEE_PCT_STR" \
+		--arg feed_started "$FEED_STARTED_AT" \
+		--argjson events "$DELEGATOR_EVENTS" \
+		--argjson snapshot "$DELEGATORS_JSON" \
+		--argjson hints "$EVALUATOR_HINTS_JSON" \
+		--argjson targets "$SUBNET_TARGETS_JSON" \
+		'{
+			cycle_number_observed: $cycle_num,
+			cycle_start_time_observed: $cycle_start,
+			cycle_end_time_observed: $cycle_end,
+			self_stake_observed_metal: $stake_metal,
+			self_stake_observed_nmetal: $stake_nmetal,
+			fee_percent_observed_at_cycle_start: $fee_pct,
+			delegator_lifecycle_observation_window_started_at: $feed_started,
+			delegator_lifecycle_events_in_cycle_observed: $events,
+			delegator_snapshot_at_cycle_end: $snapshot,
+			evaluator_hints_declared_by_operator: $hints,
+			subnet_targets_declared_by_operator: $targets
+		}')"
+else
+	OBSERVATIONS_BRANCH="$(jq -n \
+		--argjson cycle_num "$CYCLE_NUMBER" \
+		--arg cycle_start "$CYCLE_START_ISO" \
+		--arg cycle_end "$CYCLE_END_ISO" \
+		--argjson stake_metal "$STAKE_METAL_STR" \
+		--arg stake_nmetal "$STAKE_NMETAL" \
+		--argjson fee_pct "$FEE_PCT_STR" \
+		--argjson events "$DELEGATOR_EVENTS" \
+		--argjson snapshot "$DELEGATORS_JSON" \
+		--argjson hints "$EVALUATOR_HINTS_JSON" \
+		--argjson targets "$SUBNET_TARGETS_JSON" \
+		'{
+			cycle_number_observed: $cycle_num,
+			cycle_start_time_observed: $cycle_start,
+			cycle_end_time_observed: $cycle_end,
+			self_stake_observed_metal: $stake_metal,
+			self_stake_observed_nmetal: $stake_nmetal,
+			fee_percent_observed_at_cycle_start: $fee_pct,
+			delegator_lifecycle_events_in_cycle_observed: $events,
+			delegator_snapshot_at_cycle_end: $snapshot,
+			evaluator_hints_declared_by_operator: $hints,
+			subnet_targets_declared_by_operator: $targets
+		}')"
+fi
 
 # ---- artifacts_branch ------------------------------------------------
 # File list to hash: lexicographic sort mandatory (= Merkle canonical order).

@@ -101,7 +101,7 @@
 		},
 		"observations_branch": {
 			"type": "object",
-			"description": "What we observed during the anchored cycle. Observation verbs only (_observed, _at). Includes full delegator lifecycle events for institutional audit trail.",
+			"description": "What we observed during the anchored cycle. Observation verbs only (_observed, _at). Delegator lifecycle events are captured only from delegator_lifecycle_observation_window_started_at onward (typically when the operator's event-capture feed began); events preceding that timestamp are outside the observation window and NOT recorded here. Evaluators should treat the window field as authoritative on the boundary between 'observed and disclosed' and 'unobserved by this operator's feed'.",
 			"required": [
 				"cycle_number_observed",
 				"cycle_start_time_observed",
@@ -148,9 +148,14 @@
 					"maximum": 100,
 					"description": "Delegation fee percent as observed at cycle start (immutable during cycle per P-chain protocol). Not a promise — fee may differ in next cycle at operator's discretion."
 				},
+				"delegator_lifecycle_observation_window_started_at": {
+					"type": "string",
+					"format": "date-time",
+					"description": "UTC ISO 8601 timestamp when the operator's event-capture feed for delegator lifecycle events began emitting for this validator. Delegator events with observed_at earlier than this timestamp are outside the feed's observation window and are NOT present in delegator_lifecycle_events_in_cycle_observed. If this value is later than cycle_start_time_observed, the on-chain event list is partial with respect to the cycle — evaluators should cross-reference external sources (P-chain history / operator's wallet) for pre-window events. If equal to or earlier than cycle_start_time_observed, the event list is complete with respect to the cycle. Additive within v1; older anchor-source.json documents omit this field, in which case evaluators MUST assume the observation window is undefined (= partial-observation risk). T-M-style additive extension pattern."
+				},
 				"delegator_lifecycle_events_in_cycle_observed": {
 					"type": "array",
-					"description": "All delegator lifecycle events (started / ended) observed during this cycle. Complete audit trail; hidden delegator events are impossible under this schema.",
+					"description": "Delegator lifecycle events (started / ended) observed by our event-capture feed during the observation window (see delegator_lifecycle_observation_window_started_at). NOT a complete audit trail if the window starts after cycle_start_time_observed; in that case events preceding the window (e.g. delegations that started before feed activation) are not present here. Evaluators must consult the window field to know the coverage boundary.",
 					"items": {
 						"type": "object",
 						"required": [

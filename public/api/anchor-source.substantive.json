@@ -1,9 +1,10 @@
 {
   "$schema": "https://metal.freedom-yield.com/api/anchor-source.schema.v1.json",
+  "_comment": "cycle 2 predates event-capture feed activation (feed started 2026-07-01T06:02:00Z per T-B2 commit 9911171; deployment to Hetzner still pending as of this anchor). delegator_lifecycle_events_in_cycle_observed is [] because no lifecycle events occurred within the observation window (window ⊂ cycle end). First cycle with complete event trail = cycle 3 (start 2026-07-04).",
   "schema_version": 1,
-  "computed_at": "2026-07-01T07:19:00Z",
+  "computed_at": "2026-07-01T08:22:35Z",
   "computed_by_script": "manual-substantive-2026-07-01",
-  "computed_from_git_commit": "a12ef09eac48a43428315b562d21a4142dc3379d",
+  "computed_from_git_commit": "b0372383b5e4d96e882cc6b1d7f222bd43654ead",
   "identity_branch": {
     "operator_ed25519_pubkey_sha256_hex": "6ce2fc7d34318dfc7fcfcbfd1e29cca0f4d90d9a55226fb9a8a1e3a5a0ca5916",
     "operator_asserts_node_id": "NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v",
@@ -19,15 +20,8 @@
     "self_stake_observed_metal": 5900,
     "self_stake_observed_nmetal": "5900000000000",
     "fee_percent_observed_at_cycle_start": 3.0,
-    "delegator_lifecycle_events_in_cycle_observed": [
-      {
-        "event_type": "started",
-        "observed_at": "2026-06-04T09:29:05Z",
-        "delegator_tx_id": "2gCehhfrCZPBsAa1AFT6c8n3XniaNUBn6dFoFxB4Z59RYHCDWJ",
-        "weight_nmetal": "172000000000",
-        "observed_end_time": "2026-07-04T04:00:27Z"
-      }
-    ],
+    "delegator_lifecycle_observation_window_started_at": "2026-07-01T06:02:00Z",
+    "delegator_lifecycle_events_in_cycle_observed": [],
     "delegator_snapshot_at_cycle_end": [
       {
         "tx_id": "2gCehhfrCZPBsAa1AFT6c8n3XniaNUBn6dFoFxB4Z59RYHCDWJ",
@@ -85,5 +79,5 @@
     "period_uptime_observed_pct": 99.9138,
     "period_incident_count_observed": 0
   },
-  "dag_root_computed": "e1f2d9be0469b67e7cea6f6fb319a3e009387d6c7145494bd40febc478c1b6c2"
+  "dag_root_computed": "03e11c41433b7be9fdcb168cf637bb2c4cbd1af3b1f79df9a43f53f1efef5efe"
 }
