@@ -631,14 +631,14 @@ if [ "$RPC_VALID" = "1" ]; then
     if [ "$OBS_DELEGATOR_COUNT" -gt "${ORIG_DC:-0}" ]; then
       DIFF=$((OBS_DELEGATOR_COUNT - ORIG_DC))
       body=$(printf '+%s 件、合計 %s 件\n受入額: %s METAL\n自己 stake: %s METAL / 受入枠 %s METAL\n総 weight: %s METAL (self + delegators)' "$DIFF" "$OBS_DELEGATOR_COUNT" "$OBS_DELEGATOR_TOTAL_METAL" "$SELF_STAKE" "$CAPACITY_METAL" "$TOTAL_WEIGHT_METAL")
-      if notify_or_keep high "新規 delegation 受入" "$body"; then
+      if notify_or_keep high "Delegation +${DIFF} 件受入 (合計 ${OBS_DELEGATOR_COUNT} 件)" "$body"; then
         candidate_set '.delegator_count' "$OBS_DELEGATOR_COUNT"
         candidate_set '.delegator_total_nmetal' "$OBS_DELEGATOR_TOTAL_NMETAL"
       fi
     else
       DIFF=$((ORIG_DC - OBS_DELEGATOR_COUNT))
       body=$(printf '-%s 件、合計 %s 件\n受入額: %s METAL\n総 weight: %s METAL (self + delegators)\n期間満了か途中解除、explorer で確認:\nhttps://explorer.metalblockchain.org/validators/%s' "$DIFF" "$OBS_DELEGATOR_COUNT" "$OBS_DELEGATOR_TOTAL_METAL" "$TOTAL_WEIGHT_METAL" "$NODE_ID")
-      if notify_or_keep default "Delegation 終了" "$body"; then
+      if notify_or_keep default "Delegation -${DIFF} 件離脱 (合計 ${OBS_DELEGATOR_COUNT} 件)" "$body"; then
         candidate_set '.delegator_count' "$OBS_DELEGATOR_COUNT"
         candidate_set '.delegator_total_nmetal' "$OBS_DELEGATOR_TOTAL_NMETAL"
       fi
