@@ -168,25 +168,32 @@ else
 fi
 
 # === T7: state dir non-writable for mktemp → exit 4 =====================
-# Linux + non-root required (root bypasses chmod). State dir must be
-# owned by the unprivileged user but rendered read-only AFTER any mkdir
-# the script attempts.
-if is_root && ! have_unpriv; then
-  skip "T7: state dir non-writable (no unprivileged user available)"
-elif ! is_linux; then
+# Requires (a) Linux (uses flock semantics) AND (b) that the test runner
+# can actually PRODUCE a "state dir the process cannot write to" — which
+# only works when the runner is root and can chown/chmod the dir out of
+# the reach of an unprivileged user. When the runner itself is an
+# unprivileged user (e.g. the Hetzner `deploy` user invoking
+# `bash tests/run-all-tests.sh`), a chmod 0500 on a dir we own is a no-op
+# for the owner — the init script's `chmod 0750 || true` restores
+# writability and the "write fails" scenario cannot be constructed, so
+# the test would falsely assert exit 4 while the environment produces
+# exit 0. Skip cleanly in that case instead of failing.
+if ! is_linux; then
   skip "T7: state dir non-writable → exit 4 (requires Linux flock)"
+elif ! is_root; then
+  skip "T7: state dir non-writable (runner is unprivileged; cannot set up chmod-immune non-writable state)"
+elif ! have_unpriv; then
+  skip "T7: state dir non-writable (no unprivileged user available)"
 else
   new_env t7
-  if is_root; then
-    # CASE_DIR needs deploy traversal (= mktemp creates 0700 root).
-    # LOCK_DIR owned by deploy so flock + lock file open succeed.
-    # STATE_DIR stays root-owned + 0500 so deploy cannot chmod nor
-    # write inside it. The init script's `chmod 0750 || true` is
-    # silently suppressed for non-owners, so mktemp in STATE_DIR
-    # fails → exit 4.
-    chmod 0755 "$CASE_DIR"
-    chown -R "$UNPRIV_USER" "$LOCK_DIR"
-  fi
+  # CASE_DIR needs deploy traversal (= mktemp creates 0700 root).
+  # LOCK_DIR owned by deploy so flock + lock file open succeed.
+  # STATE_DIR stays root-owned + 0500 so deploy cannot chmod nor
+  # write inside it. The init script's `chmod 0750 || true` is
+  # silently suppressed for non-owners, so mktemp in STATE_DIR
+  # fails → exit 4.
+  chmod 0755 "$CASE_DIR"
+  chown -R "$UNPRIV_USER" "$LOCK_DIR"
   chmod 0500 "$STATE_DIR"
   rc=$(run_init_as_unpriv --confirm --baseline-status=running)
   chmod 0700 "$STATE_DIR"
@@ -198,23 +205,28 @@ echo "=== C5-A marker deletion ordering invariant ==="
 
 # === T8: marker deletion happens AFTER successful state write ===========
 # Invariant: missing-marker MUST NOT be removed if state write failed.
-# Linux + unprivileged-user required to make chmod effective.
-if is_root && ! have_unpriv; then
-  skip "T8: marker NOT removed when state write fails (no unprivileged user)"
-elif ! is_linux; then
+# Same runner-privilege prerequisites as T7: needs Linux + root runner
+# with an unprivileged user to construct the "state write fails" setup.
+# When run as an unprivileged user directly, chmod 0500 on a self-owned
+# dir cannot force a write failure and the invariant cannot be tested;
+# skip cleanly rather than asserting a rc/marker state the environment
+# cannot produce.
+if ! is_linux; then
   skip "T8: marker NOT removed when state write fails (requires Linux flock)"
+elif ! is_root; then
+  skip "T8: marker NOT removed when state write fails (runner is unprivileged; cannot force state write failure)"
+elif ! have_unpriv; then
+  skip "T8: marker NOT removed when state write fails (no unprivileged user)"
 else
   new_env t8
   : > "$MARKER"
-  if is_root; then
-    chmod 0755 "$CASE_DIR"
-    chown -R "$UNPRIV_USER" "$LOCK_DIR"
-    # Marker is inside STATE_DIR which we leave owned by root. The
-    # marker is a regular file inside the (still-traversable) dir.
-    # deploy cannot remove it because deploy lacks write on STATE_DIR.
-    # Exactly the invariant we want to verify: even if init wanted to
-    # remove the marker, it couldn't because state write failed first.
-  fi
+  chmod 0755 "$CASE_DIR"
+  chown -R "$UNPRIV_USER" "$LOCK_DIR"
+  # Marker is inside STATE_DIR which we leave owned by root. The
+  # marker is a regular file inside the (still-traversable) dir.
+  # deploy cannot remove it because deploy lacks write on STATE_DIR.
+  # Exactly the invariant we want to verify: even if init wanted to
+  # remove the marker, it couldn't because state write failed first.
   chmod 0500 "$STATE_DIR"
   rc=$(run_init_as_unpriv --confirm --baseline-status=running)
   chmod 0700 "$STATE_DIR"
