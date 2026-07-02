@@ -22,6 +22,16 @@ TESTS_ROOT="${REPO_ROOT}/tests"
 PATTERN="test-*.sh"
 VERBOSE=0
 
+# Anchor cwd at the repo root. When run-all-tests is invoked from an ssh
+# session where the login shell's cwd is a directory the running user cannot
+# read (e.g. `sudo -u deploy` from a shell whose cwd is /root), some sub-suite
+# tools — notably GNU find with -exec — refuse to run and return non-zero
+# because they cannot "restore initial working directory". This is
+# environmental, not a real regression, and the anchor-state sub-suite's T11
+# check (init --clear-quarantine → find -exec rm) hits it. Anchoring cwd at
+# the repo root here removes that failure mode for every downstream test.
+cd "$REPO_ROOT" || exit 2
+
 for arg in "$@"; do
 	case "$arg" in
 		--pattern=*)  PATTERN="${arg#*=}" ;;
