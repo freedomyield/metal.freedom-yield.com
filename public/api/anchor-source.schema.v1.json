@@ -289,7 +289,7 @@
 		"dag_root_computed": {
 			"type": "string",
 			"pattern": "^[0-9a-f]{64}$",
-			"description": "SHA-256 of (identity_root_hex || observations_root_hex || artifacts_root_hex), where each branch root = SHA-256 of the branch's RFC 8785 JSON canonical form. Verifiers can recompute this independently from the anchor-source.json without trusting our tools."
+			"description": "SHA-256 of (identity_root_hex || observations_root_hex || artifacts_root_hex), where each branch root = SHA-256 of the branch's canonical-form bytes and the concatenation is done on the hex strings (192 chars total = 3 × 64 hex chars) — not on the binary hashes. Canonical form: `jq -cS` (compact + sorted keys) output including the trailing newline (0x0a) that jq appends; the reference implementation `jq -cS <branch> | sha256sum` carries that newline into the hash. RFC-8785 / Python `json.dumps(sort_keys=True, separators=(',', ':'), ensure_ascii=False)` / JS `JSON.stringify(sortDeep(...))` produce byte-identical canonical strings but omit the trailing newline; verifiers using those MUST append `\\n` before hashing. Full spec: docs/ANCHOR_SOURCE.md §Dag root composition. Verifiers can recompute this independently from the anchor-source.json without trusting our tools."
 		}
 	}
 }

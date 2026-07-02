@@ -78,7 +78,7 @@ AR=$(jq -cS .artifacts_branch    "$file" | sha256sum | awk '{print $1}')
 printf '%s%s%s' "$ID" "$OB" "$AR" | sha256sum | awk '{print $1}'         # dag_root_computed
 ```
 
-The generator uses `jq -cS` (compact + sorted keys) for the JSON canonical form. Verifiers can use any RFC 8785 or `jq -cS`-equivalent canonicalizer that emits the same key ordering. The hex-string concat semantics is verified end-to-end against real testnet chain data on 2026-07-01 (memo 4 hex of tx `7b352b4a0b7c6202d14da51637c2a43791c1438d85ef43d7b7b45f17559839ea` matches the recomputed dag_root byte-for-byte).
+The generator uses `jq -cS` (compact + sorted keys) for the JSON canonical form. **The exact bytes that get hashed are the `jq -cS` output including the trailing newline (`0x0a`) that `jq` appends by default** — the reference-implementation pipeline `jq -cS ... | sha256sum` carries that newline into the hash. Verifiers using RFC 8785, Python `json.dumps(sort_keys=True, separators=(',', ':'), ensure_ascii=False)`, JavaScript `JSON.stringify(sortDeep(...))`, or any other `jq -cS`-equivalent canonicalizer that emits the same sorted-key output **but omits the trailing newline** MUST append one byte (`0x0a`) before hashing. The three canonicalizers above produce byte-identical canonical strings; `sha256(canonical + "\n")` matches the on-chain memo hex, `sha256(canonical)` does not. See `tests/anchor-source-canonicalizer/test-canonicalizer-newline.sh` for a cross-canonicalizer regression check. The hex-string concat semantics is verified end-to-end against real testnet chain data on 2026-07-01 (memo 4 hex of tx `7b352b4a0b7c6202d14da51637c2a43791c1438d85ef43d7b7b45f17559839ea` matches the recomputed dag_root byte-for-byte).
 
 ## A-chain broadcast: HC-single 4-action pack
 
