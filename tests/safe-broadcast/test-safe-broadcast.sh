@@ -120,6 +120,19 @@ run_case "gate 1: mainnet, --testnet-tx-id shape-valid but unresolvable" 3 \
 	--dry-run-log="$TEST_DRY_LOG" \
 	--non-interactive
 
+# ---- gate 3 (chain identity) failure path (exit 4) ----
+# Force a chain_id mismatch by overriding the expected testnet chain_id to a
+# value that cannot match the live chain. This exercises the identity check and
+# refuses BEFORE any broadcast (exit 4, before the pre-broadcast audit log).
+# Deterministic across environments: with proton present the real chain_id
+# differs from this bogus expectation; without proton (or offline) the wrapper
+# also exits 4 (proton-not-found / chain:set / parse failure all map to 4).
+touch "$TEST_TOKEN"
+export FYD_TESTNET_CHAIN_ID="ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+run_case "gate 3: testnet, chain_id mismatch → refuse (exit 4)" 4 \
+	--tx="$TEST_TX_VALID" --chain=testnet-a --non-interactive
+unset FYD_TESTNET_CHAIN_ID
+
 # ---- audit log: no line written on gate refusal (pre-log happens only after gates pass) ----
 if [ ! -s "$TEST_AUDIT" ]; then
 	printf 'PASS  %-70s (empty)\n' "audit log: no lines on gate refusal"

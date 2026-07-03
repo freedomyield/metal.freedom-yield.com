@@ -20,11 +20,13 @@
 #      hitting push_transaction / issueTx / eth_sendRawTransaction /
 #      /ext/bc/[XPC]/, metalgo IssueTx).
 #   5. If none match, allow.
-#   6. If a match is found, require an operator-authored token file
-#      whose mtime is within TOKEN_TTL_SECONDS (default 300s). Missing
-#      or expired token = block with PRIME_DIRECTIVE_VIOLATION message.
-#   7. On allow, append (timestamp, invoker, tool_name, command) to the
-#      audit log for tier-4 cross-check.
+#   6. If a match is found, it is a RAW direct broadcast (see the block
+#      comment below) and is refused UNCONDITIONALLY — an operator token
+#      does NOT override it. The only exception is the sanctioned wrapper
+#      bin/safe-broadcast, which sets FYD_SAFE_BROADCAST=1; that path still
+#      requires a fresh operator token.
+#   7. On the sanctioned-path allow, append (timestamp, invoker, tool_name,
+#      command) to the audit log for tier-4 cross-check.
 #
 # Environment overrides:
 #   FYD_BROADCAST_TOKEN_FILE  — default /tmp/fyd-broadcast-token
@@ -32,6 +34,9 @@
 #   FYD_BROADCAST_AUDIT_LOG   — default /var/log/fyd-broadcast-audit.log;
 #                               if not writable, falls back to
 #                               $HOME/.fyd-broadcast-audit.log
+#   FYD_SAFE_BROADCAST        — set to "1" by bin/safe-broadcast to mark the
+#                               sanctioned broadcast pathway. Never set this
+#                               by hand to bypass the guard.
 #
 # See:
 #   docs/CONSTITUTION.md PRIME DIRECTIVE
@@ -69,7 +74,7 @@ fi
 
 # Broadcast-shape detection. Patterns are ERE; each must match a plausible
 # invocation form of the corresponding tool. Kept intentionally broad —
-# false positives are recoverable (operator authorizes with a token),
+# false positives are recoverable (operator uses bin/safe-broadcast),
 # false negatives are the exact class of failure that motivated this
 # script's existence.
 BROADCAST_PATTERNS=(
@@ -98,32 +103,53 @@ if [ -z "$MATCHED_PATTERN" ]; then
 	exit 0
 fi
 
-# From here down, a broadcast-capable shape was detected. Enforce token.
+# A broadcast-capable shape was detected.
+#
+# Reaching this point ALWAYS means a raw, direct broadcast invocation. The
+# sanctioned wrapper bin/safe-broadcast is invoked as `bin/safe-broadcast ...`
+# (which matches none of the BROADCAST_PATTERNS above) and its internal
+# `proton transaction:push` call is a subprocess that the PreToolUse hook
+# never sees. So a match here is a command about to broadcast WITHOUT the
+# tier-2 four-gate check — the exact accident class this guard exists to stop
+# (see memory/feedback_no_unauthorized_broadcast.md).
+#
+# Therefore a raw call is refused UNCONDITIONALLY. An operator token does NOT
+# override it: the token proves authorization intent, not that gate 1
+# (testnet-first), gate 3 (chain match), and gate 4 (dry-run) were satisfied —
+# only bin/safe-broadcast verifies those. The sole exception is the sanctioned
+# wrapper itself, which exports FYD_SAFE_BROADCAST=1 before it calls proton;
+# on that path the four gates already ran, and we still require a fresh
+# operator token below as defense in depth.
 
-if [ ! -f "$TOKEN_FILE" ]; then
+if [ "${FYD_SAFE_BROADCAST:-}" != "1" ]; then
 	cat >&2 <<EOF
 === PRIME_DIRECTIVE_VIOLATION ===
-Broadcast-capable command detected without an authorization token.
+Raw broadcast-capable command detected — blocked unconditionally.
 
 Detected shape: $MATCHED_PATTERN
-Token file:     $TOKEN_FILE  (missing)
 
-This block is enforced by scripts/broadcast-guard.sh, the tier-1
-mechanical implementation of docs/CONSTITUTION.md PRIME DIRECTIVE
-(TESTNET-FIRST FOR ALL BROADCASTS).
+All broadcasts MUST go through bin/safe-broadcast, which enforces the four
+PRIME DIRECTIVE gates (testnet-first / per-invocation authorization /
+pre-flight chain match / dry-run). A raw broadcast (e.g. \`proton
+transaction:push\`) bypasses gates 1, 3, and 4 and is refused here even if a
+fresh operator token exists — the token alone does not prove the gates ran.
 
-To authorize this specific broadcast, the operator must:
-  1. Confirm all four PRIME DIRECTIVE gates in docs/CONSTITUTION.md
-     are simultaneously satisfied for this exact broadcast.
-  2. Create the token file with any non-empty content, e.g.:
-        touch $TOKEN_FILE
-     (Token TTL is $TOKEN_TTL seconds from mtime.)
-  3. Re-invoke the tool within the TTL window.
+To broadcast, invoke the sanctioned wrapper:
+  bin/safe-broadcast --tx=<file> --chain=<testnet-a|mainnet-a> ...
 
-Do not bypass this guard. Do not rewrite the token invocation into
-the same tool call. If the guard is blocking correctly-authorized
-work, revise the plan; do not disable the guard.
+This block is enforced by scripts/broadcast-guard.sh, the tier-1 mechanical
+implementation of docs/CONSTITUTION.md PRIME DIRECTIVE. Do not disable the
+guard or rewrite the call to evade it; use bin/safe-broadcast.
 EOF
+	exit 1
+fi
+
+# --- sanctioned wrapper context (FYD_SAFE_BROADCAST=1) ---
+# The four gates already ran inside bin/safe-broadcast. Re-verify a fresh
+# operator token (tier-2 gate 2) as defense in depth before allowing.
+
+if [ ! -f "$TOKEN_FILE" ]; then
+	printf '=== PRIME_DIRECTIVE_VIOLATION ===\nbroadcast-guard: safe-broadcast context but operator token missing (%s); failing closed.\n' "$TOKEN_FILE" >&2
 	exit 1
 fi
 
@@ -142,22 +168,12 @@ NOW="$(date +%s)"
 AGE="$((NOW - TOKEN_MTIME))"
 
 if [ "$AGE" -ge "$TOKEN_TTL" ]; then
-	cat >&2 <<EOF
-=== PRIME_DIRECTIVE_VIOLATION ===
-Authorization token expired.
-
-Token file: $TOKEN_FILE
-Age:        ${AGE}s (max ${TOKEN_TTL}s)
-Detected shape: $MATCHED_PATTERN
-
-Operator must re-authorize by touching the token file within the TTL
-window, then re-invoke the tool. Do not extend TTL; the short window
-is the enforcement.
-EOF
+	printf '=== PRIME_DIRECTIVE_VIOLATION ===\nbroadcast-guard: safe-broadcast context but operator token expired (%ss >= %ss max); failing closed.\n' "$AGE" "$TOKEN_TTL" >&2
 	exit 1
 fi
 
-# Token valid. Log the authorized broadcast attempt for tier-4 cross-check.
+# Sanctioned path with a fresh token. Log the authorized broadcast for
+# tier-4 cross-check.
 TS="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 INVOKER="${USER:-unknown}"
 # Truncate command to 800 chars to keep log lines bounded; secrets in

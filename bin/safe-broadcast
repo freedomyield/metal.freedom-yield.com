@@ -45,6 +45,12 @@
 #   --endpoint=<url>              Override proton RPC endpoint.
 #                                 Default: proton-cli current chain endpoint.
 #
+# Environment overrides:
+#   FYD_MAINNET_CHAIN_ID  — expected chain_id for mainnet-a (gate 3 identity
+#                           check). Default: the authoritative Proton mainnet
+#                           chain_id. Override only for a chain migration.
+#   FYD_TESTNET_CHAIN_ID  — expected chain_id for testnet-a (gate 3).
+#
 # Exit codes:
 #   0    broadcast succeeded, tx_id printed to stdout
 #   2    bad arg / usage error
@@ -112,9 +118,15 @@ if ! jq -e '.actions | type == "array" and length > 0' "$TX_JSON_FILE" >/dev/nul
 	exit 2
 fi
 
+# Expected chain_id per chain (gate 3 verifies proton-cli points here).
+# Constants captured 2026-07-03 from each chain's read-only get_info; chain_id
+# is a chain-level invariant. Overridable via env for forward-compat, but the
+# default is the authoritative value and gate 3 fails closed on any mismatch.
 case "$CHAIN" in
-	testnet-a|proton-test)  PROTON_CHAIN="proton-test"; IS_MAINNET=0 ;;
-	mainnet-a|proton)       PROTON_CHAIN="proton";      IS_MAINNET=1 ;;
+	testnet-a|proton-test)  PROTON_CHAIN="proton-test"; IS_MAINNET=0
+	                        EXPECTED_CHAIN_ID="${FYD_TESTNET_CHAIN_ID:-71ee83bcf52142d61019d95f9cc5427ba6a0d7ff8accd9e2088ae2abeaf3d3dd}" ;;
+	mainnet-a|proton)       PROTON_CHAIN="proton";      IS_MAINNET=1
+	                        EXPECTED_CHAIN_ID="${FYD_MAINNET_CHAIN_ID:-384da888112027f0321850a169f737c33e53b388aad48b5adace4bab97f437e0}" ;;
 	"")  echo "ERROR: --chain=<testnet-a|mainnet-a> required" >&2; exit 2 ;;
 	*)   echo "ERROR: --chain must be testnet-a or mainnet-a, got: $CHAIN" >&2; exit 2 ;;
 esac
@@ -197,13 +209,23 @@ proton chain:set "$PROTON_CHAIN" >/dev/null 2>&1 || {
 	echo "ERROR (gate 3): proton chain:set $PROTON_CHAIN failed" >&2
 	exit 4
 }
-# Validate the endpoint answers get_info and returns a plausible chain response.
-# We use the endpoint that proton-cli would use.
+# Verify the endpoint proton-cli would broadcast to is the intended chain by
+# comparing its chain_id EXACTLY to the expected constant. This is gate 3:
+# not "a chain answered" (liveness) but "the AUTHORIZED chain answered"
+# (identity). proton chain:info returns JSON; parse .chain_id with jq.
 CHAIN_INFO="$(proton chain:info 2>/dev/null || echo '')"
-if [ -z "$CHAIN_INFO" ] || ! echo "$CHAIN_INFO" | grep -qE 'chain_id|server_version|head_block'; then
-	echo "ERROR (gate 3): proton chain:info returned unexpected output; refusing to broadcast" >&2
+ACTUAL_CHAIN_ID="$(printf '%s' "$CHAIN_INFO" | jq -r '.chain_id // empty' 2>/dev/null)"
+if [ -z "$ACTUAL_CHAIN_ID" ]; then
+	echo "ERROR (gate 3): could not parse chain_id from proton chain:info; refusing to broadcast" >&2
 	echo "                Output was:" >&2
 	echo "$CHAIN_INFO" | head -20 >&2
+	exit 4
+fi
+if [ "$ACTUAL_CHAIN_ID" != "$EXPECTED_CHAIN_ID" ]; then
+	echo "ERROR (gate 3): chain_id mismatch — proton is pointed at the WRONG chain; refusing to broadcast" >&2
+	echo "                target chain:   $CHAIN ($PROTON_CHAIN)" >&2
+	echo "                expected chain_id: $EXPECTED_CHAIN_ID" >&2
+	echo "                actual chain_id:   $ACTUAL_CHAIN_ID" >&2
 	exit 4
 fi
 
@@ -245,9 +267,12 @@ if ! printf '%s\n' "$LOG_LINE_PRE" >> "$AUDIT_TARGET" 2>/dev/null; then
 fi
 
 # ---- actual broadcast ----
-# proton transaction:push accepts JSON on argv. broadcast-guard.sh (tier 1)
-# will intercept this call and check the same token file we already validated;
-# since the token is fresh, it will allow.
+# proton transaction:push accepts JSON on argv. Mark this call chain as the
+# sanctioned broadcast pathway: the tier-1 guard (broadcast-guard.sh) refuses
+# any RAW broadcast shape unless FYD_SAFE_BROADCAST=1 is set (which only this
+# wrapper does, after the four gates above have passed). Raw direct calls
+# without this marker are blocked even with a fresh token.
+export FYD_SAFE_BROADCAST=1
 BROADCAST_OUT="$(mktemp -t safe-broadcast.XXXXXX)"
 BROADCAST_ERR="$(mktemp -t safe-broadcast.XXXXXX)"
 trap 'rm -f "$BROADCAST_OUT" "$BROADCAST_ERR"' EXIT

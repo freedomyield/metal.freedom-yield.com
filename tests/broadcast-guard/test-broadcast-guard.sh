@@ -101,20 +101,41 @@ run_case "block: wget push_transaction" 1 \
 run_case "block: metalgo IssueTx" 1 \
 	'{"tool_name":"Bash","tool_input":{"command":"metalgo IssueTx arg"}}'
 
-# ---- token override: allow broadcast shape when fresh token present ----
+# ---- C2-1: raw direct broadcast is BLOCKED even with a fresh token ----
+# A broadcast shape reaching tier-1 is always a RAW direct call: the sanctioned
+# wrapper bin/safe-broadcast is invoked as `bin/safe-broadcast ...` (matches no
+# pattern) and its internal proton call is a subprocess the hook never sees.
+# Raw calls bypass gates 1/3/4, so a fresh operator token must NOT override.
 touch "$TEST_TOKEN"
-run_case "override: proton transaction:push WITH fresh token → allow" 0 \
+run_case "block: proton transaction:push WITH fresh token, no safe-broadcast marker" 1 \
 	'{"tool_name":"Bash","tool_input":{"command":"proton transaction:push arg"}}'
-run_case "override: curl issueTx WITH fresh token → allow" 0 \
+run_case "block: curl issueTx WITH fresh token, no safe-broadcast marker" 1 \
 	'{"tool_name":"Bash","tool_input":{"command":"curl http://node/ext/bc/P/issueTx"}}'
 
-# Audit log side-effect: 2 successful override cases → 2 lines appended.
+# ---- sanctioned wrapper path: safe-broadcast marker + fresh token → allow ----
+# bin/safe-broadcast exports FYD_SAFE_BROADCAST=1 before it calls proton; that
+# marker is the only way a broadcast shape is allowed through tier-1.
+export FYD_SAFE_BROADCAST=1
+run_case "allow: proton transaction:push WITH safe-broadcast marker + fresh token" 0 \
+	'{"tool_name":"Bash","tool_input":{"command":"proton transaction:push arg"}}'
+unset FYD_SAFE_BROADCAST
+
+# marker present but token missing/stale must STILL block: token freshness is
+# tier-2 gate 2 and is re-checked as defense in depth on the sanctioned path.
+export FYD_SAFE_BROADCAST=1
+rm -f "$TEST_TOKEN"
+run_case "block: safe-broadcast marker but NO token → block" 1 \
+	'{"tool_name":"Bash","tool_input":{"command":"proton transaction:push arg"}}'
+touch "$TEST_TOKEN"
+unset FYD_SAFE_BROADCAST
+
+# Audit log side-effect: only the single sanctioned allow above logged a line.
 AUDIT_LINES="$(wc -l < "$TEST_AUDIT_LOG" | tr -d ' ')"
-if [ "$AUDIT_LINES" -eq 2 ]; then
-	printf 'PASS  %-60s (lines=%d)\n' "audit log: 2 lines appended on override" "$AUDIT_LINES"
+if [ "$AUDIT_LINES" -eq 1 ]; then
+	printf 'PASS  %-60s (lines=%d)\n' "audit log: 1 line appended on sanctioned allow" "$AUDIT_LINES"
 	PASS=$((PASS + 1))
 else
-	printf 'FAIL  %-60s (lines=%d, expected 2)\n' "audit log: 2 lines appended on override" "$AUDIT_LINES" >&2
+	printf 'FAIL  %-60s (lines=%d, expected 1)\n' "audit log: 1 line appended on sanctioned allow" "$AUDIT_LINES" >&2
 	FAIL=$((FAIL + 1))
 fi
 
@@ -129,8 +150,12 @@ else
 	OLD_TS="$(date -u -v-400S +%Y%m%d%H%M)"
 fi
 touch -t "$OLD_TS" "$TEST_TOKEN"
-run_case "expired: proton transaction:push WITH stale token → block" 1 \
+# Set the marker so this exercises the expiry check on the sanctioned path
+# (without the marker the raw-broadcast block would fire first).
+export FYD_SAFE_BROADCAST=1
+run_case "block: safe-broadcast marker + expired token → block" 1 \
 	'{"tool_name":"Bash","tool_input":{"command":"proton transaction:push arg"}}'
+unset FYD_SAFE_BROADCAST
 
 # ---- Summary ----
 echo
