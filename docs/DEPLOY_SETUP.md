@@ -85,7 +85,7 @@ chmod 600 <deploy_path>/.env
 
 | Name | 値 |
 |---|---|
-| `SSH_HOST` | VPS の IP (例: `5.223.xxx.xxx`) |
+| `SSH_HOST` | VPS の IP (例: `203.0.113.x`) |
 | `SSH_USER` | `deploy` |
 | `SSH_KEY` | ローカルの `~/.ssh/<your_deploy_key>`(秘密鍵)の **全内容**(OpenSSH PEM 形式、BEGIN/END マーカーを含む全行) |
 | `SSH_PORT` | (任意、22 以外を使うなら) |
