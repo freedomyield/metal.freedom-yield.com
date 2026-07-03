@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "_comment": "Repo-level Claude Code settings. Tier-1 mechanical enforcement of docs/CONSTITUTION.md PRIME DIRECTIVE via PreToolUse hook. See memory/project_broadcast_enforcement_gate_plan.md for tier design and rationale.",
+  "_comment": "Repo-level Claude Code settings. Tier-1 mechanical enforcement of docs/CONSTITUTION.md PRIME DIRECTIVE (broadcast-guard) and the host-identifier publish guard (publish-guard: real host IP / operator handle / SSH key name) via PreToolUse hooks. See memory/project_broadcast_enforcement_gate_plan.md and docs/audits/constitution-2026-07-03T16-33-audit.md.",
   "hooks": {
     "PreToolUse": [
       {
@@ -9,6 +9,19 @@
           {
             "type": "command",
             "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/broadcast-guard.sh\""
+          },
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/publish-guard.sh\""
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/publish-guard.sh\""
           }
         ]
       }

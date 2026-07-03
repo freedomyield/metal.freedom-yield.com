@@ -1,0 +1,23 @@
+# .publish-denylist.example — template for scripts/publish-guard.sh
+#
+# publish-guard already blocks, with NO configuration:
+#   - ANY real public IPv4 literal (RFC5737 / RFC1918 / loopback / link-local /
+#     CGNAT / multicast are allowed) — so you do NOT need to list a host IP here.
+#   - the operator handle and the validator SSH key name, matched by embedded
+#     sha256 (the raw words are never stored in the tracked script).
+#
+# Use a local .publish-denylist ONLY to add EXTRA exact substrings the two
+# built-in layers do not cover (e.g. an internal hostname alias, a second SSH
+# key name, a colo/rack identifier). One exact substring per line; lines
+# beginning with # are comments; blank lines ignored.
+#
+# Setup (the real file is gitignored — it may contain sensitive strings):
+#   cp .publish-denylist.example .publish-denylist
+#   # then add real forbidden substrings, one per line, to .publish-denylist
+#
+# This .example file is TRACKED and PUBLIC — it MUST NOT contain any real
+# secret. The placeholders below are illustrative only; replace them.
+#
+# internal-host-alias.example
+# secondary-ssh-key-name
+# rack-or-colo-identifier

@@ -58,6 +58,17 @@ if echo "${STAGED_DIFF}" | grep -qE '^\+.*\b([a-z]{3,12}[[:space:]]+){11,23}[a-z
 	echo "WARN: 12-24 単語の連続を検出。mnemonic/seed phrase でないか確認してください(誤検知の可能性あり、ブロックはしません)"
 fi
 
+# (f) host-identifier publish guard — real host IP / operator handle / SSH key 名。
+#     gitleaks は鍵/token は見るが host IP/handle は検出しないため、この層で塞ぐ。
+#     (2026-07-03 に real IP + handle が public tracking file に混入した leak の再発防止)
+GUARD="$(git rev-parse --show-toplevel)/scripts/publish-guard.sh"
+if [[ -x "${GUARD}" ]]; then
+	if ! printf '%s\n' "${STAGED_DIFF}" | "${GUARD}" --diff; then
+		echo "ERROR: publish-guard が host identifier(real IP / operator handle / SSH key 名)を staged 変更内に検出しました"
+		BLOCKED=1
+	fi
+fi
+
 if [[ "${BLOCKED}" -ne 0 ]]; then
 	echo
 	echo "Commit を中止します。問題箇所を修正してから再度 git commit してください"
