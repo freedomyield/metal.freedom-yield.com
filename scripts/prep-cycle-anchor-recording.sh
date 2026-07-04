@@ -133,10 +133,10 @@ echo "== 3/6 node-info.sh — refresh validator.json to the current cycle =="
 VALIDATOR_JSON="public/api/validator.json"
 CYCLE_STATE="${STATE_DIR}/current-cycle-state.json"
 STATE_END="$(jq -r '.period_end_unix // empty' "$CYCLE_STATE" 2>/dev/null || true)"
-V_END_BEFORE="$(jq -r '.period_end_unix // .end_unix // empty' "$VALIDATOR_JSON" 2>/dev/null || true)"
+V_END_BEFORE="$(jq -r '.endTime // empty' "$VALIDATOR_JSON" 2>/dev/null || true)"
 echo "   before: validator.json period_end=${V_END_BEFORE:-?}  current-cycle-state period_end=${STATE_END:-?}"
 sudo -u deploy bash scripts/node-info.sh 2>&1 | sed 's/^/   /'
-V_END_AFTER="$(jq -r '.period_end_unix // .end_unix // empty' "$VALIDATOR_JSON" 2>/dev/null || true)"
+V_END_AFTER="$(jq -r '.endTime // empty' "$VALIDATOR_JSON" 2>/dev/null || true)"
 echo "   after:  validator.json period_end=${V_END_AFTER:-?}"
 if [ -z "$V_END_AFTER" ]; then
 	echo "ERROR: validator.json has no period_end_unix after node-info.sh." >&2
