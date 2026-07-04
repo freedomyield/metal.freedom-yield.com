@@ -154,10 +154,14 @@ echo "== 4/6 uptime-history.sh — record the closed cycle =="
 sudo -u deploy env UPTIME_STATE_DIR="$STATE_DIR" bash scripts/uptime-history.sh 2>&1 | sed 's/^/   /'
 AFTER_CYCLES="$(jq '.cycles | length' "$UPTIME_JSON")"
 echo "   closed cycles: ${BEFORE_CYCLES} -> ${AFTER_CYCLES}"
-if [ "$AFTER_CYCLES" -le "$BEFORE_CYCLES" ]; then
-	echo "ERROR: uptime-history.sh did not append a closed cycle." >&2
+# Idempotent success test: the just-closed cycle must be recorded. As of the
+# cycle 3 start there are two closed cycles (1 + 2). On a re-run uptime-history
+# appends nothing (already present) but the count is still >= 2, which passes;
+# the original bug (cycle 2 never recorded) leaves it at 1, which fails.
+if [ "$AFTER_CYCLES" -lt 2 ]; then
+	echo "ERROR: uptime-cycles.json has < 2 closed cycles — cycle 2 was not recorded." >&2
 	echo "       (metalgo may not yet report the prior cycle as closed, or the" >&2
-	echo "        boundary was already consumed). Inspect before continuing." >&2
+	echo "        boundary was not detected). Inspect before continuing." >&2
 	exit 1
 fi
 
@@ -166,13 +170,19 @@ echo "== 5/6 gen-cycle-history.sh — rebuild cycle-history.jsonl =="
 sudo -u deploy bash scripts/gen-cycle-history.sh 2>&1 | sed 's/^/   /'
 AFTER_LINES="$(grep -c . "$CYCLE_JSONL" || true)"
 echo "   cycle-history.jsonl lines: ${BEFORE_LINES} -> ${AFTER_LINES}"
-[ "$AFTER_LINES" -gt "$BEFORE_LINES" ] \
-	|| { echo "ERROR: cycle-history.jsonl did not grow." >&2; exit 1; }
+# cycle-history.jsonl is derived from uptime-cycles.json, so it must agree with
+# the closed-cycle count (idempotent: both are 2 on first run and on re-run).
+if [ "$AFTER_LINES" -ne "$AFTER_CYCLES" ] || [ "$AFTER_LINES" -lt 2 ]; then
+	echo "ERROR: cycle-history.jsonl (${AFTER_LINES}) disagrees with uptime-cycles" >&2
+	echo "       (${AFTER_CYCLES}) or is < 2 lines. Inspect before continuing." >&2
+	exit 1
+fi
 
 # ---- 6/6 publish to the web host ------------------------------------------
 echo "== 6/6 publish validator.json + cycle-history.jsonl + uptime ledgers =="
 sudo -u deploy bash scripts/push-to-xserver.sh validator.json        2>&1 | sed 's/^/   validator:     /'
-sudo -u deploy bash scripts/push-to-web-host.sh cycle-history.jsonl 2>&1 | sed 's/^/   cycle-history: /'
+sudo -u deploy env WEB_HOST_FILE=/etc/freedom-yield/xserver-host \
+	bash scripts/push-to-web-host.sh cycle-history.jsonl 2>&1 | sed 's/^/   cycle-history: /'
 sudo -u deploy bash scripts/push-to-xserver.sh uptime-cycles.json    2>&1 | sed 's/^/   uptime-cycles: /'
 sudo -u deploy bash scripts/push-to-xserver.sh uptime-recent.json    2>&1 | sed 's/^/   uptime-recent: /'
 
