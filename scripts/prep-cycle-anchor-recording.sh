@@ -143,10 +143,19 @@ if [ -z "$V_END_AFTER" ]; then
 	exit 1
 fi
 if [ -n "$STATE_END" ] && [ "$V_END_AFTER" = "$STATE_END" ]; then
-	echo "ERROR: validator.json period_end still equals current-cycle-state (${V_END_AFTER});" >&2
-	echo "       node-info.sh did not advance to a new cycle, so uptime-history would" >&2
-	echo "       still see no boundary. Inspect metalgo RPC before continuing." >&2
-	exit 1
+	# validator.json's cycle window == current-cycle-state's. Two cases:
+	#  (a) first run, node-info failed to advance -> genuine error, abort.
+	#  (b) idempotent re-run: a prior run already recorded the closed cycle AND
+	#      advanced current-cycle-state to match validator.json -> fine, continue.
+	if [ "$(jq '.cycles | length' "$UPTIME_JSON")" -ge 2 ]; then
+		echo "   validator.json == current-cycle-state, but the closed cycle is already"
+		echo "   recorded (idempotent re-run) — continuing."
+	else
+		echo "ERROR: validator.json period_end still equals current-cycle-state (${V_END_AFTER});" >&2
+		echo "       node-info.sh did not advance to a new cycle, so uptime-history would" >&2
+		echo "       still see no boundary. Inspect metalgo RPC before continuing." >&2
+		exit 1
+	fi
 fi
 
 # ---- 4/6 record the just-closed cycle -------------------------------------
