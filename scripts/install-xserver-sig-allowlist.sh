@@ -7,7 +7,7 @@
 #   anchor-source.json.sig
 #   anchor-receipt.json.sig
 #   identity.json.sig (defensive: already served but not currently uploaded
-#                      via push-to-xserver.sh — extension future-proofs
+#                      via push-to-web-host.sh — extension future-proofs
 #                      operator-triggered signature refreshes)
 #
 # The wrapper's existing signature branch (if any) is not disturbed. This

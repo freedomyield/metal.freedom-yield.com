@@ -2,6 +2,13 @@
 # prep-cycle-anchor-recording.sh — record the just-closed cycle into the
 # audit DAG so the next anchor can be broadcast with a fresh dag_root_hash.
 #
+# ⚠️ DEPRECATED (2026-07-04, commit 42797ae). The "proper fix" this script's own
+#    footer calls for is now implemented: cycle-gate.sh ungates cycle-artifact-write
+#    (the closed-cycle write proceeds while only broadcast stays gated), so the
+#    transition deadlock this script hole-punched no longer exists. Retained only
+#    until cycle-4 (~2026-08-04) validates the gate fix in production; delete after.
+#    Do NOT reach for this on the next transition — the record crons now just work.
+#
 # RUNS ON: the validator host, as root. Broadcasts NOTHING.
 #
 # WHY THIS EXISTS (cycle-gate ordering gap, surfaced on the first real
@@ -189,11 +196,11 @@ fi
 
 # ---- 6/6 publish to the web host ------------------------------------------
 echo "== 6/6 publish validator.json + cycle-history.jsonl + uptime ledgers =="
-sudo -u deploy bash scripts/push-to-xserver.sh validator.json        2>&1 | sed 's/^/   validator:     /'
+sudo -u deploy bash scripts/push-to-web-host.sh validator.json        2>&1 | sed 's/^/   validator:     /'
 sudo -u deploy env WEB_HOST_FILE=/etc/freedom-yield/xserver-host \
 	bash scripts/push-to-web-host.sh cycle-history.jsonl 2>&1 | sed 's/^/   cycle-history: /'
-sudo -u deploy bash scripts/push-to-xserver.sh uptime-cycles.json    2>&1 | sed 's/^/   uptime-cycles: /'
-sudo -u deploy bash scripts/push-to-xserver.sh uptime-recent.json    2>&1 | sed 's/^/   uptime-recent: /'
+sudo -u deploy bash scripts/push-to-web-host.sh uptime-cycles.json    2>&1 | sed 's/^/   uptime-cycles: /'
+sudo -u deploy bash scripts/push-to-web-host.sh uptime-recent.json    2>&1 | sed 's/^/   uptime-recent: /'
 
 trap - EXIT
 echo ""

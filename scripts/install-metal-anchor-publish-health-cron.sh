@@ -26,7 +26,7 @@ fi
 read -r -d '' EXPECTED <<CRON || true
 # Every 15 minutes, verify that https://metal.freedom-yield.com/api/anchor-source.json
 # returns 200. On non-200, auto-recover by pushing the Hetzner-local
-# public/api/anchor-source.json via push-to-xserver.sh. All events (including
+# public/api/anchor-source.json via push-to-web-host.sh. All events (including
 # successful recoveries) are appended to /var/log/anchor-publish-health.log.
 #
 # Motivation: GitHub Actions rsync used to delete the runtime anchor-source.json

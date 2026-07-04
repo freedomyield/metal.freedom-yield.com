@@ -6,7 +6,7 @@
 # Motivation (P2, Clean Fix Plan, 2026-07-01):
 #   receipt v2 anchor_source_url points at https://metal.freedom-yield.com/
 #   api/anchor-source.json, but that URL currently returns 404 because the
-#   file has never been published to Xserver. push-to-xserver.sh has now
+#   file has never been published to Xserver. push-to-web-host.sh has now
 #   been extended on Hetzner to include anchor-source.json / anchor-receipt.
 #   json / anchor-history.jsonl, but the Xserver-side forced-command wrapper
 #   at /home/deploy/bin/receive-metal-push carries its own independent
@@ -135,7 +135,7 @@ echo
 if [ "$RC" -eq 0 ]; then
 	echo "==> Xserver wrapper allowlist extension complete."
 	echo "    Next: from Hetzner, run"
-	echo "      bash scripts/push-to-xserver.sh anchor-source.json"
+	echo "      bash scripts/push-to-web-host.sh anchor-source.json"
 	echo "    then curl https://metal.freedom-yield.com/api/anchor-source.json"
 	echo "    to verify the file is now served (200)."
 else
