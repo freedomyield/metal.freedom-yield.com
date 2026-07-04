@@ -70,7 +70,11 @@ done
 NODE_ID="${NODE_ID:-NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v}"
 METALGO_RPC="${METALGO_RPC:-http://127.0.0.1:9650}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-DRIVER="${SCRIPT_DIR}/post-anchor-event.sh"
+# Dispatch target on a presence transition. Env-overridable so the cron can point
+# at notify-anchor-transition.sh (DETECTION/ALERT-ONLY) under Mac-only signing,
+# where post-anchor-event.sh's Hetzner-side auto-broadcast can never sign the
+# Mac-held anchor key. Default preserved for backward compat / other callers.
+DRIVER="${ANCHOR_DRIVER:-${SCRIPT_DIR}/post-anchor-event.sh}"
 STATE_DIR="${FY_STATE_DIR:-/var/lib/freedom-yield}"
 STATE_FILE="${STATE_DIR}/anchor-watcher-state.json"
 
