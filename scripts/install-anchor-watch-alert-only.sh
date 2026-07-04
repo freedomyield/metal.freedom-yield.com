@@ -15,8 +15,12 @@ NOTIFY="${REPO}/scripts/notify.sh"
 TOPIC=/etc/freedom-yield/ntfy-topic
 
 # --- prerequisites (fail closed if the alert-only driver is not deployed) ---
-[ -x "$DRIVER" ] || { echo "ERROR: notify driver missing/not executable: $DRIVER" >&2
+# sync-to-validator-host.sh does not preserve the +x bit, so ensure it here
+# (watch-anchor-events.sh execs the driver directly and requires it executable).
+[ -f "$DRIVER" ] || { echo "ERROR: notify driver missing: $DRIVER" >&2
                       echo "       run  sync-to-validator-host.sh  from the Mac first." >&2; exit 1; }
+chmod +x "$DRIVER" "${REPO}/scripts/watch-anchor-events.sh"
+[ -x "$DRIVER" ] || { echo "ERROR: could not make notify driver executable: $DRIVER" >&2; exit 1; }
 [ -x "$NOTIFY" ] || { echo "ERROR: notify.sh missing/not executable: $NOTIFY" >&2; exit 1; }
 if [ ! -r "$TOPIC" ] || [ ! -s "$TOPIC" ]; then
 	echo "WARN: ntfy topic not configured at $TOPIC — alerts will no-op (non-fatal)." >&2
