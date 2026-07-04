@@ -92,3 +92,7 @@ public/api/build.json
 # .publish-denylist.example (tracked、secret なし)。built-in の IP regex + 埋め込み
 # hash で大半は捕捉するので、この denylist は「取りこぼす追加 exact 文字列」用の任意層。
 .publish-denylist
+
+# cycle-gate test ed25519 key — regenerated at test time by setup_test_key(); never commit
+tests/cycle-gate/fixtures/test-identity-key
+tests/cycle-gate/fixtures/test-identity-key.pub

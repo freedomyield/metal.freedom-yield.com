@@ -18,7 +18,13 @@ description = "Project-level allowlist"
 #     of the on-chain anchor payload, not secrets. Gitleaks high-entropy
 #     heuristics fire on the hex strings (see anchor-source.substantive.json
 #     manifest_root, false-positive on generic-api-key rule).
+#   - tests/cycle-gate/fixtures/test-identity-key(.pub) is a throwaway ed25519
+#     keypair REGENERATED at test time by setup_test_key() in run-tests.sh. It is
+#     git-untracked + .gitignore'd (never enters history), but `gitleaks detect
+#     --no-git` scans the working tree and flags the regenerated file. Not a real
+#     secret; allowlisted so filesystem scans stay clean.
 paths = [
   '''scripts/dr-drill\.sh''',
   '''public/api/anchor-source\.[^/]+\.json''',
+  '''tests/cycle-gate/fixtures/test-identity-key(\.pub)?''',
 ]
