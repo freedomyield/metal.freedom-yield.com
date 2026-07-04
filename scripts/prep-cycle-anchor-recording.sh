@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+# prep-cycle-anchor-recording.sh — record the just-closed cycle into the
+# audit DAG so the next anchor can be broadcast with a fresh dag_root_hash.
+#
+# RUNS ON: the validator host, as root. Broadcasts NOTHING.
+#
+# WHY THIS EXISTS (cycle-gate ordering gap, surfaced on the first real
+# cycle 2 -> 3 transition):
+#   The moment a cycle closes, metalgo already reports the *next* cycle, so
+#   cycle-gate.sh flips to "deferred" (chain signature != approved). That
+#   deferral correctly blocks the anchor-watch cron from broadcasting a stale
+#   dag_root_hash — but it ALSO blocks uptime-history.sh's Job B (the append
+#   of the just-closed cycle to uptime-cycles.json). Result: the closed cycle
+#   is never recorded, cycle-history.jsonl never grows, and the DAG root never
+#   advances — so resume-after-cycle-start.sh polls forever for a "fresh"
+#   dag_root_hash that nothing produced.
+#
+#   There is no window where "the closed cycle is closed" AND "the gate is
+#   green" overlap, so recording must happen with the gate temporarily green.
+#   This script opens that window SAFELY:
+#     1. disable the anchor-watch cron   (so a green gate cannot let the cron
+#                                          broadcast a stale dag mid-window)
+#     2. back up + remove cycle-gate-state.json (gate returns green =
+#                                          backward-compat, per CYCLE_GATE.md
+#                                          rollback lever 1)
+#     3. run uptime-history.sh -> record the closed cycle
+#     4. run gen-cycle-history.sh -> rebuild cycle-history.jsonl
+#     5. publish cycle-history.jsonl + the uptime ledgers
+#
+#   The gate is NOT re-created here; resume-after-cycle-start.sh --apply
+#   re-creates it (approved = the new cycle) at broadcast time. The cron is
+#   NOT re-enabled here; that is a deliberate post-broadcast operator step
+#   (printed at the end) so no stale broadcast can slip through the window.
+#
+# IDEMPOTENT: if the just-closed cycle is already in cycle-history.jsonl the
+#   script reports "already recorded" and makes no changes.
+#
+# NOT a substitute for a permanent fix. The proper fix is to let the
+#   closed-cycle write proceed while only the broadcast stays gated. Tracked
+#   separately; this unblocks the cycle 3 anchor today.
+
+set -euo pipefail
+
+REPO=/home/deploy/metal.freedom-yield.com
+STATE_DIR="${UPTIME_STATE_DIR:-/var/lib/freedom-yield}"
+GATE_STATE="${STATE_DIR}/cycle-gate-state.json"
+CRON=/etc/cron.d/metal-anchor-watch
+STAMP="$(date +%Y%m%d-%H%M%S)"
+GATE_BAK="${GATE_STATE}.bak-prep-${STAMP}"
+CRON_DISABLED="${CRON}.disabled-cycle-transition-${STAMP}"
+
+# ---- guards ---------------------------------------------------------------
+[ "$(id -u)" -eq 0 ] || { echo "ERROR: run as root on the validator host." >&2; exit 1; }
+[ -d "$REPO" ] || { echo "ERROR: ${REPO} not found — this is not the validator host." >&2; exit 1; }
+cd "$REPO"
+command -v jq >/dev/null || { echo "ERROR: jq required." >&2; exit 1; }
+
+UPTIME_JSON="public/api/uptime-cycles.json"
+CYCLE_JSONL="public/api/cycle-history.jsonl"
+RECEIPT="public/api/anchor-receipt.json"
+
+# Rollback guidance if anything fails after we start mutating.
+CRON_MOVED=0
+rollback_hint() {
+	local rc=$?
+	[ "$rc" -eq 0 ] && return 0
+	echo "" >&2
+	echo "!! FAILED (rc=${rc}). Partial state — roll back manually:" >&2
+	[ "$CRON_MOVED" -eq 1 ] && echo "   re-enable cron:  mv ${CRON_DISABLED} ${CRON}" >&2
+	[ -f "$GATE_BAK" ] && echo "   restore gate:    sudo -u deploy cp -a ${GATE_BAK} ${GATE_STATE}" >&2
+	echo "   (do NOT run resume/broadcast until the state is understood)" >&2
+}
+trap rollback_hint EXIT
+
+# ---- safety gate: no broadcast may have occurred for the in-progress cycle -
+if [ -f "$RECEIPT" ]; then
+	echo "ERROR: ${RECEIPT} exists — an anchor broadcast may already have run." >&2
+	echo "       Inspect it before proceeding; this script refuses to touch a" >&2
+	echo "       host that has already broadcast for the current cycle." >&2
+	exit 1
+fi
+
+# ---- idempotency: is the closed cycle already recorded? -------------------
+# On-chain the validator is in cycle N (in-progress). The just-closed cycle is
+# N-1. cycle-history.jsonl should end at N-1 once recorded.
+BEFORE_CYCLES="$(jq '.cycles | length' "$UPTIME_JSON")"
+BEFORE_LINES=0; [ -f "$CYCLE_JSONL" ] && BEFORE_LINES="$(grep -c . "$CYCLE_JSONL" || true)"
+echo "== state before =="
+echo "   uptime-cycles.json closed cycles : ${BEFORE_CYCLES}"
+echo "   cycle-history.jsonl lines        : ${BEFORE_LINES}"
+echo "   highest recorded cycle_n         : $(jq -s 'max_by(.cycle_n).cycle_n // 0' "$CYCLE_JSONL" 2>/dev/null || echo 0)"
+
+# ---- 1/5 disable the anchor-watch cron ------------------------------------
+echo "== 1/5 disable anchor-watch cron (reversible) =="
+if [ -f "$CRON" ]; then
+	mv "$CRON" "$CRON_DISABLED"
+	CRON_MOVED=1
+	echo "   moved ${CRON} -> ${CRON_DISABLED}  (cron.d ignores dotted names)"
+else
+	echo "   ${CRON} already absent — skipping"
+fi
+
+# ---- 2/5 back up + remove the cycle-gate state (gate -> green) -------------
+echo "== 2/5 back up + remove cycle-gate-state.json (gate -> green) =="
+if [ -f "$GATE_STATE" ]; then
+	sudo -u deploy cp -a "$GATE_STATE" "$GATE_BAK"
+	sudo -u deploy rm -f "$GATE_STATE"
+	echo "   backup: ${GATE_BAK}"
+	echo "   removed live state — cycle-gate.sh now returns green (backward compat)"
+else
+	echo "   ${GATE_STATE} already absent — gate already green"
+fi
+sudo -u deploy bash scripts/cycle-gate.sh --side-effect=cycle-artifact-write \
+	&& echo "   confirmed: cycle-artifact-write is GREEN" \
+	|| { echo "ERROR: gate still not green after removing state file." >&2; exit 1; }
+
+# ---- 3/5 record the just-closed cycle -------------------------------------
+echo "== 3/5 uptime-history.sh — record the closed cycle =="
+sudo -u deploy env UPTIME_STATE_DIR="$STATE_DIR" bash scripts/uptime-history.sh 2>&1 | sed 's/^/   /'
+AFTER_CYCLES="$(jq '.cycles | length' "$UPTIME_JSON")"
+echo "   closed cycles: ${BEFORE_CYCLES} -> ${AFTER_CYCLES}"
+if [ "$AFTER_CYCLES" -le "$BEFORE_CYCLES" ]; then
+	echo "ERROR: uptime-history.sh did not append a closed cycle." >&2
+	echo "       (metalgo may not yet report the prior cycle as closed, or the" >&2
+	echo "        boundary was already consumed). Inspect before continuing." >&2
+	exit 1
+fi
+
+# ---- 4/5 rebuild cycle-history.jsonl --------------------------------------
+echo "== 4/5 gen-cycle-history.sh — rebuild cycle-history.jsonl =="
+sudo -u deploy bash scripts/gen-cycle-history.sh 2>&1 | sed 's/^/   /'
+AFTER_LINES="$(grep -c . "$CYCLE_JSONL" || true)"
+echo "   cycle-history.jsonl lines: ${BEFORE_LINES} -> ${AFTER_LINES}"
+[ "$AFTER_LINES" -gt "$BEFORE_LINES" ] \
+	|| { echo "ERROR: cycle-history.jsonl did not grow." >&2; exit 1; }
+
+# ---- 5/5 publish to the web host ------------------------------------------
+echo "== 5/5 publish cycle-history.jsonl + uptime ledgers =="
+sudo -u deploy bash scripts/push-to-web-host.sh cycle-history.jsonl 2>&1 | sed 's/^/   cycle-history: /'
+sudo -u deploy bash scripts/push-to-xserver.sh uptime-cycles.json    2>&1 | sed 's/^/   uptime-cycles: /'
+sudo -u deploy bash scripts/push-to-xserver.sh uptime-recent.json    2>&1 | sed 's/^/   uptime-recent: /'
+
+trap - EXIT
+echo ""
+echo "================= DONE (no broadcast performed) ================="
+echo "Closed cycle recorded. cycle-history.jsonl now has ${AFTER_LINES} line(s)."
+echo ""
+echo "NEXT STEPS (in order):"
+echo "  1. Mac:  OPERATOR_IDENTITY_KEY=~/.ssh/<identity-key> \\"
+echo "             bash scripts/operator-local/gen-identity.sh"
+echo "           -> dag_root_hash MUST now differ from 0bd4e667… (it now"
+echo "              includes the just-closed cycle). If it is unchanged, STOP."
+echo "  2. Mac:  git add public/api/identity.json public/api/identity.json.sig \\"
+echo "             public/api/cycles-history.json && git commit && git push"
+echo "  3. Wait for the GitHub Actions Deploy workflow to finish."
+echo "  4. Validator host: run the gated broadcast —"
+echo "       sudo -u deploy env PUBLIC_BASE=http://127.0.0.1:8085 \\"
+echo "         bash ${REPO}/scripts/resume-after-cycle-start.sh --apply"
+echo "     (PUBLIC_BASE points at the local Caddy because identity.json is not"
+echo "      propagated to the public Xserver origin; the fresh dag is served"
+echo "      locally after deploy. The broadcast still goes through"
+echo "      bin/safe-broadcast's four PRIME DIRECTIVE gates.)"
+echo "  5. AFTER a successful broadcast, re-enable the anchor cron:"
+echo "       mv ${CRON_DISABLED} ${CRON}"
+echo "================================================================"
