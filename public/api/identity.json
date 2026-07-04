@@ -23,13 +23,13 @@
   "artifact_manifest": {
     "evidence_json": {
       "url": "https://metal.freedom-yield.com/api/evidence.json",
-      "sha256": "c50f1a49fd94adf6c37c3e2f87c958aa4745e9c20b6036f1b7a17e7ec670eccd",
+      "sha256": "6bd067a88f19551401c962af092fbcfb0e328c0f9e35b4439230e005aee575d6",
       "schema_url": "https://metal.freedom-yield.com/api/evidence.schema.v1.json",
-      "schema_sha256": "de1e6238b80cb7f3db2f8c27582a268791f1f0371bc3dc446164b34bf2cb112a"
+      "schema_sha256": "a8281616487f6ce683bc6b0266bf5ae2b4799e05f4b8a779c5af34e734e875c6"
     },
     "validator_json": {
       "url": "https://metal.freedom-yield.com/api/validator.json",
-      "sha256": "af2ff0924ecf21ff59a3074ef075777c11c775bd0afbb558d3c82f07fbef6988",
+      "sha256": "65572068d8ce2ea9cc13b4e0d4aacd2fe2ce43a984291bbd0677caf8c6dac89a",
       "schema_url": "https://metal.freedom-yield.com/api/validator.schema.v1.json",
       "schema_sha256": "6bc5d50d2fcf8dc6485b09ce96df53eca649e71ea9831ddf64abc00d62650c1f"
     },
@@ -45,12 +45,16 @@
     },
     "incidents_json": {
       "url": "https://metal.freedom-yield.com/api/incidents.json",
-      "sha256": "4bdf09a9a215397d22478e02669a8709b0fd2c9cb9c8424e7dc69434d3f61a29"
+      "sha256": "2c3a6b3507098dfecf2ca83f6e4b254994821fe2b60b06d52a77e48d5b2a97ee"
     }
   },
-  "artifact_root": "90d0d0b00e0f2c1dfc9ea4ce0cc16692f4715813a7920f252ad352cb5b91b661",
+  "artifact_root": "cb51b6be48f0ba9e54accc4f8827cd9293e567b9b35ad21fc39e9a48390ba2dc",
   "dag_root_hash": "0bd4e667dcb7397c655ad4bccdef282b76d8a98cde4b67a8396790bcd07d3bb4",
   "cycles_history_url": "https://metal.freedom-yield.com/api/cycles-history.json",
   "anchor_receipt_url": "https://metal.freedom-yield.com/api/anchor-receipt.json",
-  "generated_at": "2026-06-22T10:52:33Z"
+  "audit": {
+    "anchor_receipt": "https://metal.freedom-yield.com/api/anchor-receipt.json",
+    "anchor_history": "https://metal.freedom-yield.com/api/anchor-history.jsonl"
+  },
+  "generated_at": "2026-07-04T04:34:42Z"
 }
