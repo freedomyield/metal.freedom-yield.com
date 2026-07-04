@@ -29,32 +29,32 @@
     },
     "validator_json": {
       "url": "https://metal.freedom-yield.com/api/validator.json",
-      "sha256": "65572068d8ce2ea9cc13b4e0d4aacd2fe2ce43a984291bbd0677caf8c6dac89a",
+      "sha256": "9d41a4662a1e1c7775043c5a1c55e08ace5eda31ba4b49962a8e02cc05bfa8a6",
       "schema_url": "https://metal.freedom-yield.com/api/validator.schema.v1.json",
       "schema_sha256": "6bc5d50d2fcf8dc6485b09ce96df53eca649e71ea9831ddf64abc00d62650c1f"
     },
     "cycle_history_jsonl": {
       "url": "https://metal.freedom-yield.com/api/cycle-history.jsonl",
-      "sha256": "3170d1405f411d3840b3c59684b6fd16f2bd52f46acd997de993171eb3ead60f",
+      "sha256": "7e756708b6092e1d33a1e039081350066c90082422148e74c4151386f6b39f42",
       "schema_url": "https://metal.freedom-yield.com/api/cycle-history.schema.v1.json",
       "schema_sha256": "1c017b6f94f86543f31cfc0b29d32771364ef317b1909c0647d886b2f7ec15a2"
     },
     "uptime_cycles_json": {
       "url": "https://metal.freedom-yield.com/api/uptime-cycles.json",
-      "sha256": "cc63dc4b38cd8826537afe73ef20f9133c86c874a72bd55d97f94383a6ddc805"
+      "sha256": "f021ab899bfe1cc06b8a9bbf3c217f5893fc51acd76372fd56be5b8181315b11"
     },
     "incidents_json": {
       "url": "https://metal.freedom-yield.com/api/incidents.json",
       "sha256": "2c3a6b3507098dfecf2ca83f6e4b254994821fe2b60b06d52a77e48d5b2a97ee"
     }
   },
-  "artifact_root": "cb51b6be48f0ba9e54accc4f8827cd9293e567b9b35ad21fc39e9a48390ba2dc",
-  "dag_root_hash": "0bd4e667dcb7397c655ad4bccdef282b76d8a98cde4b67a8396790bcd07d3bb4",
+  "artifact_root": "82f3d661397ee3b92a1d5b3f934ae354fa063ee010ac4e34e8dc7248da8f8ce4",
+  "dag_root_hash": "c205c51ba0f1c7ed4f5a91a5dc860ccb2bd6e2ac7b2aead0903b64e210d3bb5c",
   "cycles_history_url": "https://metal.freedom-yield.com/api/cycles-history.json",
   "anchor_receipt_url": "https://metal.freedom-yield.com/api/anchor-receipt.json",
   "audit": {
     "anchor_receipt": "https://metal.freedom-yield.com/api/anchor-receipt.json",
     "anchor_history": "https://metal.freedom-yield.com/api/anchor-history.jsonl"
   },
-  "generated_at": "2026-07-04T04:34:42Z"
+  "generated_at": "2026-07-04T05:54:50Z"
 }
