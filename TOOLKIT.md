@@ -126,6 +126,52 @@ These reflect our specific two-host topology and our specific initial VPS setup.
 
 ---
 
+## Tier 4 — Anchor + cycle-gate subsystem
+
+The cryptographic-evidence anchor pipeline (identity → anchor-source → A-chain inscription → receipt) and the cycle-transition gate. Under Mac-only signing the host composes + detects; the operator's Mac signs + broadcasts; the host publishes the receipt. See [`docs/audits/constitution-2026-07-04-design-stocktake.md`](docs/audits/constitution-2026-07-04-design-stocktake.md) for the subsystem's design debt + target design.
+
+**Anchor pipeline (v2, HC-single 4-action `fya<S>c<N>` pack):**
+
+| Script | Purpose | Cron |
+|---|---|---|
+| `scripts/gen-anchor-source.sh` | Compose `public/api/anchor-source.json` (3-branch identity‖observations‖artifacts + `dag_root_computed`) from live sources. Single source of truth for the inscribed value. | on demand |
+| `scripts/sign-anchor-event.sh` | Compose the 4-action tx from anchor-source and broadcast via `bin/safe-broadcast` (mainnet 4-gate). `--dry-run` composes + emits tx JSON only. Runs on the Mac (holds the anchor key). | manual |
+| `scripts/gen-anchor-receipt.sh` | Independently re-fetch the tx from mainnet Hyperion, run the 7 verify gates, write `public/api/anchor-receipt.json`. | post-broadcast |
+| `scripts/append-anchor-history.sh` | Append the v2 receipt as one JSONL line to `public/api/anchor-history.jsonl` with append-only invariants (prev-tx chain, genesis prev=null). | post-broadcast |
+| `scripts/run-anchor-pipeline.sh` | v2 orchestrator: gen-anchor-source → sign → receipt → history. (Host-signing assumption stranded under Mac-only signing — see stock-take #5.) | manual |
+| `scripts/post-anchor-event.sh` | Legacy anchor event processor (single-action `fyid1:`). **Deprecated** — incompatible with the v2 flag-only signer (stock-take #4). | — |
+| `scripts/watch-anchor-events.sh` | Poll metalgo for validator-presence transitions; dispatch to `ANCHOR_DRIVER` (default legacy; alert-only in production). | every 5 min |
+| `scripts/notify-anchor-transition.sh` | DETECTION/ALERT-ONLY driver: on a transition, ntfy-push "run the manual anchor from the Mac". Broadcasts nothing. | via watcher |
+| `scripts/preview-cycle3-anchor-broadcast.sh` | Read-only STAGE-1 preview: regenerate anchor-source + dry-run-log, display the exact tx shape before an operator broadcast. | manual |
+| `scripts/prep-cycle-anchor-recording.sh` | **Deprecated** (superseded by the cycle-gate ungate, 42797ae). Recorded a just-closed cycle by hole-punching the old transition deadlock. | — |
+| `scripts/check-anchor-publish-health.sh` | Verify `anchor-source.json` is served publicly; auto-recover by re-pushing. | every 15 min |
+| `scripts/run-testnet-rehearsal.sh` | Operator installer for the testnet anchor rehearsal (gate-1 material). | manual |
+
+**Cycle-gate (transition safety):**
+
+| Script | Purpose | Cron |
+|---|---|---|
+| `scripts/cycle-gate.sh` | Passive gate consulted before cycle-dependent side effects. `broadcast` is signature-gated; `observe` + `cycle-artifact-write` are always green (recording a closed cycle is backward-looking). | via consumers |
+| `scripts/resume-after-cycle-start.sh` | Active operator command run after a new cycle starts: verify fresh identity, write the gate approval state, trigger the anchor. (Phase 3/4 stranded under Mac-only signing — stock-take #4.) | manual |
+
+**Security guards + one-shot installers:**
+
+| Script | Purpose | Cron |
+|---|---|---|
+| `scripts/broadcast-guard.sh` | PreToolUse hook enforcing the PRIME DIRECTIVE (blocks raw broadcast commands without the safe-broadcast marker + fresh operator token). | hook |
+| `scripts/publish-guard.sh` | Block forbidden host identifiers + operator PII from entering public content (6-layer detector + 3-layer hook). | hook/pre-commit |
+| `scripts/sanitize-history.sh` | One-command scrub of forbidden host identifiers + PII across all git history (filter-repo, bundle backup). | manual |
+| `scripts/install-tier1-hook.sh` | Install the tier-1 broadcast-guard PreToolUse hook. | manual |
+| `scripts/install-anchor-watch-alert-only.sh` | Re-enable the anchor-watch cron in alert-only mode (`ANCHOR_DRIVER=notify-anchor-transition.sh`). | manual |
+| `scripts/install-metal-anchor-publish-health-cron.sh` | Install the `/etc/cron.d/metal-anchor-publish-health` cron. | manual |
+| `scripts/install-xserver-anchor-source-allowlist.sh` | Extend the Xserver-side forced-command allowlist for `anchor-source.json`. | manual |
+| `scripts/install-xserver-sig-allowlist.sh` | Extend the Xserver receive-metal-push allowlist for `.sig` files. | manual |
+| `scripts/install-delegator-feed-started-at.sh` | One-line installer for the delegator-feed `started_at` field. | manual |
+| `scripts/notify-evidence-health.sh` | Health check for `/api/evidence.json` publication; `--summary` mode for the daily digest. | daily |
+| `scripts/anomaly-state-init.sh` | Operator-driven baseline state initialiser for the anomaly detector. | manual |
+
+---
+
 ## Cron pattern we use
 
 One file per logical pipeline, kept readable. Roughly:
