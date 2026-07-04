@@ -15,20 +15,31 @@
 #   2  error     — usage error / invalid input
 #
 # Side-effect type semantics:
-#   broadcast            — A-chain inscription (IRREV). post-anchor-event.sh.
+#   broadcast            — A-chain inscription (IRREV). Signature-gated: a stale
+#                          dag must never be inscribed. THE ONLY genuinely gated
+#                          side effect.
 #   cycle-artifact-write — write to a cycle-affecting artifact / state file
 #                          (cycle-history.jsonl, uptime-cycles.json,
 #                          validator.json, evidence.json, renewal-ics).
-#                          Same gate logic as broadcast; distinct log marker.
+#                          ALWAYS GREEN. Recording a *closed* cycle is
+#                          backward-looking and can never be premature (the cycle
+#                          already ended). Gating it only created the transition
+#                          deadlock (node-info → uptime Job B → gen-cycle-history
+#                          all deferred exactly when the just-closed cycle needed
+#                          recording). See docs/audits/constitution-2026-07-04-
+#                          design-stocktake.md trouble #2. Distinct log marker.
 #   cycle-aware-notify   — validator-presence based notification (ntfy).
-#                          Same gate logic; distinct log marker.
+#                          Same gate logic as broadcast; distinct log marker.
+#                          (Ungating this is a separate open decision — it changes
+#                          anomaly-alert suppression during transitions.)
 #   observe              — read-only observation. Always green.
 #
 # Behavior matrix (= invariants from docs/CYCLE_GATE.md):
 #   observe                                   → always green
+#   cycle-artifact-write                      → always green (never gated)
 #   state file absent                         → green (= backward compat)
-#   state file present + chain signature matches approved → green
-#   state file present + chain signature differs from approved → deferred
+#   broadcast/cycle-aware-notify + signature matches approved → green
+#   broadcast/cycle-aware-notify + signature differs         → deferred
 #   state file corrupt                        → fail-closed (deferred)
 #   metalgo RPC unreachable                   → fail-closed (deferred)
 #   validator absent from chain               → deferred
@@ -75,13 +86,16 @@ case "${SIDE_EFFECT}" in
 		exit 2 ;;
 esac
 
-# observe is unconditionally green. Observation streams must never be gated
-# (= invariant from docs/CYCLE_GATE.md). This also short-circuits the RPC
-# call for the most-common gate consultation type.
-if [ "${SIDE_EFFECT}" = "observe" ]; then
-	echo "[cycle-gate] observe → green" >&2
-	exit 0
-fi
+# observe and cycle-artifact-write are unconditionally green — no state read, no
+# RPC. Observation streams must never be gated; and recording a *closed* cycle is
+# backward-looking (the cycle already ended) so it can never be premature. Gating
+# cycle-artifact-write only produced the transition deadlock. Only `broadcast`
+# (and, pending a separate decision, `cycle-aware-notify`) consult the signature.
+case "${SIDE_EFFECT}" in
+	observe|cycle-artifact-write)
+		echo "[cycle-gate] ${SIDE_EFFECT} → green (never gated)" >&2
+		exit 0 ;;
+esac
 
 # ---- config -----------------------------------------------------------------
 STATE_DIR="${FY_STATE_DIR:-/var/lib/freedom-yield}"

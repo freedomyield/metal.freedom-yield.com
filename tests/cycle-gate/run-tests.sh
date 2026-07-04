@@ -684,17 +684,17 @@ stop_mock
 assert_exit "T19 cycle-artifact-write + match → green" 0 ${RC}
 rm -rf "${STATE_DIR}"
 
-# ==== T20: cycle-gate cycle-artifact-write + state mismatch → deferred ===
-echo "[T20] cycle-gate cycle-artifact-write + state mismatch → deferred"
+# ==== T20: cycle-gate cycle-artifact-write is UNCONDITIONALLY green =======
+# (design-stocktake #2) Recording a closed cycle is backward-looking and can
+# never be premature, so cycle-artifact-write is never gated — proven green even
+# with a mismatched state file AND RPC unreachable (= it short-circuits before
+# reading state or hitting the chain, exactly like observe).
+echo "[T20] cycle-gate cycle-artifact-write + mismatch state + RPC down → green (never gated)"
 STATE_DIR="$(mktemp -d -t cgstate.XXXXXX)"
 cp "${FIXTURE_DIR}/state-old.json" "${STATE_DIR}/cycle-gate-state.json"
-start_mock "${FIXTURE_DIR}/chain-matches.json"
-FY_STATE_DIR="${STATE_DIR}" METALGO_RPC="http://127.0.0.1:${PORT}" \
-	NODE_ID="NodeID-TEST123" \
+FY_STATE_DIR="${STATE_DIR}" METALGO_RPC="http://127.0.0.1:1" FY_RPC_TIMEOUT=2 \
 	run_gate --side-effect=cycle-artifact-write
-RC=$?
-stop_mock
-assert_exit "T20 cycle-artifact-write + mismatch → deferred" 1 ${RC}
+assert_exit "T20 cycle-artifact-write never gated → green" 0 $?
 rm -rf "${STATE_DIR}"
 
 # ==== T21: post-anchor-event + cycle-gate.sh MISSING → exit 11 ==========
@@ -733,8 +733,11 @@ stop_mock
 assert_exit "T21 fail-closed when cycle-gate.sh missing → exit 11" 11 ${RC}
 rm -rf "${STATE_DIR}" "${SCEN}" "${TMP_REPO_ROOT}" "${TMP_SCRIPT_DIR}"
 
-# ==== T22: 5 simple cycle scripts skip on gate deferred → exit 0 + log ===
-echo "[T22] all 5 simple cycle scripts skip on gate deferred"
+# ==== T22: 5 cycle-artifact-write scripts are NOT deferred (ungated) ======
+# (design-stocktake #2) cycle-artifact-write is unconditionally green, so the 5
+# scripts that consult it must proceed past the gate even with a mismatched state
+# — none may print the "deferred by cycle-gate" skip marker.
+echo "[T22] all 5 cycle-artifact-write scripts proceed past ungated gate (not deferred)"
 T22_LOG="$(mktemp -t t22.XXXXXX)"
 T22_PASS=0
 T22_FAIL=0
@@ -789,23 +792,23 @@ STATJSON
 		bash "${TMP_REPO_BASE}/scripts/${script_name}" 2>&1 || true)"
 	RC=$?
 	if echo "${OUT}" | grep -q "deferred by cycle-gate"; then
-		printf '  ✓ PASS: T22[%s] gate deferred detected in stderr\n' "${script_name}"
-		T22_PASS=$((T22_PASS + 1))
-	else
-		printf '  ✗ FAIL: T22[%s] no "deferred by cycle-gate" in stderr (rc=%s)\n' \
-			"${script_name}" "${RC}"
+		printf '  ✗ FAIL: T22[%s] STILL deferred (cycle-artifact-write must never gate)\n' \
+			"${script_name}"
 		T22_FAIL=$((T22_FAIL + 1))
 		echo "${OUT}" | head -3 >&2
+	else
+		printf '  ✓ PASS: T22[%s] proceeds past ungated gate (not deferred)\n' "${script_name}"
+		T22_PASS=$((T22_PASS + 1))
 	fi
 	rm -rf "${STATE_DIR}" "${TMP_REPO_BASE}"
 	stop_mock
 done
 if [ "${T22_FAIL}" -eq 0 ]; then
 	PASS=$((PASS + 1))
-	printf '  ✓ PASS: T22 all %d simple cycle scripts skip on deferred gate\n' "${T22_PASS}"
+	printf '  ✓ PASS: T22 all %d cycle-artifact-write scripts proceed past ungated gate\n' "${T22_PASS}"
 else
 	FAIL=$((FAIL + 1))
-	FAIL_LINES+=("T22 cycle scripts gate skip (${T22_FAIL} of 5 failed)")
+	FAIL_LINES+=("T22 cycle-artifact-write scripts still deferred (${T22_FAIL} of 5)")
 fi
 
 # ==== T23: check-anomalies.sh partial gate (= cycle-section wrap) =======
