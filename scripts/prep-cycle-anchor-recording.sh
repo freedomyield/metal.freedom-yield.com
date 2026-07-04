@@ -23,9 +23,18 @@
 #     2. back up + remove cycle-gate-state.json (gate returns green =
 #                                          backward-compat, per CYCLE_GATE.md
 #                                          rollback lever 1)
-#     3. run uptime-history.sh -> record the closed cycle
-#     4. run gen-cycle-history.sh -> rebuild cycle-history.jsonl
-#     5. publish cycle-history.jsonl + the uptime ledgers
+#     3. run node-info.sh -> refresh validator.json to the CURRENT on-chain
+#                            cycle. node-info.sh is itself gate-deferred, so
+#                            during a transition validator.json is left stale
+#                            at the just-closed cycle. uptime-history's Job B
+#                            detects a boundary by comparing validator.json's
+#                            period_end_unix to current-cycle-state.json's; if
+#                            validator.json is stale the two match and NO
+#                            boundary is seen. Refreshing it first is what makes
+#                            the closed-cycle append fire.
+#     4. run uptime-history.sh -> record the closed cycle
+#     5. run gen-cycle-history.sh -> rebuild cycle-history.jsonl
+#     6. publish validator.json + cycle-history.jsonl + the uptime ledgers
 #
 #   The gate is NOT re-created here; resume-after-cycle-start.sh --apply
 #   re-creates it (approved = the new cycle) at broadcast time. The cron is
@@ -114,8 +123,34 @@ sudo -u deploy bash scripts/cycle-gate.sh --side-effect=cycle-artifact-write \
 	&& echo "   confirmed: cycle-artifact-write is GREEN" \
 	|| { echo "ERROR: gate still not green after removing state file." >&2; exit 1; }
 
-# ---- 3/5 record the just-closed cycle -------------------------------------
-echo "== 3/5 uptime-history.sh — record the closed cycle =="
+# ---- 3/6 refresh validator.json to the current on-chain cycle -------------
+# node-info.sh is itself gate-deferred, so during a transition validator.json
+# is left stale at the just-closed cycle. uptime-history's Job B detects a
+# boundary by comparing validator.json.period_end_unix to
+# current-cycle-state.json.period_end_unix; if both are stale they match and no
+# boundary fires. Refresh validator.json (gate is green now) so the two differ.
+echo "== 3/6 node-info.sh — refresh validator.json to the current cycle =="
+VALIDATOR_JSON="public/api/validator.json"
+CYCLE_STATE="${STATE_DIR}/current-cycle-state.json"
+STATE_END="$(jq -r '.period_end_unix // empty' "$CYCLE_STATE" 2>/dev/null || true)"
+V_END_BEFORE="$(jq -r '.period_end_unix // .end_unix // empty' "$VALIDATOR_JSON" 2>/dev/null || true)"
+echo "   before: validator.json period_end=${V_END_BEFORE:-?}  current-cycle-state period_end=${STATE_END:-?}"
+sudo -u deploy bash scripts/node-info.sh 2>&1 | sed 's/^/   /'
+V_END_AFTER="$(jq -r '.period_end_unix // .end_unix // empty' "$VALIDATOR_JSON" 2>/dev/null || true)"
+echo "   after:  validator.json period_end=${V_END_AFTER:-?}"
+if [ -z "$V_END_AFTER" ]; then
+	echo "ERROR: validator.json has no period_end_unix after node-info.sh." >&2
+	exit 1
+fi
+if [ -n "$STATE_END" ] && [ "$V_END_AFTER" = "$STATE_END" ]; then
+	echo "ERROR: validator.json period_end still equals current-cycle-state (${V_END_AFTER});" >&2
+	echo "       node-info.sh did not advance to a new cycle, so uptime-history would" >&2
+	echo "       still see no boundary. Inspect metalgo RPC before continuing." >&2
+	exit 1
+fi
+
+# ---- 4/6 record the just-closed cycle -------------------------------------
+echo "== 4/6 uptime-history.sh — record the closed cycle =="
 sudo -u deploy env UPTIME_STATE_DIR="$STATE_DIR" bash scripts/uptime-history.sh 2>&1 | sed 's/^/   /'
 AFTER_CYCLES="$(jq '.cycles | length' "$UPTIME_JSON")"
 echo "   closed cycles: ${BEFORE_CYCLES} -> ${AFTER_CYCLES}"
@@ -126,16 +161,17 @@ if [ "$AFTER_CYCLES" -le "$BEFORE_CYCLES" ]; then
 	exit 1
 fi
 
-# ---- 4/5 rebuild cycle-history.jsonl --------------------------------------
-echo "== 4/5 gen-cycle-history.sh — rebuild cycle-history.jsonl =="
+# ---- 5/6 rebuild cycle-history.jsonl --------------------------------------
+echo "== 5/6 gen-cycle-history.sh — rebuild cycle-history.jsonl =="
 sudo -u deploy bash scripts/gen-cycle-history.sh 2>&1 | sed 's/^/   /'
 AFTER_LINES="$(grep -c . "$CYCLE_JSONL" || true)"
 echo "   cycle-history.jsonl lines: ${BEFORE_LINES} -> ${AFTER_LINES}"
 [ "$AFTER_LINES" -gt "$BEFORE_LINES" ] \
 	|| { echo "ERROR: cycle-history.jsonl did not grow." >&2; exit 1; }
 
-# ---- 5/5 publish to the web host ------------------------------------------
-echo "== 5/5 publish cycle-history.jsonl + uptime ledgers =="
+# ---- 6/6 publish to the web host ------------------------------------------
+echo "== 6/6 publish validator.json + cycle-history.jsonl + uptime ledgers =="
+sudo -u deploy bash scripts/push-to-xserver.sh validator.json        2>&1 | sed 's/^/   validator:     /'
 sudo -u deploy bash scripts/push-to-web-host.sh cycle-history.jsonl 2>&1 | sed 's/^/   cycle-history: /'
 sudo -u deploy bash scripts/push-to-xserver.sh uptime-cycles.json    2>&1 | sed 's/^/   uptime-cycles: /'
 sudo -u deploy bash scripts/push-to-xserver.sh uptime-recent.json    2>&1 | sed 's/^/   uptime-recent: /'
