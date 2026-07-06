@@ -17,7 +17,7 @@
 #     黙ってミュート、本物の障害は ~50 秒で検知)
 #   - public /api/validator.json observedAt > 15 min stale (= push pipeline stuck)
 #
-# State file: /var/lib/<your-namespace>/anomaly-state.json
+# State file: /var/lib/freedom-yield/anomaly-state.json
 #   {
 #     "metalgo": "running",   ← last seen status
 #     "caddy":   "running",

@@ -3,12 +3,12 @@
 #
 # Maintains three artefacts:
 #
-#   1. /var/lib/<your-namespace>/uptime-history.jsonl
+#   1. /var/lib/freedom-yield/uptime-history.jsonl
 #      Master append-only daily ledger. ONE FILE for the entire lifetime
 #      of the validator. Loss = unrecoverable history. Backed up to Mac
 #      + Dropbox per [[reference_backup_locations]] discipline.
 #
-#   2. /var/lib/<your-namespace>/current-cycle-state.json
+#   2. /var/lib/freedom-yield/current-cycle-state.json
 #      In-flight cycle metadata. Used to detect cycle boundary by
 #      comparing validator.json's period_end_unix against last seen.
 #
@@ -39,7 +39,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VALIDATOR_JSON="${VALIDATOR_JSON:-$ROOT/public/api/validator.json}"
 STATUS_JSON="${STATUS_JSON:-$ROOT/public/api/server-status.json}"
-STATE_DIR="${UPTIME_STATE_DIR:-/var/lib/<your-namespace>}"
+STATE_DIR="${UPTIME_STATE_DIR:-/var/lib/freedom-yield}"
 HIST_JSONL="${STATE_DIR}/uptime-history.jsonl"
 CYCLE_STATE="${STATE_DIR}/current-cycle-state.json"
 # Optional operator-maintained notes file. Schema:

@@ -180,7 +180,7 @@ echo "wrote $OUT — ${COUNT} active validators, ${CLUSTERS} multi-node clusters
 
 # ─────────────────────── C+D: changes detector + Gini time-series ──
 # Delegated to Python — bash subshells were silently swallowing errors.
-STATE_DIR="${UPTIME_STATE_DIR:-/var/lib/<your-namespace>}"
+STATE_DIR="${UPTIME_STATE_DIR:-/var/lib/freedom-yield}"
 mkdir -p "$STATE_DIR"
 PEERS_JSON="$OUT" \
 NAMES_JSON="$NAMES_TMP" \

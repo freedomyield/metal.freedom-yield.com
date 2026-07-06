@@ -180,14 +180,14 @@ EOF
 
 step_anomaly_cron() {
   log "Step 6d/8: install 5-minute anomaly detector cron (ntfy.sh push)"
-  mkdir -p /var/lib/<your-namespace>
-  chown "$DEPLOY_USER:$DEPLOY_USER" /var/lib/<your-namespace>
-  if [ ! -f /etc/<your-namespace>/ntfy-topic ]; then
-    mkdir -p /etc/<your-namespace>
-    openssl rand -hex 16 | (echo -n ""; cat) > /etc/<your-namespace>/ntfy-topic
-    chown root:"$DEPLOY_USER" /etc/<your-namespace>/ntfy-topic
-    chmod 640 /etc/<your-namespace>/ntfy-topic
-    echo "Generated new ntfy topic at /etc/<your-namespace>/ntfy-topic — read it and subscribe in the ntfy Android app."
+  mkdir -p /var/lib/freedom-yield
+  chown "$DEPLOY_USER:$DEPLOY_USER" /var/lib/freedom-yield
+  if [ ! -f /etc/freedom-yield/ntfy-topic ]; then
+    mkdir -p /etc/freedom-yield
+    openssl rand -hex 16 | (echo -n ""; cat) > /etc/freedom-yield/ntfy-topic
+    chown root:"$DEPLOY_USER" /etc/freedom-yield/ntfy-topic
+    chmod 640 /etc/freedom-yield/ntfy-topic
+    echo "Generated new ntfy topic at /etc/freedom-yield/ntfy-topic — read it and subscribe in the ntfy Android app."
   fi
   cat > /etc/cron.d/metal-anomalies <<EOF
 */5 * * * * $DEPLOY_USER bash $DEPLOY_DIR/scripts/check-anomalies.sh >> /var/log/anomalies.log 2>&1

@@ -4,7 +4,7 @@
 # Reads the current endTime from public/api/validator.json and projects renewal
 # events for the current cycle + the next 2 estimated cycles (monthly cadence).
 # Output: public/calendar/<token>.ics, where <token> is read from
-# /etc/<your-namespace>/calendar-token (a stable random hex string). The token
+# /etc/freedom-yield/calendar-token (a stable random hex string). The token
 # acts as a hard-to-guess URL component — without it the file is undiscoverable.
 #
 # Per-cycle events (1):
@@ -33,7 +33,7 @@ fi
 
 VALIDATOR_JSON="${VALIDATOR_JSON:-$ROOT/public/api/validator.json}"
 OUT_DIR="$ROOT/public/calendar"
-TOKEN_FILE="${CALENDAR_TOKEN_FILE:-/etc/<your-namespace>/calendar-token}"
+TOKEN_FILE="${CALENDAR_TOKEN_FILE:-/etc/freedom-yield/calendar-token}"
 RENEWAL_DOC_URL="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/VALIDATOR_RENEWAL.md"
 
 if [ ! -r "$TOKEN_FILE" ]; then

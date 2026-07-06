@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # notify.sh — push a single ntfy.sh notification.
-# Reads the topic from $NTFY_TOPIC_FILE (default /etc/<your-namespace>/ntfy-topic).
+# Reads the topic from $NTFY_TOPIC_FILE (default /etc/freedom-yield/ntfy-topic).
 # Topic is treated as a shared secret (anyone who knows it can publish/subscribe).
 #
 # Usage:
@@ -37,7 +37,7 @@
 # docs/MONITORING_OPS.md §6 for the surrounding K-3 design.
 set -euo pipefail
 
-TOPIC_FILE="${NTFY_TOPIC_FILE:-/etc/<your-namespace>/ntfy-topic}"
+TOPIC_FILE="${NTFY_TOPIC_FILE:-/etc/freedom-yield/ntfy-topic}"
 STRICT="${NOTIFY_STRICT_EXIT:-0}"
 PRIO="${1:-default}"
 TITLE="${2:-Freedom Yield ops}"

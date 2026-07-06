@@ -9,7 +9,7 @@
 #   - metalgo: container status, peer count, P/C chain heights, bootstrap
 #
 # Two output files:
-#   /var/lib/<your-namespace>/node-health-history.jsonl
+#   /var/lib/freedom-yield/node-health-history.jsonl
 #     validator host master. Append-only. KEEP FOREVER. Full schema.
 #     ~250 bytes/day → 90 KB/year → 1 MB / 11 years. Trivial.
 #
@@ -25,7 +25,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STATUS_JSON="${STATUS_JSON:-$ROOT/public/api/server-status.json}"
-STATE_DIR="${UPTIME_STATE_DIR:-/var/lib/<your-namespace>}"
+STATE_DIR="${UPTIME_STATE_DIR:-/var/lib/freedom-yield}"
 HIST_JSONL="${STATE_DIR}/node-health-history.jsonl"
 OUT_PUBLIC="${ROOT}/public/api/node-health-recent.json"
 RECENT_DAYS="${RECENT_DAYS:-90}"

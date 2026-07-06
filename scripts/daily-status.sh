@@ -40,7 +40,7 @@ fi
 NOTIFY="$ROOT/scripts/notify.sh"
 STATUS_JSON="$ROOT/public/api/server-status.json"
 VALIDATOR_JSON="$ROOT/public/api/validator.json"
-WALLET_CONFIG="/etc/<your-namespace>/wallet-addresses.json"
+WALLET_CONFIG="/etc/freedom-yield/wallet-addresses.json"
 METALGO_RPC="${METALGO_RPC:-http://127.0.0.1:9650}"
 
 if [ ! -f "$STATUS_JSON" ] || [ ! -f "$VALIDATOR_JSON" ]; then
