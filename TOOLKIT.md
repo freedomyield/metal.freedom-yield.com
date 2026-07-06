@@ -163,6 +163,7 @@ The cryptographic-evidence anchor pipeline (identity → anchor-source → A-cha
 | `scripts/sanitize-history.sh` | One-command scrub of forbidden host identifiers + PII across all git history (filter-repo, bundle backup). | manual |
 | `scripts/install-tier1-hook.sh` | Install the tier-1 broadcast-guard PreToolUse hook. | manual |
 | `scripts/install-anchor-watch-alert-only.sh` | Re-enable the anchor-watch cron in alert-only mode (`ANCHOR_DRIVER=notify-anchor-transition.sh`). | manual |
+| `scripts/install-repoint-publish-crons.sh` | Repoint the live publish crons from the retired `push-to-xserver.sh` to the canonical `push-to-web-host.sh` (superset-checked, backed up, `--dry-run`/`--purge-orphans`). | manual |
 | `scripts/install-metal-anchor-publish-health-cron.sh` | Install the `/etc/cron.d/metal-anchor-publish-health` cron. | manual |
 | `scripts/install-xserver-anchor-source-allowlist.sh` | Extend the Xserver-side forced-command allowlist for `anchor-source.json`. | manual |
 | `scripts/install-xserver-sig-allowlist.sh` | Extend the Xserver receive-metal-push allowlist for `.sig` files. | manual |
