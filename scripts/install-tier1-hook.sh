@@ -137,10 +137,10 @@ else
 	SMOKE_BLOCK_RC=$?
 fi
 
-if [ "${SMOKE_ALLOW_RC}" -eq 0 ] && [ "${SMOKE_BLOCK_RC}" -eq 1 ]; then
+if [ "${SMOKE_ALLOW_RC}" -eq 0 ] && [ "${SMOKE_BLOCK_RC}" -eq 2 ]; then
 	echo "PASS 5/5: guard smoke test (safe=allow, broadcast=block)"
 else
-	echo "FAIL 5/5: guard smoke test unexpected rcs (safe=${SMOKE_ALLOW_RC} expected 0, broadcast=${SMOKE_BLOCK_RC} expected 1)" >&2
+	echo "FAIL 5/5: guard smoke test unexpected rcs (safe=${SMOKE_ALLOW_RC} expected 0, broadcast=${SMOKE_BLOCK_RC} expected 2)" >&2
 	exit 1
 fi
 

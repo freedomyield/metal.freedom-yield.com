@@ -74,31 +74,31 @@ run_case "allow: word 'cleos' in unrelated context (which)" 0 \
 	'{"tool_name":"Bash","tool_input":{"command":"which cleos"}}'
 
 # ---- block cases (broadcast shape, no token) ----
-run_case "block: proton action" 1 \
+run_case "block: proton action" 2 \
 	'{"tool_name":"Bash","tool_input":{"command":"proton action eosio.token transfer arg"}}'
-run_case "block: proton transaction" 1 \
+run_case "block: proton transaction" 2 \
 	'{"tool_name":"Bash","tool_input":{"command":"proton transaction {}"}}'
-run_case "block: proton transaction:push" 1 \
+run_case "block: proton transaction:push" 2 \
 	'{"tool_name":"Bash","tool_input":{"command":"proton transaction:push arg"}}'
-run_case "block: cleos push transaction" 1 \
+run_case "block: cleos push transaction" 2 \
 	'{"tool_name":"Bash","tool_input":{"command":"cleos push transaction tx.json"}}'
-run_case "block: cleos push_transaction (underscore form)" 1 \
+run_case "block: cleos push_transaction (underscore form)" 2 \
 	'{"tool_name":"Bash","tool_input":{"command":"cleos --url=http://x push_transaction tx.json"}}'
-run_case "block: cleos push action" 1 \
+run_case "block: cleos push action" 2 \
 	'{"tool_name":"Bash","tool_input":{"command":"cleos push action eosio.token transfer arg"}}'
-run_case "block: curl push_transaction endpoint" 1 \
+run_case "block: curl push_transaction endpoint" 2 \
 	'{"tool_name":"Bash","tool_input":{"command":"curl -sS -X POST http://api/v1/chain/push_transaction -d @tx.json"}}'
-run_case "block: curl issueTx endpoint" 1 \
+run_case "block: curl issueTx endpoint" 2 \
 	'{"tool_name":"Bash","tool_input":{"command":"curl -X POST http://node/ext/bc/P/issueTx -d @tx.json"}}'
-run_case "block: curl eth_sendRawTransaction" 1 \
+run_case "block: curl eth_sendRawTransaction" 2 \
 	'{"tool_name":"Bash","tool_input":{"command":"curl http://node -d {\"method\":\"eth_sendRawTransaction\"}"}}'
-run_case "block: curl /ext/bc/X issueTx" 1 \
+run_case "block: curl /ext/bc/X issueTx" 2 \
 	'{"tool_name":"Bash","tool_input":{"command":"curl http://node/ext/bc/X/issueTx"}}'
-run_case "block: curl /ext/bc/C issueTx" 1 \
+run_case "block: curl /ext/bc/C issueTx" 2 \
 	'{"tool_name":"Bash","tool_input":{"command":"curl http://node/ext/bc/C/issueTx"}}'
-run_case "block: wget push_transaction" 1 \
+run_case "block: wget push_transaction" 2 \
 	'{"tool_name":"Bash","tool_input":{"command":"wget --post-data=@tx.json http://api/v1/chain/push_transaction"}}'
-run_case "block: metalgo IssueTx" 1 \
+run_case "block: metalgo IssueTx" 2 \
 	'{"tool_name":"Bash","tool_input":{"command":"metalgo IssueTx arg"}}'
 
 # ---- C2-1: raw direct broadcast is BLOCKED even with a fresh token ----
@@ -107,9 +107,9 @@ run_case "block: metalgo IssueTx" 1 \
 # pattern) and its internal proton call is a subprocess the hook never sees.
 # Raw calls bypass gates 1/3/4, so a fresh operator token must NOT override.
 touch "$TEST_TOKEN"
-run_case "block: proton transaction:push WITH fresh token, no safe-broadcast marker" 1 \
+run_case "block: proton transaction:push WITH fresh token, no safe-broadcast marker" 2 \
 	'{"tool_name":"Bash","tool_input":{"command":"proton transaction:push arg"}}'
-run_case "block: curl issueTx WITH fresh token, no safe-broadcast marker" 1 \
+run_case "block: curl issueTx WITH fresh token, no safe-broadcast marker" 2 \
 	'{"tool_name":"Bash","tool_input":{"command":"curl http://node/ext/bc/P/issueTx"}}'
 
 # ---- sanctioned wrapper path: safe-broadcast marker + fresh token → allow ----
@@ -124,7 +124,7 @@ unset FYD_SAFE_BROADCAST
 # tier-2 gate 2 and is re-checked as defense in depth on the sanctioned path.
 export FYD_SAFE_BROADCAST=1
 rm -f "$TEST_TOKEN"
-run_case "block: safe-broadcast marker but NO token → block" 1 \
+run_case "block: safe-broadcast marker but NO token → block" 2 \
 	'{"tool_name":"Bash","tool_input":{"command":"proton transaction:push arg"}}'
 touch "$TEST_TOKEN"
 unset FYD_SAFE_BROADCAST
@@ -153,7 +153,7 @@ touch -t "$OLD_TS" "$TEST_TOKEN"
 # Set the marker so this exercises the expiry check on the sanctioned path
 # (without the marker the raw-broadcast block would fire first).
 export FYD_SAFE_BROADCAST=1
-run_case "block: safe-broadcast marker + expired token → block" 1 \
+run_case "block: safe-broadcast marker + expired token → block" 2 \
 	'{"tool_name":"Bash","tool_input":{"command":"proton transaction:push arg"}}'
 unset FYD_SAFE_BROADCAST
 

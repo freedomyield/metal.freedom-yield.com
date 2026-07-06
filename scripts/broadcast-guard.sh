@@ -9,7 +9,11 @@
 # Contract (Claude Code PreToolUse hook):
 #   - stdin: JSON with .tool_name and .tool_input
 #   - exit 0: allow the tool call
-#   - exit 1: block the tool call; stderr becomes the visible error
+#   - exit 2: block the tool call; stderr is fed back to Claude.
+#     (Claude Code PreToolUse semantics: ONLY exit 2 blocks. Any other
+#     non-zero exit is a NON-blocking error and the tool call proceeds —
+#     the original exit-1 implementation therefore never blocked anything
+#     in a live session, discovered 2026-07-06 by controlled probe.)
 #
 # Behavior:
 #   1. Read JSON from stdin.
@@ -57,7 +61,7 @@ INPUT="$(cat)"
 # and a broken guard MUST NOT default to allow.
 if ! command -v jq >/dev/null 2>&1; then
 	printf '=== PRIME_DIRECTIVE_VIOLATION ===\nbroadcast-guard: jq not found; guard cannot parse tool input; failing closed.\n' >&2
-	exit 1
+	exit 2
 fi
 
 TOOL_NAME="$(printf '%s' "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null)"
@@ -141,7 +145,7 @@ This block is enforced by scripts/broadcast-guard.sh, the tier-1 mechanical
 implementation of docs/CONSTITUTION.md PRIME DIRECTIVE. Do not disable the
 guard or rewrite the call to evade it; use bin/safe-broadcast.
 EOF
-	exit 1
+	exit 2
 fi
 
 # --- sanctioned wrapper context (FYD_SAFE_BROADCAST=1) ---
@@ -150,7 +154,7 @@ fi
 
 if [ ! -f "$TOKEN_FILE" ]; then
 	printf '=== PRIME_DIRECTIVE_VIOLATION ===\nbroadcast-guard: safe-broadcast context but operator token missing (%s); failing closed.\n' "$TOKEN_FILE" >&2
-	exit 1
+	exit 2
 fi
 
 # Portable mtime read: try GNU stat, then BSD stat.
@@ -161,7 +165,7 @@ elif TOKEN_MTIME="$(stat -f %m "$TOKEN_FILE" 2>/dev/null)"; then
 	:
 else
 	printf '=== PRIME_DIRECTIVE_VIOLATION ===\nbroadcast-guard: cannot stat token file %s; failing closed.\n' "$TOKEN_FILE" >&2
-	exit 1
+	exit 2
 fi
 
 NOW="$(date +%s)"
@@ -169,7 +173,7 @@ AGE="$((NOW - TOKEN_MTIME))"
 
 if [ "$AGE" -ge "$TOKEN_TTL" ]; then
 	printf '=== PRIME_DIRECTIVE_VIOLATION ===\nbroadcast-guard: safe-broadcast context but operator token expired (%ss >= %ss max); failing closed.\n' "$AGE" "$TOKEN_TTL" >&2
-	exit 1
+	exit 2
 fi
 
 # Sanctioned path with a fresh token. Log the authorized broadcast for
