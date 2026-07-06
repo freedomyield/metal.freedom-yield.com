@@ -165,6 +165,7 @@ The cryptographic-evidence anchor pipeline (identity → anchor-source → A-cha
 | `scripts/install-anchor-watch-alert-only.sh` | Re-enable the anchor-watch cron in alert-only mode (`ANCHOR_DRIVER=notify-anchor-transition.sh`). | manual |
 | `scripts/install-repoint-publish-crons.sh` | Repoint the live publish crons from the retired `push-to-xserver.sh` to the canonical `push-to-web-host.sh` (superset-checked, backed up, `--dry-run`/`--purge-orphans`). | manual |
 | `scripts/install-metal-anchor-publish-health-cron.sh` | Install the `/etc/cron.d/metal-anchor-publish-health` cron. | manual |
+| `scripts/install-cron-env-headers.sh` | Add the missing `SHELL=/bin/bash` + `PATH` env headers to `/etc/cron.d/metal-*` files (linter rule 5; idempotent, backed up, `--dry-run`). | manual |
 | `scripts/install-xserver-anchor-source-allowlist.sh` | Extend the Xserver-side forced-command allowlist for `anchor-source.json`. | manual |
 | `scripts/install-xserver-sig-allowlist.sh` | Extend the Xserver receive-metal-push allowlist for `.sig` files. | manual |
 | `scripts/deploy/build-rsync-excludes.sh` | Emit the shared rsync feed-exclusion args (single source of truth: `deploy/feed-excludes.txt`) for both deploy targets, so validator-host and Xserver rsyncs cannot drift. | CI (deploy.yml) |
