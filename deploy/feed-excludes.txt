@@ -1,0 +1,30 @@
+# Dynamically-pushed feeds — written into the public web root's api/ and
+# calendar/ by the validator-host-side push (scripts/push-to-web-host.sh) and the
+# Xserver-side receive wrapper. Any rsync with --delete into a public tree
+# MUST exclude these or the delete erases fresh feeds.
+#
+# Paths are relative to public/. Consumed by
+# scripts/deploy/build-rsync-excludes.sh (single source of truth). Keep in
+# lock-step with docs/DEPLOY_OWNERSHIP_MATRIX.md and the Xserver receive
+# wrapper allowlist.
+api/validator.json
+api/server-status.json
+api/peer-geo.json
+api/uptime-recent.json
+api/uptime-cycles.json
+api/peers.json
+api/evidence.json
+api/fee-market.json
+api/fee-market-history.jsonl
+api/node-health-recent.json
+api/peers-changes.json
+api/peers-gini.json
+api/peers-gini-history.jsonl
+api/peers-history-index.json
+api/cycle-history.jsonl
+api/anchor-source.json
+api/anchor-source.json.sig
+api/anchor-receipt.json
+api/anchor-receipt.json.sig
+api/anchor-history.jsonl
+calendar/
