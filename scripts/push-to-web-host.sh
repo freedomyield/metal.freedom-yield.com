@@ -77,9 +77,10 @@ esac
 # public repo. Two acceptable sources (env wins):
 #   1. WEB_HOST env var, e.g. WEB_HOST=<deploy_user>@203.0.113.11
 #   2. WEB_HOST_FILE env var pointing at an operator-local file
-#      (default: /etc/<your-namespace>/web-host — operators set this path)
+#      (default: /etc/freedom-yield/web-host — holds only the host, never
+#       committed; the brand-namespaced PATH is public-safe, the value is not)
 # Operator runbook is in operator-local notes.
-HOST_FILE="${WEB_HOST_FILE:-/etc/<your-namespace>/web-host}"
+HOST_FILE="${WEB_HOST_FILE:-/etc/freedom-yield/web-host}"
 if [ -z "${WEB_HOST:-}" ] && [ -f "$HOST_FILE" ]; then
   WEB_HOST=$(tr -d "[:space:]" < "$HOST_FILE")
 fi
