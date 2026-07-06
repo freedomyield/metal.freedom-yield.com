@@ -467,13 +467,32 @@ if [ "${CY_CODE}" = "200" ] && curl -sSLf -o "${CY_BODY_TMP}" "${CY_URL}"; then
 	fi
 	rm -f "${CY_LEAVES_TMP}"
 	CY_SHA="$(sha256_of_stdin < "${CY_BODY_TMP}")"
+	LAST_CYCLE_N="$(jq -s 'map(.cycle_n) | max // empty' "${CY_BODY_TMP}" 2>/dev/null || true)"
 else
 	echo "  warn: ${CY_URL} not live (HTTP ${CY_CODE}); cycles branch treated as empty" >&2
 	CYCLES_BRANCH_ROOT="${NULL_BRANCH_HASH}"
 	CY_LEAF_COUNT=0
 	CY_SHA=""
+	LAST_CYCLE_N=""
 fi
 rm -f "${CY_BODY_TMP}"
+
+# Ordering guard (design-stocktake #6). Make the just-closed cycle visible, and
+# hard-stop if FY_EXPECT_CYCLE is set and the live ledger has not caught up. In
+# cycle-3, gen-identity ran BEFORE the closed cycle was recorded, so the fetched
+# cycle-history.jsonl was stale and the DAG root did not advance (trouble #1).
+# Set FY_EXPECT_CYCLE=<the just-closed cycle> to make that a machine-checked
+# precondition instead of operator vigilance.
+echo "  cycles branch: latest recorded cycle_n = ${LAST_CYCLE_N:-none} (${CY_LEAF_COUNT} leaves)" >&2
+if [ -n "${FY_EXPECT_CYCLE:-}" ]; then
+	if [ "${LAST_CYCLE_N:-}" != "${FY_EXPECT_CYCLE}" ]; then
+		echo "ERROR: FY_EXPECT_CYCLE=${FY_EXPECT_CYCLE} but the live cycle-history.jsonl's latest cycle_n is ${LAST_CYCLE_N:-none}." >&2
+		echo "       The just-closed cycle is not on the published ledger yet, so the DAG would not advance." >&2
+		echo "       Record + publish cycle ${FY_EXPECT_CYCLE} (uptime-history.sh -> gen-cycle-history.sh -> push-to-web-host.sh) first." >&2
+		exit 7
+	fi
+	echo "  ✓ ordering guard: cycle-history is fresh to expected cycle ${FY_EXPECT_CYCLE}" >&2
+fi
 
 # DAG root = SHA-256( raw(id_root) || raw(cy_root) ).
 DAG_ROOT_HASH="$(

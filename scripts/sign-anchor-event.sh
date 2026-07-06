@@ -44,6 +44,7 @@
 #   4  bin/safe-broadcast missing or non-executable
 #   5  broadcast failed (safe-broadcast propagated non-zero)
 #   6  receipt shape assembly failed
+#   7  signing host lacks the proton CLI (broadcast runs only on the operator's Mac)
 #
 # Usage:
 #   sign-anchor-event.sh --chain=<testnet-a|mainnet-a>
@@ -306,6 +307,21 @@ if [ "$DRY_RUN" = "1" ]; then
 			tx: $tx[0]
 		}'
 	exit 0
+fi
+
+# -------- signing-host assertion (design-stocktake #6) --------
+# Broadcast needs the ${XPR_ACCOUNT}@anchor proton key, which lives ONLY in the
+# operator's Mac keystore (post-2026-07-01 control). The stranded host-side
+# auto-broadcast paths (retired under #3/#4) would otherwise reach here on a
+# keyless host and fail cryptically deep inside proton. Fail early + legibly: a
+# host without the proton CLI cannot possibly sign. This is a pre-flight only —
+# it does NOT read the keystore; the definitive key gate is bin/safe-broadcast +
+# proton itself. --dry-run above needs no key and never reaches this point.
+if ! command -v proton >/dev/null 2>&1; then
+	echo "ERROR (7): proton CLI not found on PATH. sign-anchor-event.sh broadcasts only" >&2
+	echo "           where the ${XPR_ACCOUNT}@anchor signing key lives (the operator's Mac)." >&2
+	echo "           Run with --dry-run to compose the tx without a signing key." >&2
+	exit 7
 fi
 
 # -------- delegate to bin/safe-broadcast --------
