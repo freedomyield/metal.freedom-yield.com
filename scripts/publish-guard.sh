@@ -34,7 +34,10 @@
 #   2. git hook:  publish-guard.sh --diff   (stdin = git diff; scans + lines)
 #   3. raw text:  publish-guard.sh --text    (stdin = text; scans everything)
 #
-# EXIT: 0 = allow/clean, 1 = block (stderr shown; fail-closed).
+# EXIT: 0 = allow/clean. Block is MODE-AWARE (fail-closed, stderr shown):
+#   hook mode          -> exit 2 (Claude Code PreToolUse blocks ONLY on 2;
+#                         any other non-zero is a non-blocking warning)
+#   --diff / --text    -> exit 1 (git hook convention)
 #
 # Refs: memory/feedback_no_literal_host_identifier.md,
 #       memory/feedback_no_operator_name.md, memory/feedback_no_personal_finance.md,
@@ -60,6 +63,11 @@ esac
 SCAN_TEXT=""
 CTX=""
 
+# Claude Code PreToolUse blocks ONLY on exit 2 (any other non-zero exit is a
+# non-blocking warning and the tool call proceeds). git hooks conventionally
+# treat exit 1 as failure. Pick the blocking exit per mode.
+if [ "$MODE" = "hook" ]; then BLOCK_EXIT=2; else BLOCK_EXIT=1; fi
+
 if [ "$MODE" = "diff" ]; then
 	SCAN_TEXT="$(grep -E '^\+' | grep -vE '^\+\+\+' | sed 's/^+//' || true)"
 	CTX="git diff (added lines)"
@@ -70,7 +78,7 @@ else
 	INPUT="$(cat)"
 	if ! command -v jq >/dev/null 2>&1; then
 		printf 'publish-guard: jq not found; cannot parse tool input; failing closed.\n' >&2
-		exit 1
+		exit "$BLOCK_EXIT"
 	fi
 	TOOL="$(printf '%s' "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null)"
 	FP=""
@@ -97,7 +105,7 @@ else
 pre-commit/pre-push hooks that block host IP / handle / name / phone / email
 from being published. Re-run WITHOUT --no-verify.
 EOF
-				exit 1
+				exit "$BLOCK_EXIT"
 			fi
 			exit 0 ;;
 		*)
@@ -198,7 +206,7 @@ if [ -n "$FINDINGS" ] || [ -n "$DENY_HIT" ]; then
 		echo "     never commit the operator handle / real name / company name / phone / personal email"
 		echo "     / validator SSH key name. Keep genuinely local files gitignored."
 	} >&2
-	exit 1
+	exit "$BLOCK_EXIT"
 fi
 
 exit 0
