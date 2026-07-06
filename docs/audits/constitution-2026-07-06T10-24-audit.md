@@ -58,7 +58,7 @@ bin/safe-broadcast; confirm range changes do not desync.
 - Added-line PII grep (IP/xoxb/xoxp/sk-proj/PRIVATE KEY/mnemonic/passphrase/&lt;operator-handle&gt;/&lt;company-name&gt;): 0 hits. Only IP-like token is `127.0.0.1:1` (`tests`/installer intentional unreachable-RPC loopback — not a host identifier).
 - gitleaks allowlist add (`9846eb9`) is scoped to `tests/cycle-gate/fixtures/test-identity-key(\.pub)?` — a single git-untracked, `.gitignore`'d, test-time-regenerated ed25519 keypair. NOT over-broad: it is a path allowlist for one fixture, not a rule/regex disablement, so it cannot mask a real committed key elsewhere. Verified the key is also `.gitignore`'d (double lock).
 
-**Finding**: none. See Observation-1 (informational) re. the provider word "Hetzner".
+**Finding**: none. See Observation-1 (informational) re. the provider word "<provider>".
 
 ### D4 — Strategic-target axes ↔ anchor schema coverage
 
@@ -220,7 +220,7 @@ bin/safe-broadcast; confirm range changes do not desync.
 
 ## Observations (informational — not scored findings)
 
-- **Observation-1 (provider name "Hetzner")**: the word "Hetzner" appears in the new `install-repoint-publish-crons.sh` (orphan reference `sync-to-hetzner.sh`, L22/L137). It is **pre-existing and widespread** in tracked scripts at the base `5ecf4b8` (check-anchor-publish-health.sh, gen-anchor-source.sh, install-*.sh, etc.), so it is not a net-new exposure and is not classified SECRET/CONFIDENTIAL under Constitution §3.3 (the protected literals are the validator host **IP** and **SSH key names** — neither present). Recorded only because it is mildly inconsistent with the de-branding intent of `155fb24` (`push-to-xserver.sh` → `push-to-web-host.sh`), where a retired orphan still carries the provider name. No action required for compliance.
+- **Observation-1 (provider name "<provider>")**: the word "<provider>" appears in the new `install-repoint-publish-crons.sh` (orphan reference `sync-to-<provider>.sh`, L22/L137). It is **pre-existing and widespread** in tracked scripts at the base `5ecf4b8` (check-anchor-publish-health.sh, gen-anchor-source.sh, install-*.sh, etc.), so it is not a net-new exposure and is not classified SECRET/CONFIDENTIAL under Constitution §3.3 (the protected literals are the validator host **IP** and **SSH key names** — neither present). Recorded only because it is mildly inconsistent with the de-branding intent of `155fb24` (`push-to-xserver.sh` → `push-to-web-host.sh`), where a retired orphan still carries the provider name. No action required for compliance.
 
 - **Spec §1 remote-host claims (UNVERIFIED by this auditor)**: §1's empirical assertions about the Xserver (frozen mtime 2026-07-02, no `.git`, no metal cron, no site-root deploy script) rest on "a single authorized read-only root inspection on 2026-07-06." This auditor has **no SSH path to the Xserver in scope** and cannot independently re-verify those remote facts — they are separated here as **UNVERIFIED (out of auditor reach)**, not confirmed and not disputed. What IS repo-verifiable was checked and holds: `.github/workflows/deploy.yml` rsyncs to a single `$SSH_HOST`/`$DEPLOY_PATH` (L120,L134,L168); `docs/DEPLOY_OWNERSHIP_MATRIX.md:L11` does assert git deploy is the "canonical source for repo-tracked content"; `scripts/push-to-web-host.sh` exists. The §9 "⑫ decoupled from ⑤" correction is logically sound: approach C only re-syncs git-tracked static via a second rsync, while ⑫ concerns the dynamic-push (receive-wrapper allowlist) path — orthogonal channels, so C neither blocks nor unblocks ⑫.
 
@@ -245,4 +245,4 @@ bin/safe-broadcast; confirm range changes do not desync.
 - Numeric claims: all measured (gitleaks 6.35 MB, schemaVersion count = 2×"1", modes via `git ls-files -s`); no "~"/"約" markers used by the auditor.
 - Append-only: this is a NEW file; no existing `docs/audits/**` touched.
 
-> **operator へ**: 各 finding は `superpowers:receiving-code-review` の手続きで独立 verify してください。performative agreement / blind implementation は禁止。D8 の 🟡 (5e73afe) と Observation-1 (Hetzner 語) は operator 判断事項です。spec §1 の Xserver 実測は auditor 到達外のため UNVERIFIED 分離済 — 疑義あれば当該 host での再確認、または `--review=thorough --scope=` 再監査を。
+> **operator へ**: 各 finding は `superpowers:receiving-code-review` の手続きで独立 verify してください。performative agreement / blind implementation は禁止。D8 の 🟡 (5e73afe) と Observation-1 (provider 語) は operator 判断事項です。spec §1 の Xserver 実測は auditor 到達外のため UNVERIFIED 分離済 — 疑義あれば当該 host での再確認、または `--review=thorough --scope=` 再監査を。

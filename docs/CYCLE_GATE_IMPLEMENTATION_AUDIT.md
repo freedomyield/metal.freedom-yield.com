@@ -3,7 +3,7 @@
 > **Generated**: 2026-06-29
 > **Scope**: T-1 through T-6 of `project_cycle_gate_resume_tasks` memo (= read + implement + test + document, without production deploy).
 > **Status (= 2026-06-29 16:40 JST update)**: T-1〜T-6 完了 + **T-7 deploy DEPLOYED 2026-06-29 15:09 JST** + T-RD1 / T-RD2 / T-RD3 全完了。 T-8 (= 2026-07-04 cycle 3 開始 transition での初回 live 適用) は 5 日後予定。
-> **Production state (= 2026-06-29 16:40 JST update)**: scripts/ + state file Hetzner sync 済、 cycle-gate active、 定点観測 7 check 全 green。 deploy 経路は `docs/CYCLE_GATE_TRD2_AUDIT.md` + 第 7 ラウンド独立監査で verified。 過去 audit doc 内 「T-7 pending」 表記は **historical reference**、 現在 truth は本 banner。
+> **Production state (= 2026-06-29 16:40 JST update)**: scripts/ + state file the validator host sync 済、 cycle-gate active、 定点観測 7 check 全 green。 deploy 経路は `docs/CYCLE_GATE_TRD2_AUDIT.md` + 第 7 ラウンド独立監査で verified。 過去 audit doc 内 「T-7 pending」 表記は **historical reference**、 現在 truth は本 banner。
 
 ## 1. 実施 task 一覧
 
@@ -16,7 +16,7 @@
 | T-5 | test suite 整備 (= 10 scenario) | ✅ 完了 | 10/10 PASS、 Python HTTP mock + bash test runner |
 | **T-5.5** | **追加 mock test 8 件 (= 未 cover Phase 2-5 + 統合)** | ✅ 完了 | **22/22 PASS** (= T1-T18 + 4 side-effect 検証)、 mock stub 4 件 + ed25519 test 鍵 + flock shim 追加 |
 | T-6 | docs 更新 + operator 認可 gate | ✅ AI 完了 / ⏳ operator 認可待ち | docs/CYCLE_GATE.md 213 行 新規、 docs/VALIDATOR_RENEWAL.md 修正済 (= 旧 SOP + 新 SOP 並記) |
-| T-7 | deploy | ✅ **2026-06-29 15:09 JST 完了** | 5 commit + push + Hetzner sync + state file 初期書込 + 動作確認済 |
+| T-7 | deploy | ✅ **2026-06-29 15:09 JST 完了** | 5 commit + push + the validator host sync + state file 初期書込 + 動作確認済 |
 | T-8 | 2026-07-04 cycle 3 開始 transition 初回 live 適用 | ⏳ 2026-07-04 13:00:27 JST | AI 主導 orchestrate (= model α)、 手動 cron disable/enable が発生しないことを記録 |
 
 ## 2. 成果物 一覧 (= 全 file path + 行数 + sha256)
@@ -152,7 +152,7 @@ T-5.5 で追加した test infrastructure:
 | 影響 source 候補 | 評価 |
 |---|---|
 | repo working tree (= 未 commit 変更) | 7/4 当日の deploy 経路 = git push に依存、 push しなければ無影響 |
-| Hetzner production scripts | 全成果物未 sync (= sync-to-validator-host.sh 未実行) |
+| the validator host production scripts | 全成果物未 sync (= sync-to-validator-host.sh 未実行) |
 | Xserver production | 影響なし (= cycle-gate 系は validator host 専用、 deploy.yml line 146 で scripts/ exclude) |
 | 既存 cron 設定 | 無変更 |
 | 既存 state file (= anchor-pending、 anchor-watcher-state、 anomaly-state、 last-anchored-root) | 無変更 |
@@ -200,12 +200,12 @@ gh run watch --exit-status
 
 # Note: deploy.yml line 146 で scripts/ は Xserver 配信から exclude されている。
 # 上記 push は Xserver には scripts/* を配さない (= 仕様通り)。 docs/ も同 line 29 で exclude。
-# scripts/* + docs/* は Hetzner 側に sync-to-validator-host.sh 経由で配置する。
+# scripts/* + docs/* は the validator host 側に sync-to-validator-host.sh 経由で配置する。
 
-# 4. Hetzner sync (= scripts/ + docs/ を validator host へ配置)
+# 4. the validator host sync (= scripts/ + docs/ を validator host へ配置)
 bash scripts/sync-to-validator-host.sh
 
-# 5. Hetzner で cycle-gate-state.json 初期書込 (= 現サイクル承認)
+# 5. the validator host で cycle-gate-state.json 初期書込 (= 現サイクル承認)
 ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
     'sudo -u deploy bash /home/deploy/metal.freedom-yield.com/scripts/resume-after-cycle-start.sh --apply'
 

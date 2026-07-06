@@ -105,7 +105,7 @@ Tasks currently in the queue, evaluated against the reachable set:
 | T-8.prep, T-8 (cycle-gate transition) | operational continuity | keep |
 | T-9 (state file schemaVersion) | verification hardening | keep |
 | T-RD4 (residual sanitize sweep) | operational hygiene | keep, post-7/4 |
-| T-J-20260701 (Hetzner git divergence) | operational hygiene | keep, post-7/4 |
+| T-J-20260701 (the validator host git divergence) | operational hygiene | keep, post-7/4 |
 
 No task in the current queue targets an unreachable set element; none needs to be dropped for strategic misalignment. However, several implicit claims in docs (older references to "institutional readiness" without the pseudonymous qualifier) need to be corrected in a docs-consistency pass — treated as a new task below.
 

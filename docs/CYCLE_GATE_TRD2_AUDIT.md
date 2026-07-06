@@ -114,7 +114,7 @@ gate logic はすべて同じ (= state file vs chain signature 比較)。 type �
 
 operator 直接確認 (= 2026-06-29): 「**cycle 系の cron を対象にして**、 host 系は独立してるので、 放置で良い」 → 設計は A + B = 8 cron、 C = 5 cron は触らない。
 
-## 7. /var/lib/freedom-yield/ state file map (= 2026-06-29 Hetzner 確認)
+## 7. /var/lib/freedom-yield/ state file map (= 2026-06-29 the validator host 確認)
 
 | file | writer | reader | T-RD2 gate 影響 |
 |---|---|---|---|
@@ -169,7 +169,7 @@ risk 評価: race window 内に cycle transition が起こる確率 = 極小 (= 
 |---|---|
 | 全成果物 commit | **0 件** |
 | 全成果物 push | **0 件** |
-| Hetzner production sync | **0 件** |
+| the validator host production sync | **0 件** |
 | Xserver 反映 | **0 件** (= deploy.yml exclude) |
 | 既存 cron schedule | 無変更 |
 | 既存 state file (= /var/lib/freedom-yield/*) | 無変更 |

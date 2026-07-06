@@ -47,8 +47,6 @@ EOS
 	printf '%s\n' '*/5 * * * * deploy cd /x && bash scripts/node-info.sh && bash scripts/push-to-xserver.sh a.json' > "${CD}/metal-node-info"
 	printf '%s\n' '0 4 * * * deploy cd /x && bash scripts/push-to-web-host.sh b.json' > "${CD}/metal-already-new"
 	printf 'stale\n' > "${SD}/push-to-xserver.sh.bak-20260101-000000"
-	printf '#!/usr/bin/env bash\n# retired sync\n' > "${SD}/sync-to-hetzner.sh"
-	chmod +x "${SD}/sync-to-hetzner.sh"
 }
 run(){ REPO="${WORK}" SCRIPTS_DIR="${SD}" CRON_DIR="${CD}" BACKUP_DIR="${WORK}/backups" bash "${INSTALLER}" "$@" 2>&1; }
 
@@ -114,8 +112,7 @@ run --purge-orphans >/dev/null 2>&1; RC=$?
 RETIRED_DIR="$(ls -d "${SD}"/.retired-* 2>/dev/null | head -1)"
 if [ "${RC}" = 0 ] && [ -n "${RETIRED_DIR}" ] \
    && [ ! -e "${SD}/push-to-xserver.sh" ] \
-   && [ -e "${RETIRED_DIR}/push-to-xserver.sh" ] \
-   && [ -e "${RETIRED_DIR}/sync-to-hetzner.sh" ]; then
+   && [ -e "${RETIRED_DIR}/push-to-xserver.sh" ]; then
 	ok "T7 orphans moved to .retired (reversible, not deleted)"
 else no "T7 purge-orphans (rc=${RC} retired=${RETIRED_DIR:-none})"; fi
 

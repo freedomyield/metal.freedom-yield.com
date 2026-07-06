@@ -19,9 +19,11 @@
 #   sudo bash scripts/install-repoint-publish-crons.sh [--dry-run] [--purge-orphans]
 #     --dry-run        show what would change, touch nothing
 #     --purge-orphans  after repoint, MOVE the now-unreferenced orphan scripts
-#                      (push-to-xserver.sh + its .bak-* + sync-to-hetzner.sh) into
-#                      a timestamped .retired-*/ dir. Never rm — reversible, and
-#                      VPS file deletion stays a human decision.
+#                      (push-to-xserver.sh + its .bak-*) into a timestamped
+#                      .retired-*/ dir. Never rm — reversible, and VPS file
+#                      deletion stays a human decision. (A separate legacy
+#                      provider-named sync orphan, if present on the host, is
+#                      removed by the operator manually — not referenced here.)
 #
 # Env overrides (test-time):
 #   CRON_DIR     dir holding the cron files      (default /etc/cron.d)
@@ -134,7 +136,7 @@ say ""
 # ===== 3. orphan report / optional purge ====================================
 say "── orphan scripts (no longer referenced by any cron after repoint) ──"
 shopt -s nullglob
-ORPHANS=("${SCRIPTS_DIR}/${OLD_NAME}" "${SCRIPTS_DIR}/${OLD_NAME}".bak-* "${SCRIPTS_DIR}/sync-to-hetzner.sh")
+ORPHANS=("${SCRIPTS_DIR}/${OLD_NAME}" "${SCRIPTS_DIR}/${OLD_NAME}".bak-*)
 shopt -u nullglob
 FOUND=0
 RETIRE_DIR="${SCRIPTS_DIR}/.retired-${TS}"

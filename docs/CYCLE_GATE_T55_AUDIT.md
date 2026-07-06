@@ -219,7 +219,7 @@ operator 要件: 「当日にならないと、 わからない、 というも�
 |---|---|
 | 全成果物 git commit | **0 件** |
 | 全成果物 git push | **0 件** |
-| Hetzner production sync | **0 件** |
+| the validator host production sync | **0 件** |
 | Xserver production 反映 | **0 件** (= deploy.yml line 146 で scripts/ exclude、 line 29 で docs/ exclude、 仮に push されても production 不到達) |
 | 既存 cron 設定 | 無変更 |
 | 既存 state file | 無変更 |

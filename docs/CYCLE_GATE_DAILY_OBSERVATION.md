@@ -1,12 +1,12 @@
 # Cycle gate — daily production observation log
 
-> **Purpose**: AI が Hetzner validator host を SSH 経由で daily snapshot 取得し、 本 doc に append する。 独立監査役 (= Hetzner SSH 不可) が live production 状態を doc 経由で verify 可能にする補強 mechanism。
+> **Purpose**: AI が validator host を SSH 経由で daily snapshot 取得し、 本 doc に append する。 独立監査役 (= the validator host SSH 不可) が live production 状態を doc 経由で verify 可能にする補強 mechanism。
 >
 > **Trigger**: 2026-06-29 第 7 ラウンド独立監査の「⏸ trust-but-can't-verify (= 9 件 L1-L9)」 指摘への対応。 監査役が「live host 観測不可」 のため AI claim を信用するしかなかった範囲を、 doc 化された snapshot で構造的に verify 可能化。
 >
 > **Format**: 1 snapshot = 1 day、 末尾 append-only。 各 snapshot は最低 9 件 (= L1-L9) の verifiable data を含む:
 >
-> - L1: Hetzner scripts/ sha256 一覧 (= sync 整合性)
+> - L1: the validator host scripts/ sha256 一覧 (= sync 整合性)
 > - L2: cycle-gate-state.json 内容 + sha256
 > - L3: 直近 24h の 5 min cron tick 回数 + 最新 fire 時刻
 > - L4: anomalies.log 内 cycle-gate green markers 累計
@@ -23,7 +23,7 @@ source ~/.config/freedom-yield-env.sh
 ssh -i "$VALIDATOR_HOST_KEY" "root@$VALIDATOR_HOST" '
 echo "==== snapshot @ $(TZ=Asia/Tokyo date +%Y-%m-%d\ %H:%M:%S\ JST) ===="
 echo ""
-echo "--- L1: Hetzner scripts/ sha256 ---"
+echo "--- L1: the validator host scripts/ sha256 ---"
 shasum -a 256 /home/deploy/metal.freedom-yield.com/scripts/cycle-gate.sh \
               /home/deploy/metal.freedom-yield.com/scripts/resume-after-cycle-start.sh \
               /home/deploy/metal.freedom-yield.com/scripts/post-anchor-event.sh \
@@ -90,7 +90,7 @@ free -h | grep -E "^Mem"
 
 > 第 8 ラウンド audit BLOCKER 受領後、 AI が `ssh -i $VALIDATOR_HOST_KEY root@$VALIDATOR_HOST '...'` 経由で実 capture。 snapshot #1 を全件 real data で置換。 監査役は本 snapshot の sha256 を local + 過去 audit 値と再照合可能。
 
-### L1: Hetzner scripts/ sha256 (= full 64-char、 全 10 件 real capture)
+### L1: the validator host scripts/ sha256 (= full 64-char、 全 10 件 real capture)
 
 ```
 4fd972d08649bb8a64652e5ab72455756cb7d14c90d915551c8952480b6e2875  cycle-gate.sh
@@ -105,7 +105,7 @@ dce437ecfaefe9b2e4c6b33049e864a33de7a1e24304325320712fa4824890b9  check-anomalie
 feb293b78237a9b6d1cf6bc44e389a1130c7de523ac5c6d35eb866eadb1c9b77  daily-status.sh
 ```
 
-**local repo との完全一致 verified**: `diff <(local 10 file shasum) <(Hetzner 10 file shasum)` → 0 行 diff。 sync 整合性 OK。
+**local repo との完全一致 verified**: `diff <(local 10 file shasum) <(the validator host 10 file shasum)` → 0 行 diff。 sync 整合性 OK。
 
 ### L2: cycle-gate-state.json (= sha256 + 内容、 real capture)
 
@@ -198,7 +198,7 @@ shasum -a 256 scripts/cycle-gate.sh scripts/resume-after-cycle-start.sh \
               scripts/check-anomalies.sh scripts/daily-status.sh
 
 # → 本 snapshot #2 L1 の 10 件 sha256 と 1:1 完全一致するか
-# (= 一致 = Hetzner sync 整合 + L1 verify PASS)
+# (= 一致 = the validator host sync 整合 + L1 verify PASS)
 ```
 
 ---
@@ -207,7 +207,7 @@ shasum -a 256 scripts/cycle-gate.sh scripts/resume-after-cycle-start.sh \
 
 > 第 9 ラウンド audit verdict (= clean) 後、 翌日の状態を re-capture。 5 daily cron の 4 件 (= daily-status / uptime-history / evidence / renewal-ics) の natural fire 後 verify 目的 + cycle-gate 平時動作確認。 本 snapshot は uptime-history.sh + gen-renewal-ics.sh の broken 状態 (= 2026-06-18 以来 12 日間停止) を public artifact として記録。
 
-### L1: Hetzner scripts/ sha256 (= snapshot #2 と完全一致確認)
+### L1: the validator host scripts/ sha256 (= snapshot #2 と完全一致確認)
 
 ```
 4fd972d08649bb8a64652e5ab72455756cb7d14c90d915551c8952480b6e2875  cycle-gate.sh

@@ -166,7 +166,7 @@ exit codes:
   7  atomic write failed
 ```
 
-The generator prefers HTTPS fetch from `API_BASE_URL` (default: production public URL) for public-artifact hashing so what is anchored is exactly what an evaluator would fetch. Local repo files serve as offline / air-gapped fallback. Observation fields (`period_uptime_observed_pct`, `period_incident_count_observed`) come from Hetzner state files. Identity fields come from operator-local files. Cycle boundaries and delegator snapshot come from Metal P-chain RPC.
+The generator prefers HTTPS fetch from `API_BASE_URL` (default: production public URL) for public-artifact hashing so what is anchored is exactly what an evaluator would fetch. Local repo files serve as offline / air-gapped fallback. Observation fields (`period_uptime_observed_pct`, `period_incident_count_observed`) come from the validator host state files. Identity fields come from operator-local files. Cycle boundaries and delegator snapshot come from Metal P-chain RPC.
 
 ## Verification snapshot log
 
@@ -177,7 +177,7 @@ Append-only. Each entry captures a real dry-run output for third-party reproduci
 Reproducer:
 
 ```sh
-# From Hetzner as deploy user
+# From the validator host as deploy user
 cd /home/deploy/metal.freedom-yield.com
 export ANOMALY_STATE_DIR=/var/lib/freedom-yield
 bash scripts/gen-anchor-source.sh --dry-run > /tmp/anchor-source.dry-run.json 2>&1
@@ -191,7 +191,7 @@ Observed values:
 | file size | `2782` bytes |
 | output sha256 | `1ee7b55ef72856e4ae032ca7cedb1d4546bfacf6d61b9778134532bcf0425c42` |
 | `computed_at` | `2026-07-01T03:57:35Z` |
-| `computed_from_git_commit` | `b10fac6975c79f66430871860183ae749a891657` ~~(Hetzner git head; local main was at `a1476a2`, sync gap unrelated to T-B)~~ **REVISION 2026-07-01T04:07Z**: prior parenthetical "sync gap = behind" mis-interpreted the state; the SHA itself is the correct real capture, but Hetzner is diverged (not behind) — see Note below for the accurate description. |
+| `computed_from_git_commit` | `b10fac6975c79f66430871860183ae749a891657` ~~(the validator host git head; local main was at `a1476a2`, sync gap unrelated to T-B)~~ **REVISION 2026-07-01T04:07Z**: prior parenthetical "sync gap = behind" mis-interpreted the state; the SHA itself is the correct real capture, but the validator host is diverged (not behind) — see Note below for the accurate description. |
 | `identity_branch.operator_asserts_node_id` | `NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v` |
 | `identity_branch.prev_anchor_root` | `null` (= genesis; no prior anchor broadcast yet) |
 | `observations_branch.cycle_number_observed` | `2` |
@@ -211,10 +211,10 @@ Schema validation: PASS (`ajv --spec=draft2020 --strict=false validate -s public
 
 Note on `computed_from_git_commit` (corrected 2026-07-01 after independent audit round 2):
 
-- Hetzner's deploy checkout at `/home/deploy/metal.freedom-yield.com` is a **diverged local branch**, not a straight `behind` mirror of origin. `git branch -vv` on Hetzner reports `main b10fac6 [origin/main: ahead 22, behind 2]`, and Hetzner's cached `origin/main` ref itself is stale (`e23d856...` vs actual origin `58871ea...`), indicating Hetzner has not `git fetch`ed in some time.
-- The Hetzner-local HEAD `b10fac6975c79f66430871860183ae749a891657` therefore exists only in Hetzner's local git object DB and is not resolvable from origin (`git cat-file -e b10fac6` on any origin-tracking clone fails). This is the reason the auditor round-2 flag was correct.
-- Root cause is not the anchor design; it is a pre-existing deploy-vs-repo divergence carried since before T-B. The generator itself is repo-independent — it reads `git rev-parse HEAD` from whatever checkout it runs in — so the reported SHA is accurate for the Hetzner-local state at the time of the snapshot; it is simply not a globally resolvable pointer.
-- Fix path is operator-authorized reconciliation of the Hetzner checkout with origin (not undertaken as part of T-B to avoid destructive git operations without an explicit gate; tracked separately as a follow-up).
+- the validator host's deploy checkout at `/home/deploy/metal.freedom-yield.com` is a **diverged local branch**, not a straight `behind` mirror of origin. `git branch -vv` on the validator host reports `main b10fac6 [origin/main: ahead 22, behind 2]`, and the validator host's cached `origin/main` ref itself is stale (`e23d856...` vs actual origin `58871ea...`), indicating the validator host has not `git fetch`ed in some time.
+- The validator-host-local HEAD `b10fac6975c79f66430871860183ae749a891657` therefore exists only in the validator host's local git object DB and is not resolvable from origin (`git cat-file -e b10fac6` on any origin-tracking clone fails). This is the reason the auditor round-2 flag was correct.
+- Root cause is not the anchor design; it is a pre-existing deploy-vs-repo divergence carried since before T-B. The generator itself is repo-independent — it reads `git rev-parse HEAD` from whatever checkout it runs in — so the reported SHA is accurate for the validator-host-local state at the time of the snapshot; it is simply not a globally resolvable pointer.
+- Fix path is operator-authorized reconciliation of the validator host checkout with origin (not undertaken as part of T-B to avoid destructive git operations without an explicit gate; tracked separately as a follow-up).
 - Anchor semantics are unaffected: `computed_from_git_commit` is a provenance field describing which generator source built the anchor, and evaluators reproducing the anchor via the reproducer commands above never need to resolve this SHA — they verify against `anchor-source.json` content, `dag_root_computed`, and the public-artifact hashes.
 
 ## Related
