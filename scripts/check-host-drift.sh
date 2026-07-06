@@ -82,6 +82,10 @@ BEHIND="$(git -C "$REPO_DIR" rev-list --count HEAD..origin/main 2>/dev/null || e
 # Content drift limited to the code zones, measured against the LOCAL HEAD:
 # uncommitted edits to tracked files + non-hidden untracked additions.
 # (Being behind origin is handled by the behind counter, not counted here.)
+# Note: the hidden-path filter below applies to UNTRACKED entries only — a
+# tracked, modified file under a dot-dir is still caught by the HEAD diff.
+# That asymmetry is deliberate: .retired-* installer backups are untracked
+# by nature, while anything tracked is code and must stay watched.
 # shellcheck disable=SC2086
 TRACKED_DRIFT="$(git -C "$REPO_DIR" diff HEAD --name-only -- $DRIFT_PATHS 2>/dev/null || true)"
 # shellcheck disable=SC2086
