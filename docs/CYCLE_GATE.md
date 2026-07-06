@@ -251,10 +251,12 @@ Independent rollback levers, in increasing severity:
 2. **Kill switch — freeze all gated consumers**:
    `chmod -x /home/deploy/metal.freedom-yield.com/scripts/cycle-gate.sh`.
    Every consumer detects the non-executable gate and **fails closed** —
-   the artifact writers and `daily-status.sh` skip their own work entirely
-   (`exit 0`), while `check-anomalies.sh` keeps its non-cycle checks running
-   and suppresses only the cycle-related alerts. This **stops public feed
-   generation**
+   the artifact writers skip their feed writes and `daily-status.sh` its
+   digest push (each `exit 0`; `uptime-history.sh` first completes its
+   ungated Job A — the daily snapshot append to the host-local master
+   JSONL — and skips both public uptime feeds), while `check-anomalies.sh`
+   keeps its non-cycle checks running and suppresses only the cycle-related
+   alerts. This **stops public feed generation**
    (`validator.json` / `cycle-history` / `evidence` / `renewal-ics` /
    `uptime`) until reversed with `chmod +x`; it does *not* fall back to
    pre-gate "proceed" behavior. To relax approval enforcement while keeping
