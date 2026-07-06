@@ -140,8 +140,7 @@ The cryptographic-evidence anchor pipeline (identity → anchor-source → A-cha
 | `scripts/gen-anchor-receipt.sh` | Independently re-fetch the tx from mainnet Hyperion, run the 7 verify gates, write `public/api/anchor-receipt.json`. | post-broadcast |
 | `scripts/append-anchor-history.sh` | Append the v2 receipt as one JSONL line to `public/api/anchor-history.jsonl` with append-only invariants (prev-tx chain, genesis prev=null). | post-broadcast |
 | `scripts/run-anchor-pipeline.sh` | v2 orchestrator: gen-anchor-source → sign → receipt → history. (Host-signing assumption stranded under Mac-only signing — see stock-take #5.) | manual |
-| `scripts/post-anchor-event.sh` | Legacy anchor event processor (single-action `fyid1:`). **Deprecated** — incompatible with the v2 flag-only signer (stock-take #4). | — |
-| `scripts/watch-anchor-events.sh` | Poll metalgo for validator-presence transitions; dispatch to `ANCHOR_DRIVER` (default legacy; alert-only in production). | every 5 min |
+| `scripts/watch-anchor-events.sh` | Poll metalgo for validator-presence transitions; dispatch to `ANCHOR_DRIVER` (default + production: the alert-only `notify-anchor-transition.sh`). | every 5 min |
 | `scripts/notify-anchor-transition.sh` | DETECTION/ALERT-ONLY driver: on a transition, ntfy-push "run the manual anchor from the Mac". Broadcasts nothing. | via watcher |
 | `scripts/preview-cycle3-anchor-broadcast.sh` | Read-only STAGE-1 preview: regenerate anchor-source + dry-run-log, display the exact tx shape before an operator broadcast. | manual |
 | `scripts/prep-cycle-anchor-recording.sh` | **Deprecated** (superseded by the cycle-gate ungate, 42797ae). Recorded a just-closed cycle by hole-punching the old transition deadlock. | — |
