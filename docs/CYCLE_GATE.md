@@ -250,9 +250,11 @@ Independent rollback levers, in increasing severity:
    `resume-after-cycle-start.sh --apply` recreates the file.
 2. **Kill switch — freeze all gated consumers**:
    `chmod -x /home/deploy/metal.freedom-yield.com/scripts/cycle-gate.sh`.
-   Every consumer detects the non-executable gate and **fails closed (skips
-   its own work, `exit 0`)** — alert consumers suppress alerts, artifact
-   writers skip their feed write. This **stops public feed generation**
+   Every consumer detects the non-executable gate and **fails closed** —
+   the artifact writers and `daily-status.sh` skip their own work entirely
+   (`exit 0`), while `check-anomalies.sh` keeps its non-cycle checks running
+   and suppresses only the cycle-related alerts. This **stops public feed
+   generation**
    (`validator.json` / `cycle-history` / `evidence` / `renewal-ics` /
    `uptime`) until reversed with `chmod +x`; it does *not* fall back to
    pre-gate "proceed" behavior. To relax approval enforcement while keeping
