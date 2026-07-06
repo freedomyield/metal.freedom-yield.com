@@ -65,6 +65,13 @@ EOF
 	cat > "$DIR/otherproj-job" <<'EOF'
 15 3 * * * someone bash /other/project.sh
 EOF
+
+	# WRONG-value SHELL (present but not /bin/bash) — must be left untouched
+	cat > "$DIR/metal-wrong-shell" <<'EOF'
+# wrong shell value
+SHELL=/bin/sh
+45 6 * * * deploy bash /some/wrong.sh
+EOF
 }
 teardown() { rm -rf "$DIR" "$BK"; DIR=""; BK=""; }
 
@@ -148,7 +155,7 @@ OUT2="$(run_installer 2>&1)"
 [ "$(cat "$DIR/metal-missing-both")" = "$SNAP1" ] \
 	&& ok "idempotent: second run leaves file identical" \
 	|| bad "idempotent: second run leaves file identical"
-echo "$OUT2" | grep -q 'summary: fixed 0, already compliant 4' \
+echo "$OUT2" | grep -q 'summary: fixed 0, already compliant 4, needs operator review 1' \
 	&& ok "idempotent: second run reports fixed 0 / compliant 4" \
 	|| bad "idempotent: second run reports fixed 0 / compliant 4 (out: $OUT2)"
 teardown
@@ -176,11 +183,13 @@ setup
 run_installer >/dev/null 2>&1
 ALL_OK=1
 for f in "$DIR"/metal-*; do
+	# metal-wrong-shell is deliberately left for operator review (warn path)
+	[ "$(basename "$f")" = "metal-wrong-shell" ] && continue
 	grep -qE '^SHELL=/bin/bash\b' "$f" && grep -qE '^PATH=' "$f" || ALL_OK=0
 done
 [ "$ALL_OK" = "1" ] \
-	&& ok "post-edit: every metal-* file carries both headers (rule 5)" \
-	|| bad "post-edit: every metal-* file carries both headers (rule 5)"
+	&& ok "post-edit: every fixable metal-* file carries both headers (rule 5)" \
+	|| bad "post-edit: every fixable metal-* file carries both headers (rule 5)"
 teardown
 
 # ---- case 9: unknown arg → exit 1 -------------------------------------------------
@@ -190,6 +199,31 @@ RC=$?
 [ "$RC" -eq 1 ] \
 	&& ok "arg: unknown flag → exit 1" \
 	|| bad "arg: unknown flag → exit 1 (actual=$RC)"
+teardown
+
+# ---- case 10: WRONG-value SHELL → untouched, warned, operator review ------------
+setup
+WBEFORE="$(cat "$DIR/metal-wrong-shell")"
+OUT="$(run_installer 2>&1)"
+RC=$?
+[ "$RC" -eq 0 ] \
+	&& ok "wrong-shell: exit 0 (advisory, not fatal)" \
+	|| bad "wrong-shell: exit 0 (actual=$RC)"
+[ "$(cat "$DIR/metal-wrong-shell")" = "$WBEFORE" ] \
+	&& ok "wrong-shell: file left byte-identical" \
+	|| bad "wrong-shell: file left byte-identical"
+echo "$OUT" | grep -q 'warn:.*metal-wrong-shell.*SHELL=/bin/sh.*operator review required' \
+	&& ok "wrong-shell: warn line names file + wrong value" \
+	|| bad "wrong-shell: warn line names file + wrong value (out: $OUT)"
+echo "$OUT" | grep -q 'needs operator review 1' \
+	&& ok "wrong-shell: summary counts 1 for operator review" \
+	|| bad "wrong-shell: summary counts 1 for operator review"
+[ -e "$BK/metal-wrong-shell" ] \
+	&& bad "wrong-shell: no backup entry (file untouched)" \
+	|| ok "wrong-shell: no backup entry (file untouched)"
+grep -cE '^SHELL=' "$DIR/metal-wrong-shell" | grep -q '^1$' \
+	&& ok "wrong-shell: no duplicate SHELL line introduced" \
+	|| bad "wrong-shell: no duplicate SHELL line introduced"
 teardown
 
 # ---- summary ----------------------------------------------------------------------
