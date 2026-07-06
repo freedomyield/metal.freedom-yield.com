@@ -248,11 +248,16 @@ Independent rollback levers, in increasing severity:
    `rm /var/lib/freedom-yield/cycle-gate-state.json`. `cycle-gate.sh` returns
    green for every consultation until the next
    `resume-after-cycle-start.sh --apply` recreates the file.
-2. **Disable gate consultation entirely**:
+2. **Kill switch — freeze all gated consumers**:
    `chmod -x /home/deploy/metal.freedom-yield.com/scripts/cycle-gate.sh`.
-   Consumers detect the non-executable gate and fail closed per their own
-   handling (alert consumers suppress; artifact writers skip or proceed per
-   their declared type). Reverse with `chmod +x`.
+   Every consumer detects the non-executable gate and **fails closed (skips
+   its own work, `exit 0`)** — alert consumers suppress alerts, artifact
+   writers skip their feed write. This **stops public feed generation**
+   (`validator.json` / `cycle-history` / `evidence` / `renewal-ics` /
+   `uptime`) until reversed with `chmod +x`; it does *not* fall back to
+   pre-gate "proceed" behavior. To relax approval enforcement while keeping
+   feeds flowing, use lever 1 (`rm` the state file) — that returns green for
+   every side-effect type.
 3. **Remove the design entirely**: delete `scripts/cycle-gate.sh` and
    `scripts/resume-after-cycle-start.sh` and drop the consultation blocks
    from the consumer scripts. Use only if a fundamental design issue is
