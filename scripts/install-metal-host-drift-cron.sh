@@ -15,14 +15,27 @@
 #   sudo bash scripts/install-metal-host-drift-cron.sh
 #
 # Env overrides:
-#   FYD_REPO_PATH   repo path on the host (default /home/deploy/metal.freedom-yield.com)
+#   FYD_REPO_PATH     repo path on the host (default /home/deploy/metal.freedom-yield.com)
+#   FYD_CRON_TARGET   cron file to write (default /etc/cron.d/metal-host-drift).
+#                     When overridden, the root requirement is waived (test
+#                     harness mode) and the file is written without root
+#                     ownership enforcement.
+#   FYD_BACKUP_DIR    backup destination for a differing pre-existing target
+#                     (default /var/backups)
+#
+# Exit codes:
+#   0  installed or already up to date
+#   2  not root (and FYD_CRON_TARGET not overridden)
+#   3  check-host-drift.sh missing at FYD_REPO_PATH
+#   4  generated cron file failed the check-cron-file.sh pre-flight
 
 set -euo pipefail
 
-CRON_TARGET=/etc/cron.d/metal-host-drift
+CRON_TARGET="${FYD_CRON_TARGET:-/etc/cron.d/metal-host-drift}"
 REPO_PATH="${FYD_REPO_PATH:-/home/deploy/metal.freedom-yield.com}"
+BACKUP_DIR="${FYD_BACKUP_DIR:-/var/backups}"
 
-if [ "$(id -u)" -ne 0 ]; then
+if [ "$CRON_TARGET" = "/etc/cron.d/metal-host-drift" ] && [ "$(id -u)" -ne 0 ]; then
 	echo "ERROR: this installer must run as root (needs to write /etc/cron.d/)" >&2
 	echo "       usage: sudo bash scripts/install-metal-host-drift-cron.sh" >&2
 	exit 2
@@ -63,6 +76,21 @@ if [ -x "${REPO_PATH}/scripts/check-cron-file.sh" ]; then
 	fi
 fi
 
-install -m 0644 -o root -g root "$TMP" "$CRON_TARGET"
-rm -f "$TMP"
+# Back up a pre-existing, differing target before overwrite (auditability;
+# PR #4 review 🟡 1). Content is regenerable, but the prior bytes are kept.
+if [ -f "$CRON_TARGET" ]; then
+	STAMP="$(date -u +%Y%m%d-%H%M%S)"
+	mkdir -p "$BACKUP_DIR"
+	cp -p "$CRON_TARGET" "${BACKUP_DIR}/$(basename "$CRON_TARGET").bak-${STAMP}"
+	echo "backed up prior target to ${BACKUP_DIR}/$(basename "$CRON_TARGET").bak-${STAMP}"
+fi
+
+if [ "$CRON_TARGET" = "/etc/cron.d/metal-host-drift" ]; then
+	install -m 0644 -o root -g root "$TMP" "$CRON_TARGET"
+	rm -f "$TMP"
+else
+	# test harness mode: no root ownership enforcement
+	install -m 0644 "$TMP" "$CRON_TARGET"
+	rm -f "$TMP"
+fi
 echo "installed: ${CRON_TARGET} (daily 05:15 UTC, alert-only)"
