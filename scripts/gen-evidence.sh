@@ -183,7 +183,7 @@ jq -n \
 				formal_schema_url: "https://metal.freedom-yield.com/api/identity.schema.v1.json",
 				format_guide_url: "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md",
 				operator_guide_url: "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/OPERATOR_IDENTITY_SETUP.md",
-				cross_reference_url: "https://metal.freedom-yield.com/api/cycles-history.json"
+				cross_reference_url: "https://metal.freedom-yield.com/api/anchor-source.json"
 			},
 			cycle_history_jsonl: {
 				url: "https://metal.freedom-yield.com/api/cycle-history.jsonl",

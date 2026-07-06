@@ -399,7 +399,6 @@ fi
 # hashed here; their public equivalent (uptime-recent.json + uptime-cycles.json)
 # is what a third-party evaluator can fetch and cross-verify.
 API_FILES=(
-	cycles-history.json
 	evidence.json
 	identity-history.jsonl
 	identity.json

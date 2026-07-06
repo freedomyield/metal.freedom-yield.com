@@ -1,5 +1,5 @@
 {
-	"_comment": "Synthetic schema example for /api/identity.schema.v1.json. This file is NOT a snapshot of any production identity — it is a fixed demonstration of the schema's shape. All sha256, fingerprint, hash, and timestamp values shown here are synthetic placeholders that document field formats only; they do not refer to any real artifact, key, or moment in time. Production runtime identity is published at /api/identity.json by scripts/operator-local/gen-identity.sh on the operator's local Mac (signed with the operator identity ed25519 key; the validator's staker.key / BLS signer.key are not used). Phase α A-chain anchoring is reached via the pointer fields cycles_history_url + anchor_receipt_url (added 2026-06-21). The former dag_root_hash field was RETIRED 2026-07-06 (design-stocktake #1 DAG-root collapse) — the on-chain root is anchor-receipt.json.dag_root_hash, not a field on identity.json. See docs/IDENTITY_SCHEMA_CHANGELOG.md.",
+	"_comment": "Synthetic schema example for /api/identity.schema.v1.json. This file is NOT a snapshot of any production identity — it is a fixed demonstration of the schema's shape. All sha256, fingerprint, hash, and timestamp values shown here are synthetic placeholders that document field formats only; they do not refer to any real artifact, key, or moment in time. Production runtime identity is published at /api/identity.json by scripts/operator-local/gen-identity.sh on the operator's local Mac (signed with the operator identity ed25519 key; the validator's staker.key / BLS signer.key are not used). Phase α A-chain anchoring is reached via the pointer field anchor_receipt_url (added 2026-06-21). The former dag_root_hash and cycles_history_url fields were RETIRED 2026-07-06 (design-stocktake #1 DAG-root collapse) — the single on-chain root is anchor-source.json.dag_root_computed (3-branch), surfaced via anchor-receipt.json, not a field on identity.json. See docs/IDENTITY_SCHEMA_CHANGELOG.md.",
 	"schema_version": 1,
 	"brand": "Freedom Yield",
 	"node_id": "NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v",
@@ -49,7 +49,6 @@
 		}
 	},
 	"artifact_root": "0000000000000000000000000000000000000000000000000000000000000000",
-	"cycles_history_url": "https://metal.freedom-yield.com/api/cycles-history.json",
 	"anchor_receipt_url": "https://metal.freedom-yield.com/api/anchor-receipt.json",
 	"audit": {
 		"anchor_receipt": "https://metal.freedom-yield.com/api/anchor-receipt.json",

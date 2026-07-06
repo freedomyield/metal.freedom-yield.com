@@ -375,25 +375,16 @@ fi
 ARTIFACT_MANIFEST_JSON="$(cat "${MANIFEST_TMP}")"
 rm -f "${LEAVES_TMP}" "${MANIFEST_TMP}"
 
-# ---- 3.6. Build Merkle DAG branch roots + dag_root_hash + cycles-history.json
+# ---- 3.6. Bootstrap identity-history.jsonl + cycle-ledger ordering guard. ----
 #
-# Per docs/MERKLE_DAG_SPEC.md §2-§5. Reuses the compute_merkle_root function
-# defined above (= identical algorithm; bit-for-bit equivalent to the Python
-# reference at tests/identity-verification-vectors/generate.py).
-#
-# Inputs (= published JSONL leaf sources):
-#   /api/identity-history.jsonl   bootstrapped here if absent in repo (= first
-#                                 Phase α run); maintained as append-only
-#                                 afterwards by the operator (key rotations).
-#   /api/cycle-history.jsonl      fetched from ARTIFACT_BASE; absent ⇒ treat
-#                                 the cycles branch as empty (= sentinel root).
-#
-# Outputs:
-#   identity_branch_root, cycles_branch_root, dag_root_hash (= 64-hex each).
-#   /api/cycles-history.json (= DAG summary, written here in OUT_DIR).
-#   Additive fields in identity.json (= composed in §4 below).
-
-NULL_BRANCH_HASH="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+# The Merkle DAG is no longer computed here (design-stocktake #1 collapse,
+# 2026-07-06). The single authoritative DAG lives in anchor-source.json
+# (.dag_root_computed, 3-branch) produced by scripts/gen-anchor-source.sh;
+# identity.json carries no dag_root_hash and no cycles-history.json is written.
+# This section retains the two responsibilities that stay identity generation's:
+#   1. Bootstrap /api/identity-history.jsonl on the first Phase α run.
+#   2. Ordering guard (design-stocktake #6): refuse to regenerate identity
+#      before the just-closed cycle is on the published cycle-history.jsonl.
 
 # Bootstrap identity-history.jsonl if absent (= first Phase α run).
 # (ID_HISTORY_FILE is defined once at the top of the script alongside
@@ -425,54 +416,18 @@ if [ ! -f "${ID_HISTORY_FILE}" ]; then
 	echo "  IMPORTANT: review ${ID_HISTORY_FILE} and git add it alongside identity.json." >&2
 fi
 
-# Per-line leaf hashes (= SHA-256 of each non-empty published line, including
-# the trailing '\n' that separates it from the next line; matches the spec's
-# rule that we hash the bytes "as served"). Uses portable shell only —
-# `printf '%s\n' "$line"` reproduces the publication form (= line + LF) when
-# the file is emitted by `printf '%s\n'` or `jq -c` followed by a newline,
-# which is the convention here and in gen-cycle-history.sh.
-jsonl_leaves_from_file() {
-	local file="$1" line
-	while IFS= read -r line; do
-		[ -n "${line}" ] || continue
-		printf '%s\n' "${line}" | sha256_of_stdin
-	done < "${file}"
-}
-
-# Identity branch.
-ID_LEAVES_TMP="$(mktemp -t id_leaves.XXXXXX)"
-jsonl_leaves_from_file "${ID_HISTORY_FILE}" > "${ID_LEAVES_TMP}"
-ID_LEAF_COUNT="$(wc -l < "${ID_LEAVES_TMP}" | tr -d ' ')"
-if [ "${ID_LEAF_COUNT}" -eq 0 ]; then
-	IDENTITY_BRANCH_ROOT="${NULL_BRANCH_HASH}"
-else
-	IDENTITY_BRANCH_ROOT="$(cat "${ID_LEAVES_TMP}" | compute_merkle_root)"
-fi
-rm -f "${ID_LEAVES_TMP}"
-
-ID_SHA="$(sha256_of_stdin < "${ID_HISTORY_FILE}")"
-
-# Cycles branch — fetch /api/cycle-history.jsonl from the published web host.
+# Cycle-ledger freshness — fetch /api/cycle-history.jsonl to feed the ordering
+# guard below. Only the latest cycle_n (and a leaf count for the log line) is
+# needed; no branch root is computed here (the DAG lives in anchor-source.json).
 CY_BODY_TMP="$(mktemp -t cy_body.XXXXXX)"
 CY_URL="${ARTIFACT_BASE}/api/cycle-history.jsonl"
 CY_CODE="$(curl -sSLI -o /dev/null -w "%{http_code}" "${CY_URL}")"
 if [ "${CY_CODE}" = "200" ] && curl -sSLf -o "${CY_BODY_TMP}" "${CY_URL}"; then
-	CY_LEAVES_TMP="$(mktemp -t cy_leaves.XXXXXX)"
-	jsonl_leaves_from_file "${CY_BODY_TMP}" > "${CY_LEAVES_TMP}"
-	CY_LEAF_COUNT="$(wc -l < "${CY_LEAVES_TMP}" | tr -d ' ')"
-	if [ "${CY_LEAF_COUNT}" -eq 0 ]; then
-		CYCLES_BRANCH_ROOT="${NULL_BRANCH_HASH}"
-	else
-		CYCLES_BRANCH_ROOT="$(cat "${CY_LEAVES_TMP}" | compute_merkle_root)"
-	fi
-	rm -f "${CY_LEAVES_TMP}"
-	CY_SHA="$(sha256_of_stdin < "${CY_BODY_TMP}")"
+	CY_LEAF_COUNT="$(grep -c . "${CY_BODY_TMP}" 2>/dev/null || echo 0)"
 	LAST_CYCLE_N="$(jq -s 'map(.cycle_n) | max // empty' "${CY_BODY_TMP}" 2>/dev/null || true)"
 else
-	echo "  warn: ${CY_URL} not live (HTTP ${CY_CODE}); cycles branch treated as empty" >&2
-	CYCLES_BRANCH_ROOT="${NULL_BRANCH_HASH}"
+	echo "  warn: ${CY_URL} not live (HTTP ${CY_CODE}); ledger freshness not checkable" >&2
 	CY_LEAF_COUNT=0
-	CY_SHA=""
 	LAST_CYCLE_N=""
 fi
 rm -f "${CY_BODY_TMP}"
@@ -494,65 +449,10 @@ if [ -n "${FY_EXPECT_CYCLE:-}" ]; then
 	echo "  ✓ ordering guard: cycle-history is fresh to expected cycle ${FY_EXPECT_CYCLE}" >&2
 fi
 
-# DAG root = SHA-256( raw(id_root) || raw(cy_root) ).
-DAG_ROOT_HASH="$(
-	{ printf '%s' "${IDENTITY_BRANCH_ROOT}" | xxd -r -p
-	  printf '%s' "${CYCLES_BRANCH_ROOT}"   | xxd -r -p
-	} | sha256_of_stdin
-)"
-case "${DAG_ROOT_HASH}" in
-	*[!a-f0-9]*|"") echo "ERROR: computed dag_root_hash is not 64-hex: ${DAG_ROOT_HASH}" >&2; exit 4 ;;
-esac
-if [ "${#DAG_ROOT_HASH}" -ne 64 ]; then
-	echo "ERROR: computed dag_root_hash is not 64 chars: ${DAG_ROOT_HASH}" >&2; exit 4
-fi
-
-# Write cycles-history.json (DAG snapshot).
-OUT_CYCLES_HISTORY="${OUT_DIR}/cycles-history.json"
-TMP_CYCLES="$(mktemp -t cycleshistory.XXXXXX)"
-jq -n \
-	--arg dag_root_hash "${DAG_ROOT_HASH}" \
-	--arg id_url        "https://metal.freedom-yield.com/api/identity-history.jsonl" \
-	--arg id_sha        "${ID_SHA}" \
-	--arg id_schema     "https://metal.freedom-yield.com/api/identity-history.schema.v1.json" \
-	--argjson id_count  "${ID_LEAF_COUNT}" \
-	--arg id_root       "${IDENTITY_BRANCH_ROOT}" \
-	--arg cy_url        "${ARTIFACT_BASE}/api/cycle-history.jsonl" \
-	--arg cy_sha        "${CY_SHA}" \
-	--arg cy_schema     "https://metal.freedom-yield.com/api/cycle-history.schema.v1.json" \
-	--argjson cy_count  "${CY_LEAF_COUNT}" \
-	--arg cy_root       "${CYCLES_BRANCH_ROOT}" \
-	--arg identity_url  "https://metal.freedom-yield.com/api/identity.json" \
-	--arg receipt_url   "https://metal.freedom-yield.com/api/anchor-receipt.json" \
-	--arg generated_at  "${NOW_UTC}" \
-	'{
-		_comment: "Merkle DAG snapshot generated by scripts/operator-local/gen-identity.sh per docs/MERKLE_DAG_SPEC.md.",
-		"$schema": "https://metal.freedom-yield.com/api/cycles-history.schema.v1.json",
-		schema_version: 1,
-		dag_root_hash: $dag_root_hash,
-		branches: {
-			identity: ({
-				leaf_source_url: $id_url,
-				leaf_source_sha256: $id_sha,
-				leaf_source_schema_url: $id_schema,
-				leaf_count: $id_count,
-				branch_root: $id_root
-			}),
-			cycles: ({
-				leaf_source_url: $cy_url,
-				leaf_source_sha256: $cy_sha,
-				leaf_source_schema_url: $cy_schema,
-				leaf_count: $cy_count,
-				branch_root: $cy_root
-			})
-		},
-		anchor_receipt_url: $receipt_url,
-		identity_url: $identity_url,
-		generated_at: $generated_at
-	}' > "${TMP_CYCLES}"
-jq empty "${TMP_CYCLES}" >/dev/null
-mv "${TMP_CYCLES}" "${OUT_CYCLES_HISTORY}"
-chmod 644 "${OUT_CYCLES_HISTORY}"
+# The 2-branch dag_root_hash and /api/cycles-history.json are retired here
+# (design-stocktake #1). The authoritative 3-branch dag_root_computed is built
+# by scripts/gen-anchor-source.sh from anchor-source.json and inscribed on
+# chain by scripts/sign-anchor-event.sh (memo fya<S>c<N>:).
 
 # ---- 4. Compose identity.json into a tmp file. ------------------------------
 
@@ -577,7 +477,6 @@ jq -n \
 	--arg generated_at "${NOW_UTC}" \
 	--argjson artifact_manifest "${ARTIFACT_MANIFEST_JSON}" \
 	--arg artifact_root "${ARTIFACT_ROOT}" \
-	--arg cycles_history_url "https://metal.freedom-yield.com/api/cycles-history.json" \
 	--arg anchor_receipt_url "https://metal.freedom-yield.com/api/anchor-receipt.json" \
 	--arg anchor_history_url "https://metal.freedom-yield.com/api/anchor-history.jsonl" \
 	'{
@@ -604,7 +503,6 @@ jq -n \
 		},
 		artifact_manifest: $artifact_manifest,
 		artifact_root: $artifact_root,
-		cycles_history_url: $cycles_history_url,
 		anchor_receipt_url: $anchor_receipt_url,
 		audit: {
 			anchor_receipt: $anchor_receipt_url,
@@ -682,37 +580,24 @@ LEAF_COUNT="$(jq -r '.artifact_manifest | length' "${OUT_JSON}")"
 
 echo "✓ wrote ${OUT_JSON}"
 echo "✓ wrote ${OUT_SIG}"
-echo "✓ wrote ${OUT_CYCLES_HISTORY}"
 echo "  fingerprint:          ${FP}"
 echo "  namespace:            ${NAMESPACE}"
 echo "  principal:            ${PRINCIPAL}"
 echo "  iat / exp:            ${KEY_IAT} / ${KEY_EXP}"
 echo "  artifact leaves:      ${LEAF_COUNT}"
 echo "  artifact_root:        ${ARTIFACT_ROOT}"
-echo "  identity_branch_root: ${IDENTITY_BRANCH_ROOT} (${ID_LEAF_COUNT} leaves)"
-echo "  cycles_branch_root:   ${CYCLES_BRANCH_ROOT} (${CY_LEAF_COUNT} leaves)"
-echo "  cycles-history dag:   ${DAG_ROOT_HASH}  (2-branch summary → cycles-history.json)"
-echo "  NOTE: this is NOT the on-chain anchor value. identity.json no longer"
-echo "        carries it (design-stocktake #1 DAG-root collapse, 2026-07-06)."
-echo "        The inscribed root is anchor-source.json .dag_root_computed"
-echo "        (3-branch), memo fya<S>c<N>:, via gen-anchor-source.sh + sign-anchor-event.sh."
+echo "  cycle ledger:         latest cycle_n = ${LAST_CYCLE_N:-none} (${CY_LEAF_COUNT} leaves)"
+echo "  NOTE: identity.json carries no DAG root. The single authoritative anchor"
+echo "        value is anchor-source.json .dag_root_computed (3-branch), memo"
+echo "        fya<S>c<N>:, via gen-anchor-source.sh + sign-anchor-event.sh."
 echo ""
 echo "Next steps (manual):"
 echo "  1. If not done yet, copy the public key into the repo:"
 echo "       cp ${OPERATOR_IDENTITY_KEY}.pub ${REPO_ROOT}/public/.well-known/operator-identity.pub"
-echo "  2. Stage all five files produced by this run + the .pub copy."
-echo "     Phase α requires cycles-history.json + identity-history.jsonl"
-echo "     on the live web (deploy ownership matrix + verifier branch root recompute)."
+echo "  2. Stage the files produced by this run + the .pub copy:"
 echo "       git add public/api/identity.json \\"
 echo "               public/api/identity.json.sig \\"
-echo "               public/api/cycles-history.json \\"
 echo "               public/api/identity-history.jsonl \\"
 echo "               public/.well-known/operator-identity.pub"
 echo "  3. Review the diff and commit."
 echo "  4. After deploy, verify the live URLs with the command in docs/IDENTITY_VERIFICATION.md."
-echo ""
-echo "⚠ HOLD reminder: per project_merkle_dag_identity_anchor_design memory,"
-echo "  identity.json + .sig + cycles-history.json + identity-history.jsonl"
-echo "  + operator-identity.pub publish (git add / commit) is gated on"
-echo "  Task #28 cron auto-fire PASS + Task #25 D11 Phase 3."
-echo "  Do not commit these files until both gates clear."
