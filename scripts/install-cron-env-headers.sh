@@ -15,6 +15,11 @@
 #   - Insertion point: after the leading comment block (matching the style of
 #     the already-compliant files), before the first env/command line.
 #   - Only the missing header(s) are added; an existing PATH= is never edited.
+#   - A file carrying a WRONG SHELL value (SHELL= present but not /bin/bash)
+#     is left untouched and flagged with a warning: prepending SHELL=/bin/bash
+#     above it would be defeated (cron honors the later assignment), and
+#     silently rewriting an operator-authored value is not this installer's
+#     call. Operator review required for such files.
 #   - Every modified file is first copied to the backup dir.
 #   - cron picks up /etc/cron.d mtime changes automatically; no reload needed.
 #
@@ -59,12 +64,23 @@ PATH_LINE='PATH=/usr/local/bin:/usr/bin:/bin'
 
 CHANGED=0
 SKIPPED=0
+WARNED=0
 
 for f in "$CRON_DIR"/metal-*; do
 	[ -f "$f" ] || continue
 	need_shell=1; need_path=1
 	grep -qE '^SHELL=/bin/bash\b' "$f" && need_shell=0
 	grep -qE '^PATH=' "$f" && need_path=0
+
+	# Wrong-value SHELL (present but not /bin/bash): do NOT touch. Prepending
+	# SHELL=/bin/bash would be defeated by the later assignment (cron honors
+	# the last one), and rewriting an operator-authored value is an operator
+	# decision, not this installer's.
+	if [ "$need_shell" -eq 1 ] && grep -qE '^SHELL=' "$f"; then
+		WARNED=$((WARNED + 1))
+		echo "warn:    $(basename "$f") carries $(grep -E '^SHELL=' "$f" | head -1) (not /bin/bash) — left untouched; operator review required"
+		continue
+	fi
 
 	if [ "$need_shell" -eq 0 ] && [ "$need_path" -eq 0 ]; then
 		SKIPPED=$((SKIPPED + 1))
@@ -125,9 +141,9 @@ done
 
 echo ""
 if [ "$DRY_RUN" -eq 1 ]; then
-	echo "DRY-RUN summary: would fix ${CHANGED}, already compliant ${SKIPPED}"
+	echo "DRY-RUN summary: would fix ${CHANGED}, already compliant ${SKIPPED}, needs operator review ${WARNED}"
 else
-	echo "summary: fixed ${CHANGED}, already compliant ${SKIPPED}"
+	echo "summary: fixed ${CHANGED}, already compliant ${SKIPPED}, needs operator review ${WARNED}"
 	[ "$CHANGED" -gt 0 ] && echo "backups: ${BACKUP_DIR}/"
 fi
 exit 0
