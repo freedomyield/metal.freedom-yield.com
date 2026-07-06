@@ -8,7 +8,7 @@
 #   the repo only. The host's /etc/cron.d/metal-* files still invoke the OLD name
 #   directly (7 crons: node-info, uptime-history, peer-validators, node-health,
 #   renewal-ics, peer-geo, + an anchor-publish-health comment). The old script
-#   survives on the host (rsync has no --delete) and is ~88 lines behind the
+#   survives on the host (rsync has no --delete) and has diverged from the
 #   canonical one. Data is currently healthy (both allow the same feeds) but the
 #   LIVE publish path points at a repo-untracked script, so repo edits never
 #   reach production. This repoints the crons to the tracked script.
