@@ -70,6 +70,13 @@ allowlist_tokens() {
 # does the script's case block carry a `*.ics)` glob (= accepts any .ics)?
 has_ics_glob() { sed -n '/^case /,/^esac/p' "$1" 2>/dev/null | grep -qE '\*\.ics\)'; }
 
+# check-cron-file.sh violation count for a file (0 if the linter is clean or
+# emits no Result line). `|| true`: linter exits 1 on violations — must not
+# abort us under set -e/pipefail.
+lint_violations() {
+	bash "$CHECKER" "$1" 2>/dev/null | sed -n 's/^Result: \([0-9]*\) violation.*/\1/p' || true
+}
+
 # ===== 0. preconditions =====================================================
 NEW_PATH="${SCRIPTS_DIR}/${NEW_NAME}"
 [ -f "$NEW_PATH" ] || { echo "ERROR: canonical script missing: $NEW_PATH" >&2
@@ -145,12 +152,17 @@ for f in "${CRON_FILES[@]}"; do
 	grep -q "$OLD_NAME" "$f" || continue
 	TMP="$(mktemp)"
 	sed "s/${OLD_NAME}/${NEW_NAME}/g" "$f" > "$TMP"
-	# validate the rewritten file before installing (refuse on lint failure)
+	# A name-swap must not INTRODUCE new linter violations, but pre-existing
+	# ones in the ORIGINAL are out of scope for a repoint (they predate it and
+	# no linter rule depends on the script filename). Refuse only if the rewrite
+	# is strictly WORSE than the original; carry forward pre-existing issues.
 	if [ -x "$CHECKER" ]; then
-		if ! bash "$CHECKER" "$TMP" >/dev/null 2>&1; then
-			echo "  ✗ SKIP $(basename "$f"): rewritten file fails check-cron-file.sh" >&2
+		BEFORE_V="$(lint_violations "$f")"; AFTER_V="$(lint_violations "$TMP")"
+		if [ "${AFTER_V:-0}" -gt "${BEFORE_V:-0}" ]; then
+			echo "  ✗ SKIP $(basename "$f"): rewrite would ADD linter violations (${BEFORE_V:-0}→${AFTER_V:-0})" >&2
 			rm -f "$TMP"; continue
 		fi
+		[ "${AFTER_V:-0}" -gt 0 ] && say "  (note: $(basename "$f") carries ${AFTER_V} pre-existing linter issue(s), unchanged by repoint)"
 	fi
 	if [ "$DRY_RUN" = 1 ]; then
 		say "  $(run_note)would repoint: $(basename "$f")"

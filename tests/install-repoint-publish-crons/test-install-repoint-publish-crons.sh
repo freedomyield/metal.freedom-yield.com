@@ -149,6 +149,33 @@ if [ "${RC}" = 0 ] && [ -n "${RETIRED_DIR}" ] \
 	ok "T10 EXTRA_ORPHANS legacy file retired (moved to .retired, not rm'd)"
 else no "T10 EXTRA_ORPHANS (rc=${RC})"; fi
 
+# ---- T11: pre-existing linter violations do NOT block a pure repoint -------
+echo "[T11] repoint proceeds when linter fails identically before & after"
+make_fixture
+# stub linter reporting a fixed 2 violations (as legacy non-conforming crons do)
+printf '#!/usr/bin/env bash\necho "Result: 2 violation(s)."\nexit 1\n' > "${SD}/check-cron-file.sh"
+chmod +x "${SD}/check-cron-file.sh"
+run >/dev/null 2>&1; RC=$?
+if [ "${RC}" = 0 ] && grep -q 'push-to-web-host.sh a.json' "${CD}/metal-node-info"; then
+	ok "T11 repointed despite pre-existing linter debt (rename adds none)"
+else no "T11 pre-existing-violation non-blocking (rc=${RC})"; fi
+
+# ---- T12: a rewrite that ADDS a violation is skipped (protection intact) ---
+echo "[T12] rewrite that introduces a new linter violation is skipped"
+make_fixture
+# stub: 2 violations if the file carries the NEW name, else 1 (simulates a
+# rename the linter would newly reject → must be skipped, cron left on old name)
+cat > "${SD}/check-cron-file.sh" <<'EOS'
+#!/usr/bin/env bash
+if grep -q 'push-to-web-host.sh' "$1"; then echo "Result: 2 violation(s)."; else echo "Result: 1 violation(s)."; fi
+exit 1
+EOS
+chmod +x "${SD}/check-cron-file.sh"
+run >/dev/null 2>&1; RC=$?
+if grep -q 'push-to-xserver.sh a.json' "${CD}/metal-node-info"; then
+	ok "T12 rewrite adding a violation was skipped (cron left on old name)"
+else no "T12 protective skip"; fi
+
 echo ""
 echo "================================================================"
 printf 'RESULTS: %s PASS / %s FAIL (total %s)\n' "${PASS}" "${FAIL}" "$((PASS+FAIL))"
