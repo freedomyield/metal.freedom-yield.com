@@ -167,6 +167,11 @@ jobs:
           XS_HOST: ${{ secrets.XSERVER_SSH_HOST }}
           XS_PORT: ${{ secrets.XSERVER_SSH_PORT }}
         run: |
+          if [ -z "$_XS_KEY" ] || [ -z "$XS_HOST" ]; then
+            echo "XSERVER_SSH_* secrets not set — skipping public-Xserver deploy"
+            echo "(validator-host deploy already succeeded). See docs/DEPLOY_SETUP.md §5."
+            exit 0
+          fi
           printf '%s' "$_XS_KEY" | tr -d '\r' > ~/.ssh/id_xserver
           [ -z "$(tail -c 1 ~/.ssh/id_xserver)" ] || echo "" >> ~/.ssh/id_xserver
           chmod 600 ~/.ssh/id_xserver
@@ -186,6 +191,10 @@ jobs:
           XS_USER: ${{ secrets.XSERVER_SSH_USER }}
           XS_PORT: ${{ secrets.XSERVER_SSH_PORT }}
         run: |
+          if [ ! -f ~/.ssh/id_xserver ] || [ -z "$XS_HOST" ]; then
+            echo "Xserver deploy key absent — skipping public-origin rsync (see previous step)."
+            exit 0
+          fi
           mapfile -t FEED_EXCLUDES < <(bash scripts/deploy/build-rsync-excludes.sh "")
           rsync -rltvz --delete \
             -e "ssh -i ~/.ssh/id_xserver -p $XS_PORT -o StrictHostKeyChecking=no" \
