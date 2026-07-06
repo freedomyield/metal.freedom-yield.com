@@ -23,6 +23,7 @@ trap cleanup EXIT
 # the superset check can be exercised as failing.
 make_fixture(){
 	local old_extra="${1:-}"
+	local cron_pushes_extra="${2:-}"   # "yes" → add a cron that pushes ${old_extra} via OLD
 	WORK="$(mktemp -d -t repoint.XXXXXX)"
 	SD="${WORK}/scripts"; CD="${WORK}/cron.d"
 	mkdir -p "${SD}" "${CD}"
@@ -47,8 +48,11 @@ EOS
 	printf '%s\n' '*/5 * * * * deploy cd /x && bash scripts/node-info.sh && bash scripts/push-to-xserver.sh a.json' > "${CD}/metal-node-info"
 	printf '%s\n' '0 4 * * * deploy cd /x && bash scripts/push-to-web-host.sh b.json' > "${CD}/metal-already-new"
 	printf 'stale\n' > "${SD}/push-to-xserver.sh.bak-20260101-000000"
+	if [ "${cron_pushes_extra}" = yes ] && [ -n "${old_extra}" ]; then
+		printf '%s\n' "*/7 * * * * deploy cd /x && bash scripts/push-to-xserver.sh ${old_extra}" > "${CD}/metal-extra-feed"
+	fi
 }
-run(){ REPO="${WORK}" SCRIPTS_DIR="${SD}" CRON_DIR="${CD}" BACKUP_DIR="${WORK}/backups" bash "${INSTALLER}" "$@" 2>&1; }
+run(){ REPO="${WORK}" SCRIPTS_DIR="${SD}" CRON_DIR="${CD}" BACKUP_DIR="${WORK}/backups" EXTRA_ORPHANS="${EXTRA_ORPHANS:-}" bash "${INSTALLER}" "$@" 2>&1; }
 
 echo "================================================================"
 echo "install-repoint-publish-crons.sh — scenario tests"
@@ -88,22 +92,22 @@ if [ "${RC}" = 0 ] && echo "${OUT}" | grep -q 'nothing to repoint'; then
 	ok "T4 idempotent second run"
 else no "T4 idempotent (rc=${RC})"; fi
 
-# ---- T5: superset check PASSES when new ⊇ old ----------------------------
-echo "[T5] superset check passes when new allows all old targets"
+# ---- T5: safety check PASSES when new accepts every cron-pushed target ----
+echo "[T5] safety passes when new accepts all cron-pushed targets"
 make_fixture
 OUT="$(run --dry-run)"; RC=$?
-if [ "${RC}" = 0 ] && echo "${OUT}" | grep -q 'allows every target'; then
-	ok "T5 superset PASS"
-else no "T5 superset PASS (rc=${RC})"; fi
+if [ "${RC}" = 0 ] && echo "${OUT}" | grep -q 'safe to repoint'; then
+	ok "T5 safety PASS"
+else no "T5 safety PASS (rc=${RC})"; fi
 
-# ---- T6: superset check ABORTS when old allows a target new does not -----
-echo "[T6] superset check aborts when old allows a target new rejects"
-make_fixture "z.json"
+# ---- T6: safety ABORTS when a CRON pushes a feed new rejects --------------
+echo "[T6] safety aborts when a cron pushes a feed new rejects"
+make_fixture "z.json" yes   # old allows z.json AND a cron pushes it; new rejects it
 OUT="$(run)"; RC=$?
-if [ "${RC}" != 0 ] && echo "${OUT}" | grep -q 'does NOT allow' \
+if [ "${RC}" != 0 ] && echo "${OUT}" | grep -q 'rejects feed' \
    && grep -q 'push-to-xserver.sh a.json' "${CD}/metal-node-info"; then
-	ok "T6 aborted + cron NOT repointed (z.json would be rejected)"
-else no "T6 superset abort (rc=${RC})"; fi
+	ok "T6 aborted + cron NOT repointed (a cron pushes z.json which new rejects)"
+else no "T6 safety abort (rc=${RC})"; fi
 
 # ---- T7: --purge-orphans moves orphans to a retired dir (no rm) -----------
 echo "[T7] --purge-orphans retires orphan scripts by moving them"
@@ -123,6 +127,27 @@ rm -f "${SD}/push-to-web-host.sh"
 run >/dev/null 2>&1; RC=$?
 if [ "${RC}" = 1 ]; then ok "T8 fail-closed when canonical script absent"
 else no "T8 missing-canonical (rc=${RC})"; fi
+
+# ---- T9: vestigial allowlist entry (old-only, no cron pushes) NOT blocking -
+echo "[T9] vestigial old-only allowlist entry does not block repoint"
+make_fixture "z.json"        # old allowlists z.json but NO cron pushes it; new rejects it
+OUT="$(run)"; RC=$?
+if [ "${RC}" = 0 ] && echo "${OUT}" | grep -q 'vestigial' \
+   && grep -q 'push-to-web-host.sh a.json' "${CD}/metal-node-info"; then
+	ok "T9 vestigial reported + repoint proceeded (git-deploy-owned feed not blocking)"
+else no "T9 vestigial non-blocking (rc=${RC})"; fi
+
+# ---- T10: EXTRA_ORPHANS retires an operator-supplied legacy orphan --------
+echo "[T10] EXTRA_ORPHANS retires an operator-supplied legacy orphan (moved, not deleted)"
+make_fixture
+LEG="${SD}/legacy-provider-named.sh"
+printf '#!/usr/bin/env bash\n# legacy\n' > "${LEG}"
+EXTRA_ORPHANS="${LEG}" run --purge-orphans >/dev/null 2>&1; RC=$?
+RETIRED_DIR="$(ls -d "${SD}"/.retired-* 2>/dev/null | head -1)"
+if [ "${RC}" = 0 ] && [ -n "${RETIRED_DIR}" ] \
+   && [ ! -e "${LEG}" ] && [ -e "${RETIRED_DIR}/legacy-provider-named.sh" ]; then
+	ok "T10 EXTRA_ORPHANS legacy file retired (moved to .retired, not rm'd)"
+else no "T10 EXTRA_ORPHANS (rc=${RC})"; fi
 
 echo ""
 echo "================================================================"

@@ -21,9 +21,14 @@
 #     --purge-orphans  after repoint, MOVE the now-unreferenced orphan scripts
 #                      (push-to-xserver.sh + its .bak-*) into a timestamped
 #                      .retired-*/ dir. Never rm — reversible, and VPS file
-#                      deletion stays a human decision. (A separate legacy
-#                      provider-named sync orphan, if present on the host, is
-#                      removed by the operator manually — not referenced here.)
+#                      deletion stays a human decision.
+#
+#   env EXTRA_ORPHANS="/abs/path/a.sh:/abs/path/b.sh"
+#                      extra orphan paths to retire alongside the above (with
+#                      --purge-orphans). Lets a legacy script whose NAME is a
+#                      now-forbidden literal be retired without writing that
+#                      literal into this tracked file. Each is still refused if
+#                      any cron references it, and moved (not deleted).
 #
 # Env overrides (test-time):
 #   CRON_DIR     dir holding the cron files      (default /etc/cron.d)
@@ -70,27 +75,57 @@ NEW_PATH="${SCRIPTS_DIR}/${NEW_NAME}"
 [ -f "$NEW_PATH" ] || { echo "ERROR: canonical script missing: $NEW_PATH" >&2
                         echo "       run sync-to-validator-host.sh from the Mac first." >&2; exit 1; }
 
-# ===== 1. safety: NEW must allow everything OLD allows (superset) ============
+# ===== 1. safety: every feed the CRONS ACTUALLY PUSH via OLD must be =========
+#         accepted by NEW. A feed OLD's allowlist carries but no cron pushes
+#         (and NEW rejects) is vestigial — reported, never blocking. This is
+#         stricter where it matters (real cron usage) and looser where it does
+#         not (dead allowlist entries, e.g. artifacts now git-deploy-owned).
 OLD_PATH="${SCRIPTS_DIR}/${OLD_NAME}"
+# feed tokens the live crons push through OLD (literal `OLD_NAME <name>.<ext>`)
+cron_pushed_tokens() {
+	# `|| true`: no match (grep rc=1) under pipefail must yield empty, not abort.
+	grep -rhoE "${OLD_NAME}[[:space:]]+[a-z0-9][a-z0-9._-]*\.(json|jsonl|ics)" "${CRON_DIR}"/ 2>/dev/null \
+		| awk '{print $NF}' | sort -u || true
+}
+# does any cron push a COMPUTED .ics through OLD (e.g. `OLD_NAME $(token).ics`)?
+cron_pushes_dynamic_ics() {
+	grep -rhE "${OLD_NAME}[[:space:]]+[^[:space:]]*\.ics" "${CRON_DIR}"/ 2>/dev/null \
+		| grep -qvE "${OLD_NAME}[[:space:]]+[a-z0-9][a-z0-9._-]*\.ics([[:space:]]|$)"
+}
 if [ -f "$OLD_PATH" ]; then
-	say "── allowlist superset check (${NEW_NAME} must ⊇ ${OLD_NAME}) ──"
-	MISSING=""
+	say "── repoint safety: feeds crons push via ${OLD_NAME} must be accepted by ${NEW_NAME} ──"
 	NEW_HAS_ICS_GLOB=0; has_ics_glob "$NEW_PATH" && NEW_HAS_ICS_GLOB=1
+	CRON_TOKENS="$(cron_pushed_tokens)"
+	BLOCKING=""
 	while IFS= read -r tok; do
 		[ -z "$tok" ] && continue
-		if allowlist_tokens "$NEW_PATH" | grep -qxF "$tok"; then continue; fi
-		# an .ics token is covered if NEW carries the *.ics) glob
+		allowlist_tokens "$NEW_PATH" | grep -qxF "$tok" && continue
 		case "$tok" in *.ics) [ "$NEW_HAS_ICS_GLOB" = 1 ] && continue ;; esac
-		MISSING="${MISSING} ${tok}"
-	done < <(allowlist_tokens "$OLD_PATH")
-	if [ -n "$MISSING" ]; then
-		echo "ERROR: ${NEW_NAME} does NOT allow targets that ${OLD_NAME} accepts:${MISSING}" >&2
+		BLOCKING="${BLOCKING} ${tok}"
+	done <<EOF
+${CRON_TOKENS}
+EOF
+	if cron_pushes_dynamic_ics && [ "$NEW_HAS_ICS_GLOB" = 0 ]; then
+		BLOCKING="${BLOCKING} (computed).ics"
+	fi
+	if [ -n "$BLOCKING" ]; then
+		echo "ERROR: ${NEW_NAME} rejects feed(s) a live cron pushes via ${OLD_NAME}:${BLOCKING}" >&2
 		echo "       Repointing would make these feeds silently rejected. Aborting." >&2
 		exit 1
 	fi
-	say "  ✓ ${NEW_NAME} allows every target ${OLD_NAME} accepts (safe to repoint)"
+	# informational: OLD allowlist entries NEW rejects that no cron actually pushes
+	VESTIGIAL=""
+	while IFS= read -r tok; do
+		[ -z "$tok" ] && continue
+		allowlist_tokens "$NEW_PATH" | grep -qxF "$tok" && continue
+		case "$tok" in *.ics) [ "$NEW_HAS_ICS_GLOB" = 1 ] && continue ;; esac
+		printf '%s\n' "${CRON_TOKENS}" | grep -qxF "$tok" && continue
+		VESTIGIAL="${VESTIGIAL} ${tok}"
+	done < <(allowlist_tokens "$OLD_PATH")
+	say "  ✓ every cron-pushed feed is accepted by ${NEW_NAME} (safe to repoint)"
+	[ -n "$VESTIGIAL" ] && say "  note: ${OLD_NAME} also allowlists (vestigial — no cron pushes them, e.g. git-deploy-owned):${VESTIGIAL}"
 else
-	say "  note: ${OLD_NAME} already absent from ${SCRIPTS_DIR} — superset check skipped"
+	say "  note: ${OLD_NAME} already absent from ${SCRIPTS_DIR} — safety check skipped"
 fi
 say ""
 
@@ -138,6 +173,14 @@ say "── orphan scripts (no longer referenced by any cron after repoint) ─�
 shopt -s nullglob
 ORPHANS=("${SCRIPTS_DIR}/${OLD_NAME}" "${SCRIPTS_DIR}/${OLD_NAME}".bak-*)
 shopt -u nullglob
+# Operator-supplied extra orphan paths (colon- or space-separated), so a legacy
+# script whose NAME is a now-forbidden literal can be retired WITHOUT embedding
+# that literal in this tracked file. Each still passes the cron-reference guard
+# below (refused if any cron references it) and is moved (not rm'd).
+if [ -n "${EXTRA_ORPHANS:-}" ]; then
+	IFS=': ' read -r -a _extra_orphans <<< "${EXTRA_ORPHANS}"
+	ORPHANS+=("${_extra_orphans[@]}")
+fi
 FOUND=0
 RETIRE_DIR="${SCRIPTS_DIR}/.retired-${TS}"
 for o in "${ORPHANS[@]}"; do
