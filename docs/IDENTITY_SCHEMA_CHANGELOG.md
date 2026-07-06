@@ -7,6 +7,59 @@ schema v1 and the rationale for any future major version bump. It is
 not a chain-anchored attestation and not equivalent to an external
 append-only log: see the retention note below.
 
+## 2026-07-06 — Retire `dag_root_hash` from identity.json (design-stocktake #1: DAG-root collapse)
+
+### Summary
+
+`identity.json` stops advertising its own `dag_root_hash`. The field is
+retained in the schema as **optional / RETIRED** (for backward-compatibility
+with earlier Phase-α snapshots that still carry it), and `gen-identity.sh` no
+longer emits it.
+
+### Why
+
+The pre-v2 model treated identity.json's 2-branch root
+`SHA-256(raw(identity_branch_root) || raw(cycles_branch_root))` as the value
+anchored on-chain via memo `fyid1:<dag_root_hash>`. After the v2 migration this
+became **false**: the value actually inscribed on Metal A-chain is
+`anchor-receipt.json.dag_root_hash` (= `anchor-source.json.dag_root_computed`,
+a 3-branch DAG over identity/observations/artifacts, memo `fya<S>c<N>:`).
+identity.json was therefore publishing a **second root that appears nowhere
+on-chain**, breaking the anchor's one job — a verifier reading identity.json's
+`dag_root_hash` and searching for it on-chain would never find it. This is
+trouble #1/#3 of the 2026-07-04 design stock-take.
+
+### What changed
+
+- `scripts/operator-local/gen-identity.sh`: removed the `dag_root_hash` field
+  from the identity.json object; removed the misleading `anchor memo:
+  fyid1:<dag>` console line (gen-identity does not produce the v2 memo).
+  The 2-branch root is still computed and written to
+  `cycles-history.json.dag_root_hash` (an un-advertised cycle summary).
+- `public/api/identity.schema.v1.json`: `dag_root_hash` description rewritten to
+  RETIRED; `artifact_root` and `cycles_history_url` descriptions corrected to
+  stop asserting the 2-branch root is the on-chain value.
+- `public/api/identity.example.json`: `dag_root_hash` removed; `_comment` updated.
+- `scripts/operator-local/test-gen-identity.sh`: asserts `dag_root_hash` is
+  **absent** from identity.json and that cycles-history.json still carries a
+  64-hex 2-branch summary.
+
+### Verification path (unchanged intent, now unambiguous)
+
+A verifier reaches the on-chain root via `anchor_receipt_url` /
+`audit.anchor_receipt` → `anchor-receipt.json.dag_root_hash` → the A-chain tx.
+No competing root is advertised on identity.json.
+
+### Transition note
+
+The live signed `identity.json` still carries the old field until the operator
+next runs `gen-identity.sh` (it cannot be edited without re-signing). Schema
+`additionalProperties: true` + the retained optional property keep both the
+current (field-present) and future (field-absent) snapshots valid. Removing the
+old anchored value from identity.json's bytes will shift the next
+`dag_root_computed` by one (identity.json is a hashed leaf of the artifacts
+branch) — a one-time, self-consistent change, to land before the cycle-4 anchor.
+
 ## 2026-06-22 — Phase 5 pre-execution doc + .gitignore fixes (audit GAP-1 + GAP-3)
 
 ### Summary

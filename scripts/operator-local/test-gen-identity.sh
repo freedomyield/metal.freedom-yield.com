@@ -125,17 +125,16 @@ else
 	HAS_ERROR=1
 fi
 
-# 3.6. Assert Phase α DAG additive fields are present on identity.json.
-# Added 2026-06-21 per docs/MERKLE_DAG_SPEC.md §4 and identity.schema.v1.json
-# 2026-06-21 additive revision (see docs/IDENTITY_SCHEMA_CHANGELOG.md).
+# 3.6. Assert identity.json's evidence-pointer fields are present, and — as of
+# the 2026-07-06 DAG-root collapse (design-stocktake #1) — assert identity.json
+# NO LONGER carries dag_root_hash. The pre-v2 2-branch root was advertised here
+# with a (false) "anchored via fyid1:" claim; the value actually inscribed
+# on-chain is anchor-receipt.json.dag_root_hash (3-branch dag_root_computed,
+# memo fya<S>c<N>:). identity.json now reaches the on-chain evidence purely via
+# anchor_receipt_url / audit, not a competing root. See docs/IDENTITY_SCHEMA_CHANGELOG.md.
 echo
-echo "=== 3.6. assert Phase α DAG fields on identity.json ==="
-for field in dag_root_hash cycles_history_url anchor_receipt_url; do
-	if [ "$(jq -r --arg f "${field}" 'has($f)')" = "true" ] \
-	   && [ -n "$(jq -r --arg f "${field}" '.[$f] // ""' "${OUT_JSON}")" ]; then
-		# Use grep -q with single-quoted positional for the has() check.
-		:
-	fi
+echo "=== 3.6. assert evidence-pointer fields + dag_root_hash retired on identity.json ==="
+for field in cycles_history_url anchor_receipt_url; do
 	val="$(jq -r --arg f "${field}" '.[$f] // ""' "${OUT_JSON}")"
 	if [ -n "${val}" ]; then
 		echo "  OK   ${field} present: ${val}"
@@ -145,18 +144,13 @@ for field in dag_root_hash cycles_history_url anchor_receipt_url; do
 	fi
 done
 
-# dag_root_hash specifically must be 64-hex.
-DAG_ROOT="$(jq -r '.dag_root_hash // ""' "${OUT_JSON}")"
-case "${DAG_ROOT}" in
-	*[!a-f0-9]*) echo "  FAIL dag_root_hash is not all-hex: ${DAG_ROOT}" >&2; HAS_ERROR=1 ;;
-	*)
-		if [ "${#DAG_ROOT}" -ne 64 ]; then
-			echo "  FAIL dag_root_hash is ${#DAG_ROOT} chars, expected 64" >&2; HAS_ERROR=1
-		else
-			echo "  OK   dag_root_hash is 64-hex"
-		fi
-		;;
-esac
+# dag_root_hash MUST be absent from identity.json (collapse invariant).
+if [ "$(jq -r 'has("dag_root_hash")' "${OUT_JSON}")" = "false" ]; then
+	echo "  OK   dag_root_hash absent (retired — on-chain root lives in anchor-receipt.json)"
+else
+	echo "  FAIL identity.json still carries dag_root_hash: $(jq -r '.dag_root_hash' "${OUT_JSON}")" >&2
+	HAS_ERROR=1
+fi
 
 # 3.7. Assert cycles-history.json sibling was produced.
 echo
@@ -168,12 +162,18 @@ if [ ! -f "${OUT_CYCLES_HISTORY}" ]; then
 else
 	if jq empty "${OUT_CYCLES_HISTORY}" >/dev/null 2>&1; then
 		CY_DAG="$(jq -r '.dag_root_hash // ""' "${OUT_CYCLES_HISTORY}")"
-		if [ "${CY_DAG}" = "${DAG_ROOT}" ] && [ -n "${CY_DAG}" ]; then
-			echo "  OK   cycles-history.json present + dag_root_hash matches identity.json"
-		else
-			echo "  FAIL cycles-history.json dag_root_hash does not match identity.json" >&2
-			HAS_ERROR=1
-		fi
+		# cycles-history.json retains the 2-branch DAG summary root; identity.json
+		# no longer duplicates it (collapse #1). Assert it is well-formed 64-hex.
+		case "${CY_DAG}" in
+			*[!a-f0-9]*|"") echo "  FAIL cycles-history.json dag_root_hash not 64-hex: ${CY_DAG}" >&2; HAS_ERROR=1 ;;
+			*)
+				if [ "${#CY_DAG}" -ne 64 ]; then
+					echo "  FAIL cycles-history.json dag_root_hash is ${#CY_DAG} chars, expected 64" >&2; HAS_ERROR=1
+				else
+					echo "  OK   cycles-history.json present + dag_root_hash 64-hex (2-branch summary)"
+				fi
+				;;
+		esac
 	else
 		echo "  FAIL cycles-history.json is not valid JSON" >&2
 		HAS_ERROR=1

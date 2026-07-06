@@ -558,7 +558,6 @@ jq -n \
 	--arg generated_at "${NOW_UTC}" \
 	--argjson artifact_manifest "${ARTIFACT_MANIFEST_JSON}" \
 	--arg artifact_root "${ARTIFACT_ROOT}" \
-	--arg dag_root_hash "${DAG_ROOT_HASH}" \
 	--arg cycles_history_url "https://metal.freedom-yield.com/api/cycles-history.json" \
 	--arg anchor_receipt_url "https://metal.freedom-yield.com/api/anchor-receipt.json" \
 	--arg anchor_history_url "https://metal.freedom-yield.com/api/anchor-history.jsonl" \
@@ -586,7 +585,6 @@ jq -n \
 		},
 		artifact_manifest: $artifact_manifest,
 		artifact_root: $artifact_root,
-		dag_root_hash: $dag_root_hash,
 		cycles_history_url: $cycles_history_url,
 		anchor_receipt_url: $anchor_receipt_url,
 		audit: {
@@ -674,8 +672,11 @@ echo "  artifact leaves:      ${LEAF_COUNT}"
 echo "  artifact_root:        ${ARTIFACT_ROOT}"
 echo "  identity_branch_root: ${IDENTITY_BRANCH_ROOT} (${ID_LEAF_COUNT} leaves)"
 echo "  cycles_branch_root:   ${CYCLES_BRANCH_ROOT} (${CY_LEAF_COUNT} leaves)"
-echo "  dag_root_hash:        ${DAG_ROOT_HASH}"
-echo "  anchor memo:          fyid1:${DAG_ROOT_HASH}"
+echo "  cycles-history dag:   ${DAG_ROOT_HASH}  (2-branch summary → cycles-history.json)"
+echo "  NOTE: this is NOT the on-chain anchor value. identity.json no longer"
+echo "        carries it (design-stocktake #1 DAG-root collapse, 2026-07-06)."
+echo "        The inscribed root is anchor-source.json .dag_root_computed"
+echo "        (3-branch), memo fya<S>c<N>:, via gen-anchor-source.sh + sign-anchor-event.sh."
 echo ""
 echo "Next steps (manual):"
 echo "  1. If not done yet, copy the public key into the repo:"
