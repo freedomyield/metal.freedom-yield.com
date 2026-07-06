@@ -2,7 +2,7 @@
 
 This document describes how a third-party evaluator verifies the operator identity manifest published by Freedom Yield Metal, end-to-end, from the signed manifest through the on-chain anchor.
 
-> Companion runbook for the **operator side** (key generation, signing, publication, rollback) is in [`OPERATOR_IDENTITY_SETUP.md`](./OPERATOR_IDENTITY_SETUP.md). Byte-level construction rules for the Merkle DAG are in [`MERKLE_DAG_SPEC.md`](./MERKLE_DAG_SPEC.md). This document covers the **verifier side**.
+> Companion runbook for the **operator side** (key generation, signing, publication, rollback) is in [`OPERATOR_IDENTITY_SETUP.md`](./OPERATOR_IDENTITY_SETUP.md). Byte-level construction rules for the DAG are in [`MERKLE_DAG_SPEC.md`](./MERKLE_DAG_SPEC.md). This document covers the **verifier side**.
 
 ## Key model (read first)
 
@@ -13,7 +13,7 @@ The identity manifest is signed with a **dedicated ed25519 operator identity key
 - The signing key is **not** any private key used by the `metalgo` process.
 - The operator identity key is generated, held, and rotated on the operator's local Mac — not on the validator host or the web host. CI never receives the private key.
 
-A separate `metalfreedom@anchor` key (XPRNetwork K1 / EOSIO format) lives on the validator host and signs A-chain inscriptions only. It is scoped via `linkauth` to inscribe-class actions, so a compromise of the anchor key cannot move tokens, change permissions, or deploy contracts. The signing key and the anchor key are independent; the chain of trust binds them through `identity.json`'s `operator_identity_pubkey_fingerprint` (signed by the operator identity key) and `anchor-receipt.json`'s `anchor.inscribe_action.permission.actor` (= `metalfreedom`, with the `anchor` permission).
+A separate `<xpr-account>@anchor` key (XPRNetwork K1 / EOSIO format) lives on the operator's signing machine and signs A-chain inscriptions only. It is scoped via `linkauth` to inscribe-class actions, so a compromise of the anchor key cannot move tokens, change permissions, or deploy contracts. The signing key and the anchor key are independent; the chain of trust binds them through `identity.json`'s `operator_identity_pubkey_fingerprint` (signed by the operator identity key) and the on-chain anchor action's signer permission (`<xpr-account>@anchor`).
 
 This separation is intentional. Each key has one job; reuse for off-chain manifest signing or for unrelated on-chain actions is excluded by design.
 
@@ -23,11 +23,10 @@ A single signature does not by itself prove control of the validator. NodeID bin
 
 - `/api/identity.json` — signed identity manifest (this document's subject)
 - `/api/identity.json.sig` — detached ed25519 signature
-- `/.well-known/operator-identity.pub` — current operator identity public key
-- `/api/identity-history.jsonl` — per-key-rotation leaf source for the identity branch of the Merkle DAG
-- `/api/cycle-history.jsonl` — per-validation-cycle leaf source for the cycles branch of the Merkle DAG
-- `/api/cycles-history.json` — Merkle DAG snapshot publishing both branch roots and the combined `dag_root_hash`
-- `/api/anchor-receipt.json` — Metal A-chain (PulseVM / XPRNetwork) inscription receipt anchoring `dag_root_hash`
+- `/.well-known/operator-identity.pub` — current operator identity public key (its SHA-256 is committed inside the DAG's identity branch)
+- `/api/anchor-source.json` — the DAG source: the three branch objects (identity / observations / artifacts) and the combined `dag_root_computed`
+- `/api/anchor-receipt.json` — Metal A-chain (PulseVM / XPRNetwork) inscription receipt anchoring `dag_root_computed`
+- `/api/anchor-history.jsonl` — append-only log of every broadcast anchor (cycle → tx_id → dag)
 - `/api/evidence.json` — machine-readable selection-evidence manifest, documented at `docs/EVIDENCE_MANIFEST.md`
 - `/api/validator.json` — live validator state
 - The validator registration record on the public Metal explorer (`https://explorer.metalblockchain.org/`)
@@ -38,11 +37,11 @@ An evaluator should not treat any single artifact as conclusive. The whole set a
 
 ## Machine-readable discovery
 
-An automated reviewer can discover the manifest set entirely from `/api/evidence.json`. Since Phase α activated on 2026-06-22, the `live_artifacts.identity_manifest` object lists every live URL in one place: `url`, `signature_url`, `pubkey_url`, `schema_url`, `formal_schema_url`, `format_guide_url`, `operator_guide_url`, and `cross_reference_url` (= `/api/cycles-history.json`, the DAG snapshot the manifest is folded into). The companion `live_artifacts.cycle_history_jsonl` entry covers the cycle audit packet. The `in_preparation_artifacts` block still exists for artifacts not yet live — currently `anchor_receipt`, which goes live at cycle 3 start on 2026-07-04 13:00 JST.
+An automated reviewer can discover the manifest set from `/api/evidence.json`. The `live_artifacts.identity_manifest` object lists the manifest URLs (`url`, `signature_url`, `pubkey_url`, `schema_url`, …); the anchor artifacts (`anchor-source.json`, `anchor-receipt.json`, `anchor-history.jsonl`) carry the on-chain binding.
 
-## Verification procedure (nine steps)
+## Verification procedure (seven steps)
 
-Requires **OpenSSH 8.0+** (the `-Y` subcommand was added in OpenSSH 8.0, 2019-04), `curl`, `sha256sum` or `shasum -a 256`, and `xxd` (or any tool that converts hex to raw bytes). macOS 11+, modern Linux distros, and Windows OpenSSH 8.0+ are all supported.
+Requires **OpenSSH 8.0+** (the `-Y` subcommand was added in OpenSSH 8.0), `curl`, `jq`, and `sha256sum` or `shasum -a 256`. macOS 11+, modern Linux distros, and Windows OpenSSH 8.0+ are all supported.
 
 The byte-level construction rules cited below are specified once in [`MERKLE_DAG_SPEC.md`](./MERKLE_DAG_SPEC.md). This document is the recipe; the spec is the authority. If the two disagree, the spec is the source of truth and this document is a bug.
 
@@ -53,13 +52,11 @@ BASE=https://metal.freedom-yield.com
 curl -sSLfO ${BASE}/api/identity.json
 curl -sSLfO ${BASE}/api/identity.json.sig
 curl -sSLfO ${BASE}/.well-known/operator-identity.pub
-curl -sSLfO ${BASE}/api/identity-history.jsonl
-curl -sSLfO ${BASE}/api/cycle-history.jsonl
-curl -sSLfO ${BASE}/api/cycles-history.json
+curl -sSLfO ${BASE}/api/anchor-source.json
 curl -sSLfO ${BASE}/api/anchor-receipt.json
 ```
 
-A 404 on any of the seven URLs is a verification failure: the set must be complete for the chain of evidence to hold.
+A 404 on any of the five URLs is a verification failure: the set must be complete for the chain of evidence to hold.
 
 ### Step 2 — Verify the operator's signature on identity.json
 
@@ -72,7 +69,7 @@ ssh-keygen -Y verify \
   -s identity.json.sig < identity.json
 ```
 
-A successful verification prints `Good "freedom-yield/validator-identity" signature for freedom-yield with ED25519 key SHA256:…` and exits with status 0. The four required parameters are pinned:
+A successful verification prints `Good "freedom-yield/validator-identity" signature for freedom-yield with ED25519 key SHA256:…` and exits 0. The four required parameters are pinned:
 
 | Parameter | Value | Source |
 |---|---|---|
@@ -92,134 +89,93 @@ ssh-keygen -l -f operator-identity.pub
 #         must equal identity.json.operator_identity_pubkey_fingerprint
 ```
 
-Redundant with step 2 (the signature already proves the key controls the manifest) but catches accidental key-file substitution by intermediate caches.
+Redundant with step 2 (the signature already proves the key controls the manifest) but catches accidental key-file substitution by intermediate caches. The same public key's raw-bytes SHA-256 is also committed inside the DAG at `anchor-source.json .identity_branch.operator_ed25519_pubkey_sha256_hex` (reproduce with `cat operator-identity.pub | awk '{print $2}' | base64 -d | tail -c 32 | sha256sum`).
 
-### Step 4 — Compute the identity branch root
+### Step 4 — Recompute the three branch roots
 
-```sh
-# Per-line SHA-256 of identity-history.jsonl, in file order (= key_seq ascending).
-while IFS= read -r line; do
-  printf '%s\n' "$line" | sha256sum | awk '{print $1}'
-done < identity-history.jsonl > identity-leaves.txt
-```
-
-Then build the Merkle root over `identity-leaves.txt` following the construction in [`MERKLE_DAG_SPEC.md`](./MERKLE_DAG_SPEC.md) §3: at each level, duplicate the last leaf if the count is odd; pair adjacent leaves; `parent = SHA-256( raw_bytes(left) || raw_bytes(right) )` where the inputs are 32-byte raw digests (not the 64-char hex strings); the single remaining hex digest is `identity_branch_root`.
-
-The shell construction is implemented portably in `scripts/operator-local/gen-identity.sh::compute_merkle_root` and a Python equivalent is in `truthmark.io/scrapers/xpr/merkle.py::compute_merkle_root_from_hashes`. A verifier MAY reuse either.
-
-Assert: the computed value equals `cycles-history.json.branches.identity.branch_root`.
-
-### Step 5 — Compute the cycles branch root
-
-Same procedure as step 4, applied to `cycle-history.jsonl`:
+Each branch root is the SHA-256 of the branch object's canonical bytes (`jq -cS` = compact + sorted keys), per [`MERKLE_DAG_SPEC.md`](./MERKLE_DAG_SPEC.md) §3. There is no per-branch Merkle tree — that was the retired 2-branch model.
 
 ```sh
-while IFS= read -r line; do
-  printf '%s\n' "$line" | sha256sum | awk '{print $1}'
-done < cycle-history.jsonl > cycles-leaves.txt
+ID_ROOT=$(jq -cS '.identity_branch'     anchor-source.json | sha256sum | awk '{print $1}')
+OB_ROOT=$(jq -cS '.observations_branch' anchor-source.json | sha256sum | awk '{print $1}')
+AR_ROOT=$(jq -cS '.artifacts_branch'    anchor-source.json | sha256sum | awk '{print $1}')
+printf 'id=%s\nob=%s\nar=%s\n' "$ID_ROOT" "$OB_ROOT" "$AR_ROOT"
 ```
 
-Then build the Merkle root over `cycles-leaves.txt` per the same rules.
+These three values are what the on-chain branch memos commit to (step 7). A verifier that uses a non-jq JCS serializer MUST match jq's compact + sorted-key encoding.
 
-Assert: the computed value equals `cycles-history.json.branches.cycles.branch_root`.
+### Step 5 — Recompute dag_root_computed
 
-### Step 6 — Combine into dag_root_hash
+The DAG root is SHA-256 of the three branch roots concatenated **as their 64-char lowercase-hex ASCII strings** (not raw digest bytes), per [`MERKLE_DAG_SPEC.md`](./MERKLE_DAG_SPEC.md) §4.
 
 ```sh
-IB_ROOT=$(jq -r '.branches.identity.branch_root' cycles-history.json)
-CY_ROOT=$(jq -r '.branches.cycles.branch_root' cycles-history.json)
-DAG_ROOT=$( { printf '%s' "$IB_ROOT" | xxd -r -p
-              printf '%s' "$CY_ROOT" | xxd -r -p
-            } | sha256sum | awk '{print $1}' )
-echo "$DAG_ROOT"
+DAG=$(printf '%s%s%s' "$ID_ROOT" "$OB_ROOT" "$AR_ROOT" | sha256sum | awk '{print $1}')
+echo "$DAG"
 ```
 
-This is `SHA-256( raw_bytes(identity_branch_root) || raw_bytes(cycles_branch_root) )` per [`MERKLE_DAG_SPEC.md`](./MERKLE_DAG_SPEC.md) §4.
+### Step 6 — DAG-root equality across source and receipt
 
-Empty-branch convention: if either branch has zero leaves, its root is the sentinel `SHA-256("") = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` (spec §5).
-
-### Step 7 — DAG-root equality across the three documents
-
-Assert all three of:
+Assert both of:
 
 ```sh
-jq -r .dag_root_hash identity.json
-jq -r .dag_root_hash cycles-history.json
-jq -r .dag_root_hash anchor-receipt.json
+jq -r .dag_root_computed anchor-source.json
+jq -r .dag_root_hash     anchor-receipt.json
 ```
 
-equal the `DAG_ROOT` computed in step 6. Any disagreement breaks the chain; the operator has either published an inconsistent set or the anchor receipt is stale relative to the manifest.
+equal the `DAG` computed in step 5. Any disagreement breaks the chain: the operator has either published an inconsistent `anchor-source.json` or the receipt is stale relative to the source.
 
-### Step 8 — On-chain anchor cross-check
+### Step 7 — On-chain anchor cross-check (four memos)
 
-Read the inscription on a public XPRNetwork explorer:
+The anchor is **four** `eosio.token::transfer` actions, one memo each. Compose the expected memos from the source's schema + cycle:
 
 ```sh
-TX_ID=$(jq -r .anchor.tx_id anchor-receipt.json)
-EXPLORER_URL=$(jq -r .anchor.explorer_url anchor-receipt.json)
-# Load EXPLORER_URL in a browser, or query the chain API directly.
+S=$(jq -r .schema_version                             anchor-source.json)
+N=$(jq -r .observations_branch.cycle_number_observed  anchor-source.json)
+printf 'action1  %s\naction2  %s\naction3  %s\naction4  %s\n' \
+  "fya${S}c${N}-id:${ID_ROOT}" \
+  "fya${S}c${N}-ob:${OB_ROOT}" \
+  "fya${S}c${N}-ar:${AR_ROOT}" \
+  "fya${S}c${N}:${DAG}"
 ```
 
-On the explorer entry, assert all of:
+Look up the transaction on a public XPRNetwork explorer and assert:
 
 | Field | Expected |
 |---|---|
-| action `account` | `eosio.token` (Phase α) or `metalfreedom` (Phase β) |
-| action `name` | `transfer` (Phase α) or `inscribe` (Phase β) |
-| action `memo` | exactly `fyid1:<DAG_ROOT>` (70 chars total, lowercase hex) |
-| signer permission | `metalfreedom@anchor` |
-| `from` | `metalfreedom` (Phase α `eosio.token::transfer`) |
-| `to` | NOT equal to `from`; matches `anchor-receipt.json.anchor.inscribe_action.to` |
-| block_num / block_time | matches receipt fields |
+| tx_id | `anchor-receipt.json .tx_id` (or `.anchor.tx_id`) |
+| four action memos | exactly the four strings above (branch roots `-id`/`-ob`/`-ar` + the DAG root), in the four `eosio.token::transfer` actions |
+| signer permission | `<xpr-account>@anchor` on each action |
+| `from` | `<xpr-account>` (config `xpr-account`) |
+| `to` | NOT equal to `from`; the dedicated sink (config `anchor-sink`) |
+| block height / timestamp | matches the receipt fields |
 
-The `from != to` invariant is forced by the XPRNetwork `eosio.token` contract (`eosio.token.cpp` L99 `check( from != to, "cannot transfer to self" )`) and is therefore observable on every Phase α receipt.
+The `from != to` invariant is forced by the XPRNetwork `eosio.token` contract (`eosio.token.cpp` L99 `check(from != to, "cannot transfer to self")`) and is observable on every receipt. The signer permission binds the actions to `<xpr-account>@anchor`; if signed by `@active` or `@owner` instead, the receipt is not honoring the narrow-permission discipline the operator declared, and the evaluator SHOULD flag it.
 
-The signer permission is the binding that ties the on-chain action to `metalfreedom@anchor`. If the action was signed by `metalfreedom@active` or `metalfreedom@owner` instead, the receipt is not honoring the narrow-permission discipline declared by the operator and the evaluator SHOULD flag it.
-
-### Step 9 — Cross-reference integrity (cycles ↔ identity)
-
-For each line of `cycle-history.jsonl` that carries `signed_by_key_seq` and `signed_by_pubkey_fingerprint` (= operators SHOULD set these from `cycle_n >= 3`; earlier cycles MAY omit them per the additive-only schema policy):
-
-1. Find the line in `identity-history.jsonl` whose `key_seq` matches.
-2. Assert `operator_identity_pubkey_fingerprint` matches `signed_by_pubkey_fingerprint`.
-3. Assert `key_iat ≤ start_iso` of the cycle.
-4. If the identity entry is `revoked == true`, assert `revoked_at > start_iso` (= the key was still authoritative when the cycle began).
-
-A cycle line that fails any of these checks indicates either a publication bug or a deliberate misrepresentation; either way, the evaluator SHOULD treat that cycle's claims as unverified.
-
-Cycles published before this binding was introduced (cycle 1 and cycle 2) may legitimately lack the `signed_by_*` fields. Their authenticity rests on the live-validator and on-chain record (= step 8 covers the anchor, the explorer covers the validator entry); the missing cross-ref is honest about the absence of the binding metadata, not an integrity failure.
+Publishing the three branch roots on-chain alongside the DAG root lets an evaluator confirm each branch independently and recompute the DAG root (step 5) from chain data alone.
 
 ## Rotation and revocation
 
-If the operator identity key is rotated, the new `identity.json` reflects the new `operator_identity_pubkey_fingerprint` and a new `key_iat`; a new line appends to `identity-history.jsonl` with the next `key_seq`; the prior key's line is updated with `superseded_by_key_seq` populated (and `revoked` / `revoked_at` / `revocation_reason` set if the rotation is for cause rather than for routine cadence). Both branches' roots change, `dag_root_hash` changes, and a new anchor inscription is broadcast.
+If the operator identity key is rotated, the new `identity.json` reflects the new `operator_identity_pubkey_fingerprint` and a new `key_iat`; a new line appends to `identity-history.jsonl` (the source of `identity_branch.identity_history_root`) with the next `key_seq`; the prior key's line is updated with `superseded_by_key_seq` populated (and `revoked` / `revoked_at` / `revocation_reason` set if the rotation is for cause). The identity branch root changes, hence `dag_root_computed` changes, and the next cycle's anchor commits the new root.
 
-The recommended rotation cadence is 12 months, aligned to a validation-cycle boundary.
+The recommended rotation cadence is 12 months, aligned to a validation-cycle boundary. `ssh-keygen -Y verify` does **not** check `key_iat` / `key_exp`; consumers MAY enforce them as policy.
 
-If the previous key is to be marked revoked, an interim `identity.json` may be published with `"revoked": true`, `"revoked_at"` set, and `"revocation_reason"` populated, signed by the new key.
+The validator's on-chain signing keys (staker / BLS) are unaffected by operator identity key rotation; they have no relationship to this manifest. The `<xpr-account>@anchor` key is independent and rotates on its own schedule.
 
-`ssh-keygen -Y verify` does **not** check `key_iat` / `key_exp`. These are operator-declared lifetime metadata; consumers MAY enforce them as policy.
+## Why a DAG anchor rather than just a signed manifest
 
-The validator's on-chain signing keys (staker / BLS) are unaffected by operator identity key rotation; they have no relationship to this manifest. The `metalfreedom@anchor` key is independent and rotates on its own schedule, via `metalfreedom@active` invoking `updateauth anchor`.
+A signed manifest alone proves only that the operator wrote the manifest at the moment of signing. It does not prove the manifest existed at any specific earlier time, and a malicious operator could silently re-sign a different history later. The DAG anchor adds an **independent existence-time proof**: once `dag_root_computed` is committed to Metal A-chain at a block with a known timestamp, the operator cannot later modify any branch source without producing a different DAG root that contradicts the on-chain memos.
 
-## Why a Merkle DAG anchor rather than just a signed manifest
-
-A signed manifest alone proves only that the operator (= holder of the identity private key) wrote the manifest at the moment of signing. It does not prove the manifest existed at any specific earlier time, and a malicious operator could in principle silently re-sign a different history later. The Merkle DAG anchor adds an **independent existence-time proof**: once `dag_root_hash` is committed to Metal A-chain in transaction `tx_id` at block `block_num` (block timestamp `block_time`), the operator cannot later modify `identity-history.jsonl` or `cycle-history.jsonl` without producing a different `dag_root_hash` that contradicts the on-chain memo.
-
-The anchor does not prevent the operator from publishing a new, contradicting DAG later; it commits the operator to a specific history at a specific time, and lets evaluators detect contradictions trivially (= the prior on-chain memo is still there, pointing to a different root).
-
-The on-chain mechanism for Phase α is an `eosio.token::transfer` with the binding in the `memo` field. Phase β replaces this with a dedicated `metalfreedom::inscribe` smart-contract action; both forms produce equivalent commitment to `dag_root_hash` via the memo field, and the `anchor-receipt.json.anchor.method` discriminator lets verifier tooling know which on-chain action shape to read.
+The anchor does not prevent the operator from publishing a new, contradicting DAG later; it commits the operator to a specific state at a specific time, and lets evaluators detect contradictions trivially (the prior on-chain memos still point at a different root).
 
 ## Why not BLS / staking key for the off-chain signature?
 
-Three reasons:
-
 1. **Separation of concerns.** The validator's signing keys exist to sign consensus messages. Reusing them for off-chain manifest signing widens their attack surface for no on-chain benefit.
-2. **Operational safety.** Reading validator key material on a server-side process to produce an external signature is operationally risky. The operator identity key is intentionally kept off the validator host, the web host, and CI.
-3. **Toolchain.** BLS12-381 (used by Metal validator signing keys) is not directly supported by common verification tooling on an evaluator's workstation. `ssh-keygen -Y verify` with ed25519 is universally available and produces a one-line, copy-pasteable verification.
+2. **Operational safety.** Reading validator key material to produce an external signature is operationally risky. The operator identity key is intentionally kept off the validator host, the web host, and CI.
+3. **Toolchain.** BLS12-381 is not directly supported by common verification tooling. `ssh-keygen -Y verify` with ed25519 is universally available and produces a one-line, copy-pasteable verification.
 
 ## Scope limits
 
-This identity manifest and DAG anchor are a verifiable binding from a stable public key to an operator brand and a NodeID, plus a cumulative on-chain commitment to the identity-key history and validation-cycle history. They are not:
+This identity manifest and DAG anchor are a verifiable binding from a stable public key to an operator brand and a NodeID, plus a cumulative on-chain commitment to the identity-key history, the cycle observations, and the published artifact set. They are not:
 
 - a compliance attestation
 - a regulatory disclosure
@@ -232,5 +188,4 @@ For honest disclosure of known limitations, see `/risk-disclosure/`. For unilate
 
 - [`MERKLE_DAG_SPEC.md`](./MERKLE_DAG_SPEC.md) — canonical byte-level construction rules referenced by this recipe.
 - [`OPERATOR_IDENTITY_SETUP.md`](./OPERATOR_IDENTITY_SETUP.md) — operator-side runbook for the off-chain signing key.
-- [`IDENTITY_SCHEMA_CHANGELOG.md`](./IDENTITY_SCHEMA_CHANGELOG.md) — design history of the manifest schema and DAG anchor extensions.
-- `tests/identity-verification-vectors/` — synthetic reference data for verifier-implementation self-test.
+- [`IDENTITY_SCHEMA_CHANGELOG.md`](./IDENTITY_SCHEMA_CHANGELOG.md) — design history, including the retirement of the 2-branch `fyid1:` model.
