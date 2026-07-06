@@ -7,6 +7,39 @@ schema v1 and the rationale for any future major version bump. It is
 not a chain-anchored attestation and not equivalent to an external
 append-only log: see the retention note below.
 
+## 2026-07-06 — Retire cycles-history.json + cycles_history_url (design-stocktake #1: single-DAG completion)
+
+### Summary
+
+The 2-branch DAG snapshot `/api/cycles-history.json` and identity.json's
+`cycles_history_url` pointer are removed. `gen-identity.sh` no longer computes
+the 2-branch `dag_root_hash` nor writes cycles-history.json; it retains only the
+`identity-history.jsonl` bootstrap and the `FY_EXPECT_CYCLE` ordering guard.
+`gen-anchor-source.sh` no longer hashes cycles-history.json into
+`artifacts_branch`, and `/api/cycles-history.schema.v1.json` + its example are
+retired.
+
+### Why
+
+This completes the collapse begun in the entry below (retiring identity.json's
+own `dag_root_hash`). cycles-history.json was the *published snapshot* of that
+same retired 2-branch root; leaving it in place kept two competing DAG
+namespaces alive across the generation pipeline and every doc/example pointing
+at it. The single authoritative root is now
+`anchor-source.json.dag_root_computed` (3-branch over identity / observations /
+artifacts, memo `fya<S>c<N>:`), surfaced to verifiers via `anchor-receipt.json`.
+Verifier cross-references that pointed at cycles-history.json now point at
+anchor-source.json.
+
+### Compatibility
+
+No live consumer read *data* from cycles-history.json — the references were a
+published-artifact hash entry (`gen-anchor-source.sh` `API_FILES`), a
+cross-reference URL (`gen-evidence.sh`), and operator git-add / doc
+instructions, all repointed or removed. Historical Phase-α snapshots and
+on-chain receipts that recorded cycles-history.json remain valid as dated
+records.
+
 ## 2026-07-06 — Retire `dag_root_hash` from identity.json (design-stocktake #1: DAG-root collapse)
 
 ### Summary
@@ -247,9 +280,7 @@ but the schema tolerates their absence on earlier cycle leaves.
 
 | Schema | Purpose |
 | --- | --- |
-| `/api/anchor-receipt.schema.v1.json` | A-chain inscription receipt. Republishes the most recent A-chain transaction anchoring a `dag_root_hash`, including `tx_id`, `block_num`, `block_time`, `explorer_url`, and the structured `inscribe_action` (account / name / from / to / quantity / memo / permission). Discriminator `anchor.method` distinguishes Phase α (`phase_alpha_token_transfer`) from Phase β (`phase_beta_sc_inscribe`). |
-| `/api/cycles-history.schema.v1.json` | Merkle DAG snapshot. Publishes both branch roots (`identity_branch_root`, `cycles_branch_root`), their combination `dag_root_hash`, and pointers to the leaf source JSONL documents. Naming distinction: `cycles-history.json` (plural) is the snapshot; `cycle-history.jsonl` (singular) is the per-cycle leaf source. |
-| `/api/identity-history.schema.v1.json` | Per-line schema for `/api/identity-history.jsonl`. Each line represents one operator-identity ed25519 key entry, keyed by monotone `key_seq`. Append-only within v1; serves as the leaf source for the identity branch of the DAG. |
+| `/api/anchor-receipt.schema.v1.json` | A-chain inscription receipt. Republishes the most recent A-chain transaction anchoring a `dag_root_hash`, including `tx_id`, `block_num`, `block_time`, `explorer_url`, and the structured `inscribe_action` (account / name / from / to / quantity / memo / permission). Discriminator `anchor.method` distinguishes Phase α (`phase_alpha_token_transfer`) from Phase β (`phase_beta_sc_inscribe`). || `/api/identity-history.schema.v1.json` | Per-line schema for `/api/identity-history.jsonl`. Each line represents one operator-identity ed25519 key entry, keyed by monotone `key_seq`. Append-only within v1; serves as the leaf source for the identity branch of the DAG. |
 
 All three new schemas declare `x-stability: "additive-only-within-v1"`,
 `x-issued-at: "2026-06-21T00:00:00Z"`, and

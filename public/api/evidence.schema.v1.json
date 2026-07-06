@@ -152,7 +152,7 @@
 					"cross_reference_url": {
 						"type": "string",
 						"format": "uri",
-						"description": "URL of a related live artifact whose state this artifact is folded into or relies on (e.g. identity_manifest cross-references cycles-history.json)."
+						"description": "URL of a related live artifact whose state this artifact is folded into or relies on (e.g. identity_manifest cross-references anchor-source.json)."
 					}
 				}
 			}

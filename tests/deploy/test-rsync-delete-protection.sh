@@ -67,7 +67,7 @@ mkdir -p "${DST}/public/api" "${DST}/public/.well-known"
 # --- src: Git-owned content ---
 echo '{"git_owned": true}' > "${SRC}/public/api/identity.json"
 echo 'signature-bytes'      > "${SRC}/public/api/identity.json.sig"
-echo '{"git_owned": true}' > "${SRC}/public/api/cycles-history.json"
+echo '{"$schema": "x"}'      > "${SRC}/public/api/identity.schema.v1.json"
 echo '{"key_seq": 1}'       > "${SRC}/public/api/identity-history.jsonl"
 echo 'ssh-ed25519 AAAA...'  > "${SRC}/public/.well-known/operator-identity.pub"
 
@@ -140,7 +140,7 @@ echo ""
 echo "=== Invariant 2: Git-owned files copied + stale dst overwritten ==="
 check_exists  "${DST}/public/api/identity.json"            "identity.json"
 check_exists  "${DST}/public/api/identity.json.sig"        "identity.json.sig"
-check_exists  "${DST}/public/api/cycles-history.json"      "cycles-history.json"
+check_exists  "${DST}/public/api/identity.schema.v1.json"  "identity.schema.v1.json"
 check_exists  "${DST}/public/api/identity-history.jsonl"   "identity-history.jsonl"
 check_exists  "${DST}/public/.well-known/operator-identity.pub" "operator-identity.pub"
 # And the stale identity.json was overwritten.

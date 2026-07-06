@@ -223,8 +223,8 @@ An off-chain verifier can confirm the chain integrity by:
 2. Asserting `cycles[i].prev_root == cycles[i-1].root_hash` for all `i > 0`.
 3. Asserting `cycles[0].prev_root == ZERO`.
 4. Asserting each `root_hash` matches the DAG construction in
-   `docs/MERKLE_DAG_SPEC.md` (= off-chain Merkle re-compute from
-   `cycles-history.json`).
+   `docs/MERKLE_DAG_SPEC.md` (= off-chain re-compute from
+   `anchor-source.json`).
 
 ## 6. Action invocation example (Phase β)
 
@@ -259,10 +259,10 @@ the resulting `cycles`, `roots`, `leaves` table rows are visible via
 4. Optionally: get_table_rows(scope="metalfreedom", code="metalfreedom",
    table="cycles", lower_bound=anchor.cycles_id, limit=1) and assert
    prev_root linkage backward to genesis.
-5. Confirm /api/cycles-history.json's dag_root_hash matches
+5. Confirm /api/anchor-source.json's dag_root_computed matches
    anchor.dag_root_hash.
-6. Recompute dag_root_hash from cycles-history.json + identity-history.jsonl
-   per MERKLE_DAG_SPEC.md; assert equality.
+6. Recompute dag_root_computed from anchor-source.json's three branch roots
+   (identity / observations / artifacts) per MERKLE_DAG_SPEC.md; assert equality.
 ```
 
 ## 8. ABI fragment (= alignment with C2 anchor-receipt schema)

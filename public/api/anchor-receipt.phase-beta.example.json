@@ -32,7 +32,7 @@
 			]
 		}
 	},
-	"cycles_history_url": "https://metal.freedom-yield.com/api/cycles-history.json",
+	"anchor_source_url": "https://metal.freedom-yield.com/api/anchor-source.json",
 	"identity_url": "https://metal.freedom-yield.com/api/identity.json",
 	"trigger_event": "cycle_start",
 	"trigger_reference": {

@@ -272,7 +272,7 @@ git pull origin main
 export OPERATOR_IDENTITY_KEY=~/.ssh/freedom_yield_operator
 bash scripts/operator-local/gen-identity.sh
 git add public/api/identity.json public/api/identity.json.sig \
-        public/api/cycles-history.json public/api/identity-history.jsonl \
+        public/api/identity-history.jsonl \
         public/.well-known/operator-identity.pub
 git commit -m "feat(identity): re-sign for new cycle"
 git push origin main

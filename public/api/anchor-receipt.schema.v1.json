@@ -2,7 +2,7 @@
 	"$schema": "https://json-schema.org/draft/2020-12/schema",
 	"$id": "https://metal.freedom-yield.com/api/anchor-receipt.schema.v1.json",
 	"title": "Freedom Yield Metal — A-chain Anchor Receipt v1",
-	"description": "Formal contract for /api/anchor-receipt.json. The receipt republishes the most recent Metal A-chain (PulseVM / XPRNetwork) inscription that anchors a Merkle DAG root committed by /api/identity.json and summarised by /api/cycles-history.json. The receipt is a content-addressed pointer: an evaluator may independently look up the receipt's tx_id on a public XPR explorer and assert memo == \"fyid1:\" + dag_root_hash. The receipt is regenerated each time a new inscription is broadcast (= cycle start, cycle end, or identity key rotation). Method discriminator: the anchor.method enum identifies whether the inscription is the Phase α minimal form (= eosio.token::transfer) or the Phase β dedicated form (= metalfreedom::inscribe smart-contract action). Companion design: docs/MERKLE_DAG_SPEC.md. Schema stability: additive-only within v1; breaking changes go to /api/anchor-receipt.schema.v2.json and the v1 URL stays reachable for at least 18 months.",
+	"description": "Formal contract for /api/anchor-receipt.json. The receipt republishes the most recent Metal A-chain (PulseVM / XPRNetwork) inscription that anchors a Merkle DAG root committed by /api/identity.json and sourced from /api/anchor-source.json (.dag_root_computed, 3-branch). The receipt is a content-addressed pointer: an evaluator may independently look up the receipt's tx_id on a public XPR explorer and assert memo == \"fya<S>c<N>:\" + dag_root_hash. The receipt is regenerated each time a new inscription is broadcast (= cycle start, cycle end, or identity key rotation). Method discriminator: the anchor.method enum identifies whether the inscription is the Phase α minimal form (= eosio.token::transfer) or the Phase β dedicated form (= metalfreedom::inscribe smart-contract action). Companion design: docs/MERKLE_DAG_SPEC.md. Schema stability: additive-only within v1; breaking changes go to /api/anchor-receipt.schema.v2.json and the v1 URL stays reachable for at least 18 months.",
 	"x-issued-at": "2026-06-21T00:00:00Z",
 	"x-stability": "additive-only-within-v1",
 	"x-baseline-revision": "2026-06-23-audit-fields-additive",
@@ -17,7 +17,7 @@
 		"dag_root_hash",
 		"memo",
 		"anchor",
-		"cycles_history_url",
+		"anchor_source_url",
 		"identity_url",
 		"generated_at"
 	],
@@ -37,7 +37,7 @@
 		"dag_root_hash": {
 			"type": "string",
 			"pattern": "^[a-f0-9]{64}$",
-			"description": "The 64-hex SHA-256 DAG root being anchored. Equals identity.json.dag_root_hash and cycles-history.json.dag_root_hash for the same publication moment."
+			"description": "The 64-hex SHA-256 DAG root being anchored. Equals anchor-source.json.dag_root_computed (the 3-branch DAG over identity / observations / artifacts) for the same publication moment."
 		},
 		"memo": {
 			"type": "string",
@@ -226,10 +226,10 @@
 				}
 			]
 		},
-		"cycles_history_url": {
+		"anchor_source_url": {
 			"type": "string",
 			"format": "uri",
-			"description": "URL of /api/cycles-history.json — the DAG snapshot whose root this receipt anchors. The DAG snapshot in turn references the leaf source JSONL documents."
+			"description": "URL of /api/anchor-source.json — the 3-branch DAG source (identity / observations / artifacts) whose dag_root_computed this receipt anchors on chain."
 		},
 		"identity_url": {
 			"type": "string",
