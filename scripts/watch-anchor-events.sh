@@ -160,16 +160,16 @@ else
 	if [ "${DRY_RUN}" -eq 1 ]; then
 		echo "DRY-RUN: would invoke ${DRIVER} --event-type=${EVENT}"
 	else
-		# Synchronous invocation. post-anchor-event.sh has its own
-		# idempotency on LAST_ANCHORED_ROOT, so even if the watcher's
-		# state-file update below fails, a future re-dispatch of the
-		# same transition is a no-op at the driver level (exit 2).
+		# Synchronous invocation. The alert-only driver
+		# (notify-anchor-transition.sh) treats a duplicate dispatch of the
+		# same transition as a no-op (exit 2), so even if the watcher's
+		# state-file update below fails, a future re-dispatch is safe.
 		DRIVER_EXIT=0
 		"${DRIVER}" --event-type="${EVENT}" || DRIVER_EXIT=$?
 		if [ "${DRIVER_EXIT}" -ne 0 ] && [ "${DRIVER_EXIT}" -ne 2 ]; then
 			echo "ERROR: driver returned non-zero exit ${DRIVER_EXIT}" >&2
-			# Update state anyway (= record what we observed); the driver's
-			# own state file will retry the broadcast on the next call.
+			# Update state anyway (= record what we observed); the driver
+			# re-alerts on the next dispatch of a real transition.
 			LATER_EXIT=4
 		fi
 	fi
