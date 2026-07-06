@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-# tests/cycle-gate/bin/flock — test shim for macOS where flock(1) is not
-# installed by default. Always succeeds (= "lock acquired"). Production runs
-# on Linux which ships flock natively; this shim is for local test runs only.
-# Concurrency semantics of the lock are NOT covered by these tests; they are
-# covered by post-anchor-event.sh's own exit-10 path which production exercises.
-exit 0

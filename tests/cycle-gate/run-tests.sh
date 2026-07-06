@@ -15,19 +15,6 @@ TEST_DIR="$(cd "$(dirname "$0")" && pwd)"
 FIXTURE_DIR="${TEST_DIR}/fixtures"
 SCRIPT_GATE="${REPO_ROOT}/scripts/cycle-gate.sh"
 SCRIPT_RESUME="${REPO_ROOT}/scripts/resume-after-cycle-start.sh"
-# Snapshot the real post-anchor-event.sh path BEFORE any per-test REPO_ROOT
-# override. T16/T17/T18 override REPO_ROOT with a temp dir (= for write
-# isolation), which would otherwise make ${REPO_ROOT}/scripts/post-anchor-event.sh
-# resolve to a nonexistent path inside the tmp dir (= exit 127).
-ABS_POSTANCHOR_PATH="${REPO_ROOT}/scripts/post-anchor-event.sh"
-
-# macOS does not ship flock(1) by default. Prepend a tests-local PATH that
-# carries a no-op flock shim so post-anchor-event.sh's lock acquisition
-# succeeds during tests. Production runs on Linux where flock is native;
-# concurrency semantics are not exercised by this test harness.
-if ! command -v flock >/dev/null 2>&1; then
-	export PATH="${TEST_DIR}/bin:${PATH}"
-fi
 
 PASS=0
 FAIL=0
@@ -240,8 +227,10 @@ assert_exit "T10 resume + RPC down → exit 2" 2 $?
 rm -rf "${STATE_DIR}"
 
 # ==========================================================================
-# T-5.5 extension: T11-T18 cover Phase 1 polling / signature verify, full
-# --apply path (Phase 2-5), and post-anchor-event ⇄ cycle-gate integration.
+# T11-T14 cover resume Phase 1 polling (anchor-source.json freshness) +
+# signature verify, and the full --apply path (Phase 1 verify → Phase 2
+# atomic state write). v2: resume no longer broadcasts or verifies a receipt
+# (that is the sign-anchor-event.sh → gen-anchor-receipt.sh pipeline's job).
 # ==========================================================================
 
 TEST_KEY="${FIXTURE_DIR}/test-identity-key"
@@ -285,11 +274,13 @@ compose_signed_identity() {
 }
 
 # build_resume_scenario_config <out_config_json> <chain_start_time>
-#                              <id_dag> <cycles_dag> <leaf_count>
-#                              <out_dir_for_identity_files>
+#                              <anchor_dag> <out_dir_for_identity_files>
+# Serves the chain RPC + the v2 artifacts resume Phase 1 reads:
+#   /api/anchor-source.json  (dag_root_computed — the freshness signal)
+#   /api/identity.json(.sig) + operator-identity.pub  (signature gate)
 build_resume_scenario_config() {
-	local out="$1" start="$2" id_dag="$3" cy_dag="$4" leaves="$5" iddir="$6"
-	compose_signed_identity "${id_dag}" "${iddir}"
+	local out="$1" start="$2" anchor_dag="$3" iddir="$4"
+	compose_signed_identity "${anchor_dag}" "${iddir}"
 	local pub_content sig_content id_content
 	pub_content="$(cat "${TEST_KEY}.pub")"
 	sig_content="$(cat "${iddir}/identity.json.sig")"
@@ -297,33 +288,16 @@ build_resume_scenario_config() {
 	# ssh-keygen -Y sign signed the file bytes INCLUDING the trailing newline.
 	# Append it explicitly so the mock serves byte-exact what was signed.
 	id_content="$(cat "${iddir}/identity.json")"$'\n'
-	local receipt
-	receipt=$(jq -n --arg dag "${id_dag}" '{
-		"$schema": "https://metal.freedom-yield.com/api/anchor-receipt.schema.v1.json",
-		schema_version: 1,
-		dag_root_hash: $dag,
-		memo: "fyid1:\($dag)",
-		anchor: {
-			tx_id: "mocktx_test_abcdef",
-			explorer_url: "https://explorer.xprnetwork.org/transaction/mocktx_test_abcdef"
-		},
-		signing_actor: "metalfreedom",
-		signing_permission: "anchor"
-	}')
 	# identity.json MUST be passed as --arg (= string), not --argjson (= reparsed),
 	# so the mock server returns the byte-exact JSON that was signed by
 	# ssh-keygen -Y sign. Otherwise jq would re-serialize the dict and the
 	# whitespace / key-order delta would break ssh-keygen -Y verify (= byte-exact).
-	# .sig and .pub were already --arg; receipt stays --argjson because schema
-	# check only inspects fields, not bytes.
 	jq -n \
 		--arg start "${start}" \
 		--arg id "${id_content}" \
 		--arg sig "${sig_content}" \
 		--arg pub "${pub_content}" \
-		--arg cy_dag "${cy_dag}" \
-		--argjson leaves "${leaves}" \
-		--argjson receipt "${receipt}" \
+		--arg anchor_dag "${anchor_dag}" \
 		'{
 			rpc_response: {
 				jsonrpc: "2.0",
@@ -340,29 +314,25 @@ build_resume_scenario_config() {
 				}
 			},
 			files: {
+				"/api/anchor-source.json": { dag_root_computed: $anchor_dag },
 				"/api/identity.json": $id,
 				"/api/identity.json.sig": $sig,
-				"/.well-known/operator-identity.pub": $pub,
-				"/api/cycles-history.json": {
-					dag_root_hash: $cy_dag,
-					branches: { cycles: { leaf_count: $leaves } }
-				},
-				"/api/anchor-receipt.json": $receipt
+				"/.well-known/operator-identity.pub": $pub
 			}
 		}' > "${out}"
 }
 
 # ==== T11: resume Phase 1 polling timeout → exit 3 =======================
-echo "[T11] resume Phase 1 polling timeout (= identity.json stays stale) → exit 3"
+echo "[T11] resume Phase 1 polling timeout (= anchor-source.json dag unchanged) → exit 3"
 STATE_DIR="$(mktemp -d -t cgstate.XXXXXX)"
 ID_DIR="$(mktemp -d -t iddir.XXXXXX)"
 SCEN="$(mktemp -t scen.XXXXXX).json"
-# state-old has approved_dag = 00...00; we serve identity.json with same dag.
+# state-old has approved_dag = 00...00; we serve anchor-source.json with the
+# SAME dag_root_computed → the freshness poll never sees a change → timeout.
 cp "${FIXTURE_DIR}/state-old.json" "${STATE_DIR}/cycle-gate-state.json"
 build_resume_scenario_config "${SCEN}" "1700000000" \
 	"0000000000000000000000000000000000000000000000000000000000000000" \
-	"0000000000000000000000000000000000000000000000000000000000000000" \
-	2 "${ID_DIR}"
+	"${ID_DIR}"
 start_mock "${SCEN}"
 FY_STATE_DIR="${STATE_DIR}" METALGO_RPC="http://127.0.0.1:${PORT}" \
 	PUBLIC_BASE="http://127.0.0.1:${PORT}" \
@@ -374,28 +344,6 @@ stop_mock
 assert_exit "T11 resume polling timeout → exit 3" 3 ${RC}
 rm -rf "${STATE_DIR}" "${ID_DIR}" "${SCEN}"
 
-# ==== T12: resume Phase 1 dag mismatch → exit 2 ==========================
-echo "[T12] resume Phase 1 identity.dag != cycles-history.dag → exit 2"
-STATE_DIR="$(mktemp -d -t cgstate.XXXXXX)"
-ID_DIR="$(mktemp -d -t iddir.XXXXXX)"
-SCEN="$(mktemp -t scen.XXXXXX).json"
-cp "${FIXTURE_DIR}/state-old.json" "${STATE_DIR}/cycle-gate-state.json"
-# identity.dag fresh = aaaa…, cycles-history.dag = bbbb… (mismatch).
-build_resume_scenario_config "${SCEN}" "1700000000" \
-	"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
-	"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" \
-	2 "${ID_DIR}"
-start_mock "${SCEN}"
-FY_STATE_DIR="${STATE_DIR}" METALGO_RPC="http://127.0.0.1:${PORT}" \
-	PUBLIC_BASE="http://127.0.0.1:${PORT}" \
-	NODE_ID="NodeID-TEST123" \
-	FY_POLL_INTERVAL=1 FY_POLL_MAX_SEC=10 FY_RPC_TIMEOUT=2 \
-	run_resume --dry-run
-RC=$?
-stop_mock
-assert_exit "T12 resume dag mismatch → exit 2" 2 ${RC}
-rm -rf "${STATE_DIR}" "${ID_DIR}" "${SCEN}"
-
 # ==== T13: resume Phase 1 signature verify (= test key) → Phase 1 PASS ====
 echo "[T13] resume Phase 1 signature verify with test ed25519 key → PASS"
 STATE_DIR="$(mktemp -d -t cgstate.XXXXXX)"
@@ -404,8 +352,7 @@ SCEN="$(mktemp -t scen.XXXXXX).json"
 cp "${FIXTURE_DIR}/state-old.json" "${STATE_DIR}/cycle-gate-state.json"
 build_resume_scenario_config "${SCEN}" "1700000000" \
 	"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" \
-	"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" \
-	2 "${ID_DIR}"
+	"${ID_DIR}"
 start_mock "${SCEN}"
 FY_STATE_DIR="${STATE_DIR}" METALGO_RPC="http://127.0.0.1:${PORT}" \
 	PUBLIC_BASE="http://127.0.0.1:${PORT}" \
@@ -417,258 +364,42 @@ stop_mock
 assert_exit "T13 resume Phase 1 signature PASS → dry-run exit 0" 0 ${RC}
 rm -rf "${STATE_DIR}" "${ID_DIR}" "${SCEN}"
 
-# ==== T14: resume --apply end-to-end → all phases PASS, exit 0 ===========
-echo "[T14] resume --apply end-to-end (= mock POSTANCHOR exit 0) → exit 0"
+# ==== T14: resume --apply end-to-end → Phase 1-2 PASS, state written, exit 0
+echo "[T14] resume --apply end-to-end (= v2 Phase 1 verify → Phase 2 state write) → exit 0"
 STATE_DIR="$(mktemp -d -t cgstate.XXXXXX)"
 ID_DIR="$(mktemp -d -t iddir.XXXXXX)"
 SCEN="$(mktemp -t scen.XXXXXX).json"
 cp "${FIXTURE_DIR}/state-old.json" "${STATE_DIR}/cycle-gate-state.json"
 build_resume_scenario_config "${SCEN}" "1700000000" \
 	"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" \
-	"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" \
-	2 "${ID_DIR}"
+	"${ID_DIR}"
 start_mock "${SCEN}"
-POSTANCHOR_LOG="$(mktemp -t pa.XXXXXX)"
 FY_STATE_DIR="${STATE_DIR}" METALGO_RPC="http://127.0.0.1:${PORT}" \
 	PUBLIC_BASE="http://127.0.0.1:${PORT}" \
 	NODE_ID="NodeID-TEST123" \
 	FY_POLL_INTERVAL=1 FY_POLL_MAX_SEC=10 FY_RPC_TIMEOUT=2 \
-	POSTANCHOR="${TEST_DIR}/mock-postanchor.sh" \
-	MOCK_POSTANCHOR_EXIT=0 \
-	MOCK_POSTANCHOR_LOGFILE="${POSTANCHOR_LOG}" \
 	run_resume --apply
 RC=$?
 stop_mock
 assert_exit "T14 resume --apply end-to-end → exit 0" 0 ${RC}
-# Confirm state file was written + POSTANCHOR was invoked with cyclestart.
+# v2: no post-anchor broadcast. Confirm the state file was written with the
+# new cycle signature + the v2 dag_root_computed pulled from anchor-source.json.
 if [ -f "${STATE_DIR}/cycle-gate-state.json" ] \
 	&& grep -q "NodeID-TEST123-1700000000" "${STATE_DIR}/cycle-gate-state.json" \
-	&& grep -q "cyclestart" "${POSTANCHOR_LOG}"; then
+	&& grep -q "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" "${STATE_DIR}/cycle-gate-state.json"; then
 	PASS=$((PASS + 1))
-	printf '  ✓ PASS: T14 side-effects (state written + POSTANCHOR called with cyclestart)\n'
+	printf '  ✓ PASS: T14 side-effects (state written with new signature + dag_root_computed)\n'
 else
 	FAIL=$((FAIL + 1))
 	FAIL_LINES+=("T14 side-effects verification")
 	printf '  ✗ FAIL: T14 side-effects not as expected\n'
 fi
-rm -rf "${STATE_DIR}" "${ID_DIR}" "${SCEN}" "${POSTANCHOR_LOG}"
-
-# ==== T15: resume --apply with Phase 3 stub failure → exit 5 =============
-echo "[T15] resume --apply + POSTANCHOR exits non-zero → exit 5"
-STATE_DIR="$(mktemp -d -t cgstate.XXXXXX)"
-ID_DIR="$(mktemp -d -t iddir.XXXXXX)"
-SCEN="$(mktemp -t scen.XXXXXX).json"
-cp "${FIXTURE_DIR}/state-old.json" "${STATE_DIR}/cycle-gate-state.json"
-build_resume_scenario_config "${SCEN}" "1700000000" \
-	"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" \
-	"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" \
-	2 "${ID_DIR}"
-start_mock "${SCEN}"
-FY_STATE_DIR="${STATE_DIR}" METALGO_RPC="http://127.0.0.1:${PORT}" \
-	PUBLIC_BASE="http://127.0.0.1:${PORT}" \
-	NODE_ID="NodeID-TEST123" \
-	FY_POLL_INTERVAL=1 FY_POLL_MAX_SEC=10 FY_RPC_TIMEOUT=2 \
-	POSTANCHOR="${TEST_DIR}/mock-postanchor.sh" \
-	MOCK_POSTANCHOR_EXIT=4 \
-	run_resume --apply
-RC=$?
-stop_mock
-assert_exit "T15 resume + POSTANCHOR fail → exit 5" 5 ${RC}
 rm -rf "${STATE_DIR}" "${ID_DIR}" "${SCEN}"
 
 # ==========================================================================
-# T16-T18: post-anchor-event.sh ⇄ cycle-gate.sh integration.
-# These directly invoke post-anchor-event.sh with stubs for signer / pusher /
-# history appender. The cycle-gate.sh consultation is exercised in-context.
-# ==========================================================================
-
-# Helper: build a mock-rpc config carrying only cycles-history.json (= what
-# post-anchor-event.sh fetches). Resume's identity-related artifacts are not
-# needed because post-anchor-event.sh doesn't fetch them.
-build_postanchor_scenario_config() {
-	local out="$1" cy_dag="$2"
-	jq -n --arg cy_dag "${cy_dag}" '{
-		rpc_response: null,
-		files: {
-			"/api/cycles-history.json": {
-				dag_root_hash: $cy_dag,
-				branches: { cycles: { leaf_count: 2 } }
-			}
-		}
-	}' > "${out}"
-}
-
-run_postanchor() {
-	# Use ABS_POSTANCHOR_PATH (= captured at script init) so the per-test
-	# REPO_ROOT override does NOT redirect the script lookup into the test's
-	# tmp dir. REPO_ROOT env override still applies inside the script for its
-	# own use (= AJV schema lookup, receipt write location).
-	if [ "${DEBUG:-0}" = "1" ]; then
-		bash "${ABS_POSTANCHOR_PATH}" "$@"
-	else
-		bash "${ABS_POSTANCHOR_PATH}" "$@" 2>&1
-	fi
-}
-
-# ==== T16: post-anchor-event + cycle-gate green → signer called → exit 0 ==
-echo "[T16] post-anchor-event + cycle-gate green → signer invoked, exit 0"
-STATE_DIR="$(mktemp -d -t cgstate.XXXXXX)"
-SCEN="$(mktemp -t scen.XXXXXX).json"
-TMP_REPO_ROOT="$(mktemp -d -t repo.XXXXXX)"
-mkdir -p "${TMP_REPO_ROOT}/public/api"
-# cycle-gate state matches chain (= signature TEST123-1700000000).
-cp "${FIXTURE_DIR}/state-matches.json" "${STATE_DIR}/cycle-gate-state.json"
-# Compose a chain scenario whose RPC matches state-matches.json, plus a
-# cycles-history.json with a NEW dag (= different from any prior anchor).
-jq -n '{
-	rpc_response: {
-		jsonrpc: "2.0", id: 1,
-		result: { validators: [ { nodeID: "NodeID-TEST123",
-			startTime: "1700000000", endTime: "9999999999",
-			weight: "5900000000000" } ] }
-	},
-	files: {
-		"/api/cycles-history.json": {
-			dag_root_hash: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-			branches: { cycles: { leaf_count: 2 } }
-		}
-	}
-}' > "${SCEN}"
-start_mock "${SCEN}"
-OUTPUT="$(mktemp -t out.XXXXXX)"
-FY_STATE_DIR="${STATE_DIR}" \
-	METALGO_RPC="http://127.0.0.1:${PORT}" \
-	PUBLIC_BASE="http://127.0.0.1:${PORT}" \
-	NODE_ID="NodeID-TEST123" \
-	FY_RPC_TIMEOUT=2 \
-	ANCHOR_SIGNER="${TEST_DIR}/mock-signer.sh" \
-	ANCHOR_PUSHER="${TEST_DIR}/mock-pusher.sh" \
-	ANCHOR_HISTORY_APPENDER="${TEST_DIR}/mock-history-appender.sh" \
-	REPO_ROOT="${TMP_REPO_ROOT}" \
-	run_postanchor --event-type cyclestart --cycle-n 3 > "${OUTPUT}" 2>&1
-RC=$?
-stop_mock
-assert_exit "T16 post-anchor-event + gate green → exit 0" 0 ${RC}
-# Signer invocation marker — mock-signer's chain/network strings appear when
-# its JSON fragment is consumed by post-anchor-event (= "anchoring event_type"
-# line precedes the signer call; presence of network=xpr-mainnet in receipt
-# proves signer ran).
-if grep -q "anchoring event_type" "${OUTPUT}" && grep -q "xpr-mainnet" "${OUTPUT}"; then
-	PASS=$((PASS + 1))
-	printf '  ✓ PASS: T16 signer was invoked (= gate green path proven)\n'
-else
-	FAIL=$((FAIL + 1))
-	FAIL_LINES+=("T16 signer invocation")
-	printf '  ✗ FAIL: T16 signer evidence NOT in output\n'
-fi
-rm -rf "${STATE_DIR}" "${SCEN}" "${OUTPUT}" "${TMP_REPO_ROOT}"
-
-# ==== T17: post-anchor-event + cycle-gate deferred → exit 11, no signer ===
-echo "[T17] post-anchor-event + cycle-gate deferred → exit 11, signer NOT called"
-STATE_DIR="$(mktemp -d -t cgstate.XXXXXX)"
-SCEN="$(mktemp -t scen.XXXXXX).json"
-TMP_REPO_ROOT="$(mktemp -d -t repo.XXXXXX)"
-mkdir -p "${TMP_REPO_ROOT}/public/api"
-# state-old has signature NodeID-TEST123-1600000000; chain returns 1700000000.
-cp "${FIXTURE_DIR}/state-old.json" "${STATE_DIR}/cycle-gate-state.json"
-jq -n '{
-	rpc_response: {
-		jsonrpc: "2.0", id: 1,
-		result: { validators: [ { nodeID: "NodeID-TEST123",
-			startTime: "1700000000", endTime: "9999999999",
-			weight: "5900000000000" } ] }
-	},
-	files: {
-		"/api/cycles-history.json": {
-			dag_root_hash: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-			branches: { cycles: { leaf_count: 2 } }
-		}
-	}
-}' > "${SCEN}"
-start_mock "${SCEN}"
-OUTPUT="$(mktemp -t out.XXXXXX)"
-FY_STATE_DIR="${STATE_DIR}" \
-	METALGO_RPC="http://127.0.0.1:${PORT}" \
-	PUBLIC_BASE="http://127.0.0.1:${PORT}" \
-	NODE_ID="NodeID-TEST123" \
-	FY_RPC_TIMEOUT=2 \
-	ANCHOR_SIGNER="${TEST_DIR}/mock-signer.sh" \
-	ANCHOR_PUSHER="${TEST_DIR}/mock-pusher.sh" \
-	ANCHOR_HISTORY_APPENDER="${TEST_DIR}/mock-history-appender.sh" \
-	REPO_ROOT="${TMP_REPO_ROOT}" \
-	run_postanchor --event-type cyclestart --cycle-n 3 > "${OUTPUT}" 2>&1
-RC=$?
-stop_mock
-assert_exit "T17 post-anchor-event + gate deferred → exit 11" 11 ${RC}
-# Signer evidence MUST be absent (= "anchoring event_type" precedes signer).
-if grep -q "anchoring event_type" "${OUTPUT}"; then
-	FAIL=$((FAIL + 1))
-	FAIL_LINES+=("T17 signer was invoked despite gate deferred")
-	printf '  ✗ FAIL: T17 signer WAS invoked (= gate did not block)\n'
-else
-	PASS=$((PASS + 1))
-	printf '  ✓ PASS: T17 signer NOT invoked (= gate blocked broadcast)\n'
-fi
-rm -rf "${STATE_DIR}" "${SCEN}" "${OUTPUT}" "${TMP_REPO_ROOT}"
-
-# ==== T18: post-anchor-event end-to-end → receipt assembled + state finalized
-echo "[T18] post-anchor-event end-to-end → last-anchored-root + receipt updated"
-STATE_DIR="$(mktemp -d -t cgstate.XXXXXX)"
-SCEN="$(mktemp -t scen.XXXXXX).json"
-TMP_REPO_ROOT="$(mktemp -d -t repo.XXXXXX)"
-mkdir -p "${TMP_REPO_ROOT}/public/api"
-cp "${FIXTURE_DIR}/state-matches.json" "${STATE_DIR}/cycle-gate-state.json"
-jq -n '{
-	rpc_response: {
-		jsonrpc: "2.0", id: 1,
-		result: { validators: [ { nodeID: "NodeID-TEST123",
-			startTime: "1700000000", endTime: "9999999999",
-			weight: "5900000000000" } ] }
-	},
-	files: {
-		"/api/cycles-history.json": {
-			dag_root_hash: "ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100",
-			branches: { cycles: { leaf_count: 2 } }
-		}
-	}
-}' > "${SCEN}"
-start_mock "${SCEN}"
-FY_STATE_DIR="${STATE_DIR}" \
-	METALGO_RPC="http://127.0.0.1:${PORT}" \
-	PUBLIC_BASE="http://127.0.0.1:${PORT}" \
-	NODE_ID="NodeID-TEST123" \
-	FY_RPC_TIMEOUT=2 \
-	ANCHOR_SIGNER="${TEST_DIR}/mock-signer.sh" \
-	ANCHOR_PUSHER="${TEST_DIR}/mock-pusher.sh" \
-	ANCHOR_HISTORY_APPENDER="${TEST_DIR}/mock-history-appender.sh" \
-	REPO_ROOT="${TMP_REPO_ROOT}" \
-	run_postanchor --event-type cyclestart --cycle-n 3 >/dev/null 2>&1
-RC=$?
-stop_mock
-assert_exit "T18 post-anchor-event end-to-end → exit 0" 0 ${RC}
-# Side-effects verification:
-EXPECTED_DAG="ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100"
-LAST_ANCHORED_FILE="${STATE_DIR}/last-anchored-root"
-RECEIPT_FILE="${TMP_REPO_ROOT}/public/api/anchor-receipt.json"
-if [ -f "${LAST_ANCHORED_FILE}" ] \
-	&& grep -q "${EXPECTED_DAG}" "${LAST_ANCHORED_FILE}" \
-	&& [ -f "${RECEIPT_FILE}" ] \
-	&& jq -e --arg dag "${EXPECTED_DAG}" '.dag_root_hash == $dag' "${RECEIPT_FILE}" >/dev/null 2>&1; then
-	PASS=$((PASS + 1))
-	printf '  ✓ PASS: T18 last-anchored-root + receipt both finalized with new dag\n'
-else
-	FAIL=$((FAIL + 1))
-	FAIL_LINES+=("T18 side-effects verification")
-	printf '  ✗ FAIL: T18 side-effects not as expected (state=%s receipt=%s)\n' \
-		"$([ -f "${LAST_ANCHORED_FILE}" ] && echo "exists" || echo "missing")" \
-		"$([ -f "${RECEIPT_FILE}" ] && echo "exists" || echo "missing")"
-fi
-rm -rf "${STATE_DIR}" "${SCEN}" "${TMP_REPO_ROOT}"
-
-# ==========================================================================
-# T-RD2 extension: T19-T23 cover cycle-artifact-write type, fail-closed of
-# post-anchor-event.sh when cycle-gate.sh missing, and all 7 cycle scripts
-# correctly skip on deferred gate.
+# T19-T23 cover the cycle-artifact-write side-effect type (unconditionally
+# green, never gated) and the gate-skip behavior of the live cycle scripts
+# on a deferred gate.
 # ==========================================================================
 
 # ==== T19: cycle-gate cycle-artifact-write + state matches → green =======
@@ -696,42 +427,6 @@ FY_STATE_DIR="${STATE_DIR}" METALGO_RPC="http://127.0.0.1:1" FY_RPC_TIMEOUT=2 \
 	run_gate --side-effect=cycle-artifact-write
 assert_exit "T20 cycle-artifact-write never gated → green" 0 $?
 rm -rf "${STATE_DIR}"
-
-# ==== T21: post-anchor-event + cycle-gate.sh MISSING → exit 11 ==========
-# T-RD2 Q3 fix: backward compat removed, fail-closed for missing gate script.
-echo "[T21] post-anchor-event + cycle-gate.sh MISSING → exit 11 (fail-closed)"
-STATE_DIR="$(mktemp -d -t cgstate.XXXXXX)"
-SCEN="$(mktemp -t scen.XXXXXX).json"
-TMP_REPO_ROOT="$(mktemp -d -t repo.XXXXXX)"
-TMP_SCRIPT_DIR="$(mktemp -d -t scripts.XXXXXX)"
-mkdir -p "${TMP_REPO_ROOT}/public/api"
-# Place post-anchor-event.sh in a fresh dir WITHOUT cycle-gate.sh sibling.
-cp "${REPO_ROOT}/scripts/post-anchor-event.sh" "${TMP_SCRIPT_DIR}/"
-chmod +x "${TMP_SCRIPT_DIR}/post-anchor-event.sh"
-# (= cycle-gate.sh intentionally NOT copied → fail-closed path)
-cp "${FIXTURE_DIR}/state-matches.json" "${STATE_DIR}/cycle-gate-state.json"
-jq -n '{
-	rpc_response: null,
-	files: { "/api/cycles-history.json": {
-		dag_root_hash: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-		branches: { cycles: { leaf_count: 2 } }
-	} }
-}' > "${SCEN}"
-start_mock "${SCEN}"
-FY_STATE_DIR="${STATE_DIR}" \
-	METALGO_RPC="http://127.0.0.1:${PORT}" \
-	PUBLIC_BASE="http://127.0.0.1:${PORT}" \
-	NODE_ID="NodeID-TEST123" \
-	FY_RPC_TIMEOUT=2 \
-	ANCHOR_SIGNER="${TEST_DIR}/mock-signer.sh" \
-	ANCHOR_PUSHER="${TEST_DIR}/mock-pusher.sh" \
-	ANCHOR_HISTORY_APPENDER="${TEST_DIR}/mock-history-appender.sh" \
-	REPO_ROOT="${TMP_REPO_ROOT}" \
-	bash "${TMP_SCRIPT_DIR}/post-anchor-event.sh" --event-type cyclestart --cycle-n 3 2>&1 >/dev/null
-RC=$?
-stop_mock
-assert_exit "T21 fail-closed when cycle-gate.sh missing → exit 11" 11 ${RC}
-rm -rf "${STATE_DIR}" "${SCEN}" "${TMP_REPO_ROOT}" "${TMP_SCRIPT_DIR}"
 
 # ==== T22: 5 cycle-artifact-write scripts are NOT deferred (ungated) ======
 # (design-stocktake #2) cycle-artifact-write is unconditionally green, so the 5

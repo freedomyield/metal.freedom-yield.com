@@ -78,10 +78,9 @@ cat > "${TMP_STATE_DIR}/cycle-gate-state.json" <<EOF
 }
 EOF
 
-# symlink cycle-gate + 8 cycle scripts into tmp scripts dir so REPO_BASE
-# isolation works correctly. Also symlink push-to-web-host.sh which
-# post-anchor-event indirectly calls (we override via env later).
-for s in cycle-gate.sh post-anchor-event.sh gen-cycle-history.sh \
+# symlink cycle-gate + the 7 cycle scripts into tmp scripts dir so REPO_BASE
+# isolation works correctly.
+for s in cycle-gate.sh gen-cycle-history.sh \
 		 uptime-history.sh gen-evidence.sh gen-renewal-ics.sh \
 		 node-info.sh check-anomalies.sh daily-status.sh; do
 	ln -s "${REPO_ROOT}/scripts/${s}" "${TMP_REPO_BASE}/scripts/${s}"
@@ -122,13 +121,9 @@ ENV_BASE=(
 	REPO_ROOT="${TMP_REPO_BASE}"
 	UPTIME_STATE_DIR="${TMP_REPO_BASE}/state"
 	ANOMALY_STATE_DIR="${TMP_REPO_BASE}/state"
-	ANCHOR_SIGNER="${TEST_DIR}/mock-signer.sh"
-	ANCHOR_PUSHER="${TEST_DIR}/mock-pusher.sh"
-	ANCHOR_HISTORY_APPENDER="${TEST_DIR}/mock-history-appender.sh"
 )
 
-# Scripts to test. post-anchor-event.sh is invoked with --event-type so its
-# arg handling differs; we track that separately. Other 7 take no args.
+# Scripts to test (all take no args).
 SIMPLE_SCRIPTS=(
 	gen-cycle-history.sh
 	uptime-history.sh
@@ -154,23 +149,6 @@ run_one() {
 # assert on; per-script downstream errors after the gate are out of scope).
 run_all() {
 	local label="$1"
-	# post-anchor-event.sh is NOT invoked in Phase A. In production
-	# watch-anchor-events.sh dispatches post-anchor-event ONLY on a
-	# validator-presence transition (= cyclestart / cycleend). Before
-	# endTime (= Phase A) the presence flag is unchanged, so no dispatch.
-	# Running post-anchor-event in Phase A would (1) create a mock
-	# receipt + last-anchored-root that pollutes Phase B, and (2) not
-	# reflect production behavior.
-	if [ "${label}" = "PhaseB" ]; then
-		# Phase B: ensure post-anchor-event reaches cycle-gate (= not
-		# stuck at idempotency exit 2 or RESUME_MODE recovery).
-		rm -f "${TMP_STATE_DIR}/last-anchored-root" \
-		      "${TMP_STATE_DIR}/anchor-pending.json" \
-		      "${TMP_REPO_BASE}/public/api/anchor-receipt.json"
-		echo "--- $label: post-anchor-event.sh ---"
-		run_one post-anchor-event.sh --event-type cyclestart --cycle-n 3 \
-			| sed 's/^/    /'
-	fi
 	for s in "${SIMPLE_SCRIPTS[@]}"; do
 		echo "--- $label: $s ---"
 		run_one "$s" | sed 's/^/    /'
@@ -239,11 +217,8 @@ echo ""
 echo "Phase B summary (= 'deferred / suppressed / skip' marker per script):"
 PHASE_B_PASS_COUNT=0
 PHASE_B_FAIL_LIST=()
-# Each script's expected "skip" marker. post-anchor-event uses exit 11
-# message "deferred by cycle-gate: dag_root_hash=..." which contains the
-# canonical "deferred by cycle-gate" substring.
+# Each script's expected "skip" marker on a deferred gate.
 declare -a PHASE_B_SCRIPTS=(
-	post-anchor-event.sh
 	"${SIMPLE_SCRIPTS[@]}"
 )
 for script in "${PHASE_B_SCRIPTS[@]}"; do
