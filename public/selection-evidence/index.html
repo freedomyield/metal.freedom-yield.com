@@ -332,7 +332,7 @@
 				<dt>Status</dt><dd><span class="status-badge status-badge--live">Live</span> — runtime JSONL serving since 2026-06-22; 1 leaf currently published (cycle 1)</dd>
 				<dt>Schema</dt><dd><code>/api/cycle-history.example.jsonl</code></dd>
 				<dt>Live feed</dt><dd><a href="/api/cycle-history.jsonl"><code>/api/cycle-history.jsonl</code></a></dd>
-				<dt>Cross-reference</dt><dd>Folded into <a href="/api/cycles-history.json"><code>/api/cycles-history.json</code></a> <code>.branches.cycles.leaf_source_sha256</code> (= sha256 of the served JSONL bytes)</dd>
+				<dt>Cross-reference</dt><dd>Folded into <a href="/api/anchor-source.json"><code>/api/anchor-source.json</code></a> <code>.observations_branch</code> (cycle number / uptime / fee / self-stake / delegator events) and hashed in <code>.artifacts_branch.public_api_files_hashed</code></dd>
 				<dt>Machine-readable discovery</dt><dd><a href="/api/evidence.json"><code>/api/evidence.json</code></a> → <code>.live_artifacts.cycle_history_jsonl</code></dd>
 			</dl>
 		</article>
@@ -354,13 +354,13 @@
 				<dt>Audit entry point</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/PHASE_ALPHA_AUDIT_HANDOFF.md" rel="noopener noreferrer"><code>docs/PHASE_ALPHA_AUDIT_HANDOFF.md</code></a></dd>
 				<dt>Operator runbook</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/OPERATOR_IDENTITY_SETUP.md" rel="noopener noreferrer"><code>docs/OPERATOR_IDENTITY_SETUP.md</code></a></dd>
 				<dt>Identity schema</dt><dd><a href="/api/identity.schema.v1.json"><code>/api/identity.schema.v1.json</code></a> + <a href="/api/identity.example.json"><code>example</code></a></dd>
-				<dt>DAG snapshot schema</dt><dd><a href="/api/cycles-history.schema.v1.json"><code>/api/cycles-history.schema.v1.json</code></a> + <a href="/api/cycles-history.example.json"><code>example</code></a></dd>
+				<dt>DAG snapshot schema</dt><dd><a href="/api/anchor-source.schema.v1.json"><code>/api/anchor-source.schema.v1.json</code></a> + <a href="/api/anchor-source.example.json"><code>example</code></a></dd>
 				<dt>Anchor receipt schema</dt><dd><a href="/api/anchor-receipt.schema.v1.json"><code>/api/anchor-receipt.schema.v1.json</code></a> + <a href="/api/anchor-receipt.example.json"><code>example</code></a></dd>
 				<dt>Anchor history schema</dt><dd><a href="/api/anchor-history.schema.v1.json"><code>/api/anchor-history.schema.v1.json</code></a> + <a href="/api/anchor-history.example.jsonl"><code>example</code></a></dd>
 				<dt>Identity-history leaf schema</dt><dd><a href="/api/identity-history.schema.v1.json"><code>/api/identity-history.schema.v1.json</code></a> + <a href="/api/identity-history.example.jsonl"><code>example</code></a></dd>
 				<dt>Test vectors</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/tree/main/tests/identity-verification-vectors" rel="noopener noreferrer"><code>tests/identity-verification-vectors/</code></a></dd>
 				<dt>Live manifest</dt><dd><a href="/api/identity.json"><code>/api/identity.json</code></a> + <a href="/api/identity.json.sig"><code>/api/identity.json.sig</code></a></dd>
-				<dt>Live DAG snapshot</dt><dd><a href="/api/cycles-history.json"><code>/api/cycles-history.json</code></a></dd>
+				<dt>Live DAG snapshot</dt><dd><a href="/api/anchor-source.json"><code>/api/anchor-source.json</code></a></dd>
 				<dt>Live identity-history</dt><dd><a href="/api/identity-history.jsonl"><code>/api/identity-history.jsonl</code></a> (= operator identity key rotation log; currently <code>key_seq=1</code>)</dd>
 				<dt>Scheduled anchor receipt</dt><dd><code>/api/anchor-receipt.json</code> (= first broadcast at cycle 3 start, 2026-07-04 13:00 JST)</dd>
 				<dt>Scheduled anchor history ledger</dt><dd><code>/api/anchor-history.jsonl</code> (= append-only ledger of every live anchor; first record at cycle 3 start)</dd>

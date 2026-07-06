@@ -139,11 +139,11 @@ ssh-keygen -Y verify -f "$TMP/allowed" \
 				<h3>Merkle-DAG snapshot</h3>
 				<span class="data-tag">live</span>
 			</header>
-			<p>A two-branch DAG of (i) operator identity-key history and (ii) closed validation cycles. The two branch roots combine into the <code>dag_root_hash</code> that the identity manifest also carries — they must match byte-for-byte.</p>
+			<p>A three-branch DAG over (i) operator identity-key history, (ii) cycle observations (uptime, fee, self-stake, delegator events), and (iii) the published-artifact manifest. The three branch roots combine into <code>dag_root_computed</code>, the single value inscribed on Metal A-chain (memo <code>fya&lt;S&gt;c&lt;N&gt;:</code>).</p>
 			<dl class="data-meta">
-				<dt>Snapshot</dt><dd><a href="/api/cycles-history.json"><code>/api/cycles-history.json</code></a></dd>
+				<dt>Snapshot</dt><dd><a href="/api/anchor-source.json"><code>/api/anchor-source.json</code></a></dd>
 				<dt>Identity-history leaf log</dt><dd><a href="/api/identity-history.jsonl"><code>/api/identity-history.jsonl</code></a></dd>
-				<dt>Schema</dt><dd><a href="/api/cycles-history.schema.v1.json"><code>/api/cycles-history.schema.v1.json</code></a></dd>
+				<dt>Schema</dt><dd><a href="/api/anchor-source.schema.v1.json"><code>/api/anchor-source.schema.v1.json</code></a></dd>
 			</dl>
 		</article>
 
