@@ -159,6 +159,13 @@ echo "$OUT" | grep -q '1 change(s) detected' \
 [ -s "$STUB_LOG" ] \
 	&& bad "dry-run: no notify fired" \
 	|| ok "dry-run: no notify fired"
+state | jq -e --arg n "$NID" '.[$n].name == null' >/dev/null \
+	&& ok "dry-run: baseline state NOT overwritten (pending alert preserved)" \
+	|| bad "dry-run: baseline state NOT overwritten (state: $(state))"
+run_checker >/dev/null 2>&1
+alerts | grep -q '^high|Watch validator named|' \
+	&& ok "dry-run then real run: pending alert still fires" \
+	|| bad "dry-run then real run: pending alert still fires (alerts: $(alerts))"
 teardown
 
 # ---- summary ------------------------------------------------------------------------------
