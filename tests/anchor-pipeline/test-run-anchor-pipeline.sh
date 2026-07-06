@@ -9,6 +9,9 @@
 #        harness (the orchestrator derives REPO_ROOT from its own location,
 #        so copying it into the harness redirects every sub-script call).
 #
+# Shape: 9 scenario blocks (case 1..9) carrying 26 runtime assertions —
+# the summary line's PASS count tallies assertions, not scenarios.
+#
 # What this covers that the unit suites do not:
 #   - argument forwarding across step boundaries (--chain/--testnet-tx-id/
 #     --non-interactive → sign; --trigger/--prev-anchor-tx-id → receipt;
