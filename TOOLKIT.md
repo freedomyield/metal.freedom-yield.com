@@ -167,6 +167,8 @@ The cryptographic-evidence anchor pipeline (identity → anchor-source → A-cha
 | `scripts/install-metal-anchor-publish-health-cron.sh` | Install the `/etc/cron.d/metal-anchor-publish-health` cron. | manual |
 | `scripts/install-xserver-anchor-source-allowlist.sh` | Extend the Xserver-side forced-command allowlist for `anchor-source.json`. | manual |
 | `scripts/install-xserver-sig-allowlist.sh` | Extend the Xserver receive-metal-push allowlist for `.sig` files. | manual |
+| `scripts/deploy/build-rsync-excludes.sh` | Emit the shared rsync feed-exclusion args (single source of truth: `deploy/feed-excludes.txt`) for both deploy targets, so validator-host and Xserver rsyncs cannot drift. | CI (deploy.yml) |
+| `scripts/install-xserver-static-deploy-key.sh` | Install the `rrsync -wo`-restricted `authorized_keys` entry so GitHub Actions can rsync `public/` to the Xserver public origin, confined to the metal public dir on the shared host. | manual |
 | `scripts/install-delegator-feed-started-at.sh` | One-line installer for the delegator-feed `started_at` field. | manual |
 | `scripts/notify-evidence-health.sh` | Health check for `/api/evidence.json` publication; `--summary` mode for the daily digest. | daily |
 | `scripts/anomaly-state-init.sh` | Operator-driven baseline state initialiser for the anomaly detector. | manual |
