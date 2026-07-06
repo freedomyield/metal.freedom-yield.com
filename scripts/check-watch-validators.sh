@@ -152,5 +152,9 @@ else
   fi
 fi
 
-# Persist current state for next run.
-echo "$CURRENT_JSON" > "$PREV_FILE"
+# Persist current state for next run — but NOT in dry-run: overwriting the
+# baseline without having notified would swallow the pending alerts (the next
+# real run would see "no change"). Dry-run must be side-effect-free.
+if [ "$DRY" = "0" ]; then
+  echo "$CURRENT_JSON" > "$PREV_FILE"
+fi
