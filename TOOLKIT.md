@@ -9,6 +9,7 @@ There's no installer, no Docker image, no SaaS. Just shell scripts that the oper
 - **Not a product**. No SLA, no support, no roadmap.
 - **Not curated**. Anything the operator writes for their own node lives here. If a script is useful to others, it's a side benefit.
 - **Not opinionated about your stack**. Bash + jq + cron + ntfy is what we use because it's boring and survives. Use whatever else suits you.
+- **Not the operator's private bootstrap tooling**. Scripts under `scripts/operator-local/` (identity generation and key-handling steps run only on the operator's own machine) are intentionally **excluded from this catalog** — they assume our specific keys and run order and are not reusable. This catalog covers the operational `scripts/` that other validators can fork.
 
 ## What problem this solves
 
