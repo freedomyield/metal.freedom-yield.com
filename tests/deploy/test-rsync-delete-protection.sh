@@ -7,8 +7,10 @@
 #   src/   plays the role of the GitHub Actions checkout (= Git tree)
 #   dst/   plays the role of the web-host deploy target
 #
-# We then run rsync with the exclusion list extracted from the deploy
-# workflow and assert three invariants:
+# We then run rsync with the shared feed-exclusion set (produced by
+# scripts/deploy/build-rsync-excludes.sh — the single source of truth
+# deploy.yml also consumes) for BOTH the validator-host (whole-repo) and
+# Xserver (public/-rooted) shapes, and assert these invariants:
 #
 #   1. Files the validator host writes (= rsync excludes) survive the
 #      deploy: rsync does NOT delete them from dst even when src has no
@@ -24,39 +26,35 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-DEPLOY_YML="${REPO_ROOT}/.github/workflows/deploy.yml"
-[ -f "${DEPLOY_YML}" ] || { echo "FAIL: deploy.yml not found at ${DEPLOY_YML}" >&2; exit 1; }
+EMITTER="${REPO_ROOT}/scripts/deploy/build-rsync-excludes.sh"
+[ -x "${EMITTER}" ] || { echo "FAIL: emitter not found/executable at ${EMITTER}" >&2; exit 1; }
 
-# Extract --exclude='...' arguments from deploy.yml so the test stays in
-# lock-step with the actual workflow. The grep matches the quoted form
-# the workflow uses; non-matching lines are ignored. We then convert each
-# match into an `--exclude=<value>` arg suitable to pass to rsync.
-# (Portable to bash 3.2 / macOS — no mapfile. The grep `--` argument-
-# end marker is required because `--exclude=...` otherwise looks like a
-# grep flag.)
-EXCLUDES_FILE="$(mktemp)"
-grep -oE -- "--exclude='[^']*'" "${DEPLOY_YML}" \
-	| sed -E "s/--exclude='([^']*)'/\1/" > "${EXCLUDES_FILE}"
-
+# The feed exclusion set is produced by the shared emitter (single source
+# of truth: deploy/feed-excludes.txt) — the same one deploy.yml consumes
+# for BOTH rsync targets. We exercise both deploy shapes below:
+#   - validator-host (whole-repo) shape: prefix "public/"
+#   - Xserver (public/-rooted) shape:    prefix ""
+# The emitter already prints ready-to-use `--exclude=/...` args, so we
+# collect them verbatim. (Portable to bash 3.2 / macOS — no mapfile;
+# process substitution only.)
+# Capture once, then read via here-strings. Piping the emitter into
+# `grep -q` under `set -o pipefail` would let grep close the pipe early,
+# kill the emitter with SIGPIPE, and poison the pipeline status — a false
+# negative. A captured variable avoids the pipe entirely.
+EMITTED_PUBLIC="$(bash "${EMITTER}" "public/")"
 EXCLUDE_ARGS=()
-EXCLUDES_LIST=""
 while IFS= read -r ex; do
 	[ -n "${ex}" ] || continue
-	EXCLUDE_ARGS+=("--exclude=${ex}")
-	EXCLUDES_LIST="${EXCLUDES_LIST}|${ex}"
-done < "${EXCLUDES_FILE}"
-rm -f "${EXCLUDES_FILE}"
+	EXCLUDE_ARGS+=("${ex}")
+done <<< "${EMITTED_PUBLIC}"
 
-# Sanity: anchor-receipt.json MUST be in the exclude list (= the audit
-# fix this test was written to defend).
-case "${EXCLUDES_LIST}" in
-	*"|public/api/anchor-receipt.json"*) ;;
-	*)
-		echo "FAIL  precondition: deploy.yml does not exclude public/api/anchor-receipt.json" >&2
-		exit 1
-		;;
-esac
-echo "OK    precondition: deploy.yml --exclude list contains 'public/api/anchor-receipt.json'"
+# Sanity: anchor-receipt.json MUST be excluded (= the audit fix this
+# test was written to defend).
+if ! grep -qx -- '--exclude=/public/api/anchor-receipt.json' <<< "${EMITTED_PUBLIC}"; then
+	echo "FAIL  precondition: emitter does not exclude public/api/anchor-receipt.json" >&2
+	exit 1
+fi
+echo "OK    precondition: emitter excludes 'public/api/anchor-receipt.json'"
 
 TMP="$(mktemp -d -t rsync-protect.XXXXXX)"
 trap 'rm -rf "${TMP}"' EXIT
@@ -152,6 +150,34 @@ check_content "${DST}/public/api/identity.json" '{"git_owned": true}' \
 echo ""
 echo "=== Invariant 3: junk file outside exclude list is deleted ==="
 check_absent "${DST}/public/api/junk.json" "junk.json"
+
+echo ""
+echo "=== Xserver shape: public/-rooted rsync preserves feeds, updates static ==="
+# The Xserver web root is public/ directly, so rsync's source is ./public/
+# and the feed excludes are anchored WITHOUT the public/ prefix. Same feeds,
+# same single source of truth, different anchor.
+XS="$(mktemp -d -t rsync-xserver.XXXXXX)"
+mkdir -p "${XS}/src/public/api" "${XS}/src/public/calendar" "${XS}/dst/api"
+printf 'SRC-static\n'      > "${XS}/src/public/api/identity.schema.v1.json"
+printf 'SRC-home\n'        > "${XS}/src/public/index.html"
+printf 'src-should-skip\n' > "${XS}/src/public/api/validator.json"
+printf 'src-should-skip\n' > "${XS}/src/public/api/anchor-source.json"
+printf 'FRESH-feed\n'      > "${XS}/dst/api/validator.json"
+printf 'FRESH-anchor\n'    > "${XS}/dst/api/anchor-source.json"
+printf 'STALE-static\n'    > "${XS}/dst/api/identity.schema.v1.json"
+printf 'ORPHAN\n'          > "${XS}/dst/api/old-removed.json"
+XEXC=()
+while IFS= read -r ex; do
+	[ -n "${ex}" ] || continue
+	XEXC+=("${ex}")
+done < <(bash "${EMITTER}" "")
+rsync -rlt --delete "${XEXC[@]}" "${XS}/src/public/" "${XS}/dst/" >/dev/null
+check_content "${XS}/dst/api/validator.json"          'FRESH-feed'   "Xserver validator.json feed"
+check_content "${XS}/dst/api/anchor-source.json"      'FRESH-anchor' "Xserver anchor-source.json feed"
+check_content "${XS}/dst/api/identity.schema.v1.json" 'SRC-static'   "Xserver static schema (updated from src)"
+check_exists  "${XS}/dst/index.html"                  "Xserver index.html"
+check_absent  "${XS}/dst/api/old-removed.json"        "Xserver non-feed orphan"
+rm -rf "${XS}"
 
 echo ""
 echo "Result: ${PASS} pass, ${FAIL} fail"
