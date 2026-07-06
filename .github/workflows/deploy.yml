@@ -131,6 +131,10 @@ jobs:
         # 空 JSON を出力して validator.json を上書きする等の事故になりうる。
         # 物理的に存在しないことで防ぐ。
         run: |
+          # Feed excludes come from the shared single source of truth
+          # (deploy/feed-excludes.txt via the emitter), the same set the
+          # Xserver rsync below uses — see docs/DEPLOY_OWNERSHIP_MATRIX.md.
+          mapfile -t FEED_EXCLUDES < <(bash scripts/deploy/build-rsync-excludes.sh "public/")
           rsync -rltvz --delete --inplace \
             -e "ssh -i ~/.ssh/id_deploy -p $SSH_PORT -o StrictHostKeyChecking=no" \
             --exclude='.git/' \
@@ -144,27 +148,7 @@ jobs:
             --exclude='metalgo/data/' \
             --exclude='metalgo/config/' \
             --exclude='scripts/' \
-            --exclude='public/api/validator.json' \
-            --exclude='public/api/server-status.json' \
-            --exclude='public/api/peer-geo.json' \
-            --exclude='public/api/uptime-recent.json' \
-            --exclude='public/api/uptime-cycles.json' \
-            --exclude='public/api/peers.json' \
-            --exclude='public/api/evidence.json' \
-            --exclude='public/api/fee-market.json' \
-            --exclude='public/api/fee-market-history.jsonl' \
-            --exclude='public/api/node-health-recent.json' \
-            --exclude='public/api/peers-changes.json' \
-            --exclude='public/api/peers-gini.json' \
-            --exclude='public/api/peers-gini-history.jsonl' \
-            --exclude='public/api/peers-history-index.json' \
-            --exclude='public/api/cycle-history.jsonl' \
-            --exclude='public/api/anchor-source.json' \
-            --exclude='public/api/anchor-source.json.sig' \
-            --exclude='public/api/anchor-receipt.json' \
-            --exclude='public/api/anchor-receipt.json.sig' \
-            --exclude='public/api/anchor-history.jsonl' \
-            --exclude='public/calendar/' \
+            "${FEED_EXCLUDES[@]}" \
             ./ "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/"
 
       - name: Bring up / reload Caddy on VPS
@@ -176,6 +160,37 @@ jobs:
              docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml exec -T caddy caddy reload --config /etc/caddy/Caddyfile && \
              sleep 2 && \
              curl -fsS -o /dev/null http://127.0.0.1:8085/health"
+
+      - name: Set up Xserver deploy key
+        env:
+          _XS_KEY: ${{ secrets.XSERVER_SSH_KEY }}
+          XS_HOST: ${{ secrets.XSERVER_SSH_HOST }}
+          XS_PORT: ${{ secrets.XSERVER_SSH_PORT }}
+        run: |
+          printf '%s' "$_XS_KEY" | tr -d '\r' > ~/.ssh/id_xserver
+          [ -z "$(tail -c 1 ~/.ssh/id_xserver)" ] || echo "" >> ~/.ssh/id_xserver
+          chmod 600 ~/.ssh/id_xserver
+          ssh-keyscan -p "$XS_PORT" "$XS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Rsync public/ to Xserver (public origin)
+        # Second deploy target: the public origin behind the edge CDN. The CI
+        # key is rrsync -wo confined to the metal public dir (installed via
+        # scripts/install-xserver-static-deploy-key.sh), so the remote path is
+        # fixed server-side and the client targets the rrsync root ("$HOST:").
+        # Same feed exclusion set as the validator-host rsync, empty prefix
+        # because the source root here is public/, not the repo root. Runs
+        # after the validator-host deploy has already succeeded; a failure here
+        # surfaces the drift without blocking the validator host.
+        env:
+          XS_HOST: ${{ secrets.XSERVER_SSH_HOST }}
+          XS_USER: ${{ secrets.XSERVER_SSH_USER }}
+          XS_PORT: ${{ secrets.XSERVER_SSH_PORT }}
+        run: |
+          mapfile -t FEED_EXCLUDES < <(bash scripts/deploy/build-rsync-excludes.sh "")
+          rsync -rltvz --delete \
+            -e "ssh -i ~/.ssh/id_xserver -p $XS_PORT -o StrictHostKeyChecking=no" \
+            "${FEED_EXCLUDES[@]}" \
+            ./public/ "$XS_USER@$XS_HOST:"
 
       - name: Public health check
         run: |
