@@ -7,13 +7,17 @@
 > the deploy workflow, anyone debugging "why did file X disappear/get
 > reverted".
 
-The Git deploy (GitHub Actions → web host rsync) is the **canonical
-source** for repo-tracked content. Validator-host runtime pushes are
-the **canonical source** for live operational data. The deploy
-workflow uses `rsync --delete`, which would otherwise wipe out
-runtime files between the validator push and the next deploy. The
-exclusion table below pins which files each side owns and which the
-deploy MUST leave alone.
+The Git deploy (GitHub Actions) rsyncs repo-tracked content to **two**
+targets: the validator host (internal Caddy) and the public Xserver
+origin (behind the edge CDN). It is the **canonical source** for
+repo-tracked content on both. Validator-host runtime pushes are the
+**canonical source** for live operational data. Both deploy rsyncs use
+`rsync --delete`, which would otherwise wipe out runtime files between
+the validator push and the next deploy; both derive their exclusion set
+from a **single source of truth** — `deploy/feed-excludes.txt` via
+`scripts/deploy/build-rsync-excludes.sh` — so the two targets cannot
+drift. The exclusion table below pins which files each side owns and
+which the deploy MUST leave alone.
 
 ## Ownership table
 
@@ -49,12 +53,14 @@ table, and applying the corresponding lock-step changes:
 1. **Git-owned, deploy-served, NOT excluded from `--delete`**: just
    commit to repo; no workflow change. Deploy will copy each push.
 2. **Validator-pushed, NOT git-owned, MUST be excluded from
-   `--delete`**: extend the `--exclude='public/api/<file>'` block in
-   `.github/workflows/deploy.yml` AND extend the allowlist case
-   statement in `scripts/push-to-web-host.sh` AND, on the validator
-   host, extend the forced-command wrapper allowlist (out-of-tree).
-   Three places, one filename — drift between them is the entire
-   class of failures this matrix exists to catch.
+   `--delete`**: add the `public/`-relative path to
+   `deploy/feed-excludes.txt` (the single source **both** deploy rsyncs
+   read via `scripts/deploy/build-rsync-excludes.sh`) AND extend the
+   allowlist case statement in `scripts/push-to-web-host.sh` AND, on the
+   Xserver, extend the `receive-metal-push` forced-command wrapper
+   allowlist (out-of-tree). Three lock-step places, one filename — drift
+   between them is the entire class of failures this matrix exists to
+   catch.
 3. **Owner is ambiguous**: BLOCK publication. Resolve the owner
    before the first deploy that would expose the file.
 

@@ -9,6 +9,8 @@
 - ドメイン `metal.freedom-yield.com` の DNS A レコードを edge CDN で VPS public IP に向ける
 - 80/443/TCP, 443/UDP(HTTP/3), 22/TCP, 9651/TCP が inbound 許可
 
+**配信トポロジ (2 ホスト)**: GitHub Actions は repo-tracked static を **2 つの target** に配信する — (1) validator host の内部 Caddy、(2) 公開 Xserver origin (edge CDN 背後)。公開 Xserver への static 配信は `rrsync -wo` で metal public dir に封じ込めた専用鍵（`scripts/install-xserver-static-deploy-key.sh` で設置）で行い、`public/` のみを送る。動的 feed は validator host cron → 受信 wrapper 経由で Xserver に届く（deploy とは別経路）。両 rsync の除外集合は単一 SoT `deploy/feed-excludes.txt` から生成。詳細は [`docs/DEPLOY_OWNERSHIP_MATRIX.md`](DEPLOY_OWNERSHIP_MATRIX.md)。
+
 ## 手順
 
 ### 1. VPS 側: <deploy_user> の作成 + SSH 鍵設定
@@ -90,6 +92,10 @@ chmod 600 <deploy_path>/.env
 | `SSH_KEY` | ローカルの `~/.ssh/<your_deploy_key>`(秘密鍵)の **全内容**(OpenSSH PEM 形式、BEGIN/END マーカーを含む全行) |
 | `SSH_PORT` | (任意、22 以外を使うなら) |
 | `DEPLOY_PATH` | `<deploy_path>` |
+| `XSERVER_SSH_KEY` | 公開 Xserver 配信用の専用秘密鍵の**全内容**（`rrsync -wo` 制限の deploy 鍵。root 鍵は使わない） |
+| `XSERVER_SSH_HOST` | 公開 Xserver origin の IP |
+| `XSERVER_SSH_USER` | Xserver の配信アカウント名 |
+| `XSERVER_SSH_PORT` | Xserver の SSH port |
 
 ⚠️ `SSH_KEY` は改行を含むので、エディタからコピペするときに **CRLF が混入しないように**。Mac のターミナルで `pbcopy < ~/.ssh/<your_deploy_key>` 推奨。
 
