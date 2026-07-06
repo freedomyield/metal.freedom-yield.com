@@ -152,7 +152,7 @@ ssh-keygen -Y verify -f "$TMP/allowed" \
 				<h3>Cycle audit packet</h3>
 				<span class="data-tag">live (1 cycle closed)</span>
 			</header>
-			<p>Append-only JSONL feed. One line per closed validation cycle, joining uptime + incidents + stake numbers for that cycle. Each leaf line's sha256 is folded into the cycles_branch of the Merkle DAG.</p>
+			<p>Append-only JSONL feed. One line per closed validation cycle, joining uptime + incidents + stake numbers for that cycle. Each leaf line's sha256 is folded into the observations_branch of the Merkle DAG.</p>
 			<dl class="data-meta">
 				<dt>Feed</dt><dd><a href="/api/cycle-history.jsonl"><code>/api/cycle-history.jsonl</code></a></dd>
 				<dt>Schema</dt><dd><a href="/api/cycle-history.schema.v1.json"><code>/api/cycle-history.schema.v1.json</code></a></dd>
@@ -164,7 +164,7 @@ ssh-keygen -Y verify -f "$TMP/allowed" \
 				<h3>On-chain anchor receipt</h3>
 				<span class="data-tag">scheduled</span>
 			</header>
-			<p>At each cycle transition, the operator inscribes the current <code>dag_root_hash</code> on Metal A-chain (PulseVM / XPRNetwork) using a narrow <code>metalfreedom@anchor</code> permission, with memo <code>fyid1:&lt;dag_root_hash&gt;</code>. The receipt JSON is the always-latest audit-side index of the most recent inscription.</p>
+			<p>At each cycle transition, the operator inscribes the current <code>dag_root_computed</code> on Metal A-chain (PulseVM / XPRNetwork) using a narrow <code>metalfreedom@anchor</code> permission, across four <code>eosio.token::transfer</code> memos — one per branch root (<code>fya1c&lt;N&gt;-id:</code> / <code>-ob:</code> / <code>-ar:</code>) plus the combined DAG root (<code>fya1c&lt;N&gt;:&lt;dag_root_computed&gt;</code>). The receipt JSON is the always-latest audit-side index of the most recent inscription.</p>
 			<dl class="data-meta">
 				<dt>Receipt</dt><dd><code>/api/anchor-receipt.json</code> (= first broadcast scheduled for cycle 3 start, 2026-07-04 13:00 JST)</dd>
 				<dt>Schema</dt><dd><a href="/api/anchor-receipt.schema.v1.json"><code>/api/anchor-receipt.schema.v1.json</code></a></dd>
@@ -176,7 +176,7 @@ ssh-keygen -Y verify -f "$TMP/allowed" \
 				<h3>On-chain anchor history (append-only ledger)</h3>
 				<span class="data-tag">scheduled</span>
 			</header>
-			<p>Append-only JSONL ledger covering every anchor that has reached <code>verification_status: live</code>. Independent of the always-latest receipt above: <code>anchor-receipt.json</code> rotates per cycle, <code>anchor-history.jsonl</code> accumulates. A verifier walks the ledger to retrace every prior anchoring back to the genesis cycle, then folds each line's <code>dag_root_hash</code> into the corresponding identity / cycles branch.</p>
+			<p>Append-only JSONL ledger covering every anchor that has reached <code>verification_status: live</code>. Independent of the always-latest receipt above: <code>anchor-receipt.json</code> rotates per cycle, <code>anchor-history.jsonl</code> accumulates. A verifier walks the ledger to retrace every prior anchoring back to the genesis cycle, then recomputes each line's <code>dag_root_computed</code> from its three branch roots (identity / observations / artifacts).</p>
 			<dl class="data-meta">
 				<dt>Ledger</dt><dd><code>/api/anchor-history.jsonl</code> (= first record appended at cycle 3 start, 2026-07-04 13:00 JST, after the seven-PASS verification chain)</dd>
 				<dt>Schema</dt><dd><a href="/api/anchor-history.schema.v1.json"><code>/api/anchor-history.schema.v1.json</code></a></dd>
@@ -199,8 +199,8 @@ ssh-keygen -Y verify -f "$TMP/allowed" \
 	</section>
 
 	<section class="card">
-		<h2>Full verifier procedure (nine steps)</h2>
-		<p>The complete recipe — signature → fingerprint → per-branch Merkle root → DAG combination → on-chain explorer cross-check → cross-reference integrity — is published in the repository as a reproducible runbook.</p>
+		<h2>Full verifier procedure (seven steps)</h2>
+		<p>The complete recipe — fetch artifacts → signature → fingerprint cross-check → three branch roots → DAG-root recompute → source/receipt equality → on-chain four-memo cross-check — is published in the repository as a reproducible runbook.</p>
 		<dl class="kv">
 			<dt>Verifier recipe</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer"><code>docs/IDENTITY_VERIFICATION.md</code></a></dd>
 			<dt>Merkle-DAG spec</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/MERKLE_DAG_SPEC.md" rel="noopener noreferrer"><code>docs/MERKLE_DAG_SPEC.md</code></a></dd>

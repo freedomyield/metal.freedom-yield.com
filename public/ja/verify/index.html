@@ -152,7 +152,7 @@ ssh-keygen -Y verify -f "$TMP/allowed" \
 				<h3>Cycle audit packet</h3>
 				<span class="data-tag">live(1 cycle closed)</span>
 			</header>
-			<p>append-only JSONL feed。 1 行 = 1 クローズ済 cycle、 uptime + incidents + stake 数値を join。 各 leaf 行の sha256 は Merkle DAG の cycles_branch に折り込まれます。</p>
+			<p>append-only JSONL feed。 1 行 = 1 クローズ済 cycle、 uptime + incidents + stake 数値を join。 各 leaf 行の sha256 は Merkle DAG の observations_branch に折り込まれます。</p>
 			<dl class="data-meta">
 				<dt>feed</dt><dd><a href="/api/cycle-history.jsonl"><code>/api/cycle-history.jsonl</code></a></dd>
 				<dt>スキーマ</dt><dd><a href="/api/cycle-history.schema.v1.json"><code>/api/cycle-history.schema.v1.json</code></a></dd>
@@ -164,7 +164,7 @@ ssh-keygen -Y verify -f "$TMP/allowed" \
 				<h3>on-chain anchor receipt</h3>
 				<span class="data-tag">scheduled</span>
 			</header>
-			<p>各 cycle transition で、 運用者は現在の <code>dag_root_hash</code> を Metal A-chain (PulseVM / XPRNetwork) に narrow 権限 <code>metalfreedom@anchor</code> で memo <code>fyid1:&lt;dag_root_hash&gt;</code> として刻みます。 receipt JSON は audit-side の「最新 inscription を 1 件保持する」スナップショット。</p>
+			<p>各 cycle transition で、 運用者は現在の <code>dag_root_computed</code> を Metal A-chain (PulseVM / XPRNetwork) に narrow 権限 <code>metalfreedom@anchor</code> で、4 つの <code>eosio.token::transfer</code> memo — 各 branch root(<code>fya1c&lt;N&gt;-id:</code> / <code>-ob:</code> / <code>-ar:</code>)と統合 DAG root(<code>fya1c&lt;N&gt;:&lt;dag_root_computed&gt;</code>)— として刻みます。 receipt JSON は audit-side の「最新 inscription を 1 件保持する」スナップショット。</p>
 			<dl class="data-meta">
 				<dt>receipt</dt><dd><code>/api/anchor-receipt.json</code> (= cycle 3 start = 2026-07-04 13:00 JST で初回 broadcast 予定)</dd>
 				<dt>スキーマ</dt><dd><a href="/api/anchor-receipt.schema.v1.json"><code>/api/anchor-receipt.schema.v1.json</code></a></dd>
@@ -176,7 +176,7 @@ ssh-keygen -Y verify -f "$TMP/allowed" \
 				<h3>on-chain anchor history (append-only 台帳)</h3>
 				<span class="data-tag">scheduled</span>
 			</header>
-			<p>過去の anchor を <code>verification_status: live</code> まで到達したものだけ蓄積する JSONL ledger。 上の receipt は cycle 毎に上書きされるのに対し、本 ledger は 1 行も消えません。 検証者は genesis cycle までさかのぼって全 anchoring を再現でき、 各行の <code>dag_root_hash</code> を該当 identity / cycles ブランチに折り込めます。</p>
+			<p>過去の anchor を <code>verification_status: live</code> まで到達したものだけ蓄積する JSONL ledger。 上の receipt は cycle 毎に上書きされるのに対し、本 ledger は 1 行も消えません。 検証者は genesis cycle までさかのぼって全 anchoring を再現でき、 各行の <code>dag_root_computed</code> を 3 つの branch root(identity / observations / artifacts)から再計算できます。</p>
 			<dl class="data-meta">
 				<dt>ledger</dt><dd><code>/api/anchor-history.jsonl</code> (= cycle 3 start = 2026-07-04 13:00 JST、 7-PASS 検証通過後に初回 record を追記予定)</dd>
 				<dt>スキーマ</dt><dd><a href="/api/anchor-history.schema.v1.json"><code>/api/anchor-history.schema.v1.json</code></a></dd>
@@ -199,8 +199,8 @@ ssh-keygen -Y verify -f "$TMP/allowed" \
 	</section>
 
 	<section class="card">
-		<h2>完全検証手順 (9 step)</h2>
-		<p>signature → fingerprint → per-branch Merkle root → DAG combination → on-chain explorer cross-check → cross-reference integrity の完全な recipe は、 リポジトリに再現可能な runbook として公開されています。</p>
+		<h2>完全検証手順 (7 step)</h2>
+		<p>artifact 取得 → signature → fingerprint cross-check → 3 branch root → DAG-root 再計算 → source/receipt 一致 → on-chain 4-memo cross-check の完全な recipe は、 リポジトリに再現可能な runbook として公開されています。</p>
 		<dl class="kv">
 			<dt>verifier recipe</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer"><code>docs/IDENTITY_VERIFICATION.md</code></a></dd>
 			<dt>Merkle DAG spec</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/MERKLE_DAG_SPEC.md" rel="noopener noreferrer"><code>docs/MERKLE_DAG_SPEC.md</code></a></dd>
