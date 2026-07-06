@@ -17,7 +17,7 @@
 #
 # 2026-07-01 introduction: replaces the fyid1:<hash> single-action
 # orchestration that lived in post-anchor-event.sh. That legacy script
-# stays in place for backward compat during migration; new anchor
+# was retired and deleted in the v2 migration (2026-07-06); all anchor
 # broadcasts go through this pipeline.
 #
 # Exit codes:

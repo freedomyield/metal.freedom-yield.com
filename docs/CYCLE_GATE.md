@@ -1,21 +1,36 @@
-# Cycle gate — 2-component cycle transition simplification
+# Cycle gate — passive defer / active resume for cycle transitions
 
-> ⚠️ **STALE — v2 rewrite pending (2026-07-06)**: This document predates the v2 anchor migration and the DAG-root collapse (design-stocktake #1). It still describes the **retired** `post-anchor-event.sh` auto-broadcast, the **retired** 2-branch `cycles-history.json` / `dag_root_hash` model, and the `fyid1:` memo. The live model is the single 3-branch `anchor-source.json .dag_root_computed` (memo `fya<S>c<N>:`), produced by the separate `gen-anchor-source.sh` → `sign-anchor-event.sh` → `gen-anchor-receipt.sh` pipeline; `resume-after-cycle-start.sh` no longer broadcasts. Treat every anchoring / broadcast / `post-anchor-event.sh` / `fyid1:` reference below as historical until this doc is rewritten to v2.
-
-> **Status (= 2026-06-29 15:09 JST)**: **DEPLOYED to production**. T-7 deploy completed with 5 commits (= b4d4cfe + 221ca87 + 457a4dd + 55d7a9e + aac4934), GitHub Actions deploy + the validator host sync + cycle-gate-state.json initialized for current cycle 2 (= signature `NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v-1780560117`, dag `0bd4e667…`). First live application is **2026-07-04 cycle 3 transition** (= the originally pressure-source day the design was built for). See `docs/CYCLE_GATE_DAILY_OBSERVATION.md` for ongoing production state snapshots.
->
-> The "2026-08-04 first transition" framing in earlier drafts of this doc was the AI implementer's incorrect interpretation; operator intent was always 2026-07-04 from the start. Inline references to "~2026-08-04" below are historical and reflect the now-corrected plan.
+> **Status (= 2026-07-06)**: v2 rewrite. This document describes the **live**
+> model: the single 3-branch `anchor-source.json` DAG (`dag_root_computed`,
+> memo prefix `fya<S>c<N>`), the alert-only watcher driver, and the
+> `resume-after-cycle-start.sh` that **no longer broadcasts**. The v1 model
+> this replaces (2-branch `cycles-history.json` / `dag_root_hash` /
+> `fyid1:` memo / `post-anchor-event.sh` auto-broadcast) was retired across
+> 2026-07-04 .. 2026-07-06 (design-stocktake #1/#3/#4; see
+> `docs/audits/constitution-2026-07-04-design-stocktake.md`). For the v1
+> design as originally deployed on 2026-06-29, see this file's git history.
 
 ## What problem this solves
 
-The 2026-07-04 cycle 3 transition runbook contains two pieces of operator work that exist solely to prevent the anchor cron from broadcasting with a stale `dag_root_hash`:
+A validator cycle transition (one AddValidator entry expiring, the next one
+committing) is a window in which cycle-dependent automation can act on stale
+state. The gate design removes two failure modes:
 
-- step 2: manually disable `/etc/cron.d/metal-anchor-watch` **before** the cycle closes at 13:00:27 JST
-- step 12: manually re-enable it after the orchestrated handover finishes
+- **Cycle-aware alerts firing mid-transition.** The 5-minute anomaly tick
+  observes the validator disappearing at cycle end — expected, not an
+  incident. Alert automation must know whether the operator has acknowledged
+  the new cycle.
+- **Any future cycle-gated side effect running before the operator's
+  approval state catches up.** The gate makes "safe to fire" a property of
+  explicit approval state, not of cron-enable/disable scheduling that a
+  human can forget.
 
-Forgetting either step (or doing them in the wrong order) means the cron fires its 5-minute tick during the operator's hand-rolled gen-identity / commit / push window, observes the validator transition, and triggers `post-anchor-event.sh` with the **pre-update** `dag_root_hash`. That `dag_root_hash` is missing the cycle that just closed — broadcasting it would commit a memo on Metal A-chain that an independent auditor cannot reconcile with the contemporaneous `/api/cycles-history.json`. The action is irreversible (= broadcast is IRREV per Constitution §5).
-
-The pressure source is therefore the **combination of a time-bounded operator action and an irreversible side effect**. The cycle-gate design removes this combination by making "broadcast safe to fire" a property of explicit operator approval state rather than of cron-on / cron-off scheduling.
+What this design **no longer** does: gate or trigger the anchor broadcast.
+In the v2 model the anchor inscription is produced by a separate,
+operator-driven signing pipeline (below) whose safety rests on the PRIME
+DIRECTIVE 4-gate discipline and `bin/safe-broadcast` — not on cron state.
+There is deliberately **no** automated path from "cycle transition
+observed" to "broadcast".
 
 ## Architecture
 
@@ -28,7 +43,7 @@ Two components, separated by direction:
         │                                          │
         │ reads                                    │ writes
         ▼                                          ▼
-   /var/lib/freedom-yield/cycle-gate-state.json
+   ${FY_STATE_DIR}/cycle-gate-state.json
    {
      "schemaVersion": 1,
      "approved_cycle_signature": "<NodeID>-<startTime_epoch>",
@@ -37,26 +52,60 @@ Two components, separated by direction:
    }
 ```
 
-`cycle-gate.sh` is **passive**: it does not change anything. It answers a yes/no question for the caller: "is the cycle currently visible on chain the one the operator approved?".
+`cycle-gate.sh` is **passive**: it answers a yes/no question for the caller —
+"is the cycle currently visible on chain the one the operator approved?".
 
-`resume-after-cycle-start.sh` is **active**: it is the single command the operator (or the AI on the operator's behalf) runs once per cycle. It verifies the new cycle is on chain, that the published artifacts (`identity.json`, `cycles-history.json`) carry the fresh `dag_root_hash`, atomically updates the state file, and triggers the anchor broadcast for the new cycle.
+`resume-after-cycle-start.sh` is **active**: run once per cycle after the new
+AddValidator entry is Committed. It verifies the new cycle on chain and the
+published artifacts, then atomically updates the state file. It performs
+**no broadcast**.
 
-The cron continues to fire its 5-minute tick **without any operator action to enable or disable it**. Between cycle close and operator approval, the cron's broadcast attempt is silently deferred. After approval, the next tick — or the synchronous trigger inside `resume-after-cycle-start.sh` — broadcasts with the fresh `dag_root_hash`.
+The 5-minute crons keep firing with no operator enable/disable action.
+Between cycle close and operator approval, gated side effects are silently
+deferred; after approval they resume on the next tick.
+
+## Separation from the anchor pipeline
+
+The anchor inscription is out of scope for the gate. It is produced by the
+v2 four-step pipeline (`scripts/run-anchor-pipeline.sh` orchestrates):
+
+```
+1. gen-anchor-source.sh      compose anchor-source.json      (validator host)
+2. sign-anchor-event.sh      compose + sign + broadcast the   (operator Mac ONLY —
+                             4-action pack via bin/safe-broadcast   signing-host assertion, exit 7)
+3. gen-anchor-receipt.sh     fetch tx + 7-gate verify + receipt    (validator host)
+4. append-anchor-history.sh  append to anchor-history.jsonl        (validator host)
+```
+
+- The inscribed value is `anchor-source.json .dag_root_computed` (3-branch:
+  `identity_branch` / `observations_branch` / `artifacts_branch`), carried in
+  four `eosio.token::transfer` memos: `fya<S>c<N>-id:`, `-ob:`, `-ar:`, and
+  the pivot `fya<S>c<N>:<dag_root_computed>`.
+- Broadcast safety = PRIME DIRECTIVE 4 gates enforced by `bin/safe-broadcast`
+  + per-invocation operator authorization. Never cron-triggered.
+- The event watcher (`watch-anchor-events.sh`, 5-minute cron) dispatches
+  transitions to `scripts/notify-anchor-transition.sh` — an **alert-only**
+  driver that fires an ntfy push and **broadcasts nothing**. It exists so the
+  operator learns "cycle transition observed; run the pipeline when ready".
 
 ## State file schema
 
-`${FY_STATE_DIR}/cycle-gate-state.json` (default `${FY_STATE_DIR}` = `/var/lib/freedom-yield`).
+`${FY_STATE_DIR}/cycle-gate-state.json` (default `${FY_STATE_DIR}` =
+`/var/lib/freedom-yield`).
 
 | field | type | meaning |
 | --- | --- | --- |
 | `schemaVersion` | integer | currently `1`. Bump on incompatible format change. |
 | `approved_cycle_signature` | string | `<NodeID>-<startTime_epoch>`. Uniquely identifies the validator entry on chain that this approval covers. Two distinct AddValidator transactions produce two distinct startTime values, so the signature changes per cycle. |
-| `approved_dag_root_hash` | 64-hex string | The `dag_root_hash` value present in `identity.json` at approval time. Used by `cycle-gate.sh` for the consistency check, and by `resume-after-cycle-start.sh` to detect "identity.json is still stale" during the polling phase. |
+| `approved_dag_root_hash` | 64-hex string | The `anchor-source.json .dag_root_computed` observed at approval time. (Field name retained from schemaVersion 1 for compatibility; since the v2 migration the stored value is the 3-branch `dag_root_computed`.) |
 | `approved_at` | ISO 8601 UTC string | Wall-clock time the approval was written. Diagnostic only; not consumed by gate logic. |
 
-File mode is `0644`. The file contains no SECRET-class data — both the `dag_root_hash` and the cycle signature are public on chain.
+File mode is `0644`. The file contains no SECRET-class data — both values are
+public on chain.
 
-When the file is absent (= first deploy, before the first `resume-after-cycle-start.sh` has run, or after manual `rm` for rollback) `cycle-gate.sh` returns green for every side-effect type. This is the backward-compat behavior that preserves the pre-cycle-gate cron flow.
+When the file is absent (= first deploy, or after manual `rm` for rollback)
+`cycle-gate.sh` returns green for every side-effect type — the backward-compat
+behavior that preserves the pre-gate cron flow.
 
 ## `cycle-gate.sh`
 
@@ -66,11 +115,12 @@ Consulted by cron scripts immediately before a cycle-dependent side effect.
 scripts/cycle-gate.sh --side-effect=<type>
 ```
 
-| `--side-effect` value | semantics |
-| --- | --- |
-| `broadcast` | About to invoke `sign-anchor-event.sh` (= IRREV A-chain transfer). |
-| `cycle-aware-notify` | About to emit a ntfy alert whose interpretation depends on whether we are mid-transition (= reserved for future use; no current consumer per the 2026-06-29 audit). |
-| `observe` | About to perform read-only observation. Always returns green; provided so that future call-sites can declare intent uniformly. |
+| `--side-effect` value | semantics | live consumers |
+| --- | --- | --- |
+| `cycle-artifact-write` | Write to a cycle-recording artifact. **Always green** — recording a *closed* cycle is backward-looking and can never be premature. Gating it caused the 2026-07-04 transition deadlock (design-stocktake trouble #2); ungated since. Kept as a declared type for the distinct log marker. | `gen-cycle-history.sh`, `uptime-history.sh` (Job B), `node-info.sh`, `gen-evidence.sh`, `gen-renewal-ics.sh`, `prep-cycle-anchor-recording.sh` |
+| `cycle-aware-notify` | Validator-presence-based notification (ntfy). Signature-gated: deferred while the on-chain cycle differs from the approved one, so transition-window noise is suppressed until the operator acknowledges the new cycle. | `check-anomalies.sh`, `daily-status.sh` |
+| `broadcast` | A-chain inscription (IRREV). Signature-gated. **No current consumer** — the v1 consumer (`post-anchor-event.sh`) was retired; the v2 pipeline does not consult the gate (its safety layer is `bin/safe-broadcast`). The type is retained defensively: any future automation declaring `--side-effect=broadcast` inherits fail-closed gating. | (none) |
+| `observe` | Read-only observation. Always green; lets call-sites declare intent uniformly. | (declared only) |
 
 Exit codes:
 
@@ -82,7 +132,7 @@ Exit codes:
 
 Behavior matrix (= invariants):
 
-| state | broadcast / cycle-aware-notify | observe |
+| state | broadcast / cycle-aware-notify | cycle-artifact-write / observe |
 | --- | --- | --- |
 | state file absent | green (backward compat) | green |
 | state matches chain signature | green | green |
@@ -91,11 +141,14 @@ Behavior matrix (= invariants):
 | metalgo RPC unreachable | fail-closed (deferred) | green |
 | validator absent from chain | deferred | green |
 
-The RPC timeout default is `${FY_RPC_TIMEOUT:-6}` seconds. Setting it via env at call time lets test harnesses fail fast without depending on the system default.
+The RPC timeout default is `${FY_RPC_TIMEOUT:-6}` seconds. Setting it via env
+at call time lets test harnesses fail fast without depending on the system
+default.
 
 ## `resume-after-cycle-start.sh`
 
-Single command run once per cycle, after AddValidator is Committed and the freshly signed `identity.json` is live on the web host.
+Single command run once per cycle, after AddValidator is Committed and the
+freshly published artifacts are live.
 
 ```sh
 scripts/resume-after-cycle-start.sh --dry-run    # verify only
@@ -104,72 +157,78 @@ scripts/resume-after-cycle-start.sh --apply      # full sequence
 
 Phases:
 
-1. **Phase 1 — verify.** Query metalgo RPC for the current validator entry, derive the cycle signature, idempotency-check against the prior approved signature, poll `${PUBLIC_BASE}/api/identity.json` until its `dag_root_hash` differs from the prior approved value (max `${FY_POLL_MAX_SEC:-600}` seconds at `${FY_POLL_INTERVAL:-30}` second intervals), verify the identity.json signature via `ssh-keygen -Y verify`, fetch `cycles-history.json`, confirm both artifacts agree on `dag_root_hash`. Phase 1 has no side effects.
-2. **Phase 2 — atomic state write.** Compose the new `cycle-gate-state.json` via `jq -n` to a `.new` tempfile, then `mv` over the live file. Atomic on POSIX (same dir).
-3. **Phase 3 — anchor broadcast trigger.** Invoke `post-anchor-event.sh --event-type cyclestart --cycle-n <N>` where `<N>` is `branches.cycles.leaf_count + 1` from `cycles-history.json` (= the in-progress cycle that just started). The downstream `post-anchor-event.sh` flock, idempotency check, and 3-state pending marker logic all carry over unchanged. `exit 2` from `post-anchor-event.sh` (= no-op idempotency) is treated as PASS.
-4. **Phase 4 — 7-condition PASS check.** Fetch the freshly published `anchor-receipt.json` and verify the seven conditions from `project_phase_alpha_anchor_completion_2026_07_04` (= tx_id present, memo == `fyid1:<dag>`, signing_actor in {metalfreedom, freedomyield}, signing_permission == anchor, dag_root_hash matches, `$schema` field present, explorer URL HTTP-reachable).
-5. **Phase 5 — report.** Print a one-block summary of the final state (cycle signature, dag_root_hash, cycle_n, cycle leaf_count) and the next operator step ("visually verify the explorer URL on the XPR explorer"). Exit 0.
+1. **Phase 1 — verify.** Query metalgo RPC for the current validator entry,
+   derive the cycle signature, idempotency-check against the prior approved
+   signature, poll `${PUBLIC_BASE}/api/anchor-source.json` until its
+   `dag_root_computed` differs from the prior approved value (max
+   `${FY_POLL_MAX_SEC:-600}` seconds at `${FY_POLL_INTERVAL:-30}` second
+   intervals), and verify the published `identity.json` signature via
+   `ssh-keygen -Y verify`. Phase 1 has no side effects.
+2. **Phase 2 — atomic state write.** Compose the new `cycle-gate-state.json`
+   via `jq -n` to a `.new` tempfile, then `mv` over the live file. Atomic on
+   POSIX (same dir).
+3. **Phase 3 — report.** Print a one-block summary of the final state. Exit 0.
+
+The v1 Phase 3 (broadcast trigger) and Phase 4 (`fyid1:` receipt field-match)
+were removed in the v2 migration: the anchor pipeline broadcasts under its own
+4-gate discipline, and `gen-anchor-receipt.sh` already verifies the four v2
+memos + `dag_root_computed` at receipt time, so a second post-hoc check here
+was redundant.
 
 Exit codes:
 
 | code | meaning |
 | --- | --- |
-| `0` | PASS — state updated, broadcast complete, 7/7 PASS; OR `--dry-run` Phase 1 verification succeeded; OR idempotent skip |
+| `0` | PASS — state updated; OR `--dry-run` Phase 1 verification succeeded; OR idempotent skip |
 | `1` | usage error |
 | `2` | Phase 1 verification failed |
-| `3` | Phase 1 polling timeout (= identity.json never went fresh) |
+| `3` | Phase 1 polling timeout (= anchor-source.json never went fresh) |
 | `4` | Phase 2 state write failed |
-| `5` | Phase 3 post-anchor-event.sh failed |
-| `6` | Phase 4 7-condition check failed |
 
-`--dry-run` runs only Phase 1. It does not write the state file, does not invoke the signer, and does not fetch `anchor-receipt.json`. Phase 2 / 3 / 4 emit "would do" log lines instead.
+`--dry-run` runs only Phase 1; Phase 2 emits a "would write" log line instead.
 
-## post-anchor-event.sh modification (= the only existing-script edit)
+## Operator runbook (= cycle transitions, model α)
 
-The cycle-gate consultation is inserted into `scripts/post-anchor-event.sh` immediately after the existing idempotency check (= original line 327-330) and before the signer invocation (= original line 332). It is skipped when the script is in resume mode or when `--force` is set:
-
-```bash
-if [ -z "${RESUME_MODE}" ] && [ "${FORCE}" -eq 0 ]; then
-    CYCLE_GATE_SCRIPT="${SCRIPT_DIR}/cycle-gate.sh"
-    if [ -x "${CYCLE_GATE_SCRIPT}" ]; then
-        if ! "${CYCLE_GATE_SCRIPT}" --side-effect=broadcast; then
-            echo "deferred by cycle-gate: dag_root_hash=${DAG_ROOT_HASH:0:12}… not approved for broadcast" >&2
-            exit 11
-        fi
-    fi
-fi
-```
-
-Exit 11 is added to the documented exit-code list. RESUME_MODE bypasses the gate because partial-success mid-stream completion requires the broadcast to finish for state consistency (= the chain may already have the inscription; we must finalize the local state machine). `--force` bypasses because that flag is the operator's explicit emergency authority for manual replay.
-
-Backward compatibility is structural: when `scripts/cycle-gate.sh` is absent or non-executable, the entire gate block is a no-op and the script's behavior matches the pre-cycle-gate version exactly. This means deploying the gate is safe regardless of state-file presence, and rolling back is as simple as removing `cycle-gate.sh` (or `chmod -x` it).
-
-The `check-anomalies.sh` and `daily-status.sh` "optional gate" modifications proposed earlier were withdrawn after the T-1 read. The existing `EXPECTED_DROP` logic in `check-anomalies.sh` (line 638-651) already distinguishes the cycle-end-driven validator drop from a true unexpected drop, and `daily-status.sh` is pure observation (= no IRREV side effect). Neither benefits from gate consultation. Only `post-anchor-event.sh` is modified.
-
-## Operator runbook (= cycle transitions starting 2026-07-04 cycle 3)
-
-Under model α (= AI full orchestration; see `feedback_ai_full_orchestration_default` memo), the operator's runbook collapses to four active steps:
+Under model α (= AI full orchestration; see
+`feedback_ai_full_orchestration_default` memo), the operator's active steps:
 
 1. Operator asks AI to drive the cycle transition.
-2. Operator, when AI signals it is the moment, performs the wallet flow in Metal Wallet web — collect METAL, fund the validator account, cross-chain to P-chain, submit AddValidator, confirm on-chain Committed. AI verifies on-chain state in parallel.
-3. Operator, when AI prompts, enters the proton-cli keystore password (= for `proton key:unlock`) and the operator-identity-key passphrase (= for `gen-identity.sh`). AI handles every shell command around those prompts.
-4. Operator visually verifies the explorer URL AI reports back. Done.
+2. Operator, when AI signals it is the moment, performs the wallet flow in
+   Metal Wallet web — collect METAL, fund the validator account, cross-chain
+   to P-chain, submit AddValidator, confirm on-chain Committed. AI verifies
+   on-chain state in parallel.
+3. Operator, when AI prompts, enters the proton-cli keystore password (= for
+   `proton key:unlock`, **required before signing** — see the keystore lock
+   quirk memo) and the operator-identity-key passphrase (= for
+   `gen-identity.sh`). AI handles every shell command around those prompts.
+4. Operator authorizes the mainnet anchor broadcast **per invocation**
+   (naming chain / actor / permission / action / memo / quantity — PRIME
+   DIRECTIVE gate 2), then visually verifies the explorer URL AI reports
+   back. Done.
 
-AI's hidden work between steps 2 and 4:
+AI's work around those steps:
 
-- ssh validator host: trigger `uptime-history.sh` + `gen-cycle-history.sh` + `push-to-web-host.sh cycle-history.jsonl`.
-- Mac local: `bash scripts/operator-local/gen-identity.sh` (the operator passphrase prompt surfaces here).
-- Mac local: `git add` the regenerated artifacts, commit, push.
-- `gh run watch` for the Deploy workflow until completion.
-- ssh validator host: `bash scripts/resume-after-cycle-start.sh --apply` (= polling Phase 1 finds fresh data on attempt 1 since AI already confirmed deploy completion; Phases 2-5 execute synchronously).
-- Read back the Phase 5 summary, report explorer URL to operator.
+- validator host: cycle-recording refresh (`uptime-history.sh`,
+  `gen-cycle-history.sh`, feed pushes) — these pass the always-green
+  `cycle-artifact-write` gate.
+- Mac local: `gen-identity.sh` (with `FY_EXPECT_CYCLE` ordering guard),
+  commit, push; `gh run watch` until deploy completes.
+- validator host: `gen-anchor-source.sh` (compose). Mac:
+  `sign-anchor-event.sh` via the pipeline (testnet first, then mainnet after
+  gate-2 authorization). validator host: `gen-anchor-receipt.sh` 7-gate
+  verify + `append-anchor-history.sh`.
+- validator host: `resume-after-cycle-start.sh --apply` → cycle-aware alerts
+  resume for the new cycle.
+- Read back the summary, report the explorer URL to the operator.
 
 ## Emergency fallback (= AI unavailable)
 
 If the operator must drive the transition without AI assistance:
 
-1. Operator does the wallet flow + the Mac gen-identity + commit + push as usual.
-2. After `git push`, wait for the GitHub Actions Deploy workflow to finish (= visible in the Actions tab of the repo).
+1. Operator does the wallet flow + Mac `gen-identity.sh` + commit + push as
+   usual, and runs the anchor pipeline manually (testnet-first; mainnet only
+   with all four PRIME DIRECTIVE gates satisfied).
+2. After `git push`, wait for the GitHub Actions Deploy workflow to finish.
 3. SSH the validator host and run:
 
    ```sh
@@ -177,41 +236,67 @@ If the operator must drive the transition without AI assistance:
        'sudo -u deploy bash /home/deploy/metal.freedom-yield.com/scripts/resume-after-cycle-start.sh --apply'
    ```
 
-The Phase 1 polling tolerates uncertain deploy timing: if the operator runs the command before deploy completes, Phase 1 polls for up to 10 minutes for `identity.json` to refresh before failing. The operator does not need to know the exact deploy timing; the script discovers it.
-
-If the operator wants to dry-run the verification first (= sanity check before approval), substitute `--dry-run` for `--apply`. Phase 1 runs in full; Phases 2-4 are skipped.
+Phase 1 polling tolerates uncertain deploy timing: it polls up to 10 minutes
+for `anchor-source.json` to refresh before failing. To sanity-check first,
+substitute `--dry-run` for `--apply`.
 
 ## Rollback
 
-Three independent rollback levers, in increasing severity:
+Independent rollback levers, in increasing severity:
 
-1. **Disable approval enforcement temporarily**: `rm /var/lib/freedom-yield/cycle-gate-state.json`. `cycle-gate.sh` returns green for every consultation until the file is recreated. The next `resume-after-cycle-start.sh --apply` recreates it. Use this to unblock an emergency manual `post-anchor-event.sh` invocation without `--force`.
-2. **Disable the gate consultation entirely**: `chmod -x /home/deploy/metal.freedom-yield.com/scripts/cycle-gate.sh`. `post-anchor-event.sh`'s gate block detects non-executable cycle-gate.sh and skips consultation, falling back to pre-cycle-gate behavior. Reverse with `chmod +x`.
-3. **Remove the design entirely**: delete `scripts/cycle-gate.sh`, delete `scripts/resume-after-cycle-start.sh`, revert the post-anchor-event.sh diff (= the gate block + exit 11 documentation). The repo returns to its pre-2026-08-04 state. Use only if a fundamental design issue is found.
+1. **Disable approval enforcement temporarily**:
+   `rm /var/lib/freedom-yield/cycle-gate-state.json`. `cycle-gate.sh` returns
+   green for every consultation until the next
+   `resume-after-cycle-start.sh --apply` recreates the file.
+2. **Disable gate consultation entirely**:
+   `chmod -x /home/deploy/metal.freedom-yield.com/scripts/cycle-gate.sh`.
+   Consumers detect the non-executable gate and fail closed per their own
+   handling (alert consumers suppress; artifact writers skip or proceed per
+   their declared type). Reverse with `chmod +x`.
+3. **Remove the design entirely**: delete `scripts/cycle-gate.sh` and
+   `scripts/resume-after-cycle-start.sh` and drop the consultation blocks
+   from the consumer scripts. Use only if a fundamental design issue is
+   found.
 
-The state file is regenerable from any chain-visible cycle, so accidental deletion is not a data-loss event.
+The state file is regenerable from any chain-visible cycle, so accidental
+deletion is not a data-loss event.
 
 ## Test coverage
 
-`tests/cycle-gate/run-tests.sh` runs ten scenarios against the live shell scripts using a Python HTTP mock for metalgo RPC + Xserver responses. Scenarios cover green / deferred / fail-closed for each `--side-effect` type, idempotent resume skip, and resume against unreachable RPC. The current PASS rate is `10/10`. Run via `bash tests/cycle-gate/run-tests.sh`.
+`tests/cycle-gate/run-tests.sh` exercises the deterministic state-machine
+behavior (green / deferred / fail-closed per side-effect type, idempotent
+resume skip, resume against unreachable RPC) using a Python HTTP mock for
+metalgo RPC + web-host responses. The repo-wide suite runs via
+`bash tests/run-all-tests.sh`.
 
-The tests cover the deterministic state-machine behavior. They do not cover:
+Not covered here (covered elsewhere):
 
-- Live identity.json signature verification (= would require a real ed25519 signing key; covered by the operator-Mac `gen-identity.sh` self-verify at signing time)
-- End-to-end A-chain broadcast through `proton-cli` (= covered by the operator's manual dry-run on the validator host before the first cycle 4 transition)
-
-Both are scheduled to be exercised once on the validator host as part of T-8 (= 2026-07-04 cycle 3 transition validation — first live use of the cycle-gate design).
+- identity.json signature verification against a real key — covered by the
+  operator-Mac `gen-identity.sh` self-verify at signing time.
+- A-chain broadcast — covered by the anchor pipeline's own testnet-first
+  rehearsals and `gen-anchor-receipt.sh` 7-gate verification.
 
 ## Constitution alignment
 
-- **§2 #1 validator health**: `cycle-gate.sh` hits metalgo RPC once per consultation (= same query as the existing `check-anomalies.sh` 5-minute tick, no incremental load). `resume-after-cycle-start.sh` runs at most once per cycle.
-- **§3.3**: neither script reads or writes any SECRET-class data. The `cycle-gate-state.json` contents are all publicly observable on chain.
-- **§5**: validator-host change; deployment is operator-approved. T-7 deploy completed 2026-06-29 15:09 JST per operator authorization; cycle-gate is now active on the validator host.
+- **§2 #1 validator health**: `cycle-gate.sh` hits metalgo RPC once per
+  consultation (= same query as the existing 5-minute anomaly tick, no
+  incremental load). `resume-after-cycle-start.sh` runs at most once per
+  cycle.
+- **§3.3**: neither script reads or writes any SECRET-class data.
+- **§5 / PRIME DIRECTIVE**: the gate has no broadcast path. The anchor
+  pipeline's mainnet broadcast requires testnet-first success, per-invocation
+  operator authorization, pre-flight chain verification, and exhausted
+  dry-run options — enforced by `bin/safe-broadcast` and the tiered
+  broadcast-enforcement stack.
 
 ## Related
 
-- `project_cycle_gate_resume_design` memo — strategic design summary.
-- `project_cycle_gate_resume_tasks` memo — T-1 through T-8 task plan.
-- `project_phase_alpha_anchor_completion_2026_07_04` memo — the runbook this design replaces, plus the seven-condition PASS list used in Phase 4.
-- `feedback_ai_full_orchestration_default` memo — model α role distribution.
-- `docs/VALIDATOR_RENEWAL.md` — operator-facing renewal SOP; updated alongside this document to point at the new flow.
+- `docs/ANCHOR_SOURCE.md` — the 3-branch anchor-source contract (single DAG
+  source of truth).
+- `docs/MERKLE_DAG_SPEC.md` — canonical hashing spec (`jq -cS`, trailing
+  newline included).
+- `docs/IDENTITY_VERIFICATION.md` — the public seven-step verification
+  recipe.
+- `docs/audits/constitution-2026-07-04-design-stocktake.md` — the design
+  stocktake that drove the v1 → v2 collapse.
+- `docs/VALIDATOR_RENEWAL.md` — operator-facing renewal SOP.
