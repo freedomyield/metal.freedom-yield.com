@@ -279,7 +279,7 @@ git push origin main
 
 # GitHub Actions Deploy 完了を待つ (= Actions tab 目視 or `gh run watch`)
 
-# Hetzner で resume-after-cycle-start.sh を 1 行で trigger
+# The validator host で resume-after-cycle-start.sh を 1 行で trigger
 ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
     'sudo -u deploy bash /home/deploy/metal.freedom-yield.com/scripts/resume-after-cycle-start.sh --apply'
 

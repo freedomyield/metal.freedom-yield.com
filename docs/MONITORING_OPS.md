@@ -329,7 +329,7 @@ The init script must **not** appear in any cron file. The cron in `/etc/cron.d/m
 
 | Resource | Production | CI test | Operator manual E2E |
 |---|---|---|---|
-| State dir | `/var/lib/freedom-yield/` (Hetzner) | `$TMP/state` (mktemp) | `$TMP/state` (mktemp) |
+| State dir | `/var/lib/freedom-yield/` (the validator host) | `$TMP/state` (mktemp) | `$TMP/state` (mktemp) |
 | Lock file | `/var/lib/freedom-yield/locks/check-anomalies.lock` | `$TMP/locks/test.lock` | `$TMP/locks/test.lock` |
 | Counter file | `/var/lib/freedom-yield/anomaly-contention-counter` | `$TMP/counter` | `$TMP/counter` |
 | STATUS_JSON | `public/api/server-status.json` (live) | fixture under `tests/anomalies/fixtures/` | fixture under `tests/anomalies/fixtures/` |

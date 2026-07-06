@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # install-metal-anchor-publish-health-cron.sh — install the /etc/cron.d/
 # entry that runs check-anchor-publish-health.sh every 15 minutes on the
-# Hetzner validator host.
+# validator host.
 #
 # Runs as root; writes to /etc/cron.d/metal-anchor-publish-health.
 # Idempotent: if the file already contains the same content, no change.
@@ -25,7 +25,7 @@ fi
 
 read -r -d '' EXPECTED <<CRON || true
 # Every 15 minutes, verify that https://metal.freedom-yield.com/api/anchor-source.json
-# returns 200. On non-200, auto-recover by pushing the Hetzner-local
+# returns 200. On non-200, auto-recover by pushing the validator-host-local
 # public/api/anchor-source.json via push-to-web-host.sh. All events (including
 # successful recoveries) are appended to /var/log/anchor-publish-health.log.
 #

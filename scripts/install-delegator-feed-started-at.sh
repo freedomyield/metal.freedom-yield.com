@@ -10,7 +10,7 @@
 # activation time (2026-07-01T06:02:00Z per commit 9911171) so cycle 2's
 # empty delegator_lifecycle_events array is honestly bounded.
 #
-# Usage (operator, once, on Hetzner):
+# Usage (operator, once, on the validator host):
 #   sudo bash scripts/install-delegator-feed-started-at.sh
 # Usage (with custom timestamp):
 #   sudo FEED_STARTED_AT="2026-07-01T06:02:00Z" bash scripts/install-delegator-feed-started-at.sh

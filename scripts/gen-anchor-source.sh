@@ -395,7 +395,7 @@ fi
 # ---- artifacts_branch ------------------------------------------------
 # File list to hash: lexicographic sort mandatory (= Merkle canonical order).
 # Includes only PUBLIC artifacts served at https://metal.freedom-yield.com/api/*.
-# Hetzner-only master files (= uptime-history.jsonl in state dir) are NOT
+# validator-host-only master files (= uptime-history.jsonl in state dir) are NOT
 # hashed here; their public equivalent (uptime-recent.json + uptime-cycles.json)
 # is what a third-party evaluator can fetch and cross-verify.
 API_FILES=(

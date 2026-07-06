@@ -9,9 +9,9 @@
 # BROADCASTS NOTHING. Invokes no sign-anchor-event / safe-broadcast / proton. Writes
 # no anchor-pending marker (so it can never strand a later manual anchor at exit 8).
 # Replaces the legacy post-anchor-event.sh driver, which chained to the v2-incompatible
-# signer and, being Hetzner-side, could never sign a Mac-only key. See memory/
+# signer and, being validator-host-side, could never sign a Mac-only key. See memory/
 # project_cycle3_anchor_broadcast_complete_20260704.md (findings A + B) for why the
-# Hetzner auto-broadcast path is architecturally stranded under Mac-only signing.
+# The validator host auto-broadcast path is architecturally stranded under Mac-only signing.
 #
 # Wiring: set ANCHOR_DRIVER=<this script> in /etc/cron.d/metal-anchor-watch so
 # watch-anchor-events.sh dispatches here instead of post-anchor-event.sh.

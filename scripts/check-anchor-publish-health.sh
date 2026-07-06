@@ -13,7 +13,7 @@
 # Behavior:
 #   1. curl the public URL. On 200, exit 0 quietly (or with a heartbeat
 #      when --verbose is set).
-#   2. On non-200, compare with the Hetzner-local file:
+#   2. On non-200, compare with the validator-host-local file:
 #      - if the local file exists and is non-empty, invoke push-to-web-host.sh
 #        (retry-with-backoff already built in) and re-check.
 #      - if the local file is missing, log an ERROR and exit 2 — this
@@ -65,7 +65,7 @@ if [ ! -s "$LOCAL_FILE" ]; then
 	exit 2
 fi
 
-# Auto-recover: push from Hetzner local. Do NOT regenerate — the operator
+# Auto-recover: push from the validator host local. Do NOT regenerate — the operator
 # is the source of truth for when anchor-source.json changes.
 log "INFO auto-recover: pushing $LOCAL_FILE via push-to-web-host.sh"
 if bash "${ROOT}/scripts/push-to-web-host.sh" anchor-source.json 2>&1 | sed "s/^/    push: /" >&2; then

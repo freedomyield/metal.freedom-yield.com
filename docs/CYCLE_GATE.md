@@ -1,6 +1,6 @@
 # Cycle gate — 2-component cycle transition simplification
 
-> **Status (= 2026-06-29 15:09 JST)**: **DEPLOYED to production**. T-7 deploy completed with 5 commits (= b4d4cfe + 221ca87 + 457a4dd + 55d7a9e + aac4934), GitHub Actions deploy + Hetzner sync + cycle-gate-state.json initialized for current cycle 2 (= signature `NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v-1780560117`, dag `0bd4e667…`). First live application is **2026-07-04 cycle 3 transition** (= the originally pressure-source day the design was built for). See `docs/CYCLE_GATE_DAILY_OBSERVATION.md` for ongoing production state snapshots.
+> **Status (= 2026-06-29 15:09 JST)**: **DEPLOYED to production**. T-7 deploy completed with 5 commits (= b4d4cfe + 221ca87 + 457a4dd + 55d7a9e + aac4934), GitHub Actions deploy + the validator host sync + cycle-gate-state.json initialized for current cycle 2 (= signature `NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v-1780560117`, dag `0bd4e667…`). First live application is **2026-07-04 cycle 3 transition** (= the originally pressure-source day the design was built for). See `docs/CYCLE_GATE_DAILY_OBSERVATION.md` for ongoing production state snapshots.
 >
 > The "2026-08-04 first transition" framing in earlier drafts of this doc was the AI implementer's incorrect interpretation; operator intent was always 2026-07-04 from the start. Inline references to "~2026-08-04" below are historical and reflect the now-corrected plan.
 

@@ -14,7 +14,7 @@
 # with actor=frdomyieltst, sink=fyhistorytst, chain=proton-test.
 #
 # Prerequisites (checked by this script; failed check → exit >0):
-#   - proton-cli installed on this host (Mac local, not Hetzner)
+#   - proton-cli installed on this host (Mac local, not the validator host)
 #   - Testnet keys present in proton keystore
 #     (PUB_K1_8fLkde... / PUB_K1_6crXf5... / PUB_K1_6pYLPz...)
 #   - Rehearsal config dir at ~/freedom-yield-rehearsal-config
@@ -58,7 +58,7 @@ REHEARSAL_CFG="${HOME}/freedom-yield-rehearsal-config"
 #   2. ANCHOR_SOURCE_OVERRIDE env
 #   3. public/api/anchor-source.substantive.json  ← real hashes (default)
 #   4. public/api/anchor-source.example.json      ← placeholder fallback
-# The substantive file exists once gen-anchor-source.sh has run (on Hetzner)
+# The substantive file exists once gen-anchor-source.sh has run (on the validator host)
 # or when it's been composed manually with real identity + artifact hashes.
 # Rehearsing with the example file inscribes 0000... placeholders on-chain,
 # which is what happened in the 2026-07-01 pre-substantive rehearsal.

@@ -12,8 +12,8 @@
 The public site `https://metal.freedom-yield.com` is served by
 **Cloudflare → Xserver** (web root `/home/<acct>/metal.freedom-yield.com/
 public`). The GitHub Actions deploy (`.github/workflows/deploy.yml`)
-rsyncs the repository to a **single** `SSH_HOST`, which is the **Hetzner
-validator host** — an internal Caddy, **not** the public origin.
+rsyncs the repository to a **single** `SSH_HOST`, which is the **validator
+host** — an internal Caddy, **not** the public origin.
 
 **There is no automated propagation of git-tracked static content to the
 public Xserver.** Evidence gathered by a single authorized read-only root
@@ -41,7 +41,7 @@ Consequences:
   site only because its last repo change (2026-07-01) predates the
   2026-07-02 snapshot — a coincidence, not propagation.
 - `anchor-source.json` is the sole `public/api/` artifact that stays fresh,
-  because it travels a **different** path: Hetzner cron →
+  because it travels a **different** path: the validator host cron →
   `push-to-web-host.sh` → the Xserver forced-command wrapper
   `/home/deploy/bin/receive-metal-push` (filename allowlist → web root).
 
@@ -49,7 +49,7 @@ Consequences:
 "canonical source for repo-tracked content." That was true under the
 pre-2026-05-20 single-VPS topology, where the deploy target *was* the
 public origin. After the web tier moved to Xserver, the deploy target
-became the internal Hetzner host and the assertion silently became false.
+became the internal validator host and the assertion silently became false.
 This design restores the invariant the matrix already assumes.
 
 ## 2. Goal and non-goals
@@ -57,12 +57,12 @@ This design restores the invariant the matrix already assumes.
 **Goal.** A `git push` to the default branch reliably updates the public
 Xserver web root with the current git-tracked static content — the same
 content, asset-versioned identically, that the deploy already ships to
-Hetzner — without disturbing the dynamically-pushed feeds that share
+the validator host — without disturbing the dynamically-pushed feeds that share
 `public/api/`.
 
 **Non-goals.**
 
-- Changing the dynamic-feed path (Hetzner cron → receive wrapper). It works
+- Changing the dynamic-feed path (the validator host cron → receive wrapper). It works
   and stays as-is.
 - Migrating the public origin off Xserver, or introducing a CDN origin
   change.
@@ -74,13 +74,13 @@ Hetzner — without disturbing the dynamically-pushed feeds that share
 
 The deploy workflow already: (a) checks out the repo, (b) asset-versions
 `public/assets/**` by rewriting `?v=<SHORT_SHA>`, (c) rsyncs `./` to
-Hetzner with `--delete` and an exclusion list that pins the
+the validator host with `--delete` and an exclusion list that pins the
 validator-pushed feeds. Approach C adds a **second rsync**, of the same
 built tree, to the Xserver web root.
 
 Two other approaches were considered and rejected:
 
-- **B — Hetzner → Xserver static rsync.** Adds a new channel parallel to
+- **B — the validator host → Xserver static rsync.** Adds a new channel parallel to
   the dynamic push; requires re-implementing the feed exclusions in a
   second place and an rsync-over-forced-command shim. More wiring, more
   drift surface.
@@ -100,19 +100,19 @@ rather than adding new machinery.
 git push (default branch)
   └─ GitHub Actions deploy.yml
        ├─ checkout + asset-version public/assets/** (?v=SHORT_SHA)
-       ├─ rsync #1  --delete + <feed-excludes>   → Hetzner:DEPLOY_PATH/        (existing)
+       ├─ rsync #1  --delete + <feed-excludes>   → the validator host:DEPLOY_PATH/        (existing)
        └─ rsync #2  --delete + <feed-excludes>   → Xserver:.../metal…/public/  (NEW)
 
 dynamic feeds (unchanged, parallel):
-  Hetzner crons → push-to-web-host.sh → receive-metal-push (allowlist) → Xserver public/api/
+  the validator host crons → push-to-web-host.sh → receive-metal-push (allowlist) → Xserver public/api/
 ```
 
-**Ordering.** rsync #1 (Hetzner) runs first, then rsync #2 (Xserver). A
+**Ordering.** rsync #1 (the validator host) runs first, then rsync #2 (Xserver). A
 Xserver failure fails the workflow so the drift is visible, but only after
-the Hetzner deploy has already succeeded. The two targets are independent;
+the validator host deploy has already succeeded. The two targets are independent;
 neither partial state corrupts the other.
 
-**Source root difference.** Hetzner receives `./` (the whole repo tree,
+**Source root difference.** The validator host receives `./` (the whole repo tree,
 minus excludes) into `DEPLOY_PATH`, and Caddy serves `DEPLOY_PATH/public`.
 The Xserver web root *is* `.../metal.freedom-yield.com/public` directly, so
 rsync #2's source is **`./public/`**, not `./`. This keeps repository
@@ -147,7 +147,7 @@ excludes) is an implementation-plan decision; the invariant is: **one list,
 two prefixes, zero drift.**
 
 This list is also mirrored in `docs/DEPLOY_OWNERSHIP_MATRIX.md`. That
-three-way lock-step (deploy.yml Hetzner excludes ↔ deploy.yml Xserver
+three-way lock-step (deploy.yml the validator host excludes ↔ deploy.yml Xserver
 excludes ↔ ownership matrix ↔ receive-wrapper allowlist) is the exact class
 of drift the matrix exists to catch; the matrix section is updated to name
 the Xserver target explicitly.
@@ -179,10 +179,10 @@ deploy key's blast radius MUST be confined to the metal public directory.
 
 | File | Change | Owner |
 |---|---|---|
-| `.github/workflows/deploy.yml` | Add "Set up Xserver key" + "Rsync public/ to Xserver" steps: source `./public/`, `--delete`, the shared feed-exclusion set (Xserver prefix), target from new secrets. Runs after the Hetzner rsync. | AI (diff), operator approves |
+| `.github/workflows/deploy.yml` | Add "Set up Xserver key" + "Rsync public/ to Xserver" steps: source `./public/`, `--delete`, the shared feed-exclusion set (Xserver prefix), target from new secrets. Runs after the validator host rsync. | AI (diff), operator approves |
 | `scripts/install-xserver-static-deploy-key.sh` (NEW) | Operator-run once. Installs the `rrsync`-restricted `authorized_keys` line for the CI deploy key on Xserver. Verifies `rrsync` is present; backs up `authorized_keys`; appends exactly one line; idempotent (re-run detects the line and exits 0); never edits other entries. Env-overridable (`XSERVER_HOST`, `XSERVER_USER`, `XSERVER_KEY`, `WEB_ROOT`) for testability, matching the existing `install-xserver-*-allowlist.sh` shape. | AI authors, operator executes |
-| `docs/DEPLOY_OWNERSHIP_MATRIX.md` | Correct the "canonical source" framing: git deploy now reaches **both** Hetzner and the public Xserver. Add the Xserver rsync target and its exclusion coupling to the cross-check protocol. | AI |
-| `docs/DEPLOY_SETUP.md` | Replace the obsolete single-VPS model (DNS→one VPS Caddy) with the two-host reality: Actions → Hetzner (internal) + Actions → Xserver (public origin behind Cloudflare); dynamic feeds via receive wrapper. | AI |
+| `docs/DEPLOY_OWNERSHIP_MATRIX.md` | Correct the "canonical source" framing: git deploy now reaches **both** the validator host and the public Xserver. Add the Xserver rsync target and its exclusion coupling to the cross-check protocol. | AI |
+| `docs/DEPLOY_SETUP.md` | Replace the obsolete single-VPS model (DNS→one VPS Caddy) with the two-host reality: Actions → the validator host (internal) + Actions → Xserver (public origin behind Cloudflare); dynamic feeds via receive wrapper. | AI |
 | `tests/deploy/test-rsync-delete-protection.sh` | Extend the synthetic fixture to also exercise the Xserver rsync (source `./public/`, its prefixed exclude set): assert feeds survive `--delete` and static files are copied. Local-to-local, no real host. | AI |
 
 **Operator one-time setup** (Constitution §5 / Operating Model W7):
@@ -201,8 +201,8 @@ verification steps; the operator holds execution and final approval.
 ## 7. Error handling
 
 - **Xserver rsync fails** (host unreachable, key rejected): the workflow
-  fails *after* a successful Hetzner deploy, surfacing the drift rather than
-  hiding it. Hetzner (validator-adjacent) is never blocked by a
+  fails *after* a successful the validator host deploy, surfacing the drift rather than
+  hiding it. The validator host (validator-adjacent) is never blocked by a
   public-origin problem.
 - **`--delete` vs feeds**: the shared exclusion set (§4) protects every
   dynamically-pushed feed; the regression test (§6) pins this.
@@ -229,7 +229,7 @@ verification steps; the operator holds execution and final approval.
 
 - **① (dag_root_hash retirement)** becomes publicly visible on the first
   post-C deploy (backfill, §3.2). Until C ships, ①'s schema change is
-  Hetzner-only.
+  validator-host-only.
 - **⑫ (cron publish naming split)** is *decoupled* from this design: ⑫'s
   installer superset check was protecting the old `push-to-xserver.sh`
   allowlist's `anchor-source.json`/`.sig` push capability. Those artifacts

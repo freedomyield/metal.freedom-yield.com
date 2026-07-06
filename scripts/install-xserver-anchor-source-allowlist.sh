@@ -7,7 +7,7 @@
 #   receipt v2 anchor_source_url points at https://metal.freedom-yield.com/
 #   api/anchor-source.json, but that URL currently returns 404 because the
 #   file has never been published to Xserver. push-to-web-host.sh has now
-#   been extended on Hetzner to include anchor-source.json / anchor-receipt.
+#   been extended on the validator host to include anchor-source.json / anchor-receipt.
 #   json / anchor-history.jsonl, but the Xserver-side forced-command wrapper
 #   at /home/deploy/bin/receive-metal-push carries its own independent
 #   allowlist and rejects anything not matched there. This installer
@@ -95,13 +95,13 @@ echo "--- extending allowlist ---"
 # already extended. Insert `anchor-source.json|` at the start of the pattern
 # so that regardless of how the terminator is spelled on this particular
 # wrapper (originally we expected `node-health-recent.json)` from the
-# Hetzner-side twin script, but the observed Xserver shape terminates at
+# validator-host-side twin script, but the observed Xserver shape terminates at
 # `evidence.json)`) the extension lands on the same case branch.
 #
 # We only add `anchor-source.json` here — `anchor-receipt.json` and
 # `anchor-history.jsonl` are typically already present on the Xserver
 # wrapper. If they are missing, the operator can extend manually or re-run
-# the Hetzner-side push (which will surface the specific rejection).
+# the validator-host-side push (which will surface the specific rejection).
 if grep -q 'validator\.json[|)]' "$WRAPPER"; then
 	sed -i.tmp \
 		's/validator\.json|/anchor-source.json|validator.json|/' \
@@ -134,7 +134,7 @@ RC=$?
 echo
 if [ "$RC" -eq 0 ]; then
 	echo "==> Xserver wrapper allowlist extension complete."
-	echo "    Next: from Hetzner, run"
+	echo "    Next: from the validator host, run"
 	echo "      bash scripts/push-to-web-host.sh anchor-source.json"
 	echo "    then curl https://metal.freedom-yield.com/api/anchor-source.json"
 	echo "    to verify the file is now served (200)."

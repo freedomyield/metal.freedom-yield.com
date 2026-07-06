@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make a `git push` reliably propagate git-tracked static content to the public Xserver origin (not just the internal Hetzner host), without disturbing the dynamically-pushed feeds that share `public/api/`.
+**Goal:** Make a `git push` reliably propagate git-tracked static content to the public Xserver origin (not just the internal validator host), without disturbing the dynamically-pushed feeds that share `public/api/`.
 
 **Architecture:** Add a second rsync target (the public Xserver) to `.github/workflows/deploy.yml`, reusing the asset-versioned build. The dynamically-pushed feed exclusion set is extracted to a single source of truth (`deploy/feed-excludes.txt` + `scripts/deploy/build-rsync-excludes.sh`) that both rsync invocations and the regression test consume, so the two targets can never drift. The CI deploy key is confined to the metal public directory on the multi-project shared host via an `rrsync -wo` restriction.
 
@@ -25,8 +25,8 @@
 - `deploy/feed-excludes.txt` (NEW) — the canonical feed list, one `public/`-relative path per line.
 - `scripts/deploy/build-rsync-excludes.sh` (NEW) — emits `--exclude=/<prefix><line>` args from the list; the shared exclude-building logic.
 - `tests/deploy/test-build-rsync-excludes.sh` (NEW) — unit test for the emitter.
-- `tests/deploy/test-rsync-delete-protection.sh` (MODIFY) — extend to drive both deploy shapes (Hetzner prefix `public/`, Xserver prefix ``) through the emitter and assert feed survival + static copy.
-- `.github/workflows/deploy.yml` (MODIFY) — Hetzner rsync consumes the emitter (behavior-preserving); add Xserver key setup + Xserver rsync steps.
+- `tests/deploy/test-rsync-delete-protection.sh` (MODIFY) — extend to drive both deploy shapes (the validator host prefix `public/`, Xserver prefix ``) through the emitter and assert feed survival + static copy.
+- `.github/workflows/deploy.yml` (MODIFY) — the validator host rsync consumes the emitter (behavior-preserving); add Xserver key setup + Xserver rsync steps.
 - `scripts/install-xserver-static-deploy-key.sh` (NEW) — operator-run once; installs the `rrsync`-restricted `authorized_keys` line.
 - `tests/install-xserver-static-deploy-key/test-install-xserver-static-deploy-key.sh` (NEW) — scenario tests against tmp fixtures (no real host).
 - `docs/DEPLOY_OWNERSHIP_MATRIX.md` (MODIFY) — correct the "canonical source reaches public" framing; name the Xserver target + exclusion coupling.
@@ -42,7 +42,7 @@
 - Test: `tests/deploy/test-build-rsync-excludes.sh`
 
 **Interfaces:**
-- Produces: `scripts/deploy/build-rsync-excludes.sh <prefix>` — prints, one per line, `--exclude=/<prefix><entry>` for each non-blank, non-`#` entry in `deploy/feed-excludes.txt`. `<prefix>` is `public/` for the whole-repo (Hetzner) rsync and `` (empty) for the `public/`-rooted (Xserver) rsync. Exit non-zero if the list file is missing.
+- Produces: `scripts/deploy/build-rsync-excludes.sh <prefix>` — prints, one per line, `--exclude=/<prefix><entry>` for each non-blank, non-`#` entry in `deploy/feed-excludes.txt`. `<prefix>` is `public/` for the whole-repo (the validator host) rsync and `` (empty) for the `public/`-rooted (Xserver) rsync. Exit non-zero if the list file is missing.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -59,7 +59,7 @@ PASS=0; FAIL=0
 ok(){ PASS=$((PASS+1)); printf '  ✓ %s\n' "$1"; }
 no(){ FAIL=$((FAIL+1)); printf '  ✗ %s\n' "$1"; }
 
-# Hetzner shape: prefix public/
+# The validator host shape: prefix public/
 OUT="$(bash "${EMIT}" "public/")"
 echo "${OUT}" | grep -qx -- '--exclude=/public/api/validator.json' \
   && ok "public/ prefix anchors validator.json" || no "public/ validator.json"
@@ -101,7 +101,7 @@ Create `deploy/feed-excludes.txt`:
 
 ```
 # Dynamically-pushed feeds — written into the public web root's api/ and
-# calendar/ by the Hetzner-side push (scripts/push-to-web-host.sh) and the
+# calendar/ by the validator-host-side push (scripts/push-to-web-host.sh) and the
 # Xserver-side receive wrapper. Any rsync with --delete into a public tree
 # MUST exclude these or the delete erases fresh feeds.
 #
@@ -141,7 +141,7 @@ Create `scripts/deploy/build-rsync-excludes.sh`:
 # build-rsync-excludes.sh <prefix>
 # Emit rsync --exclude args (leading-anchored) for the dynamically-pushed
 # feeds listed in deploy/feed-excludes.txt. Single source of truth so the
-# Hetzner (whole-repo, prefix "public/") and Xserver (public/-rooted, prefix
+# the validator host (whole-repo, prefix "public/") and Xserver (public/-rooted, prefix
 # "") rsyncs cannot drift.
 set -euo pipefail
 PREFIX="${1?usage: build-rsync-excludes.sh <prefix>}"
@@ -178,7 +178,7 @@ git commit -m "feat(deploy): single-source feed exclusion list + emitter for bot
 **Interfaces:**
 - Consumes: `scripts/deploy/build-rsync-excludes.sh` (Task 1).
 
-**Context:** This test builds a synthetic source/destination pair and runs a local `rsync --delete` with the deploy exclusion list, asserting feeds survive and static is copied. It currently covers only the Hetzner (whole-repo) shape with an inline list. We add coverage for the Xserver (`public/`-rooted) shape and drive both from the emitter.
+**Context:** This test builds a synthetic source/destination pair and runs a local `rsync --delete` with the deploy exclusion list, asserting feeds survive and static is copied. It currently covers only the validator host (whole-repo) shape with an inline list. We add coverage for the Xserver (`public/`-rooted) shape and drive both from the emitter.
 
 - [ ] **Step 1: Read the current test to find its assertion helpers and fixture builder**
 
@@ -214,7 +214,7 @@ grep -qx 'SRC-static'   "${XS}/dst/api/identity.schema.v1.json" && ok "Xserver: 
 rm -rf "${XS}"
 ```
 
-- [ ] **Step 3: Run to verify the new block passes (and the existing Hetzner block still passes)**
+- [ ] **Step 3: Run to verify the new block passes (and the existing the validator host block still passes)**
 
 Run: `bash tests/deploy/test-rsync-delete-protection.sh`
 Expected: PASS — existing assertions plus the 5 new Xserver assertions, `0 FAIL`.
@@ -228,7 +228,7 @@ git commit -m "test(deploy): cover Xserver public/-rooted rsync exclusion via sh
 
 ---
 
-## Task 3: Wire deploy.yml — Hetzner via emitter (behavior-preserving) + Xserver target
+## Task 3: Wire deploy.yml — the validator host via emitter (behavior-preserving) + Xserver target
 
 **Files:**
 - Modify: `.github/workflows/deploy.yml`
@@ -236,9 +236,9 @@ git commit -m "test(deploy): cover Xserver public/-rooted rsync exclusion via sh
 **Interfaces:**
 - Consumes: `scripts/deploy/build-rsync-excludes.sh` (Task 1). New secrets: `XSERVER_SSH_KEY`, `XSERVER_SSH_HOST`, `XSERVER_SSH_USER`, `XSERVER_SSH_PORT`.
 
-**Context:** `deploy.yml:134-168` is the Hetzner rsync with inline `--exclude='public/api/...'` feed lines (see `deploy.yml:147-167`). We (a) replace those inline feed lines with the emitter output (identical set, `public/` prefix), keeping the structural excludes (`.git/`, `.github/`, `scripts/`, `caddy/data/`, etc.) inline, and (b) add a second target. The Xserver push uses source `./public/` and the emitter with empty prefix.
+**Context:** `deploy.yml:134-168` is the validator host rsync with inline `--exclude='public/api/...'` feed lines (see `deploy.yml:147-167`). We (a) replace those inline feed lines with the emitter output (identical set, `public/` prefix), keeping the structural excludes (`.git/`, `.github/`, `scripts/`, `caddy/data/`, etc.) inline, and (b) add a second target. The Xserver push uses source `./public/` and the emitter with empty prefix.
 
-- [ ] **Step 1: Capture the current Hetzner exclude set as a baseline**
+- [ ] **Step 1: Capture the current the validator host exclude set as a baseline**
 
 Run:
 ```bash
@@ -247,7 +247,7 @@ bash scripts/deploy/build-rsync-excludes.sh "public/" | sed "s|--exclude=/|exclu
 ```
 Expected: after trivial quoting normalization the two lists name the SAME 21 paths. If they differ, STOP — reconcile `deploy/feed-excludes.txt` before touching the workflow. (This is the behavior-preservation gate.)
 
-- [ ] **Step 2: Refactor the Hetzner rsync to source excludes from the emitter**
+- [ ] **Step 2: Refactor the validator host rsync to source excludes from the emitter**
 
 In the "Rsync site to VPS" step, before the `rsync` call, build the feed excludes:
 
@@ -295,7 +295,7 @@ After the "Bring up / reload Caddy on VPS" step, add:
         # Second deploy target: the public origin behind Cloudflare. The CI
         # key is rrsync -wo confined to the metal public dir, so the remote
         # path is fixed server-side and the client targets the rrsync root.
-        # Same feed exclusion set as the Hetzner rsync (empty prefix because
+        # Same feed exclusion set as the validator host rsync (empty prefix because
         # the source root here is public/, not the repo root).
         env:
           XS_HOST: ${{ secrets.XSERVER_SSH_HOST }}
@@ -315,13 +315,13 @@ After the "Bring up / reload Caddy on VPS" step, add:
 
 Run: `command -v actionlint >/dev/null && actionlint .github/workflows/deploy.yml || echo "actionlint not installed — skip (syntax reviewed manually)"`
 Then: `grep -c "build-rsync-excludes.sh" .github/workflows/deploy.yml`
-Expected: `actionlint` clean (or skipped); the emitter is referenced exactly `2` times (Hetzner + Xserver); no inline `--exclude='public/api/` lines remain (`grep -c "exclude='public/api" .github/workflows/deploy.yml` → `0`).
+Expected: `actionlint` clean (or skipped); the emitter is referenced exactly `2` times (the validator host + Xserver); no inline `--exclude='public/api/` lines remain (`grep -c "exclude='public/api" .github/workflows/deploy.yml` → `0`).
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add .github/workflows/deploy.yml
-git commit -m "feat(deploy): add public Xserver as a second rsync target; Hetzner excludes via shared emitter"
+git commit -m "feat(deploy): add public Xserver as a second rsync target; the validator host excludes via shared emitter"
 ```
 
 ---
@@ -512,11 +512,11 @@ The operator, once, performs (AI supplies exact commands at handoff, not in the 
 
 - [ ] **Step 1: Correct the ownership matrix framing**
 
-In `docs/DEPLOY_OWNERSHIP_MATRIX.md`, update the intro paragraph so "the Git deploy is the canonical source for repo-tracked content" explicitly states the deploy now reaches **both** the Hetzner host and the public Xserver origin. Add to the "Cross-check protocol" a fourth lock-step location: the Xserver rsync target in `deploy.yml` derives its excludes from `deploy/feed-excludes.txt` (the same source as Hetzner), which must stay in lock-step with the receive-wrapper allowlist. Name `deploy/feed-excludes.txt` as the single source of truth for the feed set.
+In `docs/DEPLOY_OWNERSHIP_MATRIX.md`, update the intro paragraph so "the Git deploy is the canonical source for repo-tracked content" explicitly states the deploy now reaches **both** the validator host and the public Xserver origin. Add to the "Cross-check protocol" a fourth lock-step location: the Xserver rsync target in `deploy.yml` derives its excludes from `deploy/feed-excludes.txt` (the same source as the validator host), which must stay in lock-step with the receive-wrapper allowlist. Name `deploy/feed-excludes.txt` as the single source of truth for the feed set.
 
 - [ ] **Step 2: Correct DEPLOY_SETUP.md**
 
-In `docs/DEPLOY_SETUP.md`, replace the single-VPS model (DNS → one VPS Caddy) with: (a) GitHub Actions deploys the repo to the Hetzner validator host (internal Caddy); (b) GitHub Actions also rsyncs `public/` to the public Xserver origin (behind Cloudflare) using the rrsync-restricted deploy key; (c) dynamic feeds flow Hetzner cron → receive wrapper → Xserver `public/api/`. Add the `XSERVER_SSH_*` secrets to the secrets table.
+In `docs/DEPLOY_SETUP.md`, replace the single-VPS model (DNS → one VPS Caddy) with: (a) GitHub Actions deploys the repo to the validator host (internal Caddy); (b) GitHub Actions also rsyncs `public/` to the public Xserver origin (behind Cloudflare) using the rrsync-restricted deploy key; (c) dynamic feeds flow the validator host cron → receive wrapper → Xserver `public/api/`. Add the `XSERVER_SSH_*` secrets to the secrets table.
 
 - [ ] **Step 3: Verify no literal host identifiers were introduced**
 
@@ -531,7 +531,7 @@ and the validator SSH key name must never appear).
 
 ```bash
 git add docs/DEPLOY_OWNERSHIP_MATRIX.md docs/DEPLOY_SETUP.md
-git commit -m "docs(deploy): document the two-host deploy (Hetzner internal + public Xserver)"
+git commit -m "docs(deploy): document the two-host deploy (the validator host internal + public Xserver)"
 ```
 
 ---
@@ -571,7 +571,7 @@ Summarize: code merged, tests green, installer ready; the mechanism goes live on
 - §4 single-SoT exclusion, one list two prefixes → Tasks 1–2 (emitter + both-shape test), Task 3 (both rsyncs consume it).
 - §5 multi-project safety (dedicated key, rrsync -wo) → Task 4 (installer) + Global Constraints.
 - §6 components (deploy.yml, installer, matrix, setup doc, both tests) → Tasks 3, 4, 5, 1, 2.
-- §7 error handling (Xserver fails after Hetzner; --delete vs feeds; rrsync absent aborts) → Task 3 ordering, Task 2 test, Task 4 installer rrsync check.
+- §7 error handling (Xserver fails after the validator host; --delete vs feeds; rrsync absent aborts) → Task 3 ordering, Task 2 test, Task 4 installer rrsync check.
 - §8 testing → Tasks 1, 2, 4 + Task 6.
 - §9 ⑫ decoupling → no code; documented in spec; nothing in this plan touches the push allowlist. Correct.
 

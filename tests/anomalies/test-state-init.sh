@@ -172,7 +172,7 @@ fi
 # can actually PRODUCE a "state dir the process cannot write to" — which
 # only works when the runner is root and can chown/chmod the dir out of
 # the reach of an unprivileged user. When the runner itself is an
-# unprivileged user (e.g. the Hetzner `deploy` user invoking
+# unprivileged user (e.g. the validator host `deploy` user invoking
 # `bash tests/run-all-tests.sh`), a chmod 0500 on a dir we own is a no-op
 # for the owner — the init script's `chmod 0750 || true` restores
 # writability and the "write fails" scenario cannot be constructed, so

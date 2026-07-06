@@ -4,7 +4,7 @@
 #
 # Points watch-anchor-events.sh's DRIVER at notify-anchor-transition.sh via the
 # ANCHOR_DRIVER env, so a presence transition fires an ntfy push (run the MANUAL
-# anchor from the Mac) instead of the stranded Hetzner auto-broadcast path.
+# anchor from the Mac) instead of the stranded the validator host auto-broadcast path.
 # BROADCASTS NOTHING. Idempotent. Removes the .disabled-cycle-transition marker.
 set -euo pipefail
 
