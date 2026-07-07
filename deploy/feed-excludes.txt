@@ -22,8 +22,6 @@ api/peers-gini.json
 api/peers-gini-history.jsonl
 api/peers-history-index.json
 api/cycle-history.jsonl
-api/anchor-source.json
-api/anchor-source.json.sig
 api/anchor-receipt.json
 api/anchor-receipt.json.sig
 api/anchor-history.jsonl
