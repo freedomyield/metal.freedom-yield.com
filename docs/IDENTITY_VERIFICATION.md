@@ -102,7 +102,7 @@ AR_ROOT=$(jq -cS '.artifacts_branch'    anchor-source.json | sha256sum | awk '{p
 printf 'id=%s\nob=%s\nar=%s\n' "$ID_ROOT" "$OB_ROOT" "$AR_ROOT"
 ```
 
-These three values are what the on-chain branch memos commit to (step 7). A verifier that uses a non-jq JCS serializer MUST match jq's compact + sorted-key encoding.
+These three values are what the on-chain branch memos commit to (step 7). The `jq -cS … | sha256sum` pipeline above hashes the `jq -cS` output **including the trailing newline (`0x0a`) that `jq` appends by default** — the authoritative branch root is `sha256(canonical + "\n")`. A verifier that uses a non-jq JCS serializer MUST match jq's compact + sorted-key encoding **and** append one `0x0a` byte if its serializer omits the trailing newline; otherwise the digest will not match the on-chain memo hex. See [`MERKLE_DAG_SPEC.md`](./MERKLE_DAG_SPEC.md) §2.1.
 
 ### Step 5 — Recompute dag_root_computed
 

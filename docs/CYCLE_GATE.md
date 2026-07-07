@@ -302,8 +302,8 @@ Not covered here (covered elsewhere):
 
 - `docs/ANCHOR_SOURCE.md` — the 3-branch anchor-source contract (single DAG
   source of truth).
-- `docs/MERKLE_DAG_SPEC.md` — canonical hashing spec (`jq -cS`, trailing
-  newline included).
+- `docs/MERKLE_DAG_SPEC.md` — canonical hashing spec (`jq -cS`; the trailing
+  newline (`0x0a`) that `jq` appends is included in the hashed bytes, per §2.1).
 - `docs/IDENTITY_VERIFICATION.md` — the public seven-step verification
   recipe.
 - `docs/audits/constitution-2026-07-04-design-stocktake.md` — the design

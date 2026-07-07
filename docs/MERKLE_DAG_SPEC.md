@@ -41,6 +41,12 @@ A verifier MUST:
 
 A verifier MUST NOT hash the branch's served bytes verbatim — the served document may carry a different key order or pretty-print whitespace than the canonical form; only the `jq -cS` bytes are authoritative.
 
+### 2.1 Trailing newline (`0x0a`)
+
+The canonical bytes that get hashed are the `jq -cS` output **including the trailing newline (`0x0a`) that `jq` appends by default**. The reference pipeline `jq -cS '.<branch>' | sha256sum` carries that newline into the digest, so the authoritative branch root is `sha256(canonical + "\n")`, not `sha256(canonical)`.
+
+A verifier that uses a non-jq canonicalizer — RFC 8785, Python `json.dumps(sort_keys=True, separators=(',', ':'), ensure_ascii=False)`, JavaScript `JSON.stringify(sortDeep(...))`, or any other `jq -cS`-equivalent serializer that emits the same sorted-key bytes **but omits the trailing newline** — MUST append one `0x0a` byte before hashing. Omitting it yields a digest that does not match the on-chain memo hex. This is the same rule stated in [`ANCHOR_SOURCE.md`](./ANCHOR_SOURCE.md) (§ Dag root composition); the cross-canonicalizer regression check lives at `tests/anchor-source-canonicalizer/test-canonicalizer-newline.sh`.
+
 ## 3. Branch root computation
 
 ```
@@ -49,7 +55,7 @@ observations_root = SHA-256( jq -cS '.observations_branch' ) → 64 hex, lowerca
 artifacts_root    = SHA-256( jq -cS '.artifacts_branch'    ) → 64 hex, lowercase
 ```
 
-Each branch root is the lowercase hex SHA-256 digest of that branch's canonical bytes (§2). This is the exact computation performed by `scripts/gen-anchor-source.sh:470-472` (producer) and re-verified by `scripts/sign-anchor-event.sh:176-178` (signer, belt-and-suspenders).
+Each branch root is the lowercase hex SHA-256 digest of that branch's canonical bytes (§2). This is the exact computation performed by `scripts/gen-anchor-source.sh:469-471` (producer) and re-verified by `scripts/sign-anchor-event.sh:176-178` (signer, belt-and-suspenders).
 
 ### Branch object contents (informative)
 
@@ -66,7 +72,7 @@ dag_root_computed = SHA-256( ascii(identity_root) || ascii(observations_root) ||
                   → hex-encoded (64 chars, lowercase)
 ```
 
-**The three inputs are concatenated as their 64-character lowercase-hex ASCII strings** (not as raw 32-byte digests), producing a 192-byte ASCII buffer, hashed once with SHA-256. This differs from the retired model, which concatenated raw digest bytes. Reference: `gen-anchor-source.sh:473` (`sha256_str "${ID_ROOT}${OB_ROOT}${AR_ROOT}"`).
+**The three inputs are concatenated as their 64-character lowercase-hex ASCII strings** (not as raw 32-byte digests), producing a 192-byte ASCII buffer, hashed once with SHA-256. This differs from the retired model, which concatenated raw digest bytes. Reference: `gen-anchor-source.sh:472` (`sha256_str "${ID_ROOT}${OB_ROOT}${AR_ROOT}"`).
 
 This single `dag_root_computed` is the value:
 
