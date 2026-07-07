@@ -610,15 +610,62 @@ attention later.
 
 ## A10. Anchor key validator host deploy
 
-See section **B** below. Until B is executed, the anchor private key
-remains on the operator Mac in the Dashlane-backed transient state
-described in A4. The mainnet `eosio.token::transfer` broadcast (= the
-production Phase α inscription) cannot run from the validator host
-until B is complete.
+> **RETIRED (2026-07-01 anchor design revision / v2 Mac-sign model) —
+> historical record, do NOT follow as current procedure.** This step,
+> and the whole of section **B** below, describe the old model in which
+> the `anchor` private key was deployed to the validator host and the
+> anchor was signed *on the host*. That model is gone. Under the current
+> v2 pipeline the anchor is **signed only on the operator's Mac**
+> (`scripts/sign-anchor-event.sh`, using the Mac-local `proton-cli`
+> keystore); the private key is **never distributed to the validator
+> host**, and the host's `scripts/watch-anchor-events.sh` is
+> **alert-only** (it notifies the operator of a cycle transition and
+> broadcasts nothing). Deploying the key to the host and leaving the
+> on-host wallet unlocked is precisely the configuration that caused the
+> 2026-07-01 mainnet anchor-namespace pollution incident, so this model
+> was retired deliberately. Authoritative current pipeline:
+> [`ANCHOR_SOURCE.md`](./ANCHOR_SOURCE.md). The text below is preserved
+> only as a historical record.
+
+Historically: see section **B** below (now also RETIRED). Until B was
+executed, the anchor private key remained on the operator Mac in the
+Dashlane-backed transient state described in A4. Under that retired
+model the mainnet `eosio.token::transfer` broadcast (= the production
+Phase α inscription) could not run from the validator host until B was
+complete. (Under the current v2 model there is no host deploy at all;
+the broadcast is composed and signed on the operator Mac.)
 
 ---
 
 # B. Validator-host deploy of the `anchor` private key (Phase α)
+
+> **RETIRED (2026-07-01 anchor design revision / v2 Mac-sign model) —
+> historical record, do NOT follow as current procedure.** This entire
+> section (B1–B8) describes the old model in which the `anchor` private
+> key was distributed to the validator host and the anchor was signed
+> *on the host* (originally cron-triggered). That model has been retired.
+> Under the current v2 pipeline:
+>
+> - The anchor is **signed only on the operator's Mac**
+>   (`scripts/sign-anchor-event.sh`), using the Mac-local `proton-cli`
+>   keystore. The `PVT_K1_…` anchor private key is **never deployed to
+>   the validator host** — the transfer / import / keystore-password
+>   steps below (B3, B4, B4.5) are not performed.
+> - The validator host's `scripts/watch-anchor-events.sh` is
+>   **alert-only** (installed by
+>   `scripts/install-anchor-watch-alert-only.sh`): it notifies the
+>   operator of a cycle transition and broadcasts nothing.
+> - The authoritative description of the current pipeline is
+>   [`ANCHOR_SOURCE.md`](./ANCHOR_SOURCE.md).
+>
+> **Why it was retired:** deploying the key to the host and leaving the
+> on-host wallet unlocked so that a cron could sign unattended is exactly
+> the configuration that led to the 2026-07-01 mainnet anchor-namespace
+> pollution incident. The v2 model keeps the key on the operator Mac and
+> puts a human in the loop for every signature by design. This section is
+> preserved only to keep the historical record and its operational
+> lessons. (§B5b already carries its own, more specific, RETIRED banner
+> for the cron-triggered unlock model; it is not repeated here.)
 
 > **Authorization gate**: every command in this section affects the
 > validator host. Per Constitution §5, validator-host changes are
@@ -633,6 +680,11 @@ until B is complete.
 > recover.
 
 ## B1. Deploy target
+
+> **RETIRED — historical record, do NOT follow as current procedure.**
+> Part of the retired host-key-deploy model; see the RETIRED banner under
+> section **B** above. Under the current v2 Mac-sign model no anchor key
+> is deployed to the validator host.
 
 | field | value | note |
 | --- | --- | --- |
@@ -651,6 +703,11 @@ consistent and does not introduce a new convention.
 
 ## B2. Prerequisites on the validator host
 
+> **RETIRED — historical record, do NOT follow as current procedure.**
+> Part of the retired host-key-deploy model; see the RETIRED banner under
+> section **B** above. Under the current v2 Mac-sign model no anchor key
+> is deployed to the validator host.
+
 The operator confirms or installs:
 
 - `proton-cli` 0.1.98+ (verify: `proton --version`).
@@ -667,6 +724,12 @@ The operator confirms or installs:
 If any prerequisite is missing the operator installs it before B3.
 
 ## B3. Transfer the private key from Mac to validator host
+
+> **RETIRED — historical record, do NOT follow as current procedure.**
+> Part of the retired host-key-deploy model; see the RETIRED banner under
+> section **B** above. Under the current v2 Mac-sign model the anchor
+> private key is **never** transferred to the validator host — this step
+> is not performed.
 
 The transfer is one-shot and uses the operator's existing
 SSH-to-validator-host path. The exact SSH invocation depends on the
@@ -708,6 +771,12 @@ backup-of-record.
 
 ## B4. Import the key into `proton-cli` on the validator host
 
+> **RETIRED — historical record, do NOT follow as current procedure.**
+> Part of the retired host-key-deploy model; see the RETIRED banner under
+> section **B** above. Under the current v2 Mac-sign model the anchor key
+> lives only in the operator Mac's `proton-cli` keystore; it is not
+> imported on the validator host.
+
 ```sh
 ssh "${VALIDATOR_SSH_HOST}" 'sudo -u deploy bash -c "
   proton chain:set proton
@@ -725,6 +794,11 @@ per the CLI version). The `/etc/freedom-yield/anchor.k1.key` file is
 retained as the canonical source for re-import after CLI reset.
 
 ## B4.5. Wallet keystore password (= 32-character secret created during B4)
+
+> **RETIRED — historical record, do NOT follow as current procedure.**
+> Part of the retired host-key-deploy model; see the RETIRED banner under
+> section **B** above. Under the current v2 Mac-sign model there is no
+> on-host wallet keystore, so no on-host keystore password is created.
 
 `proton-cli` 0.1.98's `proton key:add` does not simply append the key
 bytes to a plaintext file. On its first invocation for a given OS user,
