@@ -12,13 +12,33 @@
 > is the rehearsal runbook before the first mainnet inscription.
 >
 > When sections below reference "Phase 6 chain-anchor memo", interpret
-> as: the inscription is now performed by `scripts/post-anchor-event.sh`
-> on the validator host, signing an `eosio.token::transfer` on Metal
-> A-chain (= PulseVM / XPRNetwork) with memo `fyid1:<dag_root_hash>`
-> using `metalfreedom@anchor`. The hash committed on chain is
-> `dag_root_hash` (= a DAG roll-up of the operator identity-key
-> history and the validation-cycle history), not a single per-cycle
-> artifact hash.
+> as the current **v2 anchor pipeline** (2026-07-01 design revision):
+> the anchor content (`/api/anchor-source.json`) is composed on the
+> validator host, the transaction is **signed on the operator's local
+> Mac** (`scripts/sign-anchor-event.sh` with `metalfreedom@anchor`),
+> and the receipt is written back and published. The validator host
+> does **NOT** broadcast — its `scripts/watch-anchor-events.sh` monitor
+> is **alert-only** (installed by
+> `scripts/install-anchor-watch-alert-only.sh`): it notifies the
+> operator of a cycle transition, and the operator drives signing from
+> the Mac. The on-chain shape is an HC-single **4-action pack** in one
+> `eosio.token::transfer` transaction on Metal A-chain (= PulseVM /
+> XPRNetwork): three per-branch memos (`fya<S>c<N>-id:<hex>`,
+> `-ob:<hex>`, `-ar:<hex>`) plus a summary memo
+> `fya<S>c<N>:<dag_root_computed_hex>` — e.g. the cycle-3 summary
+> `fya1c3:<dag_root_computed>`. The value committed on chain is
+> `anchor-source.json.dag_root_computed` (a 3-branch Merkle DAG over the
+> identity, observations, and artifacts branches), not a single
+> per-cycle artifact hash.
+>
+> The former `scripts/post-anchor-event.sh` host-cron broadcast model
+> and the single-action `fyid1:<dag_root_hash>` memo are **RETIRED**
+> (`post-anchor-event.sh` was deleted; the `fyid1v1c*` namespace was
+> abandoned after the 2026-07-01 mainnet accident, tx `997881e8…`).
+> Sections that still describe them below are kept as historical record
+> and are flagged in place; do not follow them as current procedure.
+> See [`ANCHOR_SOURCE.md`](./ANCHOR_SOURCE.md) for the authoritative v2
+> pipeline.
 >
 > At execution time, prefer the compact one-page action list for the
 > phase you are about to run:
@@ -112,11 +132,13 @@ anchor memo" was designed to commit to a different hash of the same
 key (SHA-256 of the published `.pub` bytes) on the Metal P-Chain.
 That design was retired 2026-06-20 — Metal mainnet Durango forbids
 non-empty memos on AddPermissionlessValidatorTx. The replacement is
-the Phase α A-chain Merkle DAG anchor (= `fyid1:<dag_root_hash>` memo
-on `eosio.token::transfer` signed by `metalfreedom@anchor`), which
-commits to a hash over the cumulative identity-key history AND the
-validation-cycle history (= a strictly broader commitment than the
-single-key hash). The `.pub` byte hash is still useful as an
+the Phase α A-chain Merkle DAG anchor (= the v2 HC-single 4-action pack
+with summary memo `fya<S>c<N>:<dag_root_computed>` on
+`eosio.token::transfer` signed by `metalfreedom@anchor`; the retired
+`fyid1:<dag_root_hash>` single-action shape it replaced is described in
+the banner above), which commits to `anchor-source.json.dag_root_computed`
+— a 3-branch Merkle DAG over the identity, observations, and artifacts
+branches (= a strictly broader commitment than the single-key hash). The `.pub` byte hash is still useful as an
 out-of-band fingerprint cross-check; compute and record it now:
 
 ```sh
@@ -174,13 +196,15 @@ Expected tail (your `fingerprint` and `artifact_root` will differ):
   identity_branch_root: <64-hex>   (= identity-history.jsonl Merkle root)
   cycles_branch_root:   <64-hex>   (= cycle-history.jsonl Merkle root)
   dag_root_hash:        <64-hex>   (= SHA-256(raw(id_root)||raw(cy_root)))
-  anchor memo:          fyid1:<dag_root_hash>     (Phase α A-chain inscription)
+  anchor summary memo:  fya<S>c<N>:<dag_root_computed>  (v2 A-chain inscription; historical fyid1: shape retired — see banner)
 ```
 
-Once Phase α activates, `dag_root_hash` is inscribed on Metal A-chain
-(= PulseVM / XPRNetwork) via `scripts/post-anchor-event.sh`. Before
-that, the field is computed and emitted but the on-chain inscription
-has not yet occurred (= `/api/anchor-receipt.json` is absent or stale).
+Under the v2 pipeline the value inscribed on Metal A-chain (= PulseVM /
+XPRNetwork) is `anchor-source.json.dag_root_computed` (the 3-branch DAG
+root), signed on the operator's local Mac via
+`scripts/sign-anchor-event.sh` — NOT via the deleted
+`scripts/post-anchor-event.sh` host-cron path. Until an anchor is signed
+for the cycle, `/api/anchor-receipt.json` is absent or stale.
 The historical `chain_anchor: all-zeros placeholder — bind at Phase 6`
 text was removed when the P-Chain memo design was retired
 ([`IDENTITY_SCHEMA_CHANGELOG.md`](./IDENTITY_SCHEMA_CHANGELOG.md)
@@ -226,9 +250,11 @@ feat(identity): Phase 5 — publish signed operator identity manifest
 Adds the operator identity manifest produced by gen-identity.sh:
 
   - public/api/identity.json — operator identity + artifact_manifest +
-    artifact_root (Merkle root over <N> leaves) + dag_root_hash
-    (Phase α A-chain Merkle DAG anchor; chain inscription is performed
-    separately by scripts/post-anchor-event.sh on the validator host).
+    artifact_root (Merkle root over <N> leaves). Phase α A-chain
+    inscription is performed separately by the v2 pipeline: composed on
+    the validator host, signed on the operator Mac via
+    scripts/sign-anchor-event.sh (the value inscribed is
+    anchor-source.json.dag_root_computed, not a field on identity.json).
   - public/api/identity.json.sig — detached signature produced by
     ssh-keygen -Y sign with namespace freedom-yield/validator-identity.
   - public/.well-known/operator-identity.pub — public half of the
@@ -541,7 +567,7 @@ proton action eosio.token transfer '{
   "from": "metalfreedom",
   "to": "<sink_account>",
   "quantity": "0.0001 XPR",
-  "memo": "fyid1:<root_hash>"
+  "memo": "fya<S>c<N>:<root_hash>"
 }' metalfreedom@anchor --dry-run
 ```
 
@@ -549,10 +575,11 @@ Expected: the dry-run reports the action as well-formed and accepts
 `metalfreedom@anchor` as the required authorization. No actual
 broadcast occurs with `--dry-run`.
 
-A successful mainnet broadcast of the same action (without
-`--dry-run`) is the Phase α automated-anchor path; production use
-is wired via `scripts/operator-local/sign-anchor-event.sh` (T-3) and
-`scripts/post-anchor-event.sh` (C1 T-3 / T-4).
+The corresponding live broadcast is the Phase α anchor path. Under the
+v2 pipeline it is a 4-action pack signed on the operator's local Mac via
+`scripts/sign-anchor-event.sh` (the deleted
+`scripts/post-anchor-event.sh` host-cron driver is no longer part of
+this path).
 
 ## A9. Phase β preview (deferred, NOT executed in Phase α)
 
@@ -754,7 +781,7 @@ ssh "${VALIDATOR_SSH_HOST}" 'sudo -u deploy bash -c "
     \"from\": \"metalfreedom\",
     \"to\": \"<sink_account>\",
     \"quantity\": \"0.0001 XPR\",
-    \"memo\": \"fyid1:0000000000000000000000000000000000000000000000000000000000000000\"
+    \"memo\": \"fya1c0:0000000000000000000000000000000000000000000000000000000000000000\"
   }'\'' metalfreedom@anchor --dry-run
 "'
 ```
@@ -768,7 +795,24 @@ authorization", revisit A6 / A7 — the permission install or linkauth
 did not propagate as expected. Do NOT proceed to a live broadcast
 until the dry-run is clean.
 
-## B5b. Pre-cycle keystore unlock (= operational prerequisite for cron-triggered broadcasts)
+## B5b. Pre-cycle keystore unlock (RETIRED — cron-triggered host broadcast model)
+
+> **RETIRED (2026-07-01 anchor design revision) — historical record, do
+> NOT follow as current procedure.** This entire section describes the
+> old model in which the validator host ran a cron-triggered
+> `scripts/post-anchor-event.sh` that broadcast the anchor from the host,
+> requiring the on-host `proton-cli` keystore to be unlocked before each
+> cycle. That model is gone: `scripts/post-anchor-event.sh` was deleted,
+> and under the v2 pipeline the anchor is **signed on the operator's
+> local Mac** (`scripts/sign-anchor-event.sh`). The host's
+> `scripts/watch-anchor-events.sh` monitor is now **alert-only**
+> (installed by `scripts/install-anchor-watch-alert-only.sh`): it
+> notifies the operator of a cycle transition and performs no broadcast,
+> so there is no on-host keystore to unlock and no cron-hang failure mode
+> to recover from. The keystore that matters now lives on the operator
+> Mac; unlock it there before signing. Everything below is preserved
+> only to explain the historical behaviour and the 2026-06-24 testnet
+> rehearsal. Authoritative current pipeline: [`ANCHOR_SOURCE.md`](./ANCHOR_SOURCE.md).
 
 `proton-cli` 0.1.98 stores the K1 anchor private key in an encrypted
 keystore on disk. Every `proton action ...` invocation requires the
