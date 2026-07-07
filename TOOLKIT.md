@@ -168,8 +168,9 @@ The cryptographic-evidence anchor pipeline (identity → anchor-source → A-cha
 | `scripts/install-cron-env-headers.sh` | Add the missing `SHELL=/bin/bash` + `PATH` env headers to `/etc/cron.d/metal-*` files (linter rule 5; idempotent, backed up, `--dry-run`). | manual |
 | `scripts/check-host-drift.sh` | Daily tripwire: alert (ntfy) when the validator-host checkout diverges from origin/main (local commits, code-zone edits, far behind). Read-only; never pulls. | cron (daily) |
 | `scripts/install-metal-host-drift-cron.sh` | Install the `/etc/cron.d/metal-host-drift` cron (lint-checked, idempotent). | manual |
-| `scripts/check-watch-validators.sh` | Monitor a private host-local list of watched validators for state changes (name reveal / first delegation / departure / return) and notify via ntfy. | cron (4h) |
+| `scripts/check-watch-validators.sh` | Monitor a private host-local list of watched validators for state changes (name reveal / first delegation / departure / return); one batched min/low-priority ntfy per run, explorer sanity gate against fabricated mass departures. | cron (JST daytime) |
 | `scripts/install-watch-list.sh` | Compose the private `/etc/freedom-yield/watch-list.json` (from the monitor's own state file or explicit `--ids`); validated, idempotent, backed up. | manual |
+| `scripts/install-watch-cron.sh` | Install `/etc/cron.d/metal-watch-validators` with the JST-daytime-only schedule (`0 0,4,8,12 * * *` UTC = 09/13/17/21 JST); idempotent, backed up, `--dry-run`. | manual |
 | `scripts/install-xserver-anchor-source-allowlist.sh` | Extend the Xserver-side forced-command allowlist for `anchor-source.json`. | manual |
 | `scripts/install-xserver-sig-allowlist.sh` | Extend the Xserver receive-metal-push allowlist for `.sig` files. | manual |
 | `scripts/deploy/build-rsync-excludes.sh` | Emit the shared rsync feed-exclusion args (single source of truth: `deploy/feed-excludes.txt`) for both deploy targets, so validator-host and Xserver rsyncs cannot drift. | CI (deploy.yml) |
