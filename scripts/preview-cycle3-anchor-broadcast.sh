@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # preview-cycle3-anchor-broadcast.sh — STAGE 1 of the cycle-3 mainnet A-chain anchor.
 #
+# One-shot operator preview (no automated test by design — it broadcasts
+# nothing and only displays the composed transaction shape for review).
+#
 # Refreshes anchor-source.json (v2 3-branch composition), generates the mainnet
 # --dry-run-log (safe-broadcast gate-4 material), and DISPLAYS the exact
 # transaction shape a subsequent run-anchor-pipeline.sh broadcast would inscribe.
@@ -70,7 +73,7 @@ fi
 echo
 echo "── [5/5] STAGE 2 — broadcast command (review + authorize FIRST; do NOT auto-run) ──"
 cat <<CMD
-    touch /tmp/fyd-broadcast-token          # gate-2, valid ~5 min from now
+    touch /tmp/fyd-broadcast-token          # gate-2, valid 5 min (300s TTL) from now
     cd $REPO
     bash scripts/run-anchor-pipeline.sh \\
       --chain=mainnet-a \\
