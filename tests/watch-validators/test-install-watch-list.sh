@@ -156,6 +156,7 @@ printf '[]' > "$DIR/explorer.json"
 mkdir -p "$DIR/state-dir"
 WATCH_LIST_FILE="$DIR/etc/watch-list.json" WATCH_STATE_DIR="$DIR/state-dir" \
 	EXPLORER_API="file://$DIR/explorer.json" WATCH_NOTIFY="$DIR/notify-stub.sh" \
+	EXPLORER_MIN_VALIDATORS=0 \
 	bash "$REPO_ROOT/scripts/check-watch-validators.sh" >/dev/null 2>&1
 RC=$?
 [ "$RC" -eq 0 ] \

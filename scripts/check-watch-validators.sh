@@ -8,9 +8,26 @@
 #   2. delegators count goes from 0 → >0 (someone delegated to them)
 #   3. Validator disappears from the active set (period ended)
 #   4. Validator returns to the active set after a previous departure
-#      (operator made an explicit decision to re-engage — informative
-#      signal worth surfacing at `high` priority since it indicates
-#      active intent rather than a passive timeline like an expiry)
+#
+# NOTIFICATION DESIGN (2026-07-07 rework, after the 01:00 JST incident):
+# everything this monitor observes is slow-moving market intelligence about
+# THIRD-PARTY validators — never an operational emergency for our node. So:
+#
+#   - All changes found in one run are batched into a SINGLE notification
+#     ("Watch validators: N change(s)"), never one push per validator.
+#   - Priority is `low` (name_appeared / first_delegation — the signals the
+#     watch exists for) or `min` (departed / rejoined — passive period
+#     timelines). Both are silent on Android: readable in the morning,
+#     never a night-time ring. `high`/`default` are reserved for our own
+#     validator's health alerts, per the no-false-urgency policy.
+#
+# EXPLORER SANITY GATE: absence from the explorer response is only trusted
+# as a real departure when the response itself is credible — an HTTP/curl
+# failure, a non-array body, or a suspiciously small validator set
+# (< EXPLORER_MIN_VALIDATORS, default 50 against a ~200-validator network)
+# skips the run without touching state or notifying. Without this gate a
+# single explorer outage fabricates a mass "departed" for every watched
+# NodeID and then re-fires them all as "rejoined" when the API recovers.
 #
 # Watch-list source (2026-07-06 revision): the list lives in a HOST-LOCAL
 # private config, ${WATCH_LIST_FILE:-/etc/freedom-yield/watch-list.json}
@@ -27,9 +44,12 @@
 # compare against last-known state stored in /var/lib/freedom-yield/,
 # send notify.sh on change.
 #
-# Cron: run every 4 hours (/etc/cron.d/metal-watch-validators). The watch
-# list is small so external API impact is minimal — once per check we hit
-# the explorer API.
+# Cron: JST-daytime only — 0 0,4,8,12 * * * UTC = 09/13/17/21 JST
+# (/etc/cron.d/metal-watch-validators, installed by
+# scripts/install-watch-cron.sh). The old 0 */4 schedule landed two of six
+# daily runs at 01:00/05:00 JST; intelligence this slow never justifies a
+# night-time delivery. The watch list is small so external API impact is
+# minimal — once per check we hit the explorer API.
 #
 # Manual run: bash scripts/check-watch-validators.sh [--dry-run]
 #
@@ -37,6 +57,7 @@
 #   WATCH_LIST_FILE   private NodeID list (default /etc/freedom-yield/watch-list.json)
 #   WATCH_STATE_DIR   state dir (default /var/lib/freedom-yield)
 #   EXPLORER_API      explorer validators endpoint
+#   EXPLORER_MIN_VALIDATORS  sanity floor for the response size (default 50)
 #   WATCH_NOTIFY      notifier (default <repo>/scripts/notify.sh)
 set -euo pipefail
 
@@ -45,6 +66,7 @@ WATCH_LIST_FILE="${WATCH_LIST_FILE:-/etc/freedom-yield/watch-list.json}"
 STATE_DIR="${WATCH_STATE_DIR:-/var/lib/freedom-yield}"
 PREV_FILE="${STATE_DIR}/watch-prev-state.json"
 EXPLORER_API="${EXPLORER_API:-https://explorer.metalblockchain.org/api/v1/validators}"
+EXPLORER_MIN="${EXPLORER_MIN_VALIDATORS:-50}"
 NOTIFY="${WATCH_NOTIFY:-${ROOT}/scripts/notify.sh}"
 DRY=0
 [ "${1:-}" = "--dry-run" ] && DRY=1
@@ -64,7 +86,24 @@ fi
 mkdir -p "$STATE_DIR"
 
 # Fetch current explorer snapshot once and cache for the loop.
-EXP_RESP=$(curl -sS --max-time 20 -H 'Accept: application/json' "$EXPLORER_API" || echo '[]')
+# Sanity gate (see header): only a credible response may drive state deltas.
+# Anything else skips the run — exit 0 keeps the cron green, the log line
+# carries the reason, and the untouched baseline means a recovered API
+# resumes exactly where it left off (no fabricated departed/rejoined pairs).
+if ! EXP_RESP=$(curl -sS --max-time 20 -H 'Accept: application/json' "$EXPLORER_API"); then
+  echo "explorer fetch failed — skipping run (state untouched)"
+  exit 0
+fi
+EXP_TYPE=$(printf '%s' "$EXP_RESP" | jq -r 'type' 2>/dev/null || echo invalid)
+if [ "$EXP_TYPE" != "array" ]; then
+  echo "explorer response is not an array (type=$EXP_TYPE) — skipping run (state untouched)"
+  exit 0
+fi
+EXP_LEN=$(printf '%s' "$EXP_RESP" | jq 'length')
+if [ "$EXP_LEN" -lt "$EXPLORER_MIN" ]; then
+  echo "explorer returned only $EXP_LEN validators (< floor $EXPLORER_MIN) — treating as API fault, skipping run (state untouched)"
+  exit 0
+fi
 
 # Build current state: { NodeID → { name, delegators_count, active } } for the watched IDs.
 CURRENT_JSON=$(echo "$EXP_RESP" | jq --arg ids "$WATCH_IDS" '
@@ -107,7 +146,10 @@ CHANGES=$(jq -n --argjson cur "$CURRENT_JSON" --argjson prev "$PREV_JSON" '
                [{nid: .nid, type: "name_appeared", value: .cur.name}]
              else [] end)
             +
-            (if (.cur.delegators_count // 0) > 0 and (.prev.delegators_count // 0) == 0 then
+            (if (.cur.delegators_count // 0) > 0 and (.prev.delegators_count // 0) == 0
+                and (.prev.active // false) == true then
+               # only within a continuous presence — a rejoin already reports
+               # its delegator count in the rejoined line
                [{nid: .nid, type: "first_delegation", value: .cur.delegators_count}]
              else [] end)
             +
@@ -133,22 +175,17 @@ else
   if [ "$DRY" = "1" ]; then
     echo "(dry run, not notifying)"
   else
-    echo "$CHANGES" | jq -r '.[] | "\(.type)|\(.nid)|\(.value)"' | while IFS='|' read -r kind nid val; do
-      case "$kind" in
-        name_appeared)
-          bash "$NOTIFY" high "Watch validator named" "$nid → $val (was anonymous)" || true
-          ;;
-        first_delegation)
-          bash "$NOTIFY" high "Watch validator receiving delegations" "$nid now has $val delegator(s) (was 0)" || true
-          ;;
-        departed)
-          bash "$NOTIFY" default "Watch validator left active set" "$nid is no longer in the explorer" || true
-          ;;
-        rejoined)
-          bash "$NOTIFY" high "Watch validator rejoined active set" "$nid is back in the explorer (delegators: $val)" || true
-          ;;
-      esac
-    done
+    # One batched notification per run (see header). Priority = max class
+    # present: low if any name/delegation signal, min for pure timeline moves.
+    SUMMARY=$(echo "$CHANGES" | jq -r '.[] |
+      if .type == "name_appeared" then "named: \(.nid) → \(.value)"
+      elif .type == "first_delegation" then "first delegation: \(.nid) (\(.value) delegator(s))"
+      elif .type == "departed" then "left active set: \(.nid)"
+      else "rejoined active set: \(.nid) (delegators: \(.value))"
+      end')
+    BATCH_PRIO=$(echo "$CHANGES" | jq -r 'map(.type) |
+      if any(. == "name_appeared" or . == "first_delegation") then "low" else "min" end')
+    bash "$NOTIFY" "$BATCH_PRIO" "Watch validators: ${NUM_CHANGES} change(s)" "$SUMMARY" || true
   fi
 fi
 
