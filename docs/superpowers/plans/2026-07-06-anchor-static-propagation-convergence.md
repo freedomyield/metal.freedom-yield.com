@@ -211,7 +211,7 @@ grep -qx 'FRESH-anchor' "${XS}/dst/api/anchor-source.json"   && ok "Xserver: anc
 grep -qx 'SRC-static'   "${XS}/dst/api/identity.schema.v1.json" && ok "Xserver: static schema updated from src" || no "Xserver: static schema not updated"
 [ -f "${XS}/dst/index.html" ] && grep -qx 'SRC-home' "${XS}/dst/index.html" && ok "Xserver: index.html copied" || no "Xserver: index.html missing"
 [ ! -f "${XS}/dst/api/old-removed.json" ] && ok "Xserver: non-feed orphan deleted (delete active)" || no "Xserver: orphan not deleted"
-rm -rf "${XS}"
+rm -rf "${XS:?}"
 ```
 
 - [ ] **Step 3: Run to verify the new block passes (and the existing the validator host block still passes)**
