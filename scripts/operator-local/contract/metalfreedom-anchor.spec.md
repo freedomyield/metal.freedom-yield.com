@@ -1,8 +1,15 @@
 # `metalfreedom::anchor` — Phase β smart-contract specification draft
 
 > **Status**: design draft for Phase β. **NOT deployed in Phase α.**
-> The Phase α anchor uses `eosio.token::transfer` with a memo of the
-> form `fyid1:<dag_root_hash>` and does not require a contract. This
+> The Phase α anchor uses `eosio.token::transfer` and does not require a
+> contract. Under the 2026-07-01 anchor design revision it broadcasts an
+> HC-single **4-action pack** in one transaction: three per-branch memos
+> (`fya<S>c<N>-id:<hex>`, `-ob:<hex>`, `-ar:<hex>`) plus a summary memo
+> `fya<S>c<N>:<dag_root_computed_hex>` (e.g. the cycle-3 summary
+> `fya1c3:<dag_root_computed>`). The original single-action `fyid1:<dag_
+> root_hash>` shape is **RETIRED** — the `fyid1v1c*` namespace was
+> abandoned after the 2026-07-01 mainnet accident (tx `997881e8…`); see
+> `docs/ANCHOR_SOURCE.md` and `/api/anchor-receipt.schema.v2.json`. This
 > document specifies the Phase β replacement: a custom contract on
 > `metalfreedom` (the existing XPR account) exposing an `inscribe`
 > action backed by anti-replay-checked tables.
