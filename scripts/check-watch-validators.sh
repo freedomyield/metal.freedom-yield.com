@@ -24,8 +24,10 @@
 # EXPLORER SANITY GATE: absence from the explorer response is only trusted
 # as a real departure when the response itself is credible — an HTTP/curl
 # failure, a non-array body, or a suspiciously small validator set
-# (< EXPLORER_MIN_VALIDATORS, default 50 against a ~200-validator network)
-# skips the run without touching state or notifying. Without this gate a
+# (< EXPLORER_MIN_VALIDATORS, default 50 — the live Metal validator set
+# numbers in the low hundreds, so a sub-50 response is an API fault, not a
+# real mass departure) skips the run without touching state or notifying.
+# Without this gate a
 # single explorer outage fabricates a mass "departed" for every watched
 # NodeID and then re-fires them all as "rejoined" when the API recovers.
 #
