@@ -23,8 +23,8 @@ which the deploy MUST leave alone.
 
 | File | Canonical producer | Canonical source host | Git tracked | Validator push | Deploy workflow path | rsync `--delete` exclude | Recovery / rollback |
 |---|---|---|---|---|---|---|---|
-| `public/api/anchor-source.json` | `scripts/gen-anchor-source.sh` (= v2 3-branch DAG source; carries `dag_root_computed`) | validator host | NO | YES (`push-to-web-host.sh anchor-source.json`) | NO (excluded via `deploy/feed-excludes.txt`) | **YES** | Re-derive on validator host via `gen-anchor-source.sh`; the on-chain anchor is signed from it by `sign-anchor-event.sh`. |
-| `public/api/anchor-source.json.sig` | `scripts/gen-anchor-source.sh` (detached signature over the DAG source) | validator host | NO | YES | NO (excluded via `deploy/feed-excludes.txt`) | **YES** | Produced with `anchor-source.json`. |
+| `public/api/anchor-source.json` | `scripts/gen-anchor-source.sh` (= v2 3-branch DAG source; carries `dag_root_computed`) | validator host, then committed to Git | **YES** | NO | YES (deploy serves the Git version) | NO (git-deploy owned; NOT in `deploy/feed-excludes.txt`) | Re-derive on validator host via `gen-anchor-source.sh`, then commit; the deploy serves the Git version. The committed file is exactly the signed pre-image the on-chain anchor is derived from by `sign-anchor-event.sh`, so recomputing its three branch roots reproduces the on-chain memos. |
+| `public/api/anchor-source.json.sig` | `scripts/gen-anchor-source.sh` (detached signature over the DAG source) | validator host, then committed to Git | **YES** | NO | YES (deploy serves the Git version) | NO (git-deploy owned; NOT in `deploy/feed-excludes.txt`) | Produced and committed atomically with `anchor-source.json`; the deploy serves the Git version. |
 | `public/api/anchor-receipt.json` | `scripts/gen-anchor-receipt.sh` (= verifies `sign-anchor-event.sh` output; **not** the retired `post-anchor-event.sh`) | validator host | NO | YES (`push-to-web-host.sh anchor-receipt.json`) | NO | **YES** (added 2026-06-21 per audit-C/F-E1) | Re-derive on validator host from the signed anchor; carries `dag_root_hash` (= `anchor-source.json .dag_root_computed`). |
 | `public/api/cycle-history.jsonl` | `scripts/gen-cycle-history.sh` | validator host | NO | YES | NO | YES (pre-existing) | Re-derive from `uptime-cycles.json` + `incidents.json` on validator host. |
 | `public/api/identity-history.jsonl` | `scripts/operator-local/gen-identity.sh` (bootstrap; append on rotation) | operator Mac | **YES** (after operator commits the bootstrap line) | NO | YES (deploy serves the Git version) | NO | From Git history; bootstrap is idempotent (= regenerates same line as long as the operator-identity ed25519 key has not rotated). || `public/api/identity.json` | `scripts/operator-local/gen-identity.sh` | operator Mac | YES | NO | YES | NO | From Git; regenerate via operator-Mac `gen-identity.sh`. |
@@ -44,6 +44,21 @@ which the deploy MUST leave alone.
 | `public/api/peers-gini-history.jsonl` | `scripts/peer-analytics.py` (append) | validator host | NO | YES | NO | YES (pre-existing) | Append-only; loss is recoverable from metalgo RPC. |
 | `public/api/peers-history-index.json` | `scripts/peer-analytics.py` | validator host | NO | YES | NO | YES (pre-existing) | Re-derive on validator host. |
 | `public/api/server-status.json` | `scripts/server-status.sh` | validator host | NO | YES (out-of-band; not via `push-to-web-host.sh`) | NO | YES (pre-existing) | Re-derive on validator host. |
+
+## Note — `anchor-source.json` is git-deploy, not validator-pushed
+
+`anchor-source.json` (and its detached `.sig`) are **git-deploy owned**:
+committed to the repo and distributed by the GitHub Actions deploy, the
+same path as `identity.json`. They are **not** pushed by
+`scripts/push-to-web-host.sh` (that wrapper's allowlist never carried
+`anchor-source.json`) and are therefore **removed from**
+`deploy/feed-excludes.txt` — a file that the Git deploy serves MUST NOT
+also be excluded from `--delete`, or the deploy would revert it on every
+run. This closes the class of stale-published-anchor failures that the
+unreliable validator-host push path produced. `anchor-receipt.json`,
+`anchor-receipt.json.sig`, and `anchor-history.jsonl` remain
+validator-pushed (they are produced only after the on-chain broadcast,
+which happens off the deploy path) and stay in `feed-excludes.txt`.
 
 ## Cross-check protocol
 
