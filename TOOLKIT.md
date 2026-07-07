@@ -172,6 +172,7 @@ The cryptographic-evidence anchor pipeline (identity → anchor-source → A-cha
 | `scripts/install-watch-list.sh` | Compose the private `/etc/freedom-yield/watch-list.json` (from the monitor's own state file or explicit `--ids`); validated, idempotent, backed up. | manual |
 | `scripts/install-watch-cron.sh` | Install `/etc/cron.d/metal-watch-validators` with the JST-daytime-only schedule (`0 0,4,8,12 * * *` UTC = 09/13/17/21 JST); idempotent, backed up, `--dry-run`. | manual |
 | `scripts/install-xserver-anchor-source-allowlist.sh` | Extend the Xserver-side forced-command allowlist for `anchor-source.json`. | manual |
+| `scripts/install-host-log-dir.sh` | Ensure the repo-local `logs/` directory exists on the validator host with `deploy:deploy` ownership + `755`, so cron `>> .../logs/*.log` redirects never fail after a fresh clone or `git reset --hard` (companion to the tracked `logs/.gitkeep`). Idempotent, refuses local Mac paths. | manual |
 | `scripts/install-xserver-sig-allowlist.sh` | Extend the Xserver receive-metal-push allowlist for `.sig` files. | manual |
 | `scripts/deploy/build-rsync-excludes.sh` | Emit the shared rsync feed-exclusion args (single source of truth: `deploy/feed-excludes.txt`) for both deploy targets, so validator-host and Xserver rsyncs cannot drift. | CI (deploy.yml) |
 | `scripts/install-xserver-static-deploy-key.sh` | Install the `rrsync -wo`-restricted `authorized_keys` entry so GitHub Actions can rsync `public/` to the Xserver public origin, confined to the metal public dir on the shared host. | manual |
