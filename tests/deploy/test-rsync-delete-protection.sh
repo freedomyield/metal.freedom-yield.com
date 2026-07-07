@@ -152,18 +152,27 @@ echo "=== Invariant 3: junk file outside exclude list is deleted ==="
 check_absent "${DST}/public/api/junk.json" "junk.json"
 
 echo ""
-echo "=== Xserver shape: public/-rooted rsync preserves feeds, updates static ==="
+echo "=== Xserver shape: public/-rooted rsync preserves feeds, updates git-owned static ==="
 # The Xserver web root is public/ directly, so rsync's source is ./public/
 # and the feed excludes are anchored WITHOUT the public/ prefix. Same feeds,
 # same single source of truth, different anchor.
+#
+# anchor-source.json is NOT a protected feed anymore: as of the git-deploy
+# ownership change (anchor-source.json de-excluded from deploy/feed-excludes.txt
+# and now shipped from the Git tree) it obeys invariant 2 — src MUST overwrite
+# stale dst, exactly like identity.schema.v1.json below. The protected-feed
+# coverage (invariant 1) is carried here by validator.json and
+# anchor-receipt.json, both still validator-host-pushed and rsync-excluded, so
+# their fresh dst content survives even though src has no copy.
 XS="$(mktemp -d -t rsync-xserver.XXXXXX)"
 mkdir -p "${XS}/src/public/api" "${XS}/src/public/calendar" "${XS}/dst/api"
 printf 'SRC-static\n'      > "${XS}/src/public/api/identity.schema.v1.json"
 printf 'SRC-home\n'        > "${XS}/src/public/index.html"
+printf 'SRC-anchor\n'      > "${XS}/src/public/api/anchor-source.json"
 printf 'src-should-skip\n' > "${XS}/src/public/api/validator.json"
-printf 'src-should-skip\n' > "${XS}/src/public/api/anchor-source.json"
 printf 'FRESH-feed\n'      > "${XS}/dst/api/validator.json"
-printf 'FRESH-anchor\n'    > "${XS}/dst/api/anchor-source.json"
+printf 'FRESH-receipt\n'   > "${XS}/dst/api/anchor-receipt.json"
+printf 'STALE-anchor\n'    > "${XS}/dst/api/anchor-source.json"
 printf 'STALE-static\n'    > "${XS}/dst/api/identity.schema.v1.json"
 printf 'ORPHAN\n'          > "${XS}/dst/api/old-removed.json"
 XEXC=()
@@ -172,9 +181,12 @@ while IFS= read -r ex; do
 	XEXC+=("${ex}")
 done < <(bash "${EMITTER}" "")
 rsync -rlt --delete "${XEXC[@]}" "${XS}/src/public/" "${XS}/dst/" >/dev/null
-check_content "${XS}/dst/api/validator.json"          'FRESH-feed'   "Xserver validator.json feed"
-check_content "${XS}/dst/api/anchor-source.json"      'FRESH-anchor' "Xserver anchor-source.json feed"
-check_content "${XS}/dst/api/identity.schema.v1.json" 'SRC-static'   "Xserver static schema (updated from src)"
+# Invariant 1 — protected feeds survive --delete (src carries no copy):
+check_content "${XS}/dst/api/validator.json"          'FRESH-feed'    "Xserver validator.json feed"
+check_content "${XS}/dst/api/anchor-receipt.json"     'FRESH-receipt' "Xserver anchor-receipt.json feed"
+# Invariant 2 — git-owned files overwrite stale dst:
+check_content "${XS}/dst/api/anchor-source.json"      'SRC-anchor'    "Xserver anchor-source.json (git-deploy owned, overwritten from src)"
+check_content "${XS}/dst/api/identity.schema.v1.json" 'SRC-static'    "Xserver static schema (updated from src)"
 check_exists  "${XS}/dst/index.html"                  "Xserver index.html"
 check_absent  "${XS}/dst/api/old-removed.json"        "Xserver non-feed orphan"
 rm -rf "${XS}"
