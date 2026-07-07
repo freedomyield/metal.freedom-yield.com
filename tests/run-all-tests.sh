@@ -46,11 +46,19 @@ SUITES_PASS=0
 SUITES_FAIL=0
 FAILED_SUITES=()
 
-echo "== running test suites under ${TESTS_ROOT} =="
-echo
+# Extra suites that carry their own runner and do NOT match the test-*.sh glob
+# (so the find below never discovers them). The cycle-gate suite lives at
+# tests/cycle-gate/run-tests.sh and bundles 20 scenario tests — historically it
+# was silently excluded from the aggregate. Listed explicitly so the default
+# full run always covers it. Only appended when running the default pattern; a
+# caller-supplied --pattern is honoured verbatim.
+EXTRA_SUITES=(
+	"${TESTS_ROOT}/cycle-gate/run-tests.sh"
+)
 
-# Iterate depth-first, deterministic order.
-while IFS= read -r -d '' test_file; do
+run_suite() {
+	# $1 = absolute path to an executable suite runner.
+	local test_file="$1" rel_path rc out
 	SUITES_TOTAL=$((SUITES_TOTAL + 1))
 	rel_path="${test_file#${REPO_ROOT}/}"
 	printf '=== %-55s === ' "$rel_path"
@@ -64,8 +72,9 @@ while IFS= read -r -d '' test_file; do
 	fi
 	if [ "$rc" -eq 0 ]; then
 		if [ "$VERBOSE" = "0" ]; then
-			# extract just the summary line
-			echo "PASS ($(echo "$out" | grep -E '^test-.*summary:' | head -1))"
+			# extract just the summary line (per-suite formats vary:
+			# `test-*.sh summary: ...` or cycle-gate's `RESULTS: N PASS / M FAIL`)
+			echo "PASS ($(echo "$out" | grep -E '^(test-.*summary:|RESULTS:)' | head -1))"
 		else
 			echo "=== $rel_path: PASS ==="
 		fi
@@ -80,7 +89,26 @@ while IFS= read -r -d '' test_file; do
 		SUITES_FAIL=$((SUITES_FAIL + 1))
 		FAILED_SUITES+=("$rel_path")
 	fi
+}
+
+echo "== running test suites under ${TESTS_ROOT} =="
+echo
+
+# Iterate glob-discovered suites depth-first, deterministic order.
+while IFS= read -r -d '' test_file; do
+	run_suite "$test_file"
 done < <(find "$TESTS_ROOT" -name "$PATTERN" -type f -perm -u+x -print0 | sort -z)
+
+# Append the explicitly-listed extra suites (default pattern only).
+if [ "$PATTERN" = "test-*.sh" ]; then
+	for extra in "${EXTRA_SUITES[@]}"; do
+		if [ -f "$extra" ]; then
+			run_suite "$extra"
+		else
+			echo "WARN: extra suite not found, skipping: ${extra#${REPO_ROOT}/}" >&2
+		fi
+	done
+fi
 
 echo
 echo "=========================================="
