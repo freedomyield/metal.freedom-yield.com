@@ -13,8 +13,11 @@
 # (2026-07-07 rework after four "departed" pushes landed at 01:00 JST.)
 #
 # Idempotent: identical content → no change. A differing existing file is
-# backed up beside the target as <name>.bak-<UTC ts>. File mode 0644 root
-# (cron.d requirement).
+# backed up OUTSIDE cron.d — under ${FYD_BACKUP_DIR:-/var/backups/metal-cron}
+# as <name>.bak-<UTC ts> — because a *.bak sidecar left in /etc/cron.d is
+# clutter at best and a stray executable cron at worst (mirrors the
+# out-of-cron.d backup discipline of install-repoint-publish-crons.sh).
+# File mode 0644 root (cron.d requirement).
 #
 # Usage (validator host, as root):
 #   sudo bash scripts/install-watch-cron.sh [--dry-run]
@@ -25,6 +28,8 @@
 #                   are waived (test harness mode).
 #   FYD_REPO_DIR    repo checkout on the host
 #                   (default /home/deploy/metal.freedom-yield.com)
+#   FYD_BACKUP_DIR  where a differing prior cron is backed up, OUTSIDE
+#                   cron.d (default /var/backups/metal-cron)
 #
 # Exit codes:
 #   0  installed / already up to date / dry-run
@@ -35,12 +40,14 @@ set -euo pipefail
 
 CRON_FILE="${FYD_CRON_FILE:-/etc/cron.d/metal-watch-validators}"
 REPO_DIR="${FYD_REPO_DIR:-/home/deploy/metal.freedom-yield.com}"
+# Backups live OUTSIDE cron.d so a *.bak sidecar never sits in /etc/cron.d.
+BACKUP_DIR="${FYD_BACKUP_DIR:-/var/backups/metal-cron}"
 
 DRY_RUN=0
 for arg in "$@"; do
 	case "$arg" in
 		--dry-run) DRY_RUN=1 ;;
-		-h|--help) sed -n '2,32p' "$0" | sed 's/^# \?//'; exit 0 ;;
+		-h|--help) sed -n '2,37p' "$0" | sed 's/^# \?//'; exit 0 ;;
 		*)         echo "ERROR: unknown arg: $arg" >&2; exit 1 ;;
 	esac
 done
@@ -80,8 +87,10 @@ fi
 
 if [ -f "$CRON_FILE" ]; then
 	STAMP="$(date -u +%Y%m%d-%H%M%S)"
-	cp -p "$CRON_FILE" "${CRON_FILE}.bak-${STAMP}"
-	echo "backed up prior cron to ${CRON_FILE}.bak-${STAMP}"
+	mkdir -p "$BACKUP_DIR"
+	BACKUP_FILE="${BACKUP_DIR}/$(basename "$CRON_FILE").bak-${STAMP}"
+	cp -p "$CRON_FILE" "$BACKUP_FILE"
+	echo "backed up prior cron to ${BACKUP_FILE}"
 fi
 
 TMP="$(mktemp)"

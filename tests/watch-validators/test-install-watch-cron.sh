@@ -25,7 +25,7 @@ bad() { FAIL=$((FAIL + 1)); echo "FAIL  $1"; }
 DIR=""
 setup()    { DIR="$(mktemp -d -t watch-cron-test.XXXXXX)"; }
 teardown() { rm -rf "$DIR"; DIR=""; }
-run_installer() { FYD_CRON_FILE="$DIR/cron-file" bash "$INSTALLER" "$@"; }
+run_installer() { FYD_CRON_FILE="$DIR/cron-file" FYD_BACKUP_DIR="$DIR/backups" bash "$INSTALLER" "$@"; }
 cron() { cat "$DIR/cron-file" 2>/dev/null; }
 
 # ---- case 1: fresh install — JST-daytime schedule, no night ticks ------------------
@@ -56,7 +56,7 @@ OUT="$(run_installer 2>&1)"
 echo "$OUT" | grep -q 'already up to date' \
 	&& ok "idempotent: second run reports no change" \
 	|| bad "idempotent: second run reports no change (out: $OUT)"
-ls "$DIR"/cron-file.bak-* >/dev/null 2>&1 \
+ls "$DIR"/backups/cron-file.bak-* >/dev/null 2>&1 \
 	&& bad "idempotent: no backup created" \
 	|| ok "idempotent: no backup created"
 teardown
@@ -68,9 +68,9 @@ OUT="$(run_installer 2>&1)"
 echo "$OUT" | grep -q 'backed up prior cron' \
 	&& ok "replace: prior cron backed up" \
 	|| bad "replace: prior cron backed up (out: $OUT)"
-ls "$DIR"/cron-file.bak-* >/dev/null 2>&1 \
-	&& ok "replace: backup file exists" \
-	|| bad "replace: backup file exists"
+ls "$DIR"/backups/cron-file.bak-* >/dev/null 2>&1 \
+	&& ok "replace: backup file exists (outside cron dir)" \
+	|| bad "replace: backup file exists (outside cron dir)"
 cron | grep -qE '^0 0,4,8,12 ' \
 	&& ok "replace: new schedule installed" \
 	|| bad "replace: new schedule installed"
