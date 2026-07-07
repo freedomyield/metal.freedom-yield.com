@@ -46,6 +46,10 @@
 # Cron: daily via /etc/cron.d/metal-host-drift (see
 #       scripts/install-metal-host-drift-cron.sh).
 
+# No `-e`: the drift logic deliberately leans on non-zero exits as data —
+# `[ cond ] && VAR=…` idioms (DRIFT_COUNT, PROBLEMS) evaluate false on the
+# HEALTHY path, and grep-with-no-match / `git … || echo '?'` are expected
+# non-zero. Under `set -e` any of these would abort the script mid-check.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
