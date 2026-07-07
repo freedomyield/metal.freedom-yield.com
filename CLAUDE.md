@@ -19,7 +19,7 @@ A Metal Blockchain mainnet validator project under the **"Freedom Yield"** brand
 All work in this repository MUST conform to:
 
 - [`docs/CONSTITUTION.md`](docs/CONSTITUTION.md) — the supreme reference for the project: operating priority order, absolute prohibitions, information classification (SECRET / CONFIDENTIAL / PUBLIC), infrastructure separation, communication discipline, public claims standard, scope boundaries, and amendment process.
-- [`docs/OPERATING_MODEL.md`](docs/OPERATING_MODEL.md) — workflows (W1–W10) and the operator / AI / CI responsibility matrix.
+- [`docs/OPERATING_MODEL.md`](docs/OPERATING_MODEL.md) — workflows (W1–W11) and the operator / AI / CI responsibility matrix.
 
 When the two documents conflict, the Constitution prevails.
 

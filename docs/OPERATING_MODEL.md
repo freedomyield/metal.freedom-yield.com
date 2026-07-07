@@ -150,6 +150,22 @@ For every code change merged to `main`:
 - The default posture is inbound-first. Outbound contact with network-related entities requires explicit operator approval and MUST be limited to a specific operational purpose.
 - AI assistants MUST NOT independently initiate such outreach, MUST NOT draft outreach unsolicited, and MUST NOT suggest content for outreach unless the operator has decided to make contact and has asked for drafting help.
 
+### W11 — Audit-document discipline (append-only)
+
+Audit documents — the files under `docs/audits/`, and any file that records a compliance finding, a verification result, or a dated observation snapshot — are an **append-only audit trail**. The value of the trail is that it preserves *what was claimed, what was wrong, and what was corrected*, so it MUST NOT be rewritten to hide its own history.
+
+- A published finding, snapshot, or verification result MUST NOT be edited in place. Corrections are made either by striking the old text (`~~old~~`) and appending a dated `**REVISION <UTC>**` note, or by appending a new snapshot/entry that supersedes the prior one behind a deprecation marker. The prior record stays readable.
+- Numeric corrections, additions, and meaning changes are all covered by the rule above: they use strike + `REVISION`, never a silent in-place rewrite.
+- Every audit label and every task label MUST be date-scoped, so a finding is never ambiguous about which cycle or day it belongs to.
+
+**Carve-out — forbidden-literal purge (the only exception).** When an audit document contains a **secret, PII, or forbidden literal** — the categories protected by Constitution §3.3 (operational prohibitions) and §4.1 (SECRET), for example a service-provider name, a validator host IP address, or an SSH key name — the strike-and-`REVISION` rule cannot be applied, because striking the literal (`~~forbidden~~`) leaves it in tracked content. That defeats the purge and trips `scripts/publish-guard.sh`. Strike-preservation and forbidden-literal purge are physically incompatible for this class, so for this class only the purge overrides append-only:
+
+- The forbidden literal MUST be removed by **in-place replacement**, not by strike.
+- The replacement MUST preserve the record's meaning with a neutral generic term (for example, "the validator host") or a `<placeholder>`, so the audit value of the entry survives the redaction.
+- The purge MUST be a **single-purpose commit** whose message states the purge reason. No other content change — numeric correction, addition, or meaning change — may be mixed into a purge commit; those remain subject to the strike + `REVISION` rule and belong in a separate commit.
+
+**Basis.** This carve-out was adjudicated 🟡 in `docs/audits/constitution-2026-07-06T11-45-audit.md` (finding ①/C12) as "the override is justified but its codification remained open pending operator ratification". The operator **ratified the carve-out on 2026-07-07**; this subsection is that ratification in authoritative form. The pattern matches prior redactions of forbidden literals in this repository (for example, the 2026-07-03 handle/company purge).
+
 ---
 
 ## Cadence summary
@@ -166,6 +182,7 @@ For every code change merged to `main`:
 | W8 Strategic review | Per cycle | Operator + AI | Manual |
 | W9 Code discipline | Per change | Operator + AI | Some lints |
 | W10 External communication | On trigger | Operator | None |
+| W11 Audit-document discipline | Per audit / per correction | Operator + AI | `publish-guard` |
 
 ## Responsibility matrix (condensed)
 
