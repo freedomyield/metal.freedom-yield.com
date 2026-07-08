@@ -565,23 +565,49 @@ elif [ "$OBS_WEB_STATUS" = "200" ] && [ "$ORIG_WEB" = "warn" ]; then
 fi
 
 # === transition: api_freshness (= push pipeline health, web-gated) ======
+# R11: this used to only alert on STALE (observedAt too old) and stayed
+# completely silent when /api/validator.json itself was missing,
+# unreachable, or unparseable while the site root (/health) was still
+# healthy — a strictly worse failure (the push pipeline isn't just behind,
+# the public feed can't be read at all) that produced zero alert. The
+# "broken" branch below closes that gap: any HTTP-error / curl-failure /
+# invalid-JSON / missing-or-unparseable-observedAt outcome is now treated
+# as api_freshness="warn" too (reusing the existing state value — no
+# schema change), gated the same way (fires once on ok->broken, silent on
+# repeat, recovers only once a genuinely fresh, valid observedAt is read).
 ORIG_FRESH=$(orig_get '.api_freshness'); [ "$ORIG_FRESH" = "null" ] && ORIG_FRESH="ok"
 if [ "$OBS_WEB_STATUS" = "200" ]; then
-  PUBLIC_OBS=$(curl -sS --max-time 10 "${WEB_URL}/api/validator.json" 2>/dev/null \
-    | jq -r '.observedAt // empty' 2>/dev/null)
+  PUBLIC_BODY_TMP=$(mktemp)
+  PUBLIC_HTTP_CODE=$(curl -sS -o "$PUBLIC_BODY_TMP" -w '%{http_code}' --max-time 10 "${WEB_URL}/api/validator.json" 2>/dev/null)
+  PUBLIC_CURL_RC=$?
+  PUBLIC_OBS=""
+  if [ "$PUBLIC_CURL_RC" -eq 0 ] && [ "$PUBLIC_HTTP_CODE" = "200" ]; then
+    PUBLIC_OBS=$(jq -r '.observedAt // empty' "$PUBLIC_BODY_TMP" 2>/dev/null)
+  fi
+  rm -f "$PUBLIC_BODY_TMP"
+
+  PUBLIC_OBS_EPOCH=0
   if [ -n "$PUBLIC_OBS" ]; then
     PUBLIC_OBS_EPOCH=$(date -d "$PUBLIC_OBS" +%s 2>/dev/null || echo 0)
-    if [ "$PUBLIC_OBS_EPOCH" -gt 0 ]; then
-      AGE_MIN=$(( ($(date +%s) - PUBLIC_OBS_EPOCH) / 60 ))
-      if [ "$AGE_MIN" -gt 15 ] && [ "$ORIG_FRESH" = "ok" ]; then
-        body=$(printf '公開 validator.json の observedAt が %s 分前\n(%s)\n通常は 5 分以内に更新される\n対処:\n1) /var/log/node-info.log を確認(直近の cron 実行履歴)\n2) <deploy_user> で手動 push を試す:\n   sudo -u <deploy_user> bash scripts/push-to-web-host.sh validator.json\n3) web host の <deploy_user_home>/.ssh/authorized_keys / receive-metal-push 確認\n影響: 閲覧者が古い stake / uptime / 残期間を見続ける(validator 本体は無事)' "$AGE_MIN" "$PUBLIC_OBS")
-        notify_or_keep high "API freshness 異常 (push 経路停止?)" "$body" \
-          && candidate_set '.api_freshness' '"warn"'
-      elif [ "$AGE_MIN" -le 10 ] && [ "$ORIG_FRESH" = "warn" ]; then
-        notify_or_keep default "API freshness 回復" "validator.json は ${AGE_MIN} 分前に更新済" \
-          && candidate_set '.api_freshness' '"ok"'
-      fi
+  fi
+
+  if [ "$PUBLIC_OBS_EPOCH" -gt 0 ]; then
+    AGE_MIN=$(( ($(date +%s) - PUBLIC_OBS_EPOCH) / 60 ))
+    if [ "$AGE_MIN" -gt 15 ] && [ "$ORIG_FRESH" = "ok" ]; then
+      body=$(printf '公開 validator.json の observedAt が %s 分前\n(%s)\n通常は 5 分以内に更新される\n対処:\n1) /var/log/node-info.log を確認(直近の cron 実行履歴)\n2) <deploy_user> で手動 push を試す:\n   sudo -u <deploy_user> bash scripts/push-to-web-host.sh validator.json\n3) web host の <deploy_user_home>/.ssh/authorized_keys / receive-metal-push 確認\n影響: 閲覧者が古い stake / uptime / 残期間を見続ける(validator 本体は無事)' "$AGE_MIN" "$PUBLIC_OBS")
+      notify_or_keep high "API freshness 異常 (push 経路停止?)" "$body" \
+        && candidate_set '.api_freshness' '"warn"'
+    elif [ "$AGE_MIN" -le 10 ] && [ "$ORIG_FRESH" = "warn" ]; then
+      notify_or_keep default "API freshness 回復" "validator.json は ${AGE_MIN} 分前に更新済" \
+        && candidate_set '.api_freshness' '"ok"'
     fi
+  elif [ "$ORIG_FRESH" = "ok" ]; then
+    # Endpoint itself is broken (curl failure / non-200 / invalid JSON /
+    # missing or unparseable observedAt) even though /health is 200. This
+    # is worse than "stale" and must not stay silent.
+    body=$(printf 'GET %s/api/validator.json -> HTTP %s (curl rc=%s)\n本文から observedAt を取得できない(欠落 or 不正 JSON)\n対処:\n1) web host で curl -sS %s/api/validator.json | jq . を実行し実体を確認\n2) 直近の push (scripts/push-to-web-host.sh) のログ確認\n影響: 閲覧者に公開 API が破損した状態で見える(validator 本体は無事)' "$WEB_URL" "${PUBLIC_HTTP_CODE:-000}" "$PUBLIC_CURL_RC" "$WEB_URL")
+    notify_or_keep high "API freshness 異常 (endpoint 破損)" "$body" \
+      && candidate_set '.api_freshness' '"warn"'
   fi
 fi
 
