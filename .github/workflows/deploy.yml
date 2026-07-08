@@ -34,8 +34,29 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  secret-scan:
+    # validate.yml's gitleaks job (`secret-scan`) never runs for pushes to
+    # main (`push: branches-ignore: [main]`) — this is the only path a
+    # direct push to main actually takes through CI. Runs unconditionally
+    # (not gated on DEPLOY_ENABLED) so main stays scanned even before a VPS
+    # is contracted / deploy is enabled.
+    name: gitleaks (push-to-main gate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Run gitleaks against full history
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   deploy:
     # VPS 未契約期間は DEPLOY_ENABLED=true を設定せず、job ごと skip する(CI 失敗扱いにしない)
+    # secret-scan gate: a real secret hit blocks the deploy to the live
+    # validator host, same as it already blocks local commits/pushes via
+    # .githooks/pre-commit + pre-push.
+    needs: secret-scan
     if: ${{ vars.DEPLOY_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10

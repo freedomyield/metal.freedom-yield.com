@@ -162,6 +162,7 @@ The cryptographic-evidence anchor pipeline (identity → anchor-source → A-cha
 | `scripts/publish-guard.sh` | Block forbidden host identifiers + operator PII from entering public content (6-layer detector + 3-layer hook). | hook/pre-commit |
 | `scripts/sanitize-history.sh` | One-command scrub of forbidden host identifiers + PII across all git history (filter-repo, bundle backup). | manual |
 | `scripts/install-tier1-hook.sh` | Install the tier-1 broadcast-guard PreToolUse hook. | manual |
+| `scripts/install-git-hooks.sh` | Idempotently set this clone's `core.hooksPath=.githooks` (pre-commit secret-scan + pre-push publish-guard); `--check` verifies without mutating. | manual |
 | `scripts/install-anchor-watch-alert-only.sh` | Re-enable the anchor-watch cron in alert-only mode (`ANCHOR_DRIVER=notify-anchor-transition.sh`). | manual |
 | `scripts/install-repoint-publish-crons.sh` | Repoint the live publish crons from the retired `push-to-xserver.sh` to the canonical `push-to-web-host.sh` (superset-checked, backed up, `--dry-run`/`--purge-orphans`). | manual |
 | `scripts/install-metal-anchor-publish-health-cron.sh` | Install the `/etc/cron.d/metal-anchor-publish-health` cron. | manual |
