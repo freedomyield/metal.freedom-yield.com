@@ -24,20 +24,27 @@ if [ ! -x "${REPO_PATH}/scripts/check-anchor-publish-health.sh" ]; then
 fi
 
 read -r -d '' EXPECTED <<CRON || true
-# Every 15 minutes, verify that https://metal.freedom-yield.com/api/anchor-source.json
-# returns 200. On non-200, auto-recover by pushing the validator-host-local
-# public/api/anchor-source.json via push-to-web-host.sh. All events (including
-# successful recoveries) are appended to /var/log/anchor-publish-health.log.
+# Every 15 minutes, content-verify that the PUBLIC anchor-source.json is
+# served (HTTP 200) and its dag_root_computed matches the on-chain anchored
+# root recorded in anchor-receipt.json. Alert-only: on any failure (exit
+# 2/3/4/5) the checker itself fires one high-priority ntfy push via
+# notify.sh naming the exit code, so the operator is alerted regardless of
+# cron's own (non-functional — no MTA on this host) mail delivery. The
+# `2>&1 | logger` here is a second, independent channel: if notify.sh itself
+# cannot reach ntfy (e.g. the topic file is unreadable), the run's stderr is
+# still captured via journalctl/syslog instead of vanishing into cron's dead
+# mail queue. Non-broadcast, read-only HTTP GETs; see
+# scripts/check-anchor-publish-health.sh for the full comparison logic and
+# exit-code table.
 #
-# Motivation: GitHub Actions rsync used to delete the runtime anchor-source.json
-# on every deploy (fixed by --exclude in deploy.yml), but a monitor gives us
-# a durable safety net for any future publish-path regressions.
+# Motivation: this cron sat with zero output redirect and the checker had no
+# notify call — a RED run could go unnoticed for days. Fixed 2026-07-08.
 #
-# The script does NOT regenerate; regeneration is operator-authorized (broadcast
-# timing coupling). Auto-recover only re-pushes an existing local file.
+# The script performs NO recovery/regeneration; regeneration is
+# operator-authorized (broadcast timing coupling).
 SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin
-*/15 * * * * deploy bash ${REPO_PATH}/scripts/check-anchor-publish-health.sh
+*/15 * * * * deploy bash ${REPO_PATH}/scripts/check-anchor-publish-health.sh 2>&1 | logger -t anchor-publish-health
 CRON
 
 if [ -f "$CRON_TARGET" ] && diff -q "$CRON_TARGET" <(printf '%s\n' "$EXPECTED") >/dev/null 2>&1; then
@@ -61,4 +68,5 @@ touch /etc/cron.d/
 
 echo "OK: wrote ${CRON_TARGET}"
 echo "next fire: within 15 minutes"
-echo "log:       /var/log/anchor-publish-health.log"
+echo "alerts:    high-priority ntfy push on any failure (exit 2/3/4/5), via notify.sh"
+echo "log:       /var/log/anchor-publish-health.log (when writable) + journalctl -t anchor-publish-health"
