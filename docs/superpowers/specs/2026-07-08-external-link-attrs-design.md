@@ -235,6 +235,15 @@ rel="noopener noreferrer">` template element with no `href` attribute at all;
 `explorer_url` field. Because the tag carries no `href` in the shipped HTML, the
 tool's own classification rule (`no href` → internal, untouched) skips it by
 design — it is a different pattern from JS-built anchor markup (a pre-existing
-static tag gaining a dynamic `href`, rather than a script emitting the whole tag),
-and is called out here for completeness but was not in scope for this hardening
-pass; it is flagged as a follow-up candidate.
+static tag gaining a dynamic `href`, rather than a script emitting the whole tag).
+
+This case is now closed **declaratively**, not by extending the tool's reach:
+both template anchors carry `target="_blank" rel="noopener noreferrer"` directly
+in the HTML source, so the anchor is already fully compliant before
+`journal.js` ever runs. `journal.js` only ever assigns `.href` from the
+`explorer_url` field (`explorer.xprnetwork.org` in every live and fixture
+record, which is on the nofollow-exempt allowlist) and never touches `target`
+or `rel`. No `nofollow` is needed and no JS attribute-setting was added — the
+static-HTML tool still cannot see this anchor (it carries no `href` at
+author-time, so `--check` continues to skip it by design), but there is
+nothing left for it to enforce.
