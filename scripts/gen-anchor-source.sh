@@ -16,8 +16,14 @@
 #   3  required input file missing (= validator.json / identity.json / etc.)
 #   4  P-chain RPC failed or NodeID not present in current validators
 #   5  obligation verb detected in output (= verb discipline violation)
-#   6  schema validation failed (= output does not conform to v1)
-#   7  atomic write failed
+#   6  schema validation failed (= output does not conform to v1, or the
+#      schema file itself is unreadable)
+#   7  atomic write failed (canonical public/api/anchor-source.json OR the
+#      R18 per-anchor archive copy under public/api/archive/)
+#   8  R13: no JSON schema validator available (ajv absent AND python3's
+#      jsonschema module absent) — fail-closed rather than silently skip
+#      validation. Provision one: `npm i -g ajv-cli ajv-formats` or
+#      `pip3 install jsonschema` on the host that runs this script.
 
 set -euo pipefail
 
@@ -509,17 +515,59 @@ if [ -n "$VERB_HITS" ]; then
 	exit 5
 fi
 
-# ---- optional schema validation (= ajv-cli if available) ------------
-if command -v ajv >/dev/null 2>&1 && [ -r "$SCHEMA_FILE" ]; then
-	tmp_val="$(mktemp)"
-	printf '%s' "$FINAL_JSON" > "$tmp_val"
-	if ! ajv --spec=draft2020 --strict=false validate -s "$SCHEMA_FILE" -d "$tmp_val" >/dev/null 2>&1; then
-		echo "ERROR: output failed schema validation against $SCHEMA_FILE" >&2
-		ajv --spec=draft2020 --strict=false validate -s "$SCHEMA_FILE" -d "$tmp_val" >&2 || true
-		rm -f "$tmp_val"
-		exit 6
+# ---- mandatory schema validation (R13) --------------------------------
+# Previously this step only ran `if command -v ajv`, so a host without ajv
+# silently skipped validation and let a malformed artifact reach the anchor
+# pipeline unchecked. Now validation is mandatory: try ajv (local binary,
+# no network) first, then python3's `jsonschema` module (also local, no
+# network). If NEITHER is available, fail closed (exit 8) instead of
+# silently accepting unvalidated output. This function is duplicated
+# (not sourced from a shared lib — no cross-script sourcing convention
+# exists in this repo) in gen-anchor-receipt.sh and
+# append-anchor-history.sh; keep the three in sync if you touch the logic.
+schema_validate_or_die() {
+	local schema="$1" data_file="$2" label="$3" out
+	if [ ! -r "$schema" ]; then
+		echo "ERROR: schema file not readable: $schema (cannot validate $label)" >&2
+		return 6
 	fi
+	if command -v ajv >/dev/null 2>&1; then
+		if out="$(ajv --spec=draft2020 --strict=false validate -s "$schema" -d "$data_file" 2>&1)"; then
+			echo "OK: $label schema-valid (ajv)" >&2
+			return 0
+		fi
+		echo "ERROR: $label failed schema validation against $schema (ajv)" >&2
+		printf '%s\n' "$out" >&2
+		return 6
+	fi
+	if command -v python3 >/dev/null 2>&1 && python3 -c 'import jsonschema' >/dev/null 2>&1; then
+		if out="$(python3 - "$schema" "$data_file" <<'PYEOF' 2>&1
+import json, sys
+import jsonschema
+schema = json.load(open(sys.argv[1], encoding="utf-8"))
+data = json.load(open(sys.argv[2], encoding="utf-8"))
+jsonschema.validate(instance=data, schema=schema, format_checker=jsonschema.FormatChecker())
+PYEOF
+		)"; then
+			echo "OK: $label schema-valid (python3+jsonschema)" >&2
+			return 0
+		fi
+		echo "ERROR: $label failed schema validation against $schema (python3+jsonschema)" >&2
+		printf '%s\n' "$out" >&2
+		return 6
+	fi
+	echo "ERROR: no JSON schema validator available (ajv absent; python3+jsonschema absent) — refusing to skip validation for $label. Install ajv-cli (npm i -g ajv-cli ajv-formats) or 'pip3 install jsonschema'." >&2
+	return 8
+}
+
+tmp_val="$(mktemp)"
+printf '%s' "$FINAL_JSON" > "$tmp_val"
+if schema_validate_or_die "$SCHEMA_FILE" "$tmp_val" "anchor-source.json"; then
 	rm -f "$tmp_val"
+else
+	schema_rc=$?
+	rm -f "$tmp_val"
+	exit "$schema_rc"
 fi
 
 # ---- output ---------------------------------------------------------
@@ -545,3 +593,37 @@ mv "$TMP_OUT" "$OUT_FILE" || {
 
 echo "OK: wrote $OUT_FILE"
 echo "dag_root_computed: $DAG_ROOT"
+
+# ---- R18: durable per-anchor archive copy ------------------------------
+# $OUT_FILE (public/api/anchor-source.json) is the CANONICAL "current"
+# file — every subsequent cycle's run overwrites it, so without this, a
+# past cycle's pre-image is lost the moment the next cycle regenerates the
+# file, and it can no longer be independently content-verified against its
+# on-chain memos. Archive a byte-identical copy keyed by dag_root_computed
+# (content-addressed: the exact value inscribed in the dag_root_summary
+# on-chain memo, so an evaluator holding a memo hex can locate its
+# pre-image directly). Content-addressing also makes this safe when
+# multiple anchors share one cycle_number (cyclestart + heartbeat(s) +
+# cycleend all reuse the same cycle_number but produce distinct dag roots)
+# — each gets its own archive entry, none collide or overwrite another.
+# This block runs strictly after the canonical write above succeeds and
+# writes the SAME $FINAL_JSON bytes already validated + written to
+# $OUT_FILE — it never re-derives or alters the composed content.
+ARCHIVE_DIR="${ANCHOR_SOURCE_ARCHIVE_DIR:-$(dirname "$OUT_FILE")/archive}"
+mkdir -p "$ARCHIVE_DIR" || {
+	echo "ERROR: cannot create archive dir: $ARCHIVE_DIR" >&2
+	exit 7
+}
+ARCHIVE_FILE="${ARCHIVE_DIR}/anchor-source-${DAG_ROOT}.json"
+TMP_ARCHIVE="$(mktemp -p "$ARCHIVE_DIR" .anchor-source-archive.XXXXXX)"
+printf '%s\n' "$FINAL_JSON" > "$TMP_ARCHIVE" || {
+	echo "ERROR: archive temp write failed" >&2
+	rm -f "$TMP_ARCHIVE"
+	exit 7
+}
+mv "$TMP_ARCHIVE" "$ARCHIVE_FILE" || {
+	echo "ERROR: archive atomic rename failed" >&2
+	rm -f "$TMP_ARCHIVE"
+	exit 7
+}
+echo "OK: archived $ARCHIVE_FILE"
