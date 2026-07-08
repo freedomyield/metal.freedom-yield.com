@@ -4,7 +4,7 @@ The canonical, machine-readable source that composes every A-chain anchor Freedo
 
 ## Status
 
-Phase α (7/4 target). Committed schema, example, and generator; broadcast pipeline (`sign-anchor-event.sh` rewrite) is task T-C, on the same 3-day timeline. Companion schema at `public/api/anchor-source.schema.v1.json`; placeholder-filled reference at `public/api/anchor-source.example.json`; design memo `project_merkle_dag_identity_anchor_design_20260701` (operator memory).
+Live. The broadcast pipeline (`scripts/sign-anchor-event.sh`) has anchored on Metal A-chain mainnet at the cycle 2 → cycle 3 transition (2026-07-04); the runtime `anchor-source.json` reflects that anchor's signed pre-image. Companion schema at `public/api/anchor-source.schema.v1.json`; placeholder-filled reference at `public/api/anchor-source.example.json`; design memo `project_merkle_dag_identity_anchor_design_20260701` (operator memory).
 
 ## Publish and distribution (= git-deploy)
 
