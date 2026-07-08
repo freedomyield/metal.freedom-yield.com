@@ -136,6 +136,17 @@ jobs:
         # logs/ に .gitkeep しか追跡しておらず、除外しないと --delete が
         # deploy のたびに host 側ログを消し、健全な状態でも
         # "log not found" に化ける事故になる。
+        #
+        # tests/, docs/, TOOLKIT.md は validator host が runtime で使わない
+        # repo 内 dev/doc ファイル。host は同じ repo の git checkout でもある
+        # ため、これらは git 側から既に手元にある。除外せずに rsync すると
+        # 同一内容でも rsync が touch し、host 上で git-tracked ファイルへの
+        # ローカル変更として現れ、次回 host 側 `git pull --ff-only` が
+        # abort して毎回手動 reconcile が要る事故になっていた。
+        # (public/ は deploy 時に cache-bust 変換されるため除外できず、
+        # public/ を触る push は引き続き同じ drift が起きる — これは
+        # 構造的に避けられない。この変更が消すのは
+        # tests/・docs/・TOOLKIT.md・scripts/・logs/ を触る push の drift のみ)
         run: |
           # Feed excludes come from the shared single source of truth
           # (deploy/feed-excludes.txt via the emitter), the same set the
@@ -155,6 +166,9 @@ jobs:
             --exclude='metalgo/config/' \
             --exclude='scripts/' \
             --exclude='logs/' \
+            --exclude='tests/' \
+            --exclude='docs/' \
+            --exclude='TOOLKIT.md' \
             "${FEED_EXCLUDES[@]}" \
             ./ "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/"
 
