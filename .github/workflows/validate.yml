@@ -88,6 +88,8 @@ jobs:
             grep -q 'rel="canonical"' "$f" || { echo "::warning file=$f::missing canonical link"; }
           done
           [ $fail -eq 0 ]
+      - name: Check external link rel/target attributes
+        run: bash scripts/apply-external-link-attrs.sh --check public
 
   links:
     name: Internal link check
