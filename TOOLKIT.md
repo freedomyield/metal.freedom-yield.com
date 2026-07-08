@@ -161,7 +161,7 @@ The cryptographic-evidence anchor pipeline (identity → anchor-source → A-cha
 | `scripts/broadcast-guard.sh` | PreToolUse hook enforcing the PRIME DIRECTIVE (blocks raw broadcast commands without the safe-broadcast marker + fresh operator token). | hook |
 | `scripts/publish-guard.sh` | Block forbidden host identifiers + operator PII from entering public content (6-layer detector + 3-layer hook). | hook/pre-commit |
 | `scripts/sanitize-history.sh` | One-command scrub of forbidden host identifiers + PII across all git history (filter-repo, bundle backup). | manual |
-| `scripts/install-tier1-hook.sh` | Install the tier-1 broadcast-guard PreToolUse hook. | manual |
+| `scripts/install-tier1-hook.sh` | Install the tier-1 PreToolUse hooks (broadcast-guard + publish-guard); merges into an existing `.claude/settings.json` rather than clobbering it. | manual |
 | `scripts/install-git-hooks.sh` | Idempotently set this clone's `core.hooksPath=.githooks` (pre-commit secret-scan + pre-push publish-guard); `--check` verifies without mutating. | manual |
 | `scripts/install-anchor-watch-alert-only.sh` | Re-enable the anchor-watch cron in alert-only mode (`ANCHOR_DRIVER=notify-anchor-transition.sh`). | manual |
 | `scripts/install-repoint-publish-crons.sh` | Repoint the live publish crons from the retired `push-to-xserver.sh` to the canonical `push-to-web-host.sh` (superset-checked, backed up, `--dry-run`/`--purge-orphans`). | manual |
