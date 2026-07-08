@@ -72,8 +72,22 @@ fi
 
 echo
 echo "── [5/5] STAGE 2 — broadcast command (review + authorize FIRST; do NOT auto-run) ──"
+# R16 (bin/safe-broadcast gate-2/2b): the operator token must be CHAIN- and
+# CONTENT-bound JSON, not a bare `touch` — an unbound/legacy token is REFUSED
+# unconditionally for mainnet (fail-closed). Bind it to the EXACT tx already
+# composed and displayed above ($DRYLOG's .tx), so authorization cannot drift
+# to a different shape between review and broadcast.
+if command -v sha256sum >/dev/null 2>&1; then
+  sha256_pipe() { sha256sum | awk '{print $1}'; }
+else
+  sha256_pipe() { shasum -a 256 | awk '{print $1}'; }
+fi
+TOKEN_TX_SHA256="$(jq -c .tx "$DRYLOG" | sha256_pipe)"
+echo "  token tx_sha256 (binds to THIS exact tx): $TOKEN_TX_SHA256"
 cat <<CMD
-    touch /tmp/fyd-broadcast-token          # gate-2, valid 5 min (300s TTL) from now
+    printf '{"chain":"mainnet-a","tx_sha256":"%s"}' "$TOKEN_TX_SHA256" > /tmp/fyd-broadcast-token
+                                             # gate-2/2b (R16), valid 5 min (300s TTL) from now.
+                                             # chain+tx-bound; a bare touch is REFUSED for mainnet.
     cd $REPO
     bash scripts/run-anchor-pipeline.sh \\
       --chain=mainnet-a \\
