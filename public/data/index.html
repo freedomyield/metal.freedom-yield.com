@@ -176,7 +176,7 @@
 			<dl class="data-meta">
 				<dt>URL</dt><dd><a href="/api/uptime-cycles.json"><code>/api/uptime-cycles.json</code></a></dd>
 				<dt>Updated</dt><dd>On cycle close (~once per month during the current phase)</dd>
-				<dt>Audit</dt><dd>Each row links to <a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">explorer.metalblockchain.org</a> for tx verification</dd>
+				<dt>Audit</dt><dd>Each row links to <a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer" target="_blank">explorer.metalblockchain.org</a> for tx verification</dd>
 			</dl>
 			<details class="data-example">
 				<summary>Example request</summary>
@@ -213,7 +213,7 @@
 				<dt>Planned URL</dt><dd><code>/api/cycle-history.jsonl</code></dd>
 				<dt>Example (live now)</dt><dd><a href="/api/cycle-history.example.jsonl"><code>/api/cycle-history.example.jsonl</code></a></dd>
 				<dt>Formal schema (live now)</dt><dd><a href="/api/cycle-history.schema.v1.json"><code>/api/cycle-history.schema.v1.json</code></a> — draft 2020-12, additive-only within v1</dd>
-				<dt>Generator</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/scripts/gen-cycle-history.sh" rel="noopener noreferrer"><code>scripts/gen-cycle-history.sh</code></a></dd>
+				<dt>Generator</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/scripts/gen-cycle-history.sh" rel="noopener noreferrer" target="_blank"><code>scripts/gen-cycle-history.sh</code></a></dd>
 				<dt>Status</dt><dd>In preparation; runtime activation gated on the evidence-feed cron stability check (see <a href="/selection-evidence/">/selection-evidence/</a>)</dd>
 			</dl>
 			<details class="data-example">
@@ -317,7 +317,7 @@
 				<h3>fee-market-history.jsonl</h3>
 				<span class="data-tag">GET · JSONL · full</span>
 			</header>
-			<p>Append-only mirror of the full fee-market history. Same schema as <code>fee-market.json</code> entries. Use for fee compression / dispersion analysis over long windows — especially relevant after <a href="https://build.avax.network/docs/acps/176-dynamic-evm-gas-limit-and-price-discovery-updates" rel="noopener noreferrer">ACP-176 (Fortuna, 2026-05)</a> introduced validator-configurable gas-target preferences.</p>
+			<p>Append-only mirror of the full fee-market history. Same schema as <code>fee-market.json</code> entries. Use for fee compression / dispersion analysis over long windows — especially relevant after <a href="https://build.avax.network/docs/acps/176-dynamic-evm-gas-limit-and-price-discovery-updates" rel="noopener noreferrer" target="_blank">ACP-176 (Fortuna, 2026-05)</a> introduced validator-configurable gas-target preferences.</p>
 			<dl class="data-meta">
 				<dt>URL</dt><dd><a href="/api/fee-market-history.jsonl"><code>/api/fee-market-history.jsonl</code></a></dd>
 				<dt>Updated</dt><dd>Daily at 13:00 JST (04:00 UTC), appended only</dd>
@@ -401,7 +401,7 @@ curl -s "https://metal.freedom-yield.com/api/peers-history/peers-${YDAY}.json.gz
 			</header>
 			<p>The authoritative source for validator set, stake, uptime, and delegation data. Our <code>validator.json</code> reads from here every 5 minutes.</p>
 			<dl class="data-meta">
-				<dt>URL</dt><dd><a href="https://api.metalblockchain.org/ext/bc/P" rel="noopener noreferrer"><code>https://api.metalblockchain.org/ext/bc/P</code></a></dd>
+				<dt>URL</dt><dd><a href="https://api.metalblockchain.org/ext/bc/P" rel="noopener noreferrer" target="_blank"><code>https://api.metalblockchain.org/ext/bc/P</code></a></dd>
 				<dt>Maintained by</dt><dd>Metallicus / Metal Foundation</dd>
 				<dt>Method we use</dt><dd><code>platform.getCurrentValidators</code> filtered by our NodeID</dd>
 			</dl>
@@ -422,7 +422,7 @@ curl -s "https://metal.freedom-yield.com/api/peers-history/peers-${YDAY}.json.gz
 			</header>
 			<p>Block / tx / validator browser. Use this to independently audit any tx referenced from <code>uptime-cycles.json</code>.</p>
 			<dl class="data-meta">
-				<dt>URL</dt><dd><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer"><code>https://explorer.metalblockchain.org/</code></a></dd>
+				<dt>URL</dt><dd><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer" target="_blank"><code>https://explorer.metalblockchain.org/</code></a></dd>
 				<dt>Our NodeID</dt><dd><code>NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v</code></dd>
 			</dl>
 		</article>
@@ -458,7 +458,7 @@ curl -s "https://metal.freedom-yield.com/api/peers-history/peers-${YDAY}.json.gz
 				<dt>Public key</dt><dd><a href="/.well-known/operator-identity.pub"><code>/.well-known/operator-identity.pub</code></a> — ed25519, text/plain</dd>
 				<dt>Example</dt><dd><a href="/api/identity.example.json"><code>/api/identity.example.json</code></a></dd>
 				<dt>Formal schema</dt><dd><a href="/api/identity.schema.v1.json"><code>/api/identity.schema.v1.json</code></a> — draft 2020-12, includes artifact_manifest + artifact_root Merkle DAG hub</dd>
-				<dt>Verification procedure</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer"><code>docs/IDENTITY_VERIFICATION.md</code></a></dd>
+				<dt>Verification procedure</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer" target="_blank"><code>docs/IDENTITY_VERIFICATION.md</code></a></dd>
 				<dt>Status</dt><dd>Active — first published 2026-06-22 as part of Phase 5; rotation cadence ~1 year</dd>
 			</dl>
 			<details class="data-example">
@@ -536,8 +536,8 @@ ssh-keygen -Y verify -f allowed_signers -I freedom-yield \
 				<h4>Resources</h4>
 				<ul>
 					<li><a href="/sitemap/">Sitemap</a></li>
-					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain ↗</a></li>
-					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">Explorer ↗</a></li>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer" target="_blank">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer" target="_blank">Explorer ↗</a></li>
 					<li><a href="#acknowledgments">Acknowledgments</a></li>
 					<li><a href="mailto:info@metal.freedom-yield.com">Contact</a></li>
 				</ul>
@@ -546,7 +546,7 @@ ssh-keygen -Y verify -f allowed_signers -I freedom-yield \
 		<hr class="footer-divider">
 		<p class="footer-disclaimer"><strong>Disclaimer:</strong> Freedom Yield is an independent, third-party validator operating on Metal Blockchain. It is not affiliated with, endorsed by, sponsored by, or operated by Metallicus Inc. or the Metal Blockchain Foundation. All trademarks are the property of their respective owners.</p>
 		<div class="footer-bottom">
-			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain</a>.</p>
+			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer" target="_blank">Metal Blockchain</a>.</p>
 			<p>© 2026 Freedom Yield · Metal validator</p>
 		</div>
 	</div>

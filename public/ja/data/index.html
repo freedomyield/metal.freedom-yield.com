@@ -175,7 +175,7 @@
 			<dl class="data-meta">
 				<dt>URL</dt><dd><a href="/api/uptime-cycles.json"><code>/api/uptime-cycles.json</code></a></dd>
 				<dt>更新</dt><dd>cycle クローズ時(現フェーズでは約月 1 回)</dd>
-				<dt>監査</dt><dd>各行に <a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">explorer.metalblockchain.org</a> 上の tx URL を含むので、誰でも tx 検証できます</dd>
+				<dt>監査</dt><dd>各行に <a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer" target="_blank">explorer.metalblockchain.org</a> 上の tx URL を含むので、誰でも tx 検証できます</dd>
 			</dl>
 			<details class="data-example">
 				<summary>リクエスト例</summary>
@@ -212,7 +212,7 @@
 				<dt>予定 URL</dt><dd><code>/api/cycle-history.jsonl</code></dd>
 				<dt>例示(公開済)</dt><dd><a href="/api/cycle-history.example.jsonl"><code>/api/cycle-history.example.jsonl</code></a></dd>
 				<dt>Formal schema(公開済)</dt><dd><a href="/api/cycle-history.schema.v1.json"><code>/api/cycle-history.schema.v1.json</code></a> — draft 2020-12、 v1 内 additive-only</dd>
-				<dt>生成スクリプト</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/scripts/gen-cycle-history.sh" rel="noopener noreferrer"><code>scripts/gen-cycle-history.sh</code></a></dd>
+				<dt>生成スクリプト</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/scripts/gen-cycle-history.sh" rel="noopener noreferrer" target="_blank"><code>scripts/gen-cycle-history.sh</code></a></dd>
 				<dt>状態</dt><dd>準備中。 runtime 起動は evidence feed cron 安定確認後 (詳細 <a href="/ja/selection-evidence/">/ja/selection-evidence/</a>)</dd>
 			</dl>
 			<details class="data-example">
@@ -316,7 +316,7 @@
 				<h3>fee-market-history.jsonl</h3>
 				<span class="data-tag">GET · JSONL · 全件</span>
 			</header>
-			<p>fee-market history の全件 append-only ミラー。schema は <code>fee-market.json</code> エントリと同じ。fee の compression / dispersion を長期窓で分析するのに使います。特に <a href="https://build.avax.network/docs/acps/176-dynamic-evm-gas-limit-and-price-discovery-updates" rel="noopener noreferrer">ACP-176 (Fortuna, 2026-05)</a> 以降 validator が gas-target を config できるようになったので、validator collective behavior と fee 動向の関係分析が初めて意味を持ちます。</p>
+			<p>fee-market history の全件 append-only ミラー。schema は <code>fee-market.json</code> エントリと同じ。fee の compression / dispersion を長期窓で分析するのに使います。特に <a href="https://build.avax.network/docs/acps/176-dynamic-evm-gas-limit-and-price-discovery-updates" rel="noopener noreferrer" target="_blank">ACP-176 (Fortuna, 2026-05)</a> 以降 validator が gas-target を config できるようになったので、validator collective behavior と fee 動向の関係分析が初めて意味を持ちます。</p>
 			<dl class="data-meta">
 				<dt>URL</dt><dd><a href="/api/fee-market-history.jsonl"><code>/api/fee-market-history.jsonl</code></a></dd>
 				<dt>更新</dt><dd>毎日 13:00 JST (04:00 UTC) に追記のみ</dd>
@@ -400,7 +400,7 @@ curl -s "https://metal.freedom-yield.com/api/peers-history/peers-${YDAY}.json.gz
 			</header>
 			<p>validator set / stake / uptime / delegation の authoritative source。本サイトの <code>validator.json</code> は 5 分ごとにここから取得しています。</p>
 			<dl class="data-meta">
-				<dt>URL</dt><dd><a href="https://api.metalblockchain.org/ext/bc/P" rel="noopener noreferrer"><code>https://api.metalblockchain.org/ext/bc/P</code></a></dd>
+				<dt>URL</dt><dd><a href="https://api.metalblockchain.org/ext/bc/P" rel="noopener noreferrer" target="_blank"><code>https://api.metalblockchain.org/ext/bc/P</code></a></dd>
 				<dt>運営</dt><dd>Metallicus / Metal Foundation</dd>
 				<dt>使用メソッド</dt><dd><code>platform.getCurrentValidators</code> を NodeID でフィルタ</dd>
 			</dl>
@@ -421,7 +421,7 @@ curl -s "https://metal.freedom-yield.com/api/peers-history/peers-${YDAY}.json.gz
 			</header>
 			<p>ブロック・tx・validator のブラウザ。<code>uptime-cycles.json</code> に含まれる tx の独立 audit にどうぞ。</p>
 			<dl class="data-meta">
-				<dt>URL</dt><dd><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer"><code>https://explorer.metalblockchain.org/</code></a></dd>
+				<dt>URL</dt><dd><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer" target="_blank"><code>https://explorer.metalblockchain.org/</code></a></dd>
 				<dt>本ノードの NodeID</dt><dd><code>NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v</code></dd>
 			</dl>
 		</article>
@@ -457,7 +457,7 @@ curl -s "https://metal.freedom-yield.com/api/peers-history/peers-${YDAY}.json.gz
 				<dt>公開鍵</dt><dd><a href="/.well-known/operator-identity.pub"><code>/.well-known/operator-identity.pub</code></a> — ed25519、 text/plain</dd>
 				<dt>例示</dt><dd><a href="/api/identity.example.json"><code>/api/identity.example.json</code></a></dd>
 				<dt>Formal schema</dt><dd><a href="/api/identity.schema.v1.json"><code>/api/identity.schema.v1.json</code></a> — draft 2020-12、 artifact_manifest + artifact_root の Merkle DAG hub 含む</dd>
-				<dt>検証手順</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer"><code>docs/IDENTITY_VERIFICATION.md</code></a></dd>
+				<dt>検証手順</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer" target="_blank"><code>docs/IDENTITY_VERIFICATION.md</code></a></dd>
 				<dt>状態</dt><dd>Active — Phase 5 として 2026-06-22 初回公開、 ローテーション目安 ~1 年</dd>
 			</dl>
 			<details class="data-example">
@@ -532,8 +532,8 @@ ssh-keygen -Y verify -f allowed_signers -I freedom-yield \
 				<h4>関連</h4>
 				<ul>
 					<li><a href="/ja/sitemap/">サイトマップ</a></li>
-					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain ↗</a></li>
-					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">エクスプローラ ↗</a></li>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer" target="_blank">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer" target="_blank">エクスプローラ ↗</a></li>
 					<li><a href="#acknowledgments">感謝</a></li>
 					<li><a href="mailto:info@metal.freedom-yield.com">お問い合わせ</a></li>
 				</ul>
@@ -542,7 +542,7 @@ ssh-keygen -Y verify -f allowed_signers -I freedom-yield \
 		<hr class="footer-divider">
 		<p class="footer-disclaimer"><strong>免責事項:</strong> Freedom Yield は Metal Blockchain 上で稼働する独立した第三者バリデータです。Metallicus 社および Metal Blockchain Foundation の関連会社・提携先・出資先・公式運営者ではありません。各商標は各権利者に帰属します。</p>
 		<div class="footer-bottom">
-			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain</a>.</p>
+			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer" target="_blank">Metal Blockchain</a>.</p>
 			<p>© 2026 Freedom Yield · Metal validator</p>
 		</div>
 	</div>

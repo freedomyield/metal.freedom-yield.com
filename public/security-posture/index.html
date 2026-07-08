@@ -83,10 +83,10 @@
 		<p class="hero-lead">
 			A summary of how this validator handles defense in depth, validator key custody, information classification,
 			and vulnerability reporting. This page is a synthesis for evaluators; the underlying public documents in the
-			repository (<a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md">Constitution</a>,
-			<a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/SECURITY_LAYERS.md">SECURITY_LAYERS</a>,
-			<a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md">KEY_ROTATION</a>,
-			<a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/SECURITY.md">SECURITY</a>) remain authoritative.
+			repository (<a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md" target="_blank" rel="noopener noreferrer">Constitution</a>,
+			<a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/SECURITY_LAYERS.md" target="_blank" rel="noopener noreferrer">SECURITY_LAYERS</a>,
+			<a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md" target="_blank" rel="noopener noreferrer">KEY_ROTATION</a>,
+			<a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/SECURITY.md" target="_blank" rel="noopener noreferrer">SECURITY</a>) remain authoritative.
 		</p>
 	</div>
 </header>
@@ -134,7 +134,7 @@
 		<h2>Defense in depth</h2>
 		<p>The public web side is protected in four categorical layers, outermost first. Specific tunings, thresholds, and provider details are kept off the public web and managed in operator-side documentation; what follows is the categorical shape an evaluator typically needs.</p>
 		<dl class="data-meta">
-			<dt>Edge layer (CDN)</dt><dd>Always-on L3 / L4 DDoS auto-mitigation, IP reputation filtering, edge caching for static assets, HTTPS termination. Per-IP rate limiting active at this layer. Tightening rules exist for sustained attack — see the runbook in <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/SECURITY_LAYERS.md"><code>docs/SECURITY_LAYERS.md</code></a>.</dd>
+			<dt>Edge layer (CDN)</dt><dd>Always-on L3 / L4 DDoS auto-mitigation, IP reputation filtering, edge caching for static assets, HTTPS termination. Per-IP rate limiting active at this layer. Tightening rules exist for sustained attack — see the runbook in <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/SECURITY_LAYERS.md" target="_blank" rel="noopener noreferrer"><code>docs/SECURITY_LAYERS.md</code></a>.</dd>
 			<dt>Application gateway</dt><dd>A Caddy reverse proxy enforces per-IP and per-endpoint quotas in memory. Requests over quota return <code>429 Too Many Requests</code>. The plugin honours the edge-CDN-forwarded client IP.</dd>
 			<dt>Host network</dt><dd>The web host's own provider-managed firewall and TLS terminator sit between the edge and the application gateway. Provider-side DDoS mitigation is available as an escalation channel if the upstream layers are overwhelmed.</dd>
 			<dt>OS / SSH</dt><dd>Standard hardening: a host firewall exposing only standard web and SSH ports on the validator side, <code>fail2ban</code> on the SSH daemon on both sides, public-key SSH only, password-based SSH disabled. Operator dashboards behind authentication; password-derived credentials use a high-cost hash.</dd>
@@ -144,7 +144,7 @@
 
 	<section class="card">
 		<h2>Validator key handling</h2>
-		<p>The validator runs <code>metalgo</code>; three files in its staking directory drive identity and signing. The constitution forbids ever committing the private parts to the repository in any form (<a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md">CONSTITUTION §3.3</a>), and the <code>.gitignore</code> blocks the relevant extensions as a second line of defense.</p>
+		<p>The validator runs <code>metalgo</code>; three files in its staking directory drive identity and signing. The constitution forbids ever committing the private parts to the repository in any form (<a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md" target="_blank" rel="noopener noreferrer">CONSTITUTION §3.3</a>), and the <code>.gitignore</code> blocks the relevant extensions as a second line of defense.</p>
 		<dl class="data-meta">
 			<dt><code>staker.crt</code></dt><dd>Public X.509 certificate. Its hash is the source of the NodeID. Publishable; appears in the explorer.</dd>
 			<dt><code>staker.key</code></dt><dd>Private staking key. Never leaves the host's encrypted volume. Classified SECRET (S1).</dd>
@@ -171,7 +171,7 @@
 
 	<section class="card">
 		<h2>Information classification</h2>
-		<p>Every item connected to this validator falls into one of three tiers defined in <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md">Constitution §4</a>. When an item's tier is unclear, the more restrictive treatment is applied.</p>
+		<p>Every item connected to this validator falls into one of three tiers defined in <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md" target="_blank" rel="noopener noreferrer">Constitution §4</a>. When an item's tier is unclear, the more restrictive treatment is applied.</p>
 		<dl class="data-meta">
 			<dt>SECRET</dt><dd>Items whose disclosure changes attackability or operability of the validator: validator private keys, all wallet seeds and passphrases, operator-dashboard credentials, SSH credentials and key paths, specific host IPs and hostnames, ntfy topic identifiers, third-party API tokens. Never appears anywhere public.</dd>
 			<dt>CONFIDENTIAL</dt><dd>Items whose disclosure shapes attack surface or operational predictability without being bearer secrets: cloud provider name per role, specific hardware spec, specific monitoring tools, on-call windows, internal directory structure under operator-controlled paths. Default is do-not-publish; aggregate categorical reference is permitted.</dd>
@@ -182,14 +182,14 @@
 
 	<section class="card">
 		<h2>Vulnerability reporting</h2>
-		<p>The repository carries a top-level <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/SECURITY.md"><code>SECURITY.md</code></a> describing the reporting channel and coordinated disclosure policy:</p>
+		<p>The repository carries a top-level <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/SECURITY.md" target="_blank" rel="noopener noreferrer"><code>SECURITY.md</code></a> describing the reporting channel and coordinated disclosure policy:</p>
 		<dl class="data-meta">
 			<dt>Channel</dt><dd>Email to <a href="mailto:bp@freedom-yield.com">bp@freedom-yield.com</a>. Public GitHub issues are explicitly not the channel for vulnerability reports.</dd>
 			<dt>Acknowledgement target</dt><dd>Within 48 hours on Japan business days.</dd>
 			<dt>Triage target</dt><dd>Within 7 days, with severity assessment and an indicative fix timeline.</dd>
 			<dt>Disclosure model</dt><dd>Coordinated disclosure with a default 90-day embargo, extendable by mutual agreement if upstream coordination is required.</dd>
 		</dl>
-		<p>In scope: this repository's code and configuration, the production deployment, and the validator itself once its NodeID is on the site. Out of scope: upstream <code>metalgo</code> (report directly to <a href="https://github.com/MetalBlockchain/metalgo/security" rel="noopener noreferrer">MetalBlockchain/metalgo</a>), edge or host provider issues (report to those vendors), simple traffic-flood DoS (mitigated at the edge), and best-practice suggestions without demonstrable impact.</p>
+		<p>In scope: this repository's code and configuration, the production deployment, and the validator itself once its NodeID is on the site. Out of scope: upstream <code>metalgo</code> (report directly to <a href="https://github.com/MetalBlockchain/metalgo/security" rel="noopener noreferrer" target="_blank">MetalBlockchain/metalgo</a>), edge or host provider issues (report to those vendors), simple traffic-flood DoS (mitigated at the edge), and best-practice suggestions without demonstrable impact.</p>
 	</section>
 
 	<section class="card">
@@ -201,10 +201,10 @@
 	<section class="card">
 		<h2>Related</h2>
 		<ul>
-			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md">docs/CONSTITUTION.md</a> — supreme reference, including the full SECRET / CONFIDENTIAL / PUBLIC tables.</li>
-			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/SECURITY_LAYERS.md">docs/SECURITY_LAYERS.md</a> — the four-layer defense, the under-attack runbook, and the verification checklist.</li>
-			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md">docs/KEY_ROTATION.md</a> — validator key rotation and compromise-response procedure.</li>
-			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/SECURITY.md">SECURITY.md</a> — vulnerability reporting policy.</li>
+			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md" target="_blank" rel="noopener noreferrer">docs/CONSTITUTION.md</a> — supreme reference, including the full SECRET / CONFIDENTIAL / PUBLIC tables.</li>
+			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/SECURITY_LAYERS.md" target="_blank" rel="noopener noreferrer">docs/SECURITY_LAYERS.md</a> — the four-layer defense, the under-attack runbook, and the verification checklist.</li>
+			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md" target="_blank" rel="noopener noreferrer">docs/KEY_ROTATION.md</a> — validator key rotation and compromise-response procedure.</li>
+			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/SECURITY.md" target="_blank" rel="noopener noreferrer">SECURITY.md</a> — vulnerability reporting policy.</li>
 			<li><a href="/commitments/">Operator commitments</a> — including the security-sensitive information non-exposure commitment (#9).</li>
 			<li><a href="/risk-disclosure/">Risk disclosure</a> — what the operator does <em>not</em> claim, and the limits a reasonable evaluator should know.</li>
 		</ul>
@@ -259,8 +259,8 @@
 				<h4>Resources</h4>
 				<ul>
 					<li><a href="/sitemap/">Sitemap</a></li>
-					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain ↗</a></li>
-					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">Explorer ↗</a></li>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer" target="_blank">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer" target="_blank">Explorer ↗</a></li>
 					<li><a href="#acknowledgments">Acknowledgments</a></li>
 					<li><a href="mailto:info@metal.freedom-yield.com">Contact</a></li>
 				</ul>
@@ -269,7 +269,7 @@
 		<hr class="footer-divider">
 		<p class="footer-disclaimer"><strong>Disclaimer:</strong> Freedom Yield is an independent, third-party validator operating on Metal Blockchain. It is not affiliated with, endorsed by, sponsored by, or operated by Metallicus Inc. or the Metal Blockchain Foundation. All trademarks are the property of their respective owners.</p>
 		<div class="footer-bottom">
-			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain</a>.</p>
+			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer" target="_blank">Metal Blockchain</a>.</p>
 			<p>© 2026 Freedom Yield · Metal validator</p>
 		</div>
 	</div>

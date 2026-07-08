@@ -172,10 +172,10 @@
 		</ul>
 		<p>Validator host 側の runbook は公開リポジトリにあります:</p>
 		<ul>
-			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/DISASTER_RECOVERY.md" rel="noopener noreferrer"><code>docs/DISASTER_RECOVERY.md</code></a></li>
-			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md" rel="noopener noreferrer"><code>docs/KEY_ROTATION.md</code></a></li>
-			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/VALIDATOR_RENEWAL.md" rel="noopener noreferrer"><code>docs/VALIDATOR_RENEWAL.md</code></a></li>
-			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/INCIDENT_RESPONSE.md" rel="noopener noreferrer"><code>docs/INCIDENT_RESPONSE.md</code></a></li>
+			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/DISASTER_RECOVERY.md" rel="noopener noreferrer" target="_blank"><code>docs/DISASTER_RECOVERY.md</code></a></li>
+			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md" rel="noopener noreferrer" target="_blank"><code>docs/KEY_ROTATION.md</code></a></li>
+			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/VALIDATOR_RENEWAL.md" rel="noopener noreferrer" target="_blank"><code>docs/VALIDATOR_RENEWAL.md</code></a></li>
+			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/INCIDENT_RESPONSE.md" rel="noopener noreferrer" target="_blank"><code>docs/INCIDENT_RESPONSE.md</code></a></li>
 		</ul>
 	</section>
 
@@ -206,7 +206,7 @@
 		<p>3 種類の鍵カテゴリ、 それぞれ別の場所で別の理由で保管:</p>
 		<dl class="data-meta">
 			<dt>Validator staking + BLS 鍵</dt><dd>Validator host にのみ保管。Rotation runbook に従いホスト外に暗号化バックアップ。コンセンサス用にのみ <code>metalgo</code> が使用。</dd>
-			<dt>Operator identity 鍵</dt><dd>専用 ed25519、 operator の local ワークステーションにのみ保管。<code>ssh-keygen -Y</code> で off-chain identity manifest を署名するために使用。Validator host・web host のいずれにも置きません。スキーマと検証手順は <a href="/api/identity.example.json"><code>/api/identity.example.json</code></a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer"><code>docs/IDENTITY_VERIFICATION.md</code></a> に記載。</dd>
+			<dt>Operator identity 鍵</dt><dd>専用 ed25519、 operator の local ワークステーションにのみ保管。<code>ssh-keygen -Y</code> で off-chain identity manifest を署名するために使用。Validator host・web host のいずれにも置きません。スキーマと検証手順は <a href="/api/identity.example.json"><code>/api/identity.example.json</code></a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer" target="_blank"><code>docs/IDENTITY_VERIFICATION.md</code></a> に記載。</dd>
 			<dt>Push 鍵</dt><dd>Validator host → web host、 ed25519、 forced-command wrapper にスコープ。Wrapper の allowlist から逸脱不可。</dd>
 		</dl>
 		<p>Validator の signing key を off-chain 署名や外部認証に再利用することはありません。これは絶対遵守 — 運用上の署名対象ごとに、 その用途専用の鍵を用意します。</p>
@@ -235,13 +235,13 @@
 				<tr><th>サービス</th><th>目的</th><th>データ access</th><th>障害影響</th><th>代替</th></tr>
 			</thead>
 			<tbody>
-				<tr><td data-label="サービス">Validator host プロバイダ</td><td data-label="目的">単一テナント VPS 上で <code>metalgo</code> を hosting</td><td data-label="データアクセス">標準的なインフラ access のみ。 動作プロセスとその state ディレクトリ以外の operator データはなし</td><td data-label="障害影響">backup から代替ホストに復旧するまで validator はオフライン</td><td data-label="代替経路">provider firewall + 固定 IPv4 を提供する Linux VPS であれば任意の IaaS。 <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/VALIDATOR_HOST_SETUP.md" rel="noopener noreferrer"><code>docs/VALIDATOR_HOST_SETUP.md</code></a> 参照。</td></tr>
-				<tr><td data-label="サービス">Web host プロバイダ</td><td data-label="目的">静的サイトと push wrapper が書き込む runtime JSON endpoint を hosting</td><td data-label="データアクセス">静的ファイル + push wrapper のみ。 operator の secret 材料・validator 鍵材料は一切なし</td><td data-label="障害影響">公開検証 surface が unavailable。 validator には影響なし</td><td data-label="代替経路">静的配信と SSH ベースの <code>rsync</code> 受け取りに対応する任意の商用ホスト。 <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/DEPLOY_SETUP.md" rel="noopener noreferrer"><code>docs/DEPLOY_SETUP.md</code></a> 参照。</td></tr>
-				<tr><td data-label="サービス">CDN / edge プロキシ</td><td data-label="目的">Edge cache、 DNS hosting、 baseline DDoS 緩和、 edge での HTTPS 終端</td><td data-label="データアクセス">公開 HTTP トラフィックに対する標準的な reverse-proxy ロール</td><td data-label="障害影響">Edge cache が degraded、 origin から直接配信は継続</td><td data-label="代替経路">reverse-proxy と DNS hosting に対応する任意の CDN。 現状の設定判断とその根拠は <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CF_POLICY.md" rel="noopener noreferrer"><code>docs/CF_POLICY.md</code></a> に記載。</td></tr>
+				<tr><td data-label="サービス">Validator host プロバイダ</td><td data-label="目的">単一テナント VPS 上で <code>metalgo</code> を hosting</td><td data-label="データアクセス">標準的なインフラ access のみ。 動作プロセスとその state ディレクトリ以外の operator データはなし</td><td data-label="障害影響">backup から代替ホストに復旧するまで validator はオフライン</td><td data-label="代替経路">provider firewall + 固定 IPv4 を提供する Linux VPS であれば任意の IaaS。 <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/VALIDATOR_HOST_SETUP.md" rel="noopener noreferrer" target="_blank"><code>docs/VALIDATOR_HOST_SETUP.md</code></a> 参照。</td></tr>
+				<tr><td data-label="サービス">Web host プロバイダ</td><td data-label="目的">静的サイトと push wrapper が書き込む runtime JSON endpoint を hosting</td><td data-label="データアクセス">静的ファイル + push wrapper のみ。 operator の secret 材料・validator 鍵材料は一切なし</td><td data-label="障害影響">公開検証 surface が unavailable。 validator には影響なし</td><td data-label="代替経路">静的配信と SSH ベースの <code>rsync</code> 受け取りに対応する任意の商用ホスト。 <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/DEPLOY_SETUP.md" rel="noopener noreferrer" target="_blank"><code>docs/DEPLOY_SETUP.md</code></a> 参照。</td></tr>
+				<tr><td data-label="サービス">CDN / edge プロキシ</td><td data-label="目的">Edge cache、 DNS hosting、 baseline DDoS 緩和、 edge での HTTPS 終端</td><td data-label="データアクセス">公開 HTTP トラフィックに対する標準的な reverse-proxy ロール</td><td data-label="障害影響">Edge cache が degraded、 origin から直接配信は継続</td><td data-label="代替経路">reverse-proxy と DNS hosting に対応する任意の CDN。 現状の設定判断とその根拠は <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CF_POLICY.md" rel="noopener noreferrer" target="_blank"><code>docs/CF_POLICY.md</code></a> に記載。</td></tr>
 				<tr><td data-label="サービス">Git hosting + CI</td><td data-label="目的">公開ソースリポジトリ + サイトシェル変更の CI 駆動 deploy</td><td data-label="データアクセス">公開ソースコードのみ。 web host への deploy SSH key は CI 側で repository secret として保持</td><td data-label="障害影響">Deploy 停止。 operator workstation からの手動 <code>rsync</code> は引き続き利用可能</td><td data-label="代替経路">SSH ベースの deploy key と Actions 相当の runner をサポートする任意の git ホスト。</td></tr>
-				<tr><td data-label="サービス">Upstream Metal RPC endpoint</td><td data-label="目的">データフィード cron が使用する network state クエリ (peer list、 fee market、 validator set)</td><td data-label="データアクセス">公開 on-chain クエリのみ。 鍵材料は送信しない</td><td data-label="障害影響">Live network 観測フィードが degraded、 validator のコンセンサスパスには影響なし</td><td data-label="代替経路">到達可能な任意の Metal RPC peer。 upstream 消費先は <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/EVIDENCE_MANIFEST.md" rel="noopener noreferrer"><code>docs/EVIDENCE_MANIFEST.md</code></a> に記載。</td></tr>
+				<tr><td data-label="サービス">Upstream Metal RPC endpoint</td><td data-label="目的">データフィード cron が使用する network state クエリ (peer list、 fee market、 validator set)</td><td data-label="データアクセス">公開 on-chain クエリのみ。 鍵材料は送信しない</td><td data-label="障害影響">Live network 観測フィードが degraded、 validator のコンセンサスパスには影響なし</td><td data-label="代替経路">到達可能な任意の Metal RPC peer。 upstream 消費先は <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/EVIDENCE_MANIFEST.md" rel="noopener noreferrer" target="_blank"><code>docs/EVIDENCE_MANIFEST.md</code></a> に記載。</td></tr>
 				<tr><td data-label="サービス">Upstream Metal explorer</td><td data-label="目的">cross-verification のための block + transaction 参照 (anchor receipt、 <code>AddValidator</code> transaction)</td><td data-label="データアクセス">公開 on-chain クエリのみ</td><td data-label="障害影響">訪問者にとって anchor-receipt の cross-check リンクが切れる。 on-chain raw データ自体は他 explorer や直接 RPC 経由で参照可能</td><td data-label="代替経路">任意の Metal explorer インスタンス。</td></tr>
-				<tr><td data-label="サービス">push 通知サービス</td><td data-label="目的">監視イベントと daily digest 用の operator-side アラート</td><td data-label="データアクセス">operator-side のみ。 delegator・訪問者のデータなし。 アラート本文には運用サマリのみ</td><td data-label="障害影響">operator のインシデント検知が遅れる。 visible state とインシデントログには影響なし</td><td data-label="代替経路">topic-based publish API を持つ任意の push 通知サービス。 substitution パターンは <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/TOOLKIT.md" rel="noopener noreferrer"><code>TOOLKIT.md</code></a> に記載。</td></tr>
+				<tr><td data-label="サービス">push 通知サービス</td><td data-label="目的">監視イベントと daily digest 用の operator-side アラート</td><td data-label="データアクセス">operator-side のみ。 delegator・訪問者のデータなし。 アラート本文には運用サマリのみ</td><td data-label="障害影響">operator のインシデント検知が遅れる。 visible state とインシデントログには影響なし</td><td data-label="代替経路">topic-based publish API を持つ任意の push 通知サービス。 substitution パターンは <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/TOOLKIT.md" rel="noopener noreferrer" target="_blank"><code>TOOLKIT.md</code></a> に記載。</td></tr>
 				<tr><td data-label="サービス">operator パスワードマネージャ</td><td data-label="目的">operator-side の secret 保管 (backup passphrase、 カレンダー token、 dashboard 認証情報)</td><td data-label="データアクセス">operator-side のみ</td><td data-label="障害影響">operator-side の復旧が手動になる。 公開 surface には影響なし</td><td data-label="代替経路">offline export 可能な任意のパスワードマネージャ。</td></tr>
 				<tr><td data-label="サービス">ドメインレジストラ</td><td data-label="目的">公開ドメインの DNS 委任権限</td><td data-label="データアクセス">なし (公開された registration 情報のみ)</td><td data-label="障害影響">registrar 側で復旧するまで DNS 解決失敗</td><td data-label="代替経路">任意の ICANN 認定レジストラ。</td></tr>
 			</tbody>
@@ -298,8 +298,8 @@
 				<h4>関連</h4>
 				<ul>
 					<li><a href="/ja/sitemap/">サイトマップ</a></li>
-					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain ↗</a></li>
-					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">エクスプローラ ↗</a></li>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer" target="_blank">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer" target="_blank">エクスプローラ ↗</a></li>
 					<li><a href="#acknowledgments">感謝</a></li>
 					<li><a href="mailto:info@metal.freedom-yield.com">お問い合わせ</a></li>
 				</ul>
@@ -308,7 +308,7 @@
 		<hr class="footer-divider">
 		<p class="footer-disclaimer"><strong>免責事項:</strong> Freedom Yield は Metal Blockchain 上で運用される独立した third-party validator です。Metallicus Inc. または Metal Blockchain Foundation との提携・支援・後援・運営関係はありません。すべての商標は各保有者に帰属します。</p>
 		<div class="footer-bottom">
-			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain</a>.</p>
+			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer" target="_blank">Metal Blockchain</a>.</p>
 			<p>© 2026 Freedom Yield · Metal validator</p>
 		</div>
 	</div>

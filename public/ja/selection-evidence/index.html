@@ -169,7 +169,7 @@
 			<p>Metal Blockchain mainnet 上で登録・stake 済みかつ稼働中。</p>
 			<dl class="data-meta">
 				<dt>NodeID</dt><dd><code>NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v</code></dd>
-				<dt>Explorer</dt><dd><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">explorer.metalblockchain.org</a></dd>
+				<dt>Explorer</dt><dd><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer" target="_blank">explorer.metalblockchain.org</a></dd>
 				<dt>ライブ状態</dt><dd><a href="/api/validator.json"><code>/api/validator.json</code></a></dd>
 			</dl>
 		</article>
@@ -247,11 +247,11 @@
 			</header>
 			<p>Constitution・operating model・runbook は公開リポジトリにあります。</p>
 			<dl class="data-meta">
-				<dt>Constitution</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md" rel="noopener noreferrer"><code>docs/CONSTITUTION.md</code></a></dd>
-				<dt>Operating model</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/OPERATING_MODEL.md" rel="noopener noreferrer"><code>docs/OPERATING_MODEL.md</code></a></dd>
-				<dt>Incident response</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/INCIDENT_RESPONSE.md" rel="noopener noreferrer"><code>docs/INCIDENT_RESPONSE.md</code></a></dd>
-				<dt>Key rotation</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md" rel="noopener noreferrer"><code>docs/KEY_ROTATION.md</code></a></dd>
-				<dt>Disaster recovery</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/DISASTER_RECOVERY.md" rel="noopener noreferrer"><code>docs/DISASTER_RECOVERY.md</code></a></dd>
+				<dt>Constitution</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md" rel="noopener noreferrer" target="_blank"><code>docs/CONSTITUTION.md</code></a></dd>
+				<dt>Operating model</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/OPERATING_MODEL.md" rel="noopener noreferrer" target="_blank"><code>docs/OPERATING_MODEL.md</code></a></dd>
+				<dt>Incident response</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/INCIDENT_RESPONSE.md" rel="noopener noreferrer" target="_blank"><code>docs/INCIDENT_RESPONSE.md</code></a></dd>
+				<dt>Key rotation</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md" rel="noopener noreferrer" target="_blank"><code>docs/KEY_ROTATION.md</code></a></dd>
+				<dt>Disaster recovery</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/DISASTER_RECOVERY.md" rel="noopener noreferrer" target="_blank"><code>docs/DISASTER_RECOVERY.md</code></a></dd>
 			</dl>
 		</article>
 
@@ -265,7 +265,7 @@
 			<dl class="data-meta">
 				<dt>ライブ validator 状態</dt><dd><a href="/api/validator.json"><code>/api/validator.json</code></a></dd>
 				<dt>エビデンスマニフェスト</dt><dd><a href="/api/evidence.json"><code>/api/evidence.json</code></a></dd>
-				<dt>manifest フォーマットガイド</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/EVIDENCE_MANIFEST.md" rel="noopener noreferrer"><code>docs/EVIDENCE_MANIFEST.md</code></a></dd>
+				<dt>manifest フォーマットガイド</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/EVIDENCE_MANIFEST.md" rel="noopener noreferrer" target="_blank"><code>docs/EVIDENCE_MANIFEST.md</code></a></dd>
 				<dt>正式契約(live)</dt><dd><a href="/api/evidence.schema.v1.json"><code>/api/evidence.schema.v1.json</code></a> · <a href="/api/validator.schema.v1.json"><code>/api/validator.schema.v1.json</code></a> · <a href="/api/identity.schema.v1.json"><code>/api/identity.schema.v1.json</code></a> · <a href="/api/cycle-history.schema.v1.json"><code>/api/cycle-history.schema.v1.json</code></a></dd>
 				<dt>スキーマ versioning</dt><dd>v1 契約は version 内で安定。 breaking change は新 URL <code>*.schema.v2.json</code> で公開し、 v1 URL は v2 公開後最低 18 ヶ月間 reachable を維持。</dd>
 				<dt>全カタログ</dt><dd><a href="/ja/data/">/ja/data/</a></dd>
@@ -327,7 +327,7 @@
 				<h3>Cycle 単位 audit packet</h3>
 				<span class="data-tag">live(1 cycle closed)</span>
 			</header>
-			<p><code>/api/cycle-history.jsonl</code> は live で、 現在 1 つのクローズ済 cycle(cycle 1、 2026-06-04 close、 14 日間で 100% uptime)を含みます。 各行が 1 つのクローズ済 cycle で、 <code>/api/uptime-cycles.json</code> と <code>/api/incidents.json</code> を join し、 読者が line-by-line で audit packet を stream 処理できる形式。 schema は <a href="/api/cycle-history.example.jsonl"><code>/api/cycle-history.example.jsonl</code></a>、 生成スクリプトは <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/scripts/gen-cycle-history.sh" rel="noopener noreferrer"><code>scripts/gen-cycle-history.sh</code></a>、 フォーマットと消費方法は <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CYCLE_HISTORY.md" rel="noopener noreferrer"><code>docs/CYCLE_HISTORY.md</code></a> に記載。 各 cycle close 時点で operator host 上の cron(<code>metal-cycle-history</code>、 5 分 tick)が新 leaf 行を append、 その cycle 観測は anchor 時に <code>gen-anchor-source.sh</code> によって <code>/api/anchor-source.json</code> の <code>observations_branch</code> に集約されます。</p>
+			<p><code>/api/cycle-history.jsonl</code> は live で、 現在 1 つのクローズ済 cycle(cycle 1、 2026-06-04 close、 14 日間で 100% uptime)を含みます。 各行が 1 つのクローズ済 cycle で、 <code>/api/uptime-cycles.json</code> と <code>/api/incidents.json</code> を join し、 読者が line-by-line で audit packet を stream 処理できる形式。 schema は <a href="/api/cycle-history.example.jsonl"><code>/api/cycle-history.example.jsonl</code></a>、 生成スクリプトは <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/scripts/gen-cycle-history.sh" rel="noopener noreferrer" target="_blank"><code>scripts/gen-cycle-history.sh</code></a>、 フォーマットと消費方法は <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CYCLE_HISTORY.md" rel="noopener noreferrer" target="_blank"><code>docs/CYCLE_HISTORY.md</code></a> に記載。 各 cycle close 時点で operator host 上の cron(<code>metal-cycle-history</code>、 5 分 tick)が新 leaf 行を append、 その cycle 観測は anchor 時に <code>gen-anchor-source.sh</code> によって <code>/api/anchor-source.json</code> の <code>observations_branch</code> に集約されます。</p>
 			<dl class="data-meta">
 				<dt>状態</dt><dd>Live — runtime JSONL は 2026-06-22 以降配信中、 現在 1 leaf 公開(cycle 1)</dd>
 				<dt>スキーマ</dt><dd><code>/api/cycle-history.example.jsonl</code></dd>
@@ -348,17 +348,17 @@
 			<p>verifier 手順は 7 step recipe です(artifact 取得 → signature → fingerprint → 3 branch root → DAG-root 再計算 → source/receipt 一致 → on-chain 4-memo cross-check)。 独立した参照実装が 2 種あります: portable shell 関数(<code>gen-identity.sh</code> 内)と Python 参照(<code>tests/identity-verification-vectors/</code> 下)、 自動 test script で bit-for-bit 一致を pinning。 合成テストベクトル 5 件を公開しているので、 監査者は第三言語で verifier を独自実装して照合できます。</p>
 			<p><strong>snapshot + rotation cadence の方針</strong>。 <code>identity.json</code> は発行時点の運用者状態の署名済 snapshot であり、 heartbeat ではありません。 cycle transition 時の anchor receipt は同じ commitment を <em>reaffirm</em> し、 運用者が更新版 manifest を公開するまで同じ <code>dag_root_computed</code> を刻み続けます。 更新トリガは: (1) ed25519 運用者 identity key の年次 rotation(次回 2027-06-22)、 (2) bound set への新 artifact 追加、 (3) 重要 policy 変更、 の 3 点です。 複数 cycle にわたって <code>dag_root_computed</code> が変化しないのは設計通りで、 「該当期間に運用者は新たな commitment を主張していない」ことを意味します。 業界類似事例: Certificate Transparency log(= append-only、 root は新エントリで拡張)、 DNSSEC zone signing(= 定期 re-sign + 公開 cadence)、 long-lived OpenSSH 鍵 + rotation policy。 Metal エコシステム内で validator identity binding の標準 pattern は未定であり、 本面は novel です。</p>
 			<dl class="data-meta">
-				<dt>状態</dt><dd>Active — <code>identity.json</code> + <code>identity.json.sig</code> は 2026-06-22(Phase 5 publication)以降 live。 最初の on-chain anchor は cycle 2 → cycle 3 transition(2026-07-04)で broadcast 済み(tx <a href="https://explorer.xprnetwork.org/transaction/0b70d2aa1d20bc5c4eca8ce7888a7ab6edb02316e927209f524114f1b647938f" rel="noopener noreferrer"><code>0b70d2aa…</code></a>、block 390918553、block time 2026-07-04T06:42:24Z)。 4-memo pack とその receipt は現在 live。</dd>
-				<dt>構造仕様</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/MERKLE_DAG_SPEC.md" rel="noopener noreferrer"><code>docs/MERKLE_DAG_SPEC.md</code></a></dd>
-				<dt>verifier 手順</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer"><code>docs/IDENTITY_VERIFICATION.md</code></a>(= 7 step recipe)</dd>
-				<dt>監査エントリ</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/PHASE_ALPHA_AUDIT_HANDOFF.md" rel="noopener noreferrer"><code>docs/PHASE_ALPHA_AUDIT_HANDOFF.md</code></a></dd>
-				<dt>運用者 runbook</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/OPERATOR_IDENTITY_SETUP.md" rel="noopener noreferrer"><code>docs/OPERATOR_IDENTITY_SETUP.md</code></a></dd>
+				<dt>状態</dt><dd>Active — <code>identity.json</code> + <code>identity.json.sig</code> は 2026-06-22(Phase 5 publication)以降 live。 最初の on-chain anchor は cycle 2 → cycle 3 transition(2026-07-04)で broadcast 済み(tx <a href="https://explorer.xprnetwork.org/transaction/0b70d2aa1d20bc5c4eca8ce7888a7ab6edb02316e927209f524114f1b647938f" rel="noopener noreferrer" target="_blank"><code>0b70d2aa…</code></a>、block 390918553、block time 2026-07-04T06:42:24Z)。 4-memo pack とその receipt は現在 live。</dd>
+				<dt>構造仕様</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/MERKLE_DAG_SPEC.md" rel="noopener noreferrer" target="_blank"><code>docs/MERKLE_DAG_SPEC.md</code></a></dd>
+				<dt>verifier 手順</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer" target="_blank"><code>docs/IDENTITY_VERIFICATION.md</code></a>(= 7 step recipe)</dd>
+				<dt>監査エントリ</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/PHASE_ALPHA_AUDIT_HANDOFF.md" rel="noopener noreferrer" target="_blank"><code>docs/PHASE_ALPHA_AUDIT_HANDOFF.md</code></a></dd>
+				<dt>運用者 runbook</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/OPERATOR_IDENTITY_SETUP.md" rel="noopener noreferrer" target="_blank"><code>docs/OPERATOR_IDENTITY_SETUP.md</code></a></dd>
 				<dt>identity schema</dt><dd><a href="/api/identity.schema.v1.json"><code>/api/identity.schema.v1.json</code></a> + <a href="/api/identity.example.json"><code>example</code></a></dd>
 				<dt>DAG snapshot schema</dt><dd><a href="/api/anchor-source.schema.v1.json"><code>/api/anchor-source.schema.v1.json</code></a> + <a href="/api/anchor-source.example.json"><code>example</code></a></dd>
 				<dt>anchor receipt schema</dt><dd><a href="/api/anchor-receipt.schema.v2.json"><code>/api/anchor-receipt.schema.v2.json</code></a> + <a href="/api/anchor-receipt.v2.example.json"><code>example</code></a>(v2 = HC-single four-action pack;v1 receipt schema は 2026-07-01 以前の consumer 向けに引き続き reachable)</dd>
 				<dt>anchor history schema</dt><dd><a href="/api/anchor-history.schema.v2.json"><code>/api/anchor-history.schema.v2.json</code></a> + <a href="/api/anchor-history.jsonl"><code>live example</code></a></dd>
 				<dt>identity-history leaf schema</dt><dd><a href="/api/identity-history.schema.v1.json"><code>/api/identity-history.schema.v1.json</code></a> + <a href="/api/identity-history.example.jsonl"><code>example</code></a></dd>
-				<dt>test vectors</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/tree/main/tests/identity-verification-vectors" rel="noopener noreferrer"><code>tests/identity-verification-vectors/</code></a></dd>
+				<dt>test vectors</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/tree/main/tests/identity-verification-vectors" rel="noopener noreferrer" target="_blank"><code>tests/identity-verification-vectors/</code></a></dd>
 				<dt>live manifest</dt><dd><a href="/api/identity.json"><code>/api/identity.json</code></a> + <a href="/api/identity.json.sig"><code>/api/identity.json.sig</code></a></dd>
 				<dt>live DAG snapshot</dt><dd><a href="/api/anchor-source.json"><code>/api/anchor-source.json</code></a></dd>
 				<dt>live identity-history</dt><dd><a href="/api/identity-history.jsonl"><code>/api/identity-history.jsonl</code></a>(= 運用者 identity key rotation log、 現 <code>key_seq=1</code>)</dd>
@@ -396,7 +396,7 @@
 			<dt>参照 — Commitments</dt><dd><a href="/ja/commitments/">/ja/commitments/</a> — #3 (非保管型運用) および #4 (誇張インフラ主張をしない) を含む</dd>
 			<dt>参照 — 既知の制約</dt><dd><a href="/ja/risk-disclosure/">/ja/risk-disclosure/</a></dd>
 			<dt>参照 — Subnet 境界</dt><dd><a href="/ja/subnet-readiness/">/ja/subnet-readiness/</a></dd>
-			<dt>参照 — Constitution</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md" rel="noopener noreferrer"><code>docs/CONSTITUTION.md</code></a> §1 (Mission and Identity) + §8 (Scope Boundaries)</dd>
+			<dt>参照 — Constitution</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md" rel="noopener noreferrer" target="_blank"><code>docs/CONSTITUTION.md</code></a> §1 (Mission and Identity) + §8 (Scope Boundaries)</dd>
 		</dl>
 	</section>
 
@@ -407,8 +407,8 @@
 			<dt>運用者構造</dt><dd>単一運用者。 staking + identity 材料の単独署名権限。 リスク開示 surface に明記。</dd>
 			<dt>意思決定の記録</dt><dd>公開リポジトリの単一目的 commit。 各 commit は「なぜ」を説明します。</dd>
 			<dt>改定プロセス</dt><dd>Constitution §9 — 改定は説明文付きの公開リポジトリへの commit。</dd>
-			<dt>参照 — Constitution</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md" rel="noopener noreferrer"><code>docs/CONSTITUTION.md</code></a> §9 (Amendment Process)</dd>
-			<dt>参照 — Operating model</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/OPERATING_MODEL.md" rel="noopener noreferrer"><code>docs/OPERATING_MODEL.md</code></a></dd>
+			<dt>参照 — Constitution</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md" rel="noopener noreferrer" target="_blank"><code>docs/CONSTITUTION.md</code></a> §9 (Amendment Process)</dd>
+			<dt>参照 — Operating model</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/OPERATING_MODEL.md" rel="noopener noreferrer" target="_blank"><code>docs/OPERATING_MODEL.md</code></a></dd>
 			<dt>参照 — リスク開示</dt><dd><a href="/ja/risk-disclosure/">/ja/risk-disclosure/</a></dd>
 			<dt>参照 — Commitments</dt><dd><a href="/ja/commitments/">/ja/commitments/</a> — #4 (誇張インフラ主張をしない) および #9 (security-sensitive 情報は公開しない) を含む</dd>
 		</dl>
@@ -435,7 +435,7 @@
 		<dl class="data-meta">
 			<dt>運用者 commitments</dt><dd><a href="/ja/commitments/">/ja/commitments/</a> — 10 項目、 各項目は (commitment / 根拠 / それが意味しないもの) の構成。</dd>
 			<dt>問い合わせ応答目標</dt><dd><a href="/ja/inquiry/">/ja/inquiry/</a> — 日本営業日 24 時間以内の初回応答目標 (commitment #10)。</dd>
-			<dt>インシデント対応</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/INCIDENT_RESPONSE.md" rel="noopener noreferrer"><code>docs/INCIDENT_RESPONSE.md</code></a> — 重要度 (SEV) 階梯、 障害種別分類、 種別ごとの対応手順。</dd>
+			<dt>インシデント対応</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/INCIDENT_RESPONSE.md" rel="noopener noreferrer" target="_blank"><code>docs/INCIDENT_RESPONSE.md</code></a> — 重要度 (SEV) 階梯、 障害種別分類、 種別ごとの対応手順。</dd>
 			<dt>renewal リズム</dt><dd><a href="/ja/journal/">/ja/journal/</a> — on-chain transaction リンク付きの cycle 履歴。</dd>
 		</dl>
 		<p>運用者は契約的な uptime SLA、 委任報酬の保証、 subnet 受入 commitment は公開しません。 理由はリスク開示を参照してください。</p>
@@ -447,7 +447,7 @@
 		<dl class="data-meta">
 			<dt>アーキテクチャ</dt><dd><a href="/ja/reference-architecture/">/ja/reference-architecture/</a> — 2 ホストトポロジ、 片方向 push、 3 鍵分離。</dd>
 			<dt>third-party 依存</dt><dd><a href="/ja/reference-architecture/#third-party-dependencies">/ja/reference-architecture/#third-party-dependencies</a> — service / 目的 / 障害影響 / 代替経路。</dd>
-			<dt>CDN + edge policy</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CF_POLICY.md" rel="noopener noreferrer"><code>docs/CF_POLICY.md</code></a> — 設定判断とその根拠。</dd>
+			<dt>CDN + edge policy</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CF_POLICY.md" rel="noopener noreferrer" target="_blank"><code>docs/CF_POLICY.md</code></a> — 設定判断とその根拠。</dd>
 			<dt>データ custody</dt><dd>delegator 資金、 validator-signing 材料、 operator identity key のいずれも third-party 保管ではありません。 <a href="/ja/commitments/">/ja/commitments/</a> #3 (非保管型運用) を参照。</dd>
 		</dl>
 	</section>
@@ -481,7 +481,7 @@
 				<tr><td data-label="Material">Cycle uptime 履歴</td><td data-label="Classification"><span class="status-badge status-badge--public">Public</span></td><td data-label="Where / how"><a href="/api/uptime-cycles.json"><code>/api/uptime-cycles.json</code></a> + <a href="/ja/journal/">/ja/journal/</a></td></tr>
 				<tr><td data-label="Material">インシデントログ</td><td data-label="Classification"><span class="status-badge status-badge--public">Public</span></td><td data-label="Where / how"><a href="/api/incidents.json"><code>/api/incidents.json</code></a> + <a href="/ja/incidents/">/ja/incidents/</a></td></tr>
 				<tr><td data-label="Material">Constitution + operating model</td><td data-label="Classification"><span class="status-badge status-badge--public">Public</span></td><td data-label="Where / how">公開リポジトリ <code>docs/</code></td></tr>
-				<tr><td data-label="Material">インシデント対応 runbook</td><td data-label="Classification"><span class="status-badge status-badge--public">Public</span></td><td data-label="Where / how">公開リポジトリ <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/INCIDENT_RESPONSE.md" rel="noopener noreferrer"><code>docs/INCIDENT_RESPONSE.md</code></a></td></tr>
+				<tr><td data-label="Material">インシデント対応 runbook</td><td data-label="Classification"><span class="status-badge status-badge--public">Public</span></td><td data-label="Where / how">公開リポジトリ <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/INCIDENT_RESPONSE.md" rel="noopener noreferrer" target="_blank"><code>docs/INCIDENT_RESPONSE.md</code></a></td></tr>
 				<tr><td>identity manifest + DAG schemas</td><td>Public (schema は live) / In preparation (runtime artifact)</td><td>schema は live、 runtime <code>/api/identity.json</code> + <code>/api/anchor-receipt.json</code> は次 cycle start (2026-07-04) に activate</td></tr>
 				<tr><td data-label="Material">詳細な事業継続性 / DR 手順</td><td data-label="Classification"><span class="status-badge status-badge--stated">Available on request</span></td><td data-label="Where / how"><a href="/ja/inquiry/">/ja/inquiry/</a> 経由 — 概要は <a href="/ja/continuity/">/ja/continuity/</a></td></tr>
 				<tr><td data-label="Material">Drill 報告書 + post-mortem</td><td data-label="Classification"><span class="status-badge status-badge--in-prep">In preparation</span></td><td data-label="Where / how">フォーマットは <code>docs/INCIDENT_RESPONSE.md</code> §5 post-mortem テンプレート準拠。 初回 drill はまだ未実施</td></tr>
@@ -504,22 +504,22 @@
 			</thead>
 			<tbody>
 				<tr><td data-label="Control area">validator 可用性</td><td data-label="Current control">日次モニタリング + cycle close 単位の uptime 公開</td><td data-label="Evidence"><a href="/api/uptime-cycles.json"><code>/api/uptime-cycles.json</code></a> + <a href="/ja/journal/">/ja/journal/</a></td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">単一運用者、 日本営業時間外は staffed coverage なし</td></tr>
-				<tr><td data-label="Control area">インシデント対応</td><td data-label="Current control">SEV ベース runbook + 公開インシデントログ</td><td data-label="Evidence"><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/INCIDENT_RESPONSE.md" rel="noopener noreferrer"><code>docs/INCIDENT_RESPONSE.md</code></a> + <a href="/ja/incidents/">/ja/incidents/</a></td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">外部 SOC は契約していません、 一次対応は運用者側</td></tr>
+				<tr><td data-label="Control area">インシデント対応</td><td data-label="Current control">SEV ベース runbook + 公開インシデントログ</td><td data-label="Evidence"><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/INCIDENT_RESPONSE.md" rel="noopener noreferrer" target="_blank"><code>docs/INCIDENT_RESPONSE.md</code></a> + <a href="/ja/incidents/">/ja/incidents/</a></td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">外部 SOC は契約していません、 一次対応は運用者側</td></tr>
 				<tr><td data-label="Control area">変更管理</td><td data-label="Current control">単一目的の公開 commit + pre-commit secret scan</td><td data-label="Evidence">公開リポジトリの commit 履歴</td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">単一 committer、 multi-party review gate なし</td></tr>
-				<tr><td data-label="Control area">鍵分離</td><td data-label="Current control">3 鍵モデル (validator signing / operator identity / push)</td><td data-label="Evidence"><a href="/ja/reference-architecture/">/ja/reference-architecture/</a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md" rel="noopener noreferrer"><code>docs/KEY_ROTATION.md</code></a></td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">3 カテゴリの鍵は単一運用者が保持</td></tr>
+				<tr><td data-label="Control area">鍵分離</td><td data-label="Current control">3 鍵モデル (validator signing / operator identity / push)</td><td data-label="Evidence"><a href="/ja/reference-architecture/">/ja/reference-architecture/</a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md" rel="noopener noreferrer" target="_blank"><code>docs/KEY_ROTATION.md</code></a></td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">3 カテゴリの鍵は単一運用者が保持</td></tr>
 				<tr>
 					<td>identity 検証</td>
 					<td>ed25519 署名付き identity manifest + Metal A-chain への Merkle DAG anchor (Phase α)</td>
-					<td><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer"><code>docs/IDENTITY_VERIFICATION.md</code></a> + <a href="/api/identity.example.json"><code>/api/identity.example.json</code></a> + <a href="/api/anchor-receipt.example.json"><code>/api/anchor-receipt.example.json</code></a></td>
+					<td><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer" target="_blank"><code>docs/IDENTITY_VERIFICATION.md</code></a> + <a href="/api/identity.example.json"><code>/api/identity.example.json</code></a> + <a href="/api/anchor-receipt.example.json"><code>/api/anchor-receipt.example.json</code></a></td>
 					<td>In preparation — schema・verifier recipe・test vectors は live、 runtime は 2026-07-04 に activate</td>
 					<td>Phase α は Metal A-chain への memo only、 smart contract inscription は Phase β</td>
 				</tr>
-				<tr><td data-label="Control area">データ完全性</td><td data-label="Current control">append-only 永続化 + allowlist 検証付き push + atomic write</td><td data-label="Evidence"><a href="/ja/reference-architecture/">/ja/reference-architecture/</a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/EVIDENCE_MANIFEST.md" rel="noopener noreferrer"><code>docs/EVIDENCE_MANIFEST.md</code></a></td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">third-party witness なし、 完全性主張は運用者側のみ</td></tr>
-				<tr><td data-label="Control area">バックアップ / 復旧</td><td data-label="Current control">暗号化 off-host バックアップ + 鍵 rotation runbook + DR runbook</td><td data-label="Evidence"><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/DISASTER_RECOVERY.md" rel="noopener noreferrer"><code>docs/DISASTER_RECOVERY.md</code></a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md" rel="noopener noreferrer"><code>docs/KEY_ROTATION.md</code></a></td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">定期 DR drill は準備中、 drill 報告書はまだなし</td></tr>
-				<tr><td data-label="Control area">third-party 依存</td><td data-label="Current control">識別済み、 代替可能、 鍵材料 custody なし</td><td data-label="Evidence"><a href="/ja/reference-architecture/#third-party-dependencies">/ja/reference-architecture/#third-party-dependencies</a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CF_POLICY.md" rel="noopener noreferrer"><code>docs/CF_POLICY.md</code></a></td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">CDN は <code>CF_POLICY.md</code> に記載の設定で稼働、 一部の edge 側 opt-in は意図的に off</td></tr>
+				<tr><td data-label="Control area">データ完全性</td><td data-label="Current control">append-only 永続化 + allowlist 検証付き push + atomic write</td><td data-label="Evidence"><a href="/ja/reference-architecture/">/ja/reference-architecture/</a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/EVIDENCE_MANIFEST.md" rel="noopener noreferrer" target="_blank"><code>docs/EVIDENCE_MANIFEST.md</code></a></td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">third-party witness なし、 完全性主張は運用者側のみ</td></tr>
+				<tr><td data-label="Control area">バックアップ / 復旧</td><td data-label="Current control">暗号化 off-host バックアップ + 鍵 rotation runbook + DR runbook</td><td data-label="Evidence"><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/DISASTER_RECOVERY.md" rel="noopener noreferrer" target="_blank"><code>docs/DISASTER_RECOVERY.md</code></a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md" rel="noopener noreferrer" target="_blank"><code>docs/KEY_ROTATION.md</code></a></td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">定期 DR drill は準備中、 drill 報告書はまだなし</td></tr>
+				<tr><td data-label="Control area">third-party 依存</td><td data-label="Current control">識別済み、 代替可能、 鍵材料 custody なし</td><td data-label="Evidence"><a href="/ja/reference-architecture/#third-party-dependencies">/ja/reference-architecture/#third-party-dependencies</a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CF_POLICY.md" rel="noopener noreferrer" target="_blank"><code>docs/CF_POLICY.md</code></a></td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">CDN は <code>CF_POLICY.md</code> に記載の設定で稼働、 一部の edge 側 opt-in は意図的に off</td></tr>
 				<tr><td data-label="Control area">schema 安定性</td><td data-label="Current control">JSON Schema v1 は version 内で安定、 breaking change は新 URL <code>*.schema.v2.json</code>、 v1 URL は v2 公開後最低 18 ヶ月 reachable</td><td data-label="Evidence"><a href="/api/evidence.schema.v1.json"><code>/api/evidence.schema.v1.json</code></a> + 兄弟 schema</td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">単一 author の schema、 外部 schema registry なし</td></tr>
 				<tr><td data-label="Control area">decommission</td><td data-label="Current control">合理的な decommission notice commitment</td><td data-label="Evidence"><a href="/ja/commitments/">/ja/commitments/</a> #8</td><td data-label="Status"><span class="status-badge status-badge--stated">Stated</span></td><td data-label="Known limitation">詳細な正式 exit runbook は準備中</td></tr>
-				<tr><td data-label="Control area">公開コミュニケーション</td><td data-label="Current control">公的主張基準 + 日本営業日 24 時間以内の応答目標</td><td data-label="Evidence"><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md" rel="noopener noreferrer"><code>docs/CONSTITUTION.md</code></a> §7 + <a href="/ja/inquiry/">/ja/inquiry/</a> + <a href="/ja/commitments/">/ja/commitments/</a> #10</td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">日本営業時間外は best-effort</td></tr>
+				<tr><td data-label="Control area">公開コミュニケーション</td><td data-label="Current control">公的主張基準 + 日本営業日 24 時間以内の応答目標</td><td data-label="Evidence"><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CONSTITUTION.md" rel="noopener noreferrer" target="_blank"><code>docs/CONSTITUTION.md</code></a> §7 + <a href="/ja/inquiry/">/ja/inquiry/</a> + <a href="/ja/commitments/">/ja/commitments/</a> #10</td><td data-label="Status"><span class="status-badge status-badge--active">Active</span></td><td data-label="Known limitation">日本営業時間外は best-effort</td></tr>
 			</tbody>
 		</table>
 	</section>
@@ -573,8 +573,8 @@
 				<h4>関連</h4>
 				<ul>
 					<li><a href="/ja/sitemap/">サイトマップ</a></li>
-					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain ↗</a></li>
-					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer">エクスプローラ ↗</a></li>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer" target="_blank">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer" target="_blank">エクスプローラ ↗</a></li>
 					<li><a href="#acknowledgments">感謝</a></li>
 					<li><a href="mailto:info@metal.freedom-yield.com">お問い合わせ</a></li>
 				</ul>
@@ -583,7 +583,7 @@
 		<hr class="footer-divider">
 		<p class="footer-disclaimer"><strong>免責事項:</strong> Freedom Yield は Metal Blockchain 上で稼働する独立した第三者バリデータです。Metallicus 社および Metal Blockchain Foundation の関連会社・提携先・出資先・公式運営者ではありません。各商標は各権利者に帰属します。</p>
 		<div class="footer-bottom">
-			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer">Metal Blockchain</a>.</p>
+			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer" target="_blank">Metal Blockchain</a>.</p>
 			<p>© 2026 Freedom Yield · Metal validator</p>
 		</div>
 	</div>
