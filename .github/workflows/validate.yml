@@ -150,5 +150,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+      - name: Set up schema validator (sanctioned installer; tests/run-all-tests.sh preflight requires ajv or python3+jsonschema)
+        run: bash scripts/setup-schema-validator.sh
       - name: bash tests/run-all-tests.sh
         run: bash tests/run-all-tests.sh
