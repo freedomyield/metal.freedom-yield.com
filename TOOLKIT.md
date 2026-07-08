@@ -163,6 +163,7 @@ The cryptographic-evidence anchor pipeline (identity → anchor-source → A-cha
 | `scripts/sanitize-history.sh` | One-command scrub of forbidden host identifiers + PII across all git history (filter-repo, bundle backup). | manual |
 | `scripts/install-tier1-hook.sh` | Install the tier-1 PreToolUse hooks (broadcast-guard + publish-guard); merges into an existing `.claude/settings.json` rather than clobbering it. | manual |
 | `scripts/install-git-hooks.sh` | Idempotently set this clone's `core.hooksPath=.githooks` (pre-commit secret-scan + pre-push publish-guard); `--check` verifies without mutating. | manual |
+| `scripts/setup-schema-validator.sh` | Ensure a JSON-schema validator (`ajv` or `python3`+`jsonschema`) is on `PATH` for the anchor pipeline's mandatory schema-validation gate (R13), installing via `npm`/`pip3` only — never touches a system binary, symlink, or interpreter directly. See [`docs/SCHEMA_VALIDATOR_CONVENTIONS.md`](docs/SCHEMA_VALIDATOR_CONVENTIONS.md). | manual |
 | `scripts/install-anchor-watch-alert-only.sh` | Re-enable the anchor-watch cron in alert-only mode (`ANCHOR_DRIVER=notify-anchor-transition.sh`). | manual |
 | `scripts/install-repoint-publish-crons.sh` | Repoint the live publish crons from the retired `push-to-xserver.sh` to the canonical `push-to-web-host.sh` (superset-checked, backed up, `--dry-run`/`--purge-orphans`). | manual |
 | `scripts/install-metal-anchor-publish-health-cron.sh` | Install the `/etc/cron.d/metal-anchor-publish-health` cron. | manual |
