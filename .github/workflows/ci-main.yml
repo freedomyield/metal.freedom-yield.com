@@ -53,3 +53,5 @@ jobs:
         run: bash scripts/setup-schema-validator.sh
       - name: bash tests/run-all-tests.sh
         run: bash tests/run-all-tests.sh
+      - name: Check external link rel/target attributes
+        run: bash scripts/apply-external-link-attrs.sh --check public
