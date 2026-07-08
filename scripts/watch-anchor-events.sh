@@ -17,9 +17,20 @@
 #   anchor-watcher-state.json   tracks {node_id, is_present, last_check}.
 #                               First run leaves is_present unset (= no
 #                               transition can be inferred without a prior).
-#                               Updated atomically after each poll regardless
-#                               of dispatch outcome (= prevents duplicate
-#                               dispatch on the same transition).
+#                               Updated atomically after each poll THAT EITHER
+#                               (a) detected no transition, or (b) detected a
+#                               transition and the driver CONFIRMED delivery
+#                               (exit 0, or exit 2 = nothing-to-do). When a
+#                               transition is detected but the driver cannot
+#                               confirm delivery (any other exit — see R5 /
+#                               notify-anchor-transition.sh's exit contract),
+#                               the state file is left untouched on purpose:
+#                               is_present stays at its prior value so the
+#                               same transition is re-detected — and the
+#                               driver re-invoked — on the next poll, instead
+#                               of the once-per-cycle signal being silently
+#                               and permanently dropped by a transient
+#                               notify failure at the cycle boundary.
 #
 # Constitution alignment:
 #   - §2 #1: the metalgo RPC poll is read-only (platform.getCurrentValidators
@@ -37,9 +48,10 @@
 #   2  RPC failed (= alert via cron logging; state file not updated, next
 #      tick will retry)
 #   3  state-file write failed
-#   4  driver invocation failed (= state file IS updated to prevent
-#      re-dispatch storm; the driver has its own idempotency on
-#      LAST_ANCHORED_ROOT, but its exit code is surfaced for alerting)
+#   4  driver invocation did not confirm delivery (= state file is
+#      deliberately NOT updated — is_present stays at its prior value so
+#      the same transition is re-detected and the driver re-invoked on the
+#      next tick, until delivery is confirmed. See R5.)
 #
 # Usage:
 #   watch-anchor-events.sh [--dry-run]
@@ -160,23 +172,30 @@ else
 	if [ "${DRY_RUN}" -eq 1 ]; then
 		echo "DRY-RUN: would invoke ${DRIVER} --event-type=${EVENT}"
 	else
-		# Synchronous invocation. The alert-only driver
-		# (notify-anchor-transition.sh) treats a duplicate dispatch of the
-		# same transition as a no-op (exit 2), so even if the watcher's
-		# state-file update below fails, a future re-dispatch is safe.
+		# Synchronous invocation. Exit 0 or 2 (nothing-to-do) is a CONFIRMED
+		# outcome and advances state below. Any other exit means the driver
+		# could not confirm delivery (see notify-anchor-transition.sh's exit
+		# contract, R5) — SKIP_STATE_WRITE below leaves is_present at its
+		# prior value so this same transition is re-detected and the driver
+		# re-invoked on the next poll, instead of the once-per-cycle signal
+		# being permanently dropped by a transient notify failure.
 		DRIVER_EXIT=0
 		"${DRIVER}" --event-type="${EVENT}" || DRIVER_EXIT=$?
 		if [ "${DRIVER_EXIT}" -ne 0 ] && [ "${DRIVER_EXIT}" -ne 2 ]; then
-			echo "ERROR: driver returned non-zero exit ${DRIVER_EXIT}" >&2
-			# Update state anyway (= record what we observed); the driver
-			# re-alerts on the next dispatch of a real transition.
+			echo "ERROR: driver did not confirm delivery (exit ${DRIVER_EXIT})" >&2
+			echo "NOT advancing watcher state: is_present stays '${WAS_PRESENT}' so event=${EVENT} is re-detected and re-dispatched next poll" >&2
+			SKIP_STATE_WRITE=1
 			LATER_EXIT=4
 		fi
 	fi
 fi
 
 # -------- state file update --------
-if [ "${DRY_RUN}" -eq 0 ]; then
+# Skipped only when a transition was detected this tick and the driver
+# failed to confirm delivery (see SKIP_STATE_WRITE above). Every other path
+# (no transition, first run, transition + confirmed delivery, --dry-run's
+# own guard) updates normally.
+if [ "${DRY_RUN}" -eq 0 ] && [ "${SKIP_STATE_WRITE:-0}" -eq 0 ]; then
 	if ! jq -n \
 		--arg node_id "${NODE_ID}" \
 		--argjson is_present "${IS_PRESENT}" \

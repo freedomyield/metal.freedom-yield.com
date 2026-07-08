@@ -59,7 +59,8 @@ run_checker() {
 	WATCH_STATE_DIR="$BASE/state" \
 	EXPLORER_API="file://$BASE/explorer.json" \
 	EXPLORER_MIN_VALIDATORS="${FLOOR_OVERRIDE:-0}" \
-	WATCH_NOTIFY="$BASE/notify-stub.sh" \
+	WATCH_NOTIFY="${NOTIFY_OVERRIDE:-$BASE/notify-stub.sh}" \
+	NOTIFY_RETRY_SLEEP=0 \
 	bash "$CHECKER" "$@"
 }
 alerts() { cat "$STUB_LOG" 2>/dev/null; }
@@ -262,6 +263,64 @@ RC=$?
 [ "$(ncalls)" -eq 0 ] && [ "$(state)" = "$BEFORE" ] \
 	&& ok "below floor: no mass-departure alerts, state untouched" \
 	|| bad "below floor: no mass-departure alerts, state untouched (alerts: $(alerts))"
+teardown
+
+# ---- case 13 (R5): notify permanently fails → baseline NOT advanced, re-detected next run ---
+# A stub that always exits 3 (= notify.sh strict-mode HTTP 4xx non-429 —
+# no-retry classification) so exactly one call happens and it never succeeds.
+setup
+cat > "$BASE/notify-fail-stub.sh" <<STUBEOF
+#!/usr/bin/env bash
+printf 'CALL|%s|%s\n%s\n' "\$1" "\$2" "\$3" >> "$STUB_LOG"
+exit 3
+STUBEOF
+chmod +x "$BASE/notify-fail-stub.sh"
+explorer_stub "[{\"nodeId\": \"$NID\", \"delegators\": []}]"
+run_checker >/dev/null 2>&1
+BEFORE="$(state)"
+explorer_stub "[{\"nodeId\": \"$NID\", \"name\": \"Acme\", \"delegators\": []}]"
+OUT="$(NOTIFY_OVERRIDE="$BASE/notify-fail-stub.sh" run_checker 2>&1)"
+[ "$(ncalls)" -eq 1 ] \
+	&& ok "R5 permanent fail: exactly 1 notify attempt (no retry on non-retryable rc)" \
+	|| bad "R5 permanent fail: exactly 1 notify attempt (calls=$(ncalls))"
+echo "$OUT" | grep -qi 'not confirmed' \
+	&& ok "R5 permanent fail: logs non-confirmation" \
+	|| bad "R5 permanent fail: logs non-confirmation (out: $OUT)"
+[ "$(state)" = "$BEFORE" ] \
+	&& ok "R5 permanent fail: baseline state NOT advanced" \
+	|| bad "R5 permanent fail: baseline state NOT advanced (before: $BEFORE after: $(state))"
+# Next run with a working notifier must still see (and fire) the same pending change.
+run_checker >/dev/null 2>&1
+alerts | grep -qF "named: $NID → Acme" \
+	&& ok "R5 permanent fail: pending change re-detected and delivered on next run" \
+	|| bad "R5 permanent fail: pending change re-detected and delivered on next run (alerts: $(alerts))"
+state | jq -e --arg n "$NID" '.[$n].name == "Acme"' >/dev/null \
+	&& ok "R5 permanent fail: baseline advances once delivery is confirmed" \
+	|| bad "R5 permanent fail: baseline advances once delivery is confirmed (state: $(state))"
+teardown
+
+# ---- case 14 (R5): notify fails once (retryable) then succeeds → 2 attempts, state advances --
+setup
+cat > "$BASE/notify-flaky-stub.sh" <<STUBEOF
+#!/usr/bin/env bash
+printf 'CALL|%s|%s\n%s\n' "\$1" "\$2" "\$3" >> "$STUB_LOG"
+n=0
+[ -f "$BASE/flaky-ctr" ] && n=\$(cat "$BASE/flaky-ctr")
+n=\$((n + 1))
+echo "\$n" > "$BASE/flaky-ctr"
+if [ "\$n" -eq 1 ]; then exit 5; else exit 0; fi
+STUBEOF
+chmod +x "$BASE/notify-flaky-stub.sh"
+explorer_stub "[{\"nodeId\": \"$NID\", \"delegators\": []}]"
+run_checker >/dev/null 2>&1
+explorer_stub "[{\"nodeId\": \"$NID\", \"name\": \"Acme\", \"delegators\": []}]"
+NOTIFY_OVERRIDE="$BASE/notify-flaky-stub.sh" run_checker >/dev/null 2>&1
+[ "$(ncalls)" -eq 2 ] \
+	&& ok "R5 retryable fail then success: 2 attempts (1 initial + 1 retry)" \
+	|| bad "R5 retryable fail then success: 2 attempts (calls=$(ncalls))"
+state | jq -e --arg n "$NID" '.[$n].name == "Acme"' >/dev/null \
+	&& ok "R5 retryable fail then success: baseline advances in the SAME run" \
+	|| bad "R5 retryable fail then success: baseline advances in the SAME run (state: $(state))"
 teardown
 
 # ---- summary ------------------------------------------------------------------------------

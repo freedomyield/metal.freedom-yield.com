@@ -19,10 +19,19 @@
 # Interface (called by watch-anchor-events.sh):
 #     notify-anchor-transition.sh --event-type=<cyclestart|cycleend> [--cycle-n=<n>] [--dry-run]
 # Env:
-#     ANCHOR_NOTIFY   path to notify.sh (default: <script dir>/notify.sh)
+#     ANCHOR_NOTIFY       path to notify.sh (default: <script dir>/notify.sh)
+#     NOTIFY_RETRY_SLEEP  seconds to wait before the single in-run retry
+#                         (default: 5; tests override to 0)
 # Exit:
-#     0  alert dispatched (best-effort; a notify.sh failure is logged, non-fatal)
+#     0  alert CONFIRMED delivered (notify.sh strict-mode HTTP 2xx), or --dry-run
 #     2  nothing to do (missing/unrecognized --event-type) — treated as OK by the watcher
+#     5  notify.sh failed to confirm delivery (transport / 429 / 5xx, retried once;
+#        or a non-retryable 4xx / missing topic / missing notify.sh). The caller
+#        (watch-anchor-events.sh) MUST NOT advance its transition state on this
+#        exit, so the same cyclestart/cycleend transition is re-detected and this
+#        driver re-invoked on its next poll — the once-per-cycle signal is
+#        retried until it is actually delivered, instead of being silently
+#        dropped on a transient ntfy outage at a cycle boundary.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -54,9 +63,38 @@ if [ "$DRY_RUN" -eq 1 ]; then
 	exit 0
 fi
 
-if [ -x "$NOTIFY" ]; then
-	bash "$NOTIFY" "high" "$TITLE" "$MSG" || echo "notify-anchor-transition: notify.sh returned non-zero (non-fatal)" >&2
-else
+if [ ! -x "$NOTIFY" ]; then
 	echo "notify-anchor-transition: notify.sh not executable at ${NOTIFY}" >&2
+	exit 5
 fi
+
+# Delivery-confirmed dispatch (reuses the notify_or_keep pattern from
+# check-anomalies.sh): strict mode so a non-2xx / transport failure is
+# classified rather than swallowed, one in-run retry on the retryable
+# classes, and the driver's own exit communicates delivery — NOT just
+# "we tried" — to the caller so it can gate its state advance on it.
+attempt_notify() {
+	NOTIFY_STRICT_EXIT=1 bash "$NOTIFY" "high" "$TITLE" "$MSG" >/dev/null 2>&1
+	return $?
+}
+retryable_notify_rc() {
+	case "$1" in
+		2|4|5) return 0 ;;   # transport / 429 / 5xx
+		*)     return 1 ;;
+	esac
+}
+
+RC=0
+attempt_notify || RC=$?
+if [ "$RC" -ne 0 ] && retryable_notify_rc "$RC"; then
+	sleep "${NOTIFY_RETRY_SLEEP:-5}"
+	RC=0
+	attempt_notify || RC=$?
+fi
+
+if [ "$RC" -ne 0 ]; then
+	echo "notify-anchor-transition: notify.sh failed to confirm delivery (rc=${RC}); NOT confirming dispatch" >&2
+	exit 5
+fi
+
 exit 0

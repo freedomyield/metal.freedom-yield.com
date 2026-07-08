@@ -46,6 +46,14 @@
 # compare against last-known state stored in /var/lib/freedom-yield/,
 # send notify.sh on change.
 #
+# DELIVERY-CONFIRMED STATE ADVANCE (R5, 2026-07-08): the baseline snapshot
+# (PREV_FILE) is only overwritten when there were zero changes (pure
+# observation) OR the batched notify was CONFIRMED delivered (strict mode +
+# one in-run retry, mirroring check-anomalies.sh's notify_or_keep()). If
+# notify cannot confirm delivery, the baseline is left at its prior value so
+# the same delta is recomputed and re-notified on the next run instead of a
+# transient ntfy outage silently and permanently dropping the change.
+#
 # Cron: JST-daytime only — 0 0,4,8,12 * * * UTC = 09/13/17/21 JST
 # (/etc/cron.d/metal-watch-validators, installed by
 # scripts/install-watch-cron.sh). The old 0 */4 schedule landed two of six
@@ -61,6 +69,7 @@
 #   EXPLORER_API      explorer validators endpoint
 #   EXPLORER_MIN_VALIDATORS  sanity floor for the response size (default 50)
 #   WATCH_NOTIFY      notifier (default <repo>/scripts/notify.sh)
+#   NOTIFY_RETRY_SLEEP  seconds before the single in-run notify retry (default 5; tests override to 0)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -72,6 +81,37 @@ EXPLORER_MIN="${EXPLORER_MIN_VALIDATORS:-50}"
 NOTIFY="${WATCH_NOTIFY:-${ROOT}/scripts/notify.sh}"
 DRY=0
 [ "${1:-}" = "--dry-run" ] && DRY=1
+
+# --- delivery-confirmed notify (same pattern as check-anomalies.sh's
+# notify_or_keep(): strict mode + one in-run retry on the retryable classes,
+# state only advances on confirmed delivery). See R5 / MONITORING_NOTIFY_CALLERS.md.
+attempt_notify() {
+  local prio="$1" title="$2" body="$3"
+  if [ ! -x "$NOTIFY" ]; then
+    echo "check-watch-validators: notify script missing or not executable: $NOTIFY" >&2
+    return 100
+  fi
+  NOTIFY_STRICT_EXIT=1 bash "$NOTIFY" "$prio" "$title" "$body" >/dev/null 2>&1
+  return $?
+}
+retryable_notify_rc() {
+  case "$1" in
+    2|4|5) return 0 ;;   # transport / 429 / 5xx
+    *)     return 1 ;;
+  esac
+}
+notify_or_keep() {
+  local prio="$1" title="$2" body="$3" rc
+  attempt_notify "$prio" "$title" "$body"; rc=$?
+  if [ "$rc" -eq 0 ]; then return 0; fi
+  if retryable_notify_rc "$rc"; then
+    sleep "${NOTIFY_RETRY_SLEEP:-5}"
+    attempt_notify "$prio" "$title" "$body"; rc=$?
+    if [ "$rc" -eq 0 ]; then return 0; fi
+  fi
+  echo "check-watch-validators: notify permanent fail (rc=$rc, prio=$prio, title=\"$title\")" >&2
+  return "$rc"
+}
 
 # Pull the private list of NodeIDs to watch. Missing/empty/malformed list
 # is a graceful no-op so the cron stays green pre-install.
@@ -169,6 +209,7 @@ CHANGES=$(jq -n --argjson cur "$CURRENT_JSON" --argjson prev "$PREV_JSON" '
 ')
 
 NUM_CHANGES=$(echo "$CHANGES" | jq 'length')
+NOTIFY_CONFIRMED=1
 if [ "$NUM_CHANGES" = "0" ]; then
   echo "no changes on $(echo "$WATCH_IDS" | wc -l | tr -d ' ') watched validators"
 else
@@ -187,13 +228,21 @@ else
       end')
     BATCH_PRIO=$(echo "$CHANGES" | jq -r 'map(.type) |
       if any(. == "name_appeared" or . == "first_delegation") then "low" else "min" end')
-    bash "$NOTIFY" "$BATCH_PRIO" "Watch validators: ${NUM_CHANGES} change(s)" "$SUMMARY" || true
+    if notify_or_keep "$BATCH_PRIO" "Watch validators: ${NUM_CHANGES} change(s)" "$SUMMARY"; then
+      NOTIFY_CONFIRMED=1
+    else
+      NOTIFY_CONFIRMED=0
+      echo "notify not confirmed — baseline state NOT advanced so these ${NUM_CHANGES} change(s) are re-detected and re-notified next run" >&2
+    fi
   fi
 fi
 
-# Persist current state for next run — but NOT in dry-run: overwriting the
-# baseline without having notified would swallow the pending alerts (the next
-# real run would see "no change"). Dry-run must be side-effect-free.
-if [ "$DRY" = "0" ]; then
+# Persist current state for next run — but NOT in dry-run, and NOT when this
+# was a real run with change(s) to notify whose delivery could not be
+# confirmed (NOTIFY_CONFIRMED=0). Either would overwrite the baseline without
+# having notified and silently swallow the pending alert(s) — the next run
+# would see "no change" instead of retrying. A run with zero changes always
+# persists (pure observation, nothing to confirm).
+if [ "$DRY" = "0" ] && [ "$NOTIFY_CONFIRMED" = "1" ]; then
   echo "$CURRENT_JSON" > "$PREV_FILE"
 fi
