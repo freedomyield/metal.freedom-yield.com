@@ -30,7 +30,7 @@ read -r -d '' EXPECTED <<CRON || true
 # 2/3/4/5) the checker itself fires one high-priority ntfy push via
 # notify.sh naming the exit code, so the operator is alerted regardless of
 # cron's own (non-functional — no MTA on this host) mail delivery. The
-# `2>&1 | logger` here is a second, independent channel: if notify.sh itself
+# \`2>&1 | logger\` here is a second, independent channel: if notify.sh itself
 # cannot reach ntfy (e.g. the topic file is unreadable), the run's stderr is
 # still captured via journalctl/syslog instead of vanishing into cron's dead
 # mail queue. Non-broadcast, read-only HTTP GETs; see
