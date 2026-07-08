@@ -1,0 +1,48 @@
+name: CI (unconditional main push)
+
+# R6 + R8: two coverage gaps on the push-to-main path.
+#
+# R6 (secret scan): validate.yml's gitleaks job (`secret-scan`) is gated
+# `push: branches-ignore: [main]`, so it never runs on a push to main.
+# deploy.yml's own `secret-scan` job (the push-to-main gate) inherits
+# deploy.yml's `on: push: paths-ignore: [README.md, README.ja.md,
+# .gitignore, CLAUDE.md, docs/**]` -- so a docs-only push straight to main
+# was never scanned by either workflow.
+#
+# R8 (test suite): validate.yml's `tests` job (bash tests/run-all-tests.sh)
+# lives under the same `push: branches-ignore: [main]` gate as its gitleaks
+# job, so the repo's test suite never runs in CI on a direct push to main
+# either.
+#
+# This workflow closes both gaps: it triggers on every push to main with NO
+# paths-ignore, so every commit that lands on main is both gitleaks-scanned
+# and test-suite-checked somewhere. It is an INDEPENDENT check -- neither
+# job gates or feeds the deploy pipeline (no `needs`, deploy.yml untouched),
+# so a red run here never blocks a deploy.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  secret-scan:
+    name: gitleaks (unconditional main push, no paths-ignore)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Run gitleaks against full history
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  tests:
+    name: repo test suites (unconditional main push, no paths-ignore)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: bash tests/run-all-tests.sh
+        run: bash tests/run-all-tests.sh
