@@ -55,15 +55,18 @@ For at-least-once delivery semantics required by K-3 (commit C4), the caller nee
 
 ### 4.1 S1 — env-gated strict mode (recommended)
 
-`notify.sh` keeps today's default behaviour (= exit 0 unless missing topic or curl-level failure). A new env var `NOTIFY_RETURN_HTTP_STATUS=1` opts in to HTTP-aware exit codes:
+`notify.sh` keeps today's default behaviour (= exit 0 unless missing topic or curl-level failure). A new env var opts in to HTTP-aware exit codes.
+
+> **R15 reconciliation note (post-implementation):** this subsection originally proposed the env var name `NOTIFY_RETURN_HTTP_STATUS` with a 5-code table that folded all 4xx into one code and all 5xx into another. What actually shipped in C3b/C4 (`scripts/notify.sh:15-41`, consumed by `scripts/check-anomalies.sh:427-438`) uses the env var **`NOTIFY_STRICT_EXIT`** and a 6-code table that additionally splits HTTP 429 out from generic 4xx (429 is retryable — rate-limited; other 4xx are not). The table below has been corrected to match the shipped contract; `tests/notify/test-strict-exit-classification.sh` is the executable source of truth.
 
 ```
-NOTIFY_RETURN_HTTP_STATUS=1 bash notify.sh ...
+NOTIFY_STRICT_EXIT=1 bash notify.sh ...
   exit 0   HTTP 2xx
-  exit 1   missing/empty topic file (= same as today)
-  exit 2   curl transport failure (= timeout, DNS, connection refused)
-  exit 3   HTTP 4xx
-  exit 4   HTTP 5xx
+  exit 1   missing/empty topic file (= same as today; fatal, no retry)
+  exit 2   curl transport failure (= timeout, DNS, connection refused, unexpected 1xx/3xx; retryable)
+  exit 3   HTTP 4xx excluding 429 (= no retry)
+  exit 4   HTTP 429 (= rate-limited; retryable)
+  exit 5   HTTP 5xx (= server error; retryable)
 ```
 
 Without the env var, behaviour is byte-identical to today. K-3 (= the C4 transition processing) sets this env var explicitly for every call. Daily-status, notify-evidence-health, K-3.5 best-effort notifies, and the existing check-anomalies wrapper do not.
@@ -127,34 +130,51 @@ S3 is not recommended (= maintenance cost outweighs the isolation benefit, since
 
 ## 6. K-3 expected use under S1
 
+> **R15 reconciliation note (post-implementation):** the block below was originally C3a pseudocode (env var `NOTIFY_RETURN_HTTP_STATUS`, a blanket "anything not 0/1 is retryable" policy). It has been replaced with what actually shipped — the real `attempt_notify` / `notify_or_keep` pair in `scripts/check-anomalies.sh:427-469` — so this section no longer diverges from the code. Two behavioural differences from the original pseudocode, both intentional per the corrected §4.1 exit-code table:
+>
+> - Retry is scoped to rc 2 (transport), rc 4 (HTTP 429), rc 5 (HTTP 5xx) only — rc 3 (HTTP 4xx excluding 429) is a permanent failure, NOT retried (the original pseudocode's `rc != 0 && rc != 1` would have incorrectly retried 4xx).
+> - At most one retry (2 attempts total), fixed 5s backoff, no field-specific `notify_and_state` wrapper — the caller (each transition block) does its own `notify_or_keep "$prio" "$title" "$body" && candidate_set "$field" "$new_val"`.
+
 ```bash
-# inside scripts/check-anomalies.sh K-3 / notify_and_state (C4 commit)
+# scripts/check-anomalies.sh:427-469 (verbatim, K-3 notify retry classification)
 attempt_notify() {
   local prio="$1" title="$2" body="$3"
-  NOTIFY_RETURN_HTTP_STATUS=1 bash "$NOTIFY" "$prio" "$title" "$body"
+  if [ ! -x "$NOTIFY" ]; then
+    echo "[K-3] notify script missing or not executable: $NOTIFY" >&2
+    return 100
+  fi
+  NOTIFY_STRICT_EXIT=1 bash "$NOTIFY" "$prio" "$title" "$body" >/dev/null 2>&1
   return $?
 }
 
-# retry policy (= 1 retry, 5s backoff, exits 2/3/4 retryable, exit 1 fatal)
-notify_and_state() {
-  local prio="$1" title="$2" body="$3" field="$4" new_val="$5"
-  local rc
+retryable_notify_rc() {
+  case "$1" in
+    2|4|5) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# notify_or_keep <prio> <title> <body>
+#   returns 0  → caller MAY candidate_set the field
+#   returns !0 → caller MUST NOT mutate candidate (state stays at the
+#                original value; the next cron tick re-detects and retries)
+notify_or_keep() {
+  local prio="$1" title="$2" body="$3" rc
   attempt_notify "$prio" "$title" "$body"; rc=$?
-  if [ "$rc" -ne 0 ] && [ "$rc" -ne 1 ]; then
+  if [ "$rc" -eq 0 ]; then return 0; fi
+  if retryable_notify_rc "$rc"; then
     sleep 5
     attempt_notify "$prio" "$title" "$body"; rc=$?
+    if [ "$rc" -eq 0 ]; then return 0; fi
   fi
-  if [ "$rc" -eq 0 ]; then
-    candidate_set "$field" "$new_val"
-    return 0
-  fi
-  echo "[K-3] notify_and_state permanent fail (rc=$rc, field=$field); state field unchanged" >&2
-  GLOBAL_NOTIFY_RC=6
+  echo "[K-3] notify permanent fail (rc=$rc, prio=$prio, title=\"$title\")" >&2
+  rc_priority_set 6
   return "$rc"
 }
-```
 
-(Pseudocode for C4; not part of the C3a commit.)
+# caller shape, per transition block:
+#   notify_or_keep high "title" "$body" && candidate_set '.field' '"warn"'
+```
 
 ## 7. Out of scope for C3a
 
