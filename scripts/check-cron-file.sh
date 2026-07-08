@@ -51,14 +51,52 @@ if [ -z "$CRON_LINES" ]; then
   exit 1
 fi
 
-# ---- Rule 1: log redirect must NOT point at /var/log ----------------------
-echo "[1] Log path must be project-local, not /var/log/"
-if printf '%s\n' "$CRON_LINES" | grep -qE '>>\s*/var/log/'; then
-  fail "uses >> /var/log/<...>.log — deploy user cannot create files there."
-  note "Use a project-local path under /home/deploy/metal.freedom-yield.com/logs/ instead."
-  note "Root cause: /var/log is root:syslog 755; deploy is not in syslog group."
-else
+# ---- Rule 1: /var/log redirects must be verified-writable, not just absent -
+# The original rule failed EVERY >> /var/log/ redirect unconditionally. That
+# is right for a brand-new entry (the 2026-06-19 metal-evidence failure mode:
+# deploy has no create permission under /var/log/, root:syslog 0755), but it
+# false-flags the small set of /var/log/ crons that scripts/vps-bootstrap.sh
+# pre-provisions itself (touch + chown deploy:deploy + chmod 644, BEFORE the
+# cron ever fires) — those are verified-healthy in production, not the
+# failure mode this rule exists to catch. So: a /var/log/ target now passes
+# if it is either (a) already present on THIS machine and owned by `deploy`
+# (empirically verified writable — the vps-bootstrap.sh precondition holds),
+# or (b) its basename is in the allowlist below (verified pre-provisioned
+# elsewhere, but not directly observable from wherever this linter runs, e.g.
+# a Mac checkout linting a candidate file before it ever reaches the host).
+# Extending the allowlist requires the same pre-provisioning (touch + chown
+# deploy:deploy) to exist for that path — do not add a name here just to
+# silence the linter.
+echo "[1] Log path must be project-local, or a verified-writable /var/log/ target"
+KNOWN_GOOD_VAR_LOG_BASENAMES="server-status.log node-info.log daily-status.log anomalies.log validator-period.log"
+
+var_log_owner() {
+  # Prints the file owner username, or nothing if unreadable/unsupported.
+  stat -c '%U' "$1" 2>/dev/null || stat -f '%Su' "$1" 2>/dev/null || true
+}
+
+VARLOG_TARGETS="$(printf '%s\n' "$CRON_LINES" \
+  | grep -oE '>>[[:space:]]*/var/log/[A-Za-z0-9._-]+' \
+  | sed -E 's#^>>[[:space:]]*##' | sort -u || true)"
+
+if [ -z "$VARLOG_TARGETS" ]; then
   pass "no /var/log/ redirect."
+else
+  while IFS= read -r target; do
+    [ -z "$target" ] && continue
+    base="$(basename "$target")"
+    if [ -e "$target" ] && [ "$(var_log_owner "$target")" = "deploy" ]; then
+      pass "verified: $target exists and is deploy-owned (pre-provisioned)."
+    elif printf '%s\n' $KNOWN_GOOD_VAR_LOG_BASENAMES | grep -qxF "$base"; then
+      pass "allowlisted: $target (known pre-provisioned path — see scripts/vps-bootstrap.sh)"
+    else
+      fail "uses >> $target — not verified deploy-writable and not allowlisted."
+      note "Use a project-local path under .../logs/ instead, or pre-provision"
+      note "(touch + chown deploy:deploy) and add the basename to the allowlist here."
+    fi
+  done <<VARLOG
+$VARLOG_TARGETS
+VARLOG
 fi
 echo ""
 
