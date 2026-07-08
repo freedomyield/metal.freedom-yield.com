@@ -21,8 +21,9 @@
 #   3. Extract .tool_input.command.
 #   4. Scan for broadcast-capable command shapes (proton action /
 #      transaction / transaction:push, cleos push_transaction, curl/wget
-#      hitting push_transaction / issueTx / eth_sendRawTransaction /
-#      /ext/bc/[XPC]/, metalgo IssueTx).
+#      hitting push_transaction / send_transaction / issueTx /
+#      eth_sendRawTransaction / /ext/bc/[XPC]/ / the bare AvalancheGo
+#      aliases /ext/P and /ext/X, metalgo IssueTx).
 #   5. If none match, allow.
 #   6. If a match is found, it is a RAW direct broadcast (see the block
 #      comment below) and is refused UNCONDITIONALLY — an operator token
@@ -88,9 +89,17 @@ BROADCAST_PATTERNS=(
 	# ERE `[[:space:]_]` catches both space and underscore joiners.
 	'cleos[[:space:]]+.*push[[:space:]_]+(action|transaction)'
 	'(curl|wget)[[:space:]]+.*push_transaction'
+	# Antelope send_transaction / send_transaction2 (Leap's newer broadcast
+	# RPC, replacing the deprecated push_transaction on some node builds).
+	'(curl|wget)[[:space:]]+.*send_transaction'
 	'(curl|wget)[[:space:]]+.*issueTx'
 	'(curl|wget)[[:space:]]+.*eth_sendRawTransaction'
 	'(curl|wget)[[:space:]]+.*/ext/bc/[XPC]'
+	# AvalancheGo also exposes the P-chain and X-chain APIs at the bare
+	# alias paths /ext/P and /ext/X (in addition to /ext/bc/[XP] above).
+	# Boundary-checked so it doesn't false-positive on unrelated paths that
+	# merely start with "P"/"X" (e.g. /ext/Platform).
+	'(curl|wget)[[:space:]]+.*/ext/[XP]([^[:alnum:]]|$)'
 	'metalgo[[:space:]]+.*IssueTx'
 )
 

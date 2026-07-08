@@ -101,6 +101,24 @@ run_case "block: wget push_transaction" 2 \
 run_case "block: metalgo IssueTx" 2 \
 	'{"tool_name":"Bash","tool_input":{"command":"metalgo IssueTx arg"}}'
 
+# ---- R12: Antelope send_transaction + AvalancheGo bare /ext/P /ext/X aliases ----
+run_case "block: curl Antelope send_transaction endpoint" 2 \
+	'{"tool_name":"Bash","tool_input":{"command":"curl -sS -X POST http://api/v1/chain/send_transaction -d @tx.json"}}'
+run_case "block: curl Antelope send_transaction2 endpoint" 2 \
+	'{"tool_name":"Bash","tool_input":{"command":"curl -X POST http://api/v1/chain/send_transaction2 -d @tx.json"}}'
+run_case "block: wget Antelope send_transaction endpoint" 2 \
+	'{"tool_name":"Bash","tool_input":{"command":"wget --post-data=@tx.json http://api/v1/chain/send_transaction"}}'
+run_case "block: curl AvalancheGo bare alias /ext/P (no bc/ segment)" 2 \
+	'{"tool_name":"Bash","tool_input":{"command":"curl -X POST http://node/ext/P -d @tx.json"}}'
+run_case "block: curl AvalancheGo bare alias /ext/X (no bc/ segment)" 2 \
+	'{"tool_name":"Bash","tool_input":{"command":"curl -X POST http://node/ext/X -d @tx.json"}}'
+run_case "block: curl AvalancheGo bare alias /ext/P/ with trailing path" 2 \
+	'{"tool_name":"Bash","tool_input":{"command":"curl -X POST http://node/ext/P/ -d @tx.json"}}'
+run_case "allow: curl to unrelated /ext/Platform path (not the bare /ext/P alias)" 0 \
+	'{"tool_name":"Bash","tool_input":{"command":"curl -sS http://node/ext/Platform/status"}}'
+run_case "allow: word 'send_transaction' in unrelated grep context" 0 \
+	'{"tool_name":"Bash","tool_input":{"command":"grep send_transaction scripts/*.sh"}}'
+
 # ---- C2-1: raw direct broadcast is BLOCKED even with a fresh token ----
 # A broadcast shape reaching tier-1 is always a RAW direct call: the sanctioned
 # wrapper bin/safe-broadcast is invoked as `bin/safe-broadcast ...` (matches no
