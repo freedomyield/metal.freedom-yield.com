@@ -86,7 +86,7 @@ jobs:
           echo "DEPLOY_PATH=$(printf '%s' "$_DEPLOY_PATH" | xargs)" >> $GITHUB_ENV
           echo "✓ all required secrets are set"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Cache-bust assets URL with current commit hash
         # edge CDN PoP / browser cache 対策。

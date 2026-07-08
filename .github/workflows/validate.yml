@@ -14,7 +14,7 @@ jobs:
     name: JSON syntax
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Validate all JSON
         run: |
           set -e
@@ -44,7 +44,7 @@ jobs:
     name: Caddyfile
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Validate Caddyfile
         run: |
           docker run --rm \
@@ -62,7 +62,7 @@ jobs:
       METAL_NETWORK: tahoe
       METAL_PUBLIC_IP: 192.0.2.1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: site dev (override)
         run: docker compose -f docker-compose.yml -f docker-compose.override.yml config --quiet
       - name: site prod
@@ -76,7 +76,7 @@ jobs:
     name: HTML quick lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Check HTML files have <title>, lang, and viewport
         run: |
           set -e
@@ -93,7 +93,7 @@ jobs:
     name: Internal link check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Check that internal links resolve to existing files
         run: |
           set -e
@@ -121,7 +121,7 @@ jobs:
     name: Shell scripts
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: shellcheck on scripts/ and .githooks/
         run: |
           # shellcheck is preinstalled on ubuntu-latest
@@ -131,11 +131,11 @@ jobs:
     name: gitleaks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Run gitleaks against full history
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
