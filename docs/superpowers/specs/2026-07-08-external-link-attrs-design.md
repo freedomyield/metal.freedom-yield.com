@@ -187,3 +187,54 @@ unmodified by this change.
   script, inline or external.
 - It does not attempt to classify or rewrite non-`<a>` elements (`<link>`,
   `<script>`, `<img>`), even when they reference an external host.
+
+### Out of scope: `<a>` markup injected at runtime by JavaScript
+
+`scripts/apply-external-link-attrs.sh` and the CI gate built on it only ever read
+`*.html` files. An external `<a>` tag that does not exist as literal bytes in the
+shipped HTML — because a script builds the tag's markup as a string and inserts it
+into the DOM at page-load time — is invisible to both the tool and the gate, in
+either mode. `--check public` can exit `0` on a page whose rendered DOM still
+contains a non-compliant external link, because the anchor was never part of
+`public/**/*.html` in the first place.
+
+This is a real, currently-exercised code path on this site, not a theoretical gap:
+Metal Freedom Yield's peer map (`public/assets/peer-map.js`) uses the
+[Leaflet](https://leafletjs.com/) library's tile-layer `attribution` option, whose
+value is an HTML string that Leaflet inserts into the map's attribution control at
+runtime. That string is authored as a JavaScript string literal, not as page
+markup, so it never appears to the static-HTML tool at all. The same is true of any
+other `<a ...>` markup a `.js` file under `public/assets/` (or an inline
+`<script>` block in a page) might build via string concatenation, a template
+literal, or `insertAdjacentHTML`/`innerHTML`.
+
+Because the mechanism above cannot reach this class of link, it is **hand-maintained
+to the same `rel`/`target` policy** defined earlier in this document, and any new
+instance must be brought into compliance and reviewed by eye — the same allowlist,
+token-union, and canonical-ordering rules apply, just without automated
+enforcement. As of this writing, the known instance is:
+
+- `public/assets/peer-map.js` — the OpenStreetMap tile attribution
+  (`https://www.openstreetmap.org/copyright`, host not on the nofollow-exempt
+  allowlist) carries `rel="nofollow noopener noreferrer" target="_blank"`.
+
+Two further anchors in `public/assets/main.js` build a `<a href="...">` string from
+a cycle record's `explorer_url` field (the validator's own cycle-report table and
+cycle-audit list). Their destination host in every live and fixture data record is
+`explorer.xprnetwork.org`, which **is** on the nofollow-exempt allowlist, so they
+carry `rel="noopener noreferrer" target="_blank"` (no `nofollow`). Should a future
+data source ever populate `explorer_url` with a non-allowlisted host, that host
+would still receive the exempt-host `rel` value under the current hand-authored
+code — a limitation of static, non-conditional `rel` assignment in these two call
+sites, not of the design's classification rules.
+
+A prior audit finding also noted that `public/journal/index.html` and
+`public/ja/journal/index.html` each ship a static `<a class="journal-explorer"
+rel="noopener noreferrer">` template element with no `href` attribute at all;
+`public/assets/journal.js` sets `.href` on it at runtime from the same
+`explorer_url` field. Because the tag carries no `href` in the shipped HTML, the
+tool's own classification rule (`no href` → internal, untouched) skips it by
+design — it is a different pattern from JS-built anchor markup (a pre-existing
+static tag gaining a dynamic `href`, rather than a script emitting the whole tag),
+and is called out here for completeness but was not in scope for this hardening
+pass; it is flagged as a follow-up candidate.

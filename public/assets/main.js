@@ -902,7 +902,7 @@
 
 		var rows = cycles.map(function (c) {
 			var period = fmtDate(c.start_iso) + " → " + fmtDate(c.end_iso);
-			var ex = c.explorer_url ? ('<a href="' + c.explorer_url + '" rel="noopener" target="_blank">' + (ja ? "explorer ↗" : "explorer ↗") + '</a>') : "—";
+			var ex = c.explorer_url ? ('<a href="' + c.explorer_url + '" rel="noopener noreferrer" target="_blank">' + (ja ? "explorer ↗" : "explorer ↗") + '</a>') : "—";
 			return '<tr>' +
 				'<th scope="row"><span class="cycle-num">#' + (c.cycle_n || "?") + '</span></th>' +
 				'<td class="cycle-period">' + period + '<span class="cycle-duration">' + (c.duration_days || "?") + (ja ? " 日" : " days") + '</span></td>' +
@@ -1167,7 +1167,7 @@
 			var statusClass = ok ? "cadence-past-item--ok" : "cadence-past-item--warn";
 			var upStr = (typeof c.final_uptime_pct === "number") ? (c.final_uptime_pct.toFixed(2) + "%") : "—";
 			var ex = c.explorer_url
-				? ('<a href="' + c.explorer_url + '" rel="noopener" target="_blank" class="cadence-past-audit">' + (ja ? "audit ↗" : "audit ↗") + '</a>')
+				? ('<a href="' + c.explorer_url + '" rel="noopener noreferrer" target="_blank" class="cadence-past-audit">' + (ja ? "audit ↗" : "audit ↗") + '</a>')
 				: "";
 			return '<li class="cadence-past-item ' + statusClass + '">'
 				+ '<span class="cadence-past-status" aria-hidden="true">' + statusIcon + '</span>'

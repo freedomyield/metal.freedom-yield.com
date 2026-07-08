@@ -33,7 +33,7 @@
 		attributionControl: true,
 	});
 	L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-		attribution: '© <a href="https://www.openstreetmap.org/copyright" rel="noopener">OpenStreetMap</a>',
+		attribution: '© <a href="https://www.openstreetmap.org/copyright" rel="nofollow noopener noreferrer" target="_blank">OpenStreetMap</a>',
 		maxZoom: 8,
 		className: "peer-map-tile",
 	}).addTo(map);
