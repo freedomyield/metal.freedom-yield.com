@@ -26,7 +26,8 @@
 #     script) cannot unlock; a locked keystore causes proton to
 #     hang indefinitely (see reference_proton_cli_keystore_lock_quirk).
 #   - Broadcast authorization: this script auto-creates the
-#     /tmp/fyd-broadcast-token file (5-minute TTL) so bin/safe-broadcast
+#     /tmp/fyd-broadcast-token file (5-minute TTL), bound to chain=testnet-a
+#     and the exact composed tx (tx_sha256) per R16, so bin/safe-broadcast
 #     admits the invocation. Operator invokes the script → operator
 #     token = correct authorization pathway.
 #
@@ -41,7 +42,8 @@
 #   4. Compose 4-action tx JSON via sign-anchor-event.sh --dry-run,
 #      save to a tmpfile
 #   5. Save dry-run log for future mainnet gate 4 material
-#   6. Create broadcast token (/tmp/fyd-broadcast-token, TTL 5 min)
+#   6. Create broadcast token (/tmp/fyd-broadcast-token, TTL 5 min,
+#      chain+tx-bound per R16)
 #   7. Invoke bin/safe-broadcast --chain=testnet-a with the composed tx
 #   8. Extract tx_id, fetch tx from testnet Hyperion, run the
 #      gen-anchor-receipt 7-gate verify chain
@@ -167,9 +169,22 @@ echo "  sink:        $(jq -r .sink "$DRY_RUN_LOG")"
 echo "  dry-run log saved: $DRY_RUN_LOG  (= future mainnet gate-4 material)"
 
 # ---- step 5: create broadcast token ----
-step "5/9 create broadcast token (5-min TTL)"
-touch "$TOKEN_FILE" || fail "cannot create $TOKEN_FILE"
-echo "  token created at $TOKEN_FILE"
+# R16: the token is chain- AND content-bound (not a bare `touch`), so it
+# cannot be reused, within its TTL, to authorize a differently-shaped or
+# differently-targeted (e.g. mainnet) broadcast. Bind it to the exact tx
+# composed in step 4, using the same canonicalization bin/safe-broadcast
+# uses for its own tx_sha256 (jq -c . | sha256).
+step "5/9 create broadcast token (5-min TTL, chain+tx-bound per R16)"
+if command -v sha256sum >/dev/null 2>&1; then
+	TOKEN_TX_SHA256="$(jq -c . "$TX_FILE" | sha256sum | awk '{print $1}')"
+elif command -v shasum >/dev/null 2>&1; then
+	TOKEN_TX_SHA256="$(jq -c . "$TX_FILE" | shasum -a 256 | awk '{print $1}')"
+else
+	fail "sha256sum or shasum required to bind the broadcast token (R16)"
+fi
+[ -n "$TOKEN_TX_SHA256" ] || fail "failed to compute tx_sha256 for token binding"
+printf '{"chain":"testnet-a","tx_sha256":"%s"}' "$TOKEN_TX_SHA256" > "$TOKEN_FILE" || fail "cannot create $TOKEN_FILE"
+echo "  token created at $TOKEN_FILE (chain=testnet-a, tx_sha256=${TOKEN_TX_SHA256})"
 
 # ---- step 6: invoke bin/safe-broadcast ----
 step "6/9 invoke bin/safe-broadcast --chain=testnet-a --non-interactive"

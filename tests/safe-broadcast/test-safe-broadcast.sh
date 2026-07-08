@@ -58,6 +58,39 @@ case "$1" in
 esac
 STUB
 chmod +x "$STUB_DIR/proton"
+
+# ---- hermetic curl stub (R16 gate-1 resolution, mainnet path only) ----
+# To test R16 gate-2b (token content binding) on the MAINNET path we must
+# first satisfy gate 1 (--testnet-tx-id must resolve against the testnet
+# Hyperion endpoint), which normally requires a real network call. This stub
+# resolves ONLY a fixed sentinel id (R16_RESOLVABLE_TXID, defined below,
+# used exclusively by the new R16 gate-2b test cases) and returns "not
+# found" for anything else — in particular the PRE-EXISTING all-zeros id
+# used by the "testnet-tx-id shape-valid but unresolvable" case above stays
+# unresolvable, unchanged. bin/safe-broadcast has exactly one curl call site
+# (gate 1), so this is a safe, narrow, fully-offline stub.
+R16_RESOLVABLE_TXID="1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+cat > "$STUB_DIR/curl" <<STUB
+#!/usr/bin/env bash
+# Test stub for curl (see tests/safe-broadcast/test-safe-broadcast.sh).
+SENTINEL="${R16_RESOLVABLE_TXID}"
+BODY=""
+prev=""
+for a in "\$@"; do
+	if [ "\$prev" = "-d" ]; then
+		BODY="\$a"
+	fi
+	prev="\$a"
+done
+if printf '%s' "\$BODY" | grep -q "\$SENTINEL"; then
+	printf '{"id":"%s","block_num":123456}\n' "\$SENTINEL"
+else
+	echo '{}'
+fi
+exit 0
+STUB
+chmod +x "$STUB_DIR/curl"
+
 export PATH="$STUB_DIR:$PATH"
 
 cleanup() {
@@ -157,6 +190,79 @@ run_case "gate 1: mainnet, --testnet-tx-id shape-valid but unresolvable" 3 \
 touch "$TEST_TOKEN"
 export FYD_TESTNET_CHAIN_ID="ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
 run_case "gate 3: testnet, chain_id mismatch → refuse (exit 4)" 4 \
+	--tx="$TEST_TX_VALID" --chain=testnet-a --non-interactive
+unset FYD_TESTNET_CHAIN_ID
+
+# ---- R16: gate 2b (operator token CONTENT binding) ----
+# Freshness alone used to be sufficient (gate 2 above) — a token
+# touched/bound for testnet could otherwise silently authorize an unrelated
+# mainnet broadcast within the same TTL window. These cases exercise the
+# chain-binding and tx-content-binding checks directly.
+#
+# The mainnet-path cases need gate 1 (--testnet-tx-id resolution) to PASS
+# first, since gate 1 runs before gate 2/2b in the wrapper. R16_RESOLVABLE_TXID
+# (set up alongside the hermetic curl stub near the top of this file) is a
+# sentinel id our stub curl resolves deterministically offline, distinct
+# from the pre-existing "unresolvable" all-zeros fixture above.
+if command -v sha256sum >/dev/null 2>&1; then
+	TEST_TX_VALID_SHA256="$(jq -c . "$TEST_TX_VALID" | sha256sum | awk '{print $1}')"
+else
+	TEST_TX_VALID_SHA256="$(jq -c . "$TEST_TX_VALID" | shasum -a 256 | awk '{print $1}')"
+fi
+
+# Mismatched chain binding: token bound to testnet-a, broadcast targets
+# mainnet-a → refuse at gate 2b (exit 3), BEFORE gate 3 is ever reached.
+# This is the exact scenario R16 exists to close: a testnet-bound token
+# must not be able to authorize a mainnet broadcast.
+printf '{"chain":"testnet-a"}' > "$TEST_TOKEN"
+run_case "gate 2b: mainnet, token bound to testnet-a → refuse (exit 3)" 3 \
+	--tx="$TEST_TX_VALID" \
+	--chain=mainnet-a \
+	--testnet-tx-id="$R16_RESOLVABLE_TXID" \
+	--dry-run-log="$TEST_DRY_LOG" \
+	--non-interactive
+
+# Legacy/unbound token (bare touch — no JSON content): mainnet refuses
+# unconditionally, fail-closed. (Testnet keeps accepting this for backward
+# compatibility — already proven by the "gate 3: testnet, chain_id
+# mismatch" case above, which uses a bare-touched token and still reaches
+# gate 3, not gate 2.)
+: > "$TEST_TOKEN"
+touch "$TEST_TOKEN"
+run_case "gate 2b: mainnet, legacy/unbound token → refuse (exit 3, fail-closed)" 3 \
+	--tx="$TEST_TX_VALID" \
+	--chain=mainnet-a \
+	--testnet-tx-id="$R16_RESOLVABLE_TXID" \
+	--dry-run-log="$TEST_DRY_LOG" \
+	--non-interactive
+
+# Correctly-bound token (chain=mainnet-a, matching --chain=mainnet-a): gate
+# 2b passes and processing reaches gate 3, where the hermetic proton stub
+# (which always answers with the TESTNET chain_id) deterministically
+# mismatches the MAINNET expected chain_id → exit 4. This proves the token
+# was accepted through gate 2b — a correctly-bound token still authorizes,
+# as far as this hermetic suite can observe without a live proton/network
+# (full success is covered by the testnet E2E rehearsal, T-I-20260701).
+printf '{"chain":"mainnet-a"}' > "$TEST_TOKEN"
+run_case "gate 2b: mainnet, token correctly bound to mainnet-a → passes (reaches gate 3, exit 4)" 4 \
+	--tx="$TEST_TX_VALID" \
+	--chain=mainnet-a \
+	--testnet-tx-id="$R16_RESOLVABLE_TXID" \
+	--dry-run-log="$TEST_DRY_LOG" \
+	--non-interactive
+
+# tx_sha256 binding (stronger, optional layer): chain matches but the bound
+# tx_sha256 does not match the actual --tx content → refuse (exit 3).
+printf '{"chain":"testnet-a","tx_sha256":"%s"}' "0000000000000000000000000000000000000000000000000000000000000000" > "$TEST_TOKEN"
+run_case "gate 2b: testnet, tx_sha256 bound but mismatched → refuse (exit 3)" 3 \
+	--tx="$TEST_TX_VALID" --chain=testnet-a --non-interactive
+
+# tx_sha256 binding: chain AND tx_sha256 both match → gate 2b passes,
+# reaches gate 3 (exit 4 via the same bogus FYD_TESTNET_CHAIN_ID override
+# used in the "gate 3: testnet, chain_id mismatch" case above).
+export FYD_TESTNET_CHAIN_ID="ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+printf '{"chain":"testnet-a","tx_sha256":"%s"}' "$TEST_TX_VALID_SHA256" > "$TEST_TOKEN"
+run_case "gate 2b: testnet, chain+tx_sha256 correctly bound → passes (reaches gate 3, exit 4)" 4 \
 	--tx="$TEST_TX_VALID" --chain=testnet-a --non-interactive
 unset FYD_TESTNET_CHAIN_ID
 

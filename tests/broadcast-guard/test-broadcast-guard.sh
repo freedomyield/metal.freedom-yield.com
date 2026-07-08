@@ -130,11 +130,25 @@ run_case "block: proton transaction:push WITH fresh token, no safe-broadcast mar
 run_case "block: curl issueTx WITH fresh token, no safe-broadcast marker" 2 \
 	'{"tool_name":"Bash","tool_input":{"command":"curl http://node/ext/bc/P/issueTx"}}'
 
-# ---- sanctioned wrapper path: safe-broadcast marker + fresh token → allow ----
+# ---- sanctioned wrapper path: safe-broadcast marker + fresh BOUND token → allow ----
 # bin/safe-broadcast exports FYD_SAFE_BROADCAST=1 before it calls proton; that
-# marker is the only way a broadcast shape is allowed through tier-1.
+# marker is the only way a broadcast shape is allowed through tier-1. Per
+# R16 the token must also be chain-bound (JSON with a non-empty "chain"),
+# not merely a fresh empty file — see the block case right after this one.
 export FYD_SAFE_BROADCAST=1
-run_case "allow: proton transaction:push WITH safe-broadcast marker + fresh token" 0 \
+printf '{"chain":"mainnet-a"}' > "$TEST_TOKEN"
+run_case "allow: proton transaction:push WITH safe-broadcast marker + fresh BOUND token (R16)" 0 \
+	'{"tool_name":"Bash","tool_input":{"command":"proton transaction:push arg"}}'
+
+# R16: a fresh token that is NOT chain-bound (legacy bare `touch`, no JSON
+# content) must now be refused at this defense-in-depth layer too — fresh
+# alone is no longer sufficient once FYD_SAFE_BROADCAST=1 is set. Note:
+# `touch` on an ALREADY-EXISTING file only updates mtime, it does not empty
+# the content — truncate explicitly so this is genuinely a bare/legacy token
+# and not leftover bound JSON from the case above.
+: > "$TEST_TOKEN"
+touch "$TEST_TOKEN"
+run_case "block: safe-broadcast marker + fresh but UNBOUND legacy token → block (R16)" 2 \
 	'{"tool_name":"Bash","tool_input":{"command":"proton transaction:push arg"}}'
 unset FYD_SAFE_BROADCAST
 

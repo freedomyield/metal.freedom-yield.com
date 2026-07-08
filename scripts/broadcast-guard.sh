@@ -29,7 +29,8 @@
 #      comment below) and is refused UNCONDITIONALLY — an operator token
 #      does NOT override it. The only exception is the sanctioned wrapper
 #      bin/safe-broadcast, which sets FYD_SAFE_BROADCAST=1; that path still
-#      requires a fresh operator token.
+#      requires a fresh, chain-bound operator token (R16 — see the
+#      bin/safe-broadcast usage header for the token-binding ritual).
 #   7. On the sanctioned-path allow, append (timestamp, invoker, tool_name,
 #      command) to the audit log for tier-4 cross-check.
 #
@@ -185,8 +186,27 @@ if [ "$AGE" -ge "$TOKEN_TTL" ]; then
 	exit 2
 fi
 
-# Sanctioned path with a fresh token. Log the authorized broadcast for
-# tier-4 cross-check.
+# R16 hardening: a fresh token is no longer sufficient on its own — it must
+# also be BOUND (a JSON object with a non-empty "chain" field), not merely a
+# bare/empty file created by `touch`. This is defense in depth ON TOP OF the
+# freshness check above: a fresh-but-unbound token no longer satisfies this
+# layer. Rationale: a token touched for one broadcast context must not be
+# silently reusable, within its TTL, to authorize an unrelated one (e.g. a
+# testnet token reused for a mainnet broadcast) — see bin/safe-broadcast,
+# which is the AUTHORITATIVE enforcer of the chain/content match against
+# --chain= (this hook cannot see which chain was targeted from the command
+# text alone, since chain selection happens via a separate `proton
+# chain:set` call inside the wrapper before the broadcast call is issued;
+# on the legitimate path bin/safe-broadcast has already verified the match
+# before this hook is ever reached). jq is already confirmed present above.
+TOKEN_BOUND_CHAIN="$(jq -r '.chain // empty' "$TOKEN_FILE" 2>/dev/null)"
+if [ -z "$TOKEN_BOUND_CHAIN" ]; then
+	printf '=== PRIME_DIRECTIVE_VIOLATION ===\nbroadcast-guard: operator token is not chain-bound (legacy/bare token); failing closed (R16). Use the chain-bound token ritual documented in the bin/safe-broadcast usage header.\n' >&2
+	exit 2
+fi
+
+# Sanctioned path with a fresh, bound token. Log the authorized broadcast
+# for tier-4 cross-check.
 TS="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 INVOKER="${USER:-unknown}"
 # Truncate command to 800 chars to keep log lines bounded; secrets in
