@@ -34,8 +34,35 @@ TEST_DRY_LOG="$(mktemp -t safe-bcast-dryrun.XXXXXX)"
 export FYD_BROADCAST_TOKEN_FILE="$TEST_TOKEN"
 export FYD_BROADCAST_AUDIT_LOG="$TEST_AUDIT"
 
+# ---- hermetic proton stub ----
+# The wrapper does `command -v proton || exit 4` (bin/safe-broadcast) as a
+# pre-gate check, BEFORE any PRIME DIRECTIVE gate. On a host without the real
+# proton CLI (e.g. the CI ubuntu runner) every gate-1/gate-2 scenario — which
+# expects exit 3 — would instead exit 4 at that pre-gate check and never reach
+# its intended gate. To make this suite hermetic (identical behaviour on macOS
+# and Linux, with or without the real CLI installed) we put a stub `proton` on
+# PATH for ALL scenarios. It only needs to (a) satisfy `command -v proton`, and
+# (b) answer the gate-3 chain:info probe with a well-formed chain_id. No test
+# case reaches the actual broadcast, so the stub never issues one — it does NOT
+# weaken any assertion, it only removes the environment's real-proton dependency.
+# The gate-3 scenario overrides FYD_TESTNET_CHAIN_ID to a bogus value, so the
+# stub's (real, default) chain_id deliberately mismatches → exit 4, as intended.
+STUB_DIR="$(mktemp -d -t safe-bcast-stub.XXXXXX)"
+cat > "$STUB_DIR/proton" <<'STUB'
+#!/usr/bin/env bash
+# Test stub for proton-cli (see tests/safe-broadcast/test-safe-broadcast.sh).
+case "$1" in
+	chain:set)  exit 0 ;;
+	chain:info) echo '{"chain_id":"71ee83bcf52142d61019d95f9cc5427ba6a0d7ff8accd9e2088ae2abeaf3d3dd","head_block_num":1}' ; exit 0 ;;
+	*)          exit 0 ;;
+esac
+STUB
+chmod +x "$STUB_DIR/proton"
+export PATH="$STUB_DIR:$PATH"
+
 cleanup() {
 	rm -f "$TEST_TOKEN" "$TEST_AUDIT" "$TEST_TX_VALID" "$TEST_TX_EMPTY" "$TEST_DRY_LOG"
+	rm -rf "$STUB_DIR"
 }
 trap cleanup EXIT
 
