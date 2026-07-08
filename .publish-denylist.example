@@ -3,6 +3,9 @@
 # publish-guard already blocks, with NO configuration:
 #   - ANY real public IPv4 literal (RFC5737 / RFC1918 / loopback / link-local /
 #     CGNAT / multicast are allowed) — so you do NOT need to list a host IP here.
+#   - ANY real public IPv6 literal (2001:db8::/32 doc / fc00::/7 unique-local /
+#     fe80::/10 link-local / ::1 loopback / ff00::/8 multicast are allowed) —
+#     the validator host is dual-stack, so this covers the IPv6 address too.
 #   - the operator handle and the validator SSH key name, matched by embedded
 #     sha256 (the raw words are never stored in the tracked script).
 #

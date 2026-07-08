@@ -54,6 +54,8 @@ Register the **administrative public key** in your VPS provider's SSH-key store 
 
 If your provider separates compute and storage, attach the storage volume in the **same region** as the compute instance to keep latency in single-digit milliseconds.
 
+> **Host identifier discipline**: the host is dual-stack (IPv4 + IPv6), so treat both addresses as SECRET (Constitution §4.1 S7) — neither belongs in a commit, doc, or public config. `scripts/publish-guard.sh` blocks a real public IPv4 **and** a real public IPv6 literal automatically (doc/link-local/loopback/unique-local/multicast ranges on either protocol are allowed); it does not need per-project configuration for this.
+
 ## 3. Network firewall (provider-managed)
 
 Whichever provider you use, configure the cloud-side firewall **before** the OS-level firewall. Cloud firewalls drop traffic upstream of the VPS, which both protects the host and saves bandwidth.

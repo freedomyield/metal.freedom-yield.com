@@ -12,8 +12,11 @@
 # WHAT IT BLOCKS:
 #   A.  real public IPv4 literal (RFC5737 doc / RFC1918 / loopback / link-local
 #       / CGNAT / multicast are ALLOWED).
-#   A2. Japanese phone-number literal (mobile 070/080/090, ± separators).
-#   A3. personal email literal (any domain NOT in the allowlist below).
+#   A2. real public IPv6 literal (2001:db8::/32 doc / fc00::/7 unique-local /
+#       fe80::/10 link-local / ::1 loopback / :: unspecified / ff00::/8
+#       multicast are ALLOWED — analogous to the IPv4 exclusions above).
+#   A3. Japanese phone-number literal (mobile 070/080/090, ± separators).
+#   A4. personal email literal (any domain NOT in the allowlist below).
 #   B.  forbidden ASCII word-literals (operator handle, surname, company slug,
 #       validator SSH key name) matched by sha256(lowercased token).
 #   C.  forbidden non-ASCII (CJK) literals (operator real name, company name in
@@ -124,7 +127,7 @@ fi
 
 [ -z "$SCAN_TEXT" ] && exit 0
 
-# ---- core scan (A: IP, A2: phone, A3: email, B: word hash, C: CJK hash) ----
+# ---- core scan (A: IPv4, A2: IPv6, A3: phone, A4: email, B: word hash, C: CJK hash) ----
 FINDINGS="$(
 	printf '%s' "$SCAN_TEXT" | WORDH="$WORD_HASHES" CJKH="$CJK_HASHES" \
 	perl -MDigest::SHA=sha256_hex -0777 -ne '
@@ -146,13 +149,36 @@ FINDINGS="$(
 			next if $a>=224;
 			push @hits, "public-IPv4 literal ($a.$b.x.x)";
 		}
-		# A2. Japanese mobile phone (070/080/090, optional separators). Boundaries
+		# A2. public IPv6 literals. Candidate shapes are the standard compressed
+		# and uncompressed forms (adapted from the widely-used RFC4291 regex);
+		# excluded ranges mirror the IPv4 exclusions above:
+		#   ::1        loopback         (cf. IPv4 127.0.0.0/8)
+		#   ::         unspecified      (cf. IPv4 0.0.0.0)
+		#   fc00::/7   unique-local     (cf. IPv4 RFC1918 private)
+		#   fe80::/10  link-local       (cf. IPv4 169.254.0.0/16)
+		#   2001:db8::/32 documentation (cf. IPv4 RFC5737 doc)
+		#   ff00::/8   multicast        (cf. IPv4 >=224 multicast)
+		while (/(?<![0-9A-Fa-f:])((?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,7}:|(?:[0-9A-Fa-f]{1,4}:){1,6}:[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,5}(?::[0-9A-Fa-f]{1,4}){1,2}|(?:[0-9A-Fa-f]{1,4}:){1,4}(?::[0-9A-Fa-f]{1,4}){1,3}|(?:[0-9A-Fa-f]{1,4}:){1,3}(?::[0-9A-Fa-f]{1,4}){1,4}|(?:[0-9A-Fa-f]{1,4}:){1,2}(?::[0-9A-Fa-f]{1,4}){1,5}|[0-9A-Fa-f]{1,4}:(?::[0-9A-Fa-f]{1,4}){1,6}|:(?::[0-9A-Fa-f]{1,4}){1,7})(?![0-9A-Fa-f:])/g) {
+			my $addr = lc $1;
+			next if $addr eq "::1" || $addr eq "::";
+			my ($first) = $addr =~ /^([0-9a-f]{1,4})/;
+			my $f = defined($first) ? hex($first) : 0;
+			next if ($f & 0xffc0) == 0xfe80;   # fe80::/10 link-local
+			next if ($f & 0xfe00) == 0xfc00;   # fc00::/7 unique-local
+			next if ($f & 0xff00) == 0xff00;   # ff00::/8 multicast
+			if ($f == 0x2001) {
+				my ($second) = $addr =~ /^[0-9a-f]{1,4}:([0-9a-f]{1,4})/;
+				next if defined($second) && hex($second) == 0x0db8;  # 2001:db8::/32 doc
+			}
+			push @hits, "public-IPv6 literal (redacted)";
+		}
+		# A3. Japanese mobile phone (070/080/090, optional separators). Boundaries
 		# exclude adjacent alphanumerics so an 11-digit run inside a hex string
 		# (e.g. a git SHA or a sha256 literal) is not mistaken for a phone.
 		while (/(?<![0-9A-Za-z])0[789]0[-\s]?\d{4}[-\s]?\d{4}(?![0-9A-Za-z])/g) {
 			push @hits, "phone-number literal (redacted)";
 		}
-		# A3. personal email (any domain NOT allowlisted)
+		# A4. personal email (any domain NOT allowlisted)
 		while (/[A-Za-z0-9._%+\-]+\@([A-Za-z0-9.\-]+\.[A-Za-z]{2,})/g) {
 			my $dom = lc $1;
 			next if $dom =~ /(?:^|\.)(?:metal\.freedom-yield\.com|freedom-yield\.com|anthropic\.com|(?:users\.)?noreply\.github\.com|example\.(?:com|org|net))$/;
@@ -202,7 +228,8 @@ if [ -n "$FINDINGS" ] || [ -n "$DENY_HIT" ]; then
 		[ -n "$FINDINGS" ] && printf '%s\n' "$FINDINGS"
 		[ -n "$DENY_HIT" ] && printf '%s\n' "$DENY_HIT"
 		echo
-		echo "Fix: use an RFC5737 doc IP (192.0.2/198.51.100/203.0.113.x) not a real host IP;"
+		echo "Fix: use an RFC5737 doc IP (192.0.2/198.51.100/203.0.113.x) or a 2001:db8::/32 doc"
+		echo "     IPv6 not a real host IP;"
 		echo "     never commit the operator handle / real name / company name / phone / personal email"
 		echo "     / validator SSH key name. Keep genuinely local files gitignored."
 	} >&2
