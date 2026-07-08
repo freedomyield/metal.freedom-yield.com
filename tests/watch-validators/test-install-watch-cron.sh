@@ -22,10 +22,15 @@ FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "PASS  $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL  $1"; }
 
+CHECKER="${REPO_ROOT}/scripts/check-cron-file.sh"
+
 DIR=""
 setup()    { DIR="$(mktemp -d -t watch-cron-test.XXXXXX)"; }
 teardown() { rm -rf "$DIR"; DIR=""; }
-run_installer() { FYD_CRON_FILE="$DIR/cron-file" FYD_BACKUP_DIR="$DIR/backups" bash "$INSTALLER" "$@"; }
+run_installer() {
+	FYD_CRON_FILE="$DIR/cron-file" FYD_BACKUP_DIR="$DIR/backups" FYD_REPO_DIR="$DIR/repo" \
+		bash "$INSTALLER" "$@"
+}
 cron() { cat "$DIR/cron-file" 2>/dev/null; }
 
 # ---- case 1: fresh install — JST-daytime schedule, no night ticks ------------------
@@ -47,6 +52,35 @@ cron | grep -q 'check-watch-validators.sh' \
 cron | grep -q '^NTFY_TOPIC_FILE=/etc/freedom-yield/ntfy-topic$' \
 	&& ok "install: carries the NTFY_TOPIC_FILE env header" \
 	|| bad "install: carries the NTFY_TOPIC_FILE env header"
+# R3: log-redirect pattern (2026-07-08 rework of the /var/log/ redirect that
+# would have failed check-cron-file.sh — same class as the 2026-06-19 incident).
+cron | grep -qE '>>\s*/var/log/' \
+	&& bad "install: no /var/log/ redirect remains" \
+	|| ok "install: no /var/log/ redirect remains"
+cron | grep -qF ">> ${DIR}/repo/logs/check-watch.log" \
+	&& ok "install: redirects to project-local logs/check-watch.log" \
+	|| bad "install: redirects to project-local logs/check-watch.log (cron: $(cron))"
+cron | grep -qE '\{[^}]*&&[^{]*\}\s*>>' \
+	&& ok "install: chain is brace-wrapped around the redirect" \
+	|| bad "install: chain is brace-wrapped around the redirect (cron: $(cron))"
+cron | grep -q 'rc=$?' \
+	&& ok "install: captures rc=\$?" \
+	|| bad "install: captures rc=\$? (cron: $(cron))"
+cron | grep -qE 'echo[^|]*start' && cron | grep -qE 'echo[^|]*end' \
+	&& ok "install: has start/end markers" \
+	|| bad "install: has start/end markers (cron: $(cron))"
+[ -f "$DIR/repo/logs/check-watch.log" ] \
+	&& ok "install: creates the project-local log file" \
+	|| bad "install: creates the project-local log file"
+if [ -x "$CHECKER" ]; then
+	bash "$CHECKER" "$DIR/cron-file" >/dev/null 2>&1
+	RC=$?
+	[ "$RC" -eq 0 ] \
+		&& ok "install: generated cron passes check-cron-file.sh" \
+		|| bad "install: generated cron passes check-cron-file.sh (rc=$RC)"
+else
+	echo "SKIP  lint case (check-cron-file.sh not executable)"
+fi
 teardown
 
 # ---- case 2: idempotent — second run is a no-op, no backup created ------------------
@@ -86,6 +120,9 @@ RC=$?
 [ -f "$DIR/cron-file" ] \
 	&& bad "dry-run: nothing written" \
 	|| ok "dry-run: nothing written"
+[ -e "$DIR/repo" ] \
+	&& bad "dry-run: no side-effect log dir created" \
+	|| ok "dry-run: no side-effect log dir created"
 teardown
 
 # ---- case 5: unknown arg → usage error ---------------------------------------------------
@@ -95,6 +132,22 @@ RC=$?
 [ "$RC" -eq 1 ] \
 	&& ok "unknown arg: exit 1" \
 	|| bad "unknown arg: exit 1 (actual=$RC)"
+teardown
+
+# ---- case 6: check-cron-file.sh pre-flight gate blocks a bad candidate --------------------
+setup
+STUB="$DIR/always-fail-checker.sh"
+printf '#!/usr/bin/env bash\necho "stub: forced failure"\nexit 1\n' > "$STUB"
+chmod +x "$STUB"
+OUT="$(FYD_CRON_FILE="$DIR/cron-file" FYD_BACKUP_DIR="$DIR/backups" FYD_REPO_DIR="$DIR/repo" \
+	FYD_CRON_CHECKER="$STUB" bash "$INSTALLER" 2>&1)"
+RC=$?
+[ "$RC" -eq 3 ] \
+	&& ok "lint gate: exit 3 when check-cron-file.sh fails" \
+	|| bad "lint gate: exit 3 when check-cron-file.sh fails (actual=$RC, out: $OUT)"
+[ -f "$DIR/cron-file" ] \
+	&& bad "lint gate: nothing installed on lint failure" \
+	|| ok "lint gate: nothing installed on lint failure"
 teardown
 
 # ---- summary ------------------------------------------------------------------------------

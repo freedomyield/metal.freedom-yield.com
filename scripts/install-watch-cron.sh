@@ -12,6 +12,16 @@
 #
 # (2026-07-07 rework after four "departed" pushes landed at 01:00 JST.)
 #
+# 2026-07-08: the generated cron redirected straight to /var/log/check-watch.log
+# — the same class of failure that caused the 2026-06-19 metal-evidence incident
+# (deploy user cannot create files under /var/log/). Reworked to the
+# project-local logs/ pattern documented in docs/CRON_CONVENTIONS.md: the
+# command chain is brace-wrapped so the redirect covers every command, start/end
+# markers + rc=$? capture make each run auditable, and the log target is under
+# the repo's own logs/ dir (deploy:deploy owned). The generated file is linted
+# with check-cron-file.sh before every install — a lint failure aborts the
+# install instead of writing a non-compliant cron.
+#
 # Idempotent: identical content → no change. A differing existing file is
 # backed up OUTSIDE cron.d — under ${FYD_BACKUP_DIR:-/var/backups/metal-cron}
 # as <name>.bak-<UTC ts> — because a *.bak sidecar left in /etc/cron.d is
@@ -26,15 +36,18 @@
 #   FYD_CRON_FILE   target path (default /etc/cron.d/metal-watch-validators).
 #                   When overridden, the root requirement and root ownership
 #                   are waived (test harness mode).
-#   FYD_REPO_DIR    repo checkout on the host
-#                   (default /home/deploy/metal.freedom-yield.com)
+#   FYD_REPO_DIR    repo checkout on the host — also where logs/check-watch.log
+#                   is created (default /home/deploy/metal.freedom-yield.com)
 #   FYD_BACKUP_DIR  where a differing prior cron is backed up, OUTSIDE
 #                   cron.d (default /var/backups/metal-cron)
+#   FYD_CRON_CHECKER  path to check-cron-file.sh used for the pre-flight lint
+#                   (default: the copy next to this script). Test-only knob.
 #
 # Exit codes:
 #   0  installed / already up to date / dry-run
 #   1  usage error
 #   2  not root (and FYD_CRON_FILE not overridden)
+#   3  generated cron file failed the check-cron-file.sh pre-flight lint
 
 set -euo pipefail
 
@@ -47,7 +60,7 @@ DRY_RUN=0
 for arg in "$@"; do
 	case "$arg" in
 		--dry-run) DRY_RUN=1 ;;
-		-h|--help) sed -n '2,37p' "$0" | sed 's/^# \?//'; exit 0 ;;
+		-h|--help) sed -n '2,45p' "$0" | sed 's/^# \?//'; exit 0 ;;
 		*)         echo "ERROR: unknown arg: $arg" >&2; exit 1 ;;
 	esac
 done
@@ -66,22 +79,56 @@ CONTENT="$(cat <<EOF
 # widen back to */4 — that lands ticks at 01:00/05:00 JST and this feed
 # never justifies waking the operator (2026-07-07 incident).
 #
+# Log path is project-local (logs/), not /var/log/ — see docs/CRON_CONVENTIONS.md.
+# The chain is brace-wrapped with start/end markers + rc capture (rules 1-3 of
+# that doc) and this file is linted by check-cron-file.sh before every install.
+#
 # Managed by scripts/install-watch-cron.sh — edit there, not here.
 SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin
 NTFY_TOPIC_FILE=/etc/freedom-yield/ntfy-topic
-0 0,4,8,12 * * * deploy cd ${REPO_DIR} && bash scripts/check-watch-validators.sh >> /var/log/check-watch.log 2>&1
+0 0,4,8,12 * * * deploy { echo "=== metal-watch-validators start \$(date -u +\%FT\%TZ) ==="; cd ${REPO_DIR} && bash scripts/check-watch-validators.sh; rc=\$?; echo "=== metal-watch-validators end \$(date -u +\%FT\%TZ) rc=\$rc ==="; } >> ${REPO_DIR}/logs/check-watch.log 2>&1
 EOF
 )"
+
+TMP="$(mktemp)"
+printf '%s\n' "$CONTENT" > "$TMP"
+
+CHECKER="${FYD_CRON_CHECKER:-$(cd "$(dirname "$0")" && pwd)/check-cron-file.sh}"
+if [ -x "$CHECKER" ]; then
+	if ! bash "$CHECKER" "$TMP"; then
+		echo "ERROR: proposed cron file failed check-cron-file.sh pre-flight — not installing" >&2
+		rm -f "$TMP"
+		exit 3
+	fi
+fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
 	echo "DRY-RUN: would write ${CRON_FILE}:"
 	printf '%s\n' "$CONTENT"
+	rm -f "$TMP"
 	exit 0
+fi
+
+# Ensure the project-local log directory + file exist ahead of the first
+# firing — an absent logs/ dir would make the cron's redirect fail before
+# check-watch-validators.sh ever runs (same failure class this rework fixes).
+# logs/ is tracked via logs/.gitkeep so a checkout normally already has it;
+# this is belt-and-suspenders. Real-target ownership (deploy:deploy) is only
+# enforced when installing to the actual cron.d path — test harness mode
+# (FYD_CRON_FILE overridden) skips chown so it never needs root or a real
+# `deploy` account.
+LOG_DIR="${REPO_DIR}/logs"
+LOG_FILE="${LOG_DIR}/check-watch.log"
+mkdir -p "$LOG_DIR"
+touch "$LOG_FILE"
+if [ "$CRON_FILE" = "/etc/cron.d/metal-watch-validators" ]; then
+	chown deploy:deploy "$LOG_DIR" "$LOG_FILE" 2>/dev/null || true
 fi
 
 if [ -f "$CRON_FILE" ] && [ "$(cat "$CRON_FILE")" = "$CONTENT" ]; then
 	echo "ok: ${CRON_FILE} already up to date (no change)"
+	rm -f "$TMP"
 	exit 0
 fi
 
@@ -93,11 +140,10 @@ if [ -f "$CRON_FILE" ]; then
 	echo "backed up prior cron to ${BACKUP_FILE}"
 fi
 
-TMP="$(mktemp)"
-printf '%s\n' "$CONTENT" > "$TMP"
 chmod 644 "$TMP"
 if [ "$CRON_FILE" = "/etc/cron.d/metal-watch-validators" ]; then
 	chown root:root "$TMP"
 fi
 mv "$TMP" "$CRON_FILE"
 echo "installed: ${CRON_FILE} (schedule: 0 0,4,8,12 * * * UTC = 09/13/17/21 JST)"
+echo "log:       ${LOG_FILE}"
