@@ -7,13 +7,29 @@
 # Discovers and runs every executable test-*.sh under tests/, reports
 # per-suite PASS/FAIL, exits 0 iff every suite exits 0.
 #
+# Before any suite runs, a preflight guard (added 2026-07-08) inspects the
+# environment itself: it refuses to proceed if python3 resolves to a shim
+# (a crashed prior session once replaced the machine's real python3 with a
+# scratchpad shell-script shim to fake a JSON-schema validator, and the
+# suite still reported GREEN against that corrupted interpreter — nothing
+# detected it), and it refuses to proceed if no JSON-schema validator (ajv
+# or python3+jsonschema) is available at all, instead of letting
+# validator-dependent suites silently skip or pass. See
+# preflight_check_interpreter_integrity / preflight_check_validator_presence
+# below for the exact checks the guard performs.
+#
 # Usage:
-#   bash tests/run-all-tests.sh [--pattern=<glob>]
+#   bash tests/run-all-tests.sh [--pattern=<glob>] [--preflight-only]
 #
 # Options:
-#   --pattern=<glob>   Only run test files matching the glob.
-#                      Default: 'test-*.sh'
-#   --verbose          Show sub-suite stdout inline (default: summary only).
+#   --pattern=<glob>    Only run test files matching the glob.
+#                       Default: 'test-*.sh'
+#   --verbose           Show sub-suite stdout inline (default: summary only).
+#   --preflight-only    Run ONLY the preflight guard (no suites), then exit
+#                       with its result (0 pass / 1 fail). Exists so the
+#                       guard is testable in isolation against a synthetic
+#                       PATH without needing the real machine to be broken
+#                       — see tests/run-all-tests-preflight/.
 
 set -u
 
@@ -21,6 +37,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TESTS_ROOT="${REPO_ROOT}/tests"
 PATTERN="test-*.sh"
 VERBOSE=0
+PREFLIGHT_ONLY=0
 
 # Anchor cwd at the repo root. When run-all-tests is invoked from an ssh
 # session where the login shell's cwd is a directory the running user cannot
@@ -34,12 +51,119 @@ cd "$REPO_ROOT" || exit 2
 
 for arg in "$@"; do
 	case "$arg" in
-		--pattern=*)  PATTERN="${arg#*=}" ;;
-		--verbose)    VERBOSE=1 ;;
-		-h|--help)    sed -n '2,20p' "$0" | sed 's/^# \?//'; exit 0 ;;
-		*)            echo "ERROR: unknown arg: $arg" >&2; exit 1 ;;
+		--pattern=*)      PATTERN="${arg#*=}" ;;
+		--verbose)        VERBOSE=1 ;;
+		--preflight-only) PREFLIGHT_ONLY=1 ;;
+		-h|--help)        sed -n '2,32p' "$0" | sed 's/^# \?//'; exit 0 ;;
+		*)                echo "ERROR: unknown arg: $arg" >&2; exit 1 ;;
 	esac
 done
+
+# ---- preflight guard (2026-07-08) --------------------------------------
+# NEVER SHIM: everything below only INSPECTS and reports; it must never
+# write, replace, symlink, or otherwise touch any binary or interpreter
+# path — doing so would repeat exactly the incident this guard exists to
+# catch. Factored as plain functions rather than a separate sourced lib
+# file — this repo has no cross-script sourcing convention (see the R13
+# comment in scripts/gen-anchor-source.sh, where schema_validate_or_die is
+# deliberately duplicated instead of shared) — so --preflight-only above is
+# how tests/run-all-tests-preflight/test-preflight-guard.sh exercises this
+# logic against a synthetic PATH in isolation.
+
+# preflight_check_interpreter_integrity — FAIL LOUD (rc=1) only if python3
+# resolves to a shim, or resolves to something that errors when actually
+# invoked. python3 being ABSENT from PATH is NOT a failure by itself (some
+# hosts legitimately lack it) — only a shim or a broken/erroring python3
+# fails this check.
+preflight_check_interpreter_integrity() {
+	if ! command -v python3 >/dev/null 2>&1; then
+		echo "PREFLIGHT: python3 not on PATH — skipping interpreter-integrity check (absence alone is not a failure)" >&2
+		return 0
+	fi
+
+	local resolved first2
+	resolved="$(command -v python3)"
+
+	# Static shim shape: a shim is specifically a SHELL SCRIPT (starts with
+	# a '#!' shebang — a real python3 binary is ELF/Mach-O machine code and
+	# never starts with those two bytes) whose body execs into a throwaway
+	# or ephemeral path. This is exactly the shape of the 2026-07-08
+	# incident: a scratchpad shell script that `exec`'d a venv python3
+	# under /tmp.
+	first2="$(head -c 2 -- "$resolved" 2>/dev/null || true)"
+	if [ "$first2" = "#!" ] && grep -aEq 'exec[[:space:]]+.*(/tmp/|/private/tmp/|scratchpad|venv)' -- "$resolved" 2>/dev/null; then
+		echo "PREFLIGHT FAIL: python3 (resolved: $resolved) is a shell script that execs a /tmp, /private/tmp, scratchpad, or venv path — that is the shape of a shim, not a real interpreter." >&2
+		echo "PREFLIGHT FAIL: refusing to run any suite against a shimmed interpreter. Restore the real python3 (or remove the shim) before re-running." >&2
+		return 1
+	fi
+
+	# Runtime check: a real interpreter must answer. Catches an interpreter
+	# that is broken in a way the static shape check above does not
+	# recognize (e.g. a shim whose exec target has already vanished).
+	local out
+	if ! out="$(python3 -c 'import sys; print(sys.executable)' 2>&1)" || [ -z "$out" ]; then
+		echo "PREFLIGHT FAIL: python3 (resolved: $resolved) failed to run 'import sys; print(sys.executable)' — a real interpreter must answer:" >&2
+		echo "$out" >&2
+		return 1
+	fi
+
+	echo "PREFLIGHT: python3 interpreter integrity OK (resolved: $resolved -> sys.executable: $out)" >&2
+	return 0
+}
+
+# preflight_check_validator_presence — FAIL LOUD (rc=1) if neither ajv nor
+# python3+jsonschema is available. Mirrors schema_validate_or_die's own
+# detection order (scripts/gen-anchor-source.sh, scripts/gen-anchor-receipt.sh,
+# scripts/append-anchor-history.sh) so the guard's verdict always matches
+# what those scripts will actually find at runtime. Never a silent skip:
+# a missing validator is reported here as an explicit, non-green failure,
+# not folded into the existing legitimate Linux-only anomalies SKIP.
+#
+# $1 (optional): pass a non-zero value when
+# preflight_check_interpreter_integrity has already failed for this run.
+# When set, this check does not also invoke python3 a second time for the
+# jsonschema probe — a python3 already flagged as a shim/broken is not
+# re-run just to answer this question; it relies on ajv alone instead.
+preflight_check_validator_presence() {
+	local interpreter_already_bad="${1:-0}"
+	if command -v ajv >/dev/null 2>&1; then
+		echo "PREFLIGHT: schema validator present (ajv)" >&2
+		return 0
+	fi
+	if [ "$interpreter_already_bad" -eq 0 ] \
+		&& command -v python3 >/dev/null 2>&1 \
+		&& python3 -c 'import jsonschema' >/dev/null 2>&1; then
+		echo "PREFLIGHT: schema validator present (python3+jsonschema)" >&2
+		return 0
+	fi
+	if [ "$interpreter_already_bad" -ne 0 ]; then
+		echo "PREFLIGHT FAIL: no JSON-schema validator available (ajv absent; python3 already flagged unhealthy above, so it was not re-invoked for the jsonschema probe)." >&2
+	else
+		echo "PREFLIGHT FAIL: no JSON-schema validator available (ajv absent; python3+jsonschema absent)." >&2
+	fi
+	echo "PREFLIGHT FAIL: run scripts/setup-schema-validator.sh to install one. Validator-dependent suites must never silently skip or pass without it." >&2
+	return 1
+}
+
+run_preflight() {
+	local rc=0 interp_rc=0
+	echo "== preflight: interpreter integrity + schema-validator presence ==" >&2
+	preflight_check_interpreter_integrity || { interp_rc=1; rc=1; }
+	preflight_check_validator_presence "$interp_rc" || rc=1
+	if [ "$rc" -eq 0 ]; then
+		echo "== preflight: PASS ==" >&2
+	else
+		echo "== preflight: FAIL ==" >&2
+	fi
+	return "$rc"
+}
+
+if [ "$PREFLIGHT_ONLY" = "1" ]; then
+	run_preflight
+	exit $?
+fi
+
+run_preflight || exit 2
 
 SUITES_TOTAL=0
 SUITES_PASS=0
