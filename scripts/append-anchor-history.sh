@@ -28,6 +28,13 @@
 #   3  receipt verification_status != "live"
 #   4  invariant violation (with detail on stderr)
 #   5  atomic write failed
+#   6  R13: the newly composed line failed schema validation against
+#      public/api/anchor-history.schema.v2.json (or the schema file
+#      itself is unreadable)
+#   7  R13: no JSON schema validator available (ajv absent AND python3's
+#      jsonschema module absent) — fail-closed rather than silently skip
+#      validation. Provision one: `npm i -g ajv-cli ajv-formats` or
+#      `pip3 install jsonschema` on the host that runs this script.
 #
 # Usage:
 #   append-anchor-history.sh --receipt=<anchor-receipt.json>
@@ -48,6 +55,9 @@ RECEIPT=""
 HISTORY="${FYD_HISTORY_FILE:-${REPO_ROOT}/public/api/anchor-history.jsonl}"
 EVENT_TYPE=""
 KEY_SEQ=""
+# R13: LOCAL schema file used to self-validate each newly composed line
+# before it is appended (see schema_validate_or_die below).
+SCHEMA_FILE="${SCHEMA_FILE:-${REPO_ROOT}/public/api/anchor-history.schema.v2.json}"
 
 for arg in "$@"; do
 	case "$arg" in
@@ -189,6 +199,21 @@ else
 fi
 
 # ---- compose new line ----
+# R18: archived_source_path / archived_receipt_path are ADDITIVE index
+# fields (anchor-history.schema.v2.json is "additionalProperties": true,
+# "x-stability": "additive-only-within-v2") pointing at the per-anchor,
+# content-addressed archive copies gen-anchor-source.sh and
+# gen-anchor-receipt.sh each write under public/api/archive/ — see the R18
+# comment blocks in those two scripts for the naming convention
+# (anchor-source-<dag_root_hash>.json / anchor-receipt-<tx_id>.json). Both
+# dag_root_hash and tx_id are already available on every line regardless
+# of event_type, so both fields are always populated; this script does not
+# verify the archive files actually exist (that is gen-anchor-source.sh /
+# gen-anchor-receipt.sh's job at write time) — this is purely the
+# conventional pointer an evaluator follows.
+ARCHIVED_SOURCE_PATH="api/archive/anchor-source-${DAG_ROOT}.json"
+ARCHIVED_RECEIPT_PATH="api/archive/anchor-receipt-${TX_ID}.json"
+
 if [ "$EVENT_TYPE" = "idrotate" ]; then
 	# idrotate: omit cycle_number, include key_seq.
 	NEW_LINE_JSON="$(jq -nc \
@@ -206,6 +231,8 @@ if [ "$EVENT_TYPE" = "idrotate" ]; then
 		--arg permission "$PERMISSION" \
 		--arg verified_at "$VERIFIED_AT" \
 		--argjson prev_anchor_tx_id "$PREV_TX_ID_JSON" \
+		--arg archived_source_path "$ARCHIVED_SOURCE_PATH" \
+		--arg archived_receipt_path "$ARCHIVED_RECEIPT_PATH" \
 		--arg script_ver "append-anchor-history.sh v${SCRIPT_VERSION}" \
 		'{
 			schema_version: 2, event_type: "idrotate", key_seq: $key_seq,
@@ -215,6 +242,8 @@ if [ "$EVENT_TYPE" = "idrotate" ]; then
 			explorer_url: $explorer_url, signing_actor: $actor, signing_permission: $permission,
 			verification_status: "live", verified_at: $verified_at,
 			prev_anchor_tx_id: $prev_anchor_tx_id,
+			archived_source_path: $archived_source_path,
+			archived_receipt_path: $archived_receipt_path,
 			generated_by_script_version: $script_ver
 		}')"
 else
@@ -234,6 +263,8 @@ else
 		--arg permission "$PERMISSION" \
 		--arg verified_at "$VERIFIED_AT" \
 		--argjson prev_anchor_tx_id "$PREV_TX_ID_JSON" \
+		--arg archived_source_path "$ARCHIVED_SOURCE_PATH" \
+		--arg archived_receipt_path "$ARCHIVED_RECEIPT_PATH" \
 		--arg script_ver "append-anchor-history.sh v${SCRIPT_VERSION}" \
 		'{
 			schema_version: 2, event_type: $event_type, cycle_number: $cycle_number,
@@ -243,8 +274,62 @@ else
 			explorer_url: $explorer_url, signing_actor: $actor, signing_permission: $permission,
 			verification_status: "live", verified_at: $verified_at,
 			prev_anchor_tx_id: $prev_anchor_tx_id,
+			archived_source_path: $archived_source_path,
+			archived_receipt_path: $archived_receipt_path,
 			generated_by_script_version: $script_ver
 		}')"
+fi
+
+# ---- R13: mandatory schema validation (fail closed) ------------------------
+# Try ajv (local binary, no network) first, then python3's `jsonschema`
+# module (also local, no network). If NEITHER is available, refuse to
+# append (exit 7) rather than let an unvalidated line join the append-only
+# ledger. Duplicated (not sourced) in gen-anchor-source.sh and
+# gen-anchor-receipt.sh — no cross-script sourcing convention exists in
+# this repo; keep the three in sync if you touch the logic.
+schema_validate_or_die() {
+	local schema="$1" data_file="$2" label="$3" out
+	if [ ! -r "$schema" ]; then
+		echo "ERROR (6): schema file not readable: $schema (cannot validate $label)" >&2
+		return 6
+	fi
+	if command -v ajv >/dev/null 2>&1; then
+		if out="$(ajv --spec=draft2020 --strict=false validate -s "$schema" -d "$data_file" 2>&1)"; then
+			echo "OK: $label schema-valid (ajv)" >&2
+			return 0
+		fi
+		echo "ERROR (6): $label failed schema validation against $schema (ajv)" >&2
+		printf '%s\n' "$out" >&2
+		return 6
+	fi
+	if command -v python3 >/dev/null 2>&1 && python3 -c 'import jsonschema' >/dev/null 2>&1; then
+		if out="$(python3 - "$schema" "$data_file" <<'PYEOF' 2>&1
+import json, sys
+import jsonschema
+schema = json.load(open(sys.argv[1], encoding="utf-8"))
+data = json.load(open(sys.argv[2], encoding="utf-8"))
+jsonschema.validate(instance=data, schema=schema, format_checker=jsonschema.FormatChecker())
+PYEOF
+		)"; then
+			echo "OK: $label schema-valid (python3+jsonschema)" >&2
+			return 0
+		fi
+		echo "ERROR (6): $label failed schema validation against $schema (python3+jsonschema)" >&2
+		printf '%s\n' "$out" >&2
+		return 6
+	fi
+	echo "ERROR (7): no JSON schema validator available (ajv absent; python3+jsonschema absent) — refusing to skip validation for $label. Install ajv-cli (npm i -g ajv-cli ajv-formats) or 'pip3 install jsonschema'." >&2
+	return 7
+}
+
+TMP_VAL="$(mktemp)"
+printf '%s' "$NEW_LINE_JSON" > "$TMP_VAL"
+if schema_validate_or_die "$SCHEMA_FILE" "$TMP_VAL" "anchor-history line"; then
+	rm -f "$TMP_VAL"
+else
+	schema_rc=$?
+	rm -f "$TMP_VAL"
+	exit "$schema_rc"
 fi
 
 # ---- atomic append (write new file, rename over history) ----

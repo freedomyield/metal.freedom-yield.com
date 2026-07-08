@@ -86,6 +86,14 @@
 			],
 			"description": "tx_id of the previous line. Null for the genesis line. Enables hash-chain-by-tx traversal."
 		},
+		"archived_source_path": {
+			"type": "string",
+			"description": "R18 (2026-07-08, additive): repo-relative path to the per-anchor, content-addressed archive copy of the anchor-source.json pre-image that produced this line's dag_root_hash, e.g. 'api/archive/anchor-source-<dag_root_hash>.json'. Written by scripts/gen-anchor-source.sh at generation time. Absent on lines appended before this field existed — its absence does not imply the archive copy itself is missing, only that this pointer predates R18."
+		},
+		"archived_receipt_path": {
+			"type": "string",
+			"description": "R18 (2026-07-08, additive): repo-relative path to the per-anchor, content-addressed archive copy of the anchor-receipt.json for this line's tx_id, e.g. 'api/archive/anchor-receipt-<tx_id>.json'. Written by scripts/gen-anchor-receipt.sh at generation time. Absent on lines appended before this field existed."
+		},
 		"generated_by_script_version": {"type": "string"}
 	}
 }

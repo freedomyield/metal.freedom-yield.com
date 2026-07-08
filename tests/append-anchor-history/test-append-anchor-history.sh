@@ -6,6 +6,14 @@
 #
 # Covers the 6 append-only invariants + happy-path shape assertions.
 #
+# R13 note: append-anchor-history.sh now mandatorily schema-validates each
+# newly composed line (ajv, else python3+jsonschema, else fail-closed) — see
+# tests/append-anchor-history/test-r13-schema-validate.sh for that behavior
+# specifically. The happy-path cases in THIS file need a validator to reach
+# exit 0 at all, so a stub `ajv` that always reports "valid" is prepended to
+# PATH below; this proves the (unmodified) invariant logic still governs the
+# exit-0/exit-4 outcome exactly as before, it does not re-test R13 itself.
+#
 # Usage:
 #   bash tests/append-anchor-history/test-append-anchor-history.sh
 #
@@ -30,6 +38,18 @@ fi
 
 TEST_DIR="$(mktemp -d -t append-history-test.XXXXXX)"
 trap 'rm -rf "$TEST_DIR"' EXIT
+
+# Stub ajv (always "valid") ahead of PATH so the R13 validation step never
+# falls through to the (slower, network/interpreter-dependent) python3
+# fallback in this suite; see the R13 note above.
+STUB_AJV_DIR="$TEST_DIR/bin"
+mkdir -p "$STUB_AJV_DIR"
+cat > "$STUB_AJV_DIR/ajv" <<'AJVEOF'
+#!/usr/bin/env bash
+exit 0
+AJVEOF
+chmod +x "$STUB_AJV_DIR/ajv"
+PATH="$STUB_AJV_DIR:$PATH"
 
 PASS=0
 FAIL=0
