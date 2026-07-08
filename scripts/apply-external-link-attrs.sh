@@ -72,6 +72,11 @@
 #   1  --check found at least one non-compliant external <a> tag
 #   2  bad arg / usage error, or no HTML files matched PATH_OR_GLOB
 #   3  python3 not available (this tool is stdlib-only — no pip deps)
+#   4  a malformed/unterminated <a ...> tag (e.g. an unmatched quote) was
+#      found while scanning a file. That file is skipped entirely — loudly:
+#      an ERROR line naming the file + line number is printed, and nothing
+#      in that file is written — in BOTH --check and apply mode. This never
+#      silently truncates a scan and reports "compliant"/"0 changed".
 
 set -euo pipefail
 
@@ -166,6 +171,23 @@ def is_nofollow_exempt(host):
 _TAG_BOUNDARY_CHARS = (" ", "\t", "\n", "\r", "\f", ">", "/", "")
 
 
+class MalformedTagError(Exception):
+	"""Raised when an <a ...> start tag cannot be resolved to a proper '>'
+	close (e.g. an unmatched quote inside it runs the scan to EOF). A CI
+	compliance gate must NEVER silently stop scanning and then report
+	success — the caller (main) catches this per file, prints a loud error
+	naming the file + line, and aborts that file (non-zero exit, no write)
+	rather than returning a truncated span list that looks "complete"."""
+
+	def __init__(self, offset):
+		self.offset = offset
+		super().__init__(
+			"malformed/unterminated <a ...> tag (unmatched quote, or no "
+			"closing '>' found before end of file) starting at byte "
+			"offset {}".format(offset)
+		)
+
+
 def find_a_tag_spans(html):
 	spans = []
 	i = 0
@@ -196,9 +218,13 @@ def find_a_tag_spans(html):
 				break
 			j += 1
 		if not found_close:
-			# Malformed trailing tag (unterminated) — stop scanning rather
-			# than guess; nothing after this point can be safely edited.
-			break
+			# Unterminated tag (e.g. an unmatched quote inside it
+			# swallows everything up to EOF while hunting for the real
+			# closing '>'). NEVER return a silently-truncated span list
+			# and let the caller believe scanning finished cleanly — a
+			# CI gate that quietly stops scanning and then reports "all
+			# compliant" is worse than no gate at all. Fail loud.
+			raise MalformedTagError(idx)
 		spans.append((idx, j))
 		i = j
 	return spans
@@ -230,7 +256,12 @@ def parse_attrs(tag_text):
 	insertion point for any wholly-missing attribute.
 	closing_len is 1 for a normal '>' close, 2 for a self-closing '/>'.
 	"""
-	assert tag_text.startswith("<a") and tag_text.endswith(">")
+	# Case-insensitive: <A ...> / <a ...> (and any mixed case, e.g.
+	# <A HREF=..>) are equally valid HTML5 and must be handled
+	# identically. Only the tag-name CHECK below is case-normalized —
+	# tag_text's actual bytes (including its original case) are never
+	# rewritten; only specific rel/target value/insertion spans are.
+	assert tag_text[:2].lower() == "<a" and tag_text.endswith(">")
 	# Self-closing '/>' is only recognized when the '/' is preceded by
 	# whitespace (the universal hand-authored convention, e.g. `<a ... />`)
 	# — NOT merely "second-to-last char is '/'". Without that guard, an
@@ -457,10 +488,24 @@ def main():
 
 	total_offenders = 0
 	total_changed = 0
+	had_scan_error = False
 	for path in files:
 		with open(path, "r", encoding="utf-8", newline="") as f:
 			original = f.read()
-		edits, offenders = scan_file(original, own_host, mode)
+		try:
+			edits, offenders = scan_file(original, own_host, mode)
+		except MalformedTagError as exc:
+			line_no = original.count("\n", 0, exc.offset) + 1
+			print(
+				"ERROR: {}:{}: {} — aborting scan of this file at this "
+				"point; nothing after it (including any later external "
+				"<a> tags) was evaluated, and the file was NOT written.".format(
+					path, line_no, exc
+				),
+				file=sys.stderr,
+			)
+			had_scan_error = True
+			continue
 		if mode == "check":
 			for (line_no, tag_text) in offenders:
 				print("{}:{}: {}".format(path, line_no, tag_text))
@@ -474,6 +519,20 @@ def main():
 				f.write(new_content)
 			total_changed += 1
 			print("OK: updated {}".format(path))
+
+	if had_scan_error:
+		# Never let a malformed-tag scan failure fall through to a "0
+		# offenders" / "0 changed" success message in either mode — that
+		# would be exactly the silent-pass failure mode this exists to
+		# prevent. Distinct exit code (4) so CI can tell this apart from
+		# an ordinary --check offender count (1).
+		print(
+			"FAIL: one or more files contained a malformed/unterminated "
+			"<a ...> tag — see ERROR line(s) above; fix the malformed "
+			"tag(s) and re-run. Nothing was written for those files.",
+			file=sys.stderr,
+		)
+		return 4
 
 	if mode == "check":
 		if total_offenders > 0:

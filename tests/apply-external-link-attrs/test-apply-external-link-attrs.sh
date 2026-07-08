@@ -260,6 +260,103 @@ NONCOMPLIANT_ORIG='<!doctype html>
 </html>'
 check_eq "--check mode never writes to disk" "$NONCOMPLIANT_ORIG" "$NONCOMPLIANT_AFTER_CHECK"
 
+# ============================================================================
+# CRITICAL #1 regression: a malformed/unterminated <a ...> tag (unmatched
+# quote inside it) must NEVER silently truncate the scan of the rest of the
+# file. Before the fix, the quote-tracking walk ran to EOF looking for the
+# real closing '>', found_close stayed False, and a bare `break` silently
+# abandoned scanning the entire rest of the file — a later well-formed bare
+# external <a> was never seen, --check printed "all compliant" and exited
+# 0 (false negative), and apply silently reported "0 changed". A CI gate
+# must fail LOUD (non-zero, naming the file) instead, in both modes, and
+# apply must not write a partially-processed file.
+# ============================================================================
+MALFORMED="$TMP/malformed.html"
+cat > "$MALFORMED" <<'EOF'
+<!doctype html>
+<body>
+<a href="https://example.com/broken>malformed, unmatched quote, never closes</a>
+<a href="https://example.com/report">bare external, must not be silently dropped</a>
+</body>
+</html>
+EOF
+cp "$MALFORMED" "$MALFORMED.orig"
+
+MALFORMED_CHECK_OUT="$("$SCRIPT" --check "$MALFORMED" 2>&1)"
+MALFORMED_CHECK_RC=$?
+if [ "$MALFORMED_CHECK_RC" -ne 0 ]; then
+	pass "CRITICAL#1 --check on malformed tag: exit non-zero (rc=$MALFORMED_CHECK_RC)"
+else
+	fail "CRITICAL#1 --check on malformed tag: exit 0 (silently reported compliant!)"
+fi
+echo "$MALFORMED_CHECK_OUT" | grep -qF "malformed.html" \
+	&& pass "CRITICAL#1 --check names the offending file" \
+	|| fail "CRITICAL#1 --check did not name the file (got: $MALFORMED_CHECK_OUT)"
+echo "$MALFORMED_CHECK_OUT" | grep -qi "all external.*compliant" \
+	&& fail "CRITICAL#1 --check must NOT print a false 'all compliant' success message" \
+	|| pass "CRITICAL#1 --check does not print a false 'all compliant'"
+
+MALFORMED_APPLY_OUT="$("$SCRIPT" "$MALFORMED" 2>&1)"
+MALFORMED_APPLY_RC=$?
+if [ "$MALFORMED_APPLY_RC" -ne 0 ]; then
+	pass "CRITICAL#1 apply on malformed tag: exit non-zero (rc=$MALFORMED_APPLY_RC)"
+else
+	fail "CRITICAL#1 apply on malformed tag: exit 0 (should abort loudly, not silently)"
+fi
+echo "$MALFORMED_APPLY_OUT" | grep -qF "malformed.html" \
+	&& pass "CRITICAL#1 apply error names the offending file" \
+	|| fail "CRITICAL#1 apply error did not name the file (got: $MALFORMED_APPLY_OUT)"
+MALFORMED_AFTER="$(cat "$MALFORMED")"
+MALFORMED_BEFORE="$(cat "$MALFORMED.orig")"
+check_eq "CRITICAL#1 apply must NOT write a partially-processed file (later link silently dropped)" \
+	"$MALFORMED_BEFORE" "$MALFORMED_AFTER"
+
+# ============================================================================
+# CRITICAL #2 regression: an uppercase/mixed-case <A ...> start tag is
+# valid HTML5 (find_a_tag_spans already locates it case-insensitively) but
+# parse_attrs's `assert tag_text.startswith("<a")` used to raise an
+# uncaught AssertionError — a bare traceback, no filename, exit 1
+# indistinguishable from --check's normal "offender found" exit code, and
+# every file after it in the scan order never got scanned. It must instead
+# be processed exactly like a lowercase <a ...>: rel/target applied,
+# --check evaluated, no crash, and every byte outside rel/target — the tag
+# name's case included — left untouched (no whole-tag lowercasing).
+# ============================================================================
+UPPER="$TMP/uppercase.html"
+cat > "$UPPER" <<'EOF'
+<!doctype html>
+<body>
+<A HREF="https://example.com/x">uppercase anchor tag</A>
+</body>
+</html>
+EOF
+
+UPPER_CHECK_OUT="$("$SCRIPT" --check "$UPPER" 2>&1)"
+UPPER_CHECK_RC=$?
+if [ "$UPPER_CHECK_RC" -ne 0 ]; then
+	pass "CRITICAL#2 --check on bare uppercase <A>: exit non-zero (rc=$UPPER_CHECK_RC)"
+else
+	fail "CRITICAL#2 --check on bare uppercase <A>: exit 0 (expected non-compliant)"
+fi
+echo "$UPPER_CHECK_OUT" | grep -qi "traceback" \
+	&& fail "CRITICAL#2 --check crashed with a Python traceback" \
+	|| pass "CRITICAL#2 --check did not crash (no traceback)"
+
+UPPER_APPLY_OUT="$("$SCRIPT" "$UPPER" 2>&1)"
+UPPER_APPLY_RC=$?
+check_eq "CRITICAL#2 apply on uppercase <A>: exit 0 (no crash)" "0" "$UPPER_APPLY_RC"
+echo "$UPPER_APPLY_OUT" | grep -qi "traceback" \
+	&& fail "CRITICAL#2 apply crashed with a Python traceback" \
+	|| pass "CRITICAL#2 apply did not crash (no traceback)"
+UPPER_RESULT="$(grep -F 'uppercase anchor tag' "$UPPER")"
+check_eq "CRITICAL#2 apply: target+rel applied on uppercase tag, tag-name case and other bytes unchanged" \
+	'<A HREF="https://example.com/x" target="_blank" rel="nofollow noopener noreferrer">uppercase anchor tag</A>' \
+	"$UPPER_RESULT"
+
+UPPER_CHECK2_OUT="$("$SCRIPT" --check "$UPPER" 2>&1)"
+UPPER_CHECK2_RC=$?
+check_eq "CRITICAL#2 --check on now-compliant uppercase <A>: exit 0" "0" "$UPPER_CHECK2_RC"
+
 # ---- summary ----------------------------------------------------------------
 echo
 echo "----------------------------------------"
