@@ -27,7 +27,14 @@
 #   2  input parse error
 #   3  RPC unreachable / tx_id not found
 #   4  one of the 7 verify gates failed
-#   5  atomic write failed
+#   5  atomic write failed (canonical --out file OR the R18 archive copy)
+#   6  R13: receipt failed schema validation against
+#      public/api/anchor-receipt.schema.v2.json (or the schema file itself
+#      is unreadable)
+#   7  R13: no JSON schema validator available (ajv absent AND python3's
+#      jsonschema module absent) — fail-closed rather than silently skip
+#      validation. Provision one: `npm i -g ajv-cli ajv-formats` or
+#      `pip3 install jsonschema` on the host that runs this script.
 #
 # Usage:
 #   gen-anchor-receipt.sh --input=<sign-anchor-event.json>
@@ -50,6 +57,11 @@ RPC_OVERRIDE=""
 EXPLORER_BASE="${EXPLORER_BASE:-https://explorer.xprnetwork.org/transaction}"
 TRIGGER="manual"
 SCHEMA_URL="https://metal.freedom-yield.com/api/anchor-receipt.schema.v2.json"
+# R13: LOCAL schema file used to self-validate the composed receipt before
+# it is written (see schema_validate_or_die below). Distinct from
+# $SCHEMA_URL, which is only the "$schema" field value embedded in the
+# receipt for downstream consumers.
+SCHEMA_FILE="${SCHEMA_FILE:-${REPO_ROOT}/public/api/anchor-receipt.schema.v2.json}"
 PREV_ANCHOR_TX_ID_ARG=""
 
 for arg in "$@"; do
@@ -303,6 +315,58 @@ RECEIPT_JSON="$(jq -n \
 		generated_by_script_version: $script_ver
 	}')"
 
+# ---- R13: mandatory schema validation (fail closed) --------------------
+# Try ajv (local binary, no network) first, then python3's `jsonschema`
+# module (also local, no network). If NEITHER is available, refuse to
+# proceed (exit 7) rather than let an unvalidated receipt reach the anchor
+# ledger. Duplicated (not sourced) in gen-anchor-source.sh and
+# append-anchor-history.sh — no cross-script sourcing convention exists in
+# this repo; keep the three in sync if you touch the logic.
+schema_validate_or_die() {
+	local schema="$1" data_file="$2" label="$3" out
+	if [ ! -r "$schema" ]; then
+		echo "ERROR (6): schema file not readable: $schema (cannot validate $label)" >&2
+		return 6
+	fi
+	if command -v ajv >/dev/null 2>&1; then
+		if out="$(ajv --spec=draft2020 --strict=false validate -s "$schema" -d "$data_file" 2>&1)"; then
+			echo "OK: $label schema-valid (ajv)" >&2
+			return 0
+		fi
+		echo "ERROR (6): $label failed schema validation against $schema (ajv)" >&2
+		printf '%s\n' "$out" >&2
+		return 6
+	fi
+	if command -v python3 >/dev/null 2>&1 && python3 -c 'import jsonschema' >/dev/null 2>&1; then
+		if out="$(python3 - "$schema" "$data_file" <<'PYEOF' 2>&1
+import json, sys
+import jsonschema
+schema = json.load(open(sys.argv[1], encoding="utf-8"))
+data = json.load(open(sys.argv[2], encoding="utf-8"))
+jsonschema.validate(instance=data, schema=schema, format_checker=jsonschema.FormatChecker())
+PYEOF
+		)"; then
+			echo "OK: $label schema-valid (python3+jsonschema)" >&2
+			return 0
+		fi
+		echo "ERROR (6): $label failed schema validation against $schema (python3+jsonschema)" >&2
+		printf '%s\n' "$out" >&2
+		return 6
+	fi
+	echo "ERROR (7): no JSON schema validator available (ajv absent; python3+jsonschema absent) — refusing to skip validation for $label. Install ajv-cli (npm i -g ajv-cli ajv-formats) or 'pip3 install jsonschema'." >&2
+	return 7
+}
+
+TMP_VAL="$(mktemp)"
+printf '%s' "$RECEIPT_JSON" > "$TMP_VAL"
+if schema_validate_or_die "$SCHEMA_FILE" "$TMP_VAL" "anchor-receipt.json"; then
+	rm -f "$TMP_VAL"
+else
+	schema_rc=$?
+	rm -f "$TMP_VAL"
+	exit "$schema_rc"
+fi
+
 if [ "$OUT_FILE" = "-" ]; then
 	printf '%s\n' "$RECEIPT_JSON"
 	exit 0
@@ -321,3 +385,33 @@ mv "$TMP_OUT" "$OUT_FILE" || {
 }
 
 echo "OK: 7-PASS verified, receipt written to $OUT_FILE (tx_id=$TX_ID)"
+
+# ---- R18: durable per-anchor archive copy ------------------------------
+# $OUT_FILE (public/api/anchor-receipt.json) is the CANONICAL "current"
+# receipt — the next anchor event overwrites it, so without this, a past
+# cycle's receipt is lost and can no longer be independently re-verified
+# against its on-chain tx. Archive a byte-identical copy keyed by tx_id
+# (content-addressed: unique per anchor event by construction — the same
+# tx_id can never legally recur, see append-anchor-history.sh invariant 1
+# — and it's exactly the value an evaluator already has from the explorer
+# link). This runs strictly after the canonical write above succeeds and
+# archives the SAME $RECEIPT_JSON bytes already validated + written to
+# $OUT_FILE — it never re-derives or alters the composed content.
+ARCHIVE_DIR="${ANCHOR_RECEIPT_ARCHIVE_DIR:-$(dirname "$OUT_FILE")/archive}"
+mkdir -p "$ARCHIVE_DIR" || {
+	echo "ERROR (5): cannot create archive dir: $ARCHIVE_DIR" >&2
+	exit 5
+}
+ARCHIVE_FILE="${ARCHIVE_DIR}/anchor-receipt-${TX_ID}.json"
+TMP_ARCHIVE="$(mktemp -p "$ARCHIVE_DIR" .anchor-receipt-archive.XXXXXX)"
+printf '%s\n' "$RECEIPT_JSON" > "$TMP_ARCHIVE" || {
+	echo "ERROR (5): archive temp write failed" >&2
+	rm -f "$TMP_ARCHIVE"
+	exit 5
+}
+mv "$TMP_ARCHIVE" "$ARCHIVE_FILE" || {
+	echo "ERROR (5): archive atomic rename failed" >&2
+	rm -f "$TMP_ARCHIVE"
+	exit 5
+}
+echo "OK: archived $ARCHIVE_FILE"
