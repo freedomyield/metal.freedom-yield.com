@@ -341,7 +341,7 @@
 			<header class="data-endpoint-head">
 				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg></span>
 				<h3>アイデンティティ署名(Phase α Merkle DAG anchor)</h3>
-				<span class="data-tag">live(manifest)· scheduled(anchor)</span>
+				<span class="data-tag">live(manifest)· live(anchor)</span>
 			</header>
 			<p>署名付きアイデンティティマニフェストは、 validator の <code>staker.key</code> および BLS <code>signer.key</code> とは独立した運用者専用 identity key(ed25519)で生成されます。 検証には namespace <code>freedom-yield/validator-identity</code> の OpenSSH signature を使います。 validator の signing key はこの過程で一切使用しません。</p>
 			<p>identity モデルは 3 枝の Merkle DAG です: <code>identity_branch</code>(= 運用者 identity key の履歴)、 <code>observations_branch</code>(= cycle 毎の uptime / 手数料 / self-stake / delegator events)、 <code>artifacts_branch</code>(= 公開 artifact manifest)。 3 つの branch root は <code>dag_root_computed</code> として 1 つに結合され、 限定権限 <code>metalfreedom@anchor</code> によって Metal A-chain(= PulseVM / XPRNetwork)に 4 つの <code>eosio.token::transfer</code> memo — 各 branch(<code>fya1c&lt;N&gt;-id:</code> / <code>-ob:</code> / <code>-ar:</code>)と統合 root(<code>fya1c&lt;N&gt;:&lt;dag_root_computed&gt;</code>)— として刻まれます。 旧 P-Chain memo 方式(2026-06-20 撤回)は現行 Metal mainnet Durango の protocol rule と非互換でした。</p>
@@ -362,8 +362,8 @@
 				<dt>live manifest</dt><dd><a href="/api/identity.json"><code>/api/identity.json</code></a> + <a href="/api/identity.json.sig"><code>/api/identity.json.sig</code></a></dd>
 				<dt>live DAG snapshot</dt><dd><a href="/api/anchor-source.json"><code>/api/anchor-source.json</code></a></dd>
 				<dt>live identity-history</dt><dd><a href="/api/identity-history.jsonl"><code>/api/identity-history.jsonl</code></a>(= 運用者 identity key rotation log、 現 <code>key_seq=1</code>)</dd>
-				<dt>scheduled anchor receipt</dt><dd><code>/api/anchor-receipt.json</code>(= cycle 3 start での初回 broadcast 予定、 2026-07-04 13:00 JST)</dd>
-				<dt>scheduled anchor history ledger</dt><dd><code>/api/anchor-history.jsonl</code>(= 全 live anchor の append-only ledger、 cycle 3 start で初回 record 追記予定)</dd>
+				<dt>live anchor receipt</dt><dd><code>/api/anchor-receipt.json</code>(= 2026-07-04 の cycle 3 start で初回 broadcast 済、 cycle 3、 <code>schema_version 2</code>)</dd>
+				<dt>live anchor history ledger</dt><dd><code>/api/anchor-history.jsonl</code>(= 全 live anchor の append-only ledger、 cycle 3 start(2026-07-04)で初回 record 追記済)</dd>
 				<dt>運用者 pubkey</dt><dd><a href="/.well-known/operator-identity.pub"><code>/.well-known/operator-identity.pub</code></a></dd>
 				<dt>機械可読 discovery</dt><dd><a href="/api/evidence.json"><code>/api/evidence.json</code></a> → <code>.live_artifacts.identity_manifest</code></dd>
 			</dl>
