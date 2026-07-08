@@ -29,9 +29,38 @@ STATE_DIR="${UPTIME_STATE_DIR:-/var/lib/freedom-yield}"
 HIST_JSONL="${STATE_DIR}/node-health-history.jsonl"
 OUT_PUBLIC="${ROOT}/public/api/node-health-recent.json"
 RECENT_DAYS="${RECENT_DAYS:-90}"
+API="${METALGO_API:-http://localhost:9650}"
 
 mkdir -p "$STATE_DIR"
 [ -f "$HIST_JSONL" ] || : > "$HIST_JSONL"
+
+# probe_bootstrapped <chain> — read-only query of metalgo's own
+# info.isBootstrapped RPC (no broadcast). Prints "true" / "false" / "null".
+# "null" means unprobeable (RPC unreachable, malformed response, or a
+# field of unexpected type) — it is never coerced to a fabricated true/false.
+# `|| true` on each capture keeps a transient metalgo/RPC hiccup from
+# aborting the whole daily snapshot under `set -e`.
+probe_bootstrapped() {
+  local chain="$1" resp val
+  resp=$(curl -sS -X POST --max-time 5 \
+    -H 'content-type:application/json' \
+    --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"info.isBootstrapped\",\"params\":{\"chain\":\"${chain}\"}}" \
+    "${API}/ext/info" 2>/dev/null || true)
+  # NOTE: deliberately NOT `.result.isBootstrapped // empty` — jq's `//`
+  # treats a `false` result as falsy too, so that filter would silently
+  # turn a real "not bootstrapped" into "unknown". Test for boolean type
+  # explicitly instead.
+  val=$(printf '%s' "${resp}" | jq -r '
+      if (.result.isBootstrapped | type) == "boolean"
+      then (.result.isBootstrapped | tostring)
+      else "null"
+      end
+    ' 2>/dev/null || true)
+  case "$val" in
+    true|false) printf '%s' "$val" ;;
+    *)          printf 'null' ;;
+  esac
+}
 
 if [ ! -f "$STATUS_JSON" ]; then
   echo "ERROR: $STATUS_JSON not found (is server-status.sh running?)" >&2
@@ -47,11 +76,21 @@ if grep -q "^{\"date\":\"${TODAY}\"" "$HIST_JSONL" 2>/dev/null; then
   exit 0
 fi
 
+# Actual probed bootstrap status (never a fabricated constant — see
+# probe_bootstrapped above). Probed here, after the idempotency check, so a
+# no-op run doesn't spend an RPC round-trip it won't use.
+BOOT_P=$(probe_bootstrapped P)
+BOOT_X=$(probe_bootstrapped X)
+BOOT_C=$(probe_bootstrapped C)
+
 # Read the realtime snapshot. server-status.sh writes atomically so the
 # file is always parseable.
 ENTRY=$(jq -c \
   --arg date "$TODAY" \
   --arg now "$NOW_ISO" \
+  --argjson bootP "$BOOT_P" \
+  --argjson bootX "$BOOT_X" \
+  --argjson bootC "$BOOT_C" \
   '{
     date: $date,
     observed_at: $now,
@@ -75,7 +114,7 @@ ENTRY=$(jq -c \
       c_chain_height:   .metalgo.cChainHeight
     },
     bootstrap: {
-      p: true, x: true, c: true
+      p: $bootP, x: $bootX, c: $bootC
     }
   }' "$STATUS_JSON")
 
