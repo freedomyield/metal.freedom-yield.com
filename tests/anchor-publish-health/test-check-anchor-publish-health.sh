@@ -13,6 +13,11 @@
 #   - source 200 but source body unparseable                       -> alert(exit 5)
 # Also asserts the dead auto-recover is gone (no push-to-web-host.sh call).
 #
+# Also verifies the notify.sh wiring added after the checker sat RED for days
+# with no phone signal (2026-07-08): every failure exit (2/3/4/5) must fire a
+# high-priority alert via a recording FYD_NOTIFY stub, the alert message must
+# name the exit code, and the healthy path must fire no alert at all.
+#
 # Usage:
 #   bash tests/anchor-publish-health/test-check-anchor-publish-health.sh
 #
@@ -38,11 +43,20 @@ bad() { FAIL=$((FAIL + 1)); echo "FAIL  $1"; }
 ROOT_MATCH="ad7405814683fca7dc001f11ed9c031871f7e944235694ae1a11bd17fc653369"
 ROOT_STALE="deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 
-BASE=""; STUB=""; LOG=""
+BASE=""; STUB=""; LOG=""; NOTIFY_STUB=""; NOTIFY_LOG=""
 setup() {
 	BASE="$(mktemp -d -t anchor-publish-health-test.XXXXXX)"
 	STUB="$BASE/curl-stub.sh"
 	LOG="$BASE/health.log"
+	NOTIFY_STUB="$BASE/notify-stub.sh"
+	NOTIFY_LOG="$BASE/notify.log"
+	# Recording notify stub: emulates `notify.sh <priority> <title> <message>`
+	# by appending one pipe-delimited line per call. No real ntfy network call.
+	cat > "$NOTIFY_STUB" <<NOTIFYEOF
+#!/usr/bin/env bash
+printf '%s|%s|%s\n' "\$1" "\$2" "\$3" >> "$NOTIFY_LOG"
+NOTIFYEOF
+	chmod +x "$NOTIFY_STUB"
 	# Recording curl stub. Emulates:
 	#   curl -sS -o <outfile> -w "%{http_code}" --max-time N <url>
 	# Serves per-URL fixture body + code from env set by each case:
@@ -102,6 +116,7 @@ JSON
 run_checker() {
 	# All fixture wiring comes through env; the checker never touches the network.
 	FYD_CURL="$STUB" \
+	FYD_NOTIFY="$NOTIFY_STUB" \
 	ANCHOR_PUBLISH_HEALTH_LOG="$LOG" \
 	ANCHOR_SOURCE_URL="https://example.test/api/anchor-source.json" \
 	ANCHOR_RECEIPT_URL="https://example.test/api/anchor-receipt.json" \
@@ -109,6 +124,7 @@ run_checker() {
 	RCPT_BODY_FILE="${RCPT_BODY_FILE:-}" RCPT_CODE="${RCPT_CODE:-200}" \
 		bash "$CHECKER" "$@"
 }
+alerts() { cat "$NOTIFY_LOG" 2>/dev/null; }
 
 # ---- case 1: 200 + dag matches on-chain anchored root -> OK (exit 0) ----------
 setup
@@ -120,6 +136,9 @@ RC=$?
 [ "$RC" -eq 0 ] \
 	&& ok "match: 200 + dag matches -> exit 0" \
 	|| bad "match: expected exit 0, got $RC"
+[ -s "$NOTIFY_LOG" ] \
+	&& bad "match: no alert fired on the healthy path (alerts: $(alerts))" \
+	|| ok "match: no alert fired on the healthy path"
 teardown
 
 # ---- case 2: 200 but dag MISMATCH (the stale-publish case) -> alert exit 3 ----
@@ -138,6 +157,12 @@ echo "$OUT" | grep -q 'content mismatch' \
 [ -s "$LOG" ] && grep -q 'ERROR content mismatch' "$LOG" \
 	&& ok "stale: mismatch persisted to log" \
 	|| bad "stale: mismatch not in log"
+alerts | grep -q '^high|' \
+	&& ok "stale: high-priority alert fired" \
+	|| bad "stale: high-priority alert fired (alerts: $(alerts))"
+alerts | grep -q 'exit 3' \
+	&& ok "stale: alert surfaces exit code 3" \
+	|| bad "stale: alert surfaces exit code 3 (alerts: $(alerts))"
 teardown
 
 # ---- case 3: source not served (non-200) -> alert exit 2, no recover ----------
@@ -153,6 +178,12 @@ RC=$?
 echo "$OUT" | grep -q 'no host recover' \
 	&& ok "not-served: alert states alert-only (no recover)" \
 	|| bad "not-served: alert missing no-recover note (out: $OUT)"
+alerts | grep -q '^high|' \
+	&& ok "not-served: high-priority alert fired" \
+	|| bad "not-served: high-priority alert fired (alerts: $(alerts))"
+alerts | grep -q 'exit 2' \
+	&& ok "not-served: alert surfaces exit code 2" \
+	|| bad "not-served: alert surfaces exit code 2 (alerts: $(alerts))"
 teardown
 
 # ---- case 4: source 200 but receipt unavailable -> warn exit 4 ----------------
@@ -168,6 +199,12 @@ RC=$?
 echo "$OUT" | grep -q 'cannot content-verify' \
 	&& ok "no-receipt: alert says cannot content-verify" \
 	|| bad "no-receipt: alert missing (out: $OUT)"
+alerts | grep -q '^high|' \
+	&& ok "no-receipt: high-priority alert fired" \
+	|| bad "no-receipt: high-priority alert fired (alerts: $(alerts))"
+alerts | grep -q 'exit 4' \
+	&& ok "no-receipt: alert surfaces exit code 4" \
+	|| bad "no-receipt: alert surfaces exit code 4 (alerts: $(alerts))"
 teardown
 
 # ---- case 5: source 200 but body unparseable -> alert exit 5 ------------------
@@ -179,6 +216,12 @@ RC=0; SRC_CODE=200 RCPT_CODE=200 run_checker >/dev/null 2>&1 || RC=$?
 [ "$RC" -eq 5 ] \
 	&& ok "corrupt-source: unparseable -> exit 5" \
 	|| bad "corrupt-source: expected exit 5, got $RC"
+alerts | grep -q '^high|' \
+	&& ok "corrupt-source: high-priority alert fired" \
+	|| bad "corrupt-source: high-priority alert fired (alerts: $(alerts))"
+alerts | grep -q 'exit 5' \
+	&& ok "corrupt-source: alert surfaces exit code 5" \
+	|| bad "corrupt-source: alert surfaces exit code 5 (alerts: $(alerts))"
 teardown
 
 # ---- case 6: receipt fallback to dag_root_hash (no dag_root_summary action) ---
@@ -193,6 +236,9 @@ RC=$?
 [ "$RC" -eq 0 ] \
 	&& ok "fallback: dag_root_hash used when no summary action -> exit 0" \
 	|| bad "fallback: expected exit 0, got $RC"
+[ -s "$NOTIFY_LOG" ] \
+	&& bad "fallback: no alert fired on the healthy path (alerts: $(alerts))" \
+	|| ok "fallback: no alert fired on the healthy path"
 teardown
 
 # ---- case 7: dead auto-recover removed (no live push-to-web-host invocation) --

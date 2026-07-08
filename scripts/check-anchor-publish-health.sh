@@ -29,8 +29,9 @@
 #   allowlist rejects (it only accepts anchor-receipt.json, not
 #   anchor-source.json) — the call could never succeed. Under git-deploy the
 #   publish path is GitHub Actions, not a host-side push, so a host recover is
-#   structurally impossible anyway. This monitor is alert-only: it logs and
-#   exits non-zero so the operator (or a notifier wired to the exit code) acts.
+#   structurally impossible anyway. This monitor is alert-only: it logs,
+#   fires a high-priority notify.sh push (see Alerting below), and exits
+#   non-zero so the operator acts.
 #
 # Exit codes:
 #   0  served AND dag_root_computed matches the anchored root (verbose: heartbeat)
@@ -45,8 +46,21 @@
 #   is writable, appended to $ANCHOR_PUBLISH_HEALTH_LOG
 #   (default /var/log/anchor-publish-health.log) for later audit.
 #
+# Alerting:
+#   Every failure exit (2/3/4/5) additionally fires one high-priority ntfy
+#   push via notify.sh — added 2026-07-08 after this checker sat RED for days
+#   post-incident with zero phone signal (no notify call existed, and the
+#   installed cron had no output redirect for cron mail to fall back on).
+#   The alert title always names the exit code so the operator can triage
+#   from the push notification alone, mirroring the alert() pattern in
+#   scripts/check-host-drift.sh. Best-effort: a notify.sh failure is logged
+#   (WARN) but never escalates the exit code or blocks the check.
+#
 # Usage:
 #   bash scripts/check-anchor-publish-health.sh [--verbose]
+#
+# Env overrides (test-time + ops):
+#   FYD_NOTIFY   notifier to invoke (default: <script dir>/notify.sh)
 #
 # Cron target (/etc/cron.d/metal-anchor-publish-health), every 15 minutes:
 #   */15 * * * * deploy bash /home/.../scripts/check-anchor-publish-health.sh
@@ -60,10 +74,12 @@ for arg in "$@"; do
 	esac
 done
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SOURCE_URL="${ANCHOR_SOURCE_URL:-https://metal.freedom-yield.com/api/anchor-source.json}"
 RECEIPT_URL="${ANCHOR_RECEIPT_URL:-https://metal.freedom-yield.com/api/anchor-receipt.json}"
 LOG="${ANCHOR_PUBLISH_HEALTH_LOG:-/var/log/anchor-publish-health.log}"
 CURL="${FYD_CURL:-curl}"
+NOTIFY="${FYD_NOTIFY:-${SCRIPT_DIR}/notify.sh}"
 NOW_ISO="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
 log() {
@@ -71,6 +87,16 @@ log() {
 	printf '%s %s\n' "$NOW_ISO" "$*" >&2
 	if [ -w "$(dirname "$LOG")" ] 2>/dev/null || [ -w "$LOG" ] 2>/dev/null; then
 		printf '%s %s\n' "$NOW_ISO" "$*" >> "$LOG" 2>/dev/null || true
+	fi
+}
+
+alert() {
+	# alert <priority> <title> <message> — best-effort; a notify.sh failure
+	# is logged but never changes the caller's exit code.
+	if [ -x "$NOTIFY" ] || [ -f "$NOTIFY" ]; then
+		bash "$NOTIFY" "$1" "$2" "$3" || log "WARN: notify failed (alert was: $2 — $3)"
+	else
+		log "WARN: notifier not found at $NOTIFY (alert was: $2 — $3)"
 	fi
 }
 
@@ -83,6 +109,7 @@ fetch() {
 
 if ! command -v jq >/dev/null 2>&1; then
 	log "ERROR jq not found — cannot content-verify anchor-source.json"
+	alert high "anchor-publish-health: jq missing (exit 5)" "jq not found on this host — cannot content-verify anchor-source.json."
 	exit 5
 fi
 
@@ -95,6 +122,7 @@ RCPT_BODY="$TMP/receipt.json"
 SRC_HTTP="$(fetch "$SOURCE_URL" "$SRC_BODY")"
 if [ "$SRC_HTTP" != "200" ]; then
 	log "ERROR not served: $SOURCE_URL HTTP=$SRC_HTTP — alert-only, no host recover under git-deploy"
+	alert high "anchor-publish-health: not served (exit 2)" "$SOURCE_URL returned HTTP=$SRC_HTTP — not served. Alert-only, no host recover under git-deploy."
 	exit 2
 fi
 
@@ -102,6 +130,7 @@ fi
 DAG_SRC="$(jq -er '.dag_root_computed // empty' "$SRC_BODY" 2>/dev/null || true)"
 if ! is_hex64 "$DAG_SRC"; then
 	log "ERROR served $SOURCE_URL (200) but .dag_root_computed missing/invalid — publish corrupt"
+	alert high "anchor-publish-health: publish corrupt (exit 5)" "served $SOURCE_URL (200) but .dag_root_computed missing/invalid — publish corrupt."
 	exit 5
 fi
 
@@ -109,6 +138,7 @@ fi
 RCPT_HTTP="$(fetch "$RECEIPT_URL" "$RCPT_BODY")"
 if [ "$RCPT_HTTP" != "200" ]; then
 	log "WARN served $SOURCE_URL (200) but receipt $RECEIPT_URL HTTP=$RCPT_HTTP — cannot content-verify"
+	alert high "anchor-publish-health: cannot content-verify (exit 4)" "served $SOURCE_URL (200) but receipt $RECEIPT_URL HTTP=$RCPT_HTTP — cannot content-verify."
 	exit 4
 fi
 
@@ -129,12 +159,14 @@ extract_anchored_root() {
 DAG_ANCHORED="$(extract_anchored_root "$RCPT_BODY" || true)"
 if ! is_hex64 "$DAG_ANCHORED"; then
 	log "WARN served $SOURCE_URL (200) but receipt has no parseable anchored root — cannot content-verify"
+	alert high "anchor-publish-health: cannot content-verify (exit 4)" "served $SOURCE_URL (200) but receipt has no parseable anchored root — cannot content-verify."
 	exit 4
 fi
 
 # ---- 4. content-verify: served source must reproduce the on-chain root ------
 if [ "$DAG_SRC" != "$DAG_ANCHORED" ]; then
 	log "ERROR content mismatch: served anchor-source dag_root_computed=${DAG_SRC:0:12}… != on-chain anchored root=${DAG_ANCHORED:0:12}… (stale/incorrect publish)"
+	alert high "anchor-publish-health: content mismatch (exit 3)" "served anchor-source dag_root_computed=${DAG_SRC:0:12}… != on-chain anchored root=${DAG_ANCHORED:0:12}… (stale/incorrect publish)."
 	exit 3
 fi
 
