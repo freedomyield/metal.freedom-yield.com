@@ -447,6 +447,22 @@ if [ -n "${FY_EXPECT_CYCLE:-}" ]; then
 		exit 7
 	fi
 	echo "  ✓ ordering guard: cycle-history is fresh to expected cycle ${FY_EXPECT_CYCLE}" >&2
+else
+	# FY_EXPECT_CYCLE is unset — the machine-checked ordering guard above
+	# cannot run (nothing to compare the live ledger against), so this run
+	# is NOT protected against the cycle-3 trouble #1 failure mode (a stale
+	# cycle-history.jsonl silently producing an identity.json whose DAG root
+	# does not advance). This is intentionally NOT a hard-stop: first-run /
+	# bootstrap invocations (before any cycle has closed) have no cycle to
+	# name yet, so the exit code and control flow here are unchanged from
+	# before this warning existed. Loud stderr banner only.
+	echo "  ################################################################" >&2
+	echo "  #  WARNING: ordering guard DISABLED (FY_EXPECT_CYCLE unset)  #" >&2
+	echo "  #  This run is NOT verifying the just-closed cycle is on the #" >&2
+	echo "  #  live ledger. At a cycle transition, re-run with:          #" >&2
+	echo "  #    FY_EXPECT_CYCLE=<the cycle just closed>                 #" >&2
+	echo "  #  See docs/CYCLE_GATE.md, 'Operator runbook' section.       #" >&2
+	echo "  ################################################################" >&2
 fi
 
 # The 2-branch dag_root_hash and /api/cycles-history.json are retired here

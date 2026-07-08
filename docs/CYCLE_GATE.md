@@ -211,8 +211,19 @@ AI's work around those steps:
 - validator host: cycle-recording refresh (`uptime-history.sh`,
   `gen-cycle-history.sh`, feed pushes) — these pass the always-green
   `cycle-artifact-write` gate.
-- Mac local: `gen-identity.sh` (with `FY_EXPECT_CYCLE` ordering guard),
-  commit, push; `gh run watch` until deploy completes.
+- Mac local: **MANDATORY before running `gen-identity.sh` at a cycle
+  transition** — set `FY_EXPECT_CYCLE=<the just-closed cycle N>` in the
+  environment for that invocation. One-line rule for N: N is the cycle that
+  just ended / whose leaf is being added to `cycle-history.jsonl` (e.g. at
+  the cycle-3 → cycle-4 transition, `FY_EXPECT_CYCLE=3`). This turns "record
+  the just-closed cycle before regenerating identity" from operator
+  vigilance into a machine-checked precondition (exit 7 on mismatch — see
+  `tests/test-gen-identity-ordering-guard.sh`). If `FY_EXPECT_CYCLE` is left
+  unset, `gen-identity.sh` still runs (needed for first-run / bootstrap, when
+  no cycle has closed yet) but prints a loud stderr warning that the ordering
+  guard is disabled for that run.
+- Mac local: run `gen-identity.sh` (per the above), commit, push; `gh run
+  watch` until deploy completes.
 - validator host: `gen-anchor-source.sh` (compose). Mac:
   `sign-anchor-event.sh` via the pipeline (testnet first, then mainnet after
   gate-2 authorization). validator host: `gen-anchor-receipt.sh` 7-gate

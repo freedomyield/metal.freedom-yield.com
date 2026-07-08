@@ -10,6 +10,12 @@
 # vigilance into a machine-checked precondition (the cycle-3 trouble #1 was a
 # stale ledger whose DAG root did not advance).
 #
+# Also covered (added for the "R1" hardening pass): when FY_EXPECT_CYCLE is
+# UNSET, the guard cannot machine-check anything, so gen-identity.sh prints a
+# loud stderr warning that the guard is disabled — but exit behavior for an
+# otherwise-valid run is unchanged (still 0), so first-run / bootstrap
+# invocations (before any cycle has closed) are not blocked.
+#
 # CHAIN: none. gen-identity performs no broadcast at all. This test stubs `curl`
 #        so there is zero network I/O and points REPO_ROOT at a throwaway tree so
 #        the real repo's public/api/ is never written.
@@ -156,6 +162,30 @@ if echo "$out" | grep -q "The just-closed cycle is not on the published ledger";
 	fail "Case3: control unexpectedly hit the exit-7 mismatch path"
 else
 	pass "control: no exit-7 mismatch error emitted on a fresh ledger"
+fi
+
+# ---- Case 4: FY_EXPECT_CYCLE unset -> loud warning, but exit behavior is
+# unchanged (0 for an otherwise-valid run). The guard cannot machine-check
+# anything with nothing to compare against (e.g. first-run/bootstrap, before
+# any cycle has closed), so this must degrade to a warning, never a hard
+# stop -- unset must not become a de facto "always block" mode. Ledger
+# content from Case 3 is irrelevant here: the guard block is skipped
+# entirely when FY_EXPECT_CYCLE is unset, so it is not reset first.
+out="$(run_genid "" 2>&1)"; rc=$?
+if [ "$rc" -eq 0 ]; then
+	pass "unset FY_EXPECT_CYCLE: otherwise-valid run still exits 0"
+else
+	fail "Case4: expected exit 0 on unset FY_EXPECT_CYCLE, got $rc; output: $(echo "$out" | tr '\n' '|')"
+fi
+if echo "$out" | grep -q "WARNING: ordering guard DISABLED"; then
+	pass "unset FY_EXPECT_CYCLE: loud disabled-guard warning emitted"
+else
+	fail "Case4: disabled-guard warning missing; got: $(echo "$out" | tr '\n' '|')"
+fi
+if echo "$out" | grep -q "ordering guard: cycle-history is fresh"; then
+	fail "Case4: unset run unexpectedly printed the set-path 'fresh' message"
+else
+	pass "unset FY_EXPECT_CYCLE: set-path 'fresh' message correctly absent"
 fi
 
 echo
