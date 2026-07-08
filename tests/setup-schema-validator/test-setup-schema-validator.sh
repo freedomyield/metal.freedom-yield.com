@@ -280,7 +280,7 @@ echo "$OUT4" | grep -qi "jsonschema now available" \
 F5="$TMP/farm5"; new_farm "$F5"
 assert_farm_clean "$F5" ajv npm pip3 python3
 
-OUT5="$(PATH="$F5" bash "$SCRIPT" 2>"$TMP/case5.stderr")"
+PATH="$F5" bash "$SCRIPT" >/dev/null 2>"$TMP/case5.stderr"
 RC5=$?
 if [ "$RC5" -ne 0 ]; then
 	pass "case5 neither-present-no-installer: exit non-zero (rc=$RC5)"
@@ -311,7 +311,7 @@ assert_farm_clean "$F6" ajv
 stub_npm_recorder "$F6" "$NPM6_MARKER"
 stub_pip3_installs_jsonschema "$F6" "$PIP6_MARKER" "$INSTALLED6_MARKER"
 
-OUT6="$(SETUP_VALIDATOR_PREFER=python PATH="$F6" bash "$SCRIPT" 2>"$TMP/case6.stderr")"
+SETUP_VALIDATOR_PREFER=python PATH="$F6" bash "$SCRIPT" >/dev/null 2>"$TMP/case6.stderr"
 RC6=$?
 check_eq "case6 prefer=python: exit 0" "0" "$RC6"
 [ -e "$PIP6_MARKER" ] && pass "case6: pip3 was invoked (preferred)" || fail "case6: pip3 never invoked"
