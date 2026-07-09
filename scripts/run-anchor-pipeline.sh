@@ -6,11 +6,26 @@
 # PRIME_DIRECTIVE: TESTNET-FIRST — this script broadcasts via
 #                  bin/safe-broadcast which enforces all 4 gates.
 #
-# Runs the four-step anchor pipeline sequentially:
+# Runs a fail-closed freshness preflight, then the four-step anchor
+# pipeline sequentially:
+#   0. scripts/check-scripts-freshness.sh → fail-closed HEAD==origin/main gate
 #   1. scripts/gen-anchor-source.sh   → refresh anchor-source.json
 #   2. scripts/sign-anchor-event.sh   → compose + broadcast 4-action pack
 #   3. scripts/gen-anchor-receipt.sh  → fetch tx + 7-PASS verify + write receipt
 #   4. scripts/append-anchor-history.sh → append line to history jsonl
+#
+# Freshness preflight (Task 4, 2026-07-09 host-checkout-auto-advance design):
+# a checkout that is behind origin/main can carry an already-fixed bug or a
+# stale anchor-source value forward into a live broadcast, so this pipeline
+# refuses to run anchor generation/sign/broadcast against anything but a
+# checkout that is exactly even with origin/main.
+# scripts/check-scripts-freshness.sh exit codes: 0=fresh, 1=stale,
+# 3=fetch-failed — both 1 and 3 fail-closed here: an undetermined freshness
+# (fetch failed) is treated the same as a known-stale one, because on a
+# broadcast-critical path "we couldn't tell" must never be read as "go
+# ahead". Emergency-only escape hatch: FYD_ALLOW_STALE_PIPELINE=1 skips the
+# gate and fires a loud `alert high` so the bypass is never silent; default
+# is enforce (gate ON).
 #
 # Fails fast on any step; emits step-by-step progress on stderr.
 # On success, prints the tx_id on stdout.
@@ -22,8 +37,11 @@
 #
 # Exit codes:
 #   0    all four steps PASS, tx_id on stdout
-#   10+  step-N failed, script exit = 10 + step number (11..14)
 #   1    usage / arg error
+#   2    freshness preflight failed (stale or undetermined checkout) —
+#        run advance-host-checkout.sh, or FYD_ALLOW_STALE_PIPELINE=1 to
+#        bypass (emergency only; always alerts)
+#   10+  step-N failed, script exit = 10 + step number (11..14)
 #
 # Usage:
 #   run-anchor-pipeline.sh --chain=<testnet-a|mainnet-a>
@@ -35,6 +53,12 @@
 #                          [--key-seq=<int>]
 #                          [--non-interactive]
 #                          [--skip-source-refresh]
+#
+# Env overrides:
+#   FYD_ALLOW_STALE_PIPELINE=1  bypass the freshness gate (emergency only;
+#                               fires alert high on every use — see above)
+#   FYD_NOTIFY                  notifier script used for the bypass alert
+#                               (default: <repo>/scripts/notify.sh)
 
 set -euo pipefail
 
@@ -61,7 +85,7 @@ for arg in "$@"; do
 		--key-seq=*)              KEY_SEQ="${arg#*=}" ;;
 		--non-interactive)        NON_INTERACTIVE="--non-interactive" ;;
 		--skip-source-refresh)    SKIP_SOURCE_REFRESH=1 ;;
-		-h|--help)                sed -n '2,38p' "$0" | sed 's/^# \?//'; exit 0 ;;
+		-h|--help)                sed -n '2,61p' "$0" | sed 's/^# \?//'; exit 0 ;;
 		*)                        echo "ERROR: unknown arg: $arg" >&2; exit 1 ;;
 	esac
 done
@@ -73,6 +97,35 @@ fi
 
 ANCHOR_SOURCE="${REPO_ROOT}/public/api/anchor-source.json"
 LOG() { printf '[run-anchor-pipeline] %s\n' "$*" >&2; }
+
+NOTIFY="${FYD_NOTIFY:-${REPO_ROOT}/scripts/notify.sh}"
+alert() {
+	# alert <priority> <title> <message> — mirrors advance-host-checkout.sh's
+	# alert() pattern: best-effort notify, never fatal if the notifier itself
+	# is missing/broken (that must not block the LOG line already emitted).
+	if [ -x "$NOTIFY" ] || [ -f "$NOTIFY" ]; then
+		bash "$NOTIFY" "$1" "$2" "$3" || LOG "WARN: notify failed (alert was: $2 — $3)"
+	else
+		LOG "WARN: notifier not found at $NOTIFY (alert was: $2 — $3)"
+	fi
+}
+
+# -------- preflight: fail-closed freshness gate (Task 4) --------
+# Broadcast-critical: refuse to run anchor generation/sign/broadcast against
+# a checkout that is behind origin/main, or whose freshness could not even
+# be determined. See header comment for the full rationale. Default is
+# enforce; FYD_ALLOW_STALE_PIPELINE=1 is the sole, explicitly-audited
+# escape hatch and it always alerts loudly when used so a bypass can never
+# pass unnoticed.
+if [ "${FYD_ALLOW_STALE_PIPELINE:-0}" = "1" ]; then
+	LOG "WARNING: FYD_ALLOW_STALE_PIPELINE=1 — freshness gate BYPASSED for this run"
+	alert high "run-anchor-pipeline: freshness gate BYPASSED" "FYD_ALLOW_STALE_PIPELINE=1 skipped the fail-closed freshness preflight for this anchor pipeline invocation (chain=${CHAIN}, trigger=${TRIGGER}). Emergency override only — confirm the checkout is actually safe."
+elif ! bash "${REPO_ROOT}/scripts/check-scripts-freshness.sh" >&2; then
+	LOG "ERROR (2): refusing to run anchor pipeline on a stale/undetermined checkout — run advance-host-checkout.sh"
+	exit 2
+else
+	LOG "preflight OK: checkout is fresh (HEAD == origin/main)"
+fi
 
 # -------- step 1: refresh anchor-source.json --------
 if [ "$SKIP_SOURCE_REFRESH" = "1" ]; then

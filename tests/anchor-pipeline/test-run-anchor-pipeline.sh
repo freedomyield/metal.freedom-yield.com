@@ -4,13 +4,16 @@
 # integration/wiring/ordering failures that per-script unit suites cannot see).
 #
 # CHAIN: none — the REAL orchestrator runs against STUB sub-scripts. No RPC,
-#        no signer, no broadcast path is ever reachable: the four pipeline
-#        steps are replaced by recording stubs inside an isolated tempdir
+#        no signer, no broadcast path is ever reachable: the five pipeline
+#        steps (Task 4 adds the freshness-gate preflight to the original
+#        four) are replaced by recording stubs inside an isolated tempdir
 #        harness (the orchestrator derives REPO_ROOT from its own location,
 #        so copying it into the harness redirects every sub-script call).
+#        The bypass alert is likewise a recording stub (FYD_NOTIFY) — no
+#        real notifier is ever invoked.
 #
-# Shape: 9 scenario blocks (case 1..9) carrying 26 runtime assertions —
-# the summary line's PASS count tallies assertions, not scenarios.
+# Shape: 13 scenario blocks (case 1..13) carrying runtime assertions — the
+# summary line's PASS count tallies assertions, not scenarios.
 #
 # What this covers that the unit suites do not:
 #   - argument forwarding across step boundaries (--chain/--testnet-tx-id/
@@ -21,6 +24,10 @@
 #   - exit-code mapping (step N failure → exit 10+N)
 #   - tx_id propagation (sign stdout JSON → pipeline stdout)
 #   - --skip-source-refresh contract (skips step 1 iff anchor-source exists)
+#   - freshness gate (Task 4): stale (exit 1) and fetch-failed (exit 3) both
+#     fail-closed and abort before any anchor generation; fresh (exit 0)
+#     proceeds; FYD_ALLOW_STALE_PIPELINE=1 bypasses the gate and fires an
+#     alert high
 #
 # Usage:
 #   bash tests/anchor-pipeline/test-run-anchor-pipeline.sh
@@ -46,18 +53,25 @@ ok()   { PASS=$((PASS + 1)); echo "PASS  $1"; }
 bad()  { FAIL=$((FAIL + 1)); echo "FAIL  $1"; }
 
 # ---- harness ---------------------------------------------------------------
-# build_harness: fresh tempdir with the REAL orchestrator + 4 recording stubs.
-# Stubs append their name to calls/order.log and dump "$@" to calls/<name>.args.
-# A stub fails (exit 1) iff the marker file fail-<name> exists in the harness
-# root. The sign stub emits the JSON contract the orchestrator consumes.
+# build_harness: fresh tempdir with the REAL orchestrator + 5 recording stubs
+# (Task 4 adds check-scripts-freshness to the original 4 pipeline steps, as
+# the fail-closed preflight gate). Stubs append their name to calls/order.log
+# and dump "$@" to calls/<name>.args. A stub fails (exit 1) iff the marker
+# file fail-<name> exists in the harness root. The sign stub emits the JSON
+# contract the orchestrator consumes; the freshness stub additionally honors
+# a fetchfail-check-scripts-freshness marker (exit 3), mirroring
+# check-scripts-freshness.sh's real exit-code contract (0=fresh/1=stale/
+# 3=fetch-failed).
 HARNESS=""
+NOTIFY_STUB=""
+NOTIFY_LOG=""
 build_harness() {
 	HARNESS="$(mktemp -d -t anchor-pipe-e2e.XXXXXX)"
 	mkdir -p "$HARNESS/scripts" "$HARNESS/public/api" "$HARNESS/calls"
 	cp "$ORCH" "$HARNESS/scripts/run-anchor-pipeline.sh"
 
 	local name
-	for name in gen-anchor-source sign-anchor-event gen-anchor-receipt append-anchor-history; do
+	for name in check-scripts-freshness gen-anchor-source sign-anchor-event gen-anchor-receipt append-anchor-history; do
 		cat > "$HARNESS/scripts/${name}.sh" <<STUB
 #!/usr/bin/env bash
 ROOT="\$(cd "\$(dirname "\$0")/.." && pwd)"
@@ -73,18 +87,40 @@ STUB
 		if [ "$name" = "gen-anchor-source" ]; then
 			echo 'echo "{}" > "$ROOT/public/api/anchor-source.json"' >> "$HARNESS/scripts/${name}.sh"
 		fi
+		if [ "$name" = "check-scripts-freshness" ]; then
+			echo '[ -e "$ROOT/fetchfail-check-scripts-freshness" ] && exit 3' >> "$HARNESS/scripts/${name}.sh"
+			# Mimics the REAL check-scripts-freshness.sh's success-path stdout
+			# ("fresh: HEAD == origin/main" on stdout, exit 0) so the harness
+			# can catch a regression where the orchestrator forgets to keep
+			# that message off its own stdout (which must carry ONLY the
+			# tx_id — see case 1/12's exact-match OUT assertions below).
+			echo 'echo "fresh: HEAD == origin/main"' >> "$HARNESS/scripts/${name}.sh"
+		fi
 		echo 'exit 0' >> "$HARNESS/scripts/${name}.sh"
 	done
+
+	# notify stub for the Task 4 freshness-gate bypass alert — records
+	# priority|title|message lines, mirroring tests/host-advance's pattern.
+	NOTIFY_STUB="$HARNESS/notify-stub.sh"
+	NOTIFY_LOG="$HARNESS/notify.log"
+	cat > "$NOTIFY_STUB" <<'STUBEOF'
+#!/usr/bin/env bash
+printf '%s|%s|%s\n' "$1" "$2" "$3" >> "$(dirname "$0")/notify.log"
+STUBEOF
+	chmod +x "$NOTIFY_STUB"
 }
 
 destroy_harness() {
 	[ -n "$HARNESS" ] && rm -rf "$HARNESS"
 	HARNESS=""
+	NOTIFY_STUB=""
+	NOTIFY_LOG=""
 }
 
 order_log()  { cat "$HARNESS/calls/order.log" 2>/dev/null | tr '\n' ' ' | sed 's/ $//'; }
 args_of()    { cat "$HARNESS/calls/$1.args" 2>/dev/null; }
 was_called() { [ -f "$HARNESS/calls/$1.args" ]; }
+notify_log() { cat "$NOTIFY_LOG" 2>/dev/null; }
 
 # ---- case 1: happy path — 4 steps in order, exit 0, tx_id on stdout --------
 build_harness
@@ -96,7 +132,7 @@ RC=$?
 [ "$OUT" = "feedc0de77" ] \
 	&& ok "happy path: tx_id propagated to stdout" \
 	|| bad "happy path: tx_id propagated to stdout (actual='$OUT')"
-[ "$(order_log)" = "gen-anchor-source sign-anchor-event gen-anchor-receipt append-anchor-history" ] \
+[ "$(order_log)" = "check-scripts-freshness gen-anchor-source sign-anchor-event gen-anchor-receipt append-anchor-history" ] \
 	&& ok "happy path: 4 steps invoked in pipeline order" \
 	|| bad "happy path: 4 steps invoked in pipeline order (actual='$(order_log)')"
 destroy_harness
@@ -178,7 +214,7 @@ RC=$?
 [ "$RC" -eq 11 ] \
 	&& ok "step-1 fail: exit 11" \
 	|| bad "step-1 fail: exit 11 (actual=$RC)"
-[ "$(order_log)" = "gen-anchor-source" ] \
+[ "$(order_log)" = "check-scripts-freshness gen-anchor-source" ] \
 	&& ok "step-1 fail: later steps not invoked" \
 	|| bad "step-1 fail: later steps not invoked (order='$(order_log)')"
 destroy_harness
@@ -191,7 +227,7 @@ RC=$?
 [ "$RC" -eq 12 ] \
 	&& ok "step-2 fail: exit 12" \
 	|| bad "step-2 fail: exit 12 (actual=$RC)"
-[ "$(order_log)" = "gen-anchor-source sign-anchor-event" ] \
+[ "$(order_log)" = "check-scripts-freshness gen-anchor-source sign-anchor-event" ] \
 	&& ok "step-2 fail: receipt/append not invoked" \
 	|| bad "step-2 fail: receipt/append not invoked (order='$(order_log)')"
 destroy_harness
@@ -204,7 +240,7 @@ RC=$?
 [ "$RC" -eq 13 ] \
 	&& ok "step-3 fail: exit 13" \
 	|| bad "step-3 fail: exit 13 (actual=$RC)"
-[ "$(order_log)" = "gen-anchor-source sign-anchor-event gen-anchor-receipt" ] \
+[ "$(order_log)" = "check-scripts-freshness gen-anchor-source sign-anchor-event gen-anchor-receipt" ] \
 	&& ok "step-3 fail: append not invoked" \
 	|| bad "step-3 fail: append not invoked (order='$(order_log)')"
 destroy_harness
@@ -234,6 +270,85 @@ RC=$?
 [ "$RC" -eq 1 ] \
 	&& ok "arg: unknown flag → exit 1" \
 	|| bad "arg: unknown flag → exit 1 (actual=$RC)"
+destroy_harness
+
+# ---- case 10: freshness gate STALE (checker exit 1) → abort, nothing generated ---
+# Task 4: check-scripts-freshness.sh reporting stale must fail-closed the
+# pipeline before any anchor generation/sign/broadcast step runs.
+build_harness
+touch "$HARNESS/fail-check-scripts-freshness"
+bash "$HARNESS/scripts/run-anchor-pipeline.sh" --chain=testnet-a >/dev/null 2>&1
+RC=$?
+[ "$RC" -ne 0 ] \
+	&& ok "freshness stale: non-zero exit" \
+	|| bad "freshness stale: non-zero exit (actual=$RC)"
+[ "$(order_log)" = "check-scripts-freshness" ] \
+	&& ok "freshness stale: only the freshness checker was invoked" \
+	|| bad "freshness stale: only the freshness checker was invoked (order='$(order_log)')"
+was_called gen-anchor-source \
+	&& bad "freshness stale: gen-anchor-source must NOT be invoked (no anchor generated)" \
+	|| ok "freshness stale: gen-anchor-source not invoked (no anchor generated)"
+[ -f "$HARNESS/public/api/anchor-source.json" ] \
+	&& bad "freshness stale: anchor-source.json must not be materialized" \
+	|| ok "freshness stale: anchor-source.json not materialized"
+destroy_harness
+
+# ---- case 11: freshness gate FETCH-FAILED (checker exit 3) → fail-closed too -----
+# Fetch-failure means "freshness undetermined" — on a broadcast-adjacent path
+# that must be treated the same as known-stale, never as "proceed".
+build_harness
+touch "$HARNESS/fetchfail-check-scripts-freshness"
+bash "$HARNESS/scripts/run-anchor-pipeline.sh" --chain=testnet-a >/dev/null 2>&1
+RC=$?
+[ "$RC" -ne 0 ] \
+	&& ok "freshness fetch-fail: non-zero exit" \
+	|| bad "freshness fetch-fail: non-zero exit (actual=$RC)"
+was_called gen-anchor-source \
+	&& bad "freshness fetch-fail: gen-anchor-source must NOT be invoked" \
+	|| ok "freshness fetch-fail: gen-anchor-source not invoked"
+destroy_harness
+
+# ---- case 12: freshness gate FRESH (default stub exit 0) → gate passes ----------
+build_harness
+OUT="$(bash "$HARNESS/scripts/run-anchor-pipeline.sh" --chain=testnet-a 2>/dev/null)"
+RC=$?
+[ "$RC" -eq 0 ] \
+	&& ok "freshness fresh: exit 0" \
+	|| bad "freshness fresh: exit 0 (actual=$RC)"
+was_called check-scripts-freshness \
+	&& ok "freshness fresh: checker was invoked" \
+	|| bad "freshness fresh: checker was invoked"
+was_called gen-anchor-source \
+	&& ok "freshness fresh: pipeline proceeds past the gate" \
+	|| bad "freshness fresh: pipeline proceeds past the gate"
+[ "$OUT" = "feedc0de77" ] \
+	&& ok "freshness fresh: tx_id still propagated to stdout" \
+	|| bad "freshness fresh: tx_id still propagated to stdout (actual='$OUT')"
+destroy_harness
+
+# ---- case 13: FYD_ALLOW_STALE_PIPELINE=1 bypasses the gate + fires alert high ---
+# Emergency-only override: even with a stale marker set, the pipeline must
+# proceed AND the bypass must be loudly alerted (never a silent skip).
+build_harness
+touch "$HARNESS/fail-check-scripts-freshness"
+OUT="$(FYD_ALLOW_STALE_PIPELINE=1 FYD_NOTIFY="$NOTIFY_STUB" bash "$HARNESS/scripts/run-anchor-pipeline.sh" --chain=testnet-a 2>/dev/null)"
+RC=$?
+[ "$RC" -eq 0 ] \
+	&& ok "bypass: exit 0 despite stale marker" \
+	|| bad "bypass: exit 0 despite stale marker (actual=$RC)"
+[ "$OUT" = "feedc0de77" ] \
+	&& ok "bypass: pipeline completes (tx_id on stdout)" \
+	|| bad "bypass: pipeline completes (tx_id on stdout) (actual='$OUT')"
+was_called check-scripts-freshness \
+	&& bad "bypass: freshness checker must NOT be invoked when bypassed" \
+	|| ok "bypass: freshness checker not invoked when bypassed"
+ALERTS="$(notify_log)"
+echo "$ALERTS" | grep -q '^high|' \
+	&& ok "bypass: alert fired at priority=high" \
+	|| bad "bypass: alert fired at priority=high (log: $ALERTS)"
+echo "$ALERTS" | grep -qi 'bypass' \
+	&& ok "bypass: alert message mentions the bypass" \
+	|| bad "bypass: alert message mentions the bypass (log: $ALERTS)"
 destroy_harness
 
 # ---- summary -----------------------------------------------------------------
