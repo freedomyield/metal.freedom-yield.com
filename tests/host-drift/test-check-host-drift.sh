@@ -90,6 +90,9 @@ RC=$?
 alerts | grep -q '^high|host-drift: checkout diverging|.*ahead=1' \
 	&& ok "ahead: high alert with ahead=1" \
 	|| bad "ahead: high alert with ahead=1 (alerts: $(alerts))"
+alerts | grep -q 'advance-host-checkout.sh' \
+	&& ok "ahead: alert points first remedy at auto-advance backstop" \
+	|| bad "ahead: alert points first remedy at auto-advance backstop (alerts: $(alerts))"
 teardown
 
 # ---- case 3: uncommitted code-zone drift → exit 1, file named in alert ---------

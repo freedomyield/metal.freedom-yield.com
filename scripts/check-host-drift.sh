@@ -1,13 +1,22 @@
 #!/usr/bin/env bash
-# check-host-drift.sh — daily detector for validator-host checkout drift
-# against origin/main.
+# check-host-drift.sh — daily BACKSTOP detector for validator-host checkout
+# drift against origin/main.
 #
 # Motivation: on 2026-07-06 the validator-host checkout was found 205 commits
 # ahead / 258 behind origin on an orphaned lineage — the 2026-07-03 repo
 # re-creation (history rewrite) was never followed by a re-clone, and nothing
 # watched for the divergence. After the reconcile (reset --hard origin/main,
-# FF-only discipline) this script is the tripwire that keeps the problem from
-# rebuilding silently.
+# FF-only discipline) this script became the tripwire that kept the problem
+# from rebuilding silently.
+#
+# Role since 2026-07-09: scripts/advance-host-checkout.sh is now the PRIMARY
+# self-heal — a cron-driven, FF-only auto-advance that keeps the host HEAD
+# current on its own (see docs/superpowers/specs/
+# 2026-07-09-host-checkout-auto-advance-design.md). This script no longer
+# carries primary responsibility for catching drift; it is the read-only
+# BACKSTOP that fires if the auto-advance ever stops working. It still never
+# pulls, resets, or edits anything itself — same read-only contract, same
+# drift math as before.
 #
 # What it checks (read-only; NEVER pulls, resets, or edits anything):
 #   1. fetch origin/main (quiet)
@@ -117,5 +126,5 @@ if [ "$DRIFT_COUNT" != "0" ]; then
 	DETAIL="${DETAIL} files: ${FIRST_FILES}"
 fi
 log "DRIFT: ${DETAIL}"
-alert high "host-drift: checkout diverging" "${DETAIL}— host must stay a clean FF-only mirror of origin/main; do not edit on the host."
+alert high "host-drift: checkout diverging" "${DETAIL}— first check why scripts/advance-host-checkout.sh (the primary self-heal) stopped advancing the host; host must stay a clean FF-only mirror of origin/main, do not edit on the host."
 exit 1
