@@ -145,7 +145,46 @@ Merging to `main` is an operator decision made outside this doc's scope —
 this section exists so the ordering (merge → recovery pull if needed →
 install cron) is explicit.
 
-## 5. See also
+## 5. Known edge cases
+
+### 5.1 An untracked file in `public/` collides with a file `origin/main` newly tracks
+
+`git checkout -- public/` (§2① step 3) only discards changes Git already
+tracks — it never touches untracked files, and `scripts/advance-host-checkout.sh`
+never runs `git clean` or any other untracked-file deletion by design (see
+the script's header: "NEVER: `git reset --hard`, `git merge`, discarding
+anything outside `public/`"). If an untracked file already sits at a path
+that the incoming `origin/main` diff wants to create as a newly-tracked
+file, `git pull --ff-only origin main` refuses with git's own "untracked
+working tree file would be overwritten by merge" guard, and the script
+takes the same fail-loud branch as any other pull failure: `alert high
+"host-advance: ff-only pull failed"`, exit 1, `HEAD` left unchanged. Because
+the script never deletes the colliding file and `HEAD` never advances, the
+same alert fires again on every subsequent cron tick until an operator
+intervenes — this is deliberate: the self-heal stops exactly at "would
+require deleting content Git doesn't manage," it does not push through.
+
+**Operator recovery**: move the colliding untracked file out of `public/`
+to a scratch location, then let the next cron tick (or a manual `bash
+scripts/advance-host-checkout.sh` run) retry the pull.
+
+### 5.2 Detached `HEAD` or a checkout on a branch other than `main`
+
+The script has no explicit check for the current branch name or for a
+detached `HEAD` state. It computes `ahead`/`behind` purely from
+`origin/main..HEAD` / `HEAD..origin/main` rev-list counts and runs `git pull
+--ff-only origin main` regardless of what `HEAD` currently points at. The
+mechanism assumes the validator host checkout is always on `main` (the host
+must never author commits — Constitution infra-separation rules — so it has
+no reason to be elsewhere). If the host checkout were ever moved to another
+branch or into a detached state by hand, this script would not detect or
+flag that condition on its own; it would keep comparing against `main` and
+behave however `git pull --ff-only origin main` behaves from that starting
+state, which is outside this script's tested scenarios (`tests/host-advance/test-advance-host-checkout.sh`
+covers ahead/behind/dirty-tree/fetch-failure cases, all starting from a
+normal `main` checkout).
+
+## 6. See also
 
 - `scripts/advance-host-checkout.sh` — the self-heal implementation.
 - `scripts/install-metal-host-advance-cron.sh` — its cron installer.

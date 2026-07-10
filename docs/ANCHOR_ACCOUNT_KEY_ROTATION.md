@@ -79,8 +79,8 @@ permission ごとに生成元が違う。**owner は WebAuth (新 12word 派生)
   **公開鍵を控えて AI に渡す**。生鍵 (`key:generate`) は owner に使わない。proton-cli keystore にも入れない (cold)。
 - **active / anchor (mainnet 用 2 + testnet 用 2)** — proton-cli で生成:
   ```bash
-  HOME=/Users/admin/.metal-fy-proton      proton key:generate   # ×2 (mainnet active, anchor)
-  HOME=/Users/admin/.metal-fy-proton-test proton key:generate   # ×2 (testnet active, anchor)
+  HOME=~/.metal-fy-proton      proton key:generate   # ×2 (mainnet active, anchor)
+  HOME=~/.metal-fy-proton-test proton key:generate   # ×2 (testnet active, anchor)
   ```
   出力の Public を控え、Private は vault へ。
 
@@ -92,7 +92,7 @@ permission ごとに生成元が違う。**owner は WebAuth (新 12word 派生)
 1. **frdomyieltst の active/owner 秘密鍵を復元** (現 testnet keystore は anchor しか無い)。
    vault の frdomyieltst 12word を wallet で開いて active/owner の PVT を取り出し:
    ```bash
-   HOME=/Users/admin/.metal-fy-proton-test proton key:add <frdomyieltst active/owner PVT>
+   HOME=~/.metal-fy-proton-test proton key:add <frdomyieltst active/owner PVT>
    ```
 2. 各 permission を `bin/safe-broadcast --chain=testnet-a` で差し替え (**active → anchor → owner**)。
    例 (active):
@@ -100,7 +100,7 @@ permission ごとに生成元が違う。**owner は WebAuth (新 12word 派生)
    # token を tx にバインド (scripts/run-testnet-rehearsal.sh のリチュアル参照)
    printf '{"chain":"testnet-a","tx_sha256":"%s"}' \
      "$(jq -c . rotate-fdt-active.json | shasum -a 256 | awk '{print $1}')" > /tmp/fyd-broadcast-token
-   HOME=/Users/admin/.metal-fy-proton-test \
+   HOME=~/.metal-fy-proton-test \
      bin/safe-broadcast --tx=rotate-fdt-active.json --chain=testnet-a
    ```
 3. 各段後に検証:
@@ -119,7 +119,7 @@ permission ごとに生成元が違う。**owner は WebAuth (新 12word 派生)
 2. token を mainnet-a + tx_sha256 にバインド。
 3. broadcast:
    ```bash
-   HOME=/Users/admin/.metal-fy-proton \
+   HOME=~/.metal-fy-proton \
      bin/safe-broadcast --tx=rotate-mf-active.json --chain=mainnet-a \
        --testnet-tx-id=<Phase1 active の testnet tx_id> \
        --dry-run-log=<dry-run ログ path>
@@ -137,15 +137,15 @@ permission ごとに生成元が違う。**owner は WebAuth (新 12word 派生)
 **owner は proton keystore に入れない** (WebAuth で cold 保管)。keystore は active/anchor/sink のみ。
 
 ```bash
-mv /Users/admin/.metal-fy-proton /Users/admin/.metal-fy-proton-PRE-ROTATE
-HOME=/Users/admin/.metal-fy-proton proton chain:set proton
-HOME=/Users/admin/.metal-fy-proton proton key:add <NEW active PVT>
-HOME=/Users/admin/.metal-fy-proton proton key:add <NEW anchor PVT>
-HOME=/Users/admin/.metal-fy-proton proton key:add <fyhistory PVT (据置・MainNet)>
+mv ~/.metal-fy-proton ~/.metal-fy-proton-PRE-ROTATE
+HOME=~/.metal-fy-proton proton chain:set proton
+HOME=~/.metal-fy-proton proton key:add <NEW active PVT>
+HOME=~/.metal-fy-proton proton key:add <NEW anchor PVT>
+HOME=~/.metal-fy-proton proton key:add <fyhistory PVT (据置・MainNet)>
 # owner は追加しない — root 鍵を日常署名面から外す
-chmod 600 /Users/admin/.metal-fy-proton/Library/Preferences/@proton/cli-nodejs/proton-cli.json
-HOME=/Users/admin/.metal-fy-proton proton key:list   # 公開のみ。active/anchor/fyhistory を確認
-HOME=/Users/admin/.metal-fy-proton proton key:lock
+chmod 600 ~/.metal-fy-proton/Library/Preferences/@proton/cli-nodejs/proton-cli.json
+HOME=~/.metal-fy-proton proton key:list   # 公開のみ。active/anchor/fyhistory を確認
+HOME=~/.metal-fy-proton proton key:lock
 ```
 
 testnet keystore も同様 (active/anchor/fyhistorytst のみ、owner は WebAuth cold)。

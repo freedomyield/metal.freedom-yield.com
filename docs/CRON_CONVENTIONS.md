@@ -57,6 +57,32 @@ WEB_HOST_FILE=/etc/freedom-yield/<host-file>
 
 cron's default environment is intentionally minimal. Set what your script needs. The values land in the spawned shell's environment (not as shell-local assignments), so children inherit them. Without explicit `SHELL`, cron defaults to `/bin/sh`, which lacks bash features (the `{ ... }` compound works in both, but `$()`, `$RANDOM`, etc., differ).
 
+## Alternative form: piping to `logger` instead of a log file
+
+Rules 2 and 3 above only apply to lines that redirect into a project log
+file with `>>`. A single-command cron line that instead pipes its output
+straight to `logger` — e.g. the real `metal-host-advance` entry:
+
+```
+45 4 * * * deploy bash /home/deploy/metal.freedom-yield.com/scripts/advance-host-checkout.sh 2>&1 | logger -t host-advance
+```
+
+— has neither `&&` nor `>>` in it. In `scripts/check-cron-file.sh`, rule 2's
+loop skips any line without `&&` before it ever checks for `>>` or brace
+wrapping, and rule 3's loop skips any line without `>>` before it checks
+for start/end markers or `rc=$?` capture. A `| logger -t <tag>` line with
+no `&&` chain and no `>>` redirect therefore never enters either check —
+`check-cron-file.sh` reports 0 violations for it, by design, not by gap.
+
+This is intentional: `logger -t <tag>` writes each invocation straight into
+syslog with its own timestamp, so there is no project log file to wrap a
+redirect around, and syslog already gives per-invocation boundaries (e.g.
+`journalctl -t host-advance`) without hand-rolled start/end markers. Use the
+`| logger -t <tag>` form for a single command with no `&&` chain when
+syslog is an acceptable destination; use the `{ ... } >> logs/<name>.log
+2>&1` compound form from rules 1-3 when the entry chains multiple scripts
+with `&&` and needs a project-local, greppable log file.
+
 ## Worked example: `/etc/cron.d/metal-evidence`
 
 This is the file that exists today, post-fix:
