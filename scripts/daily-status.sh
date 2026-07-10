@@ -127,6 +127,27 @@ UPTIME=$(jq -r '.uptime.network // 0' "$VALIDATOR_JSON")
 SELF_STAKE=$(jq -r '.stake.self // 0' "$VALIDATOR_JSON")
 TOTAL_RECEIVED=$(jq -r '.stake.totalReceived // 0' "$VALIDATOR_JSON")
 TOTAL_WEIGHT_METAL=$(awk -v s="$SELF_STAKE" -v d="$TOTAL_RECEIVED" 'BEGIN{printf "%.4f", s+d}' | sed -E 's/\.?0+$//')
+# Delegation capacity. Metal caps total weight at max_weight = 5 × self-stake,
+# so the receivable delegation ceiling is 4 × self. The remaining head-room
+# (= ceiling − already received) is the actionable number: when it hits 0 the
+# validator is saturated and new delegations are rejected on-chain.
+CAP_METAL=$(awk -v s="$SELF_STAKE" 'BEGIN{printf "%.4f", s*4}' | sed -E 's/\.?0+$//')
+REMAIN_METAL=$(awk -v s="$SELF_STAKE" -v r="$TOTAL_RECEIVED" 'BEGIN{v=s*4-r; if(v<0)v=0; printf "%.4f", v}' | sed -E 's/\.?0+$//')
+RECEIVED_F=$(awk -v r="$TOTAL_RECEIVED" 'BEGIN{printf "%.4f", r}' | sed -E 's/\.?0+$//')
+# 満枠 = remaining head-room within a dust epsilon of zero.
+if awk -v v="$REMAIN_METAL" 'BEGIN{exit !(v+0<=0.0001)}'; then
+  DELEG_LINE="受入: ${RECEIVED_F} / ${CAP_METAL} METAL 🔒 満枠"
+else
+  DELEG_LINE="受入: ${RECEIVED_F} / ${CAP_METAL} METAL (残枠 ${REMAIN_METAL})"
+fi
+# Bootstrap status is true/true/true for the entire life of a synced node, so
+# it is pure noise in a daily digest. Surface it only when a chain is NOT
+# bootstrapped — the abnormal case that already flips OVERALL to ⚠ 要確認.
+BOOT_WARN=""
+if ! { [ "$P_BOOT" = "true" ] && [ "$X_BOOT" = "true" ] && [ "$C_BOOT" = "true" ]; }; then
+  BOOT_WARN="⚠ Bootstrap: ${P_BOOT:0:1}/${X_BOOT:0:1}/${C_BOOT:0:1}
+"
+fi
 END_TIME=$(jq -r '.endTime // 0' "$VALIDATOR_JSON")
 NOW=$(date +%s)
 DAYS_LEFT=$(( (END_TIME - NOW) / 86400 ))
@@ -223,9 +244,8 @@ ${OVERALL}
 取得時刻: ${NOW_JST}
 
 [Validator]
-Bootstrap: ${P_BOOT:0:1}/${X_BOOT:0:1}/${C_BOOT:0:1}
-Stake: ${SELF_STAKE} METAL
-受入合計: ${TOTAL_RECEIVED} METAL
+${BOOT_WARN}Stake: ${SELF_STAKE} METAL (self)
+${DELEG_LINE}
 総 weight: ${TOTAL_WEIGHT_METAL} METAL (self + delegators)
 期限: ${PERIOD_STATE} 残 ${DAYS_LEFT} 日 (${END_DATE_JST})
 通知: 1 週間前 / 前日 / 当日 / 10 分前 (urgent)
