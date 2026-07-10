@@ -52,9 +52,9 @@ Create `scripts/install-metal-host-advance-cron.sh` mirroring `scripts/install-m
 
 **Behavior:**
 - Writes `/etc/cron.d/metal-host-advance` (env override `FYD_CRON_TARGET`).
-- Root-required guard when target is the real `/etc/cron.d/` path (mirror drift installer lines ~38-40).
+- Root-required guard when target is the real `/etc/cron.d/` path (mirror the root-required guard in install-metal-host-drift-cron.sh).
 - Cron line runs `advance-host-checkout.sh` as user `deploy`, piped to `logger -t host-advance`. Choose a schedule that runs BEFORE the daily drift check (`check-host-drift.sh` runs `15 5 * * *`) so a healthy auto-advance clears drift before the tripwire samples — e.g. `45 4 * * * deploy bash ${REPO_PATH}/scripts/advance-host-checkout.sh 2>&1 | logger -t host-advance`. State the ordering rationale in a comment.
-- Pre-flight the generated file through `check-cron-file.sh` before installing (mirror drift installer ~71-73); refuse on failure.
+- Pre-flight the generated file through `check-cron-file.sh` before installing (mirror the check-cron-file.sh pre-flight in install-metal-host-drift-cron.sh); refuse on failure.
 - `FYD_REPO_PATH` env override for the repo path, same as the drift installer.
 - Same exit-code contract as the drift installer.
 
