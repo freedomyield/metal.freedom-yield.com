@@ -108,3 +108,9 @@ key — `rsync` is run with a local-to-local source/destination pair.
   whose allowlist must stay in lock-step with this table.
 - `tests/deploy/test-rsync-delete-protection.sh` — the fixture test
   that pins the protection contract.
+- [`docs/HOST_CHECKOUT_AUTO_ADVANCE.md`](HOST_CHECKOUT_AUTO_ADVANCE.md) —
+  a separate but related drift: this table is about deploy-rsync file
+  *content* ownership; that doc is about the validator host's git `HEAD`
+  falling behind `origin/main` (nothing in this deploy workflow ever
+  advances it) and the self-heal + fail-closed gate that closes the loop.
+  Start there for "why did HEAD drift".
