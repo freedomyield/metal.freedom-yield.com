@@ -237,7 +237,7 @@ Any public claim — on the site, in `/api/*` endpoints, in social posts, in thi
 
 ## Reclassifications
 
-*(none yet)*
+- **2026-07-13** — The operator-workstation `proton-cli` keystore paths named by [§3.5](#35-keystore-separation-prohibitions-proton-cli-key-custody) (`~/.metal-fy-proton`, `~/.metal-fy-proton-test`, and the default shared-keystore location under `Library/Preferences/@proton/cli-nodejs/`) are [§4.2](#42-confidential-classification) C5 material (internal directory structure under an operator-controlled path). They are published here with operator approval because §3.5's enforcement is mechanical — guard scripts and presented commands assert against these exact literal path strings — and cannot function if the paths are abstracted away. The paths were already public via `docs/ANCHOR_ACCOUNT_KEY_ROTATION.md` prior to this amendment; this entry is the C5 approval record, not a new disclosure.
 
 ---
 
