@@ -288,8 +288,11 @@ emitter needs adjustment before mainnet.
 ssh "${VALIDATOR_SSH_HOST}" 'sudo -u deploy bash -c "
   HOME=~/.metal-fy-proton-test proton chain:set proton-test
   HOME=~/.metal-fy-proton-test proton key:remove PUB_K1_<test_anchor>
-  HOME=~/.metal-fy-proton-test proton chain:set proton    # restore mainnet as the active chain context
 "'
+# Keystore separation (§3.5): the testnet keystore never touches the
+# mainnet chain context, so there is nothing to "restore" here — the
+# mainnet keystore (HOME=~/.metal-fy-proton) stays pinned to proton
+# independent of this teardown.
 ssh "${VALIDATOR_SSH_HOST}" 'sudo shred -u '"${TEST_CONFIG_DIR}"'/anchor.k1.key && \
                               sudo rm -rf '"${TEST_CONFIG_DIR}"
 
@@ -307,8 +310,9 @@ A passing rehearsal records:
 
 - The testnet `tx_id` (= evidence the broadcast worked).
 - The validated receipt JSON (= evidence the schema is correct).
-- The chain context restored to `proton` (mainnet) and the testnet
-  key removed from the keystore (= safe handoff back to mainnet ops).
+- The testnet key removed from the `~/.metal-fy-proton-test` keystore
+  (= safe teardown; keystore separation per §3.5 means the mainnet
+  keystore was never touched and needs no "restore" step).
 
 The operator is then cleared to authorize the mainnet first
 inscription at cycle 3 start. The mainnet broadcast uses the same

@@ -66,6 +66,11 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # the keystore dir and break (e.g. step 2's config-file check). Resolve
 # them from LOGIN_HOME (via the shared fyd_login_home helper), not $HOME.
 LOGIN_HOME="$(fyd_login_home)"
+# Defensive fallback only: per fyd_login_home()'s header comment
+# (scripts/lib/require-keystore-home.sh), a failed `id -un` resolves to
+# bash's own tilde-expansion of the current $HOME rather than an empty
+# string, so this line is not reachable in practice. Kept in case that
+# resolution behavior ever changes.
 [ -n "$LOGIN_HOME" ] || LOGIN_HOME="$HOME"
 REHEARSAL_CFG="${LOGIN_HOME}/freedom-yield-rehearsal-config"
 

@@ -37,9 +37,20 @@
 #   current $HOME. Deliberately does NOT read $HOME (same reasoning as
 #   require_project_keystore_home below: it must work correctly even when
 #   $HOME has been rescoped to a project keystore dir).
-#   Prints an empty string (via the same eval-echo mechanism used below)
-#   if it cannot be resolved; callers must treat an empty result as
-#   "unresolvable" and fall back to their own default.
+#   Resolves `~<login-username>` via `id -un` + bash tilde expansion. If
+#   `id -un` itself fails or prints nothing (rare; not observed on this
+#   repo's supported macOS/Linux targets), the tilde expansion of a bare
+#   `~` falls back to bash's OWN current $HOME value — it does NOT print
+#   an empty string, despite earlier revisions of this comment claiming
+#   otherwise. Practical effect on each consumer:
+#     - require_project_keystore_home() below: on that rare failure,
+#       login_home == the caller's own $HOME, so the equality check
+#       trivially matches and the guard REFUSES — i.e. this function's
+#       failure mode is over-blocking, not fail-open.
+#     - Non-keystore-path consumers (e.g. run-testnet-rehearsal.sh's
+#       `[ -n "$LOGIN_HOME" ] || LOGIN_HOME="$HOME"` fallback) keep an
+#       explicit empty-string fallback defensively; it is unreachable
+#       given the behavior above, but harmless to retain.
 #
 #   Two consumers:
 #     1. require_project_keystore_home() below — to detect whether $HOME
@@ -57,14 +68,34 @@ fyd_login_home() {
 }
 
 # require_project_keystore_home [<label-for-error-message>]
-#   Returns 0 if $HOME is not the login default home, OR if the login
-#   default home could not be determined (inconclusive → does not block).
+#   Returns 0 if $HOME is explicitly set AND is not the login default
+#   home, OR if the login default home could not be determined
+#   (inconclusive → does not block).
 #   Returns 1 and prints a §3.5-citing error (with a corrected invocation
-#   example) to stderr if $HOME resolves to the login default home.
+#   example) to stderr if $HOME is unset/empty, OR if $HOME resolves to
+#   the login default home.
+#
+#   The unset/empty case matters on its own: node's `os.homedir()` (what
+#   proton-cli uses under the hood) falls back to a passwd-database lookup
+#   when $HOME is unset, which resolves to the SAME default keystore this
+#   guard exists to forbid. Treating unset/empty HOME as "inconclusive,
+#   let it through" would fail-open exactly the case §3.5 cares about most
+#   — so it is refused explicitly, ahead of (and independent of) the
+#   login-home comparison below.
 require_project_keystore_home() {
 	local caller="${1:-$0}"
 	local login_home
 	login_home="$(fyd_login_home || true)"
+	if [ -z "${HOME:-}" ]; then
+		echo "ERROR (keystore guard, Constitution §3.5): \$HOME must be explicitly set to a" >&2
+		echo "                project keystore (it is currently unset or empty)." >&2
+		echo "                §3.5 prohibits proton-cli against the default (shared)" >&2
+		echo "                keystore for this project — fail-closed, no bypass flag." >&2
+		echo "                Re-invoke ${caller} with an explicit project keystore prefix:" >&2
+		echo "                  HOME=~/.metal-fy-proton      ${caller} ...   (mainnet)" >&2
+		echo "                  HOME=~/.metal-fy-proton-test ${caller} ...   (testnet)" >&2
+		return 1
+	fi
 	if [ -n "$login_home" ] && [ "${HOME:-}" = "$login_home" ]; then
 		echo "ERROR (keystore guard, Constitution §3.5): \$HOME resolves to the login" >&2
 		echo "                default home (${HOME:-unset})." >&2

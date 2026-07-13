@@ -317,6 +317,52 @@ else
 	FAIL=$((FAIL + 1))
 fi
 
+# ---- audit log FALLBACK path (§3.5 follow-up): resolves against the LOGIN
+# home, not a keystore-scoped $HOME ----
+# bin/safe-broadcast computes AUDIT_LOG_FALLBACK via fyd_login_home()
+# (scripts/lib/require-keystore-home.sh) rather than reading $HOME
+# directly, so that a §3.5-compliant HOME=~/.metal-fy-proton[-test]
+# invocation does not relocate the fallback audit log into the keystore
+# dir and split it from the canonical ~/.fyd-broadcast-audit.log history.
+# Reproduce the EXACT expression bin/safe-broadcast uses (see the
+# AUDIT_LOG_FALLBACK assignment near its top) in a fresh subshell with
+# HOME scoped to a throwaway keystore fixture dir — exactly how a real
+# operator invocation sets it — and assert the result resolves under the
+# real LOGIN home, not the fixture. This never invokes proton, writes no
+# file, and does not touch the real login home directory; it only checks
+# the computed PATH STRING.
+if [ -n "$LOGIN_HOME" ]; then
+	FALLBACK_PROBE="$(mktemp -t safe-bcast-fallback-probe.XXXXXX)"
+	cat > "$FALLBACK_PROBE" <<PROBE
+. "${REPO_ROOT}/scripts/lib/require-keystore-home.sh"
+_login_home="\$(fyd_login_home || true)"
+printf '%s' "\${_login_home:-/tmp}/.fyd-broadcast-audit.log"
+PROBE
+	RESOLVED_FALLBACK="$(HOME="$TEST_HOME" bash "$FALLBACK_PROBE")"
+	rm -f "$FALLBACK_PROBE"
+	EXPECTED_FALLBACK="${LOGIN_HOME}/.fyd-broadcast-audit.log"
+	if [ "$RESOLVED_FALLBACK" = "$EXPECTED_FALLBACK" ]; then
+		printf 'PASS  %-70s (%s)\n' "audit log fallback: HOME=keystore fixture → resolves under LOGIN home" "$RESOLVED_FALLBACK"
+		PASS=$((PASS + 1))
+	else
+		printf 'FAIL  %-70s (got [%s], expected [%s])\n' "audit log fallback: HOME=keystore fixture → resolves under LOGIN home" "$RESOLVED_FALLBACK" "$EXPECTED_FALLBACK" >&2
+		FAIL=$((FAIL + 1))
+	fi
+	case "$RESOLVED_FALLBACK" in
+		"$TEST_HOME"/*)
+			printf 'FAIL  %-70s (resolved under keystore fixture: %s)\n' "audit log fallback: does NOT relocate into the keystore dir" "$RESOLVED_FALLBACK" >&2
+			FAIL=$((FAIL + 1))
+			;;
+		*)
+			printf 'PASS  %-70s\n' "audit log fallback: does NOT relocate into the keystore dir"
+			PASS=$((PASS + 1))
+			;;
+	esac
+else
+	printf 'SKIP  %-70s (login home not resolvable in this environment)\n' "audit log fallback: HOME=keystore fixture → resolves under LOGIN home"
+	printf 'SKIP  %-70s (login home not resolvable in this environment)\n' "audit log fallback: does NOT relocate into the keystore dir"
+fi
+
 # ---- Summary ----
 echo
 echo "----------------------------------------"

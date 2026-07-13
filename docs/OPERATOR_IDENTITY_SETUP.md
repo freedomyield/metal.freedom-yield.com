@@ -469,8 +469,10 @@ HOME=~/.metal-fy-proton-test proton chain:set proton-test
 # All three steps MUST PASS, with explorer-visible permission and
 # linkauth, before any mainnet command is issued.
 
-# Switch CLI back to mainnet only after the testnet PASS is recorded.
-HOME=~/.metal-fy-proton-test proton chain:set proton
+# Keystore separation (§3.5): mainnet commands always run with
+# HOME=~/.metal-fy-proton, which stays pinned to the mainnet chain
+# context independent of this testnet keystore. No "switch back"
+# step is needed or should be run here.
 ```
 
 The testnet PASS is part of the IC-2 deliverable (C3 → C1 by

@@ -142,6 +142,40 @@ else
 	fail_case "lib: HOME=project fixture dir → returns 0, silent" "rc=${FIXTURE_RC:-?} msg=[${FIXTURE_MSG}]"
 fi
 
+# 1e. HOME unset → function returns 1 (refuse), citing §3.5 and an
+# explicit "must be explicitly set" message. Regression guard for the
+# fail-open bug this case exists to close: an unset $HOME previously
+# passed through SILENTLY (rc=0), because it simply did not textually
+# equal the login-home string compared in 1b/1d above — even though
+# proton-cli (via node's os.homedir()) falls back to a passwd-database
+# lookup on an unset $HOME, resolving to the SAME default keystore this
+# guard exists to forbid.
+UNSET_STDERR="$(
+	set -u
+	env -u HOME bash -c '. "'"$LIB"'"; require_project_keystore_home "unit-test"' 2>&1 1>/dev/null
+	echo "RC=$?"
+)"
+UNSET_RC="$(printf '%s' "$UNSET_STDERR" | grep -oE 'RC=[0-9]+' | tail -1 | cut -d= -f2)"
+if [ "$UNSET_RC" = "1" ] && printf '%s' "$UNSET_STDERR" | grep -qi 'must be explicitly set'; then
+	pass "lib: HOME unset → returns 1, message says HOME must be explicitly set" "rc=$UNSET_RC"
+else
+	fail_case "lib: HOME unset → returns 1, message says HOME must be explicitly set" "rc=${UNSET_RC:-?}"
+fi
+
+# 1f. HOME set to the empty string ("") → same refusal path as unset
+# (both are caught by the same `[ -z "${HOME:-}" ]` check).
+EMPTY_STDERR="$(
+	set -u
+	HOME="" bash -c '. "'"$LIB"'"; require_project_keystore_home "unit-test"' 2>&1 1>/dev/null
+	echo "RC=$?"
+)"
+EMPTY_RC="$(printf '%s' "$EMPTY_STDERR" | grep -oE 'RC=[0-9]+' | tail -1 | cut -d= -f2)"
+if [ "$EMPTY_RC" = "1" ] && printf '%s' "$EMPTY_STDERR" | grep -qi 'must be explicitly set'; then
+	pass "lib: HOME=\"\" (empty) → returns 1, message says HOME must be explicitly set" "rc=$EMPTY_RC"
+else
+	fail_case "lib: HOME=\"\" (empty) → returns 1, message says HOME must be explicitly set" "rc=${EMPTY_RC:-?}"
+fi
+
 # ============================================================
 # Part 2: scripts/run-testnet-rehearsal.sh integration
 # ============================================================
