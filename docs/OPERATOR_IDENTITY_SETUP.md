@@ -415,7 +415,7 @@ Rationale:
     the existing `PUB_WA_3hftgAo...` credential on `active`). No
     K1 private key required.
   - The K1 private key for `EOS6w1ufdiYuZs9Q...` imported via
-    `proton key:add`. Subject to Decision #2 in
+    `HOME=~/.metal-fy-proton proton key:add`. Subject to Decision #2 in
     `project_phase_alpha_coordination_log.md`.
 - A receiver account for Phase α broadcasts (Decision #1 in the
   coord-log; placeholder `<sink_account>` below until naming is
@@ -435,7 +435,7 @@ The `anchor` key is a fresh K1 (secp256k1) keypair, NOT WebAuth and
 NOT reused from any existing key on `metalfreedom`.
 
 ```sh
-proton key:generate
+HOME=~/.metal-fy-proton proton key:generate
 # Output (record both):
 #   Private key: PVT_K1_...      ← store in Dashlane only
 #   Public key:  PUB_K1_...      ← used below as <anchor_pubkey>
@@ -458,7 +458,7 @@ Constraints:
 
 ```sh
 # Switch CLI to proton-test (= XPR testnet).
-proton chain:set proton-test
+HOME=~/.metal-fy-proton-test proton chain:set proton-test
 
 # Generate a throwaway test key and provision a test account
 # (operator: signup via webauth.com testnet or proton testnet faucet).
@@ -470,7 +470,7 @@ proton chain:set proton-test
 # linkauth, before any mainnet command is issued.
 
 # Switch CLI back to mainnet only after the testnet PASS is recorded.
-proton chain:set proton
+HOME=~/.metal-fy-proton-test proton chain:set proton
 ```
 
 The testnet PASS is part of the IC-2 deliverable (C3 → C1 by
@@ -492,10 +492,10 @@ The action payload to compose is the `eosio` system contract
 **Path 2 — sign with the K1 private key via `proton-cli`:**
 
 Requires the K1 private key for `EOS6w1ufdiYuZs9Q...` to be present
-in the local `proton-cli` keystore (`proton key:add` first).
+in the local `proton-cli` keystore (`HOME=~/.metal-fy-proton proton key:add` first).
 
 ```sh
-proton action eosio updateauth '{
+HOME=~/.metal-fy-proton proton action eosio updateauth '{
   "account": "metalfreedom",
   "permission": "anchor",
   "parent": "active",
@@ -517,7 +517,7 @@ the next account read.
 ## A7. Link the `anchor` permission to `eosio.token::transfer`
 
 ```sh
-proton action eosio linkauth '{
+HOME=~/.metal-fy-proton proton action eosio linkauth '{
   "account": "metalfreedom",
   "code": "eosio.token",
   "type": "transfer",
@@ -563,7 +563,7 @@ curl -sS -X POST -H 'Content-Type: application/json' \
 # be accepted by chain rules (replace <sink_account> with the
 # confirmed sink name; <root_hash> is any 64-hex placeholder for the
 # verification dry-run).
-proton action eosio.token transfer '{
+HOME=~/.metal-fy-proton proton action eosio.token transfer '{
   "from": "metalfreedom",
   "to": "<sink_account>",
   "quantity": "0.0001 XPR",
@@ -779,9 +779,9 @@ backup-of-record.
 
 ```sh
 ssh "${VALIDATOR_SSH_HOST}" 'sudo -u deploy bash -c "
-  proton chain:set proton
-  proton key:add \$(sudo cat /etc/freedom-yield/anchor.k1.key)
-  proton key:list
+  HOME=~/.metal-fy-proton proton chain:set proton
+  HOME=~/.metal-fy-proton proton key:add \$(sudo cat /etc/freedom-yield/anchor.k1.key)
+  HOME=~/.metal-fy-proton proton key:list
 "'
 ```
 
@@ -838,8 +838,9 @@ storage tends to produce on-the-day confusion under time pressure.
 
 After B4 completes successfully, the operator can confirm the wallet
 exists and that the password is known by running B5b's
-`proton key:unlock` once during initial setup (= not waiting until cycle
-day). If `proton key:unlock` fails with "incorrect password", the
+`HOME=~/.metal-fy-proton proton key:unlock` once during initial setup (=
+not waiting until cycle day). If `proton key:unlock` fails with
+"incorrect password", the
 operator has either mistyped the saved password in Dashlane, or
 `proton key:add` did not in fact prompt for a wallet password on this
 CLI version (older proton-cli builds store the key in plaintext under
@@ -851,7 +852,7 @@ which case applies before cycle day is mandatory.
 
 ```sh
 ssh "${VALIDATOR_SSH_HOST}" 'sudo -u deploy bash -c "
-  proton action eosio.token transfer '\''{
+  HOME=~/.metal-fy-proton proton action eosio.token transfer '\''{
     \"from\": \"metalfreedom\",
     \"to\": \"<sink_account>\",
     \"quantity\": \"0.0001 XPR\",
@@ -918,7 +919,7 @@ Before each cycle transition broadcast (= each time
 MUST manually unlock the keystore on the validator host:
 
 ```sh
-ssh -t "${VALIDATOR_SSH_HOST}" 'sudo -u deploy proton key:unlock'
+ssh -t "${VALIDATOR_SSH_HOST}" 'sudo -u deploy HOME=~/.metal-fy-proton proton key:unlock'
 # The -t flag forces remote PTY allocation so the password prompt has
 # a controlling terminal to read from. Without -t, the prompt cannot
 # be satisfied (it either errors out on /dev/tty open or echoes the
@@ -933,7 +934,7 @@ Expected output: `Success: Unlocked wallet`.
 Verify the unlocked state:
 
 ```sh
-ssh "${VALIDATOR_SSH_HOST}" 'sudo -u deploy proton key:list'
+ssh "${VALIDATOR_SSH_HOST}" 'sudo -u deploy HOME=~/.metal-fy-proton proton key:list'
 # Expect every key tagged with `(unlocked)` rather than `(locked)`.
 # -t not needed here — key:list does not prompt for input.
 ```
@@ -948,10 +949,10 @@ The keystore remains unlocked until:
 
 In practice on a long-lived validator host, the operator only needs
 to re-unlock after a reboot. For the **2026-07-04 cycle 3 start**
-specifically, the operator should `proton key:unlock` at any point
-between system boot and the cycle's 13:00 JST trigger window, and
-confirm via `proton key:list` immediately before the cron tick is
-expected.
+specifically, the operator should `HOME=~/.metal-fy-proton proton
+key:unlock` at any point between system boot and the cycle's 13:00 JST
+trigger window, and confirm via `HOME=~/.metal-fy-proton proton
+key:list` immediately before the cron tick is expected.
 
 ### Failure mode if the operator forgets
 
@@ -1018,7 +1019,7 @@ ssh "${VALIDATOR_SSH_HOST}" 'sudo -u deploy pkill -f watch-anchor-events'
 
 # 3. Unlock the keystore in a real TTY (see "Required pre-cycle step"
 #    above for why -t is mandatory).
-ssh -t "${VALIDATOR_SSH_HOST}" 'sudo -u deploy proton key:unlock'
+ssh -t "${VALIDATOR_SSH_HOST}" 'sudo -u deploy HOME=~/.metal-fy-proton proton key:unlock'
 
 # 4. Before re-broadcasting, confirm no earlier attempt actually
 #    landed on chain. The hang in step 4 of the failure chain above
@@ -1078,13 +1079,13 @@ or in response to a suspected exposure), the procedure is:
 
 ```sh
 # 1. Generate a new anchor K1 keypair on the operator Mac (per A4).
-proton key:generate    # captures PUB_K1_<new>; PVT_K1_<new> to Dashlane
+HOME=~/.metal-fy-proton proton key:generate    # captures PUB_K1_<new>; PVT_K1_<new> to Dashlane
 
 # 2. From the operator Mac, sign updateauth replacing the old pubkey
 #    on the metalfreedom@anchor permission. Either signing path
 #    (WebAuth or K1) from A6 may be used; metalfreedom@active is the
 #    required authorization.
-proton action eosio updateauth '{
+HOME=~/.metal-fy-proton proton action eosio updateauth '{
   "account": "metalfreedom",
   "permission": "anchor",
   "parent": "active",
@@ -1112,9 +1113,9 @@ ssh "${VALIDATOR_SSH_HOST}" 'sudo -u root bash -c "
   chmod 000 /etc/freedom-yield/anchor.k1.key.*.retired
 "'
 
-# 5. Re-execute B4 (proton key:add for the new key).
-# 6. proton key:remove PUB_K1_<old> from the CLI keystore on the
-#    validator host.
+# 5. Re-execute B4 (HOME=~/.metal-fy-proton proton key:add for the new key).
+# 6. HOME=~/.metal-fy-proton proton key:remove PUB_K1_<old> from the CLI
+#    keystore on the validator host.
 # 7. Self-test (B5) with the new key. Once clean, the rotation is
 #    complete; the linkauth from A7 carries over (it references the
 #    permission name 'anchor', not a specific pubkey).
