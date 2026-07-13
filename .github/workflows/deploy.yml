@@ -149,19 +149,37 @@ jobs:
       - name: Advance host checkout to origin/main
         # Delivery-ownership inversion (2026-07-13): git is the ONLY
         # delivery path for tracked files. We advance the host checkout
-        # BEFORE any rsync so the compose/Caddy step below always runs
-        # against the pushed commit's files. The script is piped from the
-        # runner's checkout (bash -s) — the host executes the version this
-        # push shipped, never a stale on-host copy, which also lets its
-        # self-heal absorb dirt left behind by the pre-inversion rsync on
-        # the very first run. Fail-closed: if the host cannot FF (real
-        # local divergence, host ahead, fetch failure), the script alerts
-        # via on-host ntfy AND this deploy fails loudly here.
+        # BEFORE any rsync so the compose/Caddy step below runs against the
+        # pushed commit's files — this is enforced, not merely assumed, by
+        # the merge-base assertion below: the host fetches origin/main from
+        # GitHub independently of this runner, so if GitHub's ref
+        # advertisement to the host ever lags the push that triggered this
+        # run, the advance script could exit 0 while the host is still
+        # short of the commit this deploy is shipping, and everything after
+        # it would silently run against stale files. The script is piped
+        # from the runner's checkout (bash -s) — the host executes the
+        # version this push shipped, never a stale on-host copy, which also
+        # lets its self-heal absorb dirt left behind by the pre-inversion
+        # rsync on the very first run. Fail-closed: if the host cannot FF
+        # (real local divergence, host ahead, fetch failure), the script
+        # alerts via on-host ntfy AND this deploy fails loudly here.
         run: |
           ssh -i ~/.ssh/id_deploy -p "$SSH_PORT" -o StrictHostKeyChecking=no \
             "$SSH_USER@$SSH_HOST" \
             "FYD_REPO_DIR='$DEPLOY_PATH' FYD_NOTIFY='$DEPLOY_PATH/scripts/notify.sh' bash -s" \
             < scripts/advance-host-checkout.sh
+
+          # Fail-closed post-advance assertion (final-review Important-1):
+          # confirm the commit that triggered this run is now actually
+          # contained in the host's HEAD, rather than trusting the script's
+          # exit 0 alone. $GITHUB_SHA is a default Actions env var already
+          # present in the runner's shell — it expands HERE, runner-side,
+          # into the literal SHA before this string is handed to ssh, so
+          # the remote command carries a fixed value, not an unexpanded
+          # reference to a var the host doesn't have.
+          ssh -i ~/.ssh/id_deploy -p "$SSH_PORT" -o StrictHostKeyChecking=no \
+            "$SSH_USER@$SSH_HOST" \
+            "git -C '$DEPLOY_PATH' merge-base --is-ancestor $GITHUB_SHA HEAD"
 
       - name: Rsync public/ to VPS
         # ONLY the deploy-transformed public/ tree travels by rsync — it is

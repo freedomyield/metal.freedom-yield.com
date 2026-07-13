@@ -344,6 +344,57 @@ alerts | grep -q '^high|host-advance: self-heal revert failed' \
 	|| bad "self-heal-op-fails: high alert on revert failure (alerts: $(alerts))"
 teardown
 
+# ---- case 12: concurrency lock (flock-gated — Linux host/CI only). macOS
+#      has no flock, and the script deliberately skips the guard there
+#      (same repo convention as tests/anomalies/integration-linux.sh), so
+#      these cases SKIP rather than fake the behavior. 12a: a held lock +
+#      short FYD_LOCK_TIMEOUT → loud exit 1 with the high "lock timeout"
+#      alert, and the repo is NOT advanced. 12b: a briefly-held lock within
+#      the timeout → the waiter proceeds normally once released. ----------
+if command -v flock >/dev/null 2>&1; then
+	# 12a: timeout path
+	build_pair
+	push_origin_commits 1
+	( flock -x 200; sleep 5 ) 200>"$CLONE/.git/fyd-advance.lock" &
+	HOLDER=$!
+	sleep 0.3
+	HEAD_BEFORE="$(git -C "$CLONE" rev-parse HEAD)"
+	FYD_LOCK_TIMEOUT=1 run_advancer >/tmp/.adv-out-$$.log 2>&1
+	RC=$?
+	OUT="$(cat /tmp/.adv-out-$$.log)"; rm -f /tmp/.adv-out-$$.log
+	[ "$RC" -eq 1 ] \
+		&& ok "lock-timeout: exit 1" \
+		|| bad "lock-timeout: exit 1 (actual=$RC, out=$OUT)"
+	alerts | grep -q '^high|host-advance: lock timeout' \
+		&& ok "lock-timeout: high alert fired" \
+		|| bad "lock-timeout: high alert fired (alerts: $(alerts))"
+	[ "$(git -C "$CLONE" rev-parse HEAD)" = "$HEAD_BEFORE" ] \
+		&& ok "lock-timeout: HEAD not advanced while lock held" \
+		|| bad "lock-timeout: HEAD not advanced while lock held"
+	wait $HOLDER 2>/dev/null
+	teardown
+
+	# 12b: wait-then-proceed path
+	build_pair
+	push_origin_commits 1
+	( flock -x 200; sleep 1 ) 200>"$CLONE/.git/fyd-advance.lock" &
+	HOLDER=$!
+	sleep 0.3
+	FYD_LOCK_TIMEOUT=10 run_advancer >/tmp/.adv-out-$$.log 2>&1
+	RC=$?
+	OUT="$(cat /tmp/.adv-out-$$.log)"; rm -f /tmp/.adv-out-$$.log
+	wait $HOLDER 2>/dev/null
+	[ "$RC" -eq 0 ] \
+		&& ok "lock-wait: exit 0 after lock released within timeout" \
+		|| bad "lock-wait: exit 0 after lock released within timeout (actual=$RC, out=$OUT)"
+	[ "$(git -C "$CLONE" rev-parse HEAD)" = "$(git -C "$ORIGIN" rev-parse main)" ] \
+		&& ok "lock-wait: HEAD advanced to origin/main after waiting" \
+		|| bad "lock-wait: HEAD advanced to origin/main after waiting"
+	teardown
+else
+	echo "SKIP  case 12 (concurrency lock): flock not available on this host (macOS) — the script skips the guard here by design; covered on Linux CI"
+fi
+
 # ---- summary ----------------------------------------------------------------------
 echo "test-advance-host-checkout.sh summary: PASS=$PASS  FAIL=$FAIL"
 if [ "$FAIL" -eq 0 ]; then

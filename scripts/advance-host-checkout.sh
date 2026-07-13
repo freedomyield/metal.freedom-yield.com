@@ -52,8 +52,11 @@
 #   bash scripts/advance-host-checkout.sh
 #
 # Env overrides (test-time + ops):
-#   FYD_REPO_DIR   repo checkout to advance (default: this script's repo)
-#   FYD_NOTIFY     notifier to invoke (default: <script dir>/notify.sh)
+#   FYD_REPO_DIR       repo checkout to advance (default: this script's repo)
+#   FYD_NOTIFY         notifier to invoke (default: <script dir>/notify.sh)
+#   FYD_LOCK_TIMEOUT   seconds to wait for the concurrency lock (default:
+#                      120; test-time only — production callers keep the
+#                      default)
 #
 # Exit codes:
 #   0  already in sync, or successfully advanced to origin/main
@@ -67,6 +70,21 @@
 # Cron: scripts/install-metal-host-advance-cron.sh, scheduled to run BEFORE
 # the check-host-drift.sh daily tripwire so a healthy self-heal clears drift
 # before the backstop samples it.
+#
+# Concurrency: two callers run this script against the SAME checkout — the
+# deploy-time invocation (deploy.yml's "Advance host checkout" step) and
+# the daily cron. If they overlap, the git-lock loser would fail its pull
+# and fire a spurious high-priority alert for what is really just benign
+# contention. A per-checkout flock on <git-dir>/fyd-advance.lock (resolved
+# via `rev-parse --absolute-git-dir` — worktrees have a .git FILE, and the
+# non-absolute form can return a cwd-relative path) serializes them: the
+# second run waits up to FYD_LOCK_TIMEOUT (120s) for the first to finish,
+# then — both runs being idempotent — typically lands on "already in
+# sync". A timeout is NOT benign contention (an advance wedged >120s) and
+# fails loudly. On systems without flock (macOS, where the dev test suite
+# runs — the repo already treats flock as Linux-only, see
+# tests/anomalies/integration-linux.sh) the guard is skipped entirely and
+# the script behaves exactly as before the guard existed.
 
 # No `-e`... actually not needed here: unlike check-host-drift.sh's
 # `[ cond ] && VAR=` drift-accumulation idiom, every operation in this
@@ -82,6 +100,17 @@
 # host-mutating automation than silently continuing on an unknown repo
 # state.
 set -euo pipefail
+
+# Stdin hardening: deploy pipes this script over SSH via `bash -s`, so the
+# script's stdin IS the script text itself. A bare `exec </dev/null` here
+# would therefore make bash read "the rest of the script" from /dev/null
+# and silently stop with exit 0 (measured, 2026-07-13). Instead the whole
+# body is one brace group with stdin redirected at the group's close:
+# bash must parse to the closing `}` before executing anything, so no
+# stdin-reading command can ever swallow script text mid-run, and every
+# command inside sees /dev/null on stdin. `exit` inside a brace group
+# (not a subshell) still exits the script with its code as before.
+{
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="${FYD_REPO_DIR:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
@@ -116,9 +145,14 @@ self_heal_lossless_dirt() {
 		case "$path" in public/*) continue ;; esac
 		case "$entry" in
 		" M "*)
-			# tracked, modified in the worktree only (index clean)
-			if git -C "$REPO_DIR" diff --quiet origin/main -- "$path"; then
-				if ! git -C "$REPO_DIR" checkout -- "$path"; then
+			# tracked, modified in the worktree only (index clean).
+			# :(literal) pathspec magic: $path must match exactly one
+			# file, never expand as a glob (a path containing * or ?
+			# would otherwise be a pathspec pattern). The cat-file /
+			# show calls below use rev:path syntax, which is not a
+			# pathspec and needs no such guard.
+			if git -C "$REPO_DIR" diff --quiet origin/main -- ":(literal)$path"; then
+				if ! git -C "$REPO_DIR" checkout -- ":(literal)$path"; then
 					log "ERROR: self-heal failed to revert ${path}"
 					alert high "host-advance: self-heal revert failed" "git checkout -- ${path} failed during lossless self-heal (behind=${BEHIND}); host state left as-is — investigate manually."
 					exit 1
@@ -150,6 +184,23 @@ self_heal_lossless_dirt() {
 if ! git -C "$REPO_DIR" rev-parse --git-dir >/dev/null 2>&1; then
 	log "ERROR: not a git checkout: $REPO_DIR"
 	exit 2
+fi
+
+# Mutual exclusion between the deploy-time invocation and the daily cron
+# (see the header's Concurrency paragraph). Lockfile lives inside the
+# checkout's own git dir: per-checkout by construction and never tracked.
+# --absolute-git-dir, not --git-dir: a worktree's .git is a FILE (so
+# "$REPO_DIR/.git/" would be wrong), and the non-absolute form can return
+# a path relative to the repo dir, which would resolve against our cwd.
+# No flock (macOS dev/test) -> skip; behavior is unchanged from before.
+if command -v flock >/dev/null 2>&1; then
+	LOCKFILE="$(git -C "$REPO_DIR" rev-parse --absolute-git-dir)/fyd-advance.lock"
+	exec 9>"$LOCKFILE"
+	if ! flock -w "${FYD_LOCK_TIMEOUT:-120}" 9; then
+		log "ERROR: lock timeout — another advance has held ${LOCKFILE} for >${FYD_LOCK_TIMEOUT:-120}s"
+		alert high "host-advance: lock timeout" "another advance has held the lock >${FYD_LOCK_TIMEOUT:-120}s (${LOCKFILE}); investigate — an advance run (deploy-time or cron) appears wedged."
+		exit 1
+	fi
 fi
 
 if ! git -C "$REPO_DIR" fetch --quiet origin main 2>/dev/null; then
@@ -204,3 +255,7 @@ else
 	alert high "host-advance: ff-only pull failed" "git pull --ff-only origin main failed (behind=${BEHIND}): ${PULL_OUT}"
 	exit 1
 fi
+
+# Close of the stdin-hardening brace group opened right after `set -euo
+# pipefail` — see the comment there.
+} </dev/null

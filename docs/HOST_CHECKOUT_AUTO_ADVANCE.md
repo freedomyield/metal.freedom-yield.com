@@ -126,6 +126,18 @@ the deploy job stops there — the `public/` rsync and the Caddy step never
 run against a host whose checkout the advance couldn't verify or bring
 current.
 
+The step then asserts `git merge-base --is-ancestor $GITHUB_SHA HEAD` on
+the host: the host fetches `origin/main` from GitHub independently of the
+runner, so if GitHub's ref advertisement lags the triggering push, the
+advance can exit 0 with the host still short of the pushed commit — the
+assertion fails the deploy loudly instead of letting the later steps run
+against stale files. The two invocation paths (this step and the daily
+cron) are also serialized against each other: the script takes a
+per-checkout `flock` on `<git-dir>/fyd-advance.lock` (waiting up to 120 s;
+timeout alerts `high` and exits 1), so an overlap never fires a spurious
+git-lock alert. On systems without `flock` (macOS dev/test) the lock is
+skipped.
+
 ### ③ Fail-closed freshness gate (backstop) — `scripts/check-scripts-freshness.sh`
 
 A read-only library check (never pulls, resets, or edits anything) that

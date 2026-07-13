@@ -114,6 +114,26 @@ else
   no "could not locate 'Advance host checkout to origin/main' before 'Set up Xserver deploy key' in the workflow — cannot bound the validator-host leg"
 fi
 
+# --- 3.5. the advance step must carry the fail-closed post-advance commit
+#        assertion (final-review Important-1): the host fetches origin/main
+#        from GitHub independently of the runner, so a ref-advertisement
+#        lag could let the advance exit 0 with the host still short of the
+#        pushed commit. `merge-base --is-ancestor` inside the advance step
+#        is what turns "the compose step runs against the pushed commit's
+#        files" from a claim into an enforced invariant. ---
+if [ -n "${ADV_LINE}" ]; then
+  ADV_NEXT="$(awk -v start="${ADV_LINE}" 'NR>start && /^      - name:/{print NR; exit}' "${WORKFLOW}")"
+  [ -n "${ADV_NEXT}" ] || ADV_NEXT=$((ADV_LINE + 1000))
+  ADV_BLOCK="$(sed -n "${ADV_LINE},$((ADV_NEXT - 1))p" "${WORKFLOW}")"
+  if printf '%s\n' "${ADV_BLOCK}" | grep -Fq -- 'merge-base --is-ancestor'; then
+    ok "advance step asserts the pushed commit reached host HEAD (merge-base --is-ancestor present)"
+  else
+    no "advance step is missing the fail-closed 'merge-base --is-ancestor' post-advance assertion"
+  fi
+else
+  no "cannot check post-advance commit assertion: 'Advance host checkout to origin/main' step not found"
+fi
+
 # --- 4. step order: Advance < Rsync public/ < Bring up/reload Caddy. The
 #        advance step must run first (git delivers everything else before
 #        Caddy is (re)started against it); the public/ rsync must land

@@ -153,7 +153,7 @@ GitHub の `Actions` タブ → `Deploy site to VPS` → `Run workflow` → main
 
 `main` ブランチに push するだけ。`README.md`, `README.ja.md`, `CLAUDE.md`,
 `docs/**`, `.gitignore` への push では deploy job 自体が走らない
-(`paths-ignore` 設定、`.github/workflows/deploy.yml` 24-29 行目)。
+(`.github/workflows/deploy.yml` の `on.push.paths-ignore` キー参照)。
 
 ただし validator host の git checkout がそれで止まるわけではない —
 こうした push も `origin/main` には乗るので、次に deploy を起動する push
