@@ -185,14 +185,33 @@ jobs:
             public/ "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/public/"
 
       - name: Bring up / reload Caddy on VPS
+        # up -d first (recreates on compose-config change as before). Then
+        # stale-mount heal: the Caddyfile is a single-file bind mount
+        # pinned to the inode present at container creation; the git
+        # advance step above updates the file via git (new inode), so if
+        # the container's view differs from the host file the mount is
+        # stale and only a container recreate — not `caddy reload`, which
+        # reads through the same stale mount — can pick up the new config.
+        # State-based (content compare), so it is a no-op on unchanged
+        # Caddyfiles and also heals a stale mount left by any earlier
+        # deploy. Reload still covers the recreate-skipped path; the
+        # health check guards both.
         run: |
           ssh -i ~/.ssh/id_deploy -p "$SSH_PORT" -o StrictHostKeyChecking=no \
-            "$SSH_USER@$SSH_HOST" \
-            "cd '$DEPLOY_PATH' && \
-             docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml up -d --remove-orphans --build && \
-             docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml exec -T caddy caddy reload --config /etc/caddy/Caddyfile && \
-             sleep 2 && \
-             curl -fsS -o /dev/null http://127.0.0.1:8085/health"
+            "$SSH_USER@$SSH_HOST" "DEPLOY_PATH='$DEPLOY_PATH' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$DEPLOY_PATH"
+          COMPOSE="docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml"
+          $COMPOSE up -d --remove-orphans --build
+          if $COMPOSE exec -T caddy cat /etc/caddy/Caddyfile | cmp -s - caddy/Caddyfile; then
+            $COMPOSE exec -T caddy caddy reload --config /etc/caddy/Caddyfile
+          else
+            echo "Caddyfile bind mount is stale (container view != host file) — recreating caddy"
+            $COMPOSE up -d --force-recreate caddy
+          fi
+          sleep 2
+          curl -fsS -o /dev/null http://127.0.0.1:8085/health
+          REMOTE
 
       - name: Set up Xserver deploy key
         env:
