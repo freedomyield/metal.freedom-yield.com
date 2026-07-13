@@ -9,7 +9,7 @@
 - ドメイン `metal.freedom-yield.com` の DNS A レコードを edge CDN で VPS public IP に向ける
 - 80/443/TCP, 443/UDP(HTTP/3), 22/TCP, 9651/TCP が inbound 許可
 
-**配信トポロジ (2 ホスト)**: GitHub Actions は repo-tracked static を **2 つの target** に配信する — (1) validator host の内部 Caddy、(2) 公開 Xserver origin (edge CDN 背後)。公開 Xserver への static 配信は `rrsync -wo` で metal public dir に封じ込めた専用鍵（`scripts/install-xserver-static-deploy-key.sh` で設置）で行い、`public/` のみを送る。動的 feed は validator host cron → 受信 wrapper 経由で Xserver に届く（deploy とは別経路）。両 rsync の除外集合は単一 SoT `deploy/feed-excludes.txt` から生成。詳細は [`docs/DEPLOY_OWNERSHIP_MATRIX.md`](DEPLOY_OWNERSHIP_MATRIX.md)。
+**配信トポロジ (2 ホスト)**: GitHub Actions は repo-tracked static (`public/`) を **2 つの target** に配信する — (1) validator host の内部 Caddy、(2) 公開 Xserver origin (edge CDN 背後)。この 2 つの配信経路は非対称: validator host は `$DEPLOY_PATH` に本リポの git checkout を持ち、`public/` 以外の git 管理ファイル(`docs/`, `scripts/`, `tests/`, `caddy/Caddyfile`, `docker-compose*.yml` 等)は deploy のたびに `scripts/advance-host-checkout.sh` の `git pull --ff-only` が届ける(§4 参照)。公開 Xserver は git checkout を一切持たず、`rrsync -wo` で metal public dir に封じ込めた専用鍵(`scripts/install-xserver-static-deploy-key.sh` で設置)による `public/` のみの rsync が唯一の配信経路。動的 feed は validator host cron → 受信 wrapper 経由で Xserver に届く(deploy とは別経路)。両 `public/` rsync の除外集合は単一 SoT `deploy/feed-excludes.txt` から生成。詳細は [`docs/DEPLOY_OWNERSHIP_MATRIX.md`](DEPLOY_OWNERSHIP_MATRIX.md)。
 
 ## 手順
 
@@ -63,15 +63,25 @@ docker compose version      # v2.x
 
 ### 4. VPS 側: deploy 先パスの準備
 
-deploy userの home 配下に bare な directory を 1 つ作る。中身は GitHub Actions が rsync で配置:
+deploy user の home 配下に **git clone** で `<deploy_path>` を作る。2026-07-13
+の delivery-ownership inversion 以降、`public/` 以外の git 管理ファイル
+(`docs/`, `scripts/`, `tests/`, `caddy/Caddyfile`, `docker-compose*.yml`
+等)は deploy のたびに `scripts/advance-host-checkout.sh` の
+`git pull --ff-only` が届ける。このステップが動くには **`<deploy_path>` が
+最初から git checkout であること** が前提 — `mkdir -p` だけの空ディレクトリの
+ままだと、その advance ステップが `not a git checkout` で exit 2 して失敗し、
+deploy job もそこで止まる。これは意図した fail-closed 挙動(git 管理外の空
+ディレクトリへ誤って FF pull を強行しないためのガード)であり、bug ではない
+— 詳細は [`docs/HOST_CHECKOUT_AUTO_ADVANCE.md`](HOST_CHECKOUT_AUTO_ADVANCE.md)。
 
 ```sh
 # deploy userに切替
 su - deploy
-mkdir -p <deploy_path>
+git clone https://github.com/<owner>/metal.freedom-yield.com.git <deploy_path>
 ```
 
-`.env` は **VPS 側でだけ手動作成**(deploy 対象外、`--exclude='.env'`):
+`.env` は **VPS 側でだけ手動作成**(`.gitignore` 対象かつ `public/` 外なので、
+git advance にも `public/` の rsync にも一切乗らない):
 
 ```sh
 cat > <deploy_path>/.env <<'EOF'
@@ -113,20 +123,41 @@ chmod 600 <deploy_path>/.env
 
 GitHub の `Actions` タブ → `Deploy site to VPS` → `Run workflow` → main を選んで実行。
 
-数十秒〜数分で:
+数十秒〜数分で(`.github/workflows/deploy.yml` の実ステップ順):
 
 1. checkout
-2. cache-bust(main.js に SHA を付与)
-3. SSH 接続
-4. rsync で `public/`, `caddy/Caddyfile`, `docker-compose.yml`, `docker-compose.prod.yml` 等を VPS に配置
-5. VPS 側で `docker compose up -d` → Caddy 起動 → Let's Encrypt 証明書取得 → `caddy reload`
-6. ヘルスチェック
+2. cache-bust(main.js 等に SHA を付与。runner 側の `public/` コピーだけを書き換える)
+3. SSH 鍵設定
+4. **Advance host checkout to origin/main** — runner のコピーの
+   `scripts/advance-host-checkout.sh` を SSH 経由で VPS に流し込んで実行。
+   `public/` 以外の git 管理ファイル(`caddy/Caddyfile`, `docker-compose*.yml`,
+   `scripts/`, `docs/`, `tests/` 等)は全てこの `git pull --ff-only` が届ける。
+   fail-closed: host が origin へ FF できなければ(host が ahead / 未 git
+   checkout / 実際の差分衝突)ここで deploy が失敗し、以降のステップは走らない。
+5. rsync で cache-bust 済みの `public/` **のみ** を VPS に配置(それ以外の
+   ファイルはこの rsync に含まれない)
+6. VPS 側で `docker compose up -d` → Caddyfile の bind mount が陳腐化して
+   いないか(コンテナ内の view と host ファイルを `cmp`)確認し、同一なら
+   `caddy reload`、異なれば `--force-recreate caddy` → ヘルスチェック
+7. (Xserver secrets 設定済みなら)公開 Xserver へも `public/` のみ rsync
+8. 公開ヘルスチェック
 
 成功後、`https://metal.freedom-yield.com/` でサイトが見えるはず。
 
 ### 8. 以降の deploy
 
-`main` ブランチに push するだけ。`README.md`, `CLAUDE.md`, `docs/**`, `.gitignore` への push では deploy は走らない(`paths-ignore` 設定)。
+`main` ブランチに push するだけ。`README.md`, `README.ja.md`, `CLAUDE.md`,
+`docs/**`, `.gitignore` への push では deploy job 自体が走らない
+(`paths-ignore` 設定、`.github/workflows/deploy.yml` 24-29 行目)。
+
+ただし validator host の git checkout がそれで止まるわけではない —
+こうした push も `origin/main` には乗るので、次に deploy を起動する push
+(他のファイルを含む push、または `workflow_dispatch`)の advance ステップ
+か、日次 04:45 UTC の `metal-host-advance` cron のどちらかが FF pull で拾う。
+paths-ignore push の直後だけ host `HEAD` が origin より数コミット遅れて
+見えるのは想定内であり drift ではない — 詳細は
+[`docs/HOST_CHECKOUT_AUTO_ADVANCE.md`](HOST_CHECKOUT_AUTO_ADVANCE.md) の
+cron backstop の節を参照。
 
 `workflow_dispatch` で随時手動実行も可。
 
@@ -137,12 +168,16 @@ GitHub の `Actions` タブ → `Deploy site to VPS` → `Run workflow` → main
 | `Permission denied (publickey)` | `authorized_keys` のパーミッション / `deploy` ユーザの home の所有権を確認 |
 | `Failed to obtain certificate` (Caddy) | DNS A レコードが VPS IP に向いていない / edge CDN の proxy ON で Let's Encrypt の HTTP-01 がブロックされている。**edge proxy は OFF か、DNS-01 challenge に切替** |
 | `caddy reload` でエラー | VPS 側で `docker compose logs caddy` を見て Caddyfile syntax エラーを修正 |
-| rsync が遅い / 時間切れ | `node_modules/` や巨大ファイルが exclude されているか確認、`--exclude` を追加 |
+| `caddy reload` 後も Caddyfile の変更が反映されない | 単一ファイル bind mount の inode 陳腐化。deploy workflow は `docker compose exec caddy cat /etc/caddy/Caddyfile` と host 側ファイルを `cmp` して不一致なら自動で `--force-recreate caddy` するが、手動 `caddy reload` だけだと同じ古い inode を読み直すだけで直らない — `docker compose up -d --force-recreate caddy` を手動実行 |
+| `Advance host checkout to origin/main` ステップで deploy が失敗 | exit 1 なら host が origin より ahead(=host が commit を author した。人間が読んで手動 reconcile、force merge/reset 禁止)か、`public/` 以外に origin/main と食い違う未コミット変更がある(自己修復対象外)。exit 2 なら `$DEPLOY_PATH` がまだ git checkout でない(§4 を参照し `git clone` する)か `git fetch` 失敗(一時的、次回リトライ)。詳細は [`docs/HOST_CHECKOUT_AUTO_ADVANCE.md`](HOST_CHECKOUT_AUTO_ADVANCE.md) |
+| rsync が遅い / 時間切れ | 2026-07-13 以降、この rsync は `public/` のみを転送する(小さい)。遅い場合は VPS 側ネットワーク/SSH を疑う — `node_modules/` 等リポジトリ全体の巨大ファイルはもう転送対象に含まれない |
 | 公開 health check が失敗 | edge DNS の TTL 待ち / edge CDN の SSL モードを "Full (strict)" にする |
 
 ## 関連
 
 - [.github/workflows/deploy.yml](../.github/workflows/deploy.yml) — 実際の workflow 定義
 - [docker-compose.prod.yml](../docker-compose.prod.yml) — VPS で起動する Caddy 設定
+- [docs/HOST_CHECKOUT_AUTO_ADVANCE.md](HOST_CHECKOUT_AUTO_ADVANCE.md) — validator host の git `HEAD` を `origin/main` に FF-only で追従させる self-heal の仕組み(git advance が担う「`public/` 以外の全ファイル配信」の実装)
+- [docs/DEPLOY_OWNERSHIP_MATRIX.md](DEPLOY_OWNERSHIP_MATRIX.md) — git 配信 vs rsync 配信の単一ルールと、`public/api/` 個別ファイルの所有権表
 - [docs/MAINNET_MIGRATION.md](MAINNET_MIGRATION.md) — Tahoe→mainnet 段階移行(本 deploy 設定もそこに連動)
 - メモ `project_public_repo_plan.md` — public 化前提のため、deploy 関連でも IP / hostname を直書きしない方針
