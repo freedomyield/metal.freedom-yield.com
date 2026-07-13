@@ -50,15 +50,23 @@ no(){ FAIL=$((FAIL+1)); printf '  ✗ %s\n' "$1"; }
 #        once outside its own definition. Two of it (or zero calls) is
 #        exactly the kind of drift a future refactor could introduce
 #        silently — e.g. an accidental double-call that heals twice, or a
-#        definition left orphaned after a call site is moved/deleted. ---
-DEF_COUNT="$(grep -c -E '^self_heal_lossless_dirt\(\)[[:space:]]*\{' "${ADVANCE_SCRIPT}")"
+#        definition left orphaned after a call site is moved/deleted.
+#        Both counts accept leading indentation, and the definition count
+#        covers BOTH bash definition styles (`name() {` and
+#        `function name {` / `function name() {`) so an indented or
+#        function-keyword shadow duplicate cannot slip past the gate. ---
+DEF_COUNT="$(grep -c -E '^[[:space:]]*(self_heal_lossless_dirt\(\)|function[[:space:]]+self_heal_lossless_dirt([[:space:]]*\(\))?)[[:space:]]*\{' "${ADVANCE_SCRIPT}")"
 if [ "${DEF_COUNT}" -eq 1 ]; then
   ok "scripts/advance-host-checkout.sh defines self_heal_lossless_dirt() exactly once"
 else
   no "scripts/advance-host-checkout.sh defines self_heal_lossless_dirt() ${DEF_COUNT} time(s) (expected exactly 1)"
 fi
 
-CALL_COUNT="$(grep -c -E '^self_heal_lossless_dirt[[:space:]]*$' "${ADVANCE_SCRIPT}")"
+# Call = a line that is nothing but the bare function name, at ANY
+# indentation — a second call nested inside an if/loop body must count
+# too, not just column-0 calls. The definition line never matches: it
+# continues with `() {`.
+CALL_COUNT="$(grep -c -E '^[[:space:]]*self_heal_lossless_dirt[[:space:]]*$' "${ADVANCE_SCRIPT}")"
 if [ "${CALL_COUNT}" -eq 1 ]; then
   ok "scripts/advance-host-checkout.sh calls self_heal_lossless_dirt exactly once outside its definition"
 else
@@ -91,7 +99,10 @@ if [ -n "${ADV_LINE}" ] && [ -n "${XS_LINE}" ] && [ "${ADV_LINE}" -lt "${XS_LINE
   if [ -z "${DEST_LINES}" ]; then
     no "validator-host leg (Advance host checkout .. Set up Xserver deploy key) has no rsync/ssh destination lines to check — expected at least the public/ rsync destination"
   else
-    BAD_DEST="$(printf '%s\n' "${DEST_LINES}" | grep -v -F -- ':$DEPLOY_PATH/public/' || true)"
+    # Suffix-anchored, not substring containment: the destination must END
+    # with :$DEPLOY_PATH/public/" — a traversal shape like
+    # :$DEPLOY_PATH/public/../secrets/ must not pass as "contains /public/".
+    BAD_DEST="$(printf '%s\n' "${DEST_LINES}" | grep -v -E -- ':\$DEPLOY_PATH/public/"[[:space:]]*$' || true)"
     if [ -z "${BAD_DEST}" ]; then
       DEST_COUNT="$(printf '%s\n' "${DEST_LINES}" | grep -c .)"
       ok "every destination in the validator-host leg (${DEST_COUNT} found) targets \$DEPLOY_PATH/public/"
