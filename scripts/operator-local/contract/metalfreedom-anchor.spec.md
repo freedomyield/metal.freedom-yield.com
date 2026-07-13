@@ -236,7 +236,7 @@ An off-chain verifier can confirm the chain integrity by:
 ## 6. Action invocation example (Phase β)
 
 ```sh
-proton action metalfreedom inscribe '{
+HOME=~/.metal-fy-proton proton action metalfreedom inscribe '{
   "cycle_id": 3,
   "event_type": "cyclestart",
   "root_hash":  "<64-hex dag_root_hash for cycle 3 start>",
@@ -249,7 +249,7 @@ proton action metalfreedom inscribe '{
 Returns: transaction id (64-hex). The transaction trace contains the
 contract's `inscribe` action with the structured payload above, and
 the resulting `cycles`, `roots`, `leaves` table rows are visible via
-`proton table get` or any Hyperion / XPR explorer.
+`HOME=~/.metal-fy-proton proton table get` or any Hyperion / XPR explorer.
 
 ## 7. Off-chain verifier path (= what consumers do)
 

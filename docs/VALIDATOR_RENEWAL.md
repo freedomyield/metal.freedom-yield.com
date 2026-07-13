@@ -249,7 +249,7 @@ State file: `/var/lib/freedom-yield/cycle-gate-state.json` (= operator 承認済
 |---|---|---|---|
 | 1 | AI に「cycle 切替お願い」 と依頼 | (= 任意の channel) | (= なし) |
 | 2 | wallet 操作 (= 集約 → 送金 → cross-chain → AddValidator → on-chain Committed 確認) | Metal Wallet web | stake 額 + duration + reward address |
-| 3 | 鍵 password / passphrase 入力 (= proton key:unlock + identity key 復号) | AI が立ち上げる TTY prompt | Dashlane に保管された 2 secret |
+| 3 | 鍵 password / passphrase 入力 (= HOME=~/.metal-fy-proton proton key:unlock + identity key 復号) | AI が立ち上げる TTY prompt | Dashlane に保管された 2 secret |
 | 4 | explorer URL を visual 確認 | XPR explorer (= AI が URL 報告) | (= 目視のみ) |
 
 ### AI が裏で自走する技術 task (= operator から見えない)
