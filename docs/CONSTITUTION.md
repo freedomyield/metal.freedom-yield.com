@@ -1,6 +1,6 @@
 # Freedom Yield Validator — Constitution
 
-> **Status:** v0.3 (draft)
+> **Status:** v0.4 (draft)
 > **Scope:** Metal Blockchain mainnet validator operation under the "Freedom Yield" brand.
 > **Authority:** This document is the supreme reference for the project. All other documents (`OPERATING_MODEL.md`, runbooks, scripts, public copy) MUST conform to it.
 
@@ -97,6 +97,19 @@ Any command or API call that causes a state-changing transaction to be accepted 
 - MUST NOT justify a mainnet broadcast by its small economic cost. The cost is not measured in fees; the cost is measured in permanent chain-state pollution and institutional-narrative damage.
 - The default execution chain for every new script MUST be testnet, set explicitly at the top of the script or by an unambiguous env var with a testnet default. Mainnet is opt-in only, at operator's per-invocation authorization.
 - Any file, script, or documentation that introduces a broadcast pathway MUST include, in its header, an explicit `# CHAIN: <testnet|mainnet>` marker declaring the intended target, and MUST default to testnet.
+
+### 3.5 Keystore separation prohibitions (proton-cli key custody)
+
+On 2026-07-10, while separating keystores across multiple projects that had been co-resident in a single shared default `proton-cli` keystore, plaintext private keys for this project's owner, active, and anchor permissions were pasted into a chat transcript from unprefixed CLI output and had to be rotated. The root cause was co-residency in the default keystore combined with commands presented without an explicit `HOME` scope. This subsection exists to prevent recurrence.
+
+- MUST NOT present, in any AI assistance, documentation, runbook, or script, a `proton-cli` command without an explicit project-scoped keystore prefix: `HOME=~/.metal-fy-proton proton …` for mainnet, `HOME=~/.metal-fy-proton-test proton …` for testnet. A bare `proton …` invocation is a violation even when offered only as an illustrative example.
+- MUST NOT use the default (shared) `proton-cli` keystore — the one resolved under the login `HOME` at `Library/Preferences/@proton/cli-nodejs/proton-cli.json` — for this project, under any circumstance.
+- MUST create a dedicated project keystore before any key operation if one does not already exist. Falling back to the default keystore for convenience or because the dedicated keystore is missing is prohibited.
+- MUST keep testnet and mainnet keys in separate dedicated keystores (separate `HOME` values). They MUST NOT share a keystore file.
+- MUST NOT reuse a keypair across networks. The same keypair MUST NOT appear on both testnet and mainnet.
+- MUST keep the account and permission topology — the shape of permission structure, thresholds, and key counts — identical between testnet and mainnet. This is what makes a testnet rehearsal a faithful stand-in for mainnet behavior, which PRIME DIRECTIVE gate 1 (testnet-first success on the identical command shape) depends on.
+
+See also [§4.1 SECRET classification](#41-secret-classification) (S1/S2 govern the keys themselves) and [`docs/ANCHOR_ACCOUNT_KEY_ROTATION.md`](ANCHOR_ACCOUNT_KEY_ROTATION.md) for the rotation runbook that implements recovery from a keystore-custody incident.
 
 ## 4. Information Hygiene
 
@@ -216,6 +229,7 @@ Any public claim — on the site, in `/api/*` endpoints, in social posts, in thi
 
 ## Changelog
 
+- **v0.4** — Added [§3.5 Keystore separation prohibitions](#35-keystore-separation-prohibitions-proton-cli-key-custody), a **tightening amendment** (effective at merge per [§9](#9-amendment-process)) proposed by the operator on 2026-07-13. New rules: every `proton-cli` command presented to the operator MUST carry an explicit project-scoped `HOME` prefix (`~/.metal-fy-proton` mainnet / `~/.metal-fy-proton-test` testnet); the default shared keystore MUST NOT be used for this project; a dedicated keystore MUST be created before any key operation rather than falling back to the default; testnet and mainnet keys MUST live in separate keystores and MUST NOT be reused across networks; account/permission topology MUST stay identical between testnet and mainnet so testnet rehearsal remains a faithful stand-in for mainnet. Trigger: on 2026-07-10, while separating keystores across co-resident projects, plaintext owner/active/anchor private keys for this project were pasted into a chat transcript from an unprefixed `proton-cli` command run against the shared default keystore, requiring a full key rotation. Root cause was co-residency in a default keystore combined with commands presented without an explicit `HOME` scope.
 - **v0.3** — Elevated the testnet-first rule from §3.4 (one of many sub-sections) to a **PRIME DIRECTIVE** placed at the very top of the Constitution, before §0, in unmissable form. §3.4 retained as enforcement detail. Rationale: operator determined that a rule tucked inside §3.4 was insufficient deterrent for the class of error that motivated v0.2; the rule must be the first thing any human or AI reads in this document, and it must override every other section. Trigger: same 2026-07-01T04:24Z event as v0.2, but with the additional observation that the AI session had access to §3.4 in principle and still failed the discipline — codification alone is not enforcement; placement matters.
 - **v0.2** — Added §3.4 Broadcast prohibitions (mainnet-first ban). Triggered by an AI-driven unauthorized mainnet A-chain broadcast on 2026-07-01T04:24Z during an exploratory investigation that was self-described as "testnet で試行" but was executed without any chain check. The event proved that "obvious" testnet-first discipline requires constitutional-level codification, not just operational memo. New rule: any new broadcast pipeline MUST first execute successfully on testnet; mainnet is opt-in only after per-invocation operator authorization.
 - **v0.1** — Applied public-repository tone and information-hygiene cleanup before publication.
@@ -223,7 +237,7 @@ Any public claim — on the site, in `/api/*` endpoints, in social posts, in thi
 
 ## Reclassifications
 
-*(none yet)*
+- **2026-07-13** — The operator-workstation `proton-cli` keystore paths named by [§3.5](#35-keystore-separation-prohibitions-proton-cli-key-custody) (`~/.metal-fy-proton`, `~/.metal-fy-proton-test`, and the default shared-keystore location under `Library/Preferences/@proton/cli-nodejs/`) are [§4.2](#42-confidential-classification) C5 material (internal directory structure under an operator-controlled path). They are published here with operator approval because §3.5's enforcement is mechanical — guard scripts and presented commands assert against these exact literal path strings — and cannot function if the paths are abstracted away. The paths were already public via `docs/ANCHOR_ACCOUNT_KEY_ROTATION.md` prior to this amendment; this entry is the C5 approval record, not a new disclosure.
 
 ---
 

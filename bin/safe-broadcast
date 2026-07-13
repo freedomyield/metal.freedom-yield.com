@@ -86,15 +86,21 @@
 #   5    interactive confirmation aborted
 #   6    broadcast failed (chain rejected the tx or transport error)
 #   7    audit log write failed
+#   8    keystore guard failed — $HOME resolves to the default (shared)
+#        proton-cli keystore; refused per docs/CONSTITUTION.md §3.5
 #
 # See also:
 #   docs/CONSTITUTION.md §3.4 + PRIME DIRECTIVE (top of file)
+#   docs/CONSTITUTION.md §3.5 (keystore separation; see the guard below)
 #   scripts/broadcast-guard.sh (tier-1 hook)
+#   scripts/lib/require-keystore-home.sh (the §3.5 guard this wrapper calls)
 #   memory/project_broadcast_enforcement_gate_plan.md (tier design)
 
 set -u
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=scripts/lib/require-keystore-home.sh
+. "${REPO_ROOT}/scripts/lib/require-keystore-home.sh"
 
 # ---- defaults ----
 TX_JSON_FILE=""
@@ -105,9 +111,15 @@ OPERATOR_TOKEN_FILE="${FYD_BROADCAST_TOKEN_FILE:-/tmp/fyd-broadcast-token}"
 INTERACTIVE=1
 CUSTOM_ENDPOINT=""
 
-# Audit log path (matches broadcast-guard.sh convention).
+# Audit log path (matches broadcast-guard.sh convention). Resolved
+# against the LOGIN home (fyd_login_home, from require-keystore-home.sh
+# above), NOT $HOME — a §3.5-compliant HOME=~/.metal-fy-proton[-test]
+# invocation would otherwise relocate the audit log into the keystore
+# dir and split it from the canonical ~/.fyd-broadcast-audit.log
+# history. Falls back to /tmp only if the login home is unresolvable.
 AUDIT_LOG_PRIMARY="${FYD_BROADCAST_AUDIT_LOG:-/var/log/fyd-broadcast-audit.log}"
-AUDIT_LOG_FALLBACK="${HOME:-/tmp}/.fyd-broadcast-audit.log"
+_AUDIT_LOG_LOGIN_HOME="$(fyd_login_home || true)"
+AUDIT_LOG_FALLBACK="${_AUDIT_LOG_LOGIN_HOME:-/tmp}/.fyd-broadcast-audit.log"
 
 usage() { sed -n '2,82p' "$0" | sed 's/^# \?//'; }
 
@@ -290,6 +302,16 @@ elif [ -n "$TOKEN_BOUND_TX_SHA256" ]; then
 		exit 3
 	fi
 fi
+
+# ---- §3.5 keystore separation guard (fail-closed) ----
+# Placed immediately before gate 3, which issues this wrapper's FIRST actual
+# invocation of the `proton` binary (`proton chain:set` below). Everything
+# above this point (arg parsing, gates 1/2/2b) only reads local files and
+# performs curl/jq work — no proton call has happened yet. Refuse here,
+# before that first invocation, if $HOME resolves to the login default
+# home (i.e. the caller did not scope HOME to a dedicated project
+# keystore). See scripts/lib/require-keystore-home.sh for the check itself.
+require_project_keystore_home "$0" || exit 8
 
 # Gate 3 (both testnet + mainnet): pre-flight chain:get.
 # proton-cli's chain command is interactive by default; use chain:set explicitly

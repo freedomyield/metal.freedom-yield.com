@@ -2,8 +2,12 @@
 # test-sign-anchor-event.sh — regression suite for scripts/sign-anchor-event.sh
 # (HC-single 4-action pack composer, delegates broadcast to bin/safe-broadcast).
 #
-# CHAIN: none — this test exercises --dry-run only, which composes the tx
-#        JSON without invoking bin/safe-broadcast. No broadcast occurs.
+# CHAIN: none — most cases exercise --dry-run only, which composes the tx
+#        JSON without invoking bin/safe-broadcast. The keystore-guard cases
+#        near the end DO reach past the --dry-run-only path, but only as far
+#        as bin/safe-broadcast's own gate 2 (a stub `proton` on PATH + an
+#        isolated, guaranteed-missing operator token file make that a
+#        deterministic local failure) — no broadcast occurs anywhere below.
 #
 # Usage:
 #   bash tests/sign-anchor-event/test-sign-anchor-event.sh
@@ -44,8 +48,28 @@ cp "${REPO_ROOT}/public/api/anchor-source.example.json" "$TMP_ANCHOR_MISSING_CYC
 jq '.observations_branch.cycle_number_observed = 0' \
 	"$TMP_ANCHOR_MISSING_CYCLE" > "$TMP_ANCHOR_MISSING_CYCLE.tmp" && mv "$TMP_ANCHOR_MISSING_CYCLE.tmp" "$TMP_ANCHOR_MISSING_CYCLE"
 
+# ---- §3.5 keystore separation guard fixtures ----
+# A hermetic `proton` stub (just enough to satisfy `command -v proton`; it
+# is never actually asked to sign or broadcast anything) plus a project
+# keystore HOME fixture, mirroring tests/safe-broadcast/test-safe-broadcast.sh.
+LOGIN_HOME="$(eval echo "~$(id -un)" 2>/dev/null || true)"
+TEST_HOME="$(mktemp -d -t fya-sign-home.XXXXXX)"
+STUB_DIR="$(mktemp -d -t fya-sign-stub.XXXXXX)"
+cat > "$STUB_DIR/proton" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+chmod +x "$STUB_DIR/proton"
+export PATH="$STUB_DIR:$PATH"
+export HOME="$TEST_HOME"
+# Guaranteed-missing token path so a guard pass-through deterministically
+# fails at bin/safe-broadcast's gate 2 (token missing) rather than picking
+# up a stray real /tmp/fyd-broadcast-token from this machine.
+NO_TOKEN_FILE="$(mktemp -u -t fya-sign-notoken.XXXXXX)"
+export FYD_BROADCAST_TOKEN_FILE="$NO_TOKEN_FILE"
+
 cleanup() {
-	rm -rf "$TMP_CFG"
+	rm -rf "$TMP_CFG" "$TEST_HOME" "$STUB_DIR"
 	rm -f "$TMP_ANCHOR_BAD_DAG" "$TMP_ANCHOR_MISSING_CYCLE"
 }
 trap cleanup EXIT
@@ -115,6 +139,30 @@ check_structure "structure: all 4 actions target eosio.token::transfer" "true" \
 	"$(echo "$DRY_OUT" | jq -r '[.tx.actions[] | (.account == "eosio.token" and .name == "transfer")] | all')"
 check_structure "structure: all 4 actions authorized by metalfreedom@anchor" "true" \
 	"$(echo "$DRY_OUT" | jq -r '[.tx.actions[] | (.authorization[0].actor == "metalfreedom" and .authorization[0].permission == "anchor")] | all')"
+
+# ---- keystore guard (§3.5): refuse when $HOME resolves to the login home ----
+# Non-dry-run path: the stub `proton` on PATH satisfies the signing-host
+# assertion (command -v proton), so execution reaches the guard just after
+# it. Only assertable when the test runner's login home is resolvable.
+if [ -n "$LOGIN_HOME" ]; then
+	export HOME="$LOGIN_HOME"
+	run_case "keystore guard: HOME=login home → refuse (exit 8)" 8 \
+		--chain=testnet-a --anchor-source="${REPO_ROOT}/public/api/anchor-source.example.json"
+	export HOME="$TEST_HOME"
+else
+	printf 'SKIP  %-70s (login home not resolvable in this environment)\n' "keystore guard: HOME=login home → refuse"
+fi
+
+# ---- keystore guard (§3.5): pass through when $HOME is a project fixture ----
+# HOME=$TEST_HOME (not the login home) → the guard does not fire, execution
+# proceeds to delegate to bin/safe-broadcast, which (with the same stub
+# proton + an isolated, guaranteed-missing $FYD_BROADCAST_TOKEN_FILE) fails
+# deterministically at ITS OWN gate 2 (token missing, rc=3) — sign-anchor-event.sh
+# maps any non-zero safe-broadcast rc to its own exit 5. This proves
+# pass-through (a real keystore guard failure would be exit 8, not 5) without
+# any real proton signing or network broadcast.
+run_case "keystore guard: HOME=project fixture dir → passes (delegates, exit 5)" 5 \
+	--chain=testnet-a --anchor-source="${REPO_ROOT}/public/api/anchor-source.example.json"
 
 # ---- Summary ----
 echo

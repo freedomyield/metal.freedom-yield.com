@@ -198,8 +198,8 @@ Under model α (= AI full orchestration; see
    to P-chain, submit AddValidator, confirm on-chain Committed. AI verifies
    on-chain state in parallel.
 3. Operator, when AI prompts, enters the proton-cli keystore password (= for
-   `proton key:unlock`, **required before signing** — see the keystore lock
-   quirk memo) and the operator-identity-key passphrase (= for
+   `HOME=~/.metal-fy-proton proton key:unlock`, **required before signing** —
+   see the keystore lock quirk memo) and the operator-identity-key passphrase (= for
    `gen-identity.sh`). AI handles every shell command around those prompts.
 4. Operator authorizes the mainnet anchor broadcast **per invocation**
    (naming chain / actor / permission / action / memo / quantity — PRIME

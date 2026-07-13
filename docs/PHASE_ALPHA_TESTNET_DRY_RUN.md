@@ -62,7 +62,7 @@ the rehearsal is re-run before mainnet proceeds.
 
 ```sh
 # Switch CLI to testnet.
-proton chain:set proton-test
+HOME=~/.metal-fy-proton-test proton chain:set proton-test
 
 # Create a fresh test account name. The name MUST NOT collide with the
 # mainnet 'metalfreedom' account; it MUST NOT include a brand identifier.
@@ -84,7 +84,7 @@ Dashlane or any persistent store.
 ## Step 2 — Reproduce A4 (anchor K1 key generation) for the test account
 
 ```sh
-proton key:generate
+HOME=~/.metal-fy-proton-test proton key:generate
 # Capture:
 #   PUB_K1_<test_anchor>
 #   PVT_K1_<test_anchor>
@@ -96,7 +96,7 @@ proton key:generate
 
 ```sh
 # A6 analog: add `anchor` as child of `active`.
-proton action eosio updateauth '{
+HOME=~/.metal-fy-proton-test proton action eosio updateauth '{
   "account": "'${TEST_ACCOUNT}'",
   "permission": "anchor",
   "parent": "active",
@@ -109,7 +109,7 @@ proton action eosio updateauth '{
 }' ${TEST_ACCOUNT}@active
 
 # A7 analog: linkauth anchor → eosio.token::transfer.
-proton action eosio linkauth '{
+HOME=~/.metal-fy-proton-test proton action eosio linkauth '{
   "account": "'${TEST_ACCOUNT}'",
   "code": "eosio.token",
   "type": "transfer",
@@ -183,9 +183,9 @@ ssh "${VALIDATOR_SSH_HOST}" "sudo -u deploy bash -c \"
 
 # Import the test key into proton-cli (= note the chain context).
 ssh "${VALIDATOR_SSH_HOST}" 'sudo -u deploy bash -c "
-  proton chain:set proton-test
-  proton key:add \$(sudo cat '"${TEST_CONFIG_DIR}"'/anchor.k1.key)
-  proton key:list
+  HOME=~/.metal-fy-proton-test proton chain:set proton-test
+  HOME=~/.metal-fy-proton-test proton key:add \$(sudo cat '"${TEST_CONFIG_DIR}"'/anchor.k1.key)
+  HOME=~/.metal-fy-proton-test proton key:list
 "'
 ```
 
@@ -286,10 +286,13 @@ emitter needs adjustment before mainnet.
 ```sh
 # On the validator host:
 ssh "${VALIDATOR_SSH_HOST}" 'sudo -u deploy bash -c "
-  proton chain:set proton-test
-  proton key:remove PUB_K1_<test_anchor>
-  proton chain:set proton    # restore mainnet as the active chain context
+  HOME=~/.metal-fy-proton-test proton chain:set proton-test
+  HOME=~/.metal-fy-proton-test proton key:remove PUB_K1_<test_anchor>
 "'
+# Keystore separation (§3.5): the testnet keystore never touches the
+# mainnet chain context, so there is nothing to "restore" here — the
+# mainnet keystore (HOME=~/.metal-fy-proton) stays pinned to proton
+# independent of this teardown.
 ssh "${VALIDATOR_SSH_HOST}" 'sudo shred -u '"${TEST_CONFIG_DIR}"'/anchor.k1.key && \
                               sudo rm -rf '"${TEST_CONFIG_DIR}"
 
@@ -307,8 +310,9 @@ A passing rehearsal records:
 
 - The testnet `tx_id` (= evidence the broadcast worked).
 - The validated receipt JSON (= evidence the schema is correct).
-- The chain context restored to `proton` (mainnet) and the testnet
-  key removed from the keystore (= safe handoff back to mainnet ops).
+- The testnet key removed from the `~/.metal-fy-proton-test` keystore
+  (= safe teardown; keystore separation per §3.5 means the mainnet
+  keystore was never touched and needs no "restore" step).
 
 The operator is then cleared to authorize the mainnet first
 inscription at cycle 3 start. The mainnet broadcast uses the same
@@ -358,7 +362,7 @@ rehearsal parser hardening) that mainnet activation requires.
 When Phase β is activated (= the `metalfreedom::inscribe` SC is
 deployed per `scripts/operator-local/contract/metalfreedom-anchor.spec.md`),
 this rehearsal extends with a step that exercises the SC action via
-`proton action metalfreedom inscribe '{...}' metalfreedom@anchor` and
+`HOME=~/.metal-fy-proton-test proton action metalfreedom inscribe '{...}' metalfreedom@anchor` and
 asserts the resulting receipt has
 `anchor.method == "phase_beta_sc_inscribe"`. The Phase α steps remain
 valid as the fallback path while Phase β stabilizes.

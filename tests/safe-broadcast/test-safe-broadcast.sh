@@ -93,9 +93,21 @@ chmod +x "$STUB_DIR/curl"
 
 export PATH="$STUB_DIR:$PATH"
 
+# ---- §3.5 keystore separation guard: project-keystore HOME fixture ----
+# bin/safe-broadcast now refuses (exit 8) if $HOME resolves to the login
+# user's default home, before its first real proton invocation (gate 3).
+# None of the scenarios below touch a real keystore (proton is stubbed
+# above), so scoping HOME to a throwaway fixture dir for the WHOLE suite is
+# exactly what a real operator invocation looks like (HOME=~/.metal-fy-proton*)
+# and lets every pre-existing gate-3/gate-2b "reaches gate 3" scenario keep
+# exercising gate 3 itself, rather than being intercepted by the new guard.
+LOGIN_HOME="$(eval echo "~$(id -un)" 2>/dev/null || true)"
+TEST_HOME="$(mktemp -d -t safe-bcast-home.XXXXXX)"
+export HOME="$TEST_HOME"
+
 cleanup() {
 	rm -f "$TEST_TOKEN" "$TEST_AUDIT" "$TEST_TX_VALID" "$TEST_TX_EMPTY" "$TEST_DRY_LOG"
-	rm -rf "$STUB_DIR"
+	rm -rf "$STUB_DIR" "$TEST_HOME"
 }
 trap cleanup EXIT
 
@@ -179,6 +191,36 @@ run_case "gate 1: mainnet, --testnet-tx-id shape-valid but unresolvable" 3 \
 	--testnet-tx-id=0000000000000000000000000000000000000000000000000000000000000000 \
 	--dry-run-log="$TEST_DRY_LOG" \
 	--non-interactive
+
+# ---- keystore guard (§3.5): refuse when $HOME resolves to the login home ----
+# The guard sits immediately before gate 3 (this wrapper's first real proton
+# invocation). It fires only when $HOME resolves EXACTLY to the login
+# user's default home (via `id -un` + `eval echo ~<user>` — independent of
+# $HOME itself). We can only assert this deterministically when the test
+# runner's login home is resolvable; if not, skip rather than fabricate a
+# result.
+touch "$TEST_TOKEN"
+if [ -n "$LOGIN_HOME" ]; then
+	export HOME="$LOGIN_HOME"
+	run_case "keystore guard: HOME=login home → refuse (exit 8, before gate 3)" 8 \
+		--tx="$TEST_TX_VALID" --chain=testnet-a --non-interactive
+	export HOME="$TEST_HOME"
+else
+	printf 'SKIP  %-70s (login home not resolvable in this environment)\n' "keystore guard: HOME=login home → refuse"
+fi
+
+# ---- keystore guard (§3.5): pass through when $HOME is a project fixture ----
+# HOME is already scoped to $TEST_HOME (a throwaway temp dir, standing in for
+# a real ~/.metal-fy-proton-test) for the whole suite (see the export near
+# the top of this file). This case shows that explicitly: the guard does
+# NOT fire, and execution proceeds to gate 3, where the hermetic proton stub
+# (testnet chain_id) matches the default expected testnet chain_id → the
+# broadcast then reaches the interactive confirmation prompt, which aborts
+# immediately on EOF stdin (run_case redirects `</dev/null`) → exit 5.
+# This proves pass-through without needing a real proton/network broadcast.
+touch "$TEST_TOKEN"
+run_case "keystore guard: HOME=project fixture dir → passes (reaches gate 3+confirm, exit 5)" 5 \
+	--tx="$TEST_TX_VALID" --chain=testnet-a
 
 # ---- gate 3 (chain identity) failure path (exit 4) ----
 # Force a chain_id mismatch by overriding the expected testnet chain_id to a
@@ -273,6 +315,52 @@ if [ ! -s "$TEST_AUDIT" ]; then
 else
 	printf 'FAIL  %-70s (unexpected content: %d bytes)\n' "audit log: no lines on gate refusal" "$(wc -c < "$TEST_AUDIT")" >&2
 	FAIL=$((FAIL + 1))
+fi
+
+# ---- audit log FALLBACK path (§3.5 follow-up): resolves against the LOGIN
+# home, not a keystore-scoped $HOME ----
+# bin/safe-broadcast computes AUDIT_LOG_FALLBACK via fyd_login_home()
+# (scripts/lib/require-keystore-home.sh) rather than reading $HOME
+# directly, so that a §3.5-compliant HOME=~/.metal-fy-proton[-test]
+# invocation does not relocate the fallback audit log into the keystore
+# dir and split it from the canonical ~/.fyd-broadcast-audit.log history.
+# Reproduce the EXACT expression bin/safe-broadcast uses (see the
+# AUDIT_LOG_FALLBACK assignment near its top) in a fresh subshell with
+# HOME scoped to a throwaway keystore fixture dir — exactly how a real
+# operator invocation sets it — and assert the result resolves under the
+# real LOGIN home, not the fixture. This never invokes proton, writes no
+# file, and does not touch the real login home directory; it only checks
+# the computed PATH STRING.
+if [ -n "$LOGIN_HOME" ]; then
+	FALLBACK_PROBE="$(mktemp -t safe-bcast-fallback-probe.XXXXXX)"
+	cat > "$FALLBACK_PROBE" <<PROBE
+. "${REPO_ROOT}/scripts/lib/require-keystore-home.sh"
+_login_home="\$(fyd_login_home || true)"
+printf '%s' "\${_login_home:-/tmp}/.fyd-broadcast-audit.log"
+PROBE
+	RESOLVED_FALLBACK="$(HOME="$TEST_HOME" bash "$FALLBACK_PROBE")"
+	rm -f "$FALLBACK_PROBE"
+	EXPECTED_FALLBACK="${LOGIN_HOME}/.fyd-broadcast-audit.log"
+	if [ "$RESOLVED_FALLBACK" = "$EXPECTED_FALLBACK" ]; then
+		printf 'PASS  %-70s (%s)\n' "audit log fallback: HOME=keystore fixture → resolves under LOGIN home" "$RESOLVED_FALLBACK"
+		PASS=$((PASS + 1))
+	else
+		printf 'FAIL  %-70s (got [%s], expected [%s])\n' "audit log fallback: HOME=keystore fixture → resolves under LOGIN home" "$RESOLVED_FALLBACK" "$EXPECTED_FALLBACK" >&2
+		FAIL=$((FAIL + 1))
+	fi
+	case "$RESOLVED_FALLBACK" in
+		"$TEST_HOME"/*)
+			printf 'FAIL  %-70s (resolved under keystore fixture: %s)\n' "audit log fallback: does NOT relocate into the keystore dir" "$RESOLVED_FALLBACK" >&2
+			FAIL=$((FAIL + 1))
+			;;
+		*)
+			printf 'PASS  %-70s\n' "audit log fallback: does NOT relocate into the keystore dir"
+			PASS=$((PASS + 1))
+			;;
+	esac
+else
+	printf 'SKIP  %-70s (login home not resolvable in this environment)\n' "audit log fallback: HOME=keystore fixture → resolves under LOGIN home"
+	printf 'SKIP  %-70s (login home not resolvable in this environment)\n' "audit log fallback: does NOT relocate into the keystore dir"
 fi
 
 # ---- Summary ----

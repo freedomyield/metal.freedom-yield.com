@@ -21,10 +21,12 @@
 #   - jq + curl + sha256sum/shasum in PATH
 #
 # Prerequisites the OPERATOR provides interactively:
-#   - `proton key:unlock` — proton-cli keystore must be unlocked
-#     BEFORE running this script. Non-interactive shells (this
-#     script) cannot unlock; a locked keystore causes proton to
-#     hang indefinitely (see reference_proton_cli_keystore_lock_quirk).
+#   - `HOME=~/.metal-fy-proton-test proton key:unlock` — proton-cli keystore
+#     must be unlocked BEFORE running this script (and this script itself
+#     must be invoked with the same HOME=~/.metal-fy-proton-test prefix, per
+#     Constitution §3.5). Non-interactive shells (this script) cannot
+#     unlock; a locked keystore causes proton to hang indefinitely (see
+#     reference_proton_cli_keystore_lock_quirk).
 #   - Broadcast authorization: this script auto-creates the
 #     /tmp/fyd-broadcast-token file (5-minute TTL), bound to chain=testnet-a
 #     and the exact composed tx (tx_sha256) per R16, so bin/safe-broadcast
@@ -53,7 +55,24 @@
 set -u
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-REHEARSAL_CFG="${HOME}/freedom-yield-rehearsal-config"
+# shellcheck source=scripts/lib/require-keystore-home.sh
+. "${REPO_ROOT}/scripts/lib/require-keystore-home.sh"
+
+# §3.5 follow-up (Task D): this script's rehearsal config dir, dry-run log,
+# and receipt file are operator-local paths that have nothing to do with
+# the proton-cli keystore. They must keep resolving under the login home
+# even when this script is (correctly, per §3.5) invoked with
+# HOME=~/.metal-fy-proton-test — otherwise they'd silently relocate into
+# the keystore dir and break (e.g. step 2's config-file check). Resolve
+# them from LOGIN_HOME (via the shared fyd_login_home helper), not $HOME.
+LOGIN_HOME="$(fyd_login_home)"
+# Defensive fallback only: per fyd_login_home()'s header comment
+# (scripts/lib/require-keystore-home.sh), a failed `id -un` resolves to
+# bash's own tilde-expansion of the current $HOME rather than an empty
+# string, so this line is not reachable in practice. Kept in case that
+# resolution behavior ever changes.
+[ -n "$LOGIN_HOME" ] || LOGIN_HOME="$HOME"
+REHEARSAL_CFG="${LOGIN_HOME}/freedom-yield-rehearsal-config"
 
 # Source pick order (highest to lowest):
 #   1. --source=<path> arg
@@ -81,11 +100,17 @@ else
 fi
 
 TESTNET_RPC="${XPR_TESTNET_RPC:-https://test.proton.eosusa.io}"
-DRY_RUN_LOG="${HOME}/.fya-testnet-dryrun-log.json"
+DRY_RUN_LOG="${LOGIN_HOME}/.fya-testnet-dryrun-log.json"
 TOKEN_FILE="/tmp/fyd-broadcast-token"
 
 step() { printf '\n=== step %s ===\n' "$*"; }
 fail() { printf '\nFAIL: %s\n' "$*" >&2; exit 1; }
+
+# ---- §3.5 keystore separation guard (fail-closed) ----
+# Must precede this script's FIRST proton invocation (step 1 below).
+# Exit 8 = keystore guard failed (§3.5), by convention with bin/safe-broadcast
+# and scripts/sign-anchor-event.sh, which share this same check.
+require_project_keystore_home "$0" || exit 8
 
 # ---- step 1: verify testnet keys ----
 step "1/9 verify testnet keys in proton keystore"
@@ -126,7 +151,7 @@ echo "  chain:info OK — head_block_num=$HEAD_BLOCK_NUM"
 # Fast timeout because a locked keystore hangs on any signing-adjacent op.
 if ! timeout 5 proton account frdomyieltst >/dev/null 2>&1; then
 	printf '  WARN: proton account frdomyieltst timed out; keystore may be locked.\n'
-	printf '        Run in a separate terminal:  proton key:unlock\n'
+	printf '        Run in a separate terminal:  HOME=~/.metal-fy-proton-test proton key:unlock\n'
 	printf '        then re-run this script.\n' >&2
 	exit 2
 fi
@@ -242,7 +267,7 @@ jq --arg tx_id "$TX_ID" '
 
 # ---- step 8: gen-anchor-receipt 7-gate verify chain ----
 step "8/9 gen-anchor-receipt 7-gate verify against $TESTNET_RPC"
-RECEIPT_OUT="${HOME}/.fya-testnet-receipt.json"
+RECEIPT_OUT="${LOGIN_HOME}/.fya-testnet-receipt.json"
 bash "${REPO_ROOT}/scripts/gen-anchor-receipt.sh" \
 	--input="$SIGN_JSON" \
 	--anchor-source="$ANCHOR_SOURCE" \
