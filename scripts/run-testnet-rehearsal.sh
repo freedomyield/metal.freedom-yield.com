@@ -57,7 +57,17 @@ set -u
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=scripts/lib/require-keystore-home.sh
 . "${REPO_ROOT}/scripts/lib/require-keystore-home.sh"
-REHEARSAL_CFG="${HOME}/freedom-yield-rehearsal-config"
+
+# §3.5 follow-up (Task D): this script's rehearsal config dir, dry-run log,
+# and receipt file are operator-local paths that have nothing to do with
+# the proton-cli keystore. They must keep resolving under the login home
+# even when this script is (correctly, per §3.5) invoked with
+# HOME=~/.metal-fy-proton-test — otherwise they'd silently relocate into
+# the keystore dir and break (e.g. step 2's config-file check). Resolve
+# them from LOGIN_HOME (via the shared fyd_login_home helper), not $HOME.
+LOGIN_HOME="$(fyd_login_home)"
+[ -n "$LOGIN_HOME" ] || LOGIN_HOME="$HOME"
+REHEARSAL_CFG="${LOGIN_HOME}/freedom-yield-rehearsal-config"
 
 # Source pick order (highest to lowest):
 #   1. --source=<path> arg
@@ -85,7 +95,7 @@ else
 fi
 
 TESTNET_RPC="${XPR_TESTNET_RPC:-https://test.proton.eosusa.io}"
-DRY_RUN_LOG="${HOME}/.fya-testnet-dryrun-log.json"
+DRY_RUN_LOG="${LOGIN_HOME}/.fya-testnet-dryrun-log.json"
 TOKEN_FILE="/tmp/fyd-broadcast-token"
 
 step() { printf '\n=== step %s ===\n' "$*"; }
@@ -252,7 +262,7 @@ jq --arg tx_id "$TX_ID" '
 
 # ---- step 8: gen-anchor-receipt 7-gate verify chain ----
 step "8/9 gen-anchor-receipt 7-gate verify against $TESTNET_RPC"
-RECEIPT_OUT="${HOME}/.fya-testnet-receipt.json"
+RECEIPT_OUT="${LOGIN_HOME}/.fya-testnet-receipt.json"
 bash "${REPO_ROOT}/scripts/gen-anchor-receipt.sh" \
 	--input="$SIGN_JSON" \
 	--anchor-source="$ANCHOR_SOURCE" \

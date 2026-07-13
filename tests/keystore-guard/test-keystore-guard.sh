@@ -226,6 +226,63 @@ else
 	skip_case "side-effect check: public/api/anchor-source.json unchanged by this suite" "file does not exist in this checkout"
 fi
 
+# ============================================================
+# Part 4: run-testnet-rehearsal.sh non-keystore path resolution
+# (§3.5 follow-up Task D — HOME dual-use fix)
+# ============================================================
+# The script has three operator-local, non-keystore paths (rehearsal
+# config dir, dry-run log, receipt file) that must stay pinned to the
+# LOGIN home even when $HOME is correctly scoped to a project keystore
+# dir (e.g. HOME=~/.metal-fy-proton-test). Two of the three
+# (REHEARSAL_CFG, DRY_RUN_LOG) are assigned before this script's first
+# proton call and before the guard check, so they can be observed via a
+# `bash -x` trace of the SAME fast-fail run already exercised by case 2b
+# above (HOME=project fixture dir → guard passes → step 1 fails closed on
+# a missing testnet pubkey against an empty/nonexistent keystore — no
+# hang, no side effect, <1s). The third (RECEIPT_OUT) is only assigned
+# deep into the happy path (step 8, after a real broadcast) and is not
+# reachable hermetically, so it — and a regression guard for all three —
+# is checked statically via source text instead.
+
+if [ -n "$LOGIN_HOME" ]; then
+	RC=0
+	TRACE_OUT="$(HOME="$TEST_HOME" timeout 20 bash -x "$REHEARSAL_SCRIPT" </dev/null 2>&1)" || RC=$?
+	REHEARSAL_CFG_LINE="$(printf '%s\n' "$TRACE_OUT" | grep -E 'REHEARSAL_CFG=' | tail -1)"
+	DRY_RUN_LOG_LINE="$(printf '%s\n' "$TRACE_OUT" | grep -E 'DRY_RUN_LOG=' | tail -1)"
+
+	# 4a. HOME=project fixture dir (not login home) → REHEARSAL_CFG
+	# resolves under LOGIN_HOME, not under $TEST_HOME.
+	if printf '%s' "$REHEARSAL_CFG_LINE" | grep -qF "REHEARSAL_CFG=${LOGIN_HOME}/freedom-yield-rehearsal-config" \
+	   && ! printf '%s' "$REHEARSAL_CFG_LINE" | grep -qF "$TEST_HOME"; then
+		pass "run-testnet-rehearsal.sh: HOME=keystore fixture → REHEARSAL_CFG resolves under LOGIN_HOME"
+	else
+		fail_case "run-testnet-rehearsal.sh: HOME=keystore fixture → REHEARSAL_CFG resolves under LOGIN_HOME" "line=[${REHEARSAL_CFG_LINE}] rc=$RC"
+	fi
+
+	# 4b. Same for DRY_RUN_LOG.
+	if printf '%s' "$DRY_RUN_LOG_LINE" | grep -qF "DRY_RUN_LOG=${LOGIN_HOME}/.fya-testnet-dryrun-log.json" \
+	   && ! printf '%s' "$DRY_RUN_LOG_LINE" | grep -qF "$TEST_HOME"; then
+		pass "run-testnet-rehearsal.sh: HOME=keystore fixture → DRY_RUN_LOG resolves under LOGIN_HOME"
+	else
+		fail_case "run-testnet-rehearsal.sh: HOME=keystore fixture → DRY_RUN_LOG resolves under LOGIN_HOME" "line=[${DRY_RUN_LOG_LINE}] rc=$RC"
+	fi
+else
+	skip_case "run-testnet-rehearsal.sh: HOME=keystore fixture → REHEARSAL_CFG resolves under LOGIN_HOME" "login home not resolvable"
+	skip_case "run-testnet-rehearsal.sh: HOME=keystore fixture → DRY_RUN_LOG resolves under LOGIN_HOME" "login home not resolvable"
+fi
+
+# 4c. Static source-text check for RECEIPT_OUT (not reachable via a
+# hermetic run — see comment above) PLUS a regression guard: none of the
+# three assignments may read a bare $HOME/{...} path (which is exactly
+# the bug this task fixes — a keystore-scoped HOME silently relocating
+# these operator-local paths into the keystore dir).
+if grep -qE '^RECEIPT_OUT="\$\{LOGIN_HOME\}/\.fya-testnet-receipt\.json"' "$REHEARSAL_SCRIPT" \
+   && ! grep -qE '\$\{?HOME\}?/(freedom-yield-rehearsal-config|\.fya-testnet-(dryrun-log|receipt)\.json)' "$REHEARSAL_SCRIPT"; then
+	pass "run-testnet-rehearsal.sh: RECEIPT_OUT uses LOGIN_HOME (source-text); no \$HOME/non-keystore-path regressions"
+else
+	fail_case "run-testnet-rehearsal.sh: RECEIPT_OUT uses LOGIN_HOME (source-text); no \$HOME/non-keystore-path regressions"
+fi
+
 # ---- Summary ----
 echo
 echo "----------------------------------------"

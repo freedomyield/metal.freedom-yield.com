@@ -32,6 +32,30 @@
 # Each calling script's own header documents this alongside its other
 # exit codes.
 #
+# fyd_login_home
+#   Prints the invoking user's LOGIN home directory, independent of the
+#   current $HOME. Deliberately does NOT read $HOME (same reasoning as
+#   require_project_keystore_home below: it must work correctly even when
+#   $HOME has been rescoped to a project keystore dir).
+#   Prints an empty string (via the same eval-echo mechanism used below)
+#   if it cannot be resolved; callers must treat an empty result as
+#   "unresolvable" and fall back to their own default.
+#
+#   Two consumers:
+#     1. require_project_keystore_home() below — to detect whether $HOME
+#        still points at the login default (the thing being forbidden).
+#     2. Scripts that ALSO have their own operator-local, non-keystore
+#        paths (e.g. scripts/run-testnet-rehearsal.sh's rehearsal config
+#        dir, dry-run log, receipt file) that must keep resolving to the
+#        login home even when the script itself is correctly invoked with
+#        HOME=<project keystore dir> per §3.5. Without this, a
+#        keystore-scoped HOME would silently relocate those unrelated
+#        paths into the keystore dir and break the script (§3.5 follow-up,
+#        Task D).
+fyd_login_home() {
+	eval echo "~$(id -un)" 2>/dev/null
+}
+
 # require_project_keystore_home [<label-for-error-message>]
 #   Returns 0 if $HOME is not the login default home, OR if the login
 #   default home could not be determined (inconclusive → does not block).
@@ -40,7 +64,7 @@
 require_project_keystore_home() {
 	local caller="${1:-$0}"
 	local login_home
-	login_home="$(eval echo "~$(id -un)" 2>/dev/null || true)"
+	login_home="$(fyd_login_home || true)"
 	if [ -n "$login_home" ] && [ "${HOME:-}" = "$login_home" ]; then
 		echo "ERROR (keystore guard, Constitution §3.5): \$HOME resolves to the login" >&2
 		echo "                default home (${HOME:-unset})." >&2
