@@ -2,8 +2,14 @@
 # build-rsync-excludes.sh <prefix>
 # Emit rsync --exclude args (leading-anchored) for the dynamically-pushed
 # feeds listed in deploy/feed-excludes.txt. Single source of truth so the
-# validator-host (whole-repo, prefix "public/") and Xserver (public/-rooted,
-# prefix "") rsyncs cannot drift.
+# validator-host and Xserver rsyncs cannot drift. Both live legs are
+# public/-rooted (prefix "") as of the 2026-07-13 delivery-ownership
+# inversion — the validator host no longer takes a whole-repo rsync at all
+# (git delivers everything outside public/ instead; see
+# scripts/advance-host-checkout.sh). <prefix> remains an argument for
+# generality and is still exercised at "public/" by
+# tests/deploy/test-rsync-delete-protection.sh for repo-root-shaped
+# coverage of the emitter, not because any live leg uses that prefix.
 set -euo pipefail
 PREFIX="${1?usage: build-rsync-excludes.sh <prefix>}"
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"

@@ -55,9 +55,11 @@ treats them differently by design:
    content into `scripts/`.** That wrapper rsyncs exactly one path — the
    local Mac's `scripts/` directory — straight to the host outside git.
    If the bytes it writes are identical (content **and** mode) to what
-   `origin/main` already has at that path, the self-heal absorbs it (each
-   absorption fires a `default`-priority ntfy notify titled
-   `host-advance: self-healed N file(s)`) and the pull proceeds. If they
+   `origin/main` already has at that path, the self-heal absorbs it (if
+   one or more files are absorbed in a run, a single batched
+   `default`-priority ntfy notify fires, titled `host-advance:
+   self-healed N file(s)`, naming every absorbed path) and the pull
+   proceeds. If they
    differ — real local edits not yet committed anywhere — the advance
    script refuses the pull loudly (`alert high`, exit 1) **by design**:
    forcing it through would silently discard operator work that git

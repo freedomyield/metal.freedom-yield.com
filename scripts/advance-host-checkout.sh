@@ -4,15 +4,21 @@
 #
 # Motivation: on 2026-07-09 the validator host was found 21 commits behind
 # origin/main (the `host-drift: checkout diverging` tripwire). Investigation
-# found nothing in any deploy leg ever advances host HEAD — deploy.yml rsyncs
-# files but excludes .git/, check-host-drift.sh is read-only by design, and
-# sync-to-validator-host.sh only rsyncs scripts/. Compounding it, deploy
-# stamps cache-bust markers (?v=<sha>) into public/*.html on the host,
-# dirtying the tree so a naive `git pull --ff-only` aborts. This script closes
-# that loop: it is the primary self-heal (see
-# docs/superpowers/specs/2026-07-09-host-checkout-auto-advance-design.md §2①);
-# check-host-drift.sh remains as the read-only backstop that detects if this
-# script ever stops running.
+# found nothing in any deploy leg ever advanced host HEAD — deploy.yml back
+# then rsynced files but excluded .git/, check-host-drift.sh is read-only by
+# design, and sync-to-validator-host.sh only rsyncs scripts/ (that last part
+# is still true today — it is a separate operator-run tool, unrelated to
+# deploy.yml). Compounding it, deploy stamps cache-bust markers (?v=<sha>)
+# into public/*.html on the host, dirtying the tree so a naive
+# `git pull --ff-only` aborts. This script closes that loop: it is the
+# primary self-heal (see
+# docs/superpowers/specs/2026-07-09-host-checkout-auto-advance-design.md
+# §2①, addendum); check-host-drift.sh remains as the read-only backstop
+# that detects if this script ever stops running. As of the 2026-07-13
+# delivery-ownership inversion, deploy.yml itself pipes and invokes this
+# script directly at every deploy (its "Advance host checkout to
+# origin/main" step) — it is no longer cron-only, and deploy.yml's own
+# rsync now ships only public/.
 #
 # Algorithm (spec §2① — followed exactly):
 #   1. fetch origin main
@@ -63,16 +69,18 @@
 # before the backstop samples it.
 
 # No `-e`... actually not needed here: unlike check-host-drift.sh's
-# `[ cond ] && VAR=` drift-accumulation idiom, this script has exactly two
-# operations that can legitimately fail in normal operation (the fetch and
-# the ff-only pull), and both are guarded by an explicit `if ! ...; then` /
-# `if VAR=$(...); then` test — which is exempt from `set -e` by POSIX
-# semantics, so their failure is handled deliberately rather than tripping
-# the trap. Everything else (rev-list --count, checkout -- public/) is
-# expected to succeed once fetch has already succeeded against real refs;
-# if one of those somehow still fails, aborting immediately via `set -e`
-# is the safer default for host-mutating automation than silently
-# continuing on an unknown repo state.
+# `[ cond ] && VAR=` drift-accumulation idiom, every operation in this
+# script that can legitimately fail in normal operation — the fetch, the
+# public/ discard, each self_heal_lossless_dirt mutating op (`git checkout
+# --`, `rm`, added 2026-07-13), and the ff-only pull — is guarded by an
+# explicit `if ! ...; then` / `if VAR=$(...); then` test, which is exempt
+# from `set -e` by POSIX semantics, so their failure is handled
+# deliberately rather than tripping the trap. Everything else (rev-list
+# --count, git status --porcelain) is expected to succeed once fetch has
+# already succeeded against real refs; if one of those somehow still
+# fails, aborting immediately via `set -e` is the safer default for
+# host-mutating automation than silently continuing on an unknown repo
+# state.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

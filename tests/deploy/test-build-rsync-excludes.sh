@@ -8,7 +8,10 @@ PASS=0; FAIL=0
 ok(){ PASS=$((PASS+1)); printf '  ✓ %s\n' "$1"; }
 no(){ FAIL=$((FAIL+1)); printf '  ✗ %s\n' "$1"; }
 
-# validator-host shape: prefix public/
+# repo-root-rooted shape: prefix public/ (no live rsync leg uses this
+# prefix anymore — both the validator-host and Xserver legs are
+# public/-rooted with empty prefix as of the 2026-07-13 delivery-ownership
+# inversion; retained here for emitter prefix-handling coverage)
 OUT="$(bash "${EMIT}" "public/")"
 echo "${OUT}" | grep -qx -- '--exclude=/public/api/validator.json' \
   && ok "public/ prefix anchors validator.json" || no "public/ validator.json"
@@ -23,7 +26,8 @@ echo "${OUT}" | grep -qx -- '--exclude=/public/api/anchor-receipt.json' \
 echo "${OUT}" | grep -qx -- '--exclude=/public/calendar/' \
   && ok "public/ prefix anchors calendar/" || no "public/ calendar/"
 
-# Xserver shape: empty prefix
+# validator-host + Xserver shape: empty prefix (both live legs, since the
+# 2026-07-13 inversion)
 OUT="$(bash "${EMIT}" "")"
 echo "${OUT}" | grep -qx -- '--exclude=/api/validator.json' \
   && ok "empty prefix anchors api/validator.json" || no "empty api/validator.json"

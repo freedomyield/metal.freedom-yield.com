@@ -178,6 +178,14 @@ Two actions are **operator-gated** and were deliberately left out of the
 implementation work — this doc records the exact commands so the operator
 can run them without further design decisions.
 
+> **Status (2026-07-10): both actions below are complete.** The mechanism
+> merged to `main` (`702676c`), the host FF-pulled from 32 commits behind
+> to zero (`546a0eb..09cc6bd`), and §4.1's cron installer ran successfully
+> — `/etc/cron.d/metal-host-advance` has run daily at 04:45 UTC since. The
+> runbooks in §4.1–§4.3 stay below as reference (reinstall, audit, or a
+> future host rebuild); §4.3 is kept as the historical record of the
+> merge ordering.
+
 ### 4.1 Install the auto-advance cron on the validator host
 
 ```sh
@@ -214,15 +222,17 @@ force a merge or reset; that condition means the host authored commits
 that are not on `origin/main`, which needs a human read before any
 correction.
 
-### 4.3 Merging this mechanism to `main`
+### 4.3 Merging this mechanism to `main` (historical — completed 2026-07-10)
 
-The scripts and this doc live on a feature branch until the operator
-reviews and merges it. Only after `main` carries `scripts/advance-host-checkout.sh`
-does the next deploy (or the recovery pull in §4.2) put it on the host, and
-only after that can §4.1's installer find the script it wires into cron.
-Merging to `main` is an operator decision made outside this doc's scope —
-this section exists so the ordering (merge → recovery pull if needed →
-install cron) is explicit.
+The scripts and this doc lived on a feature branch (`fix/host-checkout-auto-advance`)
+until the operator reviewed and merged it. `main` picked up
+`scripts/advance-host-checkout.sh` and this doc via merge commit `702676c`
+on 2026-07-10; that same day's follow-on deploy (plus a manual §4.2
+recovery pull) brought the host from 32 commits behind to zero, landing at
+`09cc6bd`, and §4.1's installer then found the script already on the host
+and wrote the cron. This section is kept as the historical record of that
+ordering (merge → recovery pull → install cron) for anyone auditing when
+the mechanism went live; it is not a pending task.
 
 ## 5. Known edge cases
 

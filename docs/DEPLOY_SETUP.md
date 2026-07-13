@@ -181,7 +181,7 @@ cron backstop の節を参照。
 ## 関連
 
 - [.github/workflows/deploy.yml](../.github/workflows/deploy.yml) — 実際の workflow 定義
-- [docker-compose.prod.yml](../docker-compose.prod.yml) — VPS で起動する Caddy 設定
+- [docker-compose.behind-proxy.yml](../docker-compose.behind-proxy.yml) — deploy.yml の「Bring up / reload Caddy on VPS」ステップが実際に読む override(`docker-compose.yml` と合わせて起動)。`docker-compose.prod.yml` は Caddy が直接 80/443 を bind する別トポロジ用の override で、この自動 deploy では使われない(手動運用手順は [docs/DISASTER_RECOVERY.md](DISASTER_RECOVERY.md) 等を参照)
 - [docs/HOST_CHECKOUT_AUTO_ADVANCE.md](HOST_CHECKOUT_AUTO_ADVANCE.md) — validator host の git `HEAD` を `origin/main` に FF-only で追従させる self-heal の仕組み(git advance が担う「`public/` 以外の全ファイル配信」の実装)
 - [docs/DEPLOY_OWNERSHIP_MATRIX.md](DEPLOY_OWNERSHIP_MATRIX.md) — git 配信 vs rsync 配信の単一ルールと、`public/api/` 個別ファイルの所有権表
 - [docs/MAINNET_MIGRATION.md](MAINNET_MIGRATION.md) — Tahoe→mainnet 段階移行(本 deploy 設定もそこに連動)
