@@ -322,6 +322,28 @@ alerts | grep -q 'self-healed' \
 	|| ok "self-heal-staged-not-healed: no self-healed alert (staged entry must not be claimed as healed)"
 teardown
 
+# ---- case 11: self-heal mutating op fails → fail LOUDLY (exit 1 + high
+#      alert), never a silent set -e hard-exit. Simulated by making the heal
+#      target's parent directory read-only: `git checkout -- path` then
+#      cannot unlink/recreate the file ("unable to unlink old ...:
+#      Permission denied") — the permissions/read-only-fs failure class the
+#      guard exists for. -----------------------------------------------------
+build_pair
+push_origin_commits 1 "docs/README.md" "origin-change"
+git -C "$ORIGIN" show main:docs/README.md > "$CLONE/docs/README.md"
+chmod -w "$CLONE/docs"
+run_advancer >/tmp/.adv-out-$$.log 2>&1
+RC=$?
+OUT="$(cat /tmp/.adv-out-$$.log)"; rm -f /tmp/.adv-out-$$.log
+chmod +w "$CLONE/docs"
+[ "$RC" -eq 1 ] \
+	&& ok "self-heal-op-fails: exit 1 (loud failure, not silent set -e exit)" \
+	|| bad "self-heal-op-fails: exit 1 (actual=$RC, out=$OUT)"
+alerts | grep -q '^high|host-advance: self-heal revert failed' \
+	&& ok "self-heal-op-fails: high alert on revert failure" \
+	|| bad "self-heal-op-fails: high alert on revert failure (alerts: $(alerts))"
+teardown
+
 # ---- summary ----------------------------------------------------------------------
 echo "test-advance-host-checkout.sh summary: PASS=$PASS  FAIL=$FAIL"
 if [ "$FAIL" -eq 0 ]; then

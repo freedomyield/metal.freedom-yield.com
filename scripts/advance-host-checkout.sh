@@ -110,7 +110,11 @@ self_heal_lossless_dirt() {
 		" M "*)
 			# tracked, modified in the worktree only (index clean)
 			if git -C "$REPO_DIR" diff --quiet origin/main -- "$path"; then
-				git -C "$REPO_DIR" checkout -- "$path"
+				if ! git -C "$REPO_DIR" checkout -- "$path"; then
+					log "ERROR: self-heal failed to revert ${path}"
+					alert high "host-advance: self-heal revert failed" "git checkout -- ${path} failed during lossless self-heal (behind=${BEHIND}); host state left as-is — investigate manually."
+					exit 1
+				fi
 				log "self-heal: reverted lossless dirt (worktree == origin/main): ${path}"
 				healed=$((healed + 1)); healed_list="${healed_list}${path} "
 			fi
@@ -119,7 +123,11 @@ self_heal_lossless_dirt() {
 			# untracked file colliding with an incoming tracked path
 			if git -C "$REPO_DIR" cat-file -e "origin/main:${path}" 2>/dev/null \
 				&& git -C "$REPO_DIR" show "origin/main:${path}" | cmp -s - "${REPO_DIR}/${path}"; then
-				rm -- "${REPO_DIR}/${path}"
+				if ! rm -- "${REPO_DIR}/${path}"; then
+					log "ERROR: self-heal failed to remove untracked ${path}"
+					alert high "host-advance: self-heal removal failed" "rm ${path} failed during lossless self-heal (untracked file identical to origin/main, behind=${BEHIND}); host state left as-is — investigate manually."
+					exit 1
+				fi
 				log "self-heal: removed untracked file identical to origin/main: ${path}"
 				healed=$((healed + 1)); healed_list="${healed_list}${path} "
 			fi
