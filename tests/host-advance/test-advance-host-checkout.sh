@@ -211,6 +211,117 @@ RC=$?
 	|| bad "non-git dir: exit 2 (actual=$RC)"
 teardown
 
+# ---- case 7: self-heal — tracked file modified but byte-identical to
+#      origin/main (the rsync-clobber signature) is absorbed and the pull
+#      succeeds. ------------------------------------------------------------
+build_pair
+push_origin_commits 1 "docs/README.md" "origin-change"
+git -C "$ORIGIN" show main:docs/README.md > "$CLONE/docs/README.md"
+run_advancer >/tmp/.adv-out-$$.log 2>&1
+RC=$?
+OUT="$(cat /tmp/.adv-out-$$.log)"; rm -f /tmp/.adv-out-$$.log
+[ "$RC" -eq 0 ] \
+	&& ok "self-heal-tracked: exit 0" \
+	|| bad "self-heal-tracked: exit 0 (actual=$RC, out=$OUT)"
+NEW_HEAD="$(git -C "$CLONE" rev-parse HEAD)"
+ORIGIN_HEAD="$(git -C "$ORIGIN" rev-parse main)"
+[ "$NEW_HEAD" = "$ORIGIN_HEAD" ] \
+	&& ok "self-heal-tracked: HEAD advanced to origin/main" \
+	|| bad "self-heal-tracked: HEAD advanced to origin/main"
+[ "$(git -C "$CLONE" status --porcelain)" = "" ] \
+	&& ok "self-heal-tracked: working tree clean" \
+	|| bad "self-heal-tracked: working tree clean (status: $(git -C "$CLONE" status --porcelain))"
+alerts | grep -q 'self-healed' \
+	&& ok "self-heal-tracked: notify log mentions self-healed" \
+	|| bad "self-heal-tracked: notify log mentions self-healed (alerts: $(alerts))"
+teardown
+
+# ---- case 8: self-heal — untracked file identical to an incoming NEW
+#      tracked file is absorbed (removed, then re-created clean by the
+#      pull). push_origin_commits relies on `commit -am`, which does not
+#      stage a brand-new path, so a new tracked file is added inline here
+#      instead (explicit `git add`). ------------------------------------
+build_pair
+NEWFILE_SCRATCH="$BASE/scratch-newfile"
+git clone -q "$ORIGIN" "$NEWFILE_SCRATCH" 2>/dev/null
+mkdir -p "$NEWFILE_SCRATCH/scripts"
+printf 'echo new-tool\n' > "$NEWFILE_SCRATCH/scripts/new-tool.sh"
+git -C "$NEWFILE_SCRATCH" "${GITQ[@]}" add scripts/new-tool.sh
+git -C "$NEWFILE_SCRATCH" "${GITQ[@]}" commit -qm add-new-tool
+git -C "$NEWFILE_SCRATCH" push -q origin main
+rm -rf "$NEWFILE_SCRATCH"
+git -C "$ORIGIN" show main:scripts/new-tool.sh > "$CLONE/scripts/new-tool.sh"
+run_advancer >/tmp/.adv-out-$$.log 2>&1
+RC=$?
+OUT="$(cat /tmp/.adv-out-$$.log)"; rm -f /tmp/.adv-out-$$.log
+[ "$RC" -eq 0 ] \
+	&& ok "self-heal-untracked: exit 0" \
+	|| bad "self-heal-untracked: exit 0 (actual=$RC, out=$OUT)"
+git -C "$CLONE" ls-files --error-unmatch scripts/new-tool.sh >/dev/null 2>&1 \
+	&& ok "self-heal-untracked: file now tracked" \
+	|| bad "self-heal-untracked: file now tracked"
+[ "$(git -C "$CLONE" status --porcelain -- scripts/new-tool.sh)" = "" ] \
+	&& ok "self-heal-untracked: file clean afterwards" \
+	|| bad "self-heal-untracked: file clean afterwards (status: $(git -C "$CLONE" status --porcelain -- scripts/new-tool.sh))"
+alerts | grep -q 'self-healed' \
+	&& ok "self-heal-untracked: notify log mentions self-healed" \
+	|| bad "self-heal-untracked: notify log mentions self-healed (alerts: $(alerts))"
+teardown
+
+# ---- case 9: refusal preserved — tracked file modified with REAL
+#      divergence from origin/main must NOT be self-healed; the pull still
+#      refuses loudly and nothing is destroyed. -----------------------------
+build_pair
+push_origin_commits 1 "docs/README.md" "origin-change"
+echo 'genuinely different local content, never seen by origin' > "$CLONE/docs/README.md"
+DIVERGENT_CONTENT="$(cat "$CLONE/docs/README.md")"
+run_advancer >/tmp/.adv-out-$$.log 2>&1
+RC=$?
+OUT="$(cat /tmp/.adv-out-$$.log)"; rm -f /tmp/.adv-out-$$.log
+[ "$RC" -eq 1 ] \
+	&& ok "self-heal-real-divergence: exit 1 (pull refuses)" \
+	|| bad "self-heal-real-divergence: exit 1 (actual=$RC, out=$OUT)"
+alerts | grep -q '^high|host-advance: ff-only pull failed' \
+	&& ok "self-heal-real-divergence: ff-only pull failed alert" \
+	|| bad "self-heal-real-divergence: ff-only pull failed alert (alerts: $(alerts))"
+[ "$(cat "$CLONE/docs/README.md")" = "$DIVERGENT_CONTENT" ] \
+	&& ok "self-heal-real-divergence: divergent content preserved (no data loss)" \
+	|| bad "self-heal-real-divergence: divergent content preserved (no data loss)"
+teardown
+
+# ---- case 10: staged change is NOT touched by self_heal_lossless_dirt even
+#      when byte-identical to origin/main — only worktree-only dirt (status
+#      " M ", not staged "M  ") is self-heal-eligible. Verified empirically
+#      (two independent clean repros outside this suite) that git's own
+#      `pull --ff-only` already resolves a staged change that is
+#      byte-identical to the incoming commit as a trivial fast-forward
+#      (exit 0, no conflict) — this is native git behavior, not something
+#      self_heal_lossless_dirt does or needs to do. What this case actually
+#      guards is the case-pattern boundary: if the " M "/"?? " matching ever
+#      widened to catch staged "M  " entries too, self_heal_lossless_dirt
+#      would run `git checkout -- path` against a staged file and/or fire a
+#      spurious "self-healed" alert for something it never touched — this
+#      case fails loudly if that regression is introduced. -----------------
+build_pair
+push_origin_commits 1 "docs/README.md" "origin-change"
+git -C "$ORIGIN" show main:docs/README.md > "$CLONE/docs/README.md"
+git -C "$CLONE" "${GITQ[@]}" add docs/README.md
+run_advancer >/tmp/.adv-out-$$.log 2>&1
+RC=$?
+OUT="$(cat /tmp/.adv-out-$$.log)"; rm -f /tmp/.adv-out-$$.log
+[ "$RC" -eq 0 ] \
+	&& ok "self-heal-staged-not-healed: exit 0 (git's own ff-only resolves it, untouched by self-heal)" \
+	|| bad "self-heal-staged-not-healed: exit 0 (actual=$RC, out=$OUT)"
+NEW_HEAD="$(git -C "$CLONE" rev-parse HEAD)"
+ORIGIN_HEAD="$(git -C "$ORIGIN" rev-parse main)"
+[ "$NEW_HEAD" = "$ORIGIN_HEAD" ] \
+	&& ok "self-heal-staged-not-healed: HEAD advanced to origin/main" \
+	|| bad "self-heal-staged-not-healed: HEAD advanced to origin/main"
+alerts | grep -q 'self-healed' \
+	&& bad "self-heal-staged-not-healed: no self-healed alert (staged entry must not be claimed as healed) (alerts: $(alerts))" \
+	|| ok "self-heal-staged-not-healed: no self-healed alert (staged entry must not be claimed as healed)"
+teardown
+
 # ---- summary ----------------------------------------------------------------------
 echo "test-advance-host-checkout.sh summary: PASS=$PASS  FAIL=$FAIL"
 if [ "$FAIL" -eq 0 ]; then

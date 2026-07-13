@@ -23,12 +23,22 @@
 #                   Constitution infra-separation rules)
 #   5. behind==0 -> log in-sync, exit 0
 #   6. else: discard ONLY public/ (deploy cache-bust dirt), then
+#      6.5. self_heal_lossless_dirt: absorb any remaining worktree dirt
+#           that is byte-identical (content AND mode) to origin/main —
+#           the rsync-clobber signature of a deploy leg writing tracked
+#           bytes onto the host outside git. Reverting/removing such dirt
+#           loses zero information (the pull that follows immediately
+#           re-creates the identical bytes) and is alerted as
+#           informational, not high, since nothing was lost. Anything not
+#           byte-identical is left untouched.
 #      `git pull --ff-only origin main`.
 #        - success -> log behind N -> 0 (old..new), exit 0
 #        - failure -> alert high, exit 1
 #
 # NEVER: `git reset --hard`, `git merge`, discarding anything outside
-# public/, or invoking any broadcast-capable command (proton / cleos /
+# public/ unless byte-identical to origin/main (see self_heal_lossless_dirt
+# — step 6.5), discarding content that differs from origin/main, or
+# invoking any broadcast-capable command (proton / cleos /
 # bin/safe-broadcast / any RPC push_transaction equivalent) — this script
 # does not touch broadcast machinery at all.
 #
@@ -80,6 +90,47 @@ alert() {
 	fi
 }
 
+# self_heal_lossless_dirt — absorb working-tree dirt that is byte-identical
+# (content AND mode) to what the incoming FF pull would write anyway.
+# This is the rsync-clobber signature: a deploy leg (or manual rsync) wrote
+# origin/main's bytes onto the host outside git, so git sees "local
+# changes" and refuses the pull even though nothing would be lost.
+# Reverting such a file to HEAD (or deleting such an untracked file) loses
+# zero information — the pull that follows immediately re-creates the
+# identical bytes. Anything NOT byte-identical (real local work, staged
+# edits, deletions, mode drift) is deliberately left alone so git's own
+# refusal keeps protecting it, exactly as before.
+self_heal_lossless_dirt() {
+	local healed=0 healed_list="" entry path
+	while IFS= read -r -d '' entry; do
+		[ "${#entry}" -ge 4 ] || continue
+		path="${entry:3}"
+		case "$path" in public/*) continue ;; esac
+		case "$entry" in
+		" M "*)
+			# tracked, modified in the worktree only (index clean)
+			if git -C "$REPO_DIR" diff --quiet origin/main -- "$path"; then
+				git -C "$REPO_DIR" checkout -- "$path"
+				log "self-heal: reverted lossless dirt (worktree == origin/main): ${path}"
+				healed=$((healed + 1)); healed_list="${healed_list}${path} "
+			fi
+			;;
+		"?? "*)
+			# untracked file colliding with an incoming tracked path
+			if git -C "$REPO_DIR" cat-file -e "origin/main:${path}" 2>/dev/null \
+				&& git -C "$REPO_DIR" show "origin/main:${path}" | cmp -s - "${REPO_DIR}/${path}"; then
+				rm -- "${REPO_DIR}/${path}"
+				log "self-heal: removed untracked file identical to origin/main: ${path}"
+				healed=$((healed + 1)); healed_list="${healed_list}${path} "
+			fi
+			;;
+		esac
+	done < <(git -C "$REPO_DIR" status --porcelain -z --untracked-files=all)
+	if [ "$healed" -gt 0 ]; then
+		alert default "host-advance: self-healed ${healed} file(s)" "Absorbed lossless working-tree dirt identical to origin/main before FF pull: ${healed_list}— something wrote git-tracked content outside git (rsync leg?); the pull proceeds, but the writer should be identified."
+	fi
+}
+
 if ! git -C "$REPO_DIR" rev-parse --git-dir >/dev/null 2>&1; then
 	log "ERROR: not a git checkout: $REPO_DIR"
 	exit 2
@@ -121,6 +172,8 @@ if ! git -C "$REPO_DIR" checkout -- public/ 2>/dev/null; then
 	alert high "host-advance: public/ discard failed" "git checkout -- public/ failed while preparing an FF-only pull (behind=${BEHIND}); host state left as-is beyond that attempt — investigate manually."
 	exit 1
 fi
+
+self_heal_lossless_dirt
 
 # FF-only, never reset/merge. If a tracked file OUTSIDE public/ has
 # uncommitted edits that the incoming diff would overwrite, git itself
