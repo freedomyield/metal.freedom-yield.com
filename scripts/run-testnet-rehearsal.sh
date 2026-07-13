@@ -21,10 +21,12 @@
 #   - jq + curl + sha256sum/shasum in PATH
 #
 # Prerequisites the OPERATOR provides interactively:
-#   - `proton key:unlock` — proton-cli keystore must be unlocked
-#     BEFORE running this script. Non-interactive shells (this
-#     script) cannot unlock; a locked keystore causes proton to
-#     hang indefinitely (see reference_proton_cli_keystore_lock_quirk).
+#   - `HOME=~/.metal-fy-proton-test proton key:unlock` — proton-cli keystore
+#     must be unlocked BEFORE running this script (and this script itself
+#     must be invoked with the same HOME=~/.metal-fy-proton-test prefix, per
+#     Constitution §3.5). Non-interactive shells (this script) cannot
+#     unlock; a locked keystore causes proton to hang indefinitely (see
+#     reference_proton_cli_keystore_lock_quirk).
 #   - Broadcast authorization: this script auto-creates the
 #     /tmp/fyd-broadcast-token file (5-minute TTL), bound to chain=testnet-a
 #     and the exact composed tx (tx_sha256) per R16, so bin/safe-broadcast
@@ -53,6 +55,8 @@
 set -u
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=scripts/lib/require-keystore-home.sh
+. "${REPO_ROOT}/scripts/lib/require-keystore-home.sh"
 REHEARSAL_CFG="${HOME}/freedom-yield-rehearsal-config"
 
 # Source pick order (highest to lowest):
@@ -86,6 +90,12 @@ TOKEN_FILE="/tmp/fyd-broadcast-token"
 
 step() { printf '\n=== step %s ===\n' "$*"; }
 fail() { printf '\nFAIL: %s\n' "$*" >&2; exit 1; }
+
+# ---- §3.5 keystore separation guard (fail-closed) ----
+# Must precede this script's FIRST proton invocation (step 1 below).
+# Exit 8 = keystore guard failed (§3.5), by convention with bin/safe-broadcast
+# and scripts/sign-anchor-event.sh, which share this same check.
+require_project_keystore_home "$0" || exit 8
 
 # ---- step 1: verify testnet keys ----
 step "1/9 verify testnet keys in proton keystore"
@@ -126,7 +136,7 @@ echo "  chain:info OK — head_block_num=$HEAD_BLOCK_NUM"
 # Fast timeout because a locked keystore hangs on any signing-adjacent op.
 if ! timeout 5 proton account frdomyieltst >/dev/null 2>&1; then
 	printf '  WARN: proton account frdomyieltst timed out; keystore may be locked.\n'
-	printf '        Run in a separate terminal:  proton key:unlock\n'
+	printf '        Run in a separate terminal:  HOME=~/.metal-fy-proton-test proton key:unlock\n'
 	printf '        then re-run this script.\n' >&2
 	exit 2
 fi

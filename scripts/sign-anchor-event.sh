@@ -45,6 +45,8 @@
 #   5  broadcast failed (safe-broadcast propagated non-zero)
 #   6  receipt shape assembly failed
 #   7  signing host lacks the proton CLI (broadcast runs only on the operator's Mac)
+#   8  keystore guard failed — $HOME resolves to the default (shared)
+#      proton-cli keystore; refused per docs/CONSTITUTION.md §3.5
 #
 # Usage:
 #   sign-anchor-event.sh --chain=<testnet-a|mainnet-a>
@@ -97,6 +99,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=scripts/lib/require-keystore-home.sh
+. "${REPO_ROOT}/scripts/lib/require-keystore-home.sh"
 SAFE_BROADCAST="${REPO_ROOT}/bin/safe-broadcast"
 
 # -------- arg parsing --------
@@ -115,7 +119,7 @@ for arg in "$@"; do
 		--dry-run-log=*)     DRY_RUN_LOG="${arg#*=}" ;;
 		--non-interactive)   NON_INTERACTIVE=1 ;;
 		--dry-run)           DRY_RUN=1 ;;
-		-h|--help)           sed -n '2,90p' "$0" | sed 's/^# \?//'; exit 0 ;;
+		-h|--help)           sed -n '2,92p' "$0" | sed 's/^# \?//'; exit 0 ;;
 		*)                   echo "ERROR: unknown arg: $arg" >&2; exit 1 ;;
 	esac
 done
@@ -323,6 +327,15 @@ if ! command -v proton >/dev/null 2>&1; then
 	echo "           Run with --dry-run to compose the tx without a signing key." >&2
 	exit 7
 fi
+
+# ---- §3.5 keystore separation guard (fail-closed) ----
+# This script never invokes `proton` with real args itself (it only checked
+# PATH presence above and delegates the actual broadcast to
+# bin/safe-broadcast, which has its own copy of this same guard). This
+# pre-flight duplicate exists so a misscoped HOME fails fast and legibly
+# here, before composing a delegate call, rather than only inside the
+# downstream wrapper. --dry-run above never reaches this point.
+require_project_keystore_home "$0" || exit 8
 
 # -------- delegate to bin/safe-broadcast --------
 SAFE_ARGS=(--tx="$TX_FILE" --chain="$CHAIN")

@@ -16,6 +16,19 @@
 # at the end of this script's output.
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=scripts/lib/require-keystore-home.sh
+. "${SCRIPT_DIR}/lib/require-keystore-home.sh"
+
+# ---- §3.5 keystore separation guard (fail-closed) ----
+# Must precede this script's only proton invocation ([4/5] gate3 probe
+# below, `proton chain:info`) — placed here, before anything else runs
+# (including the anchor-source.json regeneration in [1/5]), so a misscoped
+# HOME refuses before any side effect, not just before the proton call.
+# Exit 8 = keystore guard failed (§3.5), by convention with bin/safe-broadcast
+# and scripts/sign-anchor-event.sh, which share this same check.
+require_project_keystore_home "$0" || exit 8
+
 REPO="${REPO:-/home/deploy/metal.freedom-yield.com}"
 DRYLOG="${DRYLOG:-/home/deploy/.fya-mainnet-dryrun-cycle3.json}"
 TESTNET_TX_ID="070a845f81a5a8aed017aaf9233ebf8a9ebe9830460ea0ef42f0d6bfc5be1f43"
