@@ -27,8 +27,9 @@ rule differently because only one of them is a git checkout:
   committed source.
 - **Public Xserver origin** (behind the edge CDN): never runs a git
   checkout at all — the deploy key is `rrsync -wo`-confined to the metal
-  public dir, so the **"Rsync public/ to Xserver"** step is its only
-  delivery path for repo-tracked content, unchanged by the inversion.
+  public dir, so the **"Rsync public/ to Xserver (public origin)"** step
+  is its only delivery path for repo-tracked content, unchanged by the
+  inversion.
 
 Validator-host runtime pushes (e.g. `push-to-web-host.sh`) remain the
 **canonical source** for live operational data that is never git-tracked.
@@ -51,14 +52,16 @@ treats them differently by design:
    unconditionally (`git checkout -- public/`) before every pull —
    expected on every run, not an anomaly.
 2. **Operator-run `scripts/sync-to-validator-host.sh` writing uncommitted
-   content into `scripts/`.** That wrapper syncs local Mac `scripts/` +
-   cron files straight to the host outside git. If the bytes it writes are
-   identical (content **and** mode) to what `origin/main` already has at
-   that path, the self-heal absorbs it silently and the pull proceeds. If
-   they differ — real local edits not yet committed anywhere — the
-   advance script refuses the pull loudly (`alert high`, exit 1) **by
-   design**: forcing it through would silently discard operator work that
-   git cannot recover.
+   content into `scripts/`.** That wrapper rsyncs exactly one path — the
+   local Mac's `scripts/` directory — straight to the host outside git.
+   If the bytes it writes are identical (content **and** mode) to what
+   `origin/main` already has at that path, the self-heal absorbs it (each
+   absorption fires a `default`-priority ntfy notify titled
+   `host-advance: self-healed N file(s)`) and the pull proceeds. If they
+   differ — real local edits not yet committed anywhere — the advance
+   script refuses the pull loudly (`alert high`, exit 1) **by design**:
+   forcing it through would silently discard operator work that git
+   cannot recover.
 
 See [`docs/HOST_CHECKOUT_AUTO_ADVANCE.md`](HOST_CHECKOUT_AUTO_ADVANCE.md)
 §2① "Self-heal" for the exact absorption criteria.

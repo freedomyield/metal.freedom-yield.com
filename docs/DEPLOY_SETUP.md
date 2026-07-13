@@ -125,22 +125,27 @@ GitHub の `Actions` タブ → `Deploy site to VPS` → `Run workflow` → main
 
 数十秒〜数分で(`.github/workflows/deploy.yml` の実ステップ順):
 
-1. checkout
-2. cache-bust(main.js 等に SHA を付与。runner 側の `public/` コピーだけを書き換える)
-3. SSH 鍵設定
-4. **Advance host checkout to origin/main** — runner のコピーの
+1. Secrets 検証(`SSH_HOST`/`SSH_USER`/`SSH_KEY`/`DEPLOY_PATH` の未設定を検出)
+2. checkout
+3. cache-bust(main.js 等に SHA を付与。runner 側の `public/` コピーだけを書き換える)
+4. SSH 鍵設定
+5. `mkdir -p '$DEPLOY_PATH'`(**Ensure deploy path exists** — ディレクトリの
+   存在保証のみ。git checkout を作るわけではないので、§4 の `git clone` を
+   飛ばしていた場合はこのステップは通っても次のステップで止まる)
+6. **Advance host checkout to origin/main** — runner のコピーの
    `scripts/advance-host-checkout.sh` を SSH 経由で VPS に流し込んで実行。
    `public/` 以外の git 管理ファイル(`caddy/Caddyfile`, `docker-compose*.yml`,
    `scripts/`, `docs/`, `tests/` 等)は全てこの `git pull --ff-only` が届ける。
    fail-closed: host が origin へ FF できなければ(host が ahead / 未 git
    checkout / 実際の差分衝突)ここで deploy が失敗し、以降のステップは走らない。
-5. rsync で cache-bust 済みの `public/` **のみ** を VPS に配置(それ以外の
+7. rsync で cache-bust 済みの `public/` **のみ** を VPS に配置(それ以外の
    ファイルはこの rsync に含まれない)
-6. VPS 側で `docker compose up -d` → Caddyfile の bind mount が陳腐化して
+8. VPS 側で `docker compose up -d` → Caddyfile の bind mount が陳腐化して
    いないか(コンテナ内の view と host ファイルを `cmp`)確認し、同一なら
    `caddy reload`、異なれば `--force-recreate caddy` → ヘルスチェック
-7. (Xserver secrets 設定済みなら)公開 Xserver へも `public/` のみ rsync
-8. 公開ヘルスチェック
+9. (Xserver secrets 設定済みなら)Xserver deploy 鍵設定 → 公開 Xserver へも
+   `public/` のみ rsync
+10. 公開ヘルスチェック
 
 成功後、`https://metal.freedom-yield.com/` でサイトが見えるはず。
 
