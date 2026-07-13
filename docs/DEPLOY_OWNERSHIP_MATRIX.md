@@ -7,17 +7,66 @@
 > the deploy workflow, anyone debugging "why did file X disappear/get
 > reverted".
 
-The Git deploy (GitHub Actions) rsyncs repo-tracked content to **two**
-targets: the validator host (internal Caddy) and the public Xserver
-origin (behind the edge CDN). It is the **canonical source** for
-repo-tracked content on both. Validator-host runtime pushes are the
-**canonical source** for live operational data. Both deploy rsyncs use
-`rsync --delete`, which would otherwise wipe out runtime files between
-the validator push and the next deploy; both derive their exclusion set
-from a **single source of truth** — `deploy/feed-excludes.txt` via
-`scripts/deploy/build-rsync-excludes.sh` — so the two targets cannot
-drift. The exclusion table below pins which files each side owns and
-which the deploy MUST leave alone.
+## Delivery ownership: git vs rsync
+
+**Delivery ownership follows one rule** (since the 2026-07-13
+delivery-ownership inversion): *if git tracks it, git delivers it; rsync
+ships only deploy-derived artifacts.* The two deploy targets apply that
+rule differently because only one of them is a git checkout:
+
+- **Validator host** (internal Caddy): every git-tracked file outside
+  `public/` — `docs/`, `scripts/`, `tests/`, `caddy/Caddyfile`,
+  `docker-compose*.yml`, etc. — is delivered by
+  `scripts/advance-host-checkout.sh`'s FF-only `git pull`, invoked at
+  deploy time from `.github/workflows/deploy.yml`'s **"Advance host
+  checkout to origin/main"** step (which runs before any rsync) and, as a
+  backstop, by the daily 04:45 UTC cron. Only the deploy-transformed
+  `public/` tree — cache-bust `?v=<sha>` markers stamped into the
+  runner's copy — still travels by the **"Rsync public/ to VPS"** step:
+  git cannot deliver a build artifact that deliberately diverges from the
+  committed source.
+- **Public Xserver origin** (behind the edge CDN): never runs a git
+  checkout at all — the deploy key is `rrsync -wo`-confined to the metal
+  public dir, so the **"Rsync public/ to Xserver (public origin)"** step
+  is its only delivery path for repo-tracked content, unchanged by the
+  inversion.
+
+Validator-host runtime pushes (e.g. `push-to-web-host.sh`) remain the
+**canonical source** for live operational data that is never git-tracked.
+Both `public/` rsyncs use `rsync --delete`, which would otherwise wipe out
+those runtime files between a validator push and the next deploy; both
+derive their exclusion set from a **single source of truth** —
+`deploy/feed-excludes.txt` via `scripts/deploy/build-rsync-excludes.sh` —
+so the two targets cannot drift. The exclusion table below pins which
+`public/api/` files each side owns and which the `public/` rsync MUST
+leave alone.
+
+**Two — and only two — classes of working-tree dirt can still appear on
+the validator host**, and `scripts/advance-host-checkout.sh`'s self-heal
+treats them differently by design:
+
+1. **Deploy-stamped `public/` cache-bust markers.** Every deploy writes
+   `?v=<sha>` into the runner's copy of `public/*.html` before rsyncing
+   it; on the host this always shows up as `public/` dirt against the
+   freshly-pulled git content. The advance script discards it
+   unconditionally (`git checkout -- public/`) before every pull —
+   expected on every run, not an anomaly.
+2. **Operator-run `scripts/sync-to-validator-host.sh` writing uncommitted
+   content into `scripts/`.** That wrapper rsyncs exactly one path — the
+   local Mac's `scripts/` directory — straight to the host outside git.
+   If the bytes it writes are identical (content **and** mode) to what
+   `origin/main` already has at that path, the self-heal absorbs it (if
+   one or more files are absorbed in a run, a single batched
+   `default`-priority ntfy notify fires, titled `host-advance:
+   self-healed N file(s)`, naming every absorbed path) and the pull
+   proceeds. If they
+   differ — real local edits not yet committed anywhere — the advance
+   script refuses the pull loudly (`alert high`, exit 1) **by design**:
+   forcing it through would silently discard operator work that git
+   cannot recover.
+
+See [`docs/HOST_CHECKOUT_AUTO_ADVANCE.md`](HOST_CHECKOUT_AUTO_ADVANCE.md)
+§2① "Self-heal" for the exact absorption criteria.
 
 ## Ownership table
 
@@ -109,8 +158,10 @@ key — `rsync` is run with a local-to-local source/destination pair.
 - `tests/deploy/test-rsync-delete-protection.sh` — the fixture test
   that pins the protection contract.
 - [`docs/HOST_CHECKOUT_AUTO_ADVANCE.md`](HOST_CHECKOUT_AUTO_ADVANCE.md) —
-  a separate but related drift: this table is about deploy-rsync file
-  *content* ownership; that doc is about the validator host's git `HEAD`
-  falling behind `origin/main` (nothing in this deploy workflow ever
-  advances it) and the self-heal + fail-closed gate that closes the loop.
-  Start there for "why did HEAD drift".
+  a separate but related concern: this table is about deploy-rsync file
+  *content* ownership within `public/`; that doc is about the validator
+  host's git `HEAD` — how `.github/workflows/deploy.yml`'s git-advance step
+  (§"Delivery ownership: git vs rsync" above) and the daily cron keep it
+  current, and the self-heal + fail-closed gate that backstops it. Start
+  there for "why did HEAD drift" (now rare: only when the FF pull itself
+  refuses).

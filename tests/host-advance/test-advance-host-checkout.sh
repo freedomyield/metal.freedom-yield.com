@@ -211,6 +211,190 @@ RC=$?
 	|| bad "non-git dir: exit 2 (actual=$RC)"
 teardown
 
+# ---- case 7: self-heal — tracked file modified but byte-identical to
+#      origin/main (the rsync-clobber signature) is absorbed and the pull
+#      succeeds. ------------------------------------------------------------
+build_pair
+push_origin_commits 1 "docs/README.md" "origin-change"
+git -C "$ORIGIN" show main:docs/README.md > "$CLONE/docs/README.md"
+run_advancer >/tmp/.adv-out-$$.log 2>&1
+RC=$?
+OUT="$(cat /tmp/.adv-out-$$.log)"; rm -f /tmp/.adv-out-$$.log
+[ "$RC" -eq 0 ] \
+	&& ok "self-heal-tracked: exit 0" \
+	|| bad "self-heal-tracked: exit 0 (actual=$RC, out=$OUT)"
+NEW_HEAD="$(git -C "$CLONE" rev-parse HEAD)"
+ORIGIN_HEAD="$(git -C "$ORIGIN" rev-parse main)"
+[ "$NEW_HEAD" = "$ORIGIN_HEAD" ] \
+	&& ok "self-heal-tracked: HEAD advanced to origin/main" \
+	|| bad "self-heal-tracked: HEAD advanced to origin/main"
+[ "$(git -C "$CLONE" status --porcelain)" = "" ] \
+	&& ok "self-heal-tracked: working tree clean" \
+	|| bad "self-heal-tracked: working tree clean (status: $(git -C "$CLONE" status --porcelain))"
+alerts | grep -q 'self-healed' \
+	&& ok "self-heal-tracked: notify log mentions self-healed" \
+	|| bad "self-heal-tracked: notify log mentions self-healed (alerts: $(alerts))"
+teardown
+
+# ---- case 8: self-heal — untracked file identical to an incoming NEW
+#      tracked file is absorbed (removed, then re-created clean by the
+#      pull). push_origin_commits relies on `commit -am`, which does not
+#      stage a brand-new path, so a new tracked file is added inline here
+#      instead (explicit `git add`). ------------------------------------
+build_pair
+NEWFILE_SCRATCH="$BASE/scratch-newfile"
+git clone -q "$ORIGIN" "$NEWFILE_SCRATCH" 2>/dev/null
+mkdir -p "$NEWFILE_SCRATCH/scripts"
+printf 'echo new-tool\n' > "$NEWFILE_SCRATCH/scripts/new-tool.sh"
+git -C "$NEWFILE_SCRATCH" "${GITQ[@]}" add scripts/new-tool.sh
+git -C "$NEWFILE_SCRATCH" "${GITQ[@]}" commit -qm add-new-tool
+git -C "$NEWFILE_SCRATCH" push -q origin main
+rm -rf "$NEWFILE_SCRATCH"
+git -C "$ORIGIN" show main:scripts/new-tool.sh > "$CLONE/scripts/new-tool.sh"
+run_advancer >/tmp/.adv-out-$$.log 2>&1
+RC=$?
+OUT="$(cat /tmp/.adv-out-$$.log)"; rm -f /tmp/.adv-out-$$.log
+[ "$RC" -eq 0 ] \
+	&& ok "self-heal-untracked: exit 0" \
+	|| bad "self-heal-untracked: exit 0 (actual=$RC, out=$OUT)"
+git -C "$CLONE" ls-files --error-unmatch scripts/new-tool.sh >/dev/null 2>&1 \
+	&& ok "self-heal-untracked: file now tracked" \
+	|| bad "self-heal-untracked: file now tracked"
+[ "$(git -C "$CLONE" status --porcelain -- scripts/new-tool.sh)" = "" ] \
+	&& ok "self-heal-untracked: file clean afterwards" \
+	|| bad "self-heal-untracked: file clean afterwards (status: $(git -C "$CLONE" status --porcelain -- scripts/new-tool.sh))"
+alerts | grep -q 'self-healed' \
+	&& ok "self-heal-untracked: notify log mentions self-healed" \
+	|| bad "self-heal-untracked: notify log mentions self-healed (alerts: $(alerts))"
+teardown
+
+# ---- case 9: refusal preserved — tracked file modified with REAL
+#      divergence from origin/main must NOT be self-healed; the pull still
+#      refuses loudly and nothing is destroyed. -----------------------------
+build_pair
+push_origin_commits 1 "docs/README.md" "origin-change"
+echo 'genuinely different local content, never seen by origin' > "$CLONE/docs/README.md"
+DIVERGENT_CONTENT="$(cat "$CLONE/docs/README.md")"
+run_advancer >/tmp/.adv-out-$$.log 2>&1
+RC=$?
+OUT="$(cat /tmp/.adv-out-$$.log)"; rm -f /tmp/.adv-out-$$.log
+[ "$RC" -eq 1 ] \
+	&& ok "self-heal-real-divergence: exit 1 (pull refuses)" \
+	|| bad "self-heal-real-divergence: exit 1 (actual=$RC, out=$OUT)"
+alerts | grep -q '^high|host-advance: ff-only pull failed' \
+	&& ok "self-heal-real-divergence: ff-only pull failed alert" \
+	|| bad "self-heal-real-divergence: ff-only pull failed alert (alerts: $(alerts))"
+[ "$(cat "$CLONE/docs/README.md")" = "$DIVERGENT_CONTENT" ] \
+	&& ok "self-heal-real-divergence: divergent content preserved (no data loss)" \
+	|| bad "self-heal-real-divergence: divergent content preserved (no data loss)"
+teardown
+
+# ---- case 10: staged change is NOT touched by self_heal_lossless_dirt even
+#      when byte-identical to origin/main — only worktree-only dirt (status
+#      " M ", not staged "M  ") is self-heal-eligible. Verified empirically
+#      (two independent clean repros outside this suite) that git's own
+#      `pull --ff-only` already resolves a staged change that is
+#      byte-identical to the incoming commit as a trivial fast-forward
+#      (exit 0, no conflict) — this is native git behavior, not something
+#      self_heal_lossless_dirt does or needs to do. What this case actually
+#      guards is the case-pattern boundary: if the " M "/"?? " matching ever
+#      widened to catch staged "M  " entries too, self_heal_lossless_dirt
+#      would run `git checkout -- path` against a staged file and/or fire a
+#      spurious "self-healed" alert for something it never touched — this
+#      case fails loudly if that regression is introduced. -----------------
+build_pair
+push_origin_commits 1 "docs/README.md" "origin-change"
+git -C "$ORIGIN" show main:docs/README.md > "$CLONE/docs/README.md"
+git -C "$CLONE" "${GITQ[@]}" add docs/README.md
+run_advancer >/tmp/.adv-out-$$.log 2>&1
+RC=$?
+OUT="$(cat /tmp/.adv-out-$$.log)"; rm -f /tmp/.adv-out-$$.log
+[ "$RC" -eq 0 ] \
+	&& ok "self-heal-staged-not-healed: exit 0 (git's own ff-only resolves it, untouched by self-heal)" \
+	|| bad "self-heal-staged-not-healed: exit 0 (actual=$RC, out=$OUT)"
+NEW_HEAD="$(git -C "$CLONE" rev-parse HEAD)"
+ORIGIN_HEAD="$(git -C "$ORIGIN" rev-parse main)"
+[ "$NEW_HEAD" = "$ORIGIN_HEAD" ] \
+	&& ok "self-heal-staged-not-healed: HEAD advanced to origin/main" \
+	|| bad "self-heal-staged-not-healed: HEAD advanced to origin/main"
+alerts | grep -q 'self-healed' \
+	&& bad "self-heal-staged-not-healed: no self-healed alert (staged entry must not be claimed as healed) (alerts: $(alerts))" \
+	|| ok "self-heal-staged-not-healed: no self-healed alert (staged entry must not be claimed as healed)"
+teardown
+
+# ---- case 11: self-heal mutating op fails → fail LOUDLY (exit 1 + high
+#      alert), never a silent set -e hard-exit. Simulated by making the heal
+#      target's parent directory read-only: `git checkout -- path` then
+#      cannot unlink/recreate the file ("unable to unlink old ...:
+#      Permission denied") — the permissions/read-only-fs failure class the
+#      guard exists for. -----------------------------------------------------
+build_pair
+push_origin_commits 1 "docs/README.md" "origin-change"
+git -C "$ORIGIN" show main:docs/README.md > "$CLONE/docs/README.md"
+chmod -w "$CLONE/docs"
+run_advancer >/tmp/.adv-out-$$.log 2>&1
+RC=$?
+OUT="$(cat /tmp/.adv-out-$$.log)"; rm -f /tmp/.adv-out-$$.log
+chmod +w "$CLONE/docs"
+[ "$RC" -eq 1 ] \
+	&& ok "self-heal-op-fails: exit 1 (loud failure, not silent set -e exit)" \
+	|| bad "self-heal-op-fails: exit 1 (actual=$RC, out=$OUT)"
+alerts | grep -q '^high|host-advance: self-heal revert failed' \
+	&& ok "self-heal-op-fails: high alert on revert failure" \
+	|| bad "self-heal-op-fails: high alert on revert failure (alerts: $(alerts))"
+teardown
+
+# ---- case 12: concurrency lock (flock-gated — Linux host/CI only). macOS
+#      has no flock, and the script deliberately skips the guard there
+#      (same repo convention as tests/anomalies/integration-linux.sh), so
+#      these cases SKIP rather than fake the behavior. 12a: a held lock +
+#      short FYD_LOCK_TIMEOUT → loud exit 1 with the high "lock timeout"
+#      alert, and the repo is NOT advanced. 12b: a briefly-held lock within
+#      the timeout → the waiter proceeds normally once released. ----------
+if command -v flock >/dev/null 2>&1; then
+	# 12a: timeout path
+	build_pair
+	push_origin_commits 1
+	( flock -x 200; sleep 5 ) 200>"$CLONE/.git/fyd-advance.lock" &
+	HOLDER=$!
+	sleep 0.3
+	HEAD_BEFORE="$(git -C "$CLONE" rev-parse HEAD)"
+	FYD_LOCK_TIMEOUT=1 run_advancer >/tmp/.adv-out-$$.log 2>&1
+	RC=$?
+	OUT="$(cat /tmp/.adv-out-$$.log)"; rm -f /tmp/.adv-out-$$.log
+	[ "$RC" -eq 1 ] \
+		&& ok "lock-timeout: exit 1" \
+		|| bad "lock-timeout: exit 1 (actual=$RC, out=$OUT)"
+	alerts | grep -q '^high|host-advance: lock timeout' \
+		&& ok "lock-timeout: high alert fired" \
+		|| bad "lock-timeout: high alert fired (alerts: $(alerts))"
+	[ "$(git -C "$CLONE" rev-parse HEAD)" = "$HEAD_BEFORE" ] \
+		&& ok "lock-timeout: HEAD not advanced while lock held" \
+		|| bad "lock-timeout: HEAD not advanced while lock held"
+	wait $HOLDER 2>/dev/null
+	teardown
+
+	# 12b: wait-then-proceed path
+	build_pair
+	push_origin_commits 1
+	( flock -x 200; sleep 1 ) 200>"$CLONE/.git/fyd-advance.lock" &
+	HOLDER=$!
+	sleep 0.3
+	FYD_LOCK_TIMEOUT=10 run_advancer >/tmp/.adv-out-$$.log 2>&1
+	RC=$?
+	OUT="$(cat /tmp/.adv-out-$$.log)"; rm -f /tmp/.adv-out-$$.log
+	wait $HOLDER 2>/dev/null
+	[ "$RC" -eq 0 ] \
+		&& ok "lock-wait: exit 0 after lock released within timeout" \
+		|| bad "lock-wait: exit 0 after lock released within timeout (actual=$RC, out=$OUT)"
+	[ "$(git -C "$CLONE" rev-parse HEAD)" = "$(git -C "$ORIGIN" rev-parse main)" ] \
+		&& ok "lock-wait: HEAD advanced to origin/main after waiting" \
+		|| bad "lock-wait: HEAD advanced to origin/main after waiting"
+	teardown
+else
+	echo "SKIP  case 12 (concurrency lock): flock not available on this host (macOS) — the script skips the guard here by design; covered on Linux CI"
+fi
+
 # ---- summary ----------------------------------------------------------------------
 echo "test-advance-host-checkout.sh summary: PASS=$PASS  FAIL=$FAIL"
 if [ "$FAIL" -eq 0 ]; then

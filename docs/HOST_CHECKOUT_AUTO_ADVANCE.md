@@ -13,21 +13,34 @@
 
 ## 1. Problem
 
-Nothing in any deploy leg ever advances the validator host's git `HEAD`:
-the GitHub Actions `deploy.yml` rsyncs files but excludes `.git/`,
+**Originally** (until the 2026-07-13 delivery-ownership inversion),
+nothing in any deploy leg advanced the validator host's git `HEAD`: the
+GitHub Actions `deploy.yml` rsynced files but excluded `.git/`,
 `scripts/check-host-drift.sh` is read-only by design, and
-`scripts/sync-to-validator-host.sh` only rsyncs `scripts/`. So `HEAD` drifts
-behind `origin/main` as commits land on `main`. Compounding it, each deploy
-stamps cache-bust markers (`?v=<sha>`) into the host's `public/*.html`,
-dirtying the working tree so a naive `git pull --ff-only` aborts on the
-dirty tree — there was no safe, automated way to close the gap.
+`scripts/sync-to-validator-host.sh` only rsyncs `scripts/`. So `HEAD`
+drifted behind `origin/main` as commits landed on `main`. Compounding it,
+each deploy stamps cache-bust markers (`?v=<sha>`) into the host's
+`public/*.html`, dirtying the working tree so a naive
+`git pull --ff-only` aborts on the dirty tree — there was no safe,
+automated way to close the gap.
+
+**As of 2026-07-13**, `deploy.yml`'s **"Advance host checkout to
+origin/main"** step closes this directly: it pipes the runner's own copy
+of `scripts/advance-host-checkout.sh` to the host over SSH and runs it
+*before* any rsync, so host `HEAD` is FF-current with every push that
+reaches deploy — not just once a day. What makes that safe even though
+rsync-written cache-bust dirt (and, on the very first inversion run,
+leftover pre-inversion rsync dirt) still sits in the working tree is the
+self-heal described in §2① below.
 
 ## 2. Mechanism (defense in depth)
 
 ### ① Self-healing auto-advance (primary) — `scripts/advance-host-checkout.sh`
 
-A cron-driven script that brings host `HEAD` to `origin/main` FF-only,
-discarding only the deploy-caused `public/` dirt:
+Invoked two ways: by the daily cron (§4.1), and — since the 2026-07-13
+delivery-ownership inversion — directly from `.github/workflows/deploy.yml`
+at every deploy (see "Deploy-time invocation" below). Either way it brings
+host `HEAD` to `origin/main` FF-only:
 
 1. `git fetch origin main`.
 2. Compute `ahead` (`origin/main..HEAD`) and `behind` (`HEAD..origin/main`).
@@ -36,16 +49,94 @@ discarding only the deploy-caused `public/` dirt:
    rules); this is the one condition the script treats as a hard stop
    rather than something to fix automatically.
 4. If `behind == 0`: already in sync, log, exit 0.
-5. Otherwise: `git checkout -- public/` (discard only the cache-bust dirt —
-   see §3 for why this is safe), then `git pull --ff-only origin main`. On
-   success, log the old→new `HEAD` and exit 0; on failure, alert at high
-   priority and exit 1 (this can happen if a tracked file outside
-   `public/` has uncommitted host-local edits the incoming diff would
-   clobber — git itself refuses the merge rather than lose data, and the
-   script surfaces that as a loud alert instead of forcing it).
+5. Otherwise: `git checkout -- public/` — unconditionally discard the
+   deploy cache-bust dirt (see §3 for why this is safe).
+6. **Self-heal** (`self_heal_lossless_dirt`, added 2026-07-13): absorb any
+   *other* working-tree dirt that is byte-identical to `origin/main` — see
+   "Self-heal" below.
+7. `git pull --ff-only origin main`. On success, log the old→new `HEAD`
+   and exit 0; on failure, alert at high priority and exit 1 (this can
+   happen if a tracked file outside `public/` has uncommitted host-local
+   edits — not byte-identical to `origin/main` — that the incoming diff
+   would clobber: git itself refuses the merge rather than lose data, and
+   the script surfaces that as a loud alert instead of forcing it).
 
-It never runs `git reset --hard`, `git merge`, or discards anything outside
-`public/`, and it never invokes any broadcast-capable command.
+It never runs `git reset --hard`, `git merge`, or discards content that
+differs from `origin/main`, and it never invokes any broadcast-capable
+command. Discarding `public/` (step 5) is unconditional; discarding
+anything else (step 6) is conditional on byte-for-byte equality — see
+below.
+
+#### Self-heal: absorbing lossless rsync-clobber dirt
+
+`self_heal_lossless_dirt` runs between the `public/` discard and the FF
+pull. It walks `git status --porcelain -z --untracked-files=all`, skips
+every `public/*` path (already handled unconditionally in step 5), and
+absorbs exactly two porcelain states:
+
+- **` M ` (tracked, modified in the worktree, index clean):** absorbed
+  only if `git diff --quiet origin/main -- <path>` is true — i.e. the
+  worktree content **and mode** already match what the incoming pull
+  would write anyway. Absorption reverts the file with `git checkout --
+  <path>`.
+- **`?? ` (untracked):** absorbed only if `origin/main` already tracks
+  that path (`git cat-file -e origin/main:<path>`) **and** its content is
+  byte-identical (`git show origin/main:<path> | cmp -s - <path>`).
+  Absorption removes the file with `rm`.
+
+Anything else — staged changes, real content divergence, deletions, mode
+drift on an otherwise-identical file — is left untouched and falls
+through to git's own FF-pull refusal in step 7 (loud, `alert high`, exit
+1, `HEAD` unchanged). If a self-heal mutating op itself fails (the `git
+checkout --` or `rm` call), the script alerts `high` immediately
+("host-advance: self-heal revert failed" / "...removal failed") and exits
+1 without attempting the pull.
+
+Each absorbed path is logged individually; if one or more files were
+absorbed, a single batched **`default`**-priority notify fires titled
+`host-advance: self-healed N file(s)`, naming every absorbed path. This
+is informational, not an incident — the pull that follows recreates the
+identical bytes either way, so nothing was lost. But it is not routine
+either: it means **something wrote git-tracked content onto the host
+outside git** (an operator-run `scripts/sync-to-validator-host.sh`, or —
+on the very first deploy after the 2026-07-13 inversion — leftover dirt
+from the retired whole-repo rsync). A `host-advance: self-healed` notify
+is the signal to go find that writer, not to dismiss the alert because
+"it healed itself."
+
+#### Deploy-time invocation
+
+`.github/workflows/deploy.yml`'s **"Advance host checkout to
+origin/main"** step runs before any rsync:
+
+```sh
+ssh ... "$SSH_USER@$SSH_HOST" \
+  "FYD_REPO_DIR='$DEPLOY_PATH' FYD_NOTIFY='$DEPLOY_PATH/scripts/notify.sh' bash -s" \
+  < scripts/advance-host-checkout.sh
+```
+
+It pipes the **runner's own checked-out copy** of the script (`bash -s`
+over stdin) rather than invoking whatever copy already sits on the host —
+so a deploy always runs the version of the self-heal that this exact push
+shipped, never a stale on-host copy, even on the very first run after
+this mechanism itself is deployed. Fail-closed: if the script exits
+non-zero (refused, fetch failed, not-a-git-checkout, or a
+non-absorbable pull conflict), the SSH command fails, the step fails, and
+the deploy job stops there — the `public/` rsync and the Caddy step never
+run against a host whose checkout the advance couldn't verify or bring
+current.
+
+The step then asserts `git merge-base --is-ancestor $GITHUB_SHA HEAD` on
+the host: the host fetches `origin/main` from GitHub independently of the
+runner, so if GitHub's ref advertisement lags the triggering push, the
+advance can exit 0 with the host still short of the pushed commit — the
+assertion fails the deploy loudly instead of letting the later steps run
+against stale files. The two invocation paths (this step and the daily
+cron) are also serialized against each other: the script takes a
+per-checkout `flock` on `<git-dir>/fyd-advance.lock` (waiting up to 120 s;
+timeout alerts `high` and exits 1), so an overlap never fires a spurious
+git-lock alert. On systems without `flock` (macOS dev/test) the lock is
+skipped.
 
 ### ③ Fail-closed freshness gate (backstop) — `scripts/check-scripts-freshness.sh`
 
@@ -99,6 +190,14 @@ Two actions are **operator-gated** and were deliberately left out of the
 implementation work — this doc records the exact commands so the operator
 can run them without further design decisions.
 
+> **Status (2026-07-10): both actions below are complete.** The mechanism
+> merged to `main` (`702676c`), the host FF-pulled from 32 commits behind
+> to zero (`546a0eb..09cc6bd`), and §4.1's cron installer ran successfully
+> — `/etc/cron.d/metal-host-advance` has run daily at 04:45 UTC since. The
+> runbooks in §4.1–§4.3 stay below as reference (reinstall, audit, or a
+> future host rebuild); §4.3 is kept as the historical record of the
+> merge ordering.
+
 ### 4.1 Install the auto-advance cron on the validator host
 
 ```sh
@@ -135,38 +234,45 @@ force a merge or reset; that condition means the host authored commits
 that are not on `origin/main`, which needs a human read before any
 correction.
 
-### 4.3 Merging this mechanism to `main`
+### 4.3 Merging this mechanism to `main` (historical — completed 2026-07-10)
 
-The scripts and this doc live on a feature branch until the operator
-reviews and merges it. Only after `main` carries `scripts/advance-host-checkout.sh`
-does the next deploy (or the recovery pull in §4.2) put it on the host, and
-only after that can §4.1's installer find the script it wires into cron.
-Merging to `main` is an operator decision made outside this doc's scope —
-this section exists so the ordering (merge → recovery pull if needed →
-install cron) is explicit.
+The scripts and this doc lived on a feature branch (`fix/host-checkout-auto-advance`)
+until the operator reviewed and merged it. `main` picked up
+`scripts/advance-host-checkout.sh` and this doc via merge commit `702676c`
+on 2026-07-10; that same day's follow-on deploy (plus a manual §4.2
+recovery pull) brought the host from 32 commits behind to zero, landing at
+`09cc6bd`, and §4.1's installer then found the script already on the host
+and wrote the cron. This section is kept as the historical record of that
+ordering (merge → recovery pull → install cron) for anyone auditing when
+the mechanism went live; it is not a pending task.
 
 ## 5. Known edge cases
 
 ### 5.1 An untracked file in `public/` collides with a file `origin/main` newly tracks
 
-`git checkout -- public/` (§2① step 3) only discards changes Git already
-tracks — it never touches untracked files, and `scripts/advance-host-checkout.sh`
+`git checkout -- public/` (§2① step 5) only discards changes Git already
+tracks under `public/` — it never touches untracked files anywhere. This
+edge case is untouched by the 2026-07-13 self-heal: `self_heal_lossless_dirt`
+(§2① step 6) explicitly skips every `public/*` path, so nothing under
+`public/` is ever absorbed, byte-identical or not. `scripts/advance-host-checkout.sh`
 never runs `git clean` or any other untracked-file deletion by design (see
-the script's header: "NEVER: `git reset --hard`, `git merge`, discarding
-anything outside `public/`"). If an untracked file already sits at a path
-that the incoming `origin/main` diff wants to create as a newly-tracked
-file, `git pull --ff-only origin main` refuses with git's own "untracked
-working tree file would be overwritten by merge" guard, and the script
-takes the same fail-loud branch as any other pull failure: `alert high
+the script's header: "NEVER: ... discarding anything outside `public/`
+unless byte-identical to origin/main ... discarding content that differs
+from origin/main"). If an untracked file already sits at a path that the
+incoming `origin/main` diff wants to create as a newly-tracked file,
+`git pull --ff-only origin main` refuses with git's own "untracked working
+tree file would be overwritten by merge" guard, and the script takes the
+same fail-loud branch as any other pull failure (§2① step 7): `alert high
 "host-advance: ff-only pull failed"`, exit 1, `HEAD` left unchanged. Because
 the script never deletes the colliding file and `HEAD` never advances, the
-same alert fires again on every subsequent cron tick until an operator
-intervenes — this is deliberate: the self-heal stops exactly at "would
-require deleting content Git doesn't manage," it does not push through.
+same alert fires again on every subsequent cron tick and every deploy (see
+"Deploy-time invocation" in §2①) until an operator intervenes — this is
+deliberate: the mechanism stops exactly at "would require deleting content
+Git doesn't manage," it does not push through.
 
 **Operator recovery**: move the colliding untracked file out of `public/`
 to a scratch location, then let the next cron tick (or a manual `bash
-scripts/advance-host-checkout.sh` run) retry the pull.
+scripts/advance-host-checkout.sh` run, or the next deploy) retry the pull.
 
 ### 5.2 Detached `HEAD` or a checkout on a branch other than `main`
 
@@ -186,6 +292,9 @@ normal `main` checkout).
 
 ## 6. See also
 
+- `.github/workflows/deploy.yml` — the validator-host deploy leg; its
+  "Advance host checkout to origin/main" step is the deploy-time
+  invocation of this same script (§2① "Deploy-time invocation").
 - `scripts/advance-host-checkout.sh` — the self-heal implementation.
 - `scripts/install-metal-host-advance-cron.sh` — its cron installer.
 - `scripts/check-scripts-freshness.sh` — the fail-closed freshness library

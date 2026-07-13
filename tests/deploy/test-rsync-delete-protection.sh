@@ -9,8 +9,11 @@
 #
 # We then run rsync with the shared feed-exclusion set (produced by
 # scripts/deploy/build-rsync-excludes.sh — the single source of truth
-# deploy.yml also consumes) for BOTH the validator-host (whole-repo) and
-# Xserver (public/-rooted) shapes, and assert these invariants:
+# deploy.yml also consumes) for BOTH the repo-root-rooted (prefix
+# "public/", no live rsync leg uses this shape since the 2026-07-13
+# delivery-ownership inversion — kept for emitter coverage) and Xserver
+# (public/-rooted, prefix "" — the shape BOTH live legs now use) shapes,
+# and assert these invariants:
 #
 #   1. Files the validator host writes (= rsync excludes) survive the
 #      deploy: rsync does NOT delete them from dst even when src has no
@@ -31,9 +34,11 @@ EMITTER="${REPO_ROOT}/scripts/deploy/build-rsync-excludes.sh"
 
 # The feed exclusion set is produced by the shared emitter (single source
 # of truth: deploy/feed-excludes.txt) — the same one deploy.yml consumes
-# for BOTH rsync targets. We exercise both deploy shapes below:
-#   - validator-host (whole-repo) shape: prefix "public/"
-#   - Xserver (public/-rooted) shape:    prefix ""
+# for BOTH rsync targets (both public/-rooted, prefix "", since the
+# 2026-07-13 delivery-ownership inversion). We exercise both emitter
+# prefix shapes below for coverage:
+#   - repo-root-rooted shape (no live leg uses this): prefix "public/"
+#   - validator-host + Xserver (both public/-rooted) shape: prefix ""
 # The emitter already prints ready-to-use `--exclude=/...` args, so we
 # collect them verbatim. (Portable to bash 3.2 / macOS — no mapfile;
 # process substitution only.)

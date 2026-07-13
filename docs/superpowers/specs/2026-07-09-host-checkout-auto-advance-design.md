@@ -80,3 +80,29 @@ ever stops working). Docs + TOOLKIT updated.
 - `.github/workflows/deploy.yml:166-175` — documents the dirty-`public/` abort.
 - `docs/DEPLOY_OWNERSHIP_MATRIX.md` — deploy vs runtime ownership.
 - Investigation findings: `scratchpad/drift-investigation/A–D`.
+
+## 6. Addendum 2026-07-13: superseded by deploy git-SoT inversion
+
+This spec's §1 "Problem" statement — "GitHub Actions `deploy.yml` rsyncs
+files but excludes `.git/` — never advances HEAD" — was accurate when
+written (2026-07-09) and remains accurate as history: at that time nothing
+in any deploy leg advanced the host checkout. It is **no longer true of
+`deploy.yml` today**. As of the 2026-07-13 delivery-ownership inversion
+(see `docs/superpowers/plans/2026-07-13-deploy-git-sot-inversion.md`),
+`deploy.yml`'s **"Advance host checkout to origin/main"** step pipes and
+runs this very spec's own primary mechanism
+(`scripts/advance-host-checkout.sh`) directly, at every deploy, before any
+rsync — not only via the daily cron. The former whole-repo rsync described
+implicitly throughout §1 is also gone: the sole remaining rsync
+(**"Rsync public/ to VPS"**) ships only the deploy-transformed `public/`
+tree; every other git-tracked file now reaches the host exclusively via
+the git advance this spec designed.
+
+None of this invalidates the mechanism itself — §2① (self-healing
+auto-advance) and §3's global constraints still describe
+`scripts/advance-host-checkout.sh` as shipped, now with an added
+`self_heal_lossless_dirt` step (2026-07-13) to absorb rsync-clobber dirt
+left by the retired whole-repo rsync on the first post-inversion run. For
+the current operational picture, see
+[`docs/HOST_CHECKOUT_AUTO_ADVANCE.md`](../../HOST_CHECKOUT_AUTO_ADVANCE.md)
+rather than this spec's §1.

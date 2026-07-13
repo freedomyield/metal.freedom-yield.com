@@ -146,67 +146,90 @@ jobs:
             "$SSH_USER@$SSH_HOST" \
             "mkdir -p '$DEPLOY_PATH'"
 
-      - name: Rsync site to VPS
-        # --inplace は必須。Caddyfile の bind-mount は単一ファイル mount で
-        # 起動時の inode に pin される。--inplace で既存 inode に上書きしないと
-        # コンテナは古い Caddyfile を読み続ける
-        #
-        # scripts/ は validator host (validator host) でのみ cron 実行されるもので、
-        # web host (web host) では実行 path が無く dead code になるため除外。
-        # 万一 web host に存在すると、誤って cron に仕込まれた時に node-info.sh が
-        # 空 JSON を出力して validator.json を上書きする等の事故になりうる。
-        # 物理的に存在しないことで防ぐ。
-        #
-        # logs/ は validator host 上で cron が書き込む host-runtime state
-        # (evidence-health A1 チェックが読む cron exit-code ログ等)。git 側は
-        # logs/ に .gitkeep しか追跡しておらず、除外しないと --delete が
-        # deploy のたびに host 側ログを消し、健全な状態でも
-        # "log not found" に化ける事故になる。
-        #
-        # tests/, docs/, TOOLKIT.md は validator host が runtime で使わない
-        # repo 内 dev/doc ファイル。host は同じ repo の git checkout でもある
-        # ため、これらは git 側から既に手元にある。除外せずに rsync すると
-        # 同一内容でも rsync が touch し、host 上で git-tracked ファイルへの
-        # ローカル変更として現れ、次回 host 側 `git pull --ff-only` が
-        # abort して毎回手動 reconcile が要る事故になっていた。
-        # (public/ は deploy 時に cache-bust 変換されるため除外できず、
-        # public/ を触る push は引き続き同じ drift が起きる — これは
-        # 構造的に避けられない。この変更が消すのは
-        # tests/・docs/・TOOLKIT.md・scripts/・logs/ を触る push の drift のみ)
-        run: |
-          # Feed excludes come from the shared single source of truth
-          # (deploy/feed-excludes.txt via the emitter), the same set the
-          # Xserver rsync below uses — see docs/DEPLOY_OWNERSHIP_MATRIX.md.
-          mapfile -t FEED_EXCLUDES < <(bash scripts/deploy/build-rsync-excludes.sh "public/")
-          rsync -rltvz --delete --inplace \
-            -e "ssh -i ~/.ssh/id_deploy -p $SSH_PORT -o StrictHostKeyChecking=no" \
-            --exclude='.git/' \
-            --exclude='.github/' \
-            --exclude='.githooks/' \
-            --exclude='.claude/' \
-            --exclude='node_modules/' \
-            --exclude='.env' \
-            --exclude='caddy/data/' \
-            --exclude='caddy/config/' \
-            --exclude='metalgo/data/' \
-            --exclude='metalgo/config/' \
-            --exclude='scripts/' \
-            --exclude='logs/' \
-            --exclude='tests/' \
-            --exclude='docs/' \
-            --exclude='TOOLKIT.md' \
-            "${FEED_EXCLUDES[@]}" \
-            ./ "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/"
-
-      - name: Bring up / reload Caddy on VPS
+      - name: Advance host checkout to origin/main
+        # Delivery-ownership inversion (2026-07-13): git is the ONLY
+        # delivery path for tracked files. We advance the host checkout
+        # BEFORE any rsync so the compose/Caddy step below runs against the
+        # pushed commit's files — this is enforced, not merely assumed, by
+        # the merge-base assertion below: the host fetches origin/main from
+        # GitHub independently of this runner, so if GitHub's ref
+        # advertisement to the host ever lags the push that triggered this
+        # run, the advance script could exit 0 while the host is still
+        # short of the commit this deploy is shipping, and everything after
+        # it would silently run against stale files. The script is piped
+        # from the runner's checkout (bash -s) — the host executes the
+        # version this push shipped, never a stale on-host copy, which also
+        # lets its self-heal absorb dirt left behind by the pre-inversion
+        # rsync on the very first run. Fail-closed: if the host cannot FF
+        # (real local divergence, host ahead, fetch failure), the script
+        # alerts via on-host ntfy AND this deploy fails loudly here.
         run: |
           ssh -i ~/.ssh/id_deploy -p "$SSH_PORT" -o StrictHostKeyChecking=no \
             "$SSH_USER@$SSH_HOST" \
-            "cd '$DEPLOY_PATH' && \
-             docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml up -d --remove-orphans --build && \
-             docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml exec -T caddy caddy reload --config /etc/caddy/Caddyfile && \
-             sleep 2 && \
-             curl -fsS -o /dev/null http://127.0.0.1:8085/health"
+            "FYD_REPO_DIR='$DEPLOY_PATH' FYD_NOTIFY='$DEPLOY_PATH/scripts/notify.sh' bash -s" \
+            < scripts/advance-host-checkout.sh
+
+          # Fail-closed post-advance assertion (final-review Important-1):
+          # confirm the commit that triggered this run is now actually
+          # contained in the host's HEAD, rather than trusting the script's
+          # exit 0 alone. $GITHUB_SHA is a default Actions env var already
+          # present in the runner's shell — it expands HERE, runner-side,
+          # into the literal SHA before this string is handed to ssh, so
+          # the remote command carries a fixed value, not an unexpanded
+          # reference to a var the host doesn't have.
+          ssh -i ~/.ssh/id_deploy -p "$SSH_PORT" -o StrictHostKeyChecking=no \
+            "$SSH_USER@$SSH_HOST" \
+            "git -C '$DEPLOY_PATH' merge-base --is-ancestor $GITHUB_SHA HEAD"
+
+      - name: Rsync public/ to VPS
+        # ONLY the deploy-transformed public/ tree travels by rsync — it is
+        # the one artifact git cannot deliver (cache-bust ?v=<sha> markers
+        # are stamped into the runner's copy above, deliberately diverging
+        # from the committed files; the host-side advance discards public/
+        # dirt before each pull, so this never blocks git). Every other
+        # tracked file reaches the host via the git advance step above.
+        # This replaces the pre-2026-07-13 whole-repo rsync whose exclude
+        # blacklist repeatedly leaked git-tracked files (tests/docs/TOOLKIT
+        # in 07-06, CLAUDE.md + bin/ in 07-13) and broke the host's
+        # ff-only pull. Feed excludes (shared SoT: deploy/feed-excludes.txt
+        # via the emitter) still protect host-generated feed files from
+        # --delete; empty prefix because the transfer root is public/,
+        # same as the web-host public-origin leg below.
+        run: |
+          mapfile -t FEED_EXCLUDES < <(bash scripts/deploy/build-rsync-excludes.sh "")
+          rsync -rltvz --delete --inplace \
+            -e "ssh -i ~/.ssh/id_deploy -p $SSH_PORT -o StrictHostKeyChecking=no" \
+            "${FEED_EXCLUDES[@]}" \
+            public/ "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/public/"
+
+      - name: Bring up / reload Caddy on VPS
+        # up -d first (recreates on compose-config change as before). Then
+        # stale-mount heal: the Caddyfile is a single-file bind mount
+        # pinned to the inode present at container creation; the git
+        # advance step above updates the file via git (new inode), so if
+        # the container's view differs from the host file the mount is
+        # stale and only a container recreate — not `caddy reload`, which
+        # reads through the same stale mount — can pick up the new config.
+        # State-based (content compare), so it is a no-op on unchanged
+        # Caddyfiles and also heals a stale mount left by any earlier
+        # deploy. Reload still covers the recreate-skipped path; the
+        # health check guards both.
+        run: |
+          ssh -i ~/.ssh/id_deploy -p "$SSH_PORT" -o StrictHostKeyChecking=no \
+            "$SSH_USER@$SSH_HOST" "DEPLOY_PATH='$DEPLOY_PATH' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$DEPLOY_PATH"
+          COMPOSE="docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml"
+          $COMPOSE up -d --remove-orphans --build
+          if $COMPOSE exec -T caddy cat /etc/caddy/Caddyfile | cmp -s - caddy/Caddyfile; then
+            $COMPOSE exec -T caddy caddy reload --config /etc/caddy/Caddyfile
+          else
+            echo "Caddyfile bind mount is stale (container view != host file) — recreating caddy"
+            $COMPOSE up -d --force-recreate caddy
+          fi
+          sleep 2
+          curl -fsS -o /dev/null http://127.0.0.1:8085/health
+          REMOTE
 
       - name: Set up Xserver deploy key
         env:

@@ -249,6 +249,8 @@ Expected: after trivial quoting normalization the two lists name the SAME 21 pat
 
 - [ ] **Step 2: Refactor the validator host rsync to source excludes from the emitter**
 
+> **Superseded 2026-07-13:** the "Rsync site to VPS" step this instruction targets no longer exists — the delivery-ownership inversion ([`2026-07-13-deploy-git-sot-inversion.md`](2026-07-13-deploy-git-sot-inversion.md)) removed the whole-repo rsync entirely; kept unedited below as the dated historical plan.
+
 In the "Rsync site to VPS" step, before the `rsync` call, build the feed excludes:
 
 ```yaml

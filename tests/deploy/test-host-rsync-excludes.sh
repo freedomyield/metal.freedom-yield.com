@@ -1,33 +1,39 @@
 #!/usr/bin/env bash
-# Regression test: the validator-host rsync block in
-# .github/workflows/deploy.yml MUST exclude logs/, tests/, docs/, and
-# TOOLKIT.md from --delete.
+# Regression test: the validator-host leg of .github/workflows/deploy.yml
+# delivers every tracked file via git, not rsync.
 #
-# logs/ holds host-runtime state — project-local cron exit-code logs
-# (e.g. logs/gen-evidence.log) that scripts/notify-evidence-health.sh
-# reads for its A1 check (see scripts/check-cron-file.sh:58 for the
-# project-local-log-path convention). The repo only ships logs/.gitkeep,
-# so if the validator-host rsync block ever drops its inline
-# --exclude='logs/', a deploy's `--delete` silently wipes host cron
-# logs and the evidence-health check flaps to "cron rc: log not found"
-# on an otherwise-healthy system.
+# CHAIN: none — pure static grep of the workflow file. No network, no SSH,
+# no real deploy.
 #
-# tests/, docs/, and TOOLKIT.md are repo-internal dev/doc files the
-# validator host does not use at runtime — the host receives them via
-# its own git checkout instead. Before these were excluded, the deploy
-# rsync would still ship them and --inplace-touch the host's git-tracked
-# copies, which then showed up as local modifications and made the
-# host's `git pull --ff-only` abort on the next push touching those
-# paths — forcing a manual reconcile every time. (public/ cannot be
-# excluded the same way — it is deploy-transformed and cache-busted —
-# so pushes touching public/ still cause host drift; that part is
-# inherent and out of scope for this test.)
+# Ownership inversion (2026-07-13): before this, the validator-host leg
+# rsynced the whole repo (minus a growing --exclude blacklist) onto the
+# host, and that rsync repeatedly leaked git-tracked files past the
+# blacklist and --inplace-touched the host's git-tracked copies, which then
+# showed up as local modifications and made the host's `git pull --ff-only`
+# abort on the next push touching those paths (tests/, docs/, TOOLKIT.md on
+# 2026-07-06; CLAUDE.md + bin/ on 2026-07-13 — two recurrences of the same
+# structural class of bug).
 #
-# This test pins all four excludes in place so dropping any one of them
-# fails the test.
+# The fix inverts ownership instead of growing the blacklist again: git is
+# now the ONLY delivery path for tracked files. A new step, "Advance host
+# checkout to origin/main", pipes the runner's own checked-out copy of
+# scripts/advance-host-checkout.sh to the host (so the host always executes
+# the version this exact push shipped, never a stale on-host copy) BEFORE
+# any rsync runs. Only after that does "Rsync public/ to VPS" ship the one
+# artifact git cannot deliver: the deploy-transformed, cache-busted public/
+# tree (cache-busting stamps ?v=<sha> into the runner's copy, deliberately
+# diverging it from the committed files). With nothing outside public/
+# shipped by rsync at all, the old four inline excludes (scripts/, logs/,
+# tests/, docs/, TOOLKIT.md) have no remaining purpose and are gone; the
+# feed excludes (shared SoT: deploy/feed-excludes.txt via the emitter,
+# empty prefix — same anchor as the Xserver leg below it) still protect
+# host-generated feed files under public/ from --delete, exactly as before.
 #
-# No network, no SSH, no real deploy — pure static grep of the workflow
-# file, mirroring the style of the sibling tests in this directory.
+# This test pins: the advance step exists and pipes the script correctly
+# with both env overrides set, the public/ rsync step exists with the exact
+# public/-only source/dest and its --delete/--inplace/feed-exclude
+# machinery intact, the advance step runs strictly before the rsync step,
+# and the old whole-repo rsync shape is gone entirely.
 set -u
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -40,43 +46,74 @@ no(){ FAIL=$((FAIL+1)); printf '  ✗ %s\n' "$1"; }
 
 [ -f "${WORKFLOW}" ] || { echo "FAIL: workflow not found at ${WORKFLOW}" >&2; exit 1; }
 
-# Isolate the validator-host rsync block: the step running
-# "rsync -rltvz --delete --inplace" whose destination is the repo root
-# (./ "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/"). This is distinct from the
-# Xserver block below it, whose source is ./public/ and therefore can
-# never touch repo-root logs/, tests/, docs/, or TOOLKIT.md in the
-# first place.
-HOST_BLOCK="$(awk '/rsync -rltvz --delete --inplace/{flag=1} flag{print} flag && /\.\/ "\$SSH_USER@\$SSH_HOST:\$DEPLOY_PATH\/"/{exit}' "${WORKFLOW}")"
+ADV_LINE="$(grep -n -F -- '- name: Advance host checkout to origin/main' "${WORKFLOW}" | head -1 | cut -d: -f1)"
+RSYNC_LINE="$(grep -n -F -- '- name: Rsync public/ to VPS' "${WORKFLOW}" | head -1 | cut -d: -f1)"
 
-if [ -z "${HOST_BLOCK}" ]; then
-  no "could not isolate the validator-host rsync block in ${WORKFLOW}"
+if [ -n "${ADV_LINE}" ]; then
+  ok "found step 'Advance host checkout to origin/main' (line ${ADV_LINE})"
 else
-  ok "isolated the validator-host rsync block"
-
-  echo "${HOST_BLOCK}" | grep -Fqx -- "            --exclude='logs/' \\" \
-    && ok "validator-host rsync excludes logs/ (inline, matches surrounding style)" \
-    || no "validator-host rsync block is missing --exclude='logs/'"
-
-  echo "${HOST_BLOCK}" | grep -Fqx -- "            --exclude='tests/' \\" \
-    && ok "validator-host rsync excludes tests/ (inline, matches surrounding style)" \
-    || no "validator-host rsync block is missing --exclude='tests/'"
-
-  echo "${HOST_BLOCK}" | grep -Fqx -- "            --exclude='docs/' \\" \
-    && ok "validator-host rsync excludes docs/ (inline, matches surrounding style)" \
-    || no "validator-host rsync block is missing --exclude='docs/'"
-
-  echo "${HOST_BLOCK}" | grep -Fqx -- "            --exclude='TOOLKIT.md' \\" \
-    && ok "validator-host rsync excludes TOOLKIT.md (inline, matches surrounding style)" \
-    || no "validator-host rsync block is missing --exclude='TOOLKIT.md'"
-
-  # Guard against the fix drifting into the shared feed-excludes emitter
-  # instead: these are repo-root excludes (like scripts/), not
-  # public/-relative feeds, so they belong inline next to
-  # --exclude='scripts/'.
-  echo "${HOST_BLOCK}" | grep -Fqx -- "            --exclude='scripts/' \\" \
-    && ok "new excludes sit alongside the scripts/ exclude (repo-root style)" \
-    || no "expected sibling --exclude='scripts/' line not found for context"
+  no "workflow is missing a step named 'Advance host checkout to origin/main'"
 fi
+
+if [ -n "${RSYNC_LINE}" ]; then
+  ok "found step 'Rsync public/ to VPS' (line ${RSYNC_LINE})"
+else
+  no "workflow is missing a step named 'Rsync public/ to VPS'"
+fi
+
+if [ -n "${ADV_LINE}" ] && [ -n "${RSYNC_LINE}" ]; then
+  if [ "${ADV_LINE}" -lt "${RSYNC_LINE}" ]; then
+    ok "advance step (line ${ADV_LINE}) precedes the public/ rsync step (line ${RSYNC_LINE})"
+  else
+    no "advance step must precede the public/ rsync step (advance=${ADV_LINE}, rsync=${RSYNC_LINE})"
+  fi
+
+  # Isolate each step's own block: from its "- name:" line up to (not
+  # including) the next top-level step's "- name:" line.
+  ADV_NEXT="$(awk -v start="${ADV_LINE}" 'NR>start && /^      - name:/{print NR; exit}' "${WORKFLOW}")"
+  [ -n "${ADV_NEXT}" ] || ADV_NEXT=$((ADV_LINE + 1000))
+  ADV_BLOCK="$(sed -n "${ADV_LINE},$((ADV_NEXT - 1))p" "${WORKFLOW}")"
+
+  echo "${ADV_BLOCK}" | grep -Eq -- '<[[:space:]]*scripts/advance-host-checkout\.sh' \
+    && ok "advance step pipes the runner's scripts/advance-host-checkout.sh via bash -s" \
+    || no "advance step does not pipe scripts/advance-host-checkout.sh (regex '<[[:space:]]*scripts/advance-host-checkout\\.sh')"
+
+  echo "${ADV_BLOCK}" | grep -Fq -- 'FYD_REPO_DIR=' \
+    && ok "advance step sets FYD_REPO_DIR=" \
+    || no "advance step is missing FYD_REPO_DIR="
+
+  echo "${ADV_BLOCK}" | grep -Fq -- 'FYD_NOTIFY=' \
+    && ok "advance step sets FYD_NOTIFY=" \
+    || no "advance step is missing FYD_NOTIFY="
+
+  RSYNC_NEXT="$(awk -v start="${RSYNC_LINE}" 'NR>start && /^      - name:/{print NR; exit}' "${WORKFLOW}")"
+  [ -n "${RSYNC_NEXT}" ] || RSYNC_NEXT=$((RSYNC_LINE + 1000))
+  RSYNC_BLOCK="$(sed -n "${RSYNC_LINE},$((RSYNC_NEXT - 1))p" "${WORKFLOW}")"
+
+  echo "${RSYNC_BLOCK}" | grep -Fqx -- '            public/ "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/public/"' \
+    && ok "public/ rsync source/dest line is exactly public/ ... \$DEPLOY_PATH/public/" \
+    || no "public/ rsync step is missing the exact public/-only source/dest line"
+
+  echo "${RSYNC_BLOCK}" | grep -Fq -- '--delete' \
+    && ok "public/ rsync step still carries --delete" \
+    || no "public/ rsync step is missing --delete"
+
+  echo "${RSYNC_BLOCK}" | grep -Fq -- '--inplace' \
+    && ok "public/ rsync step still carries --inplace" \
+    || no "public/ rsync step is missing --inplace"
+
+  echo "${RSYNC_BLOCK}" | grep -Fq -- '"${FEED_EXCLUDES[@]}"' \
+    && ok "public/ rsync step still applies the FEED_EXCLUDES feed-exclusion set" \
+    || no "public/ rsync step is missing \${FEED_EXCLUDES[@]}"
+
+  echo "${RSYNC_BLOCK}" | grep -Fq -- 'build-rsync-excludes.sh ""' \
+    && ok "public/ rsync step builds FEED_EXCLUDES with the empty prefix (transfer root is public/, same anchor as the Xserver leg)" \
+    || no "public/ rsync step does not build FEED_EXCLUDES with the empty prefix"
+fi
+
+grep -Fq -- './ "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/"' "${WORKFLOW}" \
+  && no "workflow still contains the old whole-repo rsync shape (./ ... \$DEPLOY_PATH/)" \
+  || ok "old whole-repo rsync shape (./ ... \$DEPLOY_PATH/) is gone"
 
 printf 'RESULTS: %s PASS / %s FAIL\n' "${PASS}" "${FAIL}"
 [ "${FAIL}" -eq 0 ]
