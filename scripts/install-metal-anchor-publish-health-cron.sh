@@ -69,4 +69,4 @@ touch /etc/cron.d/
 echo "OK: wrote ${CRON_TARGET}"
 echo "next fire: within 15 minutes"
 echo "alerts:    high-priority ntfy push on any failure (exit 2/3/4/5), via notify.sh"
-echo "log:       /var/log/anchor-publish-health.log (when writable) + journalctl -t anchor-publish-health"
+echo "log:       ${REPO_PATH}/logs/anchor-publish-health.log (repo-local; when writable) + journalctl -t anchor-publish-health"

@@ -33,18 +33,42 @@
 #   fires a high-priority notify.sh push (see Alerting below), and exits
 #   non-zero so the operator acts.
 #
+# Fetch retries (D1): fetch() retries each GET up to FYD_FETCH_ATTEMPTS times
+#   (default 3), breaking as soon as an attempt returns HTTP 200, with a
+#   FYD_RETRY_SLEEP-second pause (default 3) between attempts — see Env
+#   overrides below. Added 2026-07-16 after a single cross-region connection
+#   blip between the validator host and the public Xserver/CF origin
+#   (HTTP=000) rang the operator's phone at 16:00 UTC on 2026-07-15 even
+#   though the 15:45 and 16:15 ticks either side were both fine — a
+#   retry-less single curl cannot tell a transient network hiccup from a real
+#   outage. The retry lives inside fetch() so it covers BOTH GETs (source:
+#   exit-2 path; receipt: exit-4 path). It does NOT soften exit 3 (content
+#   mismatch): that comparison only runs after a 200 has already been
+#   obtained, so a stale publish is never masked by the retry loop.
+#
+# Log path (D2): the default $ANCHOR_PUBLISH_HEALTH_LOG target is repo-local
+#   (${SCRIPT_DIR}/../logs/anchor-publish-health.log), not /var/log. On the
+#   validator host /var/log is NOT writable by the `deploy` user this cron
+#   runs as, so a /var/log default silently no-ops the file log forever (the
+#   `[ -w ]` guard in log() below always fails) while still looking
+#   configured. The repo-local logs/ dir is provisioned deploy:deploy by
+#   scripts/install-host-log-dir.sh, matching every other project cron.
+#
 # Exit codes:
 #   0  served AND dag_root_computed matches the anchored root (verbose: heartbeat)
-#   2  anchor-source.json not served (HTTP != 200) — alert, no recover
+#   2  anchor-source.json not served (HTTP != 200 on every retry attempt) —
+#      alert, no recover
 #   3  served but dag_root_computed MISMATCHES the anchored root (stale publish)
-#   4  served but the receipt could not be fetched/parsed (cannot content-verify)
+#   4  served but the receipt could not be fetched/parsed after retrying
+#      (cannot content-verify)
 #   5  served but anchor-source.json is unparseable / missing dag_root_computed
 #      (or jq is unavailable)
 #
 # Logging:
 #   Every non-OK event is written to stderr (for cron mail) and, when the path
-#   is writable, appended to $ANCHOR_PUBLISH_HEALTH_LOG
-#   (default /var/log/anchor-publish-health.log) for later audit.
+#   is writable, appended to $ANCHOR_PUBLISH_HEALTH_LOG (default: repo-local
+#   ${SCRIPT_DIR}/../logs/anchor-publish-health.log — see "Log path (D2)"
+#   above) for later audit.
 #
 # Alerting:
 #   Every failure exit (2/3/4/5) additionally fires one high-priority ntfy
@@ -60,7 +84,13 @@
 #   bash scripts/check-anchor-publish-health.sh [--verbose]
 #
 # Env overrides (test-time + ops):
-#   FYD_NOTIFY   notifier to invoke (default: <script dir>/notify.sh)
+#   FYD_NOTIFY          notifier to invoke (default: <script dir>/notify.sh)
+#   FYD_FETCH_ATTEMPTS  max attempts per fetch() call before giving up
+#                       (default 3)
+#   FYD_RETRY_SLEEP     seconds to pause between fetch() retry attempts
+#                       (default 3; tests set 0 so the suite never sleeps)
+#   ANCHOR_PUBLISH_HEALTH_LOG  file-log target (default: repo-local
+#                       ${SCRIPT_DIR}/../logs/anchor-publish-health.log)
 #
 # Cron target (/etc/cron.d/metal-anchor-publish-health), every 15 minutes:
 #   */15 * * * * deploy bash /home/.../scripts/check-anchor-publish-health.sh
@@ -77,7 +107,7 @@ done
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SOURCE_URL="${ANCHOR_SOURCE_URL:-https://metal.freedom-yield.com/api/anchor-source.json}"
 RECEIPT_URL="${ANCHOR_RECEIPT_URL:-https://metal.freedom-yield.com/api/anchor-receipt.json}"
-LOG="${ANCHOR_PUBLISH_HEALTH_LOG:-/var/log/anchor-publish-health.log}"
+LOG="${ANCHOR_PUBLISH_HEALTH_LOG:-${SCRIPT_DIR}/../logs/anchor-publish-health.log}"
 CURL="${FYD_CURL:-curl}"
 NOTIFY="${FYD_NOTIFY:-${SCRIPT_DIR}/notify.sh}"
 NOW_ISO="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
@@ -103,8 +133,25 @@ alert() {
 is_hex64() { [[ "$1" =~ ^[0-9a-f]{64}$ ]]; }
 
 # fetch <url> <body_outfile> -> prints the HTTP status code (000 on failure).
+# Retries up to FYD_FETCH_ATTEMPTS times (default 3), stopping as soon as an
+# attempt returns 200 (one success == healthy, no alarm for a transient
+# blip). Sleeps FYD_RETRY_SLEEP seconds (default 3; tests use 0) between
+# attempts, never after the last one. Contract unchanged for callers: prints
+# exactly the FINAL attempt's HTTP status code, and the outfile holds the
+# FINAL attempt's body.
 fetch() {
-	"$CURL" -sS -o "$2" -w "%{http_code}" --max-time 15 "$1" 2>/dev/null || echo "000"
+	local url="$1" outfile="$2"
+	local attempts="${FYD_FETCH_ATTEMPTS:-3}"
+	local sleep_s="${FYD_RETRY_SLEEP:-3}"
+	local attempt=1 code
+	while :; do
+		code="$("$CURL" -sS -o "$outfile" -w "%{http_code}" --max-time 15 "$url" 2>/dev/null || echo "000")"
+		[ "$code" = "200" ] && break
+		[ "$attempt" -ge "$attempts" ] && break
+		sleep "$sleep_s"
+		attempt=$((attempt + 1))
+	done
+	printf '%s' "$code"
 }
 
 if ! command -v jq >/dev/null 2>&1; then
