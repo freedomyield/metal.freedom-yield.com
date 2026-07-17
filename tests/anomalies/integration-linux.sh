@@ -237,6 +237,12 @@ trap 'kill $WEB_PID 2>/dev/null; chmod -R u+rwX "$TMP" 2>/dev/null; rm -rf "$TMP
 sleep 0.5  # give python time to bind
 
 export WEB_URL="http://127.0.0.1:$WEB_PORT"
+# The mini server serves /api/validator.json as `{}` (no observedAt), so the
+# api_freshness watchdog takes its blip re-probe path (empty read + prior ok).
+# Collapse that re-probe sleep to zero here — production defaults it to 10s —
+# so the integration suite doesn't pay a real 10s wait per run. Outcome is
+# unchanged (both attempts read the same `{}` → one ok->broken alert).
+export FRESH_REPROBE_SLEEP=0
 # METALGO_API points at an unreachable port so RPC fails → RPC_VALID=0,
 # validator/delegator/period transitions are skipped (= acceptable for the
 # integration cases here, which focus on the K-1..K-4 + state pipeline).
