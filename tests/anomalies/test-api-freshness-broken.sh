@@ -73,10 +73,20 @@ fi
 mkdir -p "$TMP/bin"
 
 # === stub curl: honours -o <file> and -w '%{http_code}', matching the
-# exact invocation shape used by the extracted block. Controlled via env:
-#   STUB_CURL_BODY  content written to the -o target (default: empty)
-#   STUB_CURL_HTTP  string printed to stdout as the http_code (default: 200)
-#   STUB_CURL_RC    curl's own exit code (default: 0)
+# exact invocation shape used by the extracted block. Two modes:
+#
+#   Single-shot (back-compat): every invocation returns the same response.
+#     STUB_CURL_BODY  content written to the -o target (default: empty)
+#     STUB_CURL_HTTP  string printed to stdout as the http_code (default: 200)
+#     STUB_CURL_RC    curl's own exit code (default: 0)
+#
+#   Sequence: successive invocations return successive entries, so a single
+#   script run that fetches twice (blip re-probe) can see two DIFFERENT
+#   responses. Set STUB_CURL_SEQ to newline-separated "http|rc|body" entries
+#   (body last, may contain ':' but not '|' — fine for our JSON). A per-run
+#   counter file (STUB_CURL_COUNTER) advances each call; past the last entry
+#   the last entry is reused (clamp). When STUB_CURL_SEQ is empty the
+#   single-shot path above is used unchanged.
 cat > "$TMP/bin/curl" <<'EOF'
 #!/usr/bin/env bash
 outfile=""
@@ -85,11 +95,37 @@ for a in "$@"; do
   if [ "$prev" = "-o" ]; then outfile="$a"; fi
   prev="$a"
 done
-if [ -n "$outfile" ]; then
-  printf '%s' "${STUB_CURL_BODY:-}" > "$outfile"
+
+http="${STUB_CURL_HTTP:-200}"
+rc="${STUB_CURL_RC:-0}"
+body="${STUB_CURL_BODY:-}"
+
+if [ -n "${STUB_CURL_SEQ:-}" ]; then
+  n=0
+  if [ -n "${STUB_CURL_COUNTER:-}" ] && [ -s "$STUB_CURL_COUNTER" ]; then
+    n=$(cat "$STUB_CURL_COUNTER")
+  fi
+  selected=""; last=""; i=0
+  old_ifs="$IFS"; IFS=$'\n'
+  for e in $STUB_CURL_SEQ; do
+    last="$e"
+    [ "$i" = "$n" ] && selected="$e"
+    i=$((i + 1))
+  done
+  IFS="$old_ifs"
+  [ -z "$selected" ] && selected="$last"   # clamp past-end to last entry
+  http="${selected%%|*}"
+  rest="${selected#*|}"
+  rc="${rest%%|*}"
+  body="${rest#*|}"
+  [ -n "${STUB_CURL_COUNTER:-}" ] && printf '%s' "$((n + 1))" > "$STUB_CURL_COUNTER"
 fi
-printf '%s' "${STUB_CURL_HTTP:-200}"
-exit "${STUB_CURL_RC:-0}"
+
+if [ -n "$outfile" ]; then
+  printf '%s' "$body" > "$outfile"
+fi
+printf '%s' "$http"
+exit "$rc"
 EOF
 chmod +x "$TMP/bin/curl"
 
@@ -106,11 +142,27 @@ chmod +x "$TMP/bin/date"
 # a plain subshell), so these must be genuinely exported to cross that
 # process boundary — plain prefix-assignment on an assignment-only command
 # line ("VAR=x OUT=$(...)") does NOT export, it only sets a shell-local var.
-export STUB_CURL_HTTP STUB_CURL_BODY STUB_CURL_RC
+export STUB_CURL_HTTP STUB_CURL_BODY STUB_CURL_RC STUB_CURL_SEQ STUB_CURL_COUNTER FRESH_REPROBE_SLEEP
+STUB_CURL_COUNTER="$TMP/curl_counter"
+# Collapse the script's failure-path re-probe sleep to zero so the suite stays
+# fast; the script defaults this to 10s in production.
+FRESH_REPROBE_SLEEP=0
 set_stub_curl() {
   STUB_CURL_HTTP="$1"
   STUB_CURL_BODY="$2"
   STUB_CURL_RC="${3:-0}"
+  STUB_CURL_SEQ=""          # single-shot mode
+  : > "$STUB_CURL_COUNTER"  # reset per-run sequence cursor
+}
+
+# set_stub_curl_seq "<http>|<rc>|<body>" ... — successive curl invocations in
+# one script run return successive entries (used to exercise the blip re-probe
+# where attempt #1 and attempt #2 differ).
+set_stub_curl_seq() {
+  local IFS=$'\n'
+  STUB_CURL_SEQ="$*"
+  STUB_CURL_HTTP=""; STUB_CURL_BODY=""; STUB_CURL_RC=""
+  : > "$STUB_CURL_COUNTER"
 }
 
 # run_case <orig_fresh> <web_status> -> prints "candidate_field=<val|none> notify_calls=<n> notify_titles=<t1;t2;...>"
@@ -207,6 +259,30 @@ set_stub_curl 500 "<html>error</html>"
 OUT=$(run_case ok 000)
 assert_eq "site down: api_freshness untouched" "none" "$(field_of "$OUT")"
 assert_eq "site down: no notify"               "0"    "$(calls_of "$OUT")"
+
+echo ""
+echo "=== blip re-probe: transient single-request failure vs sustained outage ==="
+
+# --- transient blip absorbed: attempt #1 times out (curl rc=28 / HTTP 000),
+#     attempt #2 succeeds with a FRESH observedAt; prior state ok. The
+#     re-probe must swallow the blip: no "endpoint 破損" alert, state stays ok
+#     (candidate untouched — a fresh+ok read is not a transition).
+set_stub_curl_seq \
+  "000|28|" \
+  "200|0|{\"observedAt\":\"${NOW_ISO_REAL}\"}"
+OUT=$(run_case ok 200)
+assert_eq "blip absorbed: no notify"            "0"    "$(calls_of "$OUT")"
+assert_eq "blip absorbed: candidate untouched"  "none" "$(field_of "$OUT")"
+
+# --- sustained breakage: BOTH attempts fail (curl rc=28 / HTTP 000); prior
+#     state ok. Re-probe confirms the outage -> exactly one ok->broken alert,
+#     candidate -> warn (identical to today's behaviour for real outages).
+set_stub_curl_seq \
+  "000|28|" \
+  "000|28|"
+OUT=$(run_case ok 200)
+assert_eq "sustained outage: 1 notify"          "1"      "$(calls_of "$OUT")"
+assert_eq "sustained outage: candidate -> warn" '"warn"' "$(field_of "$OUT")"
 
 echo ""
 echo "Total: PASS=$PASS FAIL=$FAIL"

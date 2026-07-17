@@ -576,15 +576,34 @@ fi
 # schema change), gated the same way (fires once on ok->broken, silent on
 # repeat, recovers only once a genuinely fresh, valid observedAt is read).
 ORIG_FRESH=$(orig_get '.api_freshness'); [ "$ORIG_FRESH" = "null" ] && ORIG_FRESH="ok"
-if [ "$OBS_WEB_STATUS" = "200" ]; then
-  PUBLIC_BODY_TMP=$(mktemp)
-  PUBLIC_HTTP_CODE=$(curl -sS -o "$PUBLIC_BODY_TMP" -w '%{http_code}' --max-time 10 "${WEB_URL}/api/validator.json" 2>/dev/null)
+# Blip-mitigation (mirrors the web_probe idiom above): a single fetch of the
+# uncached/DYNAMIC /api/validator.json origin (behind Cloudflare) occasionally
+# spikes to several seconds and times out (curl rc=28 -> HTTP 000), which is a
+# transient blip that self-recovers on the next cron run — not a real outage.
+# So fetch once; only if the first read yields no observedAt AND the prior
+# state was healthy do we re-fetch once after a short sleep, and decide on the
+# SECOND result. Genuine sustained breakage fails both attempts and still
+# fires exactly one ok->broken alert; only single-request blips are absorbed.
+# The re-probe cost lives on the failure path only (a healthy first read
+# returns immediately with no sleep). Timeout raised 10s->20s: the measured
+# origin spike was ~7.6s, so 10s was too tight.
+fresh_fetch() {
+  local tmp
+  tmp=$(mktemp)
+  PUBLIC_HTTP_CODE=$(curl -sS -o "$tmp" -w '%{http_code}' --max-time 20 "${WEB_URL}/api/validator.json" 2>/dev/null)
   PUBLIC_CURL_RC=$?
   PUBLIC_OBS=""
   if [ "$PUBLIC_CURL_RC" -eq 0 ] && [ "$PUBLIC_HTTP_CODE" = "200" ]; then
-    PUBLIC_OBS=$(jq -r '.observedAt // empty' "$PUBLIC_BODY_TMP" 2>/dev/null)
+    PUBLIC_OBS=$(jq -r '.observedAt // empty' "$tmp" 2>/dev/null)
   fi
-  rm -f "$PUBLIC_BODY_TMP"
+  rm -f "$tmp"
+}
+if [ "$OBS_WEB_STATUS" = "200" ]; then
+  fresh_fetch
+  if [ -z "$PUBLIC_OBS" ] && [ "$ORIG_FRESH" = "ok" ]; then
+    sleep "${FRESH_REPROBE_SLEEP:-10}"
+    fresh_fetch
+  fi
 
   PUBLIC_OBS_EPOCH=0
   if [ -n "$PUBLIC_OBS" ]; then
