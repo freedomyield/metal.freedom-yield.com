@@ -93,7 +93,7 @@ Useful but assume ntfy.sh push notifications and a few env conventions. Adapt th
 ### `scripts/notify.sh`
 **Purpose:** Push a single ntfy.sh notification. Reads topic from a file (treated as a shared secret — anyone who knows it can publish/subscribe). Used by every alert pipeline below.
 **Dependencies:** `curl`.
-**Env:** `NTFY_TOPIC_FILE` (path to a file holding the topic identifier — set this), `NTFY_SERVER` (default `https://ntfy.sh`).
+**Env:** `NTFY_TOPIC_FILE` (path to a file holding the topic identifier — set this), `NTFY_SERVER` (default `https://ntfy.sh`), `NTFY_TAGS` (non-empty value overrides the priority-derived Tags emoji for that one notification, e.g. `tada`; unset/empty keeps the default).
 **Usage:** `bash notify.sh <priority> <title> <message...>`.
 **Adapt:** If you don't use ntfy, swap with your own push (Slack webhook, Telegram bot, Pushover etc.) — the calling scripts just exec this one wrapper.
 
