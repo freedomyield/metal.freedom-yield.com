@@ -31,9 +31,6 @@ TOPIC_FILE="$TMP/topic"
 echo "test-topic-string" > "$TOPIC_FILE"
 export NTFY_TOPIC_FILE="$TOPIC_FILE"
 
-mkdir -p "$TMP/public/api"
-echo '{}' > "$TMP/public/api/validator.json"
-
 # === stub curl: record argv, one arg per line ============================
 # notify.sh passes headers as `-H "Tags: <value>"`, so the Tags header
 # appears as a single "Tags: <value>" line in the recorded argv.
@@ -49,10 +46,14 @@ EOF
 chmod +x "$TMP/bin/curl"
 
 # run_notify <priority> [env VAR=VALUE ...]
+#   `env -u NTFY_TAGS` keeps the test hermetic: an NTFY_TAGS exported by
+#   the ambient environment must not leak into the "unset" cases. Override
+#   cases re-set it explicitly via the trailing VAR=VALUE args, which win
+#   over the -u removal.
 run_notify() {
   local prio="$1"; shift
   : > "$ARGS_FILE"
-  env PATH="$TMP/bin:$PATH" NTFY_TOPIC_FILE="$TOPIC_FILE" "$@" \
+  env -u NTFY_TAGS PATH="$TMP/bin:$PATH" NTFY_TOPIC_FILE="$TOPIC_FILE" "$@" \
     bash "$NOTIFY" "$prio" "title" "body" >/dev/null 2>&1
 }
 
