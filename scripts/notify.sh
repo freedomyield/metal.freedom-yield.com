@@ -6,6 +6,9 @@
 # Usage:
 #   bash notify.sh <priority> <title> <message...>
 #     priority = default | high | urgent  (ntfy.sh "Priority" header)
+#   Env: NTFY_TAGS=<tag> — non-empty value overrides the priority-derived
+#     Tags header (= leading emoji) for this one notification, e.g.
+#     NTFY_TAGS=tada. Unset/empty keeps the priority-derived default.
 # Examples:
 #   bash notify.sh high "Validator renewal" "7 days left to re-AddValidator"
 #   bash notify.sh urgent "metalgo down" "container status: exited"
@@ -74,6 +77,13 @@ case "$PRIO" in
   high)   TAGS="warning" ;;
   *)      TAGS="information_source" ;;
 esac
+# Per-notification override: a non-empty NTFY_TAGS replaces the
+# priority-derived default (e.g. a high-priority good-news notification
+# can carry "tada" instead of "warning"). Unset or empty NTFY_TAGS falls
+# back to the mapping above — existing callers observe no change.
+if [ -n "${NTFY_TAGS:-}" ]; then
+  TAGS="$NTFY_TAGS"
+fi
 
 # Append current uptime to every notification body so the operator
 # always sees the validator's headline number in their pocket — no

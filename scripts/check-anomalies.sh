@@ -430,12 +430,19 @@ candidate_set() {
 #   no retry:     rc 1 (topic missing/empty), rc 3 (HTTP 4xx non-429),
 #                 rc 100 (NOTIFY script missing/non-executable)
 attempt_notify() {
-  local prio="$1" title="$2" body="$3"
+  local prio="$1" title="$2" body="$3" tags="${4:-}"
   if [ ! -x "$NOTIFY" ]; then
     echo "[K-3] notify script missing or not executable: $NOTIFY" >&2
     return 100
   fi
-  NOTIFY_STRICT_EXIT=1 bash "$NOTIFY" "$prio" "$title" "$body" >/dev/null 2>&1
+  # Optional 4th arg: non-empty tags override the priority-derived ntfy
+  # Tags header (= leading emoji) via NTFY_TAGS. Empty/omitted keeps the
+  # historical call shape untouched.
+  if [ -n "$tags" ]; then
+    NTFY_TAGS="$tags" NOTIFY_STRICT_EXIT=1 bash "$NOTIFY" "$prio" "$title" "$body" >/dev/null 2>&1
+  else
+    NOTIFY_STRICT_EXIT=1 bash "$NOTIFY" "$prio" "$title" "$body" >/dev/null 2>&1
+  fi
   return $?
 }
 
@@ -446,7 +453,7 @@ retryable_notify_rc() {
   esac
 }
 
-# notify_or_keep <prio> <title> <body>
+# notify_or_keep <prio> <title> <body> [tags]
 #   returns 0  → caller MAY candidate_set the field
 #   returns !0 → caller MUST NOT mutate candidate (= ORIGINAL_STATE value
 #                stays, next cron run re-detects and re-attempts).
@@ -455,12 +462,12 @@ retryable_notify_rc() {
 # duplicates are possible (= ambiguous transport success, state-commit
 # failure after notify success), and not suppressed by this pipeline.
 notify_or_keep() {
-  local prio="$1" title="$2" body="$3" rc
-  attempt_notify "$prio" "$title" "$body"; rc=$?
+  local prio="$1" title="$2" body="$3" tags="${4:-}" rc
+  attempt_notify "$prio" "$title" "$body" "$tags"; rc=$?
   if [ "$rc" -eq 0 ]; then return 0; fi
   if retryable_notify_rc "$rc"; then
     sleep 5
-    attempt_notify "$prio" "$title" "$body"; rc=$?
+    attempt_notify "$prio" "$title" "$body" "$tags"; rc=$?
     if [ "$rc" -eq 0 ]; then return 0; fi
   fi
   echo "[K-3] notify permanent fail (rc=$rc, prio=$prio, title=\"$title\")" >&2
@@ -732,7 +739,9 @@ if [ "$RPC_VALID" = "1" ]; then
     if [ "$OBS_DELEGATOR_COUNT" -gt "${ORIG_DC:-0}" ]; then
       DIFF=$((OBS_DELEGATOR_COUNT - ORIG_DC))
       body=$(printf '+%s 件、合計 %s 件\n受入額: %s METAL\n自己 stake: %s METAL / 受入枠 %s METAL\n総 weight: %s METAL (self + delegators)' "$DIFF" "$OBS_DELEGATOR_COUNT" "$OBS_DELEGATOR_TOTAL_METAL" "$SELF_STAKE" "$CAPACITY_METAL" "$TOTAL_WEIGHT_METAL")
-      if notify_or_keep high "Delegation +${DIFF} 件受入 (合計 ${OBS_DELEGATOR_COUNT} 件)" "$body"; then
+      # Good news: keep priority high (= must not be missed) but replace
+      # the priority-derived warning emoji with a celebratory one.
+      if notify_or_keep high "Delegation +${DIFF} 件受入 (合計 ${OBS_DELEGATOR_COUNT} 件)" "$body" tada; then
         candidate_set '.delegator_count' "$OBS_DELEGATOR_COUNT"
         candidate_set '.delegator_total_nmetal' "$OBS_DELEGATOR_TOTAL_NMETAL"
       fi
