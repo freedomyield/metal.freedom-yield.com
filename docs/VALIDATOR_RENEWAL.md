@@ -262,8 +262,8 @@ State file: `/var/lib/freedom-yield/cycle-gate-state.json` (= operator 承認済
 ③ validator host: `gen-cycle-history.sh` + push — 公開 `cycle-history.jsonl` が 1 行増えたことを実測確認
 ④ Mac local: `FY_EXPECT_CYCLE=<N> OPERATOR_IDENTITY_KEY=~/.ssh/freedom-yield-operator-identity bash scripts/operator-local/gen-identity.sh`(= operator passphrase prompt 発生時に 3 番目の active action)。`FY_EXPECT_CYCLE=<N>` はサイクル切替時 **MANDATORY**(N = 直前に閉じた cycle 番号。手順③の公開反映前に実行すると exit 7 で hard-stop)。続けて `git add` + `git commit` + `git push origin main`、`gh run watch` で deploy 完了監視
 ⑤ validator host: `FY_EXPECT_CYCLE=<N> bash scripts/gen-anchor-source.sh`(cycle-4 当日の例: `FY_EXPECT_CYCLE=3`)— 新 `anchor-source.json`(3-branch DAG)を compose。`cycle_number_observed` は 公開 `cycle-history.jsonl` の CLOSED_COUNT+1 から自己導出するが、`FY_EXPECT_CYCLE` を渡すと ordering guard が有効になり、CLOSED_COUNT と 不一致(= 手順③がまだ公開反映されていない)なら compose 前に **exit 9** で hard-stop する(未設定なら警告バナーのみで継続、初回 bootstrap 用)。**gen-identity.sh の exit 7 とは別条件** — `gen-anchor-source.sh` では exit 7 は既に「atomic write failed」の意味で使用中のため、意図的に番号を揃えていない(exit 7 と exit 9 を同じ意味と読まない)
-⑥ Mac local: `scripts/operator-local/commit-anchor-source.sh --expect-cycle=<N>` で host 側 `anchor-source.json` を検証+commit、続けて push + deploy 完了監視(手順④と同じパターン)。**commit+push+deploy は必須** — 公開されないと手順⑨の Phase 1 polling が exit 3 でタイムアウトする
-⑦ Mac local: `HOME=~/.metal-fy-proton proton key:unlock` で mainnet keystore を unlock(testnet keystore `HOME=~/.metal-fy-proton-test` の unlock + rehearsal は別途 gate 1 材料として必要)、`FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton bash scripts/sign-anchor-event.sh --chain=mainnet-a`(= operator の 4 番目の active action、`bin/safe-broadcast` 4-gate 経由)
+⑥ Mac local: `scripts/operator-local/commit-anchor-source.sh --expect-cycle=<N+1>`(cycle-4 当日の例: `--expect-cycle=4`)で host 側 `anchor-source.json` を検証+commit、続けて push + deploy 完了監視(手順④と同じパターン)。**手順⑤との意味の反転に注意**: `gen-anchor-source.sh` の `FY_EXPECT_CYCLE` は「直前に閉じた cycle 番号」(N)だが、このスクリプトの `--expect-cycle` は fetch した `anchor-source.json` の `observations_branch.cycle_number_observed`(= `gen-anchor-source.sh` が `CLOSED_COUNT + 1` として算出する値)と直接一致比較するため「これから刻む cycle 番号」(N+1)を渡す — `N` を渡すと exit 5 で mismatch する。**commit+push+deploy は必須** — 公開されないと手順⑨の Phase 1 polling が exit 3 でタイムアウトする
+⑦ Mac local: gate 1 材料として `HOME=~/.metal-fy-proton-test proton key:unlock` → `HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh --expect-cycle=<N+1>`(day-of は `--expect-cycle=<N+1>` が MANDATORY、`docs/PHASE_ALPHA_TESTNET_DRY_RUN.md` 参照。cycle-4 当日の例: `--expect-cycle=4`)を実行し、出力末尾の `TESTNET REHEARSAL COMPLETE testnet_tx_id=<64hex>` を控える。続けて mainnet gate-4 dry-run-log を生成 — validator host の deploy user で `bash scripts/preview-cycle-anchor-broadcast.sh --testnet-tx-id=<控えた tx id>`(推奨: gate1/gate3 pre-check も表示し STAGE 2 コマンドを埋めて出力)、または Mac 上で直接 `bash scripts/sign-anchor-event.sh --chain=mainnet-a --dry-run > <path>`。最後に `HOME=~/.metal-fy-proton proton key:unlock` で mainnet keystore を unlock し、`FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton bash scripts/sign-anchor-event.sh --chain=mainnet-a --testnet-tx-id=<控えた tx id> --dry-run-log=<上記 dry-run-log path>`(= operator の 4 番目の active action、`bin/safe-broadcast` 4-gate 経由。`--testnet-tx-id` / `--dry-run-log` は gate 1 / gate 4 の必須入力 — 欠くと safe-broadcast が REFUSE する)。**順序に注意**: `FY_CONFIG_DIR=$HOME/...` は `HOME=~/.metal-fy-proton` より前に書く(bash は prefix 代入を左→右で逐次評価するため、逆順だと `$HOME` が新しい keystore path に展開され `FY_CONFIG_DIR` が keystore 内を指してしまう)
 ⑧ validator host: `gen-anchor-receipt.sh`(7-gate verify)+ `append-anchor-history.sh` + feed push
 ⑨ validator host: `bash scripts/resume-after-cycle-start.sh --apply`(= v2 3 phase: Phase 1 verify 6 check → Phase 2 atomic state write → Phase 3 report。**broadcast なし、explorer URL は出力しない**)
 
@@ -274,13 +274,16 @@ State file: `/var/lib/freedom-yield/cycle-gate-state.json` (= operator 承認済
 AI が応答不能な場合、 operator は本書「AI が裏で自走する技術 task」の当日順序 ①〜⑨ を以下の手順で手動実行する(anchor pipeline の手順を省くと anchor 刻印が欠落するので、①〜⑨ を全て踏む):
 
 ```sh
-# ①②③ validator host で cycle-recording を閉じる(node-info tick 確認 → uptime-history → gen-cycle-history + push)
+# ①②③ validator host で cycle-recording を閉じる(node-info tick 確認 → uptime-history → gen-cycle-history → 公開 push)
 ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
     'sudo -u deploy bash -c "cd /home/deploy/metal.freedom-yield.com && \
        bash scripts/node-info.sh && \
        bash scripts/uptime-history.sh && \
-       bash scripts/gen-cycle-history.sh"'
-# 公開 cycle-history.jsonl が 1 行増えたことを目視確認してから次に進む。
+       bash scripts/gen-cycle-history.sh && \
+       bash scripts/push-to-web-host.sh cycle-history.jsonl"'
+# push-to-web-host.sh が無いと公開 URL の cycle-history.jsonl が進まず、手順④の exit 7 /
+# 手順⑤の exit 9 ガードが古いままの行数を読んでしまう。公開 cycle-history.jsonl が 1 行
+# 増えたことを実測確認(公開 URL を curl して行数比較)してから次に進む。
 
 # ④ Mac で identity を再生成(N = 直前に閉じた cycle 番号。手順②③の公開反映前に走らせると exit 7)
 cd ~/htdocs/01_PROJECTS/metal.freedom-yield.com
@@ -301,21 +304,57 @@ ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HO
     'sudo -u deploy env FY_EXPECT_CYCLE=<N> bash /home/deploy/metal.freedom-yield.com/scripts/gen-anchor-source.sh'
 
 # ⑥ Mac で host 側 anchor-source.json を検証+commit、push+deploy
-bash scripts/operator-local/commit-anchor-source.sh --expect-cycle=<N>
+# --expect-cycle は「これから刻む cycle 番号」(N+1)— ⑤の FY_EXPECT_CYCLE=<N>(閉じた cycle
+# 番号)とは意味が反転する。fetch した anchor-source.json の cycle_number_observed
+# (= CLOSED_COUNT+1)と直接一致比較するため、N を渡すと exit 5 で mismatch する
+# (cycle-4 当日の例: --expect-cycle=4)。
+bash scripts/operator-local/commit-anchor-source.sh --expect-cycle=<N+1>
 git push origin main
 # GitHub Actions Deploy 完了を待つ。この push が無いと⑨の Phase 1 polling が exit 3 でタイムアウトする。
 
-# ⑦ Mac で mainnet keystore を unlock して署名+broadcast(testnet keystore の unlock + rehearsal は gate 1 材料として別途必要)
+# ⑦-a Mac で gate 1 材料(testnet rehearsal)。day-of は --expect-cycle=<N+1> が MANDATORY
+#     (docs/PHASE_ALPHA_TESTNET_DRY_RUN.md 参照。cycle-4 当日の例: --expect-cycle=4)
+HOME=~/.metal-fy-proton-test proton key:unlock
+HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh --expect-cycle=<N+1>
+# 出力末尾の `TESTNET REHEARSAL COMPLETE testnet_tx_id=<64hex>` を控える(以下 <rehearsal-tx-id>)。
+
+# ⑦-b mainnet gate-4 dry-run-log を生成。validator host の deploy user で実行するのが推奨
+#     (gate1/gate3 pre-check も表示され、埋まった STAGE 2 コマンドがそのまま出力される)
+ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
+    'sudo -u deploy bash /home/deploy/metal.freedom-yield.com/scripts/preview-cycle-anchor-broadcast.sh --testnet-tx-id=<rehearsal-tx-id>'
+# 出力された $DRYLOG (default /home/deploy/.fya-mainnet-dryrun.json) の内容を Mac にコピーするか、
+# 代わりに Mac 上で直接再生成してもよい:
+#   bash scripts/sign-anchor-event.sh --chain=mainnet-a --dry-run > /tmp/fya-mainnet-dryrun.json
+
+# ⑦-c Mac で mainnet keystore を unlock して署名+broadcast。
+#     --testnet-tx-id / --dry-run-log は bin/safe-broadcast の gate 1 / gate 4 必須入力(欠くと REFUSE)。
+#     順序注意: FY_CONFIG_DIR=$HOME/... は HOME=~/.metal-fy-proton より前に書く(bash は prefix
+#     代入を左→右で逐次評価するため、逆順だと $HOME が新しい keystore path に展開され
+#     FY_CONFIG_DIR が keystore 内を指してしまう)。
 HOME=~/.metal-fy-proton proton key:unlock
 FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton \
-    bash scripts/sign-anchor-event.sh --chain=mainnet-a
+    bash scripts/sign-anchor-event.sh --chain=mainnet-a \
+        --testnet-tx-id=<rehearsal-tx-id> \
+        --dry-run-log=/tmp/fya-mainnet-dryrun.json
 # tx id を控えて explorer で visually verify。
 
-# ⑧ validator host で receipt 生成 + history append
+# ⑧ validator host で receipt 生成 + history append。
+# gen-anchor-receipt.sh は --input=(手順⑦の sign-anchor-event.sh 標準出力を保存した JSON)と
+# --anchor-source=(host 側 anchor-source.json)が必須(欠くと usage error で exit 1)。手順⑦の
+# 出力は Mac 側で発生するので、事前に validator host へ転送しておく(例: scp でその JSON を
+# host の /home/deploy/.fya-sign-output.json に置く)。append-anchor-history.sh は
+# --receipt=(gen-anchor-receipt.sh の --out、default public/api/anchor-receipt.json)が必須。
+# --event-type はサイクル切替の文脈では cyclestart(gen-anchor-receipt.sh 側も
+# --trigger=cyclestart を揃えること)。
 ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
     'sudo -u deploy bash -c "cd /home/deploy/metal.freedom-yield.com && \
-       bash scripts/gen-anchor-receipt.sh && \
-       bash scripts/append-anchor-history.sh"'
+       bash scripts/gen-anchor-receipt.sh \
+         --input=/home/deploy/.fya-sign-output.json \
+         --anchor-source=public/api/anchor-source.json \
+         --trigger=cyclestart && \
+       bash scripts/append-anchor-history.sh \
+         --receipt=public/api/anchor-receipt.json \
+         --event-type=cyclestart"'
 
 # ⑨ validator host で resume-after-cycle-start.sh を trigger(v2 = 3 phase、broadcast なし)
 ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \

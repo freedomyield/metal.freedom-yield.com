@@ -261,24 +261,60 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    just because the two scripts' guards are conceptually parallel.
 6. **Mac —**
    ```sh
-   bash scripts/operator-local/commit-anchor-source.sh --expect-cycle=<N>
+   bash scripts/operator-local/commit-anchor-source.sh --expect-cycle=<N+1>
    ```
-   verifies + commits the host-composed `anchor-source.json`; push + wait
-   for deploy is a separate, subsequent action (same pattern as step 4).
+   verifies + commits the host-composed `anchor-source.json` (cycle-4 day
+   example: `--expect-cycle=4`). Deliberate meaning switch from step 5:
+   `gen-anchor-source.sh`'s `FY_EXPECT_CYCLE` is the closed-cycle count,
+   while this script's `--expect-cycle` is the cycle number being
+   inscribed — it compares directly against the fetched file's
+   `observations_branch.cycle_number_observed` (which `gen-anchor-source.sh`
+   composes as `CLOSED_COUNT + 1`), so passing `<N>` here exits 5
+   (mismatch). Push + wait for deploy is a separate, subsequent action
+   (same pattern as step 4).
    **Not optional**: `anchor-source.json` publishes via the normal
    git-deploy path, and until that deploy lands, step 9's Phase 1 polling
    never observes a fresh `dag_root_computed` and times out (exit 3).
 7. **Mac — unlock, then sign + broadcast.** Gate 1 (testnet-first) needs a
-   fresh testnet rehearsal of this cycle's exact memo shape first
-   (`HOME=~/.metal-fy-proton-test proton key:unlock`, then
-   `HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh`).
-   Once that succeeds, unlock the **separate** mainnet keystore and sign:
+   fresh testnet rehearsal of this cycle's exact memo shape first, and the
+   day-of invocation MUST carry `--expect-cycle=<N+1>` (mandatory per
+   `docs/PHASE_ALPHA_TESTNET_DRY_RUN.md`; cycle-4 day example: `4`):
+   ```sh
+   HOME=~/.metal-fy-proton-test proton key:unlock
+   HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh --expect-cycle=<N+1>
+   ```
+   Its closing `TESTNET REHEARSAL COMPLETE testnet_tx_id=<64hex>` line is
+   the `--testnet-tx-id` gate-1 input below.
+
+   Next, produce the mainnet gate-4 dry-run-log for this exact shape —
+   either (recommended: also runs the gate-1/gate-3 read-only pre-checks
+   and prints the exact STAGE 2 command below with both gate args already
+   filled in), as the deploy user **on the validator host**:
+   ```sh
+   bash scripts/preview-cycle-anchor-broadcast.sh --testnet-tx-id=<rehearsal tx id>
+   ```
+   (writes `$DRYLOG`, default `/home/deploy/.fya-mainnet-dryrun.json` —
+   copy its content across to the Mac), or directly **on the Mac** (using
+   the `anchor-source.json` step 6 already committed locally):
+   ```sh
+   bash scripts/sign-anchor-event.sh --chain=mainnet-a --dry-run > /tmp/fya-mainnet-dryrun.json
+   ```
+   Once the rehearsal succeeded and the dry-run-log exists, unlock the
+   **separate** mainnet keystore and sign. `bin/safe-broadcast` gate 1 and
+   gate 4 both REFUSE without `--testnet-tx-id` / `--dry-run-log`:
    ```sh
    HOME=~/.metal-fy-proton proton key:unlock
    FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton \
-     bash scripts/sign-anchor-event.sh --chain=mainnet-a
+     bash scripts/sign-anchor-event.sh --chain=mainnet-a \
+       --testnet-tx-id=<rehearsal tx id> \
+       --dry-run-log=/tmp/fya-mainnet-dryrun.json
    ```
    `FY_CONFIG_DIR` holds `xpr-account` / `anchor-sink` / `xpr-quantity`.
+   **Order matters** in that env-prefix line: bash evaluates left-to-right,
+   so `FY_CONFIG_DIR=$HOME/...` must come before `HOME=...` — swapping the
+   order makes `$HOME` resolve to the just-assigned `~/.metal-fy-proton`
+   first, silently pointing `FY_CONFIG_DIR` inside the keystore instead of
+   the config dir.
    Routed through `bin/safe-broadcast`'s 4-gate discipline (testnet-first,
    per-invocation operator authorization naming chain / actor / permission
    / action / memo / quantity, chain-info verify, dry-run exhaustion — PRIME
