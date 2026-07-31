@@ -105,11 +105,11 @@ WebAuth wallet は mnemonic 非互換(AddValidator は Metal Wallet web 専用)�
 | 値 | 計算方法 |
 |---|---|
 | 旧期間 endTime | operator-local notes に記録された epoch |
-| **新 Start Time** | **発行時の Unix 秒 + 600(10 分)** |
-| **新 End Time** | **新 Start Time + duration in seconds**(30 日なら 2,592,000) |
+| **新 Start Time** | **入力欄なし** — submit 後、wallet 側が自動で「submit 時刻 + 5 分」に確定する |
+| **新 End Time** | date picker で「新 Start Time(≈ submit 時刻 + 5 分)+ duration」に相当する日付を選択 |
 
-> 発行時点で `date +%s` で「今の Unix 秒 + 600」を計算して Start Time にコピペ、End Time = Start Time + duration。
-> Metal Wallet web の Start/End Time 欄は **Unix 秒入力** が確実(date picker は timezone 取り違え事故あり)。
+> 旧 11-step 時代の記述(`date +%s` で Unix 秒を計算して Start/End Time にコピペ)は実機の Metal Wallet web と不一致。実機観測(cycle 3 時点)では **Start Time 入力欄自体が無く**、submit 後の auto+5min で確定する。End Time は Unix 秒直接入力ではなく **date picker** で日付を選ぶ。
+> **Wallet UI は変わり得るため、当日 Step 1 (準備 check) の段階で一度 Add Validator フォームを開き、Start Time 欄の有無 / End Time の入力形式を目視確認すること。**
 > 期間後発行モードでは、旧期間 endTime を経過していることが大前提。発行前に画面右上の Available (P) が想定値(旧 stake + reward 解放後の額)に増えていることを目視確認。
 
 #### Field 一覧
@@ -119,8 +119,8 @@ WebAuth wallet は mnemonic 非互換(AddValidator は Metal Wallet web 専用)�
 | Node ID | `NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v`(同 NodeID で連続) |
 | BLS Public Key | (Step 1.4 で取得) |
 | BLS Proof of Possession | (Step 1.4 で取得) |
-| Start Time | 上表の **新 Start Time epoch** をコピペ |
-| End Time | 上表の **新 End Time epoch** をコピペ |
+| Start Time | **入力欄なし**(submit 後、自動で「submit 時刻 + 5 分」に確定) |
+| End Time | date picker で上表の **新 End Time** に相当する日付を選択 |
 | Stake Amount | operator-chosen METAL (= NN × 10^9 nMETAL) |
 | Delegation Fee | operator-chosen % |
 | Reward Address | operator-local notes 参照(自 P-Chain) |
@@ -188,10 +188,11 @@ cat public/api/validator.json | jq '.endTime, .stake.self'
 
 ## 失敗ケースと復旧
 
-### Case A: Start Time を旧期間終了より **前** に設定してしまった
+### Case A: 旧期間 endTime を経過する前に submit してしまった
 
-- tx は拒否される(同 NodeID で重複期間は不可)
-- 別の Start Time で再投入。tx fee は還ってこないが大した金額ではない
+- Start Time は入力欄が無く submit 時刻 + 5 分で自動確定するため(Step 2.2 参照)、submit 自体を旧期間 endTime より十分後に行う必要がある
+- 旧期間 endTime 経過前に submit すると、自動確定した Start Time も旧期間 endTime より前になり、tx は拒否される(同 NodeID で重複期間は不可)
+- Metal Wallet web の Available (P) が想定値(旧 stake + reward 解放後の額)に増えていることを目視確認してから再度 submit。tx fee は還ってこないが大した金額ではない
 
 ### Case B: BLS Proof of Possession が間違っている
 
@@ -225,7 +226,7 @@ cat public/api/validator.json | jq '.endTime, .stake.self'
 2 component:
 
 - `scripts/cycle-gate.sh` (= passive): 各 cron が broadcast 直前に「現サイクルは operator 承認済か」 を問い合わせる
-- `scripts/resume-after-cycle-start.sh` (= active): 新サイクル開始確認 + state file 更新 + broadcast trigger + 7 条件 PASS 検証
+- `scripts/resume-after-cycle-start.sh` (= active、v2 = 3 phase): Phase 1 新サイクル開始確認(6 check)+ Phase 2 state file atomic 更新 + Phase 3 report。**broadcast はしない**(anchor 刻印は本書「AI が裏で自走する技術 task」記載の別 Mac-side pipeline が担う)
 
 State file: `/var/lib/freedom-yield/cycle-gate-state.json` (= operator 承認済の cycle signature + dag_root_hash を保持)
 
@@ -239,7 +240,7 @@ State file: `/var/lib/freedom-yield/cycle-gate-state.json` (= operator 承認済
 | 旧 step 12: 同 re-enable | 上記の対称で廃止 |
 | 旧 step 8: `uptime-history.sh` 手動 trigger | AI が resume orchestration 内で trigger |
 | 旧 step 9: `gen-cycle-history.sh` + push 手動 trigger | 同上 |
-| 旧 step 11: `post-anchor-event.sh` 手動 trigger | `resume-after-cycle-start.sh` 内部の Phase 3 で sync trigger |
+| 旧 step 11: `post-anchor-event.sh` 手動 trigger | `post-anchor-event.sh` は v2 migration (2026-07-06) で retired。anchor 刻印は `resume-after-cycle-start.sh` とは独立した、Mac-side の `sign-anchor-event.sh` (via `bin/safe-broadcast`) が担う。`resume-after-cycle-start.sh` は cycle-gate 承認 state の書込のみ |
 
 ### operator の能動操作 (= 4 active actions のみ)
 
@@ -254,39 +255,76 @@ State file: `/var/lib/freedom-yield/cycle-gate-state.json` (= operator 承認済
 
 ### AI が裏で自走する技術 task (= operator から見えない)
 
-- ssh validator host: `uptime-history.sh` + `gen-cycle-history.sh` + `push-to-web-host.sh cycle-history.jsonl` を順次 trigger
-- Mac local: `bash scripts/operator-local/gen-identity.sh` (= operator passphrase prompt 発生時に 3 番目の active action)
-- Mac local: `git add` + `git commit` + `git push origin main`
-- `gh run watch` で GitHub Actions Deploy workflow 完了監視
-- ssh validator host: `bash scripts/resume-after-cycle-start.sh --apply` (= Phase 1 polling は attempt 1 で fresh data 発見、 Phase 2-5 同期実行)
-- Phase 5 summary を読取、 explorer URL を operator に報告
+当日順序(厳守。cycle N の閉じ → cycle N+1 の開始):
+
+① validator host: node-info tick 待ち — `public/api/validator.json` に新 endTime が反映されたことを確認(古い endTime のまま cycle-recording を走らせると記録がずれるため)
+② validator host: `uptime-history.sh`(cycle N close)
+③ validator host: `gen-cycle-history.sh` + push — 公開 `cycle-history.jsonl` が 1 行増えたことを実測確認
+④ Mac local: `FY_EXPECT_CYCLE=<N> OPERATOR_IDENTITY_KEY=~/.ssh/freedom-yield-operator-identity bash scripts/operator-local/gen-identity.sh`(= operator passphrase prompt 発生時に 3 番目の active action)。`FY_EXPECT_CYCLE=<N>` はサイクル切替時 **MANDATORY**(N = 直前に閉じた cycle 番号。手順③の公開反映前に実行すると exit 7 で hard-stop)。続けて `git add` + `git commit` + `git push origin main`、`gh run watch` で deploy 完了監視
+⑤ validator host: `FY_EXPECT_CYCLE=<N> bash scripts/gen-anchor-source.sh`(cycle-4 当日の例: `FY_EXPECT_CYCLE=3`)— 新 `anchor-source.json`(3-branch DAG)を compose。`cycle_number_observed` は 公開 `cycle-history.jsonl` の CLOSED_COUNT+1 から自己導出するが、`FY_EXPECT_CYCLE` を渡すと ordering guard が有効になり、CLOSED_COUNT と 不一致(= 手順③がまだ公開反映されていない)なら compose 前に **exit 9** で hard-stop する(未設定なら警告バナーのみで継続、初回 bootstrap 用)。**gen-identity.sh の exit 7 とは別条件** — `gen-anchor-source.sh` では exit 7 は既に「atomic write failed」の意味で使用中のため、意図的に番号を揃えていない(exit 7 と exit 9 を同じ意味と読まない)
+⑥ Mac local: `scripts/operator-local/commit-anchor-source.sh --expect-cycle=<N>` で host 側 `anchor-source.json` を検証+commit、続けて push + deploy 完了監視(手順④と同じパターン)。**commit+push+deploy は必須** — 公開されないと手順⑨の Phase 1 polling が exit 3 でタイムアウトする
+⑦ Mac local: `HOME=~/.metal-fy-proton proton key:unlock` で mainnet keystore を unlock(testnet keystore `HOME=~/.metal-fy-proton-test` の unlock + rehearsal は別途 gate 1 材料として必要)、`FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton bash scripts/sign-anchor-event.sh --chain=mainnet-a`(= operator の 4 番目の active action、`bin/safe-broadcast` 4-gate 経由)
+⑧ validator host: `gen-anchor-receipt.sh`(7-gate verify)+ `append-anchor-history.sh` + feed push
+⑨ validator host: `bash scripts/resume-after-cycle-start.sh --apply`(= v2 3 phase: Phase 1 verify 6 check → Phase 2 atomic state write → Phase 3 report。**broadcast なし、explorer URL は出力しない**)
+
+手順⑦の tx id を読取り、explorer URL を operator に報告(resume-after-cycle-start.sh の出力ではなく、手順⑦の broadcast 結果)。
 
 ### 緊急 fallback (= AI 不在時の operator 手動経路)
 
-AI が応答不能な場合、 operator は以下を手動実行:
+AI が応答不能な場合、 operator は本書「AI が裏で自走する技術 task」の当日順序 ①〜⑨ を以下の手順で手動実行する(anchor pipeline の手順を省くと anchor 刻印が欠落するので、①〜⑨ を全て踏む):
 
 ```sh
-# Mac で全部実行
+# ①②③ validator host で cycle-recording を閉じる(node-info tick 確認 → uptime-history → gen-cycle-history + push)
+ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
+    'sudo -u deploy bash -c "cd /home/deploy/metal.freedom-yield.com && \
+       bash scripts/node-info.sh && \
+       bash scripts/uptime-history.sh && \
+       bash scripts/gen-cycle-history.sh"'
+# 公開 cycle-history.jsonl が 1 行増えたことを目視確認してから次に進む。
+
+# ④ Mac で identity を再生成(N = 直前に閉じた cycle 番号。手順②③の公開反映前に走らせると exit 7)
 cd ~/htdocs/01_PROJECTS/metal.freedom-yield.com
 git pull origin main
-export OPERATOR_IDENTITY_KEY=~/.ssh/freedom_yield_operator
+export FY_EXPECT_CYCLE=<N>
+export OPERATOR_IDENTITY_KEY=~/.ssh/freedom-yield-operator-identity
 bash scripts/operator-local/gen-identity.sh
 git add public/api/identity.json public/api/identity.json.sig \
         public/api/identity-history.jsonl \
         public/.well-known/operator-identity.pub
 git commit -m "feat(identity): re-sign for new cycle"
 git push origin main
-
 # GitHub Actions Deploy 完了を待つ (= Actions tab 目視 or `gh run watch`)
 
-# The validator host で resume-after-cycle-start.sh を 1 行で trigger
+# ⑤ validator host で anchor-source.json を compose (N = 直前に閉じた cycle 番号。
+#    cycle-history.jsonl の CLOSED_COUNT と不一致なら compose 前に exit 9 で hard-stop)
+ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
+    'sudo -u deploy env FY_EXPECT_CYCLE=<N> bash /home/deploy/metal.freedom-yield.com/scripts/gen-anchor-source.sh'
+
+# ⑥ Mac で host 側 anchor-source.json を検証+commit、push+deploy
+bash scripts/operator-local/commit-anchor-source.sh --expect-cycle=<N>
+git push origin main
+# GitHub Actions Deploy 完了を待つ。この push が無いと⑨の Phase 1 polling が exit 3 でタイムアウトする。
+
+# ⑦ Mac で mainnet keystore を unlock して署名+broadcast(testnet keystore の unlock + rehearsal は gate 1 材料として別途必要)
+HOME=~/.metal-fy-proton proton key:unlock
+FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton \
+    bash scripts/sign-anchor-event.sh --chain=mainnet-a
+# tx id を控えて explorer で visually verify。
+
+# ⑧ validator host で receipt 生成 + history append
+ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
+    'sudo -u deploy bash -c "cd /home/deploy/metal.freedom-yield.com && \
+       bash scripts/gen-anchor-receipt.sh && \
+       bash scripts/append-anchor-history.sh"'
+
+# ⑨ validator host で resume-after-cycle-start.sh を trigger(v2 = 3 phase、broadcast なし)
 ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
     'sudo -u deploy bash /home/deploy/metal.freedom-yield.com/scripts/resume-after-cycle-start.sh --apply'
 
-# Phase 5 summary に explorer URL が出力される。 visually verify。
+# Phase 3 の report が出力される(state 更新のみ、broadcast も explorer URL も出さない)。
 ```
 
-Phase 1 の identity.json polling は最大 10 分待ち、 deploy 完了 timing が不明でも安全に走る。
+Phase 1 の identity.json polling は最大 10 分待ち、 deploy 完了 timing が不明でも安全に走る。同様に resume-after-cycle-start.sh の Phase 1 も anchor-source.json の polling を最大 `FY_POLL_MAX_SEC`(default 600 秒)待つ。
 
 ### dry-run 経路
 
@@ -297,14 +335,14 @@ ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HO
     'sudo -u deploy bash /home/deploy/metal.freedom-yield.com/scripts/resume-after-cycle-start.sh --dry-run'
 ```
 
-state file 書込 / broadcast / 7 条件 check は実行されず、 Phase 1 PASS のみ報告。
+Phase 2(state file 書込)は実行されず、Phase 1 verify(6 check: prior-state read / chain query / idempotency / endTime-in-future / anchor-source.json freshness poll / identity 署名 verify)の結果のみ報告。`resume-after-cycle-start.sh` はそもそも broadcast を行わない。
 
 ### rollback (= 設計を一時無効化)
 
 3 段階、 軽い順:
 
 1. `rm /var/lib/freedom-yield/cycle-gate-state.json` → 次回 `resume-after-cycle-start.sh` まで gate 無効化 (= backward compat)
-2. `chmod -x /home/deploy/metal.freedom-yield.com/scripts/cycle-gate.sh` → gate consultation 完全無効化
+2. **⚠ 使用禁止(通常の cycle transition では使わない)**: `chmod -x /home/deploy/metal.freedom-yield.com/scripts/cycle-gate.sh`。「gate 無効化」ではなく、cycle 記録系 5 script(`gen-cycle-history.sh` / `uptime-history.sh` Job B / `node-info.sh` / `gen-evidence.sh` / `gen-renewal-ics.sh`)を fail-closed で skip させ公開 feed の記録が止まる操作。`cycle-artifact-write` は既に常時 green なので、この lever でしか relax できない対象はそもそも無い。承認 state を緩めたいだけなら lever 1(state file 退避)を使う
 3. 全 commit revert → 旧 11-step に完全復帰
 
 詳細は `docs/CYCLE_GATE.md` の Rollback section 参照。

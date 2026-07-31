@@ -11,8 +11,8 @@
 # suite covers what those two don't:
 #   1. The shared guard FUNCTION in isolation (source + call directly).
 #   2. scripts/run-testnet-rehearsal.sh and
-#      scripts/preview-cycle3-anchor-broadcast.sh, which have no prior
-#      automated test suite (preview-cycle3-anchor-broadcast.sh is
+#      scripts/preview-cycle-anchor-broadcast.sh, which have no prior
+#      automated test suite (preview-cycle-anchor-broadcast.sh is
 #      documented as "no automated test by design" since a full run
 #      regenerates public/api/anchor-source.json). For these two, this
 #      suite verifies ONLY:
@@ -29,7 +29,8 @@
 # CHAIN: none — no case in this suite invokes proton for real, reaches
 #        bin/safe-broadcast's actual broadcast step, or writes to this
 #        repo's tracked files (public/api/anchor-source.json is never
-#        touched: the preview-cycle3 pass-through case deliberately leaves
+#        touched: the preview-cycle-anchor-broadcast.sh pass-through case
+#        deliberately leaves
 #        $REPO unset so the script's own `cd "$REPO"` fails BEFORE
 #        gen-anchor-source.sh would ever run).
 #
@@ -45,7 +46,7 @@ set -u
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 LIB="${REPO_ROOT}/scripts/lib/require-keystore-home.sh"
 REHEARSAL_SCRIPT="${REPO_ROOT}/scripts/run-testnet-rehearsal.sh"
-PREVIEW_SCRIPT="${REPO_ROOT}/scripts/preview-cycle3-anchor-broadcast.sh"
+PREVIEW_SCRIPT="${REPO_ROOT}/scripts/preview-cycle-anchor-broadcast.sh"
 
 for f in "$LIB" "$REHEARSAL_SCRIPT" "$PREVIEW_SCRIPT"; do
 	if [ ! -r "$f" ]; then
@@ -58,7 +59,7 @@ LOGIN_HOME="$(eval echo "~$(id -un)" 2>/dev/null || true)"
 TEST_HOME="$(mktemp -d -t keystore-guard-home.XXXXXX)"
 
 # Baseline the tracked anchor-source.json before any case runs, so Part 3
-# can confirm the preview-cycle3-anchor-broadcast.sh pass-through case
+# can confirm the preview-cycle-anchor-broadcast.sh pass-through case
 # below truly never reached gen-anchor-source.sh (which would rewrite it).
 ANCHOR_SRC="${REPO_ROOT}/public/api/anchor-source.json"
 ANCHOR_SRC_SHA_BEFORE=""
@@ -220,7 +221,7 @@ else
 fi
 
 # ============================================================
-# Part 3: scripts/preview-cycle3-anchor-broadcast.sh integration
+# Part 3: scripts/preview-cycle-anchor-broadcast.sh integration
 # ============================================================
 
 if [ -n "$LOGIN_HOME" ]; then
@@ -230,12 +231,12 @@ if [ -n "$LOGIN_HOME" ]; then
 	RC=0
 	OUT="$(HOME="$LOGIN_HOME" bash "$PREVIEW_SCRIPT" </dev/null 2>&1)" || RC=$?
 	if [ "$RC" -eq 8 ] && printf '%s' "$OUT" | grep -q '§3.5'; then
-		pass "preview-cycle3-anchor-broadcast.sh: HOME=login home → refuse (exit 8)" "rc=$RC"
+		pass "preview-cycle-anchor-broadcast.sh: HOME=login home → refuse (exit 8)" "rc=$RC"
 	else
-		fail_case "preview-cycle3-anchor-broadcast.sh: HOME=login home → refuse (exit 8)" "rc=$RC"
+		fail_case "preview-cycle-anchor-broadcast.sh: HOME=login home → refuse (exit 8)" "rc=$RC"
 	fi
 else
-	skip_case "preview-cycle3-anchor-broadcast.sh: HOME=login home → refuse" "login home not resolvable"
+	skip_case "preview-cycle-anchor-broadcast.sh: HOME=login home → refuse" "login home not resolvable"
 fi
 
 # 3b. PASS-THROUGH: HOME=project fixture dir, $REPO deliberately left
@@ -249,13 +250,13 @@ fi
 RC=0
 OUT="$(HOME="$TEST_HOME" bash "$PREVIEW_SCRIPT" </dev/null 2>&1)" || RC=$?
 if [ "$RC" -ne 8 ] && ! printf '%s' "$OUT" | grep -q 'keystore guard'; then
-	pass "preview-cycle3-anchor-broadcast.sh: HOME=project fixture dir → passes guard" "rc=$RC (not 8)"
+	pass "preview-cycle-anchor-broadcast.sh: HOME=project fixture dir → passes guard" "rc=$RC (not 8)"
 else
-	fail_case "preview-cycle3-anchor-broadcast.sh: HOME=project fixture dir → passes guard" "rc=$RC"
+	fail_case "preview-cycle-anchor-broadcast.sh: HOME=project fixture dir → passes guard" "rc=$RC"
 fi
 
 # Belt-and-suspenders: confirm no case above (in particular the
-# preview-cycle3-anchor-broadcast.sh pass-through case, 3b) touched the
+# preview-cycle-anchor-broadcast.sh pass-through case, 3b) touched the
 # real tracked public/api/anchor-source.json.
 if [ -r "$ANCHOR_SRC" ]; then
 	ANCHOR_SRC_SHA_AFTER="$(sha256sum "$ANCHOR_SRC" 2>/dev/null || shasum -a 256 "$ANCHOR_SRC" 2>/dev/null)"

@@ -24,7 +24,7 @@
 #
 # What this helper does NOT do:
 #   - It does not generate the ed25519 key. Generate it on the operator Mac:
-#       ssh-keygen -t ed25519 -f ~/.ssh/freedom_yield_operator \
+#       ssh-keygen -t ed25519 -f ~/.ssh/freedom-yield-operator-identity \
 #                  -C "freedom-yield-operator-identity"
 #     and never commit the private file.
 #   - It does not commit anything. Run git add / git diff / git commit yourself.
@@ -48,7 +48,7 @@
 #                           https://metal.freedom-yield.com).
 #
 # Usage:
-#   export OPERATOR_IDENTITY_KEY=~/.ssh/freedom_yield_operator
+#   export OPERATOR_IDENTITY_KEY=~/.ssh/freedom-yield-operator-identity
 #   bash scripts/operator-local/gen-identity.sh
 
 set -euo pipefail

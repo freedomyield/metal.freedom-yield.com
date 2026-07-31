@@ -139,10 +139,10 @@ The cryptographic-evidence anchor pipeline (identity → anchor-source → A-cha
 | `scripts/sign-anchor-event.sh` | Compose the 4-action tx from anchor-source and broadcast via `bin/safe-broadcast` (mainnet 4-gate). `--dry-run` composes + emits tx JSON only. Runs on the Mac (holds the anchor key). | manual |
 | `scripts/gen-anchor-receipt.sh` | Independently re-fetch the tx from mainnet Hyperion, run the 7 verify gates, write `public/api/anchor-receipt.json`. | post-broadcast |
 | `scripts/append-anchor-history.sh` | Append the v2 receipt as one JSONL line to `public/api/anchor-history.jsonl` with append-only invariants (prev-tx chain, genesis prev=null). | post-broadcast |
-| `scripts/run-anchor-pipeline.sh` | v2 orchestrator: gen-anchor-source → sign → receipt → history. (Host-signing assumption stranded under Mac-only signing — see stock-take #5.) | manual |
+| `scripts/run-anchor-pipeline.sh` | v2 orchestrator: gen-anchor-source → sign → receipt → history. **Cannot complete as a single invocation**: composing + receipt run on the validator host, but signing is Mac-only (`sign-anchor-event.sh` exit 7 anywhere else), so in practice the four steps run manually, split across host and Mac, with a git commit/push/deploy hop for `anchor-source.json` in between (`scripts/operator-local/commit-anchor-source.sh`) — see `docs/CYCLE_GATE.md` "Separation from the anchor pipeline" / stock-take #5. | manual |
 | `scripts/watch-anchor-events.sh` | Poll metalgo for validator-presence transitions; dispatch to `ANCHOR_DRIVER` (default + production: the alert-only `notify-anchor-transition.sh`). | every 5 min |
 | `scripts/notify-anchor-transition.sh` | DETECTION/ALERT-ONLY driver: on a transition, ntfy-push "run the manual anchor from the Mac". Broadcasts nothing. | via watcher |
-| `scripts/preview-cycle3-anchor-broadcast.sh` | Read-only STAGE-1 preview: regenerate anchor-source + dry-run-log, display the exact tx shape before an operator broadcast. | manual |
+| `scripts/preview-cycle-anchor-broadcast.sh` | Read-only STAGE-1 preview: regenerate anchor-source + dry-run-log, display the exact tx shape before an operator broadcast. Cycle-generic (derives the cycle number from `--source`; renamed from `preview-cycle3-anchor-broadcast.sh`). | manual |
 | `scripts/prep-cycle-anchor-recording.sh` | **Deprecated** (superseded by the cycle-gate ungate, 42797ae). Recorded a just-closed cycle by hole-punching the old transition deadlock. | — |
 | `scripts/check-anchor-publish-health.sh` | Verify `anchor-source.json` is served publicly; auto-recover by re-pushing. | every 15 min |
 | `scripts/run-testnet-rehearsal.sh` | Operator installer for the testnet anchor rehearsal (gate-1 material). | manual |
@@ -152,7 +152,7 @@ The cryptographic-evidence anchor pipeline (identity → anchor-source → A-cha
 | Script | Purpose | Cron |
 |---|---|---|
 | `scripts/cycle-gate.sh` | Passive gate consulted before cycle-dependent side effects. `broadcast` is signature-gated; `observe` + `cycle-artifact-write` are always green (recording a closed cycle is backward-looking). | via consumers |
-| `scripts/resume-after-cycle-start.sh` | Active operator command run after a new cycle starts: verify fresh identity, write the gate approval state, trigger the anchor. (Phase 3/4 stranded under Mac-only signing — stock-take #4.) | manual |
+| `scripts/resume-after-cycle-start.sh` | Active operator command run after a new cycle starts (v2 = 3 phase: Phase 1 verify chain + anchor-source freshness + identity signature, Phase 2 atomic state write, Phase 3 report). **No broadcast** — the anchor pipeline is a separate, Mac-signed step (see `scripts/run-anchor-pipeline.sh` row above). | manual |
 
 **Security guards + one-shot installers:**
 
