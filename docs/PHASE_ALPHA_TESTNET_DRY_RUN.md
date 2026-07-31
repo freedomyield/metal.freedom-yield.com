@@ -285,13 +285,22 @@ confirming the composed shape on testnet and as an input to the 7-gate
 receipt above, but it is the wrong chain's dry run for the mainnet gate.
 
 The actual mainnet gate-4 material comes from a **separate**
-`--chain=mainnet-a` dry run, produced by
-`scripts/preview-cycle-anchor-broadcast.sh` (or directly via
-`sign-anchor-event.sh --chain=mainnet-a --dry-run`), targeting the
-mainnet account for the same cycle. Generate that dry-run log alongside
-this rehearsal, not from it, and pass it as
-`bin/safe-broadcast`'s `--dry-run-log=<file>` when the mainnet broadcast
-is authorized.
+`--chain=mainnet-a` dry run, produced **on the Mac** from the
+already-committed `anchor-source.json` (no recompose), targeting the
+mainnet account for the same cycle:
+
+```
+FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton \
+  bash scripts/preview-cycle-anchor-broadcast.sh \
+    --source=public/api/anchor-source.json \
+    --testnet-tx-id=<this rehearsal's tx id>
+```
+
+`FY_CONFIG_DIR` is mandatory (and must precede `HOME=`): without it the
+underlying `sign-anchor-event.sh` exits 3 and leaves a 0-byte dry-run
+log. Generate that log alongside this rehearsal, not from it, and pass it
+as `bin/safe-broadcast`'s `--dry-run-log=<file>` when the mainnet
+broadcast is authorized. Full context: `docs/CYCLE_GATE.md` step 7b.
 
 ## Troubleshooting
 

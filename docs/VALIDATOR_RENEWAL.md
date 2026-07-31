@@ -263,7 +263,17 @@ State file: `/var/lib/freedom-yield/cycle-gate-state.json` (= operator 承認済
 ④ Mac local: `FY_EXPECT_CYCLE=<N> OPERATOR_IDENTITY_KEY=~/.ssh/freedom-yield-operator-identity bash scripts/operator-local/gen-identity.sh`(= operator passphrase prompt 発生時に 3 番目の active action)。`FY_EXPECT_CYCLE=<N>` はサイクル切替時 **MANDATORY**(N = 直前に閉じた cycle 番号。手順③の公開反映前に実行すると exit 7 で hard-stop)。続けて `git add` + `git commit` + `git push origin main`、`gh run watch` で deploy 完了監視
 ⑤ validator host: `FY_EXPECT_CYCLE=<N> bash scripts/gen-anchor-source.sh`(cycle-4 当日の例: `FY_EXPECT_CYCLE=3`)— 新 `anchor-source.json`(3-branch DAG)を compose。`cycle_number_observed` は 公開 `cycle-history.jsonl` の CLOSED_COUNT+1 から自己導出するが、`FY_EXPECT_CYCLE` を渡すと ordering guard が有効になり、CLOSED_COUNT と 不一致(= 手順③がまだ公開反映されていない)なら compose 前に **exit 9** で hard-stop する(未設定なら警告バナーのみで継続、初回 bootstrap 用)。**gen-identity.sh の exit 7 とは別条件** — `gen-anchor-source.sh` では exit 7 は既に「atomic write failed」の意味で使用中のため、意図的に番号を揃えていない(exit 7 と exit 9 を同じ意味と読まない)
 ⑥ Mac local: `scripts/operator-local/commit-anchor-source.sh --expect-cycle=<N+1>`(cycle-4 当日の例: `--expect-cycle=4`)で host 側 `anchor-source.json` を検証+commit、続けて push + deploy 完了監視(手順④と同じパターン)。**手順⑤との意味の反転に注意**: `gen-anchor-source.sh` の `FY_EXPECT_CYCLE` は「直前に閉じた cycle 番号」(N)だが、このスクリプトの `--expect-cycle` は fetch した `anchor-source.json` の `observations_branch.cycle_number_observed`(= `gen-anchor-source.sh` が `CLOSED_COUNT + 1` として算出する値)と直接一致比較するため「これから刻む cycle 番号」(N+1)を渡す — `N` を渡すと exit 5 で mismatch する。**commit+push+deploy は必須** — 公開されないと手順⑨の Phase 1 polling が exit 3 でタイムアウトする
-⑦ Mac local: gate 1 材料として `HOME=~/.metal-fy-proton-test proton key:unlock` → `HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh --expect-cycle=<N+1>`(day-of は `--expect-cycle=<N+1>` が MANDATORY、`docs/PHASE_ALPHA_TESTNET_DRY_RUN.md` 参照。cycle-4 当日の例: `--expect-cycle=4`)を実行し、出力末尾の `TESTNET REHEARSAL COMPLETE testnet_tx_id=<64hex>` を控える。続けて mainnet gate-4 dry-run-log を生成 — validator host の deploy user で `bash scripts/preview-cycle-anchor-broadcast.sh --testnet-tx-id=<控えた tx id>`(推奨: gate1/gate3 pre-check も表示し STAGE 2 コマンドを埋めて出力)、または Mac 上で直接 `bash scripts/sign-anchor-event.sh --chain=mainnet-a --dry-run > <path>`。最後に `HOME=~/.metal-fy-proton proton key:unlock` で mainnet keystore を unlock し、`FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton bash scripts/sign-anchor-event.sh --chain=mainnet-a --testnet-tx-id=<控えた tx id> --dry-run-log=<上記 dry-run-log path>`(= operator の 4 番目の active action、`bin/safe-broadcast` 4-gate 経由。`--testnet-tx-id` / `--dry-run-log` は gate 1 / gate 4 の必須入力 — 欠くと safe-broadcast が REFUSE する)。**順序に注意**: `FY_CONFIG_DIR=$HOME/...` は `HOME=~/.metal-fy-proton` より前に書く(bash は prefix 代入を左→右で逐次評価するため、逆順だと `$HOME` が新しい keystore path に展開され `FY_CONFIG_DIR` が keystore 内を指してしまう)
+⑦ Mac local: **⑦ は全て Mac 上で、かつ手順⑥の commit + push が landed した後に実行する**(署名対象は commit / push / deploy 済の bytes でなければ、receipt の `url` + `sha256` が刻んだ `dag_root_computed` を含まないファイルを指してしまう)
+  - **⑦-a gate 1 材料(testnet-first)**: `HOME=~/.metal-fy-proton-test proton key:unlock` → `HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh --expect-cycle=<N+1>`(day-of は MANDATORY、`docs/PHASE_ALPHA_TESTNET_DRY_RUN.md` 参照。cycle-4 当日の例: `--expect-cycle=4`)。出力末尾の `TESTNET REHEARSAL COMPLETE testnet_tx_id=<64hex>` を控える。**この rehearsal 自身の dry-run log は testnet 側の証拠にすぎない** — `target_chain: "testnet-a"` を記録しており、mainnet gate 4 は `--chain` と異なる chain の dry-run log を拒否する
+  - **⑦-b gate 4 材料(mainnet dry run)**: 経路は 1 本だけ。Mac 上で、既に commit 済の `anchor-source.json` から、**recompose せずに** 生成する:
+    ```sh
+    FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton \
+      bash scripts/preview-cycle-anchor-broadcast.sh \
+        --source=public/api/anchor-source.json \
+        --testnet-tx-id=<控えた tx id>
+    ```
+    このスクリプトは source が `git show HEAD:public/api/anchor-source.json` と byte 一致することを検証し(不一致なら exit 9 で拒否)、`$DRYLOG`(default `/tmp/fya-mainnet-dryrun.json`)を書き、gate1/gate3 の read-only pre-check を表示し、⑦-c のコマンドを両 gate 引数入りで出力する。compose も broadcast もしない。**validator host の `sudo -u deploy` では実行しない** — §3.5 keystore guard が login HOME を **exit 8** で拒否し、かつ host 側で recompose すると `dag_root_computed` が commit 済 bytes と変わる(artifacts branch は 5 分 cron が書き換える live feed を hash しているため)。pre-check 抜きで log だけ欲しい場合の同等形は `FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton bash scripts/sign-anchor-event.sh --chain=mainnet-a --anchor-source=public/api/anchor-source.json --dry-run > /tmp/fya-mainnet-dryrun.json` — こちらも `FY_CONFIG_DIR` は必須で、無いと exit 3 になり redirect が **0 byte** の log を残す(gate 4 まで気づけない)
+  - **⑦-c 署名 + broadcast**: `HOME=~/.metal-fy-proton proton key:unlock` で mainnet keystore(testnet とは別)を unlock し、`FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton bash scripts/sign-anchor-event.sh --chain=mainnet-a --anchor-source=public/api/anchor-source.json --testnet-tx-id=<控えた tx id> --dry-run-log=/tmp/fya-mainnet-dryrun.json`(= operator の 4 番目の active action、`bin/safe-broadcast` 4-gate 経由。`--testnet-tx-id` / `--dry-run-log` は gate 1 / gate 4 の必須入力 — 欠くと safe-broadcast が REFUSE する)。**順序に注意**: どの env-prefix 行でも `FY_CONFIG_DIR=...` を `HOME=...` より前に書く。機序(2026-07-31 実測): **zsh**(operator の login shell)は prefix 代入を左→右で適用し、各代入が次の代入の展開に見えるため、`HOME=~/.metal-fy-proton` が先だと `FY_CONFIG_DIR=$HOME/...` の `$HOME` が keystore を指してしまう。bash は simple command の prefix 代入をコマンド実行前の環境に対して展開するので両順序とも動く(ただし pipeline 内では subshell 化して zsh と同じ挙動になる)。どの shell でも正しい順序で書く
 ⑧ validator host: `gen-anchor-receipt.sh`(7-gate verify)+ `append-anchor-history.sh` + feed push
 ⑨ validator host: `bash scripts/resume-after-cycle-start.sh --apply`(= v2 3 phase: Phase 1 verify 6 check → Phase 2 atomic state write → Phase 3 report。**broadcast なし、explorer URL は出力しない**)
 
@@ -318,22 +328,31 @@ HOME=~/.metal-fy-proton-test proton key:unlock
 HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh --expect-cycle=<N+1>
 # 出力末尾の `TESTNET REHEARSAL COMPLETE testnet_tx_id=<64hex>` を控える(以下 <rehearsal-tx-id>)。
 
-# ⑦-b mainnet gate-4 dry-run-log を生成。validator host の deploy user で実行するのが推奨
-#     (gate1/gate3 pre-check も表示され、埋まった STAGE 2 コマンドがそのまま出力される)
-ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
-    'sudo -u deploy bash /home/deploy/metal.freedom-yield.com/scripts/preview-cycle-anchor-broadcast.sh --testnet-tx-id=<rehearsal-tx-id>'
-# 出力された $DRYLOG (default /home/deploy/.fya-mainnet-dryrun.json) の内容を Mac にコピーするか、
-# 代わりに Mac 上で直接再生成してもよい:
-#   bash scripts/sign-anchor-event.sh --chain=mainnet-a --dry-run > /tmp/fya-mainnet-dryrun.json
+# ⑦-b mainnet gate-4 dry-run-log を Mac 上で生成。手順⑥の commit + push が landed した後に実行し、
+#     commit 済 bytes をそのまま使う(recompose しない)。validator host の sudo -u deploy では
+#     実行しない — §3.5 keystore guard が login HOME を exit 8 で拒否し、host 側 recompose は
+#     dag_root_computed を変えてしまう(artifacts branch は 5 分 cron が書き換える feed を hash)。
+#     FY_CONFIG_DIR が無いと sign-anchor-event.sh は exit 3 になり 0 byte の log が残る。
+FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton \
+    bash scripts/preview-cycle-anchor-broadcast.sh \
+        --source=public/api/anchor-source.json \
+        --testnet-tx-id=<rehearsal-tx-id>
+# source が git show HEAD:public/api/anchor-source.json と byte 一致しなければ exit 9 で止まる。
+# $DRYLOG (default /tmp/fya-mainnet-dryrun.json) が gate 4 の入力。pre-check 抜きの同等形:
+#   FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton \
+#     bash scripts/sign-anchor-event.sh --chain=mainnet-a \
+#         --anchor-source=public/api/anchor-source.json \
+#         --dry-run > /tmp/fya-mainnet-dryrun.json
 
 # ⑦-c Mac で mainnet keystore を unlock して署名+broadcast。
 #     --testnet-tx-id / --dry-run-log は bin/safe-broadcast の gate 1 / gate 4 必須入力(欠くと REFUSE)。
-#     順序注意: FY_CONFIG_DIR=$HOME/... は HOME=~/.metal-fy-proton より前に書く(bash は prefix
-#     代入を左→右で逐次評価するため、逆順だと $HOME が新しい keystore path に展開され
-#     FY_CONFIG_DIR が keystore 内を指してしまう)。
+#     順序注意: FY_CONFIG_DIR=... は HOME=... より前に書く。機序(2026-07-31 実測): zsh(operator の
+#     login shell)は prefix 代入を左→右で適用し次の代入の展開に見えるため、HOME= が先だと
+#     $HOME が keystore を指す。bash は simple command なら両順序とも動く(pipeline 内は zsh と同じ)。
 HOME=~/.metal-fy-proton proton key:unlock
 FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton \
     bash scripts/sign-anchor-event.sh --chain=mainnet-a \
+        --anchor-source=public/api/anchor-source.json \
         --testnet-tx-id=<rehearsal-tx-id> \
         --dry-run-log=/tmp/fya-mainnet-dryrun.json
 # tx id を控えて explorer で visually verify。
