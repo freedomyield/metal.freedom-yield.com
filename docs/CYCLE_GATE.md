@@ -241,13 +241,24 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    ordering guard is disabled for that run.
 5. **host —**
    ```sh
-   bash scripts/gen-anchor-source.sh
+   FY_EXPECT_CYCLE=<N> bash scripts/gen-anchor-source.sh
    ```
    composes the fresh `anchor-source.json` (3-branch DAG) on the validator
-   host. Unlike `gen-identity.sh`, this script takes no `FY_EXPECT_CYCLE`
-   override — it self-derives `cycle_number_observed` from the published
-   `cycle-history.jsonl` line count (`CLOSED_COUNT + 1`), so step 3 must
-   land before this step runs or the composed cycle number will be stale.
+   host (cycle-4 day example: `FY_EXPECT_CYCLE=3`). It derives
+   `cycle_number_observed` as `CLOSED_COUNT + 1` from the published
+   `cycle-history.jsonl` line count, and carries its own ordering guard:
+   if `FY_EXPECT_CYCLE` is set and does not match `CLOSED_COUNT` (= step 3
+   has not landed on the published ledger yet), it hard-stops with
+   **exit 9** before composing anything — checked before the P-chain RPC
+   call, so it fails fast even if metalgo is unreachable. Left unset, it
+   still runs (needed for first-run / bootstrap) but prints a loud stderr
+   warning that the guard is disabled.
+   **Exit 9 here is a different condition than `gen-identity.sh`'s exit 7**
+   for its analogous guard — the two are not the same number by design:
+   `gen-anchor-source.sh`'s own exit 7 already means "atomic write failed"
+   (see its header's exit-code table), so its ordering guard had to take a
+   different code. Do not read "exit 7" and "exit 9" as the same condition
+   just because the two scripts' guards are conceptually parallel.
 6. **Mac —**
    ```sh
    bash scripts/operator-local/commit-anchor-source.sh --expect-cycle=<N>
