@@ -217,9 +217,15 @@ harmless — a non-fatal warning is printed, since the flag had no effect.)
    step 4's unlock probe, it also carries the locked-keystore detection:
    a timed-out / non-zero `key:list` exits 2 with the unlock instruction
    rather than claiming the key was never imported.
-4. **Keystore unlock + chain preflight** — `proton chain:set proton-test`
-   + `chain:info`, then a fast-timeout read of the actor account to
-   detect a locked keystore.
+4. **Keystore unlock + chain preflight** — the script's own internal
+   `proton chain:set proton-test` + `chain:info` calls, then a
+   fast-timeout read of the actor account to detect a locked keystore.
+   Those two (like the `proton key:list` named in step 3) are
+   **script-internal**: they inherit the `HOME=~/.metal-fy-proton-test`
+   prefix the script was invoked with, so they are already keystore-
+   scoped. They are **not** commands to type by hand — a bare
+   `proton …` at the shell would hit the default shared keystore and is
+   forbidden by Constitution §3.5.
 5. **Compose the 4-action tx** — via `sign-anchor-event.sh --dry-run`
    (no broadcast; the dry-run log is retained as **testnet-side evidence
    only** — see "After PASS" below for where the mainnet gate-4 material
