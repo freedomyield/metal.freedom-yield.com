@@ -1,382 +1,265 @@
-# Phase α testnet dry-run runbook
+# Phase α testnet rehearsal runbook (v2)
 
-> **Purpose**: rehearse the full Phase α A-chain anchor pipeline on XPR
-> testnet (= `proton-test` chain) before the first mainnet inscription
-> at cycle 3 start (2026-07-04 13:00 JST).
+> **Supersedes v1.** Everything below this line reflects the **v2 HC-single
+> 4-action pack pipeline** (`scripts/sign-anchor-event.sh` v2 +
+> `bin/safe-broadcast` + `scripts/gen-anchor-receipt.sh` v2), current as of
+> the 2026-07-31 cycle-4 testnet-rehearsal repair. The v1 revision of this
+> document (single memo `fyid1:<hex>`, direct `sign-anchor-event.sh
+> cyclestart <hex>` CLI, a retired `cycles-history.json` schema, the
+> `anchor-receipt.schema.v1.json` shape, and a manual O1–O10 proton-cli
+> output-parser observation checklist) described a pipeline that was
+> retired on **2026-07-01**, before the accidental mainnet inscription of
+> memo `fyid1v1c2-test-single` (tx `997881e844befaf9c159c741988fe99e8ca566a52e539639ab83517b1f36100a`,
+> see Constitution PRIME DIRECTIVE rationale) made that memo namespace
+> permanently unusable. None of the v1 steps below should be followed;
+> they are retained nowhere in this file. The O1–O10 checklist is not
+> carried forward either — v2's `gen-anchor-receipt.sh` 7-gate (§"Pass
+> criteria" below) independently re-derives every field from the chain
+> itself, structurally replacing that manual checklist.
 >
-> **Authority**: this runbook is an operator-executed sequence on
-> XPR testnet only. Per Constitution §5, mainnet steps remain
-> separately operator-approved; the dry-run does not unblock any
-> mainnet step automatically. Successful completion of this runbook
-> is the **IC-2 PASS** deliverable in the Phase α coordination plan.
+> **Purpose**: produce **PRIME DIRECTIVE gate-1 evidence** — Constitution
+> §3.4's testnet-first requirement, which every mainnet anchor broadcast
+> (a cycle-transition anchor, an account key rotation `updateauth`, etc.)
+> must satisfy before `bin/safe-broadcast --chain=mainnet-a` will accept
+> `--testnet-tx-id=<this run's tx_id>`. Per Constitution §5, mainnet steps
+> remain separately operator-approved; a passing rehearsal does not
+> auto-trigger anything on mainnet.
 >
-> **Owner**: C2 (= drafted as part of the C3 takeover, T-9).
-> **Scope**: testnet operations only. No mainnet command in this
-> document is intended for unsupervised execution.
+> **Authority**: this runbook is an operator-executed sequence on XPR
+> testnet (`proton-test` / chain `testnet-a`) only.
+>
+> **Scope**: testnet operations only. No command in this document targets
+> mainnet.
 
-## Pass/fail criteria
+## What this rehearses
 
-The rehearsal passes when ALL of the following are observable in a
-single end-to-end run:
+`scripts/run-testnet-rehearsal.sh` runs the full anchor pipeline
+end-to-end against XPR testnet:
 
-1. A test `metalfreedom`-style account exists on XPR testnet with the
-   same three-permission shape (`owner` + `active` + `anchor`).
-2. The `anchor` permission has a `linkauth` to `eosio.token::transfer`.
-3. `scripts/sign-anchor-event.sh cyclestart <hex>` (no `--dry-run`)
-   broadcasts a transfer on testnet, returns a JSON receipt fragment
-   on stdout, exit code 0.
-4. The receipt's `tx_id` resolves on a public XPR testnet explorer
-   and shows the action with the correct `memo` field equal to
-   `fyid1:<hex>`.
-5. The receipt's `tx_id` resolves on the XPR testnet RPC endpoint
-   (`https://api-xprnetwork-test.saltant.io/v1/history/get_transaction`)
-   and the returned action data agrees with the receipt.
-6. The receipt JSON fragment validates against
-   `/api/anchor-receipt.schema.v1.json` once embedded in a full
-   anchor-receipt document (verified via `ajv validate`).
+```
+/api/anchor-source.json (identity + observations + artifacts branch roots)
+  → scripts/sign-anchor-event.sh --chain=testnet-a --dry-run
+      (composes a 4-action eosio.token::transfer tx; memos
+       fya<schema>c<cycle>-{id,ob,ar}:<hex> + fya<schema>c<cycle>:<hex>)
+  → bin/safe-broadcast --chain=testnet-a
+      (the ONLY sanctioned broadcast pathway; enforces the operator-token
+       gate + R16 content binding + chain-identity gate 3 — see its own
+       header for the full gate list)
+  → scripts/gen-anchor-receipt.sh
+      (re-fetches the broadcast tx from testnet Hyperion/history and
+       independently re-derives every field — the 7-gate verify chain,
+       see "Pass criteria" below)
+```
 
-The rehearsal fails on any of:
-
-- The broadcast command exits non-zero.
-- The receipt JSON parses but the explorer cannot find the `tx_id`.
-- The memo on the explorer does not equal `fyid1:<hex>`.
-- The signer permission shown on the explorer is not
-  `metalfreedom-style@anchor`.
-
-A failure halts the mainnet activation; the cause is diagnosed and
-the rehearsal is re-run before mainnet proceeds.
+The account that signs (`<account>@anchor`) and the sink account are read
+from the operator-local rehearsal config directory
+(`~/freedom-yield-rehearsal-config/{xpr-account,anchor-sink,xpr-chain}`),
+never from a hardcoded name in the script. By convention on this project
+the rehearsal actor is the testnet account `frdomyieltst`, signing with
+its `anchor` permission, transferring to sink account `fyhistorytst`
+(both are public testnet account names already referenced throughout this
+repo — see `docs/ANCHOR_ACCOUNT_KEY_ROTATION.md`).
 
 ## Prerequisites
 
-- The operator has reached B5 self-test PASS for the mainnet
-  installation (= the mainnet anchor key is deployed and the dry-run
-  validates). This is the gate that proves the operator-side keystore
-  and CLI are functional; the testnet rehearsal then exercises the
-  network-broadcast path that the B5 dry-run intentionally skipped.
-- The validator host has `proton-cli` 0.1.98+ installed and
-  reachable to the `deploy` user.
-- The operator has access to the XPR testnet faucet (typically via
-  `https://webauth.com/testnet` or the Proton testnet web wallet).
+- `proton-cli` installed on the **operator's Mac** (not the validator
+  host — the v2 model signs only from the operator's local keystore; see
+  `docs/OPERATOR_IDENTITY_SETUP.md`'s "current v2 Mac-sign model" note).
+- `node` (Node.js) on PATH. Already a transitive prerequisite of
+  `proton-cli` itself (an npm package); used directly by this rehearsal
+  for public-key format verification
+  (`scripts/lib/eosio-pubkey-raw-hex.js`, see "Rotation resilience"
+  below).
+- `jq`, `curl`, and `sha256sum` or `shasum` on PATH.
+- The testnet proton-cli keystore (`HOME=~/.metal-fy-proton-test`) holds
+  the CURRENT `frdomyieltst@anchor` private key, and is **unlocked**
+  before running the rehearsal:
+  ```
+  HOME=~/.metal-fy-proton-test proton key:unlock
+  ```
+  Non-interactive shells (the rehearsal script itself) cannot unlock a
+  locked keystore — a locked keystore causes `proton` to hang
+  indefinitely on any signing-adjacent call. Unlock first, in a separate
+  terminal, THEN run the rehearsal script (per Constitution §3.5, the
+  unlock command above and every other `proton` invocation in this
+  document MUST carry the `HOME=~/.metal-fy-proton-test` prefix — never
+  a bare `proton …` against the default shared keystore).
+- `~/freedom-yield-rehearsal-config/` exists with three files:
+  `xpr-account` (`frdomyieltst`), `anchor-sink` (`fyhistorytst`),
+  `xpr-chain` (`proton-test`). These are operator-local paths, resolved
+  independent of the keystore-scoped `$HOME` (see
+  `scripts/lib/require-keystore-home.sh`'s `fyd_login_home` for why).
+- The canonical anchor-source file, `public/api/anchor-source.json`, is
+  current for the cycle you are rehearsing (regenerated by
+  `scripts/gen-anchor-source.sh`, normally on the validator host, then
+  synced into this repo's tracked copy).
 
-## Step 1 — Provision a test account on XPR testnet
+## Rotation resilience (why there is no key/account pin in this doc)
 
-```sh
-# Switch CLI to testnet.
-HOME=~/.metal-fy-proton-test proton chain:set proton-test
+The rehearsal script verifies the `frdomyieltst@anchor` key dynamically:
+it fetches the account's CURRENT on-chain permission structure via a
+read-only testnet RPC call (`POST
+https://rpc.api.testnet.metalx.com/v1/chain/get_account`) and checks that
+the returned `anchor` permission's public key is present in the local
+proton-cli keystore — comparing raw key bytes after normalizing both the
+chain's legacy `EOS...` encoding and the keystore's `PUB_K1_...` encoding
+(see `scripts/lib/eosio-pubkey-raw-hex.js`; the two encodings are
+different base58check representations of the same underlying key and are
+NOT reliably comparable as strings). If the RPC is unreachable or the
+response is malformed, the script **fails closed** — it never guesses.
 
-# Create a fresh test account name. The name MUST NOT collide with the
-# mainnet 'metalfreedom' account; it MUST NOT include a brand identifier.
-# Suggested form: a deterministic but anonymous name like 'fytestNNN'
-# where NNN is a random three-digit suffix. Length 1..12, chars [a-z1-5.].
+This means: a future key rotation (see
+`docs/ANCHOR_ACCOUNT_KEY_ROTATION.md`) does **not** require editing this
+script or this doc. The rehearsal always checks against whatever key is
+CURRENTLY on-chain. (Prior to 2026-07-31 the script instead hardcoded
+three specific `PUB_K1_...` public keys; the 2026-07-10 key rotation
+silently invalidated all three, and every rehearsal attempt failed at
+step 1 until this fix. That hardcoded-pin design is retired — do not
+reintroduce it.)
 
-TEST_ACCOUNT="fytest$(printf '%03d' $((RANDOM % 1000)))"
-echo "Test account: ${TEST_ACCOUNT}"
+## Running the rehearsal
 
-# Sign up via the testnet faucet for ${TEST_ACCOUNT}; the faucet
-# provisions the account with an owner/active K1 keypair. Capture both
-# keys for the rehearsal (transient — discard at end of run).
+```
+HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh
 ```
 
-The test account is throwaway: it exists only for the duration of the
-rehearsal and is discarded afterwards. The keys are not committed to
-Dashlane or any persistent store.
+This selects the **canonical** anchor-source (`public/api/anchor-source.json`)
+by default and prints, at step 1/10, the path, cycle number, and derived
+memo prefix it is about to inscribe — confirm these match the cycle you
+intend to rehearse before letting the run continue.
 
-## Step 2 — Reproduce A4 (anchor K1 key generation) for the test account
+To point at a different (still real, non-fixture) anchor-source file:
 
-```sh
-HOME=~/.metal-fy-proton-test proton key:generate
-# Capture:
-#   PUB_K1_<test_anchor>
-#   PVT_K1_<test_anchor>
-# These are testnet keys; they are not stored in Dashlane and are
-# discarded at end of rehearsal.
+```
+HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh \
+    --source=/path/to/anchor-source.json
 ```
 
-## Step 3 — Reproduce A6 + A7 (permission install + linkauth) on testnet
+`public/api/anchor-source.substantive.json` and
+`public/api/anchor-source.example.json` are **fixtures** — stale,
+placeholder-hash files frozen at whatever cycle they were last hand-built
+for. They are refused unless you pass `--allow-fixture` explicitly:
 
-```sh
-# A6 analog: add `anchor` as child of `active`.
-HOME=~/.metal-fy-proton-test proton action eosio updateauth '{
-  "account": "'${TEST_ACCOUNT}'",
-  "permission": "anchor",
-  "parent": "active",
-  "auth": {
-    "threshold": 1,
-    "keys": [{"key": "PUB_K1_<test_anchor>", "weight": 1}],
-    "accounts": [],
-    "waits": []
-  }
-}' ${TEST_ACCOUNT}@active
-
-# A7 analog: linkauth anchor → eosio.token::transfer.
-HOME=~/.metal-fy-proton-test proton action eosio linkauth '{
-  "account": "'${TEST_ACCOUNT}'",
-  "code": "eosio.token",
-  "type": "transfer",
-  "requirement": "anchor"
-}' ${TEST_ACCOUNT}@active
+```
+HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh \
+    --source=public/api/anchor-source.example.json --allow-fixture
 ```
 
-Verify both succeed; both produce testnet tx_ids resolvable on the
-testnet explorer.
+**Never use `--allow-fixture` to produce real gate-1 evidence.** It
+exists only for schema-shape testing (e.g. confirming the pipeline still
+composes/broadcasts/verifies correctly against a known-fixed input,
+independent of whatever the current cycle's real anchor-source looks
+like). A rehearsal run with `--allow-fixture` does not satisfy PRIME
+DIRECTIVE gate 1 for a real mainnet broadcast.
 
-## Step 4 — Provision a test sink account
+### The 10 steps
 
-```sh
-# Create a second testnet account (= the sink). Same naming
-# constraints as Step 1 (anonymous, non-brand).
-TEST_SINK="fysink$(printf '%03d' $((RANDOM % 1000)))"
-echo "Test sink: ${TEST_SINK}"
-# Sign up via faucet; capture the keys (also transient).
-```
+1. **Anchor-source selection** — resolve + print the file to inscribe
+   (path, `cycle_number_observed`, `computed_at`, derived memo prefix);
+   refuse a fixture without `--allow-fixture`.
+2. **Rehearsal config** — read `~/freedom-yield-rehearsal-config/`
+   (actor account, sink, chain).
+3. **Chain-derived key check** — the rotation-resilient verification
+   described above.
+4. **Keystore unlock + chain preflight** — `proton chain:set proton-test`
+   + `chain:info`, then a fast-timeout read of the actor account to
+   detect a locked keystore.
+5. **Compose the 4-action tx** — via `sign-anchor-event.sh --dry-run`
+   (no broadcast; the dry-run log is also retained as future mainnet
+   gate-4 material).
+6. **Create the broadcast token** — `/tmp/fyd-broadcast-token`, 5-minute
+   TTL, bound to `chain=testnet-a` and the exact composed tx's sha256
+   (R16 — see `bin/safe-broadcast`'s header for the full ritual this
+   automates).
+7. **Invoke `bin/safe-broadcast --chain=testnet-a`** — the actual
+   broadcast.
+8. **Reassemble** the sign-anchor-event JSON shape for the receipt step.
+9. **`gen-anchor-receipt.sh` 7-gate verify** — re-fetches the tx from
+   testnet Hyperion/history and independently re-derives every field.
+10. **Emit the sentinel line** — `TESTNET REHEARSAL COMPLETE
+    testnet_tx_id=<64hex>` — copy this back to the AI session.
 
-## Step 5 — Deploy the test anchor key on the validator host (TEST mode)
+## Pass criteria
 
-This mirrors §B3 + §B4 from `docs/OPERATOR_IDENTITY_SETUP.md` but
-points the validator-host config at testnet. The mainnet config
-under `/etc/freedom-yield/` is **not modified**; instead, a sibling
-directory is used so the two coexist.
+The rehearsal passes when `scripts/gen-anchor-receipt.sh` (invoked as
+step 9/10, above) exits 0 — i.e. all 7 verify gates PASS:
 
-```sh
-# Choose a non-collision config dir for the rehearsal.
-TEST_CONFIG_DIR=/etc/freedom-yield/testnet
+1. The tx is reachable via `tx_id` at the testnet RPC.
+2. The tx has exactly 4 actions.
+3. All 4 actions are `eosio.token::transfer`.
+4. All 4 actions' authorizations match the expected `actor@anchor`.
+5. The 4 memos match the expected
+   `{prefix}-{id|ob|ar}:<hex>` / `{prefix}:<hex>` set.
+6. The `dag_root_summary` memo's hex equals
+   `sha256(identity_root || observations_root || artifacts_root)`.
+7. `block_num` and `block_time` are present on the resolved tx.
 
-# As deploy user on the validator host:
-ssh "${VALIDATOR_SSH_HOST}" 'sudo install -d -m 0755 -o root -g root '"${TEST_CONFIG_DIR}"
+Any gate failing is a hard stop (`gen-anchor-receipt.sh` exits 4); the
+rehearsal script's own `fail()` then halts before emitting the sentinel
+line. Diagnose and re-run — do not hand a partial or failed run's
+`tx_id` to a mainnet `--testnet-tx-id=` argument.
 
-# Push the test anchor private key (PVT_K1_<test_anchor> from Step 2).
-ANCHOR_KEY_TMP="$(mktemp -t anchor.k1.XXXXXX)"
-# Paste PVT_K1_<test_anchor> into ${ANCHOR_KEY_TMP}.
-scp -p "${ANCHOR_KEY_TMP}" \
-    "${VALIDATOR_SSH_HOST}:${TEST_CONFIG_DIR}/anchor.k1.key.incoming"
-ssh "${VALIDATOR_SSH_HOST}" 'sudo install -m 0600 -o deploy -g deploy \
-    '"${TEST_CONFIG_DIR}"'/anchor.k1.key.incoming \
-    '"${TEST_CONFIG_DIR}"'/anchor.k1.key && \
-    sudo shred -u '"${TEST_CONFIG_DIR}"'/anchor.k1.key.incoming'
-shred -u "${ANCHOR_KEY_TMP}"
+Additionally confirm, by hand, on a public testnet explorer
+(`https://testnet.protonscan.io/transaction/<tx_id>`, printed in the
+step 10/10 output) that the 4 memos are visible and legible — this is a
+visual cross-check against the automated gates, not a substitute for
+them.
 
-# Write the account + sink + chain + quantity config files. The
-# `xpr-account` file is REQUIRED (audit-C/F-E2 removed the implicit
-# 'metalfreedom' fallback). For the testnet rehearsal it MUST contain
-# ${TEST_ACCOUNT} (= the throwaway test account from Step 1), NOT
-# 'metalfreedom' — broadcasting the rehearsal from the production
-# account is exactly what the audit forced this config split to
-# prevent.
-ssh "${VALIDATOR_SSH_HOST}" "sudo -u deploy bash -c \"
-  printf '%s' '${TEST_ACCOUNT}' > '${TEST_CONFIG_DIR}/xpr-account' && \
-  printf '%s' '${TEST_SINK}'    > '${TEST_CONFIG_DIR}/anchor-sink'  && \
-  printf '%s' 'proton-test'      > '${TEST_CONFIG_DIR}/xpr-chain'    && \
-  printf '%s' '0.0001 XPR'       > '${TEST_CONFIG_DIR}/xpr-quantity' && \
-  chmod 0600 '${TEST_CONFIG_DIR}'/xpr-account '${TEST_CONFIG_DIR}'/anchor-sink '${TEST_CONFIG_DIR}'/xpr-chain '${TEST_CONFIG_DIR}'/xpr-quantity \
-\""
+## After PASS: feeding the mainnet gate
 
-# Mainnet-leak guard (= explicit assertion that the rehearsal will NOT
-# broadcast from 'metalfreedom'). Run BEFORE Step 6 invokes the signer.
-ssh "${VALIDATOR_SSH_HOST}" "sudo -u deploy bash -c \"
-  cfg_account=\\\"\$(head -n 1 '${TEST_CONFIG_DIR}/xpr-account' | tr -d '\\n\\r\\t ')\\\"
-  if [ \\\"\$cfg_account\\\" = 'metalfreedom' ]; then
-    echo 'ERROR: testnet xpr-account is metalfreedom (= production account); refusing to proceed' >&2
-    exit 1
-  fi
-  echo \\\"OK testnet xpr-account = \$cfg_account (not 'metalfreedom')\\\"
-\""
+The step 10/10 sentinel line's `testnet_tx_id` is the exact value the AI
+session passes as `--testnet-tx-id=<that value>` to
+`bin/safe-broadcast --chain=mainnet-a` for the corresponding mainnet
+broadcast (a cycle-transition anchor, an `updateauth` key rotation, etc.
+— whatever real mainnet action this rehearsal was run to gate). The
+mainnet wrapper independently re-resolves that `tx_id` against the
+testnet RPC itself before accepting it (its own gate 1) — the rehearsal
+output is evidence, not a bypassable token.
 
-# Import the test key into proton-cli (= note the chain context).
-ssh "${VALIDATOR_SSH_HOST}" 'sudo -u deploy bash -c "
-  HOME=~/.metal-fy-proton-test proton chain:set proton-test
-  HOME=~/.metal-fy-proton-test proton key:add \$(sudo cat '"${TEST_CONFIG_DIR}"'/anchor.k1.key)
-  HOME=~/.metal-fy-proton-test proton key:list
-"'
-```
+The rehearsal script's own dry-run log
+(`~/.fya-testnet-dryrun-log.json`, printed at step 10/10) additionally
+serves as the `--dry-run-log=<file>` input the mainnet wrapper requires
+(its gate 4) — the SAME identical composed-tx shape, just re-targeted
+at `--chain=mainnet-a` with the mainnet account substituted in.
 
-## Step 6 — End-to-end: invoke sign-anchor-event.sh in test mode
+## Troubleshooting
 
-```sh
-# As deploy user on the validator host, with FY_CONFIG_DIR pointing
-# at the test config dir so the mainnet config under /etc/freedom-yield/
-# is untouched.
-ssh "${VALIDATOR_SSH_HOST}" 'sudo -u deploy bash -c "
-  export FY_CONFIG_DIR='"${TEST_CONFIG_DIR}"'
-  cd /home/deploy/metal.freedom-yield.com
-  ./scripts/sign-anchor-event.sh cyclestart \
-    0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
-    --dry-run
-"'
-```
-
-Expected: exit code 0; stdout contains a JSON receipt fragment with
-`tx_id: \"dry-run-no-broadcast\"`, `block_num: 0`, `block_time:
-\"1970-01-01T00:00:00Z\"`, `network: \"xpr-testnet\"`, `method:
-\"phase_alpha_token_transfer\"`, and the correct memo +
-inscribe_action structure.
-
-If the dry-run passes, repeat without `--dry-run`:
-
-```sh
-ssh "${VALIDATOR_SSH_HOST}" 'sudo -u deploy bash -c "
-  export FY_CONFIG_DIR='"${TEST_CONFIG_DIR}"'
-  cd /home/deploy/metal.freedom-yield.com
-  ./scripts/sign-anchor-event.sh cyclestart \
-    0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
-"' | tee /tmp/testnet-receipt-fragment.json
-```
-
-Expected: exit code 0; stdout contains a JSON receipt fragment with
-the real testnet `tx_id`, `block_num`, `block_time`.
-
-## Step 7 — Cross-check the testnet inscription
-
-```sh
-# Extract the tx_id from the receipt fragment.
-TX_ID="$(jq -r .tx_id /tmp/testnet-receipt-fragment.json)"
-
-# Pull the transaction back from the testnet RPC.
-curl -sS -X POST -H 'Content-Type: application/json' \
-  --data "$(jq -nc --arg id "${TX_ID}" '{id: $id}')" \
-  https://api-xprnetwork-test.saltant.io/v1/history/get_transaction \
-  | jq '.traces[0].act'
-```
-
-Expected: the returned action data shows
-`account=eosio.token, name=transfer, data.from=${TEST_ACCOUNT}, data.to=${TEST_SINK}, data.memo="fyid1:0123...cdef"`,
-and the signer permission is `${TEST_ACCOUNT}@anchor`.
-
-Open the same `tx_id` on a public XPR testnet explorer and visually
-confirm the same fields (= belt-and-braces, catches RPC vs explorer
-divergence).
-
-## Step 8 — Validate the receipt against the schema
-
-Compose a full `anchor-receipt.json` document around the fragment
-emitted by `sign-anchor-event.sh` and validate it against the
-production schema:
-
-```sh
-DAG_ROOT="$(jq -r '.memo | sub("^fyid1:"; "")' /tmp/testnet-receipt-fragment.json)"
-TX_ID="$(jq -r .tx_id /tmp/testnet-receipt-fragment.json)"
-EXPLORER_URL="https://explorer.xprnetwork-test.metallicus.com/transaction/${TX_ID}"
-
-jq -n \
-  --argjson frag "$(cat /tmp/testnet-receipt-fragment.json)" \
-  --arg dag "${DAG_ROOT}" \
-  --arg expl "${EXPLORER_URL}" \
-  '{
-    schema_version: 1,
-    dag_root_hash: $dag,
-    memo: $frag.memo,
-    anchor: ($frag + {explorer_url: $expl}),
-    cycles_history_url: "https://metal.freedom-yield.com/api/cycles-history.json",
-    identity_url: "https://metal.freedom-yield.com/api/identity.json",
-    trigger_event: "cycle_start",
-    generated_at: (now | strftime("%Y-%m-%dT%H:%M:%SZ"))
-  }' > /tmp/testnet-anchor-receipt.json
-
-npx --yes -p ajv-cli@5.0.0 -p ajv-formats@3.0.1 ajv validate \
-  --strict=false -c=ajv-formats --spec=draft2020 \
-  -s public/api/anchor-receipt.schema.v1.json \
-  -d /tmp/testnet-anchor-receipt.json
-```
-
-Expected: `valid`. If `invalid`, the receipt-fragment shape from
-`sign-anchor-event.sh` has drifted from the schema and the fragment
-emitter needs adjustment before mainnet.
-
-## Step 9 — Tear down the rehearsal artifacts
-
-```sh
-# On the validator host:
-ssh "${VALIDATOR_SSH_HOST}" 'sudo -u deploy bash -c "
-  HOME=~/.metal-fy-proton-test proton chain:set proton-test
-  HOME=~/.metal-fy-proton-test proton key:remove PUB_K1_<test_anchor>
-"'
-# Keystore separation (§3.5): the testnet keystore never touches the
-# mainnet chain context, so there is nothing to "restore" here — the
-# mainnet keystore (HOME=~/.metal-fy-proton) stays pinned to proton
-# independent of this teardown.
-ssh "${VALIDATOR_SSH_HOST}" 'sudo shred -u '"${TEST_CONFIG_DIR}"'/anchor.k1.key && \
-                              sudo rm -rf '"${TEST_CONFIG_DIR}"
-
-# On the operator Mac:
-rm -f /tmp/testnet-receipt-fragment.json /tmp/testnet-anchor-receipt.json
-shred -u ${ANCHOR_KEY_TMP} 2>/dev/null || true
-```
-
-The testnet test account and sink are left to expire naturally on
-testnet; no follow-up cleanup is needed on chain.
-
-## After PASS
-
-A passing rehearsal records:
-
-- The testnet `tx_id` (= evidence the broadcast worked).
-- The validated receipt JSON (= evidence the schema is correct).
-- The testnet key removed from the `~/.metal-fy-proton-test` keystore
-  (= safe teardown; keystore separation per §3.5 means the mainnet
-  keystore was never touched and needs no "restore" step).
-
-The operator is then cleared to authorize the mainnet first
-inscription at cycle 3 start. The mainnet broadcast uses the same
-script and the same shape; only the chain context, the sink account
-name, and the keystored key differ.
-
-## Proton-cli output observation gates (= audit-B/L-3 / audit-C #5)
-
-`scripts/sign-anchor-event.sh` currently extracts the on-chain
-`tx_id`, `block_num`, and `block_time` from `proton-cli` output via
-multi-pattern grep with an RPC-history fallback. The audit
-intentionally did NOT prescribe a change to the parser before a
-testnet rehearsal verified the actual `proton-cli` output shape on
-the operator's installed version. The rehearsal Step 6 (= the
-non-`--dry-run` invocation) is where that verification happens.
-
-During the rehearsal the operator MUST capture, in addition to the
-PASS / FAIL of the cross-check (Step 7) and the AJV validation
-(Step 8), the following observations. Mainnet activation is BLOCKED
-until each is satisfied:
-
-| # | Observation | Action on failure |
-|---|---|---|
-| O1 | The actual `proton-cli` command that produced the broadcast (= `${PROTON_ARGS[@]}` value from `scripts/sign-anchor-event.sh` at run time). | None; this is the input to all subsequent observations. Save the full argv. |
-| O2 | The exit code of the `proton` invocation (= `$?`). | If non-zero, the broadcast failed; investigate before any mainnet step. |
-| O3 | The raw stdout AND stderr of the `proton` invocation, with `${PVT_K1_*}` / `${ANCHOR_KEY_TMP}` / any host path or SSH-key-path strings redacted (per Constitution §4.1 S7-S9). Save to `/tmp/testnet-proton.{stdout,stderr}.log` for after-the-fact analysis. | None; the redacted logs are the artifact future debugging will use. |
-| O4 | Does the installed `proton-cli` version expose a `--json` output flag for the `action` subcommand? Test: `proton action --help` (or version-specific equivalent) and grep for `--json`. | If YES, FOLLOW-UP work item: replace the grep-pattern `tx_id` parser in `sign-anchor-event.sh` with `jq -e .transaction_id`. NOT done in the rehearsal itself; flagged for a separate audit-tracked commit before mainnet. |
-| O5 | The canonical field name for the transaction id in the raw stdout. The current parser tries (in order) `transaction_id:`, `transaction id:`, JSON `"transaction_id"`, and bare 64-hex. Document which pattern matched for this `proton-cli` version. | If a NEW pattern is needed (= none of the four matched), the parser MUST be updated before any mainnet broadcast. |
-| O6 | The grep-extracted `tx_id` matches `^[a-f0-9]{64}$` exactly (= 64 lowercase hex characters, no whitespace, no prefix, no suffix). | If NOT 64 lowercase hex, BLOCK mainnet. The transaction id parser drift would cause the receipt to point at the wrong transaction (or no transaction). |
-| O7 | The grep extracted EXACTLY ONE `tx_id` candidate. If `proton-cli` output contains multiple 64-hex strings (e.g., references to historical transactions), the current `head -n 1` policy picks the first, which may not be the broadcast one. | If multiple candidates appear, BLOCK mainnet and update the parser to be context-aware (= match within the "transaction confirmed" stanza, not file-wide). |
-| O8 | The RPC-history fallback URL (= `https://api-xprnetwork-test.saltant.io/v1/history/get_transaction` for testnet; the mainnet analog for production) returns HTTP 200 with a JSON body containing both `block_num` AND `block_time` when queried with the captured `tx_id`. | If RPC fallback fails AND `proton-cli` get_transaction is also absent, the signer's fail-closed exit code 4 (audit-C/F-E4) will fire on mainnet too; document the operator workaround before proceeding. |
-| O9 | The `anchor.block_time` in the composed receipt matches the value returned by the RPC `get_transaction` (= the chain-derived value), NOT the local clock at the time of rehearsal. Compare with: `jq -r .anchor.block_time /tmp/testnet-anchor-receipt.json` vs. the same field from the explorer's view of the transaction. | If they disagree, the signer's fail-closed path was NOT exercised (= a code path was missed); BLOCK mainnet. |
-| O10 | The receipt is NOT published until O1-O9 all pass. Specifically, do not run `mv /tmp/testnet-anchor-receipt.json public/api/anchor-receipt.json` or any analog until the cross-check in Step 7 has confirmed the chain-side transaction matches the receipt. | None; this is the gate, not an observation. The audit explicitly forbids publishing a receipt before transaction status is confirmed. |
-
-After the rehearsal PASSes O1-O9 AND Steps 7-8, the operator records
-a brief note in the rehearsal log capturing:
-
-- `proton-cli` version (= `proton --version`).
-- Which pattern from O5 matched.
-- Whether O4 unlocks the parser-replacement follow-up.
-
-These three datapoints feed the separate follow-up commit (= post-
-rehearsal parser hardening) that mainnet activation requires.
+- **Step 3/10 fails "not found in the local proton-cli testnet
+  keystore"** — the on-chain `anchor` key and the local keystore
+  disagree. Either the key was never imported, or it was rotated
+  on-chain since the keystore was last updated. See
+  `docs/ANCHOR_ACCOUNT_KEY_ROTATION.md` to import the matching private
+  key (with the `HOME=~/.metal-fy-proton-test` prefix), then re-run.
+- **Step 4/10 exits 2 with a keystore-locked warning** — run
+  `HOME=~/.metal-fy-proton-test proton key:unlock` in a separate
+  terminal, then re-run the rehearsal script.
+- **Guard exits 8 (`ERROR (keystore guard, Constitution §3.5)`)** — the
+  script was invoked without the `HOME=~/.metal-fy-proton-test` prefix
+  (or with `HOME` unset). Re-invoke exactly as shown under "Running the
+  rehearsal" above.
+- **Step 9/10 (`gen-anchor-receipt.sh`) exits 4** — one of the 7 verify
+  gates failed; the script prints which one and the expected vs. actual
+  values. Do not proceed to mainnet with this run's `tx_id`.
 
 ## Phase β note
 
-When Phase β is activated (= the `metalfreedom::inscribe` SC is
-deployed per `scripts/operator-local/contract/metalfreedom-anchor.spec.md`),
-this rehearsal extends with a step that exercises the SC action via
-`HOME=~/.metal-fy-proton-test proton action metalfreedom inscribe '{...}' metalfreedom@anchor` and
-asserts the resulting receipt has
-`anchor.method == "phase_beta_sc_inscribe"`. The Phase α steps remain
-valid as the fallback path while Phase β stabilizes.
+When Phase β is activated (the `metalfreedom::inscribe` smart-contract
+action is deployed per
+`scripts/operator-local/contract/metalfreedom-anchor.spec.md`), this
+rehearsal is expected to gain a step exercising that SC action directly,
+with the resulting receipt's `anchor.method ==
+"phase_beta_sc_inscribe"`. Not yet implemented; the v2 Phase α steps
+above remain the current rehearsal path.
 
 ## See also
 
-- `docs/OPERATOR_IDENTITY_SETUP.md` §A4–A8 (= the analog operator-side
-  permission install procedure for mainnet) and §B (= validator-host
-  deploy procedure for mainnet).
-- `scripts/sign-anchor-event.sh` — the wrapper invoked above.
-- `public/api/anchor-receipt.schema.v1.json` — the receipt schema
-  the rehearsal validates against.
-- `docs/MERKLE_DAG_SPEC.md` §6 — A-chain anchor binding and
-  BLOCK-1 (`from != to`) discipline.
-- `scripts/operator-local/contract/metalfreedom-anchor.spec.md` —
-  Phase β SC inscribe spec (= the next-phase target of this same
-  rehearsal pattern).
+- `scripts/run-testnet-rehearsal.sh` — the script this runbook documents.
+- `scripts/sign-anchor-event.sh`, `bin/safe-broadcast`,
+  `scripts/gen-anchor-receipt.sh` — the pipeline stages it drives.
+- `docs/ANCHOR_ACCOUNT_KEY_ROTATION.md` — how to rotate the
+  `frdomyieltst`/`metalfreedom` account keys (testnet-first, same as
+  every other broadcast).
+- `docs/CONSTITUTION.md` — PRIME DIRECTIVE (§3.4) and keystore separation
+  (§3.5).
+- `docs/OPERATOR_IDENTITY_SETUP.md` — the mainnet analog of the
+  operator-side permission install procedure.
