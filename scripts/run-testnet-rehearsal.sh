@@ -42,27 +42,42 @@
 #
 # Usage:
 #   HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh \
-#       [--source=<path>] [--allow-fixture]
+#       [--source=<path>] [--allow-fixture] [--expect-cycle=<N>]
 #
 # Options:
-#   --source=<path>   Anchor-source JSON to inscribe. Default: the
-#                     canonical public/api/anchor-source.json (current
-#                     cycle's real hashes). Also settable via the
-#                     ANCHOR_SOURCE_OVERRIDE env var (same precedence,
-#                     --source= wins if both given).
-#   --allow-fixture   Required, IN ADDITION to a --source=/
-#                     ANCHOR_SOURCE_OVERRIDE pointing at
-#                     anchor-source.substantive.json or
-#                     anchor-source.example.json. These fixtures hold
-#                     stale/placeholder data (never updated after their
-#                     original cycle) and are refused otherwise — see
-#                     step 1/10 below. Schema-shape testing ONLY; never
-#                     valid PRIME DIRECTIVE gate-1 evidence.
+#   --source=<path>     Anchor-source JSON to inscribe. Default: the
+#                       canonical public/api/anchor-source.json (current
+#                       cycle's real hashes). Also settable via the
+#                       ANCHOR_SOURCE_OVERRIDE env var (same precedence,
+#                       --source= wins if both given).
+#   --allow-fixture     Required, IN ADDITION to a --source=/
+#                       ANCHOR_SOURCE_OVERRIDE pointing at
+#                       anchor-source.substantive.json or
+#                       anchor-source.example.json. These fixtures hold
+#                       stale/placeholder data (never updated after their
+#                       original cycle) and are refused otherwise — see
+#                       step 1/10 below. Schema-shape testing ONLY; never
+#                       valid PRIME DIRECTIVE gate-1 evidence. A warning
+#                       (not fatal) is printed if this flag is given but
+#                       the selected source is not actually a fixture.
+#   --expect-cycle=<N>  MANDATORY for a real (day-of) rehearsal per
+#                       docs/PHASE_ALPHA_TESTNET_DRY_RUN.md: fails closed
+#                       (step 1/10) if the selected anchor-source's
+#                       cycle_number_observed != N. A testnet rehearsal is
+#                       only valid gate-1 evidence for a mainnet broadcast
+#                       targeting the SAME cycle — the hardened mainnet
+#                       gate 1 refuses cross-cycle evidence (e.g. a
+#                       fya1c3 rehearsal cannot authorize a fya1c4
+#                       broadcast). Omitting this flag does not block the
+#                       run (useful for exploratory/schema-shape runs) but
+#                       prints a non-fatal reminder, since an unverified
+#                       cycle number is not real gate-1 evidence either.
 #
 # What it does:
 #   1.  Resolve + print the anchor-source file that will be inscribed
 #       (path, cycle_number_observed, computed_at, derived memo prefix);
-#       refuse a fixture file unless --allow-fixture was given.
+#       refuse a fixture file unless --allow-fixture was given; refuse
+#       (fail-closed) if --expect-cycle=<N> was given and does not match.
 #   2.  Verify rehearsal config dir + read the actor account name.
 #   3.  Fetch the CURRENT on-chain <account>@anchor public key via
 #       read-only testnet RPC get_account, and verify it is present in
@@ -119,14 +134,20 @@ REHEARSAL_CFG="${LOGIN_HOME}/freedom-yield-rehearsal-config"
 # ONLY together with --allow-fixture (step 1/10 refuses otherwise).
 ANCHOR_SOURCE_ARG=""
 ALLOW_FIXTURE=0
+EXPECT_CYCLE=""
 for arg in "$@"; do
 	case "$arg" in
-		--source=*)       ANCHOR_SOURCE_ARG="${arg#--source=}" ;;
-		--allow-fixture)  ALLOW_FIXTURE=1 ;;
-		-h|--help)        sed -n '2,84p' "$0" | sed 's/^# \?//'; exit 0 ;;
-		*)                echo "ERROR: unknown arg: $arg" >&2; exit 1 ;;
+		--source=*)         ANCHOR_SOURCE_ARG="${arg#--source=}" ;;
+		--allow-fixture)    ALLOW_FIXTURE=1 ;;
+		--expect-cycle=*)   EXPECT_CYCLE="${arg#--expect-cycle=}" ;;
+		-h|--help)          sed -n '2,99p' "$0" | sed 's/^# \?//'; exit 0 ;;
+		*)                  echo "ERROR: unknown arg: $arg" >&2; exit 1 ;;
 	esac
 done
+if [ -n "$EXPECT_CYCLE" ] && ! printf '%s' "$EXPECT_CYCLE" | grep -qE '^[0-9]+$'; then
+	echo "ERROR: --expect-cycle must be a non-negative integer, got: $EXPECT_CYCLE" >&2
+	exit 1
+fi
 if [ -n "$ANCHOR_SOURCE_ARG" ]; then
 	ANCHOR_SOURCE="$ANCHOR_SOURCE_ARG"
 	ANCHOR_SOURCE_ORIGIN="--source="
@@ -168,14 +189,19 @@ if [ ! -r "$ANCHOR_SOURCE" ]; then
 	fail "anchor-source file not readable: $ANCHOR_SOURCE"
 fi
 SRC_BASENAME="$(basename "$ANCHOR_SOURCE")"
+IS_FIXTURE=0
 case "$SRC_BASENAME" in
 	anchor-source.substantive.json|anchor-source.example.json)
+		IS_FIXTURE=1
 		if [ "$ALLOW_FIXTURE" -ne 1 ]; then
 			fail "refusing fixture anchor-source '${SRC_BASENAME}' (origin: ${ANCHOR_SOURCE_ORIGIN}) without --allow-fixture. Fixtures hold stale/placeholder hashes frozen at their original cycle and are never valid PRIME DIRECTIVE gate-1 evidence. Pass --allow-fixture to explicitly opt in for schema-shape testing only."
 		fi
 		printf '  WARNING: using FIXTURE anchor-source (--allow-fixture given) — NOT valid gate-1 evidence.\n' >&2
 		;;
 esac
+if [ "$ALLOW_FIXTURE" -eq 1 ] && [ "$IS_FIXTURE" -ne 1 ]; then
+	printf '  WARNING: --allow-fixture was given but the selected anchor-source ("%s") is not a recognized fixture — the flag had no effect.\n' "$SRC_BASENAME" >&2
+fi
 echo "  basename:  $SRC_BASENAME"
 SRC_SCHEMA_VER="$(jq -r '.schema_version // empty' "$ANCHOR_SOURCE")"
 SRC_CYCLE_NUM="$(jq -r '.observations_branch.cycle_number_observed // empty' "$ANCHOR_SOURCE")"
@@ -188,6 +214,24 @@ echo "  cycle_number_observed:  $SRC_CYCLE_NUM"
 echo "  computed_at:            $SRC_COMPUTED_AT"
 if [ -n "$SRC_SCHEMA_VER" ] && [ -n "$SRC_CYCLE_NUM" ]; then
 	echo "  derived memo_prefix:    fya${SRC_SCHEMA_VER}c${SRC_CYCLE_NUM}"
+fi
+# ---- --expect-cycle=<N> enforcement (mandatory for a real day-of
+# rehearsal; see docs/PHASE_ALPHA_TESTNET_DRY_RUN.md) ----
+# A testnet rehearsal is only valid PRIME DIRECTIVE gate-1 evidence for a
+# mainnet broadcast targeting the SAME cycle. The hardened mainnet gate 1
+# refuses cross-cycle evidence (e.g. fya1c3 evidence cannot authorize a
+# fya1c4 broadcast) — so a rehearsal run against the wrong cycle's
+# anchor-source would produce a tx_id that mainnet then refuses anyway,
+# but only AFTER the testnet broadcast already happened. Catch the
+# mismatch here instead, before anything is composed or broadcast.
+if [ -n "$EXPECT_CYCLE" ]; then
+	if [ "$SRC_CYCLE_NUM" != "$EXPECT_CYCLE" ]; then
+		fail "anchor-source cycle_number_observed (${SRC_CYCLE_NUM:-<missing>}) does not match --expect-cycle=${EXPECT_CYCLE}. A testnet rehearsal's evidence is only valid for a mainnet broadcast targeting the SAME cycle (the hardened mainnet gate 1 refuses cross-cycle evidence). Recompose/regenerate the canonical anchor-source for cycle ${EXPECT_CYCLE} first (the rehearsal must run AFTER the day-of recompose), or pass --source=<a file whose cycle_number_observed is ${EXPECT_CYCLE}>."
+	fi
+	echo "  expect-cycle:           ${EXPECT_CYCLE}  (matches — OK)"
+else
+	printf '  NOTE: --expect-cycle=<N> not given — this run is NOT verified against any target mainnet cycle.\n' >&2
+	printf '        --expect-cycle=<N> is MANDATORY for the day-of mainnet-gating rehearsal per docs/PHASE_ALPHA_TESTNET_DRY_RUN.md.\n' >&2
 fi
 echo "  identity pubkey:        $SRC_ID_HEX"
 echo "  manifest root:          $SRC_MFST"
@@ -221,11 +265,18 @@ PUBKEY_HELPER="${REPO_ROOT}/scripts/lib/eosio-pubkey-raw-hex.js"
 [ -r "$PUBKEY_HELPER" ] || fail "missing helper: $PUBKEY_HELPER"
 
 CHAIN_RC=0
+CHAIN_CURL_ERR="$(mktemp -t fya-testnet-curl-err.XXXXXX)"
 CHAIN_ACCOUNT_JSON="$(curl -sS --max-time 15 -X POST -H 'content-type: application/json' \
 	-d "$(jq -nc --arg a "$XPR_ACCOUNT" '{account_name:$a}')" \
-	"${TESTNET_CHAIN_RPC}/v1/chain/get_account" 2>/dev/null)" || CHAIN_RC=$?
+	"${TESTNET_CHAIN_RPC}/v1/chain/get_account" 2>"$CHAIN_CURL_ERR")" || CHAIN_RC=$?
+# Capture curl's own stderr (not discarded) so a fail-closed refusal here
+# triages DNS/TLS/timeout distinctly instead of a bare "unreachable" —
+# e.g. "Could not resolve host" vs "SSL certificate problem" vs "Operation
+# timed out" are different operator actions.
+CHAIN_CURL_ERR_TEXT="$(tr '\n' ' ' < "$CHAIN_CURL_ERR" 2>/dev/null)"
+rm -f "$CHAIN_CURL_ERR"
 if [ "$CHAIN_RC" -ne 0 ] || [ -z "$CHAIN_ACCOUNT_JSON" ]; then
-	fail "testnet chain RPC unreachable: POST ${TESTNET_CHAIN_RPC}/v1/chain/get_account (account_name=${XPR_ACCOUNT}). Fail-closed per PRIME DIRECTIVE gate 1 — refusing to proceed without a verified current pubkey rather than guessing."
+	fail "testnet chain RPC unreachable: POST ${TESTNET_CHAIN_RPC}/v1/chain/get_account (account_name=${XPR_ACCOUNT}, curl rc=${CHAIN_RC}). curl stderr: ${CHAIN_CURL_ERR_TEXT:-<empty>}. Fail-closed per PRIME DIRECTIVE gate 1 — refusing to proceed without a verified current pubkey rather than guessing."
 fi
 if ! printf '%s' "$CHAIN_ACCOUNT_JSON" | jq -e --arg a "$XPR_ACCOUNT" \
 	'.account_name == $a and (.permissions | type == "array")' >/dev/null 2>&1; then
@@ -242,7 +293,9 @@ if ! CHAIN_ANCHOR_RAW="$(node "$PUBKEY_HELPER" "$CHAIN_ANCHOR_PUBKEY" 2>&1)"; th
 	fail "could not decode chain-returned anchor pubkey '$CHAIN_ANCHOR_PUBKEY': $CHAIN_ANCHOR_RAW"
 fi
 
-KEYS_JSON="$(proton key:list 2>/dev/null || echo '[]')"
+# timeout matches the unlock probe below (step 4) — a locked keystore
+# must not hang this step either.
+KEYS_JSON="$(timeout 5 proton key:list 2>/dev/null || echo '[]')"
 CANDIDATES="$(printf '%s' "$KEYS_JSON" | grep -oE '(PUB_K1_|EOS)[1-9A-HJ-NP-Za-km-z]+' | sort -u || true)"
 if [ -z "$CANDIDATES" ]; then
 	fail "no public keys found via 'proton key:list' in the local testnet keystore. The ${XPR_ACCOUNT}@anchor key must be imported before rehearsal — see docs/PHASE_ALPHA_TESTNET_DRY_RUN.md."

@@ -196,15 +196,23 @@ else
 	skip_case "run-testnet-rehearsal.sh: HOME=login home → refuse" "login home not resolvable"
 fi
 
-# 2b. PASS-THROUGH: HOME=project fixture dir (no real proton on PATH
-# required — this script calls `proton key:list` directly without a
-# pre-flight `command -v proton` check, so a missing binary just yields an
-# empty key list via its own `|| echo '[]'` fallback). The script's step 1
-# then fails closed on the first missing testnet pubkey (its OWN
-# pre-existing `fail()` helper, exit 1) — a later, distinct failure from the
-# guard's exit 8, reached with zero file writes.
+# 2b. PASS-THROUGH: HOME=project fixture dir. The script's step 1
+# (anchor-source selection) reads its file BEFORE step 2 (rehearsal
+# config) or step 3 (a REAL read-only curl to the testnet chain RPC, added
+# 2026-07-31 to replace the old hardcoded pubkey pins). This case must
+# stay hermetic — no real network I/O — regardless of whether this
+# machine happens to have a real ~/freedom-yield-rehearsal-config
+# (several dev machines do), which would otherwise let the script sail
+# past step 2 and into step 3's live RPC call. Force a deterministic,
+# side-effect-free failure INSIDE step 1 instead, via
+# ANCHOR_SOURCE_OVERRIDE pointing at a path that can never be readable —
+# this fails closed on the script's own pre-existing anchor-source
+# readability check (`fail()`, exit 1) before step 2 is ever reached, a
+# later, distinct failure from the guard's exit 8, with zero file writes
+# and zero network calls. (Verified via a `curl` stub on PATH during this
+# fix: 0 invocations, vs. 2 real invocations before this fix.)
 RC=0
-OUT="$(HOME="$TEST_HOME" bash "$REHEARSAL_SCRIPT" </dev/null 2>&1)" || RC=$?
+OUT="$(HOME="$TEST_HOME" ANCHOR_SOURCE_OVERRIDE=/nonexistent/path/anchor-source.json bash "$REHEARSAL_SCRIPT" </dev/null 2>&1)" || RC=$?
 if [ "$RC" -ne 8 ] && ! printf '%s' "$OUT" | grep -q 'keystore guard'; then
 	pass "run-testnet-rehearsal.sh: HOME=project fixture dir → passes guard" "rc=$RC (not 8)"
 else
@@ -269,18 +277,20 @@ fi
 # LOGIN home even when $HOME is correctly scoped to a project keystore
 # dir (e.g. HOME=~/.metal-fy-proton-test). Two of the three
 # (REHEARSAL_CFG, DRY_RUN_LOG) are assigned before this script's first
-# proton call and before the guard check, so they can be observed via a
-# `bash -x` trace of the SAME fast-fail run already exercised by case 2b
-# above (HOME=project fixture dir → guard passes → step 1 fails closed on
-# a missing testnet pubkey against an empty/nonexistent keystore — no
-# hang, no side effect, <1s). The third (RECEIPT_OUT) is only assigned
-# deep into the happy path (step 8, after a real broadcast) and is not
-# reachable hermetically, so it — and a regression guard for all three —
-# is checked statically via source text instead.
+# proton call, before the guard check, AND before the ANCHOR_SOURCE
+# selection logic — so they are unaffected by the same forced
+# ANCHOR_SOURCE_OVERRIDE fast-fail technique as case 2b above (HOME=
+# project fixture dir → guard passes → step 1 fails closed on an
+# unreadable ANCHOR_SOURCE_OVERRIDE path — no hang, no side effect, no
+# network call, <1s), and can be observed via a `bash -x` trace of that
+# same run. The third (RECEIPT_OUT) is only assigned deep into the happy
+# path (step 8, after a real broadcast) and is not reachable hermetically,
+# so it — and a regression guard for all three — is checked statically
+# via source text instead.
 
 if [ -n "$LOGIN_HOME" ]; then
 	RC=0
-	TRACE_OUT="$(HOME="$TEST_HOME" timeout 20 bash -x "$REHEARSAL_SCRIPT" </dev/null 2>&1)" || RC=$?
+	TRACE_OUT="$(HOME="$TEST_HOME" ANCHOR_SOURCE_OVERRIDE=/nonexistent/path/anchor-source.json timeout 20 bash -x "$REHEARSAL_SCRIPT" </dev/null 2>&1)" || RC=$?
 	REHEARSAL_CFG_LINE="$(printf '%s\n' "$TRACE_OUT" | grep -E 'REHEARSAL_CFG=' | tail -1)"
 	DRY_RUN_LOG_LINE="$(printf '%s\n' "$TRACE_OUT" | grep -E 'DRY_RUN_LOG=' | tail -1)"
 

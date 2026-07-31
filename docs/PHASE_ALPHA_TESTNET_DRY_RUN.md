@@ -7,11 +7,13 @@
 > document (single memo `fyid1:<hex>`, direct `sign-anchor-event.sh
 > cyclestart <hex>` CLI, a retired `cycles-history.json` schema, the
 > `anchor-receipt.schema.v1.json` shape, and a manual O1–O10 proton-cli
-> output-parser observation checklist) described a pipeline that was
-> retired on **2026-07-01**, before the accidental mainnet inscription of
+> output-parser observation checklist) described the pipeline in place
+> **before 2026-07-01**. On that date an accidental mainnet inscription of
 > memo `fyid1v1c2-test-single` (tx `997881e844befaf9c159c741988fe99e8ca566a52e539639ab83517b1f36100a`,
-> see Constitution PRIME DIRECTIVE rationale) made that memo namespace
-> permanently unusable. None of the v1 steps below should be followed;
+> see Constitution PRIME DIRECTIVE rationale) permanently occupied the v1
+> memo namespace — the PRIME DIRECTIVE was written into the Constitution
+> and this v1 pipeline was retired the SAME day, in direct response. None
+> of the v1 steps below should be followed;
 > they are retained nowhere in this file. The O1–O10 checklist is not
 > carried forward either — v2's `gen-anchor-receipt.sh` 7-gate (§"Pass
 > criteria" below) independently re-derives every field from the chain
@@ -37,7 +39,7 @@
 end-to-end against XPR testnet:
 
 ```
-/api/anchor-source.json (identity + observations + artifacts branch roots)
+public/api/anchor-source.json (identity + observations + artifacts branch roots)
   → scripts/sign-anchor-event.sh --chain=testnet-a --dry-run
       (composes a 4-action eosio.token::transfer tx; memos
        fya<schema>c<cycle>-{id,ob,ar}:<hex> + fya<schema>c<cycle>:<hex>)
@@ -112,21 +114,69 @@ This means: a future key rotation (see
 `docs/ANCHOR_ACCOUNT_KEY_ROTATION.md`) does **not** require editing this
 script or this doc. The rehearsal always checks against whatever key is
 CURRENTLY on-chain. (Prior to 2026-07-31 the script instead hardcoded
-three specific `PUB_K1_...` public keys; the 2026-07-10 key rotation
-silently invalidated all three, and every rehearsal attempt failed at
-step 1 until this fix. That hardcoded-pin design is retired — do not
-reintroduce it.)
+three specific `PUB_K1_...` public keys — one per `owner`/`active`/
+`anchor` permission. Live `get_account` (2026-07-31) shows the 2026-07-10
+key rotation only actually replaced the **`active`** permission's key on
+`frdomyieltst`; the `owner` and `anchor` pins were, and still are,
+byte-identical to their current on-chain keys. Step 1 was therefore
+failing on the single stale `active` pin, not all three. The fix does
+not re-verify all three permissions — it checks exactly the `anchor`
+permission's current on-chain key, since that is the ONLY permission
+`sign-anchor-event.sh` ever signs with (`authorization: actor@anchor`);
+`owner` and `active` are not used for signing this pipeline and are out
+of scope for this check. That hardcoded-pin design is retired — do not
+reintroduce it, for any permission.)
+
+## Cycle number must match the target mainnet cycle
+
+A testnet rehearsal is only valid PRIME DIRECTIVE gate-1 evidence for a
+mainnet broadcast targeting the **same** cycle. The hardened mainnet
+`bin/safe-broadcast --chain=mainnet-a` gate 1 refuses cross-cycle
+evidence — e.g. a rehearsal composed against `cycle_number_observed: 3`
+(memo prefix `fya1c3`) cannot authorize a mainnet broadcast composed for
+cycle 4 (`fya1c4`), even if the testnet tx itself resolves fine.
+
+**Consequence for timing**: the rehearsal must run **after** the day-of
+recompose of the canonical anchor-source (i.e. after
+`scripts/gen-anchor-source.sh` has regenerated
+`public/api/anchor-source.json` for the target cycle) — or against a
+`--source=` file whose `cycle_number_observed` already equals the target
+cycle. Running the rehearsal against last cycle's still-canonical file,
+because the day-of recompose hasn't happened yet, produces testnet
+evidence the mainnet gate will refuse. Catch this on testnet, not after
+a wasted mainnet attempt.
+
+**Mechanical enforcement**: pass `--expect-cycle=<N>` (see "Running the
+rehearsal" below). Step 1/10 fails closed if the selected source's
+`cycle_number_observed != N`. Mandatory for the day-of invocation;
+optional (with a non-fatal reminder if omitted) for exploratory runs
+with no specific target cycle.
 
 ## Running the rehearsal
+
+For an **exploratory / pipeline-health** run (not gating any specific
+mainnet broadcast), the canonical anchor-source is selected by default:
 
 ```
 HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh
 ```
 
-This selects the **canonical** anchor-source (`public/api/anchor-source.json`)
-by default and prints, at step 1/10, the path, cycle number, and derived
-memo prefix it is about to inscribe — confirm these match the cycle you
-intend to rehearse before letting the run continue.
+For the **day-of, real gate-1-evidence** run, `--expect-cycle=<N>` is
+**mandatory** (`N` = the cycle number of the mainnet action this
+rehearsal is meant to gate — see "Cycle number must match the target
+mainnet cycle" below):
+
+```
+HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh --expect-cycle=<N>
+```
+
+Step 1/10 prints the selected source's path, cycle number, and derived
+memo prefix. **There is no interactive checkpoint in this script** —
+`--expect-cycle=<N>` is the actual mechanical enforcement, not the
+printed line: with it, step 1/10 fails closed immediately if the
+source's `cycle_number_observed` does not equal `N`; without it, a
+non-fatal reminder is printed but the run proceeds unverified against
+any target cycle.
 
 To point at a different (still real, non-fixture) anchor-source file:
 
@@ -150,13 +200,16 @@ exists only for schema-shape testing (e.g. confirming the pipeline still
 composes/broadcasts/verifies correctly against a known-fixed input,
 independent of whatever the current cycle's real anchor-source looks
 like). A rehearsal run with `--allow-fixture` does not satisfy PRIME
-DIRECTIVE gate 1 for a real mainnet broadcast.
+DIRECTIVE gate 1 for a real mainnet broadcast. (Passing `--allow-fixture`
+when the selected source is not actually one of the two fixture files is
+harmless — a non-fatal warning is printed, since the flag had no effect.)
 
 ### The 10 steps
 
 1. **Anchor-source selection** — resolve + print the file to inscribe
    (path, `cycle_number_observed`, `computed_at`, derived memo prefix);
-   refuse a fixture without `--allow-fixture`.
+   refuse a fixture without `--allow-fixture`; fail closed if
+   `--expect-cycle=<N>` was given and does not match.
 2. **Rehearsal config** — read `~/freedom-yield-rehearsal-config/`
    (actor account, sink, chain).
 3. **Chain-derived key check** — the rotation-resilient verification
@@ -165,8 +218,9 @@ DIRECTIVE gate 1 for a real mainnet broadcast.
    + `chain:info`, then a fast-timeout read of the actor account to
    detect a locked keystore.
 5. **Compose the 4-action tx** — via `sign-anchor-event.sh --dry-run`
-   (no broadcast; the dry-run log is also retained as future mainnet
-   gate-4 material).
+   (no broadcast; the dry-run log is retained as **testnet-side evidence
+   only** — see "After PASS" below for where the mainnet gate-4 material
+   actually comes from).
 6. **Create the broadcast token** — `/tmp/fyd-broadcast-token`, 5-minute
    TTL, bound to `chain=testnet-a` and the exact composed tx's sha256
    (R16 — see `bin/safe-broadcast`'s header for the full ritual this
@@ -194,10 +248,12 @@ step 9/10, above) exits 0 — i.e. all 7 verify gates PASS:
    `sha256(identity_root || observations_root || artifacts_root)`.
 7. `block_num` and `block_time` are present on the resolved tx.
 
-Any gate failing is a hard stop (`gen-anchor-receipt.sh` exits 4); the
-rehearsal script's own `fail()` then halts before emitting the sentinel
-line. Diagnose and re-run — do not hand a partial or failed run's
-`tx_id` to a mainnet `--testnet-tx-id=` argument.
+Any gate failing is a hard stop. Per `gen-anchor-receipt.sh`'s own exit
+codes: gate 1 (tx unresolvable at the RPC) exits **3**; gates 2–7 (wrong
+action count, wrong authorization, memo mismatch, etc.) exit **4**.
+Either way the rehearsal script's own `fail()` then halts before
+emitting the sentinel line. Diagnose and re-run — do not hand a partial
+or failed run's `tx_id` to a mainnet `--testnet-tx-id=` argument.
 
 Additionally confirm, by hand, on a public testnet explorer
 (`https://testnet.protonscan.io/transaction/<tx_id>`, printed in the
@@ -216,11 +272,23 @@ mainnet wrapper independently re-resolves that `tx_id` against the
 testnet RPC itself before accepting it (its own gate 1) — the rehearsal
 output is evidence, not a bypassable token.
 
-The rehearsal script's own dry-run log
-(`~/.fya-testnet-dryrun-log.json`, printed at step 10/10) additionally
-serves as the `--dry-run-log=<file>` input the mainnet wrapper requires
-(its gate 4) — the SAME identical composed-tx shape, just re-targeted
-at `--chain=mainnet-a` with the mainnet account substituted in.
+**The rehearsal's own dry-run log does NOT feed the mainnet wrapper's
+gate 4.** `~/.fya-testnet-dryrun-log.json` (printed at step 10/10)
+records `target_chain: "testnet-a"` — under the hardened mainnet gate 4,
+`bin/safe-broadcast --chain=mainnet-a` refuses a `--dry-run-log=<file>`
+whose own recorded `target_chain` does not match `--chain`. The testnet
+rehearsal's dry-run log is **testnet-side evidence only**: useful for
+confirming the composed shape on testnet and as an input to the 7-gate
+receipt above, but it is the wrong chain's dry run for the mainnet gate.
+
+The actual mainnet gate-4 material comes from a **separate**
+`--chain=mainnet-a` dry run, produced by
+`scripts/preview-cycle-anchor-broadcast.sh` (or directly via
+`sign-anchor-event.sh --chain=mainnet-a --dry-run`), targeting the
+mainnet account for the same cycle. Generate that dry-run log alongside
+this rehearsal, not from it, and pass it as
+`bin/safe-broadcast`'s `--dry-run-log=<file>` when the mainnet broadcast
+is authorized.
 
 ## Troubleshooting
 
@@ -237,8 +305,11 @@ at `--chain=mainnet-a` with the mainnet account substituted in.
   script was invoked without the `HOME=~/.metal-fy-proton-test` prefix
   (or with `HOME` unset). Re-invoke exactly as shown under "Running the
   rehearsal" above.
-- **Step 9/10 (`gen-anchor-receipt.sh`) exits 4** — one of the 7 verify
-  gates failed; the script prints which one and the expected vs. actual
+- **Step 9/10 (`gen-anchor-receipt.sh`) exits 3** — gate 1 (tx
+  unresolvable at the RPC): the RPC is unreachable or the `tx_id`
+  wasn't found. Check connectivity / broadcast success before re-running.
+- **Step 9/10 (`gen-anchor-receipt.sh`) exits 4** — one of gates 2–7
+  failed; the script prints which one and the expected vs. actual
   values. Do not proceed to mainnet with this run's `tx_id`.
 
 ## Phase β note
@@ -256,6 +327,9 @@ above remain the current rehearsal path.
 - `scripts/run-testnet-rehearsal.sh` — the script this runbook documents.
 - `scripts/sign-anchor-event.sh`, `bin/safe-broadcast`,
   `scripts/gen-anchor-receipt.sh` — the pipeline stages it drives.
+- `scripts/preview-cycle-anchor-broadcast.sh` — produces the
+  `--chain=mainnet-a` dry run that actually feeds the mainnet gate 4 (see
+  "After PASS" above); NOT this rehearsal's own testnet-side dry-run log.
 - `docs/ANCHOR_ACCOUNT_KEY_ROTATION.md` — how to rotate the
   `frdomyieltst`/`metalfreedom` account keys (testnet-first, same as
   every other broadcast).

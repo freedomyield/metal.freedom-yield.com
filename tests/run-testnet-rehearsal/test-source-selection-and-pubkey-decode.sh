@@ -316,6 +316,82 @@ else
 	fail_case "unknown flag -> exit 1" "rc=$RC_2I out=[$(printf '%s' "$OUT_2I" | tr '\n' '|')]"
 fi
 
+# ============================================================
+# Part 3: --expect-cycle=<N> mechanical enforcement (review fix round 1)
+# ============================================================
+# A testnet rehearsal is only valid gate-1 evidence for a mainnet
+# broadcast targeting the SAME cycle (the hardened mainnet gate 1 refuses
+# cross-cycle evidence). --expect-cycle=<N> fails closed at step 1/10 if
+# the selected source's cycle_number_observed != N. EXPECT_CYCLE_NUM was
+# already computed live from the canonical file for case 2a above — reused
+# here so a future cycle transition cannot make this suite stale.
+
+# 3a. --expect-cycle matching the canonical file's real current cycle ->
+# step 1/10 prints the "matches — OK" line, no fixture/cycle refusal, then
+# fails deterministically at step 2/10 (config missing, via the id-stub).
+if [ -n "$EXPECT_CYCLE_NUM" ]; then
+	OUT_3A="$(run_rehearsal "--expect-cycle=${EXPECT_CYCLE_NUM}" 2>&1)"; RC_3A=$?
+	if [ "$RC_3A" -eq 1 ] \
+	   && printf '%s' "$OUT_3A" | grep -qF "expect-cycle:           ${EXPECT_CYCLE_NUM}  (matches" \
+	   && ! printf '%s' "$OUT_3A" | grep -qi "does not match --expect-cycle" \
+	   && printf '%s' "$OUT_3A" | grep -qF "FAIL: config file missing"; then
+		pass "--expect-cycle=<matching current cycle> -> passes step 1, fails later" "rc=$RC_3A"
+	else
+		fail_case "--expect-cycle=<matching current cycle> -> passes step 1, fails later" "rc=$RC_3A out=[$(printf '%s' "$OUT_3A" | tr '\n' '|')]"
+	fi
+else
+	fail_case "--expect-cycle=<matching current cycle> -> passes step 1, fails later" "canonical anchor-source.json's cycle_number_observed not readable in this checkout"
+fi
+
+# 3b. --expect-cycle mismatched (current cycle + 999, guaranteed never to
+# collide with a real cycle number) -> refused INSIDE step 1/10, before
+# step 2/10 (config check) or step 3/10 (network call) are ever reached.
+MISMATCHED_CYCLE="$(( ${EXPECT_CYCLE_NUM:-0} + 999 ))"
+OUT_3B="$(run_rehearsal "--expect-cycle=${MISMATCHED_CYCLE}" 2>&1)"; RC_3B=$?
+if [ "$RC_3B" -eq 1 ] \
+   && printf '%s' "$OUT_3B" | grep -qi "does not match --expect-cycle=${MISMATCHED_CYCLE}" \
+   && ! printf '%s' "$OUT_3B" | grep -qF "config file missing"; then
+	pass "--expect-cycle=<mismatched> -> refused at step 1, before config/network" "rc=$RC_3B"
+else
+	fail_case "--expect-cycle=<mismatched> -> refused at step 1, before config/network" "rc=$RC_3B out=[$(printf '%s' "$OUT_3B" | tr '\n' '|')]"
+fi
+
+# 3c. --expect-cycle=<non-numeric> -> usage error, exit 1, before step 1
+# ever prints anything (arg validation happens during arg parsing, ahead
+# of the guard and every step).
+OUT_3C="$(run_rehearsal "--expect-cycle=notanumber" 2>&1)"; RC_3C=$?
+if [ "$RC_3C" -eq 1 ] \
+   && printf '%s' "$OUT_3C" | grep -qi "must be a non-negative integer" \
+   && ! printf '%s' "$OUT_3C" | grep -q "step 1/10"; then
+	pass "--expect-cycle=<non-numeric> -> usage error before any step" "rc=$RC_3C"
+else
+	fail_case "--expect-cycle=<non-numeric> -> usage error before any step" "rc=$RC_3C out=[$(printf '%s' "$OUT_3C" | tr '\n' '|')]"
+fi
+
+# 3d. No --expect-cycle given -> non-fatal reminder printed, run still
+# proceeds (does not fail inside step 1 for this reason).
+OUT_3D="$(run_rehearsal 2>&1)"; RC_3D=$?
+if [ "$RC_3D" -eq 1 ] \
+   && printf '%s' "$OUT_3D" | grep -qi -- "--expect-cycle=<N> not given" \
+   && printf '%s' "$OUT_3D" | grep -qF "FAIL: config file missing"; then
+	pass "no --expect-cycle -> non-fatal reminder, run still proceeds" "rc=$RC_3D"
+else
+	fail_case "no --expect-cycle -> non-fatal reminder, run still proceeds" "rc=$RC_3D out=[$(printf '%s' "$OUT_3D" | tr '\n' '|')]"
+fi
+
+# 3e. --allow-fixture given but the selected source is NOT a fixture
+# (canonical, default) -> non-fatal warning printed, no fixture-refusal,
+# run still proceeds past step 1.
+OUT_3E="$(run_rehearsal --allow-fixture 2>&1)"; RC_3E=$?
+if [ "$RC_3E" -eq 1 ] \
+   && printf '%s' "$OUT_3E" | grep -qi "allow-fixture was given but the selected anchor-source" \
+   && ! printf '%s' "$OUT_3E" | grep -qi "refusing fixture" \
+   && printf '%s' "$OUT_3E" | grep -qF "FAIL: config file missing"; then
+	pass "--allow-fixture without a fixture source -> warns, not fatal" "rc=$RC_3E"
+else
+	fail_case "--allow-fixture without a fixture source -> warns, not fatal" "rc=$RC_3E out=[$(printf '%s' "$OUT_3E" | tr '\n' '|')]"
+fi
+
 # ---- Summary ----
 echo
 echo "----------------------------------------"
