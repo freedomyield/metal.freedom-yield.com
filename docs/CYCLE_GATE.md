@@ -281,11 +281,21 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    (see its header's exit-code table), so its ordering guard had to take a
    different code. Do not read "exit 7" and "exit 9" as the same condition
    just because the two scripts' guards are conceptually parallel.
-6. **Mac —**
+6. **Mac —** all three lines below are commented out on purpose: pasting
+   this block as-is is a harmless no-op (every line is a `#` comment, so
+   nothing executes). Uncommented, the unquoted `<...>` placeholders break
+   shell parsing outright — `<`/`>` are redirection operators, not literal
+   text, so pasting e.g. `export VALIDATOR_HOST_KEY=~/.ssh/<your_validator_host_key>`
+   raises `syntax error near unexpected token 'newline'` before any script
+   ever runs, not the clean script-level `ERROR: SSH key not found` / exit 3
+   described below (that failure is what you get if `VALIDATOR_HOST_KEY` is
+   simply left unset, letting the script's own default apply — not from
+   pasting the placeholder text itself). Replace every placeholder with
+   your real value, THEN remove all three leading `#`s.
    ```sh
-   export VALIDATOR_HOST=<validator host IP or hostname>
-   export VALIDATOR_HOST_KEY=~/.ssh/<your_validator_host_key>
-   bash scripts/operator-local/commit-anchor-source.sh --expect-cycle=<N+1>
+   # export VALIDATOR_HOST=<validator host IP or hostname>
+   # export VALIDATOR_HOST_KEY=~/.ssh/<your_validator_host_key>  # only if not using the default path
+   # bash scripts/operator-local/commit-anchor-source.sh --expect-cycle=<N+1>
    ```
    verifies + commits the host-composed `anchor-source.json` (cycle-4 day
    example: `--expect-cycle=4`). The two exports are the SSH coordinates
