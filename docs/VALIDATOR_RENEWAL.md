@@ -256,17 +256,17 @@ State file: `/var/lib/freedom-yield/cycle-gate-state.json` (= operator 承認済
 
 当日順序(厳守。cycle N の閉じ → cycle N+1 の開始):
 
-1. validator host: node-info tick 待ち — `public/api/validator.json` に新 endTime が反映されたことを確認(古い endTime のまま cycle-recording を走らせると記録がずれるため)
-2. validator host: `uptime-history.sh`(cycle N close)
-3. validator host: `gen-cycle-history.sh` + push — 公開 `cycle-history.jsonl` が 1 行増えたことを実測確認
-4. Mac local: `FY_EXPECT_CYCLE=<N> OPERATOR_IDENTITY_KEY=~/.ssh/freedom-yield-operator-identity bash scripts/operator-local/gen-identity.sh`(= operator passphrase prompt 発生時に 3 番目の active action)。`FY_EXPECT_CYCLE=<N>` はサイクル切替時 **MANDATORY**(N = 直前に閉じた cycle 番号。手順 3 の公開反映前に実行すると exit 7 で hard-stop)。続けて `git add` + `git commit` + `git push origin main`、`gh run watch` で deploy 完了監視
-5. validator host: `bash scripts/gen-anchor-source.sh` — 新 `anchor-source.json`(3-branch DAG)を compose(手順 3 の公開 `cycle-history.jsonl` から cycle 番号を自己導出するため、手順 3 完了後に実行する必要がある)
-6. Mac local: `scripts/operator-local/commit-anchor-source.sh --expect-cycle=<N>` で host 側 `anchor-source.json` を検証+commit、続けて push + deploy 完了監視(手順 4 と同じパターン)。**commit+push+deploy は必須** — 公開されないと手順 9 の Phase 1 polling が exit 3 でタイムアウトする
-7. Mac local: `HOME=~/.metal-fy-proton proton key:unlock` で mainnet keystore を unlock(testnet keystore `HOME=~/.metal-fy-proton-test` の unlock + rehearsal は別途 gate 1 材料として必要)、`FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton bash scripts/sign-anchor-event.sh --chain=mainnet-a`(= operator の 4 番目の active action、`bin/safe-broadcast` 4-gate 経由)
-8. validator host: `gen-anchor-receipt.sh`(7-gate verify)+ `append-anchor-history.sh` + feed push
-9. validator host: `bash scripts/resume-after-cycle-start.sh --apply`(= v2 3 phase: Phase 1 verify 6 check → Phase 2 atomic state write → Phase 3 report。**broadcast なし、explorer URL は出力しない**)
+① validator host: node-info tick 待ち — `public/api/validator.json` に新 endTime が反映されたことを確認(古い endTime のまま cycle-recording を走らせると記録がずれるため)
+② validator host: `uptime-history.sh`(cycle N close)
+③ validator host: `gen-cycle-history.sh` + push — 公開 `cycle-history.jsonl` が 1 行増えたことを実測確認
+④ Mac local: `FY_EXPECT_CYCLE=<N> OPERATOR_IDENTITY_KEY=~/.ssh/freedom-yield-operator-identity bash scripts/operator-local/gen-identity.sh`(= operator passphrase prompt 発生時に 3 番目の active action)。`FY_EXPECT_CYCLE=<N>` はサイクル切替時 **MANDATORY**(N = 直前に閉じた cycle 番号。手順③の公開反映前に実行すると exit 7 で hard-stop)。続けて `git add` + `git commit` + `git push origin main`、`gh run watch` で deploy 完了監視
+⑤ validator host: `bash scripts/gen-anchor-source.sh` — 新 `anchor-source.json`(3-branch DAG)を compose(手順③の公開 `cycle-history.jsonl` から cycle 番号を自己導出するため、手順③完了後に実行する必要がある)
+⑥ Mac local: `scripts/operator-local/commit-anchor-source.sh --expect-cycle=<N>` で host 側 `anchor-source.json` を検証+commit、続けて push + deploy 完了監視(手順④と同じパターン)。**commit+push+deploy は必須** — 公開されないと手順⑨の Phase 1 polling が exit 3 でタイムアウトする
+⑦ Mac local: `HOME=~/.metal-fy-proton proton key:unlock` で mainnet keystore を unlock(testnet keystore `HOME=~/.metal-fy-proton-test` の unlock + rehearsal は別途 gate 1 材料として必要)、`FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton bash scripts/sign-anchor-event.sh --chain=mainnet-a`(= operator の 4 番目の active action、`bin/safe-broadcast` 4-gate 経由)
+⑧ validator host: `gen-anchor-receipt.sh`(7-gate verify)+ `append-anchor-history.sh` + feed push
+⑨ validator host: `bash scripts/resume-after-cycle-start.sh --apply`(= v2 3 phase: Phase 1 verify 6 check → Phase 2 atomic state write → Phase 3 report。**broadcast なし、explorer URL は出力しない**)
 
-手順 7 の tx id を読取り、explorer URL を operator に報告(resume-after-cycle-start.sh の出力ではなく、手順 7 の broadcast 結果)。
+手順⑦の tx id を読取り、explorer URL を operator に報告(resume-after-cycle-start.sh の出力ではなく、手順⑦の broadcast 結果)。
 
 ### 緊急 fallback (= AI 不在時の operator 手動経路)
 
