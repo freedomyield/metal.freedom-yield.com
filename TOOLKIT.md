@@ -9,7 +9,7 @@ There's no installer, no Docker image, no SaaS. Just shell scripts that the oper
 - **Not a product**. No SLA, no support, no roadmap.
 - **Not curated**. Anything the operator writes for their own node lives here. If a script is useful to others, it's a side benefit.
 - **Not opinionated about your stack**. Bash + jq + cron + ntfy is what we use because it's boring and survives. Use whatever else suits you.
-- **Not the operator's private bootstrap tooling**. Scripts under `scripts/operator-local/` (identity generation and key-handling steps run only on the operator's own machine) are intentionally **excluded from this catalog** — they assume our specific keys and run order and are not reusable. This catalog covers the operational `scripts/` that other validators can fork.
+- **Not the operator's private bootstrap tooling**. Most scripts under `scripts/operator-local/` (identity generation and key-handling steps run only on the operator's own machine) are intentionally **excluded from this catalog** — they assume our specific keys and run order and are not reusable. One exception: `scripts/operator-local/commit-anchor-source.sh` (below, in the anchor pipeline table) touches no key material and is pipeline-critical git-transfer glue, not bootstrap tooling. This catalog covers the operational `scripts/` that other validators can fork.
 
 ## What problem this solves
 
@@ -136,6 +136,7 @@ The cryptographic-evidence anchor pipeline (identity → anchor-source → A-cha
 | Script | Purpose | Cron |
 |---|---|---|
 | `scripts/gen-anchor-source.sh` | Compose `public/api/anchor-source.json` (3-branch identity‖observations‖artifacts + `dag_root_computed`) from live sources. Single source of truth for the inscribed value. | on demand |
+| `scripts/operator-local/commit-anchor-source.sh` | Operator-local (Mac-only) git-transfer hop: SSH-fetch the host-composed `anchor-source.json`, validate (schema + `--expect-cycle=<N+1>` match against `observations_branch.cycle_number_observed` + genesis guard), show a diff summary, and single-purpose `git commit` (optional `--push`). No key material read, no broadcast. See `docs/CYCLE_GATE.md` step 6 / `docs/VALIDATOR_RENEWAL.md` ⑥. | manual |
 | `scripts/sign-anchor-event.sh` | Compose the 4-action tx from anchor-source and broadcast via `bin/safe-broadcast` (mainnet 4-gate). `--dry-run` composes + emits tx JSON only. Runs on the Mac (holds the anchor key). | manual |
 | `scripts/gen-anchor-receipt.sh` | Independently re-fetch the tx from mainnet Hyperion, run the 7 verify gates, write `public/api/anchor-receipt.json`. | post-broadcast |
 | `scripts/append-anchor-history.sh` | Append the v2 receipt as one JSONL line to `public/api/anchor-history.jsonl` with append-only invariants (prev-tx chain, genesis prev=null). | post-broadcast |
@@ -144,7 +145,7 @@ The cryptographic-evidence anchor pipeline (identity → anchor-source → A-cha
 | `scripts/notify-anchor-transition.sh` | DETECTION/ALERT-ONLY driver: on a transition, ntfy-push "run the manual anchor from the Mac". Broadcasts nothing. | via watcher |
 | `scripts/preview-cycle-anchor-broadcast.sh` | Read-only STAGE-1 preview: regenerate anchor-source + dry-run-log, display the exact tx shape before an operator broadcast. Cycle-generic (derives the cycle number from `--source`; renamed from `preview-cycle3-anchor-broadcast.sh`). | manual |
 | `scripts/prep-cycle-anchor-recording.sh` | **Deprecated** (superseded by the cycle-gate ungate, 42797ae). Recorded a just-closed cycle by hole-punching the old transition deadlock. | — |
-| `scripts/check-anchor-publish-health.sh` | Verify `anchor-source.json` is served publicly; auto-recover by re-pushing. | every 15 min |
+| `scripts/check-anchor-publish-health.sh` | Verify `anchor-source.json` is served publicly AND content-correct (`dag_root_computed` matches the on-chain anchored root recorded in `anchor-receipt.json`). Alert-only — no re-push/recover (git-deploy makes host-side recovery structurally impossible); fires a high-priority ntfy push on every failure exit, with signature+time-window dedup on repeat content-mismatch alerts (default 6h) so the normal transition-window staleness doesn't page repeatedly. | every 15 min |
 | `scripts/run-testnet-rehearsal.sh` | Operator installer for the testnet anchor rehearsal (gate-1 material). | manual |
 
 **Cycle-gate (transition safety):**
