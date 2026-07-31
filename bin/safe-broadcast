@@ -247,20 +247,75 @@ if [ "$IS_MAINNET" = "1" ]; then
 		exit 3
 	fi
 
-	# ---- Gate 1 shape binding (2026-08 hardening) ----
+	# ---- Gate 1 shape binding (2026-08 hardening, rev 2) ----
 	# Resolution above only proves A testnet tx with this id exists — not
 	# that its shape matches the outgoing mainnet --tx=. Without this, a
 	# testnet evidence tx from an unrelated cycle (e.g. cycle-2 memo
 	# prefix fya1c2) could authorize a cycle-4 mainnet anchor broadcast.
 	# See the "Gate 1 / Gate 4 shape binding" usage-header section above.
 	#
+	# rev 2 fix: the v1 EOSIO history-plugin `get_transaction` endpoint
+	# this wrapper actually calls (above) returns actions under
+	# `.traces[].act` — ONE trace per notified account (e.g. a single
+	# eosio.token::transfer produces 3 duplicate traces: sender, receiver,
+	# RAM/ram-notify — `unique` below collapses these back down). It does
+	# NOT return a top-level `.actions[]` (that is the Hyperion v2 shape, a
+	# different endpoint this wrapper does not call) and `.trx.trx.actions[]`
+	# is the packed representation, normally `[]` on a public endpoint.
+	# Verified directly against the real testnet endpoint for tx
+	# 070a845f... (the cycle-2 rehearsal tx) while fixing this. Try, in
+	# priority order: .traces[].act, then .actions[].act (defensive, in
+	# case of a future endpoint/proxy that normalizes this way), then
+	# .trx.trx.actions[] (raw unpacked, rare) — and REFUSE if none of the
+	# three yields a non-empty result, rather than silently treating "no
+	# action source matched" as an empty (and therefore vacuously
+	# passing) shape.
+	# shellcheck disable=SC2016  # $t/$a/$r below are jq `as $var` bindings
+	# inside a single-quoted jq PROGRAM, not shell variables — must NOT expand.
+	TESTNET_ACTIONS_JQ='
+		( [.traces[]?           | {account: .act.account, name: .act.name, memo: (.act.data.memo? // null)}] ) as $t
+		| ( [.actions[]?         | {account: .act.account, name: .act.name, memo: (.act.data.memo? // null)}] ) as $a
+		| ( [.trx.trx.actions[]? | {account: .account,     name: .name,     memo: (.data.memo? // null)}]     ) as $r
+		| ( if   ($t|length) > 0 then $t
+		    elif ($a|length) > 0 then $a
+		    else $r
+		    end )
+		| unique
+	'
+	if ! TESTNET_ACTIONS="$(printf '%s' "$RESOLVE_JSON" | jq -c "$TESTNET_ACTIONS_JQ" 2>/dev/null)"; then
+		echo "ERROR (gate 1): failed to parse the resolved testnet evidence tx ${TESTNET_TX_ID} (jq error) — refusing, fail-closed" >&2
+		exit 3
+	fi
+	if [ -z "$TESTNET_ACTIONS" ] || [ "$TESTNET_ACTIONS" = "[]" ] || [ "$TESTNET_ACTIONS" = "null" ]; then
+		echo "ERROR (gate 1): could not extract any action from the resolved testnet evidence tx ${TESTNET_TX_ID} (checked .traces[], .actions[], .trx.trx.actions[]) — refusing, fail-closed" >&2
+		exit 3
+	fi
+
+	# (I2) the sanctioned compose path (sign-anchor-event.sh) always emits
+	# each action's .data as a JSON object. A non-object .data (e.g. a
+	# hex-serialized action) cannot be safely introspected for a memo below
+	# — refuse rather than let the anchor-shape check silently disable
+	# itself on such a tx.
+	if ! jq -e '[.actions[] | (.data | type) == "object"] | all' "$TX_JSON_FILE" >/dev/null 2>&1; then
+		echo "ERROR (gate 1): outgoing tx has a non-object .data field on at least one action — cannot verify shape, refusing" >&2
+		exit 3
+	fi
+
 	# (a) action-set match: the {account,name} set of the resolved
 	# testnet evidence tx must be IDENTICAL to the outgoing tx's set.
 	# Applies to every mainnet shape (anchor or not, e.g. updateauth).
-	TESTNET_ACTION_SET="$(printf '%s' "$RESOLVE_JSON" | jq -c '[.actions[]? | {account: .act.account, name: .act.name}] | unique' 2>/dev/null)"
-	[ -n "$TESTNET_ACTION_SET" ] && [ "$TESTNET_ACTION_SET" != "null" ] || TESTNET_ACTION_SET="[]"
-	OUTGOING_ACTION_SET="$(jq -c '[.actions[] | {account: .account, name: .name}] | unique' "$TX_JSON_FILE" 2>/dev/null)"
-	[ -n "$OUTGOING_ACTION_SET" ] && [ "$OUTGOING_ACTION_SET" != "null" ] || OUTGOING_ACTION_SET="[]"
+	if ! OUTGOING_ACTION_SET="$(jq -c '[.actions[] | {account: .account, name: .name}] | unique' "$TX_JSON_FILE" 2>/dev/null)"; then
+		echo "ERROR (gate 1): failed to parse the outgoing tx action set (jq error) — refusing, fail-closed" >&2
+		exit 3
+	fi
+	if [ -z "$OUTGOING_ACTION_SET" ] || [ "$OUTGOING_ACTION_SET" = "[]" ] || [ "$OUTGOING_ACTION_SET" = "null" ]; then
+		echo "ERROR (gate 1): outgoing tx action set is empty — refusing, fail-closed" >&2
+		exit 3
+	fi
+	if ! TESTNET_ACTION_SET="$(printf '%s' "$TESTNET_ACTIONS" | jq -c '[.[] | {account, name}] | unique' 2>/dev/null)"; then
+		echo "ERROR (gate 1): failed to derive the testnet evidence action set (jq error) — refusing, fail-closed" >&2
+		exit 3
+	fi
 	if [ "$TESTNET_ACTION_SET" != "$OUTGOING_ACTION_SET" ]; then
 		echo "ERROR (gate 1): testnet evidence tx action shape does not match the outgoing mainnet tx — refusing" >&2
 		echo "                expected (outgoing mainnet --tx=) action set: $OUTGOING_ACTION_SET" >&2
@@ -272,12 +327,18 @@ if [ "$IS_MAINNET" = "1" ]; then
 	# is anchor-shaped (>=1 memo matching ^fya<schema>c<cycle>). Non-anchor
 	# shapes (e.g. updateauth key rotation — no such memo) are exempt from
 	# this sub-check; (a) above is already the whole gate-1 shape
-	# requirement for them, per the brief's rotation carve-out.
-	OUTGOING_ANCHOR_PREFIXES="$(jq -c '[.actions[]? | (.data.memo? // empty) | select(test("^fya[0-9]+c[0-9]+")) | capture("^(?<p>fya[0-9]+c[0-9]+)").p] | unique | sort' "$TX_JSON_FILE" 2>/dev/null)"
-	[ -n "$OUTGOING_ANCHOR_PREFIXES" ] && [ "$OUTGOING_ANCHOR_PREFIXES" != "null" ] || OUTGOING_ANCHOR_PREFIXES="[]"
-	if [ "$OUTGOING_ANCHOR_PREFIXES" != "[]" ]; then
-		TESTNET_ANCHOR_PREFIXES="$(printf '%s' "$RESOLVE_JSON" | jq -c '[.actions[]? | (.act.data.memo? // empty) | select(test("^fya[0-9]+c[0-9]+")) | capture("^(?<p>fya[0-9]+c[0-9]+)").p] | unique | sort' 2>/dev/null)"
-		[ -n "$TESTNET_ANCHOR_PREFIXES" ] && [ "$TESTNET_ANCHOR_PREFIXES" != "null" ] || TESTNET_ANCHOR_PREFIXES="[]"
+	# requirement for them, per the brief's rotation carve-out. An empty
+	# "[]" result here is legitimate DATA (no anchor-shaped memo present),
+	# not a failure — only a nonzero jq exit (parse/runtime error) refuses.
+	if ! OUTGOING_ANCHOR_PREFIXES="$(jq -c '[.actions[] | (.data.memo? // empty) | select(test("^fya[0-9]+c[0-9]+")) | capture("^(?<p>fya[0-9]+c[0-9]+)").p] | unique' "$TX_JSON_FILE" 2>/dev/null)"; then
+		echo "ERROR (gate 1): failed to derive the outgoing tx memo-prefix set (jq error) — refusing, fail-closed" >&2
+		exit 3
+	fi
+	if [ "$OUTGOING_ANCHOR_PREFIXES" != "[]" ] && [ -n "$OUTGOING_ANCHOR_PREFIXES" ]; then
+		if ! TESTNET_ANCHOR_PREFIXES="$(printf '%s' "$TESTNET_ACTIONS" | jq -c '[.[] | (.memo? // empty) | select(test("^fya[0-9]+c[0-9]+")) | capture("^(?<p>fya[0-9]+c[0-9]+)").p] | unique' 2>/dev/null)"; then
+			echo "ERROR (gate 1): failed to derive the testnet evidence memo-prefix set (jq error) — refusing, fail-closed" >&2
+			exit 3
+		fi
 		if [ "$TESTNET_ANCHOR_PREFIXES" != "$OUTGOING_ANCHOR_PREFIXES" ]; then
 			echo "ERROR (gate 1): testnet evidence memo-prefix set does not match the outgoing mainnet anchor tx — refusing" >&2
 			echo "                expected (outgoing mainnet --tx=) memo prefix set: $OUTGOING_ANCHOR_PREFIXES" >&2
@@ -286,11 +347,20 @@ if [ "$IS_MAINNET" = "1" ]; then
 		fi
 	fi
 
-	# Gate 4: dry-run log must exist, be non-empty, and (2026-08 hardening)
-	# match the outgoing tx's recorded shape. See the usage-header section
-	# above. Reuses $OUTGOING_ANCHOR_PREFIXES computed by gate 1 just
-	# above — both gates derive "the outgoing shape" identically, by
-	# construction.
+	# Gate 4: dry-run log must exist and be non-empty (unconditional, every
+	# mainnet shape). For ANCHOR-SHAPED outgoing tx only (2026-08
+	# hardening, scoped per the rotation-flow carve-out below), it must
+	# ALSO be a JSON object with a matching memo_prefix and (if present) a
+	# matching target_chain — see the usage-header section above. Reuses
+	# $OUTGOING_ANCHOR_PREFIXES computed by gate 1 just above — both gates
+	# derive "the outgoing shape" identically, by construction.
+	#
+	# Non-anchor shapes (e.g. updateauth key rotation) keep ONLY this
+	# pre-existing non-empty-file check: their dry-run material comes from
+	# `proton transaction:push --dry-run` directly (see
+	# docs/ANCHOR_ACCOUNT_KEY_ROTATION.md, Phase 2 step 1), which is plain
+	# CLI text, not the JSON `sign-anchor-event.sh --dry-run` emits —
+	# requiring JSON there would break that flow.
 	if [ -z "$DRY_RUN_LOG" ]; then
 		echo "ERROR (gate 4): mainnet requires --dry-run-log=<file> pointing to a prior --dry-run output for this shape" >&2
 		exit 3
@@ -299,15 +369,16 @@ if [ "$IS_MAINNET" = "1" ]; then
 		echo "ERROR (gate 4): dry-run log missing or empty: $DRY_RUN_LOG" >&2
 		exit 3
 	fi
-	# (a) must be valid JSON.
-	if ! jq -e '.' "$DRY_RUN_LOG" >/dev/null 2>&1; then
-		echo "ERROR (gate 4): dry-run log is not valid JSON: $DRY_RUN_LOG" >&2
-		exit 3
-	fi
-	# (b) anchor-shaped outgoing tx: the log's recorded memo_prefix (the
-	# field name `sign-anchor-event.sh --dry-run` actually emits) must be
-	# present and match the outgoing prefix set exactly.
 	if [ "$OUTGOING_ANCHOR_PREFIXES" != "[]" ]; then
+		# (a) must be a JSON OBJECT (M2 — plain `jq -e '.'` would also
+		# accept a bare scalar/array, e.g. `42` or `[]`, as "valid JSON").
+		if ! jq -e 'type == "object"' "$DRY_RUN_LOG" >/dev/null 2>&1; then
+			echo "ERROR (gate 4): anchor-shaped outgoing tx requires a JSON-object dry-run log: $DRY_RUN_LOG" >&2
+			exit 3
+		fi
+		# (b) the log's recorded memo_prefix (the field name
+		# `sign-anchor-event.sh --dry-run` actually emits) must be present
+		# and match the outgoing prefix set exactly.
 		LOG_MEMO_PREFIX="$(jq -r '.memo_prefix // empty' "$DRY_RUN_LOG" 2>/dev/null)"
 		if [ -z "$LOG_MEMO_PREFIX" ]; then
 			echo "ERROR (gate 4): outgoing tx is anchor-shaped but dry-run log has no memo_prefix record: $DRY_RUN_LOG" >&2
@@ -320,19 +391,20 @@ if [ "$IS_MAINNET" = "1" ]; then
 			echo "                actual (dry-run log ${DRY_RUN_LOG}) memo_prefix:       $LOG_MEMO_PREFIX_SET" >&2
 			exit 3
 		fi
-	fi
-	# (c) if the log records a target chain, it must match --chain= (same
-	# alias normalization as gate 3's $PROTON_CHAIN). Absent is allowed.
-	LOG_TARGET_CHAIN="$(jq -r '.target_chain // empty' "$DRY_RUN_LOG" 2>/dev/null)"
-	if [ -n "$LOG_TARGET_CHAIN" ]; then
-		case "$LOG_TARGET_CHAIN" in
-			testnet-a|proton-test) LOG_TARGET_CHAIN_NORM="proton-test" ;;
-			mainnet-a|proton)      LOG_TARGET_CHAIN_NORM="proton" ;;
-			*)                     LOG_TARGET_CHAIN_NORM="unrecognized:${LOG_TARGET_CHAIN}" ;;
-		esac
-		if [ "$LOG_TARGET_CHAIN_NORM" != "$PROTON_CHAIN" ]; then
-			echo "ERROR (gate 4): dry-run log target_chain ('$LOG_TARGET_CHAIN') does not match --chain= ($CHAIN) — refusing" >&2
-			exit 3
+		# (c) if the log records a target chain, it must match --chain=
+		# (same alias normalization as gate 3's $PROTON_CHAIN). Absent is
+		# allowed.
+		LOG_TARGET_CHAIN="$(jq -r '.target_chain // empty' "$DRY_RUN_LOG" 2>/dev/null)"
+		if [ -n "$LOG_TARGET_CHAIN" ]; then
+			case "$LOG_TARGET_CHAIN" in
+				testnet-a|proton-test) LOG_TARGET_CHAIN_NORM="proton-test" ;;
+				mainnet-a|proton)      LOG_TARGET_CHAIN_NORM="proton" ;;
+				*)                     LOG_TARGET_CHAIN_NORM="unrecognized:${LOG_TARGET_CHAIN}" ;;
+			esac
+			if [ "$LOG_TARGET_CHAIN_NORM" != "$PROTON_CHAIN" ]; then
+				echo "ERROR (gate 4): dry-run log target_chain ('$LOG_TARGET_CHAIN') does not match --chain= ($CHAIN) — refusing" >&2
+				exit 3
+			fi
 		fi
 	fi
 fi
