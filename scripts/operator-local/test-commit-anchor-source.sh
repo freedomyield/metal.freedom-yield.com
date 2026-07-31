@@ -305,6 +305,86 @@ RC=$?
 	|| bad "non-integer-expect-cycle: exit 2 (actual=$RC)"
 teardown
 
+# ---- case 13 (fix round 1, fold-in minor): --expect-cycle=0 -> exit 2 -----
+build_repo
+fixture 4 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" f > "$BASE/f-cycle4.json"
+run_committer --expect-cycle=0 --input-file="$BASE/f-cycle4.json" >/dev/null 2>&1
+RC=$?
+[ "$RC" -eq 2 ] \
+	&& ok "expect-cycle-zero: exit 2" \
+	|| bad "expect-cycle-zero: exit 2 (actual=$RC)"
+teardown
+
+# ---- case 14 (fix round 1, fold-in minor): --expect-cycle=007 (leading
+#      zero) -> exit 2 -------------------------------------------------------
+build_repo
+fixture 4 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" f > "$BASE/f-cycle4.json"
+run_committer --expect-cycle=007 --input-file="$BASE/f-cycle4.json" >/dev/null 2>&1
+RC=$?
+[ "$RC" -eq 2 ] \
+	&& ok "expect-cycle-leading-zero: exit 2" \
+	|| bad "expect-cycle-leading-zero: exit 2 (actual=$RC)"
+teardown
+
+# ---- case 15 (C2 fix): --push refused when the repo is NOT on main ------
+#      Reproduces the reviewer-found bug: git push origin main pushes
+#      whatever branch is checked out to origin's main ref, which would
+#      otherwise silently push feature-branch content while still
+#      reporting "OK: pushed". Must refuse BEFORE committing (so there is
+#      no local-only commit left behind either) whenever --push is given
+#      off main. -------------------------------------------------------------
+build_repo
+git -C "$REPO" "${GITQ[@]}" checkout -qb some-feature-branch
+fixture 4 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" f > "$BASE/f-cycle4.json"
+BEFORE_COUNT="$(commit_count)"
+OUT="$(run_committer --expect-cycle=4 --input-file="$BASE/f-cycle4.json" --push 2>&1)"
+RC=$?
+[ "$RC" -eq 2 ] \
+	&& ok "push-refused-off-main: exit 2" \
+	|| bad "push-refused-off-main: exit 2 (actual=$RC, out=$OUT)"
+[ "$(commit_count)" -eq "$BEFORE_COUNT" ] \
+	&& ok "push-refused-off-main: no commit created (not even local-only)" \
+	|| bad "push-refused-off-main: no commit created (before=$BEFORE_COUNT, after=$(commit_count))"
+echo "$OUT" | grep -qi 'pushed' \
+	&& bad "push-refused-off-main: never claims anything was pushed (out: $OUT)" \
+	|| ok "push-refused-off-main: never claims anything was pushed"
+teardown
+
+# ---- case 16 (I3 fix): refuses to commit when other files are already
+#      staged besides anchor-source.json — otherwise `git commit` (no
+#      pathspec) would sweep pre-staged unrelated changes into this
+#      "single-purpose" commit. The unrelated staged file must remain
+#      staged and untouched afterward (this script only ever refuses; it
+#      never unstages anything on the operator's behalf). -----------------
+build_repo
+printf 'unrelated pre-staged content\n' > "$REPO/unrelated-file.txt"
+git -C "$REPO" "${GITQ[@]}" add unrelated-file.txt
+UNRELATED_CONTENT_BEFORE="$(git -C "$REPO" show :unrelated-file.txt)"
+fixture 4 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" f > "$BASE/f-cycle4.json"
+BEFORE_COUNT="$(commit_count)"
+OUT="$(run_committer --expect-cycle=4 --input-file="$BASE/f-cycle4.json" 2>&1)"
+RC=$?
+[ "$RC" -eq 7 ] \
+	&& ok "refuse-other-staged: exit 7" \
+	|| bad "refuse-other-staged: exit 7 (actual=$RC, out=$OUT)"
+[ "$(commit_count)" -eq "$BEFORE_COUNT" ] \
+	&& ok "refuse-other-staged: no commit created" \
+	|| bad "refuse-other-staged: no commit created"
+# The script's own `git add` on anchor-source.json is expected to remain
+# staged (that path is exactly what this script manages) — what must NOT
+# happen is the unrelated file being touched, unstaged, or its content
+# changed on the operator's behalf.
+git -C "$REPO" diff --cached --name-only | grep -q -x 'unrelated-file.txt' \
+	&& ok "refuse-other-staged: unrelated file still staged (script never unstages on operator's behalf)" \
+	|| bad "refuse-other-staged: unrelated file still staged (staged now: $(git -C "$REPO" diff --cached --name-only))"
+[ "$(git -C "$REPO" show :unrelated-file.txt)" = "$UNRELATED_CONTENT_BEFORE" ] \
+	&& ok "refuse-other-staged: unrelated file's staged content unchanged" \
+	|| bad "refuse-other-staged: unrelated file's staged content unchanged"
+echo "$OUT" | grep -q 'unrelated-file.txt' \
+	&& ok "refuse-other-staged: error names the unrelated staged file" \
+	|| bad "refuse-other-staged: error names the unrelated staged file (out: $OUT)"
+teardown
+
 # ---- summary ---------------------------------------------------------------
 echo "test-commit-anchor-source.sh summary: PASS=$PASS  FAIL=$FAIL"
 if [ "$FAIL" -eq 0 ]; then

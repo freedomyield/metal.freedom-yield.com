@@ -92,15 +92,23 @@
 #
 # Exit codes:
 #   0  success (committed, and pushed if --push)
-#   2  bad arg / usage error (missing --expect-cycle, unknown flag)
+#   2  bad arg / usage error (missing --expect-cycle, --expect-cycle not a
+#      positive integer or has a leading zero, unknown flag, or --push
+#      given while not checked out on main — see C2 in the branch-assert
+#      block below)
 #   3  fetch failed (SSH or --input-file read)
 #   4  jq parse failed, or schema validation failed (includes exit 8's
 #      "no validator available" case — folded into 4 here since both mean
 #      "did not validate")
 #   5  --expect-cycle mismatch
 #   6  genesis guard failed (prev_anchor_root/tx null without --allow-genesis)
-#   7  git add / git commit failed
-#   8  git push failed (only reachable with --push)
+#   7  writing the fetched bytes into the repo working tree failed, git add
+#      failed, other files were already staged besides anchor-source.json
+#      (refuses rather than sweep them into this "single-purpose" commit),
+#      or git commit itself failed
+#   8  git push failed, OR push reported success but origin/main was
+#      verified not to actually match the new commit afterward (only
+#      reachable with --push)
 #   99 host-refusal guard triggered (production-looking host detected)
 #
 # See also: docs/ANCHOR_SOURCE.md, docs/DEPLOY_OWNERSHIP_MATRIX.md,
@@ -153,7 +161,7 @@ for arg in "$@"; do
 		--push)           DO_PUSH=1 ;;
 		--input-file=*)   INPUT_FILE="${arg#--input-file=}" ;;
 		-h|--help)
-			sed -n '2,90p' "$0" | sed 's/^# \?//'
+			sed -n '2,110p' "$0" | sed 's/^# \?//'
 			exit 0
 			;;
 		*)
@@ -173,6 +181,16 @@ case "$EXPECT_CYCLE" in
 		exit 2
 		;;
 esac
+# Reject "0" and any leading-zero form ("01", "007", ...): cycle_number_observed
+# is documented (anchor-source.schema.v1.json) as an integer >= 1, and a
+# leading zero is never a legitimate cycle number literal either way.
+# ${EXPECT_CYCLE#0} strips exactly one leading '0' if present; comparing
+# the stripped form against the original catches BOTH "0" itself (strips
+# to empty, which differs from "0") and any "0N" form in one check.
+if [ "${EXPECT_CYCLE#0}" != "$EXPECT_CYCLE" ]; then
+	echo "ERROR: --expect-cycle must be a positive integer with no leading zero (0 is not a valid cycle number), got: '$EXPECT_CYCLE'" >&2
+	exit 2
+fi
 
 require_cmd() {
 	for c in "$@"; do
@@ -185,6 +203,28 @@ require_cmd() {
 require_cmd jq git diff
 
 [ -r "$SCHEMA_FILE" ] || { echo "ERROR: schema file not readable: $SCHEMA_FILE" >&2; exit 2; }
+
+# C2: --push must never report a false "OK: pushed" success. The bug this
+# closes: `git push origin main` pushes whatever branch is CURRENTLY
+# CHECKED OUT to origin's main ref — on a feature branch, that silently
+# pushes feature-branch content to origin/main, and the script would still
+# print "OK: pushed" (both the push and the exit code are genuinely
+# success from git's point of view; the false is in what the operator
+# thinks just happened). Refuse upfront, before touching anything, unless
+# --push is paired with actually being on main. This intentionally also
+# refuses the plain commit-only path in this situation when --push is
+# given — if the operator explicitly asked for --push, a silent
+# local-only commit on the wrong branch is not a better outcome either.
+if [ "$DO_PUSH" -eq 1 ]; then
+	CURRENT_BRANCH="$(git -C "$REPO_ROOT" symbolic-ref --short HEAD 2>/dev/null || echo '')"
+	if [ "$CURRENT_BRANCH" != "main" ]; then
+		echo "ERROR: --push given but the repo at ${REPO_ROOT} is on '${CURRENT_BRANCH:-<detached HEAD>}', not 'main'." >&2
+		echo "       Refusing: git push origin main pushes whatever is checked out to origin's main ref," >&2
+		echo "       which would silently push the wrong branch's content while still reporting success." >&2
+		echo "       Switch to main first, or omit --push and push by hand once you have." >&2
+		exit 2
+	fi
+fi
 
 # ---- 3. Fetch (SSH, isolated for test stubbing) -----------------------------
 
@@ -315,8 +355,19 @@ echo "--- end diff summary ---" >&2
 
 # ---- 6. Copy into repo, git add, single-purpose commit ---------------------
 
+# Copy fetched bytes into the working tree only NOW, after every validation
+# above (jq parse, schema, --expect-cycle, genesis guard) has already
+# passed — a validation failure exits before the working tree is ever
+# touched, and an atomic write (tmp file in the same dir + rename) means
+# even a failure in this very step leaves no partial file behind, so an
+# exit 7 from this point on leaves the tree clean.
 mkdir -p "$(dirname "$CANONICAL_PATH")"
-cp "$FETCHED_FILE" "$CANONICAL_PATH"
+COPY_TMP="$(mktemp -p "$(dirname "$CANONICAL_PATH")" .anchor-source.XXXXXX)"
+if ! cp "$FETCHED_FILE" "$COPY_TMP" || ! mv "$COPY_TMP" "$CANONICAL_PATH"; then
+	echo "ERROR: failed to write fetched anchor-source.json into the repo working tree at ${CANONICAL_PATH}" >&2
+	rm -f "$COPY_TMP"
+	exit 7
+fi
 
 if ! git -C "$REPO_ROOT" add "$ANCHOR_SOURCE_REL"; then
 	echo "ERROR: git add failed for $ANCHOR_SOURCE_REL" >&2
@@ -328,28 +379,56 @@ if git -C "$REPO_ROOT" diff --cached --quiet -- "$ANCHOR_SOURCE_REL"; then
 	exit 0
 fi
 
+# I3: refuse if anything OTHER than our own path is staged. Without this,
+# any pre-staged unrelated changes an operator happened to have sitting in
+# the index would get swept into this "single-purpose" commit the moment
+# `git commit` runs without a pathspec (reproduced by the reviewer). Belt
+# and suspenders with the pathspec-scoped commit below: this check refuses
+# loudly rather than relying solely on the pathspec to save us.
+OTHER_STAGED="$(git -C "$REPO_ROOT" diff --cached --name-only | grep -v -x -- "$ANCHOR_SOURCE_REL" || true)"
+if [ -n "$OTHER_STAGED" ]; then
+	echo "ERROR: refusing to commit — other files are already staged besides ${ANCHOR_SOURCE_REL}:" >&2
+	printf '%s\n' "$OTHER_STAGED" >&2
+	echo "       This script only ever commits ${ANCHOR_SOURCE_REL}. Unstage or commit the other files separately, then re-run." >&2
+	exit 7
+fi
+
 COMMIT_MSG="anchor-source: transfer cycle ${FETCHED_CYCLE} anchor (dag_root ${DAG_SHORT})
 
 Host-composed by gen-anchor-source.sh on the validator host; fetched,
 validated (schema + expect-cycle + genesis guard), and committed via
 commit-anchor-source.sh."
 
-if ! git -C "$REPO_ROOT" commit -q -m "$COMMIT_MSG"; then
+# Pathspec-scoped commit (I3): even with the refuse-if-other-staged check
+# above, scope the commit itself to exactly this path — belt and
+# suspenders, not an either/or.
+if ! git -C "$REPO_ROOT" commit -q -m "$COMMIT_MSG" -- "$ANCHOR_SOURCE_REL"; then
 	echo "ERROR: git commit failed" >&2
 	exit 7
 fi
 
 COMMIT_SHA="$(git -C "$REPO_ROOT" rev-parse --short HEAD)"
+COMMIT_SHA_FULL="$(git -C "$REPO_ROOT" rev-parse HEAD)"
 echo "OK: committed ${COMMIT_SHA} — anchor-source: transfer cycle ${FETCHED_CYCLE} anchor (dag_root ${DAG_SHORT})" >&2
 
 # ---- 7. Optional push -------------------------------------------------------
 
 if [ "$DO_PUSH" -eq 1 ]; then
+	# The branch-assert above (C2) already refused unless we were on main
+	# before any of this ran. Still verify after pushing that origin/main
+	# actually advanced to the commit we just made — a false "OK: pushed"
+	# must be impossible even if `git push`'s own exit code were ever
+	# misleading (e.g. a race, or a remote that silently accepted a no-op).
 	if ! git -C "$REPO_ROOT" push origin main; then
 		echo "ERROR: git push origin main failed (commit ${COMMIT_SHA} is local-only)" >&2
 		exit 8
 	fi
-	echo "OK: pushed ${COMMIT_SHA} to origin main" >&2
+	REMOTE_MAIN_SHA="$(git -C "$REPO_ROOT" rev-parse origin/main 2>/dev/null || echo '')"
+	if [ "$REMOTE_MAIN_SHA" != "$COMMIT_SHA_FULL" ]; then
+		echo "ERROR: git push origin main reported success but origin/main (${REMOTE_MAIN_SHA:-<unknown>}) does not match the new commit (${COMMIT_SHA_FULL}) — refusing to report a false success." >&2
+		exit 8
+	fi
+	echo "OK: pushed ${COMMIT_SHA} to origin main (verified origin/main == ${COMMIT_SHA_FULL})" >&2
 else
 	echo "NOTE: not pushed (pass --push to push origin main). Commit ${COMMIT_SHA} is local-only." >&2
 fi
