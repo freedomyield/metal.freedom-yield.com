@@ -87,24 +87,29 @@ listed in `OPERATOR_IDENTITY_SETUP.md` § Common pitfalls.
 
 ```sh
 export OPERATOR_IDENTITY_KEY=~/.ssh/freedom-yield-operator-identity
+# MANDATORY at a cycle transition: N = the cycle that just closed (e.g.
+# FY_EXPECT_CYCLE=3 at the cycle-3 -> cycle-4 transition). Without it the
+# ordering guard is disabled and this run is not protected against
+# regenerating identity before the closed cycle is on the published ledger.
+export FY_EXPECT_CYCLE=<the cycle just closed>
 bash scripts/operator-local/gen-identity.sh
 ```
 
-Expected tail:
+Expected tail (verified against the current `gen-identity.sh`):
 
 ```
 ✓ wrote .../public/api/identity.json
 ✓ wrote .../public/api/identity.json.sig
-  fingerprint:     SHA256:<your B3 value>
-  namespace:       freedom-yield/validator-identity
-  principal:       freedom-yield
-  iat / exp:       <today> / <today+365d>
+  fingerprint:          SHA256:<your B3 value>
+  namespace:            freedom-yield/validator-identity
+  principal:            freedom-yield
+  iat / exp:            <today> / <today+365d>
   artifact leaves:      <count>           # depends on which leaves resolve 200 OK
-  artifact_root:   <64-hex>
-  identity_branch_root: <64-hex> (= 1 leaf on first run after Phase α activation)
-  cycles_branch_root:   <64-hex> (= live count from /api/cycle-history.jsonl)
-  dag_root_hash:        <64-hex> (= chain-anchored via Phase α A-chain memo "fyid1:<hash>")
-  anchor memo:          fyid1:<dag_root_hash>     (consumed by post-anchor-event)
+  artifact_root:        <64-hex>
+  cycle ledger:         latest cycle_n = <N> (<count> leaves)
+  NOTE: identity.json carries no DAG root. The single authoritative anchor
+        value is anchor-source.json .dag_root_computed (3-branch), memo
+        fya<S>c<N>:, via gen-anchor-source.sh + sign-anchor-event.sh.
 ```
 
 If `fingerprint` shown does not match your B3 record, stop and
