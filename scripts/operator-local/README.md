@@ -46,6 +46,26 @@ A clean run prints `OK` and nothing else.
   the signature against the synthetic pubkey. Output never lands in
   the real repo.
 
+- `commit-anchor-source.sh` — the host→git transfer path for
+  `public/api/anchor-source.json` (plan A4). Fetches the validator
+  host's current checkout of that file over SSH (or `--input-file` for
+  manual/offline use), validates it (jq parse, schema, `--expect-cycle=N`
+  match, non-null `identity_branch.prev_anchor_root`/`prev_anchor_tx`
+  unless `--allow-genesis`), shows a diff summary against the repo copy,
+  then `git add` + a single-purpose commit naming the cycle number and
+  the `dag_root_computed` prefix. Never pushes unless `--push` is given.
+  Same host-refusal guard as `gen-identity.sh`. Companion protection:
+  `scripts/advance-host-checkout.sh` preserves host-composed
+  anchor-source.json dirt from its own public/ discard while it waits
+  for this script to run — see `docs/DEPLOY_OWNERSHIP_MATRIX.md`.
+
+- `test-commit-anchor-source.sh` — hermetic test harness for
+  `commit-anchor-source.sh`. Builds a throwaway git repo, feeds fixture
+  JSON via `--input-file` / `FYD_ANCHOR_FETCH_STUB` — no real SSH
+  connection is ever made — and asserts exit codes, commit presence/
+  absence, and committed content across the validation, genesis-guard,
+  idempotency, and push-failure paths.
+
 ## Phase 5 runbook
 
 The end-to-end procedure for generating the real operator identity
