@@ -54,6 +54,31 @@
 #   configured. The repo-local logs/ dir is provisioned deploy:deploy by
 #   scripts/install-host-log-dir.sh, matching every other project cron.
 #
+# Exit-3 alert dedup (D3): a content mismatch (exit 3) is a NORMAL,
+#   guaranteed transient state during a cycle transition — the new
+#   anchor-source.json publishes before the matching receipt does, so every
+#   15-minute tick in that window mismatches until the receipt catches up.
+#   Alerting `high` on every one of those ticks is alert fatigue (a real
+#   anomaly gets lost in a run of expected pages). So: the mismatch's
+#   SIGNATURE (served dag_root_computed + on-chain anchored root, the exact
+#   pair compared above) is persisted to $ANCHOR_PUBLISH_HEALTH_MISMATCH_STATE
+#   on the FIRST alert for that signature; repeat mismatches with the SAME
+#   signature within $ANCHOR_PUBLISH_HEALTH_MISMATCH_SUPPRESS_SEC (default
+#   21600s = 6h) are logged but do NOT re-fire notify.sh. A signature change
+#   (the mismatch resolved to a DIFFERENT stale/incorrect pair) or the window
+#   elapsing re-arms immediate alerting. On recovery (exit 0) the state is
+#   cleared, so the next mismatch — even an identical signature recurring
+#   later — alerts immediately again. The exit code (3) and the log line are
+#   UNCHANGED on every tick; only the notify.sh call is gated. State-write
+#   failures are logged (WARN) but never escalate the exit code (matches the
+#   existing alert()/notify.sh best-effort contract below). Every input that
+#   feeds the dedup decision fails OPEN (toward alerting), never silently
+#   toward suppression: an unreadable/unparseable state file, a corrupted
+#   window_started_epoch (non-numeric OR in the future — the latter would
+#   otherwise make the elapsed-window arithmetic negative and suppress
+#   forever), and a non-numeric $ANCHOR_PUBLISH_HEALTH_MISMATCH_SUPPRESS_SEC
+#   all bypass suppression and alert immediately instead.
+#
 # Exit codes:
 #   0  served AND dag_root_computed matches the anchored root (verbose: heartbeat)
 #   2  anchor-source.json not served (HTTP != 200 on every retry attempt) —
@@ -91,6 +116,11 @@
 #                       (default 3; tests set 0 so the suite never sleeps)
 #   ANCHOR_PUBLISH_HEALTH_LOG  file-log target (default: repo-local
 #                       ${SCRIPT_DIR}/../logs/anchor-publish-health.log)
+#   ANCHOR_PUBLISH_HEALTH_MISMATCH_STATE  exit-3 dedup state file (default:
+#                       repo-local ${SCRIPT_DIR}/../logs/anchor-publish-health-mismatch-state.json;
+#                       see "Exit-3 alert dedup (D3)" above)
+#   ANCHOR_PUBLISH_HEALTH_MISMATCH_SUPPRESS_SEC  dedup window in seconds
+#                       (default 21600 = 6h)
 #
 # Cron target (/etc/cron.d/metal-anchor-publish-health), every 15 minutes:
 #   */15 * * * * deploy bash /home/.../scripts/check-anchor-publish-health.sh
@@ -108,9 +138,21 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SOURCE_URL="${ANCHOR_SOURCE_URL:-https://metal.freedom-yield.com/api/anchor-source.json}"
 RECEIPT_URL="${ANCHOR_RECEIPT_URL:-https://metal.freedom-yield.com/api/anchor-receipt.json}"
 LOG="${ANCHOR_PUBLISH_HEALTH_LOG:-${SCRIPT_DIR}/../logs/anchor-publish-health.log}"
+MISMATCH_STATE="${ANCHOR_PUBLISH_HEALTH_MISMATCH_STATE:-${SCRIPT_DIR}/../logs/anchor-publish-health-mismatch-state.json}"
+MISMATCH_SUPPRESS_SEC="${ANCHOR_PUBLISH_HEALTH_MISMATCH_SUPPRESS_SEC:-21600}"
 CURL="${FYD_CURL:-curl}"
 NOTIFY="${FYD_NOTIFY:-${SCRIPT_DIR}/notify.sh}"
 NOW_ISO="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+# Portable epoch -> ISO 8601 UTC (GNU `date -d @epoch` vs BSD `date -r epoch`;
+# same shim shape as scripts/gen-anchor-source.sh's iso_utc_of_epoch). Only
+# used for the mismatch-dedup state file's human-readable timestamp field —
+# never for the dedup DECISION itself, which compares raw epoch integers.
+if date --version >/dev/null 2>&1; then
+	iso_utc_of_epoch() { date -u -d "@$1" +"%Y-%m-%dT%H:%M:%SZ"; }
+else
+	iso_utc_of_epoch() { date -u -r "$1" +"%Y-%m-%dT%H:%M:%SZ"; }
+fi
 
 log() {
 	# stderr for cron, appended to the log file when the path is writable.
@@ -131,6 +173,95 @@ alert() {
 }
 
 is_hex64() { [[ "$1" =~ ^[0-9a-f]{64}$ ]]; }
+
+# ---- exit-3 alert dedup (D3) -------------------------------------------
+# See "Exit-3 alert dedup (D3)" in the header comment for full rationale.
+# State shape ($MISMATCH_STATE, JSON):
+#   { "signature": "<dag_src>:<dag_anchored>",
+#     "window_started_epoch": <int>, "window_started_at": "<ISO8601>",
+#     "suppress_window_sec": <int> }
+
+# mismatch_should_alert <signature> -> prints "1" (alert now) or "0"
+# (suppress). Alerts whenever there is no prior state, the prior state is
+# unreadable/unparseable (fail-open toward alerting — a dedup bug must never
+# silence a real content-mismatch page), the signature differs from the
+# stored one, the stored window has elapsed, OR either input feeding the
+# window-elapsed arithmetic is untrustworthy:
+#   - $MISMATCH_SUPPRESS_SEC (env-configured) is non-numeric — an invalid
+#     config must not become an accidental "never re-alert" mode.
+#   - the persisted window_started_epoch is not a plain non-negative
+#     integer, OR is in the FUTURE relative to now (a corrupted/tampered
+#     state file) — without this clamp, a future epoch makes
+#     `now_epoch - prev_epoch` negative, which can never reach the
+#     (positive) suppress threshold, so the mismatch would be suppressed
+#     forever (fail toward silence — exactly what this guard must not do).
+mismatch_should_alert() {
+	local sig="$1" now_epoch prev_sig prev_epoch
+	now_epoch="$(date -u +%s)"
+	if [ ! -r "$MISMATCH_STATE" ]; then
+		printf '1'
+		return 0
+	fi
+	if ! [[ "$MISMATCH_SUPPRESS_SEC" =~ ^[0-9]+$ ]]; then
+		printf '1'
+		return 0
+	fi
+	prev_sig="$(jq -r '.signature // empty' "$MISMATCH_STATE" 2>/dev/null || true)"
+	prev_epoch="$(jq -r '.window_started_epoch // 0' "$MISMATCH_STATE" 2>/dev/null || echo 0)"
+	[[ "$prev_epoch" =~ ^[0-9]+$ ]] || prev_epoch=0
+	[ "$prev_epoch" -le "$now_epoch" ] || prev_epoch=0
+	if [ -z "$prev_sig" ] || [ "$prev_sig" != "$sig" ]; then
+		printf '1'
+		return 0
+	fi
+	if [ $((now_epoch - prev_epoch)) -ge "$MISMATCH_SUPPRESS_SEC" ]; then
+		printf '1'
+		return 0
+	fi
+	printf '0'
+}
+
+# mismatch_state_write <signature> — persists the signature + a fresh window
+# start (= "now"). Called only when an alert actually fires (new signature OR
+# window elapsed), so the suppress window always measures from the most
+# recent alert, not the first-ever one. Best-effort: failure is logged (WARN)
+# but never changes the caller's exit code (matches alert()'s contract).
+mismatch_state_write() {
+	local sig="$1" now_epoch now_iso dir tmp
+	now_epoch="$(date -u +%s)"
+	now_iso="$(iso_utc_of_epoch "$now_epoch" 2>/dev/null || printf '%s' "$NOW_ISO")"
+	dir="$(dirname "$MISMATCH_STATE")"
+	mkdir -p "$dir" 2>/dev/null || true
+	if [ ! -w "$dir" ] 2>/dev/null; then
+		log "WARN: mismatch-dedup state dir not writable: $dir (state not persisted; next tick will re-alert)"
+		return 1
+	fi
+	tmp="$(mktemp -p "$dir" .anchor-publish-health-mismatch.XXXXXX 2>/dev/null)" || {
+		log "WARN: mktemp failed for mismatch-dedup state in $dir (state not persisted; next tick will re-alert)"
+		return 1
+	}
+	if ! jq -n --arg sig "$sig" --argjson epoch "$now_epoch" --arg iso "$now_iso" \
+		--argjson win "$MISMATCH_SUPPRESS_SEC" \
+		'{signature: $sig, window_started_epoch: $epoch, window_started_at: $iso, suppress_window_sec: $win}' \
+		> "$tmp" 2>/dev/null; then
+		rm -f "$tmp"
+		log "WARN: jq compose failed for mismatch-dedup state (state not persisted; next tick will re-alert)"
+		return 1
+	fi
+	if ! mv "$tmp" "$MISMATCH_STATE" 2>/dev/null; then
+		rm -f "$tmp"
+		log "WARN: rename failed writing mismatch-dedup state to $MISMATCH_STATE (state not persisted; next tick will re-alert)"
+		return 1
+	fi
+	return 0
+}
+
+# mismatch_state_clear — called on recovery (exit 0) so a later mismatch,
+# even one that reproduces the exact same signature, alerts immediately
+# rather than being suppressed by a stale window from before the recovery.
+mismatch_state_clear() {
+	rm -f "$MISMATCH_STATE" 2>/dev/null || true
+}
 
 # fetch <url> <body_outfile> -> prints the HTTP status code (000 on failure).
 # Retries up to FYD_FETCH_ATTEMPTS times (default 3), stopping as soon as an
@@ -213,9 +344,21 @@ fi
 # ---- 4. content-verify: served source must reproduce the on-chain root ------
 if [ "$DAG_SRC" != "$DAG_ANCHORED" ]; then
 	log "ERROR content mismatch: served anchor-source dag_root_computed=${DAG_SRC:0:12}… != on-chain anchored root=${DAG_ANCHORED:0:12}… (stale/incorrect publish)"
-	alert high "anchor-publish-health: content mismatch (exit 3)" "served anchor-source dag_root_computed=${DAG_SRC:0:12}… != on-chain anchored root=${DAG_ANCHORED:0:12}… (stale/incorrect publish)."
+	# D3 dedup: the exit code and the log line above are unconditional on
+	# every tick — only the notify.sh call is gated on signature+window.
+	MISMATCH_SIG="${DAG_SRC}:${DAG_ANCHORED}"
+	if [ "$(mismatch_should_alert "$MISMATCH_SIG")" = "1" ]; then
+		alert high "anchor-publish-health: content mismatch (exit 3)" "served anchor-source dag_root_computed=${DAG_SRC:0:12}… != on-chain anchored root=${DAG_ANCHORED:0:12}… (stale/incorrect publish)."
+		mismatch_state_write "$MISMATCH_SIG"
+	else
+		log "INFO alert suppressed (exit 3 dedup): same mismatch signature already alerted within the last ${MISMATCH_SUPPRESS_SEC}s — set ANCHOR_PUBLISH_HEALTH_MISMATCH_SUPPRESS_SEC to override"
+	fi
 	exit 3
 fi
 
+# Recovery: clear any dedup state so a LATER mismatch — even one that
+# reproduces the exact same signature — alerts immediately rather than
+# being suppressed by a stale pre-recovery window.
+mismatch_state_clear
 [ "$VERBOSE" -eq 1 ] && log "OK served + content-verified: $SOURCE_URL dag_root_computed=${DAG_SRC:0:12}… matches on-chain anchored root"
 exit 0

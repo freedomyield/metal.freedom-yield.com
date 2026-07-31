@@ -58,13 +58,21 @@ bad() { FAIL=$((FAIL + 1)); echo "FAIL  $1"; }
 ROOT_MATCH="ad7405814683fca7dc001f11ed9c031871f7e944235694ae1a11bd17fc653369"
 ROOT_STALE="deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 
-BASE=""; STUB=""; LOG=""; NOTIFY_STUB=""; NOTIFY_LOG=""
+BASE=""; STUB=""; LOG=""; NOTIFY_STUB=""; NOTIFY_LOG=""; MISMATCH_STATE=""
 setup() {
 	BASE="$(mktemp -d -t anchor-publish-health-test.XXXXXX)"
 	STUB="$BASE/curl-stub.sh"
 	LOG="$BASE/health.log"
 	NOTIFY_STUB="$BASE/notify-stub.sh"
 	NOTIFY_LOG="$BASE/notify.log"
+	# Isolated per-setup path for the exit-3 dedup state file (D3). Without
+	# this override the checker falls back to its repo-local default
+	# (${REPO_ROOT}/logs/anchor-publish-health-mismatch-state.json), which
+	# would leak real dedup state across test cases within a single suite
+	# run (a mismatch case earlier in the file would suppress — or a later
+	# healthy case would silently clear — state for an unrelated case). Each
+	# setup() gets its own fresh, nonexistent path.
+	MISMATCH_STATE="$BASE/mismatch-state.json"
 	# Recording notify stub: emulates `notify.sh <priority> <title> <message>`
 	# by appending one pipe-delimited line per call. No real ntfy network call.
 	cat > "$NOTIFY_STUB" <<NOTIFYEOF
@@ -155,6 +163,8 @@ run_checker() {
 	FYD_CURL="$STUB" \
 	FYD_NOTIFY="$NOTIFY_STUB" \
 	ANCHOR_PUBLISH_HEALTH_LOG="$LOG" \
+	ANCHOR_PUBLISH_HEALTH_MISMATCH_STATE="$MISMATCH_STATE" \
+	ANCHOR_PUBLISH_HEALTH_MISMATCH_SUPPRESS_SEC="${ANCHOR_PUBLISH_HEALTH_MISMATCH_SUPPRESS_SEC:-21600}" \
 	ANCHOR_SOURCE_URL="https://example.test/api/anchor-source.json" \
 	ANCHOR_RECEIPT_URL="https://example.test/api/anchor-receipt.json" \
 	SRC_BODY_FILE="${SRC_BODY_FILE:-}" SRC_CODE="${SRC_CODE:-200}" SRC_CODE_SEQ="${SRC_CODE_SEQ:-}" \
@@ -388,6 +398,161 @@ else
 	echo "SKIP  default-log: ${REPO_ROOT}/logs not writable in this environment (unexpected in a dev checkout)"
 fi
 rm -f "$DEFAULT_LOG"
+teardown
+
+# ---- case 12 (D3): same mismatch signature twice in a row -> exactly 1 alert --
+# 8/4 cycle-4 transition scenario: the new anchor-source.json publishes before
+# the matching receipt does, so every 15-min tick mismatches with the SAME
+# (served, anchored) pair until the receipt catches up. The second (and any
+# further) tick with the identical signature must NOT re-fire notify.sh, but
+# the exit code and log line stay unconditional on every tick.
+setup
+SRC_BODY_FILE="$BASE/src.json"; RCPT_BODY_FILE="$BASE/rcpt.json"
+write_source  "$SRC_BODY_FILE"  "$ROOT_STALE"
+write_receipt "$RCPT_BODY_FILE" "$ROOT_MATCH"
+SRC_CODE=200 RCPT_CODE=200 run_checker >/dev/null 2>&1
+RC1=$?
+SRC_CODE=200 RCPT_CODE=200 run_checker >/dev/null 2>&1
+RC2=$?
+[ "$RC1" -eq 3 ] && [ "$RC2" -eq 3 ] \
+	&& ok "dedup: both ticks still exit 3 (exit code unaffected by dedup)" \
+	|| bad "dedup: expected exit 3 on both ticks, got RC1=$RC1 RC2=$RC2"
+[ "$(alerts | wc -l | tr -d ' ')" -eq 1 ] \
+	&& ok "dedup: identical signature back-to-back fires exactly 1 alert" \
+	|| bad "dedup: expected exactly 1 alert across 2 identical-signature ticks, got $(alerts | wc -l | tr -d ' ') (alerts: $(alerts))"
+[ -s "$LOG" ] && [ "$(grep -c 'ERROR content mismatch' "$LOG")" -ge 2 ] \
+	&& ok "dedup: content-mismatch log line still written on the suppressed tick" \
+	|| bad "dedup: expected 2+ 'ERROR content mismatch' log lines, log: $(cat "$LOG" 2>/dev/null)"
+[ -r "$MISMATCH_STATE" ] \
+	&& ok "dedup: state file persisted after the alerting tick" \
+	|| bad "dedup: expected $MISMATCH_STATE to exist"
+teardown
+
+# ---- case 13 (D3): a DIFFERENT mismatch signature re-alerts immediately ------
+# Same setup as case 12, but the second tick's on-chain anchored root changes
+# (a different stale/incorrect pair) — this must NOT be suppressed by the
+# first tick's dedup state; a changed signature is effectively a new anomaly.
+setup
+SRC_BODY_FILE="$BASE/src.json"; RCPT_BODY_FILE="$BASE/rcpt.json"
+write_source  "$SRC_BODY_FILE"  "$ROOT_STALE"
+write_receipt "$RCPT_BODY_FILE" "$ROOT_MATCH"
+SRC_CODE=200 RCPT_CODE=200 run_checker >/dev/null 2>&1
+ROOT_OTHER="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+write_receipt "$RCPT_BODY_FILE" "$ROOT_OTHER"   # anchored root changed -> new signature
+SRC_CODE=200 RCPT_CODE=200 run_checker >/dev/null 2>&1
+RC=$?
+[ "$RC" -eq 3 ] \
+	&& ok "signature-change: second (different-signature) tick still exit 3" \
+	|| bad "signature-change: expected exit 3, got $RC"
+[ "$(alerts | wc -l | tr -d ' ')" -eq 2 ] \
+	&& ok "signature-change: a changed mismatch signature re-alerts immediately (2 total alerts)" \
+	|| bad "signature-change: expected 2 alerts (one per distinct signature), got $(alerts | wc -l | tr -d ' ') (alerts: $(alerts))"
+teardown
+
+# ---- case 14 (D3): recovery clears dedup state; the SAME signature recurring
+# after a recovery alerts immediately again (not suppressed by the stale
+# pre-recovery window) ----------------------------------------------------
+setup
+SRC_BODY_FILE="$BASE/src.json"; RCPT_BODY_FILE="$BASE/rcpt.json"
+write_source  "$SRC_BODY_FILE"  "$ROOT_STALE"
+write_receipt "$RCPT_BODY_FILE" "$ROOT_MATCH"
+SRC_CODE=200 RCPT_CODE=200 run_checker >/dev/null 2>&1   # tick 1: mismatch, alert #1
+[ -r "$MISMATCH_STATE" ] \
+	&& ok "recovery: dedup state exists after the initial mismatch alert" \
+	|| bad "recovery: expected $MISMATCH_STATE to exist after tick 1"
+write_source "$SRC_BODY_FILE" "$ROOT_MATCH"              # tick 2: recovers (matches receipt)
+SRC_CODE=200 RCPT_CODE=200 run_checker >/dev/null 2>&1
+RC_RECOVER=$?
+[ "$RC_RECOVER" -eq 0 ] \
+	&& ok "recovery: recovery tick exits 0" \
+	|| bad "recovery: expected exit 0 on the recovery tick, got $RC_RECOVER"
+[ -r "$MISMATCH_STATE" ] \
+	&& bad "recovery: dedup state should be CLEARED on recovery (still present: $(cat "$MISMATCH_STATE" 2>/dev/null))" \
+	|| ok "recovery: dedup state cleared on recovery (exit 0)"
+write_source "$SRC_BODY_FILE" "$ROOT_STALE"              # tick 3: same signature as tick 1, recurs
+SRC_CODE=200 RCPT_CODE=200 run_checker >/dev/null 2>&1
+RC_RECUR=$?
+[ "$RC_RECUR" -eq 3 ] \
+	&& ok "recovery: the recurrence tick exits 3" \
+	|| bad "recovery: expected exit 3 on the recurrence tick, got $RC_RECUR"
+[ "$(alerts | wc -l | tr -d ' ')" -eq 2 ] \
+	&& ok "recovery: the SAME signature recurring after a recovery alerts immediately again (2 total alerts: initial + post-recovery)" \
+	|| bad "recovery: expected 2 alerts (initial + post-recovery recurrence), got $(alerts | wc -l | tr -d ' ') (alerts: $(alerts))"
+teardown
+
+# ---- case 15 (D3): once the suppress window elapses, the SAME signature ------
+# re-alerts (a persisting mismatch is not silenced forever — it re-pages on
+# each window boundary). Simulated deterministically by writing a dedup
+# state file whose window_started_epoch is already far in the past, rather
+# than sleeping for the (default 6h) window in a test.
+setup
+SRC_BODY_FILE="$BASE/src.json"; RCPT_BODY_FILE="$BASE/rcpt.json"
+write_source  "$SRC_BODY_FILE"  "$ROOT_STALE"
+write_receipt "$RCPT_BODY_FILE" "$ROOT_MATCH"
+mkdir -p "$(dirname "$MISMATCH_STATE")"
+PAST_EPOCH=$(( $(date -u +%s) - 999999 ))
+cat > "$MISMATCH_STATE" <<JSON
+{"signature":"${ROOT_STALE}:${ROOT_MATCH}","window_started_epoch":${PAST_EPOCH},"window_started_at":"1970-01-01T00:00:00Z","suppress_window_sec":21600}
+JSON
+SRC_CODE=200 RCPT_CODE=200 run_checker >/dev/null 2>&1
+RC=$?
+[ "$RC" -eq 3 ] \
+	&& ok "window-elapsed: still exit 3" \
+	|| bad "window-elapsed: expected exit 3, got $RC"
+[ "$(alerts | wc -l | tr -d ' ')" -eq 1 ] \
+	&& ok "window-elapsed: same signature re-alerts once the suppress window has elapsed" \
+	|| bad "window-elapsed: expected 1 alert (window elapsed = re-arm), got $(alerts | wc -l | tr -d ' ') (alerts: $(alerts))"
+teardown
+
+# ---- case 16 (D3 hardening): a FUTURE window_started_epoch must not suppress
+# forever. A corrupted/tampered state file with a future timestamp would make
+# `now_epoch - prev_epoch` negative, which can never reach the (positive)
+# suppress threshold — without the fix's clamp, this signature would be
+# suppressed permanently (fail toward silence). Must instead fail open and
+# alert immediately, exactly as if the epoch were absent/invalid.
+setup
+SRC_BODY_FILE="$BASE/src.json"; RCPT_BODY_FILE="$BASE/rcpt.json"
+write_source  "$SRC_BODY_FILE"  "$ROOT_STALE"
+write_receipt "$RCPT_BODY_FILE" "$ROOT_MATCH"
+mkdir -p "$(dirname "$MISMATCH_STATE")"
+FUTURE_EPOCH=$(( $(date -u +%s) + 999999 ))
+cat > "$MISMATCH_STATE" <<JSON
+{"signature":"${ROOT_STALE}:${ROOT_MATCH}","window_started_epoch":${FUTURE_EPOCH},"window_started_at":"2099-01-01T00:00:00Z","suppress_window_sec":21600}
+JSON
+SRC_CODE=200 RCPT_CODE=200 run_checker >/dev/null 2>&1
+RC=$?
+[ "$RC" -eq 3 ] \
+	&& ok "future-epoch: still exit 3" \
+	|| bad "future-epoch: expected exit 3, got $RC"
+[ "$(alerts | wc -l | tr -d ' ')" -eq 1 ] \
+	&& ok "future-epoch: a corrupted future window_started_epoch fails OPEN (alerts immediately) instead of suppressing forever" \
+	|| bad "future-epoch: expected 1 alert (fail-open), got $(alerts | wc -l | tr -d ' ') (alerts: $(alerts))"
+teardown
+
+# ---- case 17 (D3 hardening): a non-numeric ANCHOR_PUBLISH_HEALTH_MISMATCH_SUPPRESS_SEC
+# must fail toward alerting, not toward suppression. Without validation, the
+# arithmetic comparison `[ N -ge "garbage" ]` errors (non-zero exit, "false"
+# in the enclosing `if`), which falls through to the suppress branch — i.e.
+# a misconfigured env var would silently swallow every future alert for this
+# signature. Must instead bypass the window entirely and alert immediately.
+setup
+SRC_BODY_FILE="$BASE/src.json"; RCPT_BODY_FILE="$BASE/rcpt.json"
+write_source  "$SRC_BODY_FILE"  "$ROOT_STALE"
+write_receipt "$RCPT_BODY_FILE" "$ROOT_MATCH"
+mkdir -p "$(dirname "$MISMATCH_STATE")"
+NOW_EPOCH_C17=$(date -u +%s)
+cat > "$MISMATCH_STATE" <<JSON
+{"signature":"${ROOT_STALE}:${ROOT_MATCH}","window_started_epoch":${NOW_EPOCH_C17},"window_started_at":"now","suppress_window_sec":"garbage"}
+JSON
+ANCHOR_PUBLISH_HEALTH_MISMATCH_SUPPRESS_SEC="not-a-number" \
+	SRC_CODE=200 RCPT_CODE=200 run_checker >/dev/null 2>&1
+RC=$?
+[ "$RC" -eq 3 ] \
+	&& ok "bad-suppress-sec: still exit 3" \
+	|| bad "bad-suppress-sec: expected exit 3, got $RC"
+[ "$(alerts | wc -l | tr -d ' ')" -eq 1 ] \
+	&& ok "bad-suppress-sec: non-numeric suppress-window env fails OPEN (alerts immediately) instead of silently suppressing" \
+	|| bad "bad-suppress-sec: expected 1 alert (fail-open), got $(alerts | wc -l | tr -d ' ') (alerts: $(alerts))"
 teardown
 
 # ---- case 7: dead auto-recover removed (no live push-to-web-host invocation) --

@@ -49,8 +49,13 @@ host `HEAD` to `origin/main` FF-only:
    rules); this is the one condition the script treats as a hard stop
    rather than something to fix automatically.
 4. If `behind == 0`: already in sync, log, exit 0.
-5. Otherwise: `git checkout -- public/` — unconditionally discard the
-   deploy cache-bust dirt (see §3 for why this is safe).
+5. Otherwise: `git checkout -- public/` — discard the deploy cache-bust
+   dirt (see §3 for why this is safe), with ONE carve-out (added 2026-08,
+   plan A4): `public/api/anchor-source.json` is checked first and, if its
+   worktree content differs from `HEAD` (real host-authored dirt, not
+   routine cache-bust noise), is durably preserved to
+   `.anchor-source-preserve/` — outside `public/` entirely — BEFORE this
+   discard runs. See "anchor-source.json protection" below.
 6. **Self-heal** (`self_heal_lossless_dirt`, added 2026-07-13): absorb any
    *other* working-tree dirt that is byte-identical to `origin/main` — see
    "Self-heal" below.
@@ -63,9 +68,57 @@ host `HEAD` to `origin/main` FF-only:
 
 It never runs `git reset --hard`, `git merge`, or discards content that
 differs from `origin/main`, and it never invokes any broadcast-capable
-command. Discarding `public/` (step 5) is unconditional; discarding
+command. Discarding `public/` (step 5) is unconditional EXCEPT for the
+`public/api/anchor-source.json` carve-out described below; discarding
 anything else (step 6) is conditional on byte-for-byte equality — see
 below.
+
+#### anchor-source.json protection (added 2026-08, plan A4)
+
+`public/api/anchor-source.json` is git-tracked and git-deploy served
+(`docs/DEPLOY_OWNERSHIP_MATRIX.md`), but it is AUTHORED on this very host
+by `scripts/gen-anchor-source.sh`; the operator's Mac transfers it to Git
+via `scripts/operator-local/commit-anchor-source.sh`, a step that can lag
+the host composing it. Step 5's blanket discard would otherwise silently
+throw away that freshly-composed, not-yet-committed content.
+
+Before step 5 runs, this one path is checked: if its worktree content is
+byte-identical to `HEAD`, nothing changes (ordinary discard, zero
+information lost). If it differs, TWO copies are made, not one:
+
+1. A **durable** copy at
+   `.anchor-source-preserve/anchor-source.json.host-<UTC timestamp>` — a
+   dot-prefixed directory at the repo root, outside `public/` entirely
+   and untracked. This is written FIRST, before anything else, because
+   deploy.yml's own **"Rsync public/ to VPS"** step (see "Deploy-time
+   invocation" below) runs moments after this script exits, with
+   `--delete`, and `public/api/anchor-source.json` is deliberately NOT in
+   `deploy/feed-excludes.txt` (git-SoT must keep flowing runner→origin).
+   Anything left only inside `public/` — an in-place restore, or a
+   `.host-<ts>` sibling stash — would be destroyed by that very rsync.
+   This durable copy is never auto-deleted, and is what every alert names
+   as the recoverable location (`commit-anchor-source.sh
+   --input-file=<path>` can transfer it directly).
+2. A disposable in-place mechanism (kept alongside the durable copy, not
+   instead of it, because it still helps on the cron path where no rsync
+   follows): the content is restored onto the canonical path once the FF
+   pull's effect on this exact path is known — if the pull didn't touch
+   it, restored as-is (still pending); if the pull DID touch it and the
+   incoming bytes match (a `commit-anchor-source.sh` commit arrived via
+   origin), self-healed with no further action; if the incoming bytes
+   differ, origin wins on the canonical path and the host dirt is
+   additionally copied to an in-place `.host-<ts>` sibling for
+   convenience.
+
+Severity is decided at resolution, not capture (project no-false-urgency
+rule): capture only logs; the self-heal outcome (the intended
+compose→commit→deploy happy path) alerts at `default` priority so it
+never pages high every cycle, while a still-pending or diverged outcome
+alerts `high` naming the durable path. See
+`scripts/advance-host-checkout.sh`'s header comment and
+`tests/host-advance/test-advance-host-checkout.sh` for the exact mechanics
+and a test that proves the durable copy survives a simulated
+`public/`-only `rsync --delete`.
 
 #### Self-heal: absorbing lossless rsync-clobber dirt
 
@@ -306,4 +359,9 @@ normal `main` checkout).
   the design spec this doc summarizes for operational use.
 - [`docs/DEPLOY_OWNERSHIP_MATRIX.md`](DEPLOY_OWNERSHIP_MATRIX.md) — why the
   host's `public/` copy is never the canonical source, which is the fact
-  that makes §3's discard safe.
+  that makes §3's discard safe; also documents the three classes of
+  working-tree dirt that can appear on the host, including the
+  anchor-source.json carve-out.
+- `scripts/operator-local/commit-anchor-source.sh` — the Mac-side
+  host→git transfer path for `public/api/anchor-source.json` that the
+  anchor-source.json carve-out (§2①) exists to give time to run.

@@ -30,10 +30,22 @@
 #   --testnet-tx-id=<64hex>       tx_id of a successful testnet broadcast of the
 #                                 identical shape. Wrapper resolves it against
 #                                 the testnet Hyperion endpoint and refuses if
-#                                 it cannot be found.
-#   --dry-run-log=<log-file>      Path to a prior `proton transaction:push
-#                                 --dry-run` log for this exact shape. Wrapper
-#                                 refuses if the file is missing or empty.
+#                                 it cannot be found. As of the 2026-08 shape
+#                                 hardening (see below), the resolved evidence
+#                                 tx's actions and (for anchor-shaped tx) memo
+#                                 prefix must ALSO match the outgoing --tx=.
+#   --dry-run-log=<log-file>      Path to a prior `sign-anchor-event.sh
+#                                 --dry-run` (or equivalent) log for this
+#                                 exact shape. Wrapper refuses if the file is
+#                                 missing or empty. (2026-08 hardening) IF the
+#                                 outgoing --tx= is anchor-shaped, it must
+#                                 ALSO be a JSON object whose recorded
+#                                 memo_prefix (and target_chain, if present)
+#                                 match the outgoing tx. Non-anchor shapes
+#                                 (e.g. updateauth key rotation) keep ONLY
+#                                 the exists/non-empty check above — their
+#                                 dry-run material is plain CLI text, not
+#                                 JSON.
 #
 # Optional:
 #   --operator-token=<file>       Path to authorization token file.
@@ -71,6 +83,65 @@
 #       high-risk direction this hardening exists to close.
 #   scripts/run-testnet-rehearsal.sh already implements the new ritual as a
 #   reference — it composes the tx first, then binds the token to it.
+#
+# ---- Gate 1 / Gate 4 shape binding (2026-08, pre cycle-4 hardening) ----
+#   Audit finding: gate 1 previously only checked that --testnet-tx-id was
+#   64-hex AND resolvable on testnet Hyperion — it never compared the
+#   resolved evidence tx's CONTENT against the outgoing mainnet --tx=. A
+#   testnet tx from an unrelated cycle (e.g. cycle-2 memo prefix fya1c2)
+#   could therefore authorize a cycle-4 mainnet anchor broadcast. Likewise
+#   gate 4 only checked the --dry-run-log file was non-empty — a stale log
+#   from a different shape or a month-old cycle would pass trivially.
+#
+#   Gate 1 now ALSO requires, after successful resolution:
+#     - the resolved testnet evidence tx must yield a non-empty action list
+#       from AT LEAST ONE of three sources, tried in this priority order:
+#       `.traces[].act` (the REAL v1 `get_transaction` shape — one trace
+#       per notified account), `.actions[].act` (defensive fallback, in
+#       case a future endpoint/proxy normalizes this way), `.trx.trx.actions[]`
+#       (raw/unpacked fallback, rare). If all three are empty (or the
+#       response fails to parse), gate 1 REFUSES — "no source matched" is
+#       never treated as an empty, vacuously-passing shape.
+#     - every action in the OUTGOING --tx= must have a JSON-OBJECT `.data`
+#         field. A non-object `.data` (e.g. a hex-serialized action) REFUSES
+#         rather than silently disabling the memo-prefix check (b) below.
+#     (a) the {account,name} action-set of the resolved testnet evidence tx
+#         is IDENTICAL to the {account,name} action-set of the outgoing
+#         --tx=. This applies to every mainnet broadcast shape, anchor or
+#         not (e.g. updateauth key rotation).
+#     (b) IF the outgoing --tx= is anchor-shaped (>=1 action memo matching
+#         ^fya[0-9]+c[0-9]+), the memo-prefix SET derived from the testnet
+#         evidence tx's memos must be exactly equal to the memo-prefix set
+#         derived from the outgoing tx's memos (normally both singleton
+#         sets, e.g. {"fya1c4"}). A cycle-2 evidence tx (prefix fya1c2)
+#         against a cycle-4 outgoing tx (prefix fya1c4) now REFUSES.
+#         Non-anchor shapes (no memo matching the pattern) are exempt from
+#         this sub-check — (a) alone still applies, so the existing
+#         updateauth-based key-rotation rehearsal flow is unaffected.
+#     Mismatch refuses (exit 3) with both the expected and actual shapes
+#     printed to stderr. A jq parse/runtime failure while deriving any of
+#     the above also refuses (exit 3), fail-closed — never silently treated
+#     as an empty/non-matching set.
+#
+#   Gate 4 now ALSO requires, but ONLY when the outgoing --tx= is
+#   anchor-shaped (the SAME anchor-shape test as gate 1(b) above — a
+#   non-anchor shape, e.g. updateauth key rotation, keeps ONLY the
+#   pre-existing exists/non-empty check and nothing more, since that
+#   flow's dry-run material is plain `proton transaction:push --dry-run`
+#   CLI text, not JSON):
+#     (a) --dry-run-log content must parse as a JSON OBJECT
+#         (`jq -e 'type == "object"'` — a bare scalar or array, e.g. `42`
+#         or `[]`, does NOT satisfy this).
+#     (b) the log's top-level `.memo_prefix` field (the field name
+#         `sign-anchor-event.sh --dry-run` actually emits) MUST be present
+#         and match the outgoing tx's memo prefix exactly. Missing or
+#         mismatched refuses.
+#     (c) IF the log has a top-level `.target_chain` field, it must match
+#         --chain= (aliases normalized the same way as gate 3). Absent is
+#         allowed (older/foreign logs may not carry it) — present-and-wrong
+#         refuses.
+#   These reuse the SAME anchor-shape/prefix derivation as gate 1 above, so
+#   the two gates cannot disagree about what "the outgoing shape" is.
 #
 # Environment overrides:
 #   FYD_MAINNET_CHAIN_ID  — expected chain_id for mainnet-a (gate 3 identity
@@ -121,7 +192,7 @@ AUDIT_LOG_PRIMARY="${FYD_BROADCAST_AUDIT_LOG:-/var/log/fyd-broadcast-audit.log}"
 _AUDIT_LOG_LOGIN_HOME="$(fyd_login_home || true)"
 AUDIT_LOG_FALLBACK="${_AUDIT_LOG_LOGIN_HOME:-/tmp}/.fyd-broadcast-audit.log"
 
-usage() { sed -n '2,82p' "$0" | sed 's/^# \?//'; }
+usage() { sed -n '2,168p' "$0" | sed 's/^# \?//'; }
 
 # ---- arg parse ----
 for arg in "$@"; do
@@ -202,7 +273,120 @@ if [ "$IS_MAINNET" = "1" ]; then
 		exit 3
 	fi
 
-	# Gate 4: dry-run log must exist and be non-empty.
+	# ---- Gate 1 shape binding (2026-08 hardening, rev 2) ----
+	# Resolution above only proves A testnet tx with this id exists — not
+	# that its shape matches the outgoing mainnet --tx=. Without this, a
+	# testnet evidence tx from an unrelated cycle (e.g. cycle-2 memo
+	# prefix fya1c2) could authorize a cycle-4 mainnet anchor broadcast.
+	# See the "Gate 1 / Gate 4 shape binding" usage-header section above.
+	#
+	# rev 2 fix: the v1 EOSIO history-plugin `get_transaction` endpoint
+	# this wrapper actually calls (above) returns actions under
+	# `.traces[].act` — ONE trace per notified account (e.g. a single
+	# eosio.token::transfer produces 3 duplicate traces: sender, receiver,
+	# RAM/ram-notify — `unique` below collapses these back down). It does
+	# NOT return a top-level `.actions[]` (that is the Hyperion v2 shape, a
+	# different endpoint this wrapper does not call) and `.trx.trx.actions[]`
+	# is the packed representation, normally `[]` on a public endpoint.
+	# Verified directly against the real testnet endpoint for tx
+	# 070a845f... (the cycle-2 rehearsal tx) while fixing this. Try, in
+	# priority order: .traces[].act, then .actions[].act (defensive, in
+	# case of a future endpoint/proxy that normalizes this way), then
+	# .trx.trx.actions[] (raw unpacked, rare) — and REFUSE if none of the
+	# three yields a non-empty result, rather than silently treating "no
+	# action source matched" as an empty (and therefore vacuously
+	# passing) shape.
+	# shellcheck disable=SC2016  # $t/$a/$r below are jq `as $var` bindings
+	# inside a single-quoted jq PROGRAM, not shell variables — must NOT expand.
+	TESTNET_ACTIONS_JQ='
+		( [.traces[]?           | {account: .act.account, name: .act.name, memo: (.act.data.memo? // null)}] ) as $t
+		| ( [.actions[]?         | {account: .act.account, name: .act.name, memo: (.act.data.memo? // null)}] ) as $a
+		| ( [.trx.trx.actions[]? | {account: .account,     name: .name,     memo: (.data.memo? // null)}]     ) as $r
+		| ( if   ($t|length) > 0 then $t
+		    elif ($a|length) > 0 then $a
+		    else $r
+		    end )
+		| unique
+	'
+	if ! TESTNET_ACTIONS="$(printf '%s' "$RESOLVE_JSON" | jq -c "$TESTNET_ACTIONS_JQ" 2>/dev/null)"; then
+		echo "ERROR (gate 1): failed to parse the resolved testnet evidence tx ${TESTNET_TX_ID} (jq error) — refusing, fail-closed" >&2
+		exit 3
+	fi
+	if [ -z "$TESTNET_ACTIONS" ] || [ "$TESTNET_ACTIONS" = "[]" ] || [ "$TESTNET_ACTIONS" = "null" ]; then
+		echo "ERROR (gate 1): could not extract any action from the resolved testnet evidence tx ${TESTNET_TX_ID} (checked .traces[], .actions[], .trx.trx.actions[]) — refusing, fail-closed" >&2
+		exit 3
+	fi
+
+	# (I2) the sanctioned compose path (sign-anchor-event.sh) always emits
+	# each action's .data as a JSON object. A non-object .data (e.g. a
+	# hex-serialized action) cannot be safely introspected for a memo below
+	# — refuse rather than let the anchor-shape check silently disable
+	# itself on such a tx.
+	if ! jq -e '[.actions[] | (.data | type) == "object"] | all' "$TX_JSON_FILE" >/dev/null 2>&1; then
+		echo "ERROR (gate 1): outgoing tx has a non-object .data field on at least one action — cannot verify shape, refusing" >&2
+		exit 3
+	fi
+
+	# (a) action-set match: the {account,name} set of the resolved
+	# testnet evidence tx must be IDENTICAL to the outgoing tx's set.
+	# Applies to every mainnet shape (anchor or not, e.g. updateauth).
+	if ! OUTGOING_ACTION_SET="$(jq -c '[.actions[] | {account: .account, name: .name}] | unique' "$TX_JSON_FILE" 2>/dev/null)"; then
+		echo "ERROR (gate 1): failed to parse the outgoing tx action set (jq error) — refusing, fail-closed" >&2
+		exit 3
+	fi
+	if [ -z "$OUTGOING_ACTION_SET" ] || [ "$OUTGOING_ACTION_SET" = "[]" ] || [ "$OUTGOING_ACTION_SET" = "null" ]; then
+		echo "ERROR (gate 1): outgoing tx action set is empty — refusing, fail-closed" >&2
+		exit 3
+	fi
+	if ! TESTNET_ACTION_SET="$(printf '%s' "$TESTNET_ACTIONS" | jq -c '[.[] | {account, name}] | unique' 2>/dev/null)"; then
+		echo "ERROR (gate 1): failed to derive the testnet evidence action set (jq error) — refusing, fail-closed" >&2
+		exit 3
+	fi
+	if [ "$TESTNET_ACTION_SET" != "$OUTGOING_ACTION_SET" ]; then
+		echo "ERROR (gate 1): testnet evidence tx action shape does not match the outgoing mainnet tx — refusing" >&2
+		echo "                expected (outgoing mainnet --tx=) action set: $OUTGOING_ACTION_SET" >&2
+		echo "                actual (testnet evidence ${TESTNET_TX_ID}) action set:   $TESTNET_ACTION_SET" >&2
+		exit 3
+	fi
+
+	# (b) anchor memo-prefix set match: only applies when the outgoing tx
+	# is anchor-shaped (>=1 memo matching ^fya<schema>c<cycle>). Non-anchor
+	# shapes (e.g. updateauth key rotation — no such memo) are exempt from
+	# this sub-check; (a) above is already the whole gate-1 shape
+	# requirement for them, per the brief's rotation carve-out. An empty
+	# "[]" result here is legitimate DATA (no anchor-shaped memo present),
+	# not a failure — only a nonzero jq exit (parse/runtime error) refuses.
+	if ! OUTGOING_ANCHOR_PREFIXES="$(jq -c '[.actions[] | (.data.memo? // empty) | select(test("^fya[0-9]+c[0-9]+")) | capture("^(?<p>fya[0-9]+c[0-9]+)").p] | unique' "$TX_JSON_FILE" 2>/dev/null)"; then
+		echo "ERROR (gate 1): failed to derive the outgoing tx memo-prefix set (jq error) — refusing, fail-closed" >&2
+		exit 3
+	fi
+	if [ "$OUTGOING_ANCHOR_PREFIXES" != "[]" ] && [ -n "$OUTGOING_ANCHOR_PREFIXES" ]; then
+		if ! TESTNET_ANCHOR_PREFIXES="$(printf '%s' "$TESTNET_ACTIONS" | jq -c '[.[] | (.memo? // empty) | select(test("^fya[0-9]+c[0-9]+")) | capture("^(?<p>fya[0-9]+c[0-9]+)").p] | unique' 2>/dev/null)"; then
+			echo "ERROR (gate 1): failed to derive the testnet evidence memo-prefix set (jq error) — refusing, fail-closed" >&2
+			exit 3
+		fi
+		if [ "$TESTNET_ANCHOR_PREFIXES" != "$OUTGOING_ANCHOR_PREFIXES" ]; then
+			echo "ERROR (gate 1): testnet evidence memo-prefix set does not match the outgoing mainnet anchor tx — refusing" >&2
+			echo "                expected (outgoing mainnet --tx=) memo prefix set: $OUTGOING_ANCHOR_PREFIXES" >&2
+			echo "                actual (testnet evidence ${TESTNET_TX_ID}) memo prefix set:   $TESTNET_ANCHOR_PREFIXES" >&2
+			exit 3
+		fi
+	fi
+
+	# Gate 4: dry-run log must exist and be non-empty (unconditional, every
+	# mainnet shape). For ANCHOR-SHAPED outgoing tx only (2026-08
+	# hardening, scoped per the rotation-flow carve-out below), it must
+	# ALSO be a JSON object with a matching memo_prefix and (if present) a
+	# matching target_chain — see the usage-header section above. Reuses
+	# $OUTGOING_ANCHOR_PREFIXES computed by gate 1 just above — both gates
+	# derive "the outgoing shape" identically, by construction.
+	#
+	# Non-anchor shapes (e.g. updateauth key rotation) keep ONLY this
+	# pre-existing non-empty-file check: their dry-run material comes from
+	# `proton transaction:push --dry-run` directly (see
+	# docs/ANCHOR_ACCOUNT_KEY_ROTATION.md, Phase 2 step 1), which is plain
+	# CLI text, not the JSON `sign-anchor-event.sh --dry-run` emits —
+	# requiring JSON there would break that flow.
 	if [ -z "$DRY_RUN_LOG" ]; then
 		echo "ERROR (gate 4): mainnet requires --dry-run-log=<file> pointing to a prior --dry-run output for this shape" >&2
 		exit 3
@@ -210,6 +394,44 @@ if [ "$IS_MAINNET" = "1" ]; then
 	if [ ! -s "$DRY_RUN_LOG" ]; then
 		echo "ERROR (gate 4): dry-run log missing or empty: $DRY_RUN_LOG" >&2
 		exit 3
+	fi
+	if [ "$OUTGOING_ANCHOR_PREFIXES" != "[]" ]; then
+		# (a) must be a JSON OBJECT (M2 — plain `jq -e '.'` would also
+		# accept a bare scalar/array, e.g. `42` or `[]`, as "valid JSON").
+		if ! jq -e 'type == "object"' "$DRY_RUN_LOG" >/dev/null 2>&1; then
+			echo "ERROR (gate 4): anchor-shaped outgoing tx requires a JSON-object dry-run log: $DRY_RUN_LOG" >&2
+			exit 3
+		fi
+		# (b) the log's recorded memo_prefix (the field name
+		# `sign-anchor-event.sh --dry-run` actually emits) must be present
+		# and match the outgoing prefix set exactly.
+		LOG_MEMO_PREFIX="$(jq -r '.memo_prefix // empty' "$DRY_RUN_LOG" 2>/dev/null)"
+		if [ -z "$LOG_MEMO_PREFIX" ]; then
+			echo "ERROR (gate 4): outgoing tx is anchor-shaped but dry-run log has no memo_prefix record: $DRY_RUN_LOG" >&2
+			exit 3
+		fi
+		LOG_MEMO_PREFIX_SET="$(jq -cn --arg p "$LOG_MEMO_PREFIX" '[$p]')"
+		if [ "$LOG_MEMO_PREFIX_SET" != "$OUTGOING_ANCHOR_PREFIXES" ]; then
+			echo "ERROR (gate 4): dry-run log memo_prefix does not match the outgoing mainnet tx — refusing" >&2
+			echo "                expected (outgoing mainnet --tx=) memo prefix set: $OUTGOING_ANCHOR_PREFIXES" >&2
+			echo "                actual (dry-run log ${DRY_RUN_LOG}) memo_prefix:       $LOG_MEMO_PREFIX_SET" >&2
+			exit 3
+		fi
+		# (c) if the log records a target chain, it must match --chain=
+		# (same alias normalization as gate 3's $PROTON_CHAIN). Absent is
+		# allowed.
+		LOG_TARGET_CHAIN="$(jq -r '.target_chain // empty' "$DRY_RUN_LOG" 2>/dev/null)"
+		if [ -n "$LOG_TARGET_CHAIN" ]; then
+			case "$LOG_TARGET_CHAIN" in
+				testnet-a|proton-test) LOG_TARGET_CHAIN_NORM="proton-test" ;;
+				mainnet-a|proton)      LOG_TARGET_CHAIN_NORM="proton" ;;
+				*)                     LOG_TARGET_CHAIN_NORM="unrecognized:${LOG_TARGET_CHAIN}" ;;
+			esac
+			if [ "$LOG_TARGET_CHAIN_NORM" != "$PROTON_CHAIN" ]; then
+				echo "ERROR (gate 4): dry-run log target_chain ('$LOG_TARGET_CHAIN') does not match --chain= ($CHAIN) — refusing" >&2
+				exit 3
+			fi
+		fi
 	fi
 fi
 
