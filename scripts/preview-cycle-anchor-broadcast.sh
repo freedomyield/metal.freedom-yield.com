@@ -7,23 +7,43 @@
 # One-shot operator preview (no automated test by design — it broadcasts
 # nothing and only displays the composed transaction shape for review).
 #
-# Refreshes anchor-source.json (v2 3-branch composition), generates the mainnet
-# --dry-run-log (safe-broadcast gate-4 material), and DISPLAYS the exact
-# transaction shape a subsequent sign-anchor-event.sh broadcast would inscribe.
+# COMPOSES NOTHING. It reads the anchor-source.json bytes that are ALREADY
+# COMMITTED (verified against `git show HEAD:public/api/anchor-source.json`),
+# generates the mainnet `--dry-run-log` (safe-broadcast gate-4 material) from
+# exactly those bytes, and DISPLAYS the transaction shape a subsequent
+# sign-anchor-event.sh broadcast would inscribe.
+#
+# WHY the no-recompose rule (2026-07-31 day-of walkthrough audit, C1/C2/C3):
+# this script used to run `gen-anchor-source.sh` unconditionally before
+# producing the dry-run log. `anchor-source.json`'s artifacts branch hashes
+# live feeds (validator.json / evidence.json) that the 5-minute crons rewrite,
+# so a recompose even MINUTES after the committed one yields a DIFFERENT
+# `dag_root_computed`. The dry-run log (and therefore the tx that gets signed)
+# would then diverge from the committed + published + deployed bytes that the
+# receipt's `url` + `sha256` point at — silently. The whole point of step 6's
+# commit/push/deploy is that the signed value equals the published value, so
+# this script now REFUSES to work from anything but the committed bytes
+# (override: --allow-uncommitted, for deliberate off-cycle experiments only).
 #
 # BROADCASTS NOTHING. Invokes no `proton transaction` / real safe-broadcast
-# call. Touches no operator token. Only (re)writes the regenerable
-# anchor-source.json + a temp dry-run-log — both idempotent. Run as the deploy
-# user on the validator host.
+# call. Touches no operator token. Writes only a temp dry-run-log.
+#
+# WHERE IT RUNS: the operator's MAC, after step 6 of docs/CYCLE_GATE.md's
+# runbook has committed + pushed the day's anchor-source.json. It is NOT run
+# on the validator host: the §3.5 keystore guard below requires
+# HOME=~/.metal-fy-proton, which a `sudo -u deploy …` host invocation cannot
+# satisfy (it refuses with exit 8 against the deploy login home).
 #
 # STAGE 2 (the actual broadcast) is a SEPARATE, operator-authorized step
-# printed at the end of this script's output, and runs on the operator's
+# printed at the end of this script's output, and also runs on the operator's
 # Mac (sign-anchor-event.sh's real broadcast path requires the Mac-only
 # signing host; see the signing-host assertion in sign-anchor-event.sh).
 #
-# Usage:
-#   bash scripts/preview-cycle-anchor-broadcast.sh --testnet-tx-id=<64-hex> \
-#       [--source=public/api/anchor-source.json]
+# Usage (on the operator's Mac, from the repo root):
+#   FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton \
+#     bash scripts/preview-cycle-anchor-broadcast.sh \
+#       --source=public/api/anchor-source.json \
+#       --testnet-tx-id=<64-hex>
 #
 # Args:
 #   --testnet-tx-id=<64hex>  Required. The latest testnet rehearsal tx id for
@@ -32,14 +52,33 @@
 #                            would silently satisfy gate 1's Hyperion lookup
 #                            without proving today's shape.
 #   --source=<path>          Default: public/api/anchor-source.json (relative
-#                            to $REPO). The cycle number displayed below is
-#                            derived from this file's
+#                            to $REPO). Used VERBATIM — never regenerated.
+#                            The cycle number displayed below is derived from
+#                            this file's
 #                            observations_branch.cycle_number_observed — this
 #                            script makes no assumption about which cycle is
 #                            current.
+#   --allow-uncommitted      Skip the committed-bytes guard ([1/5]). Only for
+#                            deliberate off-cycle experiments; a real cycle
+#                            broadcast must sign the committed bytes.
+#   --skip-compose           Accepted no-op, kept so the flag reads as an
+#                            explicit statement of intent. This script never
+#                            composes; there is nothing to skip.
 #
-# Env overrides: REPO, DRYLOG (same meaning as before); TESTNET_TX_ID and
-# SOURCE_PATH are equivalent to the two flags above (flags take precedence).
+# Env overrides: REPO (default: this script's own repo root), DRYLOG (default
+# /tmp/fya-mainnet-dryrun.json), FY_CONFIG_DIR (default /etc/freedom-yield —
+# on the Mac it MUST be set, see [3/5]); TESTNET_TX_ID and SOURCE_PATH are
+# equivalent to the two flags above (flags take precedence).
+#
+# Exit codes:
+#   0  preview complete (nothing broadcast)
+#   1  usage error / unreadable --source
+#   3  broadcast config dir incomplete (xpr-account / anchor-sink missing) —
+#      same meaning as scripts/sign-anchor-event.sh's exit 3
+#   4  the mainnet dry-run log came out empty / unparseable
+#   8  keystore guard failed (§3.5)
+#   9  committed-bytes guard failed — --source does not match
+#      `git show HEAD:public/api/anchor-source.json`
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -48,9 +87,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # ---- §3.5 keystore separation guard (fail-closed) ----
 # Must precede this script's only proton invocation ([4/5] gate3 probe
-# below, `proton chain:info`) — placed here, before anything else runs
-# (including the anchor-source.json regeneration in [1/5]), so a misscoped
-# HOME refuses before any side effect, not just before the proton call.
+# below, `proton chain:info`) — placed here, before anything else runs, so a
+# misscoped HOME refuses before any side effect.
 # Exit 8 = keystore guard failed (§3.5), by convention with bin/safe-broadcast
 # and scripts/sign-anchor-event.sh, which share this same check.
 require_project_keystore_home "$0" || exit 8
@@ -58,10 +96,13 @@ require_project_keystore_home "$0" || exit 8
 # ---- args ----
 SOURCE_PATH="${SOURCE_PATH:-public/api/anchor-source.json}"
 TESTNET_TX_ID="${TESTNET_TX_ID:-}"
+ALLOW_UNCOMMITTED=0
 for arg in "$@"; do
 	case "$arg" in
 		--source=*)        SOURCE_PATH="${arg#*=}" ;;
 		--testnet-tx-id=*) TESTNET_TX_ID="${arg#*=}" ;;
+		--allow-uncommitted) ALLOW_UNCOMMITTED=1 ;;
+		--skip-compose)    : ;;   # documented no-op: this script never composes
 		--help|-h)
 			sed -n '1,/^set -euo pipefail$/p' "$0" >&2
 			exit 0 ;;
@@ -74,24 +115,87 @@ if [ -z "$TESTNET_TX_ID" ]; then
 	exit 1
 fi
 
-REPO="${REPO:-/home/deploy/metal.freedom-yield.com}"
-DRYLOG="${DRYLOG:-/home/deploy/.fya-mainnet-dryrun.json}"
+REPO="${REPO:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
+DRYLOG="${DRYLOG:-/tmp/fya-mainnet-dryrun.json}"
 EXPECTED_CHAIN_ID="384da888112027f0321850a169f737c33e53b388aad48b5adace4bab97f437e0"
 TESTNET_HIST="https://test.proton.eosusa.io/v1/history/get_transaction"
+# The single tracked path whose committed bytes are the signing contract.
+CANONICAL_TRACKED_PATH="public/api/anchor-source.json"
+
+if command -v sha256sum >/dev/null 2>&1; then
+	sha256_pipe() { sha256sum | awk '{print $1}'; }
+else
+	sha256_pipe() { shasum -a 256 | awk '{print $1}'; }
+fi
 
 cd "$REPO"
 
 echo "════════════════════════════════════════════════════════════════"
-echo "  STAGE 1 — mainnet anchor PREVIEW  (NO broadcast)"
+echo "  STAGE 1 — mainnet anchor PREVIEW  (NO broadcast, NO recompose)"
 echo "════════════════════════════════════════════════════════════════"
+echo "  repo:   $REPO"
+echo "  source: $SOURCE_PATH  (used verbatim)"
 
 echo
-echo "── [1/5] gen-anchor-source.sh — compose anchor-source.json ──"
-bash scripts/gen-anchor-source.sh
-echo "  ✓ anchor-source.json composed"
+echo "── [1/5] committed-bytes guard — sign only what is already committed ──"
+if [ ! -r "$SOURCE_PATH" ]; then
+	echo "ERROR: --source not readable: $SOURCE_PATH (relative to $REPO)" >&2
+	exit 1
+fi
+SRC_SHA256="$(sha256_pipe < "$SOURCE_PATH")"
+echo "  source sha256:  $SRC_SHA256"
+
+HEAD_TMP="$(mktemp -t fya-head-anchor-source.XXXXXX)"
+trap 'rm -f "$HEAD_TMP"' EXIT
+GUARD_STATUS=""
+if ! command -v git >/dev/null 2>&1; then
+	GUARD_STATUS="no-git-binary"
+elif ! git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1; then
+	GUARD_STATUS="not-a-git-repo"
+elif ! git -C "$REPO" show "HEAD:${CANONICAL_TRACKED_PATH}" > "$HEAD_TMP" 2>/dev/null; then
+	GUARD_STATUS="no-head-blob"
+elif cmp -s "$SOURCE_PATH" "$HEAD_TMP"; then
+	GUARD_STATUS="match"
+else
+	GUARD_STATUS="mismatch"
+fi
+
+if [ "$GUARD_STATUS" = "match" ]; then
+	echo "  ✓ byte-for-byte identical to git show HEAD:${CANONICAL_TRACKED_PATH}"
+	echo "    (= the bytes step 6 committed/pushed/deployed; the receipt's url+sha256 will agree)"
+else
+	echo "  ✗ committed-bytes guard did NOT pass: ${GUARD_STATUS}" >&2
+	if [ "$GUARD_STATUS" = "mismatch" ]; then
+		SRC_DAG="$(jq -r '.dag_root_computed // "?"' "$SOURCE_PATH" 2>/dev/null || echo '?')"
+		HEAD_DAG="$(jq -r '.dag_root_computed // "?"' "$HEAD_TMP" 2>/dev/null || echo '?')"
+		echo "      --source dag_root_computed: $SRC_DAG" >&2
+		echo "      HEAD     dag_root_computed: $HEAD_DAG" >&2
+		if [ "$SRC_DAG" != "$HEAD_DAG" ]; then
+			echo "      The two DIFFER — signing this file would inscribe a value that the" >&2
+			echo "      published anchor-source.json does not contain (silent receipt" >&2
+			echo "      url/sha256 divergence). anchor-source.json's artifacts branch hashes" >&2
+			echo "      live feeds that the 5-minute crons rewrite, so any recompose after" >&2
+			echo "      the commit produces a different dag_root." >&2
+		else
+			echo "      dag_root matches but the BYTES differ (formatting/timestamp field)." >&2
+			echo "      The receipt binds url+sha256 of the published bytes, so this still" >&2
+			echo "      diverges from what the site serves." >&2
+		fi
+	fi
+	echo "      Fix: commit + push + deploy the intended anchor-source.json first" >&2
+	echo "      (scripts/operator-local/commit-anchor-source.sh --expect-cycle=<N+1>," >&2
+	echo "      = step 6 of docs/CYCLE_GATE.md's runbook), then re-run this script." >&2
+	if [ "$ALLOW_UNCOMMITTED" -eq 1 ]; then
+		echo "      --allow-uncommitted given → continuing anyway. This preview is NOT" >&2
+		echo "      valid material for a real cycle broadcast." >&2
+	else
+		echo "      (--allow-uncommitted overrides this guard for off-cycle experiments only.)" >&2
+		exit 9
+	fi
+fi
 
 echo
-echo "── [2/5] composed values (the value that will actually be inscribed) ──"
+echo "── [2/5] values to be inscribed (read from the file above, not recomposed) ──"
 SCHEMA_VER="$(jq -r '.schema_version' "$SOURCE_PATH")"
 CYC="$(jq -r '.observations_branch.cycle_number_observed' "$SOURCE_PATH")"
 PREFIX="fya${SCHEMA_VER}c${CYC}"
@@ -103,15 +207,44 @@ echo "  ✓ cycle number (derived from $SOURCE_PATH) = $CYC  (schema major = $SC
 
 echo
 echo "── [3/5] sign-anchor-event --chain=mainnet-a --dry-run  (NO broadcast, no token) ──"
+# sign-anchor-event.sh reads xpr-account / anchor-sink / xpr-quantity from
+# ${FY_CONFIG_DIR:-/etc/freedom-yield}. On the Mac that default does not
+# exist, and without FY_CONFIG_DIR the child exits 3 — which, under the old
+# `> "$DRYLOG"` redirect, left a 0-byte dry-run log that only failed much
+# later at gate 4 (2026-07-31 audit, C1). Check up front instead.
+CONFIG_DIR="${FY_CONFIG_DIR:-/etc/freedom-yield}"
+echo "  config dir: $CONFIG_DIR"
+MISSING_CFG=""
+for f in xpr-account anchor-sink; do
+	[ -r "${CONFIG_DIR}/${f}" ] || MISSING_CFG="${MISSING_CFG} ${f}"
+done
+if [ -n "$MISSING_CFG" ]; then
+	echo "ERROR: broadcast config incomplete in ${CONFIG_DIR} — missing:${MISSING_CFG}" >&2
+	echo "       Re-invoke with the mainnet config dir, e.g.:" >&2
+	echo "         FY_CONFIG_DIR=\$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton \\" >&2
+	echo "           bash scripts/preview-cycle-anchor-broadcast.sh --source=${SOURCE_PATH} --testnet-tx-id=${TESTNET_TX_ID}" >&2
+	echo "       (FY_CONFIG_DIR must come BEFORE HOME= on that line — see docs/CYCLE_GATE.md step 7.)" >&2
+	exit 3
+fi
 bash scripts/sign-anchor-event.sh --chain=mainnet-a --anchor-source="$SOURCE_PATH" --dry-run > "$DRYLOG"
-echo "  ✓ dry-run-log written: $DRYLOG ($(wc -c < "$DRYLOG") bytes)"
+if [ ! -s "$DRYLOG" ] || ! jq -e '.tx' "$DRYLOG" >/dev/null 2>&1; then
+	echo "ERROR: dry-run log is empty or has no .tx: $DRYLOG ($(wc -c < "$DRYLOG" | tr -d ' ') bytes)" >&2
+	echo "       Refusing to hand an unusable file to safe-broadcast's gate 4." >&2
+	exit 4
+fi
+echo "  ✓ dry-run-log written: $DRYLOG ($(wc -c < "$DRYLOG" | tr -d ' ') bytes)"
 echo "  ── EXACT memos to be inscribed (expect 4: ${PREFIX}-{id,ob,ar} + ${PREFIX}) ──"
-jq -r '.. | objects | select(has("memo")) | "    memo=\(.memo)"' "$DRYLOG" 2>/dev/null || cat "$DRYLOG"
-MEMOS=$(jq -r '.. | objects | select(has("memo")) | .memo' "$DRYLOG" 2>/dev/null | grep -c '^fya' || true)
+jq -r '.tx.actions[] | "    memo=\(.data.memo // "?")"' "$DRYLOG" 2>/dev/null || cat "$DRYLOG"
+MEMOS=$(jq -r '.tx.actions[] | .data.memo // empty' "$DRYLOG" 2>/dev/null | grep -c '^fya' || true)
 echo "  memo count (expect 4): ${MEMOS:-?}"
+# Read authorization off the ACTION objects (`.tx.actions[]`), not off a
+# recursive `select(has("memo"))` — `memo` lives inside `.data`, so the old
+# recursive form only ever matched the data objects and printed "?@?" for
+# actor@permission. Gate 2 requires the operator to NAME actor+permission, so
+# this line has to show the real values.
 echo "  ── recipients / auth (expect: metalfreedom@anchor → fyhistory, 0.0001 XPR ×4) ──"
-jq -r '.. | objects | select(has("memo")) |
-  "    \(.authorization[0].actor // "?")@\(.authorization[0].permission // "?") → \(.data.to // .to // "?")  \(.data.quantity // .quantity // "?")"' \
+jq -r '.tx.actions[] |
+  "    \(.authorization[0].actor // "?")@\(.authorization[0].permission // "?") → \(.data.to // "?")  \(.data.quantity // "?")"' \
   "$DRYLOG" 2>/dev/null | sort -u || true
 
 echo
@@ -133,24 +266,17 @@ echo "── [5/5] STAGE 2 — broadcast command (review + authorize FIRST; do N
 # composed and displayed above ($DRYLOG's .tx), so authorization cannot drift
 # to a different shape between review and broadcast.
 #
-# This command runs on the OPERATOR'S MAC, not here: sign-anchor-event.sh's
-# real (non-dry-run) broadcast path enforces a signing-host assertion
-# (exit 7 anywhere but the Mac) because the anchor key never leaves the Mac.
-# Copy the dry-run-log content across (or re-derive it there — the anchor
-# source must already be committed/pushed/deployed by
-# scripts/operator-local/commit-anchor-source.sh first, see docs/CYCLE_GATE.md).
-if command -v sha256sum >/dev/null 2>&1; then
-  sha256_pipe() { sha256sum | awk '{print $1}'; }
-else
-  sha256_pipe() { shasum -a 256 | awk '{print $1}'; }
-fi
+# Both blocks below run on the OPERATOR'S MAC — the same machine this script
+# ran on: sign-anchor-event.sh's real (non-dry-run) broadcast path enforces a
+# signing-host assertion (exit 7 anywhere but the Mac) because the anchor key
+# never leaves the Mac. Since [1/5] proved $SOURCE_PATH equals the committed
+# bytes, STAGE 2 signs exactly what this preview displayed.
 TOKEN_TX_SHA256="$(jq -c .tx "$DRYLOG" | sha256_pipe)"
 echo "  token tx_sha256 (binds to THIS exact tx): $TOKEN_TX_SHA256"
 cat <<CMD
     printf '{"chain":"mainnet-a","tx_sha256":"%s"}' "$TOKEN_TX_SHA256" > /tmp/fyd-broadcast-token
                                              # gate-2/2b (R16), valid 5 min (300s TTL) from now.
                                              # chain+tx-bound; a bare touch is REFUSED for mainnet.
-                                             # Run the block below on the operator's MAC:
     HOME=~/.metal-fy-proton proton key:unlock
     FY_CONFIG_DIR=\$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton \\
       bash scripts/sign-anchor-event.sh \\
@@ -162,4 +288,4 @@ cat <<CMD
 CMD
 
 echo
-echo "════ STAGE 1 complete. NOTHING was broadcast. Paste this whole output back. ════"
+echo "════ STAGE 1 complete. NOTHING was broadcast, NOTHING was recomposed. ════"
