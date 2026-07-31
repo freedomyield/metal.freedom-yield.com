@@ -24,6 +24,12 @@
 #      jsonschema module absent) — fail-closed rather than silently skip
 #      validation. Provision one: `npm i -g ajv-cli ajv-formats` or
 #      `pip3 install jsonschema` on the host that runs this script.
+#   9  FY_EXPECT_CYCLE ordering guard: cycle-history.jsonl's CLOSED_COUNT
+#      does not match the just-closed cycle the caller declared. NOTE: this
+#      is a DIFFERENT code than gen-identity.sh's analogous ordering guard,
+#      which uses exit 7 there — that code was already taken here (see exit
+#      7 above, "atomic write failed"). One code, one meaning within this
+#      script; do not conflate the two scripts' exit-7/9 by number alone.
 
 set -euo pipefail
 
@@ -268,6 +274,13 @@ IDENTITY_BRANCH="$(jq -n \
 # prevent). Set FY_EXPECT_CYCLE=<the cycle that should already be closed> to
 # make "the cycle record is already published" a machine-checked
 # precondition instead of operator vigilance.
+#
+# Exit code note: this guard exits 9, NOT 7. gen-identity.sh's analogous
+# guard uses exit 7 there, but exit 7 already means "atomic write failed"
+# in THIS script's own exit-code table (see header) — one code, one
+# meaning within a single script wins over verbatim parity between the two
+# scripts' guards, so operators should not read "exit 7" and "exit 9" here
+# as the same condition just because gen-identity.sh's guard is 7.
 CYCLE_HISTORY_TMP="$(mktemp)"
 FETCH_API_FILE_SOURCE=""
 if fetch_api_file "cycle-history.jsonl" "$CYCLE_HISTORY_TMP" 2>/dev/null; then
@@ -289,7 +302,8 @@ if [ -n "${FY_EXPECT_CYCLE:-}" ]; then
 		echo "ERROR: FY_EXPECT_CYCLE=${FY_EXPECT_CYCLE} but cycle-history.jsonl's CLOSED_COUNT is ${CLOSED_COUNT} (source: ${CYCLE_HISTORY_SOURCE})." >&2
 		echo "       Composing now would derive CYCLE_NUMBER=$((CLOSED_COUNT + 1)), not $((FY_EXPECT_CYCLE + 1)) — the just-closed cycle is not on the published ledger yet, so the memo prefix would not advance (or would re-inscribe one already used)." >&2
 		echo "       Record + publish cycle ${FY_EXPECT_CYCLE} first (uptime-history.sh -> gen-cycle-history.sh -> git-deploy publish), confirm CDN propagation (curl ${API_BASE_URL}/cycle-history.jsonl), then re-run." >&2
-		exit 7
+		echo "       (exit 9, not 7: gen-identity.sh's analogous ordering guard uses exit 7, but that code already means \"atomic write failed\" in this script — see the header's exit-code table.)" >&2
+		exit 9
 	fi
 	echo "  ✓ ordering guard: cycle-history CLOSED_COUNT is fresh to expected cycle ${FY_EXPECT_CYCLE}" >&2
 else

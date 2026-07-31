@@ -13,8 +13,9 @@
 # tests/test-gen-identity-ordering-guard.sh, the model for this suite);
 # gen-anchor-source.sh did not, until this change.
 #
-# Guard contract (mirrors gen-identity.sh's idiom + exit code):
-#   - FY_EXPECT_CYCLE set   + CLOSED_COUNT mismatches it -> exit 7, message
+# Guard contract (mirrors gen-identity.sh's MESSAGE idiom, but NOT its exit
+# code — see below):
+#   - FY_EXPECT_CYCLE set   + CLOSED_COUNT mismatches it -> exit 9, message
 #     names expected/actual/source/remediation.
 #   - FY_EXPECT_CYCLE set   + CLOSED_COUNT matches it     -> guard passes,
 #     script continues (past the guard; this suite does not need the run to
@@ -26,6 +27,12 @@
 #     script's own repo-local mirror, and $CYCLE_HISTORY_JSONL)  -> treated
 #     as CLOSED_COUNT=0 (pre-genesis), guard still evaluates against that.
 #
+# Exit code 9, not 7: gen-identity.sh's analogous ordering guard uses exit 7,
+# but gen-anchor-source.sh's OWN exit-code table already assigns 7 to "atomic
+# write failed" (see the script's header). One code, one meaning within a
+# single script wins over verbatim parity between the two scripts' guards,
+# so this suite asserts exit 9, deliberately NOT reusing gen-identity.sh's 7.
+#
 # The guard is placed BEFORE the P-chain RPC call in gen-anchor-source.sh
 # specifically so it is reachable — and testable — without stubbing a live
 # metalgo node: this suite only fixtures the pubkey URL, identity-history
@@ -36,7 +43,7 @@
 #
 # CHAIN: none. gen-anchor-source.sh performs no broadcast of its own (it
 #        only composes a JSON artifact) and the guard cases in this suite
-#        exit 7 (or continue toward the unstubbed RPC call, which fails
+#        exit 9 (or continue toward the unstubbed RPC call, which fails
 #        closed at exit 4) strictly before any anchor-source.json write.
 # PRIME_DIRECTIVE: TESTNET-FIRST — safe. No broadcast pathway is exercised.
 #         All curl calls are routed to a local stub; zero network I/O.
@@ -176,9 +183,9 @@ run_gas() {
 	env "${envp[@]}" bash "$SCRIPT" --dry-run
 }
 
-# ---- Case 1: CLOSED_COUNT=1 (public URL) vs FY_EXPECT_CYCLE=2 -> exit 7 ----
+# ---- Case 1: CLOSED_COUNT=1 (public URL) vs FY_EXPECT_CYCLE=2 -> exit 9 ----
 out="$(run_gas 2 1 2>&1)"; rc=$?
-if [ "$rc" -eq 7 ]; then pass "mismatch: CLOSED_COUNT=1 vs FY_EXPECT_CYCLE=2 -> exit 7"; else fail "Case1: expected exit 7, got $rc"; fi
+if [ "$rc" -eq 9 ]; then pass "mismatch: CLOSED_COUNT=1 vs FY_EXPECT_CYCLE=2 -> exit 9"; else fail "Case1: expected exit 9, got $rc"; fi
 if echo "$out" | grep -q "FY_EXPECT_CYCLE=2 but cycle-history.jsonl's CLOSED_COUNT is 1"; then
 	pass "mismatch: guard message names expected (2) and actual (1) CLOSED_COUNT"
 else
@@ -188,6 +195,11 @@ if echo "$out" | grep -q "source: public URL"; then
 	pass "mismatch: guard message names the public URL as the source"
 else
 	fail "Case1: guard message missing public-URL source; got: $(echo "$out" | tr '\n' '|')"
+fi
+if echo "$out" | grep -q "exit 9, not 7"; then
+	pass "mismatch: guard message disambiguates exit 9 vs gen-identity.sh's exit 7"
+else
+	fail "Case1: guard message missing the exit-9-vs-7 disambiguation note; got: $(echo "$out" | tr '\n' '|')"
 fi
 
 # ---- Case 2: CLOSED_COUNT=2 via LOCAL fallback (public URL unreachable) ----
@@ -204,9 +216,9 @@ else
 	fail "Case2: fresh-guard message missing; got: $(echo "$out" | tr '\n' '|')"
 fi
 if echo "$out" | grep -q "the just-closed cycle is not on the published ledger"; then
-	fail "Case2: control unexpectedly hit the exit-7 mismatch path"
+	fail "Case2: control unexpectedly hit the exit-9 mismatch path"
 else
-	pass "control: no exit-7 mismatch message emitted"
+	pass "control: no exit-9 mismatch message emitted"
 fi
 if echo "$out" | grep -q "local repo fallback"; then
 	pass "control: guard message reports the local-repo-fallback source (fetch_api_file spec requirement)"
@@ -216,10 +228,10 @@ fi
 
 # ---- Case 3: FY_EXPECT_CYCLE unset -> loud warning, guard does not hard-stop
 out="$(run_gas "" 0 2>&1)"; rc=$?
-if [ "$rc" -ne 7 ]; then
-	pass "unset FY_EXPECT_CYCLE: guard itself does not force exit 7"
+if [ "$rc" -ne 9 ]; then
+	pass "unset FY_EXPECT_CYCLE: guard itself does not force exit 9"
 else
-	fail "Case3: guard hard-stopped (exit 7) despite FY_EXPECT_CYCLE being unset"
+	fail "Case3: guard hard-stopped (exit 9) despite FY_EXPECT_CYCLE being unset"
 fi
 if echo "$out" | grep -q "WARNING: ordering guard DISABLED"; then
 	pass "unset FY_EXPECT_CYCLE: loud disabled-guard warning emitted"
@@ -236,11 +248,11 @@ fi
 # Public URL fetch fails (no case_dir fixture), fetch_api_file's own
 # ROOT-hardcoded repo-local mirror is confirmed absent in this worktree (see
 # header), and CYCLE_HISTORY_JSONL points at a nonexistent path too. With
-# FY_EXPECT_CYCLE=1 this must still mismatch (0 != 1) and exit 7, reporting
+# FY_EXPECT_CYCLE=1 this must still mismatch (0 != 1) and exit 9, reporting
 # CLOSED_COUNT=0 and the "no source reachable" wording — not crash or
 # silently treat it as a match.
 out="$(run_gas 1 absent 2>&1)"; rc=$?
-if [ "$rc" -eq 7 ]; then pass "unreachable: no source anywhere -> CLOSED_COUNT=0, mismatches FY_EXPECT_CYCLE=1 -> exit 7"; else fail "Case4: expected exit 7, got $rc"; fi
+if [ "$rc" -eq 9 ]; then pass "unreachable: no source anywhere -> CLOSED_COUNT=0, mismatches FY_EXPECT_CYCLE=1 -> exit 9"; else fail "Case4: expected exit 9, got $rc"; fi
 if echo "$out" | grep -q "CLOSED_COUNT is 0"; then
 	pass "unreachable: guard message reports CLOSED_COUNT=0"
 else

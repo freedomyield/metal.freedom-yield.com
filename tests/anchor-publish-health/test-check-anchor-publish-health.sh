@@ -504,6 +504,57 @@ RC=$?
 	|| bad "window-elapsed: expected 1 alert (window elapsed = re-arm), got $(alerts | wc -l | tr -d ' ') (alerts: $(alerts))"
 teardown
 
+# ---- case 16 (D3 hardening): a FUTURE window_started_epoch must not suppress
+# forever. A corrupted/tampered state file with a future timestamp would make
+# `now_epoch - prev_epoch` negative, which can never reach the (positive)
+# suppress threshold — without the fix's clamp, this signature would be
+# suppressed permanently (fail toward silence). Must instead fail open and
+# alert immediately, exactly as if the epoch were absent/invalid.
+setup
+SRC_BODY_FILE="$BASE/src.json"; RCPT_BODY_FILE="$BASE/rcpt.json"
+write_source  "$SRC_BODY_FILE"  "$ROOT_STALE"
+write_receipt "$RCPT_BODY_FILE" "$ROOT_MATCH"
+mkdir -p "$(dirname "$MISMATCH_STATE")"
+FUTURE_EPOCH=$(( $(date -u +%s) + 999999 ))
+cat > "$MISMATCH_STATE" <<JSON
+{"signature":"${ROOT_STALE}:${ROOT_MATCH}","window_started_epoch":${FUTURE_EPOCH},"window_started_at":"2099-01-01T00:00:00Z","suppress_window_sec":21600}
+JSON
+SRC_CODE=200 RCPT_CODE=200 run_checker >/dev/null 2>&1
+RC=$?
+[ "$RC" -eq 3 ] \
+	&& ok "future-epoch: still exit 3" \
+	|| bad "future-epoch: expected exit 3, got $RC"
+[ "$(alerts | wc -l | tr -d ' ')" -eq 1 ] \
+	&& ok "future-epoch: a corrupted future window_started_epoch fails OPEN (alerts immediately) instead of suppressing forever" \
+	|| bad "future-epoch: expected 1 alert (fail-open), got $(alerts | wc -l | tr -d ' ') (alerts: $(alerts))"
+teardown
+
+# ---- case 17 (D3 hardening): a non-numeric ANCHOR_PUBLISH_HEALTH_MISMATCH_SUPPRESS_SEC
+# must fail toward alerting, not toward suppression. Without validation, the
+# arithmetic comparison `[ N -ge "garbage" ]` errors (non-zero exit, "false"
+# in the enclosing `if`), which falls through to the suppress branch — i.e.
+# a misconfigured env var would silently swallow every future alert for this
+# signature. Must instead bypass the window entirely and alert immediately.
+setup
+SRC_BODY_FILE="$BASE/src.json"; RCPT_BODY_FILE="$BASE/rcpt.json"
+write_source  "$SRC_BODY_FILE"  "$ROOT_STALE"
+write_receipt "$RCPT_BODY_FILE" "$ROOT_MATCH"
+mkdir -p "$(dirname "$MISMATCH_STATE")"
+NOW_EPOCH_C17=$(date -u +%s)
+cat > "$MISMATCH_STATE" <<JSON
+{"signature":"${ROOT_STALE}:${ROOT_MATCH}","window_started_epoch":${NOW_EPOCH_C17},"window_started_at":"now","suppress_window_sec":"garbage"}
+JSON
+ANCHOR_PUBLISH_HEALTH_MISMATCH_SUPPRESS_SEC="not-a-number" \
+	SRC_CODE=200 RCPT_CODE=200 run_checker >/dev/null 2>&1
+RC=$?
+[ "$RC" -eq 3 ] \
+	&& ok "bad-suppress-sec: still exit 3" \
+	|| bad "bad-suppress-sec: expected exit 3, got $RC"
+[ "$(alerts | wc -l | tr -d ' ')" -eq 1 ] \
+	&& ok "bad-suppress-sec: non-numeric suppress-window env fails OPEN (alerts immediately) instead of silently suppressing" \
+	|| bad "bad-suppress-sec: expected 1 alert (fail-open), got $(alerts | wc -l | tr -d ' ') (alerts: $(alerts))"
+teardown
+
 # ---- case 7: dead auto-recover removed (no live push-to-web-host invocation) --
 # The header comment may still NAME push-to-web-host.sh to explain why recovery
 # was removed; what must be gone is any executable (non-comment) call to it.

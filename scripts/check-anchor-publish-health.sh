@@ -71,7 +71,13 @@
 #   later — alerts immediately again. The exit code (3) and the log line are
 #   UNCHANGED on every tick; only the notify.sh call is gated. State-write
 #   failures are logged (WARN) but never escalate the exit code (matches the
-#   existing alert()/notify.sh best-effort contract below).
+#   existing alert()/notify.sh best-effort contract below). Every input that
+#   feeds the dedup decision fails OPEN (toward alerting), never silently
+#   toward suppression: an unreadable/unparseable state file, a corrupted
+#   window_started_epoch (non-numeric OR in the future — the latter would
+#   otherwise make the elapsed-window arithmetic negative and suppress
+#   forever), and a non-numeric $ANCHOR_PUBLISH_HEALTH_MISMATCH_SUPPRESS_SEC
+#   all bypass suppression and alert immediately instead.
 #
 # Exit codes:
 #   0  served AND dag_root_computed matches the anchored root (verbose: heartbeat)
@@ -179,7 +185,16 @@ is_hex64() { [[ "$1" =~ ^[0-9a-f]{64}$ ]]; }
 # (suppress). Alerts whenever there is no prior state, the prior state is
 # unreadable/unparseable (fail-open toward alerting — a dedup bug must never
 # silence a real content-mismatch page), the signature differs from the
-# stored one, or the stored window has elapsed.
+# stored one, the stored window has elapsed, OR either input feeding the
+# window-elapsed arithmetic is untrustworthy:
+#   - $MISMATCH_SUPPRESS_SEC (env-configured) is non-numeric — an invalid
+#     config must not become an accidental "never re-alert" mode.
+#   - the persisted window_started_epoch is not a plain non-negative
+#     integer, OR is in the FUTURE relative to now (a corrupted/tampered
+#     state file) — without this clamp, a future epoch makes
+#     `now_epoch - prev_epoch` negative, which can never reach the
+#     (positive) suppress threshold, so the mismatch would be suppressed
+#     forever (fail toward silence — exactly what this guard must not do).
 mismatch_should_alert() {
 	local sig="$1" now_epoch prev_sig prev_epoch
 	now_epoch="$(date -u +%s)"
@@ -187,9 +202,14 @@ mismatch_should_alert() {
 		printf '1'
 		return 0
 	fi
+	if ! [[ "$MISMATCH_SUPPRESS_SEC" =~ ^[0-9]+$ ]]; then
+		printf '1'
+		return 0
+	fi
 	prev_sig="$(jq -r '.signature // empty' "$MISMATCH_STATE" 2>/dev/null || true)"
 	prev_epoch="$(jq -r '.window_started_epoch // 0' "$MISMATCH_STATE" 2>/dev/null || echo 0)"
 	[[ "$prev_epoch" =~ ^[0-9]+$ ]] || prev_epoch=0
+	[ "$prev_epoch" -le "$now_epoch" ] || prev_epoch=0
 	if [ -z "$prev_sig" ] || [ "$prev_sig" != "$sig" ]; then
 		printf '1'
 		return 0
