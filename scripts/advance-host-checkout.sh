@@ -43,10 +43,38 @@
 #
 # NEVER: `git reset --hard`, `git merge`, discarding anything outside
 # public/ unless byte-identical to origin/main (see self_heal_lossless_dirt
-# — step 6.5), discarding content that differs from origin/main, or
+# — step 6.5), discarding content that differs from origin/main, silently
+# discarding host-authored public/api/anchor-source.json dirt that differs
+# from HEAD (see "anchor-source.json protection" below — step 6.7), or
 # invoking any broadcast-capable command (proton / cleos /
 # bin/safe-broadcast / any RPC push_transaction equivalent) — this script
 # does not touch broadcast machinery at all.
+#
+# anchor-source.json protection (added 2026-08, plan A4): step 6 above
+# (`git checkout -- public/`) is otherwise unconditional, but
+# public/api/anchor-source.json is special-cased before it runs. That file
+# is git-tracked yet AUTHORED on this very host by gen-anchor-source.sh —
+# the operator's Mac transfers it to Git via
+# scripts/operator-local/commit-anchor-source.sh, a step that can lag the
+# host composing it (see docs/ANCHOR_SOURCE.md). Without protection, a
+# deploy or the daily cron landing in that gap would silently discard the
+# freshly-composed, not-yet-committed anchor content along with the
+# routine cache-bust dirt step 6 exists for. So: if this file's worktree
+# content is byte-identical to HEAD, nothing changes (ordinary step-6
+# discard, zero information lost). If it differs, the bytes are preserved
+# BEFORE step 6 runs (protect_anchor_source_pre_discard, alert high) and,
+# once the FF pull (step 7) either lands or fails, resolved
+# (resolve_anchor_source_post_pull): if the pull never touched the path,
+# the preserved dirt is restored on top, still pending its own commit; if
+# the pull DID touch it (the Mac-side commit arrived via origin) and the
+# incoming bytes match the preserved dirt, it self-heals (default alert,
+# nothing lost); if they differ, origin wins on the canonical path but the
+# preserved dirt is stashed to a `.host-<UTC timestamp>` sibling (alert
+# high) rather than discarded. A single EXIT trap
+# (restore_anchor_dirt_on_exit) is the safety net for every OTHER exit
+# path between capture and resolution (discard failure, self-heal
+# failure, FF-pull failure) — it restores the preserved bytes onto the
+# real path so no exit route can silently lose them.
 #
 # Usage:
 #   bash scripts/advance-host-checkout.sh
@@ -63,7 +91,9 @@
 #   1  refused (host ahead of origin) OR public/ discard failed OR
 #      ff-only pull failed (e.g. a non-public tracked file has uncommitted
 #      edits that the incoming diff would clobber — git refuses the merge
-#      rather than lose data, and so do we)
+#      rather than lose data, and so do we) OR anchor-source.json dirt
+#      could not be preserved / stashed (mktemp or cp/mv failure — treated
+#      as loudly as any other data-loss risk in this script)
 #   2  fetch failed, or REPO_DIR is not a git checkout (both transient /
 #      environmental; next tick retries)
 #
@@ -116,6 +146,15 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="${FYD_REPO_DIR:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 NOTIFY="${FYD_NOTIFY:-${SCRIPT_DIR}/notify.sh}"
 
+# anchor-source.json protection state (see header comment). Declared here,
+# ahead of `set -u`-sensitive use, so the EXIT trap below is well-defined
+# from the moment it is registered regardless of which exit path fires.
+ANCHOR_SOURCE_REL="public/api/anchor-source.json"
+ANCHOR_SOURCE_ABS="${REPO_DIR}/${ANCHOR_SOURCE_REL}"
+ANCHOR_DIRT_CAPTURED=0
+ANCHOR_DIRT_FILE=""
+ANCHOR_DIRT_RESOLVED=0
+
 log() { printf '[advance-host-checkout] %s\n' "$*"; }
 
 alert() {
@@ -125,6 +164,129 @@ alert() {
 	else
 		log "WARN: notifier not found at $NOTIFY (alert was: $2 — $3)"
 	fi
+}
+
+# restore_anchor_dirt_on_exit — EXIT-trap safety net for anchor-source.json
+# protection (see header comment / plan A4). If protect_anchor_source_pre_
+# discard captured host dirt but the script exits before
+# resolve_anchor_source_post_pull runs to completion — public/ discard
+# failure, a self_heal_lossless_dirt failure, or an FF-pull failure are all
+# exactly this shape, since none of them reach the pull-succeeded branch
+# that calls resolve_anchor_source_post_pull — this restores the preserved
+# bytes onto the real path so no such exit route can silently lose them.
+# A no-op once ANCHOR_DIRT_RESOLVED=1 (resolve_anchor_source_post_pull sets
+# this as its first act, before it decides the dirt's fate itself) or if no
+# dirt was ever captured (ANCHOR_DIRT_CAPTURED stays 0 whenever the
+# worktree copy was already byte-identical to HEAD, or the path never had
+# any dirt to protect in the first place).
+restore_anchor_dirt_on_exit() {
+	[ "$ANCHOR_DIRT_CAPTURED" -eq 1 ] || return 0
+	[ "$ANCHOR_DIRT_RESOLVED" -eq 1 ] && return 0
+	if [ -f "$ANCHOR_DIRT_FILE" ]; then
+		if cp -p "$ANCHOR_DIRT_FILE" "$ANCHOR_SOURCE_ABS" 2>/dev/null; then
+			log "anchor-source.json: restored preserved host dirt on early exit (safety net)"
+		else
+			log "ERROR: anchor-source.json safety-net restore failed; preserved bytes remain at ${ANCHOR_DIRT_FILE}"
+		fi
+		rm -f "$ANCHOR_DIRT_FILE"
+	fi
+}
+trap restore_anchor_dirt_on_exit EXIT
+
+# protect_anchor_source_pre_discard — special-case public/api/anchor-source.json
+# ahead of the unconditional `git checkout -- public/` a few lines below.
+# That file is git-tracked but AUTHORED on this host by gen-anchor-source.sh
+# (see docs/ANCHOR_SOURCE.md); the operator's Mac transfers it to Git via
+# scripts/operator-local/commit-anchor-source.sh, a step that can lag the
+# host composing it. Without this, the blanket public/ discard would
+# silently throw away freshly-composed, not-yet-committed anchor content
+# along with the routine cache-bust dirt it exists to clear.
+#
+# If the worktree copy is already byte-identical to HEAD, this is a no-op
+# (ANCHOR_DIRT_CAPTURED stays 0) — the ordinary discard a few lines down
+# loses zero information either way. Only a REAL difference from HEAD is
+# captured: snapshotted to a tmp file (so it survives the discard that is
+# about to run) and alerted at high priority. resolve_anchor_source_post_pull
+# below decides its final fate once the FF pull's effect on this exact path
+# is known.
+protect_anchor_source_pre_discard() {
+	[ -f "$ANCHOR_SOURCE_ABS" ] || return 0
+	if git -C "$REPO_DIR" diff --quiet HEAD -- ":(literal)${ANCHOR_SOURCE_REL}" 2>/dev/null; then
+		return 0
+	fi
+	local dirt_file
+	if ! dirt_file="$(mktemp -t fyd-anchor-source-dirt.XXXXXX)"; then
+		log "ERROR: mktemp failed while preserving anchor-source.json dirt"
+		alert high "host-advance: anchor-source.json preserve failed" "mktemp failed while trying to preserve host-authored public/api/anchor-source.json dirt ahead of the public/ discard (behind=${BEHIND}); refusing to risk silent loss — investigate manually."
+		exit 1
+	fi
+	if ! cp -p "$ANCHOR_SOURCE_ABS" "$dirt_file"; then
+		log "ERROR: failed to snapshot anchor-source.json dirt to ${dirt_file}"
+		alert high "host-advance: anchor-source.json preserve failed" "cp failed while trying to preserve host-authored public/api/anchor-source.json dirt ahead of the public/ discard (behind=${BEHIND}); refusing to risk silent loss — investigate manually."
+		rm -f "$dirt_file"
+		exit 1
+	fi
+	ANCHOR_DIRT_FILE="$dirt_file"
+	ANCHOR_DIRT_CAPTURED=1
+	log "anchor-source.json: host-authored dirt differs from HEAD — preserved ahead of public/ discard"
+	alert high "host-authored anchor-source.json pending commit — preserved" "public/api/anchor-source.json has host-composed content that differs from the committed HEAD and has not yet been transferred by commit-anchor-source.sh. Preserved (not discarded) ahead of the public/ working-tree reset (behind=${BEHIND})."
+}
+
+# resolve_anchor_source_post_pull <old_blob_hash> <new_blob_hash> — called
+# only after a successful FF pull, only when protect_anchor_source_pre_
+# discard actually captured dirt above. Decides the preserved dirt's final
+# fate now that the pull's effect on this exact path is known:
+#   - old == new (pull never touched this path): the preserved dirt is
+#     restored on top of the (unchanged) pulled content — still pending
+#     its own commit-anchor-source.sh run, nothing lost.
+#   - old != new (the Mac-side commit-anchor-source.sh commit arrived via
+#     origin) and the incoming bytes match the preserved dirt exactly:
+#     self-heal — the preserved copy is now redundant, discarded, alerted
+#     at default priority (informational, nothing lost).
+#   - old != new and the incoming bytes DIFFER from the preserved dirt:
+#     origin wins on the canonical path (already what the pull just wrote
+#     there) but the preserved dirt is stashed to a `.host-<UTC
+#     timestamp>` sibling rather than discarded, alerted at high priority
+#     with the stash path.
+resolve_anchor_source_post_pull() {
+	[ "$ANCHOR_DIRT_CAPTURED" -eq 1 ] || return 0
+	ANCHOR_DIRT_RESOLVED=1
+	local old_hash="$1" new_hash="$2"
+
+	if [ "$old_hash" = "$new_hash" ]; then
+		cp -p "$ANCHOR_DIRT_FILE" "$ANCHOR_SOURCE_ABS"
+		rm -f "$ANCHOR_DIRT_FILE"
+		log "anchor-source.json: pull left this path untouched — restored preserved host dirt"
+		return 0
+	fi
+
+	if cmp -s "$ANCHOR_DIRT_FILE" "$ANCHOR_SOURCE_ABS"; then
+		rm -f "$ANCHOR_DIRT_FILE"
+		log "anchor-source.json: self-heal — incoming pull content matches preserved host dirt"
+		alert default "host-advance: self-healed anchor-source.json" "public/api/anchor-source.json: the preserved host-authored dirt was byte-identical to the incoming pull (the pending commit-anchor-source.sh commit arrived via origin) — self-healed, nothing lost."
+		return 0
+	fi
+
+	local ts stash_path
+	ts="$(date -u +%Y%m%dT%H%M%SZ)"
+	stash_path="${ANCHOR_SOURCE_ABS}.host-${ts}"
+	if mv "$ANCHOR_DIRT_FILE" "$stash_path"; then
+		log "anchor-source.json: incoming pull diverged from preserved host dirt — stashed host dirt to ${stash_path}"
+		alert high "host-advance: anchor-source.json host dirt stashed" "public/api/anchor-source.json: the incoming pull (a commit-anchor-source.sh commit that arrived via origin) diverged from the preserved host-authored content. Origin content was kept on the canonical path; the diverged host dirt was stashed to ${stash_path} for manual review — nothing was discarded."
+		return 0
+	fi
+
+	# Stash relocation itself failed (rare — mktemp's dir and REPO_DIR can be
+	# different filesystems). Mirrors self_heal_lossless_dirt's own
+	# mutating-op-failure severity: fail loudly rather than let a run that
+	# hit this edge case report a plain, undifferentiated success. The
+	# canonical path is already correct (origin content, written by the
+	# pull itself) and the preserved dirt is deliberately left in place at
+	# ANCHOR_DIRT_FILE (not deleted) so the alert's named path is where an
+	# operator actually finds it.
+	log "ERROR: failed to stash divergent anchor-source.json host dirt to ${stash_path}"
+	alert high "host-advance: anchor-source.json stash failed" "failed to move preserved host dirt to ${stash_path} after the incoming pull diverged from it; the host dirt remains readable at ${ANCHOR_DIRT_FILE} — investigate and relocate manually. The canonical path already holds the correct origin content."
+	return 1
 }
 
 # self_heal_lossless_dirt — absorb working-tree dirt that is byte-identical
@@ -226,6 +388,12 @@ fi
 
 OLD_HEAD="$(git -C "$REPO_DIR" rev-parse --short HEAD)"
 
+# Preserve any host-authored anchor-source.json dirt BEFORE the blanket
+# public/ discard below can silently take it (see header comment /
+# protect_anchor_source_pre_discard). No-op if the file is clean or
+# byte-identical to HEAD.
+protect_anchor_source_pre_discard
+
 # Discard ONLY public/ working-tree dirt, never anything else. This is safe
 # specifically because this host is internal, not the public origin: Caddy
 # here binds 127.0.0.1:${BEHIND_PROXY_PORT:-8085} only (plain HTTP, loopback)
@@ -233,7 +401,10 @@ OLD_HEAD="$(git -C "$REPO_DIR" rev-parse --short HEAD)"
 # Xserver, so nothing user-facing ever reads this host's public/ working
 # tree. Deploy legs stamp cache-bust markers (?v=<sha>) into public/*.html
 # here, which is exactly the dirt that blocks a clean FF pull; the next
-# deploy re-stamps it regardless of what we discard now.
+# deploy re-stamps it regardless of what we discard now. (Any real
+# anchor-source.json dirt was already pulled out of this path's way by
+# protect_anchor_source_pre_discard above, so this unconditional discard
+# cannot lose it — the EXIT trap restores it if the script stops here.)
 if ! git -C "$REPO_DIR" checkout -- public/ 2>/dev/null; then
 	log "ERROR: failed to discard public/ working-tree dirt"
 	alert high "host-advance: public/ discard failed" "git checkout -- public/ failed while preparing an FF-only pull (behind=${BEHIND}); host state left as-is beyond that attempt — investigate manually."
@@ -242,12 +413,28 @@ fi
 
 self_heal_lossless_dirt
 
+# Snapshot this path's blob at (pre-pull) HEAD so resolve_anchor_source_
+# post_pull can tell, after a successful pull, whether the incoming commits
+# touched it at all. Empty string if the path did not exist at HEAD (should
+# not happen in production — anchor-source.json is a required, already-
+# committed artifact — but rev-parse fails safe rather than aborting under
+# `set -e` if it ever did).
+OLD_ANCHOR_HASH="$(git -C "$REPO_DIR" rev-parse "HEAD:${ANCHOR_SOURCE_REL}" 2>/dev/null || echo '')"
+
 # FF-only, never reset/merge. If a tracked file OUTSIDE public/ has
 # uncommitted edits that the incoming diff would overwrite, git itself
 # refuses the merge rather than lose data — we surface that as a loud
 # alert instead of forcing it through.
 if PULL_OUT="$(git -C "$REPO_DIR" pull --ff-only origin main 2>&1)"; then
 	NEW_HEAD="$(git -C "$REPO_DIR" rev-parse --short HEAD)"
+	NEW_ANCHOR_HASH="$(git -C "$REPO_DIR" rev-parse "HEAD:${ANCHOR_SOURCE_REL}" 2>/dev/null || echo '')"
+	if ! resolve_anchor_source_post_pull "$OLD_ANCHOR_HASH" "$NEW_ANCHOR_HASH"; then
+		# Advance itself succeeded (HEAD is current); only the anchor-
+		# source.json stash step failed. Still a loud, non-zero exit — see
+		# resolve_anchor_source_post_pull's own comment for why the
+		# canonical path is nonetheless already correct.
+		exit 1
+	fi
 	log "advanced: behind ${BEHIND} → 0 (${OLD_HEAD}..${NEW_HEAD})"
 	exit 0
 else

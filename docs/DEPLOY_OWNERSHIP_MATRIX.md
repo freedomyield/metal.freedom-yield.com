@@ -41,9 +41,8 @@ so the two targets cannot drift. The exclusion table below pins which
 `public/api/` files each side owns and which the `public/` rsync MUST
 leave alone.
 
-**Two — and only two — classes of working-tree dirt can still appear on
-the validator host**, and `scripts/advance-host-checkout.sh`'s self-heal
-treats them differently by design:
+**Three classes of working-tree dirt can appear on the validator host**,
+and `scripts/advance-host-checkout.sh` treats them differently by design:
 
 1. **Deploy-stamped `public/` cache-bust markers.** Every deploy writes
    `?v=<sha>` into the runner's copy of `public/*.html` before rsyncing
@@ -64,6 +63,22 @@ treats them differently by design:
    script refuses the pull loudly (`alert high`, exit 1) **by design**:
    forcing it through would silently discard operator work that git
    cannot recover.
+3. **Host-authored `public/api/anchor-source.json` dirt (added 2026-08,
+   plan A4).** Unlike the other two, this dirt is neither routine nor a
+   byproduct of another tool writing tracked bytes — it is the validator
+   host's own `gen-anchor-source.sh` composing real anchor content that
+   `scripts/operator-local/commit-anchor-source.sh` has not yet
+   transferred to Git. `public/`'s otherwise-unconditional discard
+   (item 1) special-cases exactly this one path: byte-identical-to-HEAD
+   dirt is discarded same as any cache-bust marker (nothing lost either
+   way), but real dirt is preserved (alert high) ahead of the discard and
+   resolved once the FF pull's effect on that path is known — restored if
+   the pull didn't touch it, self-healed if a `commit-anchor-source.sh`
+   commit arrived via origin with identical bytes, or stashed to a
+   `.host-<UTC timestamp>` sibling (origin wins on the canonical path) if
+   it arrived with different bytes. See `scripts/advance-host-checkout.sh`'s
+   header comment and `tests/host-advance/test-advance-host-checkout.sh`
+   for the exact mechanics.
 
 See [`docs/HOST_CHECKOUT_AUTO_ADVANCE.md`](HOST_CHECKOUT_AUTO_ADVANCE.md)
 §2① "Self-heal" for the exact absorption criteria.

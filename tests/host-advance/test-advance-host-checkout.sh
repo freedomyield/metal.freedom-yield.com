@@ -40,10 +40,15 @@ build_pair() {
 	STUB_LOG="$BASE/notify.log"
 
 	local seed="$BASE/seed"
-	mkdir -p "$seed/scripts" "$seed/public" "$seed/docs"
+	mkdir -p "$seed/scripts" "$seed/public/api" "$seed/docs"
 	echo 'echo hello' > "$seed/scripts/a.sh"
 	echo '<html>' > "$seed/public/index.html"
 	echo '# doc' > "$seed/docs/README.md"
+	# Minimal anchor-source.json seed. advance-host-checkout.sh never parses
+	# this file's JSON — it only ever compares raw bytes — so a schema-valid
+	# shape is unnecessary here; the content only needs to be distinguishable
+	# across cycle numbers for the anchor-source-specific cases below.
+	printf '{"cycle":1,"dag_root_computed":"seed0000"}\n' > "$seed/public/api/anchor-source.json"
 	git -C "$seed" "${GITQ[@]}" init -q -b main
 	git -C "$seed" "${GITQ[@]}" add -A
 	git -C "$seed" "${GITQ[@]}" commit -qm seed
@@ -77,6 +82,22 @@ push_origin_commits() {
 		echo "${prefix} ${i}" >> "$scratch/$file"
 		git -C "$scratch" "${GITQ[@]}" commit -qam "${prefix}-${i}"
 	done
+	git -C "$scratch" push -q origin main
+	rm -rf "$scratch"
+}
+
+# push a single origin-only commit that OVERWRITES public/api/anchor-
+# source.json with exact given bytes (unlike push_origin_commits, which
+# only appends lines) — simulates a Mac-side commit-anchor-source.sh commit
+# landing on origin while the host clone is behind and/or dirty at that
+# same path. Uses printf '%s' (no added trailing newline) so callers can
+# byte-match this against locally-written dirt exactly via cmp.
+push_origin_anchor_source_commit() {
+	local content="$1"
+	local scratch="$BASE/scratch-anchor-$$-$RANDOM"
+	git clone -q "$ORIGIN" "$scratch" 2>/dev/null
+	printf '%s' "$content" > "$scratch/public/api/anchor-source.json"
+	git -C "$scratch" "${GITQ[@]}" commit -qam "anchor-source: mac-side commit"
 	git -C "$scratch" push -q origin main
 	rm -rf "$scratch"
 }
@@ -342,6 +363,192 @@ chmod +w "$CLONE/docs"
 alerts | grep -q '^high|host-advance: self-heal revert failed' \
 	&& ok "self-heal-op-fails: high alert on revert failure" \
 	|| bad "self-heal-op-fails: high alert on revert failure (alerts: $(alerts))"
+teardown
+
+# ---- case 13 (plan A4 / brief item a): anchor-source.json host dirt that
+#      DIFFERS from HEAD is preserved (never silently discarded by the
+#      blanket public/ checkout), alerted at high priority, and — since
+#      the incoming pull does not touch this path at all (origin only
+#      advances an unrelated file) — the preserved dirt is restored on
+#      top afterward: still pending its own commit-anchor-source.sh run,
+#      nothing lost. --------------------------------------------------------
+build_pair
+ANCHOR_ABS="$CLONE/public/api/anchor-source.json"
+LOCAL_DIRT="$(printf '{"cycle":2,"dag_root_computed":"hostdirt-untouched"}')"
+printf '%s' "$LOCAL_DIRT" > "$ANCHOR_ABS"
+push_origin_commits 1 "docs/README.md" "origin-change"
+run_advancer >/tmp/.adv-out-$$.log 2>&1
+RC=$?
+OUT="$(cat /tmp/.adv-out-$$.log)"; rm -f /tmp/.adv-out-$$.log
+[ "$RC" -eq 0 ] \
+	&& ok "anchor-preserve-untouched: exit 0" \
+	|| bad "anchor-preserve-untouched: exit 0 (actual=$RC, out=$OUT)"
+NEW_HEAD="$(git -C "$CLONE" rev-parse HEAD)"
+ORIGIN_HEAD="$(git -C "$ORIGIN" rev-parse main)"
+[ "$NEW_HEAD" = "$ORIGIN_HEAD" ] \
+	&& ok "anchor-preserve-untouched: HEAD advanced to origin/main" \
+	|| bad "anchor-preserve-untouched: HEAD advanced to origin/main"
+alerts | grep -q '^high|host-authored anchor-source.json pending commit — preserved|' \
+	&& ok "anchor-preserve-untouched: high alert on capture" \
+	|| bad "anchor-preserve-untouched: high alert on capture (alerts: $(alerts))"
+[ "$(cat "$ANCHOR_ABS")" = "$LOCAL_DIRT" ] \
+	&& ok "anchor-preserve-untouched: preserved dirt restored after pull (nothing lost)" \
+	|| bad "anchor-preserve-untouched: preserved dirt restored after pull (got: $(cat "$ANCHOR_ABS"))"
+[ -n "$(git -C "$CLONE" status --porcelain -- public/api/anchor-source.json)" ] \
+	&& ok "anchor-preserve-untouched: path still shows as dirty (still pending its own commit)" \
+	|| bad "anchor-preserve-untouched: path still shows as dirty"
+teardown
+
+# ---- case 14 (plan A4 / brief item b): anchor-source.json worktree copy
+#      that is byte-identical to HEAD is ordinary discard territory —
+#      no capture, no anchor-specific alert, and the routine public/
+#      cache-bust dirt elsewhere still gets discarded normally. -----------
+build_pair
+ANCHOR_ABS="$CLONE/public/api/anchor-source.json"
+SEED_ANCHOR_SNAPSHOT="$BASE/anchor-seed-snapshot.json"
+cp "$ANCHOR_ABS" "$SEED_ANCHOR_SNAPSHOT"
+push_origin_commits 1 "docs/README.md" "origin-change"
+# Rewrite the file with IDENTICAL bytes (simulates gen-anchor-source.sh
+# having re-run and produced byte-identical output) + dirty an unrelated
+# public/ file the ordinary way (cache-bust marker). `cp`, not a `$(cat)`
+# command substitution, preserves the seed's exact trailing newline —
+# capturing through a subshell would silently strip it and make this
+# "identical" rewrite NOT byte-identical after all (caught empirically:
+# the first version of this case falsely triggered anchor-source dirt
+# capture for exactly this reason).
+cp "$SEED_ANCHOR_SNAPSHOT" "$ANCHOR_ABS"
+echo '<html>?v=stamped-cachebust</html>' > "$CLONE/public/index.html"
+run_advancer >/tmp/.adv-out-$$.log 2>&1
+RC=$?
+OUT="$(cat /tmp/.adv-out-$$.log)"; rm -f /tmp/.adv-out-$$.log
+[ "$RC" -eq 0 ] \
+	&& ok "anchor-byte-identical: exit 0" \
+	|| bad "anchor-byte-identical: exit 0 (actual=$RC, out=$OUT)"
+NEW_HEAD="$(git -C "$CLONE" rev-parse HEAD)"
+ORIGIN_HEAD="$(git -C "$ORIGIN" rev-parse main)"
+[ "$NEW_HEAD" = "$ORIGIN_HEAD" ] \
+	&& ok "anchor-byte-identical: HEAD advanced to origin/main" \
+	|| bad "anchor-byte-identical: HEAD advanced to origin/main"
+alerts | grep -qi 'anchor-source' \
+	&& bad "anchor-byte-identical: no anchor-specific alert fired (alerts: $(alerts))" \
+	|| ok "anchor-byte-identical: no anchor-specific alert fired"
+[ "$(git -C "$CLONE" status --porcelain -- public/)" = "" ] \
+	&& ok "anchor-byte-identical: public/ tree clean (cache-bust dirt discarded as usual)" \
+	|| bad "anchor-byte-identical: public/ tree clean (status: $(git -C "$CLONE" status --porcelain -- public/))"
+teardown
+
+# ---- case 15 (plan A4 / brief item c): incoming pull DOES touch
+#      anchor-source.json (a Mac-side commit-anchor-source.sh commit
+#      arrived via origin) and its content is byte-identical to the
+#      preserved host dirt -> self-heal: default-priority alert, dirt
+#      discarded (redundant), nothing lost, no stash file created. --------
+build_pair
+ANCHOR_ABS="$CLONE/public/api/anchor-source.json"
+DIRT_CONTENT="$(printf '{"cycle":2,"dag_root_computed":"hostdirt-matches-incoming"}')"
+printf '%s' "$DIRT_CONTENT" > "$ANCHOR_ABS"
+push_origin_anchor_source_commit "$DIRT_CONTENT"
+run_advancer >/tmp/.adv-out-$$.log 2>&1
+RC=$?
+OUT="$(cat /tmp/.adv-out-$$.log)"; rm -f /tmp/.adv-out-$$.log
+[ "$RC" -eq 0 ] \
+	&& ok "anchor-self-heal-match: exit 0" \
+	|| bad "anchor-self-heal-match: exit 0 (actual=$RC, out=$OUT)"
+NEW_HEAD="$(git -C "$CLONE" rev-parse HEAD)"
+ORIGIN_HEAD="$(git -C "$ORIGIN" rev-parse main)"
+[ "$NEW_HEAD" = "$ORIGIN_HEAD" ] \
+	&& ok "anchor-self-heal-match: HEAD advanced to origin/main" \
+	|| bad "anchor-self-heal-match: HEAD advanced to origin/main"
+alerts | grep -q '^default|host-advance: self-healed anchor-source.json|' \
+	&& ok "anchor-self-heal-match: default-priority self-healed alert" \
+	|| bad "anchor-self-heal-match: default-priority self-healed alert (alerts: $(alerts))"
+alerts | grep -qi 'stashed' \
+	&& bad "anchor-self-heal-match: no stash alert fired (alerts: $(alerts))" \
+	|| ok "anchor-self-heal-match: no stash alert fired"
+[ "$(cat "$ANCHOR_ABS")" = "$DIRT_CONTENT" ] \
+	&& ok "anchor-self-heal-match: working file holds the (now-shared) content" \
+	|| bad "anchor-self-heal-match: working file holds the (now-shared) content"
+[ "$(git -C "$CLONE" status --porcelain -- public/api/anchor-source.json)" = "" ] \
+	&& ok "anchor-self-heal-match: path clean afterwards" \
+	|| bad "anchor-self-heal-match: path clean afterwards"
+NUM_STASH_FILES=$(find "$CLONE/public/api" -maxdepth 1 -name 'anchor-source.json.host-*' | wc -l | tr -d ' ')
+[ "$NUM_STASH_FILES" -eq 0 ] \
+	&& ok "anchor-self-heal-match: no stash file created" \
+	|| bad "anchor-self-heal-match: no stash file created (found: $NUM_STASH_FILES)"
+teardown
+
+# ---- case 16 (plan A4 / brief item d): incoming pull touches anchor-
+#      source.json with content that DIFFERS from the preserved host
+#      dirt -> origin wins on the canonical path, but the host dirt is
+#      stashed to a `.host-<UTC timestamp>` sibling (alert high) rather
+#      than discarded. ------------------------------------------------------
+build_pair
+ANCHOR_ABS="$CLONE/public/api/anchor-source.json"
+LOCAL_DIRT="$(printf '{"cycle":2,"dag_root_computed":"hostdirt-LOCAL-divergent"}')"
+REMOTE_CONTENT="$(printf '{"cycle":2,"dag_root_computed":"maccommit-DIFFERENT"}')"
+printf '%s' "$LOCAL_DIRT" > "$ANCHOR_ABS"
+push_origin_anchor_source_commit "$REMOTE_CONTENT"
+run_advancer >/tmp/.adv-out-$$.log 2>&1
+RC=$?
+OUT="$(cat /tmp/.adv-out-$$.log)"; rm -f /tmp/.adv-out-$$.log
+[ "$RC" -eq 0 ] \
+	&& ok "anchor-stash-diverged: exit 0" \
+	|| bad "anchor-stash-diverged: exit 0 (actual=$RC, out=$OUT)"
+NEW_HEAD="$(git -C "$CLONE" rev-parse HEAD)"
+ORIGIN_HEAD="$(git -C "$ORIGIN" rev-parse main)"
+[ "$NEW_HEAD" = "$ORIGIN_HEAD" ] \
+	&& ok "anchor-stash-diverged: HEAD advanced to origin/main" \
+	|| bad "anchor-stash-diverged: HEAD advanced to origin/main"
+alerts | grep -q '^high|host-advance: anchor-source.json host dirt stashed|' \
+	&& ok "anchor-stash-diverged: high alert on stash" \
+	|| bad "anchor-stash-diverged: high alert on stash (alerts: $(alerts))"
+[ "$(cat "$ANCHOR_ABS")" = "$REMOTE_CONTENT" ] \
+	&& ok "anchor-stash-diverged: origin content wins on the canonical path" \
+	|| bad "anchor-stash-diverged: origin content wins on the canonical path (got: $(cat "$ANCHOR_ABS"))"
+STASH_FILE="$(find "$CLONE/public/api" -maxdepth 1 -name 'anchor-source.json.host-*' | head -1)"
+[ -n "$STASH_FILE" ] \
+	&& ok "anchor-stash-diverged: stash file created" \
+	|| bad "anchor-stash-diverged: stash file created"
+[ -n "$STASH_FILE" ] && [ "$(cat "$STASH_FILE")" = "$LOCAL_DIRT" ] \
+	&& ok "anchor-stash-diverged: stash file holds the diverged host dirt (nothing lost)" \
+	|| bad "anchor-stash-diverged: stash file holds the diverged host dirt (got: $([ -n "$STASH_FILE" ] && cat "$STASH_FILE"))"
+teardown
+
+# ---- case 17 (bonus — safety-net trap): anchor-source.json dirt is
+#      captured, but the FF pull itself fails for an UNRELATED reason
+#      (a different tracked file has real, non-absorbable divergence —
+#      same shape as case 4/9). resolve_anchor_source_post_pull is never
+#      reached in this branch, so the EXIT-trap safety net
+#      (restore_anchor_dirt_on_exit) must be what restores the preserved
+#      anchor dirt — verifying the trap covers exit paths beyond the ones
+#      the brief enumerates explicitly. -----------------------------------
+build_pair
+ANCHOR_ABS="$CLONE/public/api/anchor-source.json"
+LOCAL_DIRT="$(printf '{"cycle":2,"dag_root_computed":"hostdirt-safetynet"}')"
+printf '%s' "$LOCAL_DIRT" > "$ANCHOR_ABS"
+push_origin_commits 1 "docs/README.md" "origin-change"
+echo 'genuinely different local content, never seen by origin' > "$CLONE/docs/README.md"
+HEAD_BEFORE="$(git -C "$CLONE" rev-parse HEAD)"
+run_advancer >/tmp/.adv-out-$$.log 2>&1
+RC=$?
+OUT="$(cat /tmp/.adv-out-$$.log)"; rm -f /tmp/.adv-out-$$.log
+[ "$RC" -eq 1 ] \
+	&& ok "anchor-safety-net: exit 1 (unrelated pull failure)" \
+	|| bad "anchor-safety-net: exit 1 (actual=$RC, out=$OUT)"
+[ "$(git -C "$CLONE" rev-parse HEAD)" = "$HEAD_BEFORE" ] \
+	&& ok "anchor-safety-net: HEAD did not move" \
+	|| bad "anchor-safety-net: HEAD did not move"
+alerts | grep -q '^high|host-authored anchor-source.json pending commit — preserved|' \
+	&& ok "anchor-safety-net: high alert on capture" \
+	|| bad "anchor-safety-net: high alert on capture (alerts: $(alerts))"
+alerts | grep -q '^high|host-advance: ff-only pull failed|' \
+	&& ok "anchor-safety-net: high alert on pull failure" \
+	|| bad "anchor-safety-net: high alert on pull failure (alerts: $(alerts))"
+alerts | grep -qiE 'self-healed anchor-source|host dirt stashed' \
+	&& bad "anchor-safety-net: resolve_anchor_source_post_pull never ran (no self-heal/stash alert) (alerts: $(alerts))" \
+	|| ok "anchor-safety-net: resolve_anchor_source_post_pull never ran (no self-heal/stash alert)"
+[ "$(cat "$ANCHOR_ABS")" = "$LOCAL_DIRT" ] \
+	&& ok "anchor-safety-net: preserved dirt restored by the EXIT trap (nothing lost)" \
+	|| bad "anchor-safety-net: preserved dirt restored by the EXIT trap (got: $(cat "$ANCHOR_ABS"))"
 teardown
 
 # ---- case 12: concurrency lock (flock-gated — Linux host/CI only). macOS
