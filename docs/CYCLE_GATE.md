@@ -78,9 +78,10 @@ host-composed `anchor-source.json`:
 
 ```
 1. gen-anchor-source.sh          compose anchor-source.json           (validator host)
-2. commit-anchor-source.sh       verify + commit anchor-source.json;   (operator Mac —
-   (scripts/operator-local/)     push + deploy in the same step         scripts/operator-local/,
-                                                                          never runs on the host)
+2. commit-anchor-source.sh       verify + COMMIT anchor-source.json.   (operator Mac —
+   (scripts/operator-local/)     Push + deploy are a separate,          scripts/operator-local/,
+                                 subsequent action (--push, or            never runs on the host)
+                                 `git push origin main` by hand).
 3. sign-anchor-event.sh          compose + sign + broadcast the        (operator Mac ONLY —
                                   4-action pack via bin/safe-broadcast   signing-host assertion, exit 7)
 4. gen-anchor-receipt.sh         fetch tx + 7-gate verify + receipt    (validator host)
