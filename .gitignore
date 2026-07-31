@@ -75,6 +75,10 @@ public/api/peers-history-index.json
 # calendar/*.ics は gen-renewal-ics.sh が生成、ファイル名に private token が
 # 入るので絶対コミットしない(public 化前提リポ、token は private URL の要)
 public/calendar/
+# anchor-publish-health の exit-3 alert dedup state (scripts/check-anchor-publish-health.sh)
+# — cron が repo-local logs/ に書く実行時 state、*.log ではないので上の *.log には
+# 引っかからず個別指定が必要
+logs/anchor-publish-health-mismatch-state.json
 
 # ---- Local-only artifacts ----
 # CI/CD で deploy 時に生成、コミット不要
