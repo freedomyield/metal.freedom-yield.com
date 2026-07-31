@@ -31,6 +31,11 @@ TEST_AUDIT="$(mktemp -t safe-bcast-audit.XXXXXX)"
 TEST_TX_VALID="$(mktemp -t safe-bcast-tx.XXXXXX)"
 TEST_TX_EMPTY="$(mktemp -t safe-bcast-tx.XXXXXX)"
 TEST_DRY_LOG="$(mktemp -t safe-bcast-dryrun.XXXXXX)"
+# ---- gate 1 / gate 4 shape-binding hardening fixtures (2026-08) ----
+TEST_TX_CYCLE4="$(mktemp -t safe-bcast-tx.XXXXXX)"
+TEST_TX_UPDATEAUTH="$(mktemp -t safe-bcast-tx.XXXXXX)"
+TEST_DRY_LOG_CYCLE4="$(mktemp -t safe-bcast-dryrun.XXXXXX)"
+TEST_DRY_LOG_NONJSON="$(mktemp -t safe-bcast-dryrun.XXXXXX)"
 export FYD_BROADCAST_TOKEN_FILE="$TEST_TOKEN"
 export FYD_BROADCAST_AUDIT_LOG="$TEST_AUDIT"
 
@@ -59,21 +64,67 @@ esac
 STUB
 chmod +x "$STUB_DIR/proton"
 
-# ---- hermetic curl stub (R16 gate-1 resolution, mainnet path only) ----
-# To test R16 gate-2b (token content binding) on the MAINNET path we must
-# first satisfy gate 1 (--testnet-tx-id must resolve against the testnet
-# Hyperion endpoint), which normally requires a real network call. This stub
-# resolves ONLY a fixed sentinel id (R16_RESOLVABLE_TXID, defined below,
-# used exclusively by the new R16 gate-2b test cases) and returns "not
-# found" for anything else — in particular the PRE-EXISTING all-zeros id
-# used by the "testnet-tx-id shape-valid but unresolvable" case above stays
-# unresolvable, unchanged. bin/safe-broadcast has exactly one curl call site
-# (gate 1), so this is a safe, narrow, fully-offline stub.
+# ---- hermetic curl stub (gate-1 resolution, mainnet path only) ----
+# To exercise anything past gate 1 on the MAINNET path we must first satisfy
+# gate 1 (--testnet-tx-id must resolve against the testnet Hyperion
+# endpoint), which normally requires a real network call. This stub resolves
+# ONLY a fixed set of sentinel ids (defined below, each carrying a canned
+# testnet-evidence-tx body written to $FIXTURE_DIR) and returns "not found"
+# for anything else — in particular the PRE-EXISTING all-zeros id used by the
+# "testnet-tx-id shape-valid but unresolvable" case above stays unresolvable,
+# unchanged. bin/safe-broadcast has exactly one curl call site (gate 1), so
+# this is a safe, narrow, fully-offline stub.
+#
+# Each fixture body is v1 `/v1/history/get_transaction`-shaped
+# (`.actions[].act.{account,name,data.memo}`), matching the shape
+# bin/safe-broadcast's own gate-1 code (and scripts/gen-anchor-receipt.sh's
+# v1 fallback) already assumes for this endpoint.
+FIXTURE_DIR="$(mktemp -d -t safe-bcast-fixtures.XXXXXX)"
+
+# R16_RESOLVABLE_TXID: single eosio.token::transfer, memo fya1c3-test —
+# matches $TEST_TX_VALID exactly (cycle-3 shape). Used by the pre-existing
+# R16 gate-2b test cases below, and by the new gate-4 non-JSON-log case.
 R16_RESOLVABLE_TXID="1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+cat > "$FIXTURE_DIR/r16.json" <<JSON
+{"id":"${R16_RESOLVABLE_TXID}","block_num":123456,"actions":[{"act":{"account":"eosio.token","name":"transfer","authorization":[{"actor":"metalfreedom","permission":"anchor"}],"data":{"memo":"fya1c3-test"}}}]}
+JSON
+
+# CYCLE2_EVIDENCE_TXID: single eosio.token::transfer, memo fya1c2-test — the
+# WRONG cycle vs. the cycle-4 outgoing tx ($TEST_TX_CYCLE4, memo fya1c4-test)
+# it gets paired against. Proves gate 1 (b) refuses cross-cycle evidence.
+CYCLE2_EVIDENCE_TXID="$(printf 'aaaa2222%.0s' 1 2 3 4 5 6 7 8)"
+cat > "$FIXTURE_DIR/cycle2.json" <<JSON
+{"id":"${CYCLE2_EVIDENCE_TXID}","block_num":222222,"actions":[{"act":{"account":"eosio.token","name":"transfer","authorization":[{"actor":"metalfreedom","permission":"anchor"}],"data":{"memo":"fya1c2-test"}}}]}
+JSON
+
+# CYCLE4_EVIDENCE_TXID: single eosio.token::transfer, memo fya1c4-test —
+# matches $TEST_TX_CYCLE4 exactly (same cycle). Proves gate 1 (b) passes
+# same-prefix evidence.
+CYCLE4_EVIDENCE_TXID="$(printf 'bbbb4444%.0s' 1 2 3 4 5 6 7 8)"
+cat > "$FIXTURE_DIR/cycle4.json" <<JSON
+{"id":"${CYCLE4_EVIDENCE_TXID}","block_num":444444,"actions":[{"act":{"account":"eosio.token","name":"transfer","authorization":[{"actor":"metalfreedom","permission":"anchor"}],"data":{"memo":"fya1c4-test"}}}]}
+JSON
+
+# UPDATEAUTH_SAME_TXID: single eosio::updateauth, no memo — matches
+# $TEST_TX_UPDATEAUTH's action shape exactly (key-rotation carve-out: (a)
+# action-set match applies, (b) memo-prefix match is exempt since neither
+# side has an anchor-shaped memo).
+UPDATEAUTH_SAME_TXID="$(printf 'cccc5555%.0s' 1 2 3 4 5 6 7 8)"
+cat > "$FIXTURE_DIR/updateauth-same.json" <<JSON
+{"id":"${UPDATEAUTH_SAME_TXID}","block_num":555555,"actions":[{"act":{"account":"eosio","name":"updateauth","authorization":[{"actor":"metalfreedom","permission":"active"}],"data":{}}}]}
+JSON
+
+# UPDATEAUTH_DIFF_TXID: single eosio.token::transfer (memo fya1c4-test) —
+# a DIFFERENT action than $TEST_TX_UPDATEAUTH's eosio::updateauth. Proves
+# gate 1 (a) still refuses even though neither memo-prefix set applies.
+UPDATEAUTH_DIFF_TXID="$(printf 'dddd6666%.0s' 1 2 3 4 5 6 7 8)"
+cat > "$FIXTURE_DIR/updateauth-diff.json" <<JSON
+{"id":"${UPDATEAUTH_DIFF_TXID}","block_num":666666,"actions":[{"act":{"account":"eosio.token","name":"transfer","authorization":[{"actor":"metalfreedom","permission":"anchor"}],"data":{"memo":"fya1c4-test"}}}]}
+JSON
+
 cat > "$STUB_DIR/curl" <<STUB
 #!/usr/bin/env bash
 # Test stub for curl (see tests/safe-broadcast/test-safe-broadcast.sh).
-SENTINEL="${R16_RESOLVABLE_TXID}"
 BODY=""
 prev=""
 for a in "\$@"; do
@@ -82,11 +133,15 @@ for a in "\$@"; do
 	fi
 	prev="\$a"
 done
-if printf '%s' "\$BODY" | grep -q "\$SENTINEL"; then
-	printf '{"id":"%s","block_num":123456}\n' "\$SENTINEL"
-else
-	echo '{}'
-fi
+REQ_ID="\$(printf '%s' "\$BODY" | grep -oE '"id":"[a-f0-9]{64}"' | grep -oE '[a-f0-9]{64}')"
+case "\$REQ_ID" in
+	"${R16_RESOLVABLE_TXID}")     cat "${FIXTURE_DIR}/r16.json" ;;
+	"${CYCLE2_EVIDENCE_TXID}")    cat "${FIXTURE_DIR}/cycle2.json" ;;
+	"${CYCLE4_EVIDENCE_TXID}")    cat "${FIXTURE_DIR}/cycle4.json" ;;
+	"${UPDATEAUTH_SAME_TXID}")    cat "${FIXTURE_DIR}/updateauth-same.json" ;;
+	"${UPDATEAUTH_DIFF_TXID}")    cat "${FIXTURE_DIR}/updateauth-diff.json" ;;
+	*)                            echo '{}' ;;
+esac
 exit 0
 STUB
 chmod +x "$STUB_DIR/curl"
@@ -106,8 +161,9 @@ TEST_HOME="$(mktemp -d -t safe-bcast-home.XXXXXX)"
 export HOME="$TEST_HOME"
 
 cleanup() {
-	rm -f "$TEST_TOKEN" "$TEST_AUDIT" "$TEST_TX_VALID" "$TEST_TX_EMPTY" "$TEST_DRY_LOG"
-	rm -rf "$STUB_DIR" "$TEST_HOME"
+	rm -f "$TEST_TOKEN" "$TEST_AUDIT" "$TEST_TX_VALID" "$TEST_TX_EMPTY" "$TEST_DRY_LOG" \
+		"$TEST_TX_CYCLE4" "$TEST_TX_UPDATEAUTH" "$TEST_DRY_LOG_CYCLE4" "$TEST_DRY_LOG_NONJSON"
+	rm -rf "$STUB_DIR" "$TEST_HOME" "$FIXTURE_DIR"
 }
 trap cleanup EXIT
 
@@ -125,7 +181,76 @@ cat > "$TEST_TX_VALID" <<'JSON'
 }
 JSON
 echo '{}' > "$TEST_TX_EMPTY"
-echo 'dry-run log content' > "$TEST_DRY_LOG"
+
+# ---- gate 1 / gate 4 shape-binding hardening fixtures (2026-08) ----
+# TEST_DRY_LOG: generic mainnet dry-run log paired with $TEST_TX_VALID
+# (cycle-3, memo fya1c3-test) across the pre-existing R16 gate-2b/gate-3
+# scenarios below. Gate 4 now requires valid JSON + (for anchor-shaped
+# outgoing tx) a matching memo_prefix — a bare non-JSON placeholder would
+# now be refused at gate 4 before ever reaching those gates, so this must be
+# a realistic `sign-anchor-event.sh --dry-run`-shaped JSON document, not
+# plain text. Field names (memo_prefix, target_chain) match that script's
+# actual --dry-run output (scripts/sign-anchor-event.sh:301, 298).
+cat > "$TEST_DRY_LOG" <<'JSON'
+{
+  "dry_run": true,
+  "target_chain": "mainnet-a",
+  "memo_prefix": "fya1c3",
+  "composed_memos": {"dag_root_summary": "fya1c3:deadbeef"}
+}
+JSON
+
+# TEST_TX_CYCLE4: cycle-4 shaped mainnet outgoing tx (same structure as
+# TEST_TX_VALID, different cycle prefix). Paired with CYCLE2_EVIDENCE_TXID
+# (wrong cycle → gate 1 refuse) and CYCLE4_EVIDENCE_TXID (same cycle →
+# gate 1 pass).
+cat > "$TEST_TX_CYCLE4" <<'JSON'
+{
+  "actions": [
+    {
+      "account": "eosio.token",
+      "name": "transfer",
+      "authorization": [{"actor": "metalfreedom", "permission": "anchor"}],
+      "data": {"from": "metalfreedom", "to": "fyhistory", "quantity": "0.0001 XPR", "memo": "fya1c4-test"}
+    }
+  ]
+}
+JSON
+
+# TEST_DRY_LOG_CYCLE4: dry-run log matching TEST_TX_CYCLE4's prefix
+# (fya1c4) and chain (mainnet-a) — used for the gate 1 + gate 4 combined
+# happy-path case, and reused (deliberately mismatched against a cycle-3 tx)
+# for the gate-4 memo-prefix-mismatch refusal case below.
+cat > "$TEST_DRY_LOG_CYCLE4" <<'JSON'
+{
+  "dry_run": true,
+  "target_chain": "mainnet-a",
+  "memo_prefix": "fya1c4",
+  "composed_memos": {"dag_root_summary": "fya1c4:deadbeef"}
+}
+JSON
+
+# TEST_DRY_LOG_NONJSON: not valid JSON at all — for the gate 4 (a) check.
+printf 'this is not json\n' > "$TEST_DRY_LOG_NONJSON"
+
+# TEST_TX_UPDATEAUTH: key-rotation shaped outgoing tx — no memo at all, so
+# neither gate 1 (b) nor gate 4 (b) (memo-prefix matching) apply; only
+# gate 1 (a) (action-set match) and gate 4 (a)/(c) (JSON validity / chain)
+# do. Mirrors the existing updateauth-based key-rotation rehearsal flow
+# (memory: proton keystore rotation testnet-first) that this hardening must
+# not break.
+cat > "$TEST_TX_UPDATEAUTH" <<'JSON'
+{
+  "actions": [
+    {
+      "account": "eosio",
+      "name": "updateauth",
+      "authorization": [{"actor": "metalfreedom", "permission": "active"}],
+      "data": {"account": "metalfreedom", "permission": "anchor", "parent": "active", "auth": {"threshold": 1, "keys": [], "accounts": [], "waits": []}}
+    }
+  ]
+}
+JSON
 
 PASS=0
 FAIL=0
@@ -192,6 +317,103 @@ run_case "gate 1: mainnet, --testnet-tx-id shape-valid but unresolvable" 3 \
 	--dry-run-log="$TEST_DRY_LOG" \
 	--non-interactive
 
+# ---- gate 1 / gate 4 shape binding (2026-08 hardening) ----
+# Audit finding: gate 1 previously only checked the testnet evidence tx was
+# 64-hex + resolvable — never that its shape (actions, memo prefix) matched
+# the outgoing mainnet tx. A cycle-2 testnet tx (memo prefix fya1c2) could
+# therefore authorize a cycle-4 mainnet anchor broadcast. Gate 4 only
+# checked the --dry-run-log was non-empty — a log from an unrelated shape
+# passed trivially. See the "Gate 1 / Gate 4 shape binding" section in
+# bin/safe-broadcast's usage header for the full spec these cases verify.
+
+# gate 1 (b): cycle-2 testnet evidence vs. a cycle-4 mainnet outgoing tx —
+# same action shape (eosio.token::transfer) but the memo-prefix SET differs
+# (fya1c2 vs fya1c4) → refuse. This is the exact 2026-07-04 cycle-3 incident
+# shape (there: cycle-2 evidence authorizing a cycle-3 broadcast).
+touch "$TEST_TOKEN"
+run_case "gate 1: mainnet, cycle-2 testnet evidence vs cycle-4 outgoing tx → refuse (memo prefix mismatch)" 3 \
+	--tx="$TEST_TX_CYCLE4" \
+	--chain=mainnet-a \
+	--testnet-tx-id="$CYCLE2_EVIDENCE_TXID" \
+	--dry-run-log="$TEST_DRY_LOG_CYCLE4" \
+	--non-interactive
+
+# gate 1 (a)+(b) combined pass, THEN gate 4 (a)+(b) pass: cycle-4 testnet
+# evidence vs. the matching cycle-4 outgoing tx (same action shape, same
+# memo prefix) → gate 1 passes; dry-run log memo_prefix (fya1c4) and
+# target_chain (mainnet-a) both match → gate 4 passes; a freshly
+# chain-bound token → gate 2/2b pass; execution reaches gate 3, where the
+# hermetic proton stub (always answers with the TESTNET chain_id)
+# deterministically mismatches the MAINNET expected chain_id → exit 4. This
+# is the only externally-observable way to prove gate 1 AND gate 4 both
+# passed without a live proton/network broadcast (both gates refuse with
+# the same exit code 3, so "reached a later, different exit code" is the
+# only black-box signal available — same idiom as the pre-existing R16
+# gate-2b "passes" case below).
+printf '{"chain":"mainnet-a"}' > "$TEST_TOKEN"
+run_case "gate 1+4: mainnet, matching cycle-4 evidence + matching dry-run-log → pass (reaches gate 3, exit 4)" 4 \
+	--tx="$TEST_TX_CYCLE4" \
+	--chain=mainnet-a \
+	--testnet-tx-id="$CYCLE4_EVIDENCE_TXID" \
+	--dry-run-log="$TEST_DRY_LOG_CYCLE4" \
+	--non-interactive
+
+# gate 1 (d) key-rotation carve-out, same action: an updateauth outgoing tx
+# (no memo — not anchor-shaped) paired with updateauth testnet evidence of
+# the IDENTICAL action shape → gate 1's memo-prefix sub-check (b) does not
+# apply (neither side has an anchor-shaped memo); only (a) action-set match
+# applies, and it passes. Gate 4's memo-prefix sub-check (b) is likewise
+# skipped (outgoing tx isn't anchor-shaped); only (a) JSON-validity and (c)
+# chain-match apply, and $TEST_DRY_LOG (mainnet-a) satisfies both. A fresh
+# mainnet-bound token clears gate 2/2b, so execution reaches gate 3 →
+# exit 4 (same stub-mismatch mechanism as above). This proves the existing
+# updateauth-based key-rotation testnet-first flow is NOT broken by this
+# hardening.
+printf '{"chain":"mainnet-a"}' > "$TEST_TOKEN"
+run_case "gate 1: mainnet, updateauth outgoing + same-action testnet evidence → pass (reaches gate 3, exit 4)" 4 \
+	--tx="$TEST_TX_UPDATEAUTH" \
+	--chain=mainnet-a \
+	--testnet-tx-id="$UPDATEAUTH_SAME_TXID" \
+	--dry-run-log="$TEST_DRY_LOG" \
+	--non-interactive
+
+# gate 1 (a): an updateauth outgoing tx paired with testnet evidence whose
+# action is eosio.token::transfer (a DIFFERENT account+name) → refuse, even
+# though neither side is anchor-shaped (the memo-prefix sub-check (b) does
+# not even come into play — (a) alone already refuses).
+touch "$TEST_TOKEN"
+run_case "gate 1: mainnet, updateauth outgoing vs different-action testnet evidence → refuse (action set mismatch)" 3 \
+	--tx="$TEST_TX_UPDATEAUTH" \
+	--chain=mainnet-a \
+	--testnet-tx-id="$UPDATEAUTH_DIFF_TXID" \
+	--dry-run-log="$TEST_DRY_LOG" \
+	--non-interactive
+
+# gate 4 (b): cycle-3 outgoing tx (memo fya1c3-test) whose testnet evidence
+# passes gate 1 cleanly (R16_RESOLVABLE_TXID, same cycle-3 shape), but the
+# --dry-run-log records memo_prefix "fya1c4" (from $TEST_DRY_LOG_CYCLE4) —
+# the WRONG cycle vs. the outgoing tx's actual fya1c3 prefix → gate 4
+# refuses. Proves gate 4 checks the log's OWN recorded shape, not just
+# gate 1's testnet evidence.
+touch "$TEST_TOKEN"
+run_case "gate 4: mainnet, dry-run log memo_prefix mismatch vs outgoing tx → refuse" 3 \
+	--tx="$TEST_TX_VALID" \
+	--chain=mainnet-a \
+	--testnet-tx-id="$R16_RESOLVABLE_TXID" \
+	--dry-run-log="$TEST_DRY_LOG_CYCLE4" \
+	--non-interactive
+
+# gate 4 (a): --dry-run-log exists and is non-empty but is NOT valid JSON →
+# refuse, even though gate 1 (R16_RESOLVABLE_TXID vs cycle-3 outgoing tx)
+# passes cleanly.
+touch "$TEST_TOKEN"
+run_case "gate 4: mainnet, dry-run log is not valid JSON → refuse" 3 \
+	--tx="$TEST_TX_VALID" \
+	--chain=mainnet-a \
+	--testnet-tx-id="$R16_RESOLVABLE_TXID" \
+	--dry-run-log="$TEST_DRY_LOG_NONJSON" \
+	--non-interactive
+
 # ---- keystore guard (§3.5): refuse when $HOME resolves to the login home ----
 # The guard sits immediately before gate 3 (this wrapper's first real proton
 # invocation). It fires only when $HOME resolves EXACTLY to the login
@@ -199,6 +421,14 @@ run_case "gate 1: mainnet, --testnet-tx-id shape-valid but unresolvable" 3 \
 # $HOME itself). We can only assert this deterministically when the test
 # runner's login home is resolvable; if not, skip rather than fabricate a
 # result.
+#
+# Reset the token to a bare/legacy (unbound, empty-content) state first: the
+# gate 1/gate 4 shape-binding block above left it CONTENT-bound to
+# "mainnet-a" (R16 gate 2b), which would otherwise make gate 2b itself
+# refuse these testnet-chain cases (a mainnet-bound token cannot authorize
+# testnet either, by design) before ever reaching the guard/gate 3 under
+# test here. A bare legacy token keeps testnet's backward-compat accept path.
+: > "$TEST_TOKEN"
 touch "$TEST_TOKEN"
 if [ -n "$LOGIN_HOME" ]; then
 	export HOME="$LOGIN_HOME"
