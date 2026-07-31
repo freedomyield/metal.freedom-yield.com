@@ -50,31 +50,83 @@
 # bin/safe-broadcast / any RPC push_transaction equivalent) — this script
 # does not touch broadcast machinery at all.
 #
-# anchor-source.json protection (added 2026-08, plan A4): step 6 above
-# (`git checkout -- public/`) is otherwise unconditional, but
-# public/api/anchor-source.json is special-cased before it runs. That file
-# is git-tracked yet AUTHORED on this very host by gen-anchor-source.sh —
-# the operator's Mac transfers it to Git via
-# scripts/operator-local/commit-anchor-source.sh, a step that can lag the
-# host composing it (see docs/ANCHOR_SOURCE.md). Without protection, a
-# deploy or the daily cron landing in that gap would silently discard the
-# freshly-composed, not-yet-committed anchor content along with the
-# routine cache-bust dirt step 6 exists for. So: if this file's worktree
-# content is byte-identical to HEAD, nothing changes (ordinary step-6
-# discard, zero information lost). If it differs, the bytes are preserved
-# BEFORE step 6 runs (protect_anchor_source_pre_discard, alert high) and,
-# once the FF pull (step 7) either lands or fails, resolved
-# (resolve_anchor_source_post_pull): if the pull never touched the path,
-# the preserved dirt is restored on top, still pending its own commit; if
-# the pull DID touch it (the Mac-side commit arrived via origin) and the
-# incoming bytes match the preserved dirt, it self-heals (default alert,
-# nothing lost); if they differ, origin wins on the canonical path but the
-# preserved dirt is stashed to a `.host-<UTC timestamp>` sibling (alert
-# high) rather than discarded. A single EXIT trap
-# (restore_anchor_dirt_on_exit) is the safety net for every OTHER exit
-# path between capture and resolution (discard failure, self-heal
-# failure, FF-pull failure) — it restores the preserved bytes onto the
-# real path so no exit route can silently lose them.
+# anchor-source.json protection (added 2026-08, plan A4; revised 2026-08
+# fix round 1 per reviewer C1/I5/I1/I2): step 6 above (`git checkout --
+# public/`) is otherwise unconditional, but public/api/anchor-source.json
+# is special-cased before it runs. That file is git-tracked yet AUTHORED
+# on this very host by gen-anchor-source.sh — the operator's Mac transfers
+# it to Git via scripts/operator-local/commit-anchor-source.sh, a step
+# that can lag the host composing it (see docs/ANCHOR_SOURCE.md). Without
+# protection, a deploy or the daily cron landing in that gap would
+# silently discard the freshly-composed, not-yet-committed anchor content
+# along with the routine cache-bust dirt step 6 exists for.
+#
+# Two preservation copies, not one (C1): the validator host is NOT only a
+# git checkout — deploy.yml's "Rsync public/ to VPS" step runs moments
+# after this script exits, with `--delete`, from the deploy/feed-excludes.txt
+# exclude set (which does not, and per docs/ANCHOR_SOURCE.md must not,
+# exclude api/anchor-source.json — it stays git-SoT). Anything this script
+# leaves sitting only INSIDE public/ — an in-place restore onto the
+# canonical path, or the pre-C1 design's `.host-<ts>` sibling stash — would
+# be wiped by that very next CI step. So the moment real (non-byte-
+# identical) dirt is detected, a durable copy is written FIRST, before
+# anything else, to `${REPO_DIR}/.anchor-source-preserve/anchor-source.json.host-<UTC
+# timestamp>` — a dot-prefixed directory at the repo root, outside
+# public/ entirely (no rsync --delete ever targets it) and untracked (no
+# git operation touches it; confirmed check-host-drift.sh's DRIFT_PATHS
+# is `scripts docs tests deploy` — a root-level dot-dir is structurally
+# out of its scan, and its untracked-drift filter excludes hidden paths
+# regardless). This durable copy is the one all alerts name and the one
+# `commit-anchor-source.sh --input-file=<path>` should recover from; this
+# script never auto-deletes it.
+#
+# The ORIGINAL in-place mechanism (a disposable scratch snapshot, restored
+# onto the canonical path or stashed as a `.host-<ts>` sibling next to it)
+# is kept ALONGSIDE the durable copy — not instead of it — because it
+# still helps on the cron invocation path, where no rsync follows and the
+# in-place copy is exactly where an operator glancing at `public/api/`
+# would look. It is cleaned up (removed) once its own job is done; only
+# the durable copy persists.
+#
+# Severity (I5 — project no-false-urgency rule outranks the original
+# design's capture-time high alert): capture only ever `log`s — at that
+# point the outcome (still-pending / self-healed / diverged) isn't known
+# yet, and logging, not paging, is right for something that resolves
+# silently-fine most of the time. Severity is decided at RESOLUTION,
+# once the FF pull's effect on this exact path is known:
+#   - pull never touched the path -> preserved dirt restored in-place
+#     (best-effort, not the safety mechanism) + `alert high` naming the
+#     durable path — the dirt is genuinely still pending, so this is
+#     rightly loud (an outcome, not routine).
+#   - pull DID touch the path and its content matches the preserved dirt
+#     exactly (a commit-anchor-source.sh commit arrived via origin) ->
+#     self-heal, `alert default` (existing batched-self-heal style) —
+#     this is the intended happy path (compose -> commit -> deploy) and
+#     must not page high every cycle.
+#   - pull DID touch the path with DIFFERENT content -> origin wins on
+#     the canonical path, the in-place sibling stash is written as a
+#     convenience copy, and `alert high` names the (already-written, from
+#     capture time) durable path as authoritative — operator action
+#     needed to reconcile.
+#   - any operation failure AFTER the durable copy already exists (in-place
+#     restore/stash, at resolution or in the EXIT-trap safety net) ->
+#     `alert high` unconditionally; the durable copy is never lost by a
+#     LATER operation's failure. The one exception is the disposable
+#     scratch-snapshot PREPARATION itself failing at capture time (right
+#     after the durable copy already succeeded) — that is `log`-only, not
+#     alerted: it only costs the in-place convenience mechanism for this
+#     run, not data safety, so it does not warrant paging. A durable-copy
+#     write failure itself (mkdir/cp into .anchor-source-preserve/) is
+#     always fatal (`alert high`, exit 1) regardless of timing — see
+#     protect_anchor_source_pre_discard.
+#
+# A single EXIT trap (restore_anchor_dirt_on_exit) is the safety net for
+# every OTHER exit path between capture and resolution (discard failure,
+# self-heal failure, FF-pull failure) that never reaches
+# resolve_anchor_source_post_pull — it attempts the same best-effort
+# in-place restore from the disposable scratch snapshot (loud alert high
+# if that restore itself fails; the durable copy, already written at
+# capture time, is unaffected either way).
 #
 # Usage:
 #   bash scripts/advance-host-checkout.sh
@@ -92,8 +144,10 @@
 #      ff-only pull failed (e.g. a non-public tracked file has uncommitted
 #      edits that the incoming diff would clobber — git refuses the merge
 #      rather than lose data, and so do we) OR anchor-source.json dirt
-#      could not be preserved / stashed (mktemp or cp/mv failure — treated
-#      as loudly as any other data-loss risk in this script)
+#      could not be durably preserved (mkdir/cp into .anchor-source-preserve/
+#      failure — always fatal, see C1) OR its in-place restore/stash
+#      failed (cp/mv failure — non-fatal to data safety once the durable
+#      copy exists, but still a loud non-zero exit)
 #   2  fetch failed, or REPO_DIR is not a git checkout (both transient /
 #      environmental; next tick retries)
 #
@@ -151,6 +205,14 @@ NOTIFY="${FYD_NOTIFY:-${SCRIPT_DIR}/notify.sh}"
 # from the moment it is registered regardless of which exit path fires.
 ANCHOR_SOURCE_REL="public/api/anchor-source.json"
 ANCHOR_SOURCE_ABS="${REPO_DIR}/${ANCHOR_SOURCE_REL}"
+# Durable preservation dir (C1) — outside public/, untracked, never
+# rsync'd or git-touched. ANCHOR_DURABLE_FILE is set once real dirt is
+# captured and is NEVER deleted by this script (see header comment).
+ANCHOR_PRESERVE_DIR="${REPO_DIR}/.anchor-source-preserve"
+ANCHOR_DURABLE_FILE=""
+# Disposable scratch snapshot state, used only for the in-place
+# restore/stash convenience mechanism — separate from the durable copy
+# above, and cleaned up once its own job is done.
 ANCHOR_DIRT_CAPTURED=0
 ANCHOR_DIRT_FILE=""
 ANCHOR_DIRT_RESOLVED=0
@@ -172,8 +234,12 @@ alert() {
 # resolve_anchor_source_post_pull runs to completion — public/ discard
 # failure, a self_heal_lossless_dirt failure, or an FF-pull failure are all
 # exactly this shape, since none of them reach the pull-succeeded branch
-# that calls resolve_anchor_source_post_pull — this restores the preserved
-# bytes onto the real path so no such exit route can silently lose them.
+# that calls resolve_anchor_source_post_pull — this attempts a best-effort
+# in-place restore from the disposable scratch snapshot (ANCHOR_DIRT_FILE).
+# The durable copy (ANCHOR_DURABLE_FILE, C1) was already written at capture
+# time, before anything else, and is NEVER touched here — this trap is
+# purely a convenience restore onto the canonical path; if it fails, the
+# durable copy is what's still safe, hence the failure branch names it.
 # A no-op once ANCHOR_DIRT_RESOLVED=1 (resolve_anchor_source_post_pull sets
 # this as its first act, before it decides the dirt's fate itself) or if no
 # dirt was ever captured (ANCHOR_DIRT_CAPTURED stays 0 whenever the
@@ -184,11 +250,12 @@ restore_anchor_dirt_on_exit() {
 	[ "$ANCHOR_DIRT_RESOLVED" -eq 1 ] && return 0
 	if [ -f "$ANCHOR_DIRT_FILE" ]; then
 		if cp -p "$ANCHOR_DIRT_FILE" "$ANCHOR_SOURCE_ABS" 2>/dev/null; then
-			log "anchor-source.json: restored preserved host dirt on early exit (safety net)"
+			log "anchor-source.json: restored preserved host dirt onto the canonical path on early exit (safety net); durable copy remains at ${ANCHOR_DURABLE_FILE}"
+			rm -f "$ANCHOR_DIRT_FILE"
 		else
-			log "ERROR: anchor-source.json safety-net restore failed; preserved bytes remain at ${ANCHOR_DIRT_FILE}"
+			log "ERROR: anchor-source.json safety-net restore failed; durable copy remains safe at ${ANCHOR_DURABLE_FILE}"
+			alert high "host-advance: anchor-source.json restore failed" "safety-net restore onto the canonical path failed after an early exit (behind=${BEHIND:-unknown}); nothing was lost — the durable, rsync-safe copy remains at ${ANCHOR_DURABLE_FILE}. Investigate the restore failure; commit-anchor-source.sh --input-file=${ANCHOR_DURABLE_FILE} can transfer it directly."
 		fi
-		rm -f "$ANCHOR_DIRT_FILE"
 	fi
 }
 trap restore_anchor_dirt_on_exit EXIT
@@ -203,89 +270,147 @@ trap restore_anchor_dirt_on_exit EXIT
 # along with the routine cache-bust dirt it exists to clear.
 #
 # If the worktree copy is already byte-identical to HEAD, this is a no-op
-# (ANCHOR_DIRT_CAPTURED stays 0) — the ordinary discard a few lines down
-# loses zero information either way. Only a REAL difference from HEAD is
-# captured: snapshotted to a tmp file (so it survives the discard that is
-# about to run) and alerted at high priority. resolve_anchor_source_post_pull
-# below decides its final fate once the FF pull's effect on this exact path
-# is known.
+# (ANCHOR_DIRT_CAPTURED stays 0, ANCHOR_DURABLE_FILE stays empty) — the
+# ordinary discard a few lines down loses zero information either way.
+#
+# Only a REAL difference from HEAD is captured, in TWO copies (C1):
+#   1. A durable copy at ${ANCHOR_PRESERVE_DIR}/anchor-source.json.host-<ts>
+#      — written FIRST, before anything else (including the scratch
+#      snapshot below), because the very next CI step after this script
+#      exits can be deploy.yml's public/ rsync --delete, which would
+#      destroy anything left only inside public/. This copy is never
+#      deleted by this script.
+#   2. A disposable scratch snapshot (system tmp) used only by
+#      resolve_anchor_source_post_pull's in-place restore/stash
+#      convenience mechanism below — cleaned up once its own job is done.
+# Only a `log` here (I5) — not an alert — since the outcome (still
+# pending / self-healed / diverged) is decided at resolution, not capture;
+# see the header comment's severity note.
 protect_anchor_source_pre_discard() {
 	[ -f "$ANCHOR_SOURCE_ABS" ] || return 0
 	if git -C "$REPO_DIR" diff --quiet HEAD -- ":(literal)${ANCHOR_SOURCE_REL}" 2>/dev/null; then
 		return 0
 	fi
-	local dirt_file
-	if ! dirt_file="$(mktemp -t fyd-anchor-source-dirt.XXXXXX)"; then
-		log "ERROR: mktemp failed while preserving anchor-source.json dirt"
-		alert high "host-advance: anchor-source.json preserve failed" "mktemp failed while trying to preserve host-authored public/api/anchor-source.json dirt ahead of the public/ discard (behind=${BEHIND}); refusing to risk silent loss — investigate manually."
+
+	if ! mkdir -p "$ANCHOR_PRESERVE_DIR" 2>/dev/null; then
+		log "ERROR: failed to create durable preserve dir ${ANCHOR_PRESERVE_DIR}"
+		alert high "host-advance: anchor-source.json preserve failed" "mkdir -p ${ANCHOR_PRESERVE_DIR} failed while trying to durably preserve host-authored public/api/anchor-source.json dirt ahead of the public/ discard (behind=${BEHIND}); refusing to risk silent loss — investigate manually."
 		exit 1
 	fi
-	if ! cp -p "$ANCHOR_SOURCE_ABS" "$dirt_file"; then
-		log "ERROR: failed to snapshot anchor-source.json dirt to ${dirt_file}"
-		alert high "host-advance: anchor-source.json preserve failed" "cp failed while trying to preserve host-authored public/api/anchor-source.json dirt ahead of the public/ discard (behind=${BEHIND}); refusing to risk silent loss — investigate manually."
-		rm -f "$dirt_file"
+	local ts durable_file
+	ts="$(date -u +%Y%m%dT%H%M%SZ)"
+	durable_file="${ANCHOR_PRESERVE_DIR}/anchor-source.json.host-${ts}"
+	if ! cp -p "$ANCHOR_SOURCE_ABS" "$durable_file"; then
+		log "ERROR: failed to write durable preserve copy to ${durable_file}"
+		alert high "host-advance: anchor-source.json preserve failed" "cp failed while trying to durably preserve host-authored public/api/anchor-source.json dirt to ${durable_file} ahead of the public/ discard (behind=${BEHIND}); refusing to risk silent loss — investigate manually."
 		exit 1
+	fi
+	ANCHOR_DURABLE_FILE="$durable_file"
+
+	# Disposable scratch snapshot — separate file, separate lifecycle, used
+	# only by the in-place convenience mechanism. A failure here is not a
+	# data-loss risk (the durable copy above already exists), so it is
+	# logged but not fatal: ANCHOR_DIRT_CAPTURED stays 0, resolve_anchor_
+	# source_post_pull no-ops, and the durable copy alone carries the
+	# content forward.
+	local dirt_file
+	if ! dirt_file="$(mktemp -t fyd-anchor-source-dirt.XXXXXX)" || ! cp -p "$ANCHOR_SOURCE_ABS" "$dirt_file"; then
+		log "ERROR: failed to prepare the in-place resolve snapshot (durable copy already safe at ${ANCHOR_DURABLE_FILE}); in-place restore/stash convenience will be skipped this run"
+		rm -f "${dirt_file:-}" 2>/dev/null
+		log "anchor-source.json: host-authored dirt differs from HEAD — durably preserved to ${ANCHOR_DURABLE_FILE} ahead of public/ discard (in-place snapshot skipped)"
+		return 0
 	fi
 	ANCHOR_DIRT_FILE="$dirt_file"
 	ANCHOR_DIRT_CAPTURED=1
-	log "anchor-source.json: host-authored dirt differs from HEAD — preserved ahead of public/ discard"
-	alert high "host-authored anchor-source.json pending commit — preserved" "public/api/anchor-source.json has host-composed content that differs from the committed HEAD and has not yet been transferred by commit-anchor-source.sh. Preserved (not discarded) ahead of the public/ working-tree reset (behind=${BEHIND})."
+	log "anchor-source.json: host-authored dirt differs from HEAD — durably preserved to ${ANCHOR_DURABLE_FILE} ahead of public/ discard"
 }
 
 # resolve_anchor_source_post_pull <old_blob_hash> <new_blob_hash> — called
 # only after a successful FF pull, only when protect_anchor_source_pre_
-# discard actually captured dirt above. Decides the preserved dirt's final
-# fate now that the pull's effect on this exact path is known:
-#   - old == new (pull never touched this path): the preserved dirt is
-#     restored on top of the (unchanged) pulled content — still pending
-#     its own commit-anchor-source.sh run, nothing lost.
+# discard actually captured a disposable scratch snapshot above (a no-op
+# if it didn't — e.g. the scratch snapshot itself failed to prepare; the
+# durable copy from capture time already carries the content regardless).
+# Decides the DISPOSABLE scratch copy's fate — the durable copy at
+# ANCHOR_DURABLE_FILE was already written at capture time and is NEVER
+# touched here — now that the pull's effect on this exact path is known:
+#   - old == new (pull never touched this path): the scratch snapshot is
+#     restored onto the canonical path as an in-place convenience (helps
+#     on the cron path where no rsync follows) — still pending its own
+#     commit-anchor-source.sh run. `alert high` naming the durable path:
+#     this is a real, ongoing "needs operator action" outcome, not the
+#     happy path.
 #   - old != new (the Mac-side commit-anchor-source.sh commit arrived via
-#     origin) and the incoming bytes match the preserved dirt exactly:
-#     self-heal — the preserved copy is now redundant, discarded, alerted
-#     at default priority (informational, nothing lost).
-#   - old != new and the incoming bytes DIFFER from the preserved dirt:
+#     origin) and the incoming bytes match the scratch snapshot exactly:
+#     self-heal — nothing pending anymore (it's part of HEAD now).
+#     `alert default` (existing batched-self-heal style) — the intended
+#     happy path, must not page high every cycle (I5).
+#   - old != new and the incoming bytes DIFFER from the scratch snapshot:
 #     origin wins on the canonical path (already what the pull just wrote
-#     there) but the preserved dirt is stashed to a `.host-<UTC
-#     timestamp>` sibling rather than discarded, alerted at high priority
-#     with the stash path.
+#     there); the scratch snapshot is additionally copied to a
+#     `.host-<UTC timestamp>` in-place sibling for cron-path convenience.
+#     `alert high` naming the durable path as authoritative — operator
+#     action needed to reconcile.
+# Any operation failure (cp/mv) in any branch: `alert high`, non-zero
+# return (propagated by the caller to a script-level exit 1) — the
+# durable copy is unaffected regardless, so these are loud-but-safe.
 resolve_anchor_source_post_pull() {
 	[ "$ANCHOR_DIRT_CAPTURED" -eq 1 ] || return 0
 	ANCHOR_DIRT_RESOLVED=1
 	local old_hash="$1" new_hash="$2"
 
 	if [ "$old_hash" = "$new_hash" ]; then
-		cp -p "$ANCHOR_DIRT_FILE" "$ANCHOR_SOURCE_ABS"
-		rm -f "$ANCHOR_DIRT_FILE"
-		log "anchor-source.json: pull left this path untouched — restored preserved host dirt"
-		return 0
+		# I2: check cp explicitly — this function runs under `if !
+		# resolve_anchor_source_post_pull ...; then` at the call site, which
+		# suppresses `set -e` for everything inside it (POSIX semantics for
+		# commands used as an `if` condition). An unchecked cp followed by
+		# an unconditional rm would silently destroy the only remaining
+		# copy of this branch's data on a cp failure — the durable copy
+		# from capture time is what actually saves this branch from being a
+		# real data-loss risk, but the scratch file must not be deleted
+		# unless the restore it was for actually succeeded.
+		if cp -p "$ANCHOR_DIRT_FILE" "$ANCHOR_SOURCE_ABS"; then
+			rm -f "$ANCHOR_DIRT_FILE"
+			log "anchor-source.json: pull left this path untouched — restored preserved host dirt in-place (durable copy remains at ${ANCHOR_DURABLE_FILE})"
+			alert high "host-advance: anchor-source.json pending commit" "public/api/anchor-source.json: host-authored content is still uncommitted and pending commit-anchor-source.sh. Durable copy at ${ANCHOR_DURABLE_FILE} (survives any subsequent public/ rsync --delete); canonical path restored to match it in-place for convenience."
+			return 0
+		fi
+		log "ERROR: failed to restore preserved anchor-source.json dirt onto the canonical path (in-place convenience only — durable copy at ${ANCHOR_DURABLE_FILE} is unaffected)"
+		alert high "host-advance: anchor-source.json restore failed" "in-place restore of preserved anchor-source.json dirt onto the canonical path failed (behind=${BEHIND}); the durable, rsync-safe copy remains intact at ${ANCHOR_DURABLE_FILE} — nothing was lost, but investigate the restore failure. commit-anchor-source.sh --input-file=${ANCHOR_DURABLE_FILE} can transfer it directly."
+		return 1
 	fi
 
 	if cmp -s "$ANCHOR_DIRT_FILE" "$ANCHOR_SOURCE_ABS"; then
 		rm -f "$ANCHOR_DIRT_FILE"
 		log "anchor-source.json: self-heal — incoming pull content matches preserved host dirt"
-		alert default "host-advance: self-healed anchor-source.json" "public/api/anchor-source.json: the preserved host-authored dirt was byte-identical to the incoming pull (the pending commit-anchor-source.sh commit arrived via origin) — self-healed, nothing lost."
+		alert default "host-advance: self-healed anchor-source.json" "public/api/anchor-source.json: the preserved host-authored dirt was byte-identical to the incoming pull (the pending commit-anchor-source.sh commit arrived via origin) — self-healed, nothing lost. Durable backup retained at ${ANCHOR_DURABLE_FILE}."
 		return 0
 	fi
 
+	# Diverged: origin wins on the canonical path (already what the pull
+	# just wrote there). The durable copy at ANCHOR_DURABLE_FILE already
+	# safely holds the diverged host dirt (written at capture time, before
+	# any of this ran) — this in-place sibling is an ADDITIONAL convenience
+	# copy for the cron path, not the safety mechanism, so `cp` (not `mv`)
+	# leaves the scratch file in place until we know the copy succeeded.
 	local ts stash_path
 	ts="$(date -u +%Y%m%dT%H%M%SZ)"
 	stash_path="${ANCHOR_SOURCE_ABS}.host-${ts}"
-	if mv "$ANCHOR_DIRT_FILE" "$stash_path"; then
-		log "anchor-source.json: incoming pull diverged from preserved host dirt — stashed host dirt to ${stash_path}"
-		alert high "host-advance: anchor-source.json host dirt stashed" "public/api/anchor-source.json: the incoming pull (a commit-anchor-source.sh commit that arrived via origin) diverged from the preserved host-authored content. Origin content was kept on the canonical path; the diverged host dirt was stashed to ${stash_path} for manual review — nothing was discarded."
+	if cp -p "$ANCHOR_DIRT_FILE" "$stash_path"; then
+		rm -f "$ANCHOR_DIRT_FILE"
+		log "anchor-source.json: incoming pull diverged from preserved host dirt — durable copy at ${ANCHOR_DURABLE_FILE}; in-place convenience copy at ${stash_path}"
+		alert high "host-advance: anchor-source.json host dirt stashed" "public/api/anchor-source.json: the incoming pull (a commit-anchor-source.sh commit that arrived via origin) diverged from the preserved host-authored content. Origin content was kept on the canonical path; the diverged host dirt is durably preserved at ${ANCHOR_DURABLE_FILE} (survives any subsequent public/ rsync --delete), with an in-place convenience copy at ${stash_path} — nothing was discarded."
 		return 0
 	fi
 
-	# Stash relocation itself failed (rare — mktemp's dir and REPO_DIR can be
-	# different filesystems). Mirrors self_heal_lossless_dirt's own
-	# mutating-op-failure severity: fail loudly rather than let a run that
-	# hit this edge case report a plain, undifferentiated success. The
-	# canonical path is already correct (origin content, written by the
-	# pull itself) and the preserved dirt is deliberately left in place at
-	# ANCHOR_DIRT_FILE (not deleted) so the alert's named path is where an
-	# operator actually finds it.
-	log "ERROR: failed to stash divergent anchor-source.json host dirt to ${stash_path}"
-	alert high "host-advance: anchor-source.json stash failed" "failed to move preserved host dirt to ${stash_path} after the incoming pull diverged from it; the host dirt remains readable at ${ANCHOR_DIRT_FILE} — investigate and relocate manually. The canonical path already holds the correct origin content."
+	# In-place convenience copy failed (rare — mktemp's dir and REPO_DIR can
+	# be different filesystems, or the public/api/ dir is unwritable).
+	# Mirrors self_heal_lossless_dirt's own mutating-op-failure severity:
+	# fail loudly rather than let a run that hit this edge case report a
+	# plain, undifferentiated success. The canonical path is already
+	# correct (origin content, written by the pull itself) and the durable
+	# copy from capture time is completely unaffected by this failure.
+	log "ERROR: failed to write in-place convenience stash to ${stash_path} (durable copy at ${ANCHOR_DURABLE_FILE} is unaffected)"
+	alert high "host-advance: anchor-source.json stash failed" "failed to write the in-place convenience copy to ${stash_path} after the incoming pull diverged from the preserved host dirt; the durable, rsync-safe copy remains intact at ${ANCHOR_DURABLE_FILE} — investigate and commit from there via commit-anchor-source.sh --input-file=${ANCHOR_DURABLE_FILE}. The canonical path already holds the correct origin content."
 	return 1
 }
 

@@ -365,13 +365,15 @@ alerts | grep -q '^high|host-advance: self-heal revert failed' \
 	|| bad "self-heal-op-fails: high alert on revert failure (alerts: $(alerts))"
 teardown
 
-# ---- case 13 (plan A4 / brief item a): anchor-source.json host dirt that
-#      DIFFERS from HEAD is preserved (never silently discarded by the
-#      blanket public/ checkout), alerted at high priority, and — since
-#      the incoming pull does not touch this path at all (origin only
-#      advances an unrelated file) — the preserved dirt is restored on
-#      top afterward: still pending its own commit-anchor-source.sh run,
-#      nothing lost. --------------------------------------------------------
+# ---- case 13 (plan A4 / brief item a; revised fix-round-1 per C1/I5):
+#      anchor-source.json host dirt that DIFFERS from HEAD is durably
+#      preserved to .anchor-source-preserve/ (never silently discarded by
+#      the blanket public/ checkout) — capture itself is only `log`ged
+#      (I5), not alerted — and since the incoming pull does not touch
+#      this path at all (origin only advances an unrelated file), the
+#      resolution fires `alert high` naming the durable path, and the
+#      scratch snapshot is restored on top in-place: still pending its
+#      own commit-anchor-source.sh run, nothing lost either copy. --------
 build_pair
 ANCHOR_ABS="$CLONE/public/api/anchor-source.json"
 LOCAL_DIRT="$(printf '{"cycle":2,"dag_root_computed":"hostdirt-untouched"}')"
@@ -388,12 +390,22 @@ ORIGIN_HEAD="$(git -C "$ORIGIN" rev-parse main)"
 [ "$NEW_HEAD" = "$ORIGIN_HEAD" ] \
 	&& ok "anchor-preserve-untouched: HEAD advanced to origin/main" \
 	|| bad "anchor-preserve-untouched: HEAD advanced to origin/main"
-alerts | grep -q '^high|host-authored anchor-source.json pending commit — preserved|' \
-	&& ok "anchor-preserve-untouched: high alert on capture" \
-	|| bad "anchor-preserve-untouched: high alert on capture (alerts: $(alerts))"
+alerts | grep -q '^high|host-advance: anchor-source.json pending commit|' \
+	&& ok "anchor-preserve-untouched: high alert at resolution (not capture, per I5)" \
+	|| bad "anchor-preserve-untouched: high alert at resolution (alerts: $(alerts))"
+DURABLE_FILE="$(find "$CLONE/.anchor-source-preserve" -maxdepth 1 -type f -name 'anchor-source.json.host-*' 2>/dev/null | head -1)"
+[ -n "$DURABLE_FILE" ] \
+	&& ok "anchor-preserve-untouched: durable copy created in .anchor-source-preserve/" \
+	|| bad "anchor-preserve-untouched: durable copy created in .anchor-source-preserve/"
+[ -n "$DURABLE_FILE" ] && [ "$(cat "$DURABLE_FILE")" = "$LOCAL_DIRT" ] \
+	&& ok "anchor-preserve-untouched: durable copy holds the host dirt" \
+	|| bad "anchor-preserve-untouched: durable copy holds the host dirt"
+alerts | grep -q "$DURABLE_FILE" \
+	&& ok "anchor-preserve-untouched: alert names the durable path" \
+	|| bad "anchor-preserve-untouched: alert names the durable path (alerts: $(alerts))"
 [ "$(cat "$ANCHOR_ABS")" = "$LOCAL_DIRT" ] \
-	&& ok "anchor-preserve-untouched: preserved dirt restored after pull (nothing lost)" \
-	|| bad "anchor-preserve-untouched: preserved dirt restored after pull (got: $(cat "$ANCHOR_ABS"))"
+	&& ok "anchor-preserve-untouched: in-place convenience copy restored after pull (nothing lost)" \
+	|| bad "anchor-preserve-untouched: in-place convenience copy restored after pull (got: $(cat "$ANCHOR_ABS"))"
 [ -n "$(git -C "$CLONE" status --porcelain -- public/api/anchor-source.json)" ] \
 	&& ok "anchor-preserve-untouched: path still shows as dirty (still pending its own commit)" \
 	|| bad "anchor-preserve-untouched: path still shows as dirty"
@@ -435,6 +447,9 @@ alerts | grep -qi 'anchor-source' \
 [ "$(git -C "$CLONE" status --porcelain -- public/)" = "" ] \
 	&& ok "anchor-byte-identical: public/ tree clean (cache-bust dirt discarded as usual)" \
 	|| bad "anchor-byte-identical: public/ tree clean (status: $(git -C "$CLONE" status --porcelain -- public/))"
+[ ! -d "$CLONE/.anchor-source-preserve" ] \
+	&& ok "anchor-byte-identical: no durable preserve dir created (no real dirt existed)" \
+	|| bad "anchor-byte-identical: no durable preserve dir created (found: $(ls "$CLONE/.anchor-source-preserve" 2>/dev/null))"
 teardown
 
 # ---- case 15 (plan A4 / brief item c): incoming pull DOES touch
@@ -472,8 +487,12 @@ alerts | grep -qi 'stashed' \
 	|| bad "anchor-self-heal-match: path clean afterwards"
 NUM_STASH_FILES=$(find "$CLONE/public/api" -maxdepth 1 -name 'anchor-source.json.host-*' | wc -l | tr -d ' ')
 [ "$NUM_STASH_FILES" -eq 0 ] \
-	&& ok "anchor-self-heal-match: no stash file created" \
-	|| bad "anchor-self-heal-match: no stash file created (found: $NUM_STASH_FILES)"
+	&& ok "anchor-self-heal-match: no in-place stash file created" \
+	|| bad "anchor-self-heal-match: no in-place stash file created (found: $NUM_STASH_FILES)"
+DURABLE_FILE="$(find "$CLONE/.anchor-source-preserve" -maxdepth 1 -type f -name 'anchor-source.json.host-*' 2>/dev/null | head -1)"
+[ -n "$DURABLE_FILE" ] && [ "$(cat "$DURABLE_FILE")" = "$DIRT_CONTENT" ] \
+	&& ok "anchor-self-heal-match: durable copy from capture time still retained (never auto-deleted)" \
+	|| bad "anchor-self-heal-match: durable copy from capture time still retained"
 teardown
 
 # ---- case 16 (plan A4 / brief item d): incoming pull touches anchor-
@@ -506,21 +525,34 @@ alerts | grep -q '^high|host-advance: anchor-source.json host dirt stashed|' \
 	|| bad "anchor-stash-diverged: origin content wins on the canonical path (got: $(cat "$ANCHOR_ABS"))"
 STASH_FILE="$(find "$CLONE/public/api" -maxdepth 1 -name 'anchor-source.json.host-*' | head -1)"
 [ -n "$STASH_FILE" ] \
-	&& ok "anchor-stash-diverged: stash file created" \
-	|| bad "anchor-stash-diverged: stash file created"
+	&& ok "anchor-stash-diverged: in-place convenience stash file created" \
+	|| bad "anchor-stash-diverged: in-place convenience stash file created"
 [ -n "$STASH_FILE" ] && [ "$(cat "$STASH_FILE")" = "$LOCAL_DIRT" ] \
-	&& ok "anchor-stash-diverged: stash file holds the diverged host dirt (nothing lost)" \
-	|| bad "anchor-stash-diverged: stash file holds the diverged host dirt (got: $([ -n "$STASH_FILE" ] && cat "$STASH_FILE"))"
+	&& ok "anchor-stash-diverged: in-place stash file holds the diverged host dirt (nothing lost)" \
+	|| bad "anchor-stash-diverged: in-place stash file holds the diverged host dirt (got: $([ -n "$STASH_FILE" ] && cat "$STASH_FILE"))"
+DURABLE_FILE="$(find "$CLONE/.anchor-source-preserve" -maxdepth 1 -type f -name 'anchor-source.json.host-*' 2>/dev/null | head -1)"
+[ -n "$DURABLE_FILE" ] \
+	&& ok "anchor-stash-diverged: durable copy exists in .anchor-source-preserve/" \
+	|| bad "anchor-stash-diverged: durable copy exists in .anchor-source-preserve/"
+[ -n "$DURABLE_FILE" ] && [ "$(cat "$DURABLE_FILE")" = "$LOCAL_DIRT" ] \
+	&& ok "anchor-stash-diverged: durable copy holds the diverged host dirt" \
+	|| bad "anchor-stash-diverged: durable copy holds the diverged host dirt"
+[ -n "$DURABLE_FILE" ] && alerts | grep -q "$DURABLE_FILE" \
+	&& ok "anchor-stash-diverged: alert names the durable path as authoritative" \
+	|| bad "anchor-stash-diverged: alert names the durable path as authoritative (alerts: $(alerts))"
 teardown
 
-# ---- case 17 (bonus — safety-net trap): anchor-source.json dirt is
-#      captured, but the FF pull itself fails for an UNRELATED reason
-#      (a different tracked file has real, non-absorbable divergence —
-#      same shape as case 4/9). resolve_anchor_source_post_pull is never
-#      reached in this branch, so the EXIT-trap safety net
-#      (restore_anchor_dirt_on_exit) must be what restores the preserved
-#      anchor dirt — verifying the trap covers exit paths beyond the ones
-#      the brief enumerates explicitly. -----------------------------------
+# ---- case 17 (bonus — safety-net trap; revised fix-round-1 per C1/I5):
+#      anchor-source.json dirt is captured (durable copy written, capture
+#      only `log`s per I5 — no alert fires yet), but the FF pull itself
+#      fails for an UNRELATED reason (a different tracked file has real,
+#      non-absorbable divergence — same shape as case 4/9).
+#      resolve_anchor_source_post_pull is never reached in this branch, so
+#      the EXIT-trap safety net (restore_anchor_dirt_on_exit) must be what
+#      restores the in-place convenience copy — verifying the trap covers
+#      exit paths beyond the ones the brief enumerates explicitly — while
+#      the durable copy (written at capture, untouched by the trap)
+#      persists throughout. -----------------------------------------------
 build_pair
 ANCHOR_ABS="$CLONE/public/api/anchor-source.json"
 LOCAL_DIRT="$(printf '{"cycle":2,"dag_root_computed":"hostdirt-safetynet"}')"
@@ -537,18 +569,65 @@ OUT="$(cat /tmp/.adv-out-$$.log)"; rm -f /tmp/.adv-out-$$.log
 [ "$(git -C "$CLONE" rev-parse HEAD)" = "$HEAD_BEFORE" ] \
 	&& ok "anchor-safety-net: HEAD did not move" \
 	|| bad "anchor-safety-net: HEAD did not move"
-alerts | grep -q '^high|host-authored anchor-source.json pending commit — preserved|' \
-	&& ok "anchor-safety-net: high alert on capture" \
-	|| bad "anchor-safety-net: high alert on capture (alerts: $(alerts))"
+DURABLE_FILE="$(find "$CLONE/.anchor-source-preserve" -maxdepth 1 -type f -name 'anchor-source.json.host-*' 2>/dev/null | head -1)"
+[ -n "$DURABLE_FILE" ] && [ "$(cat "$DURABLE_FILE")" = "$LOCAL_DIRT" ] \
+	&& ok "anchor-safety-net: durable copy written at capture time, unaffected by the later pull failure" \
+	|| bad "anchor-safety-net: durable copy written at capture time"
 alerts | grep -q '^high|host-advance: ff-only pull failed|' \
 	&& ok "anchor-safety-net: high alert on pull failure" \
 	|| bad "anchor-safety-net: high alert on pull failure (alerts: $(alerts))"
-alerts | grep -qiE 'self-healed anchor-source|host dirt stashed' \
-	&& bad "anchor-safety-net: resolve_anchor_source_post_pull never ran (no self-heal/stash alert) (alerts: $(alerts))" \
-	|| ok "anchor-safety-net: resolve_anchor_source_post_pull never ran (no self-heal/stash alert)"
+alerts | grep -qiE 'self-healed anchor-source|host dirt stashed|anchor-source.json pending commit|restore failed' \
+	&& bad "anchor-safety-net: resolve_anchor_source_post_pull never ran, and the trap's own restore succeeded silently (alerts: $(alerts))" \
+	|| ok "anchor-safety-net: resolve_anchor_source_post_pull never ran, and the trap's own restore succeeded silently (no anchor-resolution alert)"
 [ "$(cat "$ANCHOR_ABS")" = "$LOCAL_DIRT" ] \
-	&& ok "anchor-safety-net: preserved dirt restored by the EXIT trap (nothing lost)" \
-	|| bad "anchor-safety-net: preserved dirt restored by the EXIT trap (got: $(cat "$ANCHOR_ABS"))"
+	&& ok "anchor-safety-net: in-place convenience copy restored by the EXIT trap (nothing lost)" \
+	|| bad "anchor-safety-net: in-place convenience copy restored by the EXIT trap (got: $(cat "$ANCHOR_ABS"))"
+teardown
+
+# ---- case 18 (C1 fix, reviewer-requested): the durable preserve dir
+#      survives a simulated public/-only rsync --delete — exactly
+#      deploy.yml's "Rsync public/ to VPS" step, which runs moments after
+#      this script exits in the same CI job. This is the vulnerability C1
+#      exists to close: anything left only INSIDE public/ (an in-place
+#      convenience stash) is destroyed by that rsync, while the durable
+#      copy at .anchor-source-preserve/ (outside public/ entirely) is not
+#      — confirmed here structurally, not just by reasoning. -------------
+build_pair
+ANCHOR_ABS="$CLONE/public/api/anchor-source.json"
+# Snapshot a clean "runner build" of public/ (no host artifacts) BEFORE the
+# advancer runs — this is what deploy.yml's rsync source actually looks
+# like (the runner's own checkout, never touched by anything host-side).
+RSYNC_SRC="$BASE/runner-public-build"
+cp -r "$CLONE/public" "$RSYNC_SRC"
+LOCAL_DIRT="$(printf '{"cycle":2,"dag_root_computed":"hostdirt-rsync-survival"}')"
+REMOTE_CONTENT="$(printf '{"cycle":2,"dag_root_computed":"maccommit-rsync-survival"}')"
+printf '%s' "$LOCAL_DIRT" > "$ANCHOR_ABS"
+push_origin_anchor_source_commit "$REMOTE_CONTENT"
+run_advancer >/tmp/.adv-out-$$.log 2>&1
+RC=$?
+OUT="$(cat /tmp/.adv-out-$$.log)"; rm -f /tmp/.adv-out-$$.log
+[ "$RC" -eq 0 ] \
+	&& ok "rsync-survival: advancer exit 0" \
+	|| bad "rsync-survival: advancer exit 0 (actual=$RC, out=$OUT)"
+DURABLE_FILE="$(find "$CLONE/.anchor-source-preserve" -maxdepth 1 -type f -name 'anchor-source.json.host-*' 2>/dev/null | head -1)"
+[ -n "$DURABLE_FILE" ] \
+	&& ok "rsync-survival: durable copy exists before the simulated rsync" \
+	|| bad "rsync-survival: durable copy exists before the simulated rsync"
+INPLACE_STASH="$(find "$CLONE/public/api" -maxdepth 1 -name 'anchor-source.json.host-*' 2>/dev/null | head -1)"
+[ -n "$INPLACE_STASH" ] \
+	&& ok "rsync-survival: in-place convenience stash exists before the simulated rsync" \
+	|| bad "rsync-survival: in-place convenience stash exists before the simulated rsync"
+
+# Simulate deploy.yml's "Rsync public/ to VPS" step: rsync -a --delete
+# from the runner's clean build onto the host's public/ tree.
+rsync -a --delete "${RSYNC_SRC}/" "${CLONE}/public/" >/dev/null 2>&1
+
+[ -n "$DURABLE_FILE" ] && [ -f "$DURABLE_FILE" ] && [ "$(cat "$DURABLE_FILE")" = "$LOCAL_DIRT" ] \
+	&& ok "rsync-survival: durable copy SURVIVES the simulated public/ rsync --delete" \
+	|| bad "rsync-survival: durable copy survives (missing, or content changed, after rsync)"
+[ -n "$INPLACE_STASH" ] && [ ! -f "$INPLACE_STASH" ] \
+	&& ok "rsync-survival: in-place convenience stash is destroyed by the rsync (expected — this is exactly why the durable copy exists)" \
+	|| bad "rsync-survival: in-place convenience stash unexpectedly survived the rsync (test assumption wrong, or C1 regressed)"
 teardown
 
 # ---- case 12: concurrency lock (flock-gated — Linux host/CI only). macOS
