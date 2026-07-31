@@ -270,10 +270,18 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    just because the two scripts' guards are conceptually parallel.
 6. **Mac —**
    ```sh
+   export VALIDATOR_HOST=<validator host IP or hostname>
+   export VALIDATOR_HOST_KEY=~/.ssh/<your_validator_host_key>
    bash scripts/operator-local/commit-anchor-source.sh --expect-cycle=<N+1>
    ```
    verifies + commits the host-composed `anchor-source.json` (cycle-4 day
-   example: `--expect-cycle=4`). Deliberate meaning switch from step 5:
+   example: `--expect-cycle=4`). The two exports are the SSH coordinates
+   it fetches with — never literal in this repo, so both are yours to
+   supply: `VALIDATOR_HOST` is **required** (unset → immediate refusal
+   naming the variable), and `VALIDATOR_HOST_KEY` **defaults to the
+   literal placeholder** `~/.ssh/<your_validator_host_key>`, a path that
+   does not exist, so leaving it unset fails with `ERROR: SSH key not
+   found` and **exit 3**. (`VALIDATOR_HOST_USER` defaults to `root`.) Deliberate meaning switch from step 5:
    `gen-anchor-source.sh`'s `FY_EXPECT_CYCLE` is the closed-cycle count,
    while this script's `--expect-cycle` is the cycle number being
    inscribed — it compares directly against the fetched file's
