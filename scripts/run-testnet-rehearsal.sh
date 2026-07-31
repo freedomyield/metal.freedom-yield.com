@@ -356,7 +356,16 @@ echo "  composed 4-action tx to $TX_FILE"
 echo "  memo_prefix: $(jq -r .memo_prefix "$DRY_RUN_LOG")"
 echo "  actor@perm:  $(jq -r '"\(.authorization.actor)@\(.authorization.permission)"' "$DRY_RUN_LOG")"
 echo "  sink:        $(jq -r .sink "$DRY_RUN_LOG")"
-echo "  dry-run log saved: $DRY_RUN_LOG  (= future mainnet gate-4 material)"
+# NOT the mainnet gate-4 material: this log records target_chain="testnet-a",
+# and the hardened mainnet gate 4 refuses a --dry-run-log whose recorded
+# target_chain differs from --chain. It is testnet-side evidence only (and the
+# input step 8 reassembles into the receipt shape). The mainnet gate-4 log is
+# produced separately on the Mac by
+# scripts/preview-cycle-anchor-broadcast.sh, from the COMMITTED
+# anchor-source.json — see docs/CYCLE_GATE.md step 7.
+echo "  dry-run log saved: $DRY_RUN_LOG  (testnet-side evidence, target_chain=testnet-a)"
+echo "    NOT mainnet gate-4 material — mainnet gate 4 refuses a testnet-a dry-run log."
+echo "    The mainnet one comes from the Mac preview step (preview-cycle-anchor-broadcast.sh)."
 
 # ---- step 6: create broadcast token ----
 # R16: the token is chain- AND content-bound (not a bare `touch`), so it
@@ -463,7 +472,7 @@ Details for the record:
     [2/ob]  $(jq -r .composed_memos.observations    "$DRY_RUN_LOG")
     [3/ar]  $(jq -r .composed_memos.artifacts       "$DRY_RUN_LOG")
     [4/dag] $(jq -r .composed_memos.dag_root_summary "$DRY_RUN_LOG")
-  dry-run log:         $DRY_RUN_LOG
+  dry-run log:         $DRY_RUN_LOG  (testnet-side only — not mainnet gate-4 material)
   receipt:             $RECEIPT_OUT
   explorer URL:        https://testnet.protonscan.io/transaction/${TX_ID}
 
