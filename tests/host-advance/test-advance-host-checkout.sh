@@ -365,13 +365,16 @@ alerts | grep -q '^high|host-advance: self-heal revert failed' \
 	|| bad "self-heal-op-fails: high alert on revert failure (alerts: $(alerts))"
 teardown
 
-# ---- case 13 (plan A4 / brief item a; revised fix-round-1 per C1/I5):
-#      anchor-source.json host dirt that DIFFERS from HEAD is durably
-#      preserved to .anchor-source-preserve/ (never silently discarded by
-#      the blanket public/ checkout) — capture itself is only `log`ged
-#      (I5), not alerted — and since the incoming pull does not touch
-#      this path at all (origin only advances an unrelated file), the
-#      resolution fires `alert high` naming the durable path, and the
+# ---- case 13 (plan A4 / brief item a; revised fix-round-1 per C1/I5,
+#      severity revised again in fix round 2): anchor-source.json host
+#      dirt that DIFFERS from HEAD is durably preserved to
+#      .anchor-source-preserve/ (never silently discarded by the blanket
+#      public/ checkout) — capture itself is only `log`ged (I5), not
+#      alerted — and since the incoming pull does not touch this path at
+#      all (origin only advances an unrelated file), the resolution fires
+#      `alert default` naming the durable path (fix round 2: this
+#      untouched/still-pending state is EXPECTED mid-flow behavior on a
+#      transition day, not an anomaly, so it must not page high), and the
 #      scratch snapshot is restored on top in-place: still pending its
 #      own commit-anchor-source.sh run, nothing lost either copy. --------
 build_pair
@@ -390,9 +393,12 @@ ORIGIN_HEAD="$(git -C "$ORIGIN" rev-parse main)"
 [ "$NEW_HEAD" = "$ORIGIN_HEAD" ] \
 	&& ok "anchor-preserve-untouched: HEAD advanced to origin/main" \
 	|| bad "anchor-preserve-untouched: HEAD advanced to origin/main"
+alerts | grep -q '^default|host-advance: anchor-source.json pending commit|' \
+	&& ok "anchor-preserve-untouched: default-priority alert at resolution (expected mid-flow state, not paged high)" \
+	|| bad "anchor-preserve-untouched: default-priority alert at resolution (alerts: $(alerts))"
 alerts | grep -q '^high|host-advance: anchor-source.json pending commit|' \
-	&& ok "anchor-preserve-untouched: high alert at resolution (not capture, per I5)" \
-	|| bad "anchor-preserve-untouched: high alert at resolution (alerts: $(alerts))"
+	&& bad "anchor-preserve-untouched: must NOT be high priority (alerts: $(alerts))" \
+	|| ok "anchor-preserve-untouched: not high priority"
 DURABLE_FILE="$(find "$CLONE/.anchor-source-preserve" -maxdepth 1 -type f -name 'anchor-source.json.host-*' 2>/dev/null | head -1)"
 [ -n "$DURABLE_FILE" ] \
 	&& ok "anchor-preserve-untouched: durable copy created in .anchor-source-preserve/" \

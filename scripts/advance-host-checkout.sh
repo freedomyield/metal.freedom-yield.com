@@ -95,9 +95,12 @@
 # silently-fine most of the time. Severity is decided at RESOLUTION,
 # once the FF pull's effect on this exact path is known:
 #   - pull never touched the path -> preserved dirt restored in-place
-#     (best-effort, not the safety mechanism) + `alert high` naming the
-#     durable path — the dirt is genuinely still pending, so this is
-#     rightly loud (an outcome, not routine).
+#     (best-effort, not the safety mechanism) + `alert default` naming
+#     the durable path (revised, fix round 2). This is the EXPECTED
+#     mid-flow state on a transition day — host composed, the Mac-side
+#     commit is coming minutes later, and identity-push deploys will
+#     trigger further advances in between — so a `high` alert here would
+#     page on planned behavior, not an anomaly.
 #   - pull DID touch the path and its content matches the preserved dirt
 #     exactly (a commit-anchor-source.sh commit arrived via origin) ->
 #     self-heal, `alert default` (existing batched-self-heal style) —
@@ -107,7 +110,8 @@
 #     the canonical path, the in-place sibling stash is written as a
 #     convenience copy, and `alert high` names the (already-written, from
 #     capture time) durable path as authoritative — operator action
-#     needed to reconcile.
+#     needed to reconcile (this outcome, unlike the untouched-restore
+#     case above, is NOT expected mid-flow behavior).
 #   - any operation failure AFTER the durable copy already exists (in-place
 #     restore/stash, at resolution or in the EXIT-trap safety net) ->
 #     `alert high` unconditionally; the durable copy is never lost by a
@@ -336,9 +340,11 @@ protect_anchor_source_pre_discard() {
 #   - old == new (pull never touched this path): the scratch snapshot is
 #     restored onto the canonical path as an in-place convenience (helps
 #     on the cron path where no rsync follows) — still pending its own
-#     commit-anchor-source.sh run. `alert high` naming the durable path:
-#     this is a real, ongoing "needs operator action" outcome, not the
-#     happy path.
+#     commit-anchor-source.sh run. `alert default` naming the durable
+#     path (fix round 2): this is the EXPECTED mid-flow state on a
+#     transition day (host composed, Mac-side commit due minutes later,
+#     more advances triggered in between by identity-push deploys) — not
+#     an anomaly, so it must not page high.
 #   - old != new (the Mac-side commit-anchor-source.sh commit arrived via
 #     origin) and the incoming bytes match the scratch snapshot exactly:
 #     self-heal — nothing pending anymore (it's part of HEAD now).
@@ -371,7 +377,7 @@ resolve_anchor_source_post_pull() {
 		if cp -p "$ANCHOR_DIRT_FILE" "$ANCHOR_SOURCE_ABS"; then
 			rm -f "$ANCHOR_DIRT_FILE"
 			log "anchor-source.json: pull left this path untouched — restored preserved host dirt in-place (durable copy remains at ${ANCHOR_DURABLE_FILE})"
-			alert high "host-advance: anchor-source.json pending commit" "public/api/anchor-source.json: host-authored content is still uncommitted and pending commit-anchor-source.sh. Durable copy at ${ANCHOR_DURABLE_FILE} (survives any subsequent public/ rsync --delete); canonical path restored to match it in-place for convenience."
+			alert default "host-advance: anchor-source.json pending commit" "public/api/anchor-source.json: host-authored content is still uncommitted and pending commit-anchor-source.sh. Durable copy at ${ANCHOR_DURABLE_FILE} (survives any subsequent public/ rsync --delete); canonical path restored to match it in-place for convenience."
 			return 0
 		fi
 		log "ERROR: failed to restore preserved anchor-source.json dirt onto the canonical path (in-place convenience only — durable copy at ${ANCHOR_DURABLE_FILE} is unaffected)"
