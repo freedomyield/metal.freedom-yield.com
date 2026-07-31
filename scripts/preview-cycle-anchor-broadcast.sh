@@ -25,6 +25,19 @@
 # this script now REFUSES to work from anything but the committed bytes
 # (override: --allow-uncommitted, for deliberate off-cycle experiments only).
 #
+# WHY the published-copy guard (2026-07-31 final walkthrough re-verification):
+# the committed-bytes guard above ([1/5]) only proves --source matches LOCAL
+# HEAD — it says nothing about whether that commit has actually been pushed
+# and deployed. Running this script in the gap between "git commit" and
+# "push finishes propagating" passed [1/5] while the public site still served
+# the OLD anchor-source.json, so the receipt's url+sha256 would only be
+# caught as wrong AFTER an irreversible broadcast (resume-after-cycle-start.sh
+# exit 3, much too late). So immediately after [1/5] passes, this script ALSO
+# fetches the live published copy (cache-busted — see below) and compares its
+# dag_root_computed to --source; a mismatch or an unreachable site refuses
+# (exit 10) rather than let the operator proceed on an unverified assumption.
+# --skip-published-check bypasses this for deliberate offline/degraded use.
+#
 # BROADCASTS NOTHING. Invokes no `proton transaction` / real safe-broadcast
 # call. Touches no operator token. Writes only a temp dry-run-log.
 #
@@ -61,6 +74,13 @@
 #   --allow-uncommitted      Skip the committed-bytes guard ([1/5]). Only for
 #                            deliberate off-cycle experiments; a real cycle
 #                            broadcast must sign the committed bytes.
+#   --skip-published-check   Skip the published-copy guard that runs right
+#                            after [1/5] passes (fetches the LIVE public
+#                            anchor-source.json and compares dag_root_computed
+#                            against --source). Loud stderr warning when
+#                            given. Only for deliberate offline/degraded use —
+#                            a real cycle broadcast should verify the public
+#                            site already serves the committed bytes.
 #   --skip-compose           Accepted no-op, kept so the flag reads as an
 #                            explicit statement of intent. This script never
 #                            composes; there is nothing to skip.
@@ -68,7 +88,11 @@
 # Env overrides: REPO (default: this script's own repo root), DRYLOG (default
 # /tmp/fya-mainnet-dryrun.json), FY_CONFIG_DIR (default /etc/freedom-yield —
 # on the Mac it MUST be set, see [3/5]); TESTNET_TX_ID and SOURCE_PATH are
-# equivalent to the two flags above (flags take precedence).
+# equivalent to the two flags above (flags take precedence). ANCHOR_SOURCE_URL
+# (default https://metal.freedom-yield.com/api/anchor-source.json, same
+# convention as scripts/check-anchor-publish-health.sh) is the published-copy
+# guard's fetch target; FYD_CURL (default curl) lets tests stub that fetch —
+# also the same convention as check-anchor-publish-health.sh.
 #
 # Exit codes:
 #   0  preview complete (nothing broadcast)
@@ -79,6 +103,11 @@
 #   8  keystore guard failed (§3.5)
 #   9  committed-bytes guard failed — --source does not match
 #      `git show HEAD:public/api/anchor-source.json`
+#   10 published-copy guard failed — the live public anchor-source.json could
+#      not be fetched/parsed (network unreachable / invalid JSON), or was
+#      fetched fine but its dag_root_computed does not match --source (a
+#      push/deploy has not finished propagating yet). --skip-published-check
+#      bypasses this guard for offline/degraded use only.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -97,11 +126,13 @@ require_project_keystore_home "$0" || exit 8
 SOURCE_PATH="${SOURCE_PATH:-public/api/anchor-source.json}"
 TESTNET_TX_ID="${TESTNET_TX_ID:-}"
 ALLOW_UNCOMMITTED=0
+SKIP_PUBLISHED_CHECK=0
 for arg in "$@"; do
 	case "$arg" in
 		--source=*)        SOURCE_PATH="${arg#*=}" ;;
 		--testnet-tx-id=*) TESTNET_TX_ID="${arg#*=}" ;;
 		--allow-uncommitted) ALLOW_UNCOMMITTED=1 ;;
+		--skip-published-check) SKIP_PUBLISHED_CHECK=1 ;;
 		--skip-compose)    : ;;   # documented no-op: this script never composes
 		--help|-h)
 			sed -n '1,/^set -euo pipefail$/p' "$0" >&2
@@ -162,7 +193,8 @@ fi
 
 if [ "$GUARD_STATUS" = "match" ]; then
 	echo "  ✓ byte-for-byte identical to git show HEAD:${CANONICAL_TRACKED_PATH}"
-	echo "    (= the bytes step 6 committed/pushed/deployed; the receipt's url+sha256 will agree)"
+	echo "    (= the bytes step 6 committed locally. This does NOT yet prove push/deploy —"
+	echo "    see the published-copy guard immediately below.)"
 else
 	echo "  ✗ committed-bytes guard did NOT pass: ${GUARD_STATUS}" >&2
 	if [ "$GUARD_STATUS" = "mismatch" ]; then
@@ -191,6 +223,67 @@ else
 	else
 		echo "      (--allow-uncommitted overrides this guard for off-cycle experiments only.)" >&2
 		exit 9
+	fi
+fi
+
+# ---- published-copy guard (2026-07-31 walkthrough re-verification) ----
+# Only meaningful once the block above proved --source == local HEAD; if that
+# guard didn't pass we either already exited 9, or --allow-uncommitted was
+# given (an explicitly off-cycle experiment where "does the live site serve
+# this" isn't the question being asked). See the header's "WHY the
+# published-copy guard" section for the full incident rationale.
+if [ "$GUARD_STATUS" = "match" ]; then
+	echo
+	echo "── published-copy guard — the live site must already serve these committed bytes ──"
+	if [ "$SKIP_PUBLISHED_CHECK" -eq 1 ]; then
+		echo "  ⚠ --skip-published-check given — NOT verifying the live public copy." >&2
+		echo "    Only safe for deliberate offline/degraded use; a real cycle broadcast" >&2
+		echo "    should confirm the public site already serves these bytes." >&2
+	else
+		PUBLISHED_SOURCE_URL="${ANCHOR_SOURCE_URL:-https://metal.freedom-yield.com/api/anchor-source.json}"
+		CURL_BIN="${FYD_CURL:-curl}"
+		# Cache-bust: caddy/Caddyfile serves /api/*.json with
+		# `Cache-Control: public, max-age=120, must-revalidate`, and the CF edge
+		# in front of it now caches that response too (2026-07-17 edge-cache
+		# fix), so a plain GET run right after push+deploy can still return an
+		# edge-cached copy up to 2 minutes stale — exactly the silent
+		# divergence this guard exists to catch. A unique query string is a
+		# normal cache-key component, so it defeats the edge cache regardless
+		# of either side's Cache-Control headers; the no-cache request headers
+		# below are sent too, but as belt-and-suspenders only — a bare
+		# `Cache-Control: no-cache` REQUEST header is not guaranteed to bypass
+		# a shared/edge cache by itself.
+		CACHE_BUST="$(date +%s)-$$-${RANDOM}"
+		PUB_TMP="$(mktemp -t fya-published-anchor-source.XXXXXX)"
+		trap 'rm -f "$HEAD_TMP" "$PUB_TMP"' EXIT
+		PUB_HTTP="$("$CURL_BIN" -sS -o "$PUB_TMP" -w '%{http_code}' --max-time 15 \
+			-H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
+			"${PUBLISHED_SOURCE_URL}?cb=${CACHE_BUST}" 2>/dev/null || echo "000")"
+		if [ "$PUB_HTTP" != "200" ]; then
+			echo "  ✗ could not fetch published copy: ${PUBLISHED_SOURCE_URL} (HTTP=${PUB_HTTP})" >&2
+			echo "      Network unreachable or endpoint down — refusing to guess whether the" >&2
+			echo "      live site already serves the committed bytes." >&2
+			echo "      Fix: check connectivity / site health and re-run, or pass" >&2
+			echo "      --skip-published-check for deliberate offline/degraded use only." >&2
+			exit 10
+		fi
+		if ! jq empty "$PUB_TMP" >/dev/null 2>&1; then
+			echo "  ✗ published copy at ${PUBLISHED_SOURCE_URL} is not valid JSON" >&2
+			echo "      Fix: investigate the public endpoint, then re-run." >&2
+			exit 10
+		fi
+		PUB_DAG="$(jq -r '.dag_root_computed // empty' "$PUB_TMP" 2>/dev/null || true)"
+		COMMITTED_DAG="$(jq -r '.dag_root_computed // empty' "$SOURCE_PATH" 2>/dev/null || true)"
+		if [ -z "$PUB_DAG" ] || [ "$PUB_DAG" != "$COMMITTED_DAG" ]; then
+			echo "  ✗ published copy does NOT match committed bytes (stale publish / propagation lag)" >&2
+			echo "      committed  dag_root_computed: ${COMMITTED_DAG:-?}" >&2
+			echo "      published  dag_root_computed: ${PUB_DAG:-?}" >&2
+			echo "      Fix: push + deploy (docs/CYCLE_GATE.md step 6), wait for propagation" >&2
+			echo "      (the /api/*.json edge cache is up to 120s), then re-run this script." >&2
+			echo "      (--skip-published-check overrides this guard for offline/degraded use only.)" >&2
+			exit 10
+		fi
+		echo "  ✓ published copy matches committed bytes — the receipt's url+sha256 will agree"
 	fi
 fi
 

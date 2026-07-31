@@ -336,7 +336,11 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    ```
    The script verifies the source is byte-for-byte
    `git show HEAD:public/api/anchor-source.json` (refuses with exit 9
-   otherwise), writes the dry-run log to `$DRYLOG` (default
+   otherwise), then fetches the LIVE public `anchor-source.json`
+   (cache-busted) and refuses with **exit 10** if the site does not yet
+   serve those same bytes — push + deploy first, then re-run
+   (`--skip-published-check` bypasses this for offline/degraded use only).
+   It then writes the dry-run log to `$DRYLOG` (default
    `/tmp/fya-mainnet-dryrun.json`), runs the gate-1/gate-3 read-only
    pre-checks, and prints the 7c command below with both gate args already
    filled in. It composes nothing and broadcasts nothing.
