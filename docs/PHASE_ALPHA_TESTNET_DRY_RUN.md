@@ -213,7 +213,10 @@ harmless — a non-fatal warning is printed, since the flag had no effect.)
 2. **Rehearsal config** — read `~/freedom-yield-rehearsal-config/`
    (actor account, sink, chain).
 3. **Chain-derived key check** — the rotation-resilient verification
-   described above.
+   described above. Because this step calls `proton key:list` before
+   step 4's unlock probe, it also carries the locked-keystore detection:
+   a timed-out / non-zero `key:list` exits 2 with the unlock instruction
+   rather than claiming the key was never imported.
 4. **Keystore unlock + chain preflight** — `proton chain:set proton-test`
    + `chain:info`, then a fast-timeout read of the actor account to
    detect a locked keystore.
@@ -292,15 +295,31 @@ is authorized.
 
 ## Troubleshooting
 
+- **Step 3/10 exits 2 with a keystore-locked warning** (`proton key:list
+  timed out` / `proton key:list failed (rc=…)`) — the keystore is
+  **locked**, not missing a key. Run `HOME=~/.metal-fy-proton-test proton
+  key:unlock` in a separate terminal, then re-run the rehearsal script.
+  Step 3 runs `proton key:list` *before* step 4's unlock probe, so a
+  locked keystore surfaces here first; until 2026-07-31 it was
+  misreported as "the key must be imported" and sent the operator to the
+  key-rotation runbook instead (day-of walkthrough audit, I3). Pinned by
+  `tests/run-testnet-rehearsal/test-locked-keystore-diagnosis.sh`.
 - **Step 3/10 fails "not found in the local proton-cli testnet
-  keystore"** — the on-chain `anchor` key and the local keystore
-  disagree. Either the key was never imported, or it was rotated
-  on-chain since the keystore was last updated. See
-  `docs/ANCHOR_ACCOUNT_KEY_ROTATION.md` to import the matching private
-  key (with the `HOME=~/.metal-fy-proton-test` prefix), then re-run.
-- **Step 4/10 exits 2 with a keystore-locked warning** — run
-  `HOME=~/.metal-fy-proton-test proton key:unlock` in a separate
-  terminal, then re-run the rehearsal script.
+  keystore"** — reached only with an UNLOCKED keystore that lists keys:
+  the on-chain `anchor` key and the local keystore genuinely disagree.
+  Either the key was never imported, or it was rotated on-chain since the
+  keystore was last updated. See `docs/ANCHOR_ACCOUNT_KEY_ROTATION.md` to
+  import the matching private key (with the
+  `HOME=~/.metal-fy-proton-test` prefix), then re-run.
+- **Step 3/10 fails "listed no public keys"** — `key:list` succeeded but
+  the keystore is empty. Confirm the unlock first (a locked keystore can
+  also list nothing); if it is unlocked, import the key per
+  `docs/ANCHOR_ACCOUNT_KEY_ROTATION.md`.
+- **Step 3/10 fails "timeout(1) not on PATH"** — install GNU coreutils.
+  `timeout` bounds the locked-keystore probes in steps 3/10 and 4/10;
+  without it a locked keystore hangs the script indefinitely.
+- **Step 4/10 exits 2 with a keystore-locked warning** — same remedy as
+  the step 3/10 lock case above: unlock in a separate terminal, re-run.
 - **Guard exits 8 (`ERROR (keystore guard, Constitution §3.5)`)** — the
   script was invoked without the `HOME=~/.metal-fy-proton-test` prefix
   (or with `HOME` unset). Re-invoke exactly as shown under "Running the

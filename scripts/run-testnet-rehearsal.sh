@@ -26,6 +26,8 @@
 #     stays correct across future key rotations without a script edit.
 #   - Rehearsal config dir at ~/freedom-yield-rehearsal-config
 #   - jq + curl + sha256sum/shasum in PATH
+#   - timeout(1) (GNU coreutils) in PATH — bounds the locked-keystore probes
+#     in steps 3/10 and 4/10.
 #
 # Prerequisites the OPERATOR provides interactively:
 #   - `HOME=~/.metal-fy-proton-test proton key:unlock` — proton-cli keystore
@@ -33,7 +35,9 @@
 #     must be invoked with the same HOME=~/.metal-fy-proton-test prefix, per
 #     Constitution §3.5). Non-interactive shells (this script) cannot
 #     unlock; a locked keystore causes proton to hang indefinitely (see
-#     reference_proton_cli_keystore_lock_quirk).
+#     reference_proton_cli_keystore_lock_quirk). Both step 3/10 and step
+#     4/10 detect that state and exit 2 with the unlock instruction — they
+#     never report it as "the key was never imported".
 #   - Broadcast authorization: this script auto-creates the
 #     /tmp/fyd-broadcast-token file (5-minute TTL), bound to chain=testnet-a
 #     and the exact composed tx (tx_sha256) per R16, so bin/safe-broadcast
@@ -83,7 +87,9 @@
 #       read-only testnet RPC get_account, and verify it is present in
 #       the local proton keystore (format-normalized comparison — see
 #       scripts/lib/eosio-pubkey-raw-hex.js). Fail-closed if the RPC is
-#       unreachable or the response is malformed.
+#       unreachable or the response is malformed. A locked keystore is
+#       detected here (key:list non-zero / timed out) and exits 2 with the
+#       unlock instruction, NOT the "key must be imported" diagnosis.
 #   4.  Verify unlock state (proton-cli account read must succeed
 #       without hang; timeout applied) + proton chain:set proton-test
 #       + chain:info respond.
@@ -261,6 +267,15 @@ step "3/10 verify ${XPR_ACCOUNT}@anchor key present in proton keystore (chain-de
 if ! command -v node >/dev/null 2>&1; then
 	fail "node (Node.js) required for public-key format verification (scripts/lib/eosio-pubkey-raw-hex.js). node is already a transitive prerequisite of proton-cli itself."
 fi
+if ! command -v proton >/dev/null 2>&1; then
+	fail "proton-cli not on PATH. This script runs on the operator's Mac (npm i -g @proton/cli), not the validator host."
+fi
+# timeout(1) bounds both locked-keystore probes (this step and step 4/10).
+# Without it, `timeout 5 proton …` returns 127 and every probe below would
+# report a misleading cause. Checked explicitly instead.
+if ! command -v timeout >/dev/null 2>&1; then
+	fail "timeout(1) not on PATH (GNU coreutils). It bounds the locked-keystore probes in steps 3/10 and 4/10; without it a locked keystore hangs this script indefinitely. Install coreutils, then re-run."
+fi
 PUBKEY_HELPER="${REPO_ROOT}/scripts/lib/eosio-pubkey-raw-hex.js"
 [ -r "$PUBKEY_HELPER" ] || fail "missing helper: $PUBKEY_HELPER"
 
@@ -293,12 +308,40 @@ if ! CHAIN_ANCHOR_RAW="$(node "$PUBKEY_HELPER" "$CHAIN_ANCHOR_PUBKEY" 2>&1)"; th
 	fail "could not decode chain-returned anchor pubkey '$CHAIN_ANCHOR_PUBKEY': $CHAIN_ANCHOR_RAW"
 fi
 
-# timeout matches the unlock probe below (step 4) — a locked keystore
-# must not hang this step either.
-KEYS_JSON="$(timeout 5 proton key:list 2>/dev/null || echo '[]')"
+# ---- locked-keystore detection (2026-07-31 day-of walkthrough audit, I3) ----
+# A LOCKED keystore makes proton prompt for the passphrase; non-interactively
+# it hangs until `timeout` kills it (rc 124), or exits non-zero without
+# listing anything. The previous form swallowed both into `|| echo '[]'` and
+# then diagnosed "the key must be imported" — sending the operator to the key
+# ROTATION runbook when the actual remedy is one `key:unlock`. That
+# misdiagnosis is what the audit measured on the day-of walkthrough.
+#
+# So: distinguish the two states. A failed/timed-out `key:list` means "unlock
+# first" and exits 2 — the same code and the same remedy as step 4/10's unlock
+# probe below. Only a CLEAN listing that genuinely contains no keys keeps the
+# import diagnosis (and even then names unlock first, since a keyless listing
+# can also be a lock artifact).
+# stdin is closed so a passphrase prompt fails fast instead of burning the
+# full timeout and swallowing this script's stdin.
+KEYS_RC=0
+KEYS_JSON="$(timeout 5 proton key:list 2>/dev/null </dev/null)" || KEYS_RC=$?
+if [ "$KEYS_RC" -ne 0 ]; then
+	if [ "$KEYS_RC" -eq 124 ]; then
+		printf '  WARN: proton key:list timed out after 5s — the keystore is LOCKED.\n' >&2
+		printf '        (A locked keystore prompts for the passphrase and hangs; see\n' >&2
+		printf '         reference_proton_cli_keystore_lock_quirk.)\n' >&2
+	else
+		printf '  WARN: proton key:list failed (rc=%s) — a LOCKED keystore is the usual cause.\n' "$KEYS_RC" >&2
+	fi
+	printf '        Run in a separate terminal:  HOME=~/.metal-fy-proton-test proton key:unlock\n' >&2
+	printf '        then re-run this script.\n' >&2
+	printf '        (If it is already unlocked and this persists, the key may never have been\n' >&2
+	printf '         imported into this keystore — see docs/ANCHOR_ACCOUNT_KEY_ROTATION.md.)\n' >&2
+	exit 2
+fi
 CANDIDATES="$(printf '%s' "$KEYS_JSON" | grep -oE '(PUB_K1_|EOS)[1-9A-HJ-NP-Za-km-z]+' | sort -u || true)"
 if [ -z "$CANDIDATES" ]; then
-	fail "no public keys found via 'proton key:list' in the local testnet keystore. The ${XPR_ACCOUNT}@anchor key must be imported before rehearsal — see docs/PHASE_ALPHA_TESTNET_DRY_RUN.md."
+	fail "'proton key:list' succeeded but listed no public keys. First confirm the keystore is UNLOCKED (in a separate terminal: HOME=~/.metal-fy-proton-test proton key:unlock) — a locked keystore can also list nothing. If it IS unlocked, the ${XPR_ACCOUNT}@anchor key was never imported into this keystore — see docs/ANCHOR_ACCOUNT_KEY_ROTATION.md and docs/PHASE_ALPHA_TESTNET_DRY_RUN.md."
 fi
 
 MATCH_FOUND=0
