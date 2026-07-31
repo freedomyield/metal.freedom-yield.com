@@ -223,9 +223,17 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    it — recording against a stale `endTime` would misdate the cycle
    boundary.
 2. **host — `uptime-history.sh`** closes out cycle N's uptime record.
-3. **host — `gen-cycle-history.sh` + push** appends cycle N's row to the
-   published `cycle-history.jsonl`. Verify the published file grew by
-   exactly one line.
+3. **host — `gen-cycle-history.sh` + publish** appends cycle N's row to
+   `cycle-history.jsonl` and ships it to the web host:
+   ```sh
+   bash scripts/gen-cycle-history.sh
+   bash scripts/push-to-web-host.sh cycle-history.jsonl
+   ```
+   The publish step is **not optional and not automatic**: steps 4 and 5
+   read the *published* ledger, so without it `gen-identity.sh` (exit 7)
+   and `gen-anchor-source.sh` (exit 9) both count a stale
+   `CLOSED_COUNT`. Verify the published file grew by exactly one line
+   (curl the public URL and compare line counts) before continuing.
 4. **Mac —**
    ```sh
    FY_EXPECT_CYCLE=<N> OPERATOR_IDENTITY_KEY=~/.ssh/freedom-yield-operator-identity \
@@ -357,9 +365,25 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    DIRECTIVE). Testnet and mainnet are **two distinct keystores**
    (`HOME=~/.metal-fy-proton-test` / `HOME=~/.metal-fy-proton`) — never
    interchangeable (Constitution §3.5).
-8. **host — `gen-anchor-receipt.sh` (7-gate verify) + `append-anchor-history.sh`
-   + feed push** independently re-fetches and verifies the just-broadcast
-   tx, then appends the receipt to `anchor-history.jsonl`.
+8. **host — `gen-anchor-receipt.sh` (7-gate verify) + `append-anchor-history.sh`**
+   independently re-fetch and verify the just-broadcast tx, then append the
+   receipt to `anchor-history.jsonl`:
+   ```sh
+   bash scripts/gen-anchor-receipt.sh \
+     --input=/home/deploy/.fya-sign-output.json \
+     --anchor-source=public/api/anchor-source.json \
+     --trigger=cyclestart
+   bash scripts/append-anchor-history.sh \
+     --receipt=public/api/anchor-receipt.json \
+     --event-type=cyclestart
+   ```
+   `--input=` is step 7c's `sign-anchor-event.sh` stdout, saved as JSON.
+   That output is produced **on the Mac**, so copy it to the host first
+   (e.g. `scp` it to `/home/deploy/.fya-sign-output.json`). Both
+   `--input=` and `--anchor-source=` are required (usage error, exit 1,
+   without them), as is `append-anchor-history.sh`'s `--receipt=`. At a
+   cycle transition the event type is `cyclestart` on both scripts —
+   `--trigger=cyclestart` here, `--event-type=cyclestart` there.
 9. **host —**
    ```sh
    bash scripts/resume-after-cycle-start.sh --apply
