@@ -216,6 +216,19 @@ machine each command runs on — is AI-orchestrated across a **2-host
 topology (validator host + operator Mac)**, in this fixed day-of order
 (cf. the cycle-3 → cycle-4 transition, `N=3`):
 
+0. **operator (Metal Wallet web) — submit the new AddValidator, then
+   confirm it landed.** The one human-driven state change of the day, and
+   the precondition for everything below: fill in the Add Validator form
+   (fields + timing: `docs/VALIDATOR_RENEWAL.md` Step 2), submit, watch
+   the tx reach **Committed** on the explorer, and confirm the new entry
+   is actually visible in `platform.getCurrentValidators` (e.g.
+   `node-info.sh` on the host). The block is **mechanical, not a
+   convention**: until the entry is on chain, step 5's
+   `gen-anchor-source.sh` exits **4** (`NodeID … not present in current
+   validators`) and step 9's `resume-after-cycle-start.sh` exits **2**
+   (`NodeID=… not in current validators (= AddValidator tx not yet
+   observed?)`). Do not start the pipeline on the submit alone — wait for
+   Committed *and* the chain read.
 1. **AI/host — wait for the node-info tick.** Poll (or wait for the next
    cron tick of) `node-info.sh` until `public/api/validator.json` reflects
    the new AddValidator entry's `endTime`. This confirms the new cycle is
@@ -404,9 +417,10 @@ topology (validator host + operator Mac)**, in this fixed day-of order
 
 AI reads back step 7's tx id and reports the explorer URL to the operator
 for visual confirmation (PRIME DIRECTIVE gate 2's per-invocation
-authorization happens before that step runs, not after). Steps 1-3 and 8-9
-pass the always-green `cycle-artifact-write` gate; no cycle-gate approval
-is needed for them.
+authorization happens before that step runs, not after). Step 0 is the
+operator's own wallet action (no script, no gate). Steps 1-3 and 8-9 pass
+the always-green `cycle-artifact-write` gate; no cycle-gate approval is
+needed for them.
 
 ## Emergency fallback (= AI unavailable)
 

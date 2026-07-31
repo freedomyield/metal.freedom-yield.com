@@ -257,6 +257,7 @@ State file: `/var/lib/freedom-yield/cycle-gate-state.json` (= operator 承認済
 
 当日順序(厳守。cycle N の閉じ → cycle N+1 の開始):
 
+⓪ **operator (Metal Wallet web)**: 新 AddValidator を submit → explorer で **Committed** を確認 → `platform.getCurrentValidators` に新 entry が見えることまで確認(host の `node-info.sh` 等)。**これだけが人の手による状態変更で、以降の全手順の前提**(form の field と timing は本書 Step 2 参照)。ブロックは慣習ではなく機械的: 新 entry が chain に出るまで手順⑤ `gen-anchor-source.sh` は **exit 4**(`NodeID ... not present in current validators`)、手順⑨ `resume-after-cycle-start.sh` は **exit 2**(`NodeID=... not in current validators (= AddValidator tx not yet observed?)`)で hard-block する。submit しただけで pipeline を始めない — Committed と chain read の両方を待つ
 ① validator host: node-info tick 待ち — `public/api/validator.json` に新 endTime が反映されたことを確認(古い endTime のまま cycle-recording を走らせると記録がずれるため)
 ② validator host: `uptime-history.sh`(cycle N close)
 ③ validator host: `gen-cycle-history.sh` + push — 公開 `cycle-history.jsonl` が 1 行増えたことを実測確認
@@ -281,9 +282,13 @@ State file: `/var/lib/freedom-yield/cycle-gate-state.json` (= operator 承認済
 
 ### 緊急 fallback (= AI 不在時の operator 手動経路)
 
-AI が応答不能な場合、 operator は本書「AI が裏で自走する技術 task」の当日順序 ①〜⑨ を以下の手順で手動実行する(anchor pipeline の手順を省くと anchor 刻印が欠落するので、①〜⑨ を全て踏む):
+AI が応答不能な場合、 operator は本書「AI が裏で自走する技術 task」の当日順序 ⓪〜⑨ を以下の手順で手動実行する(anchor pipeline の手順を省くと anchor 刻印が欠落するので、⓪〜⑨ を全て踏む):
 
 ```sh
+# ⓪ Metal Wallet web で AddValidator を submit → explorer で Committed 確認 →
+#   getCurrentValidators に新 entry が見えるまで待つ(コマンドなし、operator の手作業)。
+#   これが済むまで ⑤ は exit 4、⑨ は exit 2 で hard-block する。
+
 # ①②③ validator host で cycle-recording を閉じる(node-info tick 確認 → uptime-history → gen-cycle-history → 公開 push)
 ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
     'sudo -u deploy bash -c "cd /home/deploy/metal.freedom-yield.com && \
