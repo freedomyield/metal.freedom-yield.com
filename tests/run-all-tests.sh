@@ -182,10 +182,19 @@ FAILED_SUITES=()
 #     this host can actually execute it — see the uname check below. Off
 #     Linux we still print a visible line so the suite is never silently
 #     absent from the run's output.
+#   - scripts/operator-local/test-commit-anchor-source.sh lives outside
+#     tests/ entirely (operator-local/ colocates a script with its own
+#     test, same convention as gen-identity.sh / test-gen-identity.sh —
+#     see scripts/operator-local/README.md), so the find below can never
+#     discover it either. Unlike test-gen-identity.sh (needs npx + network
+#     to pull pinned ajv-cli, deliberately left unregistered), this suite
+#     is fully hermetic (--input-file / FYD_ANCHOR_FETCH_STUB, no network,
+#     no real SSH) and belongs in the default aggregate run.
 # Only appended when running the default pattern; a caller-supplied
 # --pattern is honoured verbatim.
 EXTRA_SUITES=(
 	"${TESTS_ROOT}/cycle-gate/run-tests.sh"
+	"${REPO_ROOT}/scripts/operator-local/test-commit-anchor-source.sh"
 )
 if [ "$(uname)" = "Linux" ]; then
 	EXTRA_SUITES+=("${TESTS_ROOT}/anomalies/integration-linux.sh")
