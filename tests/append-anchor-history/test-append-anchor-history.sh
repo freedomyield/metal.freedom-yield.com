@@ -188,6 +188,40 @@ make_receipt "$BAD_PREV_RECEIPT" \
 run_case "invariant 6 refusal: prev_anchor_tx_id != last tx_id" 4 \
 	--receipt="$BAD_PREV_RECEIPT" --history="$GENESIS_HIST" --event-type=cyclestart
 
+# ---- regression: grep -c 0-match idiom must not pollute stderr (2026-08-04) ----
+# Fixed in scripts/append-anchor-history.sh's invariant 2/3 dup check: the
+# original `DUP_COUNT="$(grep -c ... || echo 0)"` idiom relied on grep -c's
+# quirk of printing "0" AND exiting 1 on zero matches. `|| echo 0` then ran
+# BECAUSE of that exit 1, appending a second "0" line, so DUP_COUNT became
+# the two-line string "0\n0" — not a valid integer — and the following
+# `[ "$DUP_COUNT" -gt 0 ]` threw "integer expression expected" to stderr.
+# This fired on every append whose cycle_number was genuinely new (not a
+# duplicate), i.e. the common case, even though the append itself still
+# succeeded. GENESIS_HIST here has 2 lines, both cycle_number=3; appending
+# cycle_number=4 (never seen before) exercises exactly the 0-match path.
+FRESH_CYCLE_RECEIPT="$TEST_DIR/fresh-cycle-receipt.json"
+make_receipt "$FRESH_CYCLE_RECEIPT" \
+	"6666666666666666666666666666666666666666666666666666666666666666" \
+	100000020 4 "7777777777777777777777777777777777777777777777777777777777777777" \
+	"\"3333333333333333333333333333333333333333333333333333333333333333\"" "cyclestart"
+FRESH_CYCLE_STDERR="$TEST_DIR/fresh-cycle-stderr.txt"
+if bash "$SCRIPT" --receipt="$FRESH_CYCLE_RECEIPT" --history="$GENESIS_HIST" --event-type=cyclestart \
+		>/dev/null 2>"$FRESH_CYCLE_STDERR"; then
+	printf 'PASS  %-70s (rc=0)\n' "fresh (non-dup) cycle_number append succeeds"
+	PASS=$((PASS + 1))
+else
+	printf 'FAIL  %-70s (rc=%d)\n' "fresh (non-dup) cycle_number append succeeds" "$?" >&2
+	FAIL=$((FAIL + 1))
+fi
+if grep -qi "integer expression" "$FRESH_CYCLE_STDERR"; then
+	echo "FAIL  fresh cycle_number append: stderr polluted with 'integer expression' error" >&2
+	sed 's/^/       stderr: /' "$FRESH_CYCLE_STDERR" >&2
+	FAIL=$((FAIL + 1))
+else
+	echo "PASS  fresh cycle_number append: stderr clean of 'integer expression' error"
+	PASS=$((PASS + 1))
+fi
+
 # ---- Summary ----
 echo
 echo "----------------------------------------"
