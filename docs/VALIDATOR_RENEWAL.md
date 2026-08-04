@@ -282,7 +282,7 @@ State file: `/var/lib/freedom-yield/cycle-gate-state.json` (= operator 承認済
         --testnet-tx-id=<控えた tx id>
     ```
     このスクリプトは source が `git show HEAD:public/api/anchor-source.json` と byte 一致することを検証し(不一致なら exit 9 で拒否)、続けて公開 `anchor-source.json`(cache-bust 付きで fetch)がまだ同じ bytes を配信していなければ **exit 10** で拒否する(push+deploy 待ちしてから再実行。`--skip-published-check` はオフライン/劣化時専用の bypass)。その後 `$DRYLOG`(default `/tmp/fya-mainnet-dryrun.json`)を書き、gate1/gate3 の read-only pre-check を表示し、⑦-c のコマンドを両 gate 引数入りで出力する。compose も broadcast もしない。**validator host の `sudo -u deploy` では実行しない** — §3.5 keystore guard が login HOME を **exit 8** で拒否し、かつ host 側で recompose すると `dag_root_computed` が commit 済 bytes と変わる(artifacts branch は 5 分 cron が書き換える live feed を hash しているため)。pre-check 抜きで log だけ欲しい場合の同等形は `FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton bash scripts/sign-anchor-event.sh --chain=mainnet-a --anchor-source=public/api/anchor-source.json --dry-run > /tmp/fya-mainnet-dryrun.json` — こちらも `FY_CONFIG_DIR` は必須で、無いと exit 3 になり redirect が **0 byte** の log を残す(gate 4 まで気づけない)
-  - **⑦-c 署名 + broadcast**: `HOME=~/.metal-fy-proton proton key:unlock` で mainnet keystore(testnet とは別)を unlock し、`FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton bash scripts/sign-anchor-event.sh --chain=mainnet-a --anchor-source=public/api/anchor-source.json --testnet-tx-id=<控えた tx id> --dry-run-log=/tmp/fya-mainnet-dryrun.json`(= operator の 4 番目の active action、`bin/safe-broadcast` 4-gate 経由。`--testnet-tx-id` / `--dry-run-log` は gate 1 / gate 4 の必須入力 — 欠くと safe-broadcast が REFUSE する)。**順序に注意**: どの env-prefix 行でも `FY_CONFIG_DIR=...` を `HOME=...` より前に書く。機序(2026-07-31 実測): **zsh**(operator の login shell)は prefix 代入を左→右で適用し、各代入が次の代入の展開に見えるため、`HOME=~/.metal-fy-proton` が先だと `FY_CONFIG_DIR=$HOME/...` の `$HOME` が keystore を指してしまう。bash は simple command の prefix 代入をコマンド実行前の環境に対して展開するので両順序とも動く(ただし pipeline 内では subshell 化して zsh と同じ挙動になる)。どの shell でも正しい順序で書く。**さらに別の罠(2026-08-04 実測)**: 順序が正しくても `FY_CONFIG_DIR` に `~`/`$HOME` を使わず**絶対 path**(`/Users/<user>/...` 形)で書くことを推奨する — tilde `~` はコマンド実行前の ambient `$HOME`(operator の実 home)に展開され、同じコマンド行がこれから設定する `HOME=` の影響を受けないため、上記の順序を守っていても keystore の外を指してしまう。`sign-anchor-event.sh` は `--output=<path>` も受け付ける — 未指定時は標準出力に加えて既定 path `/tmp/fya-mainnet-sign-output.json`(mainnet 実行の場合。testnet 実行なら `/tmp/fya-testnet-sign-output.json`)にも保存され、この fragment が手順⑧の `--input=` 値になる。broadcast 後は mainnet keystore を re-lock する: `HOME=~/.metal-fy-proton proton key:lock`。プロンプトは `Enter 32 character password (leave empty to create new)` と表示されるが、**空 Enter は新規 password の作成になるため厳禁** — unlock 時と同じ 32 文字を入力する
+  - **⑦-c 署名 + broadcast**: `HOME=~/.metal-fy-proton proton key:unlock` で mainnet keystore(testnet とは別)を unlock し、`FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton bash scripts/sign-anchor-event.sh --chain=mainnet-a --anchor-source=public/api/anchor-source.json --testnet-tx-id=<控えた tx id> --dry-run-log=/tmp/fya-mainnet-dryrun.json`(= operator の 4 番目の active action、`bin/safe-broadcast` 4-gate 経由。`--testnet-tx-id` / `--dry-run-log` は gate 1 / gate 4 の必須入力 — 欠くと safe-broadcast が REFUSE する)。**順序に注意**: どの env-prefix 行でも `FY_CONFIG_DIR=...` を `HOME=...` より前に書く。機序(2026-07-31 実測): **zsh**(operator の login shell)は prefix 代入を左→右で適用し、各代入が次の代入の展開に見えるため、`HOME=~/.metal-fy-proton` が先だと `FY_CONFIG_DIR=$HOME/...` の `$HOME` が keystore を指してしまう。bash は simple command の prefix 代入をコマンド実行前の環境に対して展開するので両順序とも動く(ただし pipeline 内では subshell 化して zsh と同じ挙動になる)。どの shell でも正しい順序で書く。**別の罠(2026-08-04 実測)**: `FY_CONFIG_DIR` の tilde は **quote しない**こと — `FY_CONFIG_DIR="~/.fy-mainnet-broadcast/config"` のように quote すると tilde が展開されず literal `~/...` path になり **exit 3**(config dir not readable)で失敗する。上記の順序を守り quote さえしなければ `~` と `$HOME` は同じ挙動になる(2026-08-04 実測、zsh/bash × 順序 正/誤 の全 4 パターン確認済)— 両者に別の分岐は無い。それでも堅牢性のため**絶対 path**(`/Users/<user>/...` 形)で書くことを推奨する — quote の罠も順序ルールも両方回避できる。`sign-anchor-event.sh` は `--output=<path>` も受け付ける — 未指定時は標準出力に加えて既定 path `/tmp/fya-mainnet-sign-output.json`(mainnet 実行の場合。testnet 実行なら `/tmp/fya-testnet-sign-output.json`)にも保存される。この fragment は **Mac 上で生成される**ため、手順⑧の前に host へ `scp` してから `--input=` 値として使う。broadcast 後は mainnet keystore を re-lock する: `HOME=~/.metal-fy-proton proton key:lock`。プロンプトは `Enter 32 character password (leave empty to create new)` と表示されるが、**空 Enter は新規 password の作成になるため厳禁** — unlock 時と同じ 32 文字を入力する
 ⑧ validator host: `gen-anchor-receipt.sh`(7-gate verify、`--prev-anchor-tx-id=` に直前 anchor の tx_id を渡す必要あり)+ `append-anchor-history.sh` + feed push
 ⑨ validator host: `bash scripts/resume-after-cycle-start.sh --apply`(= v2 3 phase: Phase 1 verify 6 check → Phase 2 atomic state write → Phase 3 report。**broadcast なし、explorer URL は出力しない**)
 
@@ -362,9 +362,11 @@ FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton \
 #     順序注意: FY_CONFIG_DIR=... は HOME=... より前に書く。機序(2026-07-31 実測): zsh(operator の
 #     login shell)は prefix 代入を左→右で適用し次の代入の展開に見えるため、HOME= が先だと
 #     $HOME が keystore を指す。bash は simple command なら両順序とも動く(pipeline 内は zsh と同じ)。
-#     別の罠(2026-08-04 実測): 順序が正しくても FY_CONFIG_DIR に ~/$HOME を使うと、tilde は
-#     コマンド実行前の ambient $HOME(operator の実 home)に展開され同じ行の HOME= の影響を
-#     受けないため keystore の外を指す。~/$HOME を使わず絶対 path(/Users/<user>/... 形)で書く。
+#     別の罠(2026-08-04 実測): FY_CONFIG_DIR の tilde は quote しない。
+#     FY_CONFIG_DIR="~/.fy-mainnet-broadcast/config" のように quote すると tilde が展開
+#     されず literal ~/... path になり exit 3(config dir not readable)で失敗する。上記の
+#     順序を守り quote さえしなければ ~ と $HOME は同じ挙動(2026-08-04 実測、zsh/bash ×
+#     順序 正/誤 の全 4 パターン確認済)。堅牢性のため絶対 path(/Users/<user>/... 形)を推奨。
 HOME=~/.metal-fy-proton proton key:unlock
 FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton \
     bash scripts/sign-anchor-event.sh --chain=mainnet-a \
@@ -373,7 +375,8 @@ FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton \
         --dry-run-log=/tmp/fya-mainnet-dryrun.json
 # tx id を控えて explorer で visually verify。
 # sign-anchor-event.sh は --output=<path> も受け付ける。未指定時は標準出力に加え既定 path
-# /tmp/fya-mainnet-sign-output.json にも保存され、この fragment が下の⑧ --input= 値になる。
+# /tmp/fya-mainnet-sign-output.json にも保存される。この fragment は Mac 上で生成されるため、
+# 下の⑧を実行する前に host へ scp してから --input= 値として使う。
 
 # broadcast 後は mainnet keystore を re-lock する。プロンプト `Enter 32 character password
 # (leave empty to create new)` で空 Enter すると新規 password 作成になるため厳禁 — unlock

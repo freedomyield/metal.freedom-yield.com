@@ -392,14 +392,18 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    orders happen to work there — but not inside a pipeline, where bash
    forks a subshell and behaves like zsh. Write the order that is correct
    in every shell.
-   Prefer an **absolute path** over `~`/`$HOME` for `FY_CONFIG_DIR`
-   entirely (e.g. `FY_CONFIG_DIR=/Users/<user>/.fy-mainnet-broadcast/config`)
-   — this is a distinct trap from the ordering one above (measured
-   2026-08-04): a literal `~` expands against the shell's *ambient*
-   `$HOME` (the operator's real home) at parse time, not the `HOME=`
-   this same command line is about to set, so it silently resolves
-   outside the keystore even when the ordering rule above is followed
-   correctly.
+   One more `FY_CONFIG_DIR` pitfall, distinct from the ordering rule
+   above: **do not quote the tilde.** `FY_CONFIG_DIR="~/.fy-mainnet-broadcast/config"`
+   does not expand at all — a quoted `~` is left as a literal `~` by the
+   shell — producing a path that doesn't exist and fails with **exit 3**
+   (config dir not readable). With the ordering rule above followed and
+   no quotes, `~` and `$HOME` resolve identically (measured 2026-08-04,
+   all four zsh/bash × correct/incorrect-order permutations) — there is
+   no separate tilde-vs-`$HOME` divergence to worry about. For
+   robustness, an **absolute path** (e.g.
+   `FY_CONFIG_DIR=/Users/<user>/.fy-mainnet-broadcast/config`) is still
+   the simplest choice: it sidesteps both the quoting pitfall above and
+   the ordering rule entirely.
    Routed through `bin/safe-broadcast`'s 4-gate discipline (testnet-first,
    per-invocation operator authorization naming chain / actor / permission
    / action / memo / quantity, chain-info verify, dry-run exhaustion — PRIME
@@ -409,8 +413,9 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    `sign-anchor-event.sh` also accepts `--output=<path>`; left unset, its
    stdout is additionally saved to a default path
    `/tmp/fya-<testnet|mainnet>-sign-output.json` — `/tmp/fya-mainnet-sign-output.json`
-   for this mainnet invocation. That fragment is step 8's `--input=` value
-   below.
+   for this mainnet invocation. That fragment is produced **on the Mac**
+   and must be `scp`'d to the host before step 8 runs, where it becomes
+   step 8's `--input=` value below.
    After the broadcast, re-lock the mainnet keystore:
    `HOME=~/.metal-fy-proton proton key:lock`. Its prompt reads `Enter 32
    character password (leave empty to create new)` — an **empty Enter
