@@ -68,9 +68,19 @@ export HOME="$TEST_HOME"
 NO_TOKEN_FILE="$(mktemp -u -t fya-sign-notoken.XXXXXX)"
 export FYD_BROADCAST_TOKEN_FILE="$NO_TOKEN_FILE"
 
+# ---- --output=<file> fixtures ----
+# The DEFAULT output path (no --output given) is fixed under /tmp regardless
+# of $HOME/chain (see scripts/sign-anchor-event.sh's --output usage note),
+# so these two paths are outside TMP_CFG/TEST_HOME and need their own
+# cleanup.
+DEFAULT_OUTPUT_TESTNET="/tmp/fya-testnet-sign-output.json"
+DEFAULT_OUTPUT_MAINNET="/tmp/fya-mainnet-sign-output.json"
+TMP_OUTPUT_DIR="$(mktemp -d -t fya-sign-output.XXXXXX)"
+
 cleanup() {
-	rm -rf "$TMP_CFG" "$TEST_HOME" "$STUB_DIR"
+	rm -rf "$TMP_CFG" "$TEST_HOME" "$STUB_DIR" "$TMP_OUTPUT_DIR"
 	rm -f "$TMP_ANCHOR_BAD_DAG" "$TMP_ANCHOR_MISSING_CYCLE"
+	rm -f "$DEFAULT_OUTPUT_TESTNET" "$DEFAULT_OUTPUT_MAINNET"
 }
 trap cleanup EXIT
 
@@ -139,6 +149,57 @@ check_structure "structure: all 4 actions target eosio.token::transfer" "true" \
 	"$(echo "$DRY_OUT" | jq -r '[.tx.actions[] | (.account == "eosio.token" and .name == "transfer")] | all')"
 check_structure "structure: all 4 actions authorized by metalfreedom@anchor" "true" \
 	"$(echo "$DRY_OUT" | jq -r '[.tx.actions[] | (.authorization[0].actor == "metalfreedom" and .authorization[0].permission == "anchor")] | all')"
+
+# ---- --output=<file>: JSON fragment is also written to file (2026-08-04) ----
+# Regression coverage for the "receipt fragment only ever went to stdout"
+# gap (a fragment was lost on 2026-08-04 and had to be reconstructed from
+# deterministic values). Exercised via --dry-run only: the write happens at
+# the same code point (write_output_fragment) for both the --dry-run compose
+# and the live receipt, so this is a faithful proxy without needing a
+# broadcast — see the script's --output usage note.
+
+# Custom --output=<file>: content must byte-match what went to stdout.
+CUSTOM_OUTPUT="$TMP_OUTPUT_DIR/custom.json"
+CUSTOM_DRY_OUT="$(bash "$SCRIPT" --chain=testnet-a \
+	--anchor-source="${REPO_ROOT}/public/api/anchor-source.example.json" \
+	--dry-run --output="$CUSTOM_OUTPUT" 2>/dev/null)"
+if [ -r "$CUSTOM_OUTPUT" ] && diff -q <(printf '%s\n' "$CUSTOM_DRY_OUT") "$CUSTOM_OUTPUT" >/dev/null 2>&1; then
+	printf 'PASS  %-70s\n' "--output=<file>: file content matches stdout"
+	PASS=$((PASS + 1))
+else
+	printf 'FAIL  %-70s\n' "--output=<file>: file content matches stdout" >&2
+	FAIL=$((FAIL + 1))
+fi
+
+# Default path (no --output given): must still write, under /tmp, keyed by
+# the short chain name (testnet-a -> "testnet").
+rm -f "$DEFAULT_OUTPUT_TESTNET"
+DEFAULT_DRY_OUT="$(bash "$SCRIPT" --chain=testnet-a \
+	--anchor-source="${REPO_ROOT}/public/api/anchor-source.example.json" --dry-run 2>/dev/null)"
+if [ -r "$DEFAULT_OUTPUT_TESTNET" ] && diff -q <(printf '%s\n' "$DEFAULT_DRY_OUT") "$DEFAULT_OUTPUT_TESTNET" >/dev/null 2>&1; then
+	printf 'PASS  %-70s\n' "--output default path: $DEFAULT_OUTPUT_TESTNET written, matches stdout"
+	PASS=$((PASS + 1))
+else
+	printf 'FAIL  %-70s\n' "--output default path: $DEFAULT_OUTPUT_TESTNET written, matches stdout" >&2
+	FAIL=$((FAIL + 1))
+fi
+
+# Write failure (unwritable target dir) must WARN on stderr but NOT turn a
+# successful compose into a failure exit code.
+UNWRITABLE_OUTPUT="$TMP_OUTPUT_DIR/no-such-subdir/out.json"
+FAIL_STDERR="$TMP_OUTPUT_DIR/fail-stderr.txt"
+FAIL_STDOUT="$TMP_OUTPUT_DIR/fail-stdout.txt"
+bash "$SCRIPT" --chain=testnet-a \
+	--anchor-source="${REPO_ROOT}/public/api/anchor-source.example.json" \
+	--dry-run --output="$UNWRITABLE_OUTPUT" >"$FAIL_STDOUT" 2>"$FAIL_STDERR"
+WRITE_FAIL_RC=$?
+if [ "$WRITE_FAIL_RC" -eq 0 ] && grep -q "WARN" "$FAIL_STDERR" && jq -e . "$FAIL_STDOUT" >/dev/null 2>&1; then
+	printf 'PASS  %-70s\n' "--output write failure: WARN on stderr, exit 0, stdout still valid JSON"
+	PASS=$((PASS + 1))
+else
+	printf 'FAIL  %-70s (rc=%d)\n' "--output write failure: WARN on stderr, exit 0, stdout still valid JSON" "$WRITE_FAIL_RC" >&2
+	FAIL=$((FAIL + 1))
+fi
 
 # ---- keystore guard (§3.5): refuse when $HOME resolves to the login home ----
 # Non-dry-run path: the stub `proton` on PATH satisfies the signing-host
