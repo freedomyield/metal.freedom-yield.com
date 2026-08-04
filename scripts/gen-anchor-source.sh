@@ -229,11 +229,14 @@ else
 fi
 rm -f "$TMP_HIST"
 
-# prev_anchor_root + prev_anchor_tx: read last row of anchor-history.jsonl
+# prev_anchor_root + prev_anchor_tx: read last row of anchor-history.jsonl.
+# The writer (scripts/append-anchor-history.sh:239,271) names this field
+# "dag_root_hash" — that is the primary key to read; the other two
+# alternatives are defensive fallbacks only, not the authoritative name.
 PREV_ROOT_JQ="null"
 PREV_TX_JQ="null"
 if [ -r "$ANCHOR_HISTORY_JSONL" ] && [ -s "$ANCHOR_HISTORY_JSONL" ]; then
-	pr="$(tail -1 "$ANCHOR_HISTORY_JSONL" | jq -r '.dag_root // .dag_root_computed // ""')"
+	pr="$(tail -1 "$ANCHOR_HISTORY_JSONL" | jq -r '.dag_root_hash // .dag_root // .dag_root_computed // ""')"
 	pt="$(tail -1 "$ANCHOR_HISTORY_JSONL" | jq -r '.tx_id // ""')"
 	[ -n "$pr" ] && PREV_ROOT_JQ="\"$pr\""
 	[ -n "$pt" ] && PREV_TX_JQ="\"$pt\""

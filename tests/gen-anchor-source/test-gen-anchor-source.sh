@@ -315,6 +315,40 @@ grep -q "no JSON schema validator available" "$TMP/out/run4.stderr" \
 	&& pass "R13: no-validator case emits a clear fail-closed error message" \
 	|| fail "R13: no-validator case error message missing/unclear"
 
+# ---- case 5: prev_anchor_root / prev_anchor_tx populated from a real
+# non-genesis anchor-history.jsonl tail line (regression for the
+# dag_root_hash/dag_root field-name mismatch between the writer,
+# scripts/append-anchor-history.sh (writes "dag_root_hash" — see its
+# jq templates around lines 239 and 271), and gen-anchor-source.sh's
+# reader, which looked only for ".dag_root // .dag_root_computed" and so
+# silently produced prev_anchor_root: null / prev_anchor_tx: null on every
+# non-genesis run — masked through cycle 3 because cycle 3 was genesis
+# (empty anchor-history.jsonl), first live-fired at the cycle 3 -> cycle 4
+# transition. The fixture below intentionally uses the SAME field names
+# append-anchor-history.sh actually writes, so this case would have failed
+# loudly (instead of silently passing) had it existed before the bug.
+FIXTURE_PREV_ROOT="9999999999999999999999999999999999999999999999999999999999999999"
+FIXTURE_PREV_TX="8888888888888888888888888888888888888888888888888888888888888888"
+ANCHOR_HISTORY_FIXTURE="$TMP/fixtures/anchor-history-with-tail.jsonl"
+cat > "$ANCHOR_HISTORY_FIXTURE" <<EOF
+{"schema_version":2,"event_type":"cyclestart","cycle_number":1,"dag_root_hash":"$FIXTURE_PREV_ROOT","memo_prefix":"fya1c1","tx_id":"$FIXTURE_PREV_TX","block_num":100000001,"block_time":"2026-07-04T04:00:00Z","verification_status":"live","prev_anchor_tx_id":null}
+EOF
+
+OUT5="$TMP/out/anchor-source-run5.json"
+STDERR5="$TMP/out/run5.stderr"
+PATH="$FARM_VALID:$PATH" ANCHOR_HISTORY_JSONL="$ANCHOR_HISTORY_FIXTURE" \
+	bash "$SCRIPT" --out="$OUT5" >"$TMP/out/run5.stdout" 2>"$STDERR5"
+RC5=$?
+check_eq "prev-root regression: exit 0" "0" "$RC5"
+if [ "$RC5" -eq 0 ]; then
+	check_eq "prev-root regression: prev_anchor_root reads writer's dag_root_hash field" \
+		"$FIXTURE_PREV_ROOT" "$(jq -r '.identity_branch.prev_anchor_root // "null"' "$OUT5" 2>/dev/null)"
+	check_eq "prev-root regression: prev_anchor_tx reads writer's tx_id field" \
+		"$FIXTURE_PREV_TX" "$(jq -r '.identity_branch.prev_anchor_tx // "null"' "$OUT5" 2>/dev/null)"
+else
+	fail "prev-root regression: script failed unexpectedly; stderr: $(cat "$STDERR5" 2>/dev/null | tr '\n' '|')"
+fi
+
 # ---- summary -----------------------------------------------------------------
 echo
 echo "----------------------------------------"
