@@ -138,8 +138,6 @@ scripts/cycle-gate.sh --side-effect=<type>
 | `broadcast` | A-chain inscription (IRREV). Signature-gated. **No current consumer** — the v1 consumer (`post-anchor-event.sh`) was retired; the v2 pipeline does not consult the gate (its safety layer is `bin/safe-broadcast`). The type is retained defensively: any future automation declaring `--side-effect=broadcast` inherits fail-closed gating. | (none) |
 | `observe` | Read-only observation. Always green; lets call-sites declare intent uniformly. | (declared only) |
 
-`scripts/prep-cycle-anchor-recording.sh` also calls `cycle-gate.sh --side-effect=cycle-artifact-write` but is **deprecated** — it hole-punched the old (pre-ungate) transition deadlock and has no remaining purpose now that `cycle-artifact-write` is unconditionally green. **Do not use it on cycle transition day.** It is left in `scripts/` for now and scheduled for deletion once cycle-4 has completed.
-
 Exit codes:
 
 | code | meaning |
@@ -394,12 +392,35 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    orders happen to work there — but not inside a pipeline, where bash
    forks a subshell and behaves like zsh. Write the order that is correct
    in every shell.
+   One more `FY_CONFIG_DIR` pitfall, distinct from the ordering rule
+   above: **do not quote the tilde.** `FY_CONFIG_DIR="~/.fy-mainnet-broadcast/config"`
+   does not expand at all — a quoted `~` is left as a literal `~` by the
+   shell — producing a path that doesn't exist and fails with **exit 3**
+   (config dir not readable). With the ordering rule above followed and
+   no quotes, `~` and `$HOME` resolve identically (measured 2026-08-04,
+   all four zsh/bash × correct/incorrect-order permutations) — there is
+   no separate tilde-vs-`$HOME` divergence to worry about. For
+   robustness, an **absolute path** (e.g.
+   `FY_CONFIG_DIR=/Users/<user>/.fy-mainnet-broadcast/config`) is still
+   the simplest choice: it sidesteps both the quoting pitfall above and
+   the ordering rule entirely.
    Routed through `bin/safe-broadcast`'s 4-gate discipline (testnet-first,
    per-invocation operator authorization naming chain / actor / permission
    / action / memo / quantity, chain-info verify, dry-run exhaustion — PRIME
    DIRECTIVE). Testnet and mainnet are **two distinct keystores**
    (`HOME=~/.metal-fy-proton-test` / `HOME=~/.metal-fy-proton`) — never
    interchangeable (Constitution §3.5).
+   `sign-anchor-event.sh` also accepts `--output=<path>`; left unset, its
+   stdout is additionally saved to a default path
+   `/tmp/fya-<testnet|mainnet>-sign-output.json` — `/tmp/fya-mainnet-sign-output.json`
+   for this mainnet invocation. That fragment is produced **on the Mac**
+   and must be `scp`'d to the host before step 8 runs, where it becomes
+   step 8's `--input=` value below.
+   After the broadcast, re-lock the mainnet keystore:
+   `HOME=~/.metal-fy-proton proton key:lock`. Its prompt reads `Enter 32
+   character password (leave empty to create new)` — an **empty Enter
+   here creates a NEW password** instead of locking with the existing one;
+   always enter the same 32-character password used to unlock.
 8. **host — `gen-anchor-receipt.sh` (7-gate verify) + `append-anchor-history.sh`**
    independently re-fetch and verify the just-broadcast tx, then append the
    receipt to `anchor-history.jsonl`:
@@ -407,11 +428,22 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    bash scripts/gen-anchor-receipt.sh \
      --input=/home/deploy/.fya-sign-output.json \
      --anchor-source=public/api/anchor-source.json \
-     --trigger=cyclestart
+     --trigger=cyclestart \
+     --prev-anchor-tx-id=<tx_id of the immediately preceding anchor event>
    bash scripts/append-anchor-history.sh \
      --receipt=public/api/anchor-receipt.json \
      --event-type=cyclestart
    ```
+   `--prev-anchor-tx-id=` is **not derived from anything else** —
+   `gen-anchor-receipt.sh` only reads it from this flag (or treats it as
+   `null` if omitted); get the value from the host's own
+   `anchor-history.jsonl` last line:
+   `tail -n 1 public/api/anchor-history.jsonl | jq -r '.tx_id'`. Omitting
+   it (or passing the wrong value) writes `prev_anchor_tx_id: null` (or a
+   stale tx_id) into the receipt, which then fails
+   `append-anchor-history.sh` invariant 6
+   (`receipt.prev_anchor_tx_id != last history tx_id`) — genesis (empty
+   history) is the only case where `null` is correct.
    `--input=` is step 7c's `sign-anchor-event.sh` stdout, saved as JSON.
    That output is produced **on the Mac**, so copy it to the host first
    (e.g. `scp` it to `/home/deploy/.fya-sign-output.json`). Both
