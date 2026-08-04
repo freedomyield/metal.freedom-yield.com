@@ -44,6 +44,27 @@ echo "metalfreedom" > "$CFG/xpr-account"
 echo "fyhistory"    > "$CFG/anchor-sink"
 echo "0.0001 XPR"   > "$CFG/xpr-quantity"
 
+# --- isolate the --output default path (never touch the real /tmp default) ---
+# Case 3 below is --dry-run, which DOES reach sign-anchor-event.sh's
+# write_output_fragment step (cases 1/2 exit at the signing-host guard,
+# before that step, so they cannot reach it regardless). Without this
+# override, case 3 would write the real /tmp/fya-testnet-sign-output.json —
+# a live operator artifact, not test scratch. See scripts/sign-anchor-event.sh
+# FY_SIGN_OUTPUT_DIR usage note and tests/sign-anchor-event/test-sign-anchor-event.sh
+# for the same fix applied there.
+SIGN_OUTPUT_DIR="$(mktemp -d -t fya-signhost-output.XXXXXX)"
+export FY_SIGN_OUTPUT_DIR="$SIGN_OUTPUT_DIR"
+
+# Snapshot the real default path now (content hash, or ABSENT) so the
+# invariant check near the end of this file can prove it went untouched.
+if command -v sha256sum >/dev/null 2>&1; then
+	real_default_hash() { [ -r "$1" ] && sha256sum "$1" | awk '{print $1}' || echo "ABSENT"; }
+else
+	real_default_hash() { [ -r "$1" ] && shasum -a 256 "$1" | awk '{print $1}' || echo "ABSENT"; }
+fi
+REAL_DEFAULT_TESTNET="/tmp/fya-testnet-sign-output.json"
+REAL_DEFAULT_TESTNET_BEFORE="$(real_default_hash "$REAL_DEFAULT_TESTNET")"
+
 # --- PATH farm WITHOUT proton -------------------------------------------------
 # Symlink exactly the tools sign-anchor-event.sh uses up to the guard, but never
 # proton. Running with PATH=$FARM makes `command -v proton` fail deterministically
@@ -55,7 +76,7 @@ for t in bash jq awk grep sed tr head cat mktemp rm dirname basename \
 	[ -n "$p" ] && ln -sf "$p" "$FARM/$t"
 done
 
-cleanup() { rm -rf "$CFG" "$FARM"; }
+cleanup() { rm -rf "$CFG" "$FARM" "$SIGN_OUTPUT_DIR"; }
 trap cleanup EXIT
 
 # Harness sanity: proton MUST be unreachable via the scrubbed PATH, otherwise the
@@ -90,6 +111,24 @@ rc=0
 PATH="$FARM" FY_CONFIG_DIR="$CFG" \
 	bash "$SCRIPT" --chain=testnet-a --anchor-source="$ANCHOR_SRC" --dry-run >/dev/null 2>&1 || rc=$?
 if [ "$rc" -eq 0 ]; then pass "control: --dry-run exits 0 before the guard (no proton needed)"; else fail "control: --dry-run expected exit 0, got $rc"; fi
+
+# Case 3 is the only case above that reaches write_output_fragment (cases 1/2
+# exit 7 at the guard, before that step) — confirm its output actually landed
+# under FY_SIGN_OUTPUT_DIR, not the real /tmp default.
+if [ -r "$SIGN_OUTPUT_DIR/fya-testnet-sign-output.json" ]; then
+	pass "case 3 output landed under FY_SIGN_OUTPUT_DIR, not the real /tmp default"
+else
+	fail "case 3 output missing from FY_SIGN_OUTPUT_DIR — check the override actually applied"
+fi
+
+# Invariant: the real /tmp default path must be exactly as it was before this
+# suite ran (untouched, or still absent), regardless of which case would
+# otherwise reach it.
+if [ "$REAL_DEFAULT_TESTNET_BEFORE" = "$(real_default_hash "$REAL_DEFAULT_TESTNET")" ]; then
+	pass "real /tmp default path untouched by this entire suite"
+else
+	fail "real /tmp default path CHANGED by this suite (was: $REAL_DEFAULT_TESTNET_BEFORE)"
+fi
 
 echo
 echo "----------------------------------------"

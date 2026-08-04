@@ -147,7 +147,18 @@ if [ -f "$HISTORY" ] && [ -s "$HISTORY" ]; then
 	# Invariant 2/3: (cycle_number, event_type) or (key_seq, idrotate) uniqueness.
 	case "$EVENT_TYPE" in
 		cyclestart|cycleend)
-			DUP_COUNT="$(grep -c "\"cycle_number\":${CYCLE_NUMBER}[,}]" "$HISTORY" || echo 0)"
+			# grep -c always prints a count; exit 1 when 0 matches. A naive
+			# `|| echo 0` fallback then APPENDS a second "0" line to stdout
+			# (grep's own "0\n" plus echo's "0\n"), producing DUP_COUNT="0\n0"
+			# — not a valid integer, so the `-gt` test below throws "integer
+			# expression expected" on every append of a genuinely new
+			# cycle_number (the common case). Use the same `|| true` idiom as
+			# gen-anchor-source.sh's INCIDENT_COUNT (see its comment ~line
+			# 526-528): `|| true` swallows the non-zero exit without adding a
+			# duplicate line, then the explicit blank-check covers the (rare)
+			# case grep emits nothing at all (e.g. read error).
+			DUP_COUNT="$(grep -c "\"cycle_number\":${CYCLE_NUMBER}[,}]" "$HISTORY" || true)"
+			[ -z "$DUP_COUNT" ] && DUP_COUNT=0
 			# Confirm the dup is same event_type via jq walk.
 			if [ "$DUP_COUNT" -gt 0 ]; then
 				if awk -v cn="$CYCLE_NUMBER" -v et="$EVENT_TYPE" '

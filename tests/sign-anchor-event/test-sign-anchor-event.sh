@@ -68,8 +68,36 @@ export HOME="$TEST_HOME"
 NO_TOKEN_FILE="$(mktemp -u -t fya-sign-notoken.XXXXXX)"
 export FYD_BROADCAST_TOKEN_FILE="$NO_TOKEN_FILE"
 
+# ---- --output=<file> fixtures ----
+# FY_SIGN_OUTPUT_DIR (added 2026-08-04, fix round 1) redirects the DEFAULT
+# --output path away from the real /tmp/fya-<chain>-sign-output.json. On the
+# operator's Mac that real path is a LIVE artifact — the last-signed
+# fragment, consumed as gen-anchor-receipt.sh's --input — NOT test scratch.
+# An earlier version of this suite read/wrote/rm'd that real path directly;
+# a routine run-all-tests between a real sign and its consumption would have
+# destroyed the artifact (reviewer-reproduced 2026-08-04). Exported here,
+# BEFORE any script invocation below (including run_case, whose first call
+# is further down this file), so every case in this file is redirected, not
+# just the --output-specific ones.
+TMP_OUTPUT_DIR="$(mktemp -d -t fya-sign-output.XXXXXX)"
+export FY_SIGN_OUTPUT_DIR="$TMP_OUTPUT_DIR"
+
+# Belt + suspenders: snapshot the REAL default paths (content hash, or
+# ABSENT) now, and diff against the same snapshot at the end of this file.
+# This turns "no case in this suite touches the real default path" into an
+# assertion instead of something only provable by reading every case.
+if command -v sha256sum >/dev/null 2>&1; then
+	real_default_hash() { [ -r "$1" ] && sha256sum "$1" | awk '{print $1}' || echo "ABSENT"; }
+else
+	real_default_hash() { [ -r "$1" ] && shasum -a 256 "$1" | awk '{print $1}' || echo "ABSENT"; }
+fi
+REAL_DEFAULT_TESTNET="/tmp/fya-testnet-sign-output.json"
+REAL_DEFAULT_MAINNET="/tmp/fya-mainnet-sign-output.json"
+REAL_DEFAULT_TESTNET_BEFORE="$(real_default_hash "$REAL_DEFAULT_TESTNET")"
+REAL_DEFAULT_MAINNET_BEFORE="$(real_default_hash "$REAL_DEFAULT_MAINNET")"
+
 cleanup() {
-	rm -rf "$TMP_CFG" "$TEST_HOME" "$STUB_DIR"
+	rm -rf "$TMP_CFG" "$TEST_HOME" "$STUB_DIR" "$TMP_OUTPUT_DIR"
 	rm -f "$TMP_ANCHOR_BAD_DAG" "$TMP_ANCHOR_MISSING_CYCLE"
 }
 trap cleanup EXIT
@@ -140,6 +168,78 @@ check_structure "structure: all 4 actions target eosio.token::transfer" "true" \
 check_structure "structure: all 4 actions authorized by metalfreedom@anchor" "true" \
 	"$(echo "$DRY_OUT" | jq -r '[.tx.actions[] | (.authorization[0].actor == "metalfreedom" and .authorization[0].permission == "anchor")] | all')"
 
+# ---- --output=<file>: JSON fragment is also written to file (2026-08-04) ----
+# Regression coverage for the "receipt fragment only ever went to stdout"
+# gap (a fragment was lost on 2026-08-04 and had to be reconstructed from
+# deterministic values). Exercised via --dry-run only: the write happens at
+# the same code point (write_output_fragment) for both the --dry-run compose
+# and the live receipt, so this is a faithful proxy without needing a
+# broadcast — see the script's --output usage note.
+
+# Custom --output=<file>: content must byte-match what went to stdout.
+CUSTOM_OUTPUT="$TMP_OUTPUT_DIR/custom.json"
+CUSTOM_DRY_OUT="$(bash "$SCRIPT" --chain=testnet-a \
+	--anchor-source="${REPO_ROOT}/public/api/anchor-source.example.json" \
+	--dry-run --output="$CUSTOM_OUTPUT" 2>/dev/null)"
+if [ -r "$CUSTOM_OUTPUT" ] && diff -q <(printf '%s\n' "$CUSTOM_DRY_OUT") "$CUSTOM_OUTPUT" >/dev/null 2>&1; then
+	printf 'PASS  %-70s\n' "--output=<file>: file content matches stdout"
+	PASS=$((PASS + 1))
+else
+	printf 'FAIL  %-70s\n' "--output=<file>: file content matches stdout" >&2
+	FAIL=$((FAIL + 1))
+fi
+
+# Default path (no --output given): must still write, keyed by the short
+# chain name (testnet-a -> "testnet"), under FY_SIGN_OUTPUT_DIR (exported
+# above to TMP_OUTPUT_DIR for this whole suite) — never the real /tmp
+# default. The final invariant check near the end of this file confirms the
+# real /tmp path is untouched regardless of this (or any other) case.
+DEFAULT_OUTPUT_TESTNET="$TMP_OUTPUT_DIR/fya-testnet-sign-output.json"
+rm -f "$DEFAULT_OUTPUT_TESTNET"
+DEFAULT_DRY_OUT="$(bash "$SCRIPT" --chain=testnet-a \
+	--anchor-source="${REPO_ROOT}/public/api/anchor-source.example.json" --dry-run 2>/dev/null)"
+if [ -r "$DEFAULT_OUTPUT_TESTNET" ] && diff -q <(printf '%s\n' "$DEFAULT_DRY_OUT") "$DEFAULT_OUTPUT_TESTNET" >/dev/null 2>&1; then
+	printf 'PASS  %-70s\n' "--output default path (FY_SIGN_OUTPUT_DIR-scoped): written, matches stdout"
+	PASS=$((PASS + 1))
+else
+	printf 'FAIL  %-70s\n' "--output default path (FY_SIGN_OUTPUT_DIR-scoped): written, matches stdout" >&2
+	FAIL=$((FAIL + 1))
+fi
+
+# FY_SIGN_OUTPUT_DIR override, proven independently of this suite's ambient
+# export: point it at a SEPARATE fresh dir for a single invocation, so this
+# case validates the env-var mechanism itself rather than piggybacking on
+# the suite-wide export happening to be correct.
+ENV_OVERRIDE_DIR="$(mktemp -d -t fya-sign-env-override.XXXXXX)"
+ENV_OVERRIDE_DRY_OUT="$(FY_SIGN_OUTPUT_DIR="$ENV_OVERRIDE_DIR" bash "$SCRIPT" --chain=mainnet-a \
+	--anchor-source="${REPO_ROOT}/public/api/anchor-source.example.json" --dry-run 2>/dev/null)"
+ENV_OVERRIDE_FILE="$ENV_OVERRIDE_DIR/fya-mainnet-sign-output.json"
+if [ -r "$ENV_OVERRIDE_FILE" ] && diff -q <(printf '%s\n' "$ENV_OVERRIDE_DRY_OUT") "$ENV_OVERRIDE_FILE" >/dev/null 2>&1; then
+	printf 'PASS  %-70s\n' "FY_SIGN_OUTPUT_DIR override: writes under override dir, matches stdout"
+	PASS=$((PASS + 1))
+else
+	printf 'FAIL  %-70s\n' "FY_SIGN_OUTPUT_DIR override: writes under override dir, matches stdout" >&2
+	FAIL=$((FAIL + 1))
+fi
+rm -rf "$ENV_OVERRIDE_DIR"
+
+# Write failure (unwritable target dir) must WARN on stderr but NOT turn a
+# successful compose into a failure exit code.
+UNWRITABLE_OUTPUT="$TMP_OUTPUT_DIR/no-such-subdir/out.json"
+FAIL_STDERR="$TMP_OUTPUT_DIR/fail-stderr.txt"
+FAIL_STDOUT="$TMP_OUTPUT_DIR/fail-stdout.txt"
+bash "$SCRIPT" --chain=testnet-a \
+	--anchor-source="${REPO_ROOT}/public/api/anchor-source.example.json" \
+	--dry-run --output="$UNWRITABLE_OUTPUT" >"$FAIL_STDOUT" 2>"$FAIL_STDERR"
+WRITE_FAIL_RC=$?
+if [ "$WRITE_FAIL_RC" -eq 0 ] && grep -q "WARN" "$FAIL_STDERR" && jq -e . "$FAIL_STDOUT" >/dev/null 2>&1; then
+	printf 'PASS  %-70s\n' "--output write failure: WARN on stderr, exit 0, stdout still valid JSON"
+	PASS=$((PASS + 1))
+else
+	printf 'FAIL  %-70s (rc=%d)\n' "--output write failure: WARN on stderr, exit 0, stdout still valid JSON" "$WRITE_FAIL_RC" >&2
+	FAIL=$((FAIL + 1))
+fi
+
 # ---- keystore guard (§3.5): refuse when $HOME resolves to the login home ----
 # Non-dry-run path: the stub `proton` on PATH satisfies the signing-host
 # assertion (command -v proton), so execution reaches the guard just after
@@ -163,6 +263,24 @@ fi
 # any real proton signing or network broadcast.
 run_case "keystore guard: HOME=project fixture dir → passes (delegates, exit 5)" 5 \
 	--chain=testnet-a --anchor-source="${REPO_ROOT}/public/api/anchor-source.example.json"
+
+# ---- invariant: this suite must NEVER touch the REAL /tmp default paths ----
+# Every invocation above ran with FY_SIGN_OUTPUT_DIR exported to a mktemp
+# dir, so none of them should have been able to reach the real default path
+# composition at all — this is the assertion that proves it held for the
+# WHOLE file, not just the cases that explicitly mention --output.
+REAL_DEFAULT_TESTNET_AFTER="$(real_default_hash "$REAL_DEFAULT_TESTNET")"
+REAL_DEFAULT_MAINNET_AFTER="$(real_default_hash "$REAL_DEFAULT_MAINNET")"
+if [ "$REAL_DEFAULT_TESTNET_BEFORE" = "$REAL_DEFAULT_TESTNET_AFTER" ] \
+		&& [ "$REAL_DEFAULT_MAINNET_BEFORE" = "$REAL_DEFAULT_MAINNET_AFTER" ]; then
+	printf 'PASS  %-70s\n' "real /tmp default paths untouched by this entire suite"
+	PASS=$((PASS + 1))
+else
+	printf 'FAIL  %-70s\n' "real /tmp default paths untouched by this entire suite" >&2
+	echo "       testnet: before=[$REAL_DEFAULT_TESTNET_BEFORE] after=[$REAL_DEFAULT_TESTNET_AFTER]" >&2
+	echo "       mainnet: before=[$REAL_DEFAULT_MAINNET_BEFORE] after=[$REAL_DEFAULT_MAINNET_AFTER]" >&2
+	FAIL=$((FAIL + 1))
+fi
 
 # ---- Summary ----
 echo

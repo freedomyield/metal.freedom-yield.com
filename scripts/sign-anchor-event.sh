@@ -54,6 +54,7 @@
 #                        [--testnet-tx-id=<64hex>]
 #                        [--dry-run-log=<file>]
 #                        [--non-interactive]
+#                        [--output=<file>]
 #
 # Required:
 #   --chain=<testnet-a|mainnet-a>   Target chain, mandatory.
@@ -68,6 +69,29 @@
 #                                   no operator token. Use for schema tests and
 #                                   for producing the --dry-run-log input to
 #                                   mainnet safe-broadcast.
+#   --output=<file>                 Also write the JSON fragment emitted on
+#                                   stdout (the --dry-run compose OR the live
+#                                   receipt fragment) to this file. Applied by
+#                                   DEFAULT even without this flag — default
+#                                   path: ${FY_SIGN_OUTPUT_DIR:-/tmp}/fya-<testnet|mainnet>-sign-output.json
+#                                   (dir defaults to /tmp, deliberately NOT
+#                                   under $HOME: at real invocation time $HOME
+#                                   is the proton-cli keystore home, not a
+#                                   scratch dir — see docs/CONSTITUTION.md
+#                                   §3.5). A write failure here is a WARNING
+#                                   on stderr only; it never turns a
+#                                   successful compose or successful
+#                                   broadcast into a failure exit code —
+#                                   stdout remains authoritative.
+#
+# Env vars:
+#   FY_SIGN_OUTPUT_DIR   Directory the --output default path is composed
+#                        under (default: /tmp). Tests MUST override this to a
+#                        mktemp dir — the real default path is a live
+#                        operator artifact (the last-signed fragment), not a
+#                        throwaway file; a hermetic test suite must never
+#                        read, write, or rm the real default path. Ignored
+#                        entirely when --output=<file> is given explicitly.
 #
 # Config files (validator-host convention, /etc/freedom-yield/):
 #   xpr-account   XPR account name that holds the anchor permission.
@@ -110,6 +134,7 @@ TESTNET_TX_ID=""
 DRY_RUN_LOG=""
 NON_INTERACTIVE=0
 DRY_RUN=0
+OUTPUT_FILE=""
 
 for arg in "$@"; do
 	case "$arg" in
@@ -119,7 +144,8 @@ for arg in "$@"; do
 		--dry-run-log=*)     DRY_RUN_LOG="${arg#*=}" ;;
 		--non-interactive)   NON_INTERACTIVE=1 ;;
 		--dry-run)           DRY_RUN=1 ;;
-		-h|--help)           sed -n '2,92p' "$0" | sed 's/^# \?//'; exit 0 ;;
+		--output=*)          OUTPUT_FILE="${arg#*=}" ;;
+		-h|--help)           sed -n '2,121p' "$0" | sed 's/^# \?//'; exit 0 ;;
 		*)                   echo "ERROR: unknown arg: $arg" >&2; exit 1 ;;
 	esac
 done
@@ -132,6 +158,39 @@ case "$CHAIN" in
 	testnet-a|mainnet-a) ;;
 	*) echo "ERROR: --chain must be testnet-a or mainnet-a, got: $CHAIN" >&2; exit 1 ;;
 esac
+
+# -------- output fragment file (default independent of $HOME) --------
+# CHAIN is validated above to be exactly testnet-a or mainnet-a, so trimming
+# the "-a" suffix deterministically yields "testnet" or "mainnet".
+CHAIN_SHORT="${CHAIN%-a}"
+# FY_SIGN_OUTPUT_DIR overrides the DIRECTORY the default filename is composed
+# under (default /tmp). This exists so tests can redirect the default path to
+# a mktemp dir instead of colliding with /tmp/fya-<chain>-sign-output.json —
+# which on the operator's Mac is a live artifact (the last-signed fragment),
+# not disposable test scratch. Only used when --output=<file> is NOT given.
+SIGN_OUTPUT_DIR="${FY_SIGN_OUTPUT_DIR:-/tmp}"
+OUTPUT_FILE="${OUTPUT_FILE:-${SIGN_OUTPUT_DIR}/fya-${CHAIN_SHORT}-sign-output.json}"
+
+# Write $2 (the JSON text already emitted to stdout by the caller) to file
+# $1 as well. Never fatal: a write failure here must not turn a successful
+# compose (--dry-run) or successful broadcast into a failure exit code —
+# stdout is authoritative regardless. See the --output usage note above for
+# why the default path is fixed under /tmp rather than $HOME.
+#
+# Redirection ORDER matters here: 2>/dev/null MUST come before > "$file".
+# Bash applies redirections left-to-right; if > "$file" is set up first and
+# fails (e.g. the target directory doesn't exist), bash prints its own
+# "No such file or directory" message to the CURRENT stderr immediately, and
+# only THEN would a later 2>/dev/null take effect for the (never-reached)
+# command itself — too late to catch the setup error. Redirecting stderr to
+# /dev/null first means that error is already going nowhere when the stdout
+# redirection is attempted, so only our own WARN reaches the real stderr.
+write_output_fragment() {
+	local file="$1" content="$2"
+	if ! printf '%s\n' "$content" 2>/dev/null > "$file"; then
+		echo "WARN: failed to write output fragment to $file (stdout above is authoritative; continuing)" >&2
+	fi
+}
 
 # -------- prerequisites --------
 if [ ! -r "$ANCHOR_SOURCE" ]; then
@@ -280,7 +339,7 @@ jq -n \
 
 # -------- --dry-run: emit tx JSON + composed memos, do NOT broadcast --------
 if [ "$DRY_RUN" = "1" ]; then
-	jq -n \
+	DRY_RUN_JSON="$(jq -n \
 		--arg chain "$CHAIN" \
 		--argjson schema_version "$SCHEMA_VER" \
 		--argjson cycle_number "$CYCLE_NUM" \
@@ -309,7 +368,9 @@ if [ "$DRY_RUN" = "1" ]; then
 			sink: $to,
 			quantity: $qty,
 			tx: $tx[0]
-		}'
+		}')"
+	printf '%s\n' "$DRY_RUN_JSON"
+	write_output_fragment "$OUTPUT_FILE" "$DRY_RUN_JSON"
 	exit 0
 fi
 
@@ -352,7 +413,7 @@ if [ "$BROADCAST_RC" -ne 0 ] || ! echo "$TX_ID" | grep -qE '^[a-f0-9]{64}$'; the
 fi
 
 # -------- emit JSON receipt fragment on stdout --------
-jq -n \
+RECEIPT_JSON="$(jq -n \
 	--arg tx_id "$TX_ID" \
 	--arg chain "$CHAIN" \
 	--argjson schema_version "$SCHEMA_VER" \
@@ -382,4 +443,6 @@ jq -n \
 		authorization: {actor: $from, permission: "anchor"},
 		sink: $to,
 		quantity: $qty
-	}'
+	}')"
+printf '%s\n' "$RECEIPT_JSON"
+write_output_fragment "$OUTPUT_FILE" "$RECEIPT_JSON"
