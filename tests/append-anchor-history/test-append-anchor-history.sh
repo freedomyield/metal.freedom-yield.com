@@ -85,6 +85,12 @@ check_expr() {
 	fi
 }
 
+if command -v sha256sum >/dev/null 2>&1; then
+	history_hash() { sha256sum "$1" | awk '{print $1}'; }
+else
+	history_hash() { shasum -a 256 "$1" | awk '{print $1}'; }
+fi
+
 # Helper: build a synthetic v2 receipt from a template with
 # {tx_id, block_num, cycle_number, dag_root_hash, prev_anchor_tx_id, event_type}.
 make_receipt() {
@@ -220,6 +226,37 @@ if grep -qi "integer expression" "$FRESH_CYCLE_STDERR"; then
 else
 	echo "PASS  fresh cycle_number append: stderr clean of 'integer expression' error"
 	PASS=$((PASS + 1))
+fi
+
+# ---- coverage: invariant 2 must still REJECT a genuine (cycle_number,
+# event_type) duplicate (2026-08-04 fix round 1) ----
+# The grep -c fix above only changes how the 0-match (non-duplicate) case
+# behaves; this proves the >0-match (genuine duplicate) refusal path it sits
+# next to is untouched. GENESIS_HIST now has 3 lines, the last being
+# cycle_number=4/cyclestart/tx=6666... (from the fresh-cycle append just
+# above). This receipt reuses cycle_number=4 + event_type=cyclestart (a true
+# duplicate of that line) while satisfying every OTHER invariant (fresh
+# tx_id, block_num >= last, prev_anchor_tx_id == last tx_id, cycle_number not
+# decreasing) so the rejection is unambiguously invariant 2, not some other
+# invariant firing first.
+GENESIS_LINES_BEFORE_DUP="$(wc -l < "$GENESIS_HIST" | tr -d ' ')"
+GENESIS_HASH_BEFORE_DUP="$(history_hash "$GENESIS_HIST")"
+DUP_EVENT_RECEIPT="$TEST_DIR/dup-cycle-event-receipt.json"
+make_receipt "$DUP_EVENT_RECEIPT" \
+	"8888888888888888888888888888888888888888888888888888888888888888" \
+	100000025 4 "9999999999999999999999999999999999999999999999999999999999999999" \
+	"\"6666666666666666666666666666666666666666666666666666666666666666\"" "cyclestart"
+run_case "invariant 2 refusal: genuine (cycle_number=4, cyclestart) duplicate" 4 \
+	--receipt="$DUP_EVENT_RECEIPT" --history="$GENESIS_HIST" --event-type=cyclestart
+GENESIS_LINES_AFTER_DUP="$(wc -l < "$GENESIS_HIST" | tr -d ' ')"
+GENESIS_HASH_AFTER_DUP="$(history_hash "$GENESIS_HIST")"
+if [ "$GENESIS_LINES_BEFORE_DUP" = "$GENESIS_LINES_AFTER_DUP" ] && [ "$GENESIS_HASH_BEFORE_DUP" = "$GENESIS_HASH_AFTER_DUP" ]; then
+	printf 'PASS  %-70s (lines=%s, unchanged)\n' "invariant 2 refusal: history unchanged after rejected dup" "$GENESIS_LINES_AFTER_DUP"
+	PASS=$((PASS + 1))
+else
+	printf 'FAIL  %-70s (lines before=%s after=%s)\n' "invariant 2 refusal: history unchanged after rejected dup" \
+		"$GENESIS_LINES_BEFORE_DUP" "$GENESIS_LINES_AFTER_DUP" >&2
+	FAIL=$((FAIL + 1))
 fi
 
 # ---- Summary ----

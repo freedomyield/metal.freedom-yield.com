@@ -73,15 +73,25 @@
 #                                   stdout (the --dry-run compose OR the live
 #                                   receipt fragment) to this file. Applied by
 #                                   DEFAULT even without this flag — default
-#                                   path: /tmp/fya-<testnet|mainnet>-sign-output.json
-#                                   (fixed under /tmp, deliberately NOT under
-#                                   $HOME: at real invocation time $HOME is the
-#                                   proton-cli keystore home, not a scratch
-#                                   dir — see docs/CONSTITUTION.md §3.5). A
-#                                   write failure here is a WARNING on stderr
-#                                   only; it never turns a successful compose
-#                                   or successful broadcast into a failure
-#                                   exit code — stdout remains authoritative.
+#                                   path: ${FY_SIGN_OUTPUT_DIR:-/tmp}/fya-<testnet|mainnet>-sign-output.json
+#                                   (dir defaults to /tmp, deliberately NOT
+#                                   under $HOME: at real invocation time $HOME
+#                                   is the proton-cli keystore home, not a
+#                                   scratch dir — see docs/CONSTITUTION.md
+#                                   §3.5). A write failure here is a WARNING
+#                                   on stderr only; it never turns a
+#                                   successful compose or successful
+#                                   broadcast into a failure exit code —
+#                                   stdout remains authoritative.
+#
+# Env vars:
+#   FY_SIGN_OUTPUT_DIR   Directory the --output default path is composed
+#                        under (default: /tmp). Tests MUST override this to a
+#                        mktemp dir — the real default path is a live
+#                        operator artifact (the last-signed fragment), not a
+#                        throwaway file; a hermetic test suite must never
+#                        read, write, or rm the real default path. Ignored
+#                        entirely when --output=<file> is given explicitly.
 #
 # Config files (validator-host convention, /etc/freedom-yield/):
 #   xpr-account   XPR account name that holds the anchor permission.
@@ -135,7 +145,7 @@ for arg in "$@"; do
 		--non-interactive)   NON_INTERACTIVE=1 ;;
 		--dry-run)           DRY_RUN=1 ;;
 		--output=*)          OUTPUT_FILE="${arg#*=}" ;;
-		-h|--help)           sed -n '2,104p' "$0" | sed 's/^# \?//'; exit 0 ;;
+		-h|--help)           sed -n '2,121p' "$0" | sed 's/^# \?//'; exit 0 ;;
 		*)                   echo "ERROR: unknown arg: $arg" >&2; exit 1 ;;
 	esac
 done
@@ -153,16 +163,31 @@ esac
 # CHAIN is validated above to be exactly testnet-a or mainnet-a, so trimming
 # the "-a" suffix deterministically yields "testnet" or "mainnet".
 CHAIN_SHORT="${CHAIN%-a}"
-OUTPUT_FILE="${OUTPUT_FILE:-/tmp/fya-${CHAIN_SHORT}-sign-output.json}"
+# FY_SIGN_OUTPUT_DIR overrides the DIRECTORY the default filename is composed
+# under (default /tmp). This exists so tests can redirect the default path to
+# a mktemp dir instead of colliding with /tmp/fya-<chain>-sign-output.json —
+# which on the operator's Mac is a live artifact (the last-signed fragment),
+# not disposable test scratch. Only used when --output=<file> is NOT given.
+SIGN_OUTPUT_DIR="${FY_SIGN_OUTPUT_DIR:-/tmp}"
+OUTPUT_FILE="${OUTPUT_FILE:-${SIGN_OUTPUT_DIR}/fya-${CHAIN_SHORT}-sign-output.json}"
 
 # Write $2 (the JSON text already emitted to stdout by the caller) to file
 # $1 as well. Never fatal: a write failure here must not turn a successful
 # compose (--dry-run) or successful broadcast into a failure exit code —
 # stdout is authoritative regardless. See the --output usage note above for
 # why the default path is fixed under /tmp rather than $HOME.
+#
+# Redirection ORDER matters here: 2>/dev/null MUST come before > "$file".
+# Bash applies redirections left-to-right; if > "$file" is set up first and
+# fails (e.g. the target directory doesn't exist), bash prints its own
+# "No such file or directory" message to the CURRENT stderr immediately, and
+# only THEN would a later 2>/dev/null take effect for the (never-reached)
+# command itself — too late to catch the setup error. Redirecting stderr to
+# /dev/null first means that error is already going nowhere when the stdout
+# redirection is attempted, so only our own WARN reaches the real stderr.
 write_output_fragment() {
 	local file="$1" content="$2"
-	if ! printf '%s\n' "$content" > "$file" 2>/dev/null; then
+	if ! printf '%s\n' "$content" 2>/dev/null > "$file"; then
 		echo "WARN: failed to write output fragment to $file (stdout above is authoritative; continuing)" >&2
 	fi
 }
