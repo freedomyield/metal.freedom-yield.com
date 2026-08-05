@@ -56,6 +56,33 @@ recv() {
 
 no_temp_left() { ! find "$ROOT" -name '.push.*' -print -quit 2>/dev/null | grep -q .; }
 
+# isolate_bin <extra-tool>...
+# Build a PATH directory holding only the tools the receive block needs,
+# deliberately WITHOUT jq and python3 unless one is named explicitly, so the
+# "no JSON validator on this host" branch is exercised for real rather than
+# asserted about. Resolved from well-known bin directories rather than
+# `command -v`, which can return a shell alias name instead of a path.
+isolate_bin() {
+	local tool d
+	mkdir -p "$BASE/isobin"
+	for tool in mkdir mktemp cat grep rm mv chmod gzip "$@"; do
+		for d in /bin /usr/bin /usr/local/bin /opt/homebrew/bin; do
+			if [ -x "$d/$tool" ]; then ln -sf "$d/$tool" "$BASE/isobin/$tool"; break; fi
+		done
+	done
+	printf '%s' "$BASE/isobin"
+}
+
+# recv_isolated <bindir> <command-string> <payload-file>
+recv_isolated() {
+	OUT="$(env -i PATH="$1" FY_SUBDIR_ROOT="$ROOT" SSH_ORIGINAL_COMMAND="$2" \
+		/bin/bash "$SNIPPET" < "$3" 2>&1)"
+	RC=$?
+}
+
+landed_count() { find "$BASE/webroot" -type f 2>/dev/null | wc -l | tr -d ' '; }
+orphan_count() { find "$BASE/webroot" -name '.push.*' 2>/dev/null | wc -l | tr -d ' '; }
+
 # ==============================================================================
 # Receiver: accepted shapes
 # ==============================================================================
@@ -317,9 +344,12 @@ grep -q 'receive-metal-push' "$REMOTE" \
 grep -q 'bak-' "$REMOTE" \
 	&& ok "installer: remote half backs the wrapper up before writing" \
 	|| bad "installer: remote half has no backup step"
-grep -qF 'bash -n "$TMP_NEW"' "$REMOTE" \
-	&& ok "installer: remote half refuses to install a wrapper that fails bash -n" \
+grep -qF '"$CHECKER" -n "$TMP_NEW"' "$REMOTE" \
+	&& ok "installer: remote half refuses to install a wrapper failing its shebang's syntax check" \
 	|| bad "installer: remote half does not syntax-check the composed wrapper"
+grep -qF 'neither jq nor python3' "$REMOTE" \
+	&& ok "installer: remote half warns when the host has no JSON validator" \
+	|| bad "installer: remote half does not surface a missing JSON validator"
 grep -q '@@FY_SUBDIR_ROOT@@' "$REMOTE" \
 	&& ok "installer: remote half substitutes (and re-checks) the root placeholder" \
 	|| bad "installer: remote half never handles the root placeholder"
@@ -419,8 +449,10 @@ FIXEOF
 }
 
 run_remote() {
-	# $1 = wrapper path, $2 = dry-run flag, $3 = api dir override
-	FY_WRAPPER_PATH="$1" bash "$BASE/remote.sh" "$B64" "$2" "$3" "FY-SUBDIR-ALLOWLIST-V1"
+	# $1 = wrapper path, $2 = dry-run flag, $3 = api dir override.
+	# The wrapper path is the remote script's 5th POSITIONAL argument (never
+	# an environment variable) — see case 24.
+	bash "$BASE/remote.sh" "$B64" "$2" "$3" "FY-SUBDIR-ALLOWLIST-V1" "$1"
 }
 
 # ---- case 14: install into a fixture wrapper, then exercise it -------------
@@ -552,6 +584,215 @@ RC=$?
 [ "$RC" -ne 0 ] \
 	&& ok "missing api dir: remote half refuses (nonzero exit)" \
 	|| bad "missing api dir: unexpectedly succeeded"
+teardown
+
+# ==============================================================================
+# Regression: the two fail-opens found in review (2026-08-05), reproduced
+# exactly as reported and re-run against the fixed block.
+# ==============================================================================
+
+# ---- case 17: JSON validation is unconditional (jq-absent fail-open) -------
+# Reported: the JSON check ran only `if command -v jq`, so on a host without
+# jq the content `THIS IS NOT JSON AT ALL {{{` landed on the public archive
+# URL with rc=0 under a perfectly valid anchor filename — while the .gz
+# branch was fail-closed. Asymmetric, and the archive side is the one an
+# evaluator is told to verify against an on-chain memo.
+setup
+BIN="$(isolate_bin)"          # neither jq nor python3 on PATH
+printf 'THIS IS NOT JSON AT ALL {{{\n' > "$BASE/evil"
+printf '{"ok":true}\n'                 > "$BASE/good"
+recv_isolated "$BIN" "archive/anchor-source-${DAG_HEX}.json" "$BASE/evil"
+[ "$RC" -eq 6 ] \
+	&& ok "no-validator: invalid JSON refused with exit 6 (was: accepted, rc=0)" \
+	|| bad "no-validator: expected exit 6, got $RC (out: $OUT)"
+echo "$OUT" | grep -q 'no JSON validator on this host' \
+	&& ok "no-validator: refusal names the missing tooling and the remedy" \
+	|| bad "no-validator: message does not explain the refusal (out: $OUT)"
+[ "$(landed_count)" = "0" ] \
+	&& ok "no-validator: nothing landed on the public path" \
+	|| bad "no-validator: a file landed on the public path"
+# A VALID payload must be refused too: the point is that this host cannot
+# verify content at all, so publishing anything unverified is the failure.
+recv_isolated "$BIN" "archive/anchor-source-${DAG_HEX}.json" "$BASE/good"
+[ "$RC" -eq 6 ] \
+	&& ok "no-validator: even valid JSON refused (cannot verify != trust)" \
+	|| bad "no-validator: valid payload expected exit 6, got $RC (out: $OUT)"
+[ "$(orphan_count)" = "0" ] \
+	&& ok "no-validator: no temp file left behind" \
+	|| bad "no-validator: temp file left behind"
+# peers-history stays fail-closed on the same host (gzip -t is always there).
+printf 'plain bytes\n' > "$BASE/notgz"
+recv_isolated "$BIN" "peers-history/peers-2026-08-05.json.gz" "$BASE/notgz"
+[ "$RC" -eq 6 ] \
+	&& ok "no-validator: .gz branch still fail-closed on the same host" \
+	|| bad "no-validator: .gz branch expected exit 6, got $RC (out: $OUT)"
+teardown
+
+# ---- case 18: python3 fallback validator ----------------------------------
+setup
+BIN="$(isolate_bin python3)"   # jq absent, python3 present
+printf 'THIS IS NOT JSON AT ALL {{{\n' > "$BASE/evil"
+printf '{"ok":true}\n'                 > "$BASE/good"
+if [ -x "$BIN/python3" ]; then
+	recv_isolated "$BIN" "archive/anchor-source-${DAG_HEX}.json" "$BASE/evil"
+	[ "$RC" -eq 6 ] \
+		&& ok "python3-fallback: invalid JSON rejected without jq" \
+		|| bad "python3-fallback: expected exit 6, got $RC (out: $OUT)"
+	recv_isolated "$BIN" "archive/anchor-source-${DAG_HEX}.json" "$BASE/good"
+	[ "$RC" -eq 0 ] && [ -f "$ROOT/archive/anchor-source-${DAG_HEX}.json" ] \
+		&& ok "python3-fallback: valid JSON accepted without jq" \
+		|| bad "python3-fallback: valid payload expected exit 0, got $RC (out: $OUT)"
+else
+	ok "python3-fallback: skipped (no python3 in the standard bin dirs)"
+fi
+teardown
+
+# ---- case 19: newline in basename (line-oriented grep fail-open) ----------
+# Reported: `printf '%s' "$base" | grep -Eq '^…$'` is line-oriented, so
+# "archive/<valid>.json\nEVIL-SUFFIX" satisfied the pattern on its first
+# line and was written under a filename containing a newline — while the
+# sender rejects that same shape, breaking the "both sides enforce the same
+# allowlist independently" property this design depends on.
+setup
+printf '{"ok":true}\n' > "$BASE/good"
+NL_NAME="$(printf 'archive/anchor-source-%s.json\nEVIL-SUFFIX' "$DAG_HEX")"
+recv "$NL_NAME" "$BASE/good"
+[ "$RC" -eq 2 ] \
+	&& ok "newline-basename: rejected with exit 2 (was: accepted, rc=0)" \
+	|| bad "newline-basename: expected exit 2, got $RC (out: $OUT)"
+echo "$OUT" | grep -q 'illegal character in basename' \
+	&& ok "newline-basename: rejection names the character-class rule" \
+	|| bad "newline-basename: unexpected message (out: $OUT)"
+[ "$(landed_count)" = "0" ] \
+	&& ok "newline-basename: no file created under any name" \
+	|| bad "newline-basename: a file was created ($(find "$BASE/webroot" -type f | cat -v))"
+# The sender rejects the identical shape — the two halves now agree.
+OUT="$(REPO_BASE="$BASE" WEB_PUSH_KEY="$BASE/good" WEB_HOST="deploy@203.0.113.11" \
+	WEB_HOST_FILE="$BASE/none" bash "$PUSHER" "$NL_NAME" 2>&1)"
+RC=$?
+[ "$RC" -ne 0 ] \
+	&& ok "newline-basename: sender rejects the same shape (parity restored)" \
+	|| bad "newline-basename: sender accepted it"
+teardown
+
+# ---- case 20: other control characters and metacharacters -----------------
+setup
+printf '{"ok":true}\n' > "$BASE/good"
+for evil in \
+	"archive/anchor-source-${DAG_HEX}.json ; id" \
+	"$(printf 'archive/anchor-source-%s.json\tTAB' "$DAG_HEX")" \
+	"archive/anchor-source-${DAG_HEX}.json\$(id)" \
+	"archive/.hidden-${DAG_HEX}.json"
+do
+	recv "$evil" "$BASE/good"
+	[ "$RC" -eq 2 ] || bad "charset: expected exit 2 for a metacharacter basename, got $RC"
+done
+[ "$(landed_count)" = "0" ] \
+	&& ok "charset: whitespace / tab / \$( ) / dotfile basenames all rejected, nothing landed" \
+	|| bad "charset: a metacharacter basename produced a file"
+teardown
+
+# ---- case 21: interrupted transfer leaves no orphan in the public dir -----
+# The temp file has to live inside the public directory for the rename to be
+# atomic, so a transfer cut off mid-push must not leave .push.XXXXXX behind
+# where the web server would serve it.
+setup
+FIFO="$BASE/fifo"
+mkfifo "$FIFO"
+( printf 'partial-payload-'; sleep 5 ) > "$FIFO" &
+WPID=$!
+FY_SUBDIR_ROOT="$ROOT" SSH_ORIGINAL_COMMAND="archive/anchor-source-${DAG_HEX}.json" \
+	bash "$SNIPPET" < "$FIFO" >/dev/null 2>&1 &
+SPID=$!
+SEEN=0
+for _ in $(seq 1 60); do
+	if [ "$(orphan_count)" != "0" ]; then SEEN=1; break; fi
+	sleep 0.1
+done
+[ "$SEEN" = "1" ] \
+	&& ok "interrupt: temp file observed in the public dir mid-transfer" \
+	|| bad "interrupt: never observed the in-flight temp file (test setup issue)"
+kill -TERM "$SPID" 2>/dev/null
+kill "$WPID" 2>/dev/null
+wait "$SPID" 2>/dev/null
+wait "$WPID" 2>/dev/null
+[ "$(orphan_count)" = "0" ] \
+	&& ok "interrupt: no .push.* orphan left in the public dir" \
+	|| bad "interrupt: orphan temp survived ($(find "$BASE/webroot" -name '.push.*'))"
+[ ! -f "$ROOT/archive/anchor-source-${DAG_HEX}.json" ] \
+	&& ok "interrupt: the truncated payload never landed under the real name" \
+	|| bad "interrupt: a truncated payload landed"
+teardown
+
+# ---- case 22: an INSTALLED wrapper ignores FY_SUBDIR_ROOT -----------------
+# The destination must not be steerable by the environment: this code runs
+# under an authorized_keys forced command.
+setup
+B64="$(base64 < "$SNIPPET" | tr -d '\n')"
+bash "$INSTALLER" --print-remote > "$BASE/remote.sh"
+WRAP="$BASE/receive-metal-push"
+make_fixture_wrapper "$WRAP" "$ROOT"
+run_remote "$WRAP" 0 "" >/dev/null 2>&1
+mkdir -p "$BASE/attacker"
+printf '{"ok":true}\n' > "$BASE/good"
+OUT="$(FY_SUBDIR_ROOT="$BASE/attacker" SSH_ORIGINAL_COMMAND="archive/anchor-receipt-${TX_HEX}.json" \
+	bash "$WRAP" < "$BASE/good" 2>&1)"
+RC=$?
+[ "$RC" -eq 0 ] \
+	&& ok "env-pinning: installed wrapper still accepts the push" \
+	|| bad "env-pinning: push failed (rc=$RC, out: $OUT)"
+[ -f "$ROOT/archive/anchor-receipt-${TX_HEX}.json" ] \
+	&& ok "env-pinning: bytes landed in the installed destination" \
+	|| bad "env-pinning: bytes did not land in the installed destination"
+[ -z "$(find "$BASE/attacker" -type f)" ] \
+	&& ok "env-pinning: FY_SUBDIR_ROOT could not redirect the write" \
+	|| bad "env-pinning: FY_SUBDIR_ROOT redirected the write to an attacker path"
+grep -q "__fy_installed='yes'" "$WRAP" \
+	&& ok "env-pinning: installed block is marked installed" \
+	|| bad "env-pinning: installed marker not substituted"
+teardown
+
+# ---- case 23: installer honours a #!/bin/sh wrapper ----------------------
+setup
+B64="$(base64 < "$SNIPPET" | tr -d '\n')"
+bash "$INSTALLER" --print-remote > "$BASE/remote.sh"
+WRAP="$BASE/receive-metal-push"
+make_fixture_wrapper "$WRAP" "$ROOT"
+# Re-point the shebang at /bin/sh, as a POSIX wrapper would have it.
+{ printf '#!/bin/sh\n'; tail -n +2 "$WRAP"; } > "$WRAP.sh" && mv "$WRAP.sh" "$WRAP"
+chmod +x "$WRAP"
+OUT="$(run_remote "$WRAP" 0 "" 2>&1)"
+RC=$?
+[ "$RC" -eq 0 ] \
+	&& ok "sh-wrapper: installs into a #!/bin/sh wrapper" \
+	|| bad "sh-wrapper: expected exit 0, got $RC (out: $OUT)"
+echo "$OUT" | grep -q 'passes sh -n' \
+	&& ok "sh-wrapper: syntax-checked with sh -n, not bash -n" \
+	|| bad "sh-wrapper: did not use the shebang's interpreter (out: $OUT)"
+printf '{"ok":true}\n' > "$BASE/good"
+OUT="$(SSH_ORIGINAL_COMMAND="archive/anchor-receipt-${TX_HEX}.json" sh "$WRAP" < "$BASE/good" 2>&1)"
+RC=$?
+[ "$RC" -eq 0 ] && [ -f "$ROOT/archive/anchor-receipt-${TX_HEX}.json" ] \
+	&& ok "sh-wrapper: the patched wrapper runs correctly under sh" \
+	|| bad "sh-wrapper: patched wrapper failed under sh (rc=$RC, out: $OUT)"
+teardown
+
+# ---- case 24: the wrapper path is positional, not environment-driven -----
+setup
+B64="$(base64 < "$SNIPPET" | tr -d '\n')"
+bash "$INSTALLER" --print-remote > "$BASE/remote.sh"
+WRAP="$BASE/receive-metal-push"
+make_fixture_wrapper "$WRAP" "$ROOT"
+# Env var set, positional override empty: must fall back to the pinned
+# production path (absent here) rather than edit the fixture.
+OUT="$(FY_WRAPPER_PATH="$WRAP" bash "$BASE/remote.sh" "$B64" 0 "" "FY-SUBDIR-ALLOWLIST-V1" "" 2>&1)"
+RC=$?
+[ "$RC" -eq 4 ] \
+	&& ok "wrapper-pinning: FY_WRAPPER_PATH in the environment is ignored" \
+	|| bad "wrapper-pinning: environment steered the target (rc=$RC, out: $OUT)"
+grep -q 'FY-SUBDIR-ALLOWLIST-V1' "$WRAP" \
+	&& bad "wrapper-pinning: the fixture wrapper was edited via the environment" \
+	|| ok "wrapper-pinning: the fixture wrapper was left untouched"
 teardown
 
 # ---- summary ---------------------------------------------------------------

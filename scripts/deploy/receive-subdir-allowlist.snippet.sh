@@ -48,9 +48,13 @@
 #      @@FY_SUBDIR_ROOT@@ was never substituted)
 #   5  I/O failure (mkdir / mktemp / write / rename)
 #   6  rejected: content did not match the declared type (invalid JSON, or
-#      not a valid gzip stream), or the payload was empty
+#      not a valid gzip stream), or the payload was empty, or the host has
+#      no JSON validator at all (jq and python3 both absent — refused, not
+#      trusted)
 #
-# Standalone invocation (how the tests drive it):
+# Standalone invocation (how the tests drive it — the FY_SUBDIR_ROOT
+# override works ONLY on the un-substituted repo copy; see @@FY_INSTALLED@@
+# below):
 #   FY_SUBDIR_ROOT=<dir> SSH_ORIGINAL_COMMAND=<name> \
 #     bash receive-subdir-allowlist.snippet.sh < payload
 
@@ -59,7 +63,18 @@
 # this line is what makes the installer idempotent — do not rename it
 # without bumping the version in the installer too.)
 __fy_arg="${SSH_ORIGINAL_COMMAND:-${1:-}}"
-__fy_root="${FY_SUBDIR_ROOT:-@@FY_SUBDIR_ROOT@@}"
+# Destination root. The installer substitutes @@FY_SUBDIR_ROOT@@ with the
+# wrapper's real api/ directory AND @@FY_INSTALLED@@ with "yes". In an
+# INSTALLED wrapper the path is therefore fixed: no environment variable can
+# steer where received bytes land, which matters because this code runs
+# under an authorized_keys forced command. The FY_SUBDIR_ROOT override is
+# honoured only while the snippet is still the un-substituted repo copy —
+# i.e. only when the test suite runs it directly.
+__fy_installed='@@FY_INSTALLED@@'
+__fy_root='@@FY_SUBDIR_ROOT@@'
+if [ "$__fy_installed" != "yes" ]; then
+	__fy_root="${FY_SUBDIR_ROOT:-$__fy_root}"
+fi
 
 case "$__fy_arg" in
 	archive/*|peers-history/*)
@@ -78,6 +93,20 @@ case "$__fy_arg" in
 		case "$__fy_base" in
 			''|*/*)
 				echo "REJECT: '$__fy_arg' must be exactly <prefix>/<basename>" >&2
+				exit 2
+				;;
+		esac
+		# Character-class guard BEFORE the pattern match below. `grep` is
+		# line-oriented: a basename containing a newline would let a valid
+		# first line satisfy `^…$` while an arbitrary second line rode along
+		# into the written filename. A `case` glob has no line concept, so
+		# this rejects newlines, whitespace, control bytes and every shell
+		# metacharacter outright — and keeps this side's allowlist exactly
+		# as strict as the sender's, which is the point of enforcing it
+		# twice independently.
+		case "$__fy_base" in
+			*[!A-Za-z0-9._-]*)
+				echo "REJECT: illegal character in basename under '$__fy_sub/'" >&2
 				exit 2
 				;;
 		esac
@@ -113,13 +142,17 @@ case "$__fy_arg" in
 			echo "ERROR: mktemp failed in $__fy_root/$__fy_sub" >&2
 			exit 5
 		}
+		# The temp file lives inside the PUBLIC directory (it has to, for the
+		# rename to be atomic), so a transfer cut off mid-push must not leave
+		# a .push.XXXXXX orphan sitting there. Cleared again right before the
+		# successful rename. No trap can already exist here: this block is the
+		# first thing in the wrapper.
+		trap 'rm -f "$__fy_tmp"' EXIT HUP INT TERM
 		if ! cat > "$__fy_tmp"; then
-			rm -f "$__fy_tmp"
 			echo "ERROR: write failed for $__fy_sub/$__fy_base" >&2
 			exit 5
 		fi
 		if [ ! -s "$__fy_tmp" ]; then
-			rm -f "$__fy_tmp"
 			echo "REJECT: empty payload for $__fy_sub/$__fy_base" >&2
 			exit 6
 		fi
@@ -127,17 +160,32 @@ case "$__fy_arg" in
 		# Content type must match what the name declares. A truncated push
 		# that still produced bytes is the realistic failure here, and it
 		# must not land on a public URL an evaluator is told to verify.
+		#
+		# Validation is MANDATORY, never conditional on tooling: an earlier
+		# revision only checked JSON `if command -v jq`, which meant a host
+		# without jq silently accepted arbitrary bytes under a perfectly
+		# valid anchor filename — the .gz branch was fail-closed while the
+		# .json branch was fail-open. Two independent validators are tried
+		# (jq, then python3's json module, both local and offline, the same
+		# fallback ladder gen-anchor-*.sh use for schema validation); if
+		# NEITHER exists the push is refused rather than trusted.
 		if [ "$__fy_kind" = "json" ]; then
 			if command -v jq >/dev/null 2>&1; then
 				if ! jq -e . "$__fy_tmp" >/dev/null 2>&1; then
-					rm -f "$__fy_tmp"
 					echo "REJECT: $__fy_sub/$__fy_base is not valid JSON" >&2
 					exit 6
 				fi
+			elif command -v python3 >/dev/null 2>&1; then
+				if ! python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$__fy_tmp" >/dev/null 2>&1; then
+					echo "REJECT: $__fy_sub/$__fy_base is not valid JSON" >&2
+					exit 6
+				fi
+			else
+				echo "REFUSE: no JSON validator on this host (jq absent; python3 absent) — refusing to publish $__fy_sub/$__fy_base unvalidated. Install jq." >&2
+				exit 6
 			fi
 		else
 			if ! gzip -t "$__fy_tmp" 2>/dev/null; then
-				rm -f "$__fy_tmp"
 				echo "REJECT: $__fy_sub/$__fy_base is not a valid gzip stream" >&2
 				exit 6
 			fi
@@ -145,10 +193,10 @@ case "$__fy_arg" in
 
 		chmod 644 "$__fy_tmp" 2>/dev/null || true
 		if ! mv -f "$__fy_tmp" "$__fy_root/$__fy_sub/$__fy_base"; then
-			rm -f "$__fy_tmp"
 			echo "ERROR: atomic rename failed for $__fy_sub/$__fy_base" >&2
 			exit 5
 		fi
+		trap - EXIT HUP INT TERM
 		echo "OK: received $__fy_sub/$__fy_base"
 		exit 0
 		;;

@@ -25,9 +25,11 @@
 #   Inserts the repo-canonical block scripts/deploy/receive-subdir-allowlist.snippet.sh
 #   at the top of /home/deploy/bin/receive-metal-push (immediately after the
 #   shebang), with @@FY_SUBDIR_ROOT@@ substituted for the wrapper's real
-#   public api/ directory. The block handles only the two prefixes above and
-#   exits; every other command string falls through to the wrapper's
-#   existing flat-filename allowlist, untouched.
+#   public api/ directory and @@FY_INSTALLED@@ set to "yes" — which pins that
+#   destination so no environment variable reaching the forced command can
+#   steer where received bytes land. The block handles only the two prefixes
+#   above and exits; every other command string falls through to the
+#   wrapper's existing flat-filename allowlist, untouched.
 #
 # Safety:
 #   - Idempotent: re-running when the FY-SUBDIR-ALLOWLIST-V1 marker is
@@ -36,7 +38,9 @@
 #     write, and writes through the existing inode (`cat > "$WRAPPER"`) so
 #     ownership/mode/authorized_keys forced-command path are preserved.
 #   - Composes the new wrapper in a temp file and refuses to install it
-#     unless `bash -n` accepts it AND the placeholder token is gone.
+#     unless a syntax check with the interpreter named in the wrapper's own
+#     shebang (`bash -n` or `sh -n`) accepts it AND both placeholder tokens
+#     are gone.
 #   - Auto-detects the destination api/ directory from the wrapper itself
 #     and REFUSES on ambiguity — pass FY_WEB_API_DIR=<dir> to be explicit.
 #   - Touches nothing else on the host: no other wrapper, vhost, cron, or
@@ -65,8 +69,8 @@
 #   2  local precondition failed (snippet missing, key unreadable, bad arg)
 #   3  SSH pre-check failed
 #   4  wrapper not found on the web host
-#   5  refused: composed wrapper failed `bash -n`, or the placeholder token
-#      survived substitution
+#   5  refused: composed wrapper failed its shebang-appropriate syntax
+#      check, or a placeholder token survived substitution
 #   6  refused: destination api/ directory could not be determined
 #      unambiguously (pass FY_WEB_API_DIR) or does not exist
 
@@ -97,10 +101,14 @@ DRY_RUN="${2:-0}"
 API_DIR_OVERRIDE="${3:-}"
 MARKER="${4:?internal: marker arg missing}"
 
-# FY_WRAPPER_PATH exists so the whole remote half can be exercised against a
-# fixture wrapper in tests/install-xserver-subdir-allowlist/ without a host.
-# It is never set on a real run: ssh does not forward the environment.
-WRAPPER="${FY_WRAPPER_PATH:-/home/deploy/bin/receive-metal-push}"
+# $5 is the wrapper-path override: it exists so the whole remote half can be
+# exercised against a fixture wrapper in
+# tests/install-xserver-subdir-allowlist/ without a host. Deliberately a
+# POSITIONAL argument rather than an environment variable, so nothing in the
+# remote environment can redirect which file gets edited — the installer
+# always passes it empty and only the test suite ever passes a value.
+WRAPPER_OVERRIDE="${5:-}"
+WRAPPER="${WRAPPER_OVERRIDE:-/home/deploy/bin/receive-metal-push}"
 
 if [ ! -f "$WRAPPER" ]; then
 	echo "ERROR (4): wrapper not found: $WRAPPER" >&2
@@ -164,9 +172,13 @@ if head -n 1 "$TMP_RAW" | grep -q '^#!'; then
 else
 	cat "$TMP_RAW" > "$TMP_SNIP"
 fi
-sed "s|@@FY_SUBDIR_ROOT@@|${API_DIR}|g" "$TMP_SNIP" > "$TMP_RAW"
+# @@FY_INSTALLED@@ -> yes pins the destination: the installed block ignores
+# FY_SUBDIR_ROOT entirely, so no environment variable reaching the forced
+# command can steer where received bytes are written.
+sed -e "s|@@FY_SUBDIR_ROOT@@|${API_DIR}|g" -e 's|@@FY_INSTALLED@@|yes|g' \
+	"$TMP_SNIP" > "$TMP_RAW"
 cat "$TMP_RAW" > "$TMP_SNIP"
-if grep -q '@@FY_SUBDIR_ROOT@@' "$TMP_SNIP"; then
+if grep -q '@@FY_SUBDIR_ROOT@@' "$TMP_SNIP" || grep -q '@@FY_INSTALLED@@' "$TMP_SNIP"; then
 	echo "ERROR (5): placeholder token survived substitution — refusing to install" >&2
 	exit 5
 fi
@@ -187,11 +199,23 @@ else
 	cat "$WRAPPER"           >> "$TMP_NEW"
 fi
 
-if ! bash -n "$TMP_NEW"; then
-	echo "ERROR (5): composed wrapper failed syntax check — wrapper left untouched" >&2
+# Syntax-check with the interpreter the wrapper actually declares. A
+# `#!/bin/sh` wrapper on a dash-based system is not bash, and checking it
+# with `bash -n` would both miss bashisms the real interpreter rejects and
+# accept constructs dash cannot run. (The snippet itself is POSIX, so it
+# passes either checker.)
+SHEBANG="$(head -n 1 "$WRAPPER")"
+case "$SHEBANG" in
+	*bash*)              CHECKER=bash ;;
+	*/sh|*/sh\ *|*dash*) CHECKER=sh ;;
+	*)                   CHECKER=bash ;;
+esac
+command -v "$CHECKER" >/dev/null 2>&1 || CHECKER=bash
+if ! "$CHECKER" -n "$TMP_NEW"; then
+	echo "ERROR (5): composed wrapper failed ${CHECKER} -n — wrapper left untouched" >&2
 	exit 5
 fi
-echo "composed wrapper passes bash -n"
+echo "composed wrapper passes ${CHECKER} -n (from shebang: ${SHEBANG})"
 
 echo
 echo "--- diff (current -> proposed) ---"
@@ -215,9 +239,25 @@ cat "$TMP_NEW" > "$WRAPPER"
 
 echo
 echo "--- verify ---"
-bash -n "$WRAPPER" && echo "syntax OK"
+"$CHECKER" -n "$WRAPPER" && echo "syntax OK (${CHECKER} -n)"
 grep -n "$MARKER" "$WRAPPER" | head -2
 ls -la "$WRAPPER"
+
+# The receive block refuses to publish an archive it cannot validate as
+# JSON, so a host with neither jq nor python3 will reject every archive push
+# (peers-history .gz pushes are unaffected — gzip -t is always available).
+# Surface that here rather than letting the operator discover it during a
+# backfill.
+echo
+if command -v jq >/dev/null 2>&1; then
+	echo "JSON validator present: jq"
+elif command -v python3 >/dev/null 2>&1; then
+	echo "JSON validator present: python3 (jq absent — fallback in use)"
+else
+	echo "WARNING: neither jq nor python3 is installed on this host." >&2
+	echo "         archive/*.json pushes will be REFUSED (exit 6) until one exists." >&2
+	echo "         Install jq, then retry the push. peers-history/*.gz is unaffected." >&2
+fi
 
 echo
 echo "OK: subdirectory allowlist installed. Backup at $BAK"
@@ -269,7 +309,7 @@ set +e
 printf '%s\n' "$REMOTE_SCRIPT" | ssh -i "$XSERVER_KEY" \
 	-o BatchMode=yes -o ConnectTimeout=10 \
 	"${XSERVER_USER}@${XSERVER_HOST}" \
-	bash -s -- "$SNIPPET_B64" "$DRY_RUN" "$FY_WEB_API_DIR" "$MARKER"
+	bash -s -- "$SNIPPET_B64" "$DRY_RUN" "$FY_WEB_API_DIR" "$MARKER" ""
 RC=$?
 set -e
 
