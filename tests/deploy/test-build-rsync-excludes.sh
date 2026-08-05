@@ -34,11 +34,20 @@ echo "${OUT}" | grep -qx -- '--exclude=/api/validator.json' \
 echo "${OUT}" | grep -qx -- '--exclude=/calendar/' \
   && ok "empty prefix anchors calendar/" || no "empty calendar/"
 
+# Subdirectory feeds (2026-08-05): api/archive/ holds the R18 per-anchor
+# archives, api/peers-history/ the daily snapshots. Both are push-owned and
+# never git-tracked, so a deploy --delete that failed to exclude them would
+# erase every archived pre-image an evaluator is pointed at.
+echo "${OUT}" | grep -qx -- '--exclude=/api/archive/' \
+  && ok "empty prefix anchors api/archive/ (R18 archives)" || no "empty api/archive/"
+echo "${OUT}" | grep -qx -- '--exclude=/api/peers-history/' \
+  && ok "empty prefix anchors api/peers-history/" || no "empty api/peers-history/"
+
 # Count parity: both shapes emit the same number of lines
 H="$(bash "${EMIT}" "public/" | wc -l | tr -d ' ')"
 X="$(bash "${EMIT}" "" | wc -l | tr -d ' ')"
-[ "${H}" = "${X}" ] && [ "${H}" = 19 ] \
-  && ok "both shapes emit 19 excludes" || no "count parity (h=${H} x=${X})"
+[ "${H}" = "${X}" ] && [ "${H}" = 21 ] \
+  && ok "both shapes emit 21 excludes" || no "count parity (h=${H} x=${X})"
 
 # Missing list file → non-zero exit
 if FEED_EXCLUDES_FILE=/nonexistent bash "${EMIT}" "public/" >/dev/null 2>&1; then

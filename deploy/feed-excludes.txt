@@ -25,4 +25,15 @@ api/cycle-history.jsonl
 api/anchor-receipt.json
 api/anchor-receipt.json.sig
 api/anchor-history.jsonl
+# Subdirectory feeds — whole-directory entries (like calendar/) because the
+# member filenames are content-addressed / date-keyed and unbounded:
+#   api/archive/       R18 per-anchor archives (anchor-source-<dag>.json,
+#                      anchor-receipt-<tx>.json) — the pre-images that
+#                      anchor-history.jsonl's archived_*_path fields point at.
+#   api/peers-history/ daily gzipped validator-set snapshots, indexed by
+#                      peers-history-index.json.
+# Both are push-owned end to end (never git-tracked), so the deploy must
+# neither deliver nor delete them.
+api/archive/
+api/peers-history/
 calendar/
