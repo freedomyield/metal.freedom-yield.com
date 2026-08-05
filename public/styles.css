@@ -3681,13 +3681,24 @@ main:has(.data-toc) .evidence-table thead th {
 	color: var(--fg);
 	line-height: 1.2;
 	font-variant-numeric: tabular-nums;
-	word-break: break-all;
+	/* break-all here used to apply to the whole string — including the
+	 * trailing unit word ("METAL"), which let the browser split it
+	 * mid-word ("MET" / "AL") on narrow cards. overflow-wrap: break-word
+	 * only forces a break when a token truly doesn't fit its own line,
+	 * so short words like "METAL" wrap whole onto the next line instead.
+	 * The one token that genuinely needs arbitrary-position breaking
+	 * (NodeID, ~50 unbroken chars) gets word-break: break-all below,
+	 * scoped to just its <code> element. */
+	overflow-wrap: break-word;
 }
 .delegate-stat-value code {
 	font-size: 0.88em;
 	background: rgba(31, 41, 55, 0.04);
 	padding: 0.05rem 0.35rem;
 	border-radius: 4px;
+	/* NodeID-... has no whitespace at all across ~50 chars — only
+	 * character-anywhere breaking keeps it inside the card. */
+	word-break: break-all;
 }
 
 /* Risk cards — coloured per risk category. */
