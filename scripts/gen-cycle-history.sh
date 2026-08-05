@@ -23,7 +23,8 @@
 #   - days_recorded              integer
 #   - final_self_stake_metal     number  (fractional METAL; NOT integer —
 #                                 self-stake need not be a whole METAL)
-#   - final_total_delegated_metal integer
+#   - final_total_delegated_metal number  (fractional METAL; NOT integer —
+#                                 delegated stake need not be a whole METAL)
 #   - final_delegation_fee_pct   number
 #   - avg_peer_count             number
 #   - min_peer_count             integer
