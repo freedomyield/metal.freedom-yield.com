@@ -42,6 +42,21 @@
 # (mirrors scripts/gen-anchor-source.sh's identical portability shim), so
 # this suite runs its real assertions on every host — no SKIP path remains.
 #
+# Review round 2: the round-1 BSD fallback for to_epoch()'s rare
+# non-numeric (ISO 8601) input branch, `date -j -f "%Y-%m-%dT%H:%M:%SZ" ...`,
+# parsed the input in the process's LOCAL timezone instead of UTC — BSD
+# strptime treats the format string's trailing "Z" as a literal character,
+# not a UTC indicator (unlike GNU `date -d`, which does recognize it).
+# Reviewer-verified a 9-hour discrepancy under TZ=Asia/Tokyo. Fixed by
+# adding `-u` to the BSD branch. Case 6 below proves the fix two ways: (a)
+# drives the REAL script end-to-end with an ISO-string (not numeric)
+# validator.json under TZ=Asia/Tokyo and asserts the rendered JST time is
+# the correct one, not the 9-hours-off value the bug produced; (b) directly
+# computes the epoch via whichever date flavor this host actually has
+# (GNU or BSD) and cross-checks it against a Python (`calendar.timegm`)
+# ground truth, which is the transitive form of "GNU and BSD agree" that
+# works on any single host regardless of which one it natively has.
+#
 # Usage:
 #   bash tests/gen-renewal-ics/test-gen-renewal-ics.sh
 #
@@ -278,6 +293,111 @@ else
 	grep -q "UID:metal-renewal-4-${TOKEN}@" "$OUT5_ICS" \
 		&& pass "no-trailing-newline: CLOSED_COUNT correctly counted as 3 (renewal UID uses n=4), not undercounted to 2" \
 		|| fail "no-trailing-newline: renewal UID does not use n=4 (wc -l undercount regression); got: $(grep 'UID:metal-renewal' "$OUT5_ICS" | tr '\n' '|')"
+fi
+
+# ---- case 6: review round 2 — BSD date_from_iso() must parse "...Z" ISO
+# input as UTC, not local time. (a) drives the REAL script end to end with
+# an ISO-string (non-numeric) validator.json under TZ=Asia/Tokyo forced for
+# the whole process (date_from_iso() carries no TZ override of its own, so
+# the bug depended on the AMBIENT TZ at the moment it ran — forcing it here
+# makes the bug reproduce deterministically on any host, not just one whose
+# local zone happens to be non-UTC). (b) directly cross-checks the epoch
+# produced by whichever date flavor(s) this host actually has against a
+# Python (`calendar.timegm`) ground truth, which is the transitive form of
+# "GNU and BSD branches agree" that works on a single host — plus a
+# negative control proving the pre-fix BSD form WOULD have been caught by
+# this same ground-truth comparison (so the check has teeth, not just
+# vacuous agreement).
+ISO_VALIDATOR_JSON="$WORK/validator-iso.json"
+cat > "$ISO_VALIDATOR_JSON" <<'EOF'
+{"nodeId":"NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v","startTime":"2026-07-01T00:00:00Z","endTime":"2026-07-16T00:00:00Z"}
+EOF
+ISO_OUT_DIR="$WORK/out-iso"
+mkdir -p "$ISO_OUT_DIR"
+ISO_STDERR="$ISO_OUT_DIR/stderr.log"
+TZ=Asia/Tokyo \
+	VALIDATOR_JSON="$ISO_VALIDATOR_JSON" \
+	CALENDAR_OUT_DIR="$ISO_OUT_DIR" \
+	CALENDAR_TOKEN_FILE="$TOKEN_FILE" \
+	CYCLE_HISTORY_JSONL="$WORK/nonexistent-cycle-history-iso.jsonl" \
+	bash "$SCRIPT" >"$ISO_OUT_DIR/stdout.log" 2>"$ISO_STDERR"
+RC6=$?
+OUT6_ICS="$ISO_OUT_DIR/${TOKEN}.ics"
+if [ "$RC6" -ne 0 ] || [ ! -r "$OUT6_ICS" ]; then
+	fail "ISO-string date parsing: script did not produce an .ics file (rc=$RC6); stderr: $(cat "$ISO_STDERR" 2>/dev/null | tr '\n' '|')"
+else
+	pass "ISO-string date parsing: script exited 0 and wrote the .ics file"
+	# Correct: 2026-07-16T00:00:00Z rendered in JST is 09:00 (UTC+9). The
+	# pre-round-2 bug (BSD date_from_iso without -u, under TZ=Asia/Tokyo
+	# ambient) would instead have produced "07/16 00:00 JST" here — a
+	# silent 9-hour shift, not a crash, so only a value-level assertion can
+	# catch it.
+	grep -q "endTime: 07/16 09:00 JST" "$OUT6_ICS" \
+		&& pass "ISO-string date parsing: endTime renders as the correct 07/16 09:00 JST (UTC+9 of 00:00 UTC)" \
+		|| fail "ISO-string date parsing: endTime did not render correctly; got: $(grep 'endTime:' "$OUT6_ICS" | tr '\n' '|')"
+	if grep -q "endTime: 07/16 00:00 JST" "$OUT6_ICS"; then
+		fail "ISO-string date parsing: endTime shows the review-round-2 bug's 9-hours-off value (07/16 00:00 JST) — BSD date_from_iso() is parsing 'Z' input as local time, not UTC"
+	else
+		pass "ISO-string date parsing: the review-round-2 buggy 9-hours-off value is absent"
+	fi
+fi
+
+# (b) direct epoch-level parity check.
+ISO_INPUT="2026-07-16T00:00:00Z"
+EXPECTED_EPOCH="$(python3 -c "import calendar,time; print(calendar.timegm(time.strptime('${ISO_INPUT}','%Y-%m-%dT%H:%M:%SZ')))" 2>/dev/null || true)"
+if [ -z "$EXPECTED_EPOCH" ]; then
+	echo "SKIP: python3 unavailable — cannot compute the ground-truth epoch for the GNU/BSD parity check" >&2
+else
+	GNU_EPOCH=""
+	# Prefer this host's native `date` if it is GNU; otherwise probe common
+	# Homebrew coreutils gnubin locations so the direct GNU-vs-BSD
+	# comparison actually runs (not just the ground-truth comparison) on a
+	# macOS dev machine that happens to have coreutils installed, without
+	# altering this suite's own PATH/behavior anywhere else.
+	if date --version >/dev/null 2>&1; then
+		GNU_DATE_BIN="date"
+	else
+		GNU_DATE_BIN=""
+		for cand in /opt/homebrew/opt/coreutils/libexec/gnubin/date /usr/local/opt/coreutils/libexec/gnubin/date; do
+			if [ -x "$cand" ] && "$cand" --version >/dev/null 2>&1; then
+				GNU_DATE_BIN="$cand"
+				break
+			fi
+		done
+	fi
+	if [ -n "$GNU_DATE_BIN" ]; then
+		GNU_EPOCH="$("$GNU_DATE_BIN" -d "$ISO_INPUT" +%s)"
+		if [ "$GNU_EPOCH" = "$EXPECTED_EPOCH" ]; then
+			pass "GNU date_from_iso form ($GNU_DATE_BIN -d) matches ground-truth epoch for $ISO_INPUT"
+		else
+			fail "GNU date_from_iso form disagrees with ground truth: got=$GNU_EPOCH expected=$EXPECTED_EPOCH"
+		fi
+	fi
+	BSD_EPOCH=""
+	if date -j -u -f "%Y-%m-%dT%H:%M:%SZ" "$ISO_INPUT" +%s >/dev/null 2>&1; then
+		BSD_EPOCH="$(date -j -u -f "%Y-%m-%dT%H:%M:%SZ" "$ISO_INPUT" +%s)"
+		if [ "$BSD_EPOCH" = "$EXPECTED_EPOCH" ]; then
+			pass "BSD (fixed, -j -u -f) date_from_iso form matches ground-truth epoch for $ISO_INPUT"
+		else
+			fail "BSD (fixed, -j -u -f) date_from_iso form disagrees with ground truth: got=$BSD_EPOCH expected=$EXPECTED_EPOCH"
+		fi
+		# Negative control: prove the round-2 bug WOULD have been caught by
+		# this same ground-truth comparison (this check has teeth, it is not
+		# vacuously agreeing because both sides are wrong the same way).
+		BSD_EPOCH_BUGGY="$(TZ=Asia/Tokyo date -j -f "%Y-%m-%dT%H:%M:%SZ" "$ISO_INPUT" +%s 2>/dev/null || true)"
+		if [ -n "$BSD_EPOCH_BUGGY" ] && [ "$BSD_EPOCH_BUGGY" != "$EXPECTED_EPOCH" ]; then
+			pass "negative control: the pre-fix BSD form (no -u, TZ=Asia/Tokyo) DOES disagree with ground truth — confirms this check has teeth"
+		else
+			fail "negative control: expected the pre-fix BSD form to disagree with ground truth under TZ=Asia/Tokyo, but it did not (got=$BSD_EPOCH_BUGGY expected=$EXPECTED_EPOCH) — this parity check may not actually be discriminating"
+		fi
+	fi
+	if [ -n "$GNU_EPOCH" ] && [ -n "$BSD_EPOCH" ]; then
+		if [ "$GNU_EPOCH" = "$BSD_EPOCH" ]; then
+			pass "GNU and BSD date_from_iso forms produce the IDENTICAL epoch for the same ISO input (direct cross-branch parity)"
+		else
+			fail "GNU and BSD date_from_iso forms DISAGREE: GNU=$GNU_EPOCH BSD=$BSD_EPOCH"
+		fi
+	fi
 fi
 
 echo

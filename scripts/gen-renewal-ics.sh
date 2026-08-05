@@ -94,7 +94,16 @@ if date --version >/dev/null 2>&1; then
 else
   # BSD (macOS)
   epoch_to_fmt() { TZ="$2" date -r "$1" +"$3"; }
-  date_from_iso() { date -j -f "%Y-%m-%dT%H:%M:%SZ" "$1" +%s; }
+  # `-u` is required, not optional (review round 2): the input format's
+  # trailing "Z" is a LITERAL character to BSD strptime, not a timezone
+  # indicator — unlike GNU `date -d`, which does recognize "Z" as UTC. Without
+  # `-u`, BSD `date -j -f` parses the wall-clock numbers in the process's
+  # LOCAL timezone (whatever $TZ happens to be, e.g. Asia/Tokyo from the
+  # fmt_* helpers above), silently producing a UTC epoch that is off by the
+  # local UTC offset (9 hours under Asia/Tokyo) for a UTC ("...Z") input.
+  # Reviewer-verified: same ISO input, GNU vs BSD-without-u disagreed by
+  # exactly 9h; GNU vs BSD-with-u agree exactly.
+  date_from_iso() { date -j -u -f "%Y-%m-%dT%H:%M:%SZ" "$1" +%s; }
 fi
 
 # validator.json stores times as Unix epoch numbers (per node-info.sh output).
