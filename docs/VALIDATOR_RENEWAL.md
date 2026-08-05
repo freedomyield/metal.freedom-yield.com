@@ -266,6 +266,8 @@ State file: `/var/lib/freedom-yield/cycle-gate-state.json` (= operator 承認済
 当日順序(厳守。cycle N の閉じ → cycle N+1 の開始):
 
 ⓪ **operator (Metal Wallet web)**: 新 AddValidator を submit → explorer で **Committed** を確認 → `platform.getCurrentValidators` に新 entry が見えることまで確認(host の `node-info.sh` 等)。**これだけが人の手による状態変更で、以降の全手順の前提**(form の field と timing は本書 Step 2 参照)。ブロックは慣習ではなく機械的: 新 entry が chain に出るまで手順⑤ `gen-anchor-source.sh` は **exit 4**(`NodeID ... not present in current validators`)、手順⑨ `resume-after-cycle-start.sh` は **exit 2**(`NodeID=... not in current validators (= AddValidator tx not yet observed?)`)で hard-block する。submit しただけで pipeline を始めない — Committed と chain read の両方を待つ
+
+**AI が chain 状態を確認する手段の注記**: `scripts/broadcast-guard.sh`(tier-1)は `/ext/bc/[XPC]` や bare `/ext/[XP]` 宛の `curl`/`wget` を **read/write を区別せず shape だけで無条件 block** する — `platform.getCurrentValidators` の読み取り専用クエリであっても、AI session からの素の `curl .../ext/bc/P` は broadcast 試行と同様に拒否される。採用済みの回避策は chain に直接問い合わせず、5 分毎の `metal-node-info` cron (`node-info.sh`) が既に書いている `public/api/validator.json` を read し、`endTime` / `observedAt` フィールドをファイルの mtime(≤5 分 = fresh、cron 周期と一致)と突き合わせて鮮度確認すること。**この目的で `broadcast-guard.sh` を無効化しない** — guard は設計上無条件であり、cron 生成物を read するのが AI session から chain 状態を見る正しい経路。
 ① validator host: node-info tick 待ち — `public/api/validator.json` に新 endTime が反映されたことを確認(古い endTime のまま cycle-recording を走らせると記録がずれるため)
 ② validator host: `uptime-history.sh`(cycle N close)
 ③ validator host: `gen-cycle-history.sh` + push — 公開 `cycle-history.jsonl` が 1 行増えたことを実測確認
@@ -273,7 +275,7 @@ State file: `/var/lib/freedom-yield/cycle-gate-state.json` (= operator 承認済
 ⑤ validator host: `FY_EXPECT_CYCLE=<N> bash scripts/gen-anchor-source.sh`(cycle-4 当日の例: `FY_EXPECT_CYCLE=3`)— 新 `anchor-source.json`(3-branch DAG)を compose。`cycle_number_observed` は 公開 `cycle-history.jsonl` の CLOSED_COUNT+1 から自己導出するが、`FY_EXPECT_CYCLE` を渡すと ordering guard が有効になり、CLOSED_COUNT と 不一致(= 手順③がまだ公開反映されていない)なら compose 前に **exit 9** で hard-stop する(未設定なら警告バナーのみで継続、初回 bootstrap 用)。**gen-identity.sh の exit 7 とは別条件** — `gen-anchor-source.sh` では exit 7 は既に「atomic write failed」の意味で使用中のため、意図的に番号を揃えていない(exit 7 と exit 9 を同じ意味と読まない)
 ⑥ Mac local: `export VALIDATOR_HOST=<validator host の IP or hostname>` + `export VALIDATOR_HOST_KEY=~/.ssh/<your_validator_host_key>` を先に設定した上で `scripts/operator-local/commit-anchor-source.sh --expect-cycle=<N+1>`(cycle-4 当日の例: `--expect-cycle=4`)で host 側 `anchor-source.json` を検証+commit、続けて push + deploy 完了監視(手順④と同じパターン)。**env 2 つは必須の SSH 座標**(repo には literal を置かない方針): `VALIDATOR_HOST` は未設定なら変数名を挙げて即 refuse、`VALIDATOR_HOST_KEY` は **default が literal placeholder** `~/.ssh/<your_validator_host_key>`(実在しない path)なので未設定だと `ERROR: SSH key not found` → **exit 3** になる(`VALIDATOR_HOST_USER` の default は `root`)。**手順⑤との意味の反転に注意**: `gen-anchor-source.sh` の `FY_EXPECT_CYCLE` は「直前に閉じた cycle 番号」(N)だが、このスクリプトの `--expect-cycle` は fetch した `anchor-source.json` の `observations_branch.cycle_number_observed`(= `gen-anchor-source.sh` が `CLOSED_COUNT + 1` として算出する値)と直接一致比較するため「これから刻む cycle 番号」(N+1)を渡す — `N` を渡すと exit 5 で mismatch する。**commit+push+deploy は必須** — 公開されないと手順⑨の Phase 1 polling が exit 3 でタイムアウトする
 ⑦ Mac local: **⑦ は全て Mac 上で、かつ手順⑥の commit + push が landed した後に実行する**(署名対象は commit / push / deploy 済の bytes でなければ、receipt の `url` + `sha256` が刻んだ `dag_root_computed` を含まないファイルを指してしまう)
-  - **⑦-a gate 1 材料(testnet-first)**: `HOME=~/.metal-fy-proton-test proton key:unlock` → `HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh --expect-cycle=<N+1>`(day-of は MANDATORY、`docs/PHASE_ALPHA_TESTNET_DRY_RUN.md` 参照。cycle-4 当日の例: `--expect-cycle=4`)。出力末尾の `TESTNET REHEARSAL COMPLETE testnet_tx_id=<64hex>` を控える。**この rehearsal 自身の dry-run log は testnet 側の証拠にすぎない** — `target_chain: "testnet-a"` を記録しており、mainnet gate 4 は `--chain` と異なる chain の dry-run log を拒否する
+  - **⑦-a gate 1 材料(testnet-first)**: `HOME=~/.metal-fy-proton-test proton key:unlock` → `HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh --expect-cycle=<N+1>`(day-of は MANDATORY、`docs/PHASE_ALPHA_TESTNET_DRY_RUN.md` 参照。cycle-4 当日の例: `--expect-cycle=4`)。出力末尾の `TESTNET REHEARSAL COMPLETE testnet_tx_id=<64hex>` を控える。**この rehearsal 自身の dry-run log は testnet 側の証拠にすぎない** — `target_chain: "testnet-a"` を記録しており、mainnet gate 4 は `--chain` と異なる chain の dry-run log を拒否する。手順⑥が既に landed 済のため、canonical `public/api/anchor-source.json` は既にこの cycle のファイル(`cycle_number_observed == N+1`)— `--source=` override も `--allow-fixture` も不要、default 選択のまま `--expect-cycle=<N+1>` がそのまま通る。**朝のうちに(手順⑥完了前に)hand-built fixture を用意して先に rehearsal する運用は行わない** — その時点の canonical source はまだ前 cycle(`N`)のままで、`N+1` の実 gate-1 evidence を得るには fixture を手作りする必要が生じる。2026-08-04 に実際にこの朝実行を行い、fixture 手作り + dag 再計算の手間とリスク(手順⑥ landed 後の実 source と後で突き合わせる二度手間)が発生した。7a は必ず手順⑥の後、実 canonical source に対して実行する。rehearsal 完了直後に `rm -f /tmp/fyd-broadcast-token` で後始末する(testnet 向けに bound された token は R16 により mainnet ⑦-c に流用できず、5 分 TTL でも自然失効するが、⑦-b/⑦-c の pre-flight 確認時に古い token が `/tmp` に残っているとノイズになるため掃除する)
   - **⑦-b gate 4 材料(mainnet dry run)**: 経路は 1 本だけ。Mac 上で、既に commit 済の `anchor-source.json` から、**recompose せずに** 生成する:
     ```sh
     FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton \
@@ -337,9 +339,15 @@ git push origin main
 
 # ⑦-a Mac で gate 1 材料(testnet rehearsal)。day-of は --expect-cycle=<N+1> が MANDATORY
 #     (docs/PHASE_ALPHA_TESTNET_DRY_RUN.md 参照。cycle-4 当日の例: --expect-cycle=4)
+#     手順⑥が landed 済のため canonical source は既に cycle N+1 — --source=/--allow-fixture は
+#     不要。朝(手順⑥前)に fixture を手作りして先行実行しない — 2026-08-04 に朝実行して
+#     fixture 手作り + dag 再計算の手間とリスクが発生した。必ず手順⑥の後に実行する。
 HOME=~/.metal-fy-proton-test proton key:unlock
 HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh --expect-cycle=<N+1>
 # 出力末尾の `TESTNET REHEARSAL COMPLETE testnet_tx_id=<64hex>` を控える(以下 <rehearsal-tx-id>)。
+# 完了直後に後始末: testnet 向け token は R16 で mainnet ⑦-c に流用不能・TTL 5 分で失効するが、
+# ⑦-b/⑦-c の pre-flight 確認時のノイズ源になるため掃除する。
+rm -f /tmp/fyd-broadcast-token
 
 # ⑦-b mainnet gate-4 dry-run-log を Mac 上で生成。手順⑥の commit + push が landed した後に実行し、
 #     commit 済 bytes をそのまま使う(recompose しない)。validator host の sudo -u deploy では
