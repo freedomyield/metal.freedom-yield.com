@@ -1,10 +1,10 @@
 # Cycle history audit packet (`/api/cycle-history.jsonl`)
 
-This document describes the per-cycle audit packet that Freedom Yield publishes (or, during the preparation phase, plans to publish) at `/api/cycle-history.jsonl`. It exists so a third-party reviewer can stream the full cycle-by-cycle record line by line, joining uptime, incident, and operating parameters into one compact format.
+This document describes the per-cycle audit packet that Freedom Yield publishes at `/api/cycle-history.jsonl`. It exists so a third-party reviewer can stream the full cycle-by-cycle record line by line, joining uptime, incident, and operating parameters into one compact format.
 
 ## Status
 
-In preparation. The schema, generator, and infrastructure plumbing (push allowlist, deploy exclude) are committed. Activation as a cron job is gated on the `/api/evidence.json` cron stability check; the JSONL goes live with its first scheduled run after that gate passes.
+Live. `scripts/gen-cycle-history.sh` runs at every cycle transition, regenerating the file with one line per closed cycle. This document does not track how many cycles have closed — the feed itself is authoritative for that; query it directly (`curl -s https://metal.freedom-yield.com/api/cycle-history.jsonl | wc -l`) or see `/api/evidence.json` → `.live_artifacts.cycle_history_jsonl` for machine-readable discovery.
 
 ## Machine-readable discovery
 
@@ -78,7 +78,7 @@ curl -s https://metal.freedom-yield.com/api/cycle-history.jsonl \
     }'
 ```
 
-While the runtime feed is in preparation, the same shape can be exercised against the committed example:
+For a fixed, schema-stable shape independent of how many cycles the live feed currently has, the same query can be exercised against the committed example:
 
 ```sh
 curl -s https://metal.freedom-yield.com/api/cycle-history.example.jsonl \
