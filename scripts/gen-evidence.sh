@@ -174,7 +174,7 @@ jq -n \
 				resolve_or_escalate_hours: 24
 			}
 		},
-		# MED-6 (2026-08-xx): anchor_receipt and anchor_history moved here from
+		# MED-6 (2026-08-05): anchor_receipt and anchor_history moved here from
 		# in_preparation_artifacts. Both have been live since the cycle 2 -> 3
 		# transition (2026-07-04) — see public/api/identity.json, which
 		# already carries anchor_receipt_url / audit.anchor_receipt /
