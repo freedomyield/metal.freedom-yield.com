@@ -192,7 +192,7 @@ ssh-keygen -Y verify -f "$TMP/allowed" \
 			<p>全 live アーティファクト + 運用者 commitments の機械可読 index。 1 fetch + 1 parse で全 audit surface にアクセス可能。</p>
 			<dl class="data-meta">
 				<dt>マニフェスト</dt><dd><a href="/api/evidence.json"><code>/api/evidence.json</code></a></dd>
-				<dt>discovery</dt><dd>本セクションのアーティファクトを index します。マニフェスト内部の key 構成は artifact が in-preparation → live に移行するたびに変わるため、 key 名に依存せず <a href="/api/evidence.json"><code>/api/evidence.json</code></a> を直接 parse するか、 上記の各 feed への直接リンクを使ってください。</dd>
+				<dt>discovery</dt><dd><code>.live_artifacts.identity_manifest</code> · <code>.live_artifacts.cycle_history_jsonl</code> · <code>.live_artifacts.anchor_receipt</code> · <code>.live_artifacts.anchor_history</code></dd>
 				<dt>スキーマ</dt><dd><a href="/api/evidence.schema.v1.json"><code>/api/evidence.schema.v1.json</code></a></dd>
 			</dl>
 		</article>
