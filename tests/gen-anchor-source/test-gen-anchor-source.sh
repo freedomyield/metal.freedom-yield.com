@@ -456,6 +456,41 @@ else
 	fail "empty (0-byte) history file: script failed unexpectedly; stderr: $(cat "$STDERR9" 2>/dev/null | tr '\n' '|')"
 fi
 
+# ---- case 10: WHITESPACE-ONLY (non-zero-size, but no non-blank line at all)
+# anchor-history.jsonl -> fail-closed exit 10, NOT the same silent-genesis
+# treatment as the genuinely-empty (0-byte) case 9 above. Review round 1
+# finding: the fall-through for "file has bytes but only blank lines" used
+# to be a no-op comment (implicit fall-through to genesis null), which is
+# the exact M-2 bug shape applied to a different trigger (whitespace-only
+# content instead of an unrecognized field name) — a truncated or
+# partially-written history file must not be silently indistinguishable
+# from genuine genesis either.
+ANCHOR_HISTORY_WHITESPACE_ONLY="$TMP/fixtures/anchor-history-whitespace-only.jsonl"
+printf '\n\n   \n\t\n' > "$ANCHOR_HISTORY_WHITESPACE_ONLY"
+# Harness sanity: confirm the fixture really is non-zero-size (otherwise
+# this case would degrade into a duplicate of case 9, not case 10).
+if [ ! -s "$ANCHOR_HISTORY_WHITESPACE_ONLY" ]; then
+	fail "harness: whitespace-only fixture is unexpectedly 0 bytes — refusing to trust case 10"
+fi
+
+OUT10="$TMP/out/anchor-source-run10.json"
+STDERR10="$TMP/out/run10.stderr"
+PATH="$FARM_VALID:$PATH" ANCHOR_HISTORY_JSONL="$ANCHOR_HISTORY_WHITESPACE_ONLY" \
+	bash "$SCRIPT" --out="$OUT10" >"$TMP/out/run10.stdout" 2>"$STDERR10"
+RC10=$?
+check_eq "whitespace-only history: fail-closed exit 10 (M-2), not silent genesis" "10" "$RC10"
+if [ -e "$OUT10" ]; then
+	fail "whitespace-only history: must NOT write $OUT10"
+else
+	pass "whitespace-only history: did not write the canonical file"
+fi
+grep -q "fail-closed" "$STDERR10" \
+	&& pass "whitespace-only history: error message identifies the fail-closed guard" \
+	|| fail "whitespace-only history: fail-closed message missing; got: $(cat "$STDERR10" 2>/dev/null | tr '\n' '|')"
+grep -q "whitespace-only content is not genesis" "$STDERR10" \
+	&& pass "whitespace-only history: error message explicitly distinguishes from genuine genesis" \
+	|| fail "whitespace-only history: message does not distinguish from genesis; got: $(cat "$STDERR10" 2>/dev/null | tr '\n' '|')"
+
 # ---- summary -----------------------------------------------------------------
 echo
 echo "----------------------------------------"

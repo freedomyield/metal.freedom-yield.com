@@ -30,15 +30,17 @@
 #      which uses exit 7 there — that code was already taken here (see exit
 #      7 above, "atomic write failed"). One code, one meaning within this
 #      script; do not conflate the two scripts' exit-7/9 by number alone.
-#  10  M-2: anchor-history.jsonl is non-empty (>=1 valid JSON line) but
+#  10  M-2: anchor-history.jsonl is non-zero-size (passes the -s test) but
 #      prev_anchor_root / prev_anchor_tx could not both be extracted as
-#      64-hex from its last valid line. Fail-closed guard added 2026-08-xx
-#      after the 08-04-incident-class bug where a trailing blank line (LF
-#      LF at EOF) or an unrecognized field name made `tail -1` / the jq
-#      lookup silently resolve to "", which the old code then wrote as
+#      64-hex from its last valid (non-blank) line — including the case
+#      where the file contains no non-blank line at all (whitespace-only
+#      bytes). Fail-closed guard added 2026-08-05 after the
+#      08-04-incident-class bug where a trailing blank line (LF LF at
+#      EOF) or an unrecognized field name made `tail -1` / the jq lookup
+#      silently resolve to "", which the old code then wrote as
 #      prev_anchor_root: null — indistinguishable from genuine genesis. A
-#      GENUINELY empty/absent history file is still genesis and exits 0
-#      with null, unchanged.
+#      GENUINELY empty (0 bytes) or absent (missing path) history file is
+#      still genesis and exits 0 with null, unchanged.
 
 set -euo pipefail
 
@@ -244,22 +246,31 @@ rm -f "$TMP_HIST"
 # alternatives are defensive fallbacks only, not the authoritative name.
 #
 # Fail-closed invariant (M-2, 08-04-incident-class defense): if the history
-# file is non-empty (>= 1 valid JSON line), prev_anchor_root AND
+# file passes the -s (non-zero-size) test below, prev_anchor_root AND
 # prev_anchor_tx MUST both resolve to 64-hex — anything else (a blank tail
 # line from a trailing double newline, an unrecognized field name, a
-# malformed value) used to silently produce "prev_anchor_root: null",
-# indistinguishable from genuine genesis, and would let a non-genesis
-# anchor re-inscribe as if it were the first. Only a GENUINELY empty/
-# absent history file (no valid JSON line at all) is genesis and exits 0
-# with null, unchanged from prior behavior.
+# malformed value, or a whitespace-only file that is non-zero-size but has
+# no non-blank line at all) used to silently produce "prev_anchor_root:
+# null", indistinguishable from genuine genesis, and would let a
+# non-genesis anchor re-inscribe as if it were the first. Only a
+# GENUINELY empty (0 bytes) or absent (missing path) history file is
+# genesis and exits 0 with null, unchanged from prior behavior.
 PREV_ROOT_JQ="null"
 PREV_TX_JQ="null"
 if [ -r "$ANCHOR_HISTORY_JSONL" ] && [ -s "$ANCHOR_HISTORY_JSONL" ]; then
 	# Strip blank lines before taking the tail: a trailing double newline
 	# (LF LF at EOF) otherwise makes `tail -1` return an empty string,
 	# which used to silently resolve to null (the M-2 bug) instead of
-	# reading the last VALID JSON line.
-	LAST_HISTORY_LINE="$(grep -vE '^[[:space:]]*$' "$ANCHOR_HISTORY_JSONL" | tail -1)"
+	# reading the last VALID JSON line. `|| true` on the pipeline is
+	# required, not cosmetic: under `set -o pipefail` (in effect for this
+	# whole script), a WHITESPACE-ONLY file makes `grep -v` match zero
+	# lines and exit 1 — with pipefail that non-zero status propagates
+	# through `tail -1` regardless of tail's own (always-0) exit code, and
+	# without `|| true` here `set -e` would abort the entire script right
+	# here instead of reaching the whitespace-only fail-closed branch
+	# below. LAST_HISTORY_LINE ending up empty (because grep matched
+	# nothing) is an expected, explicitly-handled case, not a real error.
+	LAST_HISTORY_LINE="$(grep -vE '^[[:space:]]*$' "$ANCHOR_HISTORY_JSONL" | tail -1 || true)"
 	if [ -n "$LAST_HISTORY_LINE" ]; then
 		pr="$(printf '%s\n' "$LAST_HISTORY_LINE" | jq -r '.dag_root_hash // .dag_root // .dag_root_computed // ""' 2>/dev/null)"
 		pt="$(printf '%s\n' "$LAST_HISTORY_LINE" | jq -r '.tx_id // ""' 2>/dev/null)"
@@ -272,9 +283,20 @@ if [ -r "$ANCHOR_HISTORY_JSONL" ] && [ -s "$ANCHOR_HISTORY_JSONL" ]; then
 			echo "  extracted prev_anchor_root='$pr' prev_anchor_tx='$pt' (both must match ^[0-9a-f]{64}\$)" >&2
 			exit 10
 		fi
+	else
+		# The file passed the `-s` (non-zero-size) test above but has NO
+		# non-blank line at all -- i.e. it is whitespace-only bytes, not
+		# genuinely empty/absent (a zero-byte or missing file is excluded
+		# entirely by the outer `-s` check and never reaches this branch).
+		# This is NOT genesis: whitespace-only-but-nonzero-size is an
+		# anomalous/corrupt state (e.g. a truncated or partially-written
+		# history file), and per the guard's own invariant above, must
+		# fail closed for the same reason as the unknown-field case --
+		# silently falling through to null here would be indistinguishable
+		# from genuine genesis.
+		echo "ERROR: anchor-history.jsonl ($ANCHOR_HISTORY_JSONL) has non-zero size but contains no non-blank line -- fail-closed (M-2 guard: whitespace-only content is not genesis; only a genuinely empty or absent file is treated as genesis). If this file is meant to be reset to genesis, remove it entirely rather than leaving whitespace-only bytes behind." >&2
+		exit 10
 	fi
-	# else: file has bytes but only blank lines -> treated as empty/genesis,
-	# falls through with PREV_ROOT_JQ/PREV_TX_JQ left at "null".
 fi
 
 IDENTITY_BRANCH="$(jq -n \
