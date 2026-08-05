@@ -191,21 +191,27 @@
 		renderTrackRecord(v);
 	}
 
-	// Our node's live peer count — server-status.json sits behind the
-	// ops vhost so the public site gets 403 and the existing "—" copy
-	// stays. The global validator count used to live here too but was
-	// pulled to the backend (validator.json -> networkSize.totalValidators)
+	// Our node's live peer count. server-status.json sits behind the ops
+	// vhost so the public site gets a 403 there — that endpoint never
+	// resolves for a visitor's browser, so the "—" copy was permanently
+	// stuck. Read the same peer count instead from /api/peer-geo.json,
+	// the public feed peer-map.js already relies on for the map above
+	// this note (scripts/peer-geo.py, cron-refreshed ~every 30 min).
+	// totalPeers is metalgo's raw info.peers count (not just the subset
+	// that geo-resolved), so it matches what our own node reports.
+	// The global validator count used to live here too but was pulled
+	// to the backend (validator.json -> networkSize.totalValidators)
 	// to stop each visitor's browser from hitting api.metalblockchain.org.
 	async function loadNetworkCounts() {
 		try {
-			var r = await fetch("/api/server-status.json", { cache: "no-store" });
+			var r = await fetch("/api/peer-geo.json", { cache: "no-store" });
 			if (r.ok) {
 				var s = await r.json();
-				if (s.metalgo && s.metalgo.peerCount != null) {
-					setText("liveTotalNetwork", s.metalgo.peerCount);
+				if (s.totalPeers != null) {
+					setText("liveTotalNetwork", s.totalPeers);
 				}
 			}
-		} catch (e) { /* offline / 403 — leave default */ }
+		} catch (e) { /* offline / feed missing — leave default */ }
 	}
 
 	// service worker 登録(PWA installability)
