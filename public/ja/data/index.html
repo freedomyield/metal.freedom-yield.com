@@ -11,6 +11,7 @@
 <link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/data/">
 <link rel="alternate" hreflang="x-default" href="https://metal.freedom-yield.com/data/">
 <link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#07080c">
@@ -468,6 +469,82 @@ curl -sSO https://metal.freedom-yield.com/.well-known/operator-identity.pub
 echo "freedom-yield $(cat operator-identity.pub)" &gt; allowed_signers
 ssh-keygen -Y verify -f allowed_signers -I freedom-yield \
   -n freedom-yield/validator-identity -s identity.json.sig &lt; identity.json</code></pre>
+			</details>
+		</article>
+
+		<article class="data-endpoint data-endpoint--audit">
+			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
+				<h3>identity-history.jsonl</h3>
+				<span class="data-tag">GET · JSONL · append-only</span>
+			</header>
+			<p>運用者 identity key のローテーション履歴を記録する append-only ログ — 鍵生成 1 回につき 1 行。 下記 Merkle DAG snapshot の <code>identity_branch</code> に折り込まれます。 現在は 1 件のみ(<code>key_seq=1</code>); 次回ローテーション目安は live identity manifest に記載の年次日付です。</p>
+			<dl class="data-meta">
+				<dt>URL</dt><dd><a href="/api/identity-history.jsonl"><code>/api/identity-history.jsonl</code></a></dd>
+				<dt>更新</dt><dd>運用者 identity key のローテーション時のみ追記 — 固定スケジュールなし</dd>
+				<dt>例示</dt><dd><a href="/api/identity-history.example.jsonl"><code>/api/identity-history.example.jsonl</code></a></dd>
+				<dt>Formal schema</dt><dd><a href="/api/identity-history.schema.v1.json"><code>/api/identity-history.schema.v1.json</code></a></dd>
+			</dl>
+			<details class="data-example">
+				<summary>リクエスト例</summary>
+				<pre><code>curl -s https://metal.freedom-yield.com/api/identity-history.jsonl | jq -s 'length'</code></pre>
+			</details>
+		</article>
+
+		<article class="data-endpoint data-endpoint--onchain">
+			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007 0l3-3a5 5 0 00-7-7l-1 1"/><path d="M14 11a5 5 0 00-7 0l-3 3a5 5 0 007 7l1-1"/></svg></span>
+				<h3>anchor-source.json</h3>
+				<span class="data-tag">GET · JSON · 署名付 pre-image</span>
+			</header>
+			<p>identity / observations / artifacts の 3 branch から成る Merkle DAG snapshot。 結合された <code>dag_root_computed</code> が、 各 cycle transition で Metal A-chain に刻まれる値そのものです。 on-chain anchor の元になった署名済み pre-image と byte 単位で同一なので、 第三者が branch root を独立に再計算できます。</p>
+			<dl class="data-meta">
+				<dt>URL</dt><dd><a href="/api/anchor-source.json"><code>/api/anchor-source.json</code></a></dd>
+				<dt>更新</dt><dd>各 cycle transition 時 — <code>scripts/gen-anchor-source.sh</code> が生成、 git-deploy で配信</dd>
+				<dt>例示</dt><dd><a href="/api/anchor-source.example.json"><code>/api/anchor-source.example.json</code></a></dd>
+				<dt>Formal schema</dt><dd><a href="/api/anchor-source.schema.v1.json"><code>/api/anchor-source.schema.v1.json</code></a></dd>
+			</dl>
+			<details class="data-example">
+				<summary>リクエスト例</summary>
+				<pre><code>curl -s https://metal.freedom-yield.com/api/anchor-source.json | jq '.dag_root_computed'</code></pre>
+			</details>
+		</article>
+
+		<article class="data-endpoint data-endpoint--onchain">
+			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007 0l3-3a5 5 0 00-7-7l-1 1"/><path d="M14 11a5 5 0 00-7 0l-3 3a5 5 0 007 7l1-1"/></svg></span>
+				<h3>anchor-receipt.json</h3>
+				<span class="data-tag">GET · JSON · 常に最新</span>
+			</header>
+			<p>直近の on-chain anchor を指す常に最新の監査用 index。 4 つの <code>eosio.token::transfer</code> memo(各 branch root + 統合 DAG root)と、 それらが broadcast された transaction を記録します。 cycle transition ごとに rotate — 全履歴は下記 <code>anchor-history.jsonl</code> を参照してください。</p>
+			<dl class="data-meta">
+				<dt>URL</dt><dd><a href="/api/anchor-receipt.json"><code>/api/anchor-receipt.json</code></a></dd>
+				<dt>更新</dt><dd>各 cycle transition 時 — <code>scripts/gen-anchor-receipt.sh</code> が 7-gate on-chain 検証後に生成</dd>
+				<dt>例示</dt><dd><a href="/api/anchor-receipt.v2.example.json"><code>/api/anchor-receipt.v2.example.json</code></a></dd>
+				<dt>Formal schema</dt><dd><a href="/api/anchor-receipt.schema.v2.json"><code>/api/anchor-receipt.schema.v2.json</code></a> — <code>schema_version 2</code>(HC-single four-action pack); v1 は 2026-07-01 以前の consumer 向けに引き続き reachable</dd>
+			</dl>
+			<details class="data-example">
+				<summary>リクエスト例</summary>
+				<pre><code>curl -s https://metal.freedom-yield.com/api/anchor-receipt.json | jq '.anchor.tx_id'</code></pre>
+			</details>
+		</article>
+
+		<article class="data-endpoint data-endpoint--onchain">
+			<header class="data-endpoint-head">
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007 0l3-3a5 5 0 00-7-7l-1 1"/><path d="M14 11a5 5 0 00-7 0l-3 3a5 5 0 007 7l1-1"/></svg></span>
+				<h3>anchor-history.jsonl</h3>
+				<span class="data-tag">GET · JSONL · append-only</span>
+			</header>
+			<p><code>verification_status: live</code> に達した全 anchor の append-only ledger。 2026-07-04 の初回 record 以降、 cycle transition 毎に 1 行ずつ extend します。 verifier はこの ledger を辿って genesis まで全 anchor を再確認し、 各行の <code>dag_root_computed</code> を独立に再計算できます。</p>
+			<dl class="data-meta">
+				<dt>URL</dt><dd><a href="/api/anchor-history.jsonl"><code>/api/anchor-history.jsonl</code></a></dd>
+				<dt>更新</dt><dd>各 cycle transition 時に追記 — <code>scripts/append-anchor-history.sh</code> が生成; 既存行は書き換えません</dd>
+				<dt>例示</dt><dd><a href="/api/anchor-history.jsonl"><code>live example</code></a>(v1 形式の <code>anchor-history.example.jsonl</code> は v2 契約策定前の retired ファイルにつき参照非推奨)</dd>
+				<dt>Formal schema</dt><dd><a href="/api/anchor-history.schema.v2.json"><code>/api/anchor-history.schema.v2.json</code></a></dd>
+			</dl>
+			<details class="data-example">
+				<summary>リクエスト例</summary>
+				<pre><code>curl -s https://metal.freedom-yield.com/api/anchor-history.jsonl | tail -1 | jq</code></pre>
 			</details>
 		</article>
 	</section>
