@@ -30,6 +30,15 @@
 #      which uses exit 7 there — that code was already taken here (see exit
 #      7 above, "atomic write failed"). One code, one meaning within this
 #      script; do not conflate the two scripts' exit-7/9 by number alone.
+#  10  M-2: anchor-history.jsonl is non-empty (>=1 valid JSON line) but
+#      prev_anchor_root / prev_anchor_tx could not both be extracted as
+#      64-hex from its last valid line. Fail-closed guard added 2026-08-xx
+#      after the 08-04-incident-class bug where a trailing blank line (LF
+#      LF at EOF) or an unrecognized field name made `tail -1` / the jq
+#      lookup silently resolve to "", which the old code then wrote as
+#      prev_anchor_root: null — indistinguishable from genuine genesis. A
+#      GENUINELY empty/absent history file is still genesis and exits 0
+#      with null, unchanged.
 
 set -euo pipefail
 
@@ -233,13 +242,39 @@ rm -f "$TMP_HIST"
 # The writer (scripts/append-anchor-history.sh:239,271) names this field
 # "dag_root_hash" — that is the primary key to read; the other two
 # alternatives are defensive fallbacks only, not the authoritative name.
+#
+# Fail-closed invariant (M-2, 08-04-incident-class defense): if the history
+# file is non-empty (>= 1 valid JSON line), prev_anchor_root AND
+# prev_anchor_tx MUST both resolve to 64-hex — anything else (a blank tail
+# line from a trailing double newline, an unrecognized field name, a
+# malformed value) used to silently produce "prev_anchor_root: null",
+# indistinguishable from genuine genesis, and would let a non-genesis
+# anchor re-inscribe as if it were the first. Only a GENUINELY empty/
+# absent history file (no valid JSON line at all) is genesis and exits 0
+# with null, unchanged from prior behavior.
 PREV_ROOT_JQ="null"
 PREV_TX_JQ="null"
 if [ -r "$ANCHOR_HISTORY_JSONL" ] && [ -s "$ANCHOR_HISTORY_JSONL" ]; then
-	pr="$(tail -1 "$ANCHOR_HISTORY_JSONL" | jq -r '.dag_root_hash // .dag_root // .dag_root_computed // ""')"
-	pt="$(tail -1 "$ANCHOR_HISTORY_JSONL" | jq -r '.tx_id // ""')"
-	[ -n "$pr" ] && PREV_ROOT_JQ="\"$pr\""
-	[ -n "$pt" ] && PREV_TX_JQ="\"$pt\""
+	# Strip blank lines before taking the tail: a trailing double newline
+	# (LF LF at EOF) otherwise makes `tail -1` return an empty string,
+	# which used to silently resolve to null (the M-2 bug) instead of
+	# reading the last VALID JSON line.
+	LAST_HISTORY_LINE="$(grep -vE '^[[:space:]]*$' "$ANCHOR_HISTORY_JSONL" | tail -1)"
+	if [ -n "$LAST_HISTORY_LINE" ]; then
+		pr="$(printf '%s\n' "$LAST_HISTORY_LINE" | jq -r '.dag_root_hash // .dag_root // .dag_root_computed // ""' 2>/dev/null)"
+		pt="$(printf '%s\n' "$LAST_HISTORY_LINE" | jq -r '.tx_id // ""' 2>/dev/null)"
+		if printf '%s' "$pr" | grep -qE '^[0-9a-f]{64}$' && printf '%s' "$pt" | grep -qE '^[0-9a-f]{64}$'; then
+			PREV_ROOT_JQ="\"$pr\""
+			PREV_TX_JQ="\"$pt\""
+		else
+			echo "ERROR: anchor-history.jsonl ($ANCHOR_HISTORY_JSONL) is non-empty but prev_anchor_root/prev_anchor_tx could not be extracted as 64-hex from its last valid line — fail-closed (M-2, 2026-08-04-incident-class guard: a writer/reader field-name mismatch or malformed tail line must NEVER silently degrade to prev_anchor_root: null, which is indistinguishable from genuine genesis)." >&2
+			echo "  last valid line read: $LAST_HISTORY_LINE" >&2
+			echo "  extracted prev_anchor_root='$pr' prev_anchor_tx='$pt' (both must match ^[0-9a-f]{64}\$)" >&2
+			exit 10
+		fi
+	fi
+	# else: file has bytes but only blank lines -> treated as empty/genesis,
+	# falls through with PREV_ROOT_JQ/PREV_TX_JQ left at "null".
 fi
 
 IDENTITY_BRANCH="$(jq -n \

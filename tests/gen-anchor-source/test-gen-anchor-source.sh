@@ -349,6 +349,113 @@ else
 	fail "prev-root regression: script failed unexpectedly; stderr: $(cat "$STDERR5" 2>/dev/null | tr '\n' '|')"
 fi
 
+# ---- case 6: MULTI-LINE anchor-history.jsonl (cycle 3 + cycle 4) -> the
+# TAIL (cycle 4) line's root/tx are selected, not the first line. M-2
+# regression extension: case 5 above only ever fixtured a single line, which
+# cannot distinguish "reads the last line" from "reads the only line". This
+# fixture uses two real-shaped lines so a regression to "always reads line
+# 1" (or any non-tail line) would fail loudly here.
+ROOT_C3="$(printf 'a3%.0s' {1..32})"   # 64 hex chars
+TX_C3="$(printf 'b3%.0s' {1..32})"
+ROOT_C4="$(printf 'a4%.0s' {1..32})"
+TX_C4="$(printf 'b4%.0s' {1..32})"
+ANCHOR_HISTORY_MULTI="$TMP/fixtures/anchor-history-multi.jsonl"
+cat > "$ANCHOR_HISTORY_MULTI" <<EOF
+{"schema_version":2,"event_type":"cyclestart","cycle_number":3,"dag_root_hash":"$ROOT_C3","memo_prefix":"fya1c3","tx_id":"$TX_C3","block_num":100000001,"block_time":"2026-07-04T04:00:00Z","verification_status":"live","prev_anchor_tx_id":null}
+{"schema_version":2,"event_type":"cyclestart","cycle_number":4,"dag_root_hash":"$ROOT_C4","memo_prefix":"fya1c4","tx_id":"$TX_C4","block_num":100000050,"block_time":"2026-08-04T04:00:00Z","verification_status":"live","prev_anchor_tx_id":"$TX_C3"}
+EOF
+
+OUT6="$TMP/out/anchor-source-run6.json"
+STDERR6="$TMP/out/run6.stderr"
+PATH="$FARM_VALID:$PATH" ANCHOR_HISTORY_JSONL="$ANCHOR_HISTORY_MULTI" \
+	bash "$SCRIPT" --out="$OUT6" >"$TMP/out/run6.stdout" 2>"$STDERR6"
+RC6=$?
+check_eq "multi-line history: exit 0" "0" "$RC6"
+if [ "$RC6" -eq 0 ]; then
+	check_eq "multi-line history: prev_anchor_root reads the TAIL (cycle 4) line, not cycle 3" \
+		"$ROOT_C4" "$(jq -r '.identity_branch.prev_anchor_root // "null"' "$OUT6" 2>/dev/null)"
+	check_eq "multi-line history: prev_anchor_tx reads the TAIL (cycle 4) line, not cycle 3" \
+		"$TX_C4" "$(jq -r '.identity_branch.prev_anchor_tx // "null"' "$OUT6" 2>/dev/null)"
+else
+	fail "multi-line history: script failed unexpectedly; stderr: $(cat "$STDERR6" 2>/dev/null | tr '\n' '|')"
+fi
+
+# ---- case 7: multi-line history with a TRAILING BLANK LINE (LF LF at EOF)
+# -> must still resolve to the same cycle-4 root/tx as case 6, not silently
+# degrade to null. This is the exact M-2 bug shape: `tail -1` on a file
+# ending in a blank line returns "", which the old code accepted as "no
+# prev anchor" instead of failing loudly or skipping the blank line.
+ANCHOR_HISTORY_TRAILING_BLANK="$TMP/fixtures/anchor-history-trailing-blank.jsonl"
+printf '%s\n\n' "$(cat "$ANCHOR_HISTORY_MULTI")" > "$ANCHOR_HISTORY_TRAILING_BLANK"
+# Harness sanity: confirm the fixture really does end in a blank line
+# (otherwise this case would not exercise the bug at all).
+if [ -n "$(tail -1 "$ANCHOR_HISTORY_TRAILING_BLANK")" ]; then
+	fail "harness: trailing-blank fixture does not actually end in a blank line — refusing to trust case 7"
+fi
+
+OUT7="$TMP/out/anchor-source-run7.json"
+STDERR7="$TMP/out/run7.stderr"
+PATH="$FARM_VALID:$PATH" ANCHOR_HISTORY_JSONL="$ANCHOR_HISTORY_TRAILING_BLANK" \
+	bash "$SCRIPT" --out="$OUT7" >"$TMP/out/run7.stdout" 2>"$STDERR7"
+RC7=$?
+check_eq "trailing-blank-line history: exit 0" "0" "$RC7"
+if [ "$RC7" -eq 0 ]; then
+	check_eq "trailing-blank-line history: prev_anchor_root still reads the last VALID (cycle 4) line" \
+		"$ROOT_C4" "$(jq -r '.identity_branch.prev_anchor_root // "null"' "$OUT7" 2>/dev/null)"
+	check_eq "trailing-blank-line history: prev_anchor_tx still reads the last VALID (cycle 4) line" \
+		"$TX_C4" "$(jq -r '.identity_branch.prev_anchor_tx // "null"' "$OUT7" 2>/dev/null)"
+else
+	fail "trailing-blank-line history: script failed unexpectedly (M-2 regression); stderr: $(cat "$STDERR7" 2>/dev/null | tr '\n' '|')"
+fi
+
+# ---- case 8: NON-EMPTY history + UNKNOWN field names -> new M-2 fail-closed
+# exit code (10), NOT a silent prev_anchor_root: null. This is the other half
+# of the M-2 bug shape: a writer/reader field-name drift must be loud, not
+# silently indistinguishable from genesis.
+ANCHOR_HISTORY_UNKNOWN_FIELDS="$TMP/fixtures/anchor-history-unknown-fields.jsonl"
+cat > "$ANCHOR_HISTORY_UNKNOWN_FIELDS" <<'EOF'
+{"schema_version":2,"event_type":"cyclestart","cycle_number":4,"some_future_hash_field":"deadbeef","transaction_ref":"deadbeef"}
+EOF
+
+OUT8="$TMP/out/anchor-source-run8.json"
+STDERR8="$TMP/out/run8.stderr"
+PATH="$FARM_VALID:$PATH" ANCHOR_HISTORY_JSONL="$ANCHOR_HISTORY_UNKNOWN_FIELDS" \
+	bash "$SCRIPT" --out="$OUT8" >"$TMP/out/run8.stdout" 2>"$STDERR8"
+RC8=$?
+check_eq "unknown-field history: fail-closed exit 10 (M-2), not silent null" "10" "$RC8"
+if [ -e "$OUT8" ]; then
+	fail "unknown-field history: must NOT write $OUT8"
+else
+	pass "unknown-field history: did not write the canonical file"
+fi
+grep -q "fail-closed" "$STDERR8" \
+	&& pass "unknown-field history: error message identifies the fail-closed guard" \
+	|| fail "unknown-field history: fail-closed message missing; got: $(cat "$STDERR8" 2>/dev/null | tr '\n' '|')"
+
+# ---- case 9: GENUINELY EMPTY (0-byte, touched) anchor-history.jsonl file ->
+# still genesis (null), exit 0 — distinct from case 8 (non-empty history
+# where extraction fails) and from the "file absent entirely" happy-path
+# case 1 above. Both empty-file and absent-file must take the same
+# behavior: the `[ -s "$ANCHOR_HISTORY_JSONL" ]` size check in the script
+# treats them identically.
+ANCHOR_HISTORY_EMPTY_FILE="$TMP/fixtures/anchor-history-empty.jsonl"
+: > "$ANCHOR_HISTORY_EMPTY_FILE"
+
+OUT9="$TMP/out/anchor-source-run9.json"
+STDERR9="$TMP/out/run9.stderr"
+PATH="$FARM_VALID:$PATH" ANCHOR_HISTORY_JSONL="$ANCHOR_HISTORY_EMPTY_FILE" \
+	bash "$SCRIPT" --out="$OUT9" >"$TMP/out/run9.stdout" 2>"$STDERR9"
+RC9=$?
+check_eq "empty (0-byte) history file: exit 0 (genesis, unchanged behavior)" "0" "$RC9"
+if [ "$RC9" -eq 0 ]; then
+	check_eq "empty (0-byte) history file: prev_anchor_root null" \
+		"null" "$(jq -r '.identity_branch.prev_anchor_root // "null"' "$OUT9" 2>/dev/null)"
+	check_eq "empty (0-byte) history file: prev_anchor_tx null" \
+		"null" "$(jq -r '.identity_branch.prev_anchor_tx // "null"' "$OUT9" 2>/dev/null)"
+else
+	fail "empty (0-byte) history file: script failed unexpectedly; stderr: $(cat "$STDERR9" 2>/dev/null | tr '\n' '|')"
+fi
+
 # ---- summary -----------------------------------------------------------------
 echo
 echo "----------------------------------------"
