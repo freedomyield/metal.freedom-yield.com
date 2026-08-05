@@ -91,7 +91,14 @@
 		if (statusEl) statusEl.textContent = msg;
 	}
 
-	fetch("/api/peer-geo.json", { cache: "no-store" })
+	// No explicit cache option: Caddy already serves /api/*.json with
+	// Cache-Control: public, max-age=120, must-revalidate, and main.js's
+	// loadNetworkCounts() fetches this exact URL on the same page load —
+	// letting the browser's HTTP cache apply means the second of the two
+	// fetches is typically served from cache instead of hitting the
+	// network again (was `cache: "no-store"`, which forced two real
+	// network round-trips on every homepage load).
+	fetch("/api/peer-geo.json")
 		.then(function (r) {
 			if (!r.ok) throw new Error("HTTP " + r.status);
 			return r.json();

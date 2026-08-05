@@ -202,9 +202,20 @@
 	// The global validator count used to live here too but was pulled
 	// to the backend (validator.json -> networkSize.totalValidators)
 	// to stop each visitor's browser from hitting api.metalblockchain.org.
+	//
+	// [data-field="liveTotalNetwork"] only exists on the homepage (EN/JA);
+	// every other page was still paying for this 31.5 KB fetch on every
+	// load with no element to write into. Gate on the element existing
+	// so the other ~41 pages skip the network call entirely. Also drop
+	// `cache: "no-store"` — Caddy already serves /api/*.json with
+	// `Cache-Control: public, max-age=120, must-revalidate`, so letting
+	// the browser's own HTTP cache apply means peer-map.js's fetch of
+	// this same URL (homepage only, see peer-map.js) can be served from
+	// cache instead of hitting the network a second time.
 	async function loadNetworkCounts() {
+		if (!document.querySelector('[data-field="liveTotalNetwork"]')) return;
 		try {
-			var r = await fetch("/api/peer-geo.json", { cache: "no-store" });
+			var r = await fetch("/api/peer-geo.json");
 			if (r.ok) {
 				var s = await r.json();
 				if (s.totalPeers != null) {
