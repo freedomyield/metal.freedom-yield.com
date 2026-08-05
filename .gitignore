@@ -109,3 +109,6 @@ public/api/build.json
 # cycle-gate test ed25519 key — regenerated at test time by setup_test_key(); never commit
 tests/cycle-gate/fixtures/test-identity-key
 tests/cycle-gate/fixtures/test-identity-key.pub
+
+# Per-cycle renewal state files (operator-local; contain host paths / key names)
+docs/tasks/
