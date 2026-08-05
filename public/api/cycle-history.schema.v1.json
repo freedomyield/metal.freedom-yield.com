@@ -7,7 +7,7 @@
 	"x-stability": "additive-only-within-v1",
 	"x-format-guide": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CYCLE_HISTORY.md",
 	"x-line-format": "Each line of cycle-history.jsonl validates against this schema independently. Use jq, ndjson tooling, or stream the file line-by-line.",
-	"$comment": "2026-08-05: cycle-3 close the real data showed final_total_delegated_metal and notes had been declared too narrowly. final_total_delegated_metal was declared type integer, but delegated stake is a fractional METAL quantity in production (cycle-3 real value: 8608.9458) — corrected to type number. notes was declared type string (non-nullable), but the runtime generator (scripts/gen-cycle-history.sh) emits JSON null when no free-text note applies to a cycle (cycle-2 and cycle-3 real values: null) — corrected to type [string, null]. Both were additive-only widenings under the v1 stability contract; no previously-valid document is invalidated.",
+	"$comment": "2026-08-05: cycle-3 close the real data showed final_total_delegated_metal and notes had been declared too narrowly. final_total_delegated_metal was declared type integer, but delegated stake is a fractional METAL quantity in production (cycle-3 real value: 8608.9458) — corrected to type number. notes was declared type string (non-nullable), but the runtime generator (scripts/gen-cycle-history.sh) emits JSON null when no free-text note applies to a cycle (cycle-2 and cycle-3 real values: null) — corrected to type [string, null]. Both were additive-only widenings under the v1 stability contract; no previously-valid document is invalidated. 2026-08-05 (review round 1): final_self_stake_metal was declared type integer for the same reason final_total_delegated_metal was too narrow — scripts/gen-cycle-history.sh passes both fields through uncoerced from uptime-cycles.json, so a future cycle whose self-stake is fractional would fail this schema the same way cycle-3's delegated total did. Widened final_self_stake_metal to type number pre-emptively, before any real violation was observed, to close the same class of bug at the same time.",
 	"type": "object",
 	"required": [
 		"schema_version",
@@ -41,7 +41,7 @@
 		"duration_days": { "type": "integer", "minimum": 0 },
 		"final_uptime_pct": { "type": "number", "minimum": 0, "maximum": 100 },
 		"days_recorded": { "type": "integer", "minimum": 0 },
-		"final_self_stake_metal": { "type": "integer", "minimum": 0 },
+		"final_self_stake_metal": { "type": "number", "minimum": 0 },
 		"final_total_delegated_metal": { "type": "number", "minimum": 0 },
 		"final_delegation_fee_pct": { "type": "number", "minimum": 0, "maximum": 100 },
 		"avg_peer_count": { "type": "number", "minimum": 0 },

@@ -11,6 +11,7 @@
 <link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/verify/">
 <link rel="alternate" hreflang="x-default" href="https://metal.freedom-yield.com/verify/">
 <link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#07080c">
@@ -192,7 +193,7 @@ ssh-keygen -Y verify -f "$TMP/allowed" \
 			<p>全 live アーティファクト + 運用者 commitments の機械可読 index。 1 fetch + 1 parse で全 audit surface にアクセス可能。</p>
 			<dl class="data-meta">
 				<dt>マニフェスト</dt><dd><a href="/api/evidence.json"><code>/api/evidence.json</code></a></dd>
-				<dt>discovery</dt><dd><code>.live_artifacts.identity_manifest</code> · <code>.live_artifacts.cycle_history_jsonl</code> · <code>.live_artifacts.anchor_receipt</code> · <code>.live_artifacts.anchor_history</code></dd>
+				<dt>discovery</dt><dd>path を固定せず <a href="/api/evidence.json"><code>/api/evidence.json</code></a> を直接 parse してください — 各 artifact は top-level の <code>live_artifacts</code> / <code>in_preparation_artifacts</code> object にグルーピングされますが、 どちらに属するかは運用者側 tooling が実態に追いつくにつれて変わります。 上記の直接 feed link はこの影響を受けず、常に最新です。</dd>
 				<dt>スキーマ</dt><dd><a href="/api/evidence.schema.v1.json"><code>/api/evidence.schema.v1.json</code></a></dd>
 			</dl>
 		</article>
