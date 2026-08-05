@@ -191,21 +191,45 @@
 		renderTrackRecord(v);
 	}
 
-	// Our node's live peer count — server-status.json sits behind the
-	// ops vhost so the public site gets 403 and the existing "—" copy
-	// stays. The global validator count used to live here too but was
-	// pulled to the backend (validator.json -> networkSize.totalValidators)
+	// Our node's live peer count. server-status.json sits behind the ops
+	// vhost so the public site gets a 403 there — that endpoint never
+	// resolves for a visitor's browser, so the "—" copy was permanently
+	// stuck. Read the same peer count instead from /api/peer-geo.json,
+	// the public feed peer-map.js already relies on for the map above
+	// this note (scripts/peer-geo.py, cron-refreshed ~every 30 min).
+	// Read numPeers, NOT totalPeers: numPeers is metalgo's raw info.peers
+	// count (same field scripts/server-status.sh reads). totalPeers is
+	// peer-geo.py's own post-filter count — peers missing a usable
+	// publicIP dropped, then de-duplicated by IP — which under-counts
+	// whenever any connected peer lacks a resolvable public IP. Fall
+	// back to totalPeers only for a cached peer-geo.json written before
+	// numPeers existed (pre-deploy rollout window).
+	// The global validator count used to live here too but was pulled
+	// to the backend (validator.json -> networkSize.totalValidators)
 	// to stop each visitor's browser from hitting api.metalblockchain.org.
+	//
+	// [data-field="liveTotalNetwork"] only exists on the homepage (EN/JA);
+	// every other page was still paying for this 31.5 KB fetch on every
+	// load with no element to write into. Gate on the element existing
+	// so the other ~41 pages skip the network call entirely. Also drop
+	// `cache: "no-store"` — Caddy already serves /api/*.json with
+	// `Cache-Control: public, max-age=120, must-revalidate`, so letting
+	// the browser's own HTTP cache apply means peer-map.js's fetch of
+	// this same URL (homepage only, see peer-map.js) can be served from
+	// cache instead of hitting the network a second time.
 	async function loadNetworkCounts() {
+		if (!document.querySelector('[data-field="liveTotalNetwork"]')) return;
 		try {
-			var r = await fetch("/api/server-status.json", { cache: "no-store" });
+			var r = await fetch("/api/peer-geo.json");
 			if (r.ok) {
 				var s = await r.json();
-				if (s.metalgo && s.metalgo.peerCount != null) {
-					setText("liveTotalNetwork", s.metalgo.peerCount);
+				if (s.numPeers != null) {
+					setText("liveTotalNetwork", s.numPeers);
+				} else if (s.totalPeers != null) {
+					setText("liveTotalNetwork", s.totalPeers);
 				}
 			}
-		} catch (e) { /* offline / 403 — leave default */ }
+		} catch (e) { /* offline / feed missing — leave default */ }
 	}
 
 	// service worker 登録(PWA installability)

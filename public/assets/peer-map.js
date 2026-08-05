@@ -42,9 +42,26 @@
 		return n + " " + (n === 1 ? singular : plural);
 	}
 
+	// Lang gate — matches the (document.documentElement.lang) convention
+	// used by main.js / network.js / journal.js / incidents.js.
+	function isJa() {
+		var lang = (document.documentElement.lang || "en").toLowerCase();
+		return lang.indexOf("ja") === 0;
+	}
+
 	function statusText(d) {
 		var fmt = d.generatedAt ? new Date(d.generatedAt).toLocaleString() : "—";
-		return pluralize(d.resolved || 0, "peer", "peers") + " · updated " + fmt;
+		var n = d.resolved || 0;
+		// "with known location" / 「位置が判明している」 — d.resolved is the
+		// geo-lookup success count, smaller than the raw peer count quoted
+		// in the note below the map (data-field="liveTotalNetwork", fed by
+		// numPeers). Distinguishing the two here stops the map caption
+		// reading as a second, silently different answer to "how many
+		// peers".
+		if (isJa()) {
+			return "位置が判明している " + n + " 件 · 更新 " + fmt;
+		}
+		return pluralize(n, "peer with known location", "peers with known location") + " · updated " + fmt;
 	}
 
 	function paint(data) {
@@ -91,7 +108,14 @@
 		if (statusEl) statusEl.textContent = msg;
 	}
 
-	fetch("/api/peer-geo.json", { cache: "no-store" })
+	// No explicit cache option: Caddy already serves /api/*.json with
+	// Cache-Control: public, max-age=120, must-revalidate, and main.js's
+	// loadNetworkCounts() fetches this exact URL on the same page load —
+	// letting the browser's HTTP cache apply means the second of the two
+	// fetches is typically served from cache instead of hitting the
+	// network again (was `cache: "no-store"`, which forced two real
+	// network round-trips on every homepage load).
+	fetch("/api/peer-geo.json")
 		.then(function (r) {
 			if (!r.ok) throw new Error("HTTP " + r.status);
 			return r.json();

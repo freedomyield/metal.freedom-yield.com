@@ -19,6 +19,13 @@ description = "Project-level allowlist"
 #     These are hashes of the on-chain anchor payload, not secrets. Gitleaks
 #     high-entropy heuristics fire on the hex strings (e.g. manifest_root,
 #     false-positive on generic-api-key rule).
+#   - tests/fixtures/anchor-source.substantive.json is the same kind of file
+#     (a frozen cycle-2 anchor-source snapshot used only by
+#     tests/anchor-source-canonicalizer/ and tests/run-testnet-rehearsal/ as
+#     a fixture) — moved out of public/api/ on 2026-08-05 so an unanchored
+#     historical snapshot no longer sits in the public API tree where an
+#     evaluator could mistake it for live data. Same hex-root false-positive
+#     as above; the move changed its path, not its content or classification.
 #   - tests/cycle-gate/fixtures/test-identity-key(.pub) is a throwaway ed25519
 #     keypair REGENERATED at test time by setup_test_key() in run-tests.sh. It is
 #     git-untracked + .gitignore'd (never enters history), but `gitleaks detect
@@ -27,5 +34,6 @@ description = "Project-level allowlist"
 paths = [
   '''scripts/dr-drill\.sh''',
   '''public/api/anchor-source(\.[^/]+)?\.json''',
+  '''tests/fixtures/anchor-source\.substantive\.json''',
   '''tests/cycle-gate/fixtures/test-identity-key(\.pub)?''',
 ]

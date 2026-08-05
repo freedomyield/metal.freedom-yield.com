@@ -18,6 +18,17 @@ The shape stays small: a top-level object with `generatedAt`,
 country, city, cc}` so the client can plot it on Leaflet without
 exposing the IP back to the public site. (IPs are public via the RPC
 anyway, but keeping them out of the JSON is good hygiene.)
+
+`numPeers` vs `totalPeers`: `numPeers` is metalgo's raw info.peers
+count (`.result.numPeers`, the same figure scripts/server-status.sh
+reads) — the accurate "how many peers are we connected to" number.
+`totalPeers` is `len(pairs)`, this script's own post-filter count
+(peers missing publicIP/nodeID dropped, then de-duplicated by IP) —
+smaller than numPeers whenever any peer lacks a usable public IP, and
+kept only because it's the honest denominator for `resolved` (the geo
+lookup success count) and is a documented public API field already.
+Public copy that claims "we are connected to N peers" should read
+numPeers, not totalPeers.
 """
 import json
 import os
@@ -48,7 +59,8 @@ def fetch_peers():
     )
     with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as r:
         data = json.loads(r.read())
-    peers = data.get("result", {}).get("peers", []) or []
+    result = data.get("result", {}) or {}
+    peers = result.get("peers", []) or []
     seen = set()
     pairs = []
     for p in peers:
@@ -58,7 +70,16 @@ def fetch_peers():
             continue
         seen.add(ip)
         pairs.append((node_id, ip))
-    return pairs
+    # Raw peer count as metalgo itself reports it (same field
+    # scripts/server-status.sh reads). metalgo marshals it as a JSON string
+    # (Avalanche json.Uint32), so coerce rather than type-check. Falls back to
+    # the filtered/deduped pairs count only if the field is missing or
+    # unparseable — keeps `numPeers` always present and int-typed for JS.
+    try:
+        num_peers = int(result.get("numPeers"))
+    except (TypeError, ValueError):
+        num_peers = len(pairs)
+    return pairs, num_peers
 
 
 def geo_lookup(ips):
@@ -87,7 +108,7 @@ def geo_lookup(ips):
 
 def main():
     out_path = OUT_PATH
-    pairs = fetch_peers()
+    pairs, num_peers = fetch_peers()
     if not pairs:
         print("no peers returned; aborting", file=sys.stderr)
         sys.exit(1)
@@ -116,6 +137,7 @@ def main():
     output = {
         "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "selfNodeID":  SELF_NODE,
+        "numPeers":    num_peers,
         "totalPeers":  len(pairs),
         "resolved":    len(peer_records),
         "peers":       peer_records,
@@ -127,8 +149,8 @@ def main():
     with open(tmp, "w") as f:
         json.dump(output, f, separators=(",", ":"))
     os.replace(tmp, out_path)
-    print(f"peer-geo.json: {len(peer_records)}/{len(pairs)} resolved at "
-          f"{output['generatedAt']}")
+    print(f"peer-geo.json: {len(peer_records)}/{len(pairs)} resolved "
+          f"(numPeers={num_peers}) at {output['generatedAt']}")
 
 
 if __name__ == "__main__":

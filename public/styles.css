@@ -3681,13 +3681,24 @@ main:has(.data-toc) .evidence-table thead th {
 	color: var(--fg);
 	line-height: 1.2;
 	font-variant-numeric: tabular-nums;
-	word-break: break-all;
+	/* break-all here used to apply to the whole string — including the
+	 * trailing unit word ("METAL"), which let the browser split it
+	 * mid-word ("MET" / "AL") on narrow cards. overflow-wrap: break-word
+	 * only forces a break when a token truly doesn't fit its own line,
+	 * so short words like "METAL" wrap whole onto the next line instead.
+	 * The one token that genuinely needs arbitrary-position breaking
+	 * (NodeID, ~50 unbroken chars) gets word-break: break-all below,
+	 * scoped to just its <code> element. */
+	overflow-wrap: break-word;
 }
 .delegate-stat-value code {
 	font-size: 0.88em;
 	background: rgba(31, 41, 55, 0.04);
 	padding: 0.05rem 0.35rem;
 	border-radius: 4px;
+	/* NodeID-... has no whitespace at all across ~50 chars — only
+	 * character-anywhere breaking keeps it inside the card. */
+	word-break: break-all;
 }
 
 /* Risk cards — coloured per risk category. */
@@ -3892,6 +3903,25 @@ main:has(.data-toc) .evidence-table thead th {
 	.layout-with-sidebar {
 		display: block;
 	}
+}
+
+/* .atmosphere-band (defined near the top of this file) breaks out to
+ * full-viewport width via `left: 50%; margin-left/-right: -50vw;`. That
+ * math only cancels out to true edge-to-edge when the band's containing
+ * block is itself horizontally centered in the viewport (the plain
+ * `.container { margin: 0 auto }` case). Inside this sidebar layout the
+ * content column is a grid track sitting next to the 220px sidebar, not
+ * centered — so the same math overshoots the viewport (observed ~166px
+ * on a 1440px-wide selection-evidence page) and the band renders shifted
+ * off-screen instead of bled edge-to-edge. Rather than fight that math,
+ * contain the band to its own column here: no bleed, just fills the
+ * content width like every other card in this layout. */
+.layout-content .atmosphere-band {
+	left: auto;
+	margin-left: 0;
+	margin-right: 0;
+	width: 100%;
+	max-width: 100%;
 }
 
 .section-sidebar {

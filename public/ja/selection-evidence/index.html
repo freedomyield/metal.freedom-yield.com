@@ -11,6 +11,7 @@
 <link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/selection-evidence/">
 <link rel="alternate" hreflang="x-default" href="https://metal.freedom-yield.com/selection-evidence/">
 <link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#07080c">
@@ -321,15 +322,15 @@
 			</dl>
 		</article>
 
-		<article class="data-endpoint data-endpoint--docs">
+		<article class="data-endpoint data-endpoint--live">
 			<header class="data-endpoint-head">
-				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg></span>
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>
 				<h3>Cycle 単位 audit packet</h3>
-				<span class="data-tag">live(1 cycle closed)</span>
+				<span class="data-tag">live</span>
 			</header>
-			<p><code>/api/cycle-history.jsonl</code> は live で、 現在 1 つのクローズ済 cycle(cycle 1、 2026-06-04 close、 14 日間で 100% uptime)を含みます。 各行が 1 つのクローズ済 cycle で、 <code>/api/uptime-cycles.json</code> と <code>/api/incidents.json</code> を join し、 読者が line-by-line で audit packet を stream 処理できる形式。 schema は <a href="/api/cycle-history.example.jsonl"><code>/api/cycle-history.example.jsonl</code></a>、 生成スクリプトは <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/scripts/gen-cycle-history.sh" rel="noopener noreferrer" target="_blank"><code>scripts/gen-cycle-history.sh</code></a>、 フォーマットと消費方法は <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CYCLE_HISTORY.md" rel="noopener noreferrer" target="_blank"><code>docs/CYCLE_HISTORY.md</code></a> に記載。 各 cycle close 時点で operator host 上の cron(<code>metal-cycle-history</code>、 5 分 tick)が新 leaf 行を append、 その cycle 観測は anchor 時に <code>gen-anchor-source.sh</code> によって <code>/api/anchor-source.json</code> の <code>observations_branch</code> に集約されます。</p>
+			<p><code>/api/cycle-history.jsonl</code> は live です。 各行が 1 つのクローズ済 cycle で、 <code>/api/uptime-cycles.json</code> と <code>/api/incidents.json</code> を join し、 読者が line-by-line で audit packet を stream 処理できる形式 — 現在何 cycle 分クローズ済みかは、 このページではなく feed 自体(<code>curl -s .../cycle-history.jsonl | wc -l</code>)が真です。 schema は <a href="/api/cycle-history.example.jsonl"><code>/api/cycle-history.example.jsonl</code></a>、 生成スクリプトは <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/scripts/gen-cycle-history.sh" rel="noopener noreferrer" target="_blank"><code>scripts/gen-cycle-history.sh</code></a>、 フォーマットと消費方法は <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CYCLE_HISTORY.md" rel="noopener noreferrer" target="_blank"><code>docs/CYCLE_HISTORY.md</code></a> に記載。 各 cycle close 時点で operator host 上の cron(<code>metal-cycle-history</code>、 5 分 tick)が新 leaf 行を append、 その cycle 観測は anchor 時に <code>gen-anchor-source.sh</code> によって <code>/api/anchor-source.json</code> の <code>observations_branch</code> に集約されます。</p>
 			<dl class="data-meta">
-				<dt>状態</dt><dd>Live — runtime JSONL は 2026-06-22 以降配信中、 現在 1 leaf 公開(cycle 1)</dd>
+				<dt>状態</dt><dd><span class="status-badge status-badge--live">Live</span> — runtime JSONL は 2026-06-22 以降配信中、 cycle close ごとに行数が 1 増加、 現在の総数は live feed が真</dd>
 				<dt>スキーマ</dt><dd><code>/api/cycle-history.example.jsonl</code></dd>
 				<dt>live feed</dt><dd><a href="/api/cycle-history.jsonl"><code>/api/cycle-history.jsonl</code></a></dd>
 				<dt>cross-reference</dt><dd><a href="/api/anchor-source.json"><code>/api/anchor-source.json</code></a> の <code>.observations_branch</code>(サイクル番号 / uptime / 手数料 / self-stake / delegator events)に折り込まれ、<code>.artifacts_branch.public_api_files_hashed</code> で hash されます</dd>
@@ -348,7 +349,7 @@
 			<p>verifier 手順は 7 step recipe です(artifact 取得 → signature → fingerprint → 3 branch root → DAG-root 再計算 → source/receipt 一致 → on-chain 4-memo cross-check)。 独立した参照実装が 2 種あります: portable shell 関数(<code>gen-identity.sh</code> 内)と Python 参照(<code>tests/identity-verification-vectors/</code> 下)、 自動 test script で bit-for-bit 一致を pinning。 合成テストベクトル 5 件を公開しているので、 監査者は第三言語で verifier を独自実装して照合できます。</p>
 			<p><strong>snapshot + rotation cadence の方針</strong>。 <code>identity.json</code> は発行時点の運用者状態の署名済 snapshot であり、 heartbeat ではありません。 cycle transition 時の anchor receipt は同じ commitment を <em>reaffirm</em> し、 運用者が更新版 manifest を公開するまで同じ <code>dag_root_computed</code> を刻み続けます。 更新トリガは: (1) ed25519 運用者 identity key の年次 rotation(次回 2027-06-22)、 (2) bound set への新 artifact 追加、 (3) 重要 policy 変更、 の 3 点です。 複数 cycle にわたって <code>dag_root_computed</code> が変化しないのは設計通りで、 「該当期間に運用者は新たな commitment を主張していない」ことを意味します。 業界類似事例: Certificate Transparency log(= append-only、 root は新エントリで拡張)、 DNSSEC zone signing(= 定期 re-sign + 公開 cadence)、 long-lived OpenSSH 鍵 + rotation policy。 Metal エコシステム内で validator identity binding の標準 pattern は未定であり、 本面は novel です。</p>
 			<dl class="data-meta">
-				<dt>状態</dt><dd>Active — <code>identity.json</code> + <code>identity.json.sig</code> は 2026-06-22(Phase 5 publication)以降 live。 最初の on-chain anchor は cycle 2 → cycle 3 transition(2026-07-04)で broadcast 済み(tx <a href="https://explorer.xprnetwork.org/transaction/0b70d2aa1d20bc5c4eca8ce7888a7ab6edb02316e927209f524114f1b647938f" rel="noopener noreferrer" target="_blank"><code>0b70d2aa…</code></a>、block 390918553、block time 2026-07-04T06:42:24Z)。 4-memo pack とその receipt は現在 live。</dd>
+				<dt>状態</dt><dd><span class="status-badge status-badge--active">Active</span> — <code>identity.json</code> + <code>identity.json.sig</code> は 2026-06-22(Phase 5 publication)以降 live。 最初の on-chain anchor は cycle 2 → cycle 3 transition(2026-07-04)で broadcast 済み(tx <a href="https://explorer.xprnetwork.org/transaction/0b70d2aa1d20bc5c4eca8ce7888a7ab6edb02316e927209f524114f1b647938f" rel="noopener noreferrer" target="_blank"><code>0b70d2aa…</code></a>、block 390918553、block time 2026-07-04T06:42:24Z)。 4-memo pack とその receipt は現在 live。</dd>
 				<dt>構造仕様</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/MERKLE_DAG_SPEC.md" rel="noopener noreferrer" target="_blank"><code>docs/MERKLE_DAG_SPEC.md</code></a></dd>
 				<dt>verifier 手順</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer" target="_blank"><code>docs/IDENTITY_VERIFICATION.md</code></a>(= 7 step recipe)</dd>
 				<dt>監査エントリ</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/PHASE_ALPHA_AUDIT_HANDOFF.md" rel="noopener noreferrer" target="_blank"><code>docs/PHASE_ALPHA_AUDIT_HANDOFF.md</code></a></dd>
@@ -362,8 +363,8 @@
 				<dt>live manifest</dt><dd><a href="/api/identity.json"><code>/api/identity.json</code></a> + <a href="/api/identity.json.sig"><code>/api/identity.json.sig</code></a></dd>
 				<dt>live DAG snapshot</dt><dd><a href="/api/anchor-source.json"><code>/api/anchor-source.json</code></a></dd>
 				<dt>live identity-history</dt><dd><a href="/api/identity-history.jsonl"><code>/api/identity-history.jsonl</code></a>(= 運用者 identity key rotation log、 現 <code>key_seq=1</code>)</dd>
-				<dt>live anchor receipt</dt><dd><code>/api/anchor-receipt.json</code>(= 常に最新を保持する snapshot、 <code>schema_version 2</code>; 初回 anchor は 2026-07-04 に刻印済)</dd>
-				<dt>live anchor history ledger</dt><dd><code>/api/anchor-history.jsonl</code>(= 全 live anchor の append-only ledger、 2026-07-04 の初回 record 以降 cycle transition 毎に extend)</dd>
+				<dt>live anchor receipt</dt><dd><a href="/api/anchor-receipt.json"><code>/api/anchor-receipt.json</code></a>(= 常に最新を保持する snapshot、 <code>schema_version 2</code>; 初回 anchor は 2026-07-04 に刻印済)</dd>
+				<dt>live anchor history ledger</dt><dd><a href="/api/anchor-history.jsonl"><code>/api/anchor-history.jsonl</code></a>(= 全 live anchor の append-only ledger、 2026-07-04 の初回 record 以降 cycle transition 毎に extend)</dd>
 				<dt>運用者 pubkey</dt><dd><a href="/.well-known/operator-identity.pub"><code>/.well-known/operator-identity.pub</code></a></dd>
 				<dt>機械可読 discovery</dt><dd><a href="/api/evidence.json"><code>/api/evidence.json</code></a> → <code>.live_artifacts.identity_manifest</code></dd>
 			</dl>
@@ -489,7 +490,7 @@
 				<tr><td data-label="Material">運用者 legal entity 名</td><td data-label="Classification"><span class="status-badge status-badge--private">Private / contractual</span></td><td data-label="Where / how">契約関係の中でのみ共有</td></tr>
 				<tr><td data-label="Material">運用者個人連絡先</td><td data-label="Classification"><span class="status-badge status-badge--private">Private / contractual</span></td><td data-label="Where / how">契約関係の中でのみ共有</td></tr>
 				<tr><td data-label="Material">具体的なプロバイダ名・IP・ホストパス・port</td><td data-label="Classification"><span class="status-badge status-badge--private">Not disclosed (security posture)</span></td><td data-label="Where / how">リファレンスアーキテクチャでは抽象化、 具体値は公開 surface に載せません</td></tr>
-				<tr><td>validator + identity + push 鍵材料</td><td>Private — 公開 surface には一切載せません</td><td>リファレンスアーキテクチャの 3 鍵分離に従う</td></tr>
+				<tr><td data-label="Material">validator + identity + push 鍵材料</td><td data-label="Classification"><span class="status-badge status-badge--private">Private — 公開 surface には一切載せません</span></td><td data-label="Where / how">リファレンスアーキテクチャの 3 鍵分離に従う</td></tr>
 				<tr><td data-label="Material">他事業の資料</td><td data-label="Classification"><span class="status-badge status-badge--na">N/A</span></td><td data-label="Where / how">本 validator 運用の scope 外</td></tr>
 			</tbody>
 		</table>
