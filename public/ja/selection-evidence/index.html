@@ -322,15 +322,15 @@
 			</dl>
 		</article>
 
-		<article class="data-endpoint data-endpoint--docs">
+		<article class="data-endpoint data-endpoint--live">
 			<header class="data-endpoint-head">
-				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg></span>
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>
 				<h3>Cycle 単位 audit packet</h3>
-				<span class="data-tag">live(1 cycle closed)</span>
+				<span class="data-tag">live</span>
 			</header>
-			<p><code>/api/cycle-history.jsonl</code> は live で、 現在 1 つのクローズ済 cycle(cycle 1、 2026-06-04 close、 14 日間で 100% uptime)を含みます。 各行が 1 つのクローズ済 cycle で、 <code>/api/uptime-cycles.json</code> と <code>/api/incidents.json</code> を join し、 読者が line-by-line で audit packet を stream 処理できる形式。 schema は <a href="/api/cycle-history.example.jsonl"><code>/api/cycle-history.example.jsonl</code></a>、 生成スクリプトは <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/scripts/gen-cycle-history.sh" rel="noopener noreferrer" target="_blank"><code>scripts/gen-cycle-history.sh</code></a>、 フォーマットと消費方法は <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CYCLE_HISTORY.md" rel="noopener noreferrer" target="_blank"><code>docs/CYCLE_HISTORY.md</code></a> に記載。 各 cycle close 時点で operator host 上の cron(<code>metal-cycle-history</code>、 5 分 tick)が新 leaf 行を append、 その cycle 観測は anchor 時に <code>gen-anchor-source.sh</code> によって <code>/api/anchor-source.json</code> の <code>observations_branch</code> に集約されます。</p>
+			<p><code>/api/cycle-history.jsonl</code> は live です。 各行が 1 つのクローズ済 cycle で、 <code>/api/uptime-cycles.json</code> と <code>/api/incidents.json</code> を join し、 読者が line-by-line で audit packet を stream 処理できる形式 — 現在何 cycle 分クローズ済みかは、 このページではなく feed 自体(<code>curl -s .../cycle-history.jsonl | wc -l</code>)が真です。 schema は <a href="/api/cycle-history.example.jsonl"><code>/api/cycle-history.example.jsonl</code></a>、 生成スクリプトは <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/scripts/gen-cycle-history.sh" rel="noopener noreferrer" target="_blank"><code>scripts/gen-cycle-history.sh</code></a>、 フォーマットと消費方法は <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CYCLE_HISTORY.md" rel="noopener noreferrer" target="_blank"><code>docs/CYCLE_HISTORY.md</code></a> に記載。 各 cycle close 時点で operator host 上の cron(<code>metal-cycle-history</code>、 5 分 tick)が新 leaf 行を append、 その cycle 観測は anchor 時に <code>gen-anchor-source.sh</code> によって <code>/api/anchor-source.json</code> の <code>observations_branch</code> に集約されます。</p>
 			<dl class="data-meta">
-				<dt>状態</dt><dd>Live — runtime JSONL は 2026-06-22 以降配信中、 現在 1 leaf 公開(cycle 1)</dd>
+				<dt>状態</dt><dd><span class="status-badge status-badge--live">Live</span> — runtime JSONL は 2026-06-22 以降配信中、 cycle close ごとに行数が 1 増加、 現在の総数は live feed が真</dd>
 				<dt>スキーマ</dt><dd><code>/api/cycle-history.example.jsonl</code></dd>
 				<dt>live feed</dt><dd><a href="/api/cycle-history.jsonl"><code>/api/cycle-history.jsonl</code></a></dd>
 				<dt>cross-reference</dt><dd><a href="/api/anchor-source.json"><code>/api/anchor-source.json</code></a> の <code>.observations_branch</code>(サイクル番号 / uptime / 手数料 / self-stake / delegator events)に折り込まれ、<code>.artifacts_branch.public_api_files_hashed</code> で hash されます</dd>
