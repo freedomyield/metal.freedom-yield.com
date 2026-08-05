@@ -554,11 +554,14 @@ bash "$INSTALLER" --print-remote > "$BASE/remote.sh"
 WRAP="$BASE/receive-metal-push"
 mkdir -p "$BASE/other/api"
 make_fixture_wrapper "$WRAP" "$ROOT"
-printf '# second candidate: %s\n' "$BASE/other/api" >> "$WRAP"
+# A genuinely ambiguous wrapper: two conflicting API_DIR *assignments*. A path
+# mentioned only in a comment is not ambiguity — the resolver reads
+# assignments, so prose about other directories must not stop an install.
+printf 'API_DIR="%s"\n' "$BASE/other/api" >> "$WRAP"
 OUT="$(run_remote "$WRAP" 0 "" 2>&1)"
 RC=$?
 [ "$RC" -eq 6 ] \
-	&& ok "ambiguity: two candidate api dirs -> exit 6, wrapper untouched" \
+	&& ok "ambiguity: two conflicting API_DIR assignments -> exit 6, wrapper untouched" \
 	|| bad "ambiguity: expected exit 6, got $RC (out: $OUT)"
 grep -q 'FY-SUBDIR-ALLOWLIST-V1' "$WRAP" \
 	&& bad "ambiguity: wrapper was modified despite the refusal" \

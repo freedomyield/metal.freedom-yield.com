@@ -131,7 +131,24 @@ if [ -n "$API_DIR_OVERRIDE" ]; then
 	API_DIR="$API_DIR_OVERRIDE"
 	echo "using FY_WEB_API_DIR override: $API_DIR"
 else
-	CANDIDATES="$(grep -oE '/[A-Za-z0-9._/-]+/api' "$WRAPPER" | sort -u || true)"
+	# Resolve from the wrapper's own shell assignments, not from prose: the
+	# header comments spell relative-looking paths like "/public/api/" that
+	# are not real directories on this host.
+	CANDIDATES="$(
+		{
+			sed -nE 's/^[[:space:]]*API_DIR=["'"'"']?([^"'"'"']+)["'"'"']?[[:space:]]*$/\1/p' "$WRAPPER"
+			PUB="$(sed -nE 's/^[[:space:]]*PUBLIC_DIR=["'"'"']?([^"'"'"']+)["'"'"']?[[:space:]]*$/\1/p' "$WRAPPER" | head -1)"
+			[ -n "$PUB" ] && printf '%s/api\n' "$PUB"
+		} 2>/dev/null | sed 's|/*$||' | grep -E '^/' | sort -u || true
+	)"
+	# Expand a "$PUBLIC_DIR/api"-style assignment against the literal value.
+	if printf '%s' "$CANDIDATES" | grep -q '\$'; then
+		PUB="$(sed -nE 's/^[[:space:]]*PUBLIC_DIR=["'"'"']?([^"'"'"']+)["'"'"']?[[:space:]]*$/\1/p' "$WRAPPER" | head -1)"
+		CANDIDATES="$(printf '%s\n' "$CANDIDATES" | sed "s|\\\${\{0,1\}PUBLIC_DIR}\{0,1\}|${PUB}|g" | grep -E '^/' | sort -u)"
+	fi
+	if [ -z "$CANDIDATES" ]; then
+		CANDIDATES="$(grep -oE '/[A-Za-z0-9._/-]+/api' "$WRAPPER" | sort -u || true)"
+	fi
 	COUNT="$(printf '%s\n' "$CANDIDATES" | grep -c . || true)"
 	if [ "$COUNT" -ne 1 ]; then
 		echo "ERROR (6): could not determine the destination api/ directory unambiguously." >&2
@@ -155,6 +172,30 @@ fi
 if [ ! -d "$API_DIR" ]; then
 	echo "ERROR (6): api dir does not exist on this host: $API_DIR" >&2
 	exit 6
+fi
+# Infra rule (shared host): never write outside the tree this wrapper already
+# owns. The wrapper names its own docroot, so anchor the destination to that
+# prefix — an override typo must not land files in a co-tenant's docroot.
+# A wrapper without a PUBLIC_DIR assignment (fixtures, older wrappers) yields
+# an empty value and the check below is skipped — grep's no-match exit must
+# not abort the installer under `set -euo pipefail`.
+WRAPPER_PUBLIC_DIR="$(
+	{
+		sed -nE 's/^[[:space:]]*PUBLIC_DIR=["'"'"']?([^"'"'"']+)["'"'"']?[[:space:]]*$/\1/p' "$WRAPPER" \
+			| grep -E '^/' | head -1 | sed 's|/*$||'
+	} || true
+)"
+if [ -n "$WRAPPER_PUBLIC_DIR" ]; then
+	case "$API_DIR/" in
+		"$WRAPPER_PUBLIC_DIR"/*) ;;
+		*)
+			echo "ERROR (6): api dir is outside the tree this wrapper owns." >&2
+			echo "           wrapper docroot: $WRAPPER_PUBLIC_DIR" >&2
+			echo "           requested:       $API_DIR" >&2
+			echo "           refusing (shared-host blast-radius rule)." >&2
+			exit 6
+			;;
+	esac
 fi
 
 echo
@@ -306,10 +347,17 @@ echo "==> SSH pre-check OK"
 echo
 
 set +e
+# ssh concatenates its command words into one string that the REMOTE shell
+# re-parses, so an empty argument (FY_WEB_API_DIR is empty unless overridden)
+# would vanish and shift every later positional. Quote each one for that
+# second parse.
+shq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+REMOTE_ARGS="$(shq "$SNIPPET_B64") $(shq "$DRY_RUN") $(shq "$FY_WEB_API_DIR") $(shq "$MARKER") $(shq "")"
+
 printf '%s\n' "$REMOTE_SCRIPT" | ssh -i "$XSERVER_KEY" \
 	-o BatchMode=yes -o ConnectTimeout=10 \
 	"${XSERVER_USER}@${XSERVER_HOST}" \
-	bash -s -- "$SNIPPET_B64" "$DRY_RUN" "$FY_WEB_API_DIR" "$MARKER" ""
+	"bash -s -- ${REMOTE_ARGS}"
 RC=$?
 set -e
 
