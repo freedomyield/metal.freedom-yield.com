@@ -183,7 +183,7 @@ TEST_HOME="$(mktemp -d -t rehearsal-src-sel-home.XXXXXX)"
 cleanup() { rm -rf "$STUB_DIR" "$TEST_HOME"; }
 trap cleanup EXIT
 
-FIXTURE_SUBSTANTIVE="${REPO_ROOT}/public/api/anchor-source.substantive.json"
+FIXTURE_SUBSTANTIVE="${REPO_ROOT}/tests/fixtures/anchor-source.substantive.json"
 FIXTURE_EXAMPLE="${REPO_ROOT}/public/api/anchor-source.example.json"
 CANONICAL="${REPO_ROOT}/public/api/anchor-source.json"
 

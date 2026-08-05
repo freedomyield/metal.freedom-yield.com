@@ -16,10 +16,14 @@
 #   5. hash A != hash B, and hash A appears as the mismatch value that a
 #      naive RFC-8785 verifier would compute.
 #
-# Fixture: public/api/anchor-source.substantive.json's identity_branch,
+# Fixture: tests/fixtures/anchor-source.substantive.json's identity_branch,
 # which S11 rehearsal inscribed on testnet with root
 #   840665c70f72f55ae110a9ebd5dc6e397985c76b543af6e4ca6330fb5dacf763
-# (see project_anchor_testnet_s11_semantic_c_20260701).
+# (see project_anchor_testnet_s11_semantic_c_20260701). Moved out of
+# public/api/ on 2026-08-05 (audit finding: an unanchored cycle-2
+# snapshot sitting in the public API tree risked evaluator misreading
+# it as live data) — the fixture's content and hashes are unchanged,
+# only its location.
 #
 # Skips Node.js sub-check if `node` is not installed on the test host
 # (the shell + Python sub-checks alone still prove the newline-sensitivity
@@ -28,7 +32,7 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-SUBSTANTIVE="${REPO_ROOT}/public/api/anchor-source.substantive.json"
+SUBSTANTIVE="${REPO_ROOT}/tests/fixtures/anchor-source.substantive.json"
 
 # --- expected values pinned from the S11 broadcast material ------------------
 EXPECTED_HASH_WITH_NEWLINE="840665c70f72f55ae110a9ebd5dc6e397985c76b543af6e4ca6330fb5dacf763"

@@ -185,7 +185,7 @@ HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh \
     --source=/path/to/anchor-source.json
 ```
 
-`public/api/anchor-source.substantive.json` and
+`tests/fixtures/anchor-source.substantive.json` and
 `public/api/anchor-source.example.json` are **fixtures** — stale,
 placeholder-hash files frozen at whatever cycle they were last hand-built
 for. They are refused unless you pass `--allow-fixture` explicitly:
