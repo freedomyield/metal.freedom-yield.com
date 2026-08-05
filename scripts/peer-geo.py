@@ -71,11 +71,13 @@ def fetch_peers():
         seen.add(ip)
         pairs.append((node_id, ip))
     # Raw peer count as metalgo itself reports it (same field
-    # scripts/server-status.sh reads). Falls back to the filtered/deduped
-    # pairs count only if the RPC response is ever missing this field —
-    # keeps `numPeers` always present and int-typed for JS consumers.
-    num_peers = result.get("numPeers")
-    if not isinstance(num_peers, int):
+    # scripts/server-status.sh reads). metalgo marshals it as a JSON string
+    # (Avalanche json.Uint32), so coerce rather than type-check. Falls back to
+    # the filtered/deduped pairs count only if the field is missing or
+    # unparseable — keeps `numPeers` always present and int-typed for JS.
+    try:
+        num_peers = int(result.get("numPeers"))
+    except (TypeError, ValueError):
         num_peers = len(pairs)
     return pairs, num_peers
 
