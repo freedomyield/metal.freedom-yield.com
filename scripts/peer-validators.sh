@@ -204,6 +204,22 @@ gzip -c "$OUT" > "$SNAPSHOT"
 SNAP_SIZE=$(stat -c%s "$SNAPSHOT" 2>/dev/null || stat -f%z "$SNAPSHOT")
 echo "stashed daily snapshot: $SNAPSHOT (${SNAP_SIZE} bytes gzipped)"
 
+# Publish the snapshot in the same breath as generating it. The index below
+# lists every snapshot it can see locally, so an unpublished snapshot means
+# the index advertises a URL that 404s — one more each day. Publication lives
+# here, not in the cron line, so the two can never drift apart.
+PUBLISH_DIR="${ROOT}/public/api/peers-history"
+mkdir -p "$PUBLISH_DIR"
+if cp -p "$SNAPSHOT" "${PUBLISH_DIR}/peers-${TODAY}.json.gz"; then
+	if bash "${ROOT}/scripts/push-to-web-host.sh" "peers-history/peers-${TODAY}.json.gz"; then
+		echo "published snapshot: peers-history/peers-${TODAY}.json.gz"
+	else
+		echo "WARN: snapshot published locally but push failed for peers-${TODAY}.json.gz" >&2
+	fi
+else
+	echo "WARN: could not stage snapshot for publication: peers-${TODAY}.json.gz" >&2
+fi
+
 # Update the index — a small JSON listing all known snapshot dates +
 # their sizes. The catalog can fetch this to show a date picker.
 SNAPSHOT_INDEX="${ROOT}/public/api/peers-history-index.json"
