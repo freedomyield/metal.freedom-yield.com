@@ -222,6 +222,24 @@ fi
 # verify the archive files actually exist (that is gen-anchor-source.sh /
 # gen-anchor-receipt.sh's job at write time) — this is purely the
 # conventional pointer an evaluator follows.
+#
+# PUBLICATION (2026-08-05 — the half that was missing until then): writing
+# the archive file is necessary but not sufficient. Both archives live under
+# public/api/archive/, which is push-owned (never git-tracked, see
+# .gitignore + deploy/feed-excludes.txt), so each one only becomes reachable
+# at the URL this field advertises after it is pushed:
+#
+#   bash scripts/push-to-web-host.sh archive/anchor-source-<dag_root_hash>.json
+#   bash scripts/push-to-web-host.sh archive/anchor-receipt-<tx_id>.json
+#
+# run from the validator host after the anchor pipeline completes, alongside
+# the existing `push-to-web-host.sh anchor-receipt.json` /
+# `… anchor-history.jsonl` pushes. Before that path existed, this field
+# pointed at a permanent 404 for every anchor event: push-to-web-host.sh's
+# allowlist was flat-filename-only and had no way to name a file inside a
+# subdirectory. The receiving wrapper on the web host must also carry the
+# subdirectory allowlist (scripts/install-xserver-subdir-allowlist.sh) —
+# sender and receiver enforce it independently.
 ARCHIVED_SOURCE_PATH="api/archive/anchor-source-${DAG_ROOT}.json"
 ARCHIVED_RECEIPT_PATH="api/archive/anchor-receipt-${TX_ID}.json"
 

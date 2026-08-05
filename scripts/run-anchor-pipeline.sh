@@ -14,6 +14,22 @@
 #   3. scripts/gen-anchor-receipt.sh  → fetch tx + 7-PASS verify + write receipt
 #   4. scripts/append-anchor-history.sh → append line to history jsonl
 #
+# AFTER the pipeline — publication (deliberately NOT done here): the
+# artifacts this run produced reach their public URLs from the validator
+# host via
+#   bash scripts/push-to-web-host.sh anchor-receipt.json
+#   bash scripts/push-to-web-host.sh anchor-history.jsonl
+#   bash scripts/push-to-web-host.sh archive/anchor-source-<dag_root>.json
+#   bash scripts/push-to-web-host.sh archive/anchor-receipt-<tx_id>.json
+# (`anchor-source.json` itself is git-deploy owned — commit it, do not push
+# it; see docs/DEPLOY_OWNERSHIP_MATRIX.md.) The last two are the R18
+# per-anchor archives that anchor-history.jsonl's archived_source_path /
+# archived_receipt_path advertise; the subdirectory push shapes were added
+# 2026-08-05 and require the matching web-host wrapper allowlist
+# (scripts/install-xserver-subdir-allowlist.sh). Pushing stays outside this
+# script on purpose: this is a broadcast path, and an outbound SSH failure
+# must never be able to fail a run whose on-chain anchor already succeeded.
+#
 # Freshness preflight (Task 4, 2026-07-09 host-checkout-auto-advance design):
 # a checkout that is behind origin/main can carry an already-fixed bug or a
 # stale anchor-source value forward into a live broadcast, so this pipeline
