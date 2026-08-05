@@ -227,6 +227,24 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    (`NodeID=… not in current validators (= AddValidator tx not yet
    observed?)`). Do not start the pipeline on the submit alone — wait for
    Committed *and* the chain read.
+
+   **How the AI checks chain state here without tripping the guard:**
+   `scripts/broadcast-guard.sh` (tier-1) blocks any `curl`/`wget` shaped
+   like a P-chain RPC hit (`/ext/bc/[XPC]`, the bare `/ext/[XP]` alias)
+   **unconditionally, by command shape alone** — it does not distinguish
+   a read-only `platform.getCurrentValidators` query from a broadcast, so
+   an ad hoc `curl … /ext/bc/P` from the AI session is refused same as a
+   real broadcast attempt would be. The adopted workaround is to read the
+   already-running cron's output instead of querying the chain directly:
+   `public/api/validator.json` is regenerated every 5 minutes by the
+   `metal-node-info` cron (`node-info.sh`) — the same source "confirm the
+   new entry is visible" above already points at. Fetch it (the public
+   URL, or the host copy) and check its `endTime` / `observedAt` fields
+   against the file's own mtime (≤5 minutes old = fresh, matching the
+   cron cadence) rather than shelling out to the RPC. **Do not disable
+   `broadcast-guard.sh` to work around this** — the guard is
+   unconditional by design; reading the cron artifact is the correct way
+   to observe chain state from an AI session, not a guard bypass.
 1. **AI/host — wait for the node-info tick.** Poll (or wait for the next
    cron tick of) `node-info.sh` until `public/api/validator.json` reflects
    the new AddValidator entry's `endTime`. This confirms the new cycle is
@@ -333,6 +351,32 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    **testnet-side evidence only** — it records `target_chain: "testnet-a"`,
    and mainnet gate 4 refuses a dry-run log whose recorded chain differs
    from `--chain`.
+
+   Because step 6 has already landed by the time this runs, the canonical
+   `public/api/anchor-source.json` is already this cycle's file
+   (`cycle_number_observed == N+1`) — the command above needs no
+   `--source=` override and no `--allow-fixture` fixture; the default
+   selection is correct on its own, and `--expect-cycle=<N+1>` passes
+   cleanly against it. **Do not run 7a earlier in the day (e.g. in the
+   morning, before step 6 has landed) against a hand-built fixture
+   file** — at that point the canonical source is still last cycle's
+   (`N`), and producing real gate-1 evidence for `N+1` before it exists
+   would require hand-authoring a fixture and forcing a dag-root
+   recompute. That is exactly what happened on 2026-08-04 (morning
+   rehearsal run, before that day's step 6): a hand-built fixture plus a
+   dag-root recompute that then had to be reconciled against the real
+   source once step 6 landed — extra work and an extra chance to anchor
+   the wrong bytes. Run 7a only after step 6, against the real file.
+
+   Immediately after the rehearsal completes, clean up its leftover
+   token: `rm -f /tmp/fyd-broadcast-token`. Step 6/10 of
+   `run-testnet-rehearsal.sh` wrote that file bound to `chain=testnet-a`
+   (R16) — it cannot be reused to authorize the mainnet broadcast in 7c
+   even before it expires (`bin/safe-broadcast` gate 2 refuses a
+   chain-bound mismatch outright), and its 5-minute TTL means it goes
+   stale shortly regardless — but leaving it in place is needless noise
+   when inspecting `/tmp` ahead of 7b/7c. This only removes a file the
+   rehearsal itself created; it does not touch any gate.
 
    **7b — gate-4 material (mainnet dry run).** One path only: on the Mac,
    from the already-committed `anchor-source.json`, with **no recompose**:

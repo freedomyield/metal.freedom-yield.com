@@ -44,6 +44,15 @@ Every line is a complete JSON object. Fields:
 | `cycle_status` | string | `closed` (only closed cycles appear) |
 | `notes` | string | operator-maintained free-text notes for the cycle |
 
+> **`duration_days` vs `days_recorded` are two different definitions, not a
+> consistency check.** `duration_days` is wall-clock: `(end − start) / 86400`,
+> floored, straight from the on-chain period. `days_recorded` is a sample
+> count: the number of `uptime-history.sh` daily-cron rows tagged with that
+> cycle's end time in the master ledger. The two can legitimately differ for
+> the same cycle (a missed daily tick during an outage undercounts
+> `days_recorded`; an extra catch-up sample near the boundary can overcount
+> it) — neither value corrects the other, and a mismatch alone is not a bug.
+
 The example with one fully populated cycle lives at `/api/cycle-history.example.jsonl` and is committed to the repo so the schema is verifiable today.
 
 ## How the join works
