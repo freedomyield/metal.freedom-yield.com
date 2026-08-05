@@ -11,6 +11,7 @@
 <link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/verify/">
 <link rel="alternate" hreflang="x-default" href="https://metal.freedom-yield.com/verify/">
 <link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#07080c">
@@ -150,7 +151,7 @@ ssh-keygen -Y verify -f "$TMP/allowed" \
 		<article class="data-endpoint">
 			<header class="data-endpoint-head">
 				<h3>Cycle audit packet</h3>
-				<span class="data-tag">live (1 cycle closed)</span>
+				<span class="data-tag">live (append-only)</span>
 			</header>
 			<p>Append-only JSONL feed. One line per closed validation cycle, joining uptime + incidents + stake numbers for that cycle. Each leaf line's sha256 is folded into the observations_branch of the Merkle DAG.</p>
 			<dl class="data-meta">
@@ -167,7 +168,7 @@ ssh-keygen -Y verify -f "$TMP/allowed" \
 			<p>At each cycle transition, the operator inscribes the current <code>dag_root_computed</code> on Metal A-chain (PulseVM / XPRNetwork) using a narrow <code>metalfreedom@anchor</code> permission, across four <code>eosio.token::transfer</code> memos — one per branch root (<code>fya1c&lt;N&gt;-id:</code> / <code>-ob:</code> / <code>-ar:</code>) plus the combined DAG root (<code>fya1c&lt;N&gt;:&lt;dag_root_computed&gt;</code>). The receipt JSON is the always-latest audit-side index of the most recent inscription.</p>
 			<dl class="data-meta">
 				<dt>Receipt</dt><dd><code>/api/anchor-receipt.json</code> (= always-latest; first anchor inscribed 2026-07-04, tx <a href="https://explorer.xprnetwork.org/transaction/0b70d2aa1d20bc5c4eca8ce7888a7ab6edb02316e927209f524114f1b647938f" rel="noopener noreferrer" target="_blank"><code>0b70d2aa…</code></a>)</dd>
-				<dt>Schema</dt><dd><a href="/api/anchor-receipt.schema.v1.json"><code>/api/anchor-receipt.schema.v1.json</code></a></dd>
+				<dt>Schema</dt><dd><a href="/api/anchor-receipt.schema.v2.json"><code>/api/anchor-receipt.schema.v2.json</code></a></dd>
 			</dl>
 		</article>
 
@@ -179,7 +180,7 @@ ssh-keygen -Y verify -f "$TMP/allowed" \
 			<p>Append-only JSONL ledger covering every anchor that has reached <code>verification_status: live</code>. Independent of the always-latest receipt above: <code>anchor-receipt.json</code> rotates per cycle, <code>anchor-history.jsonl</code> accumulates. A verifier walks the ledger to retrace every prior anchoring back to the genesis cycle, then recomputes each line's <code>dag_root_computed</code> from its three branch roots (identity / observations / artifacts).</p>
 			<dl class="data-meta">
 				<dt>Ledger</dt><dd><code>/api/anchor-history.jsonl</code> (= append-only from the first anchor, inscribed 2026-07-04, after the seven-PASS verification chain)</dd>
-				<dt>Schema</dt><dd><a href="/api/anchor-history.schema.v1.json"><code>/api/anchor-history.schema.v1.json</code></a></dd>
+				<dt>Schema</dt><dd><a href="/api/anchor-history.schema.v2.json"><code>/api/anchor-history.schema.v2.json</code></a></dd>
 				<dt>Invariants</dt><dd>tx_id unique · (cycle_n, event_type) unique · cycle_n non-decreasing · existing lines byte-for-byte preserved · file terminates with LF</dd>
 			</dl>
 		</article>
@@ -192,7 +193,7 @@ ssh-keygen -Y verify -f "$TMP/allowed" \
 			<p>Machine-readable index of every live artifact + the public commitments. One fetch, one parse, the whole audit surface.</p>
 			<dl class="data-meta">
 				<dt>Manifest</dt><dd><a href="/api/evidence.json"><code>/api/evidence.json</code></a></dd>
-				<dt>Discovery</dt><dd><code>.live_artifacts.identity_manifest</code> · <code>.live_artifacts.cycle_history_jsonl</code> · <code>.in_preparation_artifacts.anchor_receipt</code> · <code>.in_preparation_artifacts.anchor_history</code></dd>
+				<dt>Discovery</dt><dd>Parse <a href="/api/evidence.json"><code>/api/evidence.json</code></a> directly rather than hardcoding a path — artifacts are grouped under its top-level <code>live_artifacts</code> / <code>in_preparation_artifacts</code> objects, and which artifact sits under which evolves as the operator's tooling catches up to reality. The direct feed links above are unaffected by that and always current.</dd>
 				<dt>Schema</dt><dd><a href="/api/evidence.schema.v1.json"><code>/api/evidence.schema.v1.json</code></a></dd>
 			</dl>
 		</article>
