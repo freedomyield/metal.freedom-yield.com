@@ -22,7 +22,8 @@
 #   - final_uptime_pct           number
 #   - days_recorded              integer
 #   - final_self_stake_metal     integer
-#   - final_total_delegated_metal integer
+#   - final_total_delegated_metal number  (fractional METAL; NOT integer —
+#                                 delegated stake need not be a whole METAL)
 #   - final_delegation_fee_pct   number
 #   - avg_peer_count             number
 #   - min_peer_count             integer
@@ -30,7 +31,7 @@
 #   - incidents_in_cycle_ids     array of incident id strings
 #   - explorer_url               string
 #   - cycle_status               string  ("closed")
-#   - notes                      string
+#   - notes                      string | null
 #
 # Idempotent + deterministic — running it twice on the same inputs produces
 # the same bytes. Atomic write via tmp + validation + mv.
