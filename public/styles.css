@@ -3905,6 +3905,25 @@ main:has(.data-toc) .evidence-table thead th {
 	}
 }
 
+/* .atmosphere-band (defined near the top of this file) breaks out to
+ * full-viewport width via `left: 50%; margin-left/-right: -50vw;`. That
+ * math only cancels out to true edge-to-edge when the band's containing
+ * block is itself horizontally centered in the viewport (the plain
+ * `.container { margin: 0 auto }` case). Inside this sidebar layout the
+ * content column is a grid track sitting next to the 220px sidebar, not
+ * centered — so the same math overshoots the viewport (observed ~166px
+ * on a 1440px-wide selection-evidence page) and the band renders shifted
+ * off-screen instead of bled edge-to-edge. Rather than fight that math,
+ * contain the band to its own column here: no bleed, just fills the
+ * content width like every other card in this layout. */
+.layout-content .atmosphere-band {
+	left: auto;
+	margin-left: 0;
+	margin-right: 0;
+	width: 100%;
+	max-width: 100%;
+}
+
 .section-sidebar {
 	position: sticky;
 	top: calc(var(--topnav-h, 3.75rem) + 1rem);
