@@ -37,26 +37,6 @@
       "resolve_or_escalate_hours": 24
     }
   },
-  "in_preparation_artifacts": {
-    "anchor_receipt": {
-      "planned_url": "https://metal.freedom-yield.com/api/anchor-receipt.json",
-      "schema_url": "https://metal.freedom-yield.com/api/anchor-receipt.example.json",
-      "formal_schema_url": "https://metal.freedom-yield.com/api/anchor-receipt.schema.v1.json",
-      "format_guide_url": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md",
-      "operator_guide_url": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/PHASE_ALPHA_AUDIT_HANDOFF.md"
-    },
-    "anchor_history": {
-      "planned_url": "https://metal.freedom-yield.com/api/anchor-history.jsonl",
-      "schema_url": "https://metal.freedom-yield.com/api/anchor-history.example.jsonl",
-      "formal_schema_url": "https://metal.freedom-yield.com/api/anchor-history.schema.v1.json",
-      "format_guide_url": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md",
-      "operator_guide_url": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/PHASE_ALPHA_AUDIT_HANDOFF.md"
-    }
-  },
-  "explorer_url": "https://explorer.metalblockchain.org/",
-  "generated_at": "1970-01-01T00:00:00Z",
-  "validator_state_observed_at": "1970-01-01T00:00:00Z",
-  "stale_input_warning": false,
   "live_artifacts": {
     "identity_manifest": {
       "url": "https://metal.freedom-yield.com/api/identity.json",
@@ -73,6 +53,27 @@
       "schema_url": "https://metal.freedom-yield.com/api/cycle-history.example.jsonl",
       "formal_schema_url": "https://metal.freedom-yield.com/api/cycle-history.schema.v1.json",
       "format_guide_url": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CYCLE_HISTORY.md"
+    },
+    "anchor_receipt": {
+      "url": "https://metal.freedom-yield.com/api/anchor-receipt.json",
+      "schema_url": "https://metal.freedom-yield.com/api/anchor-receipt.v2.example.json",
+      "formal_schema_url": "https://metal.freedom-yield.com/api/anchor-receipt.schema.v2.json",
+      "format_guide_url": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md",
+      "operator_guide_url": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/PHASE_ALPHA_AUDIT_HANDOFF.md",
+      "cross_reference_url": "https://metal.freedom-yield.com/api/anchor-source.json"
+    },
+    "anchor_history": {
+      "url": "https://metal.freedom-yield.com/api/anchor-history.jsonl",
+      "schema_url": "https://metal.freedom-yield.com/api/anchor-history.example.jsonl",
+      "formal_schema_url": "https://metal.freedom-yield.com/api/anchor-history.schema.v2.json",
+      "format_guide_url": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md",
+      "operator_guide_url": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/PHASE_ALPHA_AUDIT_HANDOFF.md",
+      "cross_reference_url": "https://metal.freedom-yield.com/api/anchor-receipt.json"
     }
-  }
+  },
+  "in_preparation_artifacts": {},
+  "explorer_url": "https://explorer.metalblockchain.org/",
+  "generated_at": "1970-01-01T00:00:00Z",
+  "validator_state_observed_at": "1970-01-01T00:00:00Z",
+  "stale_input_warning": false
 }
