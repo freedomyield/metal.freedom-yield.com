@@ -197,8 +197,13 @@
 	// stuck. Read the same peer count instead from /api/peer-geo.json,
 	// the public feed peer-map.js already relies on for the map above
 	// this note (scripts/peer-geo.py, cron-refreshed ~every 30 min).
-	// totalPeers is metalgo's raw info.peers count (not just the subset
-	// that geo-resolved), so it matches what our own node reports.
+	// Read numPeers, NOT totalPeers: numPeers is metalgo's raw info.peers
+	// count (same field scripts/server-status.sh reads). totalPeers is
+	// peer-geo.py's own post-filter count — peers missing a usable
+	// publicIP dropped, then de-duplicated by IP — which under-counts
+	// whenever any connected peer lacks a resolvable public IP. Fall
+	// back to totalPeers only for a cached peer-geo.json written before
+	// numPeers existed (pre-deploy rollout window).
 	// The global validator count used to live here too but was pulled
 	// to the backend (validator.json -> networkSize.totalValidators)
 	// to stop each visitor's browser from hitting api.metalblockchain.org.
@@ -218,7 +223,9 @@
 			var r = await fetch("/api/peer-geo.json");
 			if (r.ok) {
 				var s = await r.json();
-				if (s.totalPeers != null) {
+				if (s.numPeers != null) {
+					setText("liveTotalNetwork", s.numPeers);
+				} else if (s.totalPeers != null) {
 					setText("liveTotalNetwork", s.totalPeers);
 				}
 			}
