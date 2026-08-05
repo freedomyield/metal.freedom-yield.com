@@ -202,23 +202,23 @@
 			</details>
 		</article>
 
-		<article class="data-endpoint data-endpoint--docs">
+		<article class="data-endpoint data-endpoint--audit">
 			<header class="data-endpoint-head">
-				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg></span>
-				<h3>cycle-history.jsonl(準備中)</h3>
-				<span class="data-tag">GET · JSONL · 予定</span>
+				<span class="data-endpoint-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
+				<h3>cycle-history.jsonl</h3>
+				<span class="data-tag">GET · JSONL · append-only</span>
 			</header>
-			<p>Cycle 単位の audit packet。1 行 = 1 JSON オブジェクト、 時系列順、 <code>uptime-cycles.json</code> と <code>incidents.json</code> を join して各クローズ済 cycle に該当インシデント ID をペアリング。自動 due-diligence ツールが line-by-line で消費する前提の設計。</p>
+			<p>Cycle 単位の audit packet。1 行 = 1 JSON オブジェクト、 時系列順、 <code>uptime-cycles.json</code> と <code>incidents.json</code> を join して各クローズ済 cycle に該当インシデント ID をペアリング。クローズ済 cycle のみ掲載 — 進行中の cycle は close するまで載りません。自動 due-diligence ツールが line-by-line で消費する前提の設計。</p>
 			<dl class="data-meta">
-				<dt>予定 URL</dt><dd><code>/api/cycle-history.jsonl</code></dd>
-				<dt>例示(公開済)</dt><dd><a href="/api/cycle-history.example.jsonl"><code>/api/cycle-history.example.jsonl</code></a></dd>
-				<dt>Formal schema(公開済)</dt><dd><a href="/api/cycle-history.schema.v1.json"><code>/api/cycle-history.schema.v1.json</code></a> — draft 2020-12、 v1 内 additive-only</dd>
+				<dt>URL</dt><dd><a href="/api/cycle-history.jsonl"><code>/api/cycle-history.jsonl</code></a></dd>
+				<dt>更新</dt><dd>各 cycle close 時(~月次) — <code>uptime-cycles.json</code> + <code>incidents.json</code> から <code>scripts/gen-cycle-history.sh</code> が決定的に再生成</dd>
+				<dt>例示</dt><dd><a href="/api/cycle-history.example.jsonl"><code>/api/cycle-history.example.jsonl</code></a></dd>
+				<dt>Formal schema</dt><dd><a href="/api/cycle-history.schema.v1.json"><code>/api/cycle-history.schema.v1.json</code></a> — draft 2020-12、 v1 内 additive-only</dd>
 				<dt>生成スクリプト</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/scripts/gen-cycle-history.sh" rel="noopener noreferrer" target="_blank"><code>scripts/gen-cycle-history.sh</code></a></dd>
-				<dt>状態</dt><dd>準備中。 runtime 起動は evidence feed cron 安定確認後 (詳細 <a href="/ja/selection-evidence/">/ja/selection-evidence/</a>)</dd>
 			</dl>
 			<details class="data-example">
-				<summary>リクエスト例(スキーマプレビュー向け)</summary>
-				<pre><code>curl -s https://metal.freedom-yield.com/api/cycle-history.example.jsonl | jq -c '{cycle_n, final_uptime_pct, incidents_in_cycle_count, cycle_status}'</code></pre>
+				<summary>リクエスト例</summary>
+				<pre><code>curl -s https://metal.freedom-yield.com/api/cycle-history.jsonl | jq -c '{cycle_n, final_uptime_pct, incidents_in_cycle_count, cycle_status}'</code></pre>
 			</details>
 		</article>
 
