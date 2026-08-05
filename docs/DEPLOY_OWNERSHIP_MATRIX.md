@@ -108,6 +108,27 @@ See [`docs/HOST_CHECKOUT_AUTO_ADVANCE.md`](HOST_CHECKOUT_AUTO_ADVANCE.md)
 | `public/api/peers-gini-history.jsonl` | `scripts/peer-analytics.py` (append) | validator host | NO | YES | NO | YES (pre-existing) | Append-only; loss is recoverable from metalgo RPC. |
 | `public/api/peers-history-index.json` | `scripts/peer-analytics.py` | validator host | NO | YES | NO | YES (pre-existing) | Re-derive on validator host. |
 | `public/api/server-status.json` | `scripts/server-status.sh` | validator host | NO | YES (out-of-band; not via `push-to-web-host.sh`) | NO | YES (pre-existing) | Re-derive on validator host. |
+| `public/api/archive/anchor-source-<dag_root>.json` | `scripts/gen-anchor-source.sh` (R18 archive block, content-addressed) | validator host | NO | YES (`push-to-web-host.sh archive/anchor-source-<64hex>.json`) | NO | **YES** (`api/archive/`, added 2026-08-05) | Re-derive by re-running `gen-anchor-source.sh` on the same inputs — the archive copy is byte-identical to the canonical `anchor-source.json` of that anchor event. |
+| `public/api/archive/anchor-receipt-<tx_id>.json` | `scripts/gen-anchor-receipt.sh` (R18 archive block, keyed by `tx_id`) | validator host | NO | YES (`push-to-web-host.sh archive/anchor-receipt-<64hex>.json`) | NO | **YES** (`api/archive/`, added 2026-08-05) | Re-derive by re-running `gen-anchor-receipt.sh` against the same on-chain `tx_id` (7-PASS re-verification is what produces the file). |
+| `public/api/peers-history/peers-YYYY-MM-DD.json.gz` | `scripts/peer-validators.sh` (writes into the host state dir, not the repo) | validator host | NO | YES (`push-to-web-host.sh peers-history/peers-YYYY-MM-DD.json.gz`) | NO | **YES** (`api/peers-history/`, added 2026-08-05) | Snapshots are historical observations and cannot be re-derived after the fact; the host state dir (`${UPTIME_STATE_DIR:-/var/lib/freedom-yield}/peers-history/`) is the master copy, the public tree is a mirror. |
+
+## Note — the two subdirectory feeds (`api/archive/`, `api/peers-history/`)
+
+Both are **push-owned end to end** and deliberately **not git-tracked** (see
+`.gitignore`): their member filenames are content-addressed or date-keyed
+and unbounded, so committing them would put the deploy and the runtime push
+in joint ownership of the same paths — the exact silent-reversion class this
+matrix exists to prevent. Because they are directories, the exclude entries
+are whole-directory (`api/archive/`, `api/peers-history/`), the same shape
+`calendar/` already uses.
+
+Publishing them requires **three** lock-step pieces, all present as of
+2026-08-05: the sender allowlist (`scripts/push-to-web-host.sh`, `archive/*`
+and `peers-history/*` branches), the receiver allowlist (the Xserver wrapper,
+installed by `scripts/install-xserver-subdir-allowlist.sh` from
+`scripts/deploy/receive-subdir-allowlist.snippet.sh`), and the deploy
+excludes above. Until the receiver half is installed on the web host, pushes
+are rejected remotely even though the sender accepts the name.
 
 ## Note — `anchor-source.json` is git-deploy, not validator-pushed
 

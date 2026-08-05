@@ -72,6 +72,15 @@ public/api/peers-changes.json
 public/api/peers-gini.json
 public/api/peers-gini-history.jsonl
 public/api/peers-history-index.json
+# R18 per-anchor archive (gen-anchor-source.sh / gen-anchor-receipt.sh が
+# content-addressed で書く anchor-source-<dag>.json / anchor-receipt-<tx>.json)。
+# 単一 owner = validator host push (scripts/push-to-web-host.sh archive/<name>)。
+# git 追跡すると deploy と push の二重 owner になり silent reversion を生むので
+# 追跡しない。deploy 側の除外は deploy/feed-excludes.txt の api/archive/。
+public/api/archive/
+# peers 日次 snapshot の repo-local staging (本体は host state dir 側)。
+# 同じく push-owned、追跡しない。
+public/api/peers-history/
 # calendar/*.ics は gen-renewal-ics.sh が生成、ファイル名に private token が
 # 入るので絶対コミットしない(public 化前提リポ、token は private URL の要)
 public/calendar/

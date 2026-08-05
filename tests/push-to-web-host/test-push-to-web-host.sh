@@ -23,6 +23,11 @@
 #     each without invoking ssh
 #   - WEB_HOST resolution from WEB_HOST_FILE when WEB_HOST is unset, with
 #     whitespace trimmed
+#   - subdirectory allowlist (added 2026-08-05): the two accepted prefixes
+#     (archive/, peers-history/) push with the subdirectory-qualified name
+#     intact as the remote command string, while path traversal, absolute
+#     paths, shell metacharacters, unknown prefixes, nested paths, and
+#     malformed basenames are all rejected before ssh is ever invoked
 #
 # Usage:
 #   bash tests/push-to-web-host/test-push-to-web-host.sh
@@ -47,6 +52,11 @@ ok()  { PASS=$((PASS + 1)); echo "PASS  $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL  $1"; }
 
 BASE=""; STUBDIR=""; FIXTURE_REPO=""; KEY_FILE=""; SSH_LOG=""; NO_HOST_FILE=""
+PEERS_STATE_DIR=""
+# Content-addressed archive names are 64 lowercase hex. Two distinct values
+# so a test can prove the basename is carried through verbatim.
+DAG_HEX="$(printf 'a%.0s' $(seq 1 64))"
+TX_HEX="$(printf 'b%.0s' $(seq 1 64))"
 setup() {
 	BASE="$(mktemp -d -t push-to-web-host-test.XXXXXX)"
 	STUBDIR="$BASE/bin"
@@ -55,7 +65,10 @@ setup() {
 	SSH_LOG="$BASE/ssh-invocations.log"
 	NO_HOST_FILE="$BASE/no-such-web-host-file"   # deliberately absent
 
-	mkdir -p "$STUBDIR" "$FIXTURE_REPO/public/api" "$FIXTURE_REPO/public/calendar"
+	PEERS_STATE_DIR="$BASE/state/peers-history"
+
+	mkdir -p "$STUBDIR" "$FIXTURE_REPO/public/api" "$FIXTURE_REPO/public/calendar" \
+		"$FIXTURE_REPO/public/api/archive" "$PEERS_STATE_DIR"
 
 	# Recording ssh stub. Emulates the remote forced-command wrapper enough
 	# to let the script believe the push succeeded/failed, and records what
@@ -77,6 +90,12 @@ STUBEOF
 	printf '{"ok":true}\n' > "$FIXTURE_REPO/public/api/validator.json"
 	printf '{"ok":true}\n' > "$FIXTURE_REPO/public/calendar/deadbeefdeadbeefdeadbeefdeadbeef.ics"
 
+	# Subdirectory fixtures: R18 archives live in the repo's public/api/archive/,
+	# daily peer snapshots live in the host state dir (NOT the repo).
+	printf '{"archived":"source"}\n'  > "$FIXTURE_REPO/public/api/archive/anchor-source-${DAG_HEX}.json"
+	printf '{"archived":"receipt"}\n' > "$FIXTURE_REPO/public/api/archive/anchor-receipt-${TX_HEX}.json"
+	printf '{"peers":[]}\n' | gzip -c > "$PEERS_STATE_DIR/peers-2026-08-05.json.gz"
+
 	printf 'dummy-ed25519-key-material\n' > "$KEY_FILE"
 }
 teardown() { rm -rf "$BASE"; BASE=""; }
@@ -95,6 +114,7 @@ run_push() {
 	WEB_PUSH_KEY="$KEY_FILE" \
 	WEB_HOST="${WEB_HOST-deploy@203.0.113.11}" \
 	WEB_HOST_FILE="${WEB_HOST_FILE:-$NO_HOST_FILE}" \
+	PEERS_HISTORY_DIR="${PEERS_HISTORY_DIR:-$PEERS_STATE_DIR}" \
 	SSH_STUB_LOG="$SSH_LOG" \
 	STUB_EXIT="${STUB_EXIT:-0}" \
 		bash "$SCRIPT" "$@"
@@ -226,6 +246,230 @@ unset WEB_HOST WEB_HOST_FILE
 grep -q '\[deploy@203.0.113.42\]' "$SSH_LOG" \
 	&& ok "host-file: target resolved from WEB_HOST_FILE with whitespace trimmed" \
 	|| bad "host-file: target not resolved correctly (log: $(cat "$SSH_LOG" 2>/dev/null))"
+teardown
+
+# ==============================================================================
+# Subdirectory allowlist (2026-08-05). Two prefixes only — archive/ and
+# peers-history/ — each with a strict basename pattern. These URLs are
+# already advertised by anchor-history.jsonl (archived_source_path /
+# archived_receipt_path) and peers-history-index.json, and every one of them
+# returned 404 because this script could not name a file inside a
+# subdirectory at all.
+# ==============================================================================
+
+# ---- case 9: archive/anchor-source-<64hex>.json -> pushed --------------------
+setup
+NAME="archive/anchor-source-${DAG_HEX}.json"
+OUT="$(run_push "$NAME" 2>&1)"
+RC=$?
+[ "$RC" -eq 0 ] \
+	&& ok "subdir archive: anchor-source archive -> exit 0" \
+	|| bad "subdir archive: expected exit 0, got $RC (out: $OUT)"
+grep -q "\\[${NAME}\\]" "$SSH_LOG" \
+	&& ok "subdir archive: subdirectory-qualified name is the remote command string" \
+	|| bad "subdir archive: ssh argv missing '$NAME' (log: $(cat "$SSH_LOG" 2>/dev/null))"
+EXPECT_BYTES=$(wc -c < "$FIXTURE_REPO/public/api/archive/anchor-source-${DAG_HEX}.json" | tr -d ' ')
+grep -q "STDIN_BYTES: ${EXPECT_BYTES}" "$SSH_LOG" \
+	&& ok "subdir archive: content read from public/api/archive/ ($EXPECT_BYTES bytes)" \
+	|| bad "subdir archive: stdin byte mismatch (expected $EXPECT_BYTES, log: $(cat "$SSH_LOG" 2>/dev/null))"
+teardown
+
+# ---- case 10: archive/anchor-receipt-<64hex>.json -> pushed ------------------
+setup
+NAME="archive/anchor-receipt-${TX_HEX}.json"
+OUT="$(run_push "$NAME" 2>&1)"
+RC=$?
+[ "$RC" -eq 0 ] \
+	&& ok "subdir archive: anchor-receipt archive -> exit 0" \
+	|| bad "subdir archive: expected exit 0, got $RC (out: $OUT)"
+grep -q "\\[${NAME}\\]" "$SSH_LOG" \
+	&& ok "subdir archive: receipt basename carried through verbatim (tx_id-keyed)" \
+	|| bad "subdir archive: ssh argv missing '$NAME' (log: $(cat "$SSH_LOG" 2>/dev/null))"
+teardown
+
+# ---- case 11: peers-history/<snapshot> resolved from the host state dir ------
+setup
+NAME="peers-history/peers-2026-08-05.json.gz"
+OUT="$(run_push "$NAME" 2>&1)"
+RC=$?
+[ "$RC" -eq 0 ] \
+	&& ok "subdir peers-history: snapshot -> exit 0" \
+	|| bad "subdir peers-history: expected exit 0, got $RC (out: $OUT)"
+grep -q "\\[${NAME}\\]" "$SSH_LOG" \
+	&& ok "subdir peers-history: subdirectory-qualified name is the remote command string" \
+	|| bad "subdir peers-history: ssh argv missing '$NAME' (log: $(cat "$SSH_LOG" 2>/dev/null))"
+EXPECT_BYTES=$(wc -c < "$PEERS_STATE_DIR/peers-2026-08-05.json.gz" | tr -d ' ')
+grep -q "STDIN_BYTES: ${EXPECT_BYTES}" "$SSH_LOG" \
+	&& ok "subdir peers-history: content read from the host state dir, not the repo" \
+	|| bad "subdir peers-history: stdin byte mismatch (expected $EXPECT_BYTES, log: $(cat "$SSH_LOG" 2>/dev/null))"
+teardown
+
+# ---- case 12: peers-history falls back to a repo-local staging copy ----------
+setup
+rm -f "$PEERS_STATE_DIR/peers-2026-08-05.json.gz"
+mkdir -p "$FIXTURE_REPO/public/api/peers-history"
+printf '{"staged":true}\n' | gzip -c > "$FIXTURE_REPO/public/api/peers-history/peers-2026-08-05.json.gz"
+OUT="$(run_push peers-history/peers-2026-08-05.json.gz 2>&1)"
+RC=$?
+[ "$RC" -eq 0 ] \
+	&& ok "subdir peers-history: repo-local staging fallback -> exit 0" \
+	|| bad "subdir peers-history: fallback expected exit 0, got $RC (out: $OUT)"
+EXPECT_BYTES=$(wc -c < "$FIXTURE_REPO/public/api/peers-history/peers-2026-08-05.json.gz" | tr -d ' ')
+grep -q "STDIN_BYTES: ${EXPECT_BYTES}" "$SSH_LOG" \
+	&& ok "subdir peers-history: fallback read the repo-local copy" \
+	|| bad "subdir peers-history: fallback byte mismatch (expected $EXPECT_BYTES, log: $(cat "$SSH_LOG" 2>/dev/null))"
+teardown
+
+# ---- case 13: path traversal -> rejected before ssh --------------------------
+setup
+OUT="$(run_push "archive/../../etc/passwd" 2>&1)"
+RC=$?
+[ "$RC" -ne 0 ] \
+	&& ok "traversal: archive/../../etc/passwd -> nonzero exit" \
+	|| bad "traversal: expected nonzero exit, got 0"
+echo "$OUT" | grep -q 'path traversal rejected' \
+	&& ok "traversal: error names the traversal explicitly" \
+	|| bad "traversal: missing 'path traversal rejected' (out: $OUT)"
+ssh_was_invoked \
+	&& bad "traversal: ssh stub was invoked (must fail BEFORE any push attempt)" \
+	|| ok "traversal: ssh stub was never invoked"
+teardown
+
+# ---- case 14: absolute path -> rejected before ssh --------------------------
+setup
+OUT="$(run_push "/etc/passwd" 2>&1)"
+RC=$?
+[ "$RC" -ne 0 ] \
+	&& ok "absolute: /etc/passwd -> nonzero exit" \
+	|| bad "absolute: expected nonzero exit, got 0"
+echo "$OUT" | grep -q 'absolute path rejected' \
+	&& ok "absolute: error names the absolute path rule" \
+	|| bad "absolute: missing 'absolute path rejected' (out: $OUT)"
+ssh_was_invoked \
+	&& bad "absolute: ssh stub was invoked" \
+	|| ok "absolute: ssh stub was never invoked"
+teardown
+
+# ---- case 15: shell metacharacters -> rejected before ssh -------------------
+# $FILENAME becomes the remote command string, so metacharacter rejection is
+# a remote-command-injection guard, not just a local path guard.
+setup
+OUT="$(run_push 'archive/x;whoami' 2>&1)"
+RC=$?
+[ "$RC" -ne 0 ] \
+	&& ok "metachar: 'archive/x;whoami' -> nonzero exit" \
+	|| bad "metachar: expected nonzero exit, got 0"
+echo "$OUT" | grep -q 'illegal characters' \
+	&& ok "metachar: error names the illegal-character rule" \
+	|| bad "metachar: missing 'illegal characters' (out: $OUT)"
+ssh_was_invoked \
+	&& bad "metachar: ssh stub was invoked" \
+	|| ok "metachar: ssh stub was never invoked"
+teardown
+
+# ---- case 16: nested path under an allowed prefix -> rejected ---------------
+setup
+OUT="$(run_push "archive/sub/anchor-receipt-${TX_HEX}.json" 2>&1)"
+RC=$?
+[ "$RC" -ne 0 ] \
+	&& ok "nested: archive/sub/<name> -> nonzero exit (one level only)" \
+	|| bad "nested: expected nonzero exit, got 0"
+ssh_was_invoked \
+	&& bad "nested: ssh stub was invoked" \
+	|| ok "nested: ssh stub was never invoked"
+teardown
+
+# ---- case 17: unknown subdirectory prefix -> rejected ----------------------
+setup
+OUT="$(run_push "secrets/creds.json" 2>&1)"
+RC=$?
+[ "$RC" -ne 0 ] \
+	&& ok "unknown-prefix: secrets/creds.json -> nonzero exit" \
+	|| bad "unknown-prefix: expected nonzero exit, got 0"
+echo "$OUT" | grep -q 'unrecognized filename' \
+	&& ok "unknown-prefix: falls through to the unrecognized-filename rejection" \
+	|| bad "unknown-prefix: missing 'unrecognized filename' (out: $OUT)"
+ssh_was_invoked \
+	&& bad "unknown-prefix: ssh stub was invoked" \
+	|| ok "unknown-prefix: ssh stub was never invoked"
+teardown
+
+# ---- case 18: malformed archive basename -> rejected -----------------------
+setup
+OUT="$(run_push "archive/anchor-receipt-notahash.json" 2>&1)"
+RC=$?
+[ "$RC" -ne 0 ] \
+	&& ok "bad-basename: non-hex archive basename -> nonzero exit" \
+	|| bad "bad-basename: expected nonzero exit, got 0"
+echo "$OUT" | grep -q 'archive/ basename must be' \
+	&& ok "bad-basename: error states the two accepted archive patterns" \
+	|| bad "bad-basename: missing pattern error (out: $OUT)"
+ssh_was_invoked \
+	&& bad "bad-basename: ssh stub was invoked" \
+	|| ok "bad-basename: ssh stub was never invoked"
+teardown
+
+# ---- case 19: uppercase hex archive basename -> rejected -------------------
+# The repo-wide convention is lowercase [a-f0-9]{64} (schemas, tx_id checks,
+# dag roots). Admitting uppercase here would create a second URL for the same
+# anchor, only one of which the history file points at.
+setup
+UPPER_HEX="$(printf 'A%.0s' $(seq 1 64))"
+OUT="$(run_push "archive/anchor-source-${UPPER_HEX}.json" 2>&1)"
+RC=$?
+[ "$RC" -ne 0 ] \
+	&& ok "case-sensitivity: uppercase hex archive basename -> nonzero exit" \
+	|| bad "case-sensitivity: expected nonzero exit, got 0"
+ssh_was_invoked \
+	&& bad "case-sensitivity: ssh stub was invoked" \
+	|| ok "case-sensitivity: ssh stub was never invoked"
+teardown
+
+# ---- case 20: malformed peers-history basename -> rejected -----------------
+setup
+OUT="$(run_push "peers-history/peers-2026-8-5.json.gz" 2>&1)"
+RC=$?
+[ "$RC" -ne 0 ] \
+	&& ok "bad-basename: non-ISO snapshot date -> nonzero exit" \
+	|| bad "bad-basename: expected nonzero exit, got 0"
+echo "$OUT" | grep -q 'peers-history/ basename must be' \
+	&& ok "bad-basename: error states the peers-YYYY-MM-DD.json.gz pattern" \
+	|| bad "bad-basename: missing pattern error (out: $OUT)"
+ssh_was_invoked \
+	&& bad "bad-basename: ssh stub was invoked" \
+	|| ok "bad-basename: ssh stub was never invoked"
+teardown
+
+# ---- case 21: well-formed archive name but source absent -> fails closed ----
+setup
+MISSING_HEX="$(printf 'c%.0s' $(seq 1 64))"
+OUT="$(run_push "archive/anchor-receipt-${MISSING_HEX}.json" 2>&1)"
+RC=$?
+[ "$RC" -ne 0 ] \
+	&& ok "missing-source: absent archive file -> nonzero exit" \
+	|| bad "missing-source: expected nonzero exit, got 0"
+echo "$OUT" | grep -q 'source not found' \
+	&& ok "missing-source: error names the missing archive source" \
+	|| bad "missing-source: missing 'source not found' (out: $OUT)"
+ssh_was_invoked \
+	&& bad "missing-source: ssh stub was invoked for an absent archive file" \
+	|| ok "missing-source: ssh stub was never invoked"
+teardown
+
+# ---- case 22: snapshot absent in BOTH locations -> fails closed ------------
+setup
+rm -f "$PEERS_STATE_DIR/peers-2026-08-05.json.gz"
+OUT="$(run_push "peers-history/peers-2026-08-05.json.gz" 2>&1)"
+RC=$?
+[ "$RC" -ne 0 ] \
+	&& ok "missing-source: snapshot absent in state dir and repo -> nonzero exit" \
+	|| bad "missing-source: expected nonzero exit, got 0"
+echo "$OUT" | grep -q 'nor repo fallback' \
+	&& ok "missing-source: error names both locations it looked in" \
+	|| bad "missing-source: error does not name both locations (out: $OUT)"
+ssh_was_invoked \
+	&& bad "missing-source: ssh stub was invoked" \
+	|| ok "missing-source: ssh stub was never invoked"
 teardown
 
 # ---- summary -----------------------------------------------------------------

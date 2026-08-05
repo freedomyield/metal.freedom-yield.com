@@ -119,7 +119,8 @@ These reflect our specific two-host topology and our specific initial VPS setup.
 
 | Script | What it does | Why it's specific |
 |---|---|---|
-| `scripts/push-to-web-host.sh` | SSH push of public JSON files from validator host → web host | Tied to our forced-command SSH wrapper and web-host path layout |
+| `scripts/push-to-web-host.sh` | SSH push of public JSON files from validator host → web host. Flat allowlisted filenames, plus two subdirectory prefixes: `archive/anchor-{source,receipt}-<64hex>.json` (R18 per-anchor archives) and `peers-history/peers-YYYY-MM-DD.json.gz` (daily snapshots). | Tied to our forced-command SSH wrapper and web-host path layout |
+| `scripts/deploy/receive-subdir-allowlist.snippet.sh` | Canonical text of the web-host-side receive block for those two subdirectory prefixes (validates the basename, creates the subdir, atomic write, content-type check). Not run directly — embedded by the installer below. | Mirrors the sender allowlist; both sides enforce it independently |
 | `scripts/sync-to-validator-host.sh` | local Mac → validator host sync of `scripts/` + cron files | Specific to our deploy authorization model |
 | `scripts/server-status.sh` | Host metrics JSON for ops dashboard | Tied to our `/ops/` page schema |
 | `scripts/vps-bootstrap.sh` | Initial VPS setup (sshd hardening, fail2ban, docker, cron seeding) | Specific to our chosen base image |
@@ -180,6 +181,7 @@ The cryptographic-evidence anchor pipeline (identity → anchor-source → A-cha
 | `scripts/install-xserver-anchor-source-allowlist.sh` | Extend the Xserver-side forced-command allowlist for `anchor-source.json`. | manual |
 | `scripts/install-host-log-dir.sh` | Ensure the repo-local `logs/` directory exists on the validator host with `deploy:deploy` ownership + `755`, so cron `>> .../logs/*.log` redirects never fail after a fresh clone or `git reset --hard` (companion to the tracked `logs/.gitkeep`). Idempotent, refuses local Mac paths. | manual |
 | `scripts/install-xserver-sig-allowlist.sh` | Extend the Xserver receive-metal-push allowlist for `.sig` files. | manual |
+| `scripts/install-xserver-subdir-allowlist.sh` | Teach the Xserver receive-metal-push wrapper the two subdirectory prefixes (`archive/`, `peers-history/`) by embedding `scripts/deploy/receive-subdir-allowlist.snippet.sh` at its top. Auto-detects the destination api dir (refuses on ambiguity — `FY_WEB_API_DIR=` to override), backs up, syntax-checks before installing, idempotent, `--dry-run` / `--print-remote`. | manual |
 | `scripts/deploy/build-rsync-excludes.sh` | Emit the shared rsync feed-exclusion args (single source of truth: `deploy/feed-excludes.txt`) for both deploy targets, so validator-host and Xserver rsyncs cannot drift. | CI (deploy.yml) |
 | `scripts/install-xserver-static-deploy-key.sh` | Install the `rrsync -wo`-restricted `authorized_keys` entry so GitHub Actions can rsync `public/` to the Xserver public origin, confined to the metal public dir on the shared host. | manual |
 | `scripts/install-delegator-feed-started-at.sh` | One-line installer for the delegator-feed `started_at` field. | manual |
