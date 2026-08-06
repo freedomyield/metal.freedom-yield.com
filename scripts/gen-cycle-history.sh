@@ -89,6 +89,16 @@ TMP="${OUT_DIR}/.cycle-history.jsonl.tmp.$$"
 trap 'rm -f "${TMP}"' EXIT
 
 # One JSON object per line. Sorted by cycle_n so output is deterministic.
+#
+# The incident date field is "detectionDate" — the name incidents.schema.v1.json
+# declares, the example carries and the live feed uses. Until 2026-08-06 the two
+# incident selectors below read ".date", which no incident object has ever had:
+# jq yields null for a missing key, `null >= "2026-06-04"` is false for every
+# entry, so incidents_in_cycle_count pinned to 0 and incidents_in_cycle_ids to []
+# on every cycle regardless of what actually happened. Same writer/reader
+# field-name class as the 2026-08-04 anchor-history near-miss, and just as
+# silent: the output stayed well-formed and schema-valid, it merely understated
+# the public record. Found by scripts/check-field-contracts.py.
 jq -c \
   --slurpfile inc "${INCIDENTS}" \
   --arg network "${NETWORK}" \
@@ -114,11 +124,11 @@ jq -c \
         min_peer_count: $c.min_peer_count,
         incidents_in_cycle_count:
           ( [ $inc[0].incidents[]?
-              | select(.date >= $c.start_iso and .date < $c.end_iso) ]
+              | select(.detectionDate >= $c.start_iso and .detectionDate < $c.end_iso) ]
             | length ),
         incidents_in_cycle_ids:
           [ $inc[0].incidents[]?
-            | select(.date >= $c.start_iso and .date < $c.end_iso)
+            | select(.detectionDate >= $c.start_iso and .detectionDate < $c.end_iso)
             | .id ],
         explorer_url: $c.explorer_url,
         cycle_status: "closed",

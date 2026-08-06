@@ -38,7 +38,7 @@ Every line is a complete JSON object. Fields:
 | `final_delegation_fee_pct` | number | delegation fee at cycle close |
 | `avg_peer_count` | number | mean peer count over recorded samples |
 | `min_peer_count` | integer | minimum peer count over recorded samples |
-| `incidents_in_cycle_count` | integer | count of `incidents.json` entries with date inside `[start_iso, end_iso)` |
+| `incidents_in_cycle_count` | integer | count of `incidents.json` entries whose `detectionDate` is inside `[start_iso, end_iso)` |
 | `incidents_in_cycle_ids` | array of strings | the `id` values of those incidents (empty array if none) |
 | `explorer_url` | string | explorer validator page URL for independent audit |
 | `cycle_status` | string | `closed` (only closed cycles appear) |
@@ -62,7 +62,7 @@ The generator script (`scripts/gen-cycle-history.sh`) reads:
 1. `public/api/uptime-cycles.json` — the canonical per-cycle uptime ledger.
 2. `public/api/incidents.json` — the operator-maintained incident log.
 
-For each cycle in `uptime-cycles.json.cycles[]`, sorted by `cycle_n`, it emits a JSON line whose `incidents_in_cycle_count` and `incidents_in_cycle_ids` come from selecting incidents whose `date` falls in the half-open interval `[start_iso, end_iso)`.
+For each cycle in `uptime-cycles.json.cycles[]`, sorted by `cycle_n`, it emits a JSON line whose `incidents_in_cycle_count` and `incidents_in_cycle_ids` come from selecting incidents whose `detectionDate` falls in the half-open interval `[start_iso, end_iso)`. (`detectionDate` is the field name `incidents.schema.v1.json` declares; the generator read a non-existent `date` field until 2026-08-06, which silently pinned both fields to `0` / `[]` — see the comment block in `scripts/gen-cycle-history.sh`.)
 
 The generator is deterministic and idempotent: a re-run on the same inputs produces byte-identical output, validated by `md5` against the previous file.
 
