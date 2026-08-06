@@ -27,8 +27,14 @@
 # read-only cron never grows an unused line.
 #
 # Behavior:
-#   - Scope: files matching /etc/cron.d/metal-* ONLY (project-scoped prefix;
-#     never touches other projects' cron files).
+#   - Scope: files matching /etc/cron.d/metal-* OR /etc/cron.d/freedom-yield-*
+#     ONLY (this project's two live cron.d prefixes; never touches other
+#     projects' cron files). 2026-08-06 host audit (docs/audits/
+#     constitution-2026-07-07-host-state-audit.md:35) found the live host
+#     carries 15 project cron files, one of them freedom-yield-peer-geo — an
+#     orphan with no repo installer of its own (scripts/peer-geo.py, cron-
+#     invoked, calls push-to-web-host.sh). Scoping to metal-* only would
+#     leave that cron permanently unreachable by this remediation path.
 #   - Idempotent: files already carrying every required header are left
 #     byte-identical.
 #   - Insertion point: after the leading comment block (matching the style of
@@ -138,7 +144,12 @@ CHANGED=0
 SKIPPED=0
 WARNED=0
 
-for f in "$CRON_DIR"/metal-*; do
+# Two prefixes: metal-* (the common case) and freedom-yield-* (orphan crons
+# with no repo installer, e.g. freedom-yield-peer-geo — see the Scope note
+# above). Neither pattern matching anything is tolerated the same way a bare
+# metal-* with no hits always has been: [ -f "$f" ] below skips the literal
+# unexpanded glob string.
+for f in "$CRON_DIR"/metal-* "$CRON_DIR"/freedom-yield-*; do
 	[ -f "$f" ] || continue
 	need_shell=1; need_path=1; need_fy_live=0
 	grep -qE '^SHELL=/bin/bash\b' "$f" && need_shell=0
@@ -153,7 +164,7 @@ for f in "$CRON_DIR"/metal-*; do
 	# decision, not this installer's.
 	if [ "$need_shell" -eq 1 ] && grep -qE '^SHELL=' "$f"; then
 		WARNED=$((WARNED + 1))
-		echo "warn:    $(basename "$f") carries $(grep -E '^SHELL=' "$f" | head -1) (not /bin/bash) — left untouched; operator review required"
+		echo "warn:    $(basename "$f") carries $(grep -E '^SHELL=' "$f" | head -1) (not /bin/bash) — left untouched; operator review required (FY_LIVE check also skipped)"
 		continue
 	fi
 

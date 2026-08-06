@@ -264,6 +264,13 @@ SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin
 * * * * * deploy bash ${REPO_ROOT}/scripts/server-status.sh >> /var/log/server-status.log 2>&1
 EOF
+
+	# freedom-yield-* prefix (2026-08-06 review I-2): the live host carries
+	# freedom-yield-peer-geo, an orphan cron with no repo installer, calling
+	# push-to-web-host.sh (allowlisted) directly. Missing every header.
+	cat > "$DIR2/freedom-yield-peer-geo" <<EOF
+0 6 * * * deploy bash ${REPO_ROOT}/scripts/push-to-web-host.sh peer-geo.json
+EOF
 }
 teardown2() { rm -rf "$DIR2" "$BK2"; DIR2=""; BK2=""; }
 run_installer2() {
@@ -324,6 +331,30 @@ if [ -x "${REPO_ROOT}/scripts/check-cron-file.sh" ]; then
 else
 	echo "SKIP  lint case (check-cron-file.sh not executable)"
 fi
+teardown2
+
+# ---- case 15 (2026-08-06 review I-2): freedom-yield-* prefix is in scope --------
+setup2
+run_installer2 >/dev/null 2>&1
+RC=$?
+[ "$RC" -eq 0 ] \
+	&& ok "freedom-yield-*: apply exit 0" \
+	|| bad "freedom-yield-*: apply exit 0 (actual=$RC)"
+grep -qE '^SHELL=/bin/bash$' "$DIR2/freedom-yield-peer-geo" \
+	&& grep -qE '^PATH=' "$DIR2/freedom-yield-peer-geo" \
+	&& grep -qE '^FY_LIVE=1$' "$DIR2/freedom-yield-peer-geo" \
+	&& ok "freedom-yield-*: SHELL+PATH+FY_LIVE all added to the orphan cron" \
+	|| bad "freedom-yield-*: SHELL+PATH+FY_LIVE all added to the orphan cron (content: $(cat "$DIR2/freedom-yield-peer-geo"))"
+teardown2
+
+# ---- case 16: a name that is neither metal-* nor freedom-yield-* stays out of scope --
+setup2
+printf '0 1 * * * someone bash /other/project.sh\n' > "$DIR2/otherproj-unrelated"
+OBEFORE="$(cat "$DIR2/otherproj-unrelated")"
+run_installer2 >/dev/null 2>&1
+[ "$(cat "$DIR2/otherproj-unrelated")" = "$OBEFORE" ] \
+	&& ok "freedom-yield-*: widened glob still leaves non-prefixed files untouched" \
+	|| bad "freedom-yield-*: widened glob still leaves non-prefixed files untouched"
 teardown2
 
 # ---- summary ----------------------------------------------------------------------

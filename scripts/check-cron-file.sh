@@ -226,16 +226,42 @@ echo ""
 # above are what keep a REAL side-effecting script from silently escaping
 # the rule as new callers appear.
 #
+# Known gap (not closed by either layer): a script that reaches
+# notify.sh/push-to-web-host.sh only INDIRECTLY — via an env-injected
+# driver rather than a literal scripts/<name>.sh token in the cron command
+# — is invisible to both the allowlist match (the driver's basename never
+# appears in CRON_LINES) and the dynamic resolve (same reason). Example:
+# install-anchor-watch-alert-only.sh's cron line invokes
+# watch-anchor-events.sh directly (allowlisted, so still caught here), but
+# ANCHOR_DRIVER=notify-anchor-transition.sh is set via env, not spelled out
+# on the command line — if watch-anchor-events.sh's OWN allowlist entry
+# were ever removed, its indirect notify call would stop being detected.
+# Rule 6 is therefore a floor, not a proof of completeness; a script whose
+# ONLY side-effecting caller is reached by env-injected indirection needs
+# its own allowlist entry, not just its driver's.
+#
+# Exact-match caveat: FY_LIVE=1 must appear as a bare `^FY_LIVE=1$` line —
+# no surrounding whitespace, no quoting, no inline comment. A hand-edited
+# file that wrote `FY_LIVE = 1` or `FY_LIVE=1  # note` will be reported as
+# MISSING even though cron would likely still export a truthy-looking
+# value. This mirrors fyd_is_live()'s own deliberate strictness
+# (scripts/lib/side-effects.sh: "no trimming, no truthiness, no case
+# folding") — the two must agree on what counts as live, or a file could
+# lint clean while the library it's gating still treats it as dry.
+#
 # Migration-window grace: check-cron-file.sh is invoked ONLY as a pre-flight
 # gate inside scripts/install-*-cron.sh (this candidate content, not yet
-# written anywhere) and by its own test suite — nothing in this repo runs it
-# against an already-deployed /etc/cron.d/metal-* file automatically. A host
-# file installed before this rule existed will not trip any gate until (a) a
-# human pulls it down and lints it by hand (an audit), or (b) its owning
-# installer is re-run. FYD_CRON_FY_LIVE_GRACE=1 exists for case (a) only —
-# to audit a not-yet-reinstalled host file during the 2026-08 migration
-# window without the audit itself reporting a false new violation. It must
-# never be set by an installer's own pre-flight call.
+# written anywhere), by install-repoint-publish-crons.sh's own before/after
+# lint_violations() comparison (wrapped in FYD_CRON_FY_LIVE_GRACE=1 there —
+# repointing a script name is not the tool that should be blocked by an
+# unrelated FY_LIVE gap), and by its own test suite — nothing else in this
+# repo runs it against an already-deployed /etc/cron.d file automatically.
+# A host file installed before this rule existed will not trip any OTHER
+# gate until (a) a human pulls it down and lints it by hand (an audit), or
+# (b) its owning installer is re-run. FYD_CRON_FY_LIVE_GRACE=1 exists for
+# case (a) only — to audit a not-yet-reinstalled host file during the
+# 2026-08 migration window without the audit itself reporting a false new
+# violation. It must never be set by an installer's own pre-flight call.
 echo "[6] Side-effecting cron entries must carry FY_LIVE=1"
 
 # See install-cron-env-headers.sh — this list MUST stay identical there.

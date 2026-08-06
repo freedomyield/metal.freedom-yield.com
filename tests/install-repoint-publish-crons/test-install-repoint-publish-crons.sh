@@ -176,6 +176,32 @@ if grep -q 'push-to-xserver.sh a.json' "${CD}/metal-node-info"; then
 	ok "T12 rewrite adding a violation was skipped (cron left on old name)"
 else no "T12 protective skip"; fi
 
+# ---- T13: the REAL check-cron-file.sh + a pre-existing FY_LIVE gap does NOT --
+# block a pure repoint (2026-08-06 review I-3: push-to-web-host.sh is on
+# check-cron-file.sh Rule 6's side-effect allowlist while push-to-xserver.sh
+# never was, so a rename alone can flip Rule 6's verdict from pass to fail —
+# lint_violations() must wrap the checker in FYD_CRON_FY_LIVE_GRACE=1 so this
+# unrelated migration-window gap does not look like a violation the rewrite
+# ADDED). Uses the actual repo check-cron-file.sh, not a stub, so this is a
+# real regression guard rather than a simulation of one.
+echo "[T13] real check-cron-file.sh: pre-existing FY_LIVE gap does not block repoint"
+make_fixture
+cp "${REPO_ROOT}/scripts/check-cron-file.sh" "${SD}/check-cron-file.sh"
+chmod +x "${SD}/check-cron-file.sh"
+# Rules 1-5 compliant on purpose, so only the Rule 6 (FY_LIVE) delta from the
+# OLD→NEW rename is being exercised; no FY_LIVE=1 line anywhere in the file.
+cat > "${CD}/metal-node-info" <<EOF
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+*/5 * * * * deploy { echo "=== x start \$(date -u +\%FT\%TZ) ==="; cd /x && bash scripts/node-info.sh && bash scripts/push-to-xserver.sh a.json; rc=\$?; echo "=== x end \$(date -u +\%FT\%TZ) rc=\$rc ==="; } >> /x/logs/node-info.log 2>&1
+EOF
+OUT="$(run 2>&1)"; RC=$?
+if [ "${RC}" = 0 ] \
+   && grep -q 'push-to-web-host.sh a.json' "${CD}/metal-node-info" \
+   && ! grep -q 'push-to-xserver.sh' "${CD}/metal-node-info"; then
+	ok "T13 real linter: repoint proceeds despite the pre-existing FY_LIVE gap"
+else no "T13 real linter repoint (rc=${RC}, out: ${OUT})"; fi
+
 echo ""
 echo "================================================================"
 printf 'RESULTS: %s PASS / %s FAIL (total %s)\n' "${PASS}" "${FAIL}" "$((PASS+FAIL))"
