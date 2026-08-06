@@ -44,6 +44,21 @@ check_eq() {
 TMP="$(mktemp -d -t append-history-r13r18-test.XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
 
+# Pin no-op stubs for the R18 publish side effect (review round 1,
+# 2026-08-06): case 1 below is a happy-path append but never creates a real
+# archive/ file, so it falls into the "archive not found locally" WARN+alert
+# path added by that change. Without this pin, that path calls the REAL
+# scripts/notify.sh — which fires an actual ntfy.sh push on any host that
+# has /etc/freedom-yield/ntfy-topic configured (the validator host). See
+# tests/append-anchor-history/test-r18-archive-publish.sh for the dedicated
+# coverage of the publish behavior itself.
+STUB_NOOP_DIR="$TMP/noop"
+mkdir -p "$STUB_NOOP_DIR"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB_NOOP_DIR/push.sh"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB_NOOP_DIR/notify.sh"
+chmod +x "$STUB_NOOP_DIR/push.sh" "$STUB_NOOP_DIR/notify.sh"
+export FYD_PUSH_TO_WEB_HOST="$STUB_NOOP_DIR/push.sh" FYD_NOTIFY="$STUB_NOOP_DIR/notify.sh"
+
 TX_ID="2222222222222222222222222222222222222222222222222222222222222222"
 DAG_ROOT="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 RECEIPT="$TMP/receipt.json"

@@ -57,11 +57,29 @@
 #
 # Env overrides (all optional; defaults match production layout):
 #   FYD_PUSH_TO_WEB_HOST   path to push-to-web-host.sh (default: repo's own)
-#   ANCHOR_ARCHIVE_DIR     local dir holding the archive/ copies (default:
-#                          dirname(--history)/archive, matching
-#                          gen-anchor-source.sh / gen-anchor-receipt.sh)
+#   ANCHOR_ARCHIVE_DIR     WHERE THIS SCRIPT LOOKS to decide "does the local
+#                          archive file exist" (default: dirname(--history)/
+#                          archive, matching gen-anchor-source.sh /
+#                          gen-anchor-receipt.sh's own default). Test-only
+#                          readability probe, not a redirect of what gets
+#                          pushed: the actual push source path is resolved
+#                          independently, inside push-to-web-host.sh itself,
+#                          from ITS OWN REPO_BASE (or that script's own
+#                          REPO_BASE env override) — never from this var. If
+#                          the two ever disagree, this script confirms
+#                          existence against A but push-to-web-host.sh reads
+#                          from B, so only override this for test isolation
+#                          (pointing at a scratch dir with no real
+#                          push-to-web-host.sh downstream of it), never in
+#                          production.
 #   FYD_NOTIFY             notifier script for the publish-failure alert
 #                          (default: <repo>/scripts/notify.sh)
+#   FYD_PUBLISH_ARCHIVES   set to 0 to skip the R18 publish step entirely —
+#                          no push-to-web-host.sh invocation, no notify
+#                          alert, just the two manual commands printed to
+#                          stderr. Kill switch for a rehearsal/dry-run
+#                          caller that wants zero outbound calls without
+#                          constructing stub scripts. Default: enabled (1).
 
 set -euo pipefail
 
@@ -409,7 +427,17 @@ mv "$TMP_OUT" "$HISTORY" || {
 	exit 5
 }
 
-echo "OK: appended line to $HISTORY (tx_id=$TX_ID)"
+# `|| true` is load-bearing, not decorative: under `set -e`, if the caller
+# has closed stdout (fd 1) — e.g. `bash append-anchor-history.sh >&-` —
+# this plain `echo` fails ("write error: Bad file descriptor") and, being
+# an ordinary statement (not part of a conditional), that failure aborts
+# the script HERE, before the R18 publication block below ever runs. That
+# is precisely the failure mode this feature exists to prevent: the line
+# lands (archived_source_path/archived_receipt_path already written and
+# advertised) but nothing publishes the archives it points at. Verified by
+# reproduction (2026-08-06 review round 1): without `|| true`, exit=1,
+# history line present, zero push attempts, zero WARN/alert.
+echo "OK: appended line to $HISTORY (tx_id=$TX_ID)" || true
 
 # ---- R18 publication: push the two per-anchor archives (best-effort) ------
 # Runs strictly AFTER the append above already succeeded (mv landed) — this
@@ -421,6 +449,10 @@ echo "OK: appended line to $HISTORY (tx_id=$TX_ID)"
 # publish step (or re-pushing by hand with the printed command) just
 # overwrites the same bytes at the same remote path.
 PUSH_TO_WEB_HOST="${FYD_PUSH_TO_WEB_HOST:-${REPO_ROOT}/scripts/push-to-web-host.sh}"
+# ARCHIVE_DIR only decides what THIS SCRIPT treats as "the local archive
+# file exists" — see the ANCHOR_ARCHIVE_DIR header comment. It does NOT
+# redirect what push-to-web-host.sh actually reads: that script resolves
+# its own source path independently from its own REPO_BASE. Test-only.
 ARCHIVE_DIR="${ANCHOR_ARCHIVE_DIR:-$(dirname "$HISTORY")/archive}"
 NOTIFY="${FYD_NOTIFY:-${REPO_ROOT}/scripts/notify.sh}"
 
@@ -462,5 +494,18 @@ publish_archive() {
 	return 0
 }
 
-publish_archive "${ARCHIVE_DIR}/anchor-source-${DAG_ROOT}.json" "archive/anchor-source-${DAG_ROOT}.json" "anchor-source"
-publish_archive "${ARCHIVE_DIR}/anchor-receipt-${TX_ID}.json" "archive/anchor-receipt-${TX_ID}.json" "anchor-receipt"
+# Kill switch (2026-08-06, review round 1 defense-in-depth): every existing
+# caller either stubs FYD_PUSH_TO_WEB_HOST/FYD_NOTIFY (tests) or genuinely
+# wants the real push (production pipeline), so this defaults to ON and
+# changes nothing for either. It exists for a caller that wants neither —
+# a future test or rehearsal script that exercises append-anchor-history.sh
+# for its append-only-invariant behavior without wanting ANY outbound call
+# attempted, without having to construct stub scripts first.
+if [ "${FYD_PUBLISH_ARCHIVES:-1}" = "0" ]; then
+	echo "SKIP: R18 archive publish disabled (FYD_PUBLISH_ARCHIVES=0) — history line already recorded the URLs; publish manually when ready:" >&2
+	echo "      bash \"$PUSH_TO_WEB_HOST\" \"archive/anchor-source-${DAG_ROOT}.json\"" >&2
+	echo "      bash \"$PUSH_TO_WEB_HOST\" \"archive/anchor-receipt-${TX_ID}.json\"" >&2
+else
+	publish_archive "${ARCHIVE_DIR}/anchor-source-${DAG_ROOT}.json" "archive/anchor-source-${DAG_ROOT}.json" "anchor-source"
+	publish_archive "${ARCHIVE_DIR}/anchor-receipt-${TX_ID}.json" "archive/anchor-receipt-${TX_ID}.json" "anchor-receipt"
+fi

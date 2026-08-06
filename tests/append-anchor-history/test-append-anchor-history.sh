@@ -51,6 +51,24 @@ AJVEOF
 chmod +x "$STUB_AJV_DIR/ajv"
 PATH="$STUB_AJV_DIR:$PATH"
 
+# Pin no-op stubs for the R18 publish side effect (review round 1,
+# 2026-08-06): none of the fixtures below ever create a real archive/
+# file, so every successful append here falls into the "archive not found
+# locally" WARN+alert path added by that change. Without this pin, that
+# path calls the REAL scripts/notify.sh — which, on a host that has
+# /etc/freedom-yield/ntfy-topic configured (i.e. the validator host, not
+# just this dev machine), fires an actual ntfy.sh push notification per
+# invocation. This suite alone would have fired 6 real notifications.
+# Pinning both env vars to no-op stubs makes this suite hermetic
+# regardless of host — see tests/append-anchor-history/test-r18-archive-
+# publish.sh for the dedicated coverage of the publish behavior itself.
+STUB_NOOP_DIR="$TEST_DIR/noop"
+mkdir -p "$STUB_NOOP_DIR"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB_NOOP_DIR/push.sh"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB_NOOP_DIR/notify.sh"
+chmod +x "$STUB_NOOP_DIR/push.sh" "$STUB_NOOP_DIR/notify.sh"
+export FYD_PUSH_TO_WEB_HOST="$STUB_NOOP_DIR/push.sh" FYD_NOTIFY="$STUB_NOOP_DIR/notify.sh"
+
 PASS=0
 FAIL=0
 
