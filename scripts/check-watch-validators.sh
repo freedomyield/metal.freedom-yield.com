@@ -65,34 +65,60 @@
 #
 # Env overrides (test-time + ops):
 #   WATCH_LIST_FILE   private NodeID list (default /etc/freedom-yield/watch-list.json)
-#   WATCH_STATE_DIR   state dir (default /var/lib/freedom-yield)
+#   WATCH_STATE_DIR   state dir (default /var/lib/freedom-yield). Resolved by
+#                     scripts/lib/side-effects.sh (fyd_state_dir watch), which
+#                     also honours the canonical FY_STATE_DIR at higher
+#                     precedence. The legacy spelling is unchanged.
 #   EXPLORER_API      explorer validators endpoint
 #   EXPLORER_MIN_VALIDATORS  sanity floor for the response size (default 50)
-#   WATCH_NOTIFY      notifier (default <repo>/scripts/notify.sh)
+#   WATCH_NOTIFY      notifier (default <repo>/scripts/notify.sh). Resolved by
+#                     scripts/lib/side-effects.sh, not here.
 #   NOTIFY_RETRY_SLEEP  seconds before the single in-run notify retry (default 5; tests override to 0)
+#   FY_LIVE=1         REQUIRED before any notify or baseline write actually
+#                     happens. Anything else is a loud dry no-op printing one
+#                     "DRY: would …" line per suppressed effect
+#                     (scripts/lib/side-effects.sh, C3 rollout 2026-08-06).
+#                     The cron env header carries it; tests deliberately do
+#                     not. NOTE this is a test/prod boundary and is NOT the
+#                     same knob as --dry-run, which is an operator-facing
+#                     "detect and report, don't notify, don't advance the
+#                     baseline" flag and stays exactly as it was.
+#
+# Exit code 3: scripts/lib/side-effects.sh missing (structural).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+FYD_LIB="${ROOT}/scripts/lib/side-effects.sh"
+if [ ! -r "$FYD_LIB" ]; then
+  echo "check-watch-validators: FATAL: side-effects library not readable at $FYD_LIB" >&2
+  exit 3
+fi
+# shellcheck source=scripts/lib/side-effects.sh
+. "$FYD_LIB"
+
 WATCH_LIST_FILE="${WATCH_LIST_FILE:-/etc/freedom-yield/watch-list.json}"
-STATE_DIR="${WATCH_STATE_DIR:-/var/lib/freedom-yield}"
+STATE_DIR="$(fyd_state_dir watch)" || exit $?
 PREV_FILE="${STATE_DIR}/watch-prev-state.json"
 EXPLORER_API="${EXPLORER_API:-https://explorer.metalblockchain.org/api/v1/validators}"
 EXPLORER_MIN="${EXPLORER_MIN_VALIDATORS:-50}"
-NOTIFY="${WATCH_NOTIFY:-${ROOT}/scripts/notify.sh}"
 DRY=0
 [ "${1:-}" = "--dry-run" ] && DRY=1
 
 # --- delivery-confirmed notify (same pattern as check-anomalies.sh's
 # notify_or_keep(): strict mode + one in-run retry on the retryable classes,
 # state only advances on confirmed delivery). See R5 / MONITORING_NOTIFY_CALLERS.md.
+#
+# stdout is still discarded; stderr is NOT (it used to be). A suppressed dry
+# send announces itself on stderr, and swallowing that would recreate exactly
+# the silent-no-op failure the C3 rollout exists to prevent.
+#
+# The old "notifier missing or not executable → rc 100" branch is gone: the
+# library validates the delegate itself and returns 64. Both codes are
+# non-retryable under retryable_notify_rc(), so the control flow is unchanged.
 attempt_notify() {
-  local prio="$1" title="$2" body="$3"
-  if [ ! -x "$NOTIFY" ]; then
-    echo "check-watch-validators: notify script missing or not executable: $NOTIFY" >&2
-    return 100
-  fi
-  NOTIFY_STRICT_EXIT=1 bash "$NOTIFY" "$prio" "$title" "$body" >/dev/null 2>&1
-  return $?
+  local prio="$1" title="$2" body="$3" rc=0
+  fyd_notify --strict "$prio" "$title" "$body" >/dev/null || rc=$?
+  return "$rc"
 }
 retryable_notify_rc() {
   case "$1" in
@@ -125,7 +151,7 @@ if [ -z "$WATCH_IDS" ]; then
   exit 0
 fi
 
-mkdir -p "$STATE_DIR"
+fyd_live_run "create the watch state dir ${STATE_DIR}" mkdir -p "$STATE_DIR"
 
 # Fetch current explorer snapshot once and cache for the loop.
 # Sanity gate (see header): only a credible response may drive state deltas.
@@ -243,6 +269,12 @@ fi
 # having notified and silently swallow the pending alert(s) — the next run
 # would see "no change" instead of retrying. A run with zero changes always
 # persists (pure observation, nothing to confirm).
+#
+# The write itself is gated on FY_LIVE by fyd_live_write, in lock step with
+# the notify above: under a dry run the send is suppressed AND the baseline
+# stays put, so the two can never disagree (scripts/lib/side-effects.sh
+# CONTRACT — "a caller that turns rc 0 into a state transition must gate that
+# state write with the same FY_LIVE").
 if [ "$DRY" = "0" ] && [ "$NOTIFY_CONFIRMED" = "1" ]; then
-  echo "$CURRENT_JSON" > "$PREV_FILE"
+  printf '%s\n' "$CURRENT_JSON" | fyd_live_write "the watch baseline snapshot" "$PREV_FILE"
 fi

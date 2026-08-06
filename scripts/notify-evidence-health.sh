@@ -29,6 +29,14 @@
 # Output (--summary mode): 3 lines on stdout, no ntfy call.
 #   Exit code 0 when 3/3 PASS, 1 otherwise (caller can branch on it if
 #   they want to escalate priority of the host push).
+#
+# Env:
+#   FY_LIVE=1  REQUIRED before the push mode reaches ntfy. Anything else is
+#              a loud dry no-op printing one "DRY: would notify …" line
+#              (scripts/lib/side-effects.sh, C3 rollout 2026-08-06).
+#              --summary mode has no side effect and is unaffected.
+#
+# Exit code 3 (push mode only): scripts/lib/side-effects.sh missing.
 
 set -euo pipefail
 
@@ -38,6 +46,14 @@ case "${1:-}" in
 esac
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+FYD_LIB="${ROOT}/scripts/lib/side-effects.sh"
+if [ ! -r "$FYD_LIB" ]; then
+	echo "notify-evidence-health: FATAL: side-effects library not readable at $FYD_LIB" >&2
+	exit 3
+fi
+# shellcheck source=scripts/lib/side-effects.sh
+. "$FYD_LIB"
+
 LOG_FILE="${ROOT}/logs/gen-evidence.log"
 EVIDENCE_URL="${EVIDENCE_URL:-https://metal.freedom-yield.com/api/evidence.json}"
 
@@ -142,4 +158,4 @@ else
 	TITLE="evidence health: FAIL — see body"
 fi
 
-bash "${ROOT}/scripts/notify.sh" "${PRIO}" "${TITLE}" "${MSG}"
+fyd_notify "${PRIO}" "${TITLE}" "${MSG}"

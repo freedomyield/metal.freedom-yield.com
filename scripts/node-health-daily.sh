@@ -21,18 +21,40 @@
 #     (upgrade timing signals, capacity headroom etc.).
 #
 # This script does NOT push anything itself; cron handles push.
+#
+# Env:
+#   UPTIME_STATE_DIR  state dir (default /var/lib/freedom-yield). Resolved by
+#                     scripts/lib/side-effects.sh (fyd_state_dir uptime),
+#                     which also honours the canonical FY_STATE_DIR at higher
+#                     precedence. The legacy spelling is unchanged — the live
+#                     host cron env headers still set it.
+#   FY_LIVE=1         REQUIRED before ANY file is written: the append-only
+#                     history ledger AND the public preview. Anything else is
+#                     a loud dry no-op printing one "DRY: would …" line per
+#                     suppressed write (scripts/lib/side-effects.sh, C3
+#                     rollout 2026-08-06). The cron env header carries it.
+#
+# Exit code 3: scripts/lib/side-effects.sh missing (structural).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+FYD_LIB="${ROOT}/scripts/lib/side-effects.sh"
+if [ ! -r "$FYD_LIB" ]; then
+  echo "node-health-daily: FATAL: side-effects library not readable at $FYD_LIB" >&2
+  exit 3
+fi
+# shellcheck source=scripts/lib/side-effects.sh
+. "$FYD_LIB"
+
 STATUS_JSON="${STATUS_JSON:-$ROOT/public/api/server-status.json}"
-STATE_DIR="${UPTIME_STATE_DIR:-/var/lib/freedom-yield}"
+STATE_DIR="$(fyd_state_dir uptime)" || exit $?
 HIST_JSONL="${STATE_DIR}/node-health-history.jsonl"
 OUT_PUBLIC="${ROOT}/public/api/node-health-recent.json"
 RECENT_DAYS="${RECENT_DAYS:-90}"
 API="${METALGO_API:-http://localhost:9650}"
 
-mkdir -p "$STATE_DIR"
-[ -f "$HIST_JSONL" ] || : > "$HIST_JSONL"
+fyd_live_run "create the node-health state dir ${STATE_DIR}" mkdir -p "$STATE_DIR"
+[ -f "$HIST_JSONL" ] || fyd_live_write "an empty node-health history ledger" "$HIST_JSONL" </dev/null
 
 # probe_bootstrapped <chain> — read-only query of metalgo's own
 # info.isBootstrapped RPC (no broadcast). Prints "true" / "false" / "null".
@@ -118,27 +140,40 @@ ENTRY=$(jq -c \
     }
   }' "$STATUS_JSON")
 
-echo "$ENTRY" >> "$HIST_JSONL"
+printf '%s\n' "$ENTRY" | fyd_live_write --append "today's node-health entry" "$HIST_JSONL"
 echo "node-health: appended $TODAY"
 
 # === regenerate public preview (sanitized subset, last RECENT_DAYS) ====
 # Public-safe fields only: nothing that would reveal host capacity or
 # upgrade timing. Peer count + chain heights + bootstrap are sufficient
 # to demonstrate "validator is fully sync'd and well-connected".
-tail -n "$RECENT_DAYS" "$HIST_JSONL" \
-  | jq -s --arg gen "$NOW_ISO" --argjson days "$RECENT_DAYS" '
-      {
-        generated_at: $gen,
-        window_days:  $days,
-        entries: [.[] | {
-          date: .date,
-          observed_at: .observed_at,
-          peer_count:     .metalgo.peer_count,
-          p_chain_height: .metalgo.p_chain_height,
-          c_chain_height: .metalgo.c_chain_height,
-          container_status: .metalgo.container_status,
-          bootstrap: .bootstrap
-        }]
-      }' > "${OUT_PUBLIC}.tmp"
-mv "${OUT_PUBLIC}.tmp" "$OUT_PUBLIC"
-echo "wrote $OUT_PUBLIC ($(jq '.entries | length' "$OUT_PUBLIC") entries)"
+#
+# The whole regeneration — including the sibling .tmp file — is one gated
+# unit rather than "write the tmp, gate only the mv": a dry run must not
+# leave a stray public/api/node-health-recent.json.tmp behind, and the tmp
+# is only meaningful as the first half of the atomic rename anyway.
+regen_public_preview() {
+  # FYD-GATE(branch): the two writes in this function body are only ever
+  # reached through the fyd_live_run invocation below.
+  tail -n "$RECENT_DAYS" "$HIST_JSONL" \
+    | jq -s --arg gen "$NOW_ISO" --argjson days "$RECENT_DAYS" '
+        {
+          generated_at: $gen,
+          window_days:  $days,
+          entries: [.[] | {
+            date: .date,
+            observed_at: .observed_at,
+            peer_count:     .metalgo.peer_count,
+            p_chain_height: .metalgo.p_chain_height,
+            c_chain_height: .metalgo.c_chain_height,
+            container_status: .metalgo.container_status,
+            bootstrap: .bootstrap
+          }]
+        }' > "${OUT_PUBLIC}.tmp"   # FYD-GATE(branch): see the note above.
+  # FYD-GATE(branch): body of regen_public_preview, gated by fyd_live_run below.
+  mv "${OUT_PUBLIC}.tmp" "$OUT_PUBLIC"
+}
+fyd_live_run "regenerate the public node-health preview ${OUT_PUBLIC}" regen_public_preview
+if fyd_is_live; then
+  echo "wrote $OUT_PUBLIC ($(jq '.entries | length' "$OUT_PUBLIC") entries)"
+fi

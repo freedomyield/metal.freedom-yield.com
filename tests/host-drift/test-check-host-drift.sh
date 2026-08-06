@@ -77,8 +77,14 @@ STUBEOF
 }
 teardown() { rm -rf "$BASE"; BASE=""; }
 
+# FY_LIVE=1 is what makes the recording stub actually get called: since the
+# C3 inversion (scripts/lib/side-effects.sh, 2026-08-06) every side effect is
+# opt-in, so a run without it is a loud dry no-op and no alert is delivered to
+# assert on. That default-dry behaviour has its own coverage in
+# tests/side-effects-callers/test-monitoring-side-effects.sh; here we opt in
+# because these cases are about WHAT is alerted, not WHETHER.
 run_checker() {
-	FYD_REPO_DIR="$CLONE" FYD_NOTIFY="$STUB" bash "$CHECKER" "$@"
+	FY_LIVE=1 FYD_REPO_DIR="$CLONE" FYD_NOTIFY="$STUB" bash "$CHECKER" "$@"
 }
 alerts() { cat "$STUB_LOG" 2>/dev/null; }
 
@@ -184,7 +190,7 @@ teardown
 # ---- case 7: not a git dir → exit 2, no crash ------------------------------------
 build_pair
 NOTDIR="$BASE/plain"; mkdir -p "$NOTDIR"
-FYD_REPO_DIR="$NOTDIR" FYD_NOTIFY="$STUB" bash "$CHECKER" >/dev/null 2>&1
+FY_LIVE=1 FYD_REPO_DIR="$NOTDIR" FYD_NOTIFY="$STUB" bash "$CHECKER" >/dev/null 2>&1
 RC=$?
 [ "$RC" -eq 2 ] \
 	&& ok "non-git dir: exit 2" \

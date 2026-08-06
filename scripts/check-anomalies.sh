@@ -38,9 +38,29 @@
 # Rationale: in post-expiry issuance mode (current cycle) the only moment the
 # operator can act is at or after endTime when the old stake unlocks. Firing
 # "urgent" alerts T-2 days out is false urgency.
+#
+# Env (side-effect boundary, C3 rollout 2026-08-06):
+#   FY_STATE_DIR / ANOMALY_STATE_DIR
+#       REQUIRED. One of the two MUST be set; there is deliberately no
+#       fallback to the production default. See the guard below.
+#   NOTIFY (or FYD_NOTIFY / ANCHOR_NOTIFY / WATCH_NOTIFY)
+#       notifier path override, resolved by scripts/lib/side-effects.sh
+#       rather than here. The spelling and its precedence are unchanged.
+#   FY_LIVE=1
+#       REQUIRED before any notify is delivered or any durable state write
+#       lands. Anything else is a loud dry no-op printing one "DRY: would …"
+#       line per suppressed effect. The cron env header carries it; tests
+#       deliberately do not.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+FYD_LIB="${ROOT}/scripts/lib/side-effects.sh"
+if [ ! -r "$FYD_LIB" ]; then
+  echo "[check-anomalies] FATAL: side-effects library not readable at $FYD_LIB" >&2
+  exit 1
+fi
+# shellcheck source=scripts/lib/side-effects.sh
+. "$FYD_LIB"
 
 # -------- cycle-gate (= partial gate、 cycle-aware-notify only) --------
 # Host monitoring (= metalgo / caddy / disk / memory / peers / web probe)
@@ -59,9 +79,22 @@ elif ! "${CYCLE_GATE_SCRIPT}" --side-effect=cycle-aware-notify; then
 	CYCLE_GATE_OK=0
 	echo "[check-anomalies] deferred by cycle-gate → cycle-related alerts suppressed for this tick" >&2
 fi
-NOTIFY="${NOTIFY:-$ROOT/scripts/notify.sh}"
-: "${ANOMALY_STATE_DIR:?ANOMALY_STATE_DIR is required}"
-STATE_DIR="$ANOMALY_STATE_DIR"
+# --- state dir: fail-closed, deliberately NOT fyd_state_dir's default ------
+# fyd_state_dir falls back to the production /var/lib/freedom-yield when
+# nothing is set. This script must NOT: on 2026-06-24 a placeholder state dir
+# turned the monitor into a silent no-op for days
+# (docs/postmortems/2026-06-anomaly-monitoring-resume.md), and the opposite
+# failure — a stray run silently adopting the production path — is the
+# accident class scripts/lib/side-effects.sh exists to end. So the guard the
+# postmortem installed stays, widened to accept the canonical FY_STATE_DIR
+# alongside the legacy ANOMALY_STATE_DIR that the live cron env header sets.
+# Resolution itself is delegated to the library so precedence is defined in
+# exactly one place.
+if [ -z "${FY_STATE_DIR:-}" ] && [ -z "${ANOMALY_STATE_DIR:-}" ]; then
+  echo "[check-anomalies] FY_STATE_DIR (or legacy ANOMALY_STATE_DIR) is required" >&2
+  exit 1
+fi
+STATE_DIR="$(fyd_state_dir anomaly)" || exit $?
 STATE_FILE=$STATE_DIR/anomaly-state.json
 STATUS_JSON="$ROOT/public/api/server-status.json"
 VALIDATOR_JSON="$ROOT/public/api/validator.json"
@@ -158,14 +191,39 @@ if [ "$K2RC" -ne 0 ]; then exit "$K2RC"; fi
 #   - Contention counter is bumped on skip via a separately-locked write to
 #     a counter file. Counter bump failure does NOT abort the main pipeline
 #     (= observability is best-effort).
-LOCK_FILE="${ANOMALY_LOCK_FILE:-/var/lib/freedom-yield/locks/check-anomalies.lock}"
+#
+# The two defaults are derived from the RESOLVED state dir rather than being
+# repeated as literals. In production STATE_DIR is /var/lib/freedom-yield, so
+# both paths are byte-identical to what they were; anywhere else (a test that
+# sandboxes the state dir but forgets these two) they now follow the sandbox
+# instead of silently reaching into production.
+LOCK_FILE="${ANOMALY_LOCK_FILE:-${STATE_DIR}/locks/check-anomalies.lock}"
 LOCK_DIR="$(dirname "$LOCK_FILE")"
-CONTENTION_COUNTER="${ANOMALY_CONTENTION_COUNTER:-/var/lib/freedom-yield/anomaly-contention-counter}"
+CONTENTION_COUNTER="${ANOMALY_CONTENTION_COUNTER:-${STATE_DIR}/anomaly-contention-counter}"
 
+# A note on what is NOT wrapped in fyd_live_* below, and why. Two classes of
+# write into $STATE_DIR stay ungated; each one carries an inline
+# FYD-GATE(exempt-…) marker naming its class:
+#   (a) flock backing files. flock needs a real fd held by THIS shell, so
+#       there is nothing a function could gate; they carry no content, and
+#       their directory must already exist or the run aborts with exit 5.
+#   (b) mktemp scratch inside $STATE_DIR (ORIGINAL_STATE / CANDIDATE_STATE /
+#       the candidate .swp / the counter tmp). The transition engine cannot
+#       run at all without them, and every one is either promoted by a gated
+#       rename or removed by the EXIT trap.
+# Nothing else. Every DURABLE artefact — the state file, the missing marker,
+# the quarantine dir, the delegator ledger, the counter — is gated, either by
+# an fyd_live_* call or by an enclosing `if fyd_is_live` arm marked
+# FYD-GATE(branch); tests/side-effects-callers/test-monitoring-side-effects.sh
+# fails if a durable write appears without one.
+# The primary defence for (a) and (b) is not FY_LIVE anyway: $STATE_DIR is
+# fail-closed above, so a run that has not been pointed at an explicit
+# directory dies before reaching any of them.
 bump_contention_counter() {
   # Best-effort: failure to bump must NOT abort the cron's main job.
   local counter_lock="${CONTENTION_COUNTER}.lock"
   (
+    # FYD-GATE(exempt-a): flock backing file, no content.
     if ! exec 8>"$counter_lock"; then
       echo "[K-4-COUNTER] cannot open counter lock $counter_lock; skipping bump" >&2
       exit 0
@@ -182,11 +240,18 @@ bump_contention_counter() {
     local next=$(( cur + 1 ))
     # Atomic write of the counter value.
     local tmp
+    # FYD-GATE(exempt-b): scratch; promoted by the gated rename below or removed.
     tmp=$(mktemp -p "$(dirname "$CONTENTION_COUNTER")" .counter.XXXXXX 2>/dev/null) || {
       echo "[K-4-COUNTER] mktemp failed for counter dir; skipping bump" >&2
       exit 0
     }
     printf '%s\n' "$next" > "$tmp"
+    if ! fyd_is_live; then
+      fyd_dry_note "bump the contention counter to ${next} at ${CONTENTION_COUNTER}"
+      rm -f "$tmp"
+      exit 0
+    fi
+    # FYD-GATE(branch): unreachable unless fyd_is_live succeeded just above.
     mv "$tmp" "$CONTENTION_COUNTER" 2>/dev/null \
       || { rm -f "$tmp"; echo "[K-4-COUNTER] rename to $CONTENTION_COUNTER failed; skipping bump" >&2; exit 0; }
   ) || true
@@ -196,6 +261,7 @@ if [ ! -d "$LOCK_DIR" ]; then
   echo "[K-4] lock dir missing: $LOCK_DIR (run anomaly-state-init.sh on a fresh host); exit 5" >&2
   exit 5
 fi
+# FYD-GATE(exempt-a): flock backing file, no content.
 if ! exec 9>"$LOCK_FILE"; then
   echo "[K-4] cannot open lock file: $LOCK_FILE; exit 5" >&2
   exit 5
@@ -235,14 +301,14 @@ if [ ! -f "$STATE_FILE" ]; then
   fi
   # First detection — best-effort notify + create marker. Marker creation
   # and exit code do NOT depend on notify success.
-  if [ -x "$NOTIFY" ]; then
-    bash "$NOTIFY" high "anomaly state file missing" \
-      "$(printf 'state file が存在しません: %s\n対処: scripts/anomaly-state-init.sh --confirm --baseline-status=running を実行\n再消失時に再通知できるよう missing marker を %s に作成\n本 tick は K-3 transition 処理を行わず exit 7' \
-         "$STATE_FILE" "$MISSING_MARKER")" \
-      >/dev/null 2>&1 || true
-  fi
-  # Marker is durable record; notify result is independent.
-  : > "$MISSING_MARKER" 2>/dev/null || true
+  fyd_notify high "anomaly state file missing" \
+    "$(printf 'state file が存在しません: %s\n対処: FY_LIVE=1 scripts/anomaly-state-init.sh --confirm --baseline-status=running を実行\n再消失時に再通知できるよう missing marker を %s に作成\n本 tick は K-3 transition 処理を行わず exit 7' \
+       "$STATE_FILE" "$MISSING_MARKER")" \
+    >/dev/null || true
+  # Marker is durable record; notify result is independent. Gated in lock
+  # step with the notify above so a dry tick can never leave a marker that
+  # permanently suppresses the alert it never actually sent.
+  fyd_live_write "the missing-state marker" "$MISSING_MARKER" </dev/null || true
   echo "[K-3.5] state file missing: $STATE_FILE (marker created at $MISSING_MARKER); exit 7" >&2
   exit 7
 fi
@@ -269,48 +335,58 @@ quarantine_corrupt_state() {
   fi
 
   # New corruption hash — create quarantine atomically (= mktemp dir, fill,
-  # then rename to deterministic target).
-  mkdir -p "$QUAR_DIR" 2>/dev/null || {
-    echo "[K-3.5] cannot create quarantine dir $QUAR_DIR; exit 4" >&2
-    exit 4
-  }
-  local stage
-  stage=$(mktemp -d -p "$QUAR_DIR" .stage.XXXXXX 2>/dev/null) || {
-    echo "[K-3.5] mktemp -d failed in $QUAR_DIR; exit 4" >&2
-    exit 4
-  }
-  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  cp -p "$STATE_FILE" "${stage}/state.json" 2>/dev/null || true
-  {
-    echo "reason=${reason}"
-    echo "first_seen_at_utc=${ts}"
-    echo "state_file_path=${STATE_FILE}"
-    echo "state_file_sha256=${full_sha}"
-    echo "state_file_sha8=${sha8}"
-    echo ""
-    echo "--- first 400 bytes of corrupt state ---"
-    head -c 400 "$STATE_FILE" 2>/dev/null
-    echo ""
-    echo ""
-    echo "--- jq parse/schema attempt ---"
-    jq -e . "$STATE_FILE" 2>&1 || true
-  } > "${stage}/diag.txt"
-  printf '%s\n' "$ts" > "${stage}/first-seen-at.txt"
+  # then rename to deterministic target). The whole artefact-creation block
+  # is one FY_LIVE unit: gating only the final rename would still leave a
+  # half-built .stage.XXXXXX directory inside the state dir on a dry tick.
+  # The notify and the exit code below are deliberately OUTSIDE the branch so
+  # a dry run walks exactly the same control flow (and prints the same
+  # DRY: lines for what it would have sent) as a live one.
+  if fyd_is_live; then
+    # FYD-GATE(branch): inside the fyd_is_live arm above.
+    mkdir -p "$QUAR_DIR" 2>/dev/null || {
+      echo "[K-3.5] cannot create quarantine dir $QUAR_DIR; exit 4" >&2
+      exit 4
+    }
+    local stage
+    stage=$(mktemp -d -p "$QUAR_DIR" .stage.XXXXXX 2>/dev/null) || {
+      echo "[K-3.5] mktemp -d failed in $QUAR_DIR; exit 4" >&2
+      exit 4
+    }
+    ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    # FYD-GATE(exempt): $STATE_FILE is the SOURCE here; nothing is written to it.
+    cp -p "$STATE_FILE" "${stage}/state.json" 2>/dev/null || true
+    {
+      echo "reason=${reason}"
+      echo "first_seen_at_utc=${ts}"
+      echo "state_file_path=${STATE_FILE}"
+      echo "state_file_sha256=${full_sha}"
+      echo "state_file_sha8=${sha8}"
+      echo ""
+      echo "--- first 400 bytes of corrupt state ---"
+      head -c 400 "$STATE_FILE" 2>/dev/null
+      echo ""
+      echo ""
+      echo "--- jq parse/schema attempt ---"
+      jq -e . "$STATE_FILE" 2>&1 || true
+    } > "${stage}/diag.txt"
+    printf '%s\n' "$ts" > "${stage}/first-seen-at.txt"
 
-  if ! mv "$stage" "$quar_target" 2>/dev/null; then
-    rm -rf "$stage" 2>/dev/null || true
-    echo "[K-3.5] rename of staged quarantine to ${quar_target} failed; exit 4" >&2
-    exit 4
+    # FYD-GATE(branch): inside the fyd_is_live arm above.
+    if ! mv "$stage" "$quar_target" 2>/dev/null; then
+      rm -rf "$stage" 2>/dev/null || true
+      echo "[K-3.5] rename of staged quarantine to ${quar_target} failed; exit 4" >&2
+      exit 4
+    fi
+  else
+    fyd_dry_note "quarantine ${STATE_FILE} (reason=${reason}, sha8=${sha8}) at ${quar_target}"
   fi
 
   # Best-effort notify. Result does NOT change exit code or the on-disk
   # preservation: the durable record is the quarantine dir.
-  if [ -x "$NOTIFY" ]; then
-    bash "$NOTIFY" high "anomaly state corrupted (new hash)" \
-      "$(printf 'state file が schema 不適合 (reason=%s, sha8=%s)\n元 file は変更せず保持\n診断 dir: %s\n対処: 診断確認後、 scripts/anomaly-state-init.sh --confirm --baseline-status=<value> [--clear-quarantine] で再初期化\n本 tick は K-3 transition 処理を行わず exit 4' \
-         "$reason" "$sha8" "$quar_target")" \
-      >/dev/null 2>&1 || true
-  fi
+  fyd_notify high "anomaly state corrupted (new hash)" \
+    "$(printf 'state file が schema 不適合 (reason=%s, sha8=%s)\n元 file は変更せず保持\n診断 dir: %s\n対処: 診断確認後、 FY_LIVE=1 scripts/anomaly-state-init.sh --confirm --baseline-status=<value> [--clear-quarantine] で再初期化\n本 tick は K-3 transition 処理を行わず exit 4' \
+       "$reason" "$sha8" "$quar_target")" \
+    >/dev/null || true
   echo "[K-3.5] new corruption (reason=${reason}, sha8=${sha8}) quarantined at ${quar_target}; original preserved; exit 4" >&2
   exit 4
 }
@@ -373,10 +449,12 @@ rc_priority_set() {
 }
 
 # --- ORIGINAL_STATE + CANDIDATE_STATE materialisation --------------------
+# FYD-GATE(exempt-b): scratch snapshot; removed by cleanup_k3 on EXIT.
 ORIGINAL_STATE=$(mktemp -p "$STATE_DIR" .original.XXXXXX) || {
   echo "[K-3] mktemp ORIGINAL_STATE failed in $STATE_DIR" >&2
   exit 8
 }
+# FYD-GATE(exempt-b): scratch working copy; removed by cleanup_k3 on EXIT.
 CANDIDATE_STATE=$(mktemp -p "$STATE_DIR" .candidate.XXXXXX) || {
   rm -f "$ORIGINAL_STATE"
   echo "[K-3] mktemp CANDIDATE_STATE failed in $STATE_DIR" >&2
@@ -386,6 +464,7 @@ cleanup_k3() {
   rm -f "$ORIGINAL_STATE" "$CANDIDATE_STATE" "${CANDIDATE_STATE}.swp" 2>/dev/null || true
 }
 trap cleanup_k3 EXIT
+# FYD-GATE(exempt): $STATE_FILE is the SOURCE here; nothing is written to it.
 if ! cp "$STATE_FILE" "$ORIGINAL_STATE"; then
   echo "[K-3] cp STATE_FILE -> ORIGINAL_STATE failed" >&2
   exit 8
@@ -408,6 +487,7 @@ orig_get() { jq -r "$1" "$ORIGINAL_STATE" 2>/dev/null; }
 # the final commit will fail or skip cleanly.
 candidate_set() {
   local path="$1" val="$2"
+  # FYD-GATE(exempt-b): sibling of the scratch candidate; never the live state.
   local tmp="${CANDIDATE_STATE}.swp"
   if ! jq "$path = $val" "$CANDIDATE_STATE" > "$tmp" 2>/dev/null; then
     echo "[K-3] candidate_set jq edit failed: path=$path" >&2
@@ -429,21 +509,24 @@ candidate_set() {
 #   in-run retry: rc 2 (transport), rc 4 (HTTP 429), rc 5 (HTTP 5xx)
 #   no retry:     rc 1 (topic missing/empty), rc 3 (HTTP 4xx non-429),
 #                 rc 100 (NOTIFY script missing/non-executable)
+# stdout is still discarded; stderr is NOT (it used to be). A suppressed dry
+# send announces itself on stderr, and swallowing that would recreate exactly
+# the silent-no-op failure the C3 rollout exists to prevent.
+#
+# The old "notify script missing or not executable → rc 100" branch is gone:
+# the library validates the delegate itself and returns 64. Both codes fall
+# into the same non-retryable class below, so control flow is unchanged.
 attempt_notify() {
-  local prio="$1" title="$2" body="$3" tags="${4:-}"
-  if [ ! -x "$NOTIFY" ]; then
-    echo "[K-3] notify script missing or not executable: $NOTIFY" >&2
-    return 100
-  fi
+  local prio="$1" title="$2" body="$3" tags="${4:-}" rc=0
   # Optional 4th arg: non-empty tags override the priority-derived ntfy
-  # Tags header (= leading emoji) via NTFY_TAGS. Empty/omitted keeps the
-  # historical call shape untouched.
+  # Tags header (= leading emoji). Empty/omitted keeps the historical call
+  # shape untouched (no NTFY_TAGS passed down at all).
   if [ -n "$tags" ]; then
-    NTFY_TAGS="$tags" NOTIFY_STRICT_EXIT=1 bash "$NOTIFY" "$prio" "$title" "$body" >/dev/null 2>&1
+    fyd_notify --strict --tags="$tags" "$prio" "$title" "$body" >/dev/null || rc=$?
   else
-    NOTIFY_STRICT_EXIT=1 bash "$NOTIFY" "$prio" "$title" "$body" >/dev/null 2>&1
+    fyd_notify --strict "$prio" "$title" "$body" >/dev/null || rc=$?
   fi
-  return $?
+  return "$rc"
 }
 
 retryable_notify_rc() {
@@ -701,7 +784,9 @@ if [ "$RPC_VALID" = "1" ]; then
     case "$ORIG_DELEGATORS_JSON" in
       ""|null) ORIG_DELEGATORS_JSON='[]' ;;
     esac
-    DELEGATOR_EVENTS_LOG="${DELEGATOR_EVENTS_LOG:-/var/lib/freedom-yield/delegator-events.jsonl}"
+    # Default derived from the resolved state dir (identical to the old
+    # literal in production, sandbox-following everywhere else).
+    DELEGATOR_EVENTS_LOG="${DELEGATOR_EVENTS_LOG:-${STATE_DIR}/delegator-events.jsonl}"
     NOW_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     NOW_EPOCH="$(date +%s)"
 
@@ -715,30 +800,62 @@ if [ "$RPC_VALID" = "1" ]; then
     # Append events append-only. Fail-open on log write error (= alert path
     # remains authoritative; missing event log is a follow-up finding, not
     # a broadcast blocker).
+    # Rendered first, appended only when non-empty: an empty event set must
+    # leave the ledger exactly as it was (not even create it), which is what
+    # the previous per-line `[ -n "$line" ] && … >>` loop achieved.
     if [ -w "$(dirname "$DELEGATOR_EVENTS_LOG")" ] || [ -w "$DELEGATOR_EVENTS_LOG" ]; then
       # started events
-      echo "$ADDED_JSON" | jq -cr --arg at "$NOW_ISO" --argjson epoch "$NOW_EPOCH" \
+      STARTED_LINES="$(echo "$ADDED_JSON" | jq -cr --arg at "$NOW_ISO" --argjson epoch "$NOW_EPOCH" \
         '.[] | {event_type:"started", observed_at:$at, observed_epoch:$epoch, delegator_tx_id:.tx_id, weight_nmetal:.weight_nmetal, observed_end_time:.end_time}' \
-        2>/dev/null | while IFS= read -r line; do
-          [ -n "$line" ] && printf '%s\n' "$line" >> "$DELEGATOR_EVENTS_LOG"
-        done
+        2>/dev/null | grep -v '^$' || true)"
+      if [ -n "$STARTED_LINES" ]; then
+        printf '%s\n' "$STARTED_LINES" \
+          | fyd_live_write --append "delegator 'started' lifecycle events" "$DELEGATOR_EVENTS_LOG"
+      fi
       # ended events (actual_end_cause_observed = "unknown" for MVP; refine later)
-      echo "$REMOVED_JSON" | jq -cr --arg at "$NOW_ISO" --argjson epoch "$NOW_EPOCH" \
+      ENDED_LINES="$(echo "$REMOVED_JSON" | jq -cr --arg at "$NOW_ISO" --argjson epoch "$NOW_EPOCH" \
         '.[] | {event_type:"ended", observed_at:$at, observed_epoch:$epoch, delegator_tx_id:.tx_id, weight_nmetal:.weight_nmetal, actual_end_cause_observed:"unknown"}' \
-        2>/dev/null | while IFS= read -r line; do
-          [ -n "$line" ] && printf '%s\n' "$line" >> "$DELEGATOR_EVENTS_LOG"
-        done
+        2>/dev/null | grep -v '^$' || true)"
+      if [ -n "$ENDED_LINES" ]; then
+        printf '%s\n' "$ENDED_LINES" \
+          | fyd_live_write --append "delegator 'ended' lifecycle events" "$DELEGATOR_EVENTS_LOG"
+      fi
     fi
     # Update snapshot regardless of log write outcome so next tick diffs
     # against the correct baseline.
     candidate_set '.delegator_snapshot' "$OBS_DELEGATORS_JSON"
 
     SELF_STAKE=$(jq -r '.stake.self // 0' "$VALIDATOR_JSON" 2>/dev/null)
-    CAPACITY_METAL=$(awk -v s="$SELF_STAKE" 'BEGIN{printf "%.0f", s*4}')
+    # Delegation capacity. Metal caps total weight at max_weight = 5 × self,
+    # so the receivable ceiling is 4 × self.
+    CAPACITY_METAL=$(awk -v s="$SELF_STAKE" 'BEGIN{printf "%.4f", s*4}' | sed -E 's/\.?0+$//')
     TOTAL_WEIGHT_METAL=$(awk -v s="$SELF_STAKE" -v d="$OBS_DELEGATOR_TOTAL_METAL" 'BEGIN{printf "%.4f", s+d}' | sed -E 's/\.?0+$//')
+    # 受入 line, rendered exactly as scripts/daily-status.sh renders it (that
+    # implementation is the canonical form for this fact; keep them in step).
+    #
+    # It replaces the pre-2026-08-06 pair of lines
+    #     受入額: <received> METAL
+    #     自己 stake: <self> METAL / 受入枠 <cap> METAL
+    # whose slash had a DIFFERENT quantity on each side — numerator self
+    # stake, denominator the delegation ceiling — so it read as a ratio while
+    # being none, and the number that actually belongs over that denominator
+    # (cumulative received) sat stranded on the line above. Operator reported
+    # it from a live push on 2026-08-06. Self stake is still useful context,
+    # so it stays, on its own line, as a standalone quantity.
+    #
+    # No division anywhere here, so no divide-by-zero: the head-room is a
+    # subtraction, clamped at 0 by awk so an over-cap reading (not possible
+    # on-chain, but not worth rendering as a negative if it ever happened)
+    # degrades to the 満枠 branch instead of printing "残枠 -12.3".
+    REMAIN_METAL=$(awk -v s="$SELF_STAKE" -v r="$OBS_DELEGATOR_TOTAL_METAL" 'BEGIN{v=s*4-r; if(v<0)v=0; printf "%.4f", v}' | sed -E 's/\.?0+$//')
+    if awk -v v="$REMAIN_METAL" 'BEGIN{exit !(v+0<=0.0001)}'; then
+      DELEG_LINE="受入: ${OBS_DELEGATOR_TOTAL_METAL} / ${CAPACITY_METAL} METAL 🔒 満枠"
+    else
+      DELEG_LINE="受入: ${OBS_DELEGATOR_TOTAL_METAL} / ${CAPACITY_METAL} METAL (残枠 ${REMAIN_METAL})"
+    fi
     if [ "$OBS_DELEGATOR_COUNT" -gt "${ORIG_DC:-0}" ]; then
       DIFF=$((OBS_DELEGATOR_COUNT - ORIG_DC))
-      body=$(printf '+%s 件、合計 %s 件\n受入額: %s METAL\n自己 stake: %s METAL / 受入枠 %s METAL\n総 weight: %s METAL (self + delegators)' "$DIFF" "$OBS_DELEGATOR_COUNT" "$OBS_DELEGATOR_TOTAL_METAL" "$SELF_STAKE" "$CAPACITY_METAL" "$TOTAL_WEIGHT_METAL")
+      body=$(printf '+%s 件、合計 %s 件\n%s\n自己 stake: %s METAL\n総 weight: %s METAL (self + delegators)' "$DIFF" "$OBS_DELEGATOR_COUNT" "$DELEG_LINE" "$SELF_STAKE" "$TOTAL_WEIGHT_METAL")
       # Good news: keep priority high (= must not be missed) but replace
       # the priority-derived warning emoji with a celebratory one.
       if notify_or_keep high "Delegation +${DIFF} 件受入 (合計 ${OBS_DELEGATOR_COUNT} 件)" "$body" tada; then
@@ -747,7 +864,14 @@ if [ "$RPC_VALID" = "1" ]; then
       fi
     else
       DIFF=$((ORIG_DC - OBS_DELEGATOR_COUNT))
-      body=$(printf '-%s 件、合計 %s 件\n受入額: %s METAL\n総 weight: %s METAL (self + delegators)\n期間満了か途中解除、explorer で確認:\nhttps://explorer.metalblockchain.org/validators/%s' "$DIFF" "$OBS_DELEGATOR_COUNT" "$OBS_DELEGATOR_TOTAL_METAL" "$TOTAL_WEIGHT_METAL" "$NODE_ID")
+      # `--` is load-bearing: this format string starts with a literal '-', and
+      # without the terminator bash's printf reads it as an option, dies with
+      # "printf: -%: invalid option" and substitutes an EMPTY body. That is not
+      # hypothetical — it is what this notification has done since the initial
+      # commit, so every "Delegation -N 件離脱" push ever sent carried a title
+      # and nothing else. Found 2026-08-06 while adding the body assertions
+      # below (departures are rare enough that nobody had seen one recently).
+      body=$(printf -- '-%s 件、合計 %s 件\n%s\n自己 stake: %s METAL\n総 weight: %s METAL (self + delegators)\n期間満了か途中解除、explorer で確認:\nhttps://explorer.metalblockchain.org/validators/%s' "$DIFF" "$OBS_DELEGATOR_COUNT" "$DELEG_LINE" "$SELF_STAKE" "$TOTAL_WEIGHT_METAL" "$NODE_ID")
       if notify_or_keep default "Delegation -${DIFF} 件離脱 (合計 ${OBS_DELEGATOR_COUNT} 件)" "$body"; then
         candidate_set '.delegator_count' "$OBS_DELEGATOR_COUNT"
         candidate_set '.delegator_total_nmetal' "$OBS_DELEGATOR_TOTAL_NMETAL"
@@ -860,10 +984,19 @@ fi
 # mtime change. Different → mktemp + sync + atomic rename + sync dir.
 # Best-effort durable (= POSIX rename is atomic for concurrent readers;
 # durability across crashes depends on kernel/fs and is not advertised).
+#
+# FY_LIVE gates the commit, in lock step with the notifies that authorised
+# each candidate field. This is the pairing scripts/lib/side-effects.sh's
+# CONTRACT calls out by name: notify_or_keep() turns rc 0 into "the operator
+# has been told", and a dry rc 0 must therefore NOT be recorded — otherwise a
+# tick that lost FY_LIVE=1 would persist "already notified" for an alert
+# nobody received, and the alert would never fire again.
 ORIG_CANON=$(jq -S . "$ORIGINAL_STATE")
 CAND_CANON=$(jq -S . "$CANDIDATE_STATE")
 if [ "$ORIG_CANON" = "$CAND_CANON" ]; then
   echo "[K-3] candidate == original (canonical); no commit, mtime preserved" >&2
+elif ! fyd_is_live; then
+  fyd_dry_note "commit the advanced anomaly state to ${STATE_FILE}"
 else
   COMMIT_TMP=$(mktemp -p "$STATE_DIR" .state.commit.XXXXXX 2>/dev/null) || {
     rc_priority_set 8
@@ -877,12 +1010,14 @@ else
     exit "$GLOBAL_RC"
   fi
   sync "$COMMIT_TMP" 2>/dev/null || true
+  # FYD-GATE(branch): the enclosing elif proved fyd_is_live.
   if ! mv "$COMMIT_TMP" "$STATE_FILE"; then
     rm -f "$COMMIT_TMP"
     rc_priority_set 8
     echo "[K-3] atomic rename failed; original preserved" >&2
     exit "$GLOBAL_RC"
   fi
+  # FYD-GATE(branch): the enclosing elif proved fyd_is_live.
   chmod 0644 "$STATE_FILE" 2>/dev/null || true
   sync "$STATE_DIR" 2>/dev/null || true
   echo "[K-3] committed candidate to $STATE_FILE" >&2
