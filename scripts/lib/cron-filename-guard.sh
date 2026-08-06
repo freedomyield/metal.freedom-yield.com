@@ -6,17 +6,34 @@
 # CHAIN: none — this file defines a shell function only. It never invokes
 #        a broadcast-capable command and offers no route to one.
 #
-# Why this exists (2026-08-06, H2 task): is_cron_executed_filename() was
-# introduced the same day inside scripts/install-cron-env-headers.sh (and
-# duplicated into scripts/install-repoint-publish-crons.sh, kept in
-# lock-step by convention rather than by a shared source). The H2 brief
-# explicitly asked the new remediation script this lib was extracted for
-# NOT to duplicate that logic a third time — so this file is the reusable
-# copy: source it and call the function, instead of pasting the case
-# pattern again. The two pre-existing inline copies in
-# install-cron-env-headers.sh and install-repoint-publish-crons.sh are left
-# as-is (out of this task's scope to touch already-shipped, already-tested
-# installers); a future cleanup could point them at this lib too.
+# Why this exists (2026-08-06, H2 task, then H3 same day): is_cron_executed_
+# filename() was introduced the same day inside
+# scripts/install-cron-env-headers.sh (and duplicated into
+# scripts/install-repoint-publish-crons.sh) — each with a comment claiming a
+# tests/install-cron-env-headers/ + tests/install-repoint-publish-crons/
+# "lock-step consistency check" kept the two copies in sync. That test never
+# existed: each suite only ran its own self-contained mutation check against
+# its own inline copy, so nothing would have caught the two drifting apart.
+# The H2 brief asked the new remediation script this lib was extracted for
+# NOT to duplicate that logic a third time. The H3 task then went further
+# and closed the original duplication too: both install-cron-env-headers.sh
+# and install-repoint-publish-crons.sh now source this file instead of
+# defining the function inline.
+#
+# tests/cron-filename-guard/ checks this stays true — but scoped, on
+# purpose, not "the string never appears again anywhere in the repo": it
+# scans scripts/, .githooks/, and bin/ (the three places this repo ships
+# executable code from) for a definition, matching five syntax shapes a
+# duplicate could hide behind (`name() {`, `name () {`, `function name()
+# {`, `function name {`, brace on the next line) and any file extension —
+# not just a literal byte-match on the shape above. It deliberately does
+# NOT scan tests/, where three existing suites legitimately embed their own
+# throwaway inline copy of this function for self-contained mutation
+# testing; see that suite's own header comment ("SCOPE OF THE GUARANTEE")
+# for the exact boundary and the case that proves it's enforced on purpose,
+# not a blind spot. Within that scope, this is the only definition —
+# mutation-tested per shape by reintroducing a duplicate into a scratch
+# copy and confirming the check goes red for each one.
 #
 # Per crontab(5) (Debian's cron), a /etc/cron.d/ entry is only read if its
 # name consists solely of upper/lower case letters, digits, underscores,

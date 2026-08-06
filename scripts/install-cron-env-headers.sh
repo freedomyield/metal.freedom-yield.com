@@ -104,6 +104,10 @@ if [ "$CRON_DIR" = "/etc/cron.d" ] && [ "$(id -u)" -ne 0 ]; then
 	exit 2
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=SCRIPTDIR/lib/cron-filename-guard.sh
+. "${SCRIPT_DIR}/lib/cron-filename-guard.sh"
+
 SHELL_LINE='SHELL=/bin/bash'
 PATH_LINE='PATH=/usr/local/bin:/usr/bin:/bin'
 FY_LIVE_LINE='FY_LIVE=1'
@@ -154,24 +158,18 @@ cron_file_needs_fy_live() {
 	return 1
 }
 
-# is_cron_executed_filename <basename> — true (rc 0) iff cron.d would
-# actually execute a file with this name. Per crontab(5) (Debian's cron), a
-# /etc/cron.d/ entry is only read if its name consists solely of upper/lower
-# case letters, digits, underscores, and hyphens — identical to run-parts(8)'s
-# own filename rule for cron.daily/weekly/monthly. Anything outside that set
-# (a dot, a tilde, ...) is a name cron silently ignores — most often a
-# backup/rotation sidecar (*.bak-<ts>, *.disabled, *.orig, *.dpkg-old, *~).
-# Judging by "does this look like a backup" would need updating every time a
-# new sidecar convention shows up; judging by "would cron run this" does not.
-# MUST stay identical to install-repoint-publish-crons.sh's copy of the same
-# function — see tests/install-cron-env-headers/ and
-# tests/install-repoint-publish-crons/ for the lock-step consistency check.
-is_cron_executed_filename() {
-	case "$1" in
-		*[!A-Za-z0-9_-]*) return 1 ;;
-		*) return 0 ;;
-	esac
-}
+# is_cron_executed_filename() — sourced above from
+# scripts/lib/cron-filename-guard.sh, not redefined here. (2026-08-06, H3
+# task: this used to be an inline copy with a comment claiming a
+# tests/install-cron-env-headers/ + tests/install-repoint-publish-crons/
+# "lock-step consistency check" kept it in sync with the sibling installer's
+# copy — no such cross-file test ever existed; each suite only ran its own
+# self-contained mutation check. The fix is structural, not another test to
+# keep in sync by convention: there is now exactly one definition, in the
+# shared lib, and tests/cron-filename-guard/ checks that — scoped to
+# scripts/+.githooks/+bin/ across several definition syntax shapes, not a
+# claim that the string never appears again anywhere in the repo. See that
+# lib's own header comment for the exact scope.)
 
 CHANGED=0
 SKIPPED=0
