@@ -237,16 +237,37 @@ faithfully pin the old content again.
    bypassing it. The conservation check (exit 4) must pass.
    Then record the hash you are about to publish, so step 6 has a target that
    does not depend on any constant written down here:
-   `shasum -a 256 public/api/cycle-history.jsonl`
+   `sha256sum public/api/cycle-history.jsonl`
+   (this step runs on the Linux host; the macOS spelling is `shasum -a 256`,
+   which is what step 2a below uses)
 2. **Publish the corrected feed** (push path):
    `bash scripts/push-to-web-host.sh cycle-history.jsonl`
    From here until step 4 lands, the served feed and the signed manifest
    disagree. Keep the window short; this is why it is done outside a transition.
+2a. **Confirm the corrected bytes are actually being served** before re-signing:
+
+   ```
+   curl -sS https://metal.freedom-yield.com/api/cycle-history.jsonl | shasum -a 256
+   ```
+
+   It must equal the step-1 capture. This check is not ceremonial: the feed
+   carries `cache-control: public, max-age=120, must-revalidate`, so the edge
+   can serve stale bytes for up to two minutes after a successful push. Step 3
+   fetches over the same URL — if it runs early it re-pins the **old** hash and
+   reports success. Step 6 does catch that, but only after a wasted signing
+   round and a longer window of published inconsistency. If the hashes differ,
+   wait and re-run 2a; do not proceed on the assumption that it will settle.
 3. **Re-sign the manifest on the operator Mac** (not on any host — the identity
    key lives only there):
-   `OPERATOR_IDENTITY_KEY=<path> bash scripts/operator-local/gen-identity.sh`
+   `FY_EXPECT_CYCLE=3 OPERATOR_IDENTITY_KEY=<path> bash scripts/operator-local/gen-identity.sh`
    It re-fetches every leaf, picks up the new `cycle-history.jsonl` hash,
    recomputes `artifact_root`, re-signs, and self-verifies.
+
+   `FY_EXPECT_CYCLE` is the **just-closed** cycle — 3 while cycle 4 is open.
+   It is optional here (this is a repair, not a transition), but supplying it
+   costs nothing and machine-checks that the live ledger really is the one you
+   just corrected. Leaving it unset prints a large `WARNING: ordering guard
+   DISABLED` banner; that banner is expected, not a failure.
 4. **Deliver the manifest through git** — the script prints this exact list when
    it finishes; do not substitute `push-to-web-host.sh`, which will refuse:
 
@@ -276,14 +297,15 @@ faithfully pin the old content again.
    - the served `identity-history.jsonl` sha256 equals the
      `artifacts_branch` leaf.
 
-   A review pass on 2026-08-06 measured the corrected feed as
-   `e8001d204a8dd0ed41a5755a84dadd36814b4dfda4a394db569449351e210765`. Treat
-   that as a cross-check, not as the authority: it was measured before the
-   incident-attribution boundary fix landed, and this repo has no copy of the
-   live `cycle-history.jsonl` to re-measure it against. The step-1 capture is
-   the authoritative target. If the two disagree, the boundary fix changed which
-   cycle an incident belongs to — confirm that against the incident log rather
-   than assuming corruption.
+   Two independent runs on 2026-08-06 — one during review, one on the merged
+   tree against the live `uptime-cycles.json` — both produced
+   `e8001d204a8dd0ed41a5755a84dadd36814b4dfda4a394db569449351e210765`, with
+   incident `2026-06-24-01` attributed to cycle 2 and cycles 1 and 3 empty.
+   The step-1 capture remains the authoritative target, because it is measured
+   from the bytes actually being published; but the value above is a real
+   cross-check rather than a stale one, so a mismatch at step 6 is a signal to
+   investigate, not expected drift. Superseded value, for reference when
+   reading older copies of the feed: `475bd9127b6c0a8dd2c531e78b3ac611899f9fd32bf3c0977030b6e2a3a75b0c`.
 
 Skipping step 3–4, or doing them before step 2, leaves a published feed whose
 hash contradicts a signature that is itself committed to the chain — exactly
