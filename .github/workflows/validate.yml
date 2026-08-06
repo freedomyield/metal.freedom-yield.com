@@ -156,3 +156,14 @@ jobs:
         run: bash scripts/setup-schema-validator.sh
       - name: bash tests/run-all-tests.sh
         run: bash tests/run-all-tests.sh
+      # Gate: a commit must not silently invalidate a pin inside the
+      # operator-SIGNED public/api/identity.json. On 2026-08-05 an ordinary
+      # schema edit (7dfc3c4) did exactly that to a manifest signed the day
+      # before (90bcdd9), and nothing noticed for two days. CI cannot repair
+      # it — identity.json is signed with the operator's passphrase-protected
+      # key on their local Mac — so this step only detects and stops. Fix by
+      # reverting the artifact change or re-issuing the manifest; see the
+      # "Repairing a red run" block in scripts/check-identity-pins.sh.
+      # Mirrored in ci-main.yml because this workflow ignores pushes to main.
+      - name: identity artifact pins still describe the repo
+        run: bash scripts/check-identity-pins.sh --mode=repo

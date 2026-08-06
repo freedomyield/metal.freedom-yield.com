@@ -346,6 +346,52 @@ republish whenever the underlying issue is resolved.
   you find the response surprising, check the web host's `mime.types`
   for an explicit mapping. There is no requirement to add one.
 
+## Repairing a broken artifact pin
+
+`scripts/check-identity-pins.sh` fails CI (exit 3) when a **git-tracked**
+file pinned by `artifact_manifest` no longer hashes to its pinned value, and
+the daily `--mode=live` cron pushes one high-priority alert for the same
+condition on the served site. That state means an ordinary commit changed a
+file whose bytes a signed manifest had already committed to — which is how
+`7dfc3c4` (2026-08-05, a schema widening) invalidated the manifest signed by
+`90bcdd9` the day before, unnoticed for two days.
+
+**CI cannot repair this.** `identity.json` is signed with the operator's
+passphrase-protected ed25519 key on the operator's Mac, and per Constitution
+§3.3 that key never reaches CI. Detection is automatic; the repair is manual.
+Pick one:
+
+**A — do not change the pinned file.** Revert the edit to the git-tracked
+artifact. The pin becomes valid again with no re-signing.
+
+**B — keep the change and re-issue the manifest.**
+
+1. Land and deploy the artifact change first, so the live bytes are final.
+   Re-signing against bytes that are about to change just moves the break.
+2. On the operator Mac:
+
+   ```sh
+   export OPERATOR_IDENTITY_KEY=~/.ssh/freedom-yield-operator-identity
+   bash scripts/operator-local/gen-identity.sh
+   ```
+
+   At a cycle transition add `FY_EXPECT_CYCLE=<the cycle just closed>` so the
+   ordering guard runs (see step 3 above).
+3. Commit `public/api/identity.json` + `public/api/identity.json.sig`.
+4. Remove the now-obsolete entry from `deploy/identity-pin-baseline.json`.
+   The checker prints an `OBSOLETE-BASELINE` line naming every entry that has
+   become unnecessary — an obsolete entry is not an error, but leaving it
+   there hides the next real break behind stale bookkeeping.
+
+**What the checker deliberately stays quiet about.** Pins whose target is a
+push-owned feed (`deploy/feed-excludes.txt`: `evidence.json`,
+`validator.json`, `uptime-cycles.json`, `cycle-history.jsonl`) are rewritten
+by host cron on their own cadence, so their pins are stale within minutes of
+signing — the "time-of-flight skew" pitfall above, made permanent. Those are
+recorded as `STRUCTURAL` in the log and never alert or fail; re-signing does
+not fix them, because they break again immediately. Removing moving payloads
+from the signed manifest is tracked separately as C4.
+
 ---
 
 # A-chain anchor account — permission setup (Phase α)

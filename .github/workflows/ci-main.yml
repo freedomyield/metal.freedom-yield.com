@@ -55,3 +55,11 @@ jobs:
         run: bash tests/run-all-tests.sh
       - name: Check external link rel/target attributes
         run: bash scripts/apply-external-link-attrs.sh --check public
+      # Same gate as validate.yml's `identity artifact pins` step, duplicated
+      # here for the same reason R6/R8 above are duplicated: validate.yml is
+      # gated `push: branches-ignore: [main]`, so a commit pushed straight to
+      # main would otherwise never have its identity pins checked — and a
+      # direct push to main is exactly how 7dfc3c4 landed the schema edit that
+      # broke the signed manifest on 2026-08-05.
+      - name: identity artifact pins still describe the repo
+        run: bash scripts/check-identity-pins.sh --mode=repo
