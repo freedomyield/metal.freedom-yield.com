@@ -367,6 +367,47 @@ OUT="$(run_live)"; RC=$?
 	&& ok "c20 live: manifest unfetchable alerts" || bad "c20 live: expected 1 push, got $(alert_count)"
 teardown
 
+# ---- cases 20b–20d: exit-2 "cannot run" must PUSH in live mode -------------
+# Under cron the only other channel is journald, so a silent exit 2 is
+# indistinguishable from a healthy run on the operator's phone — "no
+# notification" would read as "pins verified" while nothing was verified.
+# Repo mode stays silent on purpose: there the non-zero exit already fails CI.
+
+# 20b: corrupt baseline (live) → exit 2 + one push
+build_fake_repo
+make_curl_stub
+serve "$FAKE/public/api/identity.json"     identity.json
+serve "$FAKE/public/api/alpha.json"        alpha.json
+serve "$FAKE/public/api/alpha.schema.json" alpha.schema.json
+serve "$FAKE/public/api/stream.json"       stream.json
+printf 'not json {{{' > "$FAKE/deploy/identity-pin-baseline.json"
+OUT="$(run_live)"; RC=$?
+[ "$RC" -eq 2 ] && ok "c20b live: corrupt baseline → exit 2" || bad "c20b live: corrupt baseline → exit 2 (actual=$RC)"
+[ "$(alert_count)" -eq 1 ] \
+	&& ok "c20b live: corrupt baseline PUSHES (not silent)" || bad "c20b live: expected 1 push, got $(alert_count)"
+alerts | grep -q 'cannot run (exit 2)' \
+	&& ok "c20b live: push names the cannot-run condition" || bad "c20b live: push title (log: $(alerts))"
+teardown
+
+# 20c: missing feed-excludes list (live) → exit 2 + one push
+build_fake_repo
+make_curl_stub
+serve "$FAKE/public/api/identity.json" identity.json
+rm -f "$FAKE/deploy/feed-excludes.txt"
+OUT="$(run_live)"; RC=$?
+[ "$RC" -eq 2 ] && ok "c20c live: missing feed-excludes → exit 2" || bad "c20c live: missing feed-excludes → exit 2 (actual=$RC)"
+[ "$(alert_count)" -eq 1 ] \
+	&& ok "c20c live: missing feed-excludes PUSHES (not silent)" || bad "c20c live: expected 1 push, got $(alert_count)"
+teardown
+
+# 20d: the same two conditions in REPO mode stay silent (CI already fails loud)
+build_fake_repo
+printf 'not json {{{' > "$FAKE/deploy/identity-pin-baseline.json"
+OUT="$(run_repo)"; RC=$?
+[ "$RC" -eq 2 ] && [ "$(alert_count)" -eq 0 ] \
+	&& ok "c20d repo: corrupt baseline exits 2 without pushing" || bad "c20d repo: exit 2 silent (rc=$RC, pushes=$(alert_count))"
+teardown
+
 # =============================================================================
 # cron installer
 # =============================================================================

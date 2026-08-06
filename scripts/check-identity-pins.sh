@@ -99,7 +99,9 @@
 #   0  no new breakage (pins match, or the only mismatches are baselined
 #      `tracked` pins / structural `stream` pins)
 #   2  cannot run — jq missing, identity manifest unreadable/unparseable/empty,
-#      baseline unparseable, feed-excludes list unreadable, malformed pin URL
+#      baseline unparseable, feed-excludes list unreadable, malformed pin URL,
+#      no sha256 tool. In --mode=live every one of these also pushes (see
+#      Alerting below); a blind checker must never be mistaken for a healthy one
 #   3  NEW breakage on a `tracked` pin (mismatch, or the pinned file is gone)
 #   4  --mode=live only: a `tracked` pin's URL could not be fetched, so the
 #      comparison could not be made (mismatches are never masked by this —
@@ -110,6 +112,11 @@
 #   `stream` mismatches and baselined `tracked` mismatches are written to the
 #   log and never alert — they are known, structural, and pushing them would
 #   be exactly the false urgency the project forbids.
+#   EVERY exit-2 "cannot run" condition also pushes (via die() below). Under
+#   cron the only channel is journald, so a silent exit 2 would look exactly
+#   like a healthy run — the operator would read "no notification" as "pins
+#   verified" while nothing was verified at all. Not deduped: exit 2 means the
+#   checker is blind, which is not a state to grow quiet about.
 #   Dedup: the alert signature is the sorted set of new breaks. The same
 #   signature does not re-alert until $IDENTITY_PIN_ALERT_REARM_SEC has
 #   elapsed (default 604800 = 7d, so a long-open break still nags weekly) or
@@ -183,7 +190,24 @@ alert() {
 	fi
 }
 
-die() { log "ERROR $*"; exit 2; }
+# die <message> — unrecoverable "cannot run" (exit 2). In live mode this MUST
+# push, not merely log: the cron pipes its output to journald, so a silent
+# exit 2 is indistinguishable from a clean run on the operator's phone —
+# "no notification" would read as "healthy" at exactly the moment the checker
+# stopped checking anything at all. check-anchor-publish-health.sh, the
+# precedent this script follows elsewhere, already fires `alert high` on its
+# own cannot-run condition (missing jq); leaving these paths silent would be
+# an unexplained divergence from it, and inconsistent even within this file
+# (the unfetchable-manifest path below alerts). Routing it through die()
+# covers every cannot-run exit from one place. Repo mode deliberately does
+# not push: there the non-zero exit already fails CI loudly and visibly.
+die() {
+	log "ERROR $*"
+	if [ "$MODE" = "live" ]; then
+		alert high "identity-pins: cannot run (exit 2)" "$*"
+	fi
+	exit 2
+}
 
 sha256_of_file() {
 	if command -v shasum >/dev/null 2>&1; then
