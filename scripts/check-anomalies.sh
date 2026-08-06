@@ -826,11 +826,36 @@ if [ "$RPC_VALID" = "1" ]; then
     candidate_set '.delegator_snapshot' "$OBS_DELEGATORS_JSON"
 
     SELF_STAKE=$(jq -r '.stake.self // 0' "$VALIDATOR_JSON" 2>/dev/null)
-    CAPACITY_METAL=$(awk -v s="$SELF_STAKE" 'BEGIN{printf "%.0f", s*4}')
+    # Delegation capacity. Metal caps total weight at max_weight = 5 × self,
+    # so the receivable ceiling is 4 × self.
+    CAPACITY_METAL=$(awk -v s="$SELF_STAKE" 'BEGIN{printf "%.4f", s*4}' | sed -E 's/\.?0+$//')
     TOTAL_WEIGHT_METAL=$(awk -v s="$SELF_STAKE" -v d="$OBS_DELEGATOR_TOTAL_METAL" 'BEGIN{printf "%.4f", s+d}' | sed -E 's/\.?0+$//')
+    # 受入 line, rendered exactly as scripts/daily-status.sh renders it (that
+    # implementation is the canonical form for this fact; keep them in step).
+    #
+    # It replaces the pre-2026-08-06 pair of lines
+    #     受入額: <received> METAL
+    #     自己 stake: <self> METAL / 受入枠 <cap> METAL
+    # whose slash had a DIFFERENT quantity on each side — numerator self
+    # stake, denominator the delegation ceiling — so it read as a ratio while
+    # being none, and the number that actually belongs over that denominator
+    # (cumulative received) sat stranded on the line above. Operator reported
+    # it from a live push on 2026-08-06. Self stake is still useful context,
+    # so it stays, on its own line, as a standalone quantity.
+    #
+    # No division anywhere here, so no divide-by-zero: the head-room is a
+    # subtraction, clamped at 0 by awk so an over-cap reading (not possible
+    # on-chain, but not worth rendering as a negative if it ever happened)
+    # degrades to the 満枠 branch instead of printing "残枠 -12.3".
+    REMAIN_METAL=$(awk -v s="$SELF_STAKE" -v r="$OBS_DELEGATOR_TOTAL_METAL" 'BEGIN{v=s*4-r; if(v<0)v=0; printf "%.4f", v}' | sed -E 's/\.?0+$//')
+    if awk -v v="$REMAIN_METAL" 'BEGIN{exit !(v+0<=0.0001)}'; then
+      DELEG_LINE="受入: ${OBS_DELEGATOR_TOTAL_METAL} / ${CAPACITY_METAL} METAL 🔒 満枠"
+    else
+      DELEG_LINE="受入: ${OBS_DELEGATOR_TOTAL_METAL} / ${CAPACITY_METAL} METAL (残枠 ${REMAIN_METAL})"
+    fi
     if [ "$OBS_DELEGATOR_COUNT" -gt "${ORIG_DC:-0}" ]; then
       DIFF=$((OBS_DELEGATOR_COUNT - ORIG_DC))
-      body=$(printf '+%s 件、合計 %s 件\n受入額: %s METAL\n自己 stake: %s METAL / 受入枠 %s METAL\n総 weight: %s METAL (self + delegators)' "$DIFF" "$OBS_DELEGATOR_COUNT" "$OBS_DELEGATOR_TOTAL_METAL" "$SELF_STAKE" "$CAPACITY_METAL" "$TOTAL_WEIGHT_METAL")
+      body=$(printf '+%s 件、合計 %s 件\n%s\n自己 stake: %s METAL\n総 weight: %s METAL (self + delegators)' "$DIFF" "$OBS_DELEGATOR_COUNT" "$DELEG_LINE" "$SELF_STAKE" "$TOTAL_WEIGHT_METAL")
       # Good news: keep priority high (= must not be missed) but replace
       # the priority-derived warning emoji with a celebratory one.
       if notify_or_keep high "Delegation +${DIFF} 件受入 (合計 ${OBS_DELEGATOR_COUNT} 件)" "$body" tada; then
@@ -839,7 +864,14 @@ if [ "$RPC_VALID" = "1" ]; then
       fi
     else
       DIFF=$((ORIG_DC - OBS_DELEGATOR_COUNT))
-      body=$(printf '-%s 件、合計 %s 件\n受入額: %s METAL\n総 weight: %s METAL (self + delegators)\n期間満了か途中解除、explorer で確認:\nhttps://explorer.metalblockchain.org/validators/%s' "$DIFF" "$OBS_DELEGATOR_COUNT" "$OBS_DELEGATOR_TOTAL_METAL" "$TOTAL_WEIGHT_METAL" "$NODE_ID")
+      # `--` is load-bearing: this format string starts with a literal '-', and
+      # without the terminator bash's printf reads it as an option, dies with
+      # "printf: -%: invalid option" and substitutes an EMPTY body. That is not
+      # hypothetical — it is what this notification has done since the initial
+      # commit, so every "Delegation -N 件離脱" push ever sent carried a title
+      # and nothing else. Found 2026-08-06 while adding the body assertions
+      # below (departures are rare enough that nobody had seen one recently).
+      body=$(printf -- '-%s 件、合計 %s 件\n%s\n自己 stake: %s METAL\n総 weight: %s METAL (self + delegators)\n期間満了か途中解除、explorer で確認:\nhttps://explorer.metalblockchain.org/validators/%s' "$DIFF" "$OBS_DELEGATOR_COUNT" "$DELEG_LINE" "$SELF_STAKE" "$TOTAL_WEIGHT_METAL" "$NODE_ID")
       if notify_or_keep default "Delegation -${DIFF} 件離脱 (合計 ${OBS_DELEGATOR_COUNT} 件)" "$body"; then
         candidate_set '.delegator_count' "$OBS_DELEGATOR_COUNT"
         candidate_set '.delegator_total_nmetal' "$OBS_DELEGATOR_TOTAL_NMETAL"
