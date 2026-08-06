@@ -107,7 +107,25 @@ else
 		printf 'publish-guard: jq not found; cannot parse tool input; failing closed.\n' >&2
 		exit "$BLOCK_EXIT"
 	fi
+	# `command -v jq` proves only that SOMETHING named jq exists. Prove it
+	# actually parses, with the same positive-marker contract used for perl: a
+	# present-but-broken jq emitting garbage would yield a garbage tool name,
+	# which falls through the case below to "other tools -> allow" and lets
+	# every tool call past completely unexamined.
+	if [ "$(printf '{"pg":"ok"}' | jq -r '.pg' 2>/dev/null)" != "ok" ]; then
+		printf 'publish-guard: jq is present but did not parse a known probe; failing closed.\n' >&2
+		exit "$BLOCK_EXIT"
+	fi
 	TOOL="$(printf '%s' "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null)"
+	# `command -v jq` above only proves a jq EXISTS. A jq that is present but
+	# broken (empty or garbage output) yields an empty tool name, which fell
+	# through the case below to the catch-all `exit 0` -- allowing every tool
+	# call unexamined. Non-empty input with no parseable tool name means the
+	# parse failed, not that the tool is uninteresting.
+	if [ -z "$TOOL" ] && [ -n "$INPUT" ]; then
+		printf 'publish-guard: tool input did not parse (jq produced no tool_name); failing closed.\n' >&2
+		exit "$BLOCK_EXIT"
+	fi
 	FP=""
 	case "$TOOL" in
 		Write)
@@ -207,17 +225,25 @@ else
 					# A short-option cluster containing "n": a bare -n, or -n
 					# bundled with other boolean short options (-an, -nm, -nam).
 					my $NC = qr/-[A-Za-z]*n[A-Za-z]*/;
+					# A `git commit|push` invocation. Global options (-C <dir>,
+					# -c k=v, --no-pager) may precede the subcommand, and the
+					# separators accept a backslash so a line continuation
+					# between `git` and the subcommand cannot hide it.
+					my $GC = qr/git(?:[\s\\]+-\S*(?:[\s\\]+[^-\s]\S*)?){0,5}[\s\\]+(?:commit|push)(?![\w-])/;
 					# G. RAW text only (see header). No left word-boundary on
 					# "git" -- deliberately, because the original check had none
 					# either and adding one made a quoted
 					# `eval "git commit --no-verify"` stop matching (round-4
 					# self-test X1: a regression this file must not ship).
-					my $has_gitcmd = ($cmd =~ /git(?:\s+-\S*(?:\s+[^-\s]\S*)?){0,5}\s+(?:commit|push)(?![\w-])/) ? 1 : 0;
+					my $has_gitcmd = ($cmd =~ /$GC/) ? 1 : 0;
 					# P1. Raw literal long flag. Never masked, never stripped.
 					my $flag = ($cmd =~ /--no-verify/) ? 1 : 0;
 					# P2. Quote-masked short-option cluster.
-					if (!$flag) {
-						my $s = $cmd; my $out = q{}; my $balanced = 1;
+					my $balanced = 1;
+					my $mask;
+					$mask = sub {
+						my ($s, $depth) = @_;
+						my $out = q{};
 						pos($s) = 0;
 						while (pos($s) < length($s)) {
 							# Runs of ordinary characters pass through untouched.
@@ -229,10 +255,30 @@ else
 							if    ($s =~ /\G\x27([^\x27]*)\x27/gcs)  { $c = $1; }
 							elsif ($s =~ /\G"((?:[^"\\]|\\.)*)"/gcs) { $c = $1; }
 							else  { $balanced = 0; last; }
-							# Space-padded so masking can neither create nor destroy
-							# a word boundary for the scan below.
-							$out .= ($c eq q{--no-verify} || $c =~ /\A$NC\z/) ? qq{ $c } : qq{ \x01 };
+							# Space-padded so masking can neither create nor
+							# destroy a word boundary for the scan below.
+							if ($c eq q{--no-verify} || $c =~ /\A$NC\z/) {
+								$out .= qq{ $c };
+							}
+							# A quoted region that is ITSELF a git commit|push
+							# invocation is a command, not a message: masking it
+							# away is how `eval "git commit -m x -n"` and
+							# `bash -c "... git commit -nm y"` escaped -- the
+							# whole region collapsed to a placeholder and the
+							# tokenizer then saw one opaque token. Recurse into
+							# it instead of blanking it, so its own quoting is
+							# still masked one level down and a message that
+							# merely mentions a syntax-check flag is unaffected
+							# (such a message contains no `git commit`).
+							elsif ($c =~ /$GC/) {
+								$out .= q{ } . ($depth < 16 ? $mask->($c, $depth + 1) : $c) . q{ };
+							}
+							else { $out .= qq{ \x01 }; }
 						}
+						return $out;
+					};
+					if (!$flag) {
+						my $out  = $mask->($cmd, 0);
 						my $scan = $balanced ? $out : $cmd;
 						# Left boundary: start / whitespace / backslash (so an
 						# escaped \-n is not read as mid-word). Right boundary: not
@@ -256,6 +302,19 @@ else
 					}
 					print(($has_gitcmd && $flag) ? "BLOCK" : "ALLOW");
 				' 2>/dev/null)"
+				# The raw long-flag scan runs ALWAYS and is OR-ed in, not only
+				# when the marker check fails. The exact-marker contract cannot
+				# distinguish a working perl from a stand-in that prints ALLOW,
+				# and the realistic failure here is an accident (a broken PATH,
+				# a shadowed interpreter), not an attacker. Running this one
+				# grep unconditionally removes any need to trust perl for the
+				# long flag at all. It is NOT extended to -n: that pattern is
+				# the originally reported false positive, and re-running it
+				# unconditionally would resurrect it.
+				if printf '%s' "$CMD" | grep -qE 'git[[:space:]]+(commit|push)([[:space:]]|$)' \
+					&& printf '%s' "$CMD" | grep -qF -- '--no-verify'; then
+					BASH_BLOCK=1
+				fi
 				case "$DECISION" in
 					BLOCK) BASH_BLOCK=1 ;;
 					ALLOW) : ;;
@@ -329,7 +388,18 @@ EOF
 			# repositories, so it identifies "ours" exactly.
 			PG_OURS="$(pg_common_dir "$REPO_ROOT" || true)"
 			PG_THEIRS="$(pg_common_dir "$FP_DIR_P" || true)"
-			if [ -n "$PG_OURS" ] && [ "$PG_OURS" = "$PG_THEIRS" ]; then FP_INSIDE=1; fi
+			# Compared by IDENTITY (-ef = same device + inode), not by string.
+			# `pwd -P` resolves symlinks but, in bash, leaves the CASE exactly
+			# as it was typed, so on a case-insensitive volume /users/... and
+			# /Users/... canonicalise to two different strings for one
+			# directory and a string compare silently reported "outside" --
+			# measured against this very repository. Identity collapses case,
+			# symlinks and relative spellings at once. The string compare is
+			# kept as a cheap first branch only.
+			if [ -n "$PG_OURS" ] && [ -n "$PG_THEIRS" ] \
+				&& { [ "$PG_OURS" = "$PG_THEIRS" ] || [ "$PG_OURS" -ef "$PG_THEIRS" ]; }; then
+				FP_INSIDE=1
+			fi
 		fi
 
 		if [ "$FP_INSIDE" -eq 0 ]; then
@@ -349,7 +419,13 @@ fi
 [ -z "$SCAN_TEXT" ] && exit 0
 
 # ---- core scan (A: IPv4, A2: IPv6, A3: phone, A4: email, B: word hash, C: CJK hash) ----
-FINDINGS="$(
+# Completion is proved by a trailing marker, exactly as the Bash branch proves
+# its decision, and for the same reason: "produced no findings" and "never ran"
+# are the same empty string. Without the marker a missing/crashing/killed perl
+# (or a missing Digest::SHA) made EVERY mode return 0 = allow -- including
+# --diff, which is the layer-2 pre-commit backstop, i.e. the thing that makes
+# "nothing reaches history" true. Fail closed instead.
+SCAN_RAW="$(
 	printf '%s' "$SCAN_TEXT" | WORDH="$WORD_HASHES" CJKH="$CJK_HASHES" \
 	perl -MDigest::SHA=sha256_hex -0777 -ne '
 		my %wh = map { $_ => 1 } grep { length } split /,/, ($ENV{WORDH} // "");
@@ -439,8 +515,33 @@ FINDINGS="$(
 			push @hits, "forbidden name/word (redacted)" if $ch{ sha256_hex($1) };
 		}
 		if (@hits) { my %s; print join("\n", grep { !$s{$_}++ } @hits), "\n"; }
+		print "PUBLISH_GUARD_SCAN_OK";
 	'
 )"
+SCANNER_BROKEN=0
+case "$SCAN_RAW" in
+	*PUBLISH_GUARD_SCAN_OK)
+		FINDINGS="${SCAN_RAW%PUBLISH_GUARD_SCAN_OK}"
+		FINDINGS="${FINDINGS%$'\n'}"
+		;;
+	*)
+		SCANNER_BROKEN=1
+		FINDINGS=""
+		;;
+esac
+
+if [ "$SCANNER_BROKEN" -eq 1 ]; then
+	{
+		echo "=== PUBLISH_GUARD_BLOCK ==="
+		echo "Context: ${CTX:-$MODE}"
+		echo "The content scanner did not run to completion (perl missing, crashed,"
+		echo "killed, or Digest::SHA unavailable), so this content was NEVER checked"
+		echo "for host IP / handle / name / phone / email. Failing closed."
+		echo
+		echo "Fix: make a working perl with Digest::SHA available on PATH, then retry."
+	} >&2
+	exit "$BLOCK_EXIT"
+fi
 
 # ---- D: optional local denylist (exact substrings, gitignored) ----
 DENY_HIT=""

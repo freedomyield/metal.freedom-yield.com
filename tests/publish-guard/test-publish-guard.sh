@@ -63,6 +63,7 @@ DASH_N="$(printf -- '-%s' n)"
 
 PASS=0
 FAIL=0
+SKIP=0
 
 run_text() {
 	local name="$1" exp="$2" flag="$3" text="$4" rc
@@ -471,6 +472,117 @@ r4g_check "R4-G3 4001 unbalanced quotes"       "git commit -m $BIG_U"
 r4g_check "R4-G4 100k backslashes"             "git commit -m $BIG_B"
 r4g_check "R4-G5 30k escaped quotes in one string" "git commit -m \"$BIG_E\""
 
+echo "== Bash hook-bypass R4-I: a quoted region that is ITSELF a git command -> block =="
+# Review finding F1 (2026-08-06), each verified as a real bypass with actual
+# commits: round 4's own quote-masking collapsed `eval "git commit -m x -n"` to
+# a placeholder, so P2 lost the payload and the tokenizer saw one opaque token.
+# r2 blocked these; r3 and r4 did not. `bash -c 'cd x && git commit -nm y'` is
+# an ordinary agent invocation, not an adversarial one. The masker now recurses
+# into a quoted region whose contents are themselves a git commit|push.
+# NOTE these use the SHORT flag: R4-C1 only exercised the long one, which is
+# exactly why the gap survived round 4's own battery.
+run_json "R4-I1 eval \"git commit ... -n\" -> block" 2 \
+	"$(jq -nc --arg c "eval \"git commit -m x ${DASH_N}\"" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-I2 eval 'git commit ... -n' -> block" 2 \
+	"$(jq -nc --arg c "eval 'git commit -m x ${DASH_N}'" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-I3 bash -c \"git commit ... -n\" -> block" 2 \
+	"$(jq -nc --arg c "bash -c \"git commit -m x ${DASH_N}\"" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-I4 bash -c 'git commit ... -n' -> block" 2 \
+	"$(jq -nc --arg c "bash -c 'git commit -m x ${DASH_N}'" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-I5 sh -c \"git commit -n -m x\" -> block" 2 \
+	"$(jq -nc --arg c "sh -c \"git commit ${DASH_N} -m x\"" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-I6 eval \"git commit -an -m x\" (bundled) -> block" 2 \
+	"$(jq -nc --arg c 'eval "git commit -an -m x"' '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-I7 bash -c 'cd x && git commit -nm y' -> block" 2 \
+	"$(jq -nc --arg c "bash -c 'cd x && git commit -nm y'" '{tool_name:"Bash",tool_input:{command:$c}}')"
+# The recursion must not swallow the false-positive fix: a MESSAGE that merely
+# mentions a syntax-check flag contains no `git commit`, so it is still masked.
+I8_CMD="$(printf 'bash -c %sgit commit -m "note bash %s here"%s' "'" "$DASH_N" "'")"
+I8_JSON="$(jq -nc --arg c "$I8_CMD" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-I8 wrapper whose message merely mentions bash -n -> allow" 0 "$I8_JSON"
+I9_CMD="$(printf 'bash -c "git commit -m %sdocs mention bash %s%s"' "'" "$DASH_N" "'")"
+I9_JSON="$(jq -nc --arg c "$I9_CMD" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-I9 nested quoting, message only -> allow" 0 "$I9_JSON"
+
+echo "== Bash hook-bypass R4-N: line continuation between git and the subcommand -> block =="
+# Review finding F6: `git \<newline> commit ...` was never recognised as a git
+# invocation at all, in every round including r0. One-character fix: the
+# separators now accept a backslash.
+N1_CMD="$(printf 'git \\\ncommit -m x %s' "$NOVERIFY_FLAG")"
+run_json "R4-N1 line continuation before the subcommand -> block" 2 \
+	"$(jq -nc --arg c "$N1_CMD" '{tool_name:"Bash",tool_input:{command:$c}}')"
+N2_CMD="$(printf 'git \\\ncommit -m x %s' "$DASH_N")"
+run_json "R4-N2 same, short flag -> block" 2 \
+	"$(jq -nc --arg c "$N2_CMD" '{tool_name:"Bash",tool_input:{command:$c}}')"
+
+echo "== Bash hook-bypass R4-M: the raw long-flag scan runs even when perl says ALLOW =="
+# Review finding F7: the exact-marker contract cannot tell a working perl from
+# a stand-in that prints ALLOW, and the realistic cause is an accident (a
+# broken PATH), not an attacker. The raw grep for the long flag is now
+# unconditional -- one grep, and perl no longer has to be trusted for it.
+M_DIR="$(mktemp -d -t pubguard-r4m.XXXXXX)"
+printf '#!/bin/sh\nprintf ALLOW\n' > "$M_DIR/perl"
+chmod 755 "$M_DIR/perl"
+M1_JSON="$(jq -nc --arg c "git commit -m x ${NOVERIFY_FLAG}" '{tool_name:"Bash",tool_input:{command:$c}}')"
+printf '%s' "$M1_JSON" | PATH="$M_DIR:$PATH" bash "$GUARD" >/dev/null 2>&1; rc=$?
+[ "$rc" -eq 2 ] && { printf 'PASS  %-62s (rc=%d)\n' "R4-M1 perl says ALLOW but the long flag is real -> block" "$rc"; PASS=$((PASS+1)); } \
+	|| { printf 'FAIL  %-62s (rc=%d, want 2)\n' "R4-M1 perl says ALLOW but the long flag is real -> block" "$rc" >&2; FAIL=$((FAIL+1)); }
+# ...and it must NOT be extended to -n, which would resurrect the reported FP.
+M2_JSON="$(jq -nc --arg c "git commit -m \"docs: mention bash ${DASH_N} check\"" '{tool_name:"Bash",tool_input:{command:$c}}')"
+printf '%s' "$M2_JSON" | PATH="$M_DIR:$PATH" bash "$GUARD" >/dev/null 2>&1; rc=$?
+[ "$rc" -eq 0 ] && { printf 'PASS  %-62s (rc=%d)\n' "R4-M2 same stand-in perl, FP message -> still allow" "$rc"; PASS=$((PASS+1)); } \
+	|| { printf 'FAIL  %-62s (rc=%d, want 0)\n' "R4-M2 same stand-in perl, FP message -> still allow" "$rc" >&2; FAIL=$((FAIL+1)); }
+rm -rf "$M_DIR"
+
+echo "== R4-L: the CONTENT scanner must fail closed, in every mode =="
+# Review finding F3: round 4's "8 modes fail closed" covered only the Bash
+# branch. With perl broken, a Write carrying a real public IP returned 0 --
+# and so did --diff, which is the layer-2 pre-commit backstop that makes
+# "nothing reaches history" true. Completion is now proved by a trailing
+# marker, the same positive-marker contract the Bash branch already used.
+r4l_check() {
+	local name="$1" exp="$2" body="$3" mode="$4" bin="$5" dir rc
+	dir="$(mktemp -d -t pubguard-r4l.XXXXXX)"
+	printf '%s' "$body" > "$dir/$bin"
+	chmod 755 "$dir/$bin"
+	if [ "$mode" = "write" ]; then
+		jq -nc --arg fp "$REPO_ROOT/README.md" --arg c "host $PUB_IP" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}' \
+			| PATH="$dir:$PATH" bash "$GUARD" >/dev/null 2>&1
+	elif [ "$mode" = "diff" ]; then
+		printf -- '+++ b/x.md\n+host %s\n ctx' "$PUB_IP" \
+			| PATH="$dir:$PATH" bash "$GUARD" --diff >/dev/null 2>&1
+	else
+		printf 'host %s:9651' "$PUB_IP" | PATH="$dir:$PATH" bash "$GUARD" --text >/dev/null 2>&1
+	fi
+	rc=$?
+	rm -rf "$dir"
+	if [ "$rc" -eq "$exp" ]; then printf 'PASS  %-62s (rc=%d)\n' "$name" "$rc"; PASS=$((PASS+1))
+	else printf 'FAIL  %-62s (rc=%d, want %d)\n' "$name" "$rc" "$exp" >&2; FAIL=$((FAIL+1)); fi
+}
+PERL_DEAD='#!/bin/sh
+exit 1
+'
+PERL_MUTE='#!/bin/sh
+exit 0
+'
+PERL_JUNK='#!/bin/sh
+printf zzz
+'
+r4l_check "R4-L1 --text, perl crashes -> block"           1 "$PERL_DEAD" text  perl
+r4l_check "R4-L2 --text, perl silent -> block"            1 "$PERL_MUTE" text  perl
+r4l_check "R4-L3 --text, perl garbage -> block"           1 "$PERL_JUNK" text  perl
+r4l_check "R4-L4 --diff (layer 2), perl crashes -> block" 1 "$PERL_DEAD" diff  perl
+r4l_check "R4-L5 --diff (layer 2), perl silent -> block"  1 "$PERL_MUTE" diff  perl
+r4l_check "R4-L6 Write, perl crashes -> block"            2 "$PERL_DEAD" write perl
+r4l_check "R4-L7 Write, perl silent -> block"             2 "$PERL_MUTE" write perl
+# A jq that exists but does not parse used to yield a garbage tool name, which
+# fell through "other tools -> allow" and let every call past unexamined.
+r4l_check "R4-L8 Write, jq silent -> block"               2 "$PERL_MUTE" write jq
+r4l_check "R4-L9 Write, jq garbage -> block"              2 "$PERL_JUNK" write jq
+# A WORKING scanner must still allow clean content (no blanket over-block).
+run_text "R4-L10 working scanner, clean text -> allow"    0 --text "the validator is healthy"
+run_text "R4-L11 working scanner, clean diff -> allow"    0 --diff "$(printf '+++ b/x.md\n+all good\n ctx')"
+
 echo "== Write/Edit =="
 run_json "write public IP -> tracked README block" 2 "$(jq -nc --arg fp "$REPO_ROOT/README.md" --arg c "host $PUB_IP" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"
 run_json "write phone -> tracked README block"     2 "$(jq -nc --arg fp "$REPO_ROOT/README.md" --arg c "tel $FAKE_PHONE" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"
@@ -563,6 +675,62 @@ if [ -d "$H_WT" ] && [ -d "$H_OTHER/.git" ]; then
 	SELF_MAIN="$(dirname "$SELF_COMMON")"
 	run_json_cwd "R4-H8 tracked README block holds with cwd = the main checkout" 2 "$SELF_MAIN" \
 		"$(jq -nc --arg fp "$REPO_ROOT/README.md" --arg c "host $PUB_IP" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"
+
+	# 5. a gitignored file INSIDE a linked worktree must stay skipped. This
+	#    pins the worktree-local check-ignore attempt: without it the file is
+	#    unresolvable from the main checkout and would newly be scanned
+	#    (measured: rc=0 -> rc=2). Nothing else in the suite covers it.
+	printf '%s\n' "guardtest-ignored-wt.md" > "$H_WT/.gitignore"
+	run_json_cwd "R4-H9 gitignored file inside a linked worktree -> allow" 0 "$H_MAIN" \
+		"$(jq -nc --arg fp "$H_WT/guardtest-ignored-wt.md" --arg c "host $PUB_IP" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"
+	# ...while a NON-ignored sibling in the same worktree is still scanned, so
+	#    the assertion above cannot pass by skipping the whole worktree.
+	run_json_cwd "R4-H10 non-ignored sibling in that worktree -> block" 2 "$H_MAIN" \
+		"$(jq -nc --arg fp "$H_WT/not-ignored.md" --arg c "host $PUB_IP" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"
+
+	# 6. case aliasing. Inside the guard `pwd -P` resolves symlinks but leaves
+	#    the CASE exactly as typed (measured with `bash -x`), so on a
+	#    case-insensitive volume two spellings of one directory canonicalise to
+	#    two different strings and the guard reported "outside": rc=0,
+	#    unscanned, in r3 and in round 4 as first shipped. Membership is now
+	#    decided by inode identity instead.
+	#
+	#    The SHAPE matters. `git rev-parse --git-common-dir` answers with an
+	#    absolute path from a linked WORKTREE -- which re-normalises the case by
+	#    accident -- but with a bare `.git` from a MAIN checkout, where it is
+	#    resolved relative to the already-aliased directory and the alias
+	#    survives. Only the main-checkout shape escapes, so that is the shape
+	#    asserted here: an assertion built on the worktree passes even with the
+	#    fix reverted, i.e. pins nothing. Skipped (never silently passed) where
+	#    the filesystem is case-sensitive and the premise does not hold.
+	pg_case_alias() {
+		local base="$1" cand
+		for cand in "$(printf '%s' "$base" | tr 'A-Z' 'a-z')" \
+		            "$(printf '%s' "$base" | tr 'a-z' 'A-Z')"; do
+			if [ "$cand" != "$base" ] && [ -d "$cand" ] && [ "$cand" -ef "$base" ]; then
+				printf '%s' "$cand"; return 0
+			fi
+		done
+		return 1
+	}
+	H_ALIAS="$(pg_case_alias "$H_MAIN" || true)"
+	S_ALIAS="$(pg_case_alias "$SELF_MAIN" || true)"
+	if [ -n "$H_ALIAS" ]; then
+		run_json_cwd "R4-H11 case-aliased path in a plain checkout -> block" 2 "$H_MAIN" \
+			"$(jq -nc --arg fp "$H_ALIAS/leak.md" --arg c "host $PUB_IP" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"
+	else
+		printf 'SKIP  %-62s (case-sensitive filesystem)\n' "R4-H11 case-aliased path in a plain checkout"
+		SKIP=$((SKIP+1))
+	fi
+	if [ -n "$S_ALIAS" ]; then
+		# The reviewer's exact measurement, against this repository's own main
+		# checkout: rc=0 and unscanned before the fix.
+		run_json_cwd "R4-H12 case-aliased path in THIS repo's main checkout -> block" 2 "$SELF_MAIN" \
+			"$(jq -nc --arg fp "$S_ALIAS/README.md" --arg c "host $PUB_IP" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"
+	else
+		printf 'SKIP  %-62s (case-sensitive filesystem)\n' "R4-H12 case-aliased path in this repo's main checkout"
+		SKIP=$((SKIP+1))
+	fi
 else
 	printf 'FAIL  %-62s (fixture setup failed)\n' "R4-H fixture (worktree + unrelated repo)" >&2
 	FAIL=$((FAIL+1))
@@ -583,7 +751,11 @@ rm -f "$DENY_TMP"
 
 echo
 echo "----------------------------------------"
-echo "test-publish-guard.sh summary: PASS=$PASS  FAIL=$FAIL"
+if [ "$SKIP" -gt 0 ]; then
+	echo "test-publish-guard.sh summary: PASS=$PASS  FAIL=$FAIL  SKIP=$SKIP"
+else
+	echo "test-publish-guard.sh summary: PASS=$PASS  FAIL=$FAIL"
+fi
 if [ "$FAIL" -gt 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"
 exit 0
