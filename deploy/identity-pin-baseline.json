@@ -1,24 +1,14 @@
 {
   "_comment": "Artifact pins in the signed public/api/identity.json that were ALREADY broken when scripts/check-identity-pins.sh was introduced (2026-08-06). This file is an acknowledgement list, not a mute button: a tracked-class entry suppresses the gate only while BOTH pinned_sha256 and observed_sha256 still hold. Re-sign the manifest or edit the artifact again and the entry stops applying, so the break is reported as new. Stream-class entries are documentation only - they never gate anything, because a push-owned feed is rewritten by host cron on its own cadence and its pin is stale by construction. Every entry here is a C4 (stop pinning moving streams / re-issue on artifact change) work item.",
   "schema_version": 1,
-  "recorded_at": "2026-08-06T00:00:00Z",
+  "recorded_at": "2026-08-06T05:35:00Z",
   "recorded_against": {
-    "identity_generated_at": "2026-08-04T05:27:00Z",
-    "identity_signed_by_commit": "90bcdd986fdbe87f20dd3c858e77e1be5b220ada",
+    "identity_generated_at": "2026-08-06T05:31:44Z",
+    "identity_signed_by_commit": "7dd2eb6 (re-signed 2026-08-06; both tracked-class entries resolved by that re-issue)",
     "measurement": "tracked-class observed_sha256 measured against the repo working tree; stream-class observed_sha256 measured against the live published URL at record time (a moving value, informational only)"
   },
   "resolution_task": "C4",
   "known_broken": {
-    "cycle_history_jsonl.schema_sha256": {
-      "path": "public/api/cycle-history.schema.v1.json",
-      "class": "tracked",
-      "pinned_sha256": "1c017b6f94f86543f31cfc0b29d32771364ef317b1909c0647d886b2f7ec15a2",
-      "observed_sha256": "8a023ad9f13bf7ba9918cbfe94f583815ee67c76655ec68cbe815a341c751540",
-      "broken_by_commit": "7dfc3c49ab9f6d5fd2cddf68b72f892134fe538c",
-      "reason": "An ordinary git-tracked schema edit (7dfc3c4, 2026-08-05, widen self-stake schema) changed the file the day after 90bcdd9 signed a manifest pinning its previous bytes. Nothing in CI or cron noticed - this is the exact failure the checker now blocks.",
-      "resolution": "Re-issue identity.json (scripts/operator-local/gen-identity.sh on the operator Mac, passphrase-protected key) so the pin matches the shipped schema, then delete this entry.",
-      "gate_effect": "accepted-until-either-side-changes"
-    },
     "evidence_json.sha256": {
       "path": "public/api/evidence.json",
       "class": "stream",
@@ -45,15 +35,6 @@
       "reason": "Push-owned feed (deploy/feed-excludes.txt): appended by scripts/uptime-history.sh as cycles accumulate.",
       "resolution": "C4 - same as evidence_json.sha256.",
       "gate_effect": "not-gated-structural"
-    },
-    "incidents_json.sha256": {
-      "path": "public/api/incidents.json",
-      "class": "tracked",
-      "pinned_sha256": "2c3a6b3507098dfecf2ca83f6e4b254994821fe2b60b06d52a77e48d5b2a97ee",
-      "observed_sha256": "44baa57ddb7b237b7d5b0aed39d6e522376feddadd8becf2db4ba86a568f6ec0",
-      "reason": "In-flight, deliberate: the 2026-08-06-01 disclosure entry was appended to incidents.json as part of the cycle-history correction. incidents.json must be SERVED before gen-identity.sh can re-sign (it hashes each leaf by curling its live URL), so the manifest cannot be re-issued in the same commit. This entry acknowledges the gap for the duration of that publish-then-re-sign sequence only.",
-      "resolution": "Delete this entry in the same commit that lands the re-signed identity.json. If it is still here after that commit, the re-sign did not happen.",
-      "gate_effect": "accepted-until-either-side-changes"
     }
   }
 }
