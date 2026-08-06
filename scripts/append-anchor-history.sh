@@ -427,17 +427,24 @@ mv "$TMP_OUT" "$HISTORY" || {
 	exit 5
 }
 
-# `|| true` is load-bearing, not decorative: under `set -e`, if the caller
-# has closed stdout (fd 1) — e.g. `bash append-anchor-history.sh >&-` —
-# this plain `echo` fails ("write error: Bad file descriptor") and, being
-# an ordinary statement (not part of a conditional), that failure aborts
-# the script HERE, before the R18 publication block below ever runs. That
-# is precisely the failure mode this feature exists to prevent: the line
-# lands (archived_source_path/archived_receipt_path already written and
-# advertised) but nothing publishes the archives it points at. Verified by
-# reproduction (2026-08-06 review round 1): without `|| true`, exit=1,
-# history line present, zero push attempts, zero WARN/alert.
-echo "OK: appended line to $HISTORY (tx_id=$TX_ID)" || true
+# NOTE (2026-08-06, review round 2): the append-confirmation echo used to
+# sit HERE, between the atomic append and the R18 publication block below.
+# `|| true` alone (round 1) only protects against a closed-fd write error
+# (EBADF, e.g. `bash append-anchor-history.sh >&-`) — that's a normal
+# nonzero-exit builtin failure `set -e`/`||` can intercept. It does NOT
+# protect against a broken PIPE (e.g. `bash append-anchor-history.sh |
+# true`, a reader that exits without reading): writing to a pipe with no
+# reader delivers SIGPIPE, which kills this bash process outright — a
+# signal death bypasses `||` entirely, `set -e` never gets a chance to
+# apply. Reproduced (round 2): under `| true`, history landed but the
+# publish block never ran (0 push attempts) — the exact bug this feature
+# exists to prevent, and `|| true` alone doesn't close it. The structural
+# fix (simpler than a trap): the confirmation echo now runs LAST, after
+# publish — see the very end of this file. That way, by the time this
+# stdout write could fail (for ANY reason, EBADF or SIGPIPE alike), the
+# publish attempts have already happened; reordering, not error-catching,
+# is what makes this print's fate irrelevant to whether archives get
+# published.
 
 # ---- R18 publication: push the two per-anchor archives (best-effort) ------
 # Runs strictly AFTER the append above already succeeded (mv landed) — this
@@ -509,3 +516,12 @@ else
 	publish_archive "${ARCHIVE_DIR}/anchor-source-${DAG_ROOT}.json" "archive/anchor-source-${DAG_ROOT}.json" "anchor-source"
 	publish_archive "${ARCHIVE_DIR}/anchor-receipt-${TX_ID}.json" "archive/anchor-receipt-${TX_ID}.json" "anchor-receipt"
 fi
+
+# Confirmation print — deliberately LAST (see the note above, where this
+# echo used to sit): every consequential step (append, then publish) has
+# already happened by this point, so nothing downstream depends on this
+# statement completing. `|| true` still guards the plain EBADF case
+# (closed fd, no signal); a SIGPIPE death here (piped stdout, no reader)
+# would still kill the process at this final line, but that no longer
+# costs the invariant this feature protects — publish already ran.
+echo "OK: appended line to $HISTORY (tx_id=$TX_ID)" || true

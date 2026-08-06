@@ -375,6 +375,159 @@ else
 	fail "(d) notify stub was never invoked (expected 2 alerts for missing archives)"
 fi
 
+# =============================================================================
+# case (e): regression guard — closed stdout must never block publish
+# (review round 2, 2026-08-06). Before the round-2 fix, the append-
+# confirmation echo sat BETWEEN the atomic append and the publish block; a
+# write failure there (closed fd -> EBADF, or a broken pipe -> SIGPIPE)
+# aborted the script before publish ever ran. The fix moved that echo to
+# run LAST, after publish, so its fate can no longer gate whether the
+# archives get pushed. This case exercises the closed-fd (`>&-`) shape,
+# which is deterministic and portable inside a hermetic suite (a SIGPIPE/
+# broken-pipe variant was independently reproduced by hand for the report
+# -- its exact manifestation depends on pipe buffering/timing, which isn't
+# something to assert reliably here, but it is fixed by the same reorder).
+# =============================================================================
+RECEIPT_E="$TMP/receipt-e.json"
+TX_ID_E="0707070707070707070707070707070707070707070707070707070707070707"
+DAG_ROOT_E="0808080808080808080808080808080808080808080808080808080808080808"
+make_receipt "$RECEIPT_E" "$TX_ID_E" 400000001 9 "$DAG_ROOT_E" "null" "cyclestart"
+
+HIST_E="$TMP/history-e.jsonl"
+ARCHIVE_DIR_E="$TMP/archive-e"
+mkdir -p "$ARCHIVE_DIR_E"
+echo '{}' > "${ARCHIVE_DIR_E}/anchor-source-${DAG_ROOT_E}.json"
+echo '{}' > "${ARCHIVE_DIR_E}/anchor-receipt-${TX_ID_E}.json"
+
+PUSH_LOG_E="$TMP/push-e.log"
+PUSH_STUB_E="$TMP/push-stub-success-e.sh"
+make_push_stub "$PUSH_STUB_E" "$PUSH_LOG_E" 0
+NOTIFY_STUB_E="$TMP/notify-stub-e.sh"
+make_notify_stub "$NOTIFY_STUB_E" "$TMP/notify-e.log"
+
+STDERR_E="$TMP/run-e.stderr"
+PATH="$AJV_FARM:$PATH" \
+	ANCHOR_ARCHIVE_DIR="$ARCHIVE_DIR_E" \
+	FYD_PUSH_TO_WEB_HOST="$PUSH_STUB_E" \
+	FYD_NOTIFY="$NOTIFY_STUB_E" \
+	bash "$SCRIPT" --receipt="$RECEIPT_E" --history="$HIST_E" --event-type=cyclestart \
+	>&- 2>"$STDERR_E"
+RC_E=$?
+check_eq "(e) regression: closed stdout (>&-) still exits 0" "0" "$RC_E"
+check_eq "(e) regression: history still appended under closed stdout" "1" "$(wc -l < "$HIST_E" 2>/dev/null | tr -d ' ')"
+if [ -f "$PUSH_LOG_E" ]; then
+	check_eq "(e) regression: publish still ran under closed stdout (2 push calls)" "2" "$(wc -l < "$PUSH_LOG_E" | tr -d ' ')"
+else
+	fail "(e) regression: push stub never invoked under closed stdout (expected 2 calls) -- this is the ordering regression this case exists to catch"
+fi
+
+# =============================================================================
+# case (f): regression guard — FYD_PUBLISH_ARCHIVES kill switch, both
+# directions (review round 2, 2026-08-06). (f1) =0 disables publish
+# entirely (0 push calls) while the append itself still succeeds; (f2)/(f3)
+# unset and explicit =1 both still push (default-ON guarantee) -- a
+# mutation that inverts the switch's polarity, or that disables it
+# unconditionally, must turn one of these three red.
+# =============================================================================
+
+# f1: FYD_PUBLISH_ARCHIVES=0 -> 0 push calls, exit 0, history still 1 line.
+RECEIPT_F1="$TMP/receipt-f1.json"
+TX_ID_F1="0909090909090909090909090909090909090909090909090909090909090909"
+DAG_ROOT_F1="0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"
+make_receipt "$RECEIPT_F1" "$TX_ID_F1" 500000001 10 "$DAG_ROOT_F1" "null" "cyclestart"
+HIST_F1="$TMP/history-f1.jsonl"
+ARCHIVE_DIR_F1="$TMP/archive-f1"
+mkdir -p "$ARCHIVE_DIR_F1"
+echo '{}' > "${ARCHIVE_DIR_F1}/anchor-source-${DAG_ROOT_F1}.json"
+echo '{}' > "${ARCHIVE_DIR_F1}/anchor-receipt-${TX_ID_F1}.json"
+PUSH_LOG_F1="$TMP/push-f1.log"
+PUSH_STUB_F1="$TMP/push-stub-success-f1.sh"
+make_push_stub "$PUSH_STUB_F1" "$PUSH_LOG_F1" 0
+NOTIFY_STUB_F1="$TMP/notify-stub-f1.sh"
+make_notify_stub "$NOTIFY_STUB_F1" "$TMP/notify-f1.log"
+
+STDERR_F1="$TMP/run-f1.stderr"
+PATH="$AJV_FARM:$PATH" \
+	ANCHOR_ARCHIVE_DIR="$ARCHIVE_DIR_F1" \
+	FYD_PUSH_TO_WEB_HOST="$PUSH_STUB_F1" \
+	FYD_NOTIFY="$NOTIFY_STUB_F1" \
+	FYD_PUBLISH_ARCHIVES=0 \
+	bash "$SCRIPT" --receipt="$RECEIPT_F1" --history="$HIST_F1" --event-type=cyclestart \
+	>/dev/null 2>"$STDERR_F1"
+RC_F1=$?
+check_eq "(f1) kill switch =0: exit 0" "0" "$RC_F1"
+check_eq "(f1) kill switch =0: history still appended (1 line)" "1" "$(wc -l < "$HIST_F1" 2>/dev/null | tr -d ' ')"
+if [ -f "$PUSH_LOG_F1" ]; then
+	fail "(f1) kill switch =0: push stub WAS invoked (expected 0 calls — switch did not disable publish)"
+else
+	pass "(f1) kill switch =0: push never attempted"
+fi
+grep -q 'R18 archive publish disabled' "$STDERR_F1" \
+	&& pass "(f1) kill switch =0: stderr reports the switch is active" \
+	|| fail "(f1) kill switch =0: stderr missing disabled-switch report"
+
+# f2: FYD_PUBLISH_ARCHIVES unset -> default ON, 2 push calls.
+RECEIPT_F2="$TMP/receipt-f2.json"
+TX_ID_F2="0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b"
+DAG_ROOT_F2="0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c"
+make_receipt "$RECEIPT_F2" "$TX_ID_F2" 600000001 11 "$DAG_ROOT_F2" "null" "cyclestart"
+HIST_F2="$TMP/history-f2.jsonl"
+ARCHIVE_DIR_F2="$TMP/archive-f2"
+mkdir -p "$ARCHIVE_DIR_F2"
+echo '{}' > "${ARCHIVE_DIR_F2}/anchor-source-${DAG_ROOT_F2}.json"
+echo '{}' > "${ARCHIVE_DIR_F2}/anchor-receipt-${TX_ID_F2}.json"
+PUSH_LOG_F2="$TMP/push-f2.log"
+PUSH_STUB_F2="$TMP/push-stub-success-f2.sh"
+make_push_stub "$PUSH_STUB_F2" "$PUSH_LOG_F2" 0
+NOTIFY_STUB_F2="$TMP/notify-stub-f2.sh"
+make_notify_stub "$NOTIFY_STUB_F2" "$TMP/notify-f2.log"
+
+unset FYD_PUBLISH_ARCHIVES
+PATH="$AJV_FARM:$PATH" \
+	ANCHOR_ARCHIVE_DIR="$ARCHIVE_DIR_F2" \
+	FYD_PUSH_TO_WEB_HOST="$PUSH_STUB_F2" \
+	FYD_NOTIFY="$NOTIFY_STUB_F2" \
+	bash "$SCRIPT" --receipt="$RECEIPT_F2" --history="$HIST_F2" --event-type=cyclestart \
+	>/dev/null 2>"$TMP/run-f2.stderr"
+RC_F2=$?
+check_eq "(f2) kill switch unset: exit 0" "0" "$RC_F2"
+if [ -f "$PUSH_LOG_F2" ]; then
+	check_eq "(f2) kill switch unset (default ON): 2 push calls" "2" "$(wc -l < "$PUSH_LOG_F2" | tr -d ' ')"
+else
+	fail "(f2) kill switch unset: push stub never invoked (expected 2 calls — default-ON regression)"
+fi
+
+# f3: FYD_PUBLISH_ARCHIVES=1 explicit -> same as unset, 2 push calls.
+RECEIPT_F3="$TMP/receipt-f3.json"
+TX_ID_F3="0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d"
+DAG_ROOT_F3="0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e"
+make_receipt "$RECEIPT_F3" "$TX_ID_F3" 700000001 12 "$DAG_ROOT_F3" "null" "cyclestart"
+HIST_F3="$TMP/history-f3.jsonl"
+ARCHIVE_DIR_F3="$TMP/archive-f3"
+mkdir -p "$ARCHIVE_DIR_F3"
+echo '{}' > "${ARCHIVE_DIR_F3}/anchor-source-${DAG_ROOT_F3}.json"
+echo '{}' > "${ARCHIVE_DIR_F3}/anchor-receipt-${TX_ID_F3}.json"
+PUSH_LOG_F3="$TMP/push-f3.log"
+PUSH_STUB_F3="$TMP/push-stub-success-f3.sh"
+make_push_stub "$PUSH_STUB_F3" "$PUSH_LOG_F3" 0
+NOTIFY_STUB_F3="$TMP/notify-stub-f3.sh"
+make_notify_stub "$NOTIFY_STUB_F3" "$TMP/notify-f3.log"
+
+PATH="$AJV_FARM:$PATH" \
+	ANCHOR_ARCHIVE_DIR="$ARCHIVE_DIR_F3" \
+	FYD_PUSH_TO_WEB_HOST="$PUSH_STUB_F3" \
+	FYD_NOTIFY="$NOTIFY_STUB_F3" \
+	FYD_PUBLISH_ARCHIVES=1 \
+	bash "$SCRIPT" --receipt="$RECEIPT_F3" --history="$HIST_F3" --event-type=cyclestart \
+	>/dev/null 2>"$TMP/run-f3.stderr"
+RC_F3=$?
+check_eq "(f3) kill switch =1 explicit: exit 0" "0" "$RC_F3"
+if [ -f "$PUSH_LOG_F3" ]; then
+	check_eq "(f3) kill switch =1 explicit: 2 push calls" "2" "$(wc -l < "$PUSH_LOG_F3" | tr -d ' ')"
+else
+	fail "(f3) kill switch =1 explicit: push stub never invoked (expected 2 calls)"
+fi
+
 # ---- summary -----------------------------------------------------------------
 echo
 echo "----------------------------------------"
