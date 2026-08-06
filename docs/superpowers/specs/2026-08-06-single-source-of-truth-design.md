@@ -123,11 +123,11 @@ phase 4/5 は env を完全解決したコマンドと R16 token ritual を**印
 9/4     cycle 4→5 転換を新仕組みで実施
 ```
 
-**C3 を最初に落とす理由**: 「本番 cron が黙って no-op になる」が唯一の怖い失敗モードで、これは時間をかけた観測でしか検出できない。8 月上旬に落とせば 9/4 まで 3〜4 週間の観測期間が取れる。3 層で守る:
+**C3 を最初に落とす理由**: 「本番 cron が黙って no-op になる」が唯一の怖い失敗モードだから。ただし観測は長さより **cadence の網羅**が効く — 日次 cron が 3 回、月次相当の経路は手動 trigger で確認すれば、それ以上待っても新しい情報は出ない。よって観測は **3 日** (operator 判断、2026-08-06)。3 層で守る:
 
 1. cron の env header に `FY_LIVE=1` が無ければ、既存の `check-cron-file.sh` lint が violation とする (9 本の installer が必ず通る経路)
 2. dry 実行時は stderr に `DRY:` を出す (silent failure ではなく可視の dry-run)
-3. 着地後 48 時間、実 artifact の更新を実測確認する (mtime の前進、digest の到着、内容変化)
+3. 着地後 3 日間、**全 cron cadence を 1 周以上**観測して実 artifact の更新を実測確認する (`*/5` `*/15` `*/30` は初日で、日次は 3 回、`04:30` の cycle-history まで含めて mtime 前進・digest 到着・内容変化を確認)
 
 **C2 の退路**: `--print-only` が 13 コマンドを env 完全解決で印字する。orchestrator が当日使えなくても、その出力をそのまま実行すれば現行手順と同一になる。`docs/CYCLE_GATE.md` は引き続き正典であり、phase list と doc の step list が乖離したら CI で fail させる。
 
