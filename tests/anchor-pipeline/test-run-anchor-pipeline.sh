@@ -67,8 +67,12 @@ NOTIFY_STUB=""
 NOTIFY_LOG=""
 build_harness() {
 	HARNESS="$(mktemp -d -t anchor-pipe-e2e.XXXXXX)"
-	mkdir -p "$HARNESS/scripts" "$HARNESS/public/api" "$HARNESS/calls"
+	mkdir -p "$HARNESS/scripts/lib" "$HARNESS/public/api" "$HARNESS/calls"
 	cp "$ORCH" "$HARNESS/scripts/run-anchor-pipeline.sh"
+	# The orchestrator sources the side-effects library relative to its own
+	# location, so the harness needs the REAL one (not a stub — the point of
+	# an isolated harness is that the code under test is unmodified).
+	cp "${REPO_ROOT}/scripts/lib/side-effects.sh" "$HARNESS/scripts/lib/side-effects.sh"
 
 	local name
 	for name in check-scripts-freshness gen-anchor-source sign-anchor-event gen-anchor-receipt append-anchor-history; do
@@ -329,9 +333,14 @@ destroy_harness
 # ---- case 13: FYD_ALLOW_STALE_PIPELINE=1 bypasses the gate + fires alert high ---
 # Emergency-only override: even with a stale marker set, the pipeline must
 # proceed AND the bypass must be loudly alerted (never a silent skip).
+# FY_LIVE=1 because the assertion under test is "the alert is actually sent";
+# since the C3 rollout (2026-08-06) a dry FY_LIVE would suppress it, and the
+# case would then be measuring the library's gate instead of the bypass path.
+# The suppressed direction is covered by
+# tests/side-effects-callers/test-anchor-cycle-side-effects.sh.
 build_harness
 touch "$HARNESS/fail-check-scripts-freshness"
-OUT="$(FYD_ALLOW_STALE_PIPELINE=1 FYD_NOTIFY="$NOTIFY_STUB" bash "$HARNESS/scripts/run-anchor-pipeline.sh" --chain=testnet-a 2>/dev/null)"
+OUT="$(FY_LIVE=1 FYD_ALLOW_STALE_PIPELINE=1 FYD_NOTIFY="$NOTIFY_STUB" bash "$HARNESS/scripts/run-anchor-pipeline.sh" --chain=testnet-a 2>/dev/null)"
 RC=$?
 [ "$RC" -eq 0 ] \
 	&& ok "bypass: exit 0 despite stale marker" \

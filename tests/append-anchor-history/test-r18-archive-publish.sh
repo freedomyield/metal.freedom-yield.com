@@ -170,7 +170,7 @@ make_notify_stub "$NOTIFY_STUB_A" "$NOTIFY_LOG_A"
 
 STDOUT_A="$TMP/run-a.stdout"
 STDERR_A="$TMP/run-a.stderr"
-PATH="$AJV_FARM:$PATH" \
+FY_LIVE=1 PATH="$AJV_FARM:$PATH" \
 	ANCHOR_ARCHIVE_DIR="$ARCHIVE_DIR_A" \
 	FYD_PUSH_TO_WEB_HOST="$PUSH_STUB_A" \
 	FYD_NOTIFY="$NOTIFY_STUB_A" \
@@ -230,7 +230,7 @@ make_notify_stub "$NOTIFY_STUB_B" "$NOTIFY_LOG_B"
 
 STDOUT_B="$TMP/run-b.stdout"
 STDERR_B="$TMP/run-b.stderr"
-PATH="$AJV_FARM:$PATH" \
+FY_LIVE=1 PATH="$AJV_FARM:$PATH" \
 	ANCHOR_ARCHIVE_DIR="$ARCHIVE_DIR_B" \
 	FYD_PUSH_TO_WEB_HOST="$PUSH_STUB_B" \
 	FYD_NOTIFY="$NOTIFY_STUB_B" \
@@ -255,12 +255,18 @@ grep -q 'R18 publish FAILED for anchor-receipt' "$STDERR_B" \
 	&& pass "(b) stderr loudly reports anchor-receipt publish failure" \
 	|| fail "(b) stderr missing anchor-receipt publish-failure report"
 
-RETRY_CMD_SOURCE="$(grep -o "bash \"${PUSH_STUB_B}\" \"archive/anchor-source-${DAG_ROOT_B}.json\"" "$STDERR_B" | head -n1)"
+# The printed command quotes its two arguments with SINGLE quotes since
+# 2026-08-06 (C3): the static side-effect gate in
+# tests/side-effects-callers/test-anchor-cycle-side-effects.sh blanks
+# single-quoted runs before looking for delegate invocations, so operator
+# guidance that merely NAMES push-to-web-host.sh can never be mistaken for a
+# call to it. Still asserted byte-exactly, and still eval'd verbatim below.
+RETRY_CMD_SOURCE="$(grep -o "bash '${PUSH_STUB_B}' 'archive/anchor-source-${DAG_ROOT_B}.json'" "$STDERR_B" | head -n1)"
 check_eq "(b) exact retry command printed for anchor-source" \
-	"bash \"${PUSH_STUB_B}\" \"archive/anchor-source-${DAG_ROOT_B}.json\"" "$RETRY_CMD_SOURCE"
-RETRY_CMD_RECEIPT="$(grep -o "bash \"${PUSH_STUB_B}\" \"archive/anchor-receipt-${TX_ID_B}.json\"" "$STDERR_B" | head -n1)"
+	"bash '${PUSH_STUB_B}' 'archive/anchor-source-${DAG_ROOT_B}.json'" "$RETRY_CMD_SOURCE"
+RETRY_CMD_RECEIPT="$(grep -o "bash '${PUSH_STUB_B}' 'archive/anchor-receipt-${TX_ID_B}.json'" "$STDERR_B" | head -n1)"
 check_eq "(b) exact retry command printed for anchor-receipt" \
-	"bash \"${PUSH_STUB_B}\" \"archive/anchor-receipt-${TX_ID_B}.json\"" "$RETRY_CMD_RECEIPT"
+	"bash '${PUSH_STUB_B}' 'archive/anchor-receipt-${TX_ID_B}.json'" "$RETRY_CMD_RECEIPT"
 
 if [ -f "$NOTIFY_LOG_B" ]; then
 	check_eq "(b) notify alert fired once per failed archive" "2" "$(wc -l < "$NOTIFY_LOG_B" | tr -d ' ')"
@@ -282,7 +288,7 @@ fi
 PUSH_COUNT_BEFORE_RERUN="$(wc -l < "$PUSH_LOG_A" | tr -d ' ')"
 HIST_A_LINES_BEFORE="$(wc -l < "$HIST_A" | tr -d ' ')"
 STDERR_A_RERUN="$TMP/run-a-rerun.stderr"
-PATH="$AJV_FARM:$PATH" \
+FY_LIVE=1 PATH="$AJV_FARM:$PATH" \
 	ANCHOR_ARCHIVE_DIR="$ARCHIVE_DIR_A" \
 	FYD_PUSH_TO_WEB_HOST="$PUSH_STUB_A" \
 	FYD_NOTIFY="$NOTIFY_STUB_A" \
@@ -341,7 +347,7 @@ make_notify_stub "$NOTIFY_STUB_D" "$NOTIFY_LOG_D"
 
 STDOUT_D="$TMP/run-d.stdout"
 STDERR_D="$TMP/run-d.stderr"
-PATH="$AJV_FARM:$PATH" \
+FY_LIVE=1 PATH="$AJV_FARM:$PATH" \
 	ANCHOR_ARCHIVE_DIR="$ARCHIVE_DIR_D" \
 	FYD_PUSH_TO_WEB_HOST="$PUSH_STUB_D" \
 	FYD_NOTIFY="$NOTIFY_STUB_D" \
@@ -406,7 +412,7 @@ NOTIFY_STUB_E="$TMP/notify-stub-e.sh"
 make_notify_stub "$NOTIFY_STUB_E" "$TMP/notify-e.log"
 
 STDERR_E="$TMP/run-e.stderr"
-PATH="$AJV_FARM:$PATH" \
+FY_LIVE=1 PATH="$AJV_FARM:$PATH" \
 	ANCHOR_ARCHIVE_DIR="$ARCHIVE_DIR_E" \
 	FYD_PUSH_TO_WEB_HOST="$PUSH_STUB_E" \
 	FYD_NOTIFY="$NOTIFY_STUB_E" \
@@ -447,7 +453,7 @@ NOTIFY_STUB_F1="$TMP/notify-stub-f1.sh"
 make_notify_stub "$NOTIFY_STUB_F1" "$TMP/notify-f1.log"
 
 STDERR_F1="$TMP/run-f1.stderr"
-PATH="$AJV_FARM:$PATH" \
+FY_LIVE=1 PATH="$AJV_FARM:$PATH" \
 	ANCHOR_ARCHIVE_DIR="$ARCHIVE_DIR_F1" \
 	FYD_PUSH_TO_WEB_HOST="$PUSH_STUB_F1" \
 	FYD_NOTIFY="$NOTIFY_STUB_F1" \
@@ -483,7 +489,7 @@ NOTIFY_STUB_F2="$TMP/notify-stub-f2.sh"
 make_notify_stub "$NOTIFY_STUB_F2" "$TMP/notify-f2.log"
 
 unset FYD_PUBLISH_ARCHIVES
-PATH="$AJV_FARM:$PATH" \
+FY_LIVE=1 PATH="$AJV_FARM:$PATH" \
 	ANCHOR_ARCHIVE_DIR="$ARCHIVE_DIR_F2" \
 	FYD_PUSH_TO_WEB_HOST="$PUSH_STUB_F2" \
 	FYD_NOTIFY="$NOTIFY_STUB_F2" \
@@ -513,7 +519,7 @@ make_push_stub "$PUSH_STUB_F3" "$PUSH_LOG_F3" 0
 NOTIFY_STUB_F3="$TMP/notify-stub-f3.sh"
 make_notify_stub "$NOTIFY_STUB_F3" "$TMP/notify-f3.log"
 
-PATH="$AJV_FARM:$PATH" \
+FY_LIVE=1 PATH="$AJV_FARM:$PATH" \
 	ANCHOR_ARCHIVE_DIR="$ARCHIVE_DIR_F3" \
 	FYD_PUSH_TO_WEB_HOST="$PUSH_STUB_F3" \
 	FYD_NOTIFY="$NOTIFY_STUB_F3" \

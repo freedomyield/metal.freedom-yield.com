@@ -167,9 +167,17 @@ Single command run once per cycle, after AddValidator is Committed and the
 freshly published artifacts are live.
 
 ```sh
-scripts/resume-after-cycle-start.sh --dry-run    # verify only
-scripts/resume-after-cycle-start.sh --apply      # full sequence
+scripts/resume-after-cycle-start.sh --dry-run            # verify only
+FY_LIVE=1 scripts/resume-after-cycle-start.sh --apply    # full sequence
 ```
+
+**`--apply` requires `FY_LIVE=1`** (C3 rollout, 2026-08-06). Without it the
+script REFUSES with exit 6 before Phase 1 — it does not read, poll or write
+anything — and prints the corrected command. It refuses rather than degrading
+to a silent no-op because a suppressed write here would report
+`✓ ALL PHASES PASS` while leaving the gate unapproved, and every
+cycle-dependent side effect would then defer with nobody having a reason to
+look. `--dry-run` needs no opt-in: it reads and reports and writes nothing.
 
 Phases:
 
@@ -501,10 +509,18 @@ topology (validator host + operator Mac)**, in this fixed day-of order
      --anchor-source=public/api/anchor-source.json \
      --trigger=cyclestart \
      --prev-anchor-tx-id=<tx_id of the immediately preceding anchor event>
-   bash scripts/append-anchor-history.sh \
+   FY_LIVE=1 bash scripts/append-anchor-history.sh \
      --receipt=public/api/anchor-receipt.json \
      --event-type=cyclestart
    ```
+   **`FY_LIVE=1` is required on `append-anchor-history.sh`** (C3 rollout,
+   2026-08-06). The append itself is deliberately NOT gated — it happens
+   either way, because a forgotten opt-in must never cost a line in an
+   append-only ledger derived from a one-shot receipt. What IS gated is the
+   automatic R18 archive push described in step 8.5: without `FY_LIVE=1`
+   both pushes are announced-and-skipped (`DEFERRED: R18 publish …`) and the
+   exact manual push commands are printed instead. `gen-anchor-receipt.sh`
+   needs no opt-in.
    `--prev-anchor-tx-id=` is **not derived from anything else** —
    `gen-anchor-receipt.sh` only reads it from this flag (or treats it as
    `null` if omitted); get the value from the host's own
@@ -554,8 +570,11 @@ topology (validator host + operator Mac)**, in this fixed day-of order
 
 9. **host —**
    ```sh
-   bash scripts/resume-after-cycle-start.sh --apply
+   FY_LIVE=1 bash scripts/resume-after-cycle-start.sh --apply
    ```
+   `FY_LIVE=1` is required; without it the script refuses with exit 6 before
+   Phase 1 and writes nothing (see the `resume-after-cycle-start.sh` section
+   above).
    Phase 1 verify (6 checks: prior-state read, chain query, idempotency,
    endTime-in-future, `anchor-source.json` freshness poll, identity
    signature verify) → Phase 2 atomic state write → Phase 3 report.
@@ -581,7 +600,7 @@ If the operator must drive the transition without AI assistance:
 
    ```sh
    ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
-       'sudo -u deploy bash /home/deploy/metal.freedom-yield.com/scripts/resume-after-cycle-start.sh --apply'
+       'sudo -u deploy FY_LIVE=1 bash /home/deploy/metal.freedom-yield.com/scripts/resume-after-cycle-start.sh --apply'
    ```
 
 Phase 1 polling tolerates uncertain deploy timing: it polls up to 10 minutes

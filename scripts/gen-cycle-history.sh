@@ -54,6 +54,23 @@
 #
 # This script never reads validator keys, staking keys, or any signing
 # material. It only joins two already-public JSON files.
+#
+# NOT GATED ON FY_LIVE, and it does not source scripts/lib/side-effects.sh
+# (C3 rollout 2026-08-06 — this was a decision, not an oversight):
+#   * it sends no notification and pushes nothing to the web host — the push
+#     is a separate step (see "Push to web host" above);
+#   * it never touches ${FY_STATE_DIR} / /var/lib/freedom-yield;
+#   * its only write is a deterministic, idempotent regeneration of a
+#     working-tree artifact from two local inputs, already fail-closed behind
+#     cycle-gate.sh above.
+# Gating that write would buy nothing and cost the property that makes it
+# safe: this script is NOT in the side-effect cron list that
+# scripts/install-cron-env-headers.sh guarantees an FY_LIVE=1 header for, so a
+# gate here would turn a visible artifact into silent staleness — the failure
+# mode the C3 rollout is most afraid of. The static gate in
+# tests/side-effects-callers/test-anchor-cycle-side-effects.sh still holds
+# this file to "no raw notify, no raw push, no ungated state-dir write", so
+# the moment one of those appears the library becomes mandatory here too.
 set -euo pipefail
 
 ROOT="${REPO_BASE:-$(cd "$(dirname "$0")/.." && pwd)}"

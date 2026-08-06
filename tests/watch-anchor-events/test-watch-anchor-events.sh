@@ -82,8 +82,15 @@ DRIVER_EXIT_FILE="$TMP/driver-exit-code"
 set_driver_exit() { echo "$1" > "$DRIVER_EXIT_FILE"; }
 driver_calls() { wc -l < "$DRIVER_LOG" | tr -d ' '; }
 
+# FY_LIVE=1 on every case, including the --dry-run one. Since the C3 rollout
+# (2026-08-06) a dry FY_LIVE suppresses the state write by itself, so the R5
+# assertions below ("state NOT advanced", "state advances once confirmed")
+# would stop measuring the driver-confirmation logic they exist to protect and
+# start measuring the library's gate. The dry side is covered separately by
+# tests/side-effects-callers/test-anchor-cycle-side-effects.sh.
 run_watcher() {
 	PATH="$TMP/bin:$PATH" \
+	FY_LIVE=1 \
 	NODE_ID="$NODE_ID" \
 	METALGO_RPC="http://stub-metalgo" \
 	FY_STATE_DIR="$STATE_DIR" \

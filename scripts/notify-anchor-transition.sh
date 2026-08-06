@@ -19,12 +19,36 @@
 # Interface (called by watch-anchor-events.sh):
 #     notify-anchor-transition.sh --event-type=<cyclestart|cycleend> [--cycle-n=<n>] [--dry-run]
 # Env:
-#     ANCHOR_NOTIFY       path to notify.sh (default: <script dir>/notify.sh)
+#     ANCHOR_NOTIFY       path to notify.sh (default: <script dir>/notify.sh).
+#                         Resolved by scripts/lib/side-effects.sh, not here —
+#                         the spelling and its precedence are unchanged.
 #     NOTIFY_RETRY_SLEEP  seconds to wait before the single in-run retry
 #                         (default: 5; tests override to 0)
+#     FY_LIVE=1           REQUIRED before the alert actually reaches ntfy.
+#                         Anything else is a loud dry no-op that prints one
+#                         "DRY: would notify …" line and reports CONFIRMED
+#                         (exit 0) to the caller (scripts/lib/side-effects.sh,
+#                         C3 rollout 2026-08-06). The cron env header for
+#                         metal-anchor-watch carries it; tests deliberately do
+#                         not. NOTE this is a test/prod boundary and is NOT the
+#                         same knob as --dry-run, which is the caller-facing
+#                         rehearsal flag and stays exactly as it was.
+#
+#                         Reporting a suppressed send as CONFIRMED is correct
+#                         ONLY because watch-anchor-events.sh gates its own
+#                         state advance on the same FY_LIVE: under a dry run
+#                         the send is suppressed AND the watcher baseline stays
+#                         put, so the transition is re-detected next tick. The
+#                         two must stay in lock step — see the CONTRACT section
+#                         of scripts/lib/side-effects.sh ("a caller that turns
+#                         rc 0 into a state transition must gate that state
+#                         write with the same FY_LIVE").
 # Exit:
-#     0  alert CONFIRMED delivered (notify.sh strict-mode HTTP 2xx), or --dry-run
+#     0  alert CONFIRMED delivered (notify.sh strict-mode HTTP 2xx), or --dry-run,
+#        or suppressed by a dry FY_LIVE (see above)
 #     2  nothing to do (missing/unrecognized --event-type) — treated as OK by the watcher
+#     3  scripts/lib/side-effects.sh missing (structural — refuse rather than run
+#        an alert driver whose alerts cannot be delivered)
 #     5  notify.sh failed to confirm delivery (transport / 429 / 5xx, retried once;
 #        or a non-retryable 4xx / missing topic / missing notify.sh). The caller
 #        (watch-anchor-events.sh) MUST NOT advance its transition state on this
@@ -35,7 +59,13 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-NOTIFY="${ANCHOR_NOTIFY:-${SCRIPT_DIR}/notify.sh}"
+FYD_LIB="${SCRIPT_DIR}/lib/side-effects.sh"
+if [ ! -r "$FYD_LIB" ]; then
+	echo "notify-anchor-transition: FATAL: side-effects library not readable at $FYD_LIB" >&2
+	exit 3
+fi
+# shellcheck source=scripts/lib/side-effects.sh
+. "$FYD_LIB"
 
 EVENT_TYPE=""
 DRY_RUN=0
@@ -63,19 +93,24 @@ if [ "$DRY_RUN" -eq 1 ]; then
 	exit 0
 fi
 
-if [ ! -x "$NOTIFY" ]; then
-	echo "notify-anchor-transition: notify.sh not executable at ${NOTIFY}" >&2
-	exit 5
-fi
-
 # Delivery-confirmed dispatch (reuses the notify_or_keep pattern from
 # check-anomalies.sh): strict mode so a non-2xx / transport failure is
 # classified rather than swallowed, one in-run retry on the retryable
 # classes, and the driver's own exit communicates delivery — NOT just
 # "we tried" — to the caller so it can gate its state advance on it.
+#
+# stdout is still discarded; stderr is NOT (it used to be). A suppressed dry
+# send announces itself on stderr, and swallowing that would recreate exactly
+# the silent-no-op failure the C3 rollout exists to prevent.
+#
+# The old "notify.sh not executable → exit 5" pre-check is gone: the library
+# validates the delegate itself and returns 64. 64 is non-retryable under
+# retryable_notify_rc() and lands on the same `exit 5` below, so the exit
+# contract this driver publishes to watch-anchor-events.sh is unchanged.
 attempt_notify() {
-	NOTIFY_STRICT_EXIT=1 bash "$NOTIFY" "high" "$TITLE" "$MSG" >/dev/null 2>&1
-	return $?
+	local rc=0
+	fyd_notify --strict "high" "$TITLE" "$MSG" >/dev/null || rc=$?
+	return "$rc"
 }
 retryable_notify_rc() {
 	case "$1" in

@@ -109,7 +109,27 @@
 #   bash scripts/check-anchor-publish-health.sh [--verbose]
 #
 # Env overrides (test-time + ops):
-#   FYD_NOTIFY          notifier to invoke (default: <script dir>/notify.sh)
+#   FY_LIVE=1           REQUIRED before an alert reaches ntfy AND before the
+#                       exit-3 dedup state is written or cleared. Anything else
+#                       is a loud dry no-op printing one "DRY: would …" line
+#                       per suppressed effect (scripts/lib/side-effects.sh, C3
+#                       rollout 2026-08-06). The metal-anchor-publish-health
+#                       cron env header carries it; tests deliberately do not.
+#
+#                       The alert and the dedup state are gated TOGETHER on
+#                       purpose. mismatch_state_write() records "the operator
+#                       has been told about this signature"; if it ran while
+#                       the send was suppressed, the mismatch would go
+#                       unreported for the whole 6h window AFTER the cron got
+#                       its FY_LIVE back. That is the exact hazard the
+#                       CONTRACT section of scripts/lib/side-effects.sh names.
+#
+#                       NOT gated: the verdict, the exit code, and the file
+#                       log. This checker's job is to detect, and a dry tick
+#                       must still detect, still exit 2/3/4/5, and still leave
+#                       an audit line behind.
+#   FYD_NOTIFY          notifier to invoke (default: <script dir>/notify.sh).
+#                       Resolved by scripts/lib/side-effects.sh, not here.
 #   FYD_FETCH_ATTEMPTS  max attempts per fetch() call before giving up
 #                       (default 3)
 #   FYD_RETRY_SLEEP     seconds to pause between fetch() retry attempts
@@ -135,13 +155,20 @@ for arg in "$@"; do
 done
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+FYD_LIB="${SCRIPT_DIR}/lib/side-effects.sh"
+if [ ! -r "$FYD_LIB" ]; then
+	printf 'check-anchor-publish-health: FATAL: side-effects library not readable at %s\n' "$FYD_LIB" >&2
+	exit 6
+fi
+# shellcheck source=scripts/lib/side-effects.sh
+. "$FYD_LIB"
+
 SOURCE_URL="${ANCHOR_SOURCE_URL:-https://metal.freedom-yield.com/api/anchor-source.json}"
 RECEIPT_URL="${ANCHOR_RECEIPT_URL:-https://metal.freedom-yield.com/api/anchor-receipt.json}"
 LOG="${ANCHOR_PUBLISH_HEALTH_LOG:-${SCRIPT_DIR}/../logs/anchor-publish-health.log}"
 MISMATCH_STATE="${ANCHOR_PUBLISH_HEALTH_MISMATCH_STATE:-${SCRIPT_DIR}/../logs/anchor-publish-health-mismatch-state.json}"
 MISMATCH_SUPPRESS_SEC="${ANCHOR_PUBLISH_HEALTH_MISMATCH_SUPPRESS_SEC:-21600}"
 CURL="${FYD_CURL:-curl}"
-NOTIFY="${FYD_NOTIFY:-${SCRIPT_DIR}/notify.sh}"
 NOW_ISO="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
 # Portable epoch -> ISO 8601 UTC (GNU `date -d @epoch` vs BSD `date -r epoch`;
@@ -165,11 +192,12 @@ log() {
 alert() {
 	# alert <priority> <title> <message> — best-effort; a notify.sh failure
 	# is logged but never changes the caller's exit code.
-	if [ -x "$NOTIFY" ] || [ -f "$NOTIFY" ]; then
-		bash "$NOTIFY" "$1" "$2" "$3" || log "WARN: notify failed (alert was: $2 — $3)"
-	else
-		log "WARN: notifier not found at $NOTIFY (alert was: $2 — $3)"
-	fi
+	#
+	# Delivery is gated on FY_LIVE by fyd_notify; the delegate is resolved
+	# from FYD_NOTIFY exactly as before. A failure (including "delegate not
+	# readable", which used to be this function's own branch) is logged and
+	# swallowed — a checker must never die because its alert channel is down.
+	fyd_notify "$1" "$2" "$3" || log "WARN: notify failed (alert was: $2 — $3)"
 }
 
 is_hex64() { [[ "$1" =~ ^[0-9a-f]{64}$ ]]; }
@@ -226,7 +254,19 @@ mismatch_should_alert() {
 # window elapsed), so the suppress window always measures from the most
 # recent alert, not the first-ever one. Best-effort: failure is logged (WARN)
 # but never changes the caller's exit code (matches alert()'s contract).
+#
+# Gated on FY_LIVE in lock step with the alert it records. The WHOLE body is
+# gated (not just the final rename) because the body also mkdir's and mktemp's
+# in the log directory, and a dry tick must leave no stray
+# .anchor-publish-health-mismatch.XXXXXX behind. See the FY_LIVE block in the
+# header for why writing this record while the send is suppressed is worse
+# than doing nothing.
 mismatch_state_write() {
+	fyd_live_run "record the exit-3 mismatch dedup window in ${MISMATCH_STATE}" \
+		mismatch_state_write_live "$1"
+}
+mismatch_state_write_live() {
+	# FYD-GATE(branch): reached only through the fyd_live_run above.
 	local sig="$1" now_epoch now_iso dir tmp
 	now_epoch="$(date -u +%s)"
 	now_iso="$(iso_utc_of_epoch "$now_epoch" 2>/dev/null || printf '%s' "$NOW_ISO")"
@@ -248,6 +288,7 @@ mismatch_state_write() {
 		log "WARN: jq compose failed for mismatch-dedup state (state not persisted; next tick will re-alert)"
 		return 1
 	fi
+	# FYD-GATE(branch): body of mismatch_state_write_live — see the wrapper.
 	if ! mv "$tmp" "$MISMATCH_STATE" 2>/dev/null; then
 		rm -f "$tmp"
 		log "WARN: rename failed writing mismatch-dedup state to $MISMATCH_STATE (state not persisted; next tick will re-alert)"
@@ -259,8 +300,18 @@ mismatch_state_write() {
 # mismatch_state_clear — called on recovery (exit 0) so a later mismatch,
 # even one that reproduces the exact same signature, alerts immediately
 # rather than being suppressed by a stale window from before the recovery.
+#
+# Gated for symmetry with mismatch_state_write: a dry tick must not mutate the
+# dedup ledger in EITHER direction. (Clearing is the safe direction — it can
+# only cause an extra alert, never a missed one — but a dry run that silently
+# rearms production state is still a dry run with a side effect.)
+# The `2>/dev/null` the old body carried is gone on purpose: attached to
+# fyd_live_run it would have swallowed the "DRY: would …" line this rollout
+# exists to make visible. `rm -f` is already silent for a missing file, so the
+# only output it can now produce is a real permission problem worth seeing,
+# and `|| true` keeps that non-fatal exactly as before.
 mismatch_state_clear() {
-	rm -f "$MISMATCH_STATE" 2>/dev/null || true
+	fyd_live_run "clear the exit-3 mismatch dedup state ${MISMATCH_STATE}" rm -f "$MISMATCH_STATE" || true
 }
 
 # fetch <url> <body_outfile> -> prints the HTTP status code (000 on failure).

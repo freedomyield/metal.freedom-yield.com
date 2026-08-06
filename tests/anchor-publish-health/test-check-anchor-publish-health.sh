@@ -160,6 +160,15 @@ run_checker() {
 	# FYD_RETRY_SLEEP=0 always: the suite must never actually sleep between
 	# retry attempts. STUB_STATE_DIR=$BASE gives the stub a place to record
 	# per-URL attempt counts (see the stub above).
+	#
+	# FY_LIVE=1 on every case. This suite's subject is the alert/dedup DECISION
+	# (which exit code alerts, when the 6h window suppresses, when recovery
+	# re-arms); since the C3 rollout (2026-08-06) a dry FY_LIVE suppresses both
+	# the send and the dedup write, so every "expected N alerts" assertion
+	# below would pass trivially at N=0 and stop measuring the logic it exists
+	# to protect. The suppressed direction is covered by
+	# tests/side-effects-callers/test-anchor-cycle-side-effects.sh.
+	FY_LIVE=1 \
 	FYD_CURL="$STUB" \
 	FYD_NOTIFY="$NOTIFY_STUB" \
 	ANCHOR_PUBLISH_HEALTH_LOG="$LOG" \
@@ -379,7 +388,7 @@ rm -f "$DEFAULT_LOG"
 SRC_BODY_FILE="$BASE/src.json"; RCPT_BODY_FILE="$BASE/rcpt.json"
 write_source  "$SRC_BODY_FILE"  "$ROOT_MATCH"
 write_receipt "$RCPT_BODY_FILE" "$ROOT_MATCH"
-FYD_CURL="$STUB" FYD_NOTIFY="$NOTIFY_STUB" \
+FY_LIVE=1 FYD_CURL="$STUB" FYD_NOTIFY="$NOTIFY_STUB" \
 ANCHOR_SOURCE_URL="https://example.test/api/anchor-source.json" \
 ANCHOR_RECEIPT_URL="https://example.test/api/anchor-receipt.json" \
 SRC_BODY_FILE="$SRC_BODY_FILE" SRC_CODE=404 SRC_CODE_SEQ="" \

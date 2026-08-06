@@ -42,6 +42,27 @@
 #     is public; presence flag is public).
 #   - §5: validator-host deploy is operator-approved.
 #
+# Env:
+#   FY_STATE_DIR  state dir (default /var/lib/freedom-yield). Resolved by
+#                 scripts/lib/side-effects.sh (fyd_state_dir cycle). The
+#                 spelling is unchanged.
+#   FY_LIVE=1     REQUIRED before the state dir is created or the watcher
+#                 state file is written. Anything else is a loud dry no-op
+#                 printing one "DRY: would …" line per suppressed write
+#                 (scripts/lib/side-effects.sh, C3 rollout 2026-08-06). The
+#                 metal-anchor-watch cron env header carries it; tests
+#                 deliberately do not. NOTE this is a test/prod boundary and
+#                 is NOT the same knob as --dry-run, which is the operator-
+#                 facing rehearsal flag and stays exactly as it was.
+#
+#                 The dispatch itself is deliberately NOT gated here: the
+#                 driver (notify-anchor-transition.sh) sources the same
+#                 library and gates its own send on the same FY_LIVE. So a
+#                 dry tick still exercises the full detect → dispatch path
+#                 (with the send suppressed) and still declines to advance
+#                 the baseline — send and record stay in lock step, which is
+#                 the invariant R5 below depends on.
+#
 # Exit codes:
 #   0  success — either no transition (no-op) or transition dispatched
 #   1  usage error
@@ -52,6 +73,7 @@
 #      deliberately NOT updated — is_present stays at its prior value so
 #      the same transition is re-detected and the driver re-invoked on the
 #      next tick, until delivery is confirmed. See R5.)
+#   5  scripts/lib/side-effects.sh missing (structural)
 #
 # Usage:
 #   watch-anchor-events.sh [--dry-run]
@@ -89,7 +111,14 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # validator-host auto-broadcast (post-anchor-event.sh) has been removed. The live
 # cron also sets ANCHOR_DRIVER explicitly to the same alert-only driver.
 DRIVER="${ANCHOR_DRIVER:-${SCRIPT_DIR}/notify-anchor-transition.sh}"
-STATE_DIR="${FY_STATE_DIR:-/var/lib/freedom-yield}"
+FYD_LIB="${SCRIPT_DIR}/lib/side-effects.sh"
+if [ ! -r "$FYD_LIB" ]; then
+	echo "ERROR: side-effects library not readable at ${FYD_LIB}" >&2
+	exit 5
+fi
+# shellcheck source=scripts/lib/side-effects.sh
+. "$FYD_LIB"
+STATE_DIR="$(fyd_state_dir cycle)" || exit $?
 STATE_FILE="${STATE_DIR}/anchor-watcher-state.json"
 
 case "${NODE_ID}" in
@@ -100,7 +129,7 @@ esac
 if [ ! -x "${DRIVER}" ]; then
 	echo "ERROR: driver not executable: ${DRIVER}" >&2; exit 1
 fi
-[ -d "${STATE_DIR}" ] || mkdir -p "${STATE_DIR}"
+[ -d "${STATE_DIR}" ] || fyd_live_run "create the anchor-watcher state dir ${STATE_DIR}" mkdir -p "${STATE_DIR}"
 
 # -------- poll metalgo --------
 RPC_REQ="$(jq -nc --arg id "${NODE_ID}" '{
@@ -195,6 +224,12 @@ fi
 # failed to confirm delivery (see SKIP_STATE_WRITE above). Every other path
 # (no transition, first run, transition + confirmed delivery, --dry-run's
 # own guard) updates normally.
+#
+# The write stays ATOMIC (compose into .new, rename over the live file) and
+# BOTH halves are gated on FY_LIVE — the compose through fyd_live_write, the
+# rename through fyd_live_run. Gating only the rename would leave a stray
+# anchor-watcher-state.json.new in the production state dir on every dry
+# tick; gating only the compose would rename a file that does not exist.
 if [ "${DRY_RUN}" -eq 0 ] && [ "${SKIP_STATE_WRITE:-0}" -eq 0 ]; then
 	if ! jq -n \
 		--arg node_id "${NODE_ID}" \
@@ -202,11 +237,11 @@ if [ "${DRY_RUN}" -eq 0 ] && [ "${SKIP_STATE_WRITE:-0}" -eq 0 ]; then
 		--arg last_check "${NOW_UTC}" \
 		--arg last_event "${EVENT:-none}" \
 		'{node_id: $node_id, is_present: $is_present, last_check: $last_check, last_event: $last_event}' \
-		> "${STATE_FILE}.new"
+		| fyd_live_write "the anchor-watcher state" "${STATE_FILE}.new"
 	then
 		echo "ERROR: failed to write ${STATE_FILE}.new" >&2; exit 3
 	fi
-	mv "${STATE_FILE}.new" "${STATE_FILE}"
+	fyd_live_run "install the new anchor-watcher state at ${STATE_FILE}" mv "${STATE_FILE}.new" "${STATE_FILE}"
 fi
 
 exit "${LATER_EXIT:-0}"
