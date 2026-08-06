@@ -512,9 +512,15 @@ STATE_DIR="$(mktemp -d -t cgstate.XXXXXX)"
 cp "${FIXTURE_DIR}/state-old.json" "${STATE_DIR}/cycle-gate-state.json"
 start_mock "${FIXTURE_DIR}/chain-matches.json"
 TMP_REPO_BASE="$(mktemp -d -t repobase.XXXXXX)"
-mkdir -p "${TMP_REPO_BASE}/public/api" "${TMP_REPO_BASE}/scripts"
+mkdir -p "${TMP_REPO_BASE}/public/api" "${TMP_REPO_BASE}/scripts/lib"
 ln -s "${REPO_ROOT}/scripts/cycle-gate.sh" "${TMP_REPO_BASE}/scripts/cycle-gate.sh"
 ln -s "${REPO_ROOT}/scripts/check-anomalies.sh" "${TMP_REPO_BASE}/scripts/check-anomalies.sh"
+# check-anomalies.sh sources scripts/lib/side-effects.sh relative to the repo
+# root it is invoked from (C3 rollout, 2026-08-06) and refuses to run without
+# it, so the isolated REPO_BASE needs it too. FY_LIVE stays unset: this case
+# asserts the cycle-gate suppression marker, and the script must reach that
+# consultation without performing any production side effect.
+ln -s "${REPO_ROOT}/scripts/lib/side-effects.sh" "${TMP_REPO_BASE}/scripts/lib/side-effects.sh"
 echo '{}' > "${TMP_REPO_BASE}/public/api/validator.json"
 OUT="$(FY_STATE_DIR="${STATE_DIR}" \
 	METALGO_RPC="http://127.0.0.1:${PORT}" \

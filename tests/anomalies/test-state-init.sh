@@ -85,8 +85,15 @@ new_env() {
   mkdir -p "$STATE_DIR" "$LOCK_DIR"
 }
 
+# FY_LIVE=1 is the opt-in this script now hard-requires: since the C3
+# inversion (scripts/lib/side-effects.sh, 2026-08-06) it REFUSES with exit 6
+# rather than running dry, because a dry "init complete" would leave the
+# operator believing a baseline had been reset when nothing had happened.
+# Every case below is about what init does ONCE opted in; the refusal itself
+# is covered by tests/side-effects-callers/test-monitoring-side-effects.sh.
 run_init() {
   # Caller sets STATE_DIR / LOCK_FILE / COUNTER. Pass args after env.
+  FY_LIVE=1 \
   ANOMALY_STATE_DIR="$STATE_DIR" \
   ANOMALY_LOCK_FILE="$LOCK_FILE" \
   ANOMALY_CONTENTION_COUNTER="$COUNTER" \
@@ -101,6 +108,7 @@ run_init() {
 run_init_as_unpriv() {
   if is_root && have_unpriv; then
     sudo -n -u "$UNPRIV_USER" env \
+      FY_LIVE=1 \
       ANOMALY_STATE_DIR="$STATE_DIR" \
       ANOMALY_LOCK_FILE="$LOCK_FILE" \
       ANOMALY_CONTENTION_COUNTER="$COUNTER" \

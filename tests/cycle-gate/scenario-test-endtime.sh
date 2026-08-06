@@ -85,6 +85,14 @@ for s in cycle-gate.sh gen-cycle-history.sh \
 		 node-info.sh check-anomalies.sh daily-status.sh; do
 	ln -s "${REPO_ROOT}/scripts/${s}" "${TMP_REPO_BASE}/scripts/${s}"
 done
+# check-anomalies.sh / daily-status.sh source scripts/lib/side-effects.sh
+# relative to the repo root they are invoked from (C3 rollout, 2026-08-06) and
+# refuse to run without it, so the isolated REPO_BASE needs it too. FY_LIVE is
+# deliberately NOT set anywhere in this scenario: it asserts the cycle-gate
+# DEFERRAL markers, and the scripts must reach their gate consultation without
+# performing a single production side effect on the way.
+mkdir -p "${TMP_REPO_BASE}/scripts/lib"
+ln -s "${REPO_ROOT}/scripts/lib/side-effects.sh" "${TMP_REPO_BASE}/scripts/lib/side-effects.sh"
 
 # Minimal fixture data so scripts that read these don't crash before
 # reaching their cycle-gate consultation.

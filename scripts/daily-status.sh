@@ -7,6 +7,14 @@
 #   daily-status.sh (no arg)  → falls back to neutral title
 # Sends a single ntfy notification at "default" priority — quiet ping, full
 # context in the body so the operator can skip opening the ops dashboard.
+#
+# Env:
+#   FY_LIVE=1  REQUIRED before the digest reaches ntfy. Anything else is a
+#              loud dry no-op printing one "DRY: would notify …" line
+#              (scripts/lib/side-effects.sh, C3 rollout 2026-08-06). The
+#              cron env header carries it; tests deliberately do not.
+#
+# Exit code 3: scripts/lib/side-effects.sh missing (structural).
 set -uo pipefail
 
 SLOT="${1:-}"
@@ -18,6 +26,13 @@ case "$SLOT" in
 esac
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+FYD_LIB="${ROOT}/scripts/lib/side-effects.sh"
+if [ ! -r "$FYD_LIB" ]; then
+	echo "[daily-status] FATAL: side-effects library not readable at $FYD_LIB" >&2
+	exit 3
+fi
+# shellcheck source=scripts/lib/side-effects.sh
+. "$FYD_LIB"
 
 # -------- cycle-gate (= digest skip 制御、 fail-closed) --------
 # Skip the entire digest push when the gate is deferred or missing.
@@ -37,7 +52,6 @@ if ! "${CYCLE_GATE_SCRIPT}" --side-effect=cycle-aware-notify; then
 	exit 0
 fi
 
-NOTIFY="$ROOT/scripts/notify.sh"
 STATUS_JSON="$ROOT/public/api/server-status.json"
 VALIDATOR_JSON="$ROOT/public/api/validator.json"
 WALLET_CONFIG="/etc/freedom-yield/wallet-addresses.json"
@@ -264,4 +278,4 @@ ${NODE_SHORT}${EVIDENCE_BLOCK}
 EOF
 )
 
-bash "$NOTIFY" "$PRIO" "${TITLE_PREFIX} ${DATE_JP}" "$BODY"
+fyd_notify "$PRIO" "${TITLE_PREFIX} ${DATE_JP}" "$BODY"

@@ -61,8 +61,16 @@ cat > "$STATE_FILE" <<'EOF'
 }
 EOF
 
-# === K-3 helpers (verbatim copy from scripts/check-anomalies.sh) ===
-cat > "$TMP/k3-helpers.sh" <<'BASH'
+# === K-3 helpers (copy from scripts/check-anomalies.sh) ===
+# The helpers now source the real side-effects library and run with FY_LIVE=1,
+# because the retry classification under test is a property of the LIVE path:
+# a dry fyd_notify always returns 0 and there would be nothing to classify.
+# The delegates stay the on-disk stubs below, so nothing leaves the machine.
+cat > "$TMP/k3-helpers.sh" <<BASH
+. "$REPO/scripts/lib/side-effects.sh"
+export FY_LIVE=1
+BASH
+cat >> "$TMP/k3-helpers.sh" <<'BASH'
 GLOBAL_RC=0
 rc_priority_set() {
   local new="$1"
@@ -96,13 +104,16 @@ candidate_set() {
   return 0
 }
 
+# Post-C3 shape (scripts/lib/side-effects.sh, 2026-08-06): delivery goes
+# through fyd_notify, which resolves the delegate from NOTIFY itself and
+# returns notify.sh's exit code verbatim. The old local
+# "not executable → rc 100" branch is gone; the library returns 64 for an
+# unusable delegate. Both land in the same non-retryable class, which is
+# exactly what the cases below assert.
 attempt_notify() {
-  local prio="$1" title="$2" body="$3"
-  if [ ! -x "$NOTIFY" ]; then
-    return 100
-  fi
-  NOTIFY_STRICT_EXIT=1 bash "$NOTIFY" "$prio" "$title" "$body" >/dev/null 2>&1
-  return $?
+  local prio="$1" title="$2" body="$3" rc=0
+  fyd_notify --strict "$prio" "$title" "$body" >/dev/null 2>&1 || rc=$?
+  return "$rc"
 }
 
 retryable_notify_rc() {
@@ -218,7 +229,9 @@ echo ""
 echo "=== C4 retryable_notify_rc classification ==="
 
 test_retry() {
-  for code in 0 1 2 3 4 5 100; do
+  # 64 = the library's usage/unusable-delegate code, 100 = the historical
+  # script-local 'notifier missing' code. Both must stay non-retryable.
+  for code in 0 1 2 3 4 5 64 100; do
     if retryable_notify_rc "$code"; then
       echo "$code retryable"
     else
@@ -233,6 +246,7 @@ expected_lines="0 not-retryable
 3 not-retryable
 4 retryable
 5 retryable
+64 not-retryable
 100 not-retryable"
 idx=0
 while IFS= read -r expected_line; do
@@ -360,7 +374,11 @@ assert_eq "topic missing (rc=1) → candidate.peers unchanged"  "peers=ok" "$(ec
 assert_eq "topic missing (rc=1) → GLOBAL_RC = 6"              "RC=6"     "$(echo "$out" | sed -n '2p')"
 assert_eq "topic missing (rc=1) → 1 attempt (no retry)"       "TRIES=1"  "$(echo "$out" | sed -n '3p')"
 
-# === NOTIFY missing → rc=100 → no retry, GLOBAL_RC=6 ===
+# === NOTIFY delegate unusable → non-retryable rc → no retry, GLOBAL_RC=6 ===
+# Pre-C3 this was the script's own rc 100; the library now answers 64 for an
+# unreadable delegate. The assertions are on the CONSEQUENCE (candidate not
+# advanced, GLOBAL_RC escalated to 6, no retry), which is what actually
+# matters and is unchanged by the renaming of the code.
 test_notify_missing() {
   export NOTIFY="/nonexistent/path"
   if notify_or_keep high "test" "body"; then
@@ -370,8 +388,8 @@ test_notify_missing() {
   echo "RC=$GLOBAL_RC"
 }
 out=$(run_isolated test_notify_missing)
-assert_eq "NOTIFY missing → candidate unchanged (= running)"   "metalgo=running" "$(echo "$out" | sed -n '1p')"
-assert_eq "NOTIFY missing → GLOBAL_RC = 6"                     "RC=6"            "$(echo "$out" | sed -n '2p')"
+assert_eq "NOTIFY delegate unusable → candidate unchanged (= running)" "metalgo=running" "$(echo "$out" | sed -n '1p')"
+assert_eq "NOTIFY delegate unusable → GLOBAL_RC = 6"           "RC=6"            "$(echo "$out" | sed -n '2p')"
 
 echo ""
 echo "=== C4 commit-skip behaviour (candidate == original canonical) ==="

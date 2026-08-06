@@ -43,14 +43,23 @@
 #
 # Env overrides (test-time + ops):
 #   FYD_REPO_DIR        repo checkout to inspect (default: this script's repo)
-#   FYD_NOTIFY          notifier to invoke (default: <script dir>/notify.sh)
+#   FYD_NOTIFY          notifier to invoke (default: <script dir>/notify.sh).
+#                       Resolved by scripts/lib/side-effects.sh, not here —
+#                       the spelling and its precedence are unchanged.
 #   FYD_BEHIND_MAX      alert when behind-count exceeds this (default 10)
 #   FYD_DRIFT_PATHS     space-separated code zones (default "scripts docs tests deploy")
+#   FY_LIVE=1           REQUIRED for the alert to actually reach ntfy. Anything
+#                       else is a loud dry no-op that prints one "DRY: would …"
+#                       line per suppressed alert (scripts/lib/side-effects.sh,
+#                       C3 rollout 2026-08-06). The cron env header carries it;
+#                       tests deliberately do not.
 #
 # Exit codes:
 #   0  in sync (or behind within threshold)
 #   1  drift detected (ahead commits / code-zone content drift / behind > max)
 #   2  fetch failed
+#   3  scripts/lib/side-effects.sh missing (structural — refuse rather than
+#      run a "monitor" whose alerts cannot be delivered)
 #
 # Cron: daily via /etc/cron.d/metal-host-drift (see
 #       scripts/install-metal-host-drift-cron.sh).
@@ -62,8 +71,15 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+FYD_LIB="${SCRIPT_DIR}/lib/side-effects.sh"
+if [ ! -r "$FYD_LIB" ]; then
+	printf '[check-host-drift] FATAL: side-effects library not readable at %s\n' "$FYD_LIB" >&2
+	exit 3
+fi
+# shellcheck source=scripts/lib/side-effects.sh
+. "$FYD_LIB"
+
 REPO_DIR="${FYD_REPO_DIR:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
-NOTIFY="${FYD_NOTIFY:-${SCRIPT_DIR}/notify.sh}"
 BEHIND_MAX="${FYD_BEHIND_MAX:-10}"
 DRIFT_PATHS="${FYD_DRIFT_PATHS:-scripts docs tests deploy}"
 
@@ -71,11 +87,12 @@ log() { printf '[check-host-drift] %s\n' "$*"; }
 
 alert() {
 	# alert <priority> <title> <message>
-	if [ -x "$NOTIFY" ] || [ -f "$NOTIFY" ]; then
-		bash "$NOTIFY" "$1" "$2" "$3" || log "WARN: notify failed (alert was: $2 — $3)"
-	else
-		log "WARN: notifier not found at $NOTIFY (alert was: $2 — $3)"
-	fi
+	#
+	# Delivery is gated on FY_LIVE by fyd_notify; the delegate is resolved
+	# from FYD_NOTIFY exactly as before. A failure (including "delegate not
+	# readable", which used to be this function's own branch) is logged and
+	# swallowed — a monitor must never die because its alert channel is down.
+	fyd_notify "$1" "$2" "$3" || log "WARN: notify failed (alert was: $2 — $3)"
 }
 
 if ! git -C "$REPO_DIR" rev-parse --git-dir >/dev/null 2>&1; then

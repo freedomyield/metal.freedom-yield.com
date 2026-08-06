@@ -54,7 +54,16 @@ teardown() { rm -rf "$BASE"; BASE=""; }
 # explorer_stub <json> — write the explorer response the checker will curl.
 explorer_stub() { printf '%s' "$1" > "$BASE/explorer.json"; }
 
+# FY_LIVE=1 is what makes the recording stub actually get called and the
+# baseline actually get written: since the C3 inversion
+# (scripts/lib/side-effects.sh, 2026-08-06) every side effect is opt-in, so a
+# run without it is a loud dry no-op. That default-dry behaviour has its own
+# coverage in tests/side-effects-callers/test-monitoring-side-effects.sh; here
+# we opt in because these cases are about WHAT is notified and persisted.
+# Note FY_LIVE and --dry-run are different knobs: --dry-run stays an
+# operator-facing "detect and report" flag and is still exercised by case 8.
 run_checker() {
+	FY_LIVE=1 \
 	WATCH_LIST_FILE="$BASE/watch-list.json" \
 	WATCH_STATE_DIR="$BASE/state" \
 	EXPLORER_API="file://$BASE/explorer.json" \

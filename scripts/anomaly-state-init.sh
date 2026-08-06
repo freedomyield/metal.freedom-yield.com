@@ -15,8 +15,8 @@
 # is NEVER deleted — flock holds the fd, not the file entry.
 #
 # Usage:
-#   bash anomaly-state-init.sh --confirm --baseline-status=running
-#   bash anomaly-state-init.sh --confirm --baseline-status=running \
+#   FY_LIVE=1 bash anomaly-state-init.sh --confirm --baseline-status=running
+#   FY_LIVE=1 bash anomaly-state-init.sh --confirm --baseline-status=running \
 #       [--clear-quarantine] [--clear-counter]
 #
 # Exit codes:
@@ -26,21 +26,46 @@
 #   3  lock held by another process (= cron is in mid-run, retry shortly)
 #   4  state write failed
 #   5  state dir missing and could not be created
+#   6  FY_LIVE=1 absent (see below)
+#   7  scripts/lib/side-effects.sh missing (structural)
+#
+# WHY THIS SCRIPT REFUSES INSTEAD OF RUNNING DRY (C3 rollout, 2026-08-06)
+#   Every other migrated caller treats "FY_LIVE is not 1" as a loud no-op
+#   that still exits 0, because those are cron ticks and a suppressed tick is
+#   a success. This script is the opposite shape: mutating state is its ENTIRE
+#   purpose, it is invoked by hand, and it prints "init complete" at the end.
+#   A dry run that returned 0 would tell the operator the baseline had been
+#   reset when nothing had happened — and the monitor would then sit silent
+#   exactly the way it did for days after 2026-06-24
+#   (docs/postmortems/2026-06-anomaly-monitoring-resume.md). So a missing
+#   FY_LIVE is refused loudly with exit 6 and a copy-pastable corrected
+#   command, never absorbed.
 #
 # Constraints:
 #   - No external API calls.
 #   - No changes to lock file itself (= leaves it intact).
 #   - --confirm is required; without it, the script prints the plan and exits 1.
+#   - FY_LIVE=1 is required; without it, nothing is touched and it exits 6.
 
 set -uo pipefail
 
-STATE_DIR_DEFAULT="/var/lib/freedom-yield"
-LOCK_FILE_DEFAULT="/var/lib/freedom-yield/locks/check-anomalies.lock"
-COUNTER_DEFAULT="/var/lib/freedom-yield/anomaly-contention-counter"
+FYD_LIB="$(cd "$(dirname "$0")" && pwd)/lib/side-effects.sh"
+if [ ! -r "$FYD_LIB" ]; then
+  echo "anomaly-state-init: FATAL: side-effects library not readable at $FYD_LIB" >&2
+  exit 7
+fi
+# shellcheck source=scripts/lib/side-effects.sh
+. "$FYD_LIB"
 
-STATE_DIR="${ANOMALY_STATE_DIR:-$STATE_DIR_DEFAULT}"
-LOCK_FILE="${ANOMALY_LOCK_FILE:-$LOCK_FILE_DEFAULT}"
-COUNTER_FILE="${ANOMALY_CONTENTION_COUNTER:-$COUNTER_DEFAULT}"
+# The state dir is resolved by the library (FY_STATE_DIR, then the legacy
+# ANOMALY_STATE_DIR this script's callers and runbook already use); its
+# fallback is the same production default this script always had. LOCK_FILE
+# and COUNTER_FILE derive from the resolved dir rather than repeating the
+# literal — identical in production, sandbox-following everywhere else.
+STATE_DIR="$(fyd_state_dir anomaly)" || exit $?
+STATE_DIR_DEFAULT="$FYD_STATE_DIR_DEFAULT"
+LOCK_FILE="${ANOMALY_LOCK_FILE:-${STATE_DIR}/locks/check-anomalies.lock}"
+COUNTER_FILE="${ANOMALY_CONTENTION_COUNTER:-${STATE_DIR}/anomaly-contention-counter}"
 
 CONFIRM=0
 BASELINE_STATUS=""
@@ -49,9 +74,12 @@ CLEAR_COUNTER=0
 
 usage() {
   cat >&2 <<EOF
-Usage: $0 --confirm --baseline-status=running|stopped [--clear-quarantine] [--clear-counter]
+Usage: FY_LIVE=1 $0 --confirm --baseline-status=running|stopped [--clear-quarantine] [--clear-counter]
 
 Required:
+  FY_LIVE=1                          Opt in to real side effects. Without it this
+                                     script refuses (exit 6) rather than pretending
+                                     to succeed — see scripts/lib/side-effects.sh.
   --confirm                          Operator confirmation (refuse to proceed without it)
   --baseline-status=running|stopped  Initial metalgo + caddy state for the new baseline
 
@@ -60,9 +88,12 @@ Optional:
   --clear-counter                    Reset contention counter to 0
 
 Env overrides (for fixture / test only):
-  ANOMALY_STATE_DIR                  default: $STATE_DIR_DEFAULT
-  ANOMALY_LOCK_FILE                  default: $LOCK_FILE_DEFAULT
-  ANOMALY_CONTENTION_COUNTER         default: $COUNTER_DEFAULT
+  FY_STATE_DIR                       canonical state dir (highest precedence)
+  ANOMALY_STATE_DIR                  legacy state dir  (default: $STATE_DIR_DEFAULT)
+  ANOMALY_LOCK_FILE                  default: \${STATE_DIR}/locks/check-anomalies.lock
+                                     (resolved now: $LOCK_FILE)
+  ANOMALY_CONTENTION_COUNTER         default: \${STATE_DIR}/anomaly-contention-counter
+                                     (resolved now: $COUNTER_FILE)
 
 See docs/MONITORING_OPS.md §7 for design and §10 for the host setup runbook.
 EOF
@@ -99,6 +130,24 @@ if [ -z "$BASELINE_STATUS" ]; then
   echo "ERROR: --baseline-status is required (running or stopped)" >&2
   usage
   exit 1
+fi
+
+# FYD-GATE(refusal) — every write below this line is covered by the hard gate
+# that follows, which is why this file carries no per-write fyd_live_*
+# wrappers. Asserted by tests/side-effects-callers/test-monitoring-side-effects.sh,
+# which requires that no write precedes this marker.
+# --- FY_LIVE gate: refuse, do not run dry (see the header for why) ---------
+# Placed AFTER argument validation so a typo still reports itself as a typo
+# (exit 1), and BEFORE the first write of any kind — lock file included — so
+# a refused run leaves the host byte-identical.
+if ! fyd_is_live; then
+  echo "ERROR: FY_LIVE=1 is required (currently: FY_LIVE=${FY_LIVE:-<unset>})." >&2
+  echo "  This script exists only to mutate state. A dry run would print" >&2
+  echo "  'init complete' while changing nothing, and the anomaly monitor" >&2
+  echo "  would stay silently dead. Refusing instead." >&2
+  echo "  Re-run as:" >&2
+  echo "    FY_LIVE=1 ANOMALY_STATE_DIR=${STATE_DIR} bash $0 $*" >&2
+  exit 6
 fi
 
 LOCK_DIR="$(dirname "$LOCK_FILE")"
@@ -219,7 +268,9 @@ cat >&2 <<EOF
 
 Next: verify with
   jq . $STATE_FILE
-  bash scripts/check-anomalies.sh; echo rc=\$?
+  FY_LIVE=1 ANOMALY_STATE_DIR=$STATE_DIR bash scripts/check-anomalies.sh; echo rc=\$?
+  (drop FY_LIVE=1 for a read-only dry pass — it prints "DRY: would …" for
+   every side effect it would have performed and touches nothing)
 
 Lock is released automatically on script exit.
 EOF

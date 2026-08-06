@@ -376,12 +376,16 @@ chmod 0750 "$STATE_BASE"
 chmod 0700 "$STATE_BASE/locks"
 
 # Initialise baseline state (operator-driven, not cron-driven).
-sudo -u "$DEPLOY_USER" bash scripts/anomaly-state-init.sh \
+# FY_LIVE=1 is mandatory: since the 2026-08-06 C3 inversion
+# (scripts/lib/side-effects.sh) this script REFUSES with exit 6 rather than
+# running dry, so that a forgotten opt-in can never print "init complete"
+# while changing nothing.
+sudo -u "$DEPLOY_USER" FY_LIVE=1 bash scripts/anomaly-state-init.sh \
   --confirm \
   --baseline-status=running
 
 # Optional: wipe any prior quarantine dirs / reset counter at the same time.
-# sudo -u "$DEPLOY_USER" bash scripts/anomaly-state-init.sh \
+# sudo -u "$DEPLOY_USER" FY_LIVE=1 bash scripts/anomaly-state-init.sh \
 #   --confirm --baseline-status=running \
 #   --clear-quarantine --clear-counter
 
@@ -431,11 +435,13 @@ stat -c '%U:%G %a' /var/lib/freedom-yield 2>/dev/null
 
 **Abort if**: dir missing or wrong ownership. Run the §10 setup commands as root.
 
-### Step 3 — run the cron once dry, with the cron line still commented
+### Step 3 — run the cron's command once by hand, with the cron line still commented
+
+> "By hand" here means *not scheduled*; it does **not** mean "without side effects". Since the 2026-08-06 C3 inversion (`scripts/lib/side-effects.sh`) `FY_LIVE=1` is what turns notifies and state writes on, and this step needs them on for the `rc=7` / `rc=4` verdict below to be real. Drop `FY_LIVE=1` if you only want to look: the run then prints one `DRY: would …` line per suppressed effect and touches nothing.
 
 ```bash
 sudo -u deploy \
-  ANOMALY_STATE_DIR=/var/lib/freedom-yield \
+  FY_LIVE=1 ANOMALY_STATE_DIR=/var/lib/freedom-yield \
   bash /home/deploy/metal.freedom-yield.com/scripts/check-anomalies.sh; \
   echo "rc=$?"
 ```
@@ -459,11 +465,13 @@ sudo -u deploy \
 Run only if Step 3 returned `rc=7` (= state file missing). If Step 3 returned `rc=4`, first inspect `/var/lib/freedom-yield/quarantine/*/diag.txt` to understand the corruption and decide whether to also pass `--clear-quarantine`.
 
 ```bash
-# Dry run first — shows the plan, makes no changes.
+# Plan only — prints what would happen, makes no changes (exit 1, no --confirm).
 sudo -u deploy bash /home/deploy/metal.freedom-yield.com/scripts/anomaly-state-init.sh \
   --baseline-status=running
-# Apply.
-sudo -u deploy bash /home/deploy/metal.freedom-yield.com/scripts/anomaly-state-init.sh \
+# Apply. FY_LIVE=1 is mandatory since the 2026-08-06 C3 inversion
+# (scripts/lib/side-effects.sh); without it the script refuses with exit 6
+# instead of silently doing nothing.
+sudo -u deploy FY_LIVE=1 bash /home/deploy/metal.freedom-yield.com/scripts/anomaly-state-init.sh \
   --confirm --baseline-status=running
 sudo -u deploy jq . /var/lib/freedom-yield/anomaly-state.json | head -20
 ls /var/lib/freedom-yield/.missing-notified.marker 2>&1 | head -1
@@ -485,7 +493,7 @@ ls /var/lib/freedom-yield/.missing-notified.marker 2>&1 | head -1
 
 ```bash
 sudo -u deploy \
-  ANOMALY_STATE_DIR=/var/lib/freedom-yield \
+  FY_LIVE=1 ANOMALY_STATE_DIR=/var/lib/freedom-yield \
   bash /home/deploy/metal.freedom-yield.com/scripts/check-anomalies.sh; \
   echo "rc=$?"
 ```
@@ -508,7 +516,7 @@ sudo -u deploy \
 ) 200>/var/lib/freedom-yield/locks/check-anomalies.lock &
 sleep 0.3
 sudo -u deploy \
-  ANOMALY_STATE_DIR=/var/lib/freedom-yield \
+  FY_LIVE=1 ANOMALY_STATE_DIR=/var/lib/freedom-yield \
   bash /home/deploy/metal.freedom-yield.com/scripts/check-anomalies.sh 2>&1 | head -3
 echo "rc=$?"
 wait

@@ -181,6 +181,14 @@ chmod +x "$SBX_NOTIFY"
 
 # Convenience env exporter.
 export_sandbox() {
+  # FY_LIVE=1 is the C3 opt-in (scripts/lib/side-effects.sh, 2026-08-06).
+  # These integration cases assert on real notifies and real state commits, so
+  # they opt in — into the sandbox paths above, never production. The
+  # default-dry behaviour has its own coverage in
+  # tests/side-effects-callers/test-monitoring-side-effects.sh, and the I8
+  # production-path hash comparison at the end still proves nothing outside
+  # the sandbox moved.
+  export FY_LIVE=1
   export ANOMALY_STATE_DIR="$SBX_STATE"
   export ANOMALY_LOCK_FILE="$SBX_LOCK"
   export ANOMALY_CONTENTION_COUNTER="$SBX_COUNTER"
@@ -198,9 +206,13 @@ export_sandbox() {
 # public/api/{server-status,validator}.json so check-anomalies.sh's
 # self-rooted paths (= "$ROOT/public/api/...") read from the sandbox.
 SBX_REPO="$TMP/repo"
-mkdir -p "$SBX_REPO/scripts" "$SBX_REPO/public/api"
+mkdir -p "$SBX_REPO/scripts/lib" "$SBX_REPO/public/api"
 cp "$CHECK" "$SBX_REPO/scripts/check-anomalies.sh"
 cp "$INIT"  "$SBX_REPO/scripts/anomaly-state-init.sh"
+# Both scripts source scripts/lib/side-effects.sh relative to their own repo
+# root (C3 rollout, 2026-08-06) and refuse to run without it, so the sandbox
+# repo has to carry it too.
+cp "$REPO/scripts/lib/side-effects.sh" "$SBX_REPO/scripts/lib/side-effects.sh"
 # Real notify.sh isn't needed inside the sandbox repo because we override
 # NOTIFY env to point at the stub.
 ln -sf "$SBX_STATUS"    "$SBX_REPO/public/api/server-status.json"
@@ -436,6 +448,7 @@ assert "I4a anomaly run with lock held by init → exit 0 (skip)"   0 "$rc"
 ( flock -x 200; sleep 3 ) 200>"$SBX_LOCK" &
 HOLDER=$!
 sleep 0.3
+FY_LIVE=1 \
 ANOMALY_STATE_DIR="$SBX_STATE" \
 ANOMALY_LOCK_FILE="$SBX_LOCK" \
 ANOMALY_CONTENTION_COUNTER="$SBX_COUNTER" \
@@ -452,6 +465,7 @@ echo "=== I5: init → next anomaly run completes normally ==="
 # Fresh sandbox state dir (= state file missing).
 rm -rf "$SBX_STATE"
 mkdir -p "$SBX_STATE"
+FY_LIVE=1 \
 ANOMALY_STATE_DIR="$SBX_STATE" \
 ANOMALY_LOCK_FILE="$SBX_LOCK" \
 ANOMALY_CONTENTION_COUNTER="$SBX_COUNTER" \

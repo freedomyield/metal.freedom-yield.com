@@ -154,7 +154,10 @@ STUBEOF
 chmod +x "$DIR/notify-stub.sh"
 printf '[]' > "$DIR/explorer.json"
 mkdir -p "$DIR/state-dir"
-WATCH_LIST_FILE="$DIR/etc/watch-list.json" WATCH_STATE_DIR="$DIR/state-dir" \
+# FY_LIVE=1 opts in to the baseline write this case asserts on; without it the
+# checker is a loud dry no-op (scripts/lib/side-effects.sh, C3 2026-08-06).
+FY_LIVE=1 \
+	WATCH_LIST_FILE="$DIR/etc/watch-list.json" WATCH_STATE_DIR="$DIR/state-dir" \
 	EXPLORER_API="file://$DIR/explorer.json" WATCH_NOTIFY="$DIR/notify-stub.sh" \
 	EXPLORER_MIN_VALIDATORS=0 \
 	bash "$REPO_ROOT/scripts/check-watch-validators.sh" >/dev/null 2>&1
