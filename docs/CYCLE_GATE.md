@@ -289,6 +289,15 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    ```sh
    FY_EXPECT_CYCLE=<N> bash scripts/gen-anchor-source.sh
    ```
+   > This step prints exactly one `side-effects: WARNING: state dir falls
+   > back to the production default … while FY_LIVE is not "1"` line. That
+   > is **expected and correct here**: this script only READS the two JSONL
+   > streams under that directory, and reading production data is the whole
+   > point of composing the anchor from live sources. **Do not act on the
+   > line's suggestion to point `FY_STATE_DIR` at a sandbox** — that advice
+   > is aimed at test authors and would compose the DAG from empty inputs.
+   > Do not add `FY_LIVE=1` either: this script writes no production state,
+   > and the opt-in is not what makes the read correct.
    composes the fresh `anchor-source.json` (3-branch DAG) on the validator
    host (cycle-4 day example: `FY_EXPECT_CYCLE=3`). It derives
    `cycle_number_observed` as `CLOSED_COUNT + 1` from the published
@@ -600,7 +609,7 @@ If the operator must drive the transition without AI assistance:
 
    ```sh
    ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
-       'sudo -u deploy FY_LIVE=1 bash /home/deploy/metal.freedom-yield.com/scripts/resume-after-cycle-start.sh --apply'
+       'sudo -u deploy env FY_LIVE=1 bash /home/deploy/metal.freedom-yield.com/scripts/resume-after-cycle-start.sh --apply'
    ```
 
 Phase 1 polling tolerates uncertain deploy timing: it polls up to 10 minutes
@@ -614,7 +623,9 @@ Independent rollback levers, in increasing severity:
 1. **Disable approval enforcement temporarily**:
    `rm /var/lib/freedom-yield/cycle-gate-state.json`. `cycle-gate.sh` returns
    green for every consultation until the next
-   `resume-after-cycle-start.sh --apply` recreates the file.
+   `FY_LIVE=1 resume-after-cycle-start.sh --apply` recreates the file (the
+   opt-in is required — without it the script refuses with exit 6 and the
+   gate stays disabled).
 2. **Kill switch — freeze all gated consumers. ⚠ USE PROHIBITED for routine
    cycle transitions** (including cycle-4, 2026-08-04):
    `chmod -x /home/deploy/metal.freedom-yield.com/scripts/cycle-gate.sh`.

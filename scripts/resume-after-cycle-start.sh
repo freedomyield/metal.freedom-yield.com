@@ -27,7 +27,7 @@
 #   Operator runs this directly via SSH (= the polling logic in Phase 1
 #   tolerates uncertain deploy timing):
 #     ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
-#       'sudo -u deploy FY_LIVE=1 bash /home/deploy/metal.freedom-yield.com/scripts/resume-after-cycle-start.sh --apply'
+#       'sudo -u deploy env FY_LIVE=1 bash /home/deploy/metal.freedom-yield.com/scripts/resume-after-cycle-start.sh --apply'
 #
 # Phases:
 #   Phase 1  verify (= RPC own-entry + anchor-source freshness + identity sig)

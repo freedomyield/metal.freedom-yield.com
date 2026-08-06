@@ -694,6 +694,109 @@ verdict_same "cycle-aware-notify + signature match"    0 state-valid rpc-match.j
 verdict_same "cycle-aware-notify + signature differs"  1 state-valid rpc-other.json --side-effect=cycle-aware-notify
 verdict_same "invalid --side-effect"            2 state-empty   ""          --side-effect=bogus
 
+# ---- 3z A MISSING LIBRARY MUST NOT SWITCH OBSERVATION OFF -----------------
+# cycle-gate.sh sources the library AFTER the two unconditionally-green
+# verdicts have already returned, so on a checkout where scripts/lib/ is
+# absent `observe` and `cycle-artifact-write` keep answering green while the
+# two state-consulting verdicts fail closed with exit 3. Every consumer spells
+# the call `if ! cycle-gate.sh …`, so exit 3 is absorbed as "skip".
+#
+# This is the most load-bearing ordering property in the file — hoisting the
+# source block a few lines up would arm a total observation outage on a host
+# with a partial deploy — and it is asserted at RUNTIME, by deleting the
+# library from a sandbox, because the property is about reachability, not
+# text. (Until this case existed, that hoist passed the whole suite.)
+mk_repo gate-nolib cycle-gate.sh
+mkdir -p "${S}/state-empty"
+rm -f "${S}/scripts/lib/side-effects.sh"
+NOLIB_REPO="$S"
+nolib_rc() {   # <args...> → exit code with the library absent
+	env FY_LIVE= FY_STATE_DIR="${NOLIB_REPO}/state-empty" FY_RPC_TIMEOUT=2 \
+		NODE_ID="NodeID-sandboxgate11111111111111111111" \
+		METALGO_RPC="http://sandbox.invalid:9650" \
+		bash "${NOLIB_REPO}/scripts/cycle-gate.sh" "$@" >/dev/null 2>&1
+	printf '%s' "$?"
+}
+for pair in "observe:0" "cycle-artifact-write:0" "broadcast:3" "cycle-aware-notify:3"; do
+	eff="${pair%%:*}"; want="${pair##*:}"; got="$(nolib_rc --side-effect="$eff")"
+	if [ "$got" = "$want" ]; then
+		ok "3z library absent: ${eff} → ${want}"
+	else
+		bad "3z library absent: ${eff} → ${want}" "got ${got}"
+	fi
+done
+
+# Mutation: hoist the source block above the early return and the green
+# verdicts die with it.
+mk_repo gate-nolib-mut cycle-gate.sh
+NOLIB_REPO="$S"
+mkdir -p "${S}/state-empty"
+rm -f "${S}/scripts/lib/side-effects.sh"
+if python3 - "${S}/scripts/cycle-gate.sh" <<'PYEOF'
+import io, re, sys
+p = sys.argv[1]
+src = io.open(p, encoding="utf-8").read()
+m = re.search(r'SCRIPT_DIR="\$\(cd "\$\(dirname "\$0"\)" && pwd\)"\n'
+              r'FYD_LIB=.*?\n\. "\$\{FYD_LIB\}"\n', src, re.S)
+if not m:
+    sys.exit("mutation anchor not found")
+marker = 'case "${SIDE_EFFECT}" in\n\tobserve|cycle-artifact-write)'
+if marker not in src:
+    sys.exit("hoist target not found")
+src = src.replace(m.group(0), "").replace(marker, m.group(0) + marker, 1)
+io.open(p, "w", encoding="utf-8").write(src)
+PYEOF
+then
+	if [ "$(nolib_rc --side-effect=observe)" = "0" ]; then
+		bad "3z mutation caught: source block hoisted above the early return" \
+			"observe stayed green against a deliberately broken file"
+	else
+		ok "3z mutation caught: source block hoisted above the early return kills observe"
+	fi
+else
+	bad "3z mutation applied: source block hoisted above the early return" "sed/python anchor did not match"
+fi
+
+# ---- 3y the C3 library's FILENAME must not appear in gen-cycle-history.sh --
+# scripts/check-cron-file.sh Rule 6 and scripts/install-cron-env-headers.sh
+# both classify a script as side-effecting by grepping its RAW TEXT — comments
+# included — for that filename. gen-cycle-history.sh deliberately ignores
+# FY_LIVE and runs from /etc/cron.d/metal-cycle-history, a cron file with no
+# FY_LIVE=1 header and no repo installer. So merely NAMING the library in a
+# comment there flips that cron from PASS to FAIL and makes the lint demand a
+# header that would be wrong to add.
+#
+# Asserted end-to-end against the REAL linter (not a re-implementation of its
+# regex), so it cannot drift from the classifier it is protecting.
+mk_repo cronlint gen-cycle-history.sh
+cat >"${S}/cron-metal-cycle-history" <<CRONEOF
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+17 5 * * * deploy { echo "=== metal-cycle-history start \$(date -u +\%FT\%TZ) ==="; cd /home/deploy/metal.freedom-yield.com && bash scripts/gen-cycle-history.sh; rc=\$?; echo "=== metal-cycle-history end \$(date -u +\%FT\%TZ) rc=\$rc ==="; } >> /home/deploy/metal.freedom-yield.com/logs/cycle-history.log 2>&1
+CRONEOF
+if env FYD_CRON_SCRIPTS_DIR="${S}/scripts" \
+	bash "${SCRIPTS}/check-cron-file.sh" "${S}/cron-metal-cycle-history" \
+	>"${TMP}/3y.out" 2>&1; then
+	ok "3y real cron lint: metal-cycle-history still PASSes without an FY_LIVE=1 header"
+else
+	bad "3y real cron lint: metal-cycle-history still PASSes without an FY_LIVE=1 header" \
+		"$(grep -i 'FAIL' "${TMP}/3y.out" | head -2)"
+fi
+# Mutation: put the filename back into a COMMENT and the same lint goes red.
+printf '\n# regression: naming scripts/lib/side-effects.sh here is what F1 was\n' \
+	>>"${S}/scripts/gen-cycle-history.sh"
+if env FYD_CRON_SCRIPTS_DIR="${S}/scripts" \
+	bash "${SCRIPTS}/check-cron-file.sh" "${S}/cron-metal-cycle-history" \
+	>"${TMP}/3y-mut.out" 2>&1; then
+	bad "3y mutation caught: the library filename in a COMMENT breaks the cron gate" \
+		"lint stayed green against a deliberately broken file"
+else
+	grep -q "no 'FY_LIVE=1' line" "${TMP}/3y-mut.out" \
+		&& ok "3y mutation caught: the library filename in a COMMENT breaks the cron gate" \
+		|| bad "3y mutation caught: the library filename in a COMMENT breaks the cron gate" \
+			"lint failed, but not on Rule 6: $(tail -3 "${TMP}/3y-mut.out")"
+fi
+
 echo
 # ===========================================================================
 echo "== Part 4/5: static gate — no ungated side effect in the nine files =="
