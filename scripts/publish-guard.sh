@@ -100,8 +100,35 @@ else
 			CTX="MultiEdit $FP" ;;
 		Bash)
 			CMD="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)"
-			if printf '%s' "$CMD" | grep -qE 'git[[:space:]]+(commit|push)([[:space:]]|$)' \
-				&& printf '%s' "$CMD" | grep -qE '(--no-verify|[[:space:]]-n([[:space:]]|$))'; then
+			# Detect `git commit|push --no-verify` / `-n` as an ACTUAL flag on the
+			# command line (a hook-bypass attempt) -- not as a substring sitting
+			# inside a quoted argument VALUE (e.g. a commit message that happens
+			# to mention "bash -n"). Tokenize with shell-word rules
+			# (Text::ParseWords::shellwords -- a pure syntactic parser: no
+			# subshell / backtick / $() execution) so a flag HIDDEN inside quotes
+			# (e.g. -m x "--no-verify") is still caught exactly as itself, while
+			# prose containing "-n" inside a larger quoted/unquoted argument
+			# token is not. On any tokenizer anomaly (parse exception, or a
+			# non-empty command that yields zero tokens -- e.g. unbalanced
+			# quotes) fail closed: fall back to the original plain substring
+			# scan so a malformed/adversarial command is never silently let
+			# through.
+			if [ -n "$CMD" ] && printf '%s' "$CMD" | perl -MText::ParseWords -0777 -ne '
+				my $cmd = $_;
+				my @tok = eval { shellwords($cmd) };
+				my ($has_gitcmd, $has_flag) = (0, 0);
+				if (!$@ && @tok) {
+					for (my $i = 0; $i < $#tok; $i++) {
+						$has_gitcmd = 1 if $tok[$i] eq "git"
+							&& ($tok[$i+1] eq "commit" || $tok[$i+1] eq "push");
+					}
+					for my $t (@tok) { $has_flag = 1 if $t eq "-n" || $t eq "--no-verify"; }
+				} else {
+					$has_gitcmd = ($cmd =~ /git[ \t]+(?:commit|push)(?:[ \t]|$)/) ? 1 : 0;
+					$has_flag   = ($cmd =~ /--no-verify|[ \t]-n(?:[ \t]|$)/)      ? 1 : 0;
+				}
+				exit(($has_gitcmd && $has_flag) ? 0 : 1);
+			'; then
 				cat >&2 <<'EOF'
 === PUBLISH_GUARD_BLOCK ===
 `git commit|push --no-verify` (or -n) is refused: it would skip the
@@ -161,6 +188,19 @@ FINDINGS="$(
 		while (/(?<![0-9A-Fa-f:])((?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,7}:|(?:[0-9A-Fa-f]{1,4}:){1,6}:[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,5}(?::[0-9A-Fa-f]{1,4}){1,2}|(?:[0-9A-Fa-f]{1,4}:){1,4}(?::[0-9A-Fa-f]{1,4}){1,3}|(?:[0-9A-Fa-f]{1,4}:){1,3}(?::[0-9A-Fa-f]{1,4}){1,4}|(?:[0-9A-Fa-f]{1,4}:){1,2}(?::[0-9A-Fa-f]{1,4}){1,5}|[0-9A-Fa-f]{1,4}:(?::[0-9A-Fa-f]{1,4}){1,6}|:(?::[0-9A-Fa-f]{1,4}){1,7})(?![0-9A-Fa-f:])/g) {
 			my $addr = lc $1;
 			next if $addr eq "::1" || $addr eq "::";
+			# Minimum-specificity gate: a real routable/assigned IPv6 literal
+			# always carries at least one full 16-bit hextet worth of hex
+			# digits (global-unicast prefixes -- 2xxx/3xxx -- are never
+			# written with fewer). Below that threshold the "::"-compressed
+			# shape matches ubiquitous non-IP syntax too eagerly: CSS
+			# pseudo-elements/classes (`::before`, `pre::-webkit-scrollbar`),
+			# C++/Rust/Ruby namespace separators (`std::vector`, `Foo::Bar`),
+			# and generic `a::b` code all parse as syntactically-valid (if
+			# absurdly minimal) IPv6 shorthand. Requiring >=4 hex digits
+			# total keeps every real host address (every excluded/allowed
+			# range below already carries >=4) while dropping those.
+			(my $digits = $addr) =~ s/://g;
+			next if length($digits) < 4;
 			my ($first) = $addr =~ /^([0-9a-f]{1,4})/;
 			my $f = defined($first) ? hex($first) : 0;
 			next if ($f & 0xffc0) == 0xfe80;   # fe80::/10 link-local

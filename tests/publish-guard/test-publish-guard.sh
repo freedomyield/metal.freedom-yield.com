@@ -85,6 +85,19 @@ run_text "MAC address (not IPv6) -> allow"          0 --text "mac 00:1a:2b:3c:4d
 run_text "time-like colon string -> allow"          0 --text "at 14:32:10 today"
 run_text "diff: added public IPv6 -> block"         1 --diff "$(printf '+++ b/x.md\n+host %s\n ctx' "$PUB_IP6")"
 
+echo "== IPv6 false-positive: CSS/code '::' syntax (not an address) =="
+# Real-world regression (2026-08-05/06): these all false-positived as
+# "public-IPv6 literal" before the minimum-specificity fix, because a single
+# hex-looking char/word adjacent to "::" is syntactically valid (if absurdly
+# minimal) compressed IPv6 shorthand.
+run_text "CSS pseudo-element (reported repro, pre::-webkit-scrollbar) -> allow" 0 --text "pre::-webkit-scrollbar { display:none }"
+run_text "CSS pseudo-element ::before -> allow"    0 --text ".foo::before { content:'' }"
+run_text "CSS pseudo-element ::after -> allow"     0 --text ".foo::after { content:'' }"
+run_text "C++ namespace std::vector -> allow"      0 --text "std::vector<int> v;"
+run_text "namespace Foo::Bar -> allow"             0 --text "Foo::Bar::method()"
+run_text "generic a::b code -> allow"              0 --text "let x = a::b;"
+run_text "mutation-guard: real IPv6 amid CSS '::' syntax -> still block" 1 --text "selector::before { content:'host ${PUB_IP6}' }"
+
 echo "== phone =="
 run_text "JP mobile (no sep) -> block"             1 --text "call ${FAKE_PHONE} now"
 run_text "JP mobile (hyphen) -> block"             1 --text "tel ${FAKE_PHONE_H}"
@@ -116,6 +129,26 @@ run_json "git commit --no-verify -> block"         2 "$(jq -nc --arg c 'git comm
 run_json "git push -n -> block"                    2 "$(jq -nc --arg c 'git push origin main -n' '{tool_name:"Bash",tool_input:{command:$c}}')"
 run_json "normal git commit -> allow"              0 "$(jq -nc --arg c 'git commit -m x' '{tool_name:"Bash",tool_input:{command:$c}}')"
 run_json "unrelated command -> allow"              0 "$(jq -nc --arg c 'ls -la' '{tool_name:"Bash",tool_input:{command:$c}}')"
+
+echo "== Bash hook-bypass false-positive: '-n' inside message prose (not a flag) =="
+# Real-world regression (2026-08-05/06): a commit message that merely mentions
+# the literal text "bash -n" (e.g. documenting a syntax-check step) was
+# refused as if -n/--no-verify had been passed as an actual flag.
+run_json "msg mentions 'bash -n' (double-quoted) -> allow" 0 "$(jq -nc --arg c 'git commit -m "docs: mention bash -n check"' '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "msg mentions 'bash -n' (single-quoted) -> allow" 0 "$(jq -nc --arg c "git commit -m 'bash -n check'" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "msg mentions 'bash -n' (escaped double-quote) -> allow" 0 "$(jq -nc --arg c 'git commit -m "she said \"bash -n\" then"' '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "unrelated -n from a different subcommand's own flag -> allow" 0 "$(jq -nc --arg c 'git log --oneline -n 5' '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "empty command -> allow"                  0 "$(jq -nc --arg c '' '{tool_name:"Bash",tool_input:{command:$c}}')"
+
+echo "== Bash hook-bypass mutation-guard: real flag still caught (incl. hidden in quotes) =="
+run_json "mutation-guard: --no-verify hidden inside quotes (evasion attempt) -> block" 2 "$(jq -nc --arg c 'git commit -m x "--no-verify"' '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "mutation-guard: -n hidden inside single quotes (evasion attempt) -> block" 2 "$(jq -nc --arg c "git push origin main '-n'" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "mutation-guard: msg mentions -n AND a real -n flag is also present -> block" 2 "$(jq -nc --arg c 'git commit -m "used bash -n earlier" -n' '{tool_name:"Bash",tool_input:{command:$c}}')"
+# (assigned to a var first, not inlined: an odd embedded-quote count inline
+# as a positional arg trips a macOS /bin/bash 3.2 command-substitution
+# parsing quirk unrelated to publish-guard.sh; assignment form is unaffected)
+UNBAL_JSON="$(jq -nc --arg c 'git commit -m "unterminated --no-verify' '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "mutation-guard: unbalanced quote -> fail-closed fallback still blocks" 2 "$UNBAL_JSON"
 
 echo "== Write/Edit =="
 run_json "write public IP -> tracked README block" 2 "$(jq -nc --arg fp "$REPO_ROOT/README.md" --arg c "host $PUB_IP" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"
