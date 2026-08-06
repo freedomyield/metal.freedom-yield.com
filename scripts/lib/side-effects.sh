@@ -67,9 +67,30 @@
 #                 retryable 429 into a permanent failure. Translation, if
 #                 ever wanted, belongs in the orchestrator (design doc §6).
 #
+#   A DRY 0 MEANS "SUPPRESSED SUCCESSFULLY", NOT "DELIVERED SUCCESSFULLY".
+#   The distinction has teeth. check-anomalies.sh's notify_or_keep() treats
+#   rc 0 as permission to move the alert into the "already told the operator"
+#   set. If that state write is not gated by the same FY_LIVE, a cron that
+#   lost its FY_LIVE=1 records "notified" while notifying nobody — and
+#   because the state persists, the alert never fires again even after the
+#   cron is fixed. That is strictly worse than the no-op it looks like.
+#   Therefore: A CALLER THAT TURNS rc 0 INTO A STATE TRANSITION MUST GATE
+#   THAT STATE WRITE WITH THE SAME FY_LIVE — use fyd_live_write() (or
+#   fyd_live_run()) for the write, so the notification and the record of it
+#   are suppressed or performed together, never one without the other.
+#
 # Validation runs in BOTH modes, before the live/dry branch, so that a dry
-# run can never accept a call that a live run would reject. The one gap that
-# cannot be closed this way is documented at fyd_push().
+# run can never accept a call that a live run would reject. The gaps that
+# cannot be closed this way are documented at fyd_push() and
+# fyd_live_write().
+#
+# CALLERS WITHOUT `set -e` MUST CHECK THE RETURN CODE. Thirteen scripts in
+# this repo — several of them state-dir consumers — do not run under
+# `set -e`. In those, `STATE_DIR="$(fyd_state_dir typo)"` leaves STATE_DIR
+# EMPTY and execution continues, because a usage error prints to stderr and
+# returns 64 with nothing on stdout. Either run under `set -e`/`set -o
+# pipefail`, or check explicitly:
+#     STATE_DIR="$(fyd_state_dir anomaly)" || exit $?
 #
 # ---------------------------------------------------------------------------
 # USAGE (source once near the top of a script)
@@ -81,11 +102,35 @@
 #   fyd_notify high "Validator renewal" "7 days left"
 #   fyd_notify --strict --tags=tada high "Delegation up" "$body"
 #   fyd_push validator.json
-#   STATE_DIR="$(fyd_state_dir anomaly)"
+#   STATE_DIR="$(fyd_state_dir anomaly)" || exit $?
 #   fyd_live_run "remove the stale sign output" rm -f "$SIGN_OUT"
+#   printf '%s\n' "$json" | fyd_live_write "the cycle state" "$CYCLE_STATE"
 #
 # The library is self-locating: it resolves its sibling scripts from its own
 # path, so a caller does not have to hand it a repo root.
+#
+# ---------------------------------------------------------------------------
+# THE ONE THING THAT LOOKS GATED AND IS NOT: REDIRECTIONS
+# ---------------------------------------------------------------------------
+# A redirection belongs to the CALLER's shell and is applied BEFORE the
+# function body ever runs. So this truncates $F even in dry mode:
+#
+#     fyd_live_run "write the state" echo "$json" > "$F"     # ← WRONG
+#
+# The file is created/truncated by the caller's `>` before fyd_live_run can
+# decide anything; only `echo` is gated. This is the same shape as the
+# 2026-08 accident where a test deleted a production data file, so it is
+# worth stating bluntly: THE ARGUMENTS TO fyd_live_run ARE A COMMAND, AND
+# `>` `>>` `<` ARE NOT PART OF IT. Repo-wide there are 101 redirect-form
+# writes against 169 command-form ones, so this is the common shape, not an
+# edge case. Write files one of these ways instead:
+#
+#     printf '%s\n' "$json" | fyd_live_write "the state" "$F"   # ← gated
+#     fyd_live_write "the empty ledger" "$F" </dev/null          # ← `: > $F`
+#     fyd_live_run "install the new state" mv "$TMP" "$F"        # ← gated
+#
+# (Building content in a temp file and gating only the final `mv` also
+# works, and keeps the write atomic.)
 #
 # See tests/side-effects/test-side-effects.sh for the executable statement of
 # every rule above, including the mutation cases that prove the dry path is
@@ -120,11 +165,11 @@ FYD_PUSH_FILENAME_RE='^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)?$
 #
 #   When a later (lower-precedence) name is also set to a DIFFERENT value,
 #   the conflict is announced on stderr rather than swallowed. Precedence is
-#   always canonical-first: the canonical name is the lever a test uses to
-#   sandbox an entire run, so an ambient legacy variable must not be able to
-#   drag that run back onto a production path. Callers that set only a legacy
-#   name — every current caller and every current cron env header — observe
-#   no change and no message.
+#   always canonical-first: the canonical name is the more explicit statement
+#   of intent, so an ambient legacy variable left over in the environment
+#   must not override it. Callers that set only a legacy name — every current
+#   caller and every current cron env header — observe no change and no
+#   message.
 fyd__resolve_env() {
 	local winner_name="" winner_val="" n v
 	for n in "$@"; do
@@ -176,12 +221,16 @@ fyd_dry_note() {
 
 # fyd_live_run <description> <command> [args...]
 #   The generic gate, for side effects that are neither notify nor push:
-#   file writes, rm, ssh, systemctl, git push. Exists so those callers do not
-#   each invent a seventh spelling of "don't do it for real".
+#   rm, mv, ssh, systemctl, git push. Exists so those callers do not each
+#   invent a seventh spelling of "don't do it for real".
 #     dry  → prints "DRY: would <description>", does not run, returns 0.
 #     live → runs the command, returns its exit code verbatim.
 #   <description> is prose for the log, not a command; the command starts at
 #   $2. Both are required.
+#
+#   NOT GATED: a redirection written by the caller (`… > "$F"`). See "THE ONE
+#   THING THAT LOOKS GATED AND IS NOT" in the header — use fyd_live_write for
+#   file content, or gate a final `mv`.
 fyd_live_run() {
 	if [ "$#" -lt 2 ]; then
 		fyd__usage "fyd_live_run: usage: fyd_live_run <description> <command> [args...]"
@@ -202,6 +251,86 @@ fyd_live_run() {
 	return "$rc"
 }
 
+# fyd_live_write [--append] <description> <path>       (content on stdin)
+#   The gate for file WRITES, which fyd_live_run cannot cover: a caller-side
+#   `>` is applied by the caller's shell before any function runs, so the
+#   file is already truncated by the time a gate could object. Taking the
+#   path as an argument and the content on stdin moves the redirection inside
+#   this function, where FY_LIVE can actually stop it.
+#     dry  → prints "DRY: would write …", DRAINS stdin, leaves the file
+#            byte-for-byte untouched (an existing file is not created, not
+#            truncated, not appended to), returns 0.
+#     live → writes stdin to <path> (truncating, or appending with
+#            --append), returns the write's exit code.
+#   stdin is drained in dry mode so a producer on the left of the pipe does
+#   not take SIGPIPE and fail a `set -o pipefail` caller — a dry run must not
+#   change the caller's control flow. Draining is skipped when stdin is a
+#   terminal, so an interactive call cannot hang.
+#
+#   Known parity gap (same class as fyd_push's): a live write also fails when
+#   the parent directory is missing or unwritable. Checking that in dry mode
+#   would make dry runs fail on developer machines that have no
+#   /var/lib/freedom-yield, which is a false alarm, so it stays live-only.
+fyd_live_write() {
+	local append=0
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+			--)
+				shift
+				break
+				;;
+			--append)
+				append=1
+				shift
+				;;
+			--*)
+				fyd__usage "fyd_live_write: unknown option: $1"
+				return "$FYD_USAGE_RC"
+				;;
+			*)
+				break
+				;;
+		esac
+	done
+	if [ "$#" -ne 2 ]; then
+		fyd__usage "fyd_live_write: usage: fyd_live_write [--append] <description> <path>  (content on stdin)"
+		return "$FYD_USAGE_RC"
+	fi
+	if [ -z "${1:-}" ]; then
+		fyd__usage "fyd_live_write: description must not be empty"
+		return "$FYD_USAGE_RC"
+	fi
+	if [ -z "${2:-}" ]; then
+		fyd__usage "fyd_live_write: path must not be empty"
+		return "$FYD_USAGE_RC"
+	fi
+	local desc="$1" path="$2"
+	if [ -d "$path" ]; then
+		fyd__usage "fyd_live_write: path is a directory: ${path}"
+		return "$FYD_USAGE_RC"
+	fi
+
+	if ! fyd_is_live; then
+		local bytes=0
+		if [ ! -t 0 ]; then
+			bytes="$(wc -c 2>/dev/null | tr -d '[:space:]')" || bytes=0
+			[ -n "$bytes" ] || bytes=0
+		fi
+		local verb="write"
+		[ "$append" -eq 1 ] && verb="append to"
+		fyd_dry_note "${verb} ${desc} → ${path} (${bytes} bytes on stdin; file left untouched)"
+		return 0
+	fi
+
+	local rc=0
+	if [ "$append" -eq 1 ]; then
+		cat >>"$path" || rc=$?
+	else
+		cat >"$path" || rc=$?
+	fi
+	return "$rc"
+}
+
 # fyd_notify [--strict] [--tags=<tag>] [--] <priority> <title> [message...]
 #   The single entry point for ntfy delivery. Delegates to notify.sh, whose
 #   argv shape (priority, title, message words joined by notify.sh itself)
@@ -212,7 +341,16 @@ fyd_live_run() {
 #   caller's shell afterwards, so the tag would leak into the next
 #   notification. An ambient NTFY_TAGS / NOTIFY_STRICT_EXIT is still honoured
 #   (back-compat with existing callers and cron headers); an explicit flag
-#   wins over it.
+#   wins over it, INCLUDING an explicit empty one — `--tags=` forces the
+#   priority-derived default even when an exported NTFY_TAGS is in the
+#   environment, which requires passing the empty value down rather than
+#   letting the child inherit.
+#
+#   OPTIONS MUST PRECEDE <priority>. Everything from the first non-option
+#   argument onward is positional, so `fyd_notify high --strict "T" "b"`
+#   silently sends a notification titled "--strict". This is not refused
+#   (refusing would drop an alert, and this library never does that) but each
+#   option-shaped positional argument produces a WARNING naming the mistake.
 #
 #   Rejected in both modes (rc $FYD_USAGE_RC): an unrecognized --option (a
 #   `--tag=` typo would otherwise be silently taken as the priority), fewer
@@ -257,6 +395,18 @@ fyd_notify() {
 	local prio="$1" title="$2"
 	shift 2
 
+	# An option that arrived too late is now message text. Say so — silent
+	# mis-delivery (a notification titled "--strict") is the failure this
+	# catches.
+	local a
+	for a in "$prio" "$title" "$@"; do
+		case "$a" in
+			--strict | --tags=*)
+				echo "side-effects: WARNING: fyd_notify: '${a}' came AFTER <priority>, so it is being sent as text, not applied as an option — options must precede <priority>." >&2
+				;;
+		esac
+	done
+
 	local notify_bin
 	notify_bin="$(fyd__resolve_env FYD_NOTIFY ANCHOR_NOTIFY WATCH_NOTIFY NOTIFY || true)"
 	[ -n "$notify_bin" ] || notify_bin="${FYD_SCRIPTS_DIR}/notify.sh"
@@ -282,17 +432,24 @@ fyd_notify() {
 		return 0
 	fi
 
-	# Four explicit branches instead of an env array: bash 3.2 (the macOS
-	# system bash this repo's tests run under) errors on ${#arr[@]} for an
-	# empty array while `set -u` is in effect. An assignment prefixed to an
-	# EXTERNAL command does not leak into this shell, unlike the function
+	# Pass a variable down whenever the caller said anything about it —
+	# including `--tags=` with an empty value, which must be able to CLEAR an
+	# exported ambient NTFY_TAGS the child would otherwise inherit on its
+	# own. Four explicit branches instead of an env array: bash 3.2 (the
+	# macOS system bash this repo's tests run under) errors on ${#arr[@]} for
+	# an empty array while `set -u` is in effect. An assignment prefixed to
+	# an EXTERNAL command does not leak into this shell, unlike the function
 	# case described above.
+	local pass_tags=0 pass_strict=0
+	if [ "$have_tags" -eq 1 ] || [ -n "$tags" ]; then pass_tags=1; fi
+	if [ "$have_strict" -eq 1 ] || [ -n "$strict" ]; then pass_strict=1; fi
+
 	local rc=0
-	if [ -n "$tags" ] && [ -n "$strict" ]; then
+	if [ "$pass_tags" -eq 1 ] && [ "$pass_strict" -eq 1 ]; then
 		NTFY_TAGS="$tags" NOTIFY_STRICT_EXIT="$strict" bash "$notify_bin" "$prio" "$title" "$@" || rc=$?
-	elif [ -n "$tags" ]; then
+	elif [ "$pass_tags" -eq 1 ]; then
 		NTFY_TAGS="$tags" bash "$notify_bin" "$prio" "$title" "$@" || rc=$?
-	elif [ -n "$strict" ]; then
+	elif [ "$pass_strict" -eq 1 ]; then
 		NOTIFY_STRICT_EXIT="$strict" bash "$notify_bin" "$prio" "$title" "$@" || rc=$?
 	else
 		bash "$notify_bin" "$prio" "$title" "$@" || rc=$?
@@ -374,6 +531,21 @@ fyd_push() {
 #   refused (rc $FYD_USAGE_RC) rather than quietly falling back to the
 #   default — a typo'd role that resolved to /var/lib/freedom-yield would
 #   write to production, which is the accident class this file exists to end.
+#   (Callers not under `set -e` must check that rc; see the header.)
+#
+#   THE role ARGUMENT IS SCAFFOLDING, NOT API. All four legacy names resolve
+#   to the same directory; the roles exist only so that scripts and cron env
+#   headers still spelling it the old way keep working during the migration.
+#   SUNSET: once no cron env header and no caller sets ANOMALY_STATE_DIR /
+#   WATCH_STATE_DIR / UPTIME_STATE_DIR (grep the installers under scripts/
+#   and /etc/cron.d/metal-* to confirm), delete the roles and leave the
+#   no-argument form. Do NOT add a role for a new subsystem — a new
+#   subsystem should read FY_STATE_DIR and nothing else.
+#
+#   Setting FY_STATE_DIR does NOT sandbox a whole run by itself: delegated
+#   scripts still read their own environment (push-to-web-host.sh resolves
+#   peers-history/ from PEERS_HISTORY_DIR / UPTIME_STATE_DIR on its own).
+#   Treat this as one lever among several, not a containment boundary.
 #
 #   Resolution is not gated on FY_LIVE: naming a directory is not itself a
 #   side effect, and silently rewriting the path in dry mode would create a

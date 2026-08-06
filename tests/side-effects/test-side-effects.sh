@@ -75,6 +75,9 @@ mkdir -p "$BIN_DIR"
 : >"$TRIPWIRE"
 
 # --- recording stubs: log argv + the two env vars the lib must forward ---
+# The env vars use ${VAR-…}, NOT ${VAR:-…}: "set to the empty string" and
+# "not set at all" are DIFFERENT outcomes here (`--tags=` must be able to
+# clear an exported ambient value), and the colon form collapses them.
 write_stub() {
 	cat >"$1" <<STUB
 #!/usr/bin/env bash
@@ -82,8 +85,8 @@ write_stub() {
 	printf 'CALL=%s\n' "$2"
 	printf 'ARGC=%s\n' "\$#"
 	for a in "\$@"; do printf 'ARG=%s\n' "\$a"; done
-	printf 'ENV_NTFY_TAGS=%s\n' "\${NTFY_TAGS:-<unset>}"
-	printf 'ENV_NOTIFY_STRICT_EXIT=%s\n' "\${NOTIFY_STRICT_EXIT:-<unset>}"
+	printf 'ENV_NTFY_TAGS=%s\n' "\${NTFY_TAGS-<unset>}"
+	printf 'ENV_NOTIFY_STRICT_EXIT=%s\n' "\${NOTIFY_STRICT_EXIT-<unset>}"
 } >>"\${STUB_LOG:?}"
 exit "\${STUB_RC:-0}"
 STUB
@@ -139,11 +142,11 @@ stub_calls() {
 # Part 1: the FY_LIVE judgment (strict literal "1", one place)
 # ============================================================
 
-run_case 'for f in fyd_is_live fyd_dry_note fyd_live_run fyd_notify fyd_push fyd_state_dir; do declare -f "$f" >/dev/null 2>&1 || { echo "missing: $f"; exit 1; }; done'
+run_case 'for f in fyd_is_live fyd_dry_note fyd_live_run fyd_live_write fyd_notify fyd_push fyd_state_dir; do declare -f "$f" >/dev/null 2>&1 || { echo "missing: $f"; exit 1; }; done'
 if [ "$RC" -eq 0 ]; then
-	pass "lib: sourcing defines the six public functions"
+	pass "lib: sourcing defines the seven public functions"
 else
-	fail_case "lib: sourcing defines the six public functions" "rc=$RC out=[$OUT]"
+	fail_case "lib: sourcing defines the seven public functions" "rc=$RC out=[$OUT]"
 fi
 
 # 1b-1g. Everything that is not the literal "1" must be dry.
@@ -272,6 +275,18 @@ else
 	fail_case "fyd_notify: --tags beats an ambient NTFY_TAGS" "log=[$(cat "$STUB_LOG")]"
 fi
 
+# "explicit wins" has to include an explicit EMPTY value, and the ambient
+# variable here is EXPORTED — so the child would inherit it on its own
+# unless the lib passes the empty value down deliberately. Without that,
+# `--tags=` silently keeps the old tag.
+: >"$STUB_LOG"
+FY_LIVE=1 NTFY_TAGS=exported bash -c '. "$LIB"; fyd_notify --tags= high "T" "b"' >"$OUT_FILE" 2>"$ERR_FILE"
+if grep -q '^ENV_NTFY_TAGS=$' "$STUB_LOG"; then
+	pass "fyd_notify: --tags= (explicitly empty) clears an EXPORTED ambient NTFY_TAGS"
+else
+	fail_case "fyd_notify: --tags= (explicitly empty) clears an EXPORTED ambient NTFY_TAGS" "log=[$(cat "$STUB_LOG")]"
+fi
+
 # Exit codes are NOT translated: notify.sh's 2/3/4/5 classification is
 # consumed by retryable_notify_rc() in three callers. Renumbering would
 # silently turn a retryable 429 into a permanent failure.
@@ -325,6 +340,31 @@ if [ "$RC" -eq 0 ] && [ "$(stub_calls)" -eq 1 ] && printf '%s' "$ERR" | grep -qi
 	pass "fyd_notify: unknown priority warns but still delivers (alert loss > wrong priority)"
 else
 	fail_case "fyd_notify: unknown priority warns but still delivers" "rc=$RC calls=$(stub_calls) err=[$ERR]"
+fi
+
+# An option written AFTER the priority becomes message text — the
+# notification goes out titled "--strict". Same reasoning as above: not
+# refused (that would drop an alert), but never silent.
+: >"$STUB_LOG"
+RC=0
+FY_LIVE=1 bash -c '. "$LIB"; fyd_notify high --strict "Title" "body"' >"$OUT_FILE" 2>"$ERR_FILE" || RC=$?
+ERR="$(cat "$ERR_FILE")"
+if [ "$RC" -eq 0 ] && [ "$(stub_calls)" -eq 1 ] \
+	&& grep -q '^ARG=--strict$' "$STUB_LOG" \
+	&& grep -q '^ENV_NOTIFY_STRICT_EXIT=<unset>$' "$STUB_LOG" \
+	&& printf '%s' "$ERR" | grep -q "WARNING.*'--strict' came AFTER"; then
+	pass "fyd_notify: misplaced --strict is warned about (it became text, not an option)"
+else
+	fail_case "fyd_notify: misplaced --strict is warned about" "rc=$RC err=[$ERR] log=[$(cat "$STUB_LOG")]"
+fi
+
+: >"$STUB_LOG"
+FY_LIVE=1 bash -c '. "$LIB"; fyd_notify high "T" --tags=tada "body"' >"$OUT_FILE" 2>"$ERR_FILE"
+ERR="$(cat "$ERR_FILE")"
+if printf '%s' "$ERR" | grep -q "WARNING.*'--tags=tada' came AFTER" && grep -q '^ENV_NTFY_TAGS=<unset>$' "$STUB_LOG"; then
+	pass "fyd_notify: misplaced --tags= in the message is warned about too"
+else
+	fail_case "fyd_notify: misplaced --tags= in the message is warned about too" "err=[$ERR] log=[$(cat "$STUB_LOG")]"
 fi
 
 # ============================================================
@@ -496,6 +536,120 @@ fi
 check_both_modes "fyd_live_run: description without command rejected" 'fyd_live_run "just a description"' 64
 check_both_modes "fyd_live_run: empty description rejected" 'fyd_live_run "" true' 64
 
+# A caller-side redirection is applied by the caller's shell BEFORE the
+# function runs, so fyd_live_run cannot gate it. This case pins that
+# limitation as known-and-documented rather than leaving it to be
+# rediscovered as an incident: it is the reason fyd_live_write exists, and
+# if a future change ever DOES gate redirections, this case failing is the
+# signal to delete it and the header warning together.
+REDIR_FILE="${TMP}/redirect-not-gated"
+printf 'PRE-EXISTING\n' >"$REDIR_FILE"
+env -u FY_LIVE bash -c ". \"\$LIB\"; fyd_live_run \"write via redirect\" echo hi > \"$REDIR_FILE\"" 2>/dev/null
+if [ ! -s "$REDIR_FILE" ]; then
+	pass "fyd_live_run: caller-side '>' is NOT gated (documented limitation → use fyd_live_write)"
+else
+	fail_case "fyd_live_run: caller-side '>' is NOT gated (documented limitation)" "file kept content — behaviour changed, update the header"
+fi
+rm -f "$REDIR_FILE"
+
+# ============================================================
+# Part 7b: fyd_live_write — the gate a redirection cannot bypass
+# ============================================================
+# This is the direct counter-measure to the accident class "a test wrote to
+# / truncated / deleted a production file". The path is an argument and the
+# content arrives on stdin, so the open() happens INSIDE the gate.
+
+WFILE="${TMP}/state.json"
+
+# Dry must not create the file at all.
+rm -f "$WFILE"
+RC=0
+printf 'new content\n' | env -u FY_LIVE bash -c ". \"\$LIB\"; fyd_live_write \"the cycle state\" \"$WFILE\"" >"$OUT_FILE" 2>"$ERR_FILE" || RC=$?
+ERR="$(cat "$ERR_FILE")"
+if [ "$RC" -eq 0 ] && [ ! -e "$WFILE" ] && printf '%s' "$ERR" | grep -q '^DRY: would write the cycle state'; then
+	pass "fyd_live_write: dry → file is not even created, rc 0, 'DRY: would write …'"
+else
+	fail_case "fyd_live_write: dry → file is not even created, rc 0" "rc=$RC exists=$([ -e "$WFILE" ] && echo yes || echo no) err=[$ERR]"
+fi
+
+# Dry must not TRUNCATE an existing production file — the exact shape of the
+# 2026-08 accident.
+printf 'PRODUCTION DATA\n' >"$WFILE"
+BEFORE="$(cat "$WFILE")"
+RC=0
+printf 'clobber\n' | env -u FY_LIVE bash -c ". \"\$LIB\"; fyd_live_write \"the cycle state\" \"$WFILE\"" >"$OUT_FILE" 2>"$ERR_FILE" || RC=$?
+if [ "$RC" -eq 0 ] && [ "$(cat "$WFILE")" = "$BEFORE" ]; then
+	pass "fyd_live_write: dry → existing production file NOT truncated (byte-identical)"
+else
+	fail_case "fyd_live_write: dry → existing production file NOT truncated" "rc=$RC now=[$(cat "$WFILE")]"
+fi
+
+# Same for the append form.
+RC=0
+printf 'extra\n' | env -u FY_LIVE bash -c ". \"\$LIB\"; fyd_live_write --append \"the ledger\" \"$WFILE\"" >"$OUT_FILE" 2>"$ERR_FILE" || RC=$?
+ERR="$(cat "$ERR_FILE")"
+if [ "$RC" -eq 0 ] && [ "$(cat "$WFILE")" = "$BEFORE" ] && printf '%s' "$ERR" | grep -q '^DRY: would append to'; then
+	pass "fyd_live_write: dry --append → nothing appended, DRY line says 'append to'"
+else
+	fail_case "fyd_live_write: dry --append → nothing appended" "rc=$RC now=[$(cat "$WFILE")] err=[$ERR]"
+fi
+
+# The DRY line reports how much content was suppressed, which also proves
+# stdin was drained (a producer on the left of the pipe must not take
+# SIGPIPE and fail a `set -o pipefail` caller).
+RC=0
+OUT_ERR="$(printf '123456789\n' | env -u FY_LIVE bash -c ". \"\$LIB\"; set -o pipefail; fyd_live_write \"x\" \"$WFILE\"" 2>&1 1>/dev/null)" || RC=$?
+if [ "$RC" -eq 0 ] && printf '%s' "$OUT_ERR" | grep -q '10 bytes on stdin'; then
+	pass "fyd_live_write: dry drains stdin and reports the byte count (no SIGPIPE for the producer)"
+else
+	fail_case "fyd_live_write: dry drains stdin and reports the byte count" "rc=$RC err=[$OUT_ERR]"
+fi
+
+# Live actually writes.
+rm -f "$WFILE"
+RC=0
+printf 'live content\n' | FY_LIVE=1 bash -c ". \"\$LIB\"; fyd_live_write \"the cycle state\" \"$WFILE\"" >"$OUT_FILE" 2>"$ERR_FILE" || RC=$?
+if [ "$RC" -eq 0 ] && [ "$(cat "$WFILE" 2>/dev/null)" = "live content" ]; then
+	pass "fyd_live_write: live → stdin written to the path"
+else
+	fail_case "fyd_live_write: live → stdin written to the path" "rc=$RC content=[$(cat "$WFILE" 2>/dev/null)]"
+fi
+
+RC=0
+printf 'appended\n' | FY_LIVE=1 bash -c ". \"\$LIB\"; fyd_live_write --append \"the ledger\" \"$WFILE\"" >"$OUT_FILE" 2>"$ERR_FILE" || RC=$?
+if [ "$RC" -eq 0 ] && [ "$(cat "$WFILE" 2>/dev/null)" = "live content
+appended" ]; then
+	pass "fyd_live_write: live --append → content appended, existing content kept"
+else
+	fail_case "fyd_live_write: live --append → content appended" "rc=$RC content=[$(cat "$WFILE" 2>/dev/null)]"
+fi
+
+# Truncate-to-empty (the `: > "$f"` shape) works through the gate.
+RC=0
+FY_LIVE=1 bash -c ". \"\$LIB\"; fyd_live_write \"the empty ledger\" \"$WFILE\" </dev/null" >"$OUT_FILE" 2>"$ERR_FILE" || RC=$?
+if [ "$RC" -eq 0 ] && [ -f "$WFILE" ] && [ ! -s "$WFILE" ]; then
+	pass "fyd_live_write: live with </dev/null → truncated to empty (the ': > \$f' shape)"
+else
+	fail_case "fyd_live_write: live with </dev/null → truncated to empty" "rc=$RC size=$(wc -c <"$WFILE" 2>/dev/null)"
+fi
+
+# A failing write reports non-zero (parent directory missing — the
+# live-only parity gap documented in the lib header).
+RC=0
+printf 'x\n' | FY_LIVE=1 bash -c ". \"\$LIB\"; fyd_live_write \"nowhere\" \"${TMP}/no-such-dir/f\"" >"$OUT_FILE" 2>/dev/null || RC=$?
+if [ "$RC" -ne 0 ] && [ "$RC" -ne 64 ]; then
+	pass "fyd_live_write: live → a failing write returns non-zero (not a usage error)" "rc=$RC"
+else
+	fail_case "fyd_live_write: live → a failing write returns non-zero" "rc=$RC"
+fi
+
+check_both_modes "fyd_live_write: path without description rejected" 'fyd_live_write "only-one-arg" </dev/null' 64
+check_both_modes "fyd_live_write: empty description rejected" 'fyd_live_write "" /tmp/x </dev/null' 64
+check_both_modes "fyd_live_write: empty path rejected" 'fyd_live_write "d" "" </dev/null' 64
+check_both_modes "fyd_live_write: extra argument rejected" 'fyd_live_write "d" /tmp/x /tmp/y </dev/null' 64
+check_both_modes "fyd_live_write: unknown option rejected" 'fyd_live_write --appnd "d" /tmp/x </dev/null' 64
+check_both_modes "fyd_live_write: directory as path rejected" "fyd_live_write \"d\" \"$TMP\" </dev/null" 64
+
 # ============================================================
 # Part 8: hermeticity tripwire
 # ============================================================
@@ -526,16 +680,20 @@ env -u FY_LIVE bash -c ". \"\$LIB\"; fyd_is_live() { return 0; }; fyd_live_run d
 M1_RUN=0
 [ -e "$SENTINEL" ] && M1_RUN=1
 rm -f "$SENTINEL"
-if [ "$M1_NOTIFY" -eq 1 ] && [ "$M1_PUSH" -eq 1 ] && [ "$M1_RUN" -eq 1 ]; then
-	pass "mutation M1: always-live mutant leaks all three side effects (dry assertions are real)"
+printf 'leaked\n' | env -u FY_LIVE bash -c ". \"\$LIB\"; fyd_is_live() { return 0; }; fyd_live_write d \"$SENTINEL\"" >/dev/null 2>&1
+M1_WRITE=0
+[ -s "$SENTINEL" ] && M1_WRITE=1
+rm -f "$SENTINEL"
+if [ "$M1_NOTIFY" -eq 1 ] && [ "$M1_PUSH" -eq 1 ] && [ "$M1_RUN" -eq 1 ] && [ "$M1_WRITE" -eq 1 ]; then
+	pass "mutation M1: always-live mutant leaks all four side effects (dry assertions are real)"
 else
-	fail_case "mutation M1: always-live mutant leaks all three side effects" "notify=$M1_NOTIFY push=$M1_PUSH run=$M1_RUN — a side effect bypasses fyd_is_live"
+	fail_case "mutation M1: always-live mutant leaks all four side effects" "notify=$M1_NOTIFY push=$M1_PUSH run=$M1_RUN write=$M1_WRITE — a side effect bypasses fyd_is_live"
 fi
 
 # M2: fyd_dry_note prints nothing → the 'DRY:' assertions must lose their
 # evidence. If any DRY: line survives, some path prints it inline instead
 # of going through the single helper.
-M2_ERR="$(env -u FY_LIVE bash -c '. "$LIB"; fyd_dry_note() { return 0; }; fyd_notify high "T" "b"; fyd_push validator.json; fyd_live_run d true' 2>&1 1>/dev/null)"
+M2_ERR="$(env -u FY_LIVE bash -c ". \"\$LIB\"; fyd_dry_note() { return 0; }; fyd_notify high \"T\" \"b\"; fyd_push validator.json; fyd_live_run d true; fyd_live_write d \"${TMP}/m2\" </dev/null" 2>&1 1>/dev/null)"
 if ! printf '%s' "$M2_ERR" | grep -q 'DRY:'; then
 	pass "mutation M2: silencing fyd_dry_note removes every DRY: line (loud-dry assertions are real)"
 else
