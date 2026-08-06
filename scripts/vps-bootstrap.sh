@@ -158,6 +158,10 @@ step_daily_status_cron() {
 # Daily status push at 09:00 JST (00:00 UTC). Default priority (quiet).
 # Aligned with the operator's quiet-hours window (notify.sh suppresses
 # non-urgent notifications 22:00–09:00 JST).
+# FY_LIVE=1 required: scripts/lib/side-effects.sh (C3 rollout, 2026-08-06)
+# gates every production side effect behind FY_LIVE=1; daily-status.sh
+# sends a real ntfy push. See check-cron-file.sh Rule 6.
+FY_LIVE=1
 0 0 * * * $DEPLOY_USER bash $DEPLOY_DIR/scripts/daily-status.sh >> /var/log/daily-status.log 2>&1
 EOF
   chmod 644 /etc/cron.d/metal-daily-status
@@ -190,6 +194,11 @@ step_anomaly_cron() {
     echo "Generated new ntfy topic at /etc/freedom-yield/ntfy-topic — read it and subscribe in the ntfy Android app."
   fi
   cat > /etc/cron.d/metal-anomalies <<EOF
+# FY_LIVE=1 required: scripts/lib/side-effects.sh (C3 rollout, 2026-08-06)
+# gates every production side effect behind FY_LIVE=1; check-anomalies.sh
+# sends real ntfy pushes and writes ANOMALY_STATE_DIR. See
+# check-cron-file.sh Rule 6.
+FY_LIVE=1
 */5 * * * * $DEPLOY_USER bash $DEPLOY_DIR/scripts/check-anomalies.sh >> /var/log/anomalies.log 2>&1
 EOF
   chmod 644 /etc/cron.d/metal-anomalies

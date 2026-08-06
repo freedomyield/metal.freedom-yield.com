@@ -9,6 +9,14 @@
 # Usage:
 #   scripts/check-cron-file.sh <path-to-proposed-cron-file>
 #
+# Env overrides:
+#   FYD_CRON_SCRIPTS_DIR  scripts/ dir used to resolve a referenced *.sh
+#                         basename for Rule 6 (default: this script's own
+#                         directory). Test/audit-only knob.
+#   FYD_CRON_FY_LIVE_GRACE=1  downgrades a Rule 6 miss to a warning. See
+#                         Rule 6's own comment for the migration-window
+#                         rationale — never set this from an installer.
+#
 # Exit status:
 #   0   all checks pass
 #   1   one or more violations found
@@ -181,6 +189,95 @@ if grep -qE '^PATH=' "$CRON_FILE"; then
 else
   fail "missing 'PATH=' at the top of the file."
   note "Cron's default PATH is minimal; set it so your scripts find their tools."
+fi
+
+echo ""
+
+# ---- Rule 6: side-effecting cron entries must carry FY_LIVE=1 -------------
+# scripts/lib/side-effects.sh (2026-08-06) makes every production side
+# effect (ntfy notify, web-host push, /var/lib/freedom-yield state writes)
+# opt-in behind FY_LIVE=1 — anything else is a loud dry no-op. Migrating
+# each side-effecting script's calls onto the lib is a separate task;
+# landing this rule together with the FY_LIVE=1 line scripts/install-*-cron.sh
+# (and vps-bootstrap.sh) now write closes the dangerous ordering where a
+# migrated script fires under an un-flagged cron and goes silently dry —
+# "the cron went quiet and nobody noticed" is the one failure mode this
+# rollout is most afraid of.
+#
+# Detection is two-layered, the same shape as Rule 1's precedent above:
+#   (a) dynamic  — a referenced scripts/<name>.sh that resolves inside the
+#       scripts dir being checked (default: this script's own directory;
+#       override with FYD_CRON_SCRIPTS_DIR for tests / audits from a
+#       different checkout) and whose content sources
+#       scripts/lib/side-effects.sh. Needs no maintenance: a script is
+#       picked up automatically the day it migrates onto the lib.
+#   (b) allowlist — scripts already known (2026-08-06 audit) to call
+#       notify.sh / push-to-web-host.sh / a /var/lib/freedom-yield state
+#       dir directly, BEFORE their migration onto the lib lands. Extend
+#       this list only when a script GAINS a production side effect, never
+#       to silence this rule. KEPT IN SYNC with the identical list in
+#       install-cron-env-headers.sh — see that script's own comment and the
+#       cross-file consistency case in tests/check-cron-file/.
+#
+# A reference that matches NEITHER layer is not flagged (fail-open on this
+# one rule) — an unresolvable name (a synthetic test fixture's placeholder
+# script, or a real script this checkout doesn't happen to carry) must not
+# force every unrelated cron file to also carry FY_LIVE=1. The two layers
+# above are what keep a REAL side-effecting script from silently escaping
+# the rule as new callers appear.
+#
+# Migration-window grace: check-cron-file.sh is invoked ONLY as a pre-flight
+# gate inside scripts/install-*-cron.sh (this candidate content, not yet
+# written anywhere) and by its own test suite — nothing in this repo runs it
+# against an already-deployed /etc/cron.d/metal-* file automatically. A host
+# file installed before this rule existed will not trip any gate until (a) a
+# human pulls it down and lints it by hand (an audit), or (b) its owning
+# installer is re-run. FYD_CRON_FY_LIVE_GRACE=1 exists for case (a) only —
+# to audit a not-yet-reinstalled host file during the 2026-08 migration
+# window without the audit itself reporting a false new violation. It must
+# never be set by an installer's own pre-flight call.
+echo "[6] Side-effecting cron entries must carry FY_LIVE=1"
+
+# See install-cron-env-headers.sh — this list MUST stay identical there.
+KNOWN_SIDE_EFFECT_CRON_BASENAMES="notify.sh push-to-web-host.sh notify-anchor-transition.sh watch-anchor-events.sh check-anchor-publish-health.sh check-host-drift.sh advance-host-checkout.sh check-watch-validators.sh daily-status.sh check-anomalies.sh"
+
+CRON_FILE_SCRIPTS_DIR="${FYD_CRON_SCRIPTS_DIR:-$(cd "$(dirname "$0")" && pwd)}"
+
+cron_basename_is_side_effecting() {
+  local bn="$1"
+  # shellcheck disable=SC2086  # intentional word-split of the space-separated list
+  if printf '%s\n' $KNOWN_SIDE_EFFECT_CRON_BASENAMES | grep -qxF "$bn"; then
+    return 0
+  fi
+  local candidate="${CRON_FILE_SCRIPTS_DIR}/${bn}"
+  if [ -r "$candidate" ] && grep -qE 'side-effects\.sh' "$candidate" 2>/dev/null; then
+    return 0
+  fi
+  return 1
+}
+
+SH_BASENAMES="$(printf '%s\n' "$CRON_LINES" \
+  | grep -oE 'scripts/[A-Za-z0-9_.-]+\.sh' \
+  | sed -E 's#^scripts/##' | sort -u || true)"
+
+SIDE_EFFECT_HITS=""
+while IFS= read -r bn; do
+  [ -z "$bn" ] && continue
+  if cron_basename_is_side_effecting "$bn"; then
+    SIDE_EFFECT_HITS="${SIDE_EFFECT_HITS} ${bn}"
+  fi
+done <<< "$SH_BASENAMES"
+
+if [ -z "$SIDE_EFFECT_HITS" ]; then
+  pass "no side-effecting script referenced (or none resolvable) — FY_LIVE not required."
+elif grep -qE '^FY_LIVE=1$' "$CRON_FILE"; then
+  pass "FY_LIVE=1 present (required by:${SIDE_EFFECT_HITS})"
+elif [ "${FYD_CRON_FY_LIVE_GRACE:-0}" = "1" ]; then
+  note "MISSING FY_LIVE=1 (required by:${SIDE_EFFECT_HITS}) — downgraded to a warning because FYD_CRON_FY_LIVE_GRACE=1 is set."
+  note "Migration-window audit exception only. Never set this inside an installer's own pre-flight call — re-run the owning installer to close the gap for real."
+else
+  fail "references side-effecting script(s) (${SIDE_EFFECT_HITS# }) but the file has no 'FY_LIVE=1' line."
+  note "See scripts/lib/side-effects.sh. Add 'FY_LIVE=1' to the env header, or (migration-window audits only) set FYD_CRON_FY_LIVE_GRACE=1."
 fi
 
 echo ""

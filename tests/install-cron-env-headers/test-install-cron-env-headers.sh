@@ -226,6 +226,106 @@ grep -cE '^SHELL=' "$DIR/metal-wrong-shell" | grep -q '^1$' \
 	|| bad "wrong-shell: no duplicate SHELL line introduced"
 teardown
 
+# ---- FY_LIVE=1 cases (2026-08-06, check-cron-file.sh Rule 6 parity) --------------
+# Own fixture set / own dir: the 6 fixtures above deliberately reference
+# placeholder script paths (/some/*.sh) so none of them trip FY_LIVE
+# detection — cases 1-10 above are unaffected by this addition (verified: no
+# existing assertion changed). These cases reference REAL basenames in this
+# checkout's scripts/ dir to exercise the new behavior in isolation.
+DIR2=""; BK2=""
+setup2() {
+	DIR2="$(mktemp -d -t cron-hdr-fy-live-test.XXXXXX)"
+	BK2="$(mktemp -d -t cron-hdr-fy-live-bk.XXXXXX)"
+
+	# side-effecting script (check-host-drift.sh, on the allowlist), SHELL/PATH
+	# present, FY_LIVE missing.
+	cat > "$DIR2/metal-needs-fy-live" <<EOF
+# host drift tripwire
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+15 5 * * * deploy bash ${REPO_ROOT}/scripts/check-host-drift.sh 2>&1 | logger -t host-drift
+EOF
+
+	# same side-effecting script, already fully compliant — must stay
+	# byte-identical.
+	cat > "$DIR2/metal-side-effect-compliant" <<EOF
+# host drift tripwire
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+FY_LIVE=1
+15 5 * * * deploy bash ${REPO_ROOT}/scripts/check-host-drift.sh 2>&1 | logger -t host-drift
+EOF
+
+	# real, non-side-effecting script (server-status.sh) — FY_LIVE must NOT
+	# be added.
+	cat > "$DIR2/metal-read-only" <<EOF
+# ops dashboard refresh
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+* * * * * deploy bash ${REPO_ROOT}/scripts/server-status.sh >> /var/log/server-status.log 2>&1
+EOF
+}
+teardown2() { rm -rf "$DIR2" "$BK2"; DIR2=""; BK2=""; }
+run_installer2() {
+	FYD_CRON_DIR="$DIR2" FYD_BACKUP_DIR="$BK2" bash "$INSTALLER" "$@"
+}
+
+# ---- case 11: dry-run reports the FY_LIVE gap for the side-effecting file -------
+setup2
+OUT="$(run_installer2 --dry-run 2>&1)"
+echo "$OUT" | grep -q 'would fix: metal-needs-fy-live (missing: FY_LIVE)' \
+	&& ok "FY_LIVE: dry-run reports the gap for a side-effecting cron" \
+	|| bad "FY_LIVE: dry-run reports the gap for a side-effecting cron (out: $OUT)"
+echo "$OUT" | grep -q 'would fix: metal-read-only' \
+	&& bad "FY_LIVE: dry-run does not flag the read-only cron for a fix" \
+	|| ok "FY_LIVE: dry-run does not flag the read-only cron for a fix"
+echo "$OUT" | grep -q 'ok:.*metal-read-only' \
+	&& ok "FY_LIVE: dry-run reports the read-only cron already compliant" \
+	|| bad "FY_LIVE: dry-run reports the read-only cron already compliant (out: $OUT)"
+teardown2
+
+# ---- case 12: apply adds FY_LIVE=1 to the side-effecting file only --------------
+setup2
+RBEFORE="$(cat "$DIR2/metal-read-only")"
+run_installer2 >/dev/null 2>&1
+RC=$?
+[ "$RC" -eq 0 ] \
+	&& ok "FY_LIVE: apply exit 0" \
+	|| bad "FY_LIVE: apply exit 0 (actual=$RC)"
+grep -qE '^FY_LIVE=1$' "$DIR2/metal-needs-fy-live" \
+	&& ok "FY_LIVE: added to the side-effecting cron" \
+	|| bad "FY_LIVE: added to the side-effecting cron"
+[ "$(cat "$DIR2/metal-read-only")" = "$RBEFORE" ] \
+	&& ok "FY_LIVE: read-only cron left byte-identical (not added)" \
+	|| bad "FY_LIVE: read-only cron left byte-identical (not added)"
+teardown2
+
+# ---- case 13: already-compliant side-effecting file stays byte-identical -------
+setup2
+CBEFORE="$(cat "$DIR2/metal-side-effect-compliant")"
+run_installer2 >/dev/null 2>&1
+[ "$(cat "$DIR2/metal-side-effect-compliant")" = "$CBEFORE" ] \
+	&& ok "FY_LIVE: already-compliant side-effecting cron stays byte-identical" \
+	|| bad "FY_LIVE: already-compliant side-effecting cron stays byte-identical"
+[ -e "$BK2/metal-side-effect-compliant" ] \
+	&& bad "FY_LIVE: no backup entry for the already-compliant file" \
+	|| ok "FY_LIVE: no backup entry for the already-compliant file"
+teardown2
+
+# ---- case 14: post-apply, the fixed file passes check-cron-file.sh Rule 6 ------
+setup2
+run_installer2 >/dev/null 2>&1
+if [ -x "${REPO_ROOT}/scripts/check-cron-file.sh" ]; then
+	bash "${REPO_ROOT}/scripts/check-cron-file.sh" "$DIR2/metal-needs-fy-live" >/dev/null 2>&1
+	RC=$?
+	[ "$RC" -eq 0 ] \
+		&& ok "FY_LIVE: patched file now passes check-cron-file.sh" \
+		|| bad "FY_LIVE: patched file now passes check-cron-file.sh (rc=$RC)"
+else
+	echo "SKIP  lint case (check-cron-file.sh not executable)"
+fi
+teardown2
+
 # ---- summary ----------------------------------------------------------------------
 echo "test-install-cron-env-headers.sh summary: PASS=$PASS  FAIL=$FAIL"
 if [ "$FAIL" -eq 0 ]; then

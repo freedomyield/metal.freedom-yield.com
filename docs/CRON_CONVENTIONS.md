@@ -57,6 +57,19 @@ WEB_HOST_FILE=/etc/freedom-yield/<host-file>
 
 cron's default environment is intentionally minimal. Set what your script needs. The values land in the spawned shell's environment (not as shell-local assignments), so children inherit them. Without explicit `SHELL`, cron defaults to `/bin/sh`, which lacks bash features (the `{ ... }` compound works in both, but `$()`, `$RANDOM`, etc., differ).
 
+### 6. Set `FY_LIVE=1` when the cron invokes a side-effecting script
+
+```
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+FY_LIVE=1
+15 5 * * * deploy bash /home/deploy/.../scripts/check-host-drift.sh 2>&1 | logger -t host-drift
+```
+
+`scripts/lib/side-effects.sh` (2026-08-06) gates every production side effect — an `ntfy` push via `notify.sh`, a web-host publish via `push-to-web-host.sh`, or a `/var/lib/freedom-yield` state-dir write — behind `FY_LIVE=1`. Anything else (unset, `0`, anything but the literal `1`) is a loud dry no-op: the suppressed action logs one `DRY: would ...` line to stderr and returns success. Only cron env headers are meant to carry `FY_LIVE=1`; a test or an interactive shell that doesn't set it stays hermetic by default.
+
+A cron whose invoked script never notifies, never pushes, and never touches `/var/lib/freedom-yield` does not need the line — e.g. the `node-info` / `server-status` crons only overwrite a `public/api/*.json` file directly and are out of scope for this rule. `scripts/check-cron-file.sh` Rule 6 enforces this: it fails a candidate cron whose command references a known side-effecting script (or one that sources `scripts/lib/side-effects.sh`) without a `FY_LIVE=1` line, and passes everything else without requiring the line.
+
 ## Alternative form: piping to `logger` instead of a log file
 
 Rules 2 and 3 above only apply to lines that redirect into a project log
@@ -112,7 +125,7 @@ Run the pre-flight linter against the file you intend to install:
 scripts/check-cron-file.sh /tmp/proposed-cron-file
 ```
 
-The linter checks rules 1, 2, 3, 4, 5 above and refuses files that violate them. Install only after the linter passes:
+The linter checks rules 1, 2, 3, 4, 5, 6 above and refuses files that violate them. Install only after the linter passes:
 
 ```sh
 sudo cp -a /etc/cron.d/<name> /root/<name>.cron.bak.$(date -u +\%Y\%m\%dT\%H\%M\%SZ)

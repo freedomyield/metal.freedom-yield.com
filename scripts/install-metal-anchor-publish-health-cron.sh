@@ -5,6 +5,15 @@
 #
 # Runs as root; writes to /etc/cron.d/metal-anchor-publish-health.
 # Idempotent: if the file already contains the same content, no change.
+#
+# 2026-08-06: env header now carries FY_LIVE=1. scripts/lib/side-effects.sh
+# (the C3 rollout) gates every production side effect — notify.sh,
+# push-to-web-host.sh, /var/lib/freedom-yield state writes — behind
+# FY_LIVE=1; anything else is a loud dry no-op. check-anchor-publish-health.sh
+# fires a notify.sh alert on failure, so this cron must carry the flag now,
+# ahead of that script's own callers migrating onto the lib — landing the
+# flag first avoids the cron silently going dry the day that migration
+# lands. Enforced by check-cron-file.sh Rule 6.
 
 set -euo pipefail
 
@@ -44,6 +53,7 @@ read -r -d '' EXPECTED <<CRON || true
 # operator-authorized (broadcast timing coupling).
 SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin
+FY_LIVE=1
 */15 * * * * deploy bash ${REPO_PATH}/scripts/check-anchor-publish-health.sh 2>&1 | logger -t anchor-publish-health
 CRON
 
