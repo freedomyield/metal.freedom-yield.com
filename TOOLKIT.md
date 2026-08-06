@@ -212,31 +212,38 @@ One file per logical pipeline, kept readable. Roughly:
 # REQUIRED since 2026-08-06 (scripts/lib/side-effects.sh, C3 rollout): every
 # production side effect — ntfy notify, web-host push, /var/lib/freedom-yield
 # state write, public feed write — is opt-in behind FY_LIVE=1. Without this
-# line each entry below still runs, still logs and still returns its usual
-# exit code, but sends and writes nothing: it prints one "DRY: would …" line
-# per suppressed effect instead. scripts/check-cron-file.sh Rule 6 fails a
-# cron file that references a side-effecting script without it, and
+# line each entry below still runs and still returns its usual exit code, but
+# sends and writes nothing: it emits one "DRY: would …" line per suppressed
+# effect instead. scripts/check-cron-file.sh Rule 6 fails a cron file that
+# references a side-effecting script without it, and
 # scripts/install-cron-env-headers.sh adds it to an already-installed file.
+#
+# THOSE "DRY: would …" LINES GO TO stderr, so they are only visible if the
+# entry redirects. Every entry below therefore ends in `2>&1 | logger -t <tag>`
+# (the same shape scripts/install-*-cron.sh generate). Drop the redirect and a
+# tick that lost FY_LIVE=1 becomes SILENT — cron mails the output to a host
+# that usually has no MTA, and the loudness this whole design depends on is
+# thrown away. Read the result with `journalctl -t <tag>`.
 FY_LIVE=1
 
 # Push to web frequently
-*/5 * * * * root /path/to/scripts/node-info.sh && /path/to/scripts/push-to-web-host.sh
+*/5 * * * * root /path/to/scripts/node-info.sh && /path/to/scripts/push-to-web-host.sh 2>&1 | logger -t node-info
 
 # Anomaly detection frequently
-*/5 * * * * root /path/to/scripts/check-anomalies.sh
+*/5 * * * * root /path/to/scripts/check-anomalies.sh 2>&1 | logger -t check-anomalies
 
 # Daily status digests at multiple times per day
 # (operator's chosen times)
 
 # Validator-set snapshot + analytics + history (daily)
-0 4 * * * root /path/to/scripts/peer-validators.sh && /path/to/scripts/peer-analytics.py && /path/to/scripts/push-to-web-host.sh
+0 4 * * * root /path/to/scripts/peer-validators.sh && /path/to/scripts/peer-analytics.py && /path/to/scripts/push-to-web-host.sh 2>&1 | logger -t peer-validators
 
 # Uptime + node-health history (daily, off-peak)
-30 0 * * * root /path/to/scripts/uptime-history.sh
-35 0 * * * root /path/to/scripts/node-health-daily.sh
+30 0 * * * root /path/to/scripts/uptime-history.sh 2>&1 | logger -t uptime-history
+35 0 * * * root /path/to/scripts/node-health-daily.sh 2>&1 | logger -t node-health
 
 # Renewal calendar (rebuild daily, stays current)
-10 0 * * * root /path/to/scripts/gen-renewal-ics.sh && /path/to/scripts/push-to-web-host.sh
+10 0 * * * root /path/to/scripts/gen-renewal-ics.sh && /path/to/scripts/push-to-web-host.sh 2>&1 | logger -t renewal-ics
 ```
 
 The exact times are mostly arbitrary; spread them out so the push pipeline doesn't try to send 8 files in the same second.

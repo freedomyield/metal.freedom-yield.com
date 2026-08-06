@@ -86,6 +86,23 @@ if [ -n "${ADV_LINE}" ] && [ -n "${RSYNC_LINE}" ]; then
     && ok "advance step sets FYD_NOTIFY=" \
     || no "advance step is missing FYD_NOTIFY="
 
+  # FY_LIVE=1 (2026-08-06, C3 rollout): scripts/lib/side-effects.sh makes
+  # alert DELIVERY opt-in. This ssh command is the ONLY caller of
+  # advance-host-checkout.sh that gets no cron env header — the cron file is
+  # covered by check-cron-file.sh Rule 6, this line by nothing until now.
+  # Drop it and every gate in the repo still passes; the only symptom is that
+  # the "host is ahead" / "cannot FF" high alerts this step's own comment
+  # promises go silently undelivered.
+  #
+  # Asserted against the step's COMMAND lines, not the whole block: the block
+  # also contains a prose comment mentioning FY_LIVE=1, so a naive substring
+  # match would stay green after the flag was deleted from the ssh invocation.
+  # Requiring it on the same line as `bash -s` pins the invocation itself.
+  ADV_CMD="$(printf '%s\n' "${ADV_BLOCK}" | grep -v '^[[:space:]]*#')"
+  printf '%s\n' "${ADV_CMD}" | grep -Eq -- 'FY_LIVE=1[[:space:]].*bash -s' \
+    && ok "advance step's ssh invocation carries FY_LIVE=1 (alerts are actually delivered)" \
+    || no "advance step's ssh invocation is missing FY_LIVE=1 — its high alerts would be suppressed (scripts/lib/side-effects.sh)"
+
   RSYNC_NEXT="$(awk -v start="${RSYNC_LINE}" 'NR>start && /^      - name:/{print NR; exit}' "${WORKFLOW}")"
   [ -n "${RSYNC_NEXT}" ] || RSYNC_NEXT=$((RSYNC_LINE + 1000))
   RSYNC_BLOCK="$(sed -n "${RSYNC_LINE},$((RSYNC_NEXT - 1))p" "${WORKFLOW}")"
