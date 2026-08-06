@@ -95,8 +95,15 @@
 		// with a percent is more useful than "max total weight (5× self)".
 		var unit = (v.stake && v.stake.unit) || "METAL";
 		if (v.stake) {
-			var selfVal = (v.stake.self != null) ? v.stake.self
-			            : (v.stake.amount != null ? v.stake.amount : null);
+			// `stake.self` is the only name the writer emits — confirmed
+			// against scripts/node-info.sh, validator.schema.v1.json and
+			// validator.example.json. A `v.stake.amount` fallback used to sit
+			// here; no writer has ever produced that key, so it was
+			// unreachable debris. Removed 2026-08-06: an alternative that can
+			// never match adds no resilience, it only obscures which name is
+			// authoritative — precisely what let the 2026-08-04
+			// anchor-history field-name bug survive review for a month.
+			var selfVal = (v.stake.self != null) ? v.stake.self : null;
 			if (selfVal != null) {
 				setText("selfStake", selfVal + " " + unit);
 			}
