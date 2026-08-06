@@ -51,6 +51,25 @@
 
 set -u
 
+# Hermeticity: force a resolvable git commit identity for every git command
+# this suite runs, regardless of the ambient environment. GIT_AUTHOR_NAME /
+# GIT_COMMITTER_NAME environment variables — if merely *set*, even to an
+# empty string — take precedence over ALL config sources (system, global,
+# local repo config, and the per-invocation `-c user.name=...` this suite
+# already uses via GITQ alike). A CI runner with no global git identity and
+# an empty GECOS name derives an empty name and `git commit` dies with
+# "empty ident name ... not allowed"; GITQ's `-c user.name=` does NOT help
+# in that case, because an explicitly-empty env var already won. Exporting
+# non-empty values here is the one thing that actually wins in every
+# environment (see scripts/operator-local/test-commit-anchor-source.sh for
+# the case where this was first found to matter). Values are obviously fake
+# test fixtures (.invalid is the RFC 2606 reserved-for-testing TLD) — never
+# a real operator name/email.
+export GIT_AUTHOR_NAME="FYD Hermetic Test Suite"
+export GIT_AUTHOR_EMAIL="fyd-hermetic-test@example.invalid"
+export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME"
+export GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
+
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 SCRIPT="${REPO_ROOT}/scripts/preview-cycle-anchor-broadcast.sh"
 

@@ -127,11 +127,34 @@ run_json "multiedit public IP -> block"            2 "$(jq -nc --arg fp "$REPO_R
 run_json "read tool -> allow"                      0 "$(jq -nc '{tool_name:"Read",tool_input:{file_path:"/x"}}')"
 
 echo "== gitignore-skip =="
-EXCL="$REPO_ROOT/.git/info/exclude"
+# info/exclude always lives in the repo's *common* git dir, shared across
+# worktrees. In a normal clone that is "$REPO_ROOT/.git/info/exclude", but
+# inside a `git worktree`, "$REPO_ROOT/.git" is a FILE (a gitdir pointer),
+# not a directory, so a literal "$REPO_ROOT/.git/info/exclude" path fails
+# with "Not a directory". Ask git itself to resolve it so the same code
+# path works for both a normal clone and a worktree checkout.
+EXCL_REL="$(cd "$REPO_ROOT" && git rev-parse --git-path info/exclude)"
+case "$EXCL_REL" in
+	/*) EXCL="$EXCL_REL" ;;
+	*)  EXCL="$REPO_ROOT/$EXCL_REL" ;;
+esac
+# Snapshot the exact pre-test state (content, or "did not exist") so it can
+# be restored byte-for-byte afterward regardless of what was in it.
+EXCL_EXISTED=0
+EXCL_BACKUP=""
+if [ -f "$EXCL" ]; then
+	EXCL_EXISTED=1
+	EXCL_BACKUP="$(mktemp -t pubguard-exclude-backup.XXXXXX)"
+	cp "$EXCL" "$EXCL_BACKUP"
+fi
 IGN_NAME="guardtest-ignored-$$.md"
 printf '%s\n' "$IGN_NAME" >> "$EXCL"
 run_json "write IP into gitignored file -> allow"  0 "$(jq -nc --arg fp "$REPO_ROOT/$IGN_NAME" --arg c "host $PUB_IP" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"
-grep -vF "$IGN_NAME" "$EXCL" > "$EXCL.tmp" 2>/dev/null && mv "$EXCL.tmp" "$EXCL"
+if [ "$EXCL_EXISTED" -eq 1 ]; then
+	mv "$EXCL_BACKUP" "$EXCL"
+else
+	rm -f "$EXCL"
+fi
 
 echo "== local denylist (exact substring, incl. embedded) =="
 DENY_TMP="$(mktemp -t pubguard-deny.XXXXXX)"
