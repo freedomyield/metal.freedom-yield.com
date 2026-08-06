@@ -4,10 +4,23 @@
 # .gitignore and validate.yml have assumed exists since before this fix
 # actually gets produced and delivered.
 #
-# CHAIN: none — pure static grep of the workflow file, plus a hermetic
+# CHAIN: none — pure static grep/awk of the workflow file, plus a hermetic
 # execution of the step's own `run:` shell against synthetic
 # GITHUB_SHA/GITHUB_REF_NAME/GITHUB_RUN_ID env vars (the same ones the
 # Actions runtime provides for free — no network, no real deploy).
+#
+# Review round 1 (2026-08-06) finding: the first version of this test used
+# `python3 -c 'import yaml; ...'` to pull the step's run: block out of the
+# workflow, but PyYAML is not a dependency anything else in this repo
+# declares or requires (grepped: this was the only `import yaml` in the
+# whole tree) — a host with python3 but no PyYAML would hard-fail this
+# suite (only python3/jq presence was skip-guarded) -- an interpreter-
+# present-but-library-missing gap of the same shape this project has hit
+# before across differing hosts. Rewritten to extract the run:
+# block with awk instead, using the workflow's own fixed indentation
+# (`- name:` at 6 spaces, `run: |` at 8, block content at 10 — the same
+# convention every other step in this file already uses) — no YAML parser,
+# no new dependency at all.
 #
 # Background (2026-08-06): .gitignore documented `public/api/build.json` as
 # "CI/CD で deploy 時に生成、コミット不要" and validate.yml's committed-JSON
@@ -61,30 +74,29 @@ grep -q '> public/api/build.json' "${WORKFLOW}" \
 # synthetic Actions env vars (GITHUB_SHA / GITHUB_REF_NAME / GITHUB_RUN_ID
 # are provided by the real Actions runtime for free; jq is preinstalled on
 # ubuntu-latest, same tool this repo already depends on elsewhere). ----
-if ! command -v python3 >/dev/null 2>&1; then
-	echo "SKIP: python3 unavailable — cannot extract the run: block for functional check"
-elif ! command -v jq >/dev/null 2>&1; then
+if ! command -v jq >/dev/null 2>&1; then
 	echo "SKIP: jq unavailable — cannot execute the extracted run: block"
 else
 	WORK="$(mktemp -d)"
 	trap 'rm -rf "${WORK}"' EXIT
-	python3 - "${WORKFLOW}" "${WORK}/step.sh" <<'PY'
-import sys, yaml
-workflow, out = sys.argv[1], sys.argv[2]
-with open(workflow) as f:
-	doc = yaml.safe_load(f)
-steps = doc["jobs"]["deploy"]["steps"]
-for s in steps:
-	if s.get("name") == "Write build.json (deploy manifest)":
-		with open(out, "w") as o:
-			o.write("#!/usr/bin/env bash\nset -euo pipefail\n")
-			o.write(s["run"])
-		break
-else:
-	sys.exit("step not found")
-PY
-	if [ ! -s "${WORK}/step.sh" ]; then
-		no "could not extract the build.json step's run: block"
+	{
+		printf '#!/usr/bin/env bash\nset -euo pipefail\n'
+		awk '
+			/^      - name: Write build\.json \(deploy manifest\)$/ { instep=1 }
+			instep && /^        run: \|$/ { inrun=1; next }
+			instep && inrun {
+				if ($0 ~ /^          /) {
+					print substr($0, 11)
+				} else if ($0 !~ /^[[:space:]]*$/) {
+					exit
+				} else {
+					print ""
+				}
+			}
+		' "${WORKFLOW}"
+	} > "${WORK}/step.sh"
+	if [ ! -s "${WORK}/step.sh" ] || [ "$(wc -l < "${WORK}/step.sh" | tr -d ' ')" -le 2 ]; then
+		no "could not extract the build.json step's run: block (awk found 0 content lines — indentation drifted from 6/8/10 spaces, or the step was renamed)"
 	else
 		mkdir -p "${WORK}/repo/public/api"
 		OUT_JSON="${WORK}/repo/public/api/build.json"
