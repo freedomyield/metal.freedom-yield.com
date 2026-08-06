@@ -104,7 +104,7 @@
 		</figure>
 		<h2>クイックスタート (60 秒)</h2>
 		<p>ライブのアイデンティティマニフェストが、 公開された運用者公開鍵で署名されていることを確認します:</p>
-		<pre><code>TMP=$(mktemp -d)
+		<pre class="cmd-box"><code>TMP=$(mktemp -d)
 curl -sS https://metal.freedom-yield.com/.well-known/operator-identity.pub > "$TMP/pub"
 curl -sS https://metal.freedom-yield.com/api/identity.json                 > "$TMP/json"
 curl -sS https://metal.freedom-yield.com/api/identity.json.sig             > "$TMP/sig"

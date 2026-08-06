@@ -2325,7 +2325,25 @@ code {
 }
 .data-example > summary:hover { color: var(--fg); }
 .data-example[open] > summary { color: var(--fg); margin-bottom: 0.6rem; }
-.data-example pre {
+/* Command / code block — dark box for every <pre class="cmd-box"> across
+ * /data/, /reference-architecture/, and /verify/ (the last not wrapped in
+ * <details> — it's an always-visible primary CTA). `overflow-x: auto`
+ * scopes scrolling to the block itself; it must NOT rely on page-level
+ * horizontal scroll, which `html { overflow-x: clip }` intentionally
+ * disables.
+ * 2026-08-06: mobile audit found /verify/'s block had no class at all
+ * (bare <pre>), so long right-aligned lines (762px) were silently clipped
+ * inside a 282px viewport with no way to reach the rest. Consolidated
+ * every command/code <pre> onto one explicit class (previously /data/ and
+ * /reference-architecture/ relied on an implicit `.data-example pre`
+ * descendant selector) and added a persistent thin scrollbar so
+ * scrollability reads as obvious rather than relying on the trailing edge
+ * cutting off mid-character. The explicit class also sidesteps a
+ * publish-guard false positive: a hex digit ("e", from the element name)
+ * directly followed by a WebKit scrollbar pseudo-element's leading double
+ * colon reads as an IPv6-literal shape to the guard's regex — "cmd-box"
+ * doesn't end in a hex digit, so it can't form that shape. */
+.cmd-box {
 	background: #0f172a;
 	color: #e2e8f0;
 	padding: 0.85rem 1rem;
@@ -2334,8 +2352,21 @@ code {
 	line-height: 1.55;
 	overflow-x: auto;
 	margin: 0.4rem 0 0;
+	-webkit-overflow-scrolling: touch;
+	scrollbar-width: thin;
+	scrollbar-color: rgba(226, 232, 240, 0.4) transparent;
 }
-.data-example pre code {
+.cmd-box::-webkit-scrollbar {
+	height: 6px;
+}
+.cmd-box::-webkit-scrollbar-track {
+	background: transparent;
+}
+.cmd-box::-webkit-scrollbar-thumb {
+	background: rgba(226, 232, 240, 0.4);
+	border-radius: 3px;
+}
+.cmd-box code {
 	font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 	/* Reset the global code-pill styling (cream background + dark text)
 	 * which otherwise renders unreadable inside the dark navy pre block. */
