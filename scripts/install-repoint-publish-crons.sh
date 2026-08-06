@@ -46,6 +46,10 @@ BACKUP_DIR="${BACKUP_DIR:-/var/backups/metal-cron}"
 OLD_NAME="push-to-xserver.sh"
 NEW_NAME="push-to-web-host.sh"
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=SCRIPTDIR/lib/cron-filename-guard.sh
+. "${SCRIPT_DIR}/lib/cron-filename-guard.sh"
+
 DRY_RUN=0
 PURGE=0
 for arg in "$@"; do
@@ -60,25 +64,22 @@ done
 say() { printf '%s\n' "$*"; }
 run_note() { [ "$DRY_RUN" = 1 ] && printf '(dry-run) '; }
 
-# is_cron_executed_filename <basename> — true (rc 0) iff cron.d would
-# actually execute a file with this name. Per crontab(5) (Debian's cron), a
-# /etc/cron.d/ entry is only read if its name consists solely of upper/lower
-# case letters, digits, underscores, and hyphens — identical to run-parts(8)'s
-# own filename rule for cron.daily/weekly/monthly. Anything outside that set
-# (a dot, a tilde, ...) is a name cron silently ignores — most often a
-# backup/rotation sidecar (*.bak-<ts>, *.disabled, *.orig, *.dpkg-old, *~)
-# left by a PRIOR repoint or by install-cron-env-headers.sh's own backups.
-# Rewriting one here would repoint the OLD_NAME string inside a point-in-time
-# record without touching anything cron actually runs. MUST stay identical to
-# install-cron-env-headers.sh's copy of the same function — see
-# tests/install-repoint-publish-crons/ and tests/install-cron-env-headers/
-# for the lock-step consistency check.
-is_cron_executed_filename() {
-	case "$1" in
-		*[!A-Za-z0-9_-]*) return 1 ;;
-		*) return 0 ;;
-	esac
-}
+# is_cron_executed_filename() — sourced above from
+# scripts/lib/cron-filename-guard.sh, not redefined here. (2026-08-06, H3
+# task: this used to be an inline copy with a comment claiming a
+# tests/install-repoint-publish-crons/ + tests/install-cron-env-headers/
+# "lock-step consistency check" kept it in sync with the sibling installer's
+# copy — no such cross-file test ever existed; each suite only ran its own
+# self-contained mutation check. The fix is structural, not another test to
+# keep in sync by convention: there is now exactly one definition, in the
+# shared lib, and tests/cron-filename-guard/ asserts that repo-wide.)
+#
+# is_cron_executed_filename skips (never rewrites) any matched path whose
+# basename cron.d would silently ignore — most often a backup/rotation
+# sidecar (*.bak-<ts>, *.disabled, *.orig, *.dpkg-old, *~) left by a PRIOR
+# repoint or by install-cron-env-headers.sh's own backups. Rewriting one
+# here would repoint the OLD_NAME string inside a point-in-time record
+# without touching anything cron actually runs.
 
 # ---- extract the allowlisted filenames from a publish script's case block ----
 # Pulls every <name>.{json,jsonl,ics} token that appears inside `case … esac`.
