@@ -10,7 +10,8 @@
 			noneSince: "No incidents recorded since",
 			loadError: "Could not load incident data.",
 			severity: { critical: "Critical", major: "Major", minor: "Minor", info: "Info" },
-			status: "Status",
+			statusLabel: "Status",
+			statusValue: { open: "Open", under_remediation: "Under remediation", resolved: "Resolved" },
 			resolution: "Resolved"
 		},
 		ja: {
@@ -18,7 +19,8 @@
 			noneSince: "稼働開始から記録されたインシデントなし — ",
 			loadError: "インシデントデータの読み込みに失敗しました。",
 			severity: { critical: "重大", major: "大", minor: "中", info: "情報" },
-			status: "状態",
+			statusLabel: "状態",
+			statusValue: { open: "未対応", under_remediation: "対応中", resolved: "解消済み" },
 			resolution: "解消日"
 		}
 	};
@@ -33,12 +35,29 @@
 		for (var i = 0; i < nodes.length; i++) nodes[i].innerHTML = html;
 	}
 
+	// Value-domain contract, not just a field-name one: incidents.schema.v1.json
+	// declares severity as the capitalized enum ["Critical","Major","Minor","Info"]
+	// and the live feed carries "Minor", but the I18N tables above are keyed in
+	// lowercase. Until 2026-08-06 every lookup therefore missed, with two
+	// consequences — the JA page fell through to the raw English enum value (a
+	// locale leak), and, worse, `sev === "critical"` never matched, so a
+	// Critical or Major incident was painted badge-ok GREEN: the page actively
+	// signalled "all fine" for the most serious class of event it exists to
+	// report. Normalizing once here is what keeps the enum's case an internal
+	// detail of the feed rather than a styling input.
 	function severityBadge(sev) {
-		var label = (t.severity[sev] || sev || "Info");
-		var cls = "badge ";
-		if (sev === "critical" || sev === "major") cls += "badge-warn";
-		else cls += "badge-ok";
+		var key = String(sev || "").toLowerCase();
+		var label = t.severity[key] || sev || t.severity.info;
+		var cls = "badge " + ((key === "critical" || key === "major") ? "badge-warn" : "badge-ok");
 		return '<span class="' + cls + '">' + escapeHtml(label) + "</span>";
+	}
+
+	// Same class as severityBadge: status is the enum
+	// ["open","under_remediation","resolved"]. Rendering it raw would print
+	// "under_remediation" to a visitor, in both locales.
+	function statusLabel(status) {
+		var key = String(status || "").toLowerCase();
+		return t.statusValue[key] || status;
 	}
 
 	function escapeHtml(s) {
@@ -67,7 +86,7 @@
 		var resolution = inc.resolutionDate
 			? ('<dt>' + t.resolution + '</dt><dd>' + escapeHtml(inc.resolutionDate) + '</dd>')
 			: "";
-		var status = inc.status ? ('<dt>' + t.status + '</dt><dd>' + escapeHtml(inc.status) + '</dd>') : "";
+		var status = inc.status ? ('<dt>' + t.statusLabel + '</dt><dd>' + escapeHtml(statusLabel(inc.status)) + '</dd>') : "";
 		return '<article class="incident">' +
 			'<h3>' + escapeHtml(inc.detectionDate || "") + ' — ' + severityBadge(inc.severity) + ' ' + escapeHtml(inc.title || "") + '</h3>' +
 			(inc.summary ? '<p>' + escapeHtml(inc.summary) + '</p>' : "") +
