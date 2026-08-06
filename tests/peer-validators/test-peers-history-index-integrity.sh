@@ -262,6 +262,57 @@ check_eq "(d) INVARIANT: index count stays 0 across repeated failed runs" "0" "$
 check_eq "(d) local backlog file still present (fail-safe -- nothing deletes it)" "1" \
 	"$([ -f "$STATE_DIR/peers-history/peers-2025-02-02.json.gz" ] && echo 1 || echo 0)"
 
+# =============================================================================
+# (e) REGRESSION GUARD (review round 1, 2026-08-06) — a read-only ledger
+# file must NOT abort the script. Before this fix, `grep -qxF ... ||
+# echo "$date" >> "$PUBLISHED_LEDGER"` had the ledger append as the FINAL
+# command of an `||` list — under `set -euo pipefail`, bash does NOT
+# exempt the final command of an && / || list from errexit (only the
+# earlier, non-final commands are exempt), so a failed append aborted the
+# whole script right there. The retry loop and the index write below it
+# never ran at all, contradicting the function's own documented contract
+# ("Every exit path here is a WARN, never a hard failure"). Realistic
+# triggers: ENOSPC-triggered remount, a DR restore that left root-owned
+# perms, any read-only filesystem window. This is push-succeeds-but-
+# ledger-write-fails specifically (the touch guard for a wholly missing
+# ledger is covered by manual repro in the report -- constructing a
+# filesystem where touch itself fails but the snapshot gzip write
+# (moments earlier, same directory) still succeeds isn't reproducible
+# through simple chmod on this filesystem, since touch's utime() succeeds
+# for the file's own owner even at mode 444; an actual write via `>>`
+# does not have that exemption, which is exactly what this case drives).
+# =============================================================================
+echo "checking (e): read-only ledger must not abort the script"
+fresh_fixture "e"
+mkdir -p "$STATE_DIR/peers-history"
+: > "$STATE_DIR/peers-history/.published"
+chmod 444 "$STATE_DIR/peers-history/.published"
+make_push_stub "$PUSH_STUB" "$PUSH_LOG" 0
+
+STDERR_E="$WORK/run-e.stderr"
+run_peer_validators >/dev/null 2>"$STDERR_E"
+RC_E=$?
+check_eq "(e) read-only ledger: script still exits 0 (fail-safe contract honored)" "0" "$RC_E"
+check_eq "(e) read-only ledger: local snapshot still stashed" "1" \
+	"$([ -f "$STATE_DIR/peers-history/peers-${TODAY}.json.gz" ] && echo 1 || echo 0)"
+check_eq "(e) read-only ledger: push was still attempted and succeeded (1 call)" "1" "$(wc -l < "$PUSH_LOG" 2>/dev/null | tr -d ' ')"
+grep -q "could not record .* in the ledger" "$STDERR_E" \
+	&& pass "(e) stderr WARNs about the ledger write failure" \
+	|| fail "(e) stderr missing ledger-write-failure WARN"
+check_eq "(e) INVARIANT: index file is still written (not aborted before reaching it)" "0" \
+	"$([ -f "$FIXTURE_REPO/public/api/peers-history-index.json" ] && echo 0 || echo 1)"
+check_eq "(e) index is still valid JSON despite the ledger failure" "0" "$(INDEX | jq -r '.count')"
+
+# (e2) self-heal: permissions fixed -> next run records the ledger entry
+# and the index catches up, without needing today's already-stashed
+# snapshot to be regenerated.
+chmod 644 "$STATE_DIR/peers-history/.published"
+run_peer_validators >/dev/null 2>"$WORK/run-e2.stderr"
+RC_E2=$?
+check_eq "(e2) self-heal run exits 0" "0" "$RC_E2"
+check_eq "(e2) self-heal: ledger now records today" "$TODAY" "$(LEDGER)"
+check_eq "(e2) self-heal: index now advertises today (count=1)" "1" "$(INDEX | jq -r '.count')"
+
 # ---- summary ---------------------------------------------------------------
 echo
 echo "----------------------------------------"

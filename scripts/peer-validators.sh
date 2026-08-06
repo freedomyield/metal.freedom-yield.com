@@ -223,7 +223,18 @@ PUBLISH_DIR="${ROOT}/public/api/peers-history"
 mkdir -p "$PUBLISH_DIR"
 PUSH_TO_WEB_HOST="${FYD_PUSH_TO_WEB_HOST:-${ROOT}/scripts/push-to-web-host.sh}"
 PUBLISHED_LEDGER="${SNAPSHOT_DIR}/.published"
-touch "$PUBLISHED_LEDGER"
+# Guarded (review round 1, 2026-08-06): a bare `touch` is a top-level
+# statement under `set -e` — if STATE_DIR/the ledger file is read-only
+# (ENOSPC-triggered remount, a DR restore that left root-owned perms,
+# etc.) `touch` fails and the WHOLE SCRIPT aborts right here, before the
+# index below is ever reached, even though this section's own docstring
+# promises "never a hard failure". WARN and continue instead — the ledger
+# read below tolerates a missing file (falls back to an empty published
+# set), so a completely unwritable STATE_DIR still yields a (possibly
+# empty/stale) index rather than none at all.
+if ! touch "$PUBLISHED_LEDGER" 2>/dev/null; then
+	echo "WARN: could not create/touch ledger at $PUBLISHED_LEDGER (STATE_DIR may be read-only) — proceeding; the index below will reflect whatever ledger content is readable, or be empty if none" >&2
+fi
 
 # publish_snapshot_date <date> — stage + push one day's snapshot; record it
 # in the ledger iff the push actually succeeded. Every exit path here is a
@@ -239,7 +250,21 @@ publish_snapshot_date() {
 	fi
 	if cp -p "$file" "${PUBLISH_DIR}/peers-${date}.json.gz" \
 		&& bash "$PUSH_TO_WEB_HOST" "peers-history/peers-${date}.json.gz"; then
-		grep -qxF "$date" "$PUBLISHED_LEDGER" || echo "$date" >> "$PUBLISHED_LEDGER"
+		# Guarded (review round 1, 2026-08-06): under `set -e`, a plain
+		# `A || B` statement does NOT exempt B — if B (the ledger append)
+		# fails, the script aborts right here, mid-function, and the
+		# retry loop + index write below never run. A read-only ledger
+		# file (same triggers as the touch above) reproduced exactly
+		# this: push succeeds, append fails, script dies, index never
+		# written. Nest the check so the append's own failure is always
+		# the TESTED condition of an if, never a bare statement, and the
+		# innermost fallback explicitly ends in `|| true` (same idiom as
+		# append-anchor-history.sh's final confirmation echo).
+		if ! grep -qxF "$date" "$PUBLISHED_LEDGER" 2>/dev/null; then
+			if ! echo "$date" >> "$PUBLISHED_LEDGER" 2>/dev/null; then
+				echo "WARN: push succeeded for ${date} but could not record it in the ledger (read-only?) — next run will re-push it (harmless, idempotent)" >&2 || true
+			fi
+		fi
 		echo "published snapshot: peers-history/peers-${date}.json.gz"
 	else
 		echo "WARN: snapshot published locally but push failed for peers-${date}.json.gz — will retry next run" >&2
@@ -272,8 +297,17 @@ python3 -c "
 import os, json
 snapshot_dir = '${SNAPSHOT_DIR}'
 ledger = '${PUBLISHED_LEDGER}'
-with open(ledger) as fh:
-    dates = sorted({ln.strip() for ln in fh if ln.strip()})
+# Tolerate a ledger that could not be created at all (STATE_DIR unwritable
+# from the very first run, touch above already WARNed) -- degrade to an
+# empty published set rather than crash. A ledger that exists but merely
+# can't accept new appends (the far more common case: read-only remount of
+# an existing STATE_DIR) still opens fine here -- read access, not write,
+# is all this needs.
+dates = set()
+if os.path.exists(ledger):
+    with open(ledger) as fh:
+        dates = {ln.strip() for ln in fh if ln.strip()}
+dates = sorted(dates)
 entries = []
 for date in dates:
     name = f'peers-{date}.json.gz'
