@@ -60,6 +60,26 @@ done
 say() { printf '%s\n' "$*"; }
 run_note() { [ "$DRY_RUN" = 1 ] && printf '(dry-run) '; }
 
+# is_cron_executed_filename <basename> — true (rc 0) iff cron.d would
+# actually execute a file with this name. Per crontab(5) (Debian's cron), a
+# /etc/cron.d/ entry is only read if its name consists solely of upper/lower
+# case letters, digits, underscores, and hyphens — identical to run-parts(8)'s
+# own filename rule for cron.daily/weekly/monthly. Anything outside that set
+# (a dot, a tilde, ...) is a name cron silently ignores — most often a
+# backup/rotation sidecar (*.bak-<ts>, *.disabled, *.orig, *.dpkg-old, *~)
+# left by a PRIOR repoint or by install-cron-env-headers.sh's own backups.
+# Rewriting one here would repoint the OLD_NAME string inside a point-in-time
+# record without touching anything cron actually runs. MUST stay identical to
+# install-cron-env-headers.sh's copy of the same function — see
+# tests/install-repoint-publish-crons/ and tests/install-cron-env-headers/
+# for the lock-step consistency check.
+is_cron_executed_filename() {
+	case "$1" in
+		*[!A-Za-z0-9_-]*) return 1 ;;
+		*) return 0 ;;
+	esac
+}
+
 # ---- extract the allowlisted filenames from a publish script's case block ----
 # Pulls every <name>.{json,jsonl,ics} token that appears inside `case … esac`.
 allowlist_tokens() {
@@ -154,15 +174,27 @@ say "── repoint cron files (${OLD_NAME} → ${NEW_NAME}) ──"
 TS="$(date +%Y%m%d-%H%M%S)"
 CHECKER="${SCRIPTS_DIR}/check-cron-file.sh"
 REPOINTED=0
+SKIPPED_NOT_CRON=0
 shopt -s nullglob
 CRON_FILES=("${CRON_DIR}"/*)
 shopt -u nullglob
 for f in "${CRON_FILES[@]}"; do
 	[ -f "$f" ] || continue
-	# skip dotfiles + backup/disabled sidecars (cron.d ignores dotted names too,
-	# but be explicit so a stray file is never rewritten as if it were a cron).
-	case "$(basename "$f")" in .*|*.bak*|*.disabled*|*~) continue ;; esac
 	grep -q "$OLD_NAME" "$f" || continue
+	bn="$(basename "$f")"
+	# Not a filename cron.d would ever execute (see is_cron_executed_filename
+	# above) — most often a *.bak-<ts>/*.disabled/*.orig sidecar that still
+	# contains the OLD_NAME string from before it was retired. Skip loudly,
+	# never rewrite: doing so would corrupt a point-in-time record without
+	# touching anything cron actually runs. Checked AFTER the OLD_NAME grep
+	# so the skip line only ever names a file this repoint would otherwise
+	# have acted on — not every unrelated dotfile/other-project file that
+	# happens to live in the same cron.d.
+	if ! is_cron_executed_filename "$bn"; then
+		SKIPPED_NOT_CRON=$((SKIPPED_NOT_CRON + 1))
+		say "  skipped (not a cron-executed filename): $bn"
+		continue
+	fi
 	TMP="$(mktemp)"
 	sed "s/${OLD_NAME}/${NEW_NAME}/g" "$f" > "$TMP"
 	# A name-swap must not INTRODUCE new linter violations, but pre-existing
@@ -172,25 +204,26 @@ for f in "${CRON_FILES[@]}"; do
 	if [ -x "$CHECKER" ]; then
 		BEFORE_V="$(lint_violations "$f")"; AFTER_V="$(lint_violations "$TMP")"
 		if [ "${AFTER_V:-0}" -gt "${BEFORE_V:-0}" ]; then
-			echo "  ✗ SKIP $(basename "$f"): rewrite would ADD linter violations (${BEFORE_V:-0}→${AFTER_V:-0})" >&2
+			echo "  ✗ SKIP ${bn}: rewrite would ADD linter violations (${BEFORE_V:-0}→${AFTER_V:-0})" >&2
 			rm -f "$TMP"; continue
 		fi
-		[ "${AFTER_V:-0}" -gt 0 ] && say "  (note: $(basename "$f") carries ${AFTER_V} pre-existing linter issue(s), unchanged by repoint)"
+		[ "${AFTER_V:-0}" -gt 0 ] && say "  (note: ${bn} carries ${AFTER_V} pre-existing linter issue(s), unchanged by repoint)"
 	fi
 	if [ "$DRY_RUN" = 1 ]; then
-		say "  $(run_note)would repoint: $(basename "$f")"
+		say "  $(run_note)would repoint: ${bn}"
 		rm -f "$TMP"
 	else
 		mkdir -p "${BACKUP_DIR}/${TS}"
-		cp -p "$f" "${BACKUP_DIR}/${TS}/$(basename "$f")"
+		cp -p "$f" "${BACKUP_DIR}/${TS}/${bn}"
 		# preserve mode of the original cron file
 		install -m "$(stat -c '%a' "$f" 2>/dev/null || echo 644)" "$TMP" "$f"
 		rm -f "$TMP"
-		say "  ✓ repointed: $(basename "$f")  (backup: ${BACKUP_DIR}/${TS}/$(basename "$f"))"
+		say "  ✓ repointed: ${bn}  (backup: ${BACKUP_DIR}/${TS}/${bn})"
 	fi
 	REPOINTED=$((REPOINTED + 1))
 done
 [ "$REPOINTED" = 0 ] && say "  (nothing to repoint — all crons already use ${NEW_NAME})"
+[ "$SKIPPED_NOT_CRON" -gt 0 ] && say "  (${SKIPPED_NOT_CRON} file(s) referencing ${OLD_NAME} skipped as not cron-executed — see 'skipped' lines above)"
 say ""
 
 # ===== 3. orphan report / optional purge ====================================

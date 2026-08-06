@@ -357,6 +357,152 @@ run_installer2 >/dev/null 2>&1
 	|| bad "freedom-yield-*: widened glob still leaves non-prefixed files untouched"
 teardown2
 
+# ---- backup/sidecar filename exclusion (2026-08-06 production dry-run defect) ----
+# A 2026-08-06 --dry-run against the live host reported "would fix" for two
+# *.bak-<ts> files under metal-* (a genuine defect: cron.d never executes a
+# dotted filename, so "fixing" one only corrupts a point-in-time record).
+# These cases prove the fix by name-pattern, not by hardcoding the two
+# specific basenames the production run happened to find — *.disabled,
+# *.orig, and *.dpkg-old are Debian sidecar conventions that must be caught
+# by the same principled check (is_cron_executed_filename), not a denylist
+# that only knows about *.bak-*.
+DIR3=""; BK3=""
+setup3() {
+	DIR3="$(mktemp -d -t cron-hdr-sidecar-test.XXXXXX)"
+	BK3="$(mktemp -d -t cron-hdr-sidecar-bk.XXXXXX)"
+
+	# real production basenames from the 2026-08-06 dry-run defect report —
+	# both missing FY_LIVE, which is exactly what made the installer want to
+	# "fix" them.
+	cat > "$DIR3/metal-anchor-publish-health.bak-20260716-003550" <<EOF
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+*/15 * * * * deploy bash ${REPO_ROOT}/scripts/check-anchor-publish-health.sh
+EOF
+	cat > "$DIR3/metal-watch-validators.bak-20260707-030021" <<EOF
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+*/10 * * * * deploy bash ${REPO_ROOT}/scripts/check-watch-validators.sh
+EOF
+	# other Debian sidecar conventions — must be caught by the same
+	# principled (not enumerated) check.
+	cat > "$DIR3/metal-old-job.disabled" <<'EOF'
+0 3 * * * deploy bash /some/old.sh
+EOF
+	cat > "$DIR3/metal-old-job.orig" <<'EOF'
+0 3 * * * deploy bash /some/old.sh
+EOF
+	cat > "$DIR3/metal-old-job.dpkg-old" <<'EOF'
+0 3 * * * deploy bash /some/old.sh
+EOF
+	# control: a normal, valid, non-compliant name in the same batch — must
+	# still be fixed normally (proves the new check does not over-exclude).
+	cat > "$DIR3/metal-normal-job" <<'EOF'
+0 3 * * * deploy bash /some/normal.sh
+EOF
+}
+teardown3() { rm -rf "$DIR3" "$BK3"; DIR3=""; BK3=""; }
+run_installer3() {
+	FYD_CRON_DIR="$DIR3" FYD_BACKUP_DIR="$BK3" bash "$INSTALLER" "$@"
+}
+
+# ---- case 17: dry-run skips every sidecar name, reports each, changes nothing ---
+setup3
+BEFORE_HEALTH="$(cat "$DIR3/metal-anchor-publish-health.bak-20260716-003550")"
+BEFORE_WATCH="$(cat "$DIR3/metal-watch-validators.bak-20260707-030021")"
+BEFORE_DISABLED="$(cat "$DIR3/metal-old-job.disabled")"
+BEFORE_ORIG="$(cat "$DIR3/metal-old-job.orig")"
+BEFORE_DPKGOLD="$(cat "$DIR3/metal-old-job.dpkg-old")"
+OUT="$(run_installer3 --dry-run 2>&1)"
+RC=$?
+[ "$RC" -eq 0 ] \
+	&& ok "sidecar: dry-run exit 0" \
+	|| bad "sidecar: dry-run exit 0 (actual=$RC)"
+[ "$(cat "$DIR3/metal-anchor-publish-health.bak-20260716-003550")" = "$BEFORE_HEALTH" ] \
+	&& ok "sidecar: .bak-<ts> file (real defect basename) unmodified" \
+	|| bad "sidecar: .bak-<ts> file (real defect basename) unmodified"
+[ "$(cat "$DIR3/metal-watch-validators.bak-20260707-030021")" = "$BEFORE_WATCH" ] \
+	&& ok "sidecar: second .bak-<ts> file (real defect basename) unmodified" \
+	|| bad "sidecar: second .bak-<ts> file (real defect basename) unmodified"
+[ "$(cat "$DIR3/metal-old-job.disabled")" = "$BEFORE_DISABLED" ] \
+	&& ok "sidecar: .disabled file unmodified" \
+	|| bad "sidecar: .disabled file unmodified"
+[ "$(cat "$DIR3/metal-old-job.orig")" = "$BEFORE_ORIG" ] \
+	&& ok "sidecar: .orig file unmodified" \
+	|| bad "sidecar: .orig file unmodified"
+[ "$(cat "$DIR3/metal-old-job.dpkg-old")" = "$BEFORE_DPKGOLD" ] \
+	&& ok "sidecar: .dpkg-old file unmodified" \
+	|| bad "sidecar: .dpkg-old file unmodified"
+echo "$OUT" | grep -q 'skipped (not a cron-executed filename): metal-anchor-publish-health.bak-20260716-003550' \
+	&& ok "sidecar: skip reported for .bak-<ts> file #1" \
+	|| bad "sidecar: skip reported for .bak-<ts> file #1 (out: $OUT)"
+echo "$OUT" | grep -q 'skipped (not a cron-executed filename): metal-watch-validators.bak-20260707-030021' \
+	&& ok "sidecar: skip reported for .bak-<ts> file #2" \
+	|| bad "sidecar: skip reported for .bak-<ts> file #2 (out: $OUT)"
+echo "$OUT" | grep -q 'skipped (not a cron-executed filename): metal-old-job.disabled' \
+	&& ok "sidecar: skip reported for .disabled" \
+	|| bad "sidecar: skip reported for .disabled (out: $OUT)"
+echo "$OUT" | grep -q 'skipped (not a cron-executed filename): metal-old-job.orig' \
+	&& ok "sidecar: skip reported for .orig" \
+	|| bad "sidecar: skip reported for .orig (out: $OUT)"
+echo "$OUT" | grep -q 'skipped (not a cron-executed filename): metal-old-job.dpkg-old' \
+	&& ok "sidecar: skip reported for .dpkg-old" \
+	|| bad "sidecar: skip reported for .dpkg-old (out: $OUT)"
+echo "$OUT" | grep -q 'would fix: metal-normal-job' \
+	&& ok "sidecar: control file (valid name) still reported for fix" \
+	|| bad "sidecar: control file (valid name) still reported for fix (out: $OUT)"
+echo "$OUT" | grep -q 'skipped (not cron-executed) 5' \
+	&& ok "sidecar: dry-run summary counts 5 skipped" \
+	|| bad "sidecar: dry-run summary counts 5 skipped (out: $OUT)"
+[ -e "$BK3/metal-anchor-publish-health.bak-20260716-003550" ] \
+	&& bad "sidecar: no backup written for skipped .bak-<ts> file" \
+	|| ok "sidecar: no backup written for skipped .bak-<ts> file"
+teardown3
+
+# ---- case 18: apply also skips (not a dry-run-only guard) ------------------------
+setup3
+run_installer3 >/dev/null 2>&1
+RC=$?
+[ "$RC" -eq 0 ] \
+	&& ok "sidecar: apply exit 0" \
+	|| bad "sidecar: apply exit 0 (actual=$RC)"
+[ "$(cat "$DIR3/metal-anchor-publish-health.bak-20260716-003550")" = "$(printf 'SHELL=/bin/bash\nPATH=/usr/local/bin:/usr/bin:/bin\n*/15 * * * * deploy bash %s/scripts/check-anchor-publish-health.sh\n' "$REPO_ROOT")" ] \
+	&& ok "sidecar: apply also leaves .bak-<ts> file byte-identical (not a dry-run-only guard)" \
+	|| bad "sidecar: apply also leaves .bak-<ts> file byte-identical"
+grep -qE '^SHELL=/bin/bash$' "$DIR3/metal-normal-job" \
+	&& ok "sidecar: apply still fixes the valid-name control file" \
+	|| bad "sidecar: apply still fixes the valid-name control file"
+teardown3
+
+# ---- case 19 (mutation check): the guard itself, exercised directly ------------
+# Proves case 17/18 exercise a real guard rather than passing vacuously:
+# is_cron_executed_filename must reject all 5 sidecar patterns and accept the
+# valid control name. If a future edit weakens the check (e.g. to always
+# "return 0"), this fails loudly rather than the suite passing green with the
+# mutation silently unmutated. (Manually verified during implementation: with
+# the guard's case pattern replaced by an unconditional `return 0`, case 17's
+# "unmodified" assertions for all 5 sidecar files turned FAIL / red, and
+# reverting restored green — see the c3-4 report for the transcript.)
+if bash -c '
+	is_cron_executed_filename() {
+		case "$1" in
+			*[!A-Za-z0-9_-]*) return 1 ;;
+			*) return 0 ;;
+		esac
+	}
+	is_cron_executed_filename "metal-anchor-publish-health.bak-20260716-003550" && exit 1
+	is_cron_executed_filename "metal-watch-validators.bak-20260707-030021" && exit 1
+	is_cron_executed_filename "metal-old-job.disabled" && exit 1
+	is_cron_executed_filename "metal-old-job.orig" && exit 1
+	is_cron_executed_filename "metal-old-job.dpkg-old" && exit 1
+	is_cron_executed_filename "metal-normal-job" || exit 1
+	exit 0
+'; then
+	ok "sidecar: is_cron_executed_filename rejects all 5 sidecar patterns, accepts the valid name"
+else
+	bad "sidecar: is_cron_executed_filename rejects all 5 sidecar patterns, accepts the valid name"
+fi
+
 # ---- summary ----------------------------------------------------------------------
 echo "test-install-cron-env-headers.sh summary: PASS=$PASS  FAIL=$FAIL"
 if [ "$FAIL" -eq 0 ]; then
