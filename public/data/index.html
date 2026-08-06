@@ -120,7 +120,7 @@
 			</dl>
 			<details class="data-example">
 				<summary>Example request</summary>
-				<pre><code>curl -s https://metal.freedom-yield.com/api/validator.json | jq</code></pre>
+				<pre class="cmd-box"><code>curl -s https://metal.freedom-yield.com/api/validator.json | jq</code></pre>
 			</details>
 		</article>
 
@@ -139,7 +139,7 @@
 			</dl>
 			<details class="data-example">
 				<summary>Example request</summary>
-				<pre><code>curl -s https://metal.freedom-yield.com/api/evidence.json | jq</code></pre>
+				<pre class="cmd-box"><code>curl -s https://metal.freedom-yield.com/api/evidence.json | jq</code></pre>
 			</details>
 		</article>
 
@@ -163,7 +163,7 @@
 			</dl>
 			<details class="data-example">
 				<summary>Example request</summary>
-				<pre><code>curl -s https://metal.freedom-yield.com/api/uptime-recent.json | jq '.entries[0]'</code></pre>
+				<pre class="cmd-box"><code>curl -s https://metal.freedom-yield.com/api/uptime-recent.json | jq '.entries[0]'</code></pre>
 			</details>
 		</article>
 
@@ -181,7 +181,7 @@
 			</dl>
 			<details class="data-example">
 				<summary>Example request</summary>
-				<pre><code>curl -s https://metal.freedom-yield.com/api/uptime-cycles.json | jq '.cycles | length'</code></pre>
+				<pre class="cmd-box"><code>curl -s https://metal.freedom-yield.com/api/uptime-cycles.json | jq '.cycles | length'</code></pre>
 			</details>
 		</article>
 
@@ -199,7 +199,7 @@
 			</dl>
 			<details class="data-example">
 				<summary>Example request</summary>
-				<pre><code>curl -s https://metal.freedom-yield.com/api/incidents.json | jq</code></pre>
+				<pre class="cmd-box"><code>curl -s https://metal.freedom-yield.com/api/incidents.json | jq</code></pre>
 			</details>
 		</article>
 
@@ -219,7 +219,7 @@
 			</dl>
 			<details class="data-example">
 				<summary>Example request</summary>
-				<pre><code>curl -s https://metal.freedom-yield.com/api/cycle-history.jsonl | jq -c '{cycle_n, final_uptime_pct, incidents_in_cycle_count, cycle_status}'</code></pre>
+				<pre class="cmd-box"><code>curl -s https://metal.freedom-yield.com/api/cycle-history.jsonl | jq -c '{cycle_n, final_uptime_pct, incidents_in_cycle_count, cycle_status}'</code></pre>
 			</details>
 		</article>
 
@@ -243,7 +243,7 @@
 			</dl>
 			<details class="data-example">
 				<summary>Example request</summary>
-				<pre><code>curl -s https://metal.freedom-yield.com/api/peer-geo.json | jq '.totalPeers'</code></pre>
+				<pre class="cmd-box"><code>curl -s https://metal.freedom-yield.com/api/peer-geo.json | jq '.totalPeers'</code></pre>
 			</details>
 		</article>
 
@@ -272,7 +272,7 @@
 			</dl>
 			<details class="data-example">
 				<summary>Example request</summary>
-				<pre><code>curl -s https://metal.freedom-yield.com/api/peers-gini.json | jq '.entries[-1]'</code></pre>
+				<pre class="cmd-box"><code>curl -s https://metal.freedom-yield.com/api/peers-gini.json | jq '.entries[-1]'</code></pre>
 			</details>
 		</article>
 
@@ -290,7 +290,7 @@
 			</dl>
 			<details class="data-example">
 				<summary>Example request</summary>
-				<pre><code>curl -s https://metal.freedom-yield.com/api/peers-gini-history.jsonl | tail -7 | jq -s '[.[] | .validator_count] | {min: min, max: max, last: .[-1]}'</code></pre>
+				<pre class="cmd-box"><code>curl -s https://metal.freedom-yield.com/api/peers-gini-history.jsonl | tail -7 | jq -s '[.[] | .validator_count] | {min: min, max: max, last: .[-1]}'</code></pre>
 			</details>
 		</article>
 
@@ -308,7 +308,7 @@
 			</dl>
 			<details class="data-example">
 				<summary>Example request</summary>
-				<pre><code>curl -s https://metal.freedom-yield.com/api/fee-market.json | jq '.entries[-1] | {p10, p50, p90, self_fee_pct, self_percentile}'</code></pre>
+				<pre class="cmd-box"><code>curl -s https://metal.freedom-yield.com/api/fee-market.json | jq '.entries[-1] | {p10, p50, p90, self_fee_pct, self_percentile}'</code></pre>
 			</details>
 		</article>
 
@@ -340,7 +340,7 @@
 			</dl>
 			<details class="data-example">
 				<summary>Example request</summary>
-				<pre><code>curl -s https://metal.freedom-yield.com/api/peers-changes.json | jq '{new_count, departed_count}'</code></pre>
+				<pre class="cmd-box"><code>curl -s https://metal.freedom-yield.com/api/peers-changes.json | jq '{new_count, departed_count}'</code></pre>
 			</details>
 		</article>
 
@@ -359,7 +359,7 @@
 			</dl>
 			<details class="data-example">
 				<summary>Example: fetch yesterday's full snapshot</summary>
-				<pre><code>YDAY=$(date -u -v-1d +%Y-%m-%d)  # Linux: date -u -d 'yesterday' +%F
+				<pre class="cmd-box"><code>YDAY=$(date -u -v-1d +%Y-%m-%d)  # Linux: date -u -d 'yesterday' +%F
 curl -s "https://metal.freedom-yield.com/api/peers-history/peers-${YDAY}.json.gz" | gunzip | jq '.validators | length'</code></pre>
 			</details>
 		</article>
@@ -384,7 +384,7 @@ curl -s "https://metal.freedom-yield.com/api/peers-history/peers-${YDAY}.json.gz
 			</dl>
 			<details class="data-example">
 				<summary>Inspect</summary>
-				<pre><code>curl -s https://metal.freedom-yield.com/calendar/schedule.ics | head -40</code></pre>
+				<pre class="cmd-box"><code>curl -s https://metal.freedom-yield.com/calendar/schedule.ics | head -40</code></pre>
 			</details>
 		</article>
 
@@ -408,7 +408,7 @@ curl -s "https://metal.freedom-yield.com/api/peers-history/peers-${YDAY}.json.gz
 			</dl>
 			<details class="data-example">
 				<summary>Example request</summary>
-				<pre><code>curl -s -X POST -H "content-type:application/json" \
+				<pre class="cmd-box"><code>curl -s -X POST -H "content-type:application/json" \
   --data '{"jsonrpc":"2.0","id":1,"method":"platform.getCurrentValidators","params":{"subnetID":"11111111111111111111111111111111LpoYY"}}' \
   https://api.metalblockchain.org/ext/bc/P \
   | jq '.result.validators[] | select(.nodeID=="NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v")'</code></pre>
@@ -464,7 +464,7 @@ curl -s "https://metal.freedom-yield.com/api/peers-history/peers-${YDAY}.json.gz
 			</dl>
 			<details class="data-example">
 				<summary>Verification</summary>
-				<pre><code>curl -sSO https://metal.freedom-yield.com/api/identity.json
+				<pre class="cmd-box"><code>curl -sSO https://metal.freedom-yield.com/api/identity.json
 curl -sSO https://metal.freedom-yield.com/api/identity.json.sig
 curl -sSO https://metal.freedom-yield.com/.well-known/operator-identity.pub
 echo "freedom-yield $(cat operator-identity.pub)" &gt; allowed_signers
@@ -488,7 +488,7 @@ ssh-keygen -Y verify -f allowed_signers -I freedom-yield \
 			</dl>
 			<details class="data-example">
 				<summary>Example request</summary>
-				<pre><code>curl -s https://metal.freedom-yield.com/api/identity-history.jsonl | jq -s 'length'</code></pre>
+				<pre class="cmd-box"><code>curl -s https://metal.freedom-yield.com/api/identity-history.jsonl | jq -s 'length'</code></pre>
 			</details>
 		</article>
 
@@ -507,7 +507,7 @@ ssh-keygen -Y verify -f allowed_signers -I freedom-yield \
 			</dl>
 			<details class="data-example">
 				<summary>Example request</summary>
-				<pre><code>curl -s https://metal.freedom-yield.com/api/anchor-source.json | jq '.dag_root_computed'</code></pre>
+				<pre class="cmd-box"><code>curl -s https://metal.freedom-yield.com/api/anchor-source.json | jq '.dag_root_computed'</code></pre>
 			</details>
 		</article>
 
@@ -526,7 +526,7 @@ ssh-keygen -Y verify -f allowed_signers -I freedom-yield \
 			</dl>
 			<details class="data-example">
 				<summary>Example request</summary>
-				<pre><code>curl -s https://metal.freedom-yield.com/api/anchor-receipt.json | jq '.anchor.tx_id'</code></pre>
+				<pre class="cmd-box"><code>curl -s https://metal.freedom-yield.com/api/anchor-receipt.json | jq '.anchor.tx_id'</code></pre>
 			</details>
 		</article>
 
@@ -545,7 +545,7 @@ ssh-keygen -Y verify -f allowed_signers -I freedom-yield \
 			</dl>
 			<details class="data-example">
 				<summary>Example request</summary>
-				<pre><code>curl -s https://metal.freedom-yield.com/api/anchor-history.jsonl | tail -1 | jq</code></pre>
+				<pre class="cmd-box"><code>curl -s https://metal.freedom-yield.com/api/anchor-history.jsonl | tail -1 | jq</code></pre>
 			</details>
 		</article>
 	</section>
