@@ -593,52 +593,16 @@ run_json "multiedit public IP -> block"            2 "$(jq -nc --arg fp "$REPO_R
 run_json "read tool -> allow"                      0 "$(jq -nc '{tool_name:"Read",tool_input:{file_path:"/x"}}')"
 
 echo "== gitignore-skip =="
-# info/exclude always lives in the repo's *common* git dir, shared across
-# worktrees. In a normal clone that is "$REPO_ROOT/.git/info/exclude", but
-# inside a `git worktree`, "$REPO_ROOT/.git" is a FILE (a gitdir pointer),
-# not a directory, so a literal "$REPO_ROOT/.git/info/exclude" path fails
-# with "Not a directory" -- which made this single assertion silently FAIL
-# whenever the suite ran from a worktree. Ask git itself to resolve it so the
-# same code path works for both a normal clone and a worktree checkout.
-#
-# H1 and X2 fixed this defect independently and simultaneously; this is the
-# union of both. `--git-path info/exclude` and `--git-common-dir` + /info/
-# resolve to the same file, and the mkdir covers a common dir that has no
-# info/ directory yet.
-EXCL_REL="$(cd "$REPO_ROOT" && git rev-parse --git-path info/exclude)"
-case "$EXCL_REL" in
-	/*) EXCL="$EXCL_REL" ;;
-	*)  EXCL="$REPO_ROOT/$EXCL_REL" ;;
-esac
-mkdir -p "$(dirname "$EXCL")"
-# Snapshot the exact pre-test state (content, or "did not exist") so it can
-# be restored byte-for-byte afterward regardless of what was in it.
-#
-# The restore is driven by a TRAP, not just by the straight-line code below.
-# info/exclude lives in the repository's COMMON git dir, which every worktree
-# of this repository shares, so a line left behind there does not just dirty
-# this checkout -- it silently changes what git ignores for the main checkout
-# and for every subagent worktree, which is exactly the kind of "a file was
-# never scanned" state this guard exists to prevent. Interrupting the suite
-# (^C, or a SIGTERM from a CI timeout) between the append and the restore used
-# to leave both that line and the mktemp backup behind. Confirmed by killing
-# the suite mid-section, before and after this change.
-EXCL_EXISTED=0
-EXCL_BACKUP=""
+# This section has to ADD A LINE to the repository's info/exclude, which lives
+# in the COMMON git dir shared by every worktree. All of the snapshot / restore
+# / self-heal / trap machinery for that lives in exclude-hygiene.sh so that the
+# hermetic assertions further down exercise the very code this section runs,
+# rather than a re-implementation that could drift away from it.
+. "${REPO_ROOT}/tests/publish-guard/exclude-hygiene.sh"
 H_ROOT=""
 DENY_TMP=""
 pg_cleanup() {
-	if [ -n "${EXCL:-}" ]; then
-		if [ "$EXCL_EXISTED" -eq 1 ]; then
-			if [ -n "$EXCL_BACKUP" ] && [ -f "$EXCL_BACKUP" ]; then
-				cp "$EXCL_BACKUP" "$EXCL"
-			fi
-		else
-			rm -f "$EXCL"
-		fi
-	fi
-	if [ -n "$EXCL_BACKUP" ]; then rm -f "$EXCL_BACKUP"; fi
-	EXCL=""; EXCL_BACKUP=""; EXCL_EXISTED=0
+	xg_restore
 	# Scratch fixtures created later in the suite. Removing them here as well
 	# means an interrupt anywhere after this point does not strand a temp dir
 	# containing a registered git worktree.
@@ -651,29 +615,113 @@ pg_cleanup() {
 	DENY_TMP=""
 	return 0
 }
-trap 'pg_cleanup' EXIT
-trap 'pg_cleanup; exit 130' HUP INT TERM
-# Trap-independent self-heal, because a trap cannot cover every death: SIGKILL
-# runs no handler at all, and bash 3.2 was measured taking SIGHUP's default
-# action before the handler ran in roughly one run in three. Strip any line a
-# previous run stranded BEFORE snapshotting, so the worst case is one run's
-# damage rather than an accumulating list nobody ever notices. Only rewrites
-# the file when there is actually something to remove.
-if [ -f "$EXCL" ] && grep -q '^guardtest-ignored-' "$EXCL"; then
-	EXCL_HEAL="$(mktemp -t pubguard-exclude-heal.XXXXXX)"
-	grep -v '^guardtest-ignored-' "$EXCL" > "$EXCL_HEAL"
-	cat "$EXCL_HEAL" > "$EXCL"
-	rm -f "$EXCL_HEAL"
-fi
-if [ -f "$EXCL" ]; then
-	EXCL_EXISTED=1
-	EXCL_BACKUP="$(mktemp -t pubguard-exclude-backup.XXXXXX)"
-	cp "$EXCL" "$EXCL_BACKUP"
-fi
+xg_resolve "$REPO_ROOT"
+xg_selfheal
+xg_snapshot
+xg_install_traps pg_cleanup
+EXCL="$XG_EXCL"
 IGN_NAME="guardtest-ignored-$$.md"
 printf '%s\n' "$IGN_NAME" >> "$EXCL"
 run_json "write IP into gitignored file -> allow"  0 "$(jq -nc --arg fp "$REPO_ROOT/$IGN_NAME" --arg c "host $PUB_IP" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"
 pg_cleanup
+
+echo "== F2: the suite's own info/exclude hygiene (hermetic: throwaway repo) =="
+# Everything above ran against the REAL shared info/exclude. These assertions
+# run the same functions against a repository created for the purpose, so they
+# can kill a process mid-mutation without ever risking the real one.
+XG_T="$(mktemp -d -t pubguard-xg.XXXXXX)"
+(cd "$XG_T" && git init -q repo) >/dev/null 2>&1
+XG_REPO="$XG_T/repo"
+XG_TARGET="$XG_REPO/.git/info/exclude"
+mkdir -p "$(dirname "$XG_TARGET")"
+printf '%s\n' "# operator's own rules" "scratch-notes.md" > "$XG_TARGET"
+XG_SHA="$(shasum < "$XG_TARGET")"
+
+# A harness that uses the SHIPPED helper exactly as the section above does,
+# then holds the mutation in place long enough to be signalled deterministically.
+# $1 = "trap" or "notrap" — the notrap variant is the built-in mutation control:
+# if the file came back byte-identical without the trap, the trap would be
+# pinning nothing.
+cat > "$XG_T/harness.sh" <<HEOF
+set -u
+. "${REPO_ROOT}/tests/publish-guard/exclude-hygiene.sh"
+xg_resolve "$XG_REPO"
+xg_selfheal
+xg_snapshot
+[ "\$1" = "trap" ] && xg_install_traps xg_restore
+printf '%s\n' "guardtest-ignored-harness.md" >> "\$XG_EXCL"
+sleep 20
+xg_restore
+HEOF
+
+xg_kill_harness() {   # $1 = trap|notrap  $2 = signal -> echoes "<rc> <verdict>"
+	local mode="$1" sig="$2" pid n=0 rc=0
+	bash "$XG_T/harness.sh" "$mode" >/dev/null 2>&1 &
+	pid=$!
+	while [ "$n" -lt 400 ]; do
+		grep -q '^guardtest-ignored-harness' "$XG_TARGET" 2>/dev/null && break
+		kill -0 "$pid" 2>/dev/null || break
+		n=$((n + 1))
+		perl -e 'select undef,undef,undef,0.02'
+	done
+	kill -"$sig" "$pid" 2>/dev/null
+	wait "$pid" 2>/dev/null || rc=$?
+	if [ "$(shasum < "$XG_TARGET")" = "$XG_SHA" ]; then printf '%s restored' "$rc"; else printf '%s LEAKED' "$rc"; fi
+}
+
+# mktemp honours $TMPDIR, which on macOS is NOT /tmp — globbing /tmp here would
+# make the "no stranded backup" assertion vacuous. Count in the real location,
+# and count rather than test existence so an unrelated leftover cannot mask a
+# new one.
+XG_TMPD="${TMPDIR:-/tmp}"; XG_TMPD="${XG_TMPD%/}"
+xg_backups() { ls "$XG_TMPD"/pubguard-exclude-backup.* 2>/dev/null | wc -l | tr -d ' '; }
+XG_BK0="$(xg_backups)"
+
+XG_R="$(xg_kill_harness trap TERM)"
+case "$XG_R" in
+	"143 restored")
+		printf 'PASS  %-62s (%s)\n' "F2-1 SIGTERM mid-mutation: restored byte-identical" "$XG_R"; PASS=$((PASS+1)) ;;
+	*)
+		printf 'FAIL  %-62s (got: %s, want "143 restored")\n' "F2-1 SIGTERM mid-mutation restores byte-identical" "$XG_R" >&2; FAIL=$((FAIL+1)) ;;
+esac
+[ "$(xg_backups)" -eq "$XG_BK0" ] \
+	&& { printf 'PASS  %-62s\n' "F2-2 SIGTERM strands no mktemp backup"; PASS=$((PASS+1)); } \
+	|| { printf 'FAIL  %-62s (%s -> %s)\n' "F2-2 SIGTERM strands no mktemp backup" "$XG_BK0" "$(xg_backups)" >&2; FAIL=$((FAIL+1)); }
+
+# Control: WITHOUT the trap the very same kill must leave both the line and the
+# backup behind. Without this, F2-1/F2-2 would also "pass" if the mutation
+# never landed at all, i.e. they would pin nothing.
+XG_R="$(xg_kill_harness notrap TERM)"
+case "$XG_R" in
+	*LEAKED)
+		printf 'PASS  %-62s (%s)\n' "F2-3 control: no trap -> the same kill LEAKS the line" "$XG_R"; PASS=$((PASS+1)) ;;
+	*)
+		printf 'FAIL  %-62s (got: %s, want LEAKED)\n' "F2-3 control: no trap must leak (else F2-1 pins nothing)" "$XG_R" >&2; FAIL=$((FAIL+1)) ;;
+esac
+[ "$(xg_backups)" -gt "$XG_BK0" ] \
+	&& { printf 'PASS  %-62s\n' "F2-4 control: no trap -> the mktemp backup is stranded"; PASS=$((PASS+1)); } \
+	|| { printf 'FAIL  %-62s (still %s)\n' "F2-4 control: no trap must strand a backup (else F2-2 pins nothing)" "$(xg_backups)" >&2; FAIL=$((FAIL+1)); }
+rm -f "$XG_TMPD"/pubguard-exclude-backup.*
+
+# Self-heal: what F2-3 just produced is exactly what a SIGKILL leaves behind,
+# and no trap can cover that. Strand two more lines around it, then prove one
+# pass removes all three while leaving every other line byte-identical.
+{ printf '%s\n' "guardtest-ignored-1111.md"; cat "$XG_TARGET"; printf '%s\n' "guardtest-ignored-2222.md"; } > "$XG_T/staged"
+cat "$XG_T/staged" > "$XG_TARGET"
+XG_STRANDED="$(grep -c '^guardtest-ignored-' "$XG_TARGET")"
+[ "$XG_STRANDED" -eq 3 ] \
+	&& { printf 'PASS  %-62s (%d lines)\n' "F2-5 self-heal fixture: stranded lines are present first" "$XG_STRANDED"; PASS=$((PASS+1)); } \
+	|| { printf 'FAIL  %-62s (%d lines, want 3)\n' "F2-5 self-heal fixture: stranded lines are present first" "$XG_STRANDED" >&2; FAIL=$((FAIL+1)); }
+XG_EXCL="$XG_TARGET"
+xg_selfheal
+[ "$(grep -c '^guardtest-ignored-' "$XG_TARGET" || true)" -eq 0 ] \
+	&& { printf 'PASS  %-62s\n' "F2-6 self-heal removes every stranded line"; PASS=$((PASS+1)); } \
+	|| { printf 'FAIL  %-62s\n' "F2-6 self-heal removes every stranded line" >&2; FAIL=$((FAIL+1)); }
+[ "$(shasum < "$XG_TARGET")" = "$XG_SHA" ] \
+	&& { printf 'PASS  %-62s\n' "F2-7 self-heal leaves the operator's own rules byte-identical"; PASS=$((PASS+1)); } \
+	|| { printf 'FAIL  %-62s\n' "F2-7 self-heal leaves the operator's own rules byte-identical" >&2; FAIL=$((FAIL+1)); }
+XG_EXCL=""
+rm -rf "$XG_T"
 
 echo "== R4-H: repo membership must survive path aliasing (else the write is never scanned) =="
 # Round-4 triage (2026-08-06). Membership used to be a raw string prefix

@@ -82,6 +82,10 @@ setup() {
 	printf '\n'
 	printf 'STDIN_BYTES: %s\n' "$(wc -c | tr -d ' ')"
 } >> "$SSH_STUB_LOG"
+# Optional: signal the script that invoked us. Both halves of `cat … | ssh …`
+# are children of the push script's shell, so $PPID is that shell. Lets a case
+# deliver a signal at a known instant instead of racing one in.
+if [ -n "${SSH_STUB_SIGNAL:-}" ]; then kill -"$SSH_STUB_SIGNAL" "$PPID" 2>/dev/null; fi
 exit "${STUB_EXIT:-0}"
 STUBEOF
 	chmod +x "$STUBDIR/ssh"
@@ -130,6 +134,8 @@ run_push_ex() {
 	WEB_HOST_FILE="${WEB_HOST_FILE:-$NO_HOST_FILE}" \
 	PEERS_HISTORY_DIR="${PEERS_HISTORY_DIR:-$PEERS_STATE_DIR}" \
 	SSH_STUB_LOG="$SSH_LOG" \
+	SSH_STUB_SIGNAL="${SSH_STUB_SIGNAL:-}" \
+	GUARD_HITS="$BASE/guard-hits" \
 	STUB_EXIT="${STUB_EXIT:-0}" \
 	FYD_PUBLISH_DENYLIST=/dev/null \
 		bash "$script" "$@"
@@ -149,7 +155,33 @@ install_fixture() {
 	printf '%s' "$1/scripts/push-to-web-host.sh"
 }
 
+# signalling_guard <install-dir> <signal>
+# Replaces a fixture's guard with a wrapper that delegates to the real one and
+# then signals the PUSH SCRIPT the moment the OUTBOUND CONTENT scan has
+# returned. publish-scan runs the guard as `( … exec bash guard --text )`, a
+# subshell forked straight from the script, so the guard's $PPID is that
+# script. This pins the signal to the exact instant between "content approved"
+# and "content handed to ssh" — the window where a handler that returns instead
+# of exiting lets the next statement run against an already-cleaned snapshot.
+# Hit 1 is the self-test probe; hit 2 onward is real outbound content.
+signalling_guard() {
+	local dir="$1" sig="$2"
+	cp "$REPO_ROOT/scripts/publish-guard.sh" "$dir/scripts/publish-guard.real.sh"
+	cat > "$dir/scripts/publish-guard.sh" <<GUARDEOF
+#!/usr/bin/env bash
+n=0
+[ -f "\$GUARD_HITS" ] && n=\$(cat "\$GUARD_HITS")
+n=\$((n + 1)); printf '%s' "\$n" > "\$GUARD_HITS"
+rc=0
+bash "${dir}/scripts/publish-guard.real.sh" "\$@" || rc=\$?
+[ "\$n" -ge 2 ] && kill -${sig} "\$PPID" 2>/dev/null
+exit \$rc
+GUARDEOF
+	chmod +x "$dir/scripts/publish-guard.sh"
+}
+
 ssh_was_invoked() { [ -s "$SSH_LOG" ]; }
+ssh_invocations() { grep -c '^ARGV:' "$SSH_LOG" 2>/dev/null || echo 0; }
 
 # ---- case 1: allowlisted JSON feed -> pushed, ssh invoked correctly -----------
 setup
@@ -677,6 +709,73 @@ grep -q "STDIN_BYTES: ${EXPECT_BYTES}" "$SSH_LOG" \
 	&& ok "snapshot: ssh received exactly the scanned byte count ($EXPECT_BYTES)" \
 	|| bad "snapshot: byte mismatch (expected $EXPECT_BYTES, log: $(cat "$SSH_LOG" 2>/dev/null))"
 teardown
+
+# ==============================================================================
+# Signal handling. A handler that CLEANS UP BUT DOES NOT EXIT is worse than no
+# handler: bash runs it and then carries on from wherever the signal landed.
+# Both failure modes below were reproduced on the first version of this feature
+# (30 SIGTERM trials, no artificial delay): 12 of them started ssh with an
+# EMPTY stdin — a zero-byte body published under a real feed name — and the
+# rest ignored the signal and finished all three attempts, 19 s past the
+# SIGTERM. Neither is a leak (the handler deletes the snapshot, it never
+# substitutes content), but a cron timeout / `systemctl stop` / ^C must be able
+# to stop a publish, and an empty feed must never be published.
+#
+# The signal is delivered from inside the fixtures at a known instant rather
+# than raced in from outside, so these cases are deterministic.
+# ==============================================================================
+
+# ---- case 32: SIGTERM between "content approved" and "content sent" --------
+setup
+FIX="$BASE/install-signal-scan"
+FIX_SCRIPT="$(install_fixture "$FIX")"
+signalling_guard "$FIX" TERM
+OUT="$(run_push_ex "$FIX_SCRIPT" "" validator.json 2>&1)"
+RC=$?
+[ "$RC" -eq 143 ] \
+	&& ok "signal: SIGTERM after the scan -> exit 143 (128+SIGTERM)" \
+	|| bad "signal: expected exit 143, got $RC — the handler did not terminate the script (out: $OUT)"
+ssh_was_invoked \
+	&& bad "signal: ssh ran after the script was signalled" \
+	|| ok "signal: ssh never ran after the script was signalled"
+grep -q 'STDIN_BYTES: 0' "$SSH_LOG" 2>/dev/null \
+	&& bad "signal: a ZERO-BYTE payload reached ssh under a real feed name" \
+	|| ok "signal: no zero-byte payload reached ssh"
+teardown
+
+# ---- case 33: SIGTERM while ssh is running -> no further attempts ----------
+setup
+SSH_STUB_SIGNAL=TERM
+STUB_EXIT=1
+OUT="$(run_push validator.json 2>&1)"
+RC=$?
+unset SSH_STUB_SIGNAL STUB_EXIT
+[ "$RC" -eq 143 ] \
+	&& ok "signal: SIGTERM during a push -> exit 143, retries abandoned" \
+	|| bad "signal: expected exit 143, got $RC — the retry loop absorbed the signal (out: $OUT)"
+[ "$(ssh_invocations)" -eq 1 ] \
+	&& ok "signal: exactly one ssh attempt was made after the signal" \
+	|| bad "signal: $(ssh_invocations) ssh attempts — the loop kept going past the signal"
+teardown
+
+# ---- case 34: SIGINT and SIGHUP terminate too -------------------------------
+# Same handler shape, distinct exit codes, so a caller can tell what killed it.
+for SIGNAME in INT HUP; do
+	case "$SIGNAME" in INT) WANT=130 ;; HUP) WANT=129 ;; esac
+	setup
+	FIX="$BASE/install-signal-$SIGNAME"
+	FIX_SCRIPT="$(install_fixture "$FIX")"
+	signalling_guard "$FIX" "$SIGNAME"
+	OUT="$(run_push_ex "$FIX_SCRIPT" "" validator.json 2>&1)"
+	RC=$?
+	[ "$RC" -eq "$WANT" ] \
+		&& ok "signal: SIG${SIGNAME} after the scan -> exit ${WANT}" \
+		|| bad "signal: SIG${SIGNAME} expected exit ${WANT}, got $RC (out: $OUT)"
+	ssh_was_invoked \
+		&& bad "signal: SIG${SIGNAME} — ssh ran after the script was signalled" \
+		|| ok "signal: SIG${SIGNAME} — ssh never ran"
+	teardown
+done
 
 # ---- summary -----------------------------------------------------------------
 echo "test-push-to-web-host.sh summary: PASS=$PASS  FAIL=$FAIL"

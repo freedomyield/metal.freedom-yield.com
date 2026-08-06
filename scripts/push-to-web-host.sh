@@ -231,7 +231,22 @@ cleanup_snapshot() {
   SNAPSHOT=""
   return 0
 }
-trap cleanup_snapshot EXIT HUP INT TERM
+# A signal handler MUST terminate the script. One handler registered for
+# EXIT+HUP+INT+TERM does not: bash runs it and then CARRIES ON from wherever
+# the signal interrupted. Measured on the first version of this block (30
+# SIGTERM trials, no artificial delay): in 12 of them the handler had just set
+# SNAPSHOT="" when the very next statement ran `cat "$SNAPSHOT" | ssh` — `cat`
+# failed, but ssh still started and received an EMPTY stdin, i.e. a zero-byte
+# body published under a real feed name. In the remainder the script simply
+# absorbed the signal and ran all three attempts to completion, 19 s past the
+# SIGTERM, so a cron timeout / `systemctl stop` / ^C could not stop a push.
+# Exit codes are the conventional 128+signum so callers still see a signalled
+# death. (This is not a leak path — the handler only deletes the snapshot, it
+# never substitutes content, so the bytes are either the scanned ones or none.)
+trap cleanup_snapshot EXIT
+trap 'cleanup_snapshot; exit 129' HUP
+trap 'cleanup_snapshot; exit 130' INT
+trap 'cleanup_snapshot; exit 143' TERM
 
 ATTEMPTS=3
 DELAY=5

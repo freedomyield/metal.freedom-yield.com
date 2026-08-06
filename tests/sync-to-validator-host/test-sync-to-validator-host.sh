@@ -104,8 +104,34 @@ run_sync() {
 	REMOTE_PATH="/home/deploy/metal.freedom-yield.com/scripts/" \
 	RSYNC_STUB_LOG="$RSYNC_LOG" \
 	SSH_STUB_LOG="$SSH_LOG" \
+	GUARD_HITS="$BASE/guard-hits" \
 	FYD_PUBLISH_DENYLIST=/dev/null \
 		bash "$INSTALL/scripts/sync-to-validator-host.sh" "$@"
+}
+
+# signalling_guard <signal>
+# Replaces the fixture's guard with a wrapper that delegates to the real one
+# and then signals the SYNC SCRIPT once a real file has been scanned.
+# publish-scan runs the guard as `( … exec bash guard --text )`, a subshell
+# forked straight from the script — and the scan loop is `while … done < file`,
+# a redirection rather than a pipeline, so it is not itself a subshell — hence
+# the guard's $PPID is the script. Hit 1 is the self-test probe; hit 2 onward
+# is a real file. This makes the signal land at a known instant instead of
+# being raced in from outside.
+signalling_guard() {
+	local sig="$1"
+	cp "$REPO_ROOT/scripts/publish-guard.sh" "$INSTALL/scripts/publish-guard.real.sh"
+	cat > "$INSTALL/scripts/publish-guard.sh" <<GUARDEOF
+#!/usr/bin/env bash
+n=0
+[ -f "\$GUARD_HITS" ] && n=\$(cat "\$GUARD_HITS")
+n=\$((n + 1)); printf '%s' "\$n" > "\$GUARD_HITS"
+rc=0
+bash "${INSTALL}/scripts/publish-guard.real.sh" "\$@" || rc=\$?
+[ "\$n" -ge 2 ] && kill -${sig} "\$PPID" 2>/dev/null
+exit \$rc
+GUARDEOF
+	chmod +x "$INSTALL/scripts/publish-guard.sh"
 }
 
 remote_rsync_ran() { grep -q 'RSYNC_REMOTE:' "$RSYNC_LOG" 2>/dev/null; }
@@ -221,6 +247,43 @@ RC=$?
 	&& ok "dry-run: a leaking tree is refused in dry-run too" \
 	|| bad "dry-run: expected nonzero exit, got 0 (out: $OUT)"
 teardown
+
+# ---- case 8: a signal during the scan stops the transfer -------------------
+# A handler that cleans up but does not exit lets bash carry on from wherever
+# the signal landed. Measured on the first version of this feature: a SIGTERM
+# was absorbed completely and the script went on to run the remote rsync AND
+# the remote chown, exiting 0 — a cron timeout, `systemctl stop` or ^C could
+# not stop a production transfer that was already under way.
+setup
+signalling_guard TERM
+OUT="$(run_sync 2>&1)"
+RC=$?
+[ "$RC" -eq 143 ] \
+	&& ok "signal: SIGTERM during the scan -> exit 143 (128+SIGTERM)" \
+	|| bad "signal: expected exit 143, got $RC — the handler did not terminate the script (out: $OUT)"
+remote_rsync_ran \
+	&& bad "signal: the remote transfer ran after the script was signalled" \
+	|| ok "signal: the remote transfer never ran after the signal"
+[ -s "$SSH_LOG" ] \
+	&& bad "signal: the remote chown ran after the script was signalled" \
+	|| ok "signal: the remote chown never ran after the signal"
+teardown
+
+# ---- case 9: SIGINT / SIGHUP terminate too, with distinct codes ------------
+for SIGNAME in INT HUP; do
+	case "$SIGNAME" in INT) WANT=130 ;; HUP) WANT=129 ;; esac
+	setup
+	signalling_guard "$SIGNAME"
+	OUT="$(run_sync 2>&1)"
+	RC=$?
+	[ "$RC" -eq "$WANT" ] \
+		&& ok "signal: SIG${SIGNAME} during the scan -> exit ${WANT}" \
+		|| bad "signal: SIG${SIGNAME} expected exit ${WANT}, got $RC (out: $OUT)"
+	remote_rsync_ran \
+		&& bad "signal: SIG${SIGNAME} — the remote transfer ran anyway" \
+		|| ok "signal: SIG${SIGNAME} — the remote transfer never ran"
+	teardown
+done
 
 # ---- summary ---------------------------------------------------------------
 echo "test-sync-to-validator-host.sh summary: PASS=$PASS  FAIL=$FAIL"

@@ -99,7 +99,16 @@ fyd_publish_scan_selftest || {
 SCAN_LIST="$(mktemp -t fyd-sync-scanlist.XXXXXX)"
 SCAN_EMPTY="$(mktemp -d -t fyd-sync-empty.XXXXXX)"
 cleanup_scan() { rm -f "$SCAN_LIST"; rmdir "$SCAN_EMPTY" 2>/dev/null || true; return 0; }
-trap cleanup_scan EXIT HUP INT TERM
+# A signal handler MUST terminate the script — see the long note on the same
+# construct in push-to-web-host.sh. One handler registered for EXIT+HUP+INT+TERM
+# means bash runs it and then CARRIES ON: measured here, a SIGTERM was absorbed
+# entirely and the script went on to run the remote rsync AND the remote chown,
+# exiting 0. A cron timeout, `systemctl stop` or ^C could not stop a production
+# transfer that was already under way.
+trap cleanup_scan EXIT
+trap 'cleanup_scan; exit 129' HUP
+trap 'cleanup_scan; exit 130' INT
+trap 'cleanup_scan; exit 143' TERM
 
 rsync -rn --out-format='%n' "${RSYNC_EXCLUDE_ARGS[@]}" \
   "${LOCAL_PATH}" "${SCAN_EMPTY}/" > "$SCAN_LIST"
