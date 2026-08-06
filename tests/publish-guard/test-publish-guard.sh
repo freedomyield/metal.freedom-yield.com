@@ -613,8 +613,58 @@ esac
 mkdir -p "$(dirname "$EXCL")"
 # Snapshot the exact pre-test state (content, or "did not exist") so it can
 # be restored byte-for-byte afterward regardless of what was in it.
+#
+# The restore is driven by a TRAP, not just by the straight-line code below.
+# info/exclude lives in the repository's COMMON git dir, which every worktree
+# of this repository shares, so a line left behind there does not just dirty
+# this checkout -- it silently changes what git ignores for the main checkout
+# and for every subagent worktree, which is exactly the kind of "a file was
+# never scanned" state this guard exists to prevent. Interrupting the suite
+# (^C, or a SIGTERM from a CI timeout) between the append and the restore used
+# to leave both that line and the mktemp backup behind. Confirmed by killing
+# the suite mid-section, before and after this change.
 EXCL_EXISTED=0
 EXCL_BACKUP=""
+H_ROOT=""
+DENY_TMP=""
+pg_cleanup() {
+	if [ -n "${EXCL:-}" ]; then
+		if [ "$EXCL_EXISTED" -eq 1 ]; then
+			if [ -n "$EXCL_BACKUP" ] && [ -f "$EXCL_BACKUP" ]; then
+				cp "$EXCL_BACKUP" "$EXCL"
+			fi
+		else
+			rm -f "$EXCL"
+		fi
+	fi
+	if [ -n "$EXCL_BACKUP" ]; then rm -f "$EXCL_BACKUP"; fi
+	EXCL=""; EXCL_BACKUP=""; EXCL_EXISTED=0
+	# Scratch fixtures created later in the suite. Removing them here as well
+	# means an interrupt anywhere after this point does not strand a temp dir
+	# containing a registered git worktree.
+	if [ -n "$H_ROOT" ] && [ -d "$H_ROOT" ]; then
+		(cd "$H_ROOT/main-checkout" 2>/dev/null && git worktree remove --force ../linked-wt) >/dev/null 2>&1
+		rm -rf "$H_ROOT"
+	fi
+	H_ROOT=""
+	if [ -n "$DENY_TMP" ]; then rm -f "$DENY_TMP"; fi
+	DENY_TMP=""
+	return 0
+}
+trap 'pg_cleanup' EXIT
+trap 'pg_cleanup; exit 130' HUP INT TERM
+# Trap-independent self-heal, because a trap cannot cover every death: SIGKILL
+# runs no handler at all, and bash 3.2 was measured taking SIGHUP's default
+# action before the handler ran in roughly one run in three. Strip any line a
+# previous run stranded BEFORE snapshotting, so the worst case is one run's
+# damage rather than an accumulating list nobody ever notices. Only rewrites
+# the file when there is actually something to remove.
+if [ -f "$EXCL" ] && grep -q '^guardtest-ignored-' "$EXCL"; then
+	EXCL_HEAL="$(mktemp -t pubguard-exclude-heal.XXXXXX)"
+	grep -v '^guardtest-ignored-' "$EXCL" > "$EXCL_HEAL"
+	cat "$EXCL_HEAL" > "$EXCL"
+	rm -f "$EXCL_HEAL"
+fi
 if [ -f "$EXCL" ]; then
 	EXCL_EXISTED=1
 	EXCL_BACKUP="$(mktemp -t pubguard-exclude-backup.XXXXXX)"
@@ -623,11 +673,7 @@ fi
 IGN_NAME="guardtest-ignored-$$.md"
 printf '%s\n' "$IGN_NAME" >> "$EXCL"
 run_json "write IP into gitignored file -> allow"  0 "$(jq -nc --arg fp "$REPO_ROOT/$IGN_NAME" --arg c "host $PUB_IP" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"
-if [ "$EXCL_EXISTED" -eq 1 ]; then
-	mv "$EXCL_BACKUP" "$EXCL"
-else
-	rm -f "$EXCL"
-fi
+pg_cleanup
 
 echo "== R4-H: repo membership must survive path aliasing (else the write is never scanned) =="
 # Round-4 triage (2026-08-06). Membership used to be a raw string prefix

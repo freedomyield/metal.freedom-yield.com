@@ -50,6 +50,13 @@
 #   - Uses a dedicated ed25519 key (~/.ssh/web_push).
 #   - web host's authorized_keys forces a wrapper that validates filename
 #     against the same allowlist + content type before atomic mv.
+#   - Every outbound byte is scanned by scripts/publish-guard.sh immediately
+#     before it is handed to ssh (see scripts/lib/publish-scan.sh). The
+#     allowlist above answers "may this NAME be published"; the scan answers
+#     "may this CONTENT be published", which no allowlist can. Until
+#     2026-08-06 nothing answered the second question on this path at all:
+#     the guard's three existing layers all watch content on its way into
+#     git, and every target here is gitignored and never touches git.
 #
 # Usage:
 #   push-to-web-host.sh validator.json
@@ -175,6 +182,27 @@ TARGET="${WEB_HOST}"
 [ -f "$SOURCE" ] || { echo "ERROR: source not found: $SOURCE" >&2; exit 1; }
 [ -f "$KEY" ]    || { echo "ERROR: ssh key not found: $KEY" >&2; exit 1; }
 
+# ---- outbound content scan (publish-guard, send-time layer) --------------
+# Located from THIS SCRIPT's own directory, not from $REPO_BASE: REPO_BASE is
+# a data root that callers and tests repoint at a fixture tree, and the send
+# path must not be able to choose which guard polices it. A missing library is
+# fatal for the same reason a missing guard is — see the fail-closed note in
+# scripts/lib/publish-scan.sh.
+PUBLISH_SCAN_LIB="$(cd "$(dirname "$0")" && pwd)/lib/publish-scan.sh"
+if [ ! -r "$PUBLISH_SCAN_LIB" ]; then
+  echo "ERROR: publish-scan library not found at $PUBLISH_SCAN_LIB" >&2
+  echo "       Refusing to push ${FILENAME}: outbound content cannot be checked." >&2
+  exit 1
+fi
+# shellcheck source=lib/publish-scan.sh
+. "$PUBLISH_SCAN_LIB"
+# Prove the guard still detects BEFORE trusting a clean verdict from it. Once
+# per invocation, not once per retry.
+fyd_publish_scan_selftest || {
+  echo "ERROR: refusing to push ${FILENAME} — publish-guard could not be trusted (see above)." >&2
+  exit 1
+}
+
 # Retry-with-backoff. web host's sshd default MaxStartups (10:30:100)
 # combined with the constant brute-force flood on its public port means
 # legitimate connections from us occasionally get caught in random-drop
@@ -185,10 +213,42 @@ TARGET="${WEB_HOST}"
 # the source so a stale temp file doesn't get shipped if the producer
 # rewrote it between attempts. Total worst-case latency: ~35s — still
 # well under the 5-minute cron cadence.
+#
+# Each attempt snapshots the source, scans THE SNAPSHOT, and ships THE SAME
+# SNAPSHOT. Scanning $SOURCE and then re-reading it for ssh would leave a
+# window in which the producer (a 5-minute cron generator writing the same
+# path) rewrites the file between the two reads, so the bytes that were
+# checked and the bytes that were sent would not be the same bytes. The
+# re-read-per-attempt behaviour above is preserved exactly: the snapshot is
+# taken fresh inside the loop, so a retry still picks up a newer file — and
+# now re-scans it, because a newer file is new content.
+SNAPSHOT=""
+# Always returns 0: this runs as an EXIT trap under `set -e`, where a non-zero
+# return from the handler would be a second failure on top of whatever is
+# already unwinding.
+cleanup_snapshot() {
+  if [ -n "$SNAPSHOT" ]; then rm -f "$SNAPSHOT"; fi
+  SNAPSHOT=""
+  return 0
+}
+trap cleanup_snapshot EXIT HUP INT TERM
+
 ATTEMPTS=3
 DELAY=5
 for i in $(seq 1 "$ATTEMPTS"); do
-  if cat "$SOURCE" | ssh \
+  SNAPSHOT="$(mktemp -t fyd-push.XXXXXX)" || {
+    echo "ERROR: cannot create a temporary file to stage ${FILENAME}" >&2
+    exit 1
+  }
+  if ! cat "$SOURCE" > "$SNAPSHOT"; then
+    echo "ERROR: could not read source for ${FILENAME}: $SOURCE" >&2
+    exit 1
+  fi
+  fyd_publish_scan_file "$SNAPSHOT" "$FILENAME" || {
+    echo "ERROR: ${FILENAME} was NOT pushed — its content did not pass publish-guard." >&2
+    exit 1
+  }
+  if cat "$SNAPSHOT" | ssh \
        -i "$KEY" \
        -o BatchMode=yes \
        -o ConnectTimeout=10 \
@@ -197,6 +257,7 @@ for i in $(seq 1 "$ATTEMPTS"); do
        "$FILENAME"; then
     exit 0
   fi
+  cleanup_snapshot
   if [ "$i" -lt "$ATTEMPTS" ]; then
     echo "push attempt ${i}/${ATTEMPTS} failed for ${FILENAME}, retrying in ${DELAY}s…" >&2
     sleep "$DELAY"
