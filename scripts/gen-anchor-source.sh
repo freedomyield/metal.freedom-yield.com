@@ -241,9 +241,16 @@ fi
 rm -f "$TMP_HIST"
 
 # prev_anchor_root + prev_anchor_tx: read last row of anchor-history.jsonl.
-# The writer (scripts/append-anchor-history.sh:239,271) names this field
-# "dag_root_hash" — that is the primary key to read; the other two
-# alternatives are defensive fallbacks only, not the authoritative name.
+# The writer (scripts/append-anchor-history.sh) names this field
+# "dag_root_hash". That is the ONLY name it has ever written, so it is the
+# only name read here. The `// .dag_root // .dag_root_computed` alternatives
+# that used to follow it were removed 2026-08-06: neither has ever appeared on
+# a history line, so neither could ever match. They were left behind by the
+# 2026-08-04 fix as "defensive fallbacks", but a fallback that cannot match
+# defends nothing — it only makes the line read as if three names were equally
+# valid, which is the exact ambiguity that let the original bug (reading
+# `.dag_root` against a `dag_root_hash` writer) pass review for a month. One
+# writer name, one reader name, and the M-2 guard below to catch any drift.
 #
 # Fail-closed invariant (M-2, 08-04-incident-class defense): if the history
 # file passes the -s (non-zero-size) test below, prev_anchor_root AND
@@ -272,7 +279,7 @@ if [ -r "$ANCHOR_HISTORY_JSONL" ] && [ -s "$ANCHOR_HISTORY_JSONL" ]; then
 	# nothing) is an expected, explicitly-handled case, not a real error.
 	LAST_HISTORY_LINE="$(grep -vE '^[[:space:]]*$' "$ANCHOR_HISTORY_JSONL" | tail -1 || true)"
 	if [ -n "$LAST_HISTORY_LINE" ]; then
-		pr="$(printf '%s\n' "$LAST_HISTORY_LINE" | jq -r '.dag_root_hash // .dag_root // .dag_root_computed // ""' 2>/dev/null)"
+		pr="$(printf '%s\n' "$LAST_HISTORY_LINE" | jq -r '.dag_root_hash // ""' 2>/dev/null)"
 		pt="$(printf '%s\n' "$LAST_HISTORY_LINE" | jq -r '.tx_id // ""' 2>/dev/null)"
 		if printf '%s' "$pr" | grep -qE '^[0-9a-f]{64}$' && printf '%s' "$pt" | grep -qE '^[0-9a-f]{64}$'; then
 			PREV_ROOT_JQ="\"$pr\""

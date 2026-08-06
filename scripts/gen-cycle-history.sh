@@ -43,6 +43,15 @@
 # Push to web host:
 #   bash scripts/push-to-web-host.sh cycle-history.jsonl
 #
+# Exit codes:
+#   0  wrote the file (or skipped by the cycle gate, which is a normal outcome)
+#   1  required input missing / output dir missing
+#   2  an input is present but malformed (no .cycles / no .incidents array)
+#   3  a generated line is not valid JSON
+#   4  incident attribution is not conserved — the per-cycle counts do not sum
+#      to the number of incidents inside the overall covered window, so
+#      incidents are being dropped or double-counted. Refuses to write.
+#
 # This script never reads validator keys, staking keys, or any signing
 # material. It only joins two already-public JSON files.
 set -euo pipefail
@@ -89,6 +98,28 @@ TMP="${OUT_DIR}/.cycle-history.jsonl.tmp.$$"
 trap 'rm -f "${TMP}"' EXIT
 
 # One JSON object per line. Sorted by cycle_n so output is deterministic.
+#
+# Attribution convention: detectionDate is a DATE ("2026-06-24"), start_iso and
+# end_iso are full timestamps ("2026-05-19T07:10:14Z"). Comparing them directly
+# is a lexical comparison in which the shorter date string always sorts BEFORE
+# the same-day timestamp, so an incident detected on a cycle's own start date
+# failed `>= start_iso` and fell into the PREVIOUS cycle — and one detected on
+# the very first cycle's start date (2026-05-19, the validator's first day)
+# belonged to no cycle at all and vanished from the feed entirely. Both sides
+# are therefore truncated to their date part: a boundary-date incident belongs
+# to the cycle that STARTS that day. Windows stay contiguous and half-open, so
+# every incident lands in exactly one cycle. The conservation check after
+# generation enforces that property rather than trusting it.
+#
+# The incident date field is "detectionDate" — the name incidents.schema.v1.json
+# declares, the example carries and the live feed uses. Until 2026-08-06 the two
+# incident selectors below read ".date", which no incident object has ever had:
+# jq yields null for a missing key, `null >= "2026-06-04"` is false for every
+# entry, so incidents_in_cycle_count pinned to 0 and incidents_in_cycle_ids to []
+# on every cycle regardless of what actually happened. Same writer/reader
+# field-name class as the 2026-08-04 anchor-history near-miss, and just as
+# silent: the output stayed well-formed and schema-valid, it merely understated
+# the public record. Found by scripts/check-field-contracts.py.
 jq -c \
   --slurpfile inc "${INCIDENTS}" \
   --arg network "${NETWORK}" \
@@ -114,11 +145,13 @@ jq -c \
         min_peer_count: $c.min_peer_count,
         incidents_in_cycle_count:
           ( [ $inc[0].incidents[]?
-              | select(.date >= $c.start_iso and .date < $c.end_iso) ]
+              | select(.detectionDate >= $c.start_iso[0:10]
+                       and .detectionDate < $c.end_iso[0:10]) ]
             | length ),
         incidents_in_cycle_ids:
           [ $inc[0].incidents[]?
-            | select(.date >= $c.start_iso and .date < $c.end_iso)
+            | select(.detectionDate >= $c.start_iso[0:10]
+                     and .detectionDate < $c.end_iso[0:10])
             | .id ],
         explorer_url: $c.explorer_url,
         cycle_status: "closed",
@@ -133,6 +166,26 @@ while IFS= read -r line; do
   printf '%s\n' "$line" | jq empty >/dev/null 2>&1 \
     || { echo "ERROR: invalid JSON at line ${LINE_NO} of ${TMP}" >&2; exit 3; }
 done < "${TMP}"
+
+# Conservation check: every incident inside the overall covered window must be
+# attributed to exactly one cycle. The bug this file was fixed for produced a
+# perfectly well-formed, schema-valid feed that simply counted zero incidents
+# forever — line-level JSON validation could not see it, and neither could the
+# schema. This can: if the per-cycle counts do not sum to the number of
+# incidents in [first cycle start, last cycle end), something is being dropped
+# or double-counted, and we fail instead of publishing a quietly wrong record.
+if [ -s "${TMP}" ]; then
+  SUM_ATTRIBUTED="$(jq -s 'map(.incidents_in_cycle_count) | add // 0' "${TMP}")"
+  WINDOW_START="$(jq -rs '.[0].start_iso[0:10]' "${TMP}")"
+  WINDOW_END="$(jq -rs '.[-1].end_iso[0:10]' "${TMP}")"
+  EXPECTED_IN_WINDOW="$(jq --arg s "${WINDOW_START}" --arg e "${WINDOW_END}" \
+    '[ .incidents[]? | select(.detectionDate >= $s and .detectionDate < $e) ] | length' \
+    "${INCIDENTS}")"
+  if [ "${SUM_ATTRIBUTED}" != "${EXPECTED_IN_WINDOW}" ]; then
+    echo "ERROR: incident attribution is not conserved — per-cycle counts sum to ${SUM_ATTRIBUTED}, but ${EXPECTED_IN_WINDOW} incidents fall in [${WINDOW_START}, ${WINDOW_END}). Incidents are being dropped or double-counted; refusing to write ${OUT}." >&2
+    exit 4
+  fi
+fi
 
 mv "${TMP}" "${OUT}"
 trap - EXIT
