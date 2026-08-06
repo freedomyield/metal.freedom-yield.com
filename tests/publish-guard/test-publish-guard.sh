@@ -24,6 +24,15 @@ if [ ! -x "$GUARD" ]; then
 	exit 1
 fi
 
+# Run from the repo under test. The guard derives its own REPO_ROOT from the
+# CWD (`git rev-parse --show-toplevel`, falling back to `pwd`), so the caller's
+# directory silently decided the outcome of the Write/Edit assertions: launched
+# from an unrelated directory -- or from one that is not a git repository at
+# all, such as a scratch dir -- four expected-block cases returned rc=0 and so
+# "passed" without testing anything. Assertions that genuinely care about the
+# CWD set it explicitly through run_json_cwd instead.
+cd "$REPO_ROOT" || { echo "FATAL: cannot cd to $REPO_ROOT" >&2; exit 1; }
+
 # Isolate from the machine's real denylist.
 export FYD_PUBLISH_DENYLIST=/dev/null
 
