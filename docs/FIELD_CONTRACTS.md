@@ -89,9 +89,21 @@ Stated so they are not mistaken for coverage:
   the accepted cost is a miss when a wrong name collides with an unrelated
   sibling key in the same file.
 - Matching is by key **name**, not full dotted path.
+- **Value domains are not checked at all** — only names. An enum whose case the
+  reader gets wrong reads as a valid field and passes. See the value-domain
+  section below for why a general rule here is harder than it looks.
 - Only jq programs and JS fetch callbacks bound to a known artifact are checked.
   jq against RPC responses and unbound variables are skipped; `--coverage`
-  reports how many.
+  reports how many, including jq calls with no single-quoted program (107 in
+  this repo — `jq empty`, `jq .`, and double-quoted programs, which carry no
+  analyzable reads).
+- Reads on a jq variable (`$c.start_iso`, where `. as $c` binds the input
+  element) are not attributed. Only `--slurpfile`/`--argfile` variables, which
+  name a second artifact, are followed.
+- JS: callbacks are followed when passed inline, or by name to a `function f(x)`
+  or `var f = x => …` declaration. A callback reached any other way (a method on
+  an object, a value in a dispatch table) is not followed, so reads inside it
+  are invisible.
 - `tests/` is excluded by default (synthetic fixtures would distort both the
   writer vocabulary and the reader set). `--include-tests` scans them for manual
   review.
@@ -110,7 +122,39 @@ browser readers. Findings:
 | `incidents.json` | `public/assets/incidents.js` | `inc.durationMinutes` | *(no such field)* | HIGH | "Duration" row permanently dead; feed carries date-only strings, so no duration is derivable — row removed |
 | `incidents.json` | `public/assets/incidents.js` | `inc.impact` | *(no such field)* | HIGH | "Impact" row permanently dead — row removed |
 | `anchor-history.jsonl` | `scripts/gen-anchor-source.sh` | `.dag_root`, `.dag_root_computed` | `dag_root_hash` | LOW | dead alternatives left behind by the 2026-08-04 fix; unreachable, removed |
-| `validator.json` | `public/assets/main.js` | `v.stake.amount` | `stake.self` | LOW | dead fallback, never emitted by any writer; removed |
+| `validator.json` | `public/assets/main.js` | `v.stake.amount` | `stake.self` | LOW | dead fallback. `stake.amount` was real once (`dc80dab`, always `null`); `1c81178` moved the feed to `stake.self` and kept this branch as deliberate back-compat. No writer has emitted it since, so it had been unreachable for the whole life of the current schema; removed |
+
+### Value-domain findings (a different class, same silence)
+
+Field names being right does not mean the values are understood. Found in the
+same sweep, in a file already being edited for the field-name fixes:
+
+| Artifact | Reader | Problem | Severity | Effect |
+|---|---|---|---|---|
+| `incidents.json` | `public/assets/incidents.js` | `severity` enum is `["Critical","Major","Minor","Info"]`; the I18N tables were keyed lowercase and the badge test read `sev === "critical"` | **HIGH** | every lookup missed. The JA page rendered the raw English enum value (locale leak), and a **Critical or Major incident was painted `badge-ok` — green**. The page signalled "all fine" for the most serious event class it exists to report |
+| `incidents.json` | `public/assets/incidents.js` | `status` enum `["open","under_remediation","resolved"]` was about to be rendered raw | MEDIUM | a visitor would have read `under_remediation` verbatim, in both locales |
+
+Both are now normalized at the single point of use, and
+`tests/incidents-page/test-incidents-i18n-enums.sh` reads the enums straight
+out of the schema and fails if any value would render unlabelled — so adding a
+severity level to the schema now demands a label rather than silently
+degrading.
+
+**Can `check-field-contracts.py` catch this class?** Not reliably, and it
+should not pretend to. `severity` IS a real field read under its real name;
+only the value domain was wrong, and the checker compares names. A workable
+heuristic exists — JSON Schema `enum` values are machine-readable, so one could
+flag any source file whose object-literal keys or string comparisons match ≥2
+values of an enum case-insensitively but none exactly. That would have caught
+this exact bug. It is not implemented, for a specific reason: the correct fix
+is to normalize case at the lookup, which leaves the lowercase table in place,
+so the heuristic keeps firing on correct code. Suppressing that requires
+recognizing "a normalization call governs this lookup" — real dataflow
+analysis, and getting it wrong produces persistent false positives on code that
+is already right. That trade is bad for a gate whose entire value is that a red
+run means something. The targeted per-page test above closes the case with no
+false-positive surface; a general rule remains an open option if this class
+recurs elsewhere.
 
 Checked and found consistent: all `/var/lib/freedom-yield/` state files
 (`anomaly-state.json`, `cycle-gate-state.json`, `current-cycle-state.json`,
@@ -129,3 +173,68 @@ feed**, and every one was masked by a default (`// ""`, `|| "—"`, `? :`) so it
 rendered as a plausible-looking zero or blank rather than an error. That is the
 same failure mode as 2026-08-04, on a page whose entire purpose is showing the
 operating record honestly.
+
+## Republishing a feed whose bytes are pinned by a signed manifest
+
+**A corrected feed cannot simply be regenerated and pushed.** Several public
+feeds are content-pinned by a signed manifest whose own hash is inscribed
+on-chain, so republishing one in isolation puts the published state into
+provable disagreement with a signature and with the chain.
+
+The live chain, as measured on 2026-08-06:
+
+```
+public/api/cycle-history.jsonl
+  sha256 475bd9127b6c0a8dd2c531e78b3ac611899f9fd32bf3c0977030b6e2a3a75b0c
+      ↓ pinned by
+public/api/identity.json  .artifact_manifest.cycle_history_jsonl.sha256   (same value)
+      ↓ identity.json's own sha256 is a leaf of
+public/api/anchor-source.json  .artifacts_branch.public_api_files_hashed[]
+      ↓ folded into
+  .dag_root_computed = 063f753e…
+      ↓ inscribed as dag_root_hash on the last anchor-history line
+  Metal A-chain tx 32529f4a… block 396269445
+```
+
+`scripts/gen-cycle-history.sh` already refuses to run when the cycle gate is
+deferred, precisely because its bytes flow into that chain. The gate protects
+the *transition window*; it does not make an out-of-band republish safe.
+
+### Procedure
+
+Run **outside a cycle-transition window**, and take the steps in this order.
+The order is not stylistic: `scripts/operator-local/gen-identity.sh` hashes each
+artifact by **fetching its live URL** (it `curl`s each leaf), so it must not run
+until the corrected bytes are already being served. Re-signing first would pin
+the old content again.
+
+1. **Regenerate on the validator host, through the gate.**
+   `bash scripts/gen-cycle-history.sh` — it exits 0 without writing if the gate
+   is deferred, which is the correct outcome; wait and retry rather than
+   bypassing it. The conservation check (exit 4) must pass.
+2. **Publish the corrected feed.**
+   `bash scripts/push-to-web-host.sh cycle-history.jsonl`
+   From here until step 4 the served feed and the signed manifest disagree.
+   Keep the window short; this is why it is done outside a transition.
+3. **Re-sign the manifest on the operator Mac** (not on any host — the identity
+   key lives only there):
+   `OPERATOR_IDENTITY_KEY=<path> bash scripts/operator-local/gen-identity.sh`
+   It re-fetches every leaf, picks up the new `cycle-history.jsonl` hash,
+   recomputes `artifact_root`, re-signs, and self-verifies.
+4. **Publish the manifest and its signature together.**
+   `bash scripts/push-to-web-host.sh identity.json`
+   `bash scripts/push-to-web-host.sh identity.json.sig`
+   The published state is now internally consistent again.
+5. **Let the next anchor pick it up.** `identity.json`'s new hash changes the
+   artifacts branch and therefore `dag_root_computed`; the next scheduled anchor
+   inscribes the new root. Do not force an extra anchor for this — the previous
+   inscription is not invalidated, it simply records the state as of its own
+   time, which is what an append-only chain is for.
+6. **Verify.** Confirm the served `cycle-history.jsonl` hash equals the manifest
+   pin, and that `ssh-keygen -Y verify` accepts `identity.json` against
+   `identity.json.sig`.
+
+Skipping step 3–4, or doing them before step 2, leaves a published feed whose
+hash contradicts a signature that is itself committed to the chain — exactly
+the kind of unexplained inconsistency an evaluator is entitled to read as
+tampering.
