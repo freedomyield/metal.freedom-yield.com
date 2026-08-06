@@ -1,0 +1,99 @@
+{
+  "$comment": "Hand-maintained ground truth for the 13 execution units a cycle transition actually runs (model α, AI full orchestration). Read against real scripts on 2026-08-06 (background: docs/CYCLE_GATE.md model α runbook + docs/VALIDATOR_RENEWAL.md 新SOP were missing steps 7.5 (scp the Mac-signed fragment to the host) and 8.5 (push the two canonical anchor feeds) — buried in the prose of neighboring steps instead of being their own line item). Step 0 (operator's Metal Wallet web AddValidator submit) is deliberately NOT listed here: docs/CYCLE_GATE.md itself says 'Step 0 is the operator's own wallet action (no script, no gate)', so it is not a script-driven execution unit — it still has its own doc entry (0. / ⓪), just outside this machine-checked list of 13.",
+  "schema_version": 1,
+  "updated": "2026-08-06",
+  "source_of_truth": "docs/CYCLE_GATE.md 'Operator runbook (= cycle transitions, model α)' section + docs/VALIDATOR_RENEWAL.md '新 SOP' 当日順序 section. Both must carry every step below (as a literal substring match of that step's *_pattern) or tests/cycle-transition-steps/test-cycle-transition-steps.sh fails. Add a step here AND to both docs in the same commit.",
+  "steps": [
+    {
+      "id": "1",
+      "summary": "Wait for the node-info cron tick to reflect the new AddValidator entry's endTime before recording anything against it.",
+      "scripts": [],
+      "cycle_gate_pattern": "1. **AI/host — wait for the node-info tick.",
+      "validator_renewal_pattern": "① validator host: node-info tick"
+    },
+    {
+      "id": "2",
+      "summary": "Close out cycle N's uptime record on the validator host.",
+      "scripts": ["uptime-history.sh"],
+      "cycle_gate_pattern": "2. **host — `uptime-history.sh`**",
+      "validator_renewal_pattern": "② validator host: `uptime-history.sh`"
+    },
+    {
+      "id": "3",
+      "summary": "Append cycle N's row to cycle-history.jsonl and publish it.",
+      "scripts": ["gen-cycle-history.sh", "push-to-web-host.sh"],
+      "cycle_gate_pattern": "3. **host — `gen-cycle-history.sh` + publish**",
+      "validator_renewal_pattern": "③ validator host: `gen-cycle-history.sh` + push"
+    },
+    {
+      "id": "4",
+      "summary": "Mac: regenerate identity.json for the new cycle, commit + push + wait for deploy.",
+      "scripts": ["operator-local/gen-identity.sh"],
+      "cycle_gate_pattern": "4. **Mac —**",
+      "validator_renewal_pattern": "④ Mac local: `FY_EXPECT_CYCLE"
+    },
+    {
+      "id": "5",
+      "summary": "Host: compose the fresh anchor-source.json (3-branch DAG) for the new cycle.",
+      "scripts": ["gen-anchor-source.sh"],
+      "cycle_gate_pattern": "5. **host —**",
+      "validator_renewal_pattern": "⑤ validator host: `FY_EXPECT_CYCLE"
+    },
+    {
+      "id": "6",
+      "summary": "Mac: verify + commit the host-composed anchor-source.json, push + wait for deploy.",
+      "scripts": ["operator-local/commit-anchor-source.sh"],
+      "cycle_gate_pattern": "6. **Mac —**",
+      "validator_renewal_pattern": "⑥ Mac local: `export VALIDATOR_HOST"
+    },
+    {
+      "id": "7a",
+      "summary": "Mac: testnet rehearsal — gate-1 material (testnet-first).",
+      "scripts": ["run-testnet-rehearsal.sh"],
+      "cycle_gate_pattern": "**7a — gate-1 material (testnet-first).**",
+      "validator_renewal_pattern": "⑦-a gate 1 材料(testnet-first)"
+    },
+    {
+      "id": "7b",
+      "summary": "Mac: mainnet dry run — gate-4 material, no recompose.",
+      "scripts": ["preview-cycle-anchor-broadcast.sh"],
+      "cycle_gate_pattern": "**7b — gate-4 material (mainnet dry run).**",
+      "validator_renewal_pattern": "⑦-b gate 4 材料(mainnet dry run)"
+    },
+    {
+      "id": "7c",
+      "summary": "Mac: unlock mainnet keystore, sign + broadcast the 4-action anchor pack via bin/safe-broadcast.",
+      "scripts": ["sign-anchor-event.sh"],
+      "cycle_gate_pattern": "**7c — sign + broadcast.**",
+      "validator_renewal_pattern": "⑦-c 署名 + broadcast"
+    },
+    {
+      "id": "7.5",
+      "summary": "Mac -> host: scp the sign-anchor-event.sh output fragment (default /tmp/fya-mainnet-sign-output.json) to the host, where step 8's gen-anchor-receipt.sh --input= reads it. Added 2026-08-06 — previously only described in step 7c's/8's prose, never its own line item.",
+      "scripts": [],
+      "cycle_gate_pattern": "7.5. **Mac → host — scp the signing fragment.**",
+      "validator_renewal_pattern": "⑦.5 Mac → host"
+    },
+    {
+      "id": "8",
+      "summary": "Host: gen-anchor-receipt.sh (7-gate verify) + append-anchor-history.sh (which, since 2026-08-06 / 77fd09d, also auto-pushes the two R18 per-anchor archive files as a best-effort side effect).",
+      "scripts": ["gen-anchor-receipt.sh", "append-anchor-history.sh"],
+      "cycle_gate_pattern": "8. **host — `gen-anchor-receipt.sh`",
+      "validator_renewal_pattern": "⑧ validator host: `gen-anchor-receipt.sh`"
+    },
+    {
+      "id": "8.5",
+      "summary": "Host: push the two CANONICAL flat files (anchor-receipt.json, anchor-history.jsonl) — the only publish step left manual after 2026-08-06; the R18 archive copies are automatic (see step 8). Added 2026-08-06 — previously not documented as a step at all, so operators had no record of needing to run it.",
+      "scripts": ["push-to-web-host.sh"],
+      "cycle_gate_pattern": "8.5. **host — push the two canonical flat files.**",
+      "validator_renewal_pattern": "⑧.5 validator host: 正規"
+    },
+    {
+      "id": "9",
+      "summary": "Host: resume-after-cycle-start.sh --apply (Phase 1 verify -> Phase 2 atomic state write -> Phase 3 report). No broadcast.",
+      "scripts": ["resume-after-cycle-start.sh"],
+      "cycle_gate_pattern": "9. **host —**",
+      "validator_renewal_pattern": "⑨ validator host: `bash scripts/resume-after-cycle-start.sh"
+    }
+  ]
+}
