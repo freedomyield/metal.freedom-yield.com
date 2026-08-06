@@ -458,13 +458,40 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    stdout is additionally saved to a default path
    `/tmp/fya-<testnet|mainnet>-sign-output.json` — `/tmp/fya-mainnet-sign-output.json`
    for this mainnet invocation. That fragment is produced **on the Mac**
-   and must be `scp`'d to the host before step 8 runs, where it becomes
-   step 8's `--input=` value below.
+   and must reach the host before step 8 runs, where it becomes step 8's
+   `--input=` value below — step 7.5, immediately following, is that
+   transfer.
    After the broadcast, re-lock the mainnet keystore:
    `HOME=~/.metal-fy-proton proton key:lock`. Its prompt reads `Enter 32
    character password (leave empty to create new)` — an **empty Enter
    here creates a NEW password** instead of locking with the existing one;
    always enter the same 32-character password used to unlock.
+
+7.5. **Mac → host — scp the signing fragment.** Step 7c's
+   `sign-anchor-event.sh` output landed on the **Mac** (its default
+   `--output=` path, `/tmp/fya-mainnet-sign-output.json`); step 8's
+   `gen-anchor-receipt.sh --input=` runs on the **host** and needs that
+   same JSON there. This used to be a clause buried in step 7c's closing
+   prose rather than its own line item — worth calling out on its own,
+   since it is a distinct host-crossing action with its own failure modes
+   (wrong destination path, a stale leftover from a prior cycle, or a
+   permission the `deploy` user can't read):
+   ```sh
+   scp -i ~/.ssh/<your_validator_host_key> \
+     /tmp/fya-mainnet-sign-output.json \
+     "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}:/home/deploy/.fya-sign-output.json"
+   ssh -i ~/.ssh/<your_validator_host_key> \
+     "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
+     'chmod 644 /home/deploy/.fya-sign-output.json'
+   ```
+   The `chmod` is defensive: the `scp` connects as `root` (no
+   `VALIDATOR_HOST_USER` override here), and step 8's
+   `gen-anchor-receipt.sh` runs as `sudo -u deploy` — a restrictive root
+   umask on the target host could otherwise leave the file unreadable to
+   `deploy` and step 8 would fail on a file that is sitting right there.
+   Do this before step 8; its `--input=` value below is exactly this
+   destination path.
+
 8. **host — `gen-anchor-receipt.sh` (7-gate verify) + `append-anchor-history.sh`**
    independently re-fetch and verify the just-broadcast tx, then append the
    receipt to `anchor-history.jsonl`:
@@ -488,13 +515,43 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    `append-anchor-history.sh` invariant 6
    (`receipt.prev_anchor_tx_id != last history tx_id`) — genesis (empty
    history) is the only case where `null` is correct.
-   `--input=` is step 7c's `sign-anchor-event.sh` stdout, saved as JSON.
-   That output is produced **on the Mac**, so copy it to the host first
-   (e.g. `scp` it to `/home/deploy/.fya-sign-output.json`). Both
-   `--input=` and `--anchor-source=` are required (usage error, exit 1,
-   without them), as is `append-anchor-history.sh`'s `--receipt=`. At a
-   cycle transition the event type is `cyclestart` on both scripts —
-   `--trigger=cyclestart` here, `--event-type=cyclestart` there.
+   `--input=` is step 7c's `sign-anchor-event.sh` stdout, saved as JSON
+   and transferred to this path by step 7.5. Both `--input=` and
+   `--anchor-source=` are required (usage error, exit 1, without them), as
+   is `append-anchor-history.sh`'s `--receipt=`. At a cycle transition the
+   event type is `cyclestart` on both scripts — `--trigger=cyclestart`
+   here, `--event-type=cyclestart` there.
+
+8.5. **host — push the two canonical flat files.** Two, not four:
+   ```sh
+   bash scripts/push-to-web-host.sh anchor-receipt.json
+   bash scripts/push-to-web-host.sh anchor-history.jsonl
+   ```
+   These are the CURRENT/canonical copies `gen-anchor-receipt.sh` and
+   `append-anchor-history.sh` just wrote locally in step 8. Skip this and
+   the public `/api/anchor-receipt.json` and `/api/anchor-history.jsonl`
+   keep serving the *previous* cycle's content even though the on-chain
+   anchor already succeeded — step 9's Phase 1 only polls
+   `anchor-source.json` freshness, so it will **not** catch a missed push
+   here. `anchor-source.json` itself is not part of this step: it is
+   git-deploy owned (committed in step 6), never pushed via this script.
+
+   The other two publish targets step 8 also produces — the R18
+   per-anchor archive copies (`archive/anchor-source-<dag_root>.json`,
+   `archive/anchor-receipt-<tx_id>.json`) — are **not** a manual action
+   here. As of 2026-08-06 (`77fd09d`), `append-anchor-history.sh` pushes
+   both of them itself, automatically, immediately after its append
+   succeeds (its "R18 publication" block). That push is best-effort — a
+   failure is reported loudly (stderr + a `notify.sh high` alert) but
+   never fails the append, and step 8's own exit code says nothing about
+   whether the archive push succeeded. If stderr or an alert shows "R18
+   publish FAILED" / "R18 publish skipped", re-run the printed manual
+   retry command
+   (`push-to-web-host.sh archive/anchor-source-<dag_root>.json` /
+   `archive/anchor-receipt-<tx_id>.json`). `FYD_PUBLISH_ARCHIVES=0`
+   disables the automatic push entirely — not used at a routine cycle
+   transition.
+
 9. **host —**
    ```sh
    bash scripts/resume-after-cycle-start.sh --apply
@@ -576,6 +633,17 @@ behavior (green / deferred / fail-closed per side-effect type, idempotent
 resume skip, resume against unreachable RPC) using a Python HTTP mock for
 metalgo RPC + web-host responses. The repo-wide suite runs via
 `bash tests/run-all-tests.sh`.
+
+`tests/cycle-transition-steps/test-cycle-transition-steps.sh` guards the
+**runbook itself** against silent drift from the pipeline it describes: it
+checks every step in `docs/cycle-transition-steps.json` (the hand-maintained
+ground truth for the 13 execution units a transition actually runs) has a
+literal mention in both this doc's model α runbook and
+`docs/VALIDATOR_RENEWAL.md`'s day-of list / emergency fallback — the
+2026-08-06 gap that motivated it (steps 7.5 and 8.5 existing in the real
+pipeline but nowhere in either doc) would have failed this test on sight.
+Add a step to the pipeline → add it to the JSON and both docs in the same
+commit, or this test goes red in CI.
 
 Not covered here (covered elsewhere):
 
