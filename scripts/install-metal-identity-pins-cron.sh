@@ -77,9 +77,17 @@ read -r -d '' EXPECTED <<CRON || true
 #
 # 01:00 UTC = 10:00 JST so any push lands inside operator working hours.
 # Read-only HTTP GETs; no broadcast, no recovery. Exit codes: 0 clean,
-# 3 new tracked break, 4 unverifiable, 2 cannot run.
+# 3 new tracked break, 4 unverifiable, 2 cannot run, 5 library missing.
+#
+# FY_LIVE=1 is required for the push to be DELIVERED: scripts/lib/side-
+# effects.sh (C3 rollout, 2026-08-06) makes every production side effect
+# opt-in, and check-identity-pins.sh routes its alerts through it. Without
+# this line the daily run still checks and still exits non-zero on a break,
+# but the operator's phone stays silent — a monitor that looks healthy
+# because it cannot speak. check-cron-file.sh Rule 6 enforces the line.
 SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin
+FY_LIVE=1
 0 1 * * * deploy bash ${REPO_PATH}/scripts/check-identity-pins.sh --mode=live 2>&1 | logger -t identity-pin-drift
 CRON
 

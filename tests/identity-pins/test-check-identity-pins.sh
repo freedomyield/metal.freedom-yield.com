@@ -145,7 +145,20 @@ STUBEOF
 	chmod +x "$BASE/curl-stub.sh"
 }
 
+# FY_LIVE=1 is what makes the recording notify stub actually get called and
+# the dedup state actually get written: since the C3 inversion
+# (scripts/lib/side-effects.sh, 2026-08-06) every production side effect is
+# opt-in, so a run without it is a loud dry no-op and there is no push to
+# assert on. Here we opt in because these cases are about WHAT is alerted and
+# deduped, not WHETHER.
+#
+# run_repo above deliberately does NOT set it, and must not: --mode=repo is
+# the CI gate and has no side effect at all, so every repo-mode case below
+# doubles as proof that the inversion cannot make CI go silently green. The
+# default-dry behaviour of live mode has its own coverage in
+# tests/side-effects-callers/test-feed-side-effects.sh.
 run_live() {
+	FY_LIVE=1 \
 	FYD_REPO_ROOT="$FAKE" \
 	FYD_IDENTITY_URL="https://example.test/api/identity.json" \
 	FYD_CURL="$BASE/curl-stub.sh" \

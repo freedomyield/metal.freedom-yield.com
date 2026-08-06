@@ -15,10 +15,45 @@
 #
 # This is purely an operational network state snapshot — no thesis
 # confirmation signals or probability flags here.
+#
+# Env:
+#   UPTIME_STATE_DIR  state dir (default /var/lib/freedom-yield). Resolved by
+#                     scripts/lib/side-effects.sh (fyd_state_dir uptime),
+#                     which also honours the canonical FY_STATE_DIR at higher
+#                     precedence. The legacy spelling is unchanged.
+#   FY_LIVE=1         REQUIRED before ANY artefact is written or published:
+#                     public/api/peers.json, the gzipped daily archive, the
+#                     web-host push, the publish ledger and the index.
+#                     Anything else is a loud dry no-op printing one
+#                     "DRY: would …" line per suppressed effect
+#                     (scripts/lib/side-effects.sh, C3 rollout 2026-08-06).
+#                     The cron env header carries it; tests deliberately do
+#                     not. scripts/peer-analytics.py, invoked below, applies
+#                     the identical rule to its own six artefacts.
+#
+#                     The push and the ledger append are gated TOGETHER (see
+#                     the publish section) — a dry fyd_push returns 0 without
+#                     uploading anything, so recording the date would make
+#                     the index advertise a URL that never existed, which is
+#                     the permanent-404 bug the 2026-08-05 ledger fix closed.
+#
+# Exit codes:
+#   0  snapshot written (or, when dry, fully announced)
+#   1  bad RPC response from the local metalgo P-Chain endpoint
+#   3  scripts/lib/side-effects.sh missing (structural)
 
 set -euo pipefail
 
-ROOT="${REPO_BASE:-$(cd "$(dirname "$0")/.." && pwd)}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+FYD_LIB="${SCRIPT_DIR}/lib/side-effects.sh"
+if [ ! -r "$FYD_LIB" ]; then
+  echo "peer-validators: FATAL: side-effects library not readable at $FYD_LIB" >&2
+  exit 3
+fi
+# shellcheck source=scripts/lib/side-effects.sh
+. "$FYD_LIB"
+
+ROOT="${REPO_BASE:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 OUT="${OUT:-$ROOT/public/api/peers.json}"
 RPC="${METALGO_API:-http://localhost:9650}"
 OWN_NODE_ID="${OWN_NODE_ID:-$(jq -r '.nodeId // empty' "$ROOT/public/api/validator.json" 2>/dev/null || echo '')}"
@@ -172,17 +207,35 @@ echo "$RESP" | jq \
   }
 ' > "$TMP"
 
-mv "$TMP" "$OUT"
+# On the validator host public/api/ is the source the web host is fed from,
+# so installing this file IS a production side effect. Only the install is
+# gated — the jq above composed a mktemp file, which is inert either way,
+# and gating the final rename is what keeps the write atomic (see
+# fyd_live_write's docstring).
+fyd_live_run "install the refreshed validator-set snapshot ${OUT}" mv "$TMP" "$OUT"
 
-COUNT=$(jq '.summary.active_count' "$OUT")
-CLUSTERS=$(jq '.summary.operator_cluster_count' "$OUT")
-echo "wrote $OUT — ${COUNT} active validators, ${CLUSTERS} multi-node clusters"
+# Everything downstream reads the snapshot this run just produced. When the
+# install was suppressed, the temp file still holds exactly those bytes (the
+# mv never ran), so the rest of the run stays meaningful — it announces what
+# it WOULD publish — instead of dying on a file FY_LIVE forbade creating.
+if fyd_is_live; then PEERS_SRC="$OUT"; else PEERS_SRC="$TMP"; fi
+
+COUNT=$(jq '.summary.active_count' "$PEERS_SRC")
+CLUSTERS=$(jq '.summary.operator_cluster_count' "$PEERS_SRC")
+if fyd_is_live; then
+  echo "wrote $OUT — ${COUNT} active validators, ${CLUSTERS} multi-node clusters"
+fi
 
 # ─────────────────────── C+D: changes detector + Gini time-series ──
 # Delegated to Python — bash subshells were silently swallowing errors.
-STATE_DIR="${UPTIME_STATE_DIR:-/var/lib/freedom-yield}"
-mkdir -p "$STATE_DIR"
-PEERS_JSON="$OUT" \
+# peer-analytics.py applies the SAME FY_LIVE rule to its own writes (it
+# cannot source a bash library; see its module docstring and the lock-step
+# test in tests/side-effects-callers/), so it is invoked unconditionally —
+# reading is not a side effect, and letting it run keeps its own "DRY: would
+# …" lines in the log of a dry tick.
+STATE_DIR="$(fyd_state_dir uptime)" || exit $?
+fyd_live_run "create the peers state dir ${STATE_DIR}" mkdir -p "$STATE_DIR"
+PEERS_JSON="$PEERS_SRC" \
 NAMES_JSON="$NAMES_TMP" \
 STATE_DIR="$STATE_DIR" \
 OUT_CHANGES="${ROOT}/public/api/peers-changes.json" \
@@ -197,12 +250,14 @@ python3 "${ROOT}/scripts/peer-analytics.py"
 # answer "what was the validator set on date X?" months/years later
 # without keeping 200 KB × 365 = 73 MB of uncompressed copies.
 SNAPSHOT_DIR="${STATE_DIR}/peers-history"
-mkdir -p "$SNAPSHOT_DIR"
+fyd_live_run "create the peers snapshot archive dir ${SNAPSHOT_DIR}" mkdir -p "$SNAPSHOT_DIR"
 TODAY=$(date -u +%Y-%m-%d)
 SNAPSHOT="${SNAPSHOT_DIR}/peers-${TODAY}.json.gz"
-gzip -c "$OUT" > "$SNAPSHOT"
-SNAP_SIZE=$(stat -c%s "$SNAPSHOT" 2>/dev/null || stat -f%z "$SNAPSHOT")
-echo "stashed daily snapshot: $SNAPSHOT (${SNAP_SIZE} bytes gzipped)"
+gzip -c "$PEERS_SRC" | fyd_live_write "today's gzipped peers snapshot" "$SNAPSHOT"
+if fyd_is_live; then
+  SNAP_SIZE=$(stat -c%s "$SNAPSHOT" 2>/dev/null || stat -f%z "$SNAPSHOT")
+  echo "stashed daily snapshot: $SNAPSHOT (${SNAP_SIZE} bytes gzipped)"
+fi
 
 # ─────────────── publish + index: ledger-gated (2026-08-06 fix) ──────
 # ecd348c made this script publish each day's snapshot next to generating
@@ -219,9 +274,15 @@ echo "stashed daily snapshot: $SNAPSHOT (${SNAP_SIZE} bytes gzipped)"
 # ledger is retried automatically at the top of every run, so a transient
 # outage self-heals on the next scheduled run instead of leaving a
 # permanent gap that only a manual backfill would close.
+#
+# FY_LIVE (2026-08-06, C3-2c) does not change ANY of that reasoning — it
+# adds one more way the push can decline to happen. A dry fyd_push returns 0
+# without uploading, so the ledger append is gated by the same FY_LIVE: the
+# push and the record of it are suppressed or performed together, never one
+# without the other, and the index (built only from the ledger) therefore
+# still advertises exactly what has actually reached the web host.
 PUBLISH_DIR="${ROOT}/public/api/peers-history"
-mkdir -p "$PUBLISH_DIR"
-PUSH_TO_WEB_HOST="${FYD_PUSH_TO_WEB_HOST:-${ROOT}/scripts/push-to-web-host.sh}"
+fyd_live_run "create the public peers-history staging dir ${PUBLISH_DIR}" mkdir -p "$PUBLISH_DIR"
 PUBLISHED_LEDGER="${SNAPSHOT_DIR}/.published"
 # Guarded (review round 1, 2026-08-06): a bare `touch` is a top-level
 # statement under `set -e` — if STATE_DIR/the ledger file is read-only
@@ -232,9 +293,22 @@ PUBLISHED_LEDGER="${SNAPSHOT_DIR}/.published"
 # read below tolerates a missing file (falls back to an empty published
 # set), so a completely unwritable STATE_DIR still yields a (possibly
 # empty/stale) index rather than none at all.
-if ! touch "$PUBLISHED_LEDGER" 2>/dev/null; then
-	echo "WARN: could not create/touch ledger at $PUBLISHED_LEDGER (STATE_DIR may be read-only) — proceeding; the index below will reflect whatever ledger content is readable, or be empty if none" >&2
+#
+# Wrapped in a function so `2>/dev/null` stays on touch itself: a redirect
+# written on the fyd_live_run call would belong to THIS shell and would also
+# swallow the "DRY: would …" line, i.e. silence the very announcement the
+# gate exists to make.
+# FYD-GATE(branch): body reached only through the fyd_live_run below.
+touch_published_ledger() { touch "$PUBLISHED_LEDGER" 2>/dev/null; }
+if ! fyd_live_run "create the peers publish ledger ${PUBLISHED_LEDGER}" touch_published_ledger; then
+	echo "WARN: could not create the ledger at $PUBLISHED_LEDGER (STATE_DIR may be read-only) — proceeding; the index below will reflect whatever ledger content is readable, or be empty if none" >&2
 fi
+
+# append_ledger_date <date> — record one published date. Gated in lock step
+# with the fyd_push that authorises it (see the section comment above).
+append_ledger_date() {
+	printf '%s\n' "$1" | fyd_live_write --append "the peers publish ledger" "$PUBLISHED_LEDGER"
+}
 
 # publish_snapshot_date <date> — stage + push one day's snapshot; record it
 # in the ledger iff the push actually succeeded. Every exit path here is a
@@ -245,11 +319,21 @@ publish_snapshot_date() {
 	local date="$1"
 	local file="${SNAPSHOT_DIR}/peers-${date}.json.gz"
 	if [ ! -f "$file" ]; then
-		echo "WARN: publish skipped — no local snapshot for ${date} at ${file}" >&2
+		if fyd_is_live; then
+			echo "WARN: publish skipped — no local snapshot for ${date} at ${file}" >&2
+		else
+			# Not a warning while dry: the snapshot is absent precisely
+			# because THIS run's gzip was suppressed a few lines up. Still
+			# announce the publish that would have followed, so a dry tick's
+			# log names every suppressed effect rather than going quiet
+			# about the most important one.
+			fyd_dry_note "publish peers-history/peers-${date}.json.gz (its local snapshot was itself suppressed)"
+		fi
 		return 0
 	fi
-	if cp -p "$file" "${PUBLISH_DIR}/peers-${date}.json.gz" \
-		&& bash "$PUSH_TO_WEB_HOST" "peers-history/peers-${date}.json.gz"; then
+	if fyd_live_run "stage ${date}'s snapshot into ${PUBLISH_DIR}" \
+			cp -p "$file" "${PUBLISH_DIR}/peers-${date}.json.gz" \
+		&& fyd_push "peers-history/peers-${date}.json.gz"; then
 		# Guarded (review round 1, 2026-08-06): under `set -e`, a plain
 		# `A || B` statement does NOT exempt B — if B (the ledger append)
 		# fails, the script aborts right here, mid-function, and the
@@ -261,11 +345,13 @@ publish_snapshot_date() {
 		# innermost fallback explicitly ends in `|| true` (same idiom as
 		# append-anchor-history.sh's final confirmation echo).
 		if ! grep -qxF "$date" "$PUBLISHED_LEDGER" 2>/dev/null; then
-			if ! echo "$date" >> "$PUBLISHED_LEDGER" 2>/dev/null; then
+			if ! append_ledger_date "$date"; then
 				echo "WARN: push succeeded for ${date} but could not record it in the ledger (read-only?) — next run will re-push it (harmless, idempotent)" >&2 || true
 			fi
 		fi
-		echo "published snapshot: peers-history/peers-${date}.json.gz"
+		if fyd_is_live; then
+			echo "published snapshot: peers-history/peers-${date}.json.gz"
+		fi
 	else
 		echo "WARN: snapshot published locally but push failed for peers-${date}.json.gz — will retry next run" >&2
 	fi
@@ -316,7 +402,14 @@ for date in dates:
         continue
     entries.append({'date': date, 'size_bytes': os.path.getsize(path), 'filename': name})
 print(json.dumps({'generated_at': '${GEN_ISO}', 'count': len(entries), 'entries': entries}, indent=2))
-" > "$SNAPSHOT_INDEX"
-echo "wrote $SNAPSHOT_INDEX ($(jq '.count' "$SNAPSHOT_INDEX") snapshots indexed)"
+" | fyd_live_write "the public peers-history index" "$SNAPSHOT_INDEX"
+if fyd_is_live; then
+  echo "wrote $SNAPSHOT_INDEX ($(jq '.count' "$SNAPSHOT_INDEX") snapshots indexed)"
+fi
 
+# Explicit cleanup before disarming the trap. $TMP survives a dry run (its
+# install was suppressed, and PEERS_SRC pointed at it), so it must be removed
+# here rather than left to a trap that is about to be cleared; $NAMES_TMP was
+# leaked by the pre-2026-08-06 shape and is removed for the same reason.
+rm -f "$TMP" "$NAMES_TMP"
 trap - EXIT

@@ -84,8 +84,17 @@ STUBEOF
 }
 teardown() { rm -rf "$BASE"; BASE=""; }
 
+# FY_LIVE=1 is what makes the recording stub actually get called: since the
+# C3 inversion (scripts/lib/side-effects.sh, 2026-08-06) alert DELIVERY is
+# opt-in, so a run without it is a loud dry no-op and there is no alert to
+# assert on. The git mutations are deliberately NOT gated — this script is
+# the host's delivery mechanism, so gating the pull would stop delivery
+# altogether — which means every "HEAD advanced" / "working tree unchanged" /
+# "durable copy written" assertion in this suite passes with or without the
+# flag. The default-dry behaviour of the alert path has its own coverage in
+# tests/side-effects-callers/test-feed-side-effects.sh.
 run_advancer() {
-	FYD_REPO_DIR="$CLONE" FYD_NOTIFY="$STUB" bash "$ADVANCER" "$@"
+	FY_LIVE=1 FYD_REPO_DIR="$CLONE" FYD_NOTIFY="$STUB" bash "$ADVANCER" "$@"
 }
 alerts() { cat "$STUB_LOG" 2>/dev/null; }
 

@@ -209,6 +209,16 @@ The cryptographic-evidence anchor pipeline (identity → anchor-source → A-cha
 One file per logical pipeline, kept readable. Roughly:
 
 ```cron
+# REQUIRED since 2026-08-06 (scripts/lib/side-effects.sh, C3 rollout): every
+# production side effect — ntfy notify, web-host push, /var/lib/freedom-yield
+# state write, public feed write — is opt-in behind FY_LIVE=1. Without this
+# line each entry below still runs, still logs and still returns its usual
+# exit code, but sends and writes nothing: it prints one "DRY: would …" line
+# per suppressed effect instead. scripts/check-cron-file.sh Rule 6 fails a
+# cron file that references a side-effecting script without it, and
+# scripts/install-cron-env-headers.sh adds it to an already-installed file.
+FY_LIVE=1
+
 # Push to web frequently
 */5 * * * * root /path/to/scripts/node-info.sh && /path/to/scripts/push-to-web-host.sh
 

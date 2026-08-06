@@ -140,7 +140,16 @@ fresh_fixture() {
 	PUSH_STUB="$WORK/push-stub-$name.sh"
 }
 
+# FY_LIVE=1 is what makes the snapshot, the push and the ledger actually
+# happen: since the C3 inversion (scripts/lib/side-effects.sh, 2026-08-06)
+# every production side effect is opt-in, so a run without it is a loud dry
+# no-op and there would be no ledger or index to assert on. That default-dry
+# behaviour has its own coverage in
+# tests/side-effects-callers/test-feed-side-effects.sh; here we opt in
+# because these cases are about WHAT lands in the ledger and the index, not
+# WHETHER anything lands at all.
 run_peer_validators() {
+	FY_LIVE=1 \
 	REPO_BASE="$FIXTURE_REPO" \
 	METALGO_API="$RPC_URL" \
 	EXPLORER_API="$EXPLORER_URL" \
