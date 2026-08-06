@@ -87,7 +87,19 @@ remove_from() {  # $1 = wrapper file path (local)
 	done
 
 	echo "--- verify wrapper still syntactically valid bash ---"
-	bash -n "$WRAPPER" && echo "syntax OK"
+	# Review round 1 (2026-08-06): a bare `bash -n "$WRAPPER" && echo
+	# "syntax OK"` never gated anything — its failure was discarded, so a
+	# broken wrapper still fell through to "OK: ... still syntactically
+	# valid" and exit 0. This wrapper is the web host's SSH forced command;
+	# shipping it broken silently kills every subsequent validator-host
+	# push. Restore from the backup and fail closed instead.
+	if ! bash -n "$WRAPPER"; then
+		echo "ERROR: wrapper is no longer syntactically valid bash after the edit — restoring from backup." >&2
+		cp -p "$BAK" "$WRAPPER"
+		echo "restored: $WRAPPER <- $BAK" >&2
+		exit 6
+	fi
+	echo "syntax OK"
 
 	echo "--- diff (unified) ---"
 	diff -u "$BAK" "$WRAPPER" || true
@@ -168,7 +180,15 @@ done
 
 echo
 echo "--- verify + syntax ---"
-bash -n "$WRAPPER" && echo "syntax OK"
+# Review round 1 (2026-08-06): same gate fix as the local path above —
+# restore from backup and fail closed instead of reporting false success.
+if ! bash -n "$WRAPPER"; then
+	echo "ERROR: wrapper is no longer syntactically valid bash after the edit — restoring from backup." >&2
+	cp -p "$BAK" "$WRAPPER"
+	echo "restored: $WRAPPER <- $BAK" >&2
+	exit 6
+fi
+echo "syntax OK"
 
 echo
 echo "--- diff ---"

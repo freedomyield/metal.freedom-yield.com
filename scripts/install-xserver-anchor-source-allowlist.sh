@@ -79,7 +79,21 @@ remove_from() {  # $1 = wrapper file path (local)
 	fi
 
 	echo "--- verify wrapper still syntactically valid bash ---"
-	bash -n "$WRAPPER" && echo "syntax OK"
+	# Review round 1 (2026-08-06): this used to be `bash -n "$WRAPPER" &&
+	# echo "syntax OK"` — a check whose FAILURE was never wired to anything.
+	# bash -n's own nonzero exit was simply discarded (the `&&` only ever
+	# gates the success-echo), so a syntactically broken wrapper still fell
+	# through to "OK: ... still syntactically valid" and exit 0. Since this
+	# wrapper is the web host's SSH forced command, shipping it broken
+	# silently kills every subsequent validator-host push. Restore from the
+	# backup and fail closed instead.
+	if ! bash -n "$WRAPPER"; then
+		echo "ERROR: wrapper is no longer syntactically valid bash after the edit — restoring from backup." >&2
+		cp -p "$BAK" "$WRAPPER"
+		echo "restored: $WRAPPER <- $BAK" >&2
+		exit 6
+	fi
+	echo "syntax OK"
 
 	echo "--- diff (unified) ---"
 	diff -u "$BAK" "$WRAPPER" || true
@@ -158,7 +172,7 @@ sed -i.tmp \
 	"$WRAPPER"
 rm -f "${WRAPPER}.tmp"
 
-if grep -qE '[^.]anchor-source\.json[|)]' "$WRAPPER"; then
+if grep -qE 'anchor-source\.json[|)]' "$WRAPPER"; then
 	echo "ERROR: anchor-source.json still present after removal attempt — manual review required." >&2
 	echo "      Backup preserved at $BAK; wrapper left as edited (may be partially modified)." >&2
 	exit 5
@@ -166,7 +180,16 @@ fi
 
 echo
 echo "--- verify wrapper still syntactically valid bash ---"
-bash -n "$WRAPPER" && echo "syntax OK"
+# Review round 1 (2026-08-06): same gate fix as the local path above — a
+# broken wrapper here IS the web host's SSH forced command, so restore
+# from backup and fail closed rather than reporting false success.
+if ! bash -n "$WRAPPER"; then
+	echo "ERROR: wrapper is no longer syntactically valid bash after the edit — restoring from backup." >&2
+	cp -p "$BAK" "$WRAPPER"
+	echo "restored: $WRAPPER <- $BAK" >&2
+	exit 6
+fi
+echo "syntax OK"
 
 echo
 echo "--- diff (unified) ---"

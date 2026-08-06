@@ -42,6 +42,24 @@ WORK="$(mktemp -d)"
 run(){ SKIP_SSH=1 WRAPPER_FILE="$1" bash "$INSTALLER"; }
 any_sig_token_present(){ grep -qE '(anchor-source\.json\.sig|anchor-receipt\.json\.sig|identity\.json\.sig)[|)]' "$1"; }
 
+# ---- extract the REAL remote heredoc body (verbatim, not reimplemented) ----
+# Same technique as tests/install-xserver-anchor-source-allowlist's suite:
+# the heredoc's one hardcoded WRAPPER= line is swapped for an env-supplied
+# guard; every other byte is exactly what ships to the Xserver host.
+REMOTE_SCRIPT="${WORK}/remote-heredoc-body.sh"
+awk '/<<.REMOTE_EOF./{flag=1;next} /^REMOTE_EOF$/{flag=0} flag' "$INSTALLER" \
+	| sed 's#^WRAPPER=/home/deploy/bin/receive-metal-push$#: "${WRAPPER:?WRAPPER must be set by the test harness}"#' \
+	> "$REMOTE_SCRIPT"
+if [ ! -s "$REMOTE_SCRIPT" ]; then
+	echo "FATAL: could not extract the remote heredoc body from $INSTALLER (delimiter renamed/moved?)" >&2
+	exit 1
+fi
+if grep -qF 'WRAPPER=/home/deploy/bin/receive-metal-push' "$REMOTE_SCRIPT"; then
+	echo "FATAL: hardcoded WRAPPER= line survived extraction — env override would be silently ignored" >&2
+	exit 1
+fi
+run_remote(){ WRAPPER="$1" bash "$REMOTE_SCRIPT"; }
+
 echo "================================================================"
 echo "install-xserver-sig-allowlist.sh — scenario tests"
 echo "================================================================"
@@ -199,6 +217,50 @@ if SKIP_SSH=1 bash "$INSTALLER" >/dev/null 2>&1; then
 else
 	ok "T10 fails closed without WRAPPER_FILE"
 fi
+
+# =============================================================================
+# T11: REGRESSION GUARD — review round 1's third finding, ported to this
+# installer too. The old `bash -n "$WRAPPER" && echo "syntax OK"` never
+# gated anything (bash -n's failure was simply discarded), so a wrapper
+# left syntactically broken by the edit still reported success and exited
+# 0 -- while it is the web host's SSH forced command. Fixture is already
+# missing its closing `esac` before this installer ever touches it
+# (isolates "does the gate fire and recover" from whether this narrow,
+# single-token-per-substitution sed can itself ever produce a syntax
+# error). Both paths MUST: exit 6, and restore byte-for-byte from backup.
+# =============================================================================
+echo "[T11] regression: syntax-gate actually gates (restore + exit 6), both paths"
+BROKEN_CONTENT='case "$1" in
+  anchor-source.json.sig|validator.json)
+    exit 0
+    ;;'
+
+W_LOCAL="${WORK}/t11-local.sh"
+printf '%s\n' "$BROKEN_CONTENT" > "$W_LOCAL"
+LOCAL_ORIG="$(cat "$W_LOCAL")"
+LOCAL_OUT="$(run "$W_LOCAL" 2>&1)"; LOCAL_RC=$?
+LOCAL_AFTER="$(cat "$W_LOCAL")"
+
+W_REMOTE="${WORK}/t11-remote.sh"
+printf '%s\n' "$BROKEN_CONTENT" > "$W_REMOTE"
+REMOTE_ORIG="$(cat "$W_REMOTE")"
+REMOTE_OUT="$(run_remote "$W_REMOTE" 2>&1)"; REMOTE_RC=$?
+REMOTE_AFTER="$(cat "$W_REMOTE")"
+
+[ "$LOCAL_RC" = 6 ] && ok "T11 local: exits 6 on a broken wrapper" || no "T11 local: expected exit 6, got $LOCAL_RC"
+[ "$REMOTE_RC" = 6 ] && ok "T11 remote: exits 6 on a broken wrapper" || no "T11 remote: expected exit 6, got $REMOTE_RC"
+echo "$LOCAL_OUT" | grep -q 'restoring from backup' && ok "T11 local: reports the restore" || no "T11 local: missing restore report"
+echo "$REMOTE_OUT" | grep -q 'restoring from backup' && ok "T11 remote: reports the restore" || no "T11 remote: missing restore report"
+[ "$LOCAL_AFTER" = "$LOCAL_ORIG" ] && ok "T11 local: wrapper byte-identical to pre-edit content (genuinely restored)" \
+	|| no "T11 local: wrapper NOT restored — left mangled after a failed gate"
+[ "$REMOTE_AFTER" = "$REMOTE_ORIG" ] && ok "T11 remote: wrapper byte-identical to pre-edit content (genuinely restored)" \
+	|| no "T11 remote: wrapper NOT restored — left mangled after a failed gate"
+echo "$LOCAL_OUT" | grep -q 'OK: .sig allowlist entries removed' \
+	&& no "T11 local: falsely reported success despite the syntax failure" \
+	|| ok "T11 local: does not report false success"
+echo "$REMOTE_OUT" | grep -q 'OK: .sig allowlist removal complete' \
+	&& no "T11 remote: falsely reported success despite the syntax failure" \
+	|| ok "T11 remote: does not report false success"
 
 echo
 echo "----------------------------------------"
