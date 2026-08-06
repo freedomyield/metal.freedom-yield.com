@@ -41,6 +41,27 @@
 #                            [--history=<anchor-history.jsonl>]
 #                            [--event-type=<cyclestart|cycleend|idrotate|heartbeat>]
 #                            [--key-seq=<int>]
+#
+# R18 publication (2026-08-06): after a successful append, this script also
+# pushes the two per-anchor archive files (archived_source_path /
+# archived_receipt_path, composed below) to the web host via
+# push-to-web-host.sh, so the URL the new history line advertises is live
+# the moment the line becomes visible — never a gap where the line exists
+# but the archive it points at 404s. This is a best-effort side effect: a
+# publish failure (file missing locally, SSH/network failure, ...) is
+# reported loudly (stderr + notify.sh alert if available) but NEVER changes
+# this script's exit code — the append-only chain record must not be held
+# hostage by a downstream publish problem. See the R18 comment block below
+# for why this lives here and not in gen-anchor-source.sh /
+# gen-anchor-receipt.sh (orphan avoidance).
+#
+# Env overrides (all optional; defaults match production layout):
+#   FYD_PUSH_TO_WEB_HOST   path to push-to-web-host.sh (default: repo's own)
+#   ANCHOR_ARCHIVE_DIR     local dir holding the archive/ copies (default:
+#                          dirname(--history)/archive, matching
+#                          gen-anchor-source.sh / gen-anchor-receipt.sh)
+#   FYD_NOTIFY             notifier script for the publish-failure alert
+#                          (default: <repo>/scripts/notify.sh)
 
 set -euo pipefail
 
@@ -223,23 +244,34 @@ fi
 # gen-anchor-receipt.sh's job at write time) — this is purely the
 # conventional pointer an evaluator follows.
 #
-# PUBLICATION (2026-08-05 — the half that was missing until then): writing
-# the archive file is necessary but not sufficient. Both archives live under
-# public/api/archive/, which is push-owned (never git-tracked, see
-# .gitignore + deploy/feed-excludes.txt), so each one only becomes reachable
-# at the URL this field advertises after it is pushed:
+# PUBLICATION: writing the archive file is necessary but not sufficient.
+# Both archives live under public/api/archive/, which is push-owned (never
+# git-tracked, see .gitignore + deploy/feed-excludes.txt), so each one only
+# becomes reachable at the URL this field advertises after it is pushed via
 #
 #   bash scripts/push-to-web-host.sh archive/anchor-source-<dag_root_hash>.json
 #   bash scripts/push-to-web-host.sh archive/anchor-receipt-<tx_id>.json
 #
-# run from the validator host after the anchor pipeline completes, alongside
-# the existing `push-to-web-host.sh anchor-receipt.json` /
-# `… anchor-history.jsonl` pushes. Before that path existed, this field
-# pointed at a permanent 404 for every anchor event: push-to-web-host.sh's
-# allowlist was flat-filename-only and had no way to name a file inside a
-# subdirectory. The receiving wrapper on the web host must also carry the
-# subdirectory allowlist (scripts/install-xserver-subdir-allowlist.sh) —
-# sender and receiver enforce it independently.
+# The subdirectory push shape was added 2026-08-05 (push-to-web-host.sh's
+# allowlist was flat-filename-only before that, so this field pointed at a
+# permanent 404 for every anchor event — the receiving wrapper on the web
+# host must also carry the matching subdirectory allowlist, see
+# scripts/install-xserver-subdir-allowlist.sh; sender and receiver enforce
+# it independently). Until 2026-08-06 the push above was a manual step the
+# operator had to remember to run after every anchor event — easy to forget
+# (it was), and the failure mode is silent (a 404 nobody notices until an
+# evaluator hits it). As of 2026-08-06 THIS SCRIPT runs both pushes itself,
+# automatically, right after the atomic append below succeeds — see the
+# "R18 publication" block near the end of the file. Publishing from here
+# rather than from gen-anchor-source.sh (which runs before signing/
+# broadcast) is deliberate: gen-anchor-source.sh writes a fresh archive copy
+# for every draft it composes, including ones later abandoned before
+# broadcast (this happened 2026-08-04 — dag_root 8a4361f4… was generated but
+# never signed), so publishing at generation time would leak orphaned drafts
+# to the public archive. Publishing here instead only ever happens for a
+# receipt that already passed the verification_status=="live" check above
+# AND whose append-only invariants above just succeeded — i.e. strictly
+# confirmed, chain-recorded anchors only.
 ARCHIVED_SOURCE_PATH="api/archive/anchor-source-${DAG_ROOT}.json"
 ARCHIVED_RECEIPT_PATH="api/archive/anchor-receipt-${TX_ID}.json"
 
@@ -378,3 +410,57 @@ mv "$TMP_OUT" "$HISTORY" || {
 }
 
 echo "OK: appended line to $HISTORY (tx_id=$TX_ID)"
+
+# ---- R18 publication: push the two per-anchor archives (best-effort) ------
+# Runs strictly AFTER the append above already succeeded (mv landed) — this
+# section can only add a warning, it can never turn a successful append into
+# a failed one. See the R18 comment block above ("PUBLICATION") for why this
+# runs here and not in the generators (orphan avoidance) and for the
+# FYD_PUSH_TO_WEB_HOST / ANCHOR_ARCHIVE_DIR / FYD_NOTIFY env overrides
+# (documented in the file header too). Idempotent: re-running this script's
+# publish step (or re-pushing by hand with the printed command) just
+# overwrites the same bytes at the same remote path.
+PUSH_TO_WEB_HOST="${FYD_PUSH_TO_WEB_HOST:-${REPO_ROOT}/scripts/push-to-web-host.sh}"
+ARCHIVE_DIR="${ANCHOR_ARCHIVE_DIR:-$(dirname "$HISTORY")/archive}"
+NOTIFY="${FYD_NOTIFY:-${REPO_ROOT}/scripts/notify.sh}"
+
+alert() {
+	# Best-effort: a broken/missing notifier must never mask (or be conflated
+	# with) the publish failure it's reporting — mirrors run-anchor-pipeline.sh
+	# and gen-*.sh's alert()/notify patterns in this repo.
+	if [ -x "$NOTIFY" ] || [ -f "$NOTIFY" ]; then
+		bash "$NOTIFY" "$1" "$2" "$3" >&2 || echo "WARN: notify failed (alert was: $2 — $3)" >&2
+	else
+		echo "WARN: notifier not found at $NOTIFY (alert was: $2 — $3)" >&2
+	fi
+}
+
+# publish_archive <local_path> <push_arg> <label>
+# Fail-open by design (per the header note): every exit path here is
+# non-fatal to this script — a missing local file or a push failure is
+# reported loudly (stderr + alert) with the exact manual retry command, and
+# the function always returns 0.
+publish_archive() {
+	local local_path="$1" push_arg="$2" label="$3"
+	if [ ! -r "$local_path" ]; then
+		echo "WARN: R18 publish skipped — $label archive not found locally at $local_path" >&2
+		echo "      (history line already recorded its URL; publish once the file exists:)" >&2
+		echo "      bash \"$PUSH_TO_WEB_HOST\" \"$push_arg\"" >&2
+		alert high "anchor archive publish skipped: $label missing" \
+			"tx_id=$TX_ID dag_root=$DAG_ROOT — $local_path not found locally. Manual command once available: bash $PUSH_TO_WEB_HOST $push_arg"
+		return 0
+	fi
+	if bash "$PUSH_TO_WEB_HOST" "$push_arg" >&2; then
+		echo "OK: published $label ($push_arg)" >&2
+	else
+		echo "WARN: R18 publish FAILED for $label ($push_arg)" >&2
+		echo "      (history line already recorded its URL; retry manually:)" >&2
+		echo "      bash \"$PUSH_TO_WEB_HOST\" \"$push_arg\"" >&2
+		alert high "anchor archive publish failed: $label" \
+			"tx_id=$TX_ID dag_root=$DAG_ROOT — push-to-web-host.sh failed. Manual retry: bash $PUSH_TO_WEB_HOST $push_arg"
+	fi
+	return 0
+}
+
+publish_archive "${ARCHIVE_DIR}/anchor-source-${DAG_ROOT}.json" "archive/anchor-source-${DAG_ROOT}.json" "anchor-source"
+publish_archive "${ARCHIVE_DIR}/anchor-receipt-${TX_ID}.json" "archive/anchor-receipt-${TX_ID}.json" "anchor-receipt"
