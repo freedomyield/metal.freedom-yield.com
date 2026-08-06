@@ -56,6 +56,15 @@ Pure chain-level operations. Point them at your local `metalgo` HTTP API and you
 **Env:** `PEERS_JSON`, `NAMES_JSON`, `STATE_DIR`, `OUT_CHANGES`, `OUT_GINI`, `GEN_ISO` (all set by the shell wrapper that invokes it).
 **Cron:** daily, right after `peer-validators.sh`.
 
+### `scripts/check-field-contracts.py`
+**Purpose:** Static writer/reader field-name contract checker for every JSON/JSONL artifact the repo produces. For each feed it unions a *writer vocabulary* (example file + checked-in live file + JSON schema + the emitting script's own object construction) and compares it against every key any consumer asks for — jq paths in shell scripts and property accesses in the site's browser JS. Reports each reader key that matches no writer name.
+Exists because that mismatch is silent in both languages: jq yields `null` and JS yields `undefined` for a key nobody ever wrote, so a wrong name renders as a blank field rather than an error. On 2026-08-04 a reader asking for `.dag_root` against a writer emitting `dag_root_hash` nulled `prev_anchor_root` and would have severed the on-chain hash chain; the same class was found live in `gen-cycle-history.sh` and `incidents.js` on 2026-08-06.
+Severity model: **CRITICAL** = unknown key guarded by a default (`// ""`, `|| "—"`) — silently substitutes forever; **HIGH** = unguarded, fails loudly downstream; **LOW** = dead fallback alternative. Feeds and readers are discovered automatically (no hand-kept list to rot); `--coverage` prints per-artifact vocabulary sources and every read site that was skipped, so blind spots stay visible.
+**Dependencies:** Python 3 stdlib only. No network, no repo writes, read-only.
+**Usage:** `python3 scripts/check-field-contracts.py [--coverage] [--strict] [--json] [--include-tests]`
+**Waivers:** `tests/field-contracts/waivers.txt` — `<artifact> <key>  # reason`; a waiver without a justification is itself an error (exit 2).
+**Cron:** none — CI gate via `tests/field-contracts/test-field-contracts.sh`, discovered by `tests/run-all-tests.sh` and therefore run by both `validate.yml` and `ci-main.yml`.
+
 ### `scripts/check-validator.sh`
 **Purpose:** Lightweight liveness check of your validator's presence in `getCurrentValidators` and its uptime number. Returns non-zero if your NodeID is missing or uptime drops below threshold. Suitable for cron or external monitoring.
 **Dependencies:** `curl`, `jq`.
