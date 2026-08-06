@@ -37,6 +37,20 @@
 #     leave that cron permanently unreachable by this remediation path.
 #   - Idempotent: files already carrying every required header are left
 #     byte-identical.
+#   - Skips (never reads-as-a-target-to-mutate) any matched path whose
+#     basename is not a filename cron.d would actually execute. Per
+#     crontab(5) (Debian's cron), a /etc/cron.d/ file is only picked up if
+#     its name consists solely of upper/lower case letters, digits,
+#     underscores, and hyphens — the same rule run-parts(8) enforces for
+#     cron.daily/weekly/monthly. A name outside that set (any dot, tilde,
+#     etc.) — most often a backup/rotation sidecar such as
+#     *.bak-<UTC timestamp>, *.disabled, *.orig, *.dpkg-old, *~ — is
+#     silently ignored by cron itself, so rewriting one here would corrupt a
+#     point-in-time record without touching anything cron actually runs.
+#     2026-08-06 production --dry-run found exactly this: two *.bak-<ts>
+#     files under metal-* reported "would fix". Each skip is printed (never
+#     silent) as "skipped (not a cron-executed filename): <name>" and
+#     counted separately in the summary.
 #   - Insertion point: after the leading comment block (matching the style of
 #     the already-compliant files), before the first env/command line.
 #   - Only the missing header(s) are added; an existing PATH= (or FY_LIVE=1)
@@ -140,9 +154,29 @@ cron_file_needs_fy_live() {
 	return 1
 }
 
+# is_cron_executed_filename <basename> — true (rc 0) iff cron.d would
+# actually execute a file with this name. Per crontab(5) (Debian's cron), a
+# /etc/cron.d/ entry is only read if its name consists solely of upper/lower
+# case letters, digits, underscores, and hyphens — identical to run-parts(8)'s
+# own filename rule for cron.daily/weekly/monthly. Anything outside that set
+# (a dot, a tilde, ...) is a name cron silently ignores — most often a
+# backup/rotation sidecar (*.bak-<ts>, *.disabled, *.orig, *.dpkg-old, *~).
+# Judging by "does this look like a backup" would need updating every time a
+# new sidecar convention shows up; judging by "would cron run this" does not.
+# MUST stay identical to install-repoint-publish-crons.sh's copy of the same
+# function — see tests/install-cron-env-headers/ and
+# tests/install-repoint-publish-crons/ for the lock-step consistency check.
+is_cron_executed_filename() {
+	case "$1" in
+		*[!A-Za-z0-9_-]*) return 1 ;;
+		*) return 0 ;;
+	esac
+}
+
 CHANGED=0
 SKIPPED=0
 WARNED=0
+SKIPPED_NOT_CRON=0
 
 # Two prefixes: metal-* (the common case) and freedom-yield-* (orphan crons
 # with no repo installer, e.g. freedom-yield-peer-geo — see the Scope note
@@ -151,6 +185,18 @@ WARNED=0
 # unexpanded glob string.
 for f in "$CRON_DIR"/metal-* "$CRON_DIR"/freedom-yield-*; do
 	[ -f "$f" ] || continue
+	bn="$(basename "$f")"
+
+	# Not a filename cron.d would ever execute (see is_cron_executed_filename
+	# above) — most often a *.bak-<ts>/*.disabled/*.orig sidecar. Skip loudly,
+	# never mutate: this is the one class of file where "fixing" it would
+	# corrupt a point-in-time record rather than change anything cron runs.
+	if ! is_cron_executed_filename "$bn"; then
+		SKIPPED_NOT_CRON=$((SKIPPED_NOT_CRON + 1))
+		echo "skipped (not a cron-executed filename): $bn"
+		continue
+	fi
+
 	need_shell=1; need_path=1; need_fy_live=0
 	grep -qE '^SHELL=/bin/bash\b' "$f" && need_shell=0
 	grep -qE '^PATH=' "$f" && need_path=0
@@ -164,13 +210,13 @@ for f in "$CRON_DIR"/metal-* "$CRON_DIR"/freedom-yield-*; do
 	# decision, not this installer's.
 	if [ "$need_shell" -eq 1 ] && grep -qE '^SHELL=' "$f"; then
 		WARNED=$((WARNED + 1))
-		echo "warn:    $(basename "$f") carries $(grep -E '^SHELL=' "$f" | head -1) (not /bin/bash) — left untouched; operator review required (FY_LIVE check also skipped)"
+		echo "warn:    ${bn} carries $(grep -E '^SHELL=' "$f" | head -1) (not /bin/bash) — left untouched; operator review required (FY_LIVE check also skipped)"
 		continue
 	fi
 
 	if [ "$need_shell" -eq 0 ] && [ "$need_path" -eq 0 ] && [ "$need_fy_live" -eq 0 ]; then
 		SKIPPED=$((SKIPPED + 1))
-		echo "ok:      $(basename "$f") (all required headers present)"
+		echo "ok:      ${bn} (all required headers present)"
 		continue
 	fi
 
@@ -180,13 +226,13 @@ for f in "$CRON_DIR"/metal-* "$CRON_DIR"/freedom-yield-*; do
 	[ "$need_fy_live" -eq 1 ] && missing="${missing:+$missing+}FY_LIVE"
 
 	if [ "$DRY_RUN" -eq 1 ]; then
-		echo "would fix: $(basename "$f") (missing: $missing)"
+		echo "would fix: ${bn} (missing: $missing)"
 		CHANGED=$((CHANGED + 1))
 		continue
 	fi
 
 	mkdir -p "$BACKUP_DIR"
-	cp -p "$f" "$BACKUP_DIR/$(basename "$f")"
+	cp -p "$f" "$BACKUP_DIR/${bn}"
 
 	# Insert the missing header(s) after the leading comment/blank block —
 	# the position the already-compliant project cron files use.
@@ -227,19 +273,19 @@ for f in "$CRON_DIR"/metal-* "$CRON_DIR"/freedom-yield-*; do
 	fi
 	if [ "$VERIFY_OK" -eq 0 ]; then
 		echo "ERROR: post-edit verification failed for $f — restoring backup" >&2
-		cp -p "$BACKUP_DIR/$(basename "$f")" "$f"
+		cp -p "$BACKUP_DIR/${bn}" "$f"
 		exit 3
 	fi
 
 	CHANGED=$((CHANGED + 1))
-	echo "fixed:   $(basename "$f") (added: $missing)"
+	echo "fixed:   ${bn} (added: $missing)"
 done
 
 echo ""
 if [ "$DRY_RUN" -eq 1 ]; then
-	echo "DRY-RUN summary: would fix ${CHANGED}, already compliant ${SKIPPED}, needs operator review ${WARNED}"
+	echo "DRY-RUN summary: would fix ${CHANGED}, already compliant ${SKIPPED}, needs operator review ${WARNED}, skipped (not cron-executed) ${SKIPPED_NOT_CRON}"
 else
-	echo "summary: fixed ${CHANGED}, already compliant ${SKIPPED}, needs operator review ${WARNED}"
+	echo "summary: fixed ${CHANGED}, already compliant ${SKIPPED}, needs operator review ${WARNED}, skipped (not cron-executed) ${SKIPPED_NOT_CRON}"
 	[ "$CHANGED" -gt 0 ] && echo "backups: ${BACKUP_DIR}/"
 fi
 exit 0

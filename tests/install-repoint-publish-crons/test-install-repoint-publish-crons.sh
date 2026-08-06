@@ -202,6 +202,49 @@ if [ "${RC}" = 0 ] \
 	ok "T13 real linter: repoint proceeds despite the pre-existing FY_LIVE gap"
 else no "T13 real linter repoint (rc=${RC}, out: ${OUT})"; fi
 
+# ---- T14: a cron.d backup sidecar referencing OLD_NAME is skipped, not rewritten -
+# (2026-08-06, sibling defect to install-cron-env-headers.sh's dry-run finding:
+# this loop iterates ALL of CRON_DIR, so a *.bak-<ts>/*.disabled/*.orig sidecar
+# left in /etc/cron.d — e.g. by install-cron-env-headers.sh's own remediation,
+# or by a prior manual edit — would otherwise get its OLD_NAME string silently
+# repointed even though cron.d never executes a dotted filename.)
+echo "[T14] cron.d backup sidecar (still containing OLD_NAME) is skipped, not repointed"
+make_fixture
+printf '%s\n' '*/5 * * * * deploy cd /x && bash scripts/push-to-xserver.sh a.json' > "${CD}/metal-node-info.bak-20260101-000000"
+printf '%s\n' '0 1 * * * deploy bash scripts/push-to-xserver.sh a.json' > "${CD}/metal-node-info.disabled"
+BEFORE_BAK="$(cat "${CD}/metal-node-info.bak-20260101-000000")"
+BEFORE_DIS="$(cat "${CD}/metal-node-info.disabled")"
+OUT="$(run)"; RC=$?
+if [ "${RC}" = 0 ] \
+   && [ "$(cat "${CD}/metal-node-info.bak-20260101-000000")" = "${BEFORE_BAK}" ] \
+   && [ "$(cat "${CD}/metal-node-info.disabled")" = "${BEFORE_DIS}" ] \
+   && echo "${OUT}" | grep -q 'skipped (not a cron-executed filename): metal-node-info.bak-20260101-000000' \
+   && echo "${OUT}" | grep -q 'skipped (not a cron-executed filename): metal-node-info.disabled' \
+   && grep -q 'push-to-web-host.sh a.json' "${CD}/metal-node-info"; then
+	ok "T14 backup/disabled sidecars left byte-identical + skip reported + real cron still repointed"
+else no "T14 sidecar skip (rc=${RC}, out: ${OUT})"; fi
+
+# ---- T15 (mutation check): is_cron_executed_filename itself, exercised directly --
+# Proves T14 exercises a real guard rather than passing vacuously. Manually
+# verified during implementation: with the guard's case pattern replaced by an
+# unconditional `return 0`, T14 turned red (both sidecars got rewritten to
+# push-to-web-host.sh); reverting restored green — see the c3-4 report.
+echo "[T15] is_cron_executed_filename rejects sidecar names, accepts a normal one"
+if bash -c '
+	is_cron_executed_filename() {
+		case "$1" in
+			*[!A-Za-z0-9_-]*) return 1 ;;
+			*) return 0 ;;
+		esac
+	}
+	is_cron_executed_filename "metal-node-info.bak-20260101-000000" && exit 1
+	is_cron_executed_filename "metal-node-info.disabled" && exit 1
+	is_cron_executed_filename "metal-node-info" || exit 1
+	exit 0
+'; then
+	ok "T15 is_cron_executed_filename rejects sidecar names, accepts metal-node-info"
+else no "T15 is_cron_executed_filename mutation check"; fi
+
 echo ""
 echo "================================================================"
 printf 'RESULTS: %s PASS / %s FAIL (total %s)\n' "${PASS}" "${FAIL}" "$((PASS+FAIL))"
