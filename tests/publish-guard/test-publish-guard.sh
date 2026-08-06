@@ -64,6 +64,14 @@ run_text() {
 }
 run_json() {
 	local name="$1" exp="$2" json="$3" rc
+	# An empty payload is never a legitimate case: it means the jq that was
+	# supposed to build it failed (e.g. the macOS /bin/bash 3.2 nested-quote
+	# quirk noted below), and the guard would then exit 0 on empty stdin --
+	# turning a broken assertion into a silent PASS for every expected-0 case.
+	if [ -z "$json" ]; then
+		printf 'FAIL  %-62s (empty JSON payload: the case never ran)\n' "$name" >&2
+		FAIL=$((FAIL+1)); return
+	fi
 	printf '%s' "$json" | bash "$GUARD" >/dev/null 2>&1
 	rc=$?
 	if [ "$rc" -eq "$exp" ]; then printf 'PASS  %-62s (rc=%d)\n' "$name" "$rc"; PASS=$((PASS+1))
@@ -295,6 +303,165 @@ if [ "$rc" -eq 2 ]; then printf 'PASS  %-62s (rc=%d)\n' "I1: real --no-verify bl
 else printf 'FAIL  %-62s (rc=%d, want 2)\n' "I1: real --no-verify blocked even with broken perl on PATH" "$rc" >&2; FAIL=$((FAIL+1)); fi
 rm -rf "$I1_FAKEBIN"
 
+echo "== Bash hook-bypass R4-A: bundled short-option clusters containing n -> block =="
+# Round-4 (2026-08-06): -n bundled with other boolean short options is a REAL,
+# executable git invocation (verified in a throwaway repo with a genuine
+# pre-commit hook: the hook was SKIPPED and the commit landed for every form
+# below). The pre-round-4 check only recognised a BARE -n token, so all of
+# these silently passed.
+run_json "R4-A1 -nm with a message value -> block"   2 "$(jq -nc --arg c "git commit -nm msg" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-A2 -an (= -a -n) -> block"              2 "$(jq -nc --arg c "git commit -an -m msg" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-A3 -nam with a message value -> block"  2 "$(jq -nc --arg c "git commit -nam msg" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-A4 -nm\"attached quoted value\" -> block" 2 "$(jq -nc --arg c 'git commit -nm"msg"' '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-A5 -nmmsg (attached bare value) -> block" 2 "$(jq -nc --arg c "git commit -nmmsg" '{tool_name:"Bash",tool_input:{command:$c}}')"
+
+echo "== Bash hook-bypass R4-B: split-quote concatenation -> block (tokenizer path) =="
+# The shell concatenates adjacent quoted/unquoted fragments into ONE word, so
+# these all execute as the real flag. A raw substring scan cannot see them
+# (the literal characters are interrupted); only exact-token matching over a
+# tokenizer resolves them. This is why round 4 ORs a tokenizer check IN rather
+# than (as round 1 did) replacing the substring scan with one.
+NV_A="$(printf -- '--no-ver""%s' 'ify')"
+NV_B="$(printf -- '--no-ver"%s"' 'ify')"
+NV_C="$(printf -- '--"no-ver%s"' 'ify')"
+NV_D="$(printf -- '--no-ve%srify' "''")"
+NV_E="$(printf -- '--no-ver\\%s' 'ify')"
+run_json "R4-B1 --no-ver\"\"ify -> block"  2 "$(jq -nc --arg c "git commit -m x $NV_A" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-B2 --no-ver\"ify\" -> block"  2 "$(jq -nc --arg c "git commit -m x $NV_B" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-B3 --\"no-verify\" -> block"  2 "$(jq -nc --arg c "git commit -m x $NV_C" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-B4 --no-ve''rify -> block"    2 "$(jq -nc --arg c "git commit -m x $NV_D" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-B5 --no-ver\\ify (backslash inside the word) -> block" 2 "$(jq -nc --arg c "git commit -m x $NV_E" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-B6 -'n' -> block"             2 "$(jq -nc --arg c "git commit -m x -'n'" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-B7 '-'n -> block"             2 "$(jq -nc --arg c "git commit -m x '-'n" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-B8 \"-\"n -> block"           2 "$(jq -nc --arg c 'git commit -m x "-"n' '{tool_name:"Bash",tool_input:{command:$c}}')"
+
+echo "== Bash hook-bypass R4-C: the git-subcommand test must read the RAW text =="
+# The quote-masking that fixes the "bash -n in a message" false positive must
+# NEVER be applied to the `git commit|push` detection itself: masking the
+# contents of quotes would let a quoted command hide the subcommand entirely.
+# Round 4 briefly added a left word-boundary to that test and this exact case
+# caught it before it shipped.
+run_json "R4-C1 eval \"git commit FLAG\" (quoted command) -> block" 2 \
+	"$(jq -nc --arg c "eval \"git commit ${NOVERIFY_FLAG}\"" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-C2 \$(git commit FLAG) subshell -> block" 2 \
+	"$(jq -nc --arg c "\$(git commit -m x ${NOVERIFY_FLAG})" '{tool_name:"Bash",tool_input:{command:$c}}')"
+# Global options may sit between `git` and the subcommand. `git -C <dir>` is a
+# routine form in this project (the Bash tool discourages `cd`), and it was
+# never even examined by the pre-round-4 `git\s+(commit|push)` test.
+run_json "R4-C3 git -C <dir> commit FLAG -> block" 2 \
+	"$(jq -nc --arg c "git -C /tmp/repo commit -m x ${NOVERIFY_FLAG}" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-C4 git -C <dir> commit -n -> block" 2 \
+	"$(jq -nc --arg c "git -C /tmp/repo commit -m x ${DASH_N}" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-C5 git -c k=v commit FLAG -> block" 2 \
+	"$(jq -nc --arg c "git -c user.name=x commit -m y ${NOVERIFY_FLAG}" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-C6 git --no-pager commit FLAG -> block" 2 \
+	"$(jq -nc --arg c "git --no-pager commit -m x ${NOVERIFY_FLAG}" '{tool_name:"Bash",tool_input:{command:$c}}')"
+
+echo "== Bash hook-bypass R4-D: the two bypasses round 3 opened -> block =="
+# Both verified as TRUE bypasses by real execution (hook SKIPPED, commit
+# landed) before the round-4 rewrite.
+run_json "R4-D1 quoted '-sm' x FLAG 'y' -> block" 2 \
+	"$(jq -nc --arg c "git commit '-sm' x ${NOVERIFY_FLAG} 'y'" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-D2 -nm FLAG -> block" 2 \
+	"$(jq -nc --arg c "git commit -nm ${NOVERIFY_FLAG}" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-D3 quoted '-sm' x -n 'y' -> block" 2 \
+	"$(jq -nc --arg c "git commit '-sm' x ${DASH_N} 'y'" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-D4 -nm -n -> block" 2 \
+	"$(jq -nc --arg c "git commit -nm ${DASH_N}" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-D5 ANSI-C quoted \$'-n' -> block" 2 \
+	"$(jq -nc --arg c "git commit -m x \$'${DASH_N}'" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-D6 escaped dash \\-n -> block" 2 \
+	"$(jq -nc --arg c "git commit -m x \\${DASH_N}" '{tool_name:"Bash",tool_input:{command:$c}}')"
+
+echo "== Bash hook-bypass R4-E: additional real-world commands that must stay allowed =="
+run_json "R4-E1 commit --dry-run -> allow"   0 "$(jq -nc --arg c 'git commit -m "fix" --dry-run' '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-E2 multibyte message mentioning bash -n -> allow" 0 \
+	"$(jq -nc --arg c "git commit -m \"日本語メッセージ bash ${DASH_N} を含む\"" '{tool_name:"Bash",tool_input:{command:$c}}')"
+# Assigned first, not inlined: an apostrophe inside an inline command
+# substitution trips the macOS /bin/bash 3.2 quirk documented above, jq then
+# fails, and the empty payload would have PASSED vacuously for these two
+# expected-allow cases (caught by the empty-payload check in run_json).
+E3_CMD="$(printf 'git commit -m "msg with %snested%s quotes and bash %s"' "'" "'" "$DASH_N")"
+E3_JSON="$(jq -nc --arg c "$E3_CMD" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-E3 nested single quotes inside a double-quoted message -> allow" 0 "$E3_JSON"
+E4_CMD="$(printf 'git commit -m "don%st break this"' "'")"
+E4_JSON="$(jq -nc --arg c "$E4_CMD" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-E4 apostrophe inside a double-quoted message -> allow" 0 "$E4_JSON"
+run_json "R4-E5 message says 'no-verify' without the leading dashes -> allow" 0 \
+	"$(jq -nc --arg c 'git commit -m "wrap-up: no-verify policy notes"' '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-E6 amend --no-edit -> allow"    0 "$(jq -nc --arg c 'git commit --amend --no-edit' '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-E7 push --set-upstream to a branch containing -n -> allow" 0 \
+	"$(jq -nc --arg c 'git push --set-upstream origin feature/add-notify-nag' '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-E8 tail -n20 (no git subcommand) -> allow" 0 "$(jq -nc --arg c 'tail -n20 log.txt' '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-E9 plain push -> allow"         0 "$(jq -nc --arg c 'git push origin main' '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-E10 -F message file -> allow"   0 "$(jq -nc --arg c 'git commit -F /tmp/msg.txt' '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "R4-E11 message mentioning a path with -n in it -> allow" 0 \
+	"$(jq -nc --arg c 'git commit -m "see docs/run-nightly.md"' '{tool_name:"Bash",tool_input:{command:$c}}')"
+
+echo "== Bash hook-bypass R4-F: broken perl matrix -> always fail closed =="
+# I1 above covers "exit 1, no output". The trust signal is the EXACT stdout
+# marker, so every other way perl can malfunction must also fall through to the
+# raw substring scan rather than being read as a decision.
+R4F_JSON="$(jq -nc --arg c "git commit -m x ${NOVERIFY_FLAG}" '{tool_name:"Bash",tool_input:{command:$c}}')"
+r4f_check() {
+	local name="$1" body="$2" mode="${3:-755}" dir rc
+	dir="$(mktemp -d -t pubguard-r4f.XXXXXX)"
+	printf '%s' "$body" > "$dir/perl"
+	chmod "$mode" "$dir/perl"
+	printf '%s' "$R4F_JSON" | PATH="$dir:$PATH" bash "$GUARD" >/dev/null 2>&1
+	rc=$?
+	rm -rf "$dir"
+	if [ "$rc" -eq 2 ]; then printf 'PASS  %-62s (rc=%d)\n' "$name" "$rc"; PASS=$((PASS+1))
+	else printf 'FAIL  %-62s (rc=%d, want 2)\n' "$name" "$rc" >&2; FAIL=$((FAIL+1)); fi
+}
+r4f_check "R4-F1 perl exits 0 silently -> fail closed"        '#!/bin/sh
+exit 0
+'
+r4f_check "R4-F2 perl pollutes stdout before ALLOW -> fail closed" '#!/bin/sh
+printf "warning: x\nALLOW"
+exit 0
+'
+r4f_check "R4-F3 perl prints garbage -> fail closed"          '#!/bin/sh
+printf xyzzy
+'
+r4f_check "R4-F4 perl prints truncated marker -> fail closed" '#!/bin/sh
+printf ALLO
+'
+r4f_check "R4-F5 perl interpreter missing -> fail closed"     '#!/bin/sh
+exec /nonexistent/perl "$@"
+'
+r4f_check "R4-F6 perl killed by a signal -> fail closed"      '#!/bin/sh
+kill -9 $$
+'
+r4f_check "R4-F7 perl not executable -> fail closed"          '#!/bin/sh
+printf ALLOW
+' 644
+
+echo "== Bash hook-bypass R4-G: no catastrophic backtracking on pathological input =="
+# The masker is a \G-anchored scan with mutually exclusive branches and the
+# scans are linear, but a regression here would hang the PreToolUse hook (and
+# therefore the whole session), so it is asserted rather than assumed.
+r4g_check() {
+	local name="$1" cmd="$2" json t0 t1 el
+	json="$(jq -nc --arg c "$cmd" '{tool_name:"Bash",tool_input:{command:$c}}')"
+	t0="$(date +%s)"
+	printf '%s' "$json" | bash "$GUARD" >/dev/null 2>&1
+	t1="$(date +%s)"
+	el=$((t1 - t0))
+	if [ "$el" -lt 10 ]; then printf 'PASS  %-62s (%ds)\n' "$name" "$el"; PASS=$((PASS+1))
+	else printf 'FAIL  %-62s (%ds, want <10)\n' "$name" "$el" >&2; FAIL=$((FAIL+1)); fi
+}
+BIG_A="$(perl -e 'print "a" x 300000')"
+BIG_Q="$(perl -e 'print q{"ab"} x 4000')"
+BIG_U="$(perl -e 'print q{"} x 4001')"
+BIG_B="$(perl -e 'print qq{\\\\} x 100000')"
+BIG_E="$(perl -e 'print q{\"} x 30000')"
+r4g_check "R4-G1 300k plain characters"        "git commit -m $BIG_A"
+r4g_check "R4-G2 4000 balanced quote pairs"    "git commit -m $BIG_Q"
+r4g_check "R4-G3 4001 unbalanced quotes"       "git commit -m $BIG_U"
+r4g_check "R4-G4 100k backslashes"             "git commit -m $BIG_B"
+r4g_check "R4-G5 30k escaped quotes in one string" "git commit -m \"$BIG_E\""
+
 echo "== Write/Edit =="
 run_json "write public IP -> tracked README block" 2 "$(jq -nc --arg fp "$REPO_ROOT/README.md" --arg c "host $PUB_IP" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"
 run_json "write phone -> tracked README block"     2 "$(jq -nc --arg fp "$REPO_ROOT/README.md" --arg c "tel $FAKE_PHONE" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"
@@ -305,7 +472,17 @@ run_json "multiedit public IP -> block"            2 "$(jq -nc --arg fp "$REPO_R
 run_json "read tool -> allow"                      0 "$(jq -nc '{tool_name:"Read",tool_input:{file_path:"/x"}}')"
 
 echo "== gitignore-skip =="
-EXCL="$REPO_ROOT/.git/info/exclude"
+# .git is a FILE (not a directory) in a linked worktree, so info/exclude lives
+# in the common dir. Resolve it rather than assuming $REPO_ROOT/.git/ -- the
+# assumption made this single assertion unrunnable (and silently FAIL) whenever
+# the suite was executed from a worktree.
+GIT_COMMON="$(git -C "$REPO_ROOT" rev-parse --git-common-dir 2>/dev/null)"
+case "$GIT_COMMON" in
+	/*) : ;;
+	*)  GIT_COMMON="$REPO_ROOT/${GIT_COMMON:-.git}" ;;
+esac
+mkdir -p "$GIT_COMMON/info"
+EXCL="$GIT_COMMON/info/exclude"
 IGN_NAME="guardtest-ignored-$$.md"
 printf '%s\n' "$IGN_NAME" >> "$EXCL"
 run_json "write IP into gitignored file -> allow"  0 "$(jq -nc --arg fp "$REPO_ROOT/$IGN_NAME" --arg c "host $PUB_IP" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"

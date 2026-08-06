@@ -101,42 +101,67 @@ else
 		Bash)
 			CMD="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)"
 			# Detect `git commit|push --no-verify` / `-n` as an ACTUAL flag on the
-			# command line (a hook-bypass attempt). This is DELIBERATELY still a
-			# blind substring/regex scan of the raw command text -- NOT a shell
-			# tokenizer/interpreter -- because a prior version of this check tried
-			# to "understand" the command by tokenizing it (Text::ParseWords) and
-			# that opened six real, verified bypasses: $'--no-verify' (ANSI-C
-			# quoting), F=--no-verify; ... $F (variable indirection), $(echo
-			# --no-verify) / `echo --no-verify` (command substitution), ${Q:---no-
-			# verify} (parameter-expansion default), and a backslash-newline line
-			# continuation -- all of which a real shell expands to the literal
-			# flag at execution time, but none of which a static tokenizer
-			# resolves, so each one silently passed. A blind substring scan does
-			# not need to resolve any of that: the literal characters
-			# "--no-verify" (or "-n") are still sitting somewhere in the raw,
-			# unexecuted command text in every one of those forms, so grep finds
-			# them without understanding shell semantics at all.
+			# command line (a hook-bypass attempt).
 			#
-			# The ONLY thing that scan is too broad for is the ORIGINALLY reported
-			# false positive: a commit message that merely mentions "bash -n" in
-			# prose. So the fix is narrow on purpose: strip out just the VALUE
-			# text of known message-carrying options (-m/--message, -F/--file,
-			# -c, -C, -t, --fixup, --squash -- '=', attached, and space-separated
-			# forms) via a plain Perl regex substitution (no shell semantics, no
-			# module dependency beyond core Perl regex), then run the exact same
-			# blind substring scan the original code always used. Everything that
-			# is NOT recognized as one of those specific value slots -- including
-			# every one of the six bypass forms above, none of which places its
-			# payload inside a -m/-F/... value -- is left completely untouched and
-			# still scanned byte-for-byte.
+			# DESIGN (round 4, 2026-08-06). Three previous attempts failed the same
+			# way, so the MECHANISM that produced the failures is removed rather
+			# than tuned once more:
 			#
-			# The "-n" alternative additionally accepts a leading/trailing quote
-			# character (' or ") as a boundary, not only whitespace: the original
-			# whitespace-only boundary let a bare quoted '-n' slip through even
-			# with no tokenizing involved (quoting the whole flag doesn't change
-			# what's adjacent to it). This is still a pure character-class widening
-			# of a substring scan, not shell interpretation, so it does not
-			# reintroduce the tokenizer's failure mode.
+			#   r1  tokenized the command (Text::ParseWords) and scanned the TOKENS
+			#       INSTEAD of the raw text. Six real bypasses opened, because a
+			#       static tokenizer does not perform shell EXPANSION:
+			#       $'--no-verify' (ANSI-C quoting), F=--no-verify; ... $F,
+			#       $(echo --no-verify), `echo --no-verify`, ${Q:---no-verify}, and a
+			#       backslash-newline continuation. A real shell turns each into the
+			#       literal flag at execution time; the tokenizer resolved none.
+			#   r2  went back to a substring scan but first DELETED the value spans
+			#       of message-carrying options. Deleting text can delete the
+			#       payload: the value branch ate the NEXT, genuine token
+			#       (`git commit -m x file-c --no-verify`) as a bogus "value".
+			#   r3  refined the deletion rules. Two more deletion-shaped bypasses
+			#       appeared (`git commit '-sm' x --no-verify 'y'`,
+			#       `git commit -nm --no-verify`).
+			#
+			# Root cause: SPAN DELETION combined with FLAG-OWNERSHIP INFERENCE. Any
+			# rule that decides "these bytes are option X's value, drop them" can be
+			# steered into dropping a real flag instead, so every new rule creates a
+			# new way to hide the payload -- the reason three rounds did not
+			# converge. Round 4 removes both. Nothing is deleted and no option
+			# ownership is inferred; the checks below are pure ORs, so each one can
+			# only ever turn ALLOW into BLOCK, never the reverse.
+			#
+			#   G.  Is this a `git commit` / `git push` invocation at all? Decided on
+			#       the RAW text, never on a transformed copy -- deciding it on a
+			#       masked/stripped copy would let `eval "git commit --no-verify"`
+			#       hide the subcommand and skip the entire check. Global options
+			#       (-C <dir>, -c k=v, --no-pager) are allowed between `git` and the
+			#       subcommand: without that, `git -C /path commit --no-verify` was
+			#       never even examined (a hole present since the original version).
+			#   P1. Literal "--no-verify" anywhere in the RAW text. This is the
+			#       original pre-r1 check, byte for byte, and it alone covers all six
+			#       r1 forms: every one of them still carries the literal characters
+			#       in the unexecuted command text. It is never masked, so no
+			#       transformation can lose it. A commit message that merely mentions
+			#       "--no-verify" therefore still blocks; that is deliberate and
+			#       unchanged (use `git commit -F <file>`), and it is NOT the false
+			#       positive this work was asked to fix.
+			#   P2. A short-option cluster containing "n" (-n, -an, -nm, -nam) in the
+			#       QUOTE-MASKED text. Masking is purely lexical: scan left to right
+			#       and replace the CONTENTS of each CLOSED quoted region with a
+			#       placeholder. This is the whole fix for the reported false
+			#       positive (a commit message mentioning "bash -n"), and unlike
+			#       deletion it cannot lose a payload: each quoted region is decided
+			#       by the quoting itself, not by guessing which option it belongs
+			#       to, and text outside quotes is never touched. Contents that are
+			#       EXACTLY a flag are kept (so a deliberately quoted '-n' is still
+			#       caught); an unbalanced quote falls back to the raw text.
+			#   P3. Exact-token match over Text::ParseWords::shellwords. ADDITIVE --
+			#       never a replacement for P1/P2. The tokenizer is the only one of
+			#       the three that resolves split-quote concatenation (--no-ver"ify",
+			#       -'n', --no-ver\ify); P1/P2 are the only ones that survive shell
+			#       expansion. Neither is complete alone, so both run. Because it is
+			#       OR-ed in (r1 REPLACED the substring scan with it), it cannot
+			#       reintroduce the r1 regression.
 			#
 			# Fail-closed on tool failure. The trust signal is the EXACT literal
 			# stdout text "BLOCK" or "ALLOW" printed by the perl script below --
@@ -155,46 +180,57 @@ else
 			if [ -n "$CMD" ]; then
 				DECISION="$(printf '%s' "$CMD" | perl -0777 -ne '
 					my $cmd = $_;
-					my $qval = qr/(?: \x27[^\x27]*\x27 | "(?:[^"\\]|\\.)*" )/x;
-					my $uval = qr/\S+/;
-					my $s = $cmd;
-					# Long flags: one atomic pass ("=" form or spaced form).
-					$s =~ s{
-						(--(?:message|file|fixup|squash))
-						(?: = (?:$qval|$uval) | \s+ (?:$qval|$uval) )?
-					}{$1}gx;
-					# Short flags: one atomic pass, mutually exclusive forms, so a
-					# bare flag left by this same pass is never re-matched as if it
-					# had a fresh, unstripped value. The left boundary requires the
-					# preceding character to be whitespace, a quote, or the start
-					# of the string (NOT merely "not another dash") -- a lone
-					# negative lookbehind on a bare dash let the TAIL of an
-					# arbitrary token (e.g. "file-c", "foo-m", "A-F") misparse as
-					# a real short flag, and the attached-or-spaced value branch
-					# then ate the NEXT, genuine token as its bogus value --
-					# silently swallowing a real --no-verify/-n sitting right
-					# after it. [A-Za-z]* additionally recognizes bundled short
-					# options (-am, -sm, -qm: boolean flags bundled with a
-					# value-taking one), so their message value is still stripped
-					# and does not reintroduce the originally-reported false
-					# positive under those bundled forms.
-					$s =~ s{
-						(?<![^\s\x27\x22])(-[A-Za-z]*[mFcCt])
-						(?: = (?:$qval|$uval) | $qval | \s+ (?:$qval|$uval) | $uval )?
-					}{$1}gx;
-					my $has_gitcmd = ($s =~ /git\s+(?:commit|push)(?:\s|$)/) ? 1 : 0;
-					# -n boundary: whitespace / start / end only (matching the
-					# original), plus explicit fully-quoted-standalone-token
-					# alternatives (a lone -n wrapped in single or double quotes).
-					# NOT "any adjacent quote counts as a boundary": that was too
-					# loose -- an unrelated messages own closing quote, sitting
-					# right after an unstripped -n deep inside prose, satisfied it
-					# and reintroduced a false positive. Requiring the quotes to
-					# be a MATCHED PAIR immediately wrapping -n itself avoids that
-					# while still catching a deliberately quoted, standalone flag.
-					my $has_flag   = ($s =~ /--no-verify/
-						|| $s =~ /(?:^|\s)(?:-n|\x27-n\x27|\x22-n\x22)(?:\s|$)/) ? 1 : 0;
-					print(($has_gitcmd && $has_flag) ? "BLOCK" : "ALLOW");
+					# A short-option cluster containing "n": a bare -n, or -n
+					# bundled with other boolean short options (-an, -nm, -nam).
+					my $NC = qr/-[A-Za-z]*n[A-Za-z]*/;
+					# G. RAW text only (see header). No left word-boundary on
+					# "git" -- deliberately, because the original check had none
+					# either and adding one made a quoted
+					# `eval "git commit --no-verify"` stop matching (round-4
+					# self-test X1: a regression this file must not ship).
+					my $has_gitcmd = ($cmd =~ /git(?:\s+-\S*(?:\s+[^-\s]\S*)?){0,5}\s+(?:commit|push)(?![\w-])/) ? 1 : 0;
+					# P1. Raw literal long flag. Never masked, never stripped.
+					my $flag = ($cmd =~ /--no-verify/) ? 1 : 0;
+					# P2. Quote-masked short-option cluster.
+					if (!$flag) {
+						my $s = $cmd; my $out = q{}; my $balanced = 1;
+						pos($s) = 0;
+						while (pos($s) < length($s)) {
+							# Runs of ordinary characters pass through untouched.
+							if ($s =~ /\G([^\x27"\\]+)/gcs) { $out .= $1; next; }
+							# A backslash escape outside quotes takes its next
+							# character with it (covers \\ and line continuations).
+							if ($s =~ /\G(\\.?)/gcs)        { $out .= $1; next; }
+							my $c;
+							if    ($s =~ /\G\x27([^\x27]*)\x27/gcs)  { $c = $1; }
+							elsif ($s =~ /\G"((?:[^"\\]|\\.)*)"/gcs) { $c = $1; }
+							else  { $balanced = 0; last; }
+							# Space-padded so masking can neither create nor destroy
+							# a word boundary for the scan below.
+							$out .= ($c eq q{--no-verify} || $c =~ /\A$NC\z/) ? qq{ $c } : qq{ \x01 };
+						}
+						my $scan = $balanced ? $out : $cmd;
+						# Left boundary: start / whitespace / backslash (so an
+						# escaped \-n is not read as mid-word). Right boundary: not
+						# alphanumeric, so a bundled -nm"msg" is caught while an
+						# attached numeric argument (-n1, `tail -n20`) is not.
+						$flag = 1 if $scan =~ /(?<![^\s\\])$NC(?![A-Za-z0-9])/;
+					}
+					# P3. Additive exact-token check (split-quote concatenation).
+					if (!$flag) {
+						my @w = eval {
+							local $SIG{__WARN__} = sub {};
+							require Text::ParseWords;
+							Text::ParseWords::shellwords($cmd);
+						};
+						if (!$@) {
+							for my $t (@w) {
+								next unless defined $t;
+								if ($t eq q{--no-verify} || $t =~ /\A$NC\z/) { $flag = 1; last; }
+							}
+						}
+					}
+					print(($has_gitcmd && $flag) ? "BLOCK" : "ALLOW");
 				' 2>/dev/null)"
 				case "$DECISION" in
 					BLOCK) BASH_BLOCK=1 ;;
