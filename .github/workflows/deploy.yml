@@ -189,10 +189,18 @@ jobs:
         # rsync on the very first run. Fail-closed: if the host cannot FF
         # (real local divergence, host ahead, fetch failure), the script
         # alerts via on-host ntfy AND this deploy fails loudly here.
+        #
+        # FY_LIVE=1 (2026-08-06, C3 rollout): scripts/lib/side-effects.sh makes
+        # alert DELIVERY opt-in, and this ssh command is the one caller of the
+        # script that gets no cron env header — without the flag the "cannot
+        # FF" / "host is ahead" alerts promised just above would be suppressed,
+        # leaving this step's own failure as the only signal. The script's git
+        # mutations are deliberately NOT gated (it is the host's delivery
+        # mechanism), so the advance itself behaves identically either way.
         run: |
           ssh -i ~/.ssh/id_deploy -p "$SSH_PORT" -o StrictHostKeyChecking=no \
             "$SSH_USER@$SSH_HOST" \
-            "FYD_REPO_DIR='$DEPLOY_PATH' FYD_NOTIFY='$DEPLOY_PATH/scripts/notify.sh' bash -s" \
+            "FY_LIVE=1 FYD_REPO_DIR='$DEPLOY_PATH' FYD_NOTIFY='$DEPLOY_PATH/scripts/notify.sh' bash -s" \
             < scripts/advance-host-checkout.sh
 
           # Fail-closed post-advance assertion (final-review Important-1):

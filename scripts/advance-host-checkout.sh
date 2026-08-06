@@ -137,10 +137,46 @@
 #
 # Env overrides (test-time + ops):
 #   FYD_REPO_DIR       repo checkout to advance (default: this script's repo)
-#   FYD_NOTIFY         notifier to invoke (default: <script dir>/notify.sh)
+#   FYD_NOTIFY         notifier to invoke (default: <script dir>/notify.sh).
+#                      Resolved by scripts/lib/side-effects.sh, not here —
+#                      the spelling and its precedence are unchanged.
+#   FY_LIVE=1          REQUIRED before an alert actually reaches ntfy.
+#                      Anything else is a loud dry no-op printing one
+#                      "DRY: would notify …" line per suppressed alert
+#                      (scripts/lib/side-effects.sh, C3 rollout 2026-08-06).
+#                      Both production callers carry it: the cron env header
+#                      (scripts/install-metal-host-advance-cron.sh) and
+#                      deploy.yml's "Advance host checkout" ssh command.
+#                      ONLY the alert is gated — see "What FY_LIVE does NOT
+#                      gate here" below.
 #   FYD_LOCK_TIMEOUT   seconds to wait for the concurrency lock (default:
 #                      120; test-time only — production callers keep the
 #                      default)
+#
+# What FY_LIVE does NOT gate here (deliberate, 2026-08-06 C3-2c):
+#   The git mutations (fetch / `checkout -- public/` / self-heal revert /
+#   `pull --ff-only`) and the anchor-source preservation copies are NOT
+#   gated. This script IS the delivery mechanism for every git-tracked file
+#   on the validator host (2026-07-13 ownership inversion), so a dry run
+#   that skipped the pull would stop delivery altogether — the "cron went
+#   quiet and nobody noticed" failure the C3 rollout exists to prevent,
+#   arrived at from the opposite direction. The preservation copies stay
+#   ungated in LOCK STEP with the discard they protect: gating the copy
+#   while leaving `git checkout -- public/` live would turn a dry run into
+#   silent data loss, which is strictly worse than either extreme.
+#
+# Library resolution (and why a missing library is NOT fatal here):
+#   scripts/lib/side-effects.sh is looked up beside this script first, then
+#   under FYD_REPO_DIR. Two lookups are needed because deploy.yml pipes this
+#   script over ssh with `bash -s`, where $0 is "bash" and the script-dir
+#   guess degrades to the ssh login cwd; only FYD_REPO_DIR is trustworthy
+#   there. If NEITHER resolves, this script degrades to logging its alerts
+#   instead of refusing to run (unlike the monitoring callers, which exit 3):
+#   a delivery mechanism must not be blocked by the payload it delivers. A
+#   host that is behind the commit which introduced the library would
+#   otherwise deadlock — the new script demands a file only the pull it
+#   refuses to perform can deliver. Degrading never performs a side effect;
+#   it only means an alert is logged rather than pushed, and it says so.
 #
 # Exit codes:
 #   0  already in sync, or successfully advanced to origin/main
@@ -202,7 +238,23 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="${FYD_REPO_DIR:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
-NOTIFY="${FYD_NOTIFY:-${SCRIPT_DIR}/notify.sh}"
+
+# See "Library resolution" in the header comment for why there are two
+# candidates and why neither resolving is a degradation rather than a
+# refusal.
+FYD_LIB=""
+FYD_LIB_LOADED=0
+for fyd_lib_candidate in "${SCRIPT_DIR}/lib/side-effects.sh" "${REPO_DIR}/scripts/lib/side-effects.sh"; do
+	if [ -r "$fyd_lib_candidate" ]; then
+		FYD_LIB="$fyd_lib_candidate"
+		break
+	fi
+done
+if [ -n "$FYD_LIB" ]; then
+	# shellcheck source=scripts/lib/side-effects.sh
+	. "$FYD_LIB"
+	FYD_LIB_LOADED=1
+fi
 
 # anchor-source.json protection state (see header comment). Declared here,
 # ahead of `set -u`-sensitive use, so the EXIT trap below is well-defined
@@ -225,10 +277,18 @@ log() { printf '[advance-host-checkout] %s\n' "$*"; }
 
 alert() {
 	# alert <priority> <title> <message>
-	if [ -x "$NOTIFY" ] || [ -f "$NOTIFY" ]; then
-		bash "$NOTIFY" "$1" "$2" "$3" || log "WARN: notify failed (alert was: $2 — $3)"
+	#
+	# Delivery is gated on FY_LIVE by fyd_notify; the delegate is resolved
+	# from FYD_NOTIFY exactly as before. A failure (including "delegate not
+	# readable", which used to be this function's own branch) is logged and
+	# swallowed — the advance must never die because its alert channel is
+	# down. When the library itself could not be resolved at all (see
+	# "Library resolution" in the header) the alert is logged rather than
+	# delivered, loudly enough to grep for, and the advance still proceeds.
+	if [ "$FYD_LIB_LOADED" -eq 1 ]; then
+		fyd_notify "$1" "$2" "$3" || log "WARN: notify failed (alert was: $2 — $3)"
 	else
-		log "WARN: notifier not found at $NOTIFY (alert was: $2 — $3)"
+		log "ALERT-UNDELIVERED[$1] side-effects library unresolved (looked beside this script and under ${REPO_DIR}/scripts/lib) — $2 — $3"
 	fi
 }
 

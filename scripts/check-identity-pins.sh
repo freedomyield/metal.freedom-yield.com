@@ -106,6 +106,11 @@
 #   4  --mode=live only: a `tracked` pin's URL could not be fetched, so the
 #      comparison could not be made (mismatches are never masked by this —
 #      a fetched 200 that mismatches is still exit 3)
+#   5  structural: scripts/lib/side-effects.sh is not readable. 5, not 3:
+#      3 already means "a tracked pin broke" and renumbering it would lie to
+#      every caller that branches on it (CI, the cron's log grep). 2 is also
+#      taken, by "cannot run" conditions that ALERT — and alerting is exactly
+#      what a missing side-effects library makes impossible.
 #
 # Alerting (--mode=live only):
 #   A new `tracked` break fires ONE high-priority ntfy push via notify.sh.
@@ -126,6 +131,26 @@
 #   non-numeric or future window epoch, and a non-numeric rearm setting all
 #   bypass suppression.
 #
+# FY_LIVE (C3 rollout 2026-08-06, scripts/lib/side-effects.sh)
+#   Gates DELIVERY of the ntfy pushes above and the alert-dedup state writes
+#   that pair with them — nothing else. Anything other than exactly "1" makes
+#   each of those a loud dry no-op printing one "DRY: would …" line. The cron
+#   env header carries FY_LIVE=1; tests deliberately do not.
+#
+#   THE VERDICT IS NEVER GATED. --mode=repo is the CI gate: it must return
+#   the same exit code on a machine that has never heard of FY_LIVE, or CI
+#   would go silently green the day this library landed — the exact "it went
+#   quiet and nobody noticed" failure the rollout exists to prevent. Repo
+#   mode has no push and no state write at all, so FY_LIVE changes nothing
+#   about it; live mode still classifies, compares, logs and exits
+#   identically, and only the push and the dedup record are suppressed.
+#
+#   The alert/state pairing is required by the library's contract: a dry
+#   fyd_notify returns 0, so recording "already alerted" against a
+#   notification nobody received would suppress the NEXT real alert for a
+#   whole re-arm window. Both are gated by the same FY_LIVE, so they are
+#   suppressed or performed together, never one without the other.
+#
 # Env overrides:
 #   FYD_REPO_ROOT       repo root (default: parent of this script's dir)
 #   FYD_IDENTITY_FILE   local manifest path (repo mode)
@@ -133,7 +158,9 @@
 #   FYD_BASELINE_FILE   baseline path (default deploy/identity-pin-baseline.json)
 #   FYD_FEED_EXCLUDES   push-owned feed list (default deploy/feed-excludes.txt)
 #   FYD_CURL            curl binary (tests substitute a stub)
-#   FYD_NOTIFY          notifier (default <script dir>/notify.sh)
+#   FYD_NOTIFY          notifier (default <script dir>/notify.sh). Resolved by
+#                       scripts/lib/side-effects.sh, not here — the spelling
+#                       and its precedence are unchanged.
 #   FYD_FETCH_ATTEMPTS  attempts per GET before giving up (default 3)
 #   FYD_RETRY_SLEEP     seconds between attempts (default 3; tests use 0)
 #   IDENTITY_PIN_LOG    file log (default <repo>/logs/identity-pin-drift.log)
@@ -154,19 +181,26 @@ for arg in "$@"; do
 	case "$arg" in
 		--mode=repo|--mode=live) MODE="${arg#--mode=}" ;;
 		--verbose|-v)            VERBOSE=1 ;;
-		-h|--help)               sed -n '2,140p' "$0" | sed 's/^# \?//'; exit 0 ;;
+		-h|--help)               sed -n '2,174p' "$0" | sed 's/^# \?//'; exit 0 ;;
 		*) echo "ERROR: unknown arg: $arg (try --help)" >&2; exit 2 ;;
 	esac
 done
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+FYD_LIB="${SCRIPT_DIR}/lib/side-effects.sh"
+if [ ! -r "$FYD_LIB" ]; then
+	echo "check-identity-pins: FATAL: side-effects library not readable at $FYD_LIB" >&2
+	exit 5
+fi
+# shellcheck source=scripts/lib/side-effects.sh
+. "$FYD_LIB"
+
 REPO_ROOT="${FYD_REPO_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 IDENTITY_FILE="${FYD_IDENTITY_FILE:-${REPO_ROOT}/public/api/identity.json}"
 IDENTITY_URL="${FYD_IDENTITY_URL:-https://metal.freedom-yield.com/api/identity.json}"
 BASELINE_FILE="${FYD_BASELINE_FILE:-${REPO_ROOT}/deploy/identity-pin-baseline.json}"
 FEED_EXCLUDES="${FYD_FEED_EXCLUDES:-${REPO_ROOT}/deploy/feed-excludes.txt}"
 CURL="${FYD_CURL:-curl}"
-NOTIFY="${FYD_NOTIFY:-${SCRIPT_DIR}/notify.sh}"
 LOG="${IDENTITY_PIN_LOG:-${REPO_ROOT}/logs/identity-pin-drift.log}"
 ALERT_STATE="${IDENTITY_PIN_ALERT_STATE:-${REPO_ROOT}/logs/identity-pin-alert-state.json}"
 ALERT_REARM_SEC="${IDENTITY_PIN_ALERT_REARM_SEC:-604800}"
@@ -182,12 +216,12 @@ log() {
 # alert <priority> <title> <message> — best-effort; a notify.sh failure is
 # logged but never changes the caller's exit code (same contract as
 # scripts/check-anchor-publish-health.sh).
+#
+# Delivery is gated on FY_LIVE by fyd_notify; the delegate is resolved from
+# FYD_NOTIFY exactly as before. A failure (including "delegate not readable",
+# which used to be this function's own branch) is logged and swallowed.
 alert() {
-	if [ -x "$NOTIFY" ] || [ -f "$NOTIFY" ]; then
-		bash "$NOTIFY" "$1" "$2" "$3" || log "WARN: notify failed (alert was: $2 — $3)"
-	else
-		log "WARN: notifier not found at $NOTIFY (alert was: $2 — $3)"
-	fi
+	fyd_notify "$1" "$2" "$3" || log "WARN: notify failed (alert was: $2 — $3)"
 }
 
 # die <message> — unrecoverable "cannot run" (exit 2). In live mode this MUST
@@ -430,6 +464,17 @@ should_alert() {
 
 state_write() {
 	local sig="$1" now_epoch dir tmp
+	# FYD-GATE(branch): the whole body below is a durable state write that
+	# records "the operator has been told about this break set". A dry
+	# fyd_notify returned 0 without telling anybody, so recording it would
+	# suppress the next REAL alert for a whole re-arm window — the library's
+	# CONTRACT calls this out by name. Gate the record with the same FY_LIVE
+	# that gated the notification, at the top, so no temp file is created
+	# either.
+	if ! fyd_is_live; then
+		fyd_dry_note "record the identity-pin alert-dedup signature → ${ALERT_STATE}"
+		return 0
+	fi
 	now_epoch="$(date -u +%s)"
 	dir="$(dirname "$ALERT_STATE")"
 	mkdir -p "$dir" 2>/dev/null || true
@@ -447,6 +492,7 @@ state_write() {
 		log "WARN: jq compose failed for alert-dedup state (state not persisted; next run will re-alert)"
 		return 1
 	fi
+	# FYD-GATE(branch): unreachable unless fyd_is_live returned true above.
 	mv "$tmp" "$ALERT_STATE" 2>/dev/null || {
 		rm -f "$tmp"
 		log "WARN: rename failed writing alert-dedup state to $ALERT_STATE (state not persisted; next run will re-alert)"
@@ -481,8 +527,18 @@ if [ "$N_FETCHFAIL" -gt 0 ]; then
 fi
 
 # Green: clear the dedup state so a later break — even an identical one —
-# alerts immediately instead of being suppressed by a stale window.
-[ "$MODE" = "live" ] && rm -f "$ALERT_STATE" 2>/dev/null
+# alerts immediately instead of being suppressed by a stale window. Gated in
+# lock step with state_write above: a dry run that cleared the window would
+# make the NEXT dry run "re-alert" a notification nobody receives, and a dry
+# run has no business mutating a file the live cron owns.
+# Wrapped in a function so `2>/dev/null` stays on rm itself — a redirect
+# written on the fyd_live_run call would belong to this shell and would also
+# swallow the "DRY: would …" line the gate exists to print.
+# FYD-GATE(branch): body reached only through the fyd_live_run below.
+clear_alert_state() { rm -f "$ALERT_STATE" 2>/dev/null; }
+if [ "$MODE" = "live" ]; then
+	fyd_live_run "clear the identity-pin alert-dedup state at ${ALERT_STATE}" clear_alert_state
+fi
 if [ "$VERBOSE" -eq 1 ]; then
 	log "OK no new artifact-pin breakage (mode=${MODE}): ok=${N_OK} baselined=${N_BASELINED} structural=${N_STRUCTURAL}"
 fi

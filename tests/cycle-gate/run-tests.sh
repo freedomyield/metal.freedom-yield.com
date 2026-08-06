@@ -443,11 +443,20 @@ for script_name in gen-cycle-history.sh gen-evidence.sh gen-renewal-ics.sh node-
 	# Use empty REPO_BASE override so internal file paths point to tmp;
 	# we only care that the gate-skip path is taken before any file work.
 	TMP_REPO_BASE="$(mktemp -d -t repobase.XXXXXX)"
-	mkdir -p "${TMP_REPO_BASE}/public/api" "${TMP_REPO_BASE}/scripts"
+	mkdir -p "${TMP_REPO_BASE}/public/api" "${TMP_REPO_BASE}/scripts/lib"
 	# Symlink cycle-gate.sh + the target script into tmp scripts dir so
 	# ROOT/scripts/cycle-gate.sh resolves correctly.
 	ln -s "${REPO_ROOT}/scripts/cycle-gate.sh" "${TMP_REPO_BASE}/scripts/cycle-gate.sh"
 	ln -s "${REPO_ROOT}/scripts/${script_name}" "${TMP_REPO_BASE}/scripts/${script_name}"
+	# uptime-history.sh sources scripts/lib/side-effects.sh relative to the
+	# repo root it is invoked from (C3 rollout, 2026-08-06) and refuses with
+	# exit 3 without it. Without this symlink the case would still "pass" —
+	# a script that dies before the gate also never prints the deferral
+	# marker — i.e. it would go vacuous rather than red. FY_LIVE stays unset:
+	# the assertion is that the gate is consulted and not deferred, and the
+	# script must reach that consultation without performing any production
+	# side effect on the way.
+	ln -s "${REPO_ROOT}/scripts/lib/side-effects.sh" "${TMP_REPO_BASE}/scripts/lib/side-effects.sh"
 	# Create minimal validator.json + uptime-cycles.json + incidents.json
 	# so scripts that read these don't error before reaching gate check.
 	# Richer validator.json needed for uptime-history.sh Job A (= which runs
