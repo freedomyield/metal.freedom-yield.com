@@ -125,8 +125,23 @@ import sys
 
 SCHEMA_RE = re.compile(r"^(?P<base>.+?)\.schema\.v\d+\.json$")
 EXAMPLE_RE = re.compile(r"^(?P<base>.+?)(?:\.[A-Za-z0-9-]+)?\.example\.(?P<ext>jsonl?)$")
-STATE_PATH_RE = re.compile(r"/var/lib/freedom-yield/([A-Za-z0-9._-]+\.jsonl?)\b")
-API_PATH_RE = re.compile(r"public/api/([A-Za-z0-9._-]+\.jsonl?)\b")
+STATE_PATH_RE = re.compile(r"/var/lib/freedom-yield/([A-Za-z0-9][A-Za-z0-9._-]*\.jsonl?)\b")
+API_PATH_RE = re.compile(r"public/api/([A-Za-z0-9][A-Za-z0-9._-]*\.jsonl?)\b")
+# A JSON file named directly under a variable-denoted *directory*, e.g.
+# `STATE_FILE="${STATE_DIR}/cycle-gate-state.json"`. Without this, an artifact
+# whose path is only ever composed through a variable is invisible to discovery
+# — cycle-gate-state.json was, while the docs listed it as checked.
+#
+# Two deliberate narrowings, both learned by getting it wrong first: the
+# variable must NAME a directory (`*_DIR`), and the filename must be
+# distinctive (contain a `-`). Matching any `$VAR/*.json` instead invented
+# artifacts out of scratch-file paths — `$TMP/source.json`, `$TMP/receipt.json`,
+# `${stage}/state.json` — and such generic ghosts are worse than the gap they
+# close: a vocabulary-less `source.json` SHADOWS the real anchor-source.json
+# binding at that read site, turning an analyzed read into a skipped one.
+VAR_DIR_PATH_RE = re.compile(
+    r"\$\{?[A-Za-z_][A-Za-z0-9_]*_DIR\}?/"
+    r"([A-Za-z0-9][A-Za-z0-9._]*-[A-Za-z0-9._-]*\.jsonl?)\b")
 
 
 def walk_files(root, exts):
@@ -224,13 +239,12 @@ def discover_artifacts(repo, texts):
     # Runtime-only artifacts (never checked in): the only evidence they exist
     # is a path literal in the code that produces or consumes them.
     for text in texts:
-        for m in STATE_PATH_RE.finditer(text):
-            ensure(m.group(1))
-        for m in API_PATH_RE.finditer(text):
-            fn = m.group(1)
-            if SCHEMA_RE.match(fn) or EXAMPLE_RE.match(fn):
-                continue
-            ensure(fn)
+        for regex in (STATE_PATH_RE, API_PATH_RE, VAR_DIR_PATH_RE):
+            for m in regex.finditer(text):
+                fn = m.group(1)
+                if SCHEMA_RE.match(fn) or EXAMPLE_RE.match(fn):
+                    continue
+                ensure(fn)
 
     referenced = set()
     for text in texts:
@@ -400,7 +414,7 @@ def skip_double_quoted(text, i):
     return n
 
 
-def find_jq_calls(text):
+def find_jq_calls(text, stats=None):
     """Yield (offset, program, operand_region, preceding_region, argfile_region).
 
     Only single-quoted jq programs are recognized. Scanning skips double-quoted
@@ -431,10 +445,18 @@ def find_jq_calls(text):
             if c == "\n" or c in "|;)&":
                 break        # `jq .` / `jq -e` with no quoted program
             i += 1
+        # A jq call with no single-quoted program (`jq .`, `jq empty`, `jq -e`,
+        # or a double-quoted program) carries no analyzable field reads. Count
+        # it: an uncounted skip is an invisible blind spot, and this checker's
+        # whole claim is that its blind spots stay visible.
         if prog_start is None:
+            if stats is not None:
+                stats["jq_no_program"] = stats.get("jq_no_program", 0) + 1
             continue
         prog_end = text.find("'", prog_start + 1)
         if prog_end == -1:
+            if stats is not None:
+                stats["jq_no_program"] = stats.get("jq_no_program", 0) + 1
             continue
         program = text[prog_start + 1:prog_end]
 
@@ -499,6 +521,28 @@ def logical_rhs(text, match):
     return text[start:i]
 
 
+JQ_OPTION_VALUE_RE = re.compile(
+    r"--(?:arg|argjson|rawfile|slurpfile|argfile)\s+\S+\s+"
+    r"(?:\"[^\"]*\"|'[^']*'|\S+)")
+
+
+def strip_jq_option_values(text):
+    """Remove `--arg NAME VALUE` pairs before looking for the jq INPUT.
+
+    A variable passed as a jq option value is a scalar parameter, not the data
+    being read. Without this, check-validator.sh's
+
+        NODE_ID=$(jq -r '.nodeId' "$VALIDATOR_JSON")      # bound: validator.json
+        matched=$(echo "$json" | jq --arg id "$NODE_ID" '…')
+
+    made `matched` inherit validator.json purely because $NODE_ID appeared in
+    the line — so an RPC response got audited against a local feed's vocabulary
+    and `.weight` was reported as a mismatch. Pure false positive, and the kind
+    that teaches people to ignore the checker.
+    """
+    return JQ_OPTION_VALUE_RE.sub(" ", text)
+
+
 def bind_variables(text, artifacts):
     """Shell variable name -> artifact id, transitively.
 
@@ -525,7 +569,9 @@ def bind_variables(text, artifacts):
         for name, rhs in assigns:
             if name in bindings or "$(" not in rhs:
                 continue
-            targets = {bindings[r] for r in VAR_REF_RE.findall(rhs) if r in bindings}
+            targets = {bindings[r]
+                       for r in VAR_REF_RE.findall(strip_jq_option_values(rhs))
+                       if r in bindings}
             if len(targets) == 1:
                 bindings[name] = targets.pop()
                 changed = True
@@ -560,9 +606,17 @@ def writer_artifacts(text, bindings, artifacts):
 # jq program parsing: which field names does this program READ?
 # ---------------------------------------------------------------------------
 
-# A dotted chain not preceded by an identifier char, `$`, `)` or `]`, so
-# `$var.field` and `some.file` are not mistaken for field reads.
-CHAIN_RE = re.compile(r"(?<![\w$)\]])((?:\.[A-Za-z_][A-Za-z0-9_]*)+)")
+# A dotted chain not preceded by an identifier char or `$`, so `$var.field`
+# (a read on a jq variable, not on the input) and `some.file` are not mistaken
+# for field reads.
+#
+# `)` and `]` are deliberately NOT excluded. They were until 2026-08-06, which
+# made every field reached through an index or a group invisible — `.cycles[].x`,
+# `(.a).x`, `.a[1:2].x` and, most importantly, `$inc[0].incidents[]?`: the very
+# expression in gen-cycle-history.sh whose `.date` selector was this audit's
+# top finding. The checker could see that bug only through the `select(...)`
+# that happened to follow. Eleven real field names in this repo were dark.
+CHAIN_RE = re.compile(r"(?<![\w$])((?:\.[A-Za-z_][A-Za-z0-9_]*)+)")
 
 # `to_entries` / `with_entries` / `group_by` synthesize these names; they are
 # jq's own, not the artifact's.
@@ -571,13 +625,29 @@ JQ_ENTRY_FNS = ("to_entries", "with_entries", "from_entries", "group_by")
 
 
 def blank_jq_strings(prog):
-    """Space out jq string-literal contents, preserving offsets."""
+    """Space out jq string-literal contents, preserving offsets.
+
+    `\\( ... )` interpolations are KEPT: they are executable jq, not text, and
+    blanking them hid real reads such as `"\\(.key)\\t\\(.value.sha256)"`.
+    """
     out, i, n = list(prog), 0, len(prog)
     while i < n:
         if prog[i] == '"':
             j = i + 1
             while j < n:
                 if prog[j] == "\\":
+                    if j + 1 < n and prog[j + 1] == "(":
+                        depth, k = 0, j + 1
+                        while k < n:                # keep the interpolation
+                            if prog[k] == "(":
+                                depth += 1
+                            elif prog[k] == ")":
+                                depth -= 1
+                                if depth == 0:
+                                    break
+                            k += 1
+                        j = k + 1
+                        continue
                     j += 2
                     continue
                 if prog[j] == '"':
@@ -713,21 +783,36 @@ NAMED_CALLBACK_RE = (r"\.(?:map|forEach|filter|find|some|every|sort)\s*"
                      r"\(\s*([A-Za-z_$][\w$]*)\s*\)")
 
 
-def js_read_keys(body, root, file_text=""):
-    """Yield (key, position_class) for property reads on `root` and aliases.
+# A callback declared as a named arrow — `var render = (it) => {...}` /
+# `const render = it => {...}` — referenced later by name. Same role as a
+# `function render(it)` declaration.
+NAMED_ARROW_DECL = (r"(?:var|let|const)\s+%s\s*=\s*(?:async\s+)?"
+                    r"(?:\(\s*([A-Za-z_$][\w$]*)[^)]*\)|([A-Za-z_$][\w$]*))\s*=>")
+NAMED_FUNC_DECL = r"function\s+%s\s*\(\s*([A-Za-z_$][\w$]*)"
+
+
+def js_read_keys(regions, root, file_text=""):
+    """Yield (key, position_class, offset) for reads on `root` and its aliases.
+
+    `regions` is a list of (text, base_offset) pairs, all slices of the same
+    file, so every read can be reported at ITS OWN line rather than at the
+    fetch() that fed it — a renderer's bad field is often 50 lines away, and
+    pointing the reader at the fetch makes the finding harder to act on than
+    it needs to be.
 
     Aliases followed: `var x = data.foo`, inline element callbacks
-    (`arr.forEach(function (e) {...})`), and callbacks passed BY NAME
-    (`incidents.map(renderIncident)`) — the last one matters because that is
-    where a card renderer's per-field reads live, several lines away from the
-    fetch that supplied them.
+    (`arr.forEach(function (e) {...})`), and callbacks passed BY NAME, declared
+    either as `function render(it)` or as a named arrow `var render = it => …`.
+    The by-name case matters because that is where a card renderer's per-field
+    reads live, far from the fetch that supplied them.
     """
-    regions = [body]
+    regions = list(regions)
     aliases = {root}
-    for _ in range(3):
+    known_bodies = {r[0] for r in regions}
+    for _ in range(4):
         added = False
         for name in list(aliases):
-            for region in list(regions):
+            for region, _base in list(regions):
                 pat = (r"(?:var|let|const)\s+([A-Za-z_$][\w$]*)\s*=\s*[^;\n]*"
                        r"\b%s\b\s*[.\[]" % re.escape(name))
                 for m in re.finditer(pat, region):
@@ -748,23 +833,30 @@ def js_read_keys(body, root, file_text=""):
                     fn_name = m.group(1)
                     if fn_name in JS_BUILTINS:
                         continue
-                    fm = re.search(r"function\s+%s\s*\(\s*([A-Za-z_$][\w$]*)"
-                                   % re.escape(fn_name), file_text)
+                    fm = (re.search(NAMED_FUNC_DECL % re.escape(fn_name), file_text)
+                          or re.search(NAMED_ARROW_DECL % re.escape(fn_name), file_text))
                     if not fm:
                         continue
+                    param = next((g for g in fm.groups() if g), None)
                     fn_body = brace_body(file_text, fm.end())
-                    if fn_body and fn_body not in regions:
-                        regions.append(fn_body)
+                    if fn_body and fn_body not in known_bodies:
+                        known_bodies.add(fn_body)
+                        regions.append((fn_body, file_text.find(fn_body, fm.end())))
                         added = True
-                    if fm.group(1) not in aliases:
-                        aliases.add(fm.group(1))
+                    if param and param not in aliases:
+                        aliases.add(param)
                         added = True
         if not added:
             break
 
-    seen = set()
-    for region in regions:
-        for name in aliases:
+    # Collect, then emit deterministically. `aliases` is a set, so iterating it
+    # directly made the reported line number depend on set ordering — the same
+    # file could blame a different (equally valid) read line between runs, which
+    # turns a diffable report into a noisy one. Report each (key, class) once,
+    # at its EARLIEST occurrence.
+    found = {}
+    for region, base in regions:
+        for name in sorted(aliases):
             pat = (r"(?<![\w$.])%s\b((?:\s*\[[^\]]*\]|\s*\??\.\s*[A-Za-z_$][\w$]*)+)"
                    % re.escape(name))
             for m in re.finditer(pat, region):
@@ -786,14 +878,17 @@ def js_read_keys(body, root, file_text=""):
                         cls = "alternative"
                     else:
                         cls = "first_guarded" if (last and guarded) else "bare"
-                    if (prop, cls) in seen:
-                        continue
-                    seen.add((prop, cls))
-                    yield prop, cls
+                    off = base + m.start() if base >= 0 else base
+                    prev = found.get((prop, cls))
+                    if prev is None or off < prev:
+                        found[(prop, cls)] = off
+
+    for (prop, cls), off in sorted(found.items(), key=lambda kv: (kv[1], kv[0])):
+        yield prop, cls, off
 
 
 def find_js_reads(text, artifacts):
-    """Yield (offset, artifact_id, [(key, class), ...]) per fetch callback."""
+    """Yield (fetch_offset, artifact_id, [(key, class, read_offset), ...])."""
     for m in FETCH_RE.finditer(text):
         url = m.group(1)
         base = url.rsplit("/", 1)[-1]
@@ -811,7 +906,8 @@ def find_js_reads(text, artifacts):
         am = AWAIT_JSON_RE.search(window)
         if am:
             yield (m.start(), base,
-                   list(js_read_keys(window[am.end():], am.group(1), text)))
+                   list(js_read_keys([(window[am.end():], m.end() + am.end())],
+                                     am.group(1), text)))
             continue
 
         tm = THEN_PARAM_RE.search(window)
@@ -831,7 +927,9 @@ def find_js_reads(text, artifacts):
         body = brace_body(window, tm.end())
         if not body:
             continue
-        yield m.start(), base, list(js_read_keys(body, param, text))
+        yield (m.start(), base,
+               list(js_read_keys([(body, m.end() + window.find(body, tm.end()))],
+                                 param, text)))
 
 
 # ---------------------------------------------------------------------------
@@ -923,7 +1021,9 @@ def main(argv):
     artifacts = discover_artifacts(
         repo, list(shell_raw.values()) + list(py_text.values()) + list(js_raw.values()))
 
-    programs = {p: [c[1] for c in find_jq_calls(t)] for p, t in shell_text.items()}
+    stats = {}
+    programs = {p: [c[1] for c in find_jq_calls(t, stats)]
+                for p, t in shell_text.items()}
     bindings = {p: bind_variables(t, artifacts) for p, t in shell_text.items()}
 
     # ---- vocabulary --------------------------------------------------------
@@ -1050,12 +1150,16 @@ def main(argv):
                 continue
             analyzed += 1
             seen = set()
-            for key, cls in keys:
+            for key, cls, read_off in keys:
                 if key in vocab[aid] or (aid, key) in waived or (key, cls) in seen:
                     continue
                 seen.add((key, cls))
-                record(aid, key, cls, rel, line_of(text, offset),
-                       "fetch('%s') callback" % aid, "js")
+                # Report the line of the READ, not of the fetch() that fed it:
+                # a renderer's bad field is routinely 50 lines away, and a
+                # finding you have to go hunting for is a finding that waits.
+                line = line_of(text, read_off if read_off >= 0 else offset)
+                record(aid, key, cls, rel, line,
+                       "read off the fetch('%s') response" % aid, "js")
 
     # One line of code that reads one bad key is ONE finding. The same
     # property often appears twice at a site under different guard contexts
@@ -1105,6 +1209,8 @@ def main(argv):
                   % (aid, len(vocab[aid]), src, wr))
         print("  jq sites skipped (input not bound to a known artifact): %d"
               % skipped_unbound)
+        print("  jq calls with no single-quoted program (nothing to analyze): %d"
+              % stats.get("jq_no_program", 0))
         if skipped_no_vocab:
             print("  read sites skipped (artifact has NO vocabulary source): %d"
                   % len(skipped_no_vocab))

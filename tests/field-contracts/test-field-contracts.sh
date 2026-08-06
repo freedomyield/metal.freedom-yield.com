@@ -199,6 +199,54 @@ echo "$OUT" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if
 	&& ok "A10 --json emits parseable findings with counts" \
 	|| bad "A10 --json output: $OUT"
 
+# ---- A11: reads inside a jq string interpolation are analyzed --------------
+# `"\(.foo)"` is executable jq, not text. Blanking whole string literals used
+# to hide these entirely.
+new_fixture "$T"
+# Written directly rather than sed-substituted: the replacement text contains
+# `\(`, which sed would read as a BRE group opener.
+cat > "$T/scripts/reader.sh" <<'EOF'
+#!/usr/bin/env bash
+THING="${ROOT}/public/api/thing.json"
+A="$(jq -r '"a=\(.alpha) b=\(.alfa)"' "$THING")"
+EOF
+run "$T"
+[ "$RC" -eq 1 ] && echo "$OUT" | grep -q "\.alfa" \
+	&& ok "A11 field read inside a jq string interpolation is analyzed" \
+	|| bad "A11 jq interpolation (rc=$RC): $OUT"
+
+# ---- A12: a variable used only as a jq --arg VALUE must not bind ------------
+# Regression guard. `--arg id "$BOUND"` passes a scalar; it does not make the
+# jq INPUT be that artifact. Treating it as a binding audited an unrelated API
+# response against a local feed's vocabulary and produced a pure false positive
+# (check-validator.sh's `.weight`, 2026-08-06).
+new_fixture "$T"
+cat >> "$T/scripts/reader.sh" <<'EOF'
+RESP="$(cat /dev/null)"
+W="$(echo "$RESP" | jq -r --arg id "$A" '.result.validators[]? | .weight')"
+EOF
+run "$T" --strict
+[ "$RC" -eq 0 ] \
+	&& ok "A12 --arg scalar does not bind the consumer to that artifact" \
+	|| bad "A12 --arg binding leak (rc=$RC): $OUT"
+
+# ---- A13: artifact reached only through a ${VAR_DIR}/ path is discovered ----
+new_fixture "$T"
+cat >> "$T/scripts/writer.sh" <<'EOF'
+STATE_DIR="/var/lib/example"
+GATE_FILE="${STATE_DIR}/my-gate-state.json"
+jq -n '{approved: true, seq: 1}' > "$GATE_FILE"
+EOF
+cat >> "$T/scripts/reader.sh" <<'EOF'
+STATE_DIR="/var/lib/example"
+GATE_FILE="${STATE_DIR}/my-gate-state.json"
+G="$(jq -r '.approvd // empty' "$GATE_FILE")"
+EOF
+run "$T"
+[ "$RC" -eq 1 ] && echo "$OUT" | grep -q "my-gate-state.json" \
+	&& ok "A13 \${VAR_DIR}/-composed artifact is discovered and checked" \
+	|| bad "A13 var-dir discovery (rc=$RC): $OUT"
+
 # ---------------------------------------------------------------------------
 # B. Mutation tests against a copy of THIS repo
 # ---------------------------------------------------------------------------
@@ -265,6 +313,10 @@ restore_mirror
 
 # ---------------------------------------------------------------------------
 echo
-echo "field-contracts: pass=$PASS fail=$FAIL"
+# Format required by tests/run-all-tests.sh's summary extractor
+# (`^(test-.*summary:|RESULTS:|Ran [0-9]+ tests? in)`). Anything else makes the
+# aggregator print this suite as an empty "PASS ()" and the case counts vanish
+# from CI output — the suite still gates, but silently.
+echo "test-field-contracts.sh summary: PASS=$PASS  FAIL=$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
 exit 0
