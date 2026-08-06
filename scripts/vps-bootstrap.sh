@@ -103,9 +103,17 @@ step_repo() {
 
 step_server_status_cron() {
   log "Step 6c/8: install 1-minute server-status.json refresh cron (ops dashboard)"
+  # 2026-08-06 (H2): SHELL/PATH headers (Rule 5) and the brace-wrapped
+  # start/end markers + rc=$? capture (Rules 2/3) were missing here — the
+  # linter (scripts/check-cron-file.sh) was never green against this
+  # template's own output. Schedule/user/command body/log target below are
+  # UNCHANGED; only the audit-visibility wrapper was added. See
+  # docs/CRON_CONVENTIONS.md rules 2/3/5.
   cat > /etc/cron.d/metal-server-status <<EOF
 # Refresh ops dashboard data every 1 minute.
-* * * * * $DEPLOY_USER bash $DEPLOY_DIR/scripts/server-status.sh >> /var/log/server-status.log 2>&1
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+* * * * * $DEPLOY_USER { echo "=== metal-server-status start \$(date -u +\%FT\%TZ) ==="; bash $DEPLOY_DIR/scripts/server-status.sh; rc=\$?; echo "=== metal-server-status end \$(date -u +\%FT\%TZ) rc=\$rc ==="; } >> /var/log/server-status.log 2>&1
 EOF
   chmod 644 /etc/cron.d/metal-server-status
   touch /var/log/server-status.log
@@ -130,9 +138,17 @@ step_node_info_cron() {
   log "Step 6a/8: install 5-minute validator.json refresh cron"
   # PWA countdown / explorer link / public stake values are read from
   # public/api/validator.json, which is refreshed by this cron from metalgo.
+  # 2026-08-06 (H2): SHELL/PATH headers (Rule 5) and the brace-wrapped
+  # start/end markers + rc=$? capture (Rules 2/3) were missing — this was
+  # the un-braced `&&` chain the H2 audit cited by name (only the last
+  # command's redirect actually applied; node-info.sh's own stdout/stderr
+  # never reached the log). Schedule/user/command body/log target below are
+  # UNCHANGED; only the audit-visibility wrapper was added.
   cat > /etc/cron.d/metal-node-info <<EOF
 # Refresh public/api/validator.json every 5 minutes.
-*/5 * * * * $DEPLOY_USER cd $DEPLOY_DIR && bash scripts/node-info.sh >> /var/log/node-info.log 2>&1
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+*/5 * * * * $DEPLOY_USER { echo "=== metal-node-info start \$(date -u +\%FT\%TZ) ==="; cd $DEPLOY_DIR && bash scripts/node-info.sh; rc=\$?; echo "=== metal-node-info end \$(date -u +\%FT\%TZ) rc=\$rc ==="; } >> /var/log/node-info.log 2>&1
 EOF
   chmod 644 /etc/cron.d/metal-node-info
   touch /var/log/node-info.log
@@ -154,6 +170,10 @@ EOF
 
 step_daily_status_cron() {
   log "Step 6e/8: install daily status digest cron (09:00 JST = 00:00 UTC)"
+  # 2026-08-06 (H2): SHELL/PATH headers (Rule 5) and the brace-wrapped
+  # start/end markers + rc=$? capture (Rules 2/3) were missing here.
+  # Schedule/user/command body/log target below are UNCHANGED; only the
+  # audit-visibility wrapper was added.
   cat > /etc/cron.d/metal-daily-status <<EOF
 # Daily status push at 09:00 JST (00:00 UTC). Default priority (quiet).
 # Aligned with the operator's quiet-hours window (notify.sh suppresses
@@ -161,8 +181,10 @@ step_daily_status_cron() {
 # FY_LIVE=1 required: scripts/lib/side-effects.sh (C3 rollout, 2026-08-06)
 # gates every production side effect behind FY_LIVE=1; daily-status.sh
 # sends a real ntfy push. See check-cron-file.sh Rule 6.
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
 FY_LIVE=1
-0 0 * * * $DEPLOY_USER bash $DEPLOY_DIR/scripts/daily-status.sh >> /var/log/daily-status.log 2>&1
+0 0 * * * $DEPLOY_USER { echo "=== metal-daily-status start \$(date -u +\%FT\%TZ) ==="; bash $DEPLOY_DIR/scripts/daily-status.sh; rc=\$?; echo "=== metal-daily-status end \$(date -u +\%FT\%TZ) rc=\$rc ==="; } >> /var/log/daily-status.log 2>&1
 EOF
   chmod 644 /etc/cron.d/metal-daily-status
   touch /var/log/daily-status.log
@@ -193,6 +215,10 @@ step_anomaly_cron() {
     chmod 640 /etc/freedom-yield/ntfy-topic
     echo "Generated new ntfy topic at /etc/freedom-yield/ntfy-topic — read it and subscribe in the ntfy Android app."
   fi
+  # 2026-08-06 (H2): SHELL/PATH headers (Rule 5) and the brace-wrapped
+  # start/end markers + rc=$? capture (Rules 2/3) were missing here.
+  # Schedule/user/command body/log target below are UNCHANGED; only the
+  # audit-visibility wrapper was added.
   cat > /etc/cron.d/metal-anomalies <<EOF
 # ANOMALY_STATE_DIR=/var/lib/freedom-yield required: commit 57378ec
 # (2026-06-20) added the \${ANOMALY_STATE_DIR:?required} guard to
@@ -208,9 +234,11 @@ step_anomaly_cron() {
 # gates every production side effect behind FY_LIVE=1; check-anomalies.sh
 # sends real ntfy pushes and writes into ANOMALY_STATE_DIR. See
 # check-cron-file.sh Rule 6.
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
 FY_LIVE=1
 ANOMALY_STATE_DIR=/var/lib/freedom-yield
-*/5 * * * * $DEPLOY_USER bash $DEPLOY_DIR/scripts/check-anomalies.sh >> /var/log/anomalies.log 2>&1
+*/5 * * * * $DEPLOY_USER { echo "=== metal-anomalies start \$(date -u +\%FT\%TZ) ==="; bash $DEPLOY_DIR/scripts/check-anomalies.sh; rc=\$?; echo "=== metal-anomalies end \$(date -u +\%FT\%TZ) rc=\$rc ==="; } >> /var/log/anomalies.log 2>&1
 EOF
   chmod 644 /etc/cron.d/metal-anomalies
   touch /var/log/anomalies.log
