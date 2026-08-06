@@ -135,6 +135,7 @@ phase 4/5 は env を完全解決したコマンドと R16 token ritual を**印
 
 正直に記録する。
 
+- **registry は repo が生成しないものを支配できない。** 本番の project cron 15 本のうち **7 本は repo に installer が無く**、command body が repo から検証できない (`freedom-yield-peer-geo` / `metal-cycle-history` / `metal-evidence` / `metal-node-health` / `metal-peer-validators` / `metal-renewal-ics` / `metal-uptime-history`)。SoT を名乗る仕組みが本番の 47% を見ていないのに「カバー済み」と誤認するのが最も危険な失敗形なので、`/etc/cron.d` は **registry の外部 surface** として明示宣言し、alert-only の reconciler (registry が知らない cron / Rule 6 違反 / 前回観測からの content 変化を日次で通知) で補完する。書き込まないので事故らない。2026-08-06 に `freedom-yield-peer-geo` が是正手段の射程外だった件は、この盲点が具体化した最初の実例。
 - **writer/reader の field 名不一致** (2026-08-04 に踏んだ形) は orchestrator でも registry でも消えない。同型箇所の棚卸しを別タスクで行う。
 - **runtime の push 失敗そのもの**は消えない。公示 URL を定期的に HEAD で検査する reconciler (alert-only) で、永久 404 を最大 N 分の 404 に落とす。
 - **kind 規律の適用は公開契約 (署名済み manifest の意味論) を変える**。検証ページ・schema・doc を同時に更新する必要がある。
