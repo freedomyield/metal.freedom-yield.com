@@ -129,6 +129,32 @@ jobs:
           NJS=$(grep -l "?v=${SHORT_SHA}" public/assets/hero-3d/*.js 2>/dev/null | wc -l | tr -d ' ')
           echo "${NJS} hero-3d JS files have relative imports cache-busted to ?v=${SHORT_SHA}"
 
+      - name: Write build.json (deploy manifest)
+        # Verifiable-freshness manifest: lets an operator or evaluator ask
+        # "what commit is actually live right now?" via a single GET,
+        # without needing repo/CI access — closes a long-standing gap
+        # (.gitignore and validate.yml both already assumed this file
+        # would exist, added 2026-08-06). Both rsync legs below are
+        # public/-rooted, so writing it into the runner's local public/
+        # checkout here ships it to the validator host and the Xserver
+        # public origin in the same run, no separate publish step needed.
+        # Not git-tracked (.gitignore) — regenerated fresh every deploy,
+        # the same way the cache-busted HTML above is, so it deliberately
+        # is NOT in deploy/feed-excludes.txt (that list protects
+        # host-generated feeds from THIS rsync's --delete; build.json is
+        # the opposite — produced by this rsync's own source tree).
+        run: |
+          jq -n \
+            --arg sha "$GITHUB_SHA" \
+            --arg short_sha "${GITHUB_SHA:0:8}" \
+            --arg ref "$GITHUB_REF_NAME" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg deployed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{commit_sha: $sha, commit_short_sha: $short_sha, ref: $ref, workflow_run_id: $run_id, deployed_at: $deployed_at}' \
+            > public/api/build.json
+          echo "wrote public/api/build.json:"
+          cat public/api/build.json
+
       - name: Set up SSH key
         env:
           _SSH_KEY: ${{ secrets.SSH_KEY }}

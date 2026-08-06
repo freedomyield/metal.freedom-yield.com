@@ -1,38 +1,112 @@
 #!/usr/bin/env bash
-# install-xserver-anchor-source-allowlist.sh — extend Xserver-side
-# receive-metal-push wrapper allowlist to accept anchor-source.json,
-# anchor-receipt.json, and anchor-history.jsonl.
+# install-xserver-anchor-source-allowlist.sh — REMOVE `anchor-source.json`
+# from the Xserver-side receive-metal-push wrapper allowlist.
 #
-# Motivation (P2, Clean Fix Plan, 2026-07-01):
-#   receipt v2 anchor_source_url points at https://metal.freedom-yield.com/
-#   api/anchor-source.json, but that URL currently returns 404 because the
-#   file has never been published to Xserver. push-to-web-host.sh has now
-#   been extended on the validator host to include anchor-source.json / anchor-receipt.
-#   json / anchor-history.jsonl, but the Xserver-side forced-command wrapper
-#   at /home/deploy/bin/receive-metal-push carries its own independent
-#   allowlist and rejects anything not matched there. This installer
-#   extends the wrapper's allowlist so evaluators can fetch anchor-source
-#   .json via HTTPS.
+# RETIRED / FLIPPED 2026-08-06. This script originally (P2, Clean Fix Plan,
+# 2026-07-01) EXTENDED the wrapper allowlist so push-to-web-host.sh could
+# publish anchor-source.json over SSH. That premise died on 2026-07-07: the
+# git-deploy migration made anchor-source.json committed-to-repo and
+# distributed by the GitHub Actions deploy instead — push-to-web-host.sh's
+# own sender allowlist has never carried `anchor-source.json` since (grep it:
+# absent), and per docs/DEPLOY_OWNERSHIP_MATRIX.md this is now a permanent
+# architectural decision, not a temporary gap. So the receive side accepting
+# a filename the sender will never send again is pure drift — dead
+# acceptance with no producer behind it, discovered 2026-08-06 alongside two
+# related dead references (see docs/DEPLOY_OWNERSHIP_MATRIX.md's "no
+# detached .sig exists" note).
 #
-# Usage (operator, on Mac, once):
+# This script now does the OPPOSITE of its original behavior: it removes
+# `anchor-source.json` from the wrapper's allowlist if an earlier run of the
+# pre-2026-08-06 version of this script (or a manual edit) ever put it
+# there. Idempotent either way — if the wrapper never had it, this is a
+# no-op.
+#
+# Usage (operator, on Mac):
 #   XSERVER_HOST=<ip>  bash scripts/install-xserver-anchor-source-allowlist.sh
 #
-# Or if the operator already has ~/.ssh/id_rsa set up to reach Xserver as
-# root and the host is known, just:
-#   bash scripts/install-xserver-anchor-source-allowlist.sh
-#
-# Idempotent: re-running when the allowlist already contains anchor-source
-# .json prints "OK: allowlist already extended" and exits 0 without changes.
+# Test/local mode: SKIP_SSH=1 WRAPPER_FILE=<path> operates on a local file
+# copy (no host contacted) — mirrors install-xserver-static-deploy-key.sh's
+# SKIP_SSH convention.
 #
 # Safety:
 #   - Backs up the wrapper before editing (receive-metal-push.bak-<timestamp>).
-#   - Refuses to edit if the wrapper has been already extended (no double-edit).
-#   - Uses a narrow sed pattern targeting the exact case statement, not a
-#     broad match.
-#   - Does not touch anything else on Xserver.
-#   - Does not touch other projects' vhosts / wrappers.
+#   - Idempotent: absent -> "OK: ... not present" and exit 0, no changes.
+#   - Narrow sed pattern targeting only the exact `anchor-source.json` case-
+#     branch token (never touches `anchor-source.json.sig`, a distinct dead
+#     reference tracked separately — see the DEPLOY_OWNERSHIP_MATRIX.md note).
+#   - Does not touch anything else on Xserver, or other projects' vhosts.
 
 set -euo pipefail
+
+# ---- shared removal logic (kept in one place; both the SKIP_SSH=1 local
+# path and the remote heredoc below apply this same transform to keep the
+# two paths from drifting — see install_into()'s analogue in
+# install-xserver-static-deploy-key.sh for the established pattern). ----
+remove_from() {  # $1 = wrapper file path (local)
+	local WRAPPER="$1"
+	[ -f "$WRAPPER" ] || { echo "ERROR: wrapper not found: $WRAPPER" >&2; exit 4; }
+
+	# The [|)] suffix requires "anchor-source.json" to be immediately
+	# followed by a case-pattern delimiter, which a bare `.` (as in
+	# anchor-source.json.sig — a separate, also-dead reference tracked in
+	# docs/DEPLOY_OWNERSHIP_MATRIX.md, out of scope for this installer)
+	# never satisfies. Confirmed by direct test: this check alone already
+	# leaves an anchor-source.json.sig-only line untouched.
+	if ! grep -qE 'anchor-source\.json[|)]' "$WRAPPER"; then
+		echo "OK: allowlist does not contain anchor-source.json — nothing to remove"
+		return 0
+	fi
+
+	local BAK
+	BAK="${WRAPPER}.bak-$(date +%Y%m%d-%H%M%S)"
+	cp -p "$WRAPPER" "$BAK"
+	echo "--- backup: $BAK ---"
+
+	# Reverses exactly what the pre-2026-08-06 version of this script
+	# inserted (`s/validator\.json|/anchor-source.json|validator.json|/`),
+	# plus a defensive end-of-list variant in case the token was ever placed
+	# last in the case pattern instead of first.
+	sed -i.tmp \
+		-e 's/anchor-source\.json|//' \
+		-e 's/|anchor-source\.json)/)/' \
+		"$WRAPPER"
+	rm -f "${WRAPPER}.tmp"
+
+	if grep -qE 'anchor-source\.json[|)]' "$WRAPPER"; then
+		echo "ERROR: anchor-source.json still present after removal attempt — manual review required." >&2
+		echo "      Backup preserved at $BAK; wrapper left as edited (may be partially modified)." >&2
+		exit 5
+	fi
+
+	echo "--- verify wrapper still syntactically valid bash ---"
+	# Review round 1 (2026-08-06): this used to be `bash -n "$WRAPPER" &&
+	# echo "syntax OK"` — a check whose FAILURE was never wired to anything.
+	# bash -n's own nonzero exit was simply discarded (the `&&` only ever
+	# gates the success-echo), so a syntactically broken wrapper still fell
+	# through to "OK: ... still syntactically valid" and exit 0. Since this
+	# wrapper is the web host's SSH forced command, shipping it broken
+	# silently kills every subsequent validator-host push. Restore from the
+	# backup and fail closed instead.
+	if ! bash -n "$WRAPPER"; then
+		echo "ERROR: wrapper is no longer syntactically valid bash after the edit — restoring from backup." >&2
+		cp -p "$BAK" "$WRAPPER"
+		echo "restored: $WRAPPER <- $BAK" >&2
+		exit 6
+	fi
+	echo "syntax OK"
+
+	echo "--- diff (unified) ---"
+	diff -u "$BAK" "$WRAPPER" || true
+
+	echo
+	echo "OK: anchor-source.json removed from allowlist; wrapper still syntactically valid"
+	echo "backup preserved: $BAK"
+}
+
+if [ "${SKIP_SSH:-0}" = "1" ]; then
+	remove_from "${WRAPPER_FILE:?WRAPPER_FILE required in SKIP_SSH mode}"
+	exit 0
+fi
 
 : "${XSERVER_HOST:?XSERVER_HOST env var required (Xserver IP or hostname)}"
 XSERVER_USER="${XSERVER_USER:-root}"
@@ -47,8 +121,6 @@ echo "==> Xserver target: ${XSERVER_USER}@${XSERVER_HOST}"
 echo "==> Using SSH key:  $XSERVER_KEY"
 echo
 
-# Guard: dry-run the SSH connection first so authentication failures don't
-# leave the wrapper half-touched.
 if ! ssh -i "$XSERVER_KEY" -o BatchMode=yes -o ConnectTimeout=10 \
 	"${XSERVER_USER}@${XSERVER_HOST}" 'exit 0' 2>&1; then
 	echo "ERROR: SSH pre-check failed — cannot reach ${XSERVER_USER}@${XSERVER_HOST}" >&2
@@ -78,8 +150,12 @@ grep -nE '(case|\|.*\.json|\|.*\.jsonl|allow|filename|receive)' "$WRAPPER" | hea
 
 echo
 echo "--- idempotency check ---"
-if grep -q 'anchor-source\.json' "$WRAPPER"; then
-	echo "OK: allowlist already contains anchor-source.json — no changes needed"
+# [|)] requires "anchor-source.json" to be immediately followed by a
+# case-pattern delimiter; a bare "." (anchor-source.json.sig — a separate,
+# also-dead reference out of scope for this installer) never satisfies
+# that, so this check already leaves a .sig-only line untouched.
+if ! grep -qE 'anchor-source\.json[|)]' "$WRAPPER"; then
+	echo "OK: allowlist does not contain anchor-source.json — nothing to remove"
 	exit 0
 fi
 
@@ -89,55 +165,47 @@ cp -p "$WRAPPER" "$BAK"
 ls -la "$BAK"
 
 echo
-echo "--- extending allowlist ---"
-# Approach: find any single line whose case-branch pattern contains
-# `validator.json` (the wrapper's canonical anchor-file marker) and is not
-# already extended. Insert `anchor-source.json|` at the start of the pattern
-# so that regardless of how the terminator is spelled on this particular
-# wrapper (originally we expected `node-health-recent.json)` from the
-# validator-host-side twin script, but the observed Xserver shape terminates at
-# `evidence.json)`) the extension lands on the same case branch.
-#
-# We only add `anchor-source.json` here — `anchor-receipt.json` and
-# `anchor-history.jsonl` are typically already present on the Xserver
-# wrapper. If they are missing, the operator can extend manually or re-run
-# the validator-host-side push (which will surface the specific rejection).
-if grep -q 'validator\.json[|)]' "$WRAPPER"; then
-	sed -i.tmp \
-		's/validator\.json|/anchor-source.json|validator.json|/' \
-		"$WRAPPER"
-	rm -f "${WRAPPER}.tmp"
-else
-	echo "ERROR: cannot locate a case-statement branch containing 'validator.json' in the wrapper. Manual review required." >&2
-	echo "      Backup preserved at $BAK; wrapper unchanged." >&2
+echo "--- removing anchor-source.json from allowlist ---"
+sed -i.tmp \
+	-e 's/anchor-source\.json|//' \
+	-e 's/|anchor-source\.json)/)/' \
+	"$WRAPPER"
+rm -f "${WRAPPER}.tmp"
+
+if grep -qE 'anchor-source\.json[|)]' "$WRAPPER"; then
+	echo "ERROR: anchor-source.json still present after removal attempt — manual review required." >&2
+	echo "      Backup preserved at $BAK; wrapper left as edited (may be partially modified)." >&2
 	exit 5
 fi
 
 echo
-echo "--- verify extended allowlist ---"
-grep -nE 'anchor-source\.json|anchor-receipt\.json|anchor-history\.jsonl' "$WRAPPER"
-
-echo
 echo "--- verify wrapper still syntactically valid bash ---"
-bash -n "$WRAPPER" && echo "syntax OK"
+# Review round 1 (2026-08-06): same gate fix as the local path above — a
+# broken wrapper here IS the web host's SSH forced command, so restore
+# from backup and fail closed rather than reporting false success.
+if ! bash -n "$WRAPPER"; then
+	echo "ERROR: wrapper is no longer syntactically valid bash after the edit — restoring from backup." >&2
+	cp -p "$BAK" "$WRAPPER"
+	echo "restored: $WRAPPER <- $BAK" >&2
+	exit 6
+fi
+echo "syntax OK"
 
 echo
 echo "--- diff (unified) ---"
 diff -u "$BAK" "$WRAPPER" || true
 
 echo
-echo "OK: allowlist extended and wrapper still syntactically valid"
+echo "OK: anchor-source.json removed from allowlist; wrapper still syntactically valid"
 echo "backup preserved: $BAK"
 REMOTE_EOF
 
 RC=$?
 echo
 if [ "$RC" -eq 0 ]; then
-	echo "==> Xserver wrapper allowlist extension complete."
-	echo "    Next: from the validator host, run"
-	echo "      bash scripts/push-to-web-host.sh anchor-source.json"
-	echo "    then curl https://metal.freedom-yield.com/api/anchor-source.json"
-	echo "    to verify the file is now served (200)."
+	echo "==> Xserver wrapper allowlist cleanup complete."
+	echo "    anchor-source.json is served via git-deploy only; push-to-web-host.sh"
+	echo "    will never send it. See docs/DEPLOY_OWNERSHIP_MATRIX.md."
 else
 	echo "==> Xserver wrapper update returned rc=$RC (see error above)."
 	exit "$RC"

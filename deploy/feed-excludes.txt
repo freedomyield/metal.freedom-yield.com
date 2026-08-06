@@ -23,7 +23,6 @@ api/peers-gini-history.jsonl
 api/peers-history-index.json
 api/cycle-history.jsonl
 api/anchor-receipt.json
-api/anchor-receipt.json.sig
 api/anchor-history.jsonl
 # Subdirectory feeds — whole-directory entries (like calendar/) because the
 # member filenames are content-addressed / date-keyed and unbounded:

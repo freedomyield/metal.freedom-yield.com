@@ -18,7 +18,7 @@
 
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="${REPO_BASE:-$(cd "$(dirname "$0")/.." && pwd)}"
 OUT="${OUT:-$ROOT/public/api/peers.json}"
 RPC="${METALGO_API:-http://localhost:9650}"
 OWN_NODE_ID="${OWN_NODE_ID:-$(jq -r '.nodeId // empty' "$ROOT/public/api/validator.json" 2>/dev/null || echo '')}"
@@ -204,33 +204,117 @@ gzip -c "$OUT" > "$SNAPSHOT"
 SNAP_SIZE=$(stat -c%s "$SNAPSHOT" 2>/dev/null || stat -f%z "$SNAPSHOT")
 echo "stashed daily snapshot: $SNAPSHOT (${SNAP_SIZE} bytes gzipped)"
 
-# Publish the snapshot in the same breath as generating it. The index below
-# lists every snapshot it can see locally, so an unpublished snapshot means
-# the index advertises a URL that 404s — one more each day. Publication lives
-# here, not in the cron line, so the two can never drift apart.
+# ─────────────── publish + index: ledger-gated (2026-08-06 fix) ──────
+# ecd348c made this script publish each day's snapshot next to generating
+# it, but the push was WARN-and-continue while the index below globbed
+# every *.json.gz found in SNAPSHOT_DIR (the local archive, which always
+# succeeds — no network) unconditionally. One push failure therefore left
+# the index citing that date forever: the local file exists so the glob
+# picks it up, but nothing ever reached the web host, so the advertised
+# URL 404s permanently.
+#
+# Fix: PUBLISHED_LEDGER (one YYYY-MM-DD per line) is now the ONLY thing
+# the index is built from — an entry lands there iff push-to-web-host.sh
+# has actually exited 0 for that date. Any local snapshot not yet in the
+# ledger is retried automatically at the top of every run, so a transient
+# outage self-heals on the next scheduled run instead of leaving a
+# permanent gap that only a manual backfill would close.
 PUBLISH_DIR="${ROOT}/public/api/peers-history"
 mkdir -p "$PUBLISH_DIR"
-if cp -p "$SNAPSHOT" "${PUBLISH_DIR}/peers-${TODAY}.json.gz"; then
-	if bash "${ROOT}/scripts/push-to-web-host.sh" "peers-history/peers-${TODAY}.json.gz"; then
-		echo "published snapshot: peers-history/peers-${TODAY}.json.gz"
-	else
-		echo "WARN: snapshot published locally but push failed for peers-${TODAY}.json.gz" >&2
-	fi
-else
-	echo "WARN: could not stage snapshot for publication: peers-${TODAY}.json.gz" >&2
+PUSH_TO_WEB_HOST="${FYD_PUSH_TO_WEB_HOST:-${ROOT}/scripts/push-to-web-host.sh}"
+PUBLISHED_LEDGER="${SNAPSHOT_DIR}/.published"
+# Guarded (review round 1, 2026-08-06): a bare `touch` is a top-level
+# statement under `set -e` — if STATE_DIR/the ledger file is read-only
+# (ENOSPC-triggered remount, a DR restore that left root-owned perms,
+# etc.) `touch` fails and the WHOLE SCRIPT aborts right here, before the
+# index below is ever reached, even though this section's own docstring
+# promises "never a hard failure". WARN and continue instead — the ledger
+# read below tolerates a missing file (falls back to an empty published
+# set), so a completely unwritable STATE_DIR still yields a (possibly
+# empty/stale) index rather than none at all.
+if ! touch "$PUBLISHED_LEDGER" 2>/dev/null; then
+	echo "WARN: could not create/touch ledger at $PUBLISHED_LEDGER (STATE_DIR may be read-only) — proceeding; the index below will reflect whatever ledger content is readable, or be empty if none" >&2
 fi
 
-# Update the index — a small JSON listing all known snapshot dates +
-# their sizes. The catalog can fetch this to show a date picker.
+# publish_snapshot_date <date> — stage + push one day's snapshot; record it
+# in the ledger iff the push actually succeeded. Every exit path here is a
+# WARN, never a hard failure — always returns 0 so a publish problem can
+# never take down the rest of this script (same fail-open posture as
+# append-anchor-history.sh's R18 publish_archive()).
+publish_snapshot_date() {
+	local date="$1"
+	local file="${SNAPSHOT_DIR}/peers-${date}.json.gz"
+	if [ ! -f "$file" ]; then
+		echo "WARN: publish skipped — no local snapshot for ${date} at ${file}" >&2
+		return 0
+	fi
+	if cp -p "$file" "${PUBLISH_DIR}/peers-${date}.json.gz" \
+		&& bash "$PUSH_TO_WEB_HOST" "peers-history/peers-${date}.json.gz"; then
+		# Guarded (review round 1, 2026-08-06): under `set -e`, a plain
+		# `A || B` statement does NOT exempt B — if B (the ledger append)
+		# fails, the script aborts right here, mid-function, and the
+		# retry loop + index write below never run. A read-only ledger
+		# file (same triggers as the touch above) reproduced exactly
+		# this: push succeeds, append fails, script dies, index never
+		# written. Nest the check so the append's own failure is always
+		# the TESTED condition of an if, never a bare statement, and the
+		# innermost fallback explicitly ends in `|| true` (same idiom as
+		# append-anchor-history.sh's final confirmation echo).
+		if ! grep -qxF "$date" "$PUBLISHED_LEDGER" 2>/dev/null; then
+			if ! echo "$date" >> "$PUBLISHED_LEDGER" 2>/dev/null; then
+				echo "WARN: push succeeded for ${date} but could not record it in the ledger (read-only?) — next run will re-push it (harmless, idempotent)" >&2 || true
+			fi
+		fi
+		echo "published snapshot: peers-history/peers-${date}.json.gz"
+	else
+		echo "WARN: snapshot published locally but push failed for peers-${date}.json.gz — will retry next run" >&2
+	fi
+	return 0
+}
+
+publish_snapshot_date "$TODAY"
+
+# Retry backlog: any local snapshot older than today that never made it
+# into the ledger is a prior failed push. Retrying here means the index
+# below self-heals as soon as connectivity returns, instead of the gap
+# persisting until someone notices and backfills by hand.
+for f in "${SNAPSHOT_DIR}"/peers-*.json.gz; do
+	[ -e "$f" ] || continue
+	d="$(basename "$f" .json.gz)"
+	d="${d#peers-}"
+	[ "$d" = "$TODAY" ] && continue
+	grep -qxF "$d" "$PUBLISHED_LEDGER" && continue
+	echo "retrying backlog snapshot: peers-${d}.json.gz"
+	publish_snapshot_date "$d"
+done
+
+# Update the index — restricted to ledger entries whose local snapshot
+# still exists. This is the invariant the fix above exists to hold: every
+# URL the index advertises is one push-to-web-host.sh has confirmed
+# actually reached the web host.
 SNAPSHOT_INDEX="${ROOT}/public/api/peers-history-index.json"
 python3 -c "
-import os, json, glob, datetime
-files = sorted(glob.glob('${SNAPSHOT_DIR}/peers-*.json.gz'))
+import os, json
+snapshot_dir = '${SNAPSHOT_DIR}'
+ledger = '${PUBLISHED_LEDGER}'
+# Tolerate a ledger that could not be created at all (STATE_DIR unwritable
+# from the very first run, touch above already WARNed) -- degrade to an
+# empty published set rather than crash. A ledger that exists but merely
+# can't accept new appends (the far more common case: read-only remount of
+# an existing STATE_DIR) still opens fine here -- read access, not write,
+# is all this needs.
+dates = set()
+if os.path.exists(ledger):
+    with open(ledger) as fh:
+        dates = {ln.strip() for ln in fh if ln.strip()}
+dates = sorted(dates)
 entries = []
-for f in files:
-    name = os.path.basename(f)
-    date = name.replace('peers-', '').replace('.json.gz', '')
-    entries.append({'date': date, 'size_bytes': os.path.getsize(f), 'filename': name})
+for date in dates:
+    name = f'peers-{date}.json.gz'
+    path = os.path.join(snapshot_dir, name)
+    if not os.path.exists(path):
+        continue
+    entries.append({'date': date, 'size_bytes': os.path.getsize(path), 'filename': name})
 print(json.dumps({'generated_at': '${GEN_ISO}', 'count': len(entries), 'entries': entries}, indent=2))
 " > "$SNAPSHOT_INDEX"
 echo "wrote $SNAPSHOT_INDEX ($(jq '.count' "$SNAPSHOT_INDEX") snapshots indexed)"
