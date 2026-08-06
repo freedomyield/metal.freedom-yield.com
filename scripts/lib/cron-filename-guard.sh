@@ -18,10 +18,22 @@
 # NOT to duplicate that logic a third time. The H3 task then went further
 # and closed the original duplication too: both install-cron-env-headers.sh
 # and install-repoint-publish-crons.sh now source this file instead of
-# defining the function inline. This is the ONLY definition in the repo —
-# tests/cron-filename-guard/ asserts that repo-wide (grep for exactly one
-# match, mutation-tested by adding a second definition to a scratch copy and
-# confirming the check goes red).
+# defining the function inline.
+#
+# tests/cron-filename-guard/ checks this stays true — but scoped, on
+# purpose, not "the string never appears again anywhere in the repo": it
+# scans scripts/, .githooks/, and bin/ (the three places this repo ships
+# executable code from) for a definition, matching five syntax shapes a
+# duplicate could hide behind (`name() {`, `name () {`, `function name()
+# {`, `function name {`, brace on the next line) and any file extension —
+# not just a literal byte-match on the shape above. It deliberately does
+# NOT scan tests/, where three existing suites legitimately embed their own
+# throwaway inline copy of this function for self-contained mutation
+# testing; see that suite's own header comment ("SCOPE OF THE GUARANTEE")
+# for the exact boundary and the case that proves it's enforced on purpose,
+# not a blind spot. Within that scope, this is the only definition —
+# mutation-tested per shape by reintroducing a duplicate into a scratch
+# copy and confirming the check goes red for each one.
 #
 # Per crontab(5) (Debian's cron), a /etc/cron.d/ entry is only read if its
 # name consists solely of upper/lower case letters, digits, underscores,

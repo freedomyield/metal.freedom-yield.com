@@ -166,7 +166,10 @@ cron_file_needs_fy_live() {
 # copy — no such cross-file test ever existed; each suite only ran its own
 # self-contained mutation check. The fix is structural, not another test to
 # keep in sync by convention: there is now exactly one definition, in the
-# shared lib, and tests/cron-filename-guard/ asserts that repo-wide.)
+# shared lib, and tests/cron-filename-guard/ checks that — scoped to
+# scripts/+.githooks/+bin/ across several definition syntax shapes, not a
+# claim that the string never appears again anywhere in the repo. See that
+# lib's own header comment for the exact scope.)
 
 CHANGED=0
 SKIPPED=0
