@@ -44,10 +44,19 @@ echo "${OUT}" | grep -qx -- '--exclude=/api/peers-history/' \
   && ok "empty prefix anchors api/peers-history/" || no "empty api/peers-history/"
 
 # Count parity: both shapes emit the same number of lines
+# (20, not 21: api/anchor-receipt.json.sig was removed 2026-08-06 — it had
+# no producer anywhere in the repo, a dead exclude for a file that is never
+# written, so nothing protected it from being cleaned up by --delete.)
 H="$(bash "${EMIT}" "public/" | wc -l | tr -d ' ')"
 X="$(bash "${EMIT}" "" | wc -l | tr -d ' ')"
-[ "${H}" = "${X}" ] && [ "${H}" = 21 ] \
-  && ok "both shapes emit 21 excludes" || no "count parity (h=${H} x=${X})"
+[ "${H}" = "${X}" ] && [ "${H}" = 20 ] \
+  && ok "both shapes emit 20 excludes" || no "count parity (h=${H} x=${X})"
+
+# Regression guard: the dead anchor-receipt.json.sig exclude must not
+# reappear without a producer to justify it.
+echo "$(bash "${EMIT}" "")" | grep -qx -- '--exclude=/api/anchor-receipt.json.sig' \
+  && no "anchor-receipt.json.sig must NOT be excluded (no producer exists)" \
+  || ok "anchor-receipt.json.sig not excluded — dead reference removed"
 
 # Missing list file → non-zero exit
 if FEED_EXCLUDES_FILE=/nonexistent bash "${EMIT}" "public/" >/dev/null 2>&1; then

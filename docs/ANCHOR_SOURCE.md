@@ -8,7 +8,9 @@ Live. The broadcast pipeline (`scripts/sign-anchor-event.sh`) has anchored on Me
 
 ## Publish and distribution (= git-deploy)
 
-The runtime `anchor-source.json` (and its detached `anchor-source.json.sig`) are **git-deploy owned**: the file `gen-anchor-source.sh` produces on the validator host is committed to the repo and distributed by the GitHub Actions deploy, which rsyncs the repo-tracked copy to both the validator-host internal Caddy and the public Xserver origin. It is **not** published by the validator-host runtime push (`scripts/push-to-web-host.sh`), and it is therefore **not** listed in `deploy/feed-excludes.txt`.
+The runtime `anchor-source.json` is **git-deploy owned**: the file `gen-anchor-source.sh` produces on the validator host is committed to the repo and distributed by the GitHub Actions deploy, which rsyncs the repo-tracked copy to both the validator-host internal Caddy and the public Xserver origin. It is **not** published by the validator-host runtime push (`scripts/push-to-web-host.sh`), and it is therefore **not** listed in `deploy/feed-excludes.txt`.
+
+No detached `anchor-source.json.sig` is produced — `gen-anchor-source.sh` has no signing step, and none is planned; see `docs/DEPLOY_OWNERSHIP_MATRIX.md`'s "no detached `.sig` exists" note for why a separate signature over this file would be redundant given the on-chain transaction signature, the recomputable branch-hash cross-check, and `identity.json.sig` already covering operator-key attestation.
 
 Because the published file is the exact committed pre-image that was signed and hashed for the on-chain anchor, the public URL, the repo copy, and the signed source are the same bytes — there is no separate push path that can drift or silently drop, which is the failure mode the earlier host-push route produced. Ownership is pinned in [`docs/DEPLOY_OWNERSHIP_MATRIX.md`](DEPLOY_OWNERSHIP_MATRIX.md); `anchor-receipt.json` and `anchor-history.jsonl` remain validator-pushed because they are produced only after the broadcast, off the deploy path.
 

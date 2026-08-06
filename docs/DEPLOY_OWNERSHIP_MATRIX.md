@@ -88,7 +88,6 @@ See [`docs/HOST_CHECKOUT_AUTO_ADVANCE.md`](HOST_CHECKOUT_AUTO_ADVANCE.md)
 | File | Canonical producer | Canonical source host | Git tracked | Validator push | Deploy workflow path | rsync `--delete` exclude | Recovery / rollback |
 |---|---|---|---|---|---|---|---|
 | `public/api/anchor-source.json` | `scripts/gen-anchor-source.sh` (= v2 3-branch DAG source; carries `dag_root_computed`) | validator host, then committed to Git | **YES** | NO | YES (deploy serves the Git version) | NO (git-deploy owned; NOT in `deploy/feed-excludes.txt`) | Re-derive on validator host via `gen-anchor-source.sh`, then commit; the deploy serves the Git version. The committed file is exactly the signed pre-image the on-chain anchor is derived from by `sign-anchor-event.sh`, so recomputing its three branch roots reproduces the on-chain memos. |
-| `public/api/anchor-source.json.sig` | `scripts/gen-anchor-source.sh` (detached signature over the DAG source) | validator host, then committed to Git | **YES** | NO | YES (deploy serves the Git version) | NO (git-deploy owned; NOT in `deploy/feed-excludes.txt`) | Produced and committed atomically with `anchor-source.json`; the deploy serves the Git version. |
 | `public/api/anchor-receipt.json` | `scripts/gen-anchor-receipt.sh` (= verifies `sign-anchor-event.sh` output; **not** the retired `post-anchor-event.sh`) | validator host | NO | YES (`push-to-web-host.sh anchor-receipt.json`) | NO | **YES** (added 2026-06-21 per audit-C/F-E1) | Re-derive on validator host from the signed anchor; carries `dag_root_hash` (= `anchor-source.json .dag_root_computed`). |
 | `public/api/cycle-history.jsonl` | `scripts/gen-cycle-history.sh` | validator host | NO | YES | NO | YES (pre-existing) | Re-derive from `uptime-cycles.json` + `incidents.json` on validator host. |
 | `public/api/identity-history.jsonl` | `scripts/operator-local/gen-identity.sh` (bootstrap; append on rotation) | operator Mac | **YES** (after operator commits the bootstrap line) | NO | YES (deploy serves the Git version) | NO | From Git history; bootstrap is idempotent (= regenerates same line as long as the operator-identity ed25519 key has not rotated). || `public/api/identity.json` | `scripts/operator-local/gen-identity.sh` | operator Mac | YES | NO | YES | NO | From Git; regenerate via operator-Mac `gen-identity.sh`. |
@@ -132,18 +131,55 @@ are rejected remotely even though the sender accepts the name.
 
 ## Note — `anchor-source.json` is git-deploy, not validator-pushed
 
-`anchor-source.json` (and its detached `.sig`) are **git-deploy owned**:
-committed to the repo and distributed by the GitHub Actions deploy, the
-same path as `identity.json`. They are **not** pushed by
-`scripts/push-to-web-host.sh` (that wrapper's allowlist never carried
-`anchor-source.json`) and are therefore **removed from**
-`deploy/feed-excludes.txt` — a file that the Git deploy serves MUST NOT
-also be excluded from `--delete`, or the deploy would revert it on every
-run. This closes the class of stale-published-anchor failures that the
-unreliable validator-host push path produced. `anchor-receipt.json`,
-`anchor-receipt.json.sig`, and `anchor-history.jsonl` remain
+`anchor-source.json` is **git-deploy owned**: committed to the repo and
+distributed by the GitHub Actions deploy, the same path as
+`identity.json`. It is **not** pushed by `scripts/push-to-web-host.sh`
+(that wrapper's allowlist never carried `anchor-source.json`) and is
+therefore **removed from** `deploy/feed-excludes.txt` — a file that the
+Git deploy serves MUST NOT also be excluded from `--delete`, or the
+deploy would revert it on every run. This closes the class of
+stale-published-anchor failures that the unreliable validator-host push
+path produced. `anchor-receipt.json` and `anchor-history.jsonl` remain
 validator-pushed (they are produced only after the on-chain broadcast,
 which happens off the deploy path) and stay in `feed-excludes.txt`.
+
+## Note — no detached `.sig` exists for `anchor-source.json` or `anchor-receipt.json` (verified 2026-08-06)
+
+Earlier drafts of this matrix and of `docs/ANCHOR_SOURCE.md` described
+`anchor-source.json.sig` as git-deploy owned and committed atomically
+with `anchor-source.json`, and `deploy/feed-excludes.txt` carried a
+matching `api/anchor-receipt.json.sig` exclude line. Neither file has
+ever existed: `scripts/gen-anchor-source.sh` and
+`scripts/gen-anchor-receipt.sh` contain no signing step, `git ls-files`
+has never tracked either `.sig` path, and no CI or cron job produces
+one. Both were an aspirational carry-over from the pre-2026-07-07
+publish design; the git-deploy migration and the R18 archive/history
+work superseded the need without anyone going back to retract the
+mention, leaving the URLs permanently 404 and the exclude line dead
+weight protecting a file nothing ever writes.
+
+This is now treated as a closed decision, not an open gap: a detached
+signature specifically over `anchor-source.json` would be redundant
+given the verification chain that already exists —
+1. the on-chain XPR transaction that inscribes the anchor is itself
+   cryptographically signed by the broadcasting account key
+   (independently checkable via any Antelope/Hyperion history
+   endpoint, read-only);
+2. `anchor-source.json`'s three branch hashes and combined
+   `dag_root_computed` are independently recomputable from the served
+   bytes and checked against those on-chain memos by
+   `scripts/check-anchor-publish-health.sh`; and
+3. `identity.json.sig` (git-deploy owned, `ssh-keygen -Y sign` on the
+   operator's Mac) already proves control of the operator identity key
+   the anchor's `identity_branch` asserts.
+
+`deploy/feed-excludes.txt` no longer carries `api/anchor-receipt.json.sig`
+(removed 2026-08-06); `scripts/install-xserver-sig-allowlist.sh` and
+`scripts/install-xserver-anchor-source-allowlist.sh` — the two Xserver
+receive-wrapper installers that predate this decision — have been
+retired to idempotent removal installers so a wrapper that was ever
+extended with these dead names can be cleaned back to the sender's real
+allowlist. See those scripts' headers for detail.
 
 ## Cross-check protocol
 
