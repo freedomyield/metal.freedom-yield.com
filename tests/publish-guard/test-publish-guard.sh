@@ -488,6 +488,79 @@ printf '%s\n' "$IGN_NAME" >> "$EXCL"
 run_json "write IP into gitignored file -> allow"  0 "$(jq -nc --arg fp "$REPO_ROOT/$IGN_NAME" --arg c "host $PUB_IP" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"
 grep -vF "$IGN_NAME" "$EXCL" > "$EXCL.tmp" 2>/dev/null && mv "$EXCL.tmp" "$EXCL"
 
+echo "== R4-H: repo membership must survive path aliasing (else the write is never scanned) =="
+# Round-4 triage (2026-08-06). Membership used to be a raw string prefix
+# compare of tool_input.file_path against `git rev-parse --show-toplevel`,
+# which is derived from the CWD. Any aliasing between the two spellings made
+# the guard skip the file entirely -- silently, with rc=0. All four cases below
+# were reproduced with a real public IPv4 payload that then went unscanned.
+run_json_cwd() {
+	local name="$1" exp="$2" cwd="$3" json="$4" rc
+	if [ -z "$json" ]; then
+		printf 'FAIL  %-62s (empty JSON payload: the case never ran)\n' "$name" >&2
+		FAIL=$((FAIL+1)); return
+	fi
+	rc=0
+	printf '%s' "$json" | ( cd "$cwd" 2>/dev/null && bash "$GUARD" ) >/dev/null 2>&1 || rc=$?
+	if [ "$rc" -eq "$exp" ]; then printf 'PASS  %-62s (rc=%d)\n' "$name" "$rc"; PASS=$((PASS+1))
+	else printf 'FAIL  %-62s (rc=%d, want %d)\n' "$name" "$rc" "$exp" >&2; FAIL=$((FAIL+1)); fi
+}
+H_ROOT="$(mktemp -d -t pubguard-h.XXXXXX)"
+# mktemp on macOS hands back a path under /var, itself a symlink to /private/var,
+# so this exercises the logical-vs-physical mismatch with no special setup.
+H_PHYS="$( cd "$H_ROOT" && pwd -P )"
+(
+	cd "$H_ROOT" || exit 0
+	git init -q main-checkout 2>/dev/null
+	cd main-checkout || exit 0
+	git -c user.email=t@example.com -c user.name=T commit -q --allow-empty -m seed 2>/dev/null
+	git worktree add -q ../linked-wt -b guardtest-h 2>/dev/null
+) >/dev/null 2>&1
+H_MAIN="$H_ROOT/main-checkout"
+H_WT="$H_ROOT/linked-wt"
+H_OTHER="$H_ROOT/unrelated-repo"
+mkdir -p "$H_OTHER" && (cd "$H_OTHER" && git init -q .) >/dev/null 2>&1
+if [ -d "$H_WT" ] && [ -d "$H_OTHER/.git" ]; then
+	# 1. logical vs physical spelling of the very same file
+	run_json_cwd "R4-H1 logical path (via symlinked ancestor) -> block" 2 "$H_MAIN" \
+		"$(jq -nc --arg fp "$H_MAIN/leak.md" --arg c "host $PUB_IP" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"
+	run_json_cwd "R4-H2 physical path of the same file -> block" 2 "$H_PHYS/main-checkout" \
+		"$(jq -nc --arg fp "$H_PHYS/main-checkout/leak.md" --arg c "host $PUB_IP" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"
+	# 2. a LINKED WORKTREE of the same repository, hook running from the main
+	#    checkout -- this project's standard subagent workflow, and the case
+	#    where every agent write was previously skipped
+	run_json_cwd "R4-H3 write into a linked worktree, cwd = main checkout -> block" 2 "$H_MAIN" \
+		"$(jq -nc --arg fp "$H_WT/leak.md" --arg c "host $PUB_IP" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"
+	run_json_cwd "R4-H4 edit into a linked worktree, cwd = main checkout -> block" 2 "$H_MAIN" \
+		"$(jq -nc --arg fp "$H_WT/leak.md" --arg c "host $PUB_IP" '{tool_name:"Edit",tool_input:{file_path:$fp,new_string:$c}}')"
+	run_json_cwd "R4-H5 worktree subdir that does not exist yet -> block" 2 "$H_MAIN" \
+		"$(jq -nc --arg fp "$H_WT/no/such/dir/leak.md" --arg c "host $PUB_IP" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"
+	# 3. the fix must NOT over-reach: a genuinely unrelated repository and
+	#    ordinary out-of-repo scratch paths stay skipped
+	run_json_cwd "R4-H6 unrelated repository -> allow" 0 "$H_MAIN" \
+		"$(jq -nc --arg fp "$H_OTHER/notes.md" --arg c "host $PUB_IP" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"
+	run_json_cwd "R4-H7 out-of-repo scratch path -> allow" 0 "$H_MAIN" \
+		"$(jq -nc --arg fp "$H_ROOT/scratch.md" --arg c "host $PUB_IP" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"
+	# 4. this repository's own tracked file must be scanned when the hook runs
+	#    from the MAIN checkout of the same repository -- the real deployment
+	#    (CLAUDE_PROJECT_DIR) whenever the suite or an agent works in a
+	#    worktree. Four Write/Edit assertions above silently flipped to PASS
+	#    with rc=0 depending on the caller's directory before this was fixed.
+	SELF_COMMON="$(git -C "$REPO_ROOT" rev-parse --git-common-dir 2>/dev/null)"
+	case "$SELF_COMMON" in
+		/*) : ;;
+		*)  SELF_COMMON="$REPO_ROOT/${SELF_COMMON:-.git}" ;;
+	esac
+	SELF_MAIN="$(dirname "$SELF_COMMON")"
+	run_json_cwd "R4-H8 tracked README block holds with cwd = the main checkout" 2 "$SELF_MAIN" \
+		"$(jq -nc --arg fp "$REPO_ROOT/README.md" --arg c "host $PUB_IP" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"
+else
+	printf 'FAIL  %-62s (fixture setup failed)\n' "R4-H fixture (worktree + unrelated repo)" >&2
+	FAIL=$((FAIL+1))
+fi
+(cd "$H_MAIN" 2>/dev/null && git worktree remove --force ../linked-wt) >/dev/null 2>&1
+rm -rf "$H_ROOT"
+
 echo "== local denylist (exact substring, incl. embedded) =="
 DENY_TMP="$(mktemp -t pubguard-deny.XXXXXX)"
 printf '%s\n' "# c" "SecretHostAlias" > "$DENY_TMP"

@@ -57,6 +57,30 @@ CJK_HASHES="${FYD_PUBLISH_CJK_HASHES:-00bb0a1ec63ccbc0348e1afd6c70153b9a5c531fe2
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 DENYLIST_FILE="${FYD_PUBLISH_DENYLIST:-$REPO_ROOT/.publish-denylist}"
 
+# Path helpers for the repo-membership test in hook mode (see the long note at
+# that test). Both resolve to PHYSICAL paths so that symlink and case aliasing
+# cannot make one spelling of a path look like a different location.
+
+# pg_common_dir <existing-dir> -> physical .git common dir of the repository
+# that directory belongs to (shared by all worktrees of one repository).
+pg_common_dir() {
+	( cd "$1" 2>/dev/null || exit 1
+	  pg_d="$(git rev-parse --git-common-dir 2>/dev/null)" || exit 1
+	  [ -n "$pg_d" ] || exit 1
+	  cd "$pg_d" 2>/dev/null || exit 1
+	  pwd -P )
+}
+
+# pg_canon_file <path> -> physical directory + original basename. The file
+# itself need not exist; if its directory does not either, echoes the input.
+pg_canon_file() {
+	pg_d="${1%/*}"
+	[ "$pg_d" = "$1" ] && pg_d="."
+	[ -z "$pg_d" ] && pg_d="/"
+	pg_p="$( (cd "$pg_d" 2>/dev/null && pwd -P) 2>/dev/null || true )"
+	if [ -n "$pg_p" ]; then printf '%s/%s' "$pg_p" "${1##*/}"; else printf '%s' "$1"; fi
+}
+
 MODE="hook"
 case "${1:-}" in
 	--diff) MODE="diff" ;;
@@ -258,12 +282,67 @@ EOF
 	esac
 
 	if [ -n "$FP" ]; then
-		case "$FP" in
-			"$REPO_ROOT"/*) : ;;
-			/*) exit 0 ;;
-		esac
+		# Repo membership decides whether this write is scanned AT ALL, so it
+		# must not rest on a raw string prefix compare of two unnormalised
+		# paths: any aliasing between the two spellings silently converts an
+		# in-repo write into an unscanned one -- precisely the failure this
+		# guard exists to prevent. Four escapes were reproduced on 2026-08-06,
+		# each with a real public IPv4 payload the guard then never looked at:
+		#   1. /tmp/<repo>/f against the /private/tmp/<repo>/f that git
+		#      reports (macOS symlinks /tmp): logical vs physical path;
+		#   2. any symlinked ancestor directory on the way to the repo;
+		#   3. case aliasing on a case-insensitive volume (/users vs /Users);
+		#   4. worst, a LINKED WORKTREE of this same repository: its toplevel
+		#      differs from the main checkout's, so with the hook running from
+		#      the main checkout (CLAUDE_PROJECT_DIR) every write an agent made
+		#      inside a worktree -- this project's standard subagent workflow
+		#      -- was skipped.
+		# Fixed by comparing PHYSICAL paths (pwd -P canonicalises symlinks and
+		# case) and by asking git whether the target belongs to the same
+		# REPOSITORY rather than to the same directory string. Every branch
+		# below can only ADD "inside", so nothing previously scanned stops
+		# being scanned.
+		FP_INSIDE=0
+		case "$FP" in "$REPO_ROOT"/*) FP_INSIDE=1 ;; esac
+
+		# Nearest existing ancestor directory of $FP: for a Write neither the
+		# file nor its parent directory necessarily exists yet.
+		FP_DIR="${FP%/*}"
+		[ "$FP_DIR" = "$FP" ] && FP_DIR="."
+		[ -z "$FP_DIR" ] && FP_DIR="/"
+		while [ ! -d "$FP_DIR" ]; do
+			FP_NEXT="${FP_DIR%/*}"
+			[ -z "$FP_NEXT" ] && FP_NEXT="/"
+			[ "$FP_NEXT" = "$FP_DIR" ] && break
+			FP_DIR="$FP_NEXT"
+		done
+		FP_DIR_P="$( (cd "$FP_DIR" 2>/dev/null && pwd -P) 2>/dev/null || true )"
+
+		if [ "$FP_INSIDE" -eq 0 ] && [ -n "$FP_DIR_P" ]; then
+			REPO_ROOT_P="$( (cd "$REPO_ROOT" 2>/dev/null && pwd -P) 2>/dev/null || printf '%s' "$REPO_ROOT" )"
+			case "$FP_DIR_P/" in "$REPO_ROOT_P"/*) FP_INSIDE=1 ;; esac
+		fi
+
+		if [ "$FP_INSIDE" -eq 0 ] && [ -n "$FP_DIR_P" ]; then
+			# Same repository through a different worktree? The common dir is
+			# shared by every worktree of one repository and differs between
+			# repositories, so it identifies "ours" exactly.
+			PG_OURS="$(pg_common_dir "$REPO_ROOT" || true)"
+			PG_THEIRS="$(pg_common_dir "$FP_DIR_P" || true)"
+			if [ -n "$PG_OURS" ] && [ "$PG_OURS" = "$PG_THEIRS" ]; then FP_INSIDE=1; fi
+		fi
+
+		if [ "$FP_INSIDE" -eq 0 ]; then
+			case "$FP" in /*) exit 0 ;; esac
+		fi
+
+		# check-ignore from the file's own worktree too: a path in a linked
+		# worktree is not resolvable from $REPO_ROOT, and without this a file
+		# genuinely gitignored there would newly be scanned.
 		if git -C "$REPO_ROOT" check-ignore -q "$FP" 2>/dev/null; then exit 0; fi
+		if [ -n "$FP_DIR_P" ] && git -C "$FP_DIR_P" check-ignore -q "$FP" 2>/dev/null; then exit 0; fi
 		if [ "$FP" = "$DENYLIST_FILE" ]; then exit 0; fi
+		if [ -n "$FP_DIR_P" ] && [ "$FP_DIR_P/${FP##*/}" = "$(pg_canon_file "$DENYLIST_FILE")" ]; then exit 0; fi
 	fi
 fi
 
