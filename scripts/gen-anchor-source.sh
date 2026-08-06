@@ -42,15 +42,39 @@
 #      GENUINELY empty (0 bytes) or absent (missing path) history file is
 #      still genesis and exits 0 with null, unchanged.
 
+#  11  scripts/lib/side-effects.sh missing (structural). Sourced only to
+#      resolve the state directory through the one shared spelling; this
+#      script performs no notify, no push and no state write, so nothing
+#      here is gated on FY_LIVE — see the note at STATE_DIR below.
+
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SCRIPT_VERSION="1.0"
+FYD_LIB="${ROOT}/scripts/lib/side-effects.sh"
+if [ ! -r "$FYD_LIB" ]; then
+	echo "gen-anchor-source: FATAL: side-effects library not readable at $FYD_LIB" >&2
+	exit 11
+fi
+# shellcheck source=scripts/lib/side-effects.sh
+. "$FYD_LIB"
 
 # ---- config (env overridable) -----------------------------------------
 NODE_ID="${NODE_ID:-NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v}"
 METALGO_API="${METALGO_API:-http://127.0.0.1:9650}"
-STATE_DIR="${ANOMALY_STATE_DIR:-/var/lib/freedom-yield}"
+# READ-ONLY use: the two JSONL streams below are inputs to the DAG, never
+# written here. Resolved through fyd_state_dir (role `anomaly`, the same role
+# check-anomalies.sh WRITES through) so the producer and this consumer cannot
+# drift onto different directories — the legacy ANOMALY_STATE_DIR spelling is
+# still honoured, at lower precedence than the canonical FY_STATE_DIR.
+#
+# NOT gated on FY_LIVE, and this script's own output (anchor-source.json plus
+# its R18 archive copy) is not gated either: it is a deterministic generator
+# that an operator runs by hand at a cycle transition, its output is a working-
+# tree artifact that reaches the public site through git-deploy, and gating it
+# would turn a forgotten export into a silently missing anchor source on the
+# one day of the cycle that it matters.
+STATE_DIR="$(fyd_state_dir anomaly)"
 
 # The public API base URL is authoritative for artifacts hashing (= hash what
 # the third-party evaluator would fetch, not what a stale local checkout has).

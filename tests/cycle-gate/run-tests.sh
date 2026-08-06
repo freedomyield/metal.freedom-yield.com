@@ -365,6 +365,10 @@ assert_exit "T13 resume Phase 1 signature PASS → dry-run exit 0" 0 ${RC}
 rm -rf "${STATE_DIR}" "${ID_DIR}" "${SCEN}"
 
 # ==== T14: resume --apply end-to-end → Phase 1-2 PASS, state written, exit 0
+# FY_LIVE=1 is REQUIRED for --apply since the C3 rollout (2026-08-06): the
+# state write is this script's entire purpose, so it refuses rather than
+# degrading to a dry no-op that would report PASS while approving nothing.
+# T14b below is the negative half of that contract.
 echo "[T14] resume --apply end-to-end (= v2 Phase 1 verify → Phase 2 state write) → exit 0"
 STATE_DIR="$(mktemp -d -t cgstate.XXXXXX)"
 ID_DIR="$(mktemp -d -t iddir.XXXXXX)"
@@ -374,7 +378,7 @@ build_resume_scenario_config "${SCEN}" "1700000000" \
 	"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" \
 	"${ID_DIR}"
 start_mock "${SCEN}"
-FY_STATE_DIR="${STATE_DIR}" METALGO_RPC="http://127.0.0.1:${PORT}" \
+FY_LIVE=1 FY_STATE_DIR="${STATE_DIR}" METALGO_RPC="http://127.0.0.1:${PORT}" \
 	PUBLIC_BASE="http://127.0.0.1:${PORT}" \
 	NODE_ID="NodeID-TEST123" \
 	FY_POLL_INTERVAL=1 FY_POLL_MAX_SEC=10 FY_RPC_TIMEOUT=2 \
@@ -395,6 +399,45 @@ else
 	printf '  ✗ FAIL: T14 side-effects not as expected\n'
 fi
 rm -rf "${STATE_DIR}" "${ID_DIR}" "${SCEN}"
+
+# ==== T14b: resume --apply WITHOUT FY_LIVE=1 → refused (exit 6), nothing
+# read, polled or written. The negative half of T14's contract. No mock RPC
+# is started on purpose: the refusal must land BEFORE Phase 1, so a run with
+# no reachable chain and no served artifacts must still exit 6 (not 2, which
+# is what an unreachable RPC would produce) and must do it immediately.
+echo "[T14b] resume --apply without FY_LIVE=1 → refuse (exit 6), no state written"
+STATE_DIR="$(mktemp -d -t cgstate.XXXXXX)"
+cp "${FIXTURE_DIR}/state-old.json" "${STATE_DIR}/cycle-gate-state.json"
+BEFORE_SUM="$(shasum -a 256 "${STATE_DIR}/cycle-gate-state.json" | awk '{print $1}')"
+T14B_ERR="$(mktemp -t t14b.XXXXXX)"
+FY_STATE_DIR="${STATE_DIR}" METALGO_RPC="http://127.0.0.1:1" \
+	PUBLIC_BASE="http://127.0.0.1:1" \
+	NODE_ID="NodeID-TEST123" \
+	FY_POLL_INTERVAL=1 FY_POLL_MAX_SEC=3 FY_RPC_TIMEOUT=2 \
+	bash "${SCRIPT_RESUME}" --apply 2>"${T14B_ERR}"
+RC=$?
+assert_exit "T14b resume --apply without FY_LIVE → exit 6" 6 ${RC}
+AFTER_SUM="$(shasum -a 256 "${STATE_DIR}/cycle-gate-state.json" | awk '{print $1}')"
+if [ "${BEFORE_SUM}" = "${AFTER_SUM}" ] \
+	&& [ ! -e "${STATE_DIR}/cycle-gate-state.json.new" ] \
+	&& grep -q 'FY_LIVE=1 is required' "${T14B_ERR}" \
+	&& grep -q 'FY_LIVE=1 bash' "${T14B_ERR}"; then
+	PASS=$((PASS + 1))
+	printf '  ✓ PASS: T14b refusal left the state byte-identical and printed the corrected command\n'
+else
+	FAIL=$((FAIL + 1))
+	FAIL_LINES+=("T14b refusal side-effects verification")
+	printf '  ✗ FAIL: T14b refusal side-effects not as expected\n'
+fi
+# --dry-run needs no opt-in and must still reach Phase 1 (here: RPC down → 2).
+FY_STATE_DIR="${STATE_DIR}" METALGO_RPC="http://127.0.0.1:1" \
+	PUBLIC_BASE="http://127.0.0.1:1" \
+	NODE_ID="NodeID-TEST123" \
+	FY_POLL_INTERVAL=1 FY_POLL_MAX_SEC=3 FY_RPC_TIMEOUT=2 \
+	run_resume --dry-run
+RC=$?
+assert_exit "T14b resume --dry-run needs no FY_LIVE (reaches Phase 1 → exit 2)" 2 ${RC}
+rm -rf "${STATE_DIR}" "${T14B_ERR}"
 
 # ==========================================================================
 # T19-T23 cover the cycle-artifact-write side-effect type (unconditionally

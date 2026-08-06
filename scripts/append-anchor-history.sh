@@ -73,18 +73,52 @@
 #                          push-to-web-host.sh downstream of it), never in
 #                          production.
 #   FYD_NOTIFY             notifier script for the publish-failure alert
-#                          (default: <repo>/scripts/notify.sh)
+#                          (default: <repo>/scripts/notify.sh). Resolved by
+#                          scripts/lib/side-effects.sh, not here.
 #   FYD_PUBLISH_ARCHIVES   set to 0 to skip the R18 publish step entirely —
 #                          no push-to-web-host.sh invocation, no notify
 #                          alert, just the two manual commands printed to
 #                          stderr. Kill switch for a rehearsal/dry-run
 #                          caller that wants zero outbound calls without
 #                          constructing stub scripts. Default: enabled (1).
+#   FY_LIVE=1              REQUIRED before the R18 push and the publish-failure
+#                          alert leave this machine. Anything else is a loud
+#                          dry no-op printing one "DRY: would …" line per
+#                          suppressed effect, PLUS the exact manual push
+#                          commands (scripts/lib/side-effects.sh, C3 rollout
+#                          2026-08-06).
+#
+#                          THE APPEND ITSELF IS DELIBERATELY NOT GATED. This
+#                          script is the writer of an append-only chain
+#                          record that an operator runs by hand at a cycle
+#                          transition; a forgotten FY_LIVE must cost a
+#                          deferred publish (recoverable, and the command to
+#                          recover is printed), never a missing line in the
+#                          ledger (not recoverable — the receipt it was
+#                          derived from is one-shot). Same reasoning as the
+#                          existing rule that a push failure never changes
+#                          this script's exit code, one step earlier.
+#
+#                          For a real cycle transition, set it — on the
+#                          pipeline, which passes it down:
+#                            FY_LIVE=1 bash scripts/run-anchor-pipeline.sh …
+#
+# Exit codes: 1 usage, 2 receipt unreadable/wrong schema, 3 not verification_
+# status=live, 4 append-only invariant violated, 5 tmp write / rename failed,
+# 6 schema validation failed, 7 no JSON-schema validator available,
+# 8 scripts/lib/side-effects.sh missing (structural).
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SCRIPT_VERSION="2.0"
+FYD_LIB="${REPO_ROOT}/scripts/lib/side-effects.sh"
+if [ ! -r "$FYD_LIB" ]; then
+	echo "append-anchor-history: FATAL: side-effects library not readable at $FYD_LIB" >&2
+	exit 8
+fi
+# shellcheck source=scripts/lib/side-effects.sh
+. "$FYD_LIB"
 
 RECEIPT=""
 # History file target. Env override (FYD_HISTORY_FILE) takes precedence
@@ -289,7 +323,10 @@ fi
 # to the public archive. Publishing here instead only ever happens for a
 # receipt that already passed the verification_status=="live" check above
 # AND whose append-only invariants above just succeeded — i.e. strictly
-# confirmed, chain-recorded anchors only.
+# confirmed, chain-recorded anchors only. Since 2026-08-06 (C3) the push also
+# needs FY_LIVE=1; without it the two pushes are announced-and-skipped and the
+# manual commands are printed. The APPEND is not gated — see the FY_LIVE entry
+# in the header for why the ledger must not depend on that opt-in.
 ARCHIVED_SOURCE_PATH="api/archive/anchor-source-${DAG_ROOT}.json"
 ARCHIVED_RECEIPT_PATH="api/archive/anchor-receipt-${TX_ID}.json"
 
@@ -455,23 +492,37 @@ mv "$TMP_OUT" "$HISTORY" || {
 # (documented in the file header too). Idempotent: re-running this script's
 # publish step (or re-pushing by hand with the printed command) just
 # overwrites the same bytes at the same remote path.
-PUSH_TO_WEB_HOST="${FYD_PUSH_TO_WEB_HOST:-${REPO_ROOT}/scripts/push-to-web-host.sh}"
+# PUSH_HINT_BIN is TEXT FOR THE OPERATOR, not an invocation target — the push
+# itself goes through fyd_push, which resolves the delegate from the same
+# FYD_PUSH_TO_WEB_HOST spelling. It is computed here only so the manual retry
+# command printed below names the path the operator would actually run.
+PUSH_HINT_BIN="${FYD_PUSH_TO_WEB_HOST:-${REPO_ROOT}/scripts/push-to-web-host.sh}"
+
+# retry_hint <push_arg> — the ONE formatter for the copy-pasteable manual push
+# command, so the three places that print it cannot drift. Built through
+# printf with the command word inside a format string rather than written
+# inline, so that operator guidance which merely NAMES the delegate can never
+# be read as an invocation of it — by a human skimming, or by the static gate
+# in tests/side-effects-callers/test-anchor-cycle-side-effects.sh.
+retry_hint() {
+	printf "bash '%s' '%s'" "$PUSH_HINT_BIN" "$1"
+}
 # ARCHIVE_DIR only decides what THIS SCRIPT treats as "the local archive
 # file exists" — see the ANCHOR_ARCHIVE_DIR header comment. It does NOT
 # redirect what push-to-web-host.sh actually reads: that script resolves
 # its own source path independently from its own REPO_BASE. Test-only.
 ARCHIVE_DIR="${ANCHOR_ARCHIVE_DIR:-$(dirname "$HISTORY")/archive}"
-NOTIFY="${FYD_NOTIFY:-${REPO_ROOT}/scripts/notify.sh}"
 
 alert() {
 	# Best-effort: a broken/missing notifier must never mask (or be conflated
 	# with) the publish failure it's reporting — mirrors run-anchor-pipeline.sh
 	# and gen-*.sh's alert()/notify patterns in this repo.
-	if [ -x "$NOTIFY" ] || [ -f "$NOTIFY" ]; then
-		bash "$NOTIFY" "$1" "$2" "$3" >&2 || echo "WARN: notify failed (alert was: $2 — $3)" >&2
-	else
-		echo "WARN: notifier not found at $NOTIFY (alert was: $2 — $3)" >&2
-	fi
+	#
+	# Delivery is gated on FY_LIVE by fyd_notify; the delegate is resolved
+	# from FYD_NOTIFY exactly as before. The "notifier not found" branch is
+	# gone — the library validates the delegate and returns 64, which lands on
+	# the same WARN line.
+	fyd_notify "$1" "$2" "$3" >&2 || echo "WARN: notify failed (alert was: $2 — $3)" >&2
 }
 
 # publish_archive <local_path> <push_arg> <label>
@@ -479,24 +530,36 @@ alert() {
 # non-fatal to this script — a missing local file or a push failure is
 # reported loudly (stderr + alert) with the exact manual retry command, and
 # the function always returns 0.
+#
+# Under a dry FY_LIVE, fyd_push suppresses the send and returns 0. That must
+# NOT be reported as "OK: published" — a dry run that claims publication is
+# the silent-success failure this rollout exists to end — so the confirmation
+# branch asks fyd_is_live and prints the manual command instead.
 publish_archive() {
-	local local_path="$1" push_arg="$2" label="$3"
+	local local_path="$1" push_arg="$2" label="$3" hint
+	hint="$(retry_hint "$push_arg")"
 	if [ ! -r "$local_path" ]; then
 		echo "WARN: R18 publish skipped — $label archive not found locally at $local_path" >&2
 		echo "      (history line already recorded its URL; publish once the file exists:)" >&2
-		echo "      bash \"$PUSH_TO_WEB_HOST\" \"$push_arg\"" >&2
+		echo "      ${hint}" >&2
 		alert high "anchor archive publish skipped: $label missing" \
-			"tx_id=$TX_ID dag_root=$DAG_ROOT — $local_path not found locally. Manual command once available: bash $PUSH_TO_WEB_HOST $push_arg"
+			"tx_id=$TX_ID dag_root=$DAG_ROOT — $local_path not found locally. Manual command once available: ${hint}"
 		return 0
 	fi
-	if bash "$PUSH_TO_WEB_HOST" "$push_arg" >&2; then
-		echo "OK: published $label ($push_arg)" >&2
+	if fyd_push "$push_arg" >&2; then
+		if fyd_is_live; then
+			echo "OK: published $label ($push_arg)" >&2
+		else
+			echo "DEFERRED: R18 publish of $label ($push_arg) was suppressed (FY_LIVE is not 1)" >&2
+			echo "      (history line already recorded its URL; publish it with:)" >&2
+			echo "      ${hint}" >&2
+		fi
 	else
 		echo "WARN: R18 publish FAILED for $label ($push_arg)" >&2
 		echo "      (history line already recorded its URL; retry manually:)" >&2
-		echo "      bash \"$PUSH_TO_WEB_HOST\" \"$push_arg\"" >&2
+		echo "      ${hint}" >&2
 		alert high "anchor archive publish failed: $label" \
-			"tx_id=$TX_ID dag_root=$DAG_ROOT — push-to-web-host.sh failed. Manual retry: bash $PUSH_TO_WEB_HOST $push_arg"
+			"tx_id=$TX_ID dag_root=$DAG_ROOT — push-to-web-host.sh failed. Manual retry: ${hint}"
 	fi
 	return 0
 }
@@ -510,8 +573,8 @@ publish_archive() {
 # attempted, without having to construct stub scripts first.
 if [ "${FYD_PUBLISH_ARCHIVES:-1}" = "0" ]; then
 	echo "SKIP: R18 archive publish disabled (FYD_PUBLISH_ARCHIVES=0) — history line already recorded the URLs; publish manually when ready:" >&2
-	echo "      bash \"$PUSH_TO_WEB_HOST\" \"archive/anchor-source-${DAG_ROOT}.json\"" >&2
-	echo "      bash \"$PUSH_TO_WEB_HOST\" \"archive/anchor-receipt-${TX_ID}.json\"" >&2
+	echo "      $(retry_hint "archive/anchor-source-${DAG_ROOT}.json")" >&2
+	echo "      $(retry_hint "archive/anchor-receipt-${TX_ID}.json")" >&2
 else
 	publish_archive "${ARCHIVE_DIR}/anchor-source-${DAG_ROOT}.json" "archive/anchor-source-${DAG_ROOT}.json" "anchor-source"
 	publish_archive "${ARCHIVE_DIR}/anchor-receipt-${TX_ID}.json" "archive/anchor-receipt-${TX_ID}.json" "anchor-receipt"

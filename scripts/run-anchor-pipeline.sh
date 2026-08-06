@@ -63,6 +63,7 @@
 #   2    freshness preflight failed (stale or undetermined checkout) —
 #        run advance-host-checkout.sh, or FYD_ALLOW_STALE_PIPELINE=1 to
 #        bypass (emergency only; always alerts)
+#   3    scripts/lib/side-effects.sh missing (structural)
 #   10+  step-N failed, script exit = 10 + step number (11..14)
 #
 # Usage:
@@ -80,11 +81,32 @@
 #   FYD_ALLOW_STALE_PIPELINE=1  bypass the freshness gate (emergency only;
 #                               fires alert high on every use — see above)
 #   FYD_NOTIFY                  notifier script used for the bypass alert
-#                               (default: <repo>/scripts/notify.sh)
+#                               (default: <repo>/scripts/notify.sh). Resolved
+#                               by scripts/lib/side-effects.sh, not here.
+#   FY_LIVE=1                   REQUIRED before the bypass alert reaches ntfy,
+#                               and (inherited by step 4) before
+#                               append-anchor-history.sh pushes the two R18
+#                               archives. Anything else is a loud dry no-op
+#                               printing "DRY: would …" (scripts/lib/
+#                               side-effects.sh, C3 rollout 2026-08-06).
+#                               A REAL cycle-transition run MUST set it:
+#                                 FY_LIVE=1 bash scripts/run-anchor-pipeline.sh …
+#                               Without it the anchor still broadcasts and the
+#                               history line is still appended (neither is
+#                               gated — see append-anchor-history.sh), but the
+#                               archive URLs that line advertises stay 404
+#                               until the printed manual push is run.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+FYD_LIB="${REPO_ROOT}/scripts/lib/side-effects.sh"
+if [ ! -r "$FYD_LIB" ]; then
+	echo "run-anchor-pipeline: FATAL: side-effects library not readable at $FYD_LIB" >&2
+	exit 3
+fi
+# shellcheck source=scripts/lib/side-effects.sh
+. "$FYD_LIB"
 
 CHAIN=""
 TRIGGER="manual"
@@ -120,16 +142,16 @@ fi
 ANCHOR_SOURCE="${REPO_ROOT}/public/api/anchor-source.json"
 LOG() { printf '[run-anchor-pipeline] %s\n' "$*" >&2; }
 
-NOTIFY="${FYD_NOTIFY:-${REPO_ROOT}/scripts/notify.sh}"
 alert() {
 	# alert <priority> <title> <message> — mirrors advance-host-checkout.sh's
 	# alert() pattern: best-effort notify, never fatal if the notifier itself
 	# is missing/broken (that must not block the LOG line already emitted).
-	if [ -x "$NOTIFY" ] || [ -f "$NOTIFY" ]; then
-		bash "$NOTIFY" "$1" "$2" "$3" || LOG "WARN: notify failed (alert was: $2 — $3)"
-	else
-		LOG "WARN: notifier not found at $NOTIFY (alert was: $2 — $3)"
-	fi
+	#
+	# Delivery is gated on FY_LIVE by fyd_notify; the delegate is resolved
+	# from FYD_NOTIFY exactly as before. The "notifier not found" branch is
+	# gone — the library validates the delegate and returns 64, which lands on
+	# the same WARN line.
+	fyd_notify "$1" "$2" "$3" || LOG "WARN: notify failed (alert was: $2 — $3)"
 }
 
 # -------- preflight: fail-closed freshness gate (Task 4) --------

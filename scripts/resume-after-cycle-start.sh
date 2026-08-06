@@ -27,7 +27,7 @@
 #   Operator runs this directly via SSH (= the polling logic in Phase 1
 #   tolerates uncertain deploy timing):
 #     ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
-#       'sudo -u deploy bash /home/deploy/metal.freedom-yield.com/scripts/resume-after-cycle-start.sh --apply'
+#       'sudo -u deploy env FY_LIVE=1 bash /home/deploy/metal.freedom-yield.com/scripts/resume-after-cycle-start.sh --apply'
 #
 # Phases:
 #   Phase 1  verify (= RPC own-entry + anchor-source freshness + identity sig)
@@ -47,9 +47,30 @@
 #                                      signature invalid, etc.)
 #   3   Phase 1 polling timeout (= anchor-source.json not fresh after max wait)
 #   4   Phase 2 state write failed
+#   5   scripts/lib/side-effects.sh missing (structural)
+#   6   --apply without FY_LIVE=1 (see below) — REFUSED, nothing was read,
+#       polled or written
+#
+# FY_LIVE=1 IS REQUIRED FOR --apply (C3 rollout 2026-08-06).
+#   This script's whole purpose is one production state write, so it does NOT
+#   degrade to a "loud dry no-op" the way the cron-driven callers do — a
+#   suppressed no-op here would print "✓ ALL PHASES PASS" while the gate stayed
+#   unapproved, and the next cron tick would defer every cycle-dependent side
+#   effect with nobody having a reason to look. It REFUSES instead (exit 6),
+#   before Phase 1, and prints the corrected command. Same shape as
+#   scripts/anomaly-state-init.sh, the other opt-in operator command.
+#
+#   --dry-run needs no opt-in: it reads and reports and writes nothing. The one
+#   write it used to make regardless of mode — mkdir of the state dir — is now
+#   gated too, so a dry run on a machine that has no /var/lib/freedom-yield
+#   leaves none behind.
 #
 # Env overrides (= test-time + ops):
-#   FY_STATE_DIR        dir holding cycle-gate-state.json
+#   FY_LIVE             must be exactly "1" for --apply (above)
+#   FY_STATE_DIR        dir holding cycle-gate-state.json. Resolved by
+#                       scripts/lib/side-effects.sh (fyd_state_dir cycle) —
+#                       the same call cycle-gate.sh makes to READ this file,
+#                       so writer and reader cannot drift onto different paths.
 #                       default /var/lib/freedom-yield
 #   METALGO_RPC         metalgo RPC base URL (default http://127.0.0.1:9650)
 #   PUBLIC_BASE         Xserver base URL (default https://metal.freedom-yield.com)
@@ -81,7 +102,28 @@ fi
 # ---- config -----------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
-STATE_DIR="${FY_STATE_DIR:-/var/lib/freedom-yield}"
+FYD_LIB="${SCRIPT_DIR}/lib/side-effects.sh"
+if [ ! -r "${FYD_LIB}" ]; then
+	echo "[resume] FATAL: side-effects library not readable at ${FYD_LIB}" >&2
+	exit 5
+fi
+# shellcheck source=scripts/lib/side-effects.sh
+. "${FYD_LIB}"
+
+# FYD-GATE(refusal) — --apply requires the explicit opt-in. Refused HERE, before
+# Phase 1, so a mis-invocation costs zero RPC calls and zero polling minutes
+# instead of ten. See the FY_LIVE block in the header for why this refuses
+# rather than degrading to a dry no-op.
+if [ "${MODE}" = "apply" ] && ! fyd_is_live; then
+	echo "[resume] REFUSED: --apply writes the cycle-gate approval state, so FY_LIVE=1 is required (got FY_LIVE='${FY_LIVE:-<unset>}')." >&2
+	echo "[resume] A suppressed write here would report PASS while leaving the gate unapproved — this script refuses instead of pretending." >&2
+	echo "[resume] Corrected command:" >&2
+	echo "[resume]   FY_LIVE=1 bash $0 --apply" >&2
+	echo "[resume] To verify only (no opt-in needed, writes nothing): bash $0 --dry-run" >&2
+	exit 6
+fi
+
+STATE_DIR="$(fyd_state_dir cycle)" || exit $?
 STATE_FILE="${STATE_DIR}/cycle-gate-state.json"
 METALGO_RPC="${METALGO_RPC:-http://127.0.0.1:9650}"
 PUBLIC_BASE="${PUBLIC_BASE:-https://metal.freedom-yield.com}"
@@ -94,7 +136,7 @@ PUBKEY_URL="${PUBKEY_URL:-${PUBLIC_BASE}/.well-known/operator-identity.pub}"
 log()       { printf '[resume] %s\n' "$*" >&2; }
 log_phase() { printf '\n[resume] ==== %s ====\n' "$*" >&2; }
 
-[ -d "${STATE_DIR}" ] || mkdir -p "${STATE_DIR}"
+[ -d "${STATE_DIR}" ] || fyd_live_run "create the cycle-gate state dir ${STATE_DIR}" mkdir -p "${STATE_DIR}"
 
 # Temp files for fetched artifacts. Single trap covers all of them so the
 # cleanup runs whether we exit at Phase 1 or Phase 2.
@@ -247,6 +289,12 @@ if [ "${MODE}" = "dry-run" ]; then
 	log "  approved_dag_root_hash=${NEW_DAG}"
 	log "Phase 2 SKIPPED (dry-run)"
 else
+	# Reachable only under --apply, which the refusal above already proved is
+	# live. The three writes still go through the library so the static gate
+	# in tests/side-effects-callers/ can see they are covered, and so a future
+	# edit that moves this block out from behind the refusal cannot silently
+	# reintroduce an ungated production write. The write stays ATOMIC:
+	# compose into .new, then rename.
 	STATE_TMP="${STATE_FILE}.new"
 	NOW_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 	if ! jq -n \
@@ -258,15 +306,15 @@ else
 				approved_cycle_signature: $sig,
 				approved_dag_root_hash:   $dag,
 				approved_at:              $ts
-			}' > "${STATE_TMP}"; then
+			}' | fyd_live_write "the new cycle-gate approval state" "${STATE_TMP}"; then
 		log "FAIL: jq failed to compose state file"
 		exit 4
 	fi
-	if ! mv "${STATE_TMP}" "${STATE_FILE}"; then
+	if ! fyd_live_run "install the new cycle-gate state at ${STATE_FILE}" mv "${STATE_TMP}" "${STATE_FILE}"; then
 		log "FAIL: mv failed for ${STATE_FILE}"
 		exit 4
 	fi
-	chmod 644 "${STATE_FILE}"
+	fyd_live_run "make ${STATE_FILE} world-readable" chmod 644 "${STATE_FILE}"
 	log "wrote ${STATE_FILE}"
 	log "Phase 2 PASS"
 fi

@@ -54,6 +54,35 @@
 #
 # This script never reads validator keys, staking keys, or any signing
 # material. It only joins two already-public JSON files.
+#
+# NOT GATED ON FY_LIVE, and it deliberately does not source the C3 side-effect
+# library under scripts/lib/ (2026-08-06 — a decision, not an oversight):
+#   * it sends no notification and pushes nothing to the web host — the push
+#     is a separate step (see "Push to web host" above);
+#   * it never touches ${FY_STATE_DIR} / /var/lib/freedom-yield;
+#   * its only write is a deterministic, idempotent regeneration of a
+#     working-tree artifact from two local inputs, already fail-closed behind
+#     cycle-gate.sh above.
+# Gating that write would buy nothing and cost the property that makes it
+# safe: this script is NOT in the side-effect cron list that
+# scripts/install-cron-env-headers.sh guarantees an FY_LIVE=1 header for, so a
+# gate here would turn a visible artifact into silent staleness — the failure
+# mode the C3 rollout is most afraid of. The static gate under
+# tests/side-effects-callers/ still holds this file to "no raw notify, no raw
+# push, no ungated state-dir write", so the moment one of those appears the
+# library becomes mandatory here too.
+#
+# ⚠ DO NOT WRITE THE LIBRARY'S FILENAME IN THIS FILE — NOT EVEN IN A COMMENT.
+# scripts/check-cron-file.sh (Rule 6) and scripts/install-cron-env-headers.sh
+# both classify a script as side-effecting by grepping its RAW TEXT for that
+# filename, comments included. Naming it here flips the host's
+# /etc/cron.d/metal-cycle-history from PASS to FAIL — breaking the binary
+# 16/16-clean cron gate — and makes the lint demand an FY_LIVE=1 header for a
+# script that deliberately ignores FY_LIVE, i.e. the lint would be advising a
+# change that is wrong. Refer to the library by description ("the C3
+# side-effect library") or by directory (scripts/lib/) instead. Enforced by
+# tests/side-effects-callers/, which runs the REAL lint against a synthetic
+# cron file naming this script.
 set -euo pipefail
 
 ROOT="${REPO_BASE:-$(cd "$(dirname "$0")/.." && pwd)}"

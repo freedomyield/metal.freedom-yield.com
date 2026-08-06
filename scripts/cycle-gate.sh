@@ -13,6 +13,22 @@
 #   0  green     — side effect safe to execute
 #   1  deferred  — transition window or unapproved cycle; skip the side effect
 #   2  error     — usage error / invalid input
+#   3  structural — scripts/lib/side-effects.sh missing. Every consumer treats
+#                   any non-zero as "skip", so this is fail-closed like 1/2.
+#                   Only the state-consulting paths can reach it: `observe`
+#                   and `cycle-artifact-write` return green BEFORE the library
+#                   is sourced, on purpose — a missing library must never be
+#                   able to switch observation off.
+#
+# THIS SCRIPT PERFORMS NO SIDE EFFECT AND IS THEREFORE NOT GATED ON FY_LIVE.
+# It reads a state file and the metalgo RPC and returns a verdict; a verdict
+# is not a side effect. Seven scripts consult this gate before deciding
+# whether to write or notify, so a gate that went quiet under a dry run would
+# stop every recording path on transition day — the opposite of the C3 intent.
+# The library is sourced solely so the state directory has ONE spelling
+# (fyd_state_dir cycle) shared with resume-after-cycle-start.sh, which writes
+# the very file this script reads. A second inline default here would let the
+# writer and the reader drift onto different paths silently.
 #
 # Side-effect type semantics:
 #   broadcast            — A-chain inscription (IRREV). Signature-gated: a stale
@@ -98,7 +114,17 @@ case "${SIDE_EFFECT}" in
 esac
 
 # ---- config -----------------------------------------------------------------
-STATE_DIR="${FY_STATE_DIR:-/var/lib/freedom-yield}"
+# Sourced HERE, after the unconditionally-green verdicts above, so a missing
+# library can never suppress observation (see the exit-3 note in the header).
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+FYD_LIB="${SCRIPT_DIR}/lib/side-effects.sh"
+if [ ! -r "${FYD_LIB}" ]; then
+	echo "[cycle-gate] ERROR: side-effects library not readable at ${FYD_LIB} → fail-closed (deferred)" >&2
+	exit 3
+fi
+# shellcheck source=scripts/lib/side-effects.sh
+. "${FYD_LIB}"
+STATE_DIR="$(fyd_state_dir cycle)" || exit $?
 STATE_FILE="${STATE_DIR}/cycle-gate-state.json"
 METALGO_RPC="${METALGO_RPC:-http://127.0.0.1:9650}"
 NODE_ID="${NODE_ID:-NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v}"

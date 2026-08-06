@@ -273,6 +273,8 @@ State file: `/var/lib/freedom-yield/cycle-gate-state.json` (= operator 承認済
 ③ validator host: `gen-cycle-history.sh` + push — 公開 `cycle-history.jsonl` が 1 行増えたことを実測確認
 ④ Mac local: `FY_EXPECT_CYCLE=<N> OPERATOR_IDENTITY_KEY=~/.ssh/freedom-yield-operator-identity bash scripts/operator-local/gen-identity.sh`(= operator passphrase prompt 発生時に 3 番目の active action)。`FY_EXPECT_CYCLE=<N>` はサイクル切替時 **MANDATORY**(N = 直前に閉じた cycle 番号。手順③の公開反映前に実行すると exit 7 で hard-stop)。続けて `git add` + `git commit` + `git push origin main`、`gh run watch` で deploy 完了監視
 ⑤ validator host: `FY_EXPECT_CYCLE=<N> bash scripts/gen-anchor-source.sh`(cycle-4 当日の例: `FY_EXPECT_CYCLE=3`)— 新 `anchor-source.json`(3-branch DAG)を compose。`cycle_number_observed` は 公開 `cycle-history.jsonl` の CLOSED_COUNT+1 から自己導出するが、`FY_EXPECT_CYCLE` を渡すと ordering guard が有効になり、CLOSED_COUNT と 不一致(= 手順③がまだ公開反映されていない)なら compose 前に **exit 9** で hard-stop する(未設定なら警告バナーのみで継続、初回 bootstrap 用)。**gen-identity.sh の exit 7 とは別条件** — `gen-anchor-source.sh` では exit 7 は既に「atomic write failed」の意味で使用中のため、意図的に番号を揃えていない(exit 7 と exit 9 を同じ意味と読まない)
+
+  > この step は `side-effects: WARNING: state dir falls back to the production default … while FY_LIVE is not "1"` を**ちょうど 1 行**出す。**これは正常**: この script は当該 dir 配下の 2 本の JSONL を**読むだけ**で、live source から DAG を組むのが目的なので、production data を読むのが正しい。**警告文が勧める「テスト用に `FY_STATE_DIR` を sandbox に向ける」に従ってはいけない** — それは test 作者向けの案内で、従うと空の入力から DAG を組んでしまう。`FY_LIVE=1` を足す必要もない(この script は production state を一切書かないので、opt-in は読取の正しさとは無関係)。
 ⑥ Mac local: `export VALIDATOR_HOST=<validator host の IP or hostname>` + `export VALIDATOR_HOST_KEY=~/.ssh/<your_validator_host_key>` を先に設定した上で `scripts/operator-local/commit-anchor-source.sh --expect-cycle=<N+1>`(cycle-4 当日の例: `--expect-cycle=4`)で host 側 `anchor-source.json` を検証+commit、続けて push + deploy 完了監視(手順④と同じパターン)。**env 2 つは必須の SSH 座標**(repo には literal を置かない方針): `VALIDATOR_HOST` は未設定なら変数名を挙げて即 refuse、`VALIDATOR_HOST_KEY` は **default が literal placeholder** `~/.ssh/<your_validator_host_key>`(実在しない path)なので未設定だと `ERROR: SSH key not found` → **exit 3** になる(`VALIDATOR_HOST_USER` の default は `root`)。**手順⑤との意味の反転に注意**: `gen-anchor-source.sh` の `FY_EXPECT_CYCLE` は「直前に閉じた cycle 番号」(N)だが、このスクリプトの `--expect-cycle` は fetch した `anchor-source.json` の `observations_branch.cycle_number_observed`(= `gen-anchor-source.sh` が `CLOSED_COUNT + 1` として算出する値)と直接一致比較するため「これから刻む cycle 番号」(N+1)を渡す — `N` を渡すと exit 5 で mismatch する。**commit+push+deploy は必須** — 公開されないと手順⑨の Phase 1 polling が exit 3 でタイムアウトする
 ⑦ Mac local: **⑦ は全て Mac 上で、かつ手順⑥の commit + push が landed した後に実行する**(署名対象は commit / push / deploy 済の bytes でなければ、receipt の `url` + `sha256` が刻んだ `dag_root_computed` を含まないファイルを指してしまう)
   - **⑦-a gate 1 材料(testnet-first)**: `HOME=~/.metal-fy-proton-test proton key:unlock` → `HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh --expect-cycle=<N+1>`(day-of は MANDATORY、`docs/PHASE_ALPHA_TESTNET_DRY_RUN.md` 参照。cycle-4 当日の例: `--expect-cycle=4`)。出力末尾の `TESTNET REHEARSAL COMPLETE testnet_tx_id=<64hex>` を控える。**この rehearsal 自身の dry-run log は testnet 側の証拠にすぎない** — `target_chain: "testnet-a"` を記録しており、mainnet gate 4 は `--chain` と異なる chain の dry-run log を拒否する。手順⑥が既に landed 済のため、canonical `public/api/anchor-source.json` は既にこの cycle のファイル(`cycle_number_observed == N+1`)— `--source=` override も `--allow-fixture` も不要、default 選択のまま `--expect-cycle=<N+1>` がそのまま通る。**朝のうちに(手順⑥完了前に)hand-built fixture を用意して先に rehearsal する運用は行わない** — その時点の canonical source はまだ前 cycle(`N`)のままで、`N+1` の実 gate-1 evidence を得るには fixture を手作りする必要が生じる。2026-08-04 に実際にこの朝実行を行い、fixture 手作り + dag 再計算の手間とリスク(手順⑥ landed 後の実 source と後で突き合わせる二度手間)が発生した。7a は必ず手順⑥の後、実 canonical source に対して実行する。rehearsal 完了直後に `rm -f /tmp/fyd-broadcast-token` で後始末する(testnet 向けに bound された token は R16 により mainnet ⑦-c に流用できず、5 分 TTL でも自然失効するが、⑦-b/⑦-c の pre-flight 確認時に古い token が `/tmp` に残っているとノイズになるため掃除する)
@@ -295,7 +297,7 @@ State file: `/var/lib/freedom-yield/cycle-gate-state.json` (= operator 承認済
       'chmod 644 /home/deploy/.fya-sign-output.json'
   ```
   `chmod` は防御的措置: `scp` は `root` として接続する(`VALIDATOR_HOST_USER` は未指定=default `root`)が、手順⑧の `gen-anchor-receipt.sh` は `sudo -u deploy` で走るため、host 側 root の umask 次第では `deploy` から読めないパーミッションになり得る。
-⑧ validator host: `gen-anchor-receipt.sh`(7-gate verify、`--prev-anchor-tx-id=` に直前 anchor の tx_id を渡す必要あり)+ `append-anchor-history.sh`(= append 成功直後に R18 archive 2 本を自動 push する。詳細は手順⑧.5)
+⑧ validator host: `gen-anchor-receipt.sh`(7-gate verify、`--prev-anchor-tx-id=` に直前 anchor の tx_id を渡す必要あり)+ `FY_LIVE=1 bash append-anchor-history.sh`(**R18 archive の自動 push には `FY_LIVE=1` が必須**。append 自体は gate されないので FY_LIVE 無しでも台帳行は書かれるが、archive push は `DEFERRED: R18 publish …` として見送られ、手動 push コマンドが表示される。C3 rollout 2026-08-06)(= append 成功直後に R18 archive 2 本を自動 push する。詳細は手順⑧.5)
 ⑧.5 validator host: 正規(canonical)の flat file 2 本を push する — R18 archive の 2 本とは別物:
   ```sh
   bash scripts/push-to-web-host.sh anchor-receipt.json
@@ -304,7 +306,7 @@ State file: `/var/lib/freedom-yield/cycle-gate-state.json` (= operator 承認済
   これを省くと、on-chain anchor は成功済みでも公開 `/api/anchor-receipt.json` / `/api/anchor-history.jsonl` が前 cycle の内容のまま止まる。手順⑨の Phase 1 は `anchor-source.json` の鮮度しか poll しないため、この push 漏れは検知されない。`anchor-source.json` 自体はこの push の対象外(手順⑥で git-deploy 済、`push-to-web-host.sh` では扱わない)。
 
   R18 per-anchor archive の 2 本(`archive/anchor-source-<dag_root>.json` / `archive/anchor-receipt-<tx_id>.json`)は、この手動 push の対象では**ない**: 2026-08-06(`77fd09d`)以降、`append-anchor-history.sh` が append 成功直後に自動で push する(best-effort — 失敗しても append 自体は失敗させない)。失敗時は stderr + `notify.sh high` alert に "R18 publish FAILED" / "R18 publish skipped" が出るので、その場合だけ表示された retry コマンドを手動実行する。`FYD_PUBLISH_ARCHIVES=0` で自動 push 自体を無効化できるが、通常の cycle 切替では使わない。
-⑨ validator host: `bash scripts/resume-after-cycle-start.sh --apply`(= v2 3 phase: Phase 1 verify 6 check → Phase 2 atomic state write → Phase 3 report。**broadcast なし、explorer URL は出力しない**)
+⑨ validator host: `FY_LIVE=1 bash scripts/resume-after-cycle-start.sh --apply`(**`FY_LIVE=1` 必須** — 無いと Phase 1 の前に exit 6 で拒否し、read も poll も write も一切しない。C3 rollout 2026-08-06)(= v2 3 phase: Phase 1 verify 6 check → Phase 2 atomic state write → Phase 3 report。**broadcast なし、explorer URL は出力しない**)
 
 手順⑦の tx id を読取り、explorer URL を operator に報告(resume-after-cycle-start.sh の出力ではなく、手順⑦の broadcast 結果)。
 
@@ -441,7 +443,7 @@ ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HO
          --anchor-source=public/api/anchor-source.json \
          --trigger=cyclestart \
          --prev-anchor-tx-id=\$PREV_TX && \
-       bash scripts/append-anchor-history.sh \
+       FY_LIVE=1 bash scripts/append-anchor-history.sh \
          --receipt=public/api/anchor-receipt.json \
          --event-type=cyclestart"'
 
@@ -456,7 +458,7 @@ ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HO
 
 # ⑨ validator host で resume-after-cycle-start.sh を trigger(v2 = 3 phase、broadcast なし)
 ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
-    'sudo -u deploy bash /home/deploy/metal.freedom-yield.com/scripts/resume-after-cycle-start.sh --apply'
+    'sudo -u deploy env FY_LIVE=1 bash /home/deploy/metal.freedom-yield.com/scripts/resume-after-cycle-start.sh --apply'
 
 # Phase 3 の report が出力される(state 更新のみ、broadcast も explorer URL も出さない)。
 ```

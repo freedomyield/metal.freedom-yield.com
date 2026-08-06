@@ -93,7 +93,7 @@
       "summary": "Host: resume-after-cycle-start.sh --apply (Phase 1 verify -> Phase 2 atomic state write -> Phase 3 report). No broadcast.",
       "scripts": ["resume-after-cycle-start.sh"],
       "cycle_gate_pattern": "9. **host —**",
-      "validator_renewal_pattern": "⑨ validator host: `bash scripts/resume-after-cycle-start.sh"
+      "validator_renewal_pattern": "⑨ validator host: `FY_LIVE=1 bash scripts/resume-after-cycle-start.sh"
     }
   ]
 }
