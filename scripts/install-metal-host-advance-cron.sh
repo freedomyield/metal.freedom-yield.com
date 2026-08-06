@@ -8,6 +8,15 @@
 # docs/CRON_CONVENTIONS.md (check-cron-file.sh rule 5) and logs via logger
 # (rule: no redirect into /var/log paths the deploy user cannot create).
 #
+# 2026-08-06: env header now also carries FY_LIVE=1. scripts/lib/side-effects.sh
+# (the C3 rollout) gates every production side effect — notify.sh,
+# push-to-web-host.sh, /var/lib/freedom-yield state writes — behind
+# FY_LIVE=1; anything else is a loud dry no-op. advance-host-checkout.sh
+# fires notify.sh alerts on several paths, so this cron must carry the flag
+# now, ahead of that script's own callers migrating onto the lib — landing
+# the flag first avoids the cron silently going dry the day that migration
+# lands. Enforced by check-cron-file.sh Rule 6.
+#
 # Schedule: 04:45 UTC daily — BEFORE check-host-drift.sh's 05:15 UTC tripwire
 # (scripts/install-metal-host-drift-cron.sh). This ordering is deliberate: a
 # healthy auto-advance run clears any behind-origin drift 30 minutes before
@@ -66,6 +75,7 @@ read -r -d '' EXPECTED <<CRON || true
 # 2026-07-09-host-checkout-auto-advance-design.md.
 SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin
+FY_LIVE=1
 45 4 * * * deploy bash ${REPO_PATH}/scripts/advance-host-checkout.sh 2>&1 | logger -t host-advance
 CRON
 

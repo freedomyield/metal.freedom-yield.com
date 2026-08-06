@@ -16,6 +16,15 @@
 # logs/ dir (deploy:deploy owned). The generated file is linted with
 # check-cron-file.sh before every install — a lint failure aborts the install.
 #
+# 2026-08-06: env header now carries FY_LIVE=1. scripts/lib/side-effects.sh
+# (the C3 rollout) gates every production side effect — notify.sh,
+# push-to-web-host.sh, /var/lib/freedom-yield state writes — behind
+# FY_LIVE=1; anything else is a loud dry no-op. This cron's chain notifies
+# and writes anchor-watcher-state.json, so it must carry the flag now, ahead
+# of watch-anchor-events.sh's own callers migrating onto the lib — landing
+# the flag first avoids the cron silently going dry the day that migration
+# lands. Enforced by check-cron-file.sh Rule 6.
+#
 # Env overrides (test-time):
 #   FYD_ANCHOR_WATCH_CRON  target cron path (default /etc/cron.d/metal-anchor-watch).
 #                          When overridden, the root requirement and root/deploy
@@ -71,6 +80,7 @@ cat > "$TMP" <<EOF
 # that doc) and this file is linted by check-cron-file.sh before every install.
 SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin
+FY_LIVE=1
 ANCHOR_DRIVER=${DRIVER}
 */5 * * * * deploy { echo "=== metal-anchor-watch start \$(date -u +\%FT\%TZ) ==="; cd ${REPO} && bash scripts/watch-anchor-events.sh; rc=\$?; echo "=== metal-anchor-watch end \$(date -u +\%FT\%TZ) rc=\$rc ==="; } >> ${REPO}/logs/anchor-watch.log 2>&1
 EOF

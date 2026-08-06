@@ -22,6 +22,15 @@
 # with check-cron-file.sh before every install — a lint failure aborts the
 # install instead of writing a non-compliant cron.
 #
+# 2026-08-06: env header now also carries FY_LIVE=1. scripts/lib/side-effects.sh
+# (the C3 rollout) gates every production side effect — notify.sh,
+# push-to-web-host.sh, /var/lib/freedom-yield state writes — behind
+# FY_LIVE=1; anything else is a loud dry no-op. check-watch-validators.sh
+# fires a notify.sh push and writes WATCH_STATE_DIR, so this cron must
+# carry the flag now, ahead of that script's own callers migrating onto the
+# lib — landing the flag first avoids the cron silently going dry the day
+# that migration lands. Enforced by check-cron-file.sh Rule 6.
+#
 # Idempotent: identical content → no change. A differing existing file is
 # backed up OUTSIDE cron.d — under ${FYD_BACKUP_DIR:-/var/backups/metal-cron}
 # as <name>.bak-<UTC ts> — because a *.bak sidecar left in /etc/cron.d is
@@ -86,6 +95,7 @@ CONTENT="$(cat <<EOF
 # Managed by scripts/install-watch-cron.sh — edit there, not here.
 SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin
+FY_LIVE=1
 NTFY_TOPIC_FILE=/etc/freedom-yield/ntfy-topic
 0 0,4,8,12 * * * deploy { echo "=== metal-watch-validators start \$(date -u +\%FT\%TZ) ==="; cd ${REPO_DIR} && bash scripts/check-watch-validators.sh; rc=\$?; echo "=== metal-watch-validators end \$(date -u +\%FT\%TZ) rc=\$rc ==="; } >> ${REPO_DIR}/logs/check-watch.log 2>&1
 EOF

@@ -73,8 +73,21 @@ has_ics_glob() { sed -n '/^case /,/^esac/p' "$1" 2>/dev/null | grep -qE '\*\.ics
 # check-cron-file.sh violation count for a file (0 if the linter is clean or
 # emits no Result line). `|| true`: linter exits 1 on violations — must not
 # abort us under set -e/pipefail.
+#
+# FYD_CRON_FY_LIVE_GRACE=1 (2026-08-06, check-cron-file.sh Rule 6): a rename
+# from OLD_NAME to NEW_NAME can flip a cron's Rule-6 outcome purely because
+# NEW_NAME (push-to-web-host.sh) is on Rule 6's side-effect allowlist while
+# OLD_NAME (push-to-xserver.sh) never was — a file with zero FY_LIVE-related
+# violations before the repoint would gain one after, purely from the name
+# swap, on every currently-live cron that has not yet had FY_LIVE=1 added to
+# its env header. §2's BEFORE_V vs AFTER_V comparison exists to protect
+# against a rewrite that adds a NEW problem, not to enforce an unrelated,
+# already-known migration-window gap — that is exactly the case this flag
+# is for. Without it, this script would start silently refusing to repoint
+# every affected live cron the day Rule 6 landed, undermining the one job
+# it exists to do.
 lint_violations() {
-	bash "$CHECKER" "$1" 2>/dev/null | sed -n 's/^Result: \([0-9]*\) violation.*/\1/p' || true
+	FYD_CRON_FY_LIVE_GRACE=1 bash "$CHECKER" "$1" 2>/dev/null | sed -n 's/^Result: \([0-9]*\) violation.*/\1/p' || true
 }
 
 # ===== 0. preconditions =====================================================

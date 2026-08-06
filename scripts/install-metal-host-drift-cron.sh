@@ -8,6 +8,15 @@
 # docs/CRON_CONVENTIONS.md (check-cron-file.sh rule 5) and logs via logger
 # (rule: no redirect into /var/log paths the deploy user cannot create).
 #
+# 2026-08-06: env header now also carries FY_LIVE=1. scripts/lib/side-effects.sh
+# (the C3 rollout) gates every production side effect — notify.sh,
+# push-to-web-host.sh, /var/lib/freedom-yield state writes — behind
+# FY_LIVE=1; anything else is a loud dry no-op. check-host-drift.sh fires a
+# notify.sh alert on any drift condition, so this cron must carry the flag
+# now, ahead of that script's own callers migrating onto the lib — landing
+# the flag first avoids the cron silently going dry the day that migration
+# lands. Enforced by check-cron-file.sh Rule 6.
+#
 # Schedule: 05:15 UTC daily — after the 04:00 feed batch and the deploy
 # window, so a healthy day reads "in sync" exactly once.
 #
@@ -56,6 +65,7 @@ read -r -d '' EXPECTED <<CRON || true
 # that from rebuilding silently. See scripts/check-host-drift.sh.
 SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin
+FY_LIVE=1
 15 5 * * * deploy bash ${REPO_PATH}/scripts/check-host-drift.sh 2>&1 | logger -t host-drift
 CRON
 
