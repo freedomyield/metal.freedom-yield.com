@@ -101,34 +101,93 @@ else
 		Bash)
 			CMD="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)"
 			# Detect `git commit|push --no-verify` / `-n` as an ACTUAL flag on the
-			# command line (a hook-bypass attempt) -- not as a substring sitting
-			# inside a quoted argument VALUE (e.g. a commit message that happens
-			# to mention "bash -n"). Tokenize with shell-word rules
-			# (Text::ParseWords::shellwords -- a pure syntactic parser: no
-			# subshell / backtick / $() execution) so a flag HIDDEN inside quotes
-			# (e.g. -m x "--no-verify") is still caught exactly as itself, while
-			# prose containing "-n" inside a larger quoted/unquoted argument
-			# token is not. On any tokenizer anomaly (parse exception, or a
-			# non-empty command that yields zero tokens -- e.g. unbalanced
-			# quotes) fail closed: fall back to the original plain substring
-			# scan so a malformed/adversarial command is never silently let
-			# through.
-			if [ -n "$CMD" ] && printf '%s' "$CMD" | perl -MText::ParseWords -0777 -ne '
-				my $cmd = $_;
-				my @tok = eval { shellwords($cmd) };
-				my ($has_gitcmd, $has_flag) = (0, 0);
-				if (!$@ && @tok) {
-					for (my $i = 0; $i < $#tok; $i++) {
-						$has_gitcmd = 1 if $tok[$i] eq "git"
-							&& ($tok[$i+1] eq "commit" || $tok[$i+1] eq "push");
-					}
-					for my $t (@tok) { $has_flag = 1 if $t eq "-n" || $t eq "--no-verify"; }
-				} else {
-					$has_gitcmd = ($cmd =~ /git[ \t]+(?:commit|push)(?:[ \t]|$)/) ? 1 : 0;
-					$has_flag   = ($cmd =~ /--no-verify|[ \t]-n(?:[ \t]|$)/)      ? 1 : 0;
-				}
-				exit(($has_gitcmd && $has_flag) ? 0 : 1);
-			'; then
+			# command line (a hook-bypass attempt). This is DELIBERATELY still a
+			# blind substring/regex scan of the raw command text -- NOT a shell
+			# tokenizer/interpreter -- because a prior version of this check tried
+			# to "understand" the command by tokenizing it (Text::ParseWords) and
+			# that opened six real, verified bypasses: $'--no-verify' (ANSI-C
+			# quoting), F=--no-verify; ... $F (variable indirection), $(echo
+			# --no-verify) / `echo --no-verify` (command substitution), ${Q:---no-
+			# verify} (parameter-expansion default), and a backslash-newline line
+			# continuation -- all of which a real shell expands to the literal
+			# flag at execution time, but none of which a static tokenizer
+			# resolves, so each one silently passed. A blind substring scan does
+			# not need to resolve any of that: the literal characters
+			# "--no-verify" (or "-n") are still sitting somewhere in the raw,
+			# unexecuted command text in every one of those forms, so grep finds
+			# them without understanding shell semantics at all.
+			#
+			# The ONLY thing that scan is too broad for is the ORIGINALLY reported
+			# false positive: a commit message that merely mentions "bash -n" in
+			# prose. So the fix is narrow on purpose: strip out just the VALUE
+			# text of known message-carrying options (-m/--message, -F/--file,
+			# -c, -C, -t, --fixup, --squash -- '=', attached, and space-separated
+			# forms) via a plain Perl regex substitution (no shell semantics, no
+			# module dependency beyond core Perl regex), then run the exact same
+			# blind substring scan the original code always used. Everything that
+			# is NOT recognized as one of those specific value slots -- including
+			# every one of the six bypass forms above, none of which places its
+			# payload inside a -m/-F/... value -- is left completely untouched and
+			# still scanned byte-for-byte.
+			#
+			# The "-n" alternative additionally accepts a leading/trailing quote
+			# character (' or ") as a boundary, not only whitespace: the original
+			# whitespace-only boundary let a bare quoted '-n' slip through even
+			# with no tokenizing involved (quoting the whole flag doesn't change
+			# what's adjacent to it). This is still a pure character-class widening
+			# of a substring scan, not shell interpretation, so it does not
+			# reintroduce the tokenizer's failure mode.
+			#
+			# Fail-closed on tool failure. The trust signal is the EXACT literal
+			# stdout text "BLOCK" or "ALLOW" printed by the perl script below --
+			# not its exit code. An exit code alone is NOT a safe signal here: a
+			# broken/absent perl (or any other malfunction) could easily exit 0
+			# or 1 by coincidence with no real detection logic having run at
+			# all, and 0/1 are exactly the two codes this check would otherwise
+			# treat as legitimate decisions -- silently swallowing a real
+			# bypass. Requiring the precise marker string means any malfunction
+			# (missing perl -> no output at all, a crash, a truncated run, a
+			# stray warning polluting stdout) fails the exact-match and falls
+			# through to the ORIGINAL raw substring scan below, i.e. it
+			# degrades to exactly the pre-existing (already safe) behavior,
+			# never to "allow".
+			BASH_BLOCK=0
+			if [ -n "$CMD" ]; then
+				DECISION="$(printf '%s' "$CMD" | perl -0777 -ne '
+					my $cmd = $_;
+					my $qval = qr/(?: \x27[^\x27]*\x27 | "(?:[^"\\]|\\.)*" )/x;
+					my $uval = qr/\S+/;
+					my $s = $cmd;
+					# Long flags: one atomic pass ("=" form or spaced form).
+					$s =~ s{
+						(--(?:message|file|fixup|squash))
+						(?: = (?:$qval|$uval) | \s+ (?:$qval|$uval) )?
+					}{$1}gx;
+					# Short flags: one atomic pass, mutually exclusive forms, so a
+					# bare flag left by this same pass is never re-matched as if it
+					# had a fresh, unstripped value. (?<!-) excludes the "-m" that
+					# is a substring of "--message".
+					$s =~ s{
+						(?<!-)(-[mFcCt])
+						(?: = (?:$qval|$uval) | $qval | \s+ (?:$qval|$uval) | $uval )?
+					}{$1}gx;
+					my $has_gitcmd = ($s =~ /git\s+(?:commit|push)(?:\s|$)/) ? 1 : 0;
+					my $has_flag   = ($s =~ /--no-verify/
+						|| $s =~ /[\s\x27\x22]-n(?:[\s\x27\x22]|$)/) ? 1 : 0;
+					print(($has_gitcmd && $has_flag) ? "BLOCK" : "ALLOW");
+				' 2>/dev/null)"
+				case "$DECISION" in
+					BLOCK) BASH_BLOCK=1 ;;
+					ALLOW) : ;;
+					*)
+						if printf '%s' "$CMD" | grep -qE 'git[[:space:]]+(commit|push)([[:space:]]|$)' \
+							&& printf '%s' "$CMD" | grep -qE '(--no-verify|[[:space:]]-n([[:space:]]|$))'; then
+							BASH_BLOCK=1
+						fi
+						;;
+				esac
+			fi
+			if [ "$BASH_BLOCK" -eq 1 ]; then
 				cat >&2 <<'EOF'
 === PUBLISH_GUARD_BLOCK ===
 `git commit|push --no-verify` (or -n) is refused: it would skip the
@@ -189,18 +248,29 @@ FINDINGS="$(
 			my $addr = lc $1;
 			next if $addr eq "::1" || $addr eq "::";
 			# Minimum-specificity gate: a real routable/assigned IPv6 literal
-			# always carries at least one full 16-bit hextet worth of hex
-			# digits (global-unicast prefixes -- 2xxx/3xxx -- are never
-			# written with fewer). Below that threshold the "::"-compressed
-			# shape matches ubiquitous non-IP syntax too eagerly: CSS
-			# pseudo-elements/classes (`::before`, `pre::-webkit-scrollbar`),
-			# C++/Rust/Ruby namespace separators (`std::vector`, `Foo::Bar`),
-			# and generic `a::b` code all parse as syntactically-valid (if
-			# absurdly minimal) IPv6 shorthand. Requiring >=4 hex digits
-			# total keeps every real host address (every excluded/allowed
-			# range below already carries >=4) while dropping those.
-			(my $digits = $addr) =~ s/://g;
-			next if length($digits) < 4;
+			# is written with at least one FULL 16-bit hextet (4 hex digits in
+			# one unbroken colon-delimited segment) -- global-unicast prefixes
+			# (2xxx/3xxx) are always written that way. Below that, the "::"-
+			# compressed shape matches ubiquitous non-IP syntax too eagerly:
+			# CSS pseudo-elements/classes (`::before`, `pre::-webkit-
+			# scrollbar`), C++/Rust/Ruby namespace separators (`std::vector`,
+			# `Foo::Bar`), and generic `a::b` code all parse as syntactically-
+			# valid (if absurdly minimal) IPv6 shorthand.
+			#
+			# A same-total-digit-count gate (">=4 digits summed across all
+			# segments") is NOT enough here: `h3::before` / `.status-
+			# badge::before` / `.commitment-card::before` (real selectors)
+			# each combine one short leading hex fragment (e.g. the "3" off
+			# "h3", or the "e" off "badge") with the "bef" that "before"
+			# happens to start with (b/e/f are all valid hex letters) and land
+			# at EXACTLY 4 total digits split across two short segments,
+			# passing a total-count gate while still not being an address.
+			# Requiring one segment to independently reach the full 4 digits
+			# closes that: no real host address is written any other way, and
+			# no incidental code/CSS collision plausibly produces one unbroken
+			# 4-hex-char run immediately adjacent to "::".
+			my @hx = grep { length } split /:/, $addr;
+			next unless grep { length($_) == 4 } @hx;
 			my ($first) = $addr =~ /^([0-9a-f]{1,4})/;
 			my $f = defined($first) ? hex($first) : 0;
 			next if ($f & 0xffc0) == 0xfe80;   # fe80::/10 link-local

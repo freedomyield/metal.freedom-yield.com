@@ -40,9 +40,17 @@ PUB_IP="$(printf '%d.%d.%d.%d' 8 8 8 8)"
 PUB_IP2="$(printf '%d.%d.%d.%d' 1 1 1 1)"
 PUB_IP6="$(printf '%s:%s:%s::%s' 2606 4700 4700 1111)"
 PUB_IP6_2="$(printf '%s:%s:%s:%s:%s:%s:%s:%s' 2607 f8b0 4004 c07 0 0 0 64)"
+PUB_IP6_3="$(printf '%s::%s' 2000 1)"
+PUB_IP6_4="$(printf '%s:%s::%s' 2620 fe fe)"
 FAKE_PHONE="$(printf '090%s' 12345678)"
 FAKE_PHONE_H="$(printf '090-%s-%s' 1234 5678)"
 FAKE_EMAIL="$(printf 'user@%s' badactor.io)"
+# The literal bypass-flag text, assembled at runtime so this tracked test
+# file never contains the raw flag string (which would itself trip the
+# Bash-tool PreToolUse hook when *this file* is committed/edited by an
+# agent session with that hook wired in -- see round-2 review notes).
+NOVERIFY_FLAG="$(printf -- '--no-ver%s' ify)"
+DASH_N="$(printf -- '-%s' n)"
 
 PASS=0
 FAIL=0
@@ -84,15 +92,29 @@ run_text "multicast ff00::/8 -> allow"              0 --text "mcast ff02::1"
 run_text "MAC address (not IPv6) -> allow"          0 --text "mac 00:1a:2b:3c:4d:5e"
 run_text "time-like colon string -> allow"          0 --text "at 14:32:10 today"
 run_text "diff: added public IPv6 -> block"         1 --diff "$(printf '+++ b/x.md\n+host %s\n ctx' "$PUB_IP6")"
+run_text "public IPv6 (assembled, reviewer-tested case A) -> block" 1 --text "host ${PUB_IP6_3} up"
+run_text "public IPv6 (assembled, reviewer-tested case B, Quad9) -> block" 1 --text "host ${PUB_IP6_4} up"
 
 echo "== IPv6 false-positive: CSS/code '::' syntax (not an address) =="
 # Real-world regression (2026-08-05/06): these all false-positived as
 # "public-IPv6 literal" before the minimum-specificity fix, because a single
 # hex-looking char/word adjacent to "::" is syntactically valid (if absurdly
 # minimal) compressed IPv6 shorthand.
+#
+# NOTE (round-2 review, I3): ".foo::before" / ".foo::after" do NOT exercise
+# the regex at all (the 'o' immediately before "::" is not a hex character,
+# so no candidate address is even matched) -- they passed vacuously
+# regardless of any gate logic and gave false confidence. Replaced with the
+# ACTUAL selectors found in public/styles.css, where the preceding character
+# genuinely is hex (h3::before's "3", "-badge::before"'s "e", etc.) and the
+# regex genuinely matches a candidate that the gate must then correctly
+# exclude.
 run_text "CSS pseudo-element (reported repro, pre::-webkit-scrollbar) -> allow" 0 --text "pre::-webkit-scrollbar { display:none }"
-run_text "CSS pseudo-element ::before -> allow"    0 --text ".foo::before { content:'' }"
-run_text "CSS pseudo-element ::after -> allow"     0 --text ".foo::after { content:'' }"
+run_text "real selector public/styles.css: h3::before -> allow"  0 --text ".footer-brand h3::before { content:'' }"
+run_text "real selector public/styles.css: .status-badge::before -> allow" 0 --text ".status-badge::before { content:'' }"
+run_text "real selector public/styles.css: .commitment-card::before -> allow" 0 --text ".commitment-card::before { content:'' }"
+run_text "real selector public/styles.css: td::before -> allow"  0 --text ".evidence-table tbody td::before { content:'' }"
+run_text "real selector public/styles.css: .nav-dropdown-toggle::before -> allow" 0 --text ".nav-dropdown > .nav-dropdown-toggle::before { content:'' }"
 run_text "C++ namespace std::vector -> allow"      0 --text "std::vector<int> v;"
 run_text "namespace Foo::Bar -> allow"             0 --text "Foo::Bar::method()"
 run_text "generic a::b code -> allow"              0 --text "let x = a::b;"
@@ -149,6 +171,73 @@ run_json "mutation-guard: msg mentions -n AND a real -n flag is also present -> 
 # parsing quirk unrelated to publish-guard.sh; assignment form is unaffected)
 UNBAL_JSON="$(jq -nc --arg c 'git commit -m "unterminated --no-verify' '{tool_name:"Bash",tool_input:{command:$c}}')"
 run_json "mutation-guard: unbalanced quote -> fail-closed fallback still blocks" 2 "$UNBAL_JSON"
+
+echo "== Bash hook-bypass C1: six real, verified evasion forms must still BLOCK =="
+# Round-2 review (2026-08-06): a prior fix (Text::ParseWords tokenization)
+# eliminated the false positive above but opened six REAL, verified
+# hook-bypass forms -- confirmed with actual hook execution in a throwaway
+# repo (git's own pre-commit hook genuinely did not fire for any of these;
+# see round-2 report for the transcript). A real shell expands every one of
+# these to the literal flag at execution time; a static tokenizer resolves
+# none of them. The fix reverted to a blind substring scan (which does not
+# need to resolve any of this) plus narrow value-stripping for message
+# options only.
+run_json "C1-1 ANSI-C quoting \$'--no-verify' -> block" 2 \
+	"$(jq -nc --arg c "git commit -m x \$'${NOVERIFY_FLAG}'" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "C1-2 variable indirection F=--no-verify; ... \$F -> block" 2 \
+	"$(jq -nc --arg c "F=${NOVERIFY_FLAG}; git commit -m x \$F" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "C1-3 command substitution \$(echo --no-verify) -> block" 2 \
+	"$(jq -nc --arg c "git commit -m x \$(echo ${NOVERIFY_FLAG})" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "C1-4 backtick \`echo --no-verify\` -> block" 2 \
+	"$(jq -nc --arg c "git commit -m x \`echo ${NOVERIFY_FLAG}\`" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "C1-5 parameter expansion default \${Q:---no-verify} -> block" 2 \
+	"$(jq -nc --arg c "git commit -m x \${Q:-${NOVERIFY_FLAG}}" '{tool_name:"Bash",tool_input:{command:$c}}')"
+LINECONT_CMD="$(printf 'git commit -m x \\\n%s' "$NOVERIFY_FLAG")"
+run_json "C1-6 backslash-newline line continuation -> block" 2 \
+	"$(jq -nc --arg c "$LINECONT_CMD" '{tool_name:"Bash",tool_input:{command:$c}}')"
+
+echo "== Bash hook-bypass gap closure: quoted -n (whitespace-only boundary was too narrow) =="
+run_json "-n hidden in single quotes -> block"     2 "$(jq -nc --arg c "git push origin main '${DASH_N}'" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "-n hidden in double quotes -> block"     2 "$(jq -nc --arg c "git push origin main \"${DASH_N}\"" '{tool_name:"Bash",tool_input:{command:$c}}')"
+
+echo "== Bash hook-bypass value-stripping precision (regression guards for the stripper itself) =="
+# These caught real bugs in earlier drafts of the value-stripping regex:
+# (a) "--message" contains the substring "-m", which without a (?<!-)
+#     lookbehind got misidentified as a bare short "-m" flag; (b) splitting
+#     the stripping into separate sequential passes let an already-bare flag
+#     get re-matched by a later pass, swallowing an unrelated SUBSEQUENT
+#     flag as if it were that flag's "value".
+run_json "long --message= form, real -n flag follows -> block" 2 \
+	"$(jq -nc --arg c "git commit --message=\"text with ${DASH_N} inside\" ${DASH_N}" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "attached -mVALUE (no space), real flag follows -> block" 2 \
+	"$(jq -nc --arg c "git commit -mx ${NOVERIFY_FLAG}" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "attached -m\"quoted value\", real flag follows -> block" 2 \
+	"$(jq -nc --arg c "git commit -m\"prose bash ${DASH_N}\" ${NOVERIFY_FLAG}" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "-F value, real -n flag follows -> block" 2 \
+	"$(jq -nc --arg c "git commit -F somefile.txt ${DASH_N}" '{tool_name:"Bash",tool_input:{command:$c}}')"
+
+echo "== Bash hook-bypass sanity: widened -n boundary must not false-positive on ordinary hyphenated text =="
+run_json "sanity: -n1 attached (not a bare -n token) -> allow" 0 "$(jq -nc --arg c 'git status -n1' '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "sanity: -n substring inside an ordinary word -> allow" 0 "$(jq -nc --arg c 'echo hyphenated-nomenclature-here' '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "sanity: hyphenated filename positional arg -> allow" 0 "$(jq -nc --arg c 'git commit -m x path/to/co-narrator-file.txt' '{tool_name:"Bash",tool_input:{command:$c}}')"
+
+echo "== Bash hook-bypass I1: perl unavailable/misbehaving must still fail-closed (never silently allow) =="
+# Round-2 review (2026-08-06): the trust signal for "did the value-stripper
+# actually run" must not be the perl exit code alone -- a broken/replaced
+# "perl" that merely exits 0 or 1 (the same two codes a clean run uses)
+# would be indistinguishable from a genuine decision and silently let a real
+# --no-verify through. Verified here by shadowing "perl" on PATH with a
+# minimal broken stand-in for the duration of a single invocation only (no
+# system perl is touched or modified).
+I1_FAKEBIN="$(mktemp -d -t pubguard-i1fakebin.XXXXXX)"
+printf '#!/bin/sh\nexit 1\n' > "$I1_FAKEBIN/perl"
+chmod +x "$I1_FAKEBIN/perl"
+I1_JSON="$(jq -nc --arg c "git commit -m x ${NOVERIFY_FLAG}" '{tool_name:"Bash",tool_input:{command:$c}}')"
+printf '%s' "$I1_JSON" | PATH="$I1_FAKEBIN:$PATH" bash "$GUARD" >/dev/null 2>&1
+rc=$?
+if [ "$rc" -eq 2 ]; then printf 'PASS  %-62s (rc=%d)\n' "I1: real --no-verify blocked even with broken perl on PATH" "$rc"; PASS=$((PASS+1))
+else printf 'FAIL  %-62s (rc=%d, want 2)\n' "I1: real --no-verify blocked even with broken perl on PATH" "$rc" >&2; FAIL=$((FAIL+1)); fi
+rm -rf "$I1_FAKEBIN"
 
 echo "== Write/Edit =="
 run_json "write public IP -> tracked README block" 2 "$(jq -nc --arg fp "$REPO_ROOT/README.md" --arg c "host $PUB_IP" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"
