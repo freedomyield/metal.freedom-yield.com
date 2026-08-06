@@ -1,20 +1,35 @@
 {
-	"_comment": "Operator-maintained incident log. Per-entry shape conforms to /api/incidents.schema.v1.json.",
-	"validatorSince": "2026-05-19",
-	"incidents": [
-		{
-			"id": "2026-06-24-01",
-			"type": "incident",
-			"detectionDate": "2026-06-24",
-			"confirmedPauseWindowEnd": "2026-06-24T11:20:02Z",
-			"potentiallyAffectedStart": null,
-			"potentiallyAffectedStartStatus": "undetermined",
-			"resolutionDate": "2026-06-24",
-			"title": "Anomaly monitoring maintenance pause and delayed resume",
-			"severity": "Minor",
-			"status": "resolved",
-			"summary": "On 2026-06-24, the auxiliary anomaly-monitoring cron pipeline failed to resume after an intentional maintenance pause because a runtime requirement and its cron environment were out of sync. The pipeline was restored at 2026-06-24T11:20:02Z and subsequently completed 13 hours of continuous validation with 157 successful scheduled runs. No effect on validator operation, the on-chain validator entry, delegations, or recorded uptime was identified in the records reviewed. This was an operational monitoring incident, not a validator service incident. A separate daily-status monitoring degradation remains open.",
-			"postmortemUrl": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/postmortems/2026-06-anomaly-monitoring-resume.md"
-		}
-	]
+  "_comment": "Operator-maintained incident log. Per-entry shape conforms to /api/incidents.schema.v1.json.",
+  "validatorSince": "2026-05-19",
+  "incidents": [
+    {
+      "id": "2026-08-06-01",
+      "type": "incident",
+      "detectionDate": "2026-08-06",
+      "confirmedPauseWindowStart": null,
+      "confirmedPauseWindowEnd": null,
+      "potentiallyAffectedStart": "2026-07-04",
+      "potentiallyAffectedStartStatus": "known",
+      "resolutionDate": "2026-08-06",
+      "title": "Published cycle-history feed under-reported per-cycle incident counts",
+      "severity": "Minor",
+      "status": "resolved",
+      "summary": "From 2026-07-04, when cycle 2 closed and its row first entered this feed, until 2026-08-06, the derived feed /api/cycle-history.jsonl reported incidents_in_cycle_count: 0 and an empty incidents_in_cycle_ids for every cycle, although incident 2026-06-24-01 falls inside cycle 2. The generator selected incidents by a \"date\" field that the incidents schema does not define; the records carry \"detectionDate\", so every comparison matched nothing and the count silently stayed at zero. The primary record, /api/incidents.json, was correct throughout and 2026-06-24-01 was published there on 2026-06-25, so nothing was withheld: only the derived per-cycle rollup was wrong. The same audit found the public /incidents/ page reading four further fields under names the schema does not define, and rendering a Critical severity with the neutral badge style. All are corrected as of 2026-08-06. /api/cycle-history.jsonl changed from sha256 475bd9127b6c0a8dd2c531e78b3ac611899f9fd32bf3c0977030b6e2a3a75b0c to sha256 e8001d204a8dd0ed41a5755a84dadd36814b4dfda4a394db569449351e210765, and /api/identity.json was re-signed so its pinned hashes match the corrected bytes; a holder of an earlier copy can confirm the change from those two values alone. A contract check now runs in CI and fails the build when any artifact field is read under a name its schema does not define. No effect on validator operation, delegations, or recorded uptime was identified in the records reviewed.",
+      "postmortemUrl": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/FIELD_CONTRACTS.md"
+    },
+    {
+      "id": "2026-06-24-01",
+      "type": "incident",
+      "detectionDate": "2026-06-24",
+      "confirmedPauseWindowEnd": "2026-06-24T11:20:02Z",
+      "potentiallyAffectedStart": null,
+      "potentiallyAffectedStartStatus": "undetermined",
+      "resolutionDate": "2026-06-24",
+      "title": "Anomaly monitoring maintenance pause and delayed resume",
+      "severity": "Minor",
+      "status": "resolved",
+      "summary": "On 2026-06-24, the auxiliary anomaly-monitoring cron pipeline failed to resume after an intentional maintenance pause because a runtime requirement and its cron environment were out of sync. The pipeline was restored at 2026-06-24T11:20:02Z and subsequently completed 13 hours of continuous validation with 157 successful scheduled runs. No effect on validator operation, the on-chain validator entry, delegations, or recorded uptime was identified in the records reviewed. This was an operational monitoring incident, not a validator service incident. A separate daily-status monitoring degradation remains open.",
+      "postmortemUrl": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/postmortems/2026-06-anomaly-monitoring-resume.md"
+    }
+  ]
 }

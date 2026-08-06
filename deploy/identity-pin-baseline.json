@@ -45,6 +45,15 @@
       "reason": "Push-owned feed (deploy/feed-excludes.txt): appended by scripts/uptime-history.sh as cycles accumulate.",
       "resolution": "C4 - same as evidence_json.sha256.",
       "gate_effect": "not-gated-structural"
+    },
+    "incidents_json.sha256": {
+      "path": "public/api/incidents.json",
+      "class": "tracked",
+      "pinned_sha256": "2c3a6b3507098dfecf2ca83f6e4b254994821fe2b60b06d52a77e48d5b2a97ee",
+      "observed_sha256": "44baa57ddb7b237b7d5b0aed39d6e522376feddadd8becf2db4ba86a568f6ec0",
+      "reason": "In-flight, deliberate: the 2026-08-06-01 disclosure entry was appended to incidents.json as part of the cycle-history correction. incidents.json must be SERVED before gen-identity.sh can re-sign (it hashes each leaf by curling its live URL), so the manifest cannot be re-issued in the same commit. This entry acknowledges the gap for the duration of that publish-then-re-sign sequence only.",
+      "resolution": "Delete this entry in the same commit that lands the re-signed identity.json. If it is still here after that commit, the re-sign did not happen.",
+      "gate_effect": "accepted-until-either-side-changes"
     }
   }
 }
