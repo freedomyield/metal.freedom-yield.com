@@ -615,7 +615,13 @@ def writer_artifacts(text, bindings, artifacts):
 # `(.a).x`, `.a[1:2].x` and, most importantly, `$inc[0].incidents[]?`: the very
 # expression in gen-cycle-history.sh whose `.date` selector was this audit's
 # top finding. The checker could see that bug only through the `select(...)`
-# that happened to follow. Eleven real field names in this repo were dark.
+# that happened to follow.
+#
+# Measured on this repo with the final code (both this fix and the string-
+# interpolation fix below), stating the basis because the figures differ by it:
+# 26 distinct field names were dark across ALL jq programs; restricted to
+# programs actually bound to a known artifact — i.e. the ones that can produce
+# a finding — 10 read occurrences across 7 distinct (artifact, key) pairs.
 CHAIN_RE = re.compile(r"(?<![\w$])((?:\.[A-Za-z_][A-Za-z0-9_]*)+)")
 
 # `to_entries` / `with_entries` / `group_by` synthesize these names; they are
@@ -783,9 +789,16 @@ NAMED_CALLBACK_RE = (r"\.(?:map|forEach|filter|find|some|every|sort)\s*"
                      r"\(\s*([A-Za-z_$][\w$]*)\s*\)")
 
 
-# A callback declared as a named arrow — `var render = (it) => {...}` /
-# `const render = it => {...}` — referenced later by name. Same role as a
-# `function render(it)` declaration.
+# A callback declared as a named arrow with a BLOCK body — `var render = (it)
+# => { ... }` / `const render = it => { ... }` — referenced later by name. Same
+# role as a `function render(it)` declaration.
+#
+# A concise-body arrow (`var f = x => x.foo`, no braces) is matched here but its
+# body is NOT recovered: brace_body() needs a `{` and returns "" without one, so
+# no region is added and the reads inside are invisible. Verified by running all
+# five forms through the checker. Documented rather than fixed because concise
+# bodies hold a single expression, which is not where this repo's feed-rendering
+# logic lives; claiming coverage it does not have would be worse than the gap.
 NAMED_ARROW_DECL = (r"(?:var|let|const)\s+%s\s*=\s*(?:async\s+)?"
                     r"(?:\(\s*([A-Za-z_$][\w$]*)[^)]*\)|([A-Za-z_$][\w$]*))\s*=>")
 NAMED_FUNC_DECL = r"function\s+%s\s*\(\s*([A-Za-z_$][\w$]*)"
@@ -802,7 +815,9 @@ def js_read_keys(regions, root, file_text=""):
 
     Aliases followed: `var x = data.foo`, inline element callbacks
     (`arr.forEach(function (e) {...})`), and callbacks passed BY NAME, declared
-    either as `function render(it)` or as a named arrow `var render = it => …`.
+    either as `function render(it)` or as a named block-body arrow
+    `var render = it => { … }` (concise-body arrows are not followed — see the
+    NAMED_ARROW_DECL comment).
     The by-name case matters because that is where a card renderer's per-field
     reads live, far from the fetch that supplied them.
     """

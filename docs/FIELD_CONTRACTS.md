@@ -101,9 +101,10 @@ Stated so they are not mistaken for coverage:
   element) are not attributed. Only `--slurpfile`/`--argfile` variables, which
   name a second artifact, are followed.
 - JS: callbacks are followed when passed inline, or by name to a `function f(x)`
-  or `var f = x => …` declaration. A callback reached any other way (a method on
-  an object, a value in a dispatch table) is not followed, so reads inside it
-  are invisible.
+  or **block-body** arrow `var f = x => { … }` declaration. A *concise-body*
+  arrow (`var f = x => x.foo`) is not followed — the body extractor requires a
+  `{`. Nor is a callback reached any other way (a method on an object, a value
+  in a dispatch table). Reads inside any of those are invisible.
 - `tests/` is excluded by default (synthetic fixtures would distort both the
   writer vocabulary and the reader set). `--include-tests` scans them for manual
   review.
@@ -200,39 +201,89 @@ public/api/anchor-source.json  .artifacts_branch.public_api_files_hashed[]
 deferred, precisely because its bytes flow into that chain. The gate protects
 the *transition window*; it does not make an out-of-band republish safe.
 
+### Two delivery mechanisms — do not mix them up
+
+The files in this procedure do **not** travel the same way, and using the wrong
+command silently fails:
+
+| File | Delivered by | Command |
+|---|---|---|
+| `cycle-history.jsonl` | **push** (host-side, listed in `deploy/feed-excludes.txt` so the deploy rsync never touches it) | `scripts/push-to-web-host.sh cycle-history.jsonl` |
+| `identity.json`, `identity.json.sig`, `identity-history.jsonl` | **git** (absent from `feed-excludes.txt`, so `deploy.yml`'s rsync delivers them) | `git add` → commit → push → deploy |
+
+`push-to-web-host.sh` accepts a fixed 16-filename allowlist plus two
+subdirectory prefixes. `identity.json` is not on it and never was:
+
+```
+$ bash scripts/push-to-web-host.sh identity.json
+ERROR: unrecognized filename: identity.json      # exit 1
+```
+
+`docs/DEPLOY_OWNERSHIP_MATRIX.md` records the same split ("From Git; regenerate
+via operator-Mac `gen-identity.sh`"), and `gen-identity.sh` itself ends by
+printing the `git add` list. Three independent sources agree.
+
 ### Procedure
 
 Run **outside a cycle-transition window**, and take the steps in this order.
 The order is not stylistic: `scripts/operator-local/gen-identity.sh` hashes each
 artifact by **fetching its live URL** (it `curl`s each leaf), so it must not run
-until the corrected bytes are already being served. Re-signing first would pin
-the old content again.
+until the corrected bytes are already being served. Re-signing first would
+faithfully pin the old content again.
 
 1. **Regenerate on the validator host, through the gate.**
    `bash scripts/gen-cycle-history.sh` — it exits 0 without writing if the gate
    is deferred, which is the correct outcome; wait and retry rather than
    bypassing it. The conservation check (exit 4) must pass.
-2. **Publish the corrected feed.**
+   Then record the hash you are about to publish, so step 6 has a target that
+   does not depend on any constant written down here:
+   `shasum -a 256 public/api/cycle-history.jsonl`
+2. **Publish the corrected feed** (push path):
    `bash scripts/push-to-web-host.sh cycle-history.jsonl`
-   From here until step 4 the served feed and the signed manifest disagree.
-   Keep the window short; this is why it is done outside a transition.
+   From here until step 4 lands, the served feed and the signed manifest
+   disagree. Keep the window short; this is why it is done outside a transition.
 3. **Re-sign the manifest on the operator Mac** (not on any host — the identity
    key lives only there):
    `OPERATOR_IDENTITY_KEY=<path> bash scripts/operator-local/gen-identity.sh`
    It re-fetches every leaf, picks up the new `cycle-history.jsonl` hash,
    recomputes `artifact_root`, re-signs, and self-verifies.
-4. **Publish the manifest and its signature together.**
-   `bash scripts/push-to-web-host.sh identity.json`
-   `bash scripts/push-to-web-host.sh identity.json.sig`
-   The published state is now internally consistent again.
+4. **Deliver the manifest through git** — the script prints this exact list when
+   it finishes; do not substitute `push-to-web-host.sh`, which will refuse:
+
+   ```
+   git add public/api/identity.json \
+           public/api/identity.json.sig \
+           public/api/identity-history.jsonl \
+           public/.well-known/operator-identity.pub
+   ```
+
+   Review the diff, commit, push. `deploy.yml`'s rsync delivers all of them.
+
+   `identity-history.jsonl` is not optional here: it is **itself a leaf** of
+   `anchor-source.json .artifacts_branch.public_api_files_hashed[]` (currently
+   `0021e4d2…`). Committing `identity.json` while leaving it behind
+   re-introduces exactly the manifest-vs-served divergence this procedure exists
+   to close.
 5. **Let the next anchor pick it up.** `identity.json`'s new hash changes the
    artifacts branch and therefore `dag_root_computed`; the next scheduled anchor
    inscribes the new root. Do not force an extra anchor for this — the previous
    inscription is not invalidated, it simply records the state as of its own
    time, which is what an append-only chain is for.
-6. **Verify.** Confirm the served `cycle-history.jsonl` hash equals the manifest
-   pin, and that `ssh-keygen -Y verify` accepts `identity.json` against
-   `identity.json.sig`.
+6. **Verify**, in this order:
+   - the served `cycle-history.jsonl` sha256 equals the value captured in step 1
+     **and** equals `identity.json .artifact_manifest.cycle_history_jsonl.sha256`;
+   - `ssh-keygen -Y verify` accepts `identity.json` against `identity.json.sig`;
+   - the served `identity-history.jsonl` sha256 equals the
+     `artifacts_branch` leaf.
+
+   A review pass on 2026-08-06 measured the corrected feed as
+   `e8001d204a8dd0ed41a5755a84dadd36814b4dfda4a394db569449351e210765`. Treat
+   that as a cross-check, not as the authority: it was measured before the
+   incident-attribution boundary fix landed, and this repo has no copy of the
+   live `cycle-history.jsonl` to re-measure it against. The step-1 capture is
+   the authoritative target. If the two disagree, the boundary fix changed which
+   cycle an incident belongs to — confirm that against the incident log rather
+   than assuming corruption.
 
 Skipping step 3–4, or doing them before step 2, leaves a published feed whose
 hash contradicts a signature that is itself committed to the chain — exactly

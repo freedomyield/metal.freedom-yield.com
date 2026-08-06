@@ -247,6 +247,39 @@ run "$T"
 	&& ok "A13 \${VAR_DIR}/-composed artifact is discovered and checked" \
 	|| bad "A13 var-dir discovery (rc=$RC): $OUT"
 
+# ---- A14: which named-callback declaration forms are actually followed -----
+# Pins the limit docs/FIELD_CONTRACTS.md states, so the doc cannot drift from
+# behaviour. Block bodies are followed; a concise-body arrow is not, because
+# the body extractor needs a `{`. Asserting the NEGATIVE too is deliberate: a
+# documented gap that quietly closes is fine, but a documented gap that is
+# actually wider than claimed is how a checker over-promises.
+for form in 'var f = (x) => x.bad;|no' \
+            'var f = x => x.bad;|no' \
+            'var f = (x) => { return x.bad; };|yes' \
+            'var f = x => { return x.bad; };|yes' \
+            'function f(x) { return x.bad; }|yes'; do
+	decl="${form%|*}"
+	want="${form#*|}"
+	new_fixture "$T"
+	cat > "$T/public/assets/app.js" <<EOF
+(function () {
+	${decl}
+	async function load() {
+		var res = await fetch("/api/thing.json", { cache: "no-store" });
+		var data = await res.json();
+		var list = data.list || [];
+		document.title = list.map(f).join("");
+	}
+	load();
+})();
+EOF
+	run "$T"
+	if echo "$OUT" | grep -q "\.bad"; then got=yes; else got=no; fi
+	[ "$got" = "$want" ] \
+		&& ok "A14 [$decl] followed=$got (as documented)" \
+		|| bad "A14 [$decl] followed=$got, documented $want"
+done
+
 # ---------------------------------------------------------------------------
 # B. Mutation tests against a copy of THIS repo
 # ---------------------------------------------------------------------------
