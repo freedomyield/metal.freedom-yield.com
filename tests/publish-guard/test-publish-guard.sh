@@ -196,7 +196,63 @@ LINECONT_CMD="$(printf 'git commit -m x \\\n%s' "$NOVERIFY_FLAG")"
 run_json "C1-6 backslash-newline line continuation -> block" 2 \
 	"$(jq -nc --arg c "$LINECONT_CMD" '{tool_name:"Bash",tool_input:{command:$c}}')"
 
-echo "== Bash hook-bypass gap closure: quoted -n (whitespace-only boundary was too narrow) =="
+echo "== Bash hook-bypass N1: value-stripper must not eat a real flag after an arbitrary -m/-F/-c/-C/-t-ending token ==="
+# Round-3 review (2026-08-06): the round-2 stripper excluded only "preceded
+# by another dash" (?<!-), not a full left word-boundary. Any token ending
+# in -m/-F/-c/-C/-t (e.g. "file-c", "foo-m", "A-F") misparsed as a real
+# short flag, and the value branch then ate the NEXT, genuine token as its
+# bogus "value" -- silently swallowing a real --no-verify/-n sitting right
+# after it. Confirmed with real hook execution: git COMMITTED and the real
+# pre-commit hook was SKIPPED for every one of these before the fix.
+run_json "N1-1 file-c eats a real --no-verify -> block" 2 \
+	"$(jq -nc --arg c "git commit -m x file-c ${NOVERIFY_FLAG}" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "N1-2 foo-m eats a real --no-verify -> block" 2 \
+	"$(jq -nc --arg c "git commit -m x foo-m ${NOVERIFY_FLAG}" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "N1-3 pre-t eats a real --no-verify -> block" 2 \
+	"$(jq -nc --arg c "git commit -m x pre-t ${NOVERIFY_FLAG}" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "N1-4 A-F eats a real --no-verify -> block" 2 \
+	"$(jq -nc --arg c "git commit -m x A-F ${NOVERIFY_FLAG}" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "N1-5 A-C eats a real --no-verify -> block" 2 \
+	"$(jq -nc --arg c "git commit -m x A-C ${NOVERIFY_FLAG}" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "N1-6 file-c eats a real -n -> block" 2 \
+	"$(jq -nc --arg c "git commit -m x file-c ${DASH_N}" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "N1-7 file-c eats a quoted --no-verify -> block" 2 \
+	"$(jq -nc --arg c "git commit -m x file-c \"${NOVERIFY_FLAG}\"" '{tool_name:"Bash",tool_input:{command:$c}}')"
+
+echo "== Bash hook-bypass N2: bundled short options (-am/-sm/-qm) must still strip the message value ==="
+# Round-3 review (2026-08-06): the round-2 stripper only recognized a bare
+# -m, not -m bundled with another boolean short flag in the same token
+# (e.g. "-am" = -a + -m). "git commit -am \"...\"" is one of the single most
+# common invocations, so the ORIGINALLY reported false-positive class (a
+# message mentioning "bash -n") was reintroduced under this form, and the
+# round-2 -n boundary widening made it worse (a bare -n followed only by
+# the messages own closing quote, no space, newly matched too). Fixed by
+# recognizing bundled forms (-[A-Za-z]*[mFcCt]) and narrowing the -n
+# boundary back down (see gap-closure section above).
+run_json "N2-1 -am bundled -> allow" 0 \
+	"$(jq -nc --arg c "git commit -am \"docs: mention bash ${DASH_N} check\"" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "N2-2 -sm bundled -> allow" 0 \
+	"$(jq -nc --arg c "git commit -sm \"docs: mention bash ${DASH_N} check\"" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "N2-3 -qm bundled -> allow" 0 \
+	"$(jq -nc --arg c "git commit -qm \"docs: mention bash ${DASH_N} check\"" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "N2-4 -am bundled, single-quoted message -> allow" 0 \
+	"$(jq -nc --arg c "git commit -am 'bash ${DASH_N} check'" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "N2-5 -am bundled, -n at the very end of the message -> allow" 0 \
+	"$(jq -nc --arg c "git commit -am \"docs mention bash ${DASH_N}\"" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "N2-6 --amend -am bundled -> allow" 0 \
+	"$(jq -nc --arg c "git commit --amend -am \"docs: mention bash ${DASH_N} check\"" '{tool_name:"Bash",tool_input:{command:$c}}')"
+run_json "N2-7 -am bundled, -n mid-message -> allow" 0 \
+	"$(jq -nc --arg c "git commit -am \"first ${DASH_N} second\"" '{tool_name:"Bash",tool_input:{command:$c}}')"
+
+echo "== Bash hook-bypass gap closure: a lone -n fully wrapped in matching quotes -> block =="
+# Round-3 (2026-08-06): the -n boundary went through two shapes. Round 2
+# widened it to "any adjacent quote counts as a boundary", which itself
+# reintroduced a false positive (see N2 below: an unstripped messages own
+# closing quote, sitting right after "-n" deep in prose, satisfied it).
+# Round 3 narrowed it back to whitespace/start/end PLUS two explicit
+# alternatives for a lone -n wrapped in a MATCHED quote pair ('-n' / "-n"
+# as a whole standalone token) -- precise enough to still catch this
+# deliberate-quoting case without the prose false positive.
 run_json "-n hidden in single quotes -> block"     2 "$(jq -nc --arg c "git push origin main '${DASH_N}'" '{tool_name:"Bash",tool_input:{command:$c}}')"
 run_json "-n hidden in double quotes -> block"     2 "$(jq -nc --arg c "git push origin main \"${DASH_N}\"" '{tool_name:"Bash",tool_input:{command:$c}}')"
 

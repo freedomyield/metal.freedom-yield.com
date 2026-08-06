@@ -165,15 +165,35 @@ else
 					}{$1}gx;
 					# Short flags: one atomic pass, mutually exclusive forms, so a
 					# bare flag left by this same pass is never re-matched as if it
-					# had a fresh, unstripped value. (?<!-) excludes the "-m" that
-					# is a substring of "--message".
+					# had a fresh, unstripped value. The left boundary requires the
+					# preceding character to be whitespace, a quote, or the start
+					# of the string (NOT merely "not another dash") -- a lone
+					# negative lookbehind on a bare dash let the TAIL of an
+					# arbitrary token (e.g. "file-c", "foo-m", "A-F") misparse as
+					# a real short flag, and the attached-or-spaced value branch
+					# then ate the NEXT, genuine token as its bogus value --
+					# silently swallowing a real --no-verify/-n sitting right
+					# after it. [A-Za-z]* additionally recognizes bundled short
+					# options (-am, -sm, -qm: boolean flags bundled with a
+					# value-taking one), so their message value is still stripped
+					# and does not reintroduce the originally-reported false
+					# positive under those bundled forms.
 					$s =~ s{
-						(?<!-)(-[mFcCt])
+						(?<![^\s\x27\x22])(-[A-Za-z]*[mFcCt])
 						(?: = (?:$qval|$uval) | $qval | \s+ (?:$qval|$uval) | $uval )?
 					}{$1}gx;
 					my $has_gitcmd = ($s =~ /git\s+(?:commit|push)(?:\s|$)/) ? 1 : 0;
+					# -n boundary: whitespace / start / end only (matching the
+					# original), plus explicit fully-quoted-standalone-token
+					# alternatives (a lone -n wrapped in single or double quotes).
+					# NOT "any adjacent quote counts as a boundary": that was too
+					# loose -- an unrelated messages own closing quote, sitting
+					# right after an unstripped -n deep inside prose, satisfied it
+					# and reintroduced a false positive. Requiring the quotes to
+					# be a MATCHED PAIR immediately wrapping -n itself avoids that
+					# while still catching a deliberately quoted, standalone flag.
 					my $has_flag   = ($s =~ /--no-verify/
-						|| $s =~ /[\s\x27\x22]-n(?:[\s\x27\x22]|$)/) ? 1 : 0;
+						|| $s =~ /(?:^|\s)(?:-n|\x27-n\x27|\x22-n\x22)(?:\s|$)/) ? 1 : 0;
 					print(($has_gitcmd && $has_flag) ? "BLOCK" : "ALLOW");
 				' 2>/dev/null)"
 				case "$DECISION" in
