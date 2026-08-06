@@ -113,8 +113,18 @@ export FYD_PUSH_TO_WEB_HOST="$PUSH_STUB"
 PASS=0
 FAIL=0
 
+SKIP=0
+
 pass() { printf 'PASS  %-72s%s\n' "$1" "${2:+ ($2)}"; PASS=$((PASS + 1)); }
 fail_case() { printf 'FAIL  %-72s%s\n' "$1" "${2:+ ($2)}" >&2; FAIL=$((FAIL + 1)); }
+skip_case() { printf 'SKIP  %-72s%s\n' "$1" "${2:+ ($2)}"; SKIP=$((SKIP + 1)); }
+
+# The two fd-0-CLOSED cases assert "returns at all", which needs a real
+# timer. Without `timeout` the regression would present as the suite
+# hanging, so those cases are skipped loudly rather than silently passing
+# on a rc that only looks non-124.
+HAVE_TIMEOUT=0
+command -v timeout >/dev/null 2>&1 && HAVE_TIMEOUT=1
 
 # run_case <snippet-run-with-lib-sourced>
 #   Caller sets per-case env with an `env VAR=...` prefix. Resets the stub
@@ -595,14 +605,59 @@ else
 fi
 
 # The DRY line reports how much content was suppressed, which also proves
-# stdin was drained (a producer on the left of the pipe must not take
-# SIGPIPE and fail a `set -o pipefail` caller).
+# stdin was drained.
 RC=0
 OUT_ERR="$(printf '123456789\n' | env -u FY_LIVE bash -c ". \"\$LIB\"; set -o pipefail; fyd_live_write \"x\" \"$WFILE\"" 2>&1 1>/dev/null)" || RC=$?
 if [ "$RC" -eq 0 ] && printf '%s' "$OUT_ERR" | grep -q '10 bytes on stdin'; then
-	pass "fyd_live_write: dry drains stdin and reports the byte count (no SIGPIPE for the producer)"
+	pass "fyd_live_write: dry drains stdin and reports the byte count"
 else
 	fail_case "fyd_live_write: dry drains stdin and reports the byte count" "rc=$RC err=[$OUT_ERR]"
+fi
+
+# Why the drain exists, at a size that actually needs it: a small producer
+# fits in the pipe buffer and exits cleanly whether or not anyone reads it,
+# so a 10-byte case cannot tell a working drain from a missing one. At 1 MB
+# the producer blocks, and a reader that just returns without draining
+# hands it SIGPIPE — rc 141 through `set -o pipefail`, i.e. a dry run
+# changing the caller's control flow.
+RC=0
+env -u FY_LIVE bash -c "
+	set -o pipefail
+	. \"\$LIB\"
+	dd if=/dev/zero bs=1024 count=1024 2>/dev/null | fyd_live_write 'a big state file' '$WFILE'
+" >"$OUT_FILE" 2>"$ERR_FILE" || RC=$?
+ERR="$(cat "$ERR_FILE")"
+if [ "$RC" -eq 0 ] && printf '%s' "$ERR" | grep -q '1048576 bytes on stdin'; then
+	pass "fyd_live_write: dry drains a 1 MB producer (no SIGPIPE → pipefail caller unaffected)" "rc=0"
+else
+	fail_case "fyd_live_write: dry drains a 1 MB producer (no SIGPIPE)" "rc=$RC (141 = producer got SIGPIPE) err=[$ERR]"
+fi
+
+# fd 0 CLOSED must not hang. The drain's command substitution gets its own
+# pipe assigned to the lowest free descriptor — which is 0 — so an
+# unguarded `wc` reads the pipe it is writing to and never returns. Live
+# surfaced this instantly (rc 1, "Bad file descriptor"); dry hung forever.
+# Only the SAFE mode could wedge a cron tick. `timeout` is the assertion:
+# without the guard this case does not fail, it never finishes.
+if [ "$HAVE_TIMEOUT" -eq 1 ]; then
+	RC=0
+	timeout 10 env -u FY_LIVE bash -c ". \"\$LIB\"; fyd_live_write 'closed stdin' '$WFILE' <&-" >"$OUT_FILE" 2>"$ERR_FILE" || RC=$?
+	if [ "$RC" -ne 124 ]; then
+		pass "fyd_live_write: dry with fd 0 CLOSED returns instead of hanging" "rc=$RC"
+	else
+		fail_case "fyd_live_write: dry with fd 0 CLOSED returns instead of hanging" "rc=124 — timed out, the drain deadlocked on its own substitution pipe"
+	fi
+
+	RC=0
+	timeout 10 env FY_LIVE=1 bash -c ". \"\$LIB\"; fyd_live_write 'closed stdin' '$WFILE' <&-" >"$OUT_FILE" 2>/dev/null || RC=$?
+	if [ "$RC" -ne 124 ]; then
+		pass "fyd_live_write: live with fd 0 CLOSED returns instead of hanging" "rc=$RC"
+	else
+		fail_case "fyd_live_write: live with fd 0 CLOSED returns instead of hanging" "rc=124 — timed out"
+	fi
+else
+	skip_case "fyd_live_write: dry with fd 0 CLOSED returns instead of hanging" "no timeout(1) on this host"
+	skip_case "fyd_live_write: live with fd 0 CLOSED returns instead of hanging" "no timeout(1) on this host"
 fi
 
 # Live actually writes.
@@ -703,7 +758,7 @@ fi
 # ---- Summary ----
 echo
 echo "----------------------------------------"
-echo "test-side-effects.sh summary: PASS=$PASS  FAIL=$FAIL"
+echo "test-side-effects.sh summary: PASS=$PASS  FAIL=$FAIL  SKIP=$SKIP"
 if [ "$FAIL" -gt 0 ]; then
 	echo "RESULT: FAIL"
 	exit 1

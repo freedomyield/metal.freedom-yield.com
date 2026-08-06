@@ -265,7 +265,18 @@ fyd_live_run() {
 #   stdin is drained in dry mode so a producer on the left of the pipe does
 #   not take SIGPIPE and fail a `set -o pipefail` caller — a dry run must not
 #   change the caller's control flow. Draining is skipped when stdin is a
-#   terminal, so an interactive call cannot hang.
+#   terminal (an interactive call must not hang waiting for input) and when
+#   fd 0 is CLOSED (see the guard below for why that one is load-bearing).
+#
+#   NOT ATOMIC. `>` truncates at open, so a producer that dies mid-pipe
+#   leaves a truncated or partial file where the previous content used to
+#   be — the same exposure a bare `> "$f"` has. Several current writers are
+#   atomic on purpose (check-anomalies.sh and uptime-history.sh build a
+#   mktemp file and mv it into place); moving those to fyd_live_write
+#   mechanically would quietly lose that property. FOR STATE THAT MUST
+#   SURVIVE A CRASH, KEEP THE TEMP FILE AND GATE THE FINAL RENAME INSTEAD:
+#       printf '%s\n' "$json" >"$TMP" &&
+#           fyd_live_run "install the new state" mv "$TMP" "$STATE"
 #
 #   Known parity gap (same class as fyd_push's): a live write also fails when
 #   the parent directory is missing or unwritable. Checking that in dry mode
@@ -312,7 +323,19 @@ fyd_live_write() {
 
 	if ! fyd_is_live; then
 		local bytes=0
-		if [ ! -t 0 ]; then
+		# Drain only when fd 0 is a real, open, non-terminal descriptor.
+		#
+		# The `[ -e /dev/fd/0 ]` half is not defensive garnish: with fd 0
+		# CLOSED (`fyd_live_write d f <&-`), bash allocates the command
+		# substitution's own pipe at the lowest free descriptor — which IS
+		# 0 — so `wc` ends up reading the pipe it is writing to and the
+		# call HANGS FOREVER. Live returns 1 immediately in that case, so
+		# the hang appeared only in dry mode: a cron tick that stops dead
+		# instead of failing, which is a worse version of the exact
+		# "silently went quiet" failure this library exists to prevent.
+		# (`{ true <&0; }` does NOT detect this — it reports success on a
+		# closed descriptor. /dev/fd/0 does.)
+		if [ ! -t 0 ] && [ -e /dev/fd/0 ]; then
 			bytes="$(wc -c 2>/dev/null | tr -d '[:space:]')" || bytes=0
 			[ -n "$bytes" ] || bytes=0
 		fi
@@ -541,6 +564,14 @@ fyd_push() {
 #   and /etc/cron.d/metal-* to confirm), delete the roles and leave the
 #   no-argument form. Do NOT add a role for a new subsystem — a new
 #   subsystem should read FY_STATE_DIR and nothing else.
+#
+#   MIGRATION HAZARD, decide it deliberately: check-anomalies.sh currently
+#   hard-requires its state dir (`ANOMALY_STATE_DIR="${ANOMALY_STATE_DIR:?}"`)
+#   and dies when it is unset. This function does the opposite — it falls
+#   back to the production default, silently under FY_LIVE=1. Porting that
+#   script trades a fail-closed guard for a production-path default. Either
+#   keep the `:?` in the script, or give this function a --required mode
+#   first; do not drop the guard by accident.
 #
 #   Setting FY_STATE_DIR does NOT sandbox a whole run by itself: delegated
 #   scripts still read their own environment (push-to-web-host.sh resolves
