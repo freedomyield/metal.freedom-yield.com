@@ -164,9 +164,24 @@ mk_repo() {
 	local name="$1"; shift
 	S="${TMP}/${name}"
 	mkdir -p "${S}/scripts/lib" "${S}/public/api" "${S}/logs"
-	cp "$LIB" "${S}/scripts/lib/side-effects.sh"
+	# Mirror scripts/lib/ as a WHOLE DIRECTORY, not a hand-picked file. Naming
+	# just side-effects.sh here is exactly the bug that broke the sibling
+	# suites when push-to-web-host.sh grew a second hard dependency,
+	# scripts/lib/publish-scan.sh, during the C3 integration (task h5,
+	# 2026-08-07): the real repo ships scripts/lib/ as one git-tracked unit,
+	# so the sandbox must carry it the same way — as a unit — or the NEXT
+	# scripts/lib/*.sh addition silently repeats this failure here too (this
+	# suite happened not to trip on it only because none of its callers
+	# actually invoke push-to-web-host.sh at runtime). See the
+	# mirrored-growth regression guard near the end of this file.
+	cp -R "${SCRIPTS}/lib/." "${S}/scripts/lib/"
 	cp "${SCRIPTS}/notify.sh" "${S}/scripts/notify.sh"
 	cp "${SCRIPTS}/push-to-web-host.sh" "${S}/scripts/push-to-web-host.sh"
+	# publish-scan.sh (mirrored above) requires this SIBLING of lib/ at
+	# runtime — see FYD_PUBLISH_SCAN_GUARD in scripts/lib/publish-scan.sh.
+	# Named explicitly, like notify.sh and push-to-web-host.sh above, because
+	# it is a top-level delegate script, not a scripts/lib/ member.
+	cp "${SCRIPTS}/publish-guard.sh" "${S}/scripts/publish-guard.sh"
 	local s
 	for s in "$@"; do cp "${SCRIPTS}/${s}" "${S}/scripts/${s}"; done
 	printf 'sandbox-topic-not-a-real-topic\n' >"${S}/topic"
@@ -642,6 +657,76 @@ mutate "G4 — a gated ledger append reverts to a raw redirect" \
 mutate "G4/G5 — the hard-refusal marker is removed from anomaly-state-init" \
 	"${SCRIPTS}/anomaly-state-init.sh" \
 	's@# FYD-GATE(refusal).*@#@'
+
+# ---------------------------------------------------------------------------
+# Sandbox regression guard (task h5, 2026-08-07)
+# ---------------------------------------------------------------------------
+# mk_repo above mirrors the ENTIRE real scripts/lib/ directory precisely so a
+# FUTURE addition there is picked up with zero suite edits — the bug this
+# task fixed was mk_repo hand-copying just side-effects.sh while
+# push-to-web-host.sh grew a hard dependency on its sibling scripts/lib/
+# publish-scan.sh (which in turn requires scripts/publish-guard.sh). None of
+# THIS suite's callers happen to invoke push-to-web-host.sh at runtime, which
+# is exactly why it did not fail when the sibling suites did — that is
+# fragile, not safe, so this guard proves the mechanism generalizes here too
+# instead of relying on today's callers never changing.
+echo "== Sandbox regression guard: scripts/lib/ growth is picked up automatically =="
+
+# 1) Growth: drop a brand-new file into a throwaway COPY of scripts/lib/ and
+#    confirm mk_repo mirrors it into a fresh sandbox with NO suite changes.
+MUT_SCRIPTS="${TMP}/mut-scripts-src"
+mkdir -p "${MUT_SCRIPTS}/lib"
+cp -R "${SCRIPTS}/lib/." "${MUT_SCRIPTS}/lib/"
+cp "${SCRIPTS}/notify.sh" "${MUT_SCRIPTS}/notify.sh"
+cp "${SCRIPTS}/push-to-web-host.sh" "${MUT_SCRIPTS}/push-to-web-host.sh"
+cp "${SCRIPTS}/publish-guard.sh" "${MUT_SCRIPTS}/publish-guard.sh"
+printf '#!/usr/bin/env bash\n# task-h5 mutation probe: proves mk_repo mirrors a NEW scripts/lib/ file.\n' \
+	>"${MUT_SCRIPTS}/lib/zz-mutation-probe.sh"
+_H5_REAL_SCRIPTS="$SCRIPTS"
+SCRIPTS="$MUT_SCRIPTS"
+mk_repo h5-libgrowth-probe
+SCRIPTS="$_H5_REAL_SCRIPTS"
+if [ -f "${S}/scripts/lib/zz-mutation-probe.sh" ]; then
+	ok "sandbox-guard: a brand-new scripts/lib/*.sh file is mirrored into a fresh sandbox automatically"
+else
+	bad "sandbox-guard: a brand-new scripts/lib/*.sh file is mirrored into a fresh sandbox automatically" \
+		"mk_repo did not copy it into ${S}/scripts/lib/"
+fi
+
+# 2) Non-vacuity: the real (unmutated) scripts/lib/ has N files and a freshly
+#    built sandbox must have exactly N — not "at least one", not a
+#    hard-coded number. An enumerated cp list regressing to fewer files
+#    drops below N and fails loudly here instead of staying silently green.
+real_lib_count=$(find "${SCRIPTS}/lib" -maxdepth 1 -type f | wc -l | tr -d '[:space:]')
+mk_repo h5-libparity-probe
+sandbox_lib_count=$(find "${S}/scripts/lib" -maxdepth 1 -type f | wc -l | tr -d '[:space:]')
+if [ "$real_lib_count" -gt 0 ] && [ "$real_lib_count" = "$sandbox_lib_count" ]; then
+	ok "sandbox-guard: sandbox scripts/lib/ file count matches the real one (${real_lib_count})"
+else
+	bad "sandbox-guard: sandbox scripts/lib/ file count matches the real one" \
+		"real=${real_lib_count} sandbox=${sandbox_lib_count}"
+fi
+
+# 3) End-to-end: run push-to-web-host.sh FOR REAL against the sandbox mk_repo
+#    just built and require it to reach the (stubbed) ssh, i.e. get PAST its
+#    own publish-scan self-test, not die on "library not found". This is the
+#    exact failure this task fixed, reproduced and re-asserted every run.
+mkdir -p "${S}/public/api"
+printf '{}\n' >"${S}/public/api/validator.json"
+printf 'sandbox-guard-key-not-a-real-key\n' >"${S}/h5-guard-key"
+chmod 600 "${S}/h5-guard-key"
+reset_tripwire
+H5_PUSHDEP_OUT="$(env REPO_BASE="${S}" WEB_HOST="sandbox@host.invalid" WEB_PUSH_KEY="${S}/h5-guard-key" \
+	bash "${S}/scripts/push-to-web-host.sh" validator.json 2>&1 || true)"
+if printf '%s' "$H5_PUSHDEP_OUT" | grep -qE 'library not found|publish-guard not found'; then
+	bad "sandbox-guard: push-to-web-host.sh's full runtime dependency closure is present in the sandbox" \
+		"$(printf '%s' "$H5_PUSHDEP_OUT" | head -3)"
+else
+	ok "sandbox-guard: push-to-web-host.sh's full runtime dependency closure is present in the sandbox"
+fi
+[ "$(grep -c '^ssh ' "$TRIPWIRE" 2>/dev/null | tr -d '[:space:]')" != "0" ] \
+	&& ok "sandbox-guard: proved by actually REACHING ssh, not by a shortcut" \
+	|| bad "sandbox-guard: proved by actually REACHING ssh, not by a shortcut" "$H5_PUSHDEP_OUT"
 
 echo
 echo "test-monitoring-side-effects.sh summary: PASS=$PASS  FAIL=$FAIL  SKIP=$SKIP"
