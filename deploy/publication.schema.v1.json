@@ -1,0 +1,310 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://metal.freedom-yield.com/schema/publication.v1.json",
+  "title": "Freedom Yield publication registry v1",
+  "description": "Declared inventory of published artifacts and the rendering instructions for the files derived from it. This schema constrains SHAPE only. It cannot tell whether a declaration is true — that is what tests/publication-registry/ measures against the real files.",
+  "type": "object",
+  "required": ["schema_version", "coverage", "kind_definitions", "publications", "known_kind_violations", "known_doc_drift", "known_render_drift", "derived"],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "recorded_at": { "type": "string" },
+    "spec": { "type": "string" },
+    "_comment": { "type": "string" },
+
+    "kind_definitions": {
+      "type": "object",
+      "required": ["stream", "record", "static"],
+      "properties": {
+        "stream": { "type": "string" },
+        "record": { "type": "string" },
+        "static": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+
+    "coverage": {
+      "description": "Mandatory honesty block. does_not_govern must be non-empty: a registry that claims to govern everything is the failure mode the spec (§9) names as the most dangerous one.",
+      "type": "object",
+      "required": ["governs", "does_not_govern"],
+      "properties": {
+        "governs": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "does_not_govern": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["surface", "measured", "why_excluded"],
+            "properties": {
+              "surface": { "type": "string" },
+              "measured": { "type": "string" },
+              "why_excluded": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+
+    "publications": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["path", "kind", "publisher", "owner", "pinned_by", "git_tracked", "gitignored"],
+        "comment_on_entry_type": "A trailing '/' in path and entry_type='directory' must agree. Declaring one without the other is how a directory entry gets silently treated as a file by a consumer that reads only one of them. git_tracked and gitignored are mandatory because T13 compares them against git — omitting a field is otherwise a way to opt an entry out of being checked.",
+        "if": { "properties": { "path": { "pattern": "/$" } } },
+        "then": { "required": ["entry_type"], "properties": { "entry_type": { "const": "directory" } } },
+        "else": { "properties": { "entry_type": { "const": "file" } } },
+        "properties": {
+          "path": {
+            "description": "Position under the public web root. Directory entries end with '/'.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*/?$"
+          },
+          "entry_type": { "enum": ["file", "directory"] },
+          "kind": { "enum": ["stream", "record", "static"] },
+          "publisher": {
+            "description": "git-deploy = tracked, shipped by the deploy rsync. push = scripts/push-to-web-host.sh flat allowlist. push-subdir = the two allowlisted subdirectory prefixes. push-out-of-band = excluded from --delete but NOT on the push wrapper's allowlist. deploy-runner = written by the deploy workflow into the runner's own checkout.",
+            "enum": ["git-deploy", "push", "push-subdir", "push-out-of-band", "deploy-runner"]
+          },
+          "owner": {
+            "type": "object",
+            "required": ["producer", "runs_on"],
+            "properties": {
+              "producer": { "type": "string" },
+              "producer_evidence": { "type": "string" },
+              "runs_on": { "enum": ["validator-host", "operator-mac", "github-actions", "repo"] },
+              "cron_file": { "type": ["string", "null"] },
+              "cron_installer_in_repo": { "type": ["boolean", "null"] },
+              "invocation_note": { "type": "string" }
+            },
+            "additionalProperties": false
+          },
+          "push_name": { "type": ["string", "null"] },
+          "push_target": { "type": "string" },
+          "push_content_check": { "type": "string" },
+          "push_prefix": { "type": "string" },
+          "member_pattern": { "type": "string" },
+          "rsync_delete_exclude": { "type": "boolean" },
+          "gitignored": { "type": "boolean" },
+          "git_tracked": { "type": "boolean" },
+          "pinned_by": {
+            "description": "Pin references of the form '<path>#<json pointerish path>'. MUST be empty when kind is 'stream' unless the pin is listed in known_kind_violations.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "note": { "type": "string" },
+          "kind_note": { "type": "string" },
+          "becomes_record_after": {
+            "description": "Qualifier, never a downgrade of .kind: names the moment after which a member of this path stops changing, so a consumer that understands the qualifier may pin what .kind alone forbids. A consumer that ignores it stays correct.",
+            "enum": ["utc-day-close"]
+          },
+          "record_caveat": {
+            "description": "For kind=record only: the part of the immutability claim that rests on operating discipline rather than on the naming scheme.",
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+
+    "push_allowlist_only": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["push_name", "push_target", "push_content_check"],
+        "properties": {
+          "_comment": { "type": "string" },
+          "push_name": { "type": "string" },
+          "push_target": { "type": "string" },
+          "push_content_check": { "type": "string" },
+          "member_of": { "type": "string" },
+          "case_pattern": { "type": "string" },
+          "basename_pattern": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+
+    "known_kind_violations": {
+      "type": "object",
+      "required": ["violations"],
+      "properties": {
+        "_comment": { "type": "string" },
+        "resolution_task": { "type": "string" },
+        "measured_at": { "type": "string" },
+        "measured_against": { "type": "object" },
+        "violations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["path", "reason", "also_in_identity_pin_baseline"],
+            "properties": {
+              "path": { "type": "string" },
+              "reason": { "type": "string" },
+              "also_in_identity_pin_baseline": { "type": "boolean" },
+              "note": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "known_doc_drift": {
+      "description": "Documentation measured to be wrong about a fact the registry now carries. Every entry must be falsifiable: wrong_text is what the doc still says, entries[] is what was measured instead, and the test fails as OBSOLETE once the doc no longer says it.",
+      "type": "object",
+      "properties": { "_comment": { "type": "string" } },
+      "patternProperties": {
+        "^[^_]": {
+          "type": "object",
+          "required": ["target_file", "wrong_text", "entries", "evidence", "expires_when"],
+          "properties": {
+            "target_file": { "type": "string" },
+            "measured_at": { "type": "string" },
+            "wrong_text": { "type": "string" },
+            "entries": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["path", "measured_producer"],
+                "properties": {
+                  "path": { "type": "string" },
+                  "measured_producer": { "type": "string" }
+                },
+                "additionalProperties": false
+              }
+            },
+            "evidence": { "type": "string" },
+            "consequence": { "type": "string" },
+            "resolution": { "type": "string" },
+            "expires_when": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "known_render_drift": {
+      "description": "Regions whose current bytes differ from what the registry would render, recorded because Phase 0 must not modify the target files.",
+      "type": "object",
+      "additionalProperties": true
+    },
+
+    "derived": {
+      "type": "object",
+      "required": ["feed_excludes", "gitignore_block", "push_allowlist_doc", "push_allowlist_case"],
+      "properties": {
+        "_comment": { "type": "string" },
+        "feed_excludes": {
+          "type": "object",
+          "required": ["target_file", "header", "order"],
+          "properties": {
+            "target_file": { "type": "string" },
+            "header": { "type": "array", "items": { "type": "string" } },
+            "order": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["path"],
+                "properties": {
+                  "path": { "type": "string" },
+                  "comment_before": { "type": "array", "items": { "type": "string" } }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "gitignore_block": {
+          "type": "object",
+          "required": ["target_file", "section_header", "path_prefix", "extract_rule", "order", "trailer"],
+          "properties": {
+            "target_file": { "type": "string" },
+            "section_header": { "type": "string" },
+            "path_prefix": { "type": "string" },
+            "extract_rule": { "type": "string" },
+            "order": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["path"],
+                "properties": {
+                  "path": { "type": "string" },
+                  "comment_before": { "type": "array", "items": { "type": "string" } }
+                },
+                "additionalProperties": false
+              }
+            },
+            "trailer": {
+              "type": "object",
+              "required": ["lines"],
+              "properties": {
+                "_comment": { "type": "string" },
+                "lines": { "type": "array", "items": { "type": "string" } }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "push_allowlist_doc": {
+          "type": "object",
+          "required": ["target_file", "region_start", "region_end_before", "extract_rule", "layout", "flat_order", "subdir_header", "subdir_rows"],
+          "properties": {
+            "target_file": { "type": "string" },
+            "region_start": { "type": "string" },
+            "region_end_before": { "type": "string" },
+            "extract_rule": { "type": "string" },
+            "layout": {
+              "type": "object",
+              "required": ["name_field_width", "target_field_width", "indent", "arrow"],
+              "properties": {
+                "name_field_width": { "type": "integer" },
+                "target_field_width": { "type": "integer" },
+                "indent": { "type": "string" },
+                "arrow": { "type": "string" }
+              },
+              "additionalProperties": false
+            },
+            "flat_order": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+            "subdir_header": { "type": "array", "items": { "type": "string" } },
+            "subdir_rows": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["name", "target"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "target": { "type": "string" }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "push_allowlist_case": {
+          "type": "object",
+          "required": ["target_file", "extract_rule", "indent", "order"],
+          "properties": {
+            "target_file": { "type": "string" },
+            "extract_rule": { "type": "string" },
+            "indent": { "type": "string" },
+            "order": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
