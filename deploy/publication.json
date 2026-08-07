@@ -1,5 +1,5 @@
 {
-  "_comment": "Declared inventory of everything this repository publishes, and of the derived files that must agree with it. WHAT THIS GUARANTEES TODAY: nothing is generated FROM this file at runtime yet. deploy/feed-excludes.txt, .gitignore and scripts/push-to-web-host.sh are still hand-maintained and are still what the deploy and the push actually obey. All this file buys, as of C1 Phase 0, is that scripts/deploy/render-publication.sh can reproduce those three regions byte-for-byte from here, and tests/publication-registry/ fails if it ever cannot. That is a detector, not an enforcement: a hand edit to one of those three files that is NOT mirrored here turns the test red, but nothing stops the edit from being made or deployed. Turning consumers around to read this file is C1 Phase 1 and later.",
+  "_comment": "Declared inventory of what this repository publishes THROUGH THE THREE GOVERNED SURFACES listed in coverage.governs, and of the derived files that must agree with it. It is NOT an inventory of every published byte: 179 files under public/ are tracked and deployed and this file names 30 of them; the remaining 149 are covered by a checked disjointness rule (T9), not by enumeration. WHAT THIS GUARANTEES TODAY: nothing is generated FROM this file at runtime yet. deploy/feed-excludes.txt, .gitignore and scripts/push-to-web-host.sh are still hand-maintained and are still what the deploy and the push actually obey. All this file buys, as of C1 Phase 0, is that scripts/deploy/render-publication.sh can reproduce those three regions byte-for-byte from here, and tests/publication-registry/ fails if it ever cannot. That is a detector, not an enforcement: a hand edit to one of those three files that is NOT mirrored here turns the test red, but nothing stops the edit from being made or deployed. Turning consumers around to read this file is C1 Phase 1 and later.",
   "schema_version": 1,
   "recorded_at": "2026-08-07",
   "spec": "docs/superpowers/specs/2026-08-06-single-source-of-truth-design.md (C1)",
@@ -7,8 +7,9 @@
   "kind_definitions": {
     "_comment": "The taxonomy is defined by ONE measurable question: can these bytes change without a commit to this repository? That question is what decides whether a sha256 pin in a signed manifest can survive, which is the only thing the kind gate acts on.",
     "stream": "Content can change without any commit — host cron, runtime push, or an operator writing straight to the public tree. A pin taken at signing time goes stale on its own. MUST NOT appear in pinned_by.",
-    "record": "Immutable once written and addressed by its own content or by a date that never recurs, at a URL that never points at different bytes. Safe to pin.",
-    "static": "Changes only when a commit in this repository changes it, and is delivered by the git deploy. Safe to pin, on the condition that the commit which changes it also re-issues the pin — that condition is what scripts/check-identity-pins.sh enforces."
+    "record": "Immutable once written, at a URL that never resolves to different bytes. Safe to pin.",
+    "static": "Changes only when a commit in this repository changes it, and is delivered by the git deploy. Safe to pin, on the condition that the commit which changes it also re-issues the pin — that condition is what scripts/check-identity-pins.sh enforces.",
+    "_kind_is_the_floor": "kind is the SAFE FLOOR, never a summary. A consumer that reads only .kind and nothing else must always end up doing the safe thing, so a path is classified by its WEAKEST moment, not its typical one. Qualifier fields (becomes_record_after, record_caveat) may only WIDEN what a consumer that understands them may do; they never narrow what .kind already permits, and a consumer that ignores them stays correct. This is why api/peers-history/ is kind=stream even though every snapshot older than the current UTC day is immutable: at any instant one member is being rewritten, and a consumer pinning on the strength of .kind alone would pin exactly that one."
   },
 
   "coverage": {
@@ -20,13 +21,13 @@
     ],
     "does_not_govern": [
       {
-        "surface": "The rest of the tracked public/ tree (HTML pages, CSS, JS, images, fonts).",
-        "measured": "149 tracked files under public/ that are neither public/api/* nor public/.well-known/* (git ls-files public/ | grep -v -E '^public/(api|\\.well-known)/' | wc -l, 2026-08-07).",
-        "why_excluded": "They have exactly one owner (the git deploy), are never pushed, and are never pinned, so there is no lock-step obligation for a registry to hold. tests/publication-registry/ checks this claim rather than assuming it: any tracked file under public/ that is absent from publications[] must also be absent from feed-excludes and from the push allowlist. If that ever stops holding, the file has acquired a second owner and must be added here."
+        "surface": "The rest of the tracked public/ tree (HTML pages, CSS, JS, images, fonts) — everything under public/ that is neither public/api/* nor public/.well-known/*.",
+        "measured": "149 files: git ls-files public/ = 179 total, git ls-files public/api/ public/.well-known/ = 30, and all 30 of those ARE enumerated in publications[] (T16 fails if that stops being true in either direction). 179 - 30 = 149 unenumerated, 2026-08-07.",
+        "why_excluded": "They have exactly one owner (the git deploy), are never pushed, and are never pinned, so there is no lock-step obligation for a registry to hold. tests/publication-registry/ checks the claim rather than assuming it: T9 asserts every tracked file under public/ is disjoint from every feed exclude and every push name, so any of the 149 that ever acquires a second owner is named by a failing test. T16 separately asserts that the two prefixes this file DOES claim (public/api/, public/.well-known/) are enumerated exhaustively — adding a tracked file under either without a row here is a failure."
       },
       {
         "surface": "/etc/cron.d on the validator host — the cron files that actually invoke the producers.",
-        "measured": "Six cron basenames have a creating installer in this repo (metal-host-advance, metal-anchor-watch, metal-anchor-publish-health, metal-identity-pins, metal-host-drift, metal-watch-validators — grep of scripts/install-*.sh for cron.d/, 2026-08-07). NONE of them produces a publication listed here. Every publication whose publisher is 'push' is produced by a cron whose command body is not in this repo. That is recorded per entry as owner.cron_installer_in_repo, which is false for all of them.",
+        "measured": "Six cron basenames have a creating installer in this repo (metal-host-advance, metal-anchor-watch, metal-anchor-publish-health, metal-identity-pins, metal-host-drift, metal-watch-validators — grep of scripts/install-*.sh for cron.d/, 2026-08-07). NONE of them produces a publication listed here. Of the 20 push-owned publications (publisher push / push-subdir / push-out-of-band), 17 name a cron and ALL 17 carry owner.cron_installer_in_repo=false, i.e. zero of them have a repo-verifiable command body. The other 3 — api/anchor-receipt.json, api/anchor-history.jsonl, api/archive/ — are on NO cron at all and carry cron_installer_in_repo=null; they are produced by hand through scripts/run-anchor-pipeline.sh after an on-chain broadcast. Do not read this as 'push implies cron'.",
         "why_excluded": "A registry cannot govern text it cannot read. The spec (§9) records that 15 project cron files run in production and 7 have no repo installer; that count was measured on the host, not by this file, and is not re-measured here. What IS measured here is the repo side: the schedule, the arguments, and the environment that decide when and where a producer writes are outside this file for every push-owned publication. Do not read owner.producer as 'the registry controls this artifact' — it means only 'this script contains the write'."
       },
       {
@@ -86,7 +87,7 @@
       "publisher": "push",
       "owner": {
         "producer": "scripts/peer-geo.py",
-        "producer_evidence": "scripts/peer-geo.py:45 OUT_PATH = sys.argv[1] ... :150 json.dump(output, f) — the destination is an ARGUMENT, so which path this writes is decided by the (repo-external) cron, not by the script",
+        "producer_evidence": "scripts/peer-geo.py:45 OUT_PATH = sys.argv[1] if len(sys.argv) > 1 else \"/tmp/peer-geo.json\" ... :150 json.dump(output, f). Note the default: run with no argument this script does NOT write anywhere under public/api/ at all. The destination is an argument supplied by the (repo-external) cron, so the binding between this producer and this publication is the one thing here that cannot be verified from the repo.",
         "runs_on": "validator-host",
         "cron_file": "freedom-yield-peer-geo",
         "cron_installer_in_repo": false
@@ -387,12 +388,13 @@
       "gitignored": true,
       "git_tracked": false,
       "pinned_by": [],
-      "note": "kind=record because the member filename contains the content hash: a given URL under this prefix never resolves to different bytes. This is the shape the spec's kind discipline wants api/anchor-source.json to move to (C4)."
+      "record_caveat": "Only the anchor-source half is STRUCTURALLY immutable. anchor-source-<dag_root>.json is named by a digest derived from its own branch contents and the generator writes no timestamp field (grep of scripts/gen-anchor-source.sh for generated_at: zero hits), so different bytes would land under a different name. anchor-receipt-<tx_id>.json is named by the transaction id and DOES carry a timestamp (scripts/gen-anchor-receipt.sh:314 generated_at: $now), so re-running the generator for the same tx writes different bytes to the SAME URL. In practice each receipt is produced once, immediately after its broadcast, so the URL is stable by operating discipline rather than by construction — which is a weaker guarantee than the name suggests and is recorded here rather than glossed. Whoever acts on kind=record for this prefix (C4) must treat a receipt regeneration as a re-pin event.",
+      "note": "kind=record for the prefix. This is the shape the spec's kind discipline wants api/anchor-source.json to move to (C4). See record_caveat for the half of that claim that rests on operating discipline instead of on the naming scheme."
     },
     {
       "path": "api/peers-history/",
       "entry_type": "directory",
-      "kind": "record",
+      "kind": "stream",
       "publisher": "push-subdir",
       "owner": {
         "producer": "scripts/peer-validators.sh",
@@ -407,7 +409,8 @@
       "gitignored": true,
       "git_tracked": false,
       "pinned_by": [],
-      "note": "kind=record on the date key: a given day's snapshot is written once and never rewritten. The master copy lives in the host state dir, not in the repo — the repo path is a staging mirror."
+      "becomes_record_after": "utc-day-close",
+      "note": "kind=stream, NOT record, and the date key does not make it one. Measured 2026-08-07: scripts/peer-validators.sh:254-256 recomputes SNAPSHOT=\"${SNAPSHOT_DIR}/peers-${TODAY}.json.gz\" and gzips peers.json over it on EVERY run, and :361 calls publish_snapshot_date \"$TODAY\" unconditionally — the PUBLISHED_LEDGER is consulted only to decide whether to APPEND a ledger line (:360) and to drive the past-day backlog loop (:373), never to decide whether to push today. So the published URL for the current UTC day resolves to different bytes several times a day, which is exactly what kind=record forbids. becomes_record_after=utc-day-close is the true, narrower fact: a member stops changing once its UTC day has passed. That qualifier is the only thing that may license pinning a closed day; .kind alone must never be read as permission (see kind_definitions._kind_is_the_floor). The master copy lives in the host state dir, not in the repo — the repo path is a staging mirror."
     },
     {
       "path": "calendar/",
@@ -437,32 +440,34 @@
     { "path": "api/incidents.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "producer_evidence": "no script writes it; scripts/gen-cycle-history.sh:106 reads it as INCIDENTS and its header at :9 calls it 'operator-maintained incident log'", "runs_on": "repo", "cron_file": null, "cron_installer_in_repo": null }, "rsync_delete_exclude": false, "gitignored": false, "git_tracked": true, "pinned_by": ["api/identity.json#artifact_manifest.incidents_json.sha256"] },
     { "path": "api/validator-directory.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "producer_evidence": "no script writes it; referenced only by public/data/index.html and public/ja/data/index.html", "runs_on": "repo", "cron_file": null, "cron_installer_in_repo": null }, "rsync_delete_exclude": false, "gitignored": false, "git_tracked": true, "pinned_by": [] },
     { "path": ".well-known/operator-identity.pub", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "producer_evidence": "copied by hand from the operator Mac's ed25519 public key; .gitignore:18 blocks the source filename so only the renamed copy can be tracked", "runs_on": "repo", "cron_file": null, "cron_installer_in_repo": null }, "rsync_delete_exclude": false, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": ".well-known/README.md", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "producer_evidence": "no script writes it; git ls-files public/.well-known/ returns exactly this file and operator-identity.pub", "runs_on": "repo", "cron_file": null, "cron_installer_in_repo": null }, "rsync_delete_exclude": false, "gitignored": false, "git_tracked": true, "pinned_by": [],
+      "note": "Added 2026-08-07 after review: it was the one tracked file inside a prefix this registry claims to enumerate that had no row, which is precisely the omission class the registry exists to make impossible. T16 now fails on any such gap. Its BODY is separately known to be stale (it says the operator identity public key is not yet published, while the sibling .pub has been live for some time) — that is a public-copy defect outside this task's scope and is deliberately not touched here." },
     { "path": "api/build.json", "kind": "stream", "publisher": "deploy-runner", "owner": { "producer": ".github/workflows/deploy.yml (step: Write build.json (deploy manifest))", "producer_evidence": "grep of .github/workflows/deploy.yml for api/build.json", "runs_on": "github-actions", "cron_file": null, "cron_installer_in_repo": null }, "rsync_delete_exclude": false, "gitignored": true, "git_tracked": false, "pinned_by": [],
       "note": "The fourth shape: written into the runner's own public/ checkout before both rsync legs, so it rides the normal deploy and needs no --delete exclude. gitignored via .gitignore:98, which sits in the 'Local-only artifacts' section, NOT in the section this registry renders." },
 
-    { "path": "api/anchor-history.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "git_tracked": true, "pinned_by": [] },
-    { "path": "api/anchor-history.schema.v2.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "git_tracked": true, "pinned_by": [] },
-    { "path": "api/anchor-receipt.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "git_tracked": true, "pinned_by": [] },
-    { "path": "api/anchor-receipt.schema.v2.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "git_tracked": true, "pinned_by": [] },
-    { "path": "api/anchor-source.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "git_tracked": true, "pinned_by": [] },
-    { "path": "api/cycle-history.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "git_tracked": true, "pinned_by": ["api/identity.json#artifact_manifest.cycle_history_jsonl.schema_sha256"] },
-    { "path": "api/evidence.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "git_tracked": true, "pinned_by": ["api/identity.json#artifact_manifest.evidence_json.schema_sha256"] },
-    { "path": "api/identity-history.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "git_tracked": true, "pinned_by": [] },
-    { "path": "api/identity.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "git_tracked": true, "pinned_by": [] },
-    { "path": "api/incidents.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "git_tracked": true, "pinned_by": [] },
-    { "path": "api/validator.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "git_tracked": true, "pinned_by": ["api/identity.json#artifact_manifest.validator_json.schema_sha256"] },
+    { "path": "api/anchor-history.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/anchor-history.schema.v2.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/anchor-receipt.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/anchor-receipt.schema.v2.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/anchor-source.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/cycle-history.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": ["api/identity.json#artifact_manifest.cycle_history_jsonl.schema_sha256"] },
+    { "path": "api/evidence.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": ["api/identity.json#artifact_manifest.evidence_json.schema_sha256"] },
+    { "path": "api/identity-history.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/identity.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/incidents.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/validator.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": ["api/identity.json#artifact_manifest.validator_json.schema_sha256"] },
 
-    { "path": "api/anchor-history.example.jsonl", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "git_tracked": true, "pinned_by": [] },
-    { "path": "api/anchor-receipt.example.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "git_tracked": true, "pinned_by": [] },
-    { "path": "api/anchor-receipt.phase-beta.example.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "git_tracked": true, "pinned_by": [] },
-    { "path": "api/anchor-receipt.v2.example.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "git_tracked": true, "pinned_by": [] },
-    { "path": "api/anchor-source.example.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "git_tracked": true, "pinned_by": [] },
-    { "path": "api/cycle-history.example.jsonl", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "git_tracked": true, "pinned_by": [] },
-    { "path": "api/evidence.example.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "git_tracked": true, "pinned_by": [] },
-    { "path": "api/identity-history.example.jsonl", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "git_tracked": true, "pinned_by": [] },
-    { "path": "api/identity.example.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "git_tracked": true, "pinned_by": [] },
-    { "path": "api/incidents.example.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "git_tracked": true, "pinned_by": [] },
-    { "path": "api/validator.example.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "git_tracked": true, "pinned_by": [] }
+    { "path": "api/anchor-history.example.jsonl", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/anchor-receipt.example.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/anchor-receipt.phase-beta.example.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/anchor-receipt.v2.example.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/anchor-source.example.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/cycle-history.example.jsonl", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/evidence.example.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/identity-history.example.jsonl", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/identity.example.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/incidents.example.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/validator.example.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] }
   ],
 
   "push_allowlist_only": [
@@ -514,6 +519,25 @@
         "also_in_identity_pin_baseline": false,
         "note": "This is the fourth stream pin and the only one deploy/identity-pin-baseline.json does not list. That is a documentation gap, NOT a gate gap: scripts/check-identity-pins.sh classifies it as stream from deploy/feed-excludes.txt and stream-class pins never alert there, so nothing was being suppressed. Recording it here makes all four visible in one place."
       }
+    }
+  },
+
+  "known_doc_drift": {
+    "_comment": "Documentation that this registry measured to be WRONG about a fact the registry itself now carries. Same expiry design as everything else here: each entry records the exact wrong text, and the test fails as OBSOLETE the moment the doc is corrected, so the registry cannot go on describing a defect that no longer exists. This block exists because the alternative — leaving the correction only in prose inside owner.producer_evidence — would turn silently false the day someone fixes the doc, which is the same failure mode the drift baselines were built to avoid.",
+    "deploy_ownership_matrix.wrong_producer": {
+      "target_file": "docs/DEPLOY_OWNERSHIP_MATRIX.md",
+      "measured_at": "2026-08-07",
+      "wrong_text": "`scripts/node-info.sh`",
+      "entries": [
+        { "path": "api/uptime-recent.json",        "measured_producer": "scripts/uptime-history.sh" },
+        { "path": "api/uptime-cycles.json",        "measured_producer": "scripts/uptime-history.sh" },
+        { "path": "api/fee-market.json",           "measured_producer": "scripts/peer-analytics.py" },
+        { "path": "api/fee-market-history.jsonl",  "measured_producer": "scripts/peer-analytics.py" }
+      ],
+      "evidence": "The matrix rows for all four name scripts/node-info.sh as canonical producer. Measured: node-info.sh:32 writes exactly one publication (public/api/validator.json) and contains zero occurrences of the string 'fee-market'; uptime-history.sh:86-87 writes the uptime pair; peer-analytics.py:256-262 writes the fee-market pair, invoked from peer-validators.sh:245.",
+      "consequence": "An operator debugging a stale uptime or fee-market feed is sent to the wrong script and the wrong cron.",
+      "resolution": "Correct the four matrix rows (a separate change — this task must not touch docs it did not measure end to end), then delete this entry.",
+      "expires_when": "any of the four matrix rows stops containing wrong_text"
     }
   },
 

@@ -103,8 +103,42 @@ t5() {
 	as_built="${TMPDIR_T}/doc-asbuilt"
 	bash "$RENDER" push-allowlist-doc            > "$canonical"
 	bash "$RENDER" push-allowlist-doc --as-built > "$as_built"
-	# Lines present canonically but not as built, reduced to the push name.
-	added="$(diff "$as_built" "$canonical" | sed -n 's/^> #   \([^ ]*\) .*/\1/p' | sort)"
+	# Nothing may be REMOVED by --as-built other than whole rows.
+	if diff "$as_built" "$canonical" | grep -q '^< '; then
+		fail "T5  as-built render has lines the canonical render lacks — that is not a missing-row drift"
+		return
+	fi
+
+	# Attribute each ADDED LINE to a declared name by prefix, after stripping
+	# the comment indent — NOT by slicing a fixed column. A push name longer
+	# than the table's name field renders as two lines (the name, then an
+	# arrow-only continuation), and a column-based match sees neither, i.e. it
+	# reports "no drift" for exactly the shape most likely to have some. A
+	# continuation is recognised by the character after the indent being a
+	# space, which no real push name ever starts with.
+	local indent added_lines line stripped matched name unmatched=0
+	indent="$(jq -r '.derived.push_allowlist_doc.layout.indent' "$REGISTRY")"
+	added_lines="$(diff "$as_built" "$canonical" | sed -n 's/^> //p')"
+	added=""
+	while IFS= read -r line; do
+		[ -n "$line" ] || continue
+		stripped="${line#"$indent"}"
+		[ "$stripped" = "$line" ] && continue
+		case "$stripped" in ' '*|'') continue ;; esac
+		matched=""
+		while IFS= read -r name; do
+			[ -n "$name" ] || continue
+			case "$stripped" in "$name"*) matched="$name" ;; esac
+		done <<< "$declared"
+		if [ -z "$matched" ]; then
+			fail "T5  added line attributable to no declared missing row: ${line}"
+			unmatched=1
+		else
+			added="${added}${matched}"$'\n'
+		fi
+	done <<< "$added_lines"
+	[ "$unmatched" -eq 0 ] || return
+	added="$(printf '%s' "$added" | grep . | sort -u)"
 	if [ "$added" != "$declared" ]; then
 		fail "T5  canonical-minus-as-built is not exactly the declared missing_rows"
 		note "declared: $(echo "$declared" | tr '\n' ' ')"
@@ -114,12 +148,20 @@ t5() {
 	# Expiry conditions: each declared row must STILL be (a) absent from the
 	# live header table and (b) present in the live enforced case line. Either
 	# flipping makes the entry obsolete, and obsolete must be loud.
-	local live_doc live_case name obsolete=0
+	local live_doc live_case obsolete=0
 	live_doc="$(bash "$RENDER" --extract push-allowlist-doc)"
 	live_case="$(bash "$RENDER" --extract push-allowlist-case)"
 	while IFS= read -r name; do
 		[ -n "$name" ] || continue
-		if printf '%s\n' "$live_doc" | grep -Fq -- "#   ${name} "; then
+		# Row present == a line that is exactly indent+name followed by a
+		# space or end-of-line. Literal comparison, not a regex: push names
+		# contain '.', '<' and '>'.
+		if printf '%s\n' "$live_doc" | awk -v ind="$indent" -v n="$name" '
+			index($0, ind n) == 1 {
+				r = substr($0, length(ind n) + 1)
+				if (r == "" || substr(r, 1, 1) == " ") found = 1
+			}
+			END { exit found ? 0 : 1 }'; then
 			fail "T5  OBSOLETE: '${name}' now HAS a row in the header table — drop it from known_render_drift"
 			obsolete=1
 		fi
@@ -295,7 +337,18 @@ t10() {
 		grep -Fq -- "$pattern" "$RECEIVER" || { fail "T10 pattern for '${prefix}/' not found verbatim in receive-subdir-allowlist.snippet.sh"; bad=1; }
 	done <<< "$(jq -r '.publications[] | select(.push_prefix != null) | .push_prefix, .member_pattern' "$REGISTRY")"
 	[ "$n" -gt 0 ] || { fail "T10 registry declares no subdirectory member_pattern at all"; bad=1; }
-	[ "$bad" -eq 0 ] && pass "T10 all ${n} subdirectory basename patterns are byte-identical in registry, sender and receiver"
+
+	# Flat push names can carry a basename_pattern too (the token-named .ics).
+	# Declaring one and never comparing it to the sender is a pattern that
+	# looks enforced and is not.
+	local pname m=0
+	while IFS= read -r pname && IFS= read -r pattern; do
+		[ -n "$pname" ] || continue
+		m=$((m + 1))
+		grep -Fq -- "$pattern" "$SENDER" || { fail "T10 basename_pattern for push name '${pname}' not found verbatim in scripts/push-to-web-host.sh"; bad=1; }
+	done <<< "$(jq -r '.push_allowlist_only[]? | select(.basename_pattern != null) | .push_name, .basename_pattern' "$REGISTRY")"
+
+	[ "$bad" -eq 0 ] && pass "T10 all ${n} subdirectory + ${m} flat basename patterns are byte-identical in the registry and the scripts that enforce them"
 }
 t10
 
@@ -401,6 +454,117 @@ t14() {
 	[ "$bad" -eq 0 ] && pass "T14 all ${n} manifest pins are declared on exactly the publication the manifest's own url names"
 }
 t14
+
+# ---------------------------------------------------------------------------
+# T16 — enumeration closure over the prefixes the registry CLAIMS.
+# T9 protects the files the registry deliberately does not list. This is the
+# other direction, and the one that was missing: inside public/api/ and
+# public/.well-known/ — the two prefixes coverage.does_not_govern implicitly
+# claims ARE enumerated — every tracked file must have a row. Without this,
+# adding a tracked artifact under either prefix left the suite green, which is
+# the whole failure class this registry exists to end.
+# ---------------------------------------------------------------------------
+t16() {
+	local declared tracked missing extra bad=0 n
+	declared="$(jq -r '.publications[] | select(.git_tracked == true) | .path' "$REGISTRY" | sort)"
+	tracked="$(cd "$REPO_ROOT" && git ls-files public/api/ public/.well-known/ | sed 's|^public/||' | sort)"
+	missing="$(comm -13 <(printf '%s\n' "$declared") <(printf '%s\n' "$tracked"))"
+	extra="$(comm -23 <(printf '%s\n' "$declared") <(printf '%s\n' "$tracked"))"
+	if [ -n "$missing" ]; then
+		fail "T16 tracked under a claimed prefix but absent from publications[]:"
+		while IFS= read -r f; do [ -n "$f" ] && note "  public/${f}"; done <<< "$missing"
+		bad=1
+	fi
+	if [ -n "$extra" ]; then
+		fail "T16 declared git_tracked=true but git does not track it under a claimed prefix:"
+		while IFS= read -r f; do [ -n "$f" ] && note "  public/${f}"; done <<< "$extra"
+		bad=1
+	fi
+	n="$(printf '%s\n' "$tracked" | grep -c . || true)"
+	[ "$bad" -eq 0 ] && pass "T16 public/api/ and public/.well-known/ are enumerated exhaustively (${n} tracked files, ${n} rows)"
+}
+t16
+
+# ---------------------------------------------------------------------------
+# T17 — known_doc_drift is real and expiring.
+# Same contract as T5, applied to documentation the registry contradicts. The
+# alternative — leaving the correction only in prose — goes silently false the
+# day someone fixes the doc.
+# ---------------------------------------------------------------------------
+t17() {
+	local key tf wrong path declared_producer registry_producer row bad=0 n=0
+	while IFS= read -r key; do
+		[ -n "$key" ] || continue
+		tf="${REPO_ROOT}/$(jq -r --arg k "$key" '.known_doc_drift[$k].target_file' "$REGISTRY")"
+		wrong="$(jq -r --arg k "$key" '.known_doc_drift[$k].wrong_text' "$REGISTRY")"
+		if [ ! -r "$tf" ]; then
+			fail "T17 [${key}] target_file not readable: ${tf}"
+			bad=1
+			continue
+		fi
+		while IFS= read -r path && IFS= read -r declared_producer; do
+			[ -n "$path" ] || continue
+			n=$((n + 1))
+			# The doc row for this path must STILL contain the wrong text.
+			row="$(grep -F "\`public/${path}\`" "$tf" | head -1)"
+			if [ -z "$row" ]; then
+				fail "T17 [${key}] OBSOLETE: no row for public/${path} in ${tf} any more — drop the entry"
+				bad=1
+				continue
+			fi
+			if ! printf '%s\n' "$row" | grep -Fq -- "$wrong"; then
+				fail "T17 [${key}] OBSOLETE: the row for public/${path} no longer says ${wrong} — the doc was fixed, drop the entry"
+				bad=1
+				continue
+			fi
+			# And the registry must actually carry the corrected producer.
+			registry_producer="$(jq -r --arg p "$path" '.publications[] | select(.path == $p) | .owner.producer' "$REGISTRY")"
+			if [ "$registry_producer" != "$declared_producer" ]; then
+				fail "T17 [${key}] ${path}: drift entry says the real producer is '${declared_producer}' but publications[] says '${registry_producer}'"
+				bad=1
+			fi
+		done <<< "$(jq -r --arg k "$key" '.known_doc_drift[$k].entries[] | .path, .measured_producer' "$REGISTRY")"
+	done <<< "$(jq -r '.known_doc_drift | keys[] | select(startswith("_") | not)' "$REGISTRY")"
+	[ "$bad" -eq 0 ] && pass "T17 all ${n} known_doc_drift rows are still wrong in the doc and still corrected here"
+}
+t17
+
+# ---------------------------------------------------------------------------
+# T18 — kind=record must be earned by a digest key, never by a date key.
+# This encodes the mistake found in review on 2026-08-07: api/peers-history/
+# was classified record on the strength of "one file per day", but its
+# producer rewrites the CURRENT day's member on every run
+# (scripts/peer-validators.sh:254-256, :361), so the published URL for today
+# resolves to different bytes several times a day. A date is a promise about
+# naming; only a content-derived key is a promise about bytes. The second rule
+# keeps the qualifier honest: becomes_record_after may only WIDEN what a
+# knowing consumer may do, so it may never sit on an entry whose .kind already
+# grants pin permission.
+# ---------------------------------------------------------------------------
+t18() {
+	local path pattern kind bad=0 n=0
+	while IFS= read -r path && IFS= read -r pattern; do
+		[ -n "$path" ] || continue
+		n=$((n + 1))
+		case "$pattern" in
+			*'[a-f0-9]{64}'*) ;;
+			*)
+				fail "T18 ${path} is kind=record but its member_pattern is not keyed by a 64-hex digest: ${pattern}"
+				note "     a date or sequence key names a file; it does not promise its bytes. Use kind=stream + becomes_record_after."
+				bad=1
+				;;
+		esac
+	done <<< "$(jq -r '.publications[] | select(.kind == "record") | .path, (.member_pattern // "")' "$REGISTRY")"
+
+	while IFS= read -r path; do
+		[ -n "$path" ] || continue
+		kind="$(kind_of "$path")"
+		[ "$kind" = "stream" ] || { fail "T18 ${path} carries becomes_record_after but kind=${kind}; the qualifier may only widen, never restate"; bad=1; }
+	done <<< "$(jq -r '.publications[] | select(has("becomes_record_after")) | .path' "$REGISTRY")"
+
+	[ "$bad" -eq 0 ] && pass "T18 all ${n} kind=record entries are keyed by a content digest, and every becomes_record_after sits on a kind=stream entry"
+}
+t18
 
 # ---------------------------------------------------------------------------
 # T15 — mutation self-proof.
