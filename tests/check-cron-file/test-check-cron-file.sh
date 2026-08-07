@@ -129,6 +129,179 @@ RC=$?
 	|| bad "Rule 2 still enforced: un-braced chain fails (actual=$RC)"
 teardown
 
+# ---- case 8b (Rule 2, 2026-08-07 widening): un-braced chain piped to another
+# command — `A && B 2>&1 | logger` — must fail too. Before the widening this
+# was INVISIBLE to Rule 2 (it only inspected lines containing `>>`) and the
+# real TOOLKIT.md peer-validators sample shipped in exactly this shape with
+# 4 of 6 output streams silently dropped while the linter reported clean.
+# scripts/foo.sh / bar.sh are placeholders that exist nowhere in this repo,
+# so Rule 6 cannot resolve them (fail-open there by design) and this case
+# isolates Rule 2.
+setup
+cat > "$DIR/pipe-no-brace-2cmd" <<'EOF'
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+*/5 * * * * deploy bash scripts/foo.sh && bash scripts/bar.sh 2>&1 | logger -t tag
+EOF
+bash "$CHECKER" "$DIR/pipe-no-brace-2cmd" >/tmp/pipe2_out.txt 2>&1
+RC=$?
+[ "$RC" -eq 1 ] \
+	&& ok "Rule 2 widened: un-braced 2-command chain piped to logger fails" \
+	|| bad "Rule 2 widened: un-braced 2-command chain piped to logger fails (actual=$RC, out: $(cat /tmp/pipe2_out.txt))"
+grep -qF 'found a chain that redirects only the last command' /tmp/pipe2_out.txt \
+	&& ok "Rule 2 widened: violation carries the Rule 2 message" \
+	|| bad "Rule 2 widened: violation carries the Rule 2 message (out: $(cat /tmp/pipe2_out.txt))"
+teardown
+
+# ---- case 8c (Rule 2, widening): 3-command chain piped to logger — the
+# EXACT shape that shipped in TOOLKIT.md's old peer-validators sample line
+# (measured: 2 of 6 streams reached the tag, 4 were dropped) — must fail.
+setup
+cat > "$DIR/pipe-no-brace-3cmd" <<'EOF'
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+0 4 * * * deploy bash scripts/foo.sh && bash scripts/bar.sh && bash scripts/baz.sh 2>&1 | logger -t tag
+EOF
+bash "$CHECKER" "$DIR/pipe-no-brace-3cmd" >/tmp/pipe3_out.txt 2>&1
+RC=$?
+[ "$RC" -eq 1 ] \
+	&& ok "Rule 2 widened: un-braced 3-command chain piped to logger fails" \
+	|| bad "Rule 2 widened: un-braced 3-command chain piped to logger fails (actual=$RC, out: $(cat /tmp/pipe3_out.txt))"
+teardown
+
+# ---- case 8d (Rule 2, widening): un-braced chain with a bare `>` (not `>>`)
+# truncating redirect on the last command only — must fail. Previously Rule 2
+# only looked for `>>`, so a single `>` chain-scoping bug was invisible too.
+setup
+cat > "$DIR/single-gt-no-brace" <<'EOF'
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+0 4 * * * deploy bash scripts/foo.sh && bash scripts/bar.sh > /tmp/x.log 2>&1
+EOF
+bash "$CHECKER" "$DIR/single-gt-no-brace" >/tmp/singlegt_out.txt 2>&1
+RC=$?
+[ "$RC" -eq 1 ] \
+	&& ok "Rule 2 widened: un-braced chain with a bare > redirect fails" \
+	|| bad "Rule 2 widened: un-braced chain with a bare > redirect fails (actual=$RC, out: $(cat /tmp/singlegt_out.txt))"
+teardown
+
+# ---- case 8e (Rule 2, widening — no false positive): `{ A && B ; } 2>&1 | logger`
+# is the CORRECT wrapped form of the pipe shape and must pass Rule 2.
+setup
+cat > "$DIR/braced-pipe" <<'EOF'
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+*/5 * * * * deploy { bash scripts/foo.sh && bash scripts/bar.sh ; } 2>&1 | logger -t tag
+EOF
+bash "$CHECKER" "$DIR/braced-pipe" >/tmp/bracedpipe_out.txt 2>&1
+RC=$?
+[ "$RC" -eq 0 ] \
+	&& ok "Rule 2 widened: braced chain piped to logger passes (no false positive)" \
+	|| bad "Rule 2 widened: braced chain piped to logger passes (actual=$RC, out: $(cat /tmp/bracedpipe_out.txt))"
+teardown
+
+# ---- case 8f (Rule 2, widening — no false positive): bash -c "A && B" 2>&1 | logger
+# is the real production shape of freedom-yield-peer-geo (the one cron with
+# no repo installer of its own). The && is inside bash -c's own quoted
+# argument, not a top-level cron-line chain, so the outer pipe correctly
+# scopes the whole bash -c invocation — must pass Rule 2.
+setup
+cat > "$DIR/bash-c-pipe" <<'EOF'
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+0 6 * * * deploy bash -c "cd /home/deploy/metal.freedom-yield.com && python3 scripts/foo.py && bash scripts/bar.sh" 2>&1 | logger -t peer-geo
+EOF
+bash "$CHECKER" "$DIR/bash-c-pipe" >/tmp/bashcpipe_out.txt 2>&1
+RC=$?
+[ "$RC" -eq 0 ] \
+	&& ok "Rule 2 widened: bash -c \"A && B\" 2>&1 | logger passes (no false positive)" \
+	|| bad "Rule 2 widened: bash -c \"A && B\" 2>&1 | logger passes (actual=$RC, out: $(cat /tmp/bashcpipe_out.txt))"
+teardown
+
+# ---- case 8g (Rule 2, widening — no false positive): a single command
+# piped to logger, no chain at all — must pass. This is the shape most
+# read-only crons already use; the widening must not touch it.
+setup
+cat > "$DIR/single-cmd-pipe" <<'EOF'
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+*/5 * * * * deploy bash scripts/foo.sh 2>&1 | logger -t tag
+EOF
+bash "$CHECKER" "$DIR/single-cmd-pipe" >/tmp/singlecmdpipe_out.txt 2>&1
+RC=$?
+[ "$RC" -eq 0 ] \
+	&& ok "Rule 2 widened: single command piped to logger passes (no chain, no false positive)" \
+	|| bad "Rule 2 widened: single command piped to logger passes (actual=$RC, out: $(cat /tmp/singlecmdpipe_out.txt))"
+teardown
+
+# ---- case 8h (Rule 2, pass-message honesty): the compliant-file fixture
+# from case 3 (a braced && chain with a >> redirect) must still report Rule 2
+# as explicitly checked and passing — not the pre-2026-08-07 message that
+# claimed to check a shape (pipes) it never inspected.
+setup
+cat > "$DIR/good-for-msg" <<EOF
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+0 5 * * * deploy { echo "=== x start \$(date -u +\%FT\%TZ) ==="; cd /home/deploy/metal.freedom-yield.com && bash scripts/x.sh; rc=\$?; echo "=== x end \$(date -u +\%FT\%TZ) rc=\$rc ==="; } >> /home/deploy/metal.freedom-yield.com/logs/x.log 2>&1
+EOF
+bash "$CHECKER" "$DIR/good-for-msg" >/tmp/goodmsg_out.txt 2>&1
+grep -qF 'every && chain with a redirect or pipe wraps it in { ... }' /tmp/goodmsg_out.txt \
+	&& ok "Rule 2 pass message states what was actually checked (redirect AND pipe)" \
+	|| bad "Rule 2 pass message states what was actually checked (out: $(cat /tmp/goodmsg_out.txt))"
+teardown
+
+# ---- case 8i (mutation control): prove the 2026-08-07 widening — not
+# something else — is what makes cases 8b/8c/8d fail. old_rule2_flags_violation
+# below is a self-contained, byte-for-byte reproduction of Rule 2's PRE-WIDEN
+# trigger condition (a line needs BOTH a literal `&&` AND a literal `>>` to
+# even be inspected — this is the exact code that shipped before this task).
+# It must report "not flagged" for all three broken fixtures — i.e. reverting
+# the widening really does make them slip through silently, which is the
+# defect this task exists to close. This does not re-test the CURRENT
+# checker (cases 8b/8c/8d already did, via the real scripts/check-cron-file.sh);
+# it isolates that the widening specifically is the responsible change.
+old_rule2_flags_violation() {
+	local file="$1" cron_lines any
+	cron_lines="$(grep -vE '^\s*(#|$)' "$file" | grep -vE '^[A-Z_]+=' || true)"
+	any=0
+	while IFS= read -r line; do
+		[ -z "$line" ] && continue
+		if ! printf '%s' "$line" | grep -q '&&'; then continue; fi
+		if ! printf '%s' "$line" | grep -q '>>'; then continue; fi
+		if ! printf '%s' "$line" | grep -qE '\{[^}]*&&[^{]*\}\s*>>'; then
+			any=1
+		fi
+	done <<< "$cron_lines"
+	[ "$any" -eq 1 ]
+}
+
+setup
+cat > "$DIR/mut-2cmd" <<'EOF'
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+*/5 * * * * deploy bash scripts/foo.sh && bash scripts/bar.sh 2>&1 | logger -t tag
+EOF
+cat > "$DIR/mut-3cmd" <<'EOF'
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+0 4 * * * deploy bash scripts/foo.sh && bash scripts/bar.sh && bash scripts/baz.sh 2>&1 | logger -t tag
+EOF
+cat > "$DIR/mut-single-gt" <<'EOF'
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+0 4 * * * deploy bash scripts/foo.sh && bash scripts/bar.sh > /tmp/x.log 2>&1
+EOF
+old_rule2_flags_violation "$DIR/mut-2cmd" \
+	&& bad "mutation control: pre-widen Rule 2 does NOT catch the 2-cmd pipe chain (it did — regression in the control itself)" \
+	|| ok "mutation control: pre-widen Rule 2 silently passed the 2-cmd pipe chain (confirms the widening is what fixes it)"
+old_rule2_flags_violation "$DIR/mut-3cmd" \
+	&& bad "mutation control: pre-widen Rule 2 does NOT catch the 3-cmd pipe chain (it did — regression in the control itself)" \
+	|| ok "mutation control: pre-widen Rule 2 silently passed the 3-cmd pipe chain (confirms the widening is what fixes it)"
+old_rule2_flags_violation "$DIR/mut-single-gt" \
+	&& bad "mutation control: pre-widen Rule 2 does NOT catch the bare > chain (it did — regression in the control itself)" \
+	|| ok "mutation control: pre-widen Rule 2 silently passed the bare > chain (confirms the widening is what fixes it)"
+teardown
+
 # ---- case 9 (Rule 6): allowlisted side-effecting script, no FY_LIVE=1 → FAIL ------------
 setup
 cat > "$DIR/side-effect-missing" <<'EOF'
