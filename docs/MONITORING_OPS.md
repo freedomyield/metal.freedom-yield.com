@@ -471,7 +471,7 @@ sudo -u deploy bash /home/deploy/metal.freedom-yield.com/scripts/anomaly-state-i
 # Apply. FY_LIVE=1 is mandatory since the 2026-08-06 C3 inversion
 # (scripts/lib/side-effects.sh); without it the script refuses with exit 6
 # instead of silently doing nothing.
-sudo -u deploy FY_LIVE=1 bash /home/deploy/metal.freedom-yield.com/scripts/anomaly-state-init.sh \
+sudo -u deploy env FY_LIVE=1 bash /home/deploy/metal.freedom-yield.com/scripts/anomaly-state-init.sh \
   --confirm --baseline-status=running
 sudo -u deploy jq . /var/lib/freedom-yield/anomaly-state.json | head -20
 ls /var/lib/freedom-yield/.missing-notified.marker 2>&1 | head -1

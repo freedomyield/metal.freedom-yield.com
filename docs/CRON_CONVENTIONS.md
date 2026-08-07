@@ -20,14 +20,18 @@ sudo -u deploy mkdir -p /home/deploy/metal.freedom-yield.com/logs
 sudo -u deploy touch    /home/deploy/metal.freedom-yield.com/logs/<name>.log
 ```
 
-### 2. Wrap the work in a compound, redirect the compound
+### 2. Wrap the work in a compound, redirect (or pipe) the compound
 
 ```
 GOOD:  { ...stuff... } >> /home/deploy/.../logs/<name>.log 2>&1
 BAD:   ...stuff... >> /home/deploy/.../logs/<name>.log 2>&1
+
+GOOD:  { ...stuff... } 2>&1 | logger -t <tag>
+GOOD:  bash -c "...stuff..." 2>&1 | logger -t <tag>
+BAD:   ...stuff... 2>&1 | logger -t <tag>
 ```
 
-Without the braces, the redirect attaches only to the last `simple command` in the chain (POSIX shell rule). Earlier commands' stdout is discarded by cron (mailed to the operator, but there's no MTA on this host). The braces are an explicit grouping so every command in the chain shares the log target.
+Without the braces (or an equivalent `bash -c "..."` wrapper), a redirect OR a pipe attaches only to the last `simple command` in the chain (POSIX shell rule — a pipeline binds tighter than `&&`). Earlier commands' stdout is discarded by cron (mailed to the operator, but there's no MTA on this host). The braces are an explicit grouping so every command in the chain shares the same log target or pipe destination — `scripts/check-cron-file.sh` Rule 2 enforces this for both the redirect and the pipe form (widened 2026-08-07; see "Alternative form" below for the pipe case in detail).
 
 ### 3. Emit start / end markers and capture rc
 
@@ -74,29 +78,57 @@ A cron whose invoked command never notifies, never pushes, and never touches `/v
 
 ## Alternative form: piping to `logger` instead of a log file
 
-Rules 2 and 3 above only apply to lines that redirect into a project log
-file with `>>`. A single-command cron line that instead pipes its output
-straight to `logger` — e.g. the real `metal-host-advance` entry:
+A single-command cron line can pipe its output straight to `logger` instead
+of redirecting into a project log file — e.g. the real `metal-host-advance`
+entry:
 
 ```
 45 4 * * * deploy bash /home/deploy/metal.freedom-yield.com/scripts/advance-host-checkout.sh 2>&1 | logger -t host-advance
 ```
 
-— has neither `&&` nor `>>` in it. In `scripts/check-cron-file.sh`, rule 2's
-loop skips any line without `&&` before it ever checks for `>>` or brace
-wrapping, and rule 3's loop skips any line without `>>` before it checks
-for start/end markers or `rc=$?` capture. A `| logger -t <tag>` line with
-no `&&` chain and no `>>` redirect therefore never enters either check —
-`check-cron-file.sh` reports 0 violations for it, by design, not by gap.
-
 This is intentional: `logger -t <tag>` writes each invocation straight into
 syslog with its own timestamp, so there is no project log file to wrap a
 redirect around, and syslog already gives per-invocation boundaries (e.g.
-`journalctl -t host-advance`) without hand-rolled start/end markers. Use the
-`| logger -t <tag>` form for a single command with no `&&` chain when
-syslog is an acceptable destination; use the `{ ... } >> logs/<name>.log
-2>&1` compound form from rules 1-3 when the entry chains multiple scripts
-with `&&` and needs a project-local, greppable log file.
+`journalctl -t host-advance`) without hand-rolled start/end markers.
+
+**What each rule actually checks, per line** (corrected 2026-08-07 — this
+section previously said Rule 2 only looks at `>>`, which stopped being true
+the day Rule 2 was widened to also catch a `&&` chain piped to `logger`):
+
+- **Rule 3** (start/end markers + `rc=$?`) only ever applies to a line
+  containing a literal `>>`. A `| logger` line has no `>>`, so Rule 3 never
+  engages for it — this part is unchanged.
+- **Rule 2** applies to any line with a **top-level `&&` chain**, not just
+  lines containing `>>`. It requires the chain's sink — `>>`, a bare `>`, OR
+  a `|` pipe — to cover the WHOLE chain: a pipeline binds tighter than
+  `&&`, so `A && B 2>&1 | logger` pipes only `B`'s output; `A`'s is
+  discarded by cron (mailed to the operator, but there's no MTA on this
+  host) — the exact same POSIX-precedence problem as the un-braced `>>`
+  case in rule 2 above, not a different one. A line with **no** `&&` — like
+  `metal-host-advance` above, a single command — has no chain for Rule 2 to
+  check at all, so it reports 0 violations for that line regardless of
+  whether it redirects, pipes, or does neither. That part is still true and
+  still by design, not a gap: there is nothing to scope-mismatch when there
+  is only one command.
+
+**A chained command piped to `logger` MUST still be wrapped**, exactly like
+the `>>` case — either with `{ ... }` (sink placed right after the closing
+brace) or by running the whole chain inside a single `bash -c "..."`
+invocation (the chain is then opaque to cron; the outer pipe scopes that one
+process). The real `freedom-yield-peer-geo` entry uses the second form:
+
+```
+GOOD:  bash -c "cd <repo> && python3 scripts/peer-geo.py && bash scripts/push-to-web-host.sh peer-geo.json" 2>&1 | logger -t peer-geo
+GOOD:  { cmd1 && cmd2 ; } 2>&1 | logger -t <tag>
+BAD:   cmd1 && cmd2 2>&1 | logger -t <tag>          # only cmd2 reaches the tag
+```
+
+Use the plain `| logger -t <tag>` form (no wrapper needed) only for a
+**single command with no `&&` chain**, when syslog is an acceptable
+destination; use `{ ... } >> logs/<name>.log 2>&1` or a wrapped/`bash -c`
+pipe form from rules 1-3 above when the entry chains multiple scripts with
+`&&` and needs a project-local, greppable log file (or syslog with all
+commands' output preserved).
 
 ## Worked example: `/etc/cron.d/metal-evidence`
 

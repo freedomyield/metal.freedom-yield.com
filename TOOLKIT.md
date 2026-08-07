@@ -172,6 +172,7 @@ The cryptographic-evidence anchor pipeline (identity → anchor-source → A-cha
 |---|---|---|
 | `scripts/broadcast-guard.sh` | PreToolUse hook enforcing the PRIME DIRECTIVE (blocks raw broadcast commands without the safe-broadcast marker + fresh operator token). | hook |
 | `scripts/publish-guard.sh` | Block forbidden host identifiers + operator PII from entering public content (6-layer detector + 3-layer hook). | hook/pre-commit |
+| `scripts/lib/publish-scan.sh` | Send-time layer over `publish-guard.sh` for content that never touches git — `push-to-web-host.sh`'s targets (`public/api/*.json`, `archive/`, `peers-history/`, `public/calendar/`) are gitignored by design, and `sync-to-validator-host.sh` rsyncs `scripts/` straight onto the host, so neither is seen by the git-hook-based guard above. Scans the OUTBOUND BYTES THEMSELVES right before they leave the machine and refuses the transfer on any non-zero result — no path allowlist, no trust in a prior git-committed version. `fyd_publish_scan_selftest` proves the guard still detects on THIS machine (a known-bad probe payload) before the first send of a process; `fyd_publish_scan_file <path> [label]` scans one file's exact bytes. | library (sourced) |
 | `scripts/sanitize-history.sh` | One-command scrub of forbidden host identifiers + PII across all git history (filter-repo, bundle backup). | manual |
 | `scripts/install-tier1-hook.sh` | Install the tier-1 PreToolUse hooks (broadcast-guard + publish-guard); merges into an existing `.claude/settings.json` rather than clobbering it. | manual |
 | `scripts/install-git-hooks.sh` | Idempotently set this clone's `core.hooksPath=.githooks` (pre-commit secret-scan + pre-push publish-guard); `--check` verifies without mutating. | manual |
@@ -232,8 +233,13 @@ One file per logical pipeline, kept readable. Roughly:
 # streams from a three-command chain, two reach the tag and four are lost.
 # `{ A && B && C ; } 2>&1 | logger` captures all six. This is not a style
 # preference — scripts/check-cron-file.sh Rule 2 fails a `&&` chain whose
-# redirect covers only the last command, and scripts/install-watch-cron.sh
-# already generates the brace form.
+# redirect OR pipe covers only the last command (widened 2026-08-07; the
+# original rule only inspected lines containing `>>`, so this exact pipe
+# shape was invisible to it), and scripts/install-watch-cron.sh already
+# generates the brace form. A single `bash -c "A && B && C" 2>&1 | logger`
+# invocation also passes Rule 2 — the chain is then opaque to cron and the
+# outer pipe correctly scopes the one bash -c process (see the
+# freedom-yield-peer-geo cron, this repo's one real example of that shape).
 FY_LIVE=1
 
 # Push to web frequently

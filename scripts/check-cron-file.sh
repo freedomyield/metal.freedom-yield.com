@@ -108,25 +108,128 @@ VARLOG
 fi
 echo ""
 
-# ---- Rule 2: redirect must apply to a compound, not a single command ------
-echo "[2] Compound { ... } redirect so the whole chain shares the log target"
+# ---- Rule 2: a chain's redirect/pipe must cover the WHOLE chain -----------
+# A pipeline binds TIGHTER than && (or ;), so in
+#     A && B 2>&1 | logger
+# the pipe applies ONLY to B — A's stdout/stderr go to cron's own handling
+# (typically MAILTO, usually unset on this host, so just dropped). The exact
+# same problem exists for a redirect:
+#     A && B >> log 2>&1
+# only redirects B. Both are fixed the same way: wrap the whole chain in
+# `{ ... ; }` and put the redirect/pipe AFTER the closing brace, or run the
+# chain as a single `bash -c "A && B" 2>&1 | logger` invocation (the chain is
+# then opaque to cron; the outer redirect/pipe scopes that one bash -c
+# process, which is what we want — this is the real production shape used by
+# the freedom-yield-peer-geo cron).
+#
+# 2026-08-07 widening. Originally this rule only inspected lines containing
+# `>>` — a line whose only sink was a pipe (`2>&1 | logger`) was invisible to
+# it, and it PASSED with an explicit "✓ all chains wrap their redirect in
+# { ... }" even though it never looked at that line. This is exactly how a
+# real cron sample (TOOLKIT.md's old `peer-validators` line) shipped with 4
+# of 6 output streams silently dropped while the linter said it was fine. Now
+# checked, for any line with a top-level `&&`:
+#   - `>>` (append redirect) — as before.
+#   - a bare `>` that is not part of an `N>&M` fd-duplication like `2>&1`
+#     (so `A && B > /tmp/x 2>&1` is now caught; `2>&1` alone is not a false
+#     trigger — it never writes to a file or a process by itself).
+#   - `|` (pipe to another command, e.g. `logger`).
+#
+# Quoting. "Top-level" means outside any '...' or "...". The check strips
+# quoted substrings first — a plain textual strip, NOT a shell parse — so
+# `bash -c "A && B" 2>&1 | logger` reads as a single command with no
+# top-level chain: the && is opaque inside bash -c's own argument, and the
+# outer pipe scopes that one process, which is correct. The SAME stripped
+# text is used to look for the `{ ... }` wrapper, so a brace pair that only
+# exists INSIDE a quoted argument can't be mistaken for a real wrapper
+# around a chain that is actually unbraced.
+#
+# Known gaps (deliberate — see task-h4-report.md for the full reasoning):
+#   - `;` and `||` chains are not inspected, only `&&`. No production cron
+#     line in this repo joins top-level commands with `;` or `||`; widening
+#     to them risks false positives from a literal `;` inside an unquoted
+#     argument without a real shell parse, which this linter deliberately
+#     does not attempt (see the 2026-08-06 publish-guard "tried to understand
+#     shell" over-reach precedent this task exists to avoid repeating). This
+#     is also why a MULTI-STATEMENT line — an independently `;`-separated
+#     chain BEFORE or AFTER a correctly-wrapped `{ ... && ... ; } | sink`
+#     group on the same line — is not detected even though the unwrapped
+#     part has the exact same problem: the wrapped group's own match is
+#     enough to mark the WHOLE line safe. No production cron line in this
+#     repo puts more than one top-level statement on a line, so this has
+#     never fired in practice; documented here rather than silently relied
+#     on (2026-08-07 review F-5 — verified the shape both before and after
+#     that review's F-1 fix).
+#   - The quote-strip is a plain textual `"[^"]*"` / `'[^']*'` removal, not a
+#     shell tokenizer: it does not understand backslash-escaped quotes
+#     (`\"` inside a double-quoted string). Spot-checked 2026-08-07 with
+#     three shapes containing `\"` (a safe one, and two genuinely-broken
+#     unwrapped-chain ones) — all three came out correct, because an EVEN
+#     number of literal `"` characters still pairs up left-to-right into
+#     something that resolves the same top-level `&&`/sink either way. This
+#     is not a proof for every possible escaped-quote shape, only the ones
+#     tested; unlike a truly ambiguous case, an ODD/unbalanced literal quote
+#     count reliably leaves a stray `&&` or brace unmatched, which can only
+#     ever produce an EXTRA violation (fail closed), never a missed one —
+#     the same posture Rule 1 and Rule 6 already take toward input they
+#     cannot fully resolve.
+echo "[2] A chain's redirect/pipe must cover the WHOLE chain, not just its last command"
 ANY_CHAIN_NO_BRACES=0
 while IFS= read -r line; do
   [ -z "$line" ] && continue
-  # Skip lines without && (no chain — single-command lines are fine).
-  if ! printf '%s' "$line" | grep -q '&&'; then continue; fi
-  # Skip lines without a >> redirect (they don't have the problem).
-  if ! printf '%s' "$line" | grep -q '>>'; then continue; fi
-  # Lines that have both `&&` and `>>` must wrap in `{ ... }` so the
-  # redirect scope covers every command in the chain.
-  if ! printf '%s' "$line" | grep -qE '\{[^}]*&&[^{]*\}\s*>>'; then
-    fail "found a chain that redirects only the last command:"
+
+  # Strip quoted substrings so a && / > / | found INSIDE a quoted argument
+  # (e.g. bash -c "A && B") is not mistaken for a top-level chain or sink.
+  UNQUOTED="$(printf '%s' "$line" | sed -E "s/\"[^\"]*\"//g; s/'[^']*'//g")"
+
+  # No top-level && => no chain, nothing here for this rule to check.
+  if ! printf '%s' "$UNQUOTED" | grep -q '&&'; then continue; fi
+
+  # Strip fd-duplication tokens (2>&1, >&2, ...) GLOBALLY over the whole
+  # line before any further matching — not just from a slice taken after
+  # some separately-computed "end of brace" boundary. 2026-08-07 review
+  # (F-1): an earlier version sliced the line with `sed 's/^.*\}//'` to get
+  # "everything after the brace", but that `.*` is greedy and eats through
+  # to the LAST `}` in the line, not the chain's own closing brace — a
+  # trailing `${VAR}` (`{ A && B ; } >> ${LOGDIR}/x.log 2>&1`) or a `}`
+  # inside an unquoted argument (`{ A && B ; } 2>&1 | logger -t tag-}x`)
+  # both swallowed the real `>>`/`|` into the discarded prefix and produced
+  # a false violation on a correctly-wrapped line. Stripping fd-dup globally
+  # first, then testing the WHOLE probe with ONE anchored regex below (the
+  # same shape Rule 2 always used for `>>` alone) avoids ever slicing the
+  # string at all — the regex engine itself finds the correct closing brace,
+  # because `[^{]*` cannot cross a real `{` and a candidate `}` that isn't
+  # immediately followed by a sink simply fails to complete the match, which
+  # correctly rules out an unrelated LATER `}` on the same line (proved by
+  # case 8j/8k's two F-1 fixtures below).
+  PROBE="$(printf '%s' "$UNQUOTED" | sed -E 's/[0-9]*>&[0-9]+//g')"
+
+  # Does the chain have a scope-sensitive sink at all?
+  if ! printf '%s' "$PROBE" | grep -qE '[>|]'; then continue; fi
+
+  # A chain with a sink is safe ONLY if a `{ ... }` wrapper covers the whole
+  # chain and the sink sits right after ITS OWN closing brace — one anchored
+  # match, not a match-then-slice.
+  WRAPPED=0
+  if printf '%s' "$PROBE" | grep -qE '\{[^}]*&&[^{]*\}[[:space:]]*[>|]'; then
+    WRAPPED=1
+  fi
+
+  if [ "$WRAPPED" -eq 0 ]; then
+    # NOTE: keep the literal substring "found a chain that redirects only
+    # the last command" at the front of this message — it is asserted
+    # verbatim by tests/cron-generators-lint/test-cron-generators-lint.sh
+    # (outside this task's file set), which predates the 2026-08-07 pipe
+    # widening below and still expects it.
+    fail "found a chain that redirects only the last command (a trailing | pipe has the exact same problem):"
     printf "         %s\n" "$line"
-    note "Wrap the chain in { ... } so every command's output flows to the log."
+    note "Wrap the chain in { ... ; } with the redirect/pipe AFTER the closing"
+    note "brace, or invoke it as bash -c \"...\" 2>&1 | ..., so every"
+    note "command's output reaches the log."
     ANY_CHAIN_NO_BRACES=1
   fi
 done <<< "$CRON_LINES"
-[ $ANY_CHAIN_NO_BRACES -eq 0 ] && pass "all chains wrap their redirect in { ... }."
+[ $ANY_CHAIN_NO_BRACES -eq 0 ] && pass "every && chain with a redirect or pipe wraps it in { ... } (or is a single bash -c \"...\" invocation)."
 echo ""
 
 # ---- Rule 3: start + end markers + rc capture ----------------------------
