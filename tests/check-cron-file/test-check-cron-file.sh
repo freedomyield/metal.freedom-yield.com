@@ -302,6 +302,117 @@ old_rule2_flags_violation "$DIR/mut-single-gt" \
 	|| ok "mutation control: pre-widen Rule 2 silently passed the bare > chain (confirms the widening is what fixes it)"
 teardown
 
+# ---- case 8j/8k (Rule 2, F-1 fix, no false positive): a `${VAR}` or a
+# literal `}` inside an unquoted argument, appearing AFTER a correctly
+# wrapped chain's own closing brace, must not be mistaken for "the end of
+# the wrapper". 2026-08-07 review found the first implementation of this
+# widening sliced the line with `sed 's/^.*\}//'` (greedy — eats through to
+# the LAST `}` in the line, not the chain's own), which lost the real
+# `>>`/`|` into the discarded prefix and produced a false violation on a
+# correctly-wrapped line. Both must PASS.
+setup
+cat > "$DIR/f1-logdir" <<'EOF'
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+LOGDIR=/home/deploy/metal.freedom-yield.com/logs
+0 5 * * * deploy { cd /repo && bash a.sh ; } >> ${LOGDIR}/x.log 2>&1
+EOF
+bash "$CHECKER" "$DIR/f1-logdir" >/tmp/f1logdir_out.txt 2>&1
+grep -A2 '^\[2\]' /tmp/f1logdir_out.txt | grep -qF '✓' \
+	&& ok "Rule 2 F-1 fix: braced chain followed by \${VAR}/path passes (no false positive)" \
+	|| bad "Rule 2 F-1 fix: braced chain followed by \${VAR}/path passes (out: $(cat /tmp/f1logdir_out.txt))"
+teardown
+
+setup
+cat > "$DIR/f1-tagbrace" <<'EOF'
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+*/5 * * * * deploy { cd /repo && bash a.sh ; } 2>&1 | logger -t tag-}x
+EOF
+bash "$CHECKER" "$DIR/f1-tagbrace" >/tmp/f1tagbrace_out.txt 2>&1
+RC=$?
+[ "$RC" -eq 0 ] \
+	&& ok "Rule 2 F-1 fix: braced chain followed by an unquoted trailing } passes (no false positive)" \
+	|| bad "Rule 2 F-1 fix: braced chain followed by an unquoted trailing } passes (actual=$RC, out: $(cat /tmp/f1tagbrace_out.txt))"
+teardown
+
+# ---- case 8l (Rule 2, F-5 gap closed): a `;`-separated, self-contained,
+# ALREADY-correctly-wrapped brace group earlier on the line must not make a
+# SEPARATE, genuinely unwrapped chain later on the same line look safe. The
+# single anchored-regex rewrite (F-1's fix) closed this as a side effect —
+# proven directly against the real checker.
+setup
+cat > "$DIR/f5-disconnected" <<'EOF'
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+0 4 * * * deploy { echo a && echo b ; } ; cd /repo && bash x.sh 2>&1 | logger -t t
+EOF
+bash "$CHECKER" "$DIR/f5-disconnected" >/tmp/f5disc_out.txt 2>&1
+RC=$?
+[ "$RC" -eq 1 ] \
+	&& ok "Rule 2 F-5 gap closed: an unrelated wrapped group earlier on the line no longer masks a later unwrapped chain" \
+	|| bad "Rule 2 F-5 gap closed: an unrelated wrapped group earlier on the line no longer masks a later unwrapped chain (actual=$RC, out: $(cat /tmp/f5disc_out.txt))"
+teardown
+
+# ---- case 8m (mutation control, F-1/F-5): byte-for-byte reproduction of the
+# intermediate (widened-but-buggy) implementation this review round replaced
+# — the match-then-greedy-slice version, NOT the pre-widening version
+# case 8i already controls for. Proves the F-1 rewrite (single anchored
+# regex, no slice) is specifically what fixes both defects: the control must
+# OVER-flag f1-logdir/f1-tagbrace (false positive) and UNDER-flag
+# f5-disconnected (false negative) — the exact opposite of what the real
+# checker does above.
+buggy_two_step_wrapped() {
+	local file="$1" cron_lines line unquoted sink_probe after_brace after_brace_probe wrapped any_bad
+	cron_lines="$(grep -vE '^\s*(#|$)' "$file" | grep -vE '^[A-Z_]+=' || true)"
+	any_bad=0
+	while IFS= read -r line; do
+		[ -z "$line" ] && continue
+		unquoted="$(printf '%s' "$line" | sed -E "s/\"[^\"]*\"//g; s/'[^']*'//g")"
+		if ! printf '%s' "$unquoted" | grep -q '&&'; then continue; fi
+		sink_probe="$(printf '%s' "$unquoted" | sed -E 's/[0-9]*>&[0-9]+//g')"
+		if ! printf '%s' "$sink_probe" | grep -qE '[>|]'; then continue; fi
+		wrapped=0
+		if printf '%s' "$unquoted" | grep -qE '\{[^}]*&&[^{]*\}'; then
+			after_brace="$(printf '%s' "$unquoted" | sed -E 's/^.*\}//')"
+			after_brace_probe="$(printf '%s' "$after_brace" | sed -E 's/[0-9]*>&[0-9]+//g')"
+			if printf '%s' "$after_brace_probe" | grep -qE '[>|]'; then
+				wrapped=1
+			fi
+		fi
+		[ "$wrapped" -eq 0 ] && any_bad=1
+	done <<< "$cron_lines"
+	[ "$any_bad" -eq 1 ]
+}
+
+setup
+cat > "$DIR/f1-logdir" <<'EOF'
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+LOGDIR=/home/deploy/metal.freedom-yield.com/logs
+0 5 * * * deploy { cd /repo && bash a.sh ; } >> ${LOGDIR}/x.log 2>&1
+EOF
+cat > "$DIR/f1-tagbrace" <<'EOF'
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+*/5 * * * * deploy { cd /repo && bash a.sh ; } 2>&1 | logger -t tag-}x
+EOF
+cat > "$DIR/f5-disconnected" <<'EOF'
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+0 4 * * * deploy { echo a && echo b ; } ; cd /repo && bash x.sh 2>&1 | logger -t t
+EOF
+buggy_two_step_wrapped "$DIR/f1-logdir" \
+	&& ok "mutation control: match-then-slice implementation DID false-flag \${VAR} (confirms F-1 fix is what's responsible)" \
+	|| bad "mutation control: match-then-slice implementation did NOT false-flag \${VAR} (control no longer reproduces F-1 — investigate)"
+buggy_two_step_wrapped "$DIR/f1-tagbrace" \
+	&& ok "mutation control: match-then-slice implementation DID false-flag the trailing } (confirms F-1 fix is what's responsible)" \
+	|| bad "mutation control: match-then-slice implementation did NOT false-flag the trailing } (control no longer reproduces F-1 — investigate)"
+buggy_two_step_wrapped "$DIR/f5-disconnected" \
+	&& bad "mutation control: match-then-slice implementation caught the disconnected chain (control no longer reproduces F-5 — investigate)" \
+	|| ok "mutation control: match-then-slice implementation silently missed the disconnected chain (confirms F-1 fix ALSO closes F-5)"
+teardown
+
 # ---- case 9 (Rule 6): allowlisted side-effecting script, no FY_LIVE=1 → FAIL ------------
 setup
 cat > "$DIR/side-effect-missing" <<'EOF'

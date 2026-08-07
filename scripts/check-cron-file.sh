@@ -150,12 +150,29 @@ echo ""
 #     to them risks false positives from a literal `;` inside an unquoted
 #     argument without a real shell parse, which this linter deliberately
 #     does not attempt (see the 2026-08-06 publish-guard "tried to understand
-#     shell" over-reach precedent this task exists to avoid repeating).
-#   - The quote-strip is textual, not a shell tokenizer: adversarial or
-#     deeply nested quoting (e.g. a `{ ... }` pair that exists only inside a
-#     quoted argument, combined with a SEPARATE real top-level chain on the
-#     same line) can in principle still confuse it. No such shape exists in
-#     this repo's production crons or test fixtures.
+#     shell" over-reach precedent this task exists to avoid repeating). This
+#     is also why a MULTI-STATEMENT line — an independently `;`-separated
+#     chain BEFORE or AFTER a correctly-wrapped `{ ... && ... ; } | sink`
+#     group on the same line — is not detected even though the unwrapped
+#     part has the exact same problem: the wrapped group's own match is
+#     enough to mark the WHOLE line safe. No production cron line in this
+#     repo puts more than one top-level statement on a line, so this has
+#     never fired in practice; documented here rather than silently relied
+#     on (2026-08-07 review F-5 — verified the shape both before and after
+#     that review's F-1 fix).
+#   - The quote-strip is a plain textual `"[^"]*"` / `'[^']*'` removal, not a
+#     shell tokenizer: it does not understand backslash-escaped quotes
+#     (`\"` inside a double-quoted string). Spot-checked 2026-08-07 with
+#     three shapes containing `\"` (a safe one, and two genuinely-broken
+#     unwrapped-chain ones) — all three came out correct, because an EVEN
+#     number of literal `"` characters still pairs up left-to-right into
+#     something that resolves the same top-level `&&`/sink either way. This
+#     is not a proof for every possible escaped-quote shape, only the ones
+#     tested; unlike a truly ambiguous case, an ODD/unbalanced literal quote
+#     count reliably leaves a stray `&&` or brace unmatched, which can only
+#     ever produce an EXTRA violation (fail closed), never a missed one —
+#     the same posture Rule 1 and Rule 6 already take toward input they
+#     cannot fully resolve.
 echo "[2] A chain's redirect/pipe must cover the WHOLE chain, not just its last command"
 ANY_CHAIN_NO_BRACES=0
 while IFS= read -r line; do
@@ -168,21 +185,34 @@ while IFS= read -r line; do
   # No top-level && => no chain, nothing here for this rule to check.
   if ! printf '%s' "$UNQUOTED" | grep -q '&&'; then continue; fi
 
-  # Does the chain have a scope-sensitive sink at all? Strip fd-duplication
-  # tokens (2>&1, >&2, ...) first — they never write to a file or a process
-  # on their own and must not trigger this rule by themselves.
-  SINK_PROBE="$(printf '%s' "$UNQUOTED" | sed -E 's/[0-9]*>&[0-9]+//g')"
-  if ! printf '%s' "$SINK_PROBE" | grep -qE '[>|]'; then continue; fi
+  # Strip fd-duplication tokens (2>&1, >&2, ...) GLOBALLY over the whole
+  # line before any further matching — not just from a slice taken after
+  # some separately-computed "end of brace" boundary. 2026-08-07 review
+  # (F-1): an earlier version sliced the line with `sed 's/^.*\}//'` to get
+  # "everything after the brace", but that `.*` is greedy and eats through
+  # to the LAST `}` in the line, not the chain's own closing brace — a
+  # trailing `${VAR}` (`{ A && B ; } >> ${LOGDIR}/x.log 2>&1`) or a `}`
+  # inside an unquoted argument (`{ A && B ; } 2>&1 | logger -t tag-}x`)
+  # both swallowed the real `>>`/`|` into the discarded prefix and produced
+  # a false violation on a correctly-wrapped line. Stripping fd-dup globally
+  # first, then testing the WHOLE probe with ONE anchored regex below (the
+  # same shape Rule 2 always used for `>>` alone) avoids ever slicing the
+  # string at all — the regex engine itself finds the correct closing brace,
+  # because `[^{]*` cannot cross a real `{` and a candidate `}` that isn't
+  # immediately followed by a sink simply fails to complete the match, which
+  # correctly rules out an unrelated LATER `}` on the same line (proved by
+  # case 8j/8k's two F-1 fixtures below).
+  PROBE="$(printf '%s' "$UNQUOTED" | sed -E 's/[0-9]*>&[0-9]+//g')"
+
+  # Does the chain have a scope-sensitive sink at all?
+  if ! printf '%s' "$PROBE" | grep -qE '[>|]'; then continue; fi
 
   # A chain with a sink is safe ONLY if a `{ ... }` wrapper covers the whole
-  # chain and the sink sits right after the closing brace.
+  # chain and the sink sits right after ITS OWN closing brace — one anchored
+  # match, not a match-then-slice.
   WRAPPED=0
-  if printf '%s' "$UNQUOTED" | grep -qE '\{[^}]*&&[^{]*\}'; then
-    AFTER_BRACE="$(printf '%s' "$UNQUOTED" | sed -E 's/^.*\}//')"
-    AFTER_BRACE_PROBE="$(printf '%s' "$AFTER_BRACE" | sed -E 's/[0-9]*>&[0-9]+//g')"
-    if printf '%s' "$AFTER_BRACE_PROBE" | grep -qE '[>|]'; then
-      WRAPPED=1
-    fi
+  if printf '%s' "$PROBE" | grep -qE '\{[^}]*&&[^{]*\}[[:space:]]*[>|]'; then
+    WRAPPED=1
   fi
 
   if [ "$WRAPPED" -eq 0 ]; then
