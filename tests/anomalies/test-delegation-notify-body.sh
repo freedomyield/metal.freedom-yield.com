@@ -15,19 +15,29 @@
 #   number that actually belongs over that denominator (cumulative received)
 #   was stranded on the previous line. The operator caught it in a live push.
 #   The decrease body carried the same received figure with no ceiling
-#   context at all. Both now render the same 受入 line that
-#   scripts/daily-status.sh has always rendered.
+#   context at all.
 #
-#   The failure was one of MEANING, not of mechanism, so the assertions here
+#   On 2026-08-10 the operator reported the next layer of the same problem:
+#   the push said "+1 件" and never said what that one delegation was WORTH.
+#   The previous cumulative was already in the state file — written on every
+#   successful notify, never read back — so the delta was recoverable and
+#   simply was not being computed. The body now carries a 新規 / 離脱 line,
+#   and the cumulative line was shortened to a bare ratio (label, unit and
+#   normal-case head-room dropped) because a phone push is read in two
+#   seconds. 満枠 keeps its 🔒 marker: "cannot receive more" is an operational
+#   branch, not an arithmetic one.
+#
+#   Both failures were of MEANING, not of mechanism, so the assertions here
 #   are on the exact bytes of the delivered body, not on "a notify happened".
 #
 # METHOD
 #   The real script is driven end to end inside a sandbox repo: a curl stand-in
 #   answers platform.getCurrentValidators with a canned delegator set, and
 #   scripts/notify.sh is a recording shim, so what is asserted is the body the
-#   operator would actually have received. The fixture numbers are the ones
-#   from the 2026-08-06 live push (self 21640, received 11183.7979, 3
-#   delegators) so the expected strings can be read against that push directly.
+#   operator would actually have received. The "live numbers" case below uses
+#   the exact figures from the 2026-08-10 report (self 21640, 33179.7979 →
+#   33768.7979, 8 delegators) so its expected body can be diffed against the
+#   operator's own mock line for line.
 #
 # Usage:
 #   bash tests/anomalies/test-delegation-notify-body.sh
@@ -39,6 +49,16 @@
 #     freshness gate needs `date -d`, so the run cannot reach the transition)
 
 set -u
+
+# tests/run-all-tests.sh drives its suite list through `while read … done <
+# <(find …)`, i.e. on THIS script's stdin. Anything in here that reads stdin
+# eats the rest of the run and the suite silently finishes early with a green
+# "ALL PASS" on a truncated list — which is exactly what happened while these
+# cases were being written (a `grep -qF "-589"` parsed the needle as an option,
+# fell back to stdin, and swallowed 76 of the 88 suites). The `--` terminators
+# in assert_has / assert_lacks are the real fix; this is the backstop so the
+# next such slip costs one red assertion instead of the whole run.
+exec </dev/null
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 SCRIPT="${REPO}/scripts/check-anomalies.sh"
@@ -95,33 +115,52 @@ if ! date -u -d '@0' +%s >/dev/null 2>&1; then
 fi
 export PATH="${BIN}:${PATH}"
 
-# --- fixture values, taken from the 2026-08-06 live push -------------------
+# --- fixture values --------------------------------------------------------
 SELF_STAKE=21640                      # METAL
 TOTAL_NMETAL=11183797900000           # = 11183.7979 METAL
 NODE_ID="NodeID-sandboxdelegationtest"
 EXPECT_RECEIVED="11183.7979"
 EXPECT_CAP="86560"                    # 21640 * 4
-EXPECT_REMAIN="75376.2021"            # 86560 - 11183.7979
+EXPECT_REMAIN="75376.2021"            # 86560 - 11183.7979 (daily-status.sh still shows it)
 EXPECT_WEIGHT="32823.7979"            # 21640 + 11183.7979
 
-cat >"$RPC_JSON" <<JSON
+# Baseline cumulative for the default cases: 589 METAL below the observed
+# total, so the default delta is the operator's own 589 figure.
+DEFAULT_BASELINE_TOTAL=10594797900000 # = 10594.7979 METAL
+
+# write_rpc <delegator_count> <aggregate_weight_nmetal>
+#   Only .delegatorCount and .delegatorWeight feed the notification body;
+#   the per-delegator array exists so the lifecycle-event diff has something
+#   to chew on (its output is asserted in other tests, not here).
+write_rpc() {
+	local count="$1" weight="$2" i list=""
+	for ((i = 1; i <= count; i++)); do
+		[ -n "$list" ] && list="${list},"
+		list="${list}{\"txID\":\"tx-$(printf '%03d' "$i")\",\"weight\":\"1\",\"endTime\":\"4102444800\"}"
+	done
+	cat >"$RPC_JSON" <<JSON
 {"jsonrpc":"2.0","id":1,"result":{"validators":[{
   "nodeID":"${NODE_ID}",
   "endTime":"4102444800",
-  "delegatorCount":"3",
-  "delegatorWeight":"${TOTAL_NMETAL}",
-  "delegators":[
-    {"txID":"tx-aaa","weight":"3727932633333","endTime":"4102444800"},
-    {"txID":"tx-bbb","weight":"3727932633333","endTime":"4102444800"},
-    {"txID":"tx-ccc","weight":"3727932633334","endTime":"4102444800"}
-  ]
+  "delegatorCount":"${count}",
+  "delegatorWeight":"${weight}",
+  "delegators":[${list}]
 }]}}
 JSON
+}
+write_rpc 3 "$TOTAL_NMETAL"
+
+# BASELINE_TOTAL_NMETAL is consume-once: set it immediately before a
+# build_sandbox call to state that case's baseline cumulative, and
+# build_sandbox clears it again so the next case cannot silently inherit it.
+BASELINE_TOTAL_NMETAL=""
 
 # build_sandbox <name> <baseline delegator_count> [script-override]
 #   Returns the sandbox path in $S and the recording log path in $LOG.
 build_sandbox() {
 	local name="$1" baseline_count="$2" script_src="${3:-$SCRIPT}"
+	local baseline_total="${BASELINE_TOTAL_NMETAL:-$DEFAULT_BASELINE_TOTAL}"
+	BASELINE_TOTAL_NMETAL=""
 	S="${TMP}/${name}"
 	LOG="${TMP}/${name}.notify.log"
 	rm -rf "$S"; : >"$LOG"
@@ -158,7 +197,7 @@ JSON
   "metalgo": "running", "caddy": "running", "disk": "ok", "memory": "ok",
   "peers": "ok", "web": "warn", "api_freshness": "warn",
   "validator_present": "yes", "last_known_end_time": null,
-  "delegator_count": ${baseline_count}, "delegator_total_nmetal": 1,
+  "delegator_count": ${baseline_count}, "delegator_total_nmetal": ${baseline_total},
   "delegator_snapshot": [],
   "period_alert_sent": { "7": false, "1": false, "0": false, "10min": false }
 }
@@ -177,6 +216,40 @@ run_sandbox() {
 
 body_of() { sed -n 's/^BODY<<//p' "$LOG" | head -1; }
 whole_of() { cat "$LOG"; }
+# The bodies are multi-line, so the recorded BODY<<…>> spans to EOF.
+actual_body() { sed -n '/^BODY<</,$p' "$LOG" | sed '1s/^BODY<<//' | sed '$s/>>$//'; }
+
+# assert_body <case name> <expected body>
+assert_body() {
+	local name="$1" expected="$2" actual
+	actual="$(actual_body)"
+	if [ "$actual" = "$expected" ]; then
+		ok "$name"
+	else
+		bad "$name" "expected [$expected] actual [$actual]"
+	fi
+}
+# assert_has / assert_lacks <case name> <fixed needle>
+# `--` is load-bearing: needles here legitimately start with '-' (a leaked
+# negative amount is one of the things being ruled out), and without the
+# terminator grep reads "-589" as its obsolete -NUM context option, then finds
+# no file operand and silently searches STDIN instead — passing vacuously AND
+# draining the outer runner's suite list. See the exec </dev/null note above.
+assert_has() {
+	grep -qF -- "$2" "$LOG" && ok "$1" || bad "$1" "missing [$2] in [$(tr '\n' '|' <"$LOG")]"
+}
+assert_lacks() {
+	grep -qF -- "$2" "$LOG" && bad "$1" "found [$2] in [$(tr '\n' '|' <"$LOG")]" || ok "$1"
+}
+# Body-scoped variant. The titles legitimately carry 受入 / 離脱 wording that
+# tracks the COUNT, so a whole-log grep cannot ask "is this word in the body".
+assert_body_lacks() {
+	local actual; actual="$(actual_body)"
+	case "$actual" in
+		*"$2"*) bad "$1" "found [$2] in body [$(printf '%s' "$actual" | tr '\n' '|')]" ;;
+		*)      ok "$1" ;;
+	esac
+}
 
 if [ "$GNU_DATE" -eq 0 ]; then
 	skip "delegation notify body cases" "host date lacks -d and gdate is absent"
@@ -196,16 +269,16 @@ grep -qF "TITLE<<Delegation +1 件受入 (合計 3 件)>>" "$LOG" \
 	&& ok "increase: title unchanged" \
 	|| bad "increase: title unchanged" "$(head -1 "$LOG")"
 
-EXPECT_INC="$(printf '+1 件、合計 3 件\n受入: %s / %s METAL (残枠 %s)\n自己 stake: %s METAL\n総 weight: %s METAL (self + delegators)' \
-	"$EXPECT_RECEIVED" "$EXPECT_CAP" "$EXPECT_REMAIN" "$SELF_STAKE" "$EXPECT_WEIGHT")"
-ACTUAL_INC="$(sed -n '/^BODY<</,$p' "$LOG" | sed '1s/^BODY<<//' | sed '$s/>>$//')"
+EXPECT_INC="$(printf '+1 件、合計 3 件\n新規 589\n%s / %s\n自己 stake: %s METAL\n総 weight: %s METAL (self + delegators)' \
+	"$EXPECT_RECEIVED" "$EXPECT_CAP" "$SELF_STAKE" "$EXPECT_WEIGHT")"
+ACTUAL_INC="$(actual_body)"
 if [ "$ACTUAL_INC" = "$EXPECT_INC" ]; then
 	ok "increase: body is byte-exact"
 else
 	bad "increase: body is byte-exact" "expected [$EXPECT_INC] actual [$ACTUAL_INC]"
 fi
 
-printf '%s' "$INC_LOG" | grep -qF "受入: ${EXPECT_RECEIVED} / ${EXPECT_CAP} METAL" \
+printf '%s' "$INC_LOG" | grep -qF "${EXPECT_RECEIVED} / ${EXPECT_CAP}" \
 	&& ok "increase: the slash has received over ceiling (same quantity family)" \
 	|| bad "increase: the slash has received over ceiling"
 printf '%s' "$INC_LOG" | grep -qF "自己 stake: ${SELF_STAKE} METAL / " \
@@ -217,10 +290,14 @@ printf '%s' "$INC_LOG" | grep -qF "受入額:" \
 printf '%s' "$INC_LOG" | grep -qF "自己 stake: ${SELF_STAKE} METAL" \
 	&& ok "increase: self stake survives as a standalone quantity" \
 	|| bad "increase: self stake survives as a standalone quantity"
+# The head-room is still correct arithmetic (daily-status.sh prints it); the
+# push just no longer spends a line on a number the reader can subtract.
+assert_lacks "increase: the head-room figure is absent from the push" "$EXPECT_REMAIN"
 
 # ===========================================================================
 echo
 echo "== decrease branch (4 → 3 delegators) =="
+BASELINE_TOTAL_NMETAL=11772797900000    # 11772.7979 → 589 METAL leaves
 build_sandbox dec 4
 run_sandbox
 DEC_LOG="$(whole_of)"
@@ -229,15 +306,15 @@ grep -qF "TITLE<<Delegation -1 件離脱 (合計 3 件)>>" "$LOG" \
 	&& ok "decrease: title unchanged" \
 	|| bad "decrease: title unchanged" "$(head -1 "$LOG")"
 
-EXPECT_DEC="$(printf -- '-1 件、合計 3 件\n受入: %s / %s METAL (残枠 %s)\n自己 stake: %s METAL\n総 weight: %s METAL (self + delegators)\n期間満了か途中解除、explorer で確認:\nhttps://explorer.metalblockchain.org/validators/%s' \
-	"$EXPECT_RECEIVED" "$EXPECT_CAP" "$EXPECT_REMAIN" "$SELF_STAKE" "$EXPECT_WEIGHT" "$NODE_ID")"
-ACTUAL_DEC="$(sed -n '/^BODY<</,$p' "$LOG" | sed '1s/^BODY<<//' | sed '$s/>>$//')"
+EXPECT_DEC="$(printf -- '-1 件、合計 3 件\n離脱 589\n%s / %s\n自己 stake: %s METAL\n総 weight: %s METAL (self + delegators)\n期間満了か途中解除、explorer で確認:\nhttps://explorer.metalblockchain.org/validators/%s' \
+	"$EXPECT_RECEIVED" "$EXPECT_CAP" "$SELF_STAKE" "$EXPECT_WEIGHT" "$NODE_ID")"
+ACTUAL_DEC="$(actual_body)"
 if [ "$ACTUAL_DEC" = "$EXPECT_DEC" ]; then
 	ok "decrease: body is byte-exact"
 else
 	bad "decrease: body is byte-exact" "expected [$EXPECT_DEC] actual [$ACTUAL_DEC]"
 fi
-printf '%s' "$DEC_LOG" | grep -qF "受入: ${EXPECT_RECEIVED} / ${EXPECT_CAP} METAL" \
+printf '%s' "$DEC_LOG" | grep -qF "${EXPECT_RECEIVED} / ${EXPECT_CAP}" \
 	&& ok "decrease: carries the same 受入 line as the increase branch" \
 	|| bad "decrease: carries the same 受入 line as the increase branch"
 printf '%s' "$DEC_LOG" | grep -qF "受入額:" \
@@ -254,16 +331,21 @@ printf '%s' "$DEC_LOG" | grep -qF "受入額:" \
 
 # ===========================================================================
 echo
-echo "== format parity with the canonical renderer (daily-status.sh) =="
-# daily-status.sh owns the canonical shape of this fact. Assert the literal
-# both files must share, so a change to one without the other is caught.
+echo "== deliberate divergence from the canonical renderer (daily-status.sh) =="
+# daily-status.sh owns the at-rest shape of this fact and keeps the full form
+# including the head-room. The push shortens it (2026-08-10 operator mock).
+# Assert BOTH literals so a future edit that "unifies" them trips here and has
+# to re-read this comment first.
 CANON='受入: ${RECEIVED_F} / ${CAP_METAL} METAL (残枠 ${REMAIN_METAL})'
 grep -qF "$CANON" "${REPO}/scripts/daily-status.sh" \
-	&& ok "daily-status.sh still renders the canonical 受入 shape" \
-	|| bad "daily-status.sh still renders the canonical 受入 shape" "canon moved — re-derive check-anomalies.sh from it"
-grep -qF '受入: ${OBS_DELEGATOR_TOTAL_METAL} / ${CAPACITY_METAL} METAL (残枠 ${REMAIN_METAL})' "$SCRIPT" \
-	&& ok "check-anomalies.sh renders the same shape" \
-	|| bad "check-anomalies.sh renders the same shape"
+	&& ok "daily-status.sh still renders the full 受入 shape with 残枠" \
+	|| bad "daily-status.sh still renders the full 受入 shape with 残枠" "canon moved — re-derive the divergence note in check-anomalies.sh"
+grep -qF 'DELEG_LINE="${OBS_DELEGATOR_TOTAL_METAL} / ${CAPACITY_METAL}"' "$SCRIPT" \
+	&& ok "check-anomalies.sh renders the shortened push shape (bare ratio)" \
+	|| bad "check-anomalies.sh renders the shortened push shape (bare ratio)"
+grep -qF '(残枠 ${REMAIN_METAL})' "$SCRIPT" \
+	&& bad "check-anomalies.sh no longer prints 残枠 in the push" "残枠 is back in the push body" \
+	|| ok "check-anomalies.sh no longer prints 残枠 in the push"
 
 # ===========================================================================
 echo
@@ -311,9 +393,9 @@ else
 	printf '%s' "$MUT_LOG" | grep -qF "自己 stake: ${SELF_STAKE} METAL / 受入枠" \
 		&& ok "mutation: the old cross-quantity slash reappears in the mutated build" \
 		|| bad "mutation: the old cross-quantity slash reappears" "$(printf '%s' "$MUT_LOG" | tr '\n' '|' | head -c 300)"
-	printf '%s' "$MUT_LOG" | grep -qF "受入: ${EXPECT_RECEIVED} / ${EXPECT_CAP} METAL" \
-		&& bad "mutation: the corrected 受入 line is absent from the mutated build" "still present" \
-		|| ok "mutation: the corrected 受入 line is absent from the mutated build"
+	printf '%s' "$MUT_LOG" | grep -qF "新規 589" \
+		&& bad "mutation: the 新規 line is absent from the old-format build" "still present" \
+		|| ok "mutation: the 新規 line is absent from the old-format build"
 fi
 
 # Second mutation: drop the `--` terminator and the decrease body must go
@@ -325,10 +407,221 @@ if cmp -s "$MUT2" "$SCRIPT"; then
 else
 	build_sandbox mut2 4 "$MUT2"
 	run_sandbox
-	MUT2_BODY="$(sed -n '/^BODY<</,$p' "$LOG" | sed '1s/^BODY<<//' | sed '$s/>>$//')"
+	MUT2_BODY="$(actual_body)"
 	[ -z "$MUT2_BODY" ] \
 		&& ok "mutation: removing printf -- empties the decrease body (guard is real)" \
 		|| bad "mutation: removing printf -- empties the decrease body" "body was [$MUT2_BODY]"
+fi
+
+# ===========================================================================
+# 2026-08-10: "how much moved this time"
+# ===========================================================================
+# From here the fixture switches to the operator's live shape: 8 delegators,
+# self 21640 (→ ceiling 86560). Every case states its own baseline cumulative.
+LIVE_RECEIVED_NMETAL=33768797900000     # 33768.7979 METAL
+LIVE_RECEIVED="33768.7979"
+LIVE_WEIGHT="55408.7979"                # 21640 + 33768.7979
+
+echo
+echo "== live numbers from the 2026-08-10 report (33179.7979 → 33768.7979) =="
+write_rpc 8 "$LIVE_RECEIVED_NMETAL"
+BASELINE_TOTAL_NMETAL=33179797900000
+build_sandbox live 7
+run_sandbox
+
+assert_has "live: title unchanged" "TITLE<<Delegation +1 件受入 (合計 8 件)>>"
+# This is the operator's mock, line for line.
+EXPECT_LIVE="$(printf '+1 件、合計 8 件\n新規 589\n%s / %s\n自己 stake: %s METAL\n総 weight: %s METAL (self + delegators)' \
+	"$LIVE_RECEIVED" "$EXPECT_CAP" "$SELF_STAKE" "$LIVE_WEIGHT")"
+assert_body "live: body matches the operator mock byte for byte" "$EXPECT_LIVE"
+# Rounding rule 1: an exact-integer delta loses its %.4f tail.
+assert_has   "live: integer delta drops trailing zeros (589, not 589.0000)" "新規 589"
+assert_lacks "live: no 589.0000"                                            "589.0000"
+# Requirement: the normal case must NOT carry the head-room.
+assert_lacks "live: normal case omits 残枠"                                  "残枠"
+assert_lacks "live: normal case omits the 満枠 marker"                       "満枠"
+assert_lacks "live: the ratio line dropped its 受入 label"                   "受入:"
+
+echo
+echo "== the baseline advances: a second tick reports its own delta, not the sum =="
+# The delta is only meaningful if the committed baseline moves with each
+# delivered push. Same sandbox, second tick, log cleared in between.
+if [ "$(jq -r '.delegator_total_nmetal' "${S}/state/anomaly-state.json")" = "$LIVE_RECEIVED_NMETAL" ]; then
+	ok "tick 1 committed the new cumulative to state"
+else
+	bad "tick 1 committed the new cumulative to state" "state has $(jq -c '{delegator_count, delegator_total_nmetal}' "${S}/state/anomaly-state.json")"
+fi
+: >"$LOG"
+write_rpc 9 34357797900000            # +589 again, on top of 33768.7979
+run_sandbox
+EXPECT_TICK2="$(printf '+1 件、合計 9 件\n新規 589\n34357.7979 / %s\n自己 stake: %s METAL\n総 weight: 55997.7979 METAL (self + delegators)' \
+	"$EXPECT_CAP" "$SELF_STAKE")"
+assert_body  "tick 2: 新規 is this tick's 589, not the 1178 since bootstrap" "$EXPECT_TICK2"
+assert_lacks "tick 2: the delta did not accumulate" "新規 1178"
+
+echo
+echo "== 満枠: the ceiling reached (86560 / 86560) =="
+write_rpc 8 86560000000000
+BASELINE_TOTAL_NMETAL=85971000000000    # 85971 → +589
+build_sandbox full 7
+run_sandbox
+EXPECT_FULL="$(printf '+1 件、合計 8 件\n新規 589\n%s / %s 🔒 満枠\n自己 stake: %s METAL\n総 weight: %s METAL (self + delegators)' \
+	"$EXPECT_CAP" "$EXPECT_CAP" "$SELF_STAKE" "108200")"
+assert_body  "満枠: body is byte-exact (marker present, head-room still absent)" "$EXPECT_FULL"
+assert_has   "満枠: the 🔒 marker is shown"       "86560 / 86560 🔒 満枠"
+assert_lacks "満枠: still no 残枠"                "残枠"
+
+# --- boundary 1: several delegations inside one tick -----------------------
+echo
+echo "== boundary 1: +2 件 in one tick — 新規 is the SUM, not one delegation =="
+write_rpc 8 "$LIVE_RECEIVED_NMETAL"
+BASELINE_TOTAL_NMETAL=32000000000000    # 32000 → +1768.7979 across TWO arrivals
+build_sandbox multi 6
+run_sandbox
+assert_has "multi: title says +2 件" "TITLE<<Delegation +2 件受入 (合計 8 件)>>"
+EXPECT_MULTI="$(printf '+2 件、合計 8 件\n新規 1768.7979\n%s / %s\n自己 stake: %s METAL\n総 weight: %s METAL (self + delegators)' \
+	"$LIVE_RECEIVED" "$EXPECT_CAP" "$SELF_STAKE" "$LIVE_WEIGHT")"
+assert_body "multi: 新規 is the aggregate movement of the tick" "$EXPECT_MULTI"
+
+# --- boundary 2: count and amount disagree ---------------------------------
+echo
+echo "== boundary 2a: count UP but amount DOWN (big one expired, small one arrived) =="
+# DECISION (2026-08-10): the label follows the SIGN OF THE AMOUNT, not the
+# direction of the count, so this renders 離脱 589 under a "+1 件" title. The
+# alternative considered was suppressing the line entirely when the delta is
+# ≤ 0; rejected because this is precisely the tick where the operator most
+# needs the number, and hiding it recreates the reported defect. The brief
+# forbids "新規 -589" — satisfied structurally: the magnitude is |v| by
+# construction, so no minus sign can reach the body on any path.
+write_rpc 8 "$LIVE_RECEIVED_NMETAL"
+BASELINE_TOTAL_NMETAL=34357797900000    # 34357.7979 → net −589 despite +1 件
+build_sandbox mixed 7
+run_sandbox
+EXPECT_MIXED="$(printf '+1 件、合計 8 件\n離脱 589\n%s / %s\n自己 stake: %s METAL\n総 weight: %s METAL (self + delegators)' \
+	"$LIVE_RECEIVED" "$EXPECT_CAP" "$SELF_STAKE" "$LIVE_WEIGHT")"
+assert_body  "mixed: count up + amount down renders 離脱 with the net figure" "$EXPECT_MIXED"
+assert_lacks      "mixed: never renders a signed 新規"        "新規 -"
+assert_lacks      "mixed: no minus sign anywhere in the amount" "-589"
+assert_body_lacks "mixed: does not claim 新規 on a net loss"    "新規"
+
+echo
+echo "== boundary 2b: count DOWN but amount UP (mirror case) =="
+write_rpc 8 "$LIVE_RECEIVED_NMETAL"
+BASELINE_TOTAL_NMETAL=33179797900000    # net +589 despite −1 件
+build_sandbox mirror 9
+run_sandbox
+EXPECT_MIRROR="$(printf -- '-1 件、合計 8 件\n新規 589\n%s / %s\n自己 stake: %s METAL\n総 weight: %s METAL (self + delegators)\n期間満了か途中解除、explorer で確認:\nhttps://explorer.metalblockchain.org/validators/%s' \
+	"$LIVE_RECEIVED" "$EXPECT_CAP" "$SELF_STAKE" "$LIVE_WEIGHT" "$NODE_ID")"
+assert_body  "mirror: count down + amount up renders 新規 on the decrease branch" "$EXPECT_MIRROR"
+assert_body_lacks "mirror: does not claim 離脱 on a net gain" "離脱"
+assert_lacks      "mirror: never renders a signed 離脱"       "離脱 -"
+
+# --- boundary 3: no usable baseline ----------------------------------------
+echo
+echo "== boundary 3: bootstrap / unknown baseline =="
+write_rpc 8 "$LIVE_RECEIVED_NMETAL"
+BASELINE_TOTAL_NMETAL=null              # field present but never populated
+build_sandbox nobase 7
+run_sandbox
+EXPECT_NOBASE="$(printf '+1 件、合計 8 件\n%s / %s\n自己 stake: %s METAL\n総 weight: %s METAL (self + delegators)' \
+	"$LIVE_RECEIVED" "$EXPECT_CAP" "$SELF_STAKE" "$LIVE_WEIGHT")"
+assert_body  "nobase: null baseline drops the line entirely (no blank line, no fake delta)" "$EXPECT_NOBASE"
+assert_lacks "nobase: does not present the cumulative as if it were new" "新規"
+assert_lacks "nobase: and does not invent a departure"                   "離脱"
+
+# A genuine first-ever delegation (baseline 0) is NOT the unknown case: the
+# delta really does equal the cumulative, and both numbers are printed one
+# above the other, so they agree instead of misleading.
+write_rpc 8 "$LIVE_RECEIVED_NMETAL"
+BASELINE_TOTAL_NMETAL=0
+build_sandbox firstever 7
+run_sandbox
+EXPECT_FIRST="$(printf '+1 件、合計 8 件\n新規 %s\n%s / %s\n自己 stake: %s METAL\n総 weight: %s METAL (self + delegators)' \
+	"$LIVE_RECEIVED" "$LIVE_RECEIVED" "$EXPECT_CAP" "$SELF_STAKE" "$LIVE_WEIGHT")"
+assert_body "firstever: a real 0 baseline reports the full amount as new" "$EXPECT_FIRST"
+
+# The true bootstrap (delegator_count itself null) must stay silent — the
+# paired transition seeds both fields without notifying.
+write_rpc 8 "$LIVE_RECEIVED_NMETAL"
+BASELINE_TOTAL_NMETAL=null
+build_sandbox bootstrap null
+run_sandbox
+[ -z "$(whole_of)" ] \
+	&& ok "bootstrap: null delegator_count still emits no notification at all" \
+	|| bad "bootstrap: null delegator_count still emits no notification at all" "$(tr '\n' '|' <"$LOG")"
+
+# --- boundary 4: rounding ---------------------------------------------------
+echo
+echo "== boundary 4: rounding follows the existing %.4f + strip-trailing-zeros rule =="
+write_rpc 8 "$LIVE_RECEIVED_NMETAL"
+BASELINE_TOTAL_NMETAL=33768000000000    # → +0.7979 exactly
+build_sandbox frac 7
+run_sandbox
+EXPECT_FRAC="$(printf '+1 件、合計 8 件\n新規 0.7979\n%s / %s\n自己 stake: %s METAL\n総 weight: %s METAL (self + delegators)' \
+	"$LIVE_RECEIVED" "$EXPECT_CAP" "$SELF_STAKE" "$LIVE_WEIGHT")"
+assert_body  "frac: sub-1 delta keeps 4 decimals and no padding" "$EXPECT_FRAC"
+assert_lacks "frac: no 0.79790000"                               "0.79790000"
+
+write_rpc 8 "$LIVE_RECEIVED_NMETAL"
+BASELINE_TOTAL_NMETAL=33768797899999    # 1 nMETAL below → rounds to 0.0000
+build_sandbox dust 7
+run_sandbox
+assert_body  "dust: a delta under the display precision drops the line" "$EXPECT_NOBASE"
+assert_lacks "dust: never prints 新規 0"  "新規 0"
+assert_lacks "dust: never prints 離脱 0"  "離脱 0"
+
+# ===========================================================================
+echo
+echo "== mutations for the 2026-08-10 delta line =="
+
+# M3: silence the delta line. The live case must lose 新規 589 while keeping
+# everything else, proving the delta assertions are not passing by accident.
+MUT3="${TMP}/check-anomalies.nodelta.sh"
+sed 's@^        DELTA_BLOCK="${DELTA_DIR} ${DELTA_MAG}".*@        DELTA_BLOCK=""@' "$SCRIPT" >"$MUT3"
+if cmp -s "$MUT3" "$SCRIPT"; then
+	bad "mutation applied: delta line silenced" "sed matched nothing"
+else
+	write_rpc 8 "$LIVE_RECEIVED_NMETAL"
+	BASELINE_TOTAL_NMETAL=33179797900000
+	build_sandbox mut3 7 "$MUT3"
+	run_sandbox
+	assert_lacks "mutation: silencing DELTA_BLOCK removes 新規 589 (delta assertions are real)" "新規 589"
+	assert_has   "mutation: the rest of the body survives the silencing"  "${LIVE_RECEIVED} / ${EXPECT_CAP}"
+fi
+
+# M4: put the head-room back. The live body must stop matching, proving the
+# "no 残枠 in the push" requirement is actually enforced.
+MUT4="${TMP}/check-anomalies.remain.sh"
+sed 's@^      DELEG_LINE="${OBS_DELEGATOR_TOTAL_METAL} / ${CAPACITY_METAL}"$@      DELEG_LINE="${OBS_DELEGATOR_TOTAL_METAL} / ${CAPACITY_METAL} METAL (残枠 ${REMAIN_METAL})"@' "$SCRIPT" >"$MUT4"
+if cmp -s "$MUT4" "$SCRIPT"; then
+	bad "mutation applied: 残枠 restored" "sed matched nothing"
+else
+	write_rpc 8 "$LIVE_RECEIVED_NMETAL"
+	BASELINE_TOTAL_NMETAL=33179797900000
+	build_sandbox mut4 7 "$MUT4"
+	run_sandbox
+	assert_has "mutation: restoring the head-room makes 残枠 reappear" "残枠 52791.2021"
+	[ "$(actual_body)" != "$EXPECT_LIVE" ] \
+		&& ok "mutation: the operator-mock body no longer matches once 残枠 is back" \
+		|| bad "mutation: the operator-mock body no longer matches once 残枠 is back" "still byte-equal"
+fi
+
+# M5: drop the absolute value. The count-up/amount-down case must then leak a
+# minus sign, proving the |v| in the magnitude awk is load-bearing.
+MUT5="${TMP}/check-anomalies.signed.sh"
+sed 's@BEGIN{v=(a-b)/1e9; if(v<0)v=-v; printf@BEGIN{v=(a-b)/1e9; printf@' "$SCRIPT" >"$MUT5"
+if cmp -s "$MUT5" "$SCRIPT"; then
+	bad "mutation applied: abs removed" "sed matched nothing"
+else
+	write_rpc 8 "$LIVE_RECEIVED_NMETAL"
+	BASELINE_TOTAL_NMETAL=34357797900000
+	build_sandbox mut5 7 "$MUT5"
+	run_sandbox
+	assert_has "mutation: removing |v| leaks a negative amount (the abs is load-bearing)" "離脱 -589"
+	# Same needle the "mixed" case rules out, asserted positively here. If the
+	# grep helper ever loses its `--` again this flips red instead of every
+	# leading-dash assertion in the file quietly passing on empty stdin.
+	assert_has "mutation: the bare -589 needle really matches (grep -- guard is live)" "-589"
 fi
 
 echo
