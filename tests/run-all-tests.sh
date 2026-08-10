@@ -18,6 +18,15 @@
 # preflight_check_interpreter_integrity / preflight_check_validator_presence
 # below for the exact checks the guard performs.
 #
+# After the suites run, a roster reconciliation (added 2026-08-10) proves the
+# run executed what it found: every discovered and registered suite must end
+# up either executed, announced as a host SKIP, or warned about as missing,
+# and the arithmetic is printed on the ROSTER line. A shortfall exits 3 and
+# never prints RESULT: ALL PASS. This exists because the runner used to feed
+# its own discovery list through stdin while starting suites with that same
+# stdin attached: one suite reading stdin swallowed the rest of the list, the
+# loop ended, and the run reported ALL PASS having executed 12 of 88 suites.
+#
 # Usage:
 #   bash tests/run-all-tests.sh [--pattern=<glob>] [--preflight-only]
 #
@@ -30,6 +39,12 @@
 #                       guard is testable in isolation against a synthetic
 #                       PATH without needing the real machine to be broken
 #                       — see tests/run-all-tests-preflight/.
+#
+# Exit codes:
+#   0  every suite passed AND the roster reconciles
+#   1  at least one suite failed
+#   2  preflight or suite discovery refused to proceed (no verdict given)
+#   3  roster mismatch — the run did not execute what it discovered
 
 set -u
 
@@ -54,7 +69,7 @@ for arg in "$@"; do
 		--pattern=*)      PATTERN="${arg#*=}" ;;
 		--verbose)        VERBOSE=1 ;;
 		--preflight-only) PREFLIGHT_ONLY=1 ;;
-		-h|--help)        sed -n '2,32p' "$0" | sed 's/^# \?//'; exit 0 ;;
+		-h|--help)        sed -n '2,47p' "$0" | sed 's/^# \?//'; exit 0 ;;
 		*)                echo "ERROR: unknown arg: $arg" >&2; exit 1 ;;
 	esac
 done
@@ -170,6 +185,19 @@ SUITES_PASS=0
 SUITES_FAIL=0
 FAILED_SUITES=()
 
+# ---- roster accounting (2026-08-10) ------------------------------------
+# Every suite this run knows about must end up in exactly one bucket:
+# executed (SUITES_TOTAL), deliberately skipped on this host and announced
+# as such (SUITES_SKIPPED), or registered but absent from disk and warned
+# about (SUITES_MISSING). The sum is reconciled against the roster at the
+# bottom; a shortfall means suites vanished between discovery and execution
+# and the run refuses to report PASS. Counting the roster independently of
+# the loop that executes it is the whole point — a count derived from the
+# executing loop would shrink along with it and could never disagree.
+SUITES_SKIPPED=0
+SUITES_MISSING=0
+DISCOVERED_COUNT=0
+
 # Extra suites that carry their own runner and do NOT match the test-*.sh glob
 # (so the find below never discovers them). Listed explicitly so the default
 # full run always covers them — do NOT let a new non-matching suite go
@@ -196,8 +224,20 @@ EXTRA_SUITES=(
 	"${TESTS_ROOT}/cycle-gate/run-tests.sh"
 	"${REPO_ROOT}/scripts/operator-local/test-commit-anchor-source.sh"
 )
+
+# Linux-only extra suites. These stay in a named array of their own instead
+# of being conditionally appended and otherwise forgotten, so the roster
+# reconciliation below can account for them on every host: on Linux they
+# move into EXTRA_SUITES and run; elsewhere each one is announced as an
+# explicit SKIP line and counted in SUITES_SKIPPED. Either way the suite is
+# named in the run's output and shows up in the arithmetic — it never just
+# ceases to exist depending on `uname`.
+EXTRA_SUITES_LINUX_ONLY=(
+	"${TESTS_ROOT}/anomalies/integration-linux.sh"
+)
 if [ "$(uname)" = "Linux" ]; then
-	EXTRA_SUITES+=("${TESTS_ROOT}/anomalies/integration-linux.sh")
+	EXTRA_SUITES+=("${EXTRA_SUITES_LINUX_ONLY[@]}")
+	EXTRA_SUITES_LINUX_ONLY=()
 fi
 
 # Extra suites whose own interpreter is not bash (e.g. a python3 unittest
@@ -214,16 +254,28 @@ run_suite() {
 	# $1 = absolute path to an executable suite runner.
 	# $2 = interpreter to invoke it with (default: bash). Used for suites
 	#      that are not themselves bash scripts.
+	#
+	# EVERY suite is started with its stdin closed (see the redirect on both
+	# invocations below). A suite must never inherit the orchestrator's own
+	# stdin: the discovery loop further down feeds itself from stdin, so a
+	# suite that reads stdin — deliberately, or by accident — drains the
+	# remaining suite paths, the loop ends at once, and the run still prints
+	# RESULT: ALL PASS having executed a fraction of what it discovered.
+	# That is not hypothetical: a suite whose `grep -qF "-589" "$LOG"` needle
+	# was parsed as a grep option lost its file operand, fell back to stdin,
+	# and silently took the run from 88 suites to 12 — green. This redirect
+	# closes that route; the roster reconciliation at the bottom of this file
+	# is the general net that catches any other one.
 	local test_file="$1" interpreter="${2:-bash}" rel_path rc out
 	SUITES_TOTAL=$((SUITES_TOTAL + 1))
 	rel_path="${test_file#${REPO_ROOT}/}"
 	printf '=== %-55s === ' "$rel_path"
 	if [ "$VERBOSE" = "1" ]; then
 		echo
-		"$interpreter" "$test_file"
+		"$interpreter" "$test_file" </dev/null
 		rc=$?
 	else
-		out="$("$interpreter" "$test_file" 2>&1)"
+		out="$("$interpreter" "$test_file" </dev/null 2>&1)"
 		rc=$?
 	fi
 	if [ "$rc" -eq 0 ]; then
@@ -251,21 +303,53 @@ run_suite() {
 echo "== running test suites under ${TESTS_ROOT} =="
 echo
 
+# ---- suite discovery ---------------------------------------------------
+# Discovery is materialised to a file FIRST, counted by a loop that executes
+# nothing, and only then iterated. Deriving the expected count from the same
+# loop that runs the suites would make the expectation shrink in lockstep
+# with any truncation, so the mismatch check could never fire.
+DISCOVERY_LIST="$(mktemp -t fyd-run-all-tests-discovery.XXXXXX)" || {
+	echo "FATAL: could not create the suite-discovery list file." >&2
+	exit 2
+}
+trap 'rm -f "$DISCOVERY_LIST"' EXIT
+
+find "$TESTS_ROOT" -name "$PATTERN" -type f -perm -u+x -print0 | sort -z > "$DISCOVERY_LIST"
+DISCOVERY_RC=("${PIPESTATUS[@]}")
+if [ "${DISCOVERY_RC[0]}" -ne 0 ] || [ "${DISCOVERY_RC[1]}" -ne 0 ]; then
+	echo "FATAL: suite discovery failed (find rc=${DISCOVERY_RC[0]}, sort rc=${DISCOVERY_RC[1]}) — a partially-written list would make a short run look complete. Refusing to report a verdict." >&2
+	exit 2
+fi
+
+# Count in a loop whose body runs nothing, so nothing can consume the list.
+while IFS= read -r -d '' _discovered_path; do
+	DISCOVERED_COUNT=$((DISCOVERED_COUNT + 1))
+done < "$DISCOVERY_LIST"
+
+if [ "$PATTERN" = "test-*.sh" ] && [ "$DISCOVERED_COUNT" -eq 0 ]; then
+	echo "FATAL: the default pattern discovered zero suites under ${TESTS_ROOT}. That is a broken discovery step, not an empty repo — refusing to report a verdict." >&2
+	exit 2
+fi
+
 # Iterate glob-discovered suites depth-first, deterministic order.
 while IFS= read -r -d '' test_file; do
 	run_suite "$test_file"
-done < <(find "$TESTS_ROOT" -name "$PATTERN" -type f -perm -u+x -print0 | sort -z)
+done < "$DISCOVERY_LIST"
 
 # Append the explicitly-listed extra suites (default pattern only).
 if [ "$PATTERN" = "test-*.sh" ]; then
-	if [ "$(uname)" != "Linux" ]; then
-		echo "SKIP: tests/anomalies/integration-linux.sh — requires Linux (flock + GNU date); not counted in this host's run" >&2
+	if [ "${#EXTRA_SUITES_LINUX_ONLY[@]}" -gt 0 ]; then
+		for skipped in "${EXTRA_SUITES_LINUX_ONLY[@]}"; do
+			echo "SKIP: ${skipped#${REPO_ROOT}/} — requires Linux (flock + GNU date); not counted in this host's run" >&2
+			SUITES_SKIPPED=$((SUITES_SKIPPED + 1))
+		done
 	fi
 	for extra in "${EXTRA_SUITES[@]}"; do
 		if [ -f "$extra" ]; then
 			run_suite "$extra"
 		else
 			echo "WARN: extra suite not found, skipping: ${extra#${REPO_ROOT}/}" >&2
+			SUITES_MISSING=$((SUITES_MISSING + 1))
 		fi
 	done
 	for entry in "${EXTRA_SUITES_OTHER[@]}"; do
@@ -275,18 +359,64 @@ if [ "$PATTERN" = "test-*.sh" ]; then
 			run_suite "$path" "$interp"
 		else
 			echo "WARN: extra suite not found, skipping: ${path#${REPO_ROOT}/}" >&2
+			SUITES_MISSING=$((SUITES_MISSING + 1))
 		fi
 	done
 fi
 
+# ---- roster reconciliation ---------------------------------------------
+# The roster is everything this run knew about before it started: the
+# glob-discovered suites plus every registered extra, including the
+# Linux-only ones it is not going to run here. Under a caller-supplied
+# --pattern no extras are appended, so the roster is the glob alone.
+ROSTER_TOTAL="$DISCOVERED_COUNT"
+if [ "$PATTERN" = "test-*.sh" ]; then
+	ROSTER_TOTAL=$((ROSTER_TOTAL + ${#EXTRA_SUITES[@]} + ${#EXTRA_SUITES_OTHER[@]} + ${#EXTRA_SUITES_LINUX_ONLY[@]}))
+fi
+ROSTER_ACCOUNTED=$((SUITES_TOTAL + SUITES_SKIPPED + SUITES_MISSING))
+
 echo
 echo "=========================================="
 echo "OVERALL: total=$SUITES_TOTAL  pass=$SUITES_PASS  fail=$SUITES_FAIL"
+echo "ROSTER:  roster=$ROSTER_TOTAL (discovered=$DISCOVERED_COUNT + registered-extra=$((ROSTER_TOTAL - DISCOVERED_COUNT)))  accounted=$ROSTER_ACCOUNTED (ran=$SUITES_TOTAL + skipped=$SUITES_SKIPPED + missing=$SUITES_MISSING)"
+
+ROSTER_OK=1
+if [ "$ROSTER_ACCOUNTED" -ne "$ROSTER_TOTAL" ]; then
+	ROSTER_OK=0
+	{
+		echo
+		echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+		echo "ROSTER MISMATCH — THIS RUN DID NOT EXECUTE WHAT IT DISCOVERED."
+		echo "  roster    (discovered + registered extras) : $ROSTER_TOTAL"
+		echo "  accounted (ran + skipped + missing)        : $ROSTER_ACCOUNTED"
+		echo "  ran=$SUITES_TOTAL  skipped=$SUITES_SKIPPED  missing=$SUITES_MISSING"
+		if [ "$ROSTER_ACCOUNTED" -lt "$ROSTER_TOTAL" ]; then
+			echo "  $((ROSTER_TOTAL - ROSTER_ACCOUNTED)) suite(s) were discovered or registered, then never ran"
+			echo "  and were never announced as skipped. The classic cause is a suite"
+			echo "  that reads stdin and drains the discovery list, ending the loop"
+			echo "  early; any code path that drops a discovered suite looks the same."
+		else
+			echo "  $((ROSTER_ACCOUNTED - ROSTER_TOTAL)) suite execution(s) more than the roster — a suite was"
+			echo "  counted twice, or run outside the roster the accounting knows about."
+		fi
+		echo "Reporting green over a roster that does not add up is the worst"
+		echo "failure this runner has. Refusing to report PASS."
+		echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+	} >&2
+fi
+
 if [ "$SUITES_FAIL" -gt 0 ]; then
 	echo "FAILED SUITES:"
 	for f in "${FAILED_SUITES[@]}"; do
 		echo "  - $f"
 	done
+fi
+
+if [ "$ROSTER_OK" -eq 0 ]; then
+	echo "RESULT: FAIL — roster mismatch (roster=$ROSTER_TOTAL, accounted=$ROSTER_ACCOUNTED)"
+	exit 3
+fi
+if [ "$SUITES_FAIL" -gt 0 ]; then
 	exit 1
 fi
 echo "RESULT: ALL PASS"
