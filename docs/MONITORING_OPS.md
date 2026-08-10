@@ -277,7 +277,9 @@ The commit is **atomic from the perspective of any concurrent reader** of `$STAT
 
 ### 6.6 Counter / non-state mutations
 
-The `delegator_count` and `delegator_total_nmetal` fields are written every run regardless of notify outcome (= they are observed values, not transition states). In the candidate model they are still written via candidate field set + atomic commit at end. They do not participate in retry semantics.
+The `delegator_count` and `delegator_total_nmetal` fields are written as a **pair, and only when the notify for that transition succeeded** — both `candidate_set` calls sit inside the `if notify_or_keep …; then` body on each branch. A run where the count did not change writes neither; a run whose notify fails leaves both at their original values. They therefore **do** participate in retry semantics: the next run re-detects the same transition against the unchanged baseline and re-attempts. (Written via candidate field set + atomic commit at end, as everything else in the candidate model is.)
+
+The pairing is load-bearing, not incidental. `delegator_total_nmetal` is read back as the baseline for the `新規 / 離脱 / 差引 <amount>` line in the delegation push, so the stored value means **"the cumulative as of the last push the operator actually received"**, and the printed delta means "what moved since then". A missed push folds its amount into the next one rather than losing it — true only because the two fields advance together with the notification, and broken if either were written unconditionally.
 
 ## 7. anomaly-state-init.sh (operator-only)
 

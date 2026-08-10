@@ -830,8 +830,7 @@ if [ "$RPC_VALID" = "1" ]; then
     # so the receivable ceiling is 4 × self.
     CAPACITY_METAL=$(awk -v s="$SELF_STAKE" 'BEGIN{printf "%.4f", s*4}' | sed -E 's/\.?0+$//')
     TOTAL_WEIGHT_METAL=$(awk -v s="$SELF_STAKE" -v d="$OBS_DELEGATOR_TOTAL_METAL" 'BEGIN{printf "%.4f", s+d}' | sed -E 's/\.?0+$//')
-    # 受入 line, rendered exactly as scripts/daily-status.sh renders it (that
-    # implementation is the canonical form for this fact; keep them in step).
+    # Cumulative-over-ceiling line.
     #
     # It replaces the pre-2026-08-06 pair of lines
     #     受入額: <received> METAL
@@ -843,22 +842,116 @@ if [ "$RPC_VALID" = "1" ]; then
     # it from a live push on 2026-08-06. Self stake is still useful context,
     # so it stays, on its own line, as a standalone quantity.
     #
+    # 2026-08-10 (operator mock): the push deliberately DIVERGES from
+    # scripts/daily-status.sh here. daily-status.sh is a digest read at rest
+    # and keeps the full "受入: X / Y METAL (残枠 Z)" form; this is a phone
+    # push read in two seconds, so it drops the label, the unit and — in the
+    # normal case — the head-room, leaving a bare ratio. The head-room is not
+    # information the push loses: it is Y − X, both of which are on the line.
+    # 満枠 keeps its marker because "cannot receive any more" is an operational
+    # branch, not an arithmetic one, and must be visible without comparing two
+    # numbers.
+    #
     # No division anywhere here, so no divide-by-zero: the head-room is a
     # subtraction, clamped at 0 by awk so an over-cap reading (not possible
     # on-chain, but not worth rendering as a negative if it ever happened)
-    # degrades to the 満枠 branch instead of printing "残枠 -12.3".
+    # degrades to the 満枠 branch instead of printing a negative.
     REMAIN_METAL=$(awk -v s="$SELF_STAKE" -v r="$OBS_DELEGATOR_TOTAL_METAL" 'BEGIN{v=s*4-r; if(v<0)v=0; printf "%.4f", v}' | sed -E 's/\.?0+$//')
     if awk -v v="$REMAIN_METAL" 'BEGIN{exit !(v+0<=0.0001)}'; then
-      DELEG_LINE="受入: ${OBS_DELEGATOR_TOTAL_METAL} / ${CAPACITY_METAL} METAL 🔒 満枠"
+      DELEG_LINE="${OBS_DELEGATOR_TOTAL_METAL} / ${CAPACITY_METAL} 🔒 満枠"
     else
-      DELEG_LINE="受入: ${OBS_DELEGATOR_TOTAL_METAL} / ${CAPACITY_METAL} METAL (残枠 ${REMAIN_METAL})"
+      DELEG_LINE="${OBS_DELEGATOR_TOTAL_METAL} / ${CAPACITY_METAL}"
+    fi
+
+    # --- how much moved THIS time (2026-08-10) --------------------------
+    # The push used to say "+1 件" and nothing about the amount, so the one
+    # number the operator actually wants — what that delegation was worth —
+    # could only be recovered by remembering the previous cumulative and
+    # subtracting. The old cumulative was already in state; it was simply
+    # never read back.
+    #
+    # BASELINE SEMANTICS: delegator_count and delegator_total_nmetal are
+    # committed together, and only when the notify succeeded (see the two
+    # candidate_set pairs below). So the baseline is "the last state we
+    # managed to tell the operator about", and the delta is "what changed
+    # since the last delivered push" — which is the right thing to print even
+    # when a push was missed, because the missed amount is then folded in
+    # rather than lost.
+    #
+    # LABEL IS CHOSEN BY THE SIGN OF THE AMOUNT, NOT BY THE COUNT. The two are
+    # independent: a tick can add a delegator while a larger one expires (count
+    # up, amount down) or drop one while a larger one starts (count down,
+    # amount up). Labelling by count would then print a number that moved the
+    # other way. Labelling by amount is always true, needs no third word, and
+    # never renders "新規 -589" — the magnitude is absolute by construction
+    # (awk takes |v|), so no minus sign can reach the body.
+    #
+    # OMITTED, NEVER ZERO OR UNKNOWN:
+    #   - baseline absent / not a number (state predates the field, or was
+    #     hand-edited) → no line, rather than presenting the whole cumulative
+    #     as if it had just arrived. `| numbers` is the type gate; null, a
+    #     string and a missing key all yield the empty string.
+    #   - |delta| rounds to 0 at the shared %.4f precision → no line. A dust
+    #     move is not worth a line, and "新規 0" would be actively confusing.
+    #   A real 0 baseline (first delegator ever) is NOT this case: the delta
+    #   genuinely equals the cumulative, both numbers are printed one above
+    #   the other, and they agree.
+    #
+    # DELTA_BLOCK carries its own trailing newline so the body format can
+    # splice it in with %s%s and collapse to nothing when absent — no blank
+    # line, no separate format string to keep in step.
+    #
+    # WHEN COUNT AND AMOUNT POINT OPPOSITE WAYS, THE DECORATION MUST NOT
+    # CELEBRATE. The title states the count and stays as it is — "+1 件受入"
+    # is literally true, and rewriting it would swap a lie about the amount
+    # for a lie about the count. What has to give is the part that asserts a
+    # DIRECTION without naming its quantity: the tada tag, which ntfy renders
+    # as the leading emoji. On a phone at 05:41 the eye takes in emoji +
+    # title + first line, and letting two of those three say "up" while the
+    # net moved down is the same defect class as the 2026-08-06
+    # cross-quantity slash — not hard to read, but actively misread. Dropping
+    # the override falls back to the priority-derived tag (high → warning),
+    # so the glance is neutral and the body is what resolves it.
+    #
+    # The 差引 prefix exists because "+1 件" above "離脱 589" otherwise reads
+    # as "and separately, 589 left" — the line never said it was a NET
+    # figure. It is added only on the contradicting ticks, so the ordinary
+    # push keeps exactly the two words the operator approved.
+    #
+    # This is not a rare same-tick coincidence. A swap that leaves the count
+    # unchanged is not notified at all (the `ORIG_DC != OBS` gate above), so
+    # its movement is never committed and folds into the NEXT push — meaning
+    # a large departure followed later by a small arrival reaches this branch
+    # in two ordinary steps. Cycle boundaries cluster expiries, so this
+    # validator will meet it.
+    ORIG_DTN=$(orig_get '.delegator_total_nmetal | numbers')
+    DELTA_BLOCK=""
+    DELEG_TAGS="tada"
+    if [ -n "$ORIG_DTN" ]; then
+      DELTA_MAG=$(awk -v a="$OBS_DELEGATOR_TOTAL_NMETAL" -v b="$ORIG_DTN" 'BEGIN{v=(a-b)/1e9; if(v<0)v=-v; printf "%.4f", v}' | sed -E 's/\.?0+$//')
+      DELTA_DIR=$(awk -v a="$OBS_DELEGATOR_TOTAL_NMETAL" -v b="$ORIG_DTN" 'BEGIN{print ((a-b)<0) ? "離脱" : "新規"}')
+      if [ "$DELTA_MAG" != "0" ]; then
+        DELTA_NET_PREFIX=""
+        if [ "${DELTA_DIR:-}" = "離脱" ] && [ "$OBS_DELEGATOR_COUNT" -gt "${ORIG_DC:-0}" ]; then
+          # count up, amount down → name it net, and withdraw the celebration.
+          DELTA_NET_PREFIX="差引 "
+          DELEG_TAGS=""
+        elif [ "${DELTA_DIR:-}" = "新規" ] && [ "$OBS_DELEGATOR_COUNT" -lt "${ORIG_DC:-0}" ]; then
+          # count down, amount up → name it net. The departure branch never
+          # passed a tag override, so there is no celebration to withdraw.
+          DELTA_NET_PREFIX="差引 "
+        fi
+        DELTA_BLOCK="${DELTA_NET_PREFIX}${DELTA_DIR} ${DELTA_MAG}"$'\n'
+      fi
     fi
     if [ "$OBS_DELEGATOR_COUNT" -gt "${ORIG_DC:-0}" ]; then
       DIFF=$((OBS_DELEGATOR_COUNT - ORIG_DC))
-      body=$(printf '+%s 件、合計 %s 件\n%s\n自己 stake: %s METAL\n総 weight: %s METAL (self + delegators)' "$DIFF" "$OBS_DELEGATOR_COUNT" "$DELEG_LINE" "$SELF_STAKE" "$TOTAL_WEIGHT_METAL")
-      # Good news: keep priority high (= must not be missed) but replace
-      # the priority-derived warning emoji with a celebratory one.
-      if notify_or_keep high "Delegation +${DIFF} 件受入 (合計 ${OBS_DELEGATOR_COUNT} 件)" "$body" tada; then
+      body=$(printf '+%s 件、合計 %s 件\n%s%s\n自己 stake: %s METAL\n総 weight: %s METAL (self + delegators)' "$DIFF" "$OBS_DELEGATOR_COUNT" "$DELTA_BLOCK" "$DELEG_LINE" "$SELF_STAKE" "$TOTAL_WEIGHT_METAL")
+      # Good news: keep priority high (= must not be missed) but replace the
+      # priority-derived warning emoji with a celebratory one — unless the
+      # net amount went the other way, in which case DELEG_TAGS is empty and
+      # the warning emoji stands (see the DELTA_BLOCK rationale above).
+      if notify_or_keep high "Delegation +${DIFF} 件受入 (合計 ${OBS_DELEGATOR_COUNT} 件)" "$body" "$DELEG_TAGS"; then
         candidate_set '.delegator_count' "$OBS_DELEGATOR_COUNT"
         candidate_set '.delegator_total_nmetal' "$OBS_DELEGATOR_TOTAL_NMETAL"
       fi
@@ -871,7 +964,7 @@ if [ "$RPC_VALID" = "1" ]; then
       # commit, so every "Delegation -N 件離脱" push ever sent carried a title
       # and nothing else. Found 2026-08-06 while adding the body assertions
       # below (departures are rare enough that nobody had seen one recently).
-      body=$(printf -- '-%s 件、合計 %s 件\n%s\n自己 stake: %s METAL\n総 weight: %s METAL (self + delegators)\n期間満了か途中解除、explorer で確認:\nhttps://explorer.metalblockchain.org/validators/%s' "$DIFF" "$OBS_DELEGATOR_COUNT" "$DELEG_LINE" "$SELF_STAKE" "$TOTAL_WEIGHT_METAL" "$NODE_ID")
+      body=$(printf -- '-%s 件、合計 %s 件\n%s%s\n自己 stake: %s METAL\n総 weight: %s METAL (self + delegators)\n期間満了か途中解除、explorer で確認:\nhttps://explorer.metalblockchain.org/validators/%s' "$DIFF" "$OBS_DELEGATOR_COUNT" "$DELTA_BLOCK" "$DELEG_LINE" "$SELF_STAKE" "$TOTAL_WEIGHT_METAL" "$NODE_ID")
       if notify_or_keep default "Delegation -${DIFF} 件離脱 (合計 ${OBS_DELEGATOR_COUNT} 件)" "$body"; then
         candidate_set '.delegator_count' "$OBS_DELEGATOR_COUNT"
         candidate_set '.delegator_total_nmetal' "$OBS_DELEGATOR_TOTAL_NMETAL"
