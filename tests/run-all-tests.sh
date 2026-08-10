@@ -20,9 +20,12 @@
 #
 # After the suites run, a roster reconciliation (added 2026-08-10) proves the
 # run executed what it found: every discovered and registered suite must end
-# up either executed, announced as a host SKIP, or warned about as missing,
-# and the arithmetic is printed on the ROSTER line. A shortfall exits 3 and
-# never prints RESULT: ALL PASS. This exists because the runner used to feed
+# up either executed, announced as a host SKIP, or accounted as missing from
+# disk, and the arithmetic is printed on the ROSTER line. A shortfall exits 3
+# and never prints RESULT: ALL PASS. So does a non-zero `missing`: the bucket
+# exists to keep the arithmetic honest about where a suite went, not to excuse
+# its absence — every registered extra is git-tracked, so one going missing
+# means the aggregate silently shrank. This exists because the runner used to feed
 # its own discovery list through stdin while starting suites with that same
 # stdin attached: one suite reading stdin swallowed the rest of the list, the
 # loop ended, and the run reported ALL PASS having executed 12 of 88 suites.
@@ -44,7 +47,8 @@
 #   0  every suite passed AND the roster reconciles
 #   1  at least one suite failed
 #   2  preflight or suite discovery refused to proceed (no verdict given)
-#   3  roster mismatch — the run did not execute what it discovered
+#   3  roster integrity failure — the accounting did not balance, and/or a
+#      registered suite was missing from disk
 
 set -u
 
@@ -69,7 +73,7 @@ for arg in "$@"; do
 		--pattern=*)      PATTERN="${arg#*=}" ;;
 		--verbose)        VERBOSE=1 ;;
 		--preflight-only) PREFLIGHT_ONLY=1 ;;
-		-h|--help)        sed -n '2,47p' "$0" | sed 's/^# \?//'; exit 0 ;;
+		-h|--help)        sed -n '2,51p' "$0" | sed 's/^# \?//'; exit 0 ;;
 		*)                echo "ERROR: unknown arg: $arg" >&2; exit 1 ;;
 	esac
 done
@@ -326,8 +330,12 @@ while IFS= read -r -d '' _discovered_path; do
 	DISCOVERED_COUNT=$((DISCOVERED_COUNT + 1))
 done < "$DISCOVERY_LIST"
 
-if [ "$PATTERN" = "test-*.sh" ] && [ "$DISCOVERED_COUNT" -eq 0 ]; then
-	echo "FATAL: the default pattern discovered zero suites under ${TESTS_ROOT}. That is a broken discovery step, not an empty repo — refusing to report a verdict." >&2
+# Zero discovered suites is a refusal, not an empty green run — for the
+# default pattern AND for a caller-supplied one. Zero found reconciles
+# perfectly with zero executed, so the arithmetic below can never catch it;
+# only this check can. A run that executed nothing must never read as PASS.
+if [ "$DISCOVERED_COUNT" -eq 0 ]; then
+	echo "FATAL: pattern '${PATTERN}' discovered zero suites under ${TESTS_ROOT}. A run that executes nothing must never read as green — refusing to report a verdict." >&2
 	exit 2
 fi
 
@@ -381,8 +389,11 @@ echo "OVERALL: total=$SUITES_TOTAL  pass=$SUITES_PASS  fail=$SUITES_FAIL"
 echo "ROSTER:  roster=$ROSTER_TOTAL (discovered=$DISCOVERED_COUNT + registered-extra=$((ROSTER_TOTAL - DISCOVERED_COUNT)))  accounted=$ROSTER_ACCOUNTED (ran=$SUITES_TOTAL + skipped=$SUITES_SKIPPED + missing=$SUITES_MISSING)"
 
 ROSTER_OK=1
+ROSTER_FAIL_REASON=""
+
 if [ "$ROSTER_ACCOUNTED" -ne "$ROSTER_TOTAL" ]; then
 	ROSTER_OK=0
+	ROSTER_FAIL_REASON="roster mismatch (roster=$ROSTER_TOTAL, accounted=$ROSTER_ACCOUNTED)"
 	{
 		echo
 		echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
@@ -405,6 +416,36 @@ if [ "$ROSTER_ACCOUNTED" -ne "$ROSTER_TOTAL" ]; then
 	} >&2
 fi
 
+# `missing` keeps the arithmetic honest — it names where a registered suite
+# went, so the roster still balances instead of silently shrinking. It is NOT
+# a licence to report PASS. Every registered extra is git-tracked, so the only
+# way one goes missing in CI is a rename or deletion that did not update the
+# array above: the aggregate run just got smaller, which is precisely the
+# class of failure this whole accounting exists to surface. A stderr WARN
+# alone would be buried in the CI log, so a missing suite is red.
+if [ "$SUITES_MISSING" -gt 0 ]; then
+	ROSTER_OK=0
+	if [ -n "$ROSTER_FAIL_REASON" ]; then
+		ROSTER_FAIL_REASON="${ROSTER_FAIL_REASON}; "
+	fi
+	ROSTER_FAIL_REASON="${ROSTER_FAIL_REASON}${SUITES_MISSING} registered suite(s) missing from disk"
+	{
+		echo
+		echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+		echo "REGISTERED SUITE MISSING FROM DISK — THE AGGREGATE RUN JUST GOT SMALLER."
+		echo "  $SUITES_MISSING suite(s) named in EXTRA_SUITES / EXTRA_SUITES_OTHER /"
+		echo "  EXTRA_SUITES_LINUX_ONLY do not exist on disk (see the WARN lines above)."
+		echo "  Every registered extra is git-tracked, so this means a rename or a"
+		echo "  deletion that did not update the array — the run is quietly covering"
+		echo "  less than it did yesterday, with the roster still balancing because"
+		echo "  'missing' accounted for it. That balance is bookkeeping, not consent."
+		echo "  Fix the array or restore the file. If some suite must genuinely be"
+		echo "  allowed to be absent, add it to an explicit allowlist here so the"
+		echo "  exemption is named and reviewable — do not let the count slide."
+		echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+	} >&2
+fi
+
 if [ "$SUITES_FAIL" -gt 0 ]; then
 	echo "FAILED SUITES:"
 	for f in "${FAILED_SUITES[@]}"; do
@@ -413,7 +454,7 @@ if [ "$SUITES_FAIL" -gt 0 ]; then
 fi
 
 if [ "$ROSTER_OK" -eq 0 ]; then
-	echo "RESULT: FAIL — roster mismatch (roster=$ROSTER_TOTAL, accounted=$ROSTER_ACCOUNTED)"
+	echo "RESULT: FAIL — $ROSTER_FAIL_REASON"
 	exit 3
 fi
 if [ "$SUITES_FAIL" -gt 0 ]; then

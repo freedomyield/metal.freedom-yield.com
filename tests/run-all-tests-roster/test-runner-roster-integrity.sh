@@ -42,11 +42,16 @@
 #      the roster mismatch fires on a truncation route that has nothing to do
 #      with stdin — proving defence (2) is general, not a second spelling of
 #      defence (1).
-#   5. a registered extra suite that is absent from disk is counted as
-#      missing, the arithmetic still balances, and the run stays green.
+#   5. a registered extra suite that is absent from disk keeps the arithmetic
+#      balanced (it is named in the `missing` bucket) AND still turns the run
+#      red. Every registered extra is git-tracked, so `missing` always means
+#      the aggregate silently shrank; balancing the books is not consent.
+#  5b. MUTANT (the missing>0 check disabled): the same fixture goes green
+#      again — proving that check is what creates the red, not some other
+#      incidental failure in the fixture.
 #   6. host SKIP (Linux-only extra) is accounted for, not silently dropped.
-#   7. discovery that finds nothing under the default pattern is a hard
-#      refusal (rc 2), not an empty green run.
+#   7. discovery that finds nothing is a hard refusal (rc 2), not an empty
+#      green run — under the default pattern AND a caller-supplied one.
 #   8. every mutation asserts its own target was found before running, so a
 #      future reformat of the runner turns this suite red instead of quietly
 #      testing an unmutated copy.
@@ -189,6 +194,8 @@ M_STDIN_QUIET_FROM='out="$("$interpreter" "$test_file" </dev/null 2>&1)"'
 M_STDIN_QUIET_TO='out="$("$interpreter" "$test_file" 2>&1)"'
 M_DROP_FROM=$'\trun_suite "$test_file"\ndone < "$DISCOVERY_LIST"'
 M_DROP_TO=$'\tcase "$test_file" in *test-03*) continue ;; esac\n\trun_suite "$test_file"\ndone < "$DISCOVERY_LIST"'
+M_MISSING_FROM='if [ "$SUITES_MISSING" -gt 0 ]; then'
+M_MISSING_TO='if false; then # MUTANT: missing-suite check disabled'
 
 # On Linux the Linux-only extra runs and nothing is skipped; elsewhere it is
 # announced as a SKIP. Both are legitimate — what must never differ is that
@@ -359,9 +366,15 @@ else
 fi
 
 # =====================================================================
-# case 5 — a registered extra that is absent from disk is accounted as
-# missing; the arithmetic still balances and the run stays green. Absence
-# must be a named bucket, not a hole in the count.
+# case 5 — a registered extra that is absent from disk. Two properties that
+# must hold TOGETHER:
+#   - the arithmetic still balances: absence is a named bucket ("missing"),
+#     not a hole, so nothing vanishes unexplained;
+#   - and the run is still RED. Every registered extra is git-tracked, so
+#     `missing` in CI can only mean a rename or deletion that did not update
+#     the array — the aggregate silently got smaller, which is exactly the
+#     class of failure this accounting exists to surface. Balancing the books
+#     is bookkeeping, not consent. A stderr WARN alone would be buried.
 # =====================================================================
 C5="$TMP/case5"; build_fixture "$C5"
 rm -f "$C5/repo/scripts/operator-local/test-commit-anchor-source.sh"
@@ -383,10 +396,42 @@ if [ -n "${R5_ROSTER:-}" ] && [ "${R5_ACC:-x}" = "${R5_ROSTER:-y}" ]; then
 else
 	fail "case5: accounting broke on a missing extra (roster=$R5_ROSTER accounted=$R5_ACC)"
 fi
-if [ "$RC5" -eq 0 ]; then
-	pass "case5: a warned-about missing extra does not turn the run red"
+if [ "$RC5" -eq 3 ]; then
+	pass "case5: a missing registered suite turns the run red (rc=3) despite balancing"
 else
-	fail "case5: run exited $RC5 on a warned-about missing extra: $OUT5"
+	fail "case5: run exited $RC5 on a missing registered suite, expected 3: $OUT5"
+fi
+printf '%s\n' "$OUT5" | grep -q "RESULT: ALL PASS" \
+	&& fail "case5: printed RESULT: ALL PASS while a registered suite was absent" \
+	|| pass "case5: never printed RESULT: ALL PASS"
+printf '%s\n' "$OUT5" | grep -q "REGISTERED SUITE MISSING FROM DISK" \
+	&& pass "case5: missing-suite banner fired loudly on stderr" \
+	|| fail "case5: no missing-suite banner (got: $OUT5)"
+printf '%s\n' "$OUT5" | grep -q "ROSTER MISMATCH" \
+	&& fail "case5: reported a roster mismatch — the books DO balance here; the diagnosis must be 'missing', not 'mismatch'" \
+	|| pass "case5: diagnosed as missing, not misdiagnosed as a mismatch"
+
+# =====================================================================
+# case 5b — MUTANT: disable only the missing>0 check. The identical fixture
+# must go green again. Without this control, case 5's red could be coming
+# from anything; this pins the red to that specific check.
+# =====================================================================
+C5B="$TMP/case5b"; build_fixture "$C5B"
+rm -f "$C5B/repo/scripts/operator-local/test-commit-anchor-source.sh"
+MUT5B="$C5B/repo/tests/run-all-tests.sh"
+if apply_mutation "$MUT5B" "$M_MISSING_FROM" "$M_MISSING_TO"; then
+	pass "case5b: mutation applied (missing-suite check disabled)"
+	OUT5B="$(bash "$MUT5B" 2>&1)"; RC5B=$?
+	if [ "$RC5B" -eq 0 ]; then
+		pass "case5b: with the check disabled the same fixture is green (rc=0) — the check is what makes case5 red"
+	else
+		fail "case5b: still exited $RC5B with the check disabled — case5's red is not (only) that check: $OUT5B"
+	fi
+	printf '%s\n' "$OUT5B" | grep -q "RESULT: ALL PASS" \
+		&& pass "case5b: mutant prints RESULT: ALL PASS, isolating the check's effect" \
+		|| fail "case5b: mutant did not print RESULT: ALL PASS (got: $OUT5B)"
+else
+	fail "case5b: mutation target (missing-suite check) not found in the runner — reformatted?"
 fi
 
 # =====================================================================
@@ -410,9 +455,11 @@ else
 fi
 
 # =====================================================================
-# case 7 — discovery that finds nothing under the default pattern is a hard
-# refusal, not an empty green run. (Zero discovered suites reconciles
-# perfectly with zero executed, so the arithmetic alone cannot catch it.)
+# case 7 — discovery that finds nothing is a hard refusal, not an empty green
+# run. Zero discovered reconciles perfectly with zero executed, so the
+# arithmetic can never catch this one; only an explicit floor can. Holds for
+# the default pattern and for a caller-supplied --pattern alike — "it matched
+# nothing" is not a pass under either.
 # =====================================================================
 C7="$TMP/case7"; build_fixture "$C7"
 rm -f "$C7/repo/tests/fixture/"test-*.sh
@@ -428,6 +475,19 @@ printf '%s\n' "$OUT7" | grep -q "discovered zero suites" \
 printf '%s\n' "$OUT7" | grep -q "RESULT: ALL PASS" \
 	&& fail "case7: an empty run reported RESULT: ALL PASS" \
 	|| pass "case7: an empty run never reported RESULT: ALL PASS"
+
+# Same floor under a caller-supplied pattern, on a repo whose suites all
+# still exist — only the glob matches nothing.
+C7B="$TMP/case7b"; build_fixture "$C7B"
+OUT7B="$(bash "$C7B/repo/tests/run-all-tests.sh" --pattern='zzz-no-such-suite-*.sh' 2>&1)"; RC7B=$?
+if [ "$RC7B" -eq 2 ]; then
+	pass "case7b: zero-discovery under a caller-supplied --pattern also refuses with rc=2"
+else
+	fail "case7b: custom-pattern zero-discovery exited $RC7B, expected 2: $OUT7B"
+fi
+printf '%s\n' "$OUT7B" | grep -q "RESULT: ALL PASS" \
+	&& fail "case7b: an empty custom-pattern run reported RESULT: ALL PASS" \
+	|| pass "case7b: an empty custom-pattern run never reported RESULT: ALL PASS"
 
 # ---- summary -----------------------------------------------------------------
 echo
