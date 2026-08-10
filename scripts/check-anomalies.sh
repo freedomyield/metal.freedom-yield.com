@@ -900,21 +900,58 @@ if [ "$RPC_VALID" = "1" ]; then
     # DELTA_BLOCK carries its own trailing newline so the body format can
     # splice it in with %s%s and collapse to nothing when absent — no blank
     # line, no separate format string to keep in step.
+    #
+    # WHEN COUNT AND AMOUNT POINT OPPOSITE WAYS, THE DECORATION MUST NOT
+    # CELEBRATE. The title states the count and stays as it is — "+1 件受入"
+    # is literally true, and rewriting it would swap a lie about the amount
+    # for a lie about the count. What has to give is the part that asserts a
+    # DIRECTION without naming its quantity: the tada tag, which ntfy renders
+    # as the leading emoji. On a phone at 05:41 the eye takes in emoji +
+    # title + first line, and letting two of those three say "up" while the
+    # net moved down is the same defect class as the 2026-08-06
+    # cross-quantity slash — not hard to read, but actively misread. Dropping
+    # the override falls back to the priority-derived tag (high → warning),
+    # so the glance is neutral and the body is what resolves it.
+    #
+    # The 差引 prefix exists because "+1 件" above "離脱 589" otherwise reads
+    # as "and separately, 589 left" — the line never said it was a NET
+    # figure. It is added only on the contradicting ticks, so the ordinary
+    # push keeps exactly the two words the operator approved.
+    #
+    # This is not a rare same-tick coincidence. A swap that leaves the count
+    # unchanged is not notified at all (the `ORIG_DC != OBS` gate above), so
+    # its movement is never committed and folds into the NEXT push — meaning
+    # a large departure followed later by a small arrival reaches this branch
+    # in two ordinary steps. Cycle boundaries cluster expiries, so this
+    # validator will meet it.
     ORIG_DTN=$(orig_get '.delegator_total_nmetal | numbers')
     DELTA_BLOCK=""
+    DELEG_TAGS="tada"
     if [ -n "$ORIG_DTN" ]; then
       DELTA_MAG=$(awk -v a="$OBS_DELEGATOR_TOTAL_NMETAL" -v b="$ORIG_DTN" 'BEGIN{v=(a-b)/1e9; if(v<0)v=-v; printf "%.4f", v}' | sed -E 's/\.?0+$//')
       DELTA_DIR=$(awk -v a="$OBS_DELEGATOR_TOTAL_NMETAL" -v b="$ORIG_DTN" 'BEGIN{print ((a-b)<0) ? "離脱" : "新規"}')
       if [ "$DELTA_MAG" != "0" ]; then
-        DELTA_BLOCK="${DELTA_DIR} ${DELTA_MAG}"$'\n'
+        DELTA_NET_PREFIX=""
+        if [ "${DELTA_DIR:-}" = "離脱" ] && [ "$OBS_DELEGATOR_COUNT" -gt "${ORIG_DC:-0}" ]; then
+          # count up, amount down → name it net, and withdraw the celebration.
+          DELTA_NET_PREFIX="差引 "
+          DELEG_TAGS=""
+        elif [ "${DELTA_DIR:-}" = "新規" ] && [ "$OBS_DELEGATOR_COUNT" -lt "${ORIG_DC:-0}" ]; then
+          # count down, amount up → name it net. The departure branch never
+          # passed a tag override, so there is no celebration to withdraw.
+          DELTA_NET_PREFIX="差引 "
+        fi
+        DELTA_BLOCK="${DELTA_NET_PREFIX}${DELTA_DIR} ${DELTA_MAG}"$'\n'
       fi
     fi
     if [ "$OBS_DELEGATOR_COUNT" -gt "${ORIG_DC:-0}" ]; then
       DIFF=$((OBS_DELEGATOR_COUNT - ORIG_DC))
       body=$(printf '+%s 件、合計 %s 件\n%s%s\n自己 stake: %s METAL\n総 weight: %s METAL (self + delegators)' "$DIFF" "$OBS_DELEGATOR_COUNT" "$DELTA_BLOCK" "$DELEG_LINE" "$SELF_STAKE" "$TOTAL_WEIGHT_METAL")
-      # Good news: keep priority high (= must not be missed) but replace
-      # the priority-derived warning emoji with a celebratory one.
-      if notify_or_keep high "Delegation +${DIFF} 件受入 (合計 ${OBS_DELEGATOR_COUNT} 件)" "$body" tada; then
+      # Good news: keep priority high (= must not be missed) but replace the
+      # priority-derived warning emoji with a celebratory one — unless the
+      # net amount went the other way, in which case DELEG_TAGS is empty and
+      # the warning emoji stands (see the DELTA_BLOCK rationale above).
+      if notify_or_keep high "Delegation +${DIFF} 件受入 (合計 ${OBS_DELEGATOR_COUNT} 件)" "$body" "$DELEG_TAGS"; then
         candidate_set '.delegator_count' "$OBS_DELEGATOR_COUNT"
         candidate_set '.delegator_total_nmetal' "$OBS_DELEGATOR_TOTAL_NMETAL"
       fi

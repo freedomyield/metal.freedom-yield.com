@@ -167,9 +167,12 @@ build_sandbox() {
 	mkdir -p "${S}/scripts/lib" "${S}/public/api" "${S}/state/locks"
 	cp "$script_src" "${S}/scripts/check-anomalies.sh"
 	cp "${REPO}/scripts/lib/side-effects.sh" "${S}/scripts/lib/side-effects.sh"
+	# TAGS is recorded FIRST and BODY LAST: the bodies are multi-line, so
+	# actual_body() reads from BODY<< to EOF and anything appended after it
+	# would be swallowed into the body.
 	cat >"${S}/scripts/notify.sh" <<SHIM
 #!/usr/bin/env bash
-{ printf 'TITLE<<%s>>\n' "\$2"; printf 'BODY<<%s>>\n' "\$3"; } >>"${LOG}"
+{ printf 'TAGS<<%s>>\n' "\${NTFY_TAGS:-}"; printf 'TITLE<<%s>>\n' "\$2"; printf 'BODY<<%s>>\n' "\$3"; } >>"${LOG}"
 exit 0
 SHIM
 	chmod +x "${S}/scripts/notify.sh"
@@ -205,7 +208,11 @@ JSON
 }
 
 run_sandbox() {
+	# NTFY_TAGS is pinned empty so the recorded TAGS<<…>> reflects only what
+	# this run decided, never what the developer's shell happened to export
+	# (same hermeticity rule as the 2026-07-21 override test).
 	env FY_LIVE=1 \
+		NTFY_TAGS= \
 		ANOMALY_STATE_DIR="${S}/state" \
 		NODE_ID="$NODE_ID" \
 		METALGO_API="http://127.0.0.1:1" \
@@ -218,6 +225,16 @@ body_of() { sed -n 's/^BODY<<//p' "$LOG" | head -1; }
 whole_of() { cat "$LOG"; }
 # The bodies are multi-line, so the recorded BODY<<…>> spans to EOF.
 actual_body() { sed -n '/^BODY<</,$p' "$LOG" | sed '1s/^BODY<<//' | sed '$s/>>$//'; }
+# Exact tag line for the first (and, in every case here, only) notification.
+actual_tags() { sed -n '1s/^TAGS<<\(.*\)>>$/\1/p' "$LOG"; }
+assert_tags() {
+	local name="$1" expected="$2" actual; actual="$(actual_tags)"
+	if [ "$actual" = "$expected" ]; then
+		ok "$name"
+	else
+		bad "$name" "expected tags [$expected] actual [$actual]"
+	fi
+}
 
 # assert_body <case name> <expected body>
 assert_body() {
@@ -441,6 +458,10 @@ assert_lacks "live: no 589.0000"                                            "589
 assert_lacks "live: normal case omits 残枠"                                  "残枠"
 assert_lacks "live: normal case omits the 満枠 marker"                       "満枠"
 assert_lacks "live: the ratio line dropped its 受入 label"                   "受入:"
+# Count and amount agree here, so the ordinary push is untouched by the
+# contradiction handling: the celebration stands and no 差引 qualifier appears.
+assert_tags  "live: the tada tag survives when count and amount agree"       "tada"
+assert_lacks "live: no 差引 qualifier on an ordinary increase"               "差引"
 
 echo
 echo "== the baseline advances: a second tick reports its own delta, not the sum =="
@@ -493,13 +514,25 @@ echo "== boundary 2a: count UP but amount DOWN (big one expired, small one arriv
 # needs the number, and hiding it recreates the reported defect. The brief
 # forbids "新規 -589" — satisfied structurally: the magnitude is |v| by
 # construction, so no minus sign can reach the body on any path.
+#
+# REVIEW FIX (2026-08-10): the title legitimately reports the COUNT, so on
+# this tick the title and the amount point opposite ways. Two things follow,
+# both asserted below:
+#   - the tada tag is withdrawn, so ntfy's leading emoji stops asserting a
+#     direction the net movement contradicts (high → the warning default);
+#   - the amount is prefixed 差引 so the line names itself as a NET figure —
+#     without it, "+1 件" above "離脱 589" reads as a separate departure.
+# The title itself is left alone: "+1 件受入" is true, and rewriting it would
+# trade a misleading amount for a false count.
 write_rpc 8 "$LIVE_RECEIVED_NMETAL"
 BASELINE_TOTAL_NMETAL=34357797900000    # 34357.7979 → net −589 despite +1 件
 build_sandbox mixed 7
 run_sandbox
-EXPECT_MIXED="$(printf '+1 件、合計 8 件\n離脱 589\n%s / %s\n自己 stake: %s METAL\n総 weight: %s METAL (self + delegators)' \
+EXPECT_MIXED="$(printf '+1 件、合計 8 件\n差引 離脱 589\n%s / %s\n自己 stake: %s METAL\n総 weight: %s METAL (self + delegators)' \
 	"$LIVE_RECEIVED" "$EXPECT_CAP" "$SELF_STAKE" "$LIVE_WEIGHT")"
-assert_body  "mixed: count up + amount down renders 離脱 with the net figure" "$EXPECT_MIXED"
+assert_body  "mixed: count up + amount down renders 差引 離脱 with the net figure" "$EXPECT_MIXED"
+assert_has   "mixed: title still reports the count truthfully" "TITLE<<Delegation +1 件受入 (合計 8 件)>>"
+assert_tags  "mixed: the celebratory tag is withdrawn (emoji stops saying 'up')" ""
 assert_lacks      "mixed: never renders a signed 新規"        "新規 -"
 assert_lacks      "mixed: no minus sign anywhere in the amount" "-589"
 assert_body_lacks "mixed: does not claim 新規 on a net loss"    "新規"
@@ -510,9 +543,12 @@ write_rpc 8 "$LIVE_RECEIVED_NMETAL"
 BASELINE_TOTAL_NMETAL=33179797900000    # net +589 despite −1 件
 build_sandbox mirror 9
 run_sandbox
-EXPECT_MIRROR="$(printf -- '-1 件、合計 8 件\n新規 589\n%s / %s\n自己 stake: %s METAL\n総 weight: %s METAL (self + delegators)\n期間満了か途中解除、explorer で確認:\nhttps://explorer.metalblockchain.org/validators/%s' \
+EXPECT_MIRROR="$(printf -- '-1 件、合計 8 件\n差引 新規 589\n%s / %s\n自己 stake: %s METAL\n総 weight: %s METAL (self + delegators)\n期間満了か途中解除、explorer で確認:\nhttps://explorer.metalblockchain.org/validators/%s' \
 	"$LIVE_RECEIVED" "$EXPECT_CAP" "$SELF_STAKE" "$LIVE_WEIGHT" "$NODE_ID")"
-assert_body  "mirror: count down + amount up renders 新規 on the decrease branch" "$EXPECT_MIRROR"
+assert_body  "mirror: count down + amount up renders 差引 新規 on the decrease branch" "$EXPECT_MIRROR"
+# Symmetric to mixed. There is no celebration to withdraw here — the decrease
+# branch has never passed a tag override — so 差引 carries the whole fix.
+assert_tags       "mirror: departure branch still passes no tag override" ""
 assert_body_lacks "mirror: does not claim 離脱 on a net gain" "離脱"
 assert_lacks      "mirror: never renders a signed 離脱"       "離脱 -"
 
@@ -577,7 +613,7 @@ echo "== mutations for the 2026-08-10 delta line =="
 # M3: silence the delta line. The live case must lose 新規 589 while keeping
 # everything else, proving the delta assertions are not passing by accident.
 MUT3="${TMP}/check-anomalies.nodelta.sh"
-sed 's@^        DELTA_BLOCK="${DELTA_DIR} ${DELTA_MAG}".*@        DELTA_BLOCK=""@' "$SCRIPT" >"$MUT3"
+sed 's@^        DELTA_BLOCK="${DELTA_NET_PREFIX}${DELTA_DIR} ${DELTA_MAG}".*@        DELTA_BLOCK=""@' "$SCRIPT" >"$MUT3"
 if cmp -s "$MUT3" "$SCRIPT"; then
 	bad "mutation applied: delta line silenced" "sed matched nothing"
 else
@@ -622,6 +658,38 @@ else
 	# grep helper ever loses its `--` again this flips red instead of every
 	# leading-dash assertion in the file quietly passing on empty stdin.
 	assert_has "mutation: the bare -589 needle really matches (grep -- guard is live)" "-589"
+fi
+
+# M6: keep celebrating on a net loss. The mixed tick must then go out with the
+# tada emoji again — proving the withdrawal is what suppresses it, not some
+# incidental property of that code path.
+MUT6="${TMP}/check-anomalies.stillcelebrates.sh"
+sed 's@^          DELEG_TAGS=""$@          :@' "$SCRIPT" >"$MUT6"
+if cmp -s "$MUT6" "$SCRIPT"; then
+	bad "mutation applied: tag withdrawal removed" "sed matched nothing"
+else
+	write_rpc 8 "$LIVE_RECEIVED_NMETAL"
+	BASELINE_TOTAL_NMETAL=34357797900000
+	build_sandbox mut6 7 "$MUT6"
+	run_sandbox
+	assert_tags "mutation: keeping DELEG_TAGS celebrates a net loss again" "tada"
+fi
+
+# M7: drop the 差引 qualifier. The mixed body must stop matching, so the
+# "name it net" requirement is enforced rather than merely written down.
+MUT7="${TMP}/check-anomalies.noqualifier.sh"
+sed 's@DELTA_NET_PREFIX="差引 "@DELTA_NET_PREFIX=""@g' "$SCRIPT" >"$MUT7"
+if cmp -s "$MUT7" "$SCRIPT"; then
+	bad "mutation applied: 差引 qualifier removed" "sed matched nothing"
+else
+	write_rpc 8 "$LIVE_RECEIVED_NMETAL"
+	BASELINE_TOTAL_NMETAL=34357797900000
+	build_sandbox mut7 7 "$MUT7"
+	run_sandbox
+	assert_lacks "mutation: removing the qualifier drops 差引 from the body" "差引"
+	[ "$(actual_body)" != "$EXPECT_MIXED" ] \
+		&& ok "mutation: the mixed body no longer matches without 差引" \
+		|| bad "mutation: the mixed body no longer matches without 差引" "still byte-equal"
 fi
 
 echo
