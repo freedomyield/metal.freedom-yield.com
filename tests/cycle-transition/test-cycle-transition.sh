@@ -167,6 +167,48 @@ else
 	bad "step 4b heading present but its cleanup checklist is missing"
 fi
 
+# A unit heading is not a step. Every script docs/cycle-transition-steps.json
+# declares must actually be INVOKED on a command line IN ITS OWN UNIT —
+# otherwise a unit keeps its id and its prose while quietly running nothing.
+#
+# Scoping to the unit is load-bearing, not pedantry: an earlier revision of
+# this case searched the whole plan, and deleting unit 3's
+# push-to-web-host.sh call left it GREEN because unit 8.5 calls the same
+# script. That is precisely the vacuous pass this suite exists to rule out.
+#
+# Checked against the tx-resolved plan so units 7b/7c are live commands rather
+# than the deliberately commented-out pending form.
+PLAN_COV="${TMP}/plan-coverage.txt"
+run_plan "$LEDGER_POST" "$PLAN_COV" --testnet-tx-id="$TX64" || true
+
+# unit_block <plan> <unit-id> — the command lines belonging to one unit.
+# Literal index() matching, not regex: unit ids 7.5 and 8.5 contain a dot.
+unit_block() {
+	awk -v want="# [unit $2] " '
+		index($0, want) == 1 { f = 1; next }
+		index($0, "# [unit ") == 1 { f = 0 }
+		index($0, "# === PHASE") == 1 { f = 0 }
+		f { print }
+	' "$1" | grep -vE '^#'
+}
+COV_MISSING=""
+COV_N=0
+while IFS=$'\t' read -r step_id script; do
+	[ -n "$step_id" ] || continue
+	[ -n "$script" ] || continue
+	COV_N=$((COV_N + 1))
+	if ! unit_block "$PLAN_COV" "$step_id" | grep -qF "$script"; then
+		COV_MISSING="${COV_MISSING:+$COV_MISSING }${step_id}:${script}"
+	fi
+done < <(jq -r '.steps[] | .id as $i | .scripts[]? | [$i, .] | @tsv' "$STEPS_JSON")
+if [ "$COV_N" -lt 12 ]; then
+	bad "only ${COV_N} (step, script) pair(s) checked — expected at least 12, the check may be vacuous"
+elif [ -z "$COV_MISSING" ]; then
+	ok "all ${COV_N} (step, script) pairs from cycle-transition-steps.json are invoked inside their own unit"
+else
+	bad "declared script(s) not invoked by their own unit: ${COV_MISSING}"
+fi
+
 # ---- MUTATION: dropping any single unit row must break coverage -----------
 # The rows are captured once, then a subshell re-defines fyct__unit_rows to
 # serve them minus one id. This exercises the REAL printer over mutated data;
@@ -280,12 +322,29 @@ fi
 # ===========================================================================
 # C. Full env resolution
 # ===========================================================================
-UNRESOLVED="$(grep -nE '\$\{?[A-Za-z_][A-Za-z0-9_]*\}?' "$PLAN" || true)"
+# Unescaped variable references must be zero: those resolve in whatever shell
+# pastes the plan, which is exactly what "env fully resolved" forbids.
+UNRESOLVED="$(grep -nE '(^|[^\\])\$\{?[A-Za-z_][A-Za-z0-9_]*\}?' "$PLAN" || true)"
 if [ -z "$UNRESOLVED" ]; then
-	ok "the plan contains zero unresolved shell variables (no \$FOO, no \${BAR}) anywhere"
+	ok "the plan contains zero UNESCAPED shell variables (no \$FOO, no \${BAR}) anywhere"
 else
-	bad "the plan contains unresolved shell variables:"
+	bad "the plan contains unescaped shell variables:"
 	printf '%s\n' "$UNRESOLVED" | head -5 | sed 's/^/        /'
+fi
+
+# Escaped ones are legitimate but must be an exact, named allowlist: they
+# survive to the DEPLOY shell on the host on purpose. Pinning the set is what
+# keeps "one deliberate exception" from drifting into "we stopped resolving".
+ESCAPED_NAMES="$(grep -oE '\\\$\{?[A-Za-z_][A-Za-z0-9_]*' "$PLAN" | sed 's/[^A-Za-z0-9_]//g' | sort -u || true)"
+if [ "$ESCAPED_NAMES" = "PREV_TX" ]; then
+	ok "the only host-evaluated (escaped) variable is PREV_TX, as the header declares"
+else
+	bad "escaped-variable allowlist drift: got '$(printf '%s' "$ESCAPED_NAMES" | tr '\n' ' ')', expected exactly 'PREV_TX'"
+fi
+if [ -z "$(grep -F 'PREV_TX' "$PLAN" | grep -vE '^ssh |^#' || true)" ]; then
+	ok "PREV_TX appears only inside an ssh remote command, never on a locally-run line"
+else
+	bad "PREV_TX appears on a line that is not an ssh remote command"
 fi
 
 # The resolved values really are substituted, not merely absent.
@@ -312,6 +371,140 @@ if [ -z "$UNTAGGED" ]; then
 else
 	bad "command line(s) with no machine tag:"
 	printf '%s\n' "$UNTAGGED" | head -5 | sed 's/^/        /'
+fi
+
+# --- Host routing. `# host` is a label; the line must also GET there. -------
+# Regression guard for the C2-2 review finding: a bare `bash scripts/foo.sh`
+# tagged `# host` silently runs on the Mac (wrong machine, wrong repo) or, if
+# the operator ssh's in by hand, as ROOT — which is the ownership accident
+# unit 7.5's chmod exists to recover from.
+HOST_CMDS="$(grep -E '  # host$' "$PLAN" || true)"
+HOST_N="$(printf '%s\n' "$HOST_CMDS" | grep -c . || true)"
+if [ "$HOST_N" -ge 7 ]; then
+	ok "the plan emits ${HOST_N} host command lines"
+else
+	bad "expected at least 7 host command lines, found ${HOST_N}"
+fi
+BAD_HOST="$(printf '%s\n' "$HOST_CMDS" | grep -vE "^ssh -i ${FAKE_KEY} root@${FAKE_HOST} " || true)"
+if [ -z "$BAD_HOST" ]; then
+	ok "every host command line is a resolved ssh invocation to the validator host"
+else
+	bad "host command line(s) missing the ssh route:"
+	printf '%s\n' "$BAD_HOST" | head -3 | sed 's/^/        /'
+fi
+BAD_SUDO="$(printf '%s\n' "$HOST_CMDS" | grep -vF "sudo -u deploy" || true)"
+if [ -z "$BAD_SUDO" ]; then
+	ok "every host command line drops to the deploy user (never runs as root)"
+else
+	bad "host command line(s) that would run as root:"
+	printf '%s\n' "$BAD_SUDO" | head -3 | sed 's/^/        /'
+fi
+BAD_REPO="$(printf '%s\n' "$HOST_CMDS" | grep -vF "/home/deploy/metal.freedom-yield.com" || true)"
+if [ -z "$BAD_REPO" ]; then
+	ok "every host command line names the repo path on the host"
+else
+	bad "host command line(s) with no host repo path"
+fi
+# Mac lines may legitimately contact the host — unit 7.5 IS the Mac->host
+# transfer (scp + a defensive chmod). What they must never do is run a
+# pipeline script on the host, which is the thing that has to go through
+# sudo -u deploy.
+MAC_CMDS="$(grep -E '  # Mac$' "$PLAN" || true)"
+if [ -z "$(printf '%s\n' "$MAC_CMDS" | grep -F 'sudo -u deploy' || true)" ]; then
+	ok "no Mac-tagged line carries sudo -u deploy (host execution is not smuggled onto a Mac line)"
+else
+	bad "a Mac-tagged line carries sudo -u deploy"
+fi
+if [ -z "$(printf '%s\n' "$MAC_CMDS" | grep -E 'bash /home/deploy/' || true)" ]; then
+	ok "no Mac-tagged line runs a script from the host repo path"
+else
+	bad "a Mac-tagged line runs a script out of the host repo path"
+fi
+
+# --- The three-shell quoting actually survives ------------------------------
+# Each ssh line crosses three shells (local -> remote root -> deploy bash -c).
+# This evaluates the printed line locally with `ssh` stubbed, proving it yields
+# exactly ONE remote-command argument, then evaluates that argument with `sudo`
+# stubbed, proving `bash -c` receives the intended script. Nothing real runs:
+# the local layer is single-quoted and the escaped `$` does not substitute.
+QPROBE="${TMP}/quote-probe.sh"
+cat > "$QPROBE" <<'QEOF'
+ssh() {
+	local last=""
+	for a in "$@"; do last="$a"; done
+	printf 'ARGC=%s\n' "$#"
+	printf '%s' "$last" > "$QP_REMOTE_OUT"
+}
+sudo() {
+	# The whole argument vector, not just the last: the two sanctioned forms
+	# end differently (`bash -c <script>` vs `env … bash <path> --apply`).
+	printf '%s' "$*" > "$QP_SCRIPT_OUT"
+}
+eval "$(cat "$QP_LINE")"
+eval "$(cat "$QP_REMOTE_OUT")"
+QEOF
+Q_OK=1
+Q_N=0
+while IFS= read -r hline; do
+	[ -n "$hline" ] || continue
+	Q_N=$((Q_N + 1))
+	printf '%s\n' "$hline" > "${TMP}/qline.txt"
+	QOUT="$(QP_LINE="${TMP}/qline.txt" QP_REMOTE_OUT="${TMP}/qremote.txt" \
+		QP_SCRIPT_OUT="${TMP}/qscript.txt" bash "$QPROBE" 2>/dev/null)"
+	# ssh must receive exactly: -i <key> <user@host> <one remote command>
+	if ! printf '%s' "$QOUT" | grep -qx 'ARGC=4'; then
+		bad "host line ${Q_N}: ssh did not receive exactly 4 arguments ($(printf '%s' "$QOUT" | head -1)) — the remote command is being split"
+		Q_OK=0
+	fi
+	# ...and sudo must be handed a command rooted at the host repo path.
+	if ! grep -qF '/home/deploy/metal.freedom-yield.com' "${TMP}/qscript.txt" 2>/dev/null; then
+		bad "host line ${Q_N}: sudo would not receive a command rooted at the host repo path"
+		Q_OK=0
+	fi
+	if ! grep -qF -- '-u deploy' "${TMP}/qscript.txt" 2>/dev/null; then
+		bad "host line ${Q_N}: sudo would not run as the deploy user"
+		Q_OK=0
+	fi
+done <<EOF
+$HOST_CMDS
+EOF
+if [ "$Q_OK" -eq 1 ] && [ "$Q_N" -ge 7 ]; then
+	ok "all ${Q_N} host lines survive local -> root -> deploy quoting with one intact remote command"
+fi
+# The PREV_TX line specifically must reach the deploy shell UNESCAPED, so the
+# deploy shell (not the root shell) is the one that reads the ledger.
+printf '%s\n' "$HOST_CMDS" | grep -F 'PREV_TX' > "${TMP}/qline.txt" 2>/dev/null || true
+if [ -s "${TMP}/qline.txt" ]; then
+	QP_LINE="${TMP}/qline.txt" QP_REMOTE_OUT="${TMP}/qremote.txt" \
+		QP_SCRIPT_OUT="${TMP}/qscript.txt" bash "$QPROBE" >/dev/null 2>&1
+	if grep -q 'PREV_TX=\$(tail' "${TMP}/qscript.txt" 2>/dev/null &&
+		grep -q -- '--prev-anchor-tx-id=\$PREV_TX' "${TMP}/qscript.txt" 2>/dev/null; then
+		ok "unit 8 reaches the deploy shell with PREV_TX still unevaluated (the host reads its own ledger)"
+	else
+		bad "unit 8's PREV_TX did not survive to the deploy shell as an unevaluated substitution"
+	fi
+else
+	bad "could not locate the PREV_TX host line"
+fi
+
+# --- C1 regression: the identity signature must be staged with the manifest --
+SIG_LINE="$(grep -E '^git add ' "$PLAN" || true)"
+if printf '%s' "$SIG_LINE" | grep -qF 'public/api/identity.json.sig'; then
+	ok "unit 4b stages public/api/identity.json.sig alongside the manifest"
+else
+	bad "unit 4b's git add omits public/api/identity.json.sig — a new manifest would be published under the previous cycle's signature"
+fi
+if printf '%s' "$SIG_LINE" | grep -qF 'public/api/identity.json '; then
+	ok "unit 4b stages public/api/identity.json"
+else
+	bad "unit 4b's git add omits public/api/identity.json"
+fi
+
+# --- M3: the output warns against republishing itself -----------------------
+if grep -q 'DO NOT PASTE THIS OUTPUT INTO A COMMIT' "$PLAN"; then
+	ok "the plan carries the do-not-republish banner (it contains host + key paths)"
+else
+	bad "the plan is missing the do-not-republish banner"
 fi
 
 # The machine set is closed: a third spelling would read as a new machine.

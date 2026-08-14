@@ -25,12 +25,22 @@
 #   * EVERY line of the output is either a `#` comment or a command. The
 #     whole output parses as a shell script (`bash -n`), which
 #     tests/cycle-transition/ asserts on every run.
-#   * EVERY command line carries a trailing `# host` or `# Mac` naming the
-#     machine it must run on. There are exactly two machines and no third
+#   * THE WHOLE PLAN IS TYPED ON THE MAC. Every command line carries a
+#     trailing `# host` or `# Mac` naming where it EXECUTES, and a `# host`
+#     line already carries the `ssh` + `sudo -u deploy` that gets it there and
+#     runs it as the right user (plus a `cd <repo>` on the units that need a
+#     working directory; the ones invoked by absolute path do not use one).
+#     Naming the machine without handing over the route was a C2-2 review
+#     finding: `# host` alone is a label, not a procedure, and running these
+#     as root instead of deploy reproduces the ownership accident unit 7.5's
+#     chmod exists to prevent. There are exactly two machines and no third
 #     spelling.
-#   * Values are resolved at print time. The output contains no `$FOO` and no
-#     `${BAR}`; the test asserts zero of them. The three places where a value
-#     genuinely cannot exist yet are listed under "WHAT IS NOT RESOLVED".
+#   * Values are resolved at print time. The output contains no unescaped
+#     `$FOO` / `${BAR}`. Exactly two escaped `$` sequences are emitted, both
+#     on unit 8's line: `\$(tail …)` and `\$PREV_TX`. They are escaped so the
+#     DEPLOY SHELL ON THE HOST evaluates them rather than this machine; the
+#     test pins the escaped-variable allowlist to exactly `PREV_TX`. What
+#     genuinely cannot be resolved is listed under "WHAT IS NOT RESOLVED".
 #
 # docs/CYCLE_GATE.md REMAINS THE CANON. This file does not replace it; it
 # restates it in a machine-checkable shape. tests/cycle-transition/ fails if
@@ -133,11 +143,19 @@
 #   --expect-cycle=<N>       REQUIRED. The cycle that CLOSES today — exactly
 #                            the value units 4 and 5 pass as FY_EXPECT_CYCLE.
 #                            Why it is not derived: see THE OFF-BY-ONE below.
-#   --ledger=<path>          REQUIRED. The published cycle-history.jsonl. Not
+#   --ledger=<path>          REQUIRED. The PUBLISHED cycle-history.jsonl. Not
 #                            the source of the cycle number — the CHECK on it.
 #                            There is no default, for the reason stated at
 #                            length in scripts/lib/cycle-context.sh ("THE
-#                            LEDGER ARGUMENT IS MANDATORY").
+#                            LEDGER ARGUMENT IS MANDATORY"). It is not in this
+#                            repo (the public feeds are gitignored), so fetch
+#                            the published copy first:
+#                              curl -fsS https://metal.freedom-yield.com/api/cycle-history.jsonl \
+#                                -o /tmp/cycle-history.jsonl
+#                            Fetching the PUBLISHED bytes is the point: units
+#                            4 and 5 guard against that same copy, so a local
+#                            mirror could agree with the plan while the guards
+#                            still refuse.
 #   --testnet-tx-id=<64hex>  Optional. See "WHAT IS NOT RESOLVED" above.
 #
 # ---------------------------------------------------------------------------
@@ -162,9 +180,27 @@
 #   closed == N    ->  phase 1 has landed. Normal for a re-print.
 #   anything else  ->  REFUSED (exit 68), naming both numbers.
 #
-# The refusal is the point. The cycle number becomes the memo prefix of an
-# append-only on-chain inscription; a plausible-looking off-by-one there is not
-# recoverable, and 2026-07-01 is what an unrecoverable anchor mistake costs.
+# WHAT THIS CLOSES, AND WHAT IT DOES NOT. Stating only the first half would be
+# the overclaim this repo keeps paying for.
+#
+# CLOSED: the plan cannot disagree with ITSELF. A morning print and an
+# afternoon re-print of the same declared N produce the same N and N+1, so the
+# memo prefix does not move under the operator while the day proceeds. The
+# test asserts exactly that.
+#
+# NOT CLOSED: whether the DECLARATION is right. The guard narrows the input to
+# two accepted values, it does not verify them. `--expect-cycle=3` against a
+# 3-row ledger is accepted, reports "phase 1 HAS landed", and derives 4 to
+# inscribe — and because gen-identity.sh and gen-anchor-source.sh compare
+# against that same not-yet-advanced ledger, both of them pass too. The first
+# thing that objects is append-anchor-history.sh's invariant 4, which runs
+# AFTER the irreversible broadcast. That is no worse than the current runbook,
+# where the same number is typed by hand into two scripts with no cross-check
+# at all — but it is not a solved problem, and nothing here should be read as
+# solving it. Closing it needs a SECOND, INDEPENDENT observation of which
+# cycle is current; the obvious candidate is the endTime in the validator.json
+# that step 0 already reads, which distinguishes the two states outright.
+# That belongs to C2-3 along with the post-condition resume.
 #
 # Required environment (refused if unset — see fyct__require_env):
 #   VALIDATOR_HOST       the validator host. Never literal in this repo
@@ -177,7 +213,15 @@
 #                        would emit a line that cannot be pasted (the exact
 #                        trap docs/CYCLE_GATE.md step 6 warns about).
 # Optional environment:
-#   VALIDATOR_HOST_USER  defaults to root, as in the sibling scripts.
+#   VALIDATOR_HOST_USER  defaults to root, as in the sibling scripts. This is
+#                        the SSH login only — every host unit then drops to
+#                        `sudo -u deploy`, because the pipeline's files are
+#                        deploy-owned and running them as root is what unit
+#                        7.5's defensive chmod exists to recover from.
+#   FY_REMOTE_REPO       the repo path on the validator host. Defaults to
+#                        /home/deploy/metal.freedom-yield.com, the path
+#                        docs/CYCLE_GATE.md and docs/VALIDATOR_RENEWAL.md
+#                        both use verbatim.
 #   FY_CONFIG_DIR        defaults to $HOME/.fy-mainnet-broadcast/config,
 #                        RESOLVED TO AN ABSOLUTE PATH at print time. That
 #                        resolution is not cosmetic: it removes the zsh
@@ -233,7 +277,7 @@ fyct__phase_rows() {
 2|identity|2|OPERATOR, AT A TTY. Unit 4 prompts for the operator identity key passphrase; it is held in Dashlane (see docs/OPERATOR_IDENTITY_SETUP.md). The prompt appears when gen-identity.sh runs, so the passphrase is a precondition of phase 2, not a review of it.
 3|compose|-|-
 4|rehearsal|3|OPERATOR, AT A TTY. Unlock the PROJECT TESTNET keystore (HOME=~/.metal-fy-proton-test) — the unlock command itself is handed over in chat, not printed here (see this script's header, "WHY THE KEYSTORE UNLOCK COMMANDS ARE NOT PRINTED"; exact wording in docs/CYCLE_GATE.md step 7a). Unit 7a cannot run against a locked keystore: it exits 2. This is also where testnet broadcast authorization is given.
-5|刻印 / inscribe|4|OPERATOR, TWICE. (a) BEFORE unit 7c: unlock the SEPARATE MAINNET keystore (HOME=~/.metal-fy-proton) and give the PRIME DIRECTIVE gate-2 per-invocation authorization, naming chain, actor, permission, action, memo and quantity explicitly. Gate 2 is a precondition, not a review. (b) AFTER unit 7c: confirm the transaction on the explorer by eye, then re-lock the mainnet keystore — its prompt reads "Enter 32 character password (leave empty to create new)", and an empty Enter there creates a NEW password instead of locking with the existing one.
+5|刻印 / inscribe|4|OPERATOR, TWICE — AND (a) IS NOT DUE YET AT THIS LINE. (a) Between unit 7b and unit 7c, NOT before 7b: unlock the SEPARATE MAINNET keystore (HOME=~/.metal-fy-proton) and give the PRIME DIRECTIVE gate-2 per-invocation authorization, naming chain, actor, permission, action, memo and quantity explicitly. Gate 2 is a precondition of 7c, not a review of it — but 7b is a dry run that needs the mainnet keystore HOME only for the separation guard, never an UNLOCKED one, so unlocking here would leave the keystore open one unit longer than necessary. Unit 7b prints the exact unlock line and token ritual itself when it finishes, which is the moment to do this. (b) AFTER unit 7c: confirm the transaction on the explorer by eye, then re-lock the mainnet keystore — its prompt reads "Enter 32 character password (leave empty to create new)", and an empty Enter there creates a NEW password instead of locking with the existing one.
 6|事後 / post|-|-
 FYCT_PHASE_EOF
 }
@@ -353,6 +397,33 @@ fyct__cmd() {
 	printf '%s  # %s\n' "$*" "$machine"
 }
 
+# fyct__host_cd <remote-shell-command>
+#   A `# host` unit that needs a working directory: ssh in, drop to the deploy
+#   user, cd to the repo, run. This is docs/VALIDATOR_RENEWAL.md's day-of form
+#   verbatim (its ①②③ / ⑧ / ⑧.5 blocks), not an invention here.
+#
+#   QUOTING, because it is three shells deep and easy to get wrong:
+#     - the outer '...' is consumed by the LOCAL shell, so everything inside
+#       reaches ssh untouched;
+#     - the "..." inside is expanded by the REMOTE LOGIN shell (root);
+#     - `bash -c` then runs the result as the deploy user.
+#   So a `$` that must survive to the deploy shell has to reach the remote
+#   login shell as `\$`. Only unit 8 needs that, and it is the reason the
+#   escaped-variable allowlist in tests/cycle-transition/ is non-empty.
+fyct__host_cd() {
+	fyct__cmd host "ssh -i ${VHK} ${VHU}@${VH} 'sudo -u deploy bash -c \"cd ${REMOTE_REPO} && $1\"'"
+}
+
+# fyct__host_env <env-assignments> <script-relative-path> [args...]
+#   A `# host` unit that needs no working directory: the `sudo -u deploy env
+#   … bash <absolute script path>` form docs/CYCLE_GATE.md's emergency
+#   fallback and docs/VALIDATOR_RENEWAL.md ⑤/⑨ both use.
+fyct__host_env() {
+	local envs="$1"
+	shift
+	fyct__cmd host "ssh -i ${VHK} ${VHU}@${VH} 'sudo -u deploy env ${envs} bash ${REMOTE_REPO}/$*'"
+}
+
 # cmd_pending <machine> <reason-tag> <command-text>
 #   The same, COMMENTED OUT, for a command that cannot be resolved yet.
 fyct__cmd_pending() {
@@ -411,20 +482,19 @@ fyct__unit_commands() {
 
 	case "$id" in
 	1)
-		fyct__wrap "  " "Repeat until endTime is the NEW AddValidator entry's. The metal-node-info cron rewrites this file every 5 minutes, so a file whose mtime is under 5 minutes old is fresh."
+		fyct__wrap "  " "Forces a fresh node-info tick and then reads it back, rather than waiting on the 5-minute cron. Repeat until endTime is the NEW AddValidator entry's."
 		fyct__wrap "  " "Do NOT query the P-chain RPC directly to check this: scripts/broadcast-guard.sh refuses that command shape unconditionally, by shape alone, and reading this cron artifact is the sanctioned way to observe chain state (docs/CYCLE_GATE.md step 0)."
-		fyct__cmd "$m" "jq -r '{endTime: .endTime, observedAt: .observedAt}' public/api/validator.json"
+		fyct__host_cd "bash scripts/node-info.sh && jq -r .endTime,.observedAt public/api/validator.json"
 		;;
 	2)
-		fyct__wrap "  " "FY_LIVE=1 is REQUIRED and docs/CYCLE_GATE.md step 2 does not show it — that step carries no command block at all. Measured 2026-08-14: every write in uptime-history.sh goes through fyd_live_write / fyd_live_run (lines 91-107, 166, 257) and the file contains no ungated redirect write, so without the opt-in this step is a loud but complete no-op and the cycle never closes."
-		fyct__cmd "$m" "FY_LIVE=1 bash scripts/uptime-history.sh"
+		fyct__wrap "  " "FY_LIVE=1 is REQUIRED, and docs/CYCLE_GATE.md step 2 does not show it — that step carries no command block at all. Measured 2026-08-14: uptime-history.sh routes every persistent write through fyd_live_write / fyd_live_run (91, 92, 106, 107, 108, 166), and its only two raw redirects go to mktemp paths (253 to the temp from 234, 283 to the temp from 280) whose install mv is itself gated (257, 284). So without the opt-in nothing lands anywhere and the cycle simply never closes."
+		fyct__host_env "FY_LIVE=1" "scripts/uptime-history.sh"
 		;;
 	3)
 		fyct__wrap "  " "The publish is neither optional nor automatic: units 4 and 5 read the PUBLISHED ledger, so skipping it makes gen-identity.sh exit 7 and gen-anchor-source.sh exit 9 against a stale count."
-		fyct__cmd "$m" "bash scripts/gen-cycle-history.sh"
-		fyct__cmd "$m" "bash scripts/push-to-web-host.sh cycle-history.jsonl"
-		fyct__wrap "  " "Confirm the published copy grew by exactly one line and now holds ${N} records before continuing."
-		fyct__cmd "$m" "curl -fsS 'https://metal.freedom-yield.com/api/cycle-history.jsonl' | grep -cve '^[[:space:]]*\$' || true"
+		fyct__host_cd "bash scripts/gen-cycle-history.sh && bash scripts/push-to-web-host.sh cycle-history.jsonl"
+		fyct__wrap "  " "Then confirm the PUBLISHED copy grew by exactly one line and now holds ${N} records. Deliberately checked from the Mac, not the host: units 4 and 5 guard against what the site actually serves, so the host's own copy is not the thing that matters here."
+		fyct__cmd Mac "curl -fsS 'https://metal.freedom-yield.com/api/cycle-history.jsonl' | grep -cve '^[[:space:]]*\$' || true"
 		;;
 	4)
 		fyct__wrap "  " "FY_EXPECT_CYCLE is the CLOSED-cycle count (${N}), not the number being inscribed. It is mandatory at a transition: it hard-stops with exit 7 if unit 3's publish has not landed."
@@ -440,7 +510,8 @@ fyct__unit_commands() {
 		fyct__cb
 		fyct__wrap "  " "docs/CYCLE_GATE.md step 4b also records an open item that must be corrected BEFORE this step runs: the record_caveat on the api/archive/ row still says STRUCTURALLY immutable on the basis of a grep for a field name that is actually spelled computed_at. Read that step before editing."
 		fyct__cmd "$m" "bash tests/publication-registry/test-publication-registry.sh"
-		fyct__cmd "$m" "git add public/api/identity.json deploy/identity-pin-baseline.json deploy/publication.json"
+		fyct__wrap "  " "public/api/identity.json.sig IS IN THIS LIST AND MUST STAY. gen-identity.sh writes the manifest and its detached signature as a pair (its atomic-publish block moves both), and the real cycle-4 transition commit 90bcdd9 carried exactly those two files. Staging the manifest without the signature publishes a NEW manifest under the PREVIOUS cycle's signature: the public ssh-keygen -Y verify then fails, and unit 9's Phase 1 identity signature check fails with it."
+		fyct__cmd "$m" "git add public/api/identity.json public/api/identity.json.sig deploy/identity-pin-baseline.json deploy/publication.json"
 		fyct__cmd "$m" "git commit -m 'chore(identity): cycle ${INSCRIBE} identity manifest + C4 post-issuance cleanup'"
 		fyct__cmd "$m" "git push"
 		fyct__cmd "$m" "gh run watch"
@@ -448,7 +519,7 @@ fyct__unit_commands() {
 	5)
 		fyct__wrap "  " "Expect exactly one 'side-effects: WARNING: state dir falls back to the production default' line. It is correct here — this script only READS the production streams. Do NOT point FY_STATE_DIR at a sandbox (it would compose the DAG from empty inputs) and do NOT add FY_LIVE=1 (it writes no production state)."
 		fyct__wrap "  " "Its ordering guard is exit 9, not 7. Its exit 7 means an atomic write failed — a different condition."
-		fyct__cmd "$m" "FY_EXPECT_CYCLE=${N} bash scripts/gen-anchor-source.sh"
+		fyct__host_env "FY_EXPECT_CYCLE=${N}" "scripts/gen-anchor-source.sh"
 		;;
 	6)
 		fyct__wrap "  " "Meaning switch from unit 5, deliberate: --expect-cycle here is the number being INSCRIBED (${INSCRIBE}), compared against the fetched file's observations_branch.cycle_number_observed. Passing ${N} exits 5."
@@ -469,7 +540,8 @@ fyct__unit_commands() {
 	7b)
 		fyct__wrap "  " "From the ALREADY-COMMITTED bytes, with no recompose. It refuses with exit 9 if the source differs from git show HEAD:public/api/anchor-source.json, and with exit 10 if the live public copy does not yet serve those same bytes. It composes nothing and sends nothing."
 		fyct__wrap "  " "Do not run it on the validator host: the keystore separation guard refuses a login-HOME invocation with exit 8, and a host-side recompose would produce a different dag_root_computed because the artifacts branch hashes feeds the 5-minute crons rewrite."
-		fyct__wrap "  " "FY_CONFIG_DIR is printed as an absolute path on purpose: that sidesteps the zsh left-to-right assignment-ordering trap that silently relocates the config dir inside the keystore when it is written home-relative. Deliberate: no line of this plan contains a shell variable reference, so nothing in it can resolve differently in the shell that pastes it."
+		fyct__wrap "  " "FY_CONFIG_DIR is printed as an absolute path on purpose: that sidesteps the zsh left-to-right assignment-ordering trap that silently relocates the config dir inside the keystore when it is written home-relative."
+		fyct__wrap "  " "This unit needs the mainnet keystore HOME (the separation guard refuses otherwise with exit 8) but NOT an unlocked keystore, no signing key, and no authorization — it is a dry run that touches no operator token. It also prints the stop-4(a) unlock line, the token ritual and the unit 7c command with both gate args filled in, so prefer ITS output over the line printed below."
 		if [ "$TTX_KNOWN" = "1" ]; then
 			fyct__cmd "$m" "FY_CONFIG_DIR=${CFG} HOME=~/.metal-fy-proton bash scripts/preview-cycle-anchor-broadcast.sh --source=public/api/anchor-source.json --testnet-tx-id=${TTX}"
 		else
@@ -493,20 +565,18 @@ fyct__unit_commands() {
 		fyct__cmd "$m" "ssh -i ${VHK} ${VHU}@${VH} 'chmod 644 /home/deploy/.fya-sign-output.json'"
 		;;
 	8)
-		fyct__wrap "  " "--prev-anchor-tx-id is NOT derived from anything else, and it is read on the host from the last line of the anchor ledger — so it is emitted as the command substitution docs/CYCLE_GATE.md step 8 prescribes, which resolves at paste time on the host. Omitting it, or passing a stale value, writes a wrong prev link into the receipt and then fails append invariant 6. Only genesis may be null."
-		fyct__cmd "$m" "bash scripts/gen-anchor-receipt.sh --input=/home/deploy/.fya-sign-output.json --anchor-source=public/api/anchor-source.json --trigger=cyclestart --prev-anchor-tx-id=\"\$(tail -n 1 public/api/anchor-history.jsonl | jq -r '.tx_id')\""
-		fyct__wrap "  " "FY_LIVE=1 is required on the append, but not for the reason it usually is: the append itself happens either way, deliberately, because a forgotten opt-in must never cost a line in an append-only ledger. What the opt-in gates is the automatic R18 archive push. gen-anchor-receipt.sh needs no opt-in at all."
-		fyct__cmd "$m" "FY_LIVE=1 bash scripts/append-anchor-history.sh --receipt=public/api/anchor-receipt.json --event-type=cyclestart"
+		fyct__wrap "  " "--prev-anchor-tx-id is NOT derived from anything else. It is read on the HOST from the last line of the anchor ledger, into PREV_TX, chained with && so a failed read stops the receipt instead of writing an empty prev link. That is why this one line carries an escaped \$ — it must survive to the deploy shell. Passing a stale value (or none) writes a wrong prev link and then fails append invariant 6. Only genesis may be null."
+		fyct__wrap "  " "FY_LIVE=1 on the append is required, but not for the reason it usually is: the append itself happens either way, deliberately, because a forgotten opt-in must never cost a line in an append-only ledger. What the opt-in gates is the automatic R18 archive push. gen-anchor-receipt.sh needs no opt-in at all."
+		fyct__host_cd "PREV_TX=\\\$(tail -n 1 public/api/anchor-history.jsonl | jq -r .tx_id) && bash scripts/gen-anchor-receipt.sh --input=/home/deploy/.fya-sign-output.json --anchor-source=public/api/anchor-source.json --trigger=cyclestart --prev-anchor-tx-id=\\\$PREV_TX && FY_LIVE=1 bash scripts/append-anchor-history.sh --receipt=public/api/anchor-receipt.json --event-type=cyclestart"
 		;;
 	8.5)
-		fyct__wrap "  " "Two, not four. These are the canonical flat copies unit 8 just wrote locally. Skip this and the public feeds keep serving the PREVIOUS cycle even though the anchor already succeeded — unit 9 polls only anchor-source.json freshness, so it will NOT catch a missed push here. anchor-source.json is not in this list: it is git-deploy owned."
-		fyct__cmd "$m" "bash scripts/push-to-web-host.sh anchor-receipt.json"
-		fyct__cmd "$m" "bash scripts/push-to-web-host.sh anchor-history.jsonl"
+		fyct__wrap "  " "Two, not four. These are the canonical flat copies unit 8 just wrote on the host. Skip this and the public feeds keep serving the PREVIOUS cycle even though the anchor already succeeded — unit 9 polls only anchor-source.json freshness, so it will NOT catch a missed push here. anchor-source.json is not in this list: it is git-deploy owned."
+		fyct__host_cd "bash scripts/push-to-web-host.sh anchor-receipt.json && bash scripts/push-to-web-host.sh anchor-history.jsonl"
 		fyct__wrap "  " "The two R18 per-anchor archive copies are pushed automatically by unit 8's append. That push is best-effort: if stderr or an alert shows 'R18 publish FAILED' or 'R18 publish skipped', re-run the manual retry command it prints."
 		;;
 	9)
 		fyct__wrap "  " "FY_LIVE=1 is required; without it the script refuses with exit 6 before Phase 1 and writes nothing. No broadcast and no explorer URL here — this only records cycle-gate approval state."
-		fyct__cmd "$m" "FY_LIVE=1 bash scripts/resume-after-cycle-start.sh --apply"
+		fyct__host_env "FY_LIVE=1" "scripts/resume-after-cycle-start.sh --apply"
 		;;
 	*)
 		echo "cycle-transition: ERROR: no command block for unit '${id}' — the unit table and the command blocks have drifted." >&2
@@ -527,6 +597,10 @@ fyct_print_plan() {
 	fyct__c "PRINT ONLY. Nothing below has been executed, and this script has no code"
 	fyct__c "path that could execute it."
 	fyct__c "============================================================================"
+	fyct__c "DO NOT PASTE THIS OUTPUT INTO A COMMIT, A PR, AN ISSUE, A CHAT LOG OR"
+	fyct__c "A PUBLISHED REPORT. It carries the resolved validator host and ssh key"
+	fyct__c "path, which are never literal in this repository on purpose."
+	fyct__c "============================================================================"
 	fyct__c "printed by     : scripts/cycle-transition.sh --print-only"
 	fyct__c "printed at     : ${PRINTED_AT}"
 	fyct__c "ledger read    : ${LEDGER}"
@@ -535,7 +609,8 @@ fyct_print_plan() {
 	fyct__c "ledger cross-check       : ${PHASE1_STATE}"
 	fyct__c "validator host : ${VH}"
 	fyct__c "host ssh key   : ${VHK}"
-	fyct__c "host ssh user  : ${VHU}"
+	fyct__c "host ssh user  : ${VHU} (login only — every host unit drops to sudo -u deploy)"
+	fyct__c "host repo path : ${REMOTE_REPO}"
 	fyct__c "mainnet config : ${CFG}"
 	if [ "$TTX_KNOWN" = "1" ]; then
 		fyct__c "rehearsal tx   : ${TTX}"
@@ -551,7 +626,7 @@ fyct_print_plan() {
 	fi
 	fyct__cb
 	fyct__c "HOW TO READ THIS"
-	fyct__wrap "  " "Every line is either a comment or a command. Each command ends with the machine it runs on: '# host' is the validator host, '# Mac' is the operator Mac. There is no third machine."
+	fyct__wrap "  " "TYPE EVERYTHING ON THE MAC. Each command ends with the machine it EXECUTES on: '# Mac' runs locally; '# host' already carries the ssh and the sudo -u deploy that take it to the validator host and run it as the deploy user (with a cd into the repo where the unit needs one). There is no third machine, and you should not need a second terminal on the host."
 	fyct__wrap "  " "The four STOP blocks are human actions. This script performs none of them, and it holds no route to a broadcast — phases 4 and 5 print and stop, permanently, enforced by tests/orchestrator-guard/."
 	fyct__wrap "  " "docs/CYCLE_GATE.md remains the canon. This plan restates it with values filled in; where the two differ, an inline comment says so."
 	fyct__c "============================================================================"
@@ -593,15 +668,17 @@ fyct_print_plan() {
 	fyct__c "============================================================================"
 	fyct__c "WHERE THIS PLAN IS NOT A COMPLETE SUBSTITUTE FOR docs/CYCLE_GATE.md"
 	fyct__cb
-	fyct__wrap "  " "1. The keystore unlock and re-lock commands for stops 3 and 4 are NOT printed. tests/orchestrator-guard/ fails this file if it names the signing CLI, and those two are the operator's own manual actions, handed over in chat. Get their exact wording from docs/CYCLE_GATE.md step 7."
+	fyct__wrap "  " "1. The keystore unlock and re-lock commands for stops 3 and 4 are NOT printed here. tests/orchestrator-guard/ fails this file if it names the signing CLI, and those are the operator's own manual actions, handed over in chat. Measured relief: the phase scripts print them themselves — unit 7b prints the MAINNET unlock line plus the token ritual, and unit 7a prints the TESTNET unlock line whenever it detects a locked keystore. So the only step of the day with no printed source anywhere is the FINAL RE-LOCK after unit 7c, which is also the one where an empty Enter silently sets a new password. Get its wording from docs/CYCLE_GATE.md step 7c."
 	if [ "$TTX_KNOWN" != "1" ]; then
 		fyct__wrap "  " "2. Units 7b and 7c are commented out because the rehearsal tx id does not exist yet. Re-run with --testnet-tx-id=<64hex> once unit 7a has printed its sentinel."
 	else
 		fyct__wrap "  " "2. Units 7b and 7c are resolved against the supplied rehearsal tx id. Verify it is THIS cycle's (cycle ${INSCRIBE}) — a stale id from an earlier rehearsal satisfies the shape check and fails gate 1."
 	fi
-	fyct__wrap "  " "3. Unit 8's --prev-anchor-tx-id resolves on the host at paste time, by design; it is not a value this plan could know."
+	fyct__wrap "  " "3. Unit 8's PREV_TX resolves on the host at paste time, by design; it is not a value this plan could know. It is the one escaped variable in the output."
 	fyct__wrap "  " "4. Unit 4b is a set of hand edits. Only its verification and commit are commands."
-	fyct__wrap "  " "5. This plan does not execute, verify, or resume. Post-condition-driven resume is C2-3."
+	fyct__wrap "  " "5. The '~' in the keystore and identity-key paths is USER-RELATIVE, not resolved here. It expands to the home directory of whoever pastes it, which is correct on the operator's Mac and wrong anywhere else. Everything else on those lines is fully resolved."
+	fyct__wrap "  " "6. The host repo path (${REMOTE_REPO}) and the deploy user are assumed, not probed. If the host layout ever changes, these lines are wrong in a way this plan cannot detect."
+	fyct__wrap "  " "7. This plan does not execute, verify, or resume. Post-condition-driven resume is C2-3."
 	fyct__c "============================================================================"
 	return 0
 }
@@ -716,6 +793,7 @@ fyct_main() {
 	VHK="$VALIDATOR_HOST_KEY"
 	VHU="${VALIDATOR_HOST_USER:-root}"
 	CFG="${FY_CONFIG_DIR:-${HOME}/.fy-mainnet-broadcast/config}"
+	REMOTE_REPO="${FY_REMOTE_REPO:-/home/deploy/metal.freedom-yield.com}"
 	TTX="$ttx"
 	TTX_KNOWN=0
 	[ -n "$ttx" ] && TTX_KNOWN=1
