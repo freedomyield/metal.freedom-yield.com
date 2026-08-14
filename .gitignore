@@ -72,6 +72,10 @@ public/api/peers-changes.json
 public/api/peers-gini.json
 public/api/peers-gini-history.jsonl
 public/api/peers-history-index.json
+# R18 anchor receipt / history — on-chain anchor 確定後にのみ生成・push される
+# (validator host, scripts/run-anchor-pipeline.sh 経由。cron 常駐ではない)
+public/api/anchor-receipt.json
+public/api/anchor-history.jsonl
 # R18 per-anchor archive (gen-anchor-source.sh / gen-anchor-receipt.sh が
 # content-addressed で書く anchor-source-<dag>.json / anchor-receipt-<tx>.json)。
 # 単一 owner = validator host push (scripts/push-to-web-host.sh archive/<name>)。

@@ -17,6 +17,8 @@
 #   node-health-recent.json     → /public/api/node-health-recent.json     (JSON-validated)
 #   evidence.json               → /public/api/evidence.json               (JSON-validated)
 #   cycle-history.jsonl         → /public/api/cycle-history.jsonl         (JSONL)
+#   anchor-receipt.json         → /public/api/anchor-receipt.json         (JSON-validated)
+#   anchor-history.jsonl        → /public/api/anchor-history.jsonl        (JSONL)
 #   schedule.ics                → /public/calendar/schedule.ics           (ICS-validated)
 #   <16-64 hex>.ics             → /public/calendar/<name>.ics             (ICS-validated)
 #
