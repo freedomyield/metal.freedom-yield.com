@@ -683,10 +683,38 @@ t19() {
 			sha256: $z }
 	' "$IDENTITY" > "$fx_id" || { fail "T19 could not build the post-C4 manifest fixture"; return; }
 
-	cp "$REGISTRY" "$reg_stale"
+	# The "stale" registry is SYNTHESISED into the pre-C4 shape, never copied
+	# from the live one. Copying it was the first version of this case and it
+	# was wrong in a way that only bites later: on 2026-09-04, the moment the
+	# operator performs the step-4b cleanup, the live registry stops being
+	# stale, the fixture stops being a stale fixture, and the two assertions
+	# below flip to red — inside the very commit that did the right thing.
+	# Measured on a tree with step 4b applied: "T7 did NOT flag the 4 expired
+	# violations" / "T14 did NOT flag the stale pinned_by set", PASS=23 FAIL=2.
+	# That is the same transition-day dead end this case exists to prevent,
+	# merely relocated into the test. Forcing both states here makes T19 give
+	# the same verdict before and after the cleanup.
+	jq '
+		.known_kind_violations.violations = {
+			"evidence_json.sha256":       { path: "api/evidence.json",       reason: "T19 fixture" },
+			"validator_json.sha256":      { path: "api/validator.json",      reason: "T19 fixture" },
+			"uptime_cycles_json.sha256":  { path: "api/uptime-cycles.json",  reason: "T19 fixture" },
+			"cycle_history_jsonl.sha256": { path: "api/cycle-history.jsonl", reason: "T19 fixture" }
+		}
+		| .publications |= map(
+			. as $row
+			| if   $row.path == "api/evidence.json"       then .pinned_by = ["api/identity.json#artifact_manifest.evidence_json.sha256"]
+			  elif $row.path == "api/validator.json"      then .pinned_by = ["api/identity.json#artifact_manifest.validator_json.sha256"]
+			  elif $row.path == "api/uptime-cycles.json"  then .pinned_by = ["api/identity.json#artifact_manifest.uptime_cycles_json.sha256"]
+			  elif $row.path == "api/cycle-history.jsonl" then .pinned_by = ["api/identity.json#artifact_manifest.cycle_history_jsonl.sha256"]
+			  elif $row.path == "api/incidents.schema.v1.json" then .pinned_by = []
+			  elif $row.path == "api/archive/"                 then .pinned_by = []
+			  else . end)
+	' "$REGISTRY" > "$reg_stale" || { fail "T19 could not synthesise the pre-C4 registry fixture"; return; }
 
-	# The registry as the 2026-09-04 commit must leave it: the four stream
-	# acknowledgements gone, their pinned_by cleared, the two new pins declared.
+	# The registry as the 2026-09-04 commit must leave it — derived from the
+	# SYNTHETIC stale fixture, so this pair is a genuine before/after of the
+	# step-4b edit rather than a comparison against whatever is on disk today.
 	jq '
 		.known_kind_violations.violations = {}
 		| .publications |= map(
@@ -698,7 +726,38 @@ t19() {
 			elif .path == "api/archive/"
 			then .pinned_by = ["api/identity.json#artifact_manifest.anchor_source_archive_json.sha256"]
 			else . end)
-	' "$REGISTRY" > "$reg_done" 2>/dev/null || { fail "T19 could not build the updated-registry fixture"; return; }
+	' "$reg_stale" > "$reg_done" || { fail "T19 could not build the updated-registry fixture"; return; }
+
+	# The fixtures must actually contain what the case claims to exercise. A
+	# renamed or deleted publication row would otherwise silently shrink the
+	# test instead of failing it.
+	# n_pins counts PINS the way identity_pins() does — a payload sha256 and a
+	# schema_sha256 are each one pin — not entries.
+	local n_pins n_unpinned n_rows
+	n_pins="$(IDENTITY="$fx_id" identity_pins | grep -c .)"
+	n_unpinned="$(jq -r '[.artifact_manifest[] | select(has("sha256") | not)] | length' "$fx_id")"
+	[ "$n_pins" -eq 6 ] && [ "$n_unpinned" -eq 4 ] \
+		|| { fail "T19 manifest fixture is not the shape this case tests (${n_pins} pins / ${n_unpinned} unpinned entries, want 6/4) — a leaf was added or removed upstream"; return; }
+	n_rows="$(jq -r '[.publications[] | select(.path == "api/incidents.schema.v1.json" or .path == "api/archive/")] | length' "$reg_stale")"
+	[ "$n_rows" -eq 2 ] \
+		|| { fail "T19 registry fixture is missing api/incidents.schema.v1.json and/or api/archive/ (found ${n_rows} of 2) — the rows step 4b writes to no longer exist"; return; }
+
+	# The stale fixture must be STALE no matter what the live registry says.
+	# This is the assertion that would have caught the copy: on a tree where
+	# step 4b has already been applied, `cp "$REGISTRY"` yields 0 violations
+	# and 0 stream pins here, and the two comparisons below would then be
+	# checking nothing while still reporting green.
+	local n_viol n_streampins
+	n_viol="$(jq -r '.known_kind_violations.violations | length' "$reg_stale")"
+	n_streampins="$(jq -r '[ .publications[]
+		| select([.pinned_by[]? | test("artifact_manifest\\.(evidence_json|validator_json|uptime_cycles_json|cycle_history_jsonl)\\.sha256$")] | any)
+		] | length' "$reg_stale")"
+	if [ "$n_viol" -eq 4 ] && [ "$n_streampins" -eq 4 ]; then
+		pass "T19 the stale fixture is synthesised, not copied (4 violations + 4 stream pins, independent of the live registry)"
+	else
+		fail "T19 the stale fixture is not stale (${n_viol} violations / ${n_streampins} stream pins, want 4/4) — it is tracking the live registry instead of pinning the pre-C4 state"
+		return
+	fi
 
 	# Run the real checks against the fixtures in a subshell so their pass/fail
 	# counters and their globals cannot leak into this suite's own tally.
