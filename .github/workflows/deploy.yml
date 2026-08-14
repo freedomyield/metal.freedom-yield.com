@@ -56,12 +56,79 @@ jobs:
       - name: Run gitleaks against full history
         run: gitleaks detect --source . --config .gitleaks.toml --redact --exit-code 1 --no-banner
 
+  publish-guard:
+    # The OTHER half of the pre-deploy gate. gitleaks above scans key/token
+    # secrets and does NOT catch host IPs, operator handles, real names, phone
+    # numbers or emails — publish-guard.sh's own header says exactly that, and
+    # the 2026-07-03 incident it was written for (a real validator host IP plus
+    # the operator handle committed into a public-tracked file) went straight
+    # past gitleaks.
+    #
+    # That guard is otherwise enforced only in .githooks/pre-commit and
+    # pre-push, which are opt-in per clone (core.hooksPath is never committed).
+    # ci-main.yml re-runs it on every push to main, but ci-main.yml is a
+    # SEPARATE WORKFLOW and `needs:` cannot cross workflows — so before this job
+    # existed, a push from a hook-less clone published the leak to the live site
+    # first and turned ci-main red afterwards. Red-after-publish is not a gate.
+    #
+    # Deliberately duplicated from ci-main.yml's job of the same name rather
+    # than referenced, for the same reason R6/R8 are duplicated there: a
+    # workflow's gate has to live in the workflow it gates. Keep the two in
+    # step. Runs unconditionally (not gated on DEPLOY_ENABLED), matching
+    # secret-scan above.
+    name: publish-guard (host identifier / PII) on pushed diff, fail-closed
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Run publish-guard --diff against the pushed diff (fail-closed)
+        env:
+          EVT_BEFORE: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          GUARD="scripts/publish-guard.sh"
+
+          # Fail-closed: an absent/non-executable guard must STOP the job,
+          # never be treated as "nothing to check, so allow". A guard this
+          # repo cannot run is a guard that caught nothing.
+          if [ ! -x "$GUARD" ]; then
+            echo "::error::${GUARD} is missing or not executable — cannot scan, failing closed." >&2
+            exit 1
+          fi
+
+          ZERO="0000000000000000000000000000000000000000"
+          BASE="${EVT_BEFORE:-}"
+
+          if [ -n "$BASE" ] && [ "$BASE" != "$ZERO" ] && git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+            echo "publish-guard: scanning pushed diff ${BASE}..${HEAD_SHA}"
+            if ! git diff -U0 "${BASE}" "${HEAD_SHA}" | "$GUARD" --diff; then
+              echo "::error::publish-guard detected a forbidden host identifier / PII literal in the pushed diff — refusing to deploy it (see log above)." >&2
+              exit 1
+            fi
+          else
+            # No usable prior SHA (branch creation, force-push whose old tip is
+            # gone, workflow_dispatch, or a shallow-history edge case) — a diff
+            # cannot be computed. Do NOT skip: fall back to scanning every
+            # tracked file's current content so this run still means something.
+            echo "publish-guard: no usable prior SHA for a diff — scanning the full tracked tree instead of skipping."
+            if ! git ls-files -z | xargs -0 cat -- | "$GUARD" --text; then
+              echo "::error::publish-guard detected a forbidden host identifier / PII literal in the tracked tree — refusing to deploy it (see log above)." >&2
+              exit 1
+            fi
+          fi
+          echo "publish-guard: clean."
+
   deploy:
     # VPS 未契約期間は DEPLOY_ENABLED=true を設定せず、job ごと skip する(CI 失敗扱いにしない)
-    # secret-scan gate: a real secret hit blocks the deploy to the live
-    # validator host, same as it already blocks local commits/pushes via
-    # .githooks/pre-commit + pre-push.
-    needs: secret-scan
+    # Gate: a real secret hit (secret-scan) OR a host-identifier / PII literal
+    # (publish-guard) blocks the deploy to the live validator host and to the
+    # public origin, the same way both already block local commits/pushes via
+    # .githooks/pre-commit + pre-push. Both gate jobs run unconditionally, so
+    # neither can be skipped into a pass.
+    needs: [secret-scan, publish-guard]
     if: ${{ vars.DEPLOY_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
