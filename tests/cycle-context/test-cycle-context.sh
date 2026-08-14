@@ -964,13 +964,57 @@ done
 
 echo
 echo "=== T13: the library changes no existing script ==="
-# The whole value of this phase is that nothing was replaced yet. If a
-# consumer appears, this assertion is the place to update deliberately.
+# UPDATED DELIBERATELY (2026-08-14, task C2-2). The previous revision required
+# that NOTHING under scripts/ source the library, and its own comment named
+# this case as the place to update when a consumer appeared. One has:
+# scripts/cycle-transition.sh, the C2 orchestrator, for which the design doc
+# names this library as the cycle-number source.
+#
+# The invariant being protected was never "nobody sources it" — it was "no
+# DEPLOYED script's behaviour changed without the equivalence work". C2-1
+# shipped the library and proved it WOULD be equivalent, deliberately without
+# swapping any caller. A brand-new script has no prior behaviour to change and
+# cannot violate that; a pre-existing one still can, and still fails here.
+#
+# So: every consumer must be on an exact allowlist, every allowlisted name must
+# exist on disk (or the list rots into a blanket permission), and no
+# allowlisted name may be a script this library DESCRIBES — those are the
+# deployed ones C2-1 promised not to touch.
+T13_ALLOWED_CONSUMERS="cycle-transition.sh"
+
 consumers="$(grep -rlF 'lib/cycle-context.sh' "${SCRIPTS_DIR}" 2>/dev/null | grep -vF 'lib/cycle-context.sh' || true)"
-if [ -z "$consumers" ]; then
-	pass "T13: no script under scripts/ sources the library yet (this phase adds a library, not a replacement)"
+t13_unexpected=""
+while IFS= read -r c; do
+	[ -n "$c" ] || continue
+	c_base="${c##*/}"
+	c_allowed=0
+	for a in $T13_ALLOWED_CONSUMERS; do
+		[ "$c_base" = "$a" ] && c_allowed=1
+	done
+	[ "$c_allowed" -eq 1 ] || t13_unexpected="${t13_unexpected:+$t13_unexpected }${c#"${REPO_ROOT}"/}"
+done <<EOF
+$consumers
+EOF
+
+if [ -z "$t13_unexpected" ]; then
+	pass "T13: only allowlisted new consumer(s) source the library; no pre-existing script does"
 else
-	fail "T13: script(s) now source the library, so the 'no behaviour change' claim no longer holds: $(printf '%s' "$consumers" | tr '\n' ' ')"
+	fail "T13: unallowlisted script(s) now source the library, so the 'no behaviour change' claim no longer holds: ${t13_unexpected}"
 fi
+
+# The allowlist must stay honest.
+t13_table_scripts="$(fyc_scripts_in_table)"
+for a in $T13_ALLOWED_CONSUMERS; do
+	if [ -f "${SCRIPTS_DIR}/${a}" ]; then
+		pass "T13: allowlisted consumer ${a} exists (the allowlist is not stale)"
+	else
+		fail "T13: allowlisted consumer ${a} does not exist under scripts/ — remove it from the allowlist"
+	fi
+	if printf '%s\n' "$t13_table_scripts" | grep -qxF "$a"; then
+		fail "T13: ${a} is a script this library DESCRIBES, so allowlisting it would hide a real behaviour change"
+	else
+		pass "T13: allowlisted consumer ${a} is not one of the deployed scripts the table describes"
+	fi
+done
 
 finish

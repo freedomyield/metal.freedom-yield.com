@@ -165,6 +165,7 @@ The cryptographic-evidence anchor pipeline (identity → anchor-source → A-cha
 |---|---|---|
 | `scripts/cycle-gate.sh` | Passive gate consulted before cycle-dependent side effects. `broadcast` is signature-gated; `observe` + `cycle-artifact-write` are always green (recording a closed cycle is backward-looking). | via consumers |
 | `scripts/resume-after-cycle-start.sh` | Active operator command run after a new cycle starts (v2 = 3 phase: Phase 1 verify chain + anchor-source freshness + identity signature, Phase 2 atomic state write, Phase 3 report). **No broadcast** — the anchor pipeline is a separate, Mac-signed step (see `scripts/run-anchor-pipeline.sh` row above). | manual |
+| `scripts/cycle-transition.sh` | Cycle-transition orchestrator, `--print-only` **only**: prints the day's 14 execution units across 6 phases with every value resolved, each command tagged `# host` / `# Mac`, and the 4 operator stop points marked. **Executes nothing** — there is no execution code path in the file, and `tests/orchestrator-guard/` permanently forbids a broadcast-tool string in it. Requires `--expect-cycle=<N>` (the cycle closing today) and `--ledger=<path>`; the ledger CHECKS that declaration rather than supplying it. `docs/CYCLE_GATE.md` stays canonical and `tests/cycle-transition/` fails if the two drift. | manual |
 
 **Security guards + one-shot installers:**
 
