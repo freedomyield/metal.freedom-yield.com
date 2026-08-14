@@ -109,7 +109,14 @@ the day Rule 2 was widened to also catch a `&&` chain piped to `logger`):
   check at all, so it reports 0 violations for that line regardless of
   whether it redirects, pipes, or does neither. That part is still true and
   still by design, not a gap: there is nothing to scope-mismatch when there
-  is only one command.
+  is only one command. **This is a guarantee about one `&&` chain, not about
+  the whole line**: `;`- and `||`-joined statements are entirely outside
+  Rule 2's scope, and a correctly-wrapped `{ ... } | sink` group elsewhere on
+  the same line satisfies the check by itself, so an independent unwrapped
+  `;`-separated chain sharing that line has the identical redirect-scope
+  problem but is not detected (see `scripts/check-cron-file.sh`'s own "Known
+  gaps" comment; no production cron line in this repo has ever had this
+  shape).
 
 **A chained command piped to `logger` MUST still be wrapped**, exactly like
 the `>>` case — either with `{ ... }` (sink placed right after the closing
