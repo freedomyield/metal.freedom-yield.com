@@ -46,6 +46,35 @@ if [ ! -f "$SCRIPT" ]; then
 	exit 1
 fi
 
+# SIGDFL — run the script under test with SIGINT/SIGQUIT at their DEFAULT
+# dispositions.
+#
+# WHY. A shell without job control sets SIGINT and SIGQUIT to SIG_IGN in every
+# ASYNCHRONOUS command it starts — i.e. in anything launched with `&` from a
+# non-interactive script, which is how this repository runs suites in parallel.
+# A signal ignored on entry cannot be trapped, so `trap … INT` inside the
+# script under test never installs, and the SIGINT cases below then measure the
+# LAUNCHER's job-control context instead of the script's handler. Measured
+# 2026-08-14: in the foreground the SIGINT cases pass; the identical suite as a
+# background job reports exit 0 and "the handler did not terminate the script",
+# while SIGTERM and SIGHUP — which are not ignored this way — pass in both. That
+# is a false red, and a false red that appears only under parallelism is how a
+# real red stops being believed.
+#
+# perl restores the disposition and then execs, and exec preserves it. exec also
+# keeps the PID, so $PPID inside the script — which is how the ssh stub and
+# signalling_guard address it — is unchanged.
+#
+# Resolved to an ABSOLUTE path here, before any case shadows perl on PATH: one
+# case installs a deliberately broken perl to prove publish-guard fails closed,
+# and that case must keep shadowing the GUARD's perl without disarming this.
+SIGDFL_PERL="$(command -v perl 2>/dev/null || true)"
+if [ -z "$SIGDFL_PERL" ]; then
+	echo "FATAL: perl not found. It is required to give the script under test default signal dispositions (and publish-guard, which this suite exercises, needs it too)." >&2
+	exit 1
+fi
+SIGDFL=( "$SIGDFL_PERL" -e '$SIG{INT}="DEFAULT"; $SIG{QUIT}="DEFAULT"; exec { $ARGV[0] } @ARGV or die "exec: $!"' -- )
+
 PASS=0
 FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "PASS  $1"; }
@@ -138,7 +167,7 @@ run_push_ex() {
 	GUARD_HITS="$BASE/guard-hits" \
 	STUB_EXIT="${STUB_EXIT:-0}" \
 	FYD_PUBLISH_DENYLIST=/dev/null \
-		bash "$script" "$@"
+		"${SIGDFL[@]}" bash "$script" "$@"
 }
 
 # install_fixture <dir> -> echoes the path of the push script inside it.

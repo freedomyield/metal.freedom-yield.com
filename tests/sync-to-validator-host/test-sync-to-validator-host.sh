@@ -40,6 +40,31 @@ if [ -z "$REAL_RSYNC" ]; then
 	exit 1
 fi
 
+# SIGDFL — run the script under test with SIGINT/SIGQUIT at their DEFAULT
+# dispositions.
+#
+# WHY. A shell without job control sets SIGINT and SIGQUIT to SIG_IGN in every
+# ASYNCHRONOUS command it starts — i.e. in anything launched with `&` from a
+# non-interactive script, which is how this repository runs suites in parallel.
+# A signal ignored on entry cannot be trapped, so `trap … INT` inside the
+# script under test never installs, and the SIGINT case below then measures the
+# LAUNCHER's job-control context instead of the script's handler. Measured
+# 2026-08-14: in the foreground the SIGINT case passes; the identical suite as
+# a background job reports exit 0 and "the remote transfer ran anyway", while
+# SIGTERM — not ignored this way — passes in both. That is a false red, and a
+# false red that appears only under parallelism is how a real red stops being
+# believed.
+#
+# perl restores the disposition and then execs, and exec preserves it. exec also
+# keeps the PID, so $PPID inside the script — which is how signalling_guard
+# addresses it — is unchanged.
+SIGDFL_PERL="$(command -v perl 2>/dev/null || true)"
+if [ -z "$SIGDFL_PERL" ]; then
+	echo "FATAL: perl not found. It is required to give the script under test default signal dispositions (and publish-guard, which this suite exercises, needs it too)." >&2
+	exit 1
+fi
+SIGDFL=( "$SIGDFL_PERL" -e '$SIG{INT}="DEFAULT"; $SIG{QUIT}="DEFAULT"; exec { $ARGV[0] } @ARGV or die "exec: $!"' -- )
+
 PASS=0
 FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "PASS  $1"; }
@@ -106,7 +131,7 @@ run_sync() {
 	SSH_STUB_LOG="$SSH_LOG" \
 	GUARD_HITS="$BASE/guard-hits" \
 	FYD_PUBLISH_DENYLIST=/dev/null \
-		bash "$INSTALL/scripts/sync-to-validator-host.sh" "$@"
+		"${SIGDFL[@]}" bash "$INSTALL/scripts/sync-to-validator-host.sh" "$@"
 }
 
 # signalling_guard <signal>
