@@ -78,6 +78,25 @@ PATH=/usr/local/bin:/usr/bin:/bin
 0 3 * * * deploy echo "start"; bash scripts/y.sh >> /var/log/y.log 2>&1
 EOF
 
+	# pipe-form Rule 2 violation: an unwrapped && chain piped straight to
+	# logger, no >> anywhere on the line. Before the 2026-08-14 fix,
+	# line_is_compliant() only ever looked at whether the line contained
+	# `>>` and returned "compliant" immediately when it did not — so this
+	# genuinely-broken, unwrapped chain (only the last command's output
+	# reaches the tag; the earlier one is dropped, the exact defect Rule 2
+	# exists to catch) was silently reported "ok: ... (no fix needed)"
+	# instead of the "needs operator review" this installer gives every
+	# other shape it cannot safely auto-fix. This script never learned to
+	# REWRITE the pipe form (fix_line() only knows >>), so the correct
+	# post-fix behavior is the review path, not a fix — same as
+	# metal-partial above.
+	cat > "$DIR/metal-pipe-chain" <<'EOF'
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+FY_LIVE=1
+10 7 * * * deploy cd /home/deploy/metal.freedom-yield.com && bash scripts/check-anomalies.sh 2>&1 | logger -t anomalies-pipe-chain
+EOF
+
 	# freedom-yield-* orphan (no repo installer) — must be in scope.
 	cat > "$DIR/freedom-yield-peer-geo" <<'EOF'
 0 6 * * * deploy bash /home/deploy/metal.freedom-yield.com/scripts/peer-geo.py >> /home/deploy/metal.freedom-yield.com/logs/peer-geo.log 2>&1
@@ -229,12 +248,34 @@ echo "$OUT" | grep -q 'warn:.*metal-partial.*operator review required' \
 echo "$OUT" | grep -qF 'echo "start"; bash scripts/y.sh >> /var/log/y.log 2>&1' \
 	&& ok "ambiguous line: the offending line itself is echoed for review" \
 	|| bad "ambiguous line: the offending line itself is echoed for review"
-echo "$OUT" | grep -q 'needs operator review 1' \
-	&& ok "ambiguous line: summary counts 1 for operator review" \
-	|| bad "ambiguous line: summary counts 1 for operator review (out: $OUT)"
+echo "$OUT" | grep -q 'needs operator review 2' \
+	&& ok "ambiguous line: summary counts 2 for operator review (metal-partial + metal-pipe-chain)" \
+	|| bad "ambiguous line: summary counts 2 for operator review (out: $OUT)"
 [ -e "$BK/metal-partial" ] \
 	&& bad "ambiguous line: no backup entry (file untouched)" \
 	|| ok "ambiguous line: no backup entry (file untouched)"
+teardown
+
+# ---- case 8b: pipe-form Rule 2 violation -> flagged for review, not silently
+#               marked compliant, and never auto-"fixed" into a wrong shape --
+setup
+CBEFORE_PC="$(cat "$DIR/metal-pipe-chain")"
+OUT="$(run_installer 2>&1)"
+[ "$(cat "$DIR/metal-pipe-chain")" = "$CBEFORE_PC" ] \
+	&& ok "pipe-chain: file left byte-identical (this installer cannot rewrite pipe form)" \
+	|| bad "pipe-chain: file left byte-identical"
+echo "$OUT" | grep -qF 'ok:      metal-pipe-chain (no fix needed)' \
+	&& bad "pipe-chain: must NOT be silently reported as already compliant" \
+	|| ok "pipe-chain: not silently reported as already compliant"
+echo "$OUT" | grep -q 'warn:.*metal-pipe-chain.*operator review required' \
+	&& ok "pipe-chain: warn names the file + reason" \
+	|| bad "pipe-chain: warn names the file + reason (out: $OUT)"
+echo "$OUT" | grep -qF 'cd /home/deploy/metal.freedom-yield.com && bash scripts/check-anomalies.sh 2>&1 | logger -t anomalies-pipe-chain' \
+	&& ok "pipe-chain: the offending line itself is echoed for review" \
+	|| bad "pipe-chain: the offending line itself is echoed for review (out: $OUT)"
+[ -e "$BK/metal-pipe-chain" ] \
+	&& bad "pipe-chain: no backup entry (file untouched)" \
+	|| ok "pipe-chain: no backup entry (file untouched)"
 teardown
 
 # ---- case 9: freedom-yield-* prefix is in scope ------------------------------
@@ -307,9 +348,9 @@ OUT2="$(run_installer 2>&1)"
 [ "$(cat "$DIR/metal-server-status")" = "$SNAP_SS" ] \
 	&& ok "idempotent: single-command file identical after second run" \
 	|| bad "idempotent: single-command file identical after second run"
-echo "$OUT2" | grep -q 'summary: fixed 0, already compliant 5, needs operator review 1, skipped (not cron-executed) 3' \
-	&& ok "idempotent: second run reports fixed 0 / compliant 5 / review 1 / skipped 3" \
-	|| bad "idempotent: second run reports fixed 0 / compliant 5 / review 1 / skipped 3 (out: $OUT2)"
+echo "$OUT2" | grep -q 'summary: fixed 0, already compliant 5, needs operator review 2, skipped (not cron-executed) 3' \
+	&& ok "idempotent: second run reports fixed 0 / compliant 5 / review 2 / skipped 3" \
+	|| bad "idempotent: second run reports fixed 0 / compliant 5 / review 2 / skipped 3 (out: $OUT2)"
 teardown
 
 # ---- case 14: unknown arg -> exit 1 ------------------------------------------
