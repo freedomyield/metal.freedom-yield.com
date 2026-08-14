@@ -3,7 +3,11 @@
 > **Supersedes v1.** Everything below this line reflects the **v2 HC-single
 > 4-action pack pipeline** (`scripts/sign-anchor-event.sh` v2 +
 > `bin/safe-broadcast` + `scripts/gen-anchor-receipt.sh` v2), current as of
-> the 2026-07-31 cycle-4 testnet-rehearsal repair. The v1 revision of this
+> the 2026-07-31 cycle-4 testnet-rehearsal repair (path reference updated
+> 2026-08-05; reconciled line-by-line against `main` again on 2026-08-14 —
+> see "Scope: what a rehearsal run actually proves" below for that
+> reconciliation's findings — with no pipeline-shape changes found either
+> time). The v1 revision of this
 > document (single memo `fyid1:<hex>`, direct `sign-anchor-event.sh
 > cyclestart <hex>` CLI, a retired `cycles-history.json` schema, the
 > `anchor-receipt.schema.v1.json` shape, and a manual O1–O10 proton-cli
@@ -62,6 +66,107 @@ its `anchor` permission, transferring to sink account `fyhistorytst`
 (both are public testnet account names already referenced throughout this
 repo — see `docs/ANCHOR_ACCOUNT_KEY_ROTATION.md`).
 
+## Scope: what a rehearsal run actually proves (read before 9/4)
+
+This section exists because "ran the rehearsal" and "produced valid PRIME
+DIRECTIVE gate-1 evidence" are not the same claim, and because an AI
+session preparing for the transition cannot honestly write "verified
+identical to mainnet" — several things structurally differ, and several
+steps structurally cannot be exercised by anything other than the
+operator. Both are spelled out below rather than glossed over.
+
+### testnet vs. mainnet: what is deliberately identical, what is not
+
+Per Constitution §3.5, the **account/permission topology** (owner → active
+→ anchor structure, threshold, key count) is kept identical between
+testnet and mainnet — that identity is what makes a passing rehearsal
+meaningful evidence at all. Everything else below is, and is expected to
+be, different:
+
+| | testnet | mainnet |
+|---|---|---|
+| keystore `HOME` | `~/.metal-fy-proton-test` | `~/.metal-fy-proton` |
+| chain (`--chain=`) | `testnet-a` | `mainnet-a` |
+| actor account | `frdomyieltst` | the mainnet operator account |
+| sink account | `fyhistorytst` | the mainnet anchor-history sink |
+| chain RPC | `rpc.api.testnet.metalx.com` (step 3), `test.proton.eosusa.io` (step 9) | separate mainnet endpoints |
+| chain_id (gate 3) | `bin/safe-broadcast`'s `testnet-a` `EXPECTED_CHAIN_ID` | `bin/safe-broadcast`'s `mainnet-a` `EXPECTED_CHAIN_ID` (a **different** constant — gate 3 fails closed on any mismatch, by design; see that script for the literal values rather than duplicating them here where they could drift out of sync) |
+| cycle number rehearsed | whatever `--expect-cycle=<N>` names for THIS run | the mainnet cycle the testnet run is meant to gate — MUST be the same `N` (see "Cycle number must match the target mainnet cycle" below) |
+
+A rehearsal proves the **pipeline shape** (compose → gate → broadcast →
+verify) and the **current account/key state** behave correctly. It does
+not, and cannot, prove anything about mainnet's chain_id, RPC
+reachability, or account state at broadcast time — those are re-verified
+independently, on mainnet, by `bin/safe-broadcast`'s own gates 1/3/4 at
+the actual mainnet invocation.
+
+### What an AI session can verify, and what only the operator can
+
+Per Constitution §3.4, invoking a broadcast-capable command requires
+**per-broadcast operator authorization** — and this script's own design
+(see its header, "Broadcast authorization") makes the **operator's own
+invocation of this script** the authorization pathway for its testnet
+broadcast (it self-creates the token bound to the exact composed tx). An
+AI session is therefore structurally unable to ever produce a real
+`testnet_tx_id` from this script — not as a policy choice made per-run,
+but because no invocation of this script by an AI session can constitute
+the operator authorization step 7 (`bin/safe-broadcast`) requires. This
+holds even though the target is testnet, not mainnet.
+
+Concretely, as of this document's last line-by-line reconciliation
+against `scripts/run-testnet-rehearsal.sh` (2026-08-14, current `main`):
+
+- **Steps 1–3 were actually executed** (`HOME=~/.metal-fy-proton-test
+  bash scripts/run-testnet-rehearsal.sh --expect-cycle=4`, real config,
+  real canonical `anchor-source.json`, a real read-only RPC call to
+  `rpc.api.testnet.metalx.com`): anchor-source selection, `--expect-cycle`
+  enforcement, rehearsal-config read, and the chain-derived `anchor`
+  pubkey check all completed correctly and printed the expected fields.
+  The run then correctly halted at step 3/10 with exit 2 ("keystore is
+  LOCKED … Run in a separate terminal: `HOME=~/.metal-fy-proton-test
+  proton key:unlock`") — the AI session cannot unlock the keystore (no
+  passphrase), so this is the actual, expected stopping point, not a
+  workaround.
+- **Step 5 (compose) was independently verified**, without going through
+  the full script (which cannot reach step 5 without an unlocked
+  keystore): `scripts/sign-anchor-event.sh --chain=testnet-a --dry-run`
+  invoked directly with `FY_CONFIG_DIR` pointed at the real rehearsal
+  config and the real canonical `anchor-source.json` — no `proton` call
+  happens in `--dry-run` mode at all, so this needs no unlock. It produced
+  the correctly-shaped 4-action tx with `fya1c4`-prefixed memos, and the
+  step-8 JSON reassembly shape (which step 5's output feeds) was confirmed
+  to match what `gen-anchor-receipt.sh` expects as input.
+- **Steps 4, 6, 7, 8, 9, 10 were NOT executed by any AI session** and
+  cannot be, short of the operator unlocking the keystore and running the
+  script to completion themselves. This is also why the sibling test
+  suite (`tests/run-testnet-rehearsal/test-locked-keystore-diagnosis.sh`)
+  deliberately stops its own stubbed run inside step 4 — "a test suite
+  must never drive any part of the broadcast path, not even a stubbed
+  one" (see that file's header). Nothing in this repository's test suite
+  exercises steps 5–10 end-to-end; step 5 alone is covered indirectly by
+  `tests/sign-anchor-event/`'s own suite (its `--dry-run` compose logic,
+  decoupled from this rehearsal script).
+- **The changes that landed between the 2026-08-04 cycle-4 transition and
+  this reconciliation (C3's `FY_LIVE` opt-in rollout, F8's `publish-scan`
+  guard, the cron file-format change, and C1's `deploy/publication.json`
+  registry) do not intersect this pipeline** — confirmed by direct
+  inspection of each of `scripts/run-testnet-rehearsal.sh`,
+  `scripts/sign-anchor-event.sh`, `bin/safe-broadcast`,
+  `scripts/gen-anchor-receipt.sh`, and `scripts/gen-anchor-source.sh`
+  (none reference `FY_LIVE`, source `scripts/lib/side-effects.sh`'s gating
+  functions, reference `publish-scan`, or reference
+  `deploy/publication.json`), and pinned as a permanent regression guard
+  by `tests/run-testnet-rehearsal/test-pipeline-not-fy-live-gated.sh`. The
+  cron format change only touches `/etc/cron.d` installers, which this
+  Mac-run rehearsal never invokes.
+
+**Conclusion**: a clean run through step 3 (or a direct step-5 compose
+check) is evidence the pipeline is not structurally broken. It is **not**
+PRIME DIRECTIVE gate-1 evidence — only a real step 10 sentinel line
+(`TESTNET REHEARSAL COMPLETE testnet_tx_id=<64hex>`), produced by the
+operator running this script to completion, is. Do not represent a
+partial run as a passed rehearsal.
+
 ## Prerequisites
 
 - `proton-cli` installed on the **operator's Mac** (not the validator
@@ -73,6 +178,13 @@ repo — see `docs/ANCHOR_ACCOUNT_KEY_ROTATION.md`).
   (`scripts/lib/eosio-pubkey-raw-hex.js`, see "Rotation resilience"
   below).
 - `jq`, `curl`, and `sha256sum` or `shasum` on PATH.
+- `timeout(1)` (GNU coreutils) on PATH. It bounds the locked-keystore
+  probes in steps 3/10 and 4/10 (`proton key:list`, `proton account`) —
+  without it, a locked keystore hangs the script indefinitely instead of
+  exiting 2 with the unlock instruction. On macOS this is `coreutils`
+  from Homebrew (`brew install coreutils`), which installs it as
+  `gtimeout` by default — confirm plain `timeout` itself resolves
+  (`command -v timeout`), not just `gtimeout`.
 - The testnet proton-cli keystore (`HOME=~/.metal-fy-proton-test`) holds
   the CURRENT `frdomyieltst@anchor` private key, and is **unlocked**
   before running the rehearsal:
@@ -164,7 +276,7 @@ HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh
 For the **day-of, real gate-1-evidence** run, `--expect-cycle=<N>` is
 **mandatory** (`N` = the cycle number of the mainnet action this
 rehearsal is meant to gate — see "Cycle number must match the target
-mainnet cycle" below):
+mainnet cycle" above):
 
 ```
 HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh --expect-cycle=<N>
@@ -207,9 +319,13 @@ harmless — a non-fatal warning is printed, since the flag had no effect.)
 ### The 10 steps
 
 1. **Anchor-source selection** — resolve + print the file to inscribe
-   (path, `cycle_number_observed`, `computed_at`, derived memo prefix);
-   refuse a fixture without `--allow-fixture`; fail closed if
-   `--expect-cycle=<N>` was given and does not match.
+   (path, `schema_version`, `cycle_number_observed`, `computed_at`,
+   derived memo prefix, plus the `identity_branch` pubkey-sha256,
+   `artifacts_branch` manifest root, and `dag_root_computed` audit
+   fields); refuse a fixture without `--allow-fixture`; fail closed if
+   `--expect-cycle=<N>` was given and does not match; print a non-fatal
+   warning if `identity_branch`/`artifacts_branch` still hold placeholder
+   (`0000…`) hashes.
 2. **Rehearsal config** — read `~/freedom-yield-rehearsal-config/`
    (actor account, sink, chain).
 3. **Chain-derived key check** — the rotation-resilient verification
