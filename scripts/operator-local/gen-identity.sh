@@ -568,9 +568,13 @@ resolve_archive_record() {
 		return 1
 	fi
 
-	# Shape gate: only the anchor-source half of api/archive/ is structurally
-	# immutable (deploy/publication.json record_caveat — the receipt half is
-	# stable by operating discipline, which is not a property to sign).
+	# Shape gate: only the anchor-source half of api/archive/ is named by a
+	# digest of any of its own content (deploy/publication.json record_caveat
+	# — the receipt is named by a transaction id, which binds nothing about
+	# the bytes, so its URL is stable by operating discipline alone and that
+	# is not a property to sign). How far the anchor-source name actually
+	# reaches is stated at the self-check below; it is narrower than the row's
+	# kind=record on its own suggests.
 	base="${rel##*/}"
 	case "${base}" in
 		anchor-source-*.json) hex="${base#anchor-source-}"; hex="${hex%.json}" ;;
@@ -632,10 +636,11 @@ resolve_archive_record() {
 	# over an existing archive unconditionally. So this URL is NOT a promise
 	# that its bytes are fixed forever — the sha256 recorded below is what
 	# fixes them, as of this signing. deploy/publication.json's record_caveat
-	# currently calls the anchor-source half "STRUCTURALLY immutable" on the
-	# strength of a grep for `generated_at` (0 hits) — the field is spelled
-	# computed_at, so that grep missed it. Recorded here and in
-	# docs/IDENTITY_VERIFICATION.md rather than glossed.
+	# called this half "STRUCTURALLY immutable" until 2026-08-14, on the
+	# strength of a grep for `generated_at` returning 0 hits — the field is
+	# spelled computed_at, so that grep missed it. That row now states the
+	# same scope as this comment and as docs/IDENTITY_VERIFICATION.md; keep
+	# the three in step.
 	arc_sha="$(sha256_of_stdin < "${arc_tmp}")"
 	rm -f "${arc_tmp}"
 	[ -n "${arc_sha}" ] || return 1
