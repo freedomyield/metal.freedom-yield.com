@@ -12,15 +12,48 @@
 #   is never shipped to the validator host or web host. Verify with --dry-run.
 #
 # What this helper does:
-#   1. Probes each artifact URL (curl) and computes content sha256.
-#   2. Computes the SHA-256 Merkle root over the artifact_manifest leaves
-#      (alphabetical key order, odd-duplicate, raw-bytes binary tree —
-#      matches the algorithm documented in identity.schema.v1.json).
+#   1. Probes each artifact URL (curl), reads its `kind` from the publication
+#      registry, and computes a content sha256 ONLY for artifacts the registry
+#      declares safe to pin (see "kind discipline" below).
+#   2. Computes the SHA-256 Merkle root over the artifact_manifest leaves that
+#      carry a sha256 (alphabetical key order, odd-duplicate, raw-bytes binary
+#      tree — matches the algorithm documented in identity.schema.v1.json).
 #   3. Composes identity.json with artifact_manifest + artifact_root.
 #   4. Validates JSON with `jq empty`.
 #   5. Signs with `ssh-keygen -Y sign` using namespace freedom-yield/validator-identity.
 #   6. Self-verifies with `ssh-keygen -Y verify` before publishing.
 #   7. Atomically places identity.json and identity.json.sig in public/api/.
+#
+# ---------------------------------------------------------------------------
+# kind discipline (C4, spec docs/superpowers/specs/2026-08-06-single-source-of-truth-design.md)
+# ---------------------------------------------------------------------------
+# A sha256 inside a SIGNED manifest is a claim about bytes. It can only hold
+# for bytes that cannot change without a commit. deploy/publication.json is the
+# single declaration of that property:
+#
+#   kind=stream   content changes without a commit (host cron / runtime push).
+#                 A pin taken at signing time is stale by construction.
+#                 -> listed in artifact_manifest with url + kind, NO sha256.
+#   kind=static   changes only when a commit changes it. -> pinned.
+#   kind=record   immutable bytes at a URL that never resolves differently.
+#                 -> pinned.
+#
+# `kind` is the registry's SAFE FLOOR, never a summary: a path is classified by
+# its weakest moment. This script therefore reads `.kind` and nothing else — no
+# `becomes_record_after`, no `record_caveat`. Those qualifiers may only WIDEN
+# what a knowing consumer may do, so a consumer that ignores them is always
+# correct (deploy/publication.json kind_definitions._kind_is_the_floor).
+#
+# For a directory entry (path ending in "/") the registry's kind applies only
+# to members whose basename matches its declared `member_pattern`; anything
+# else is treated as unpinnable. That is what makes api/archive/ usable: its
+# member_pattern is keyed by a 64-hex content digest, which is the property
+# tests/publication-registry/ T18 enforces before kind=record may be claimed.
+#
+# History: before 2026-08-14 this script pinned every leaf it fetched. Four of
+# the five were kind=stream, so four of the eight pins in the manifest signed
+# 2026-08-06 were already wrong when scripts/check-identity-pins.sh measured
+# them the same day. See deploy/identity-pin-baseline.json.
 #
 # What this helper does NOT do:
 #   - It does not generate the ed25519 key. Generate it on the operator Mac:
@@ -46,10 +79,32 @@
 #   PRINCIPAL               allowed_signers principal (default: freedom-yield).
 #   ARTIFACT_BASE           URL prefix for leaf artifacts (default:
 #                           https://metal.freedom-yield.com).
+#   FY_PUBLICATION_REGISTRY path to the publication registry that supplies each
+#                           artifact's `kind` (default: deploy/publication.json
+#                           inside THIS SCRIPT's own repo — deliberately not
+#                           under REPO_ROOT, which tests point at a throwaway
+#                           output tree).
 #
 # Usage:
 #   export OPERATOR_IDENTITY_KEY=~/.ssh/freedom-yield-operator-identity
 #   bash scripts/operator-local/gen-identity.sh
+#
+# Exit codes:
+#   1   input/precondition error (missing key, missing OUT_DIR, bad fingerprint)
+#   2   signing or self-verification failed
+#   3   no live leaf artifact at all — refusing to publish an empty manifest
+#   4   computed artifact_root is not 64-hex
+#   6   a retired env var (CHAIN_ANCHOR_*) is set
+#   7   FY_EXPECT_CYCLE ordering guard: the published cycle ledger is stale
+#   8   KEY_IAT diverges from the identity-history ledger
+#   9   publication registry unusable: unreadable, unparseable, or a catalog
+#       artifact has no row in it. Fail-closed: without the registry this
+#       script cannot know which digests are safe to sign, and guessing is the
+#       failure this whole change removes.
+#   10  live artifacts exist but NONE of them is pinnable, so artifact_root
+#       would commit to nothing. Distinct from 3 (nothing live at all).
+#   98  the operator identity private key path is inside the repo
+#   99  refusing to run: this looks like the validator host or the web host
 
 set -euo pipefail
 
@@ -116,6 +171,14 @@ if [[ ! -f "${OPERATOR_IDENTITY_KEY}.pub" ]]; then
 fi
 
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+
+# The publication registry is resolved from THIS SCRIPT's own location, not
+# from REPO_ROOT. REPO_ROOT is the *output* root and the test harnesses point
+# it at a throwaway tree; the registry, by contrast, is the declaration that
+# governs this script's behaviour and always ships beside it in the same repo.
+SCRIPT_REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+PUBLICATION_REGISTRY="${FY_PUBLICATION_REGISTRY:-${SCRIPT_REPO_ROOT}/deploy/publication.json}"
+
 OUT_DIR="${REPO_ROOT}/public/api"
 OUT_JSON="${OUT_DIR}/identity.json"
 OUT_SIG="${OUT_DIR}/identity.json.sig"
@@ -221,8 +284,96 @@ fi
 # 4xx/5xx leaves (e.g., cycle-history.jsonl is HOLD until Task #28 / D10 gate
 # clears) — they will be picked up automatically once they go live, and the
 # Merkle root will change accordingly.
+#
+# A leaf is HASHED only when the publication registry declares it pinnable
+# (kind=static / kind=record). kind=stream leaves are still listed — the URL is
+# part of the published artifact set — but carry no sha256 and contribute no
+# Merkle leaf. See "kind discipline" in the header.
 
 ARTIFACT_BASE="${ARTIFACT_BASE:-https://metal.freedom-yield.com}"
+
+# ---- publication registry (single source of `kind`) -------------------------
+[ -r "${PUBLICATION_REGISTRY}" ] || {
+	echo "ERROR: publication registry not readable: ${PUBLICATION_REGISTRY}" >&2
+	echo "       Without it this script cannot tell which artifacts are safe to" >&2
+	echo "       pin in a signed manifest, and it will not guess. Restore the" >&2
+	echo "       file (it is git-tracked) or set FY_PUBLICATION_REGISTRY." >&2
+	exit 9
+}
+jq empty "${PUBLICATION_REGISTRY}" >/dev/null 2>&1 || {
+	echo "ERROR: publication registry is not valid JSON: ${PUBLICATION_REGISTRY}" >&2
+	exit 9
+}
+
+# url_to_registry_path <url> -> path relative to public/ (e.g. api/evidence.json)
+# Same normalisation scripts/check-identity-pins.sh uses, so the two agree on
+# what a manifest URL points at.
+url_to_registry_path() {
+	local u="$1" rest
+	case "$u" in *://*) ;; *) return 1 ;; esac
+	rest="${u#*://}"                     # host/api/x.json
+	case "$rest" in */*) ;; *) return 1 ;; esac
+	rest="${rest#*/}"                    # api/x.json
+	[ -n "${rest}" ] || return 1
+	printf '%s' "${rest}"
+}
+
+# registry_kind_of_path <path-relative-to-public> -> kind on stdout, or empty.
+#
+# Exact rows win. Directory rows (path ending in "/") apply to a member ONLY
+# when the member's basename matches the row's declared member_pattern — a
+# directory that promises immutability for digest-named members promises
+# nothing for anything else, and the safe floor for "anything else" is
+# unpinnable. Returns empty for an unknown path; the caller treats that as
+# fail-closed (exit 9), never as "probably fine".
+registry_kind_of_path() {
+	local p="$1"
+	# `. as $row` first, then reference $row everywhere: inside startswith() /
+	# endswith() / a slice index, `.` is the STRING being operated on, not the
+	# publication object.
+	jq -r --arg p "$p" '
+		( [ .publications[] | select(.path == $p) | .kind ] | first // "" ) as $exact
+		| if $exact != "" then $exact
+		  else
+			( [ .publications[]
+				| . as $row
+				| select($row.path | endswith("/"))
+				| select(($row.member_pattern // "") != "")
+				| select($p | startswith($row.path))
+				| ($row.path | length) as $plen
+				| ($p[$plen:]) as $member
+				| select($member | test($row.member_pattern))
+				| $row.kind
+			  ] | first // "" )
+		  end
+	' "${PUBLICATION_REGISTRY}" 2>/dev/null
+}
+
+# kind_is_pinnable <kind> -> 0 when a sha256 of these bytes may be signed.
+kind_is_pinnable() {
+	case "$1" in
+		static|record) return 0 ;;
+		*)             return 1 ;;
+	esac
+}
+
+# resolve_kind_or_die <url> <label> -> kind on stdout; exit 9 if unknown.
+resolve_kind_or_die() {
+	local url="$1" label="$2" rel kind
+	rel="$(url_to_registry_path "${url}")" || {
+		echo "ERROR: ${label}: malformed artifact URL: ${url}" >&2
+		exit 9
+	}
+	kind="$(registry_kind_of_path "${rel}")"
+	if [ -z "${kind}" ]; then
+		echo "ERROR: ${label}: '${rel}' has no row in ${PUBLICATION_REGISTRY##*/}." >&2
+		echo "       Every artifact this manifest names must be declared there so" >&2
+		echo "       its pinnability is a machine-checked fact, not an assumption." >&2
+		echo "       Add the publication (with its kind) and re-run." >&2
+		exit 9
+	fi
+	printf '%s' "${kind}"
+}
 
 # Portable sha256: macOS ships `shasum`, Linux usually ships both; prefer
 # `shasum -a 256` for cross-platform behaviour.
@@ -287,18 +438,45 @@ compute_merkle_root() {
 # Empty <schema_url> = no formal schema yet (manifest entry without schema_url
 # is honest about that state; see identity.schema.v1.json artifact_manifest
 # description "(where applicable)").
+#
+# Every URL here must have a row in the publication registry — a missing row is
+# exit 9, and tests/identity-kind-discipline/ asserts the real catalog resolves
+# against the real registry so that never first happens on a transition day.
 LEAF_CATALOG="evidence_json|${ARTIFACT_BASE}/api/evidence.json|${ARTIFACT_BASE}/api/evidence.schema.v1.json
 validator_json|${ARTIFACT_BASE}/api/validator.json|${ARTIFACT_BASE}/api/validator.schema.v1.json
 cycle_history_jsonl|${ARTIFACT_BASE}/api/cycle-history.jsonl|${ARTIFACT_BASE}/api/cycle-history.schema.v1.json
 uptime_cycles_json|${ARTIFACT_BASE}/api/uptime-cycles.json|
-incidents_json|${ARTIFACT_BASE}/api/incidents.json|"
+incidents_json|${ARTIFACT_BASE}/api/incidents.json|${ARTIFACT_BASE}/api/incidents.schema.v1.json"
 
-LEAVES_TMP="$(mktemp -t leaves.XXXXXX)"      # sorted leaf body
+LEAVES_TMP="$(mktemp -t leaves.XXXXXX)"      # sorted leaf body (pinned only)
 MANIFEST_TMP="$(mktemp -t manifest.XXXXXX)"  # incremental manifest JSON
+LIVE_COUNT=0                                 # leaves that answered 200
 printf '%s' '{}' > "${MANIFEST_TMP}"
+
+# manifest_put <key> <url> <kind> <sha|""> <schema_url|""> <schema_sha|"">
+# Fields are added in a fixed order and omitted when empty, so an absent
+# sha256 is a positive statement ("declared unpinnable"), not a truncation.
+manifest_put() {
+	jq --arg key "$1" --arg url "$2" --arg kind "$3" \
+	   --arg sha "$4" --arg surl "$5" --arg ssha "$6" '
+		.[$key] = (
+			{url: $url, kind: $kind}
+			+ (if $sha  != "" then {sha256: $sha}          else {} end)
+			+ (if $surl != "" then {schema_url: $surl}     else {} end)
+			+ (if $ssha != "" then {schema_sha256: $ssha}  else {} end)
+		)
+	' "${MANIFEST_TMP}" > "${MANIFEST_TMP}.next"
+	mv "${MANIFEST_TMP}.next" "${MANIFEST_TMP}"
+}
 
 while IFS='|' read -r LEAF_KEY LEAF_URL LEAF_SCHEMA_URL; do
 	[ -z "${LEAF_KEY}" ] && continue
+
+	# Resolve the declared kind BEFORE any fetch. An artifact this manifest
+	# names but the registry does not declare is a hard stop (exit 9).
+	# `|| exit 9` is not decoration: resolve_kind_or_die's own `exit` runs in
+	# the command-substitution subshell, so it must be re-raised here.
+	LEAF_KIND="$(resolve_kind_or_die "${LEAF_URL}" "leaf ${LEAF_KEY}")" || exit 9
 
 	# Probe leaf URL.
 	LEAF_CODE="$(curl -sSLI -o /dev/null -w "%{http_code}" "${LEAF_URL}")"
@@ -306,60 +484,192 @@ while IFS='|' read -r LEAF_KEY LEAF_URL LEAF_SCHEMA_URL; do
 		echo "  skip ${LEAF_KEY}: HTTP ${LEAF_CODE} at ${LEAF_URL}" >&2
 		continue
 	fi
+	LIVE_COUNT=$((LIVE_COUNT + 1))
 
-	# Fetch + sha256 of leaf body.
-	LEAF_BODY="$(mktemp -t leaf.XXXXXX)"
-	if ! curl -sSLf -o "${LEAF_BODY}" "${LEAF_URL}"; then
+	# Fetch + sha256 of the leaf body — ONLY when the kind permits a pin.
+	# A stream is not fetched at all: its digest has no signed meaning, so
+	# downloading it would only add a failure mode to the signing path.
+	LEAF_SHA=""
+	if kind_is_pinnable "${LEAF_KIND}"; then
+		LEAF_BODY="$(mktemp -t leaf.XXXXXX)"
+		if ! curl -sSLf -o "${LEAF_BODY}" "${LEAF_URL}"; then
+			rm -f "${LEAF_BODY}"
+			echo "  skip ${LEAF_KEY}: fetch failed at ${LEAF_URL}" >&2
+			LIVE_COUNT=$((LIVE_COUNT - 1))
+			continue
+		fi
+		LEAF_SHA="$(sha256_of_stdin < "${LEAF_BODY}")"
 		rm -f "${LEAF_BODY}"
-		echo "  skip ${LEAF_KEY}: fetch failed at ${LEAF_URL}" >&2
-		continue
+	else
+		echo "  unpinned ${LEAF_KEY}: kind=${LEAF_KIND} — listed without sha256 (a signed pin on a stream is stale by construction)" >&2
 	fi
-	LEAF_SHA="$(sha256_of_stdin < "${LEAF_BODY}")"
-	rm -f "${LEAF_BODY}"
 
-	# Optional schema probe + sha256.
+	# Optional schema probe + sha256. The schema is a separate publication with
+	# its own kind: a stream payload can still have a static, pinnable schema —
+	# which is exactly what "pin the schema, not the payload" means here.
 	LEAF_SCHEMA_SHA=""
 	if [ -n "${LEAF_SCHEMA_URL}" ]; then
+		LEAF_SCHEMA_KIND="$(resolve_kind_or_die "${LEAF_SCHEMA_URL}" "schema of ${LEAF_KEY}")" || exit 9
 		SCHEMA_CODE="$(curl -sSLI -o /dev/null -w "%{http_code}" "${LEAF_SCHEMA_URL}")"
-		if [ "${SCHEMA_CODE}" = "200" ]; then
+		if [ "${SCHEMA_CODE}" != "200" ]; then
+			echo "  warn ${LEAF_KEY}: schema URL HTTP ${SCHEMA_CODE}; dropping schema fields for this leaf" >&2
+			LEAF_SCHEMA_URL=""
+		elif kind_is_pinnable "${LEAF_SCHEMA_KIND}"; then
 			SCHEMA_BODY="$(mktemp -t schema.XXXXXX)"
 			curl -sSLf -o "${SCHEMA_BODY}" "${LEAF_SCHEMA_URL}"
 			LEAF_SCHEMA_SHA="$(sha256_of_stdin < "${SCHEMA_BODY}")"
 			rm -f "${SCHEMA_BODY}"
 		else
-			echo "  warn ${LEAF_KEY}: schema URL HTTP ${SCHEMA_CODE}; dropping schema fields for this leaf" >&2
-			LEAF_SCHEMA_URL=""
+			echo "  unpinned ${LEAF_KEY} schema: kind=${LEAF_SCHEMA_KIND} — schema_url kept, schema_sha256 omitted" >&2
 		fi
 	fi
 
-	# Record sorted leaf line (key + sha256), and merge into manifest JSON.
-	printf '%s\t%s\n' "${LEAF_KEY}" "${LEAF_SHA}" >> "${LEAVES_TMP}"
+	# Only a pinned digest becomes a Merkle leaf.
+	[ -n "${LEAF_SHA}" ] && printf '%s\t%s\n' "${LEAF_KEY}" "${LEAF_SHA}" >> "${LEAVES_TMP}"
 
-	if [ -n "${LEAF_SCHEMA_URL}" ]; then
-		jq --arg key "${LEAF_KEY}" \
-		   --arg url "${LEAF_URL}" \
-		   --arg sha "${LEAF_SHA}" \
-		   --arg surl "${LEAF_SCHEMA_URL}" \
-		   --arg ssha "${LEAF_SCHEMA_SHA}" \
-		   '.[$key] = {url: $url, sha256: $sha, schema_url: $surl, schema_sha256: $ssha}' \
-		   "${MANIFEST_TMP}" > "${MANIFEST_TMP}.next"
-	else
-		jq --arg key "${LEAF_KEY}" \
-		   --arg url "${LEAF_URL}" \
-		   --arg sha "${LEAF_SHA}" \
-		   '.[$key] = {url: $url, sha256: $sha}' \
-		   "${MANIFEST_TMP}" > "${MANIFEST_TMP}.next"
-	fi
-	mv "${MANIFEST_TMP}.next" "${MANIFEST_TMP}"
+	manifest_put "${LEAF_KEY}" "${LEAF_URL}" "${LEAF_KIND}" \
+	             "${LEAF_SHA}" "${LEAF_SCHEMA_URL}" "${LEAF_SCHEMA_SHA}"
 done <<EOF
 ${LEAF_CATALOG}
 EOF
 
-# Require at least one leaf so the Merkle tree is well-defined.
-if [ ! -s "${LEAVES_TMP}" ]; then
+# ---- 3.55. Record leaf: the content-addressed anchor-source archive. --------
+#
+# The signed pre-image of the most recent anchor event. api/anchor-source.json
+# serves the same object at a MUTABLE URL (the spec's category error, and the
+# root cause of the 2026-07-07 stale publication); api/archive/ serves it at a
+# URL named by the digest it commits to, which is what makes it pinnable.
+#
+# Discovery goes through api/anchor-history.jsonl (append-only, push-owned).
+# That file is a stream, so it is trusted for DISCOVERY only: the archive is
+# accepted as a record only after its own .dag_root_computed is confirmed equal
+# to the 64-hex in its filename. A file that does not hash-address itself is
+# not a record and is skipped.
+#
+# Every failure here is fail-open (skip the leaf, print why). The manifest must
+# never fail to issue on a transition day because an optional record was
+# unreachable.
+ARCHIVE_LEAF_KEY="anchor_source_archive_json"
+
+resolve_archive_record() {
+	# stdout: "<url>\t<sha256>\t<kind>" on success. Return 1 otherwise.
+	local hist_tmp code rel base hex arc_tmp arc_url arc_root arc_sha arc_kind
+	hist_tmp="$(mktemp -t anchorhist.XXXXXX)"
+	code="$(curl -sSLI -o /dev/null -w "%{http_code}" "${ARTIFACT_BASE}/api/anchor-history.jsonl" 2>/dev/null || printf '000')"
+	if [ "${code}" != "200" ] || ! curl -sSLf -o "${hist_tmp}" "${ARTIFACT_BASE}/api/anchor-history.jsonl" 2>/dev/null; then
+		rm -f "${hist_tmp}"
+		echo "  skip ${ARCHIVE_LEAF_KEY}: anchor-history.jsonl not fetchable (HTTP ${code})" >&2
+		return 1
+	fi
+	rel="$(jq -Rr '(fromjson? // empty) | .archived_source_path // empty' "${hist_tmp}" 2>/dev/null | tail -n 1)"
+	rm -f "${hist_tmp}"
+	if [ -z "${rel}" ]; then
+		echo "  skip ${ARCHIVE_LEAF_KEY}: no archived_source_path on the last anchor-history line" >&2
+		return 1
+	fi
+
+	# Shape gate: only the anchor-source half of api/archive/ is structurally
+	# immutable (deploy/publication.json record_caveat — the receipt half is
+	# stable by operating discipline, which is not a property to sign).
+	base="${rel##*/}"
+	case "${base}" in
+		anchor-source-*.json) hex="${base#anchor-source-}"; hex="${hex%.json}" ;;
+		*) echo "  skip ${ARCHIVE_LEAF_KEY}: unexpected archive basename '${base}'" >&2; return 1 ;;
+	esac
+	case "${hex}" in
+		*[!a-f0-9]*|"") echo "  skip ${ARCHIVE_LEAF_KEY}: archive name is not digest-addressed: ${base}" >&2; return 1 ;;
+	esac
+	[ "${#hex}" -eq 64 ] || { echo "  skip ${ARCHIVE_LEAF_KEY}: archive digest is not 64-hex: ${base}" >&2; return 1; }
+
+	# The registry must independently declare this member a record.
+	arc_kind="$(registry_kind_of_path "${rel}")"
+	if ! kind_is_pinnable "${arc_kind:-unknown}"; then
+		echo "  skip ${ARCHIVE_LEAF_KEY}: registry kind='${arc_kind:-<none>}' for ${rel} is not pinnable" >&2
+		return 1
+	fi
+
+	arc_url="${ARTIFACT_BASE}/${rel}"
+	code="$(curl -sSLI -o /dev/null -w "%{http_code}" "${arc_url}" 2>/dev/null || printf '000')"
+	if [ "${code}" != "200" ]; then
+		echo "  skip ${ARCHIVE_LEAF_KEY}: HTTP ${code} at ${arc_url}" >&2
+		return 1
+	fi
+	arc_tmp="$(mktemp -t anchorarc.XXXXXX)"
+	if ! curl -sSLf -o "${arc_tmp}" "${arc_url}" 2>/dev/null; then
+		rm -f "${arc_tmp}"
+		echo "  skip ${ARCHIVE_LEAF_KEY}: fetch failed at ${arc_url}" >&2
+		return 1
+	fi
+
+	# Content-addressing self-check — this is what earns the record
+	# classification. The three branch roots are RE-DERIVED from the fetched
+	# bytes (jq -cS canonical form including jq's trailing 0x0a, per
+	# docs/MERKLE_DAG_SPEC.md §2.1/§3/§4) and folded, instead of trusting the
+	# file's own .dag_root_computed field: a self-declared digest proves
+	# nothing about the bytes carrying it.
+	local id_root ob_root ar_root derived
+	id_root="$(jq -cS '.identity_branch'     "${arc_tmp}" 2>/dev/null | sha256_of_stdin || true)"
+	ob_root="$(jq -cS '.observations_branch' "${arc_tmp}" 2>/dev/null | sha256_of_stdin || true)"
+	ar_root="$(jq -cS '.artifacts_branch'    "${arc_tmp}" 2>/dev/null | sha256_of_stdin || true)"
+	derived="$(printf '%s%s%s' "${id_root}" "${ob_root}" "${ar_root}" | sha256_of_stdin || true)"
+	arc_root="$(jq -r '.dag_root_computed // empty' "${arc_tmp}" 2>/dev/null || true)"
+	if [ "${derived}" != "${hex}" ]; then
+		rm -f "${arc_tmp}"
+		echo "  skip ${ARCHIVE_LEAF_KEY}: re-derived DAG root does not address the file name (derived='${derived:-<none>}' vs '${hex}')" >&2
+		return 1
+	fi
+	if [ "${arc_root}" != "${derived}" ]; then
+		rm -f "${arc_tmp}"
+		echo "  skip ${ARCHIVE_LEAF_KEY}: declared dag_root_computed='${arc_root:-<none>}' disagrees with the re-derived root" >&2
+		return 1
+	fi
+
+	# HONEST SCOPE OF THE NAME (measured 2026-08-14). The file name binds the
+	# THREE BRANCHES and nothing else. anchor-source.json also carries
+	# computed_at / computed_by_script / computed_from_git_commit, and none of
+	# them sits inside a branch: editing computed_at leaves the re-derived root
+	# unchanged while the file's sha256 changes, and gen-anchor-source.sh mv's
+	# over an existing archive unconditionally. So this URL is NOT a promise
+	# that its bytes are fixed forever — the sha256 recorded below is what
+	# fixes them, as of this signing. deploy/publication.json's record_caveat
+	# currently calls the anchor-source half "STRUCTURALLY immutable" on the
+	# strength of a grep for `generated_at` (0 hits) — the field is spelled
+	# computed_at, so that grep missed it. Recorded here and in
+	# docs/IDENTITY_VERIFICATION.md rather than glossed.
+	arc_sha="$(sha256_of_stdin < "${arc_tmp}")"
+	rm -f "${arc_tmp}"
+	[ -n "${arc_sha}" ] || return 1
+	printf '%s\t%s\t%s' "${arc_url}" "${arc_sha}" "${arc_kind}"
+}
+
+if ARCHIVE_RESOLVED="$(resolve_archive_record)" && [ -n "${ARCHIVE_RESOLVED}" ]; then
+	IFS=$'\t' read -r ARC_URL ARC_SHA ARC_KIND <<< "${ARCHIVE_RESOLVED}"
+	LIVE_COUNT=$((LIVE_COUNT + 1))
+	printf '%s\t%s\n' "${ARCHIVE_LEAF_KEY}" "${ARC_SHA}" >> "${LEAVES_TMP}"
+	manifest_put "${ARCHIVE_LEAF_KEY}" "${ARC_URL}" "${ARC_KIND}" "${ARC_SHA}" "" ""
+	echo "  pinned ${ARCHIVE_LEAF_KEY}: kind=${ARC_KIND} ${ARC_URL##*/}" >&2
+fi
+
+# Require at least one live artifact so the manifest is not empty.
+if [ "${LIVE_COUNT}" -eq 0 ]; then
 	echo "ERROR: no live leaves found at ${ARTIFACT_BASE}/api/* — refusing to publish empty artifact_manifest." >&2
 	rm -f "${LEAVES_TMP}" "${MANIFEST_TMP}"
 	exit 3
+fi
+
+# Require at least one PINNABLE leaf so the Merkle tree is well-defined and
+# artifact_root commits to something. Distinct from exit 3: here the artifacts
+# are live, but every one of them is a stream, so the signature would assert
+# nothing about any bytes.
+if [ ! -s "${LEAVES_TMP}" ]; then
+	echo "ERROR: ${LIVE_COUNT} live artifact(s), but none is pinnable (all kind=stream)." >&2
+	echo "       artifact_root would commit to nothing, so the signature would" >&2
+	echo "       assert nothing about any bytes. Refusing to publish." >&2
+	echo "       Expected pinnable artifacts: api/incidents.json (kind=static)" >&2
+	echo "       and the api/archive/ anchor-source record. Check that they are" >&2
+	echo "       served at ${ARTIFACT_BASE}." >&2
+	rm -f "${LEAVES_TMP}" "${MANIFEST_TMP}"
+	exit 10
 fi
 
 # Merkle root over leaves sorted alphabetically by key.
@@ -493,6 +803,9 @@ jq -n \
 	--arg generated_at "${NOW_UTC}" \
 	--argjson artifact_manifest "${ARTIFACT_MANIFEST_JSON}" \
 	--arg artifact_root "${ARTIFACT_ROOT}" \
+	--arg pin_policy_source "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/deploy/publication.json" \
+	--arg pin_policy_rule "An artifact_manifest entry carries sha256 only when the publication registry declares its kind as 'static' (bytes change only when a commit changes them) or 'record' (immutable bytes at a URL that never resolves differently). Entries with kind 'stream' are published with url + kind and NO sha256: their bytes change without a commit, so a digest fixed at signing time would be false within minutes. The absence of sha256 is a deliberate declaration, not an omission, and a verifier MUST NOT treat it as a broken manifest. The same rule is applied independently to schema_url / schema_sha256." \
+	--arg pin_policy_root "artifact_root is the Merkle root over exactly the sha256 values present in artifact_manifest, in alphabetical key order." \
 	--arg anchor_receipt_url "https://metal.freedom-yield.com/api/anchor-receipt.json" \
 	--arg anchor_history_url "https://metal.freedom-yield.com/api/anchor-history.jsonl" \
 	'{
@@ -519,6 +832,11 @@ jq -n \
 		},
 		artifact_manifest: $artifact_manifest,
 		artifact_root: $artifact_root,
+		pin_policy: {
+			source: $pin_policy_source,
+			rule: $pin_policy_rule,
+			merkle_leaves: $pin_policy_root
+		},
 		anchor_receipt_url: $anchor_receipt_url,
 		audit: {
 			anchor_receipt: $anchor_receipt_url,
@@ -593,6 +911,8 @@ trap - EXIT
 rm -f "${ALLOWED}"
 
 LEAF_COUNT="$(jq -r '.artifact_manifest | length' "${OUT_JSON}")"
+PINNED_COUNT="$(jq -r '[.artifact_manifest[] | select(has("sha256"))] | length' "${OUT_JSON}")"
+UNPINNED_KEYS="$(jq -r '[.artifact_manifest | to_entries[] | select(.value | has("sha256") | not) | .key] | join(", ")' "${OUT_JSON}")"
 
 echo "✓ wrote ${OUT_JSON}"
 echo "✓ wrote ${OUT_SIG}"
@@ -600,8 +920,10 @@ echo "  fingerprint:          ${FP}"
 echo "  namespace:            ${NAMESPACE}"
 echo "  principal:            ${PRINCIPAL}"
 echo "  iat / exp:            ${KEY_IAT} / ${KEY_EXP}"
-echo "  artifact leaves:      ${LEAF_COUNT}"
-echo "  artifact_root:        ${ARTIFACT_ROOT}"
+echo "  artifact leaves:      ${LEAF_COUNT} listed / ${PINNED_COUNT} pinned"
+echo "  unpinned (kind=stream): ${UNPINNED_KEYS:-none}"
+echo "  registry:             ${PUBLICATION_REGISTRY}"
+echo "  artifact_root:        ${ARTIFACT_ROOT} (Merkle over the ${PINNED_COUNT} pinned digest(s))"
 echo "  cycle ledger:         latest cycle_n = ${LAST_CYCLE_N:-none} (${CY_LEAF_COUNT} leaves)"
 echo "  NOTE: identity.json carries no DAG root. The single authoritative anchor"
 echo "        value is anchor-source.json .dag_root_computed (3-branch), memo"

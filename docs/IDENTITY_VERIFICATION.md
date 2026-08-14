@@ -153,6 +153,76 @@ The `from != to` invariant is forced by the XPRNetwork `eosio.token` contract (`
 
 Publishing the three branch roots on-chain alongside the DAG root lets an evaluator confirm each branch independently and recompute the DAG root (step 5) from chain data alone.
 
+## Artifact manifest — what the signature pins, and what it deliberately does not
+
+`identity.json` carries an `artifact_manifest` object. Each entry names one published artifact. **Not every entry carries a `sha256`, and that is the contract, not a defect.**
+
+A digest inside a signed document is a claim about bytes. It can only hold for bytes that cannot change without the operator committing that change. The repository declares that property for every published path in [`deploy/publication.json`](../deploy/publication.json), and `gen-identity.sh` copies the declaration into each entry as `kind`:
+
+| `kind` | What it means | `sha256` present? |
+|---|---|---|
+| `record` | A URL named by a digest of what it contains — see the scope note below for exactly how far that name reaches | yes |
+| `static` | Bytes change only when a commit in the operator's repository changes them | yes |
+| `stream` | Bytes can change without any commit — host cron or runtime push rewrites them on their own cadence | **no** |
+
+`kind` is a **safe floor**, not a summary: a path is classified by its weakest moment, so a verifier that acts on `kind` alone always does the safe thing. The rule is also restated in-band, inside the signed bytes, as the top-level `pin_policy` object — so the manifest explains itself without reference to this document.
+
+#### Scope note on `record` — what the URL's name binds, and what it does not
+
+The only `record` in the manifest is `anchor_source_archive_json`, at `/api/archive/anchor-source-<64-hex>.json`. Stated plainly, because "content-addressed" reads stronger than what was measured (2026-08-14):
+
+- The `<64-hex>` in the name is `dag_root_computed`, derived from **the three branch objects and nothing else** (steps 4–5 above). You can recompute it from the fetched file and confirm it equals the name. `gen-identity.sh` does exactly that before agreeing to pin — re-deriving the three roots rather than reading the file's own `dag_root_computed` field, since a self-declared digest proves nothing about the bytes carrying it.
+- The file **also** carries `computed_at`, `computed_by_script` and `computed_from_git_commit`, and **none of those sits inside any branch**. Changing `computed_at` leaves the derived root — and therefore the file name — unchanged while the file's SHA-256 changes. The generator writes the archive with an unconditional overwrite. So the same URL can in principle serve different bytes under the same honest name.
+- Therefore: **the URL's name binds the three branch roots; the `sha256` in the manifest binds the whole file as of signing.** If you fetch this URL and the digest does not match, do not stop there — recompute the three branch roots. If they still fold to the value in the file name, the difference is confined to provenance fields and the anchored DAG is unaffected. If they do not fold to it, that is a real finding.
+
+The receipt half of `/api/archive/` (`anchor-receipt-<tx_id>.json`) is deliberately **not** pinned here: it is named by a transaction id rather than by a digest of itself, so its name binds nothing about its contents at all.
+
+Because `gen-identity.sh` runs before the current cycle's anchor is composed, the record pinned in any given manifest is **the pre-image of the previous cycle's anchor**, not of the cycle that manifest opens. Read its `observations_branch.cycle_number_observed` rather than assuming it is the newest.
+
+### How to check the pinned entries
+
+```sh
+BASE=https://metal.freedom-yield.com
+jq -r '.artifact_manifest | to_entries[]
+       | select(.value.sha256 != null)
+       | "\(.value.sha256)  \(.value.url)"' identity.json |
+while read -r want url; do
+  got=$(curl -sSLf "$url" | sha256sum | awk '{print $1}')
+  [ "$want" = "$got" ] && echo "OK   $url" || echo "FAIL $url ($want != $got)"
+done
+```
+
+Do the same for `schema_sha256` / `schema_url`. A payload's schema is a separate publication with its own `kind`: a `stream` payload can have a `static` schema, so an entry may carry `schema_sha256` while carrying no `sha256`. That is the pin being placed where it can actually hold.
+
+**A `FAIL` on any entry that carries a `sha256` is a real finding.** Report it. Those artifacts are delivered by the git deploy or are content-addressed; nothing but an operator error or an interfering intermediary makes them differ.
+
+### The unpinned entries
+
+An entry without `sha256` asserts exactly two things: the artifact is published at that URL, and the operator classifies it as a moving stream. It asserts nothing about the bytes served there at any moment. **Do not compute a digest of a `kind: "stream"` artifact and compare it to anything in this manifest — there is nothing to compare it to.**
+
+Point-in-time digests of the stream artifacts do exist, and they are stronger evidence than a manifest pin would be, because they are timestamped by a blockchain rather than by the operator: `anchor-source.json` `.artifacts_branch.public_api_files_hashed[]` captures the digest of each public artifact at the instant the anchor was composed, and that branch is folded into `dag_root_computed`, which step 7 above finds inscribed on Metal A-chain. A stream's bytes at anchor time are therefore verifiable against the chain; a stream's bytes *right now* are, correctly, claimed by nobody.
+
+### Recomputing `artifact_root`
+
+`artifact_root` is the SHA-256 Merkle root over **the `sha256` values that are present**, in alphabetical key order — odd counts duplicate the last leaf, a parent is `SHA-256(raw(left) || raw(right))`, and a single leaf is its own root. Entries without `sha256` contribute no leaf.
+
+```sh
+jq -r '.artifact_manifest | to_entries | sort_by(.key)[]
+       | select(.value.sha256 != null) | .value.sha256' identity.json
+# fold the resulting list per the rule above; the result must equal .artifact_root
+```
+
+### Manifests issued before 2026-08-14
+
+This discipline is applied by the generator from 2026-08-14; a manifest takes the shape above from the operator's first re-issue on or after that date. **Measured 2026-08-14: the manifest currently served at `/api/identity.json` (`generated_at` `2026-08-06T05:31:44Z`) predates it.** It carries a `sha256` on all five of its entries, four of which are `kind: "stream"` in the registry (`evidence_json`, `validator_json`, `cycle_history_jsonl`, `uptime_cycles_json`), and it carries no `kind` and no `pin_policy` fields at all.
+
+For that manifest, and any older one, a verifier should:
+
+- treat a digest mismatch on those four artifacts as **carrying no information** — it is expected at an unpredictable rate, since the feeds are rewritten by host cron on their own cadence, and a momentary *match* is equally uninformative. All four are named as such in [`deploy/publication.json`](../deploy/publication.json) under `known_kind_violations`. [`deploy/identity-pin-baseline.json`](../deploy/identity-pin-baseline.json) names three of the four (`cycle_history_jsonl.sha256` is recorded only in the registry) and records specific digests from the **2026-08-04** manifest, not from the one served today — read the `c4_status` block there before comparing values;
+- treat a mismatch on `incidents_json` or on any `schema_sha256` as a real finding, exactly as above. One such break is already on record: an ordinary commit on 2026-08-05 edited a git-tracked schema and invalidated `cycle_history_jsonl.schema_sha256` in the manifest signed the day before. That failure mode is *not* addressed by the kind discipline — it is what `scripts/check-identity-pins.sh` exists to catch, and it is repaired by re-issuing the manifest.
+
+A manifest that carries `pin_policy` is post-discipline and every `sha256` in it is meant to hold.
+
 ## Rotation and revocation
 
 If the operator identity key is rotated, the new `identity.json` reflects the new `operator_identity_pubkey_fingerprint` and a new `key_iat`; a new line appends to `identity-history.jsonl` (the source of `identity_branch.identity_history_root`) with the next `key_seq`; the prior key's line is updated with `superseded_by_key_seq` populated (and `revoked` / `revoked_at` / `revocation_reason` set if the rotation is for cause). The identity branch root changes, hence `dag_root_computed` changes, and the next cycle's anchor commits the new root.

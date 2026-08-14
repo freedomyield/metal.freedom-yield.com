@@ -285,6 +285,64 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    operator vigilance. Left unset, `gen-identity.sh` still runs (needed for
    first-run / bootstrap) but prints a loud stderr warning that the
    ordering guard is disabled for that run.
+
+   **Two other hard-stops fire in this step, both BEFORE the exit-7
+   ordering guard** (they sit in the artifact-probing section, which runs
+   first — so if you see one of these, the ordering guard has not been
+   evaluated yet and says nothing about your ledger):
+
+   | exit | meaning | fix |
+   |---|---|---|
+   | **9** | `deploy/publication.json` is unreadable / unparseable, or an artifact the manifest names has no row in it. The script will not guess whether a digest is safe to sign. | Restore or fix the registry (it is git-tracked), or add the missing publication row with its `kind`. |
+   | **10** | Artifacts are live, but every one of them is `kind=stream`, so `artifact_root` would commit to nothing. | Check that `/api/incidents.json` (kind=static) and the `/api/archive/` anchor-source record are actually being served. |
+
+   Neither has ever fired in production; both exist because signing a
+   manifest whose pins are unverifiable is worse than not signing one.
+
+4b. **Mac — the C4 post-issuance cleanup (MANDATORY, same commit as step 4).**
+   `gen-identity.sh` stopped pinning `kind=stream` publications on
+   2026-08-14, but the acknowledgement lists that describe the *old* pins
+   are not self-clearing. Land all of this in the commit that carries the
+   new `identity.json`, or `tests/publication-registry/` goes red on main:
+
+   - `deploy/identity-pin-baseline.json` — delete all three
+     `known_broken` entries (`evidence_json.sha256`,
+     `validator_json.sha256`, `uptime_cycles_json.sha256`) and the
+     `c4_status` block with them. Those pins no longer exist.
+   - `deploy/publication.json` — set
+     `known_kind_violations.violations` to `{}` (all four entries expire
+     at once), and clear `pinned_by` on `api/evidence.json`,
+     `api/validator.json`, `api/cycle-history.jsonl` and
+     `api/uptime-cycles.json`.
+   - `deploy/publication.json` — declare the two pins that are new:
+     `api/incidents.schema.v1.json` gains
+     `"pinned_by": ["api/identity.json#artifact_manifest.incidents_json.schema_sha256"]`,
+     and the `api/archive/` directory row gains
+     `"pinned_by": ["api/identity.json#artifact_manifest.anchor_source_archive_json.sha256"]`
+     (a content-addressed member is declared on its directory row —
+     that is the only row that can carry it).
+
+   Verify with `bash tests/publication-registry/test-publication-registry.sh`.
+   Its `T19` case exercises exactly this before/after pair, and **both of its
+   registry fixtures are synthesised rather than read off disk**, so T19 gives
+   the same verdict before and after you apply this list — a green T19 after
+   the cleanup is the expected result, not a sign the case stopped testing.
+   The suite as a whole is the check that the cleanup was complete: `T6`, `T7`
+   and `T14` read the real registry and the real manifest, and they are what
+   go red if any bullet above is missed.
+
+   > **Known open item, tracked separately (do not fix here).** The
+   > `record_caveat` on the `api/archive/` row still calls the anchor-source
+   > half "STRUCTURALLY immutable", justified by a grep for `generated_at`
+   > returning zero hits. The field is actually spelled `computed_at`, and it
+   > sits outside all three DAG branches together with `computed_by_script`
+   > and `computed_from_git_commit` — so the same URL can serve different
+   > bytes under the same honest name. **That caveat is the stated basis for
+   > pinning a record at all**, so it must be corrected before this step runs.
+   > The signed side is already honest: `identity.json`'s `pin_policy`,
+   > `docs/IDENTITY_VERIFICATION.md` and `gen-identity.sh`'s own check were
+   > all corrected on 2026-08-14 to say the URL binds the three branch roots
+   > while the manifest's `sha256` binds the whole file as of signing.
 5. **host —**
    ```sh
    FY_EXPECT_CYCLE=<N> bash scripts/gen-anchor-source.sh

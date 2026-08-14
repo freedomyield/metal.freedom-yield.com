@@ -191,8 +191,10 @@ Expected tail (your `fingerprint` and `artifact_root` will differ):
   namespace:       freedom-yield/validator-identity
   principal:       freedom-yield
   iat / exp:       <today> / <today+365d>
-  leaves bound:    <count>           # 5 if cycle-history.jsonl is live, else 4
-  artifact_root:   <64-hex>
+  artifact leaves:      <listed> listed / <pinned> pinned
+  unpinned (kind=stream): evidence_json, validator_json, cycle_history_jsonl, uptime_cycles_json
+  registry:             .../deploy/publication.json
+  artifact_root:   <64-hex>   (Merkle over the <pinned> pinned digest(s))
   identity_branch_root: <64-hex>   (= identity-history.jsonl Merkle root)
   cycles_branch_root:   <64-hex>   (= cycle-history.jsonl Merkle root)
   dag_root_hash:        <64-hex>   (= SHA-256(raw(id_root)||raw(cy_root)))
@@ -333,12 +335,24 @@ republish whenever the underlying issue is resolved.
   time of signing. Re-running `gen-identity.sh` and re-committing is
   the way to extend the bound set.
 
-- **Time-of-flight skew.** If `evidence.json` updates between the
+- **Time-of-flight skew.** ~~If `evidence.json` updates between the
   moment `gen-identity.sh` fetched it and the moment a verifier
   fetches it, the verifier's recomputed leaf sha256 will not match
   the manifest's claim. Re-run `gen-identity.sh` to refresh the
   manifest. For frequently-updated leaves this is unavoidable; the
-  manifest binds the set at signing time, not in perpetuity.
+  manifest binds the set at signing time, not in perpetuity.~~
+  **REVISED 2026-08-14 (C4).** "Re-run to refresh" was never a real
+  remedy: `validator.json` was measured changing twice inside one
+  20-minute window on 2026-08-06, so no signing cadence could keep up.
+  The manifest now declines to pin any publication whose
+  `deploy/publication.json` kind is `stream`, so this skew has no
+  surface left — those entries carry no digest to disagree with. The
+  point-in-time digests still exist where they can be timestamped by
+  something other than the operator: `anchor-source.json`
+  `.artifacts_branch`, folded into the on-chain `dag_root_computed`.
+  Skew remains possible only for `static` / `record` artifacts, where
+  it means a genuine problem and `scripts/check-identity-pins.sh`
+  reports it.
 
 - **`.pub` content-type.** The web host serves `.well-known/*.pub`
   with whatever MIME type its config dictates. The verifier doesn't

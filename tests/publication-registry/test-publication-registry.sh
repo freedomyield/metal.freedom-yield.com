@@ -39,6 +39,9 @@
 # T13 declared git_tracked / gitignored match git
 # T14 pinned_by is exactly the pin set in identity.json's artifact_manifest
 # T15 mutation self-proof: break the registry three ways, each must go red
+# T19 forward regression: the suite behaves correctly against the post-C4
+#     manifest shape (streams listed unpinned, a record pinned on a directory
+#     row), including a mutation that reproduces the pre-fix T7 false pass
 
 set -uo pipefail
 
@@ -181,16 +184,65 @@ t5
 # "<pin key>\t<public-relative path>" for every pin in the signed manifest.
 # The path is derived from the manifest's own url / schema_url, not asserted
 # by the registry, so this is a measurement and not a restatement.
+#
+# A PIN IS A PRESENT sha256, not a listed entry. Since the C4 kind discipline
+# (2026-08-14) an entry whose publication kind is `stream` is listed with url +
+# kind and NO sha256, so emitting a `.sha256` row for every entry would invent
+# pins that do not exist. scripts/check-identity-pins.sh:302-307 has always
+# gated on `(.value.sha256 // "") != ""`; this is the second implementation of
+# the same enumeration and the two must not disagree. Measured consequence of
+# the disagreement, before this fix: against a post-C4 manifest T7 reported
+# "all 4 known_kind_violations entries still describe a real violation" while
+# the manifest contained no stream pin at all — a false pass on the one check
+# whose entire job is to expire the acknowledgement list.
 identity_pins() {
 	jq -r '
 		.artifact_manifest | to_entries[] |
-		( [ (.key + ".sha256"), (.value.url        | sub("^https?://[^/]+/"; "")) ] | @tsv ),
+		( select(.value.sha256 != null)
+		  | [ (.key + ".sha256"), (.value.url        | sub("^https?://[^/]+/"; "")) ] | @tsv ),
 		( select(.value.schema_sha256 != null)
 		  | [ (.key + ".schema_sha256"), (.value.schema_url | sub("^https?://[^/]+/"; "")) ] | @tsv )
 	' "$IDENTITY"
 }
 
-kind_of() { jq -r --arg p "$1" '.publications[] | select(.path == $p) | .kind' "$REGISTRY"; }
+# registry_row_for_path <public-relative path> -> the registry `path` that
+# GOVERNS it, or empty.
+#
+# Exact row wins. Otherwise a directory row (path ending in "/") governs the
+# member only when the member's basename matches that row's member_pattern —
+# the same resolution scripts/operator-local/gen-identity.sh performs, and the
+# reason a digest-named archive member may be treated as kind=record while
+# api/archive/whatever.json may not. Without this, a pin on a directory member
+# resolved to NO row: kind_of returned empty so T6 skipped it in silence, and
+# T14 compared the member URL against a registry path that can only ever be the
+# directory itself, so a record pin was impossible to declare at all.
+registry_row_for_path() {
+	jq -r --arg p "$1" '
+		( [ .publications[] | select(.path == $p) | .path ] | first // "" ) as $exact
+		| if $exact != "" then $exact
+		  else
+			( [ .publications[]
+				| . as $row
+				| select($row.path | endswith("/"))
+				| select(($row.member_pattern // "") != "")
+				| select($p | startswith($row.path))
+				| ($row.path | length) as $plen
+				| ($p[$plen:]) as $member
+				| select($member | test($row.member_pattern))
+				| $row.path
+			  ] | first // "" )
+		  end
+	' "${2:-$REGISTRY}"
+}
+
+# kind_of resolves through the same governing row, so a pin on a directory
+# member is classified by that directory's kind instead of vanishing.
+kind_of() {
+	local reg="${2:-$REGISTRY}" row
+	row="$(registry_row_for_path "$1" "$reg")"
+	[ -n "$row" ] || return 0
+	jq -r --arg p "$row" '.publications[] | select(.path == $p) | .kind' "$reg"
+}
 
 # ---------------------------------------------------------------------------
 # T6 — kind gate: kind=stream must not be pinned, except in the baseline
@@ -441,8 +493,26 @@ t13
 # T14 — pinned_by is exactly the manifest's pin set, in both directions
 # ---------------------------------------------------------------------------
 t14() {
-	local live declared bad=0 n
-	live="$(identity_pins | awk -F'\t' '{ printf "api/identity.json#artifact_manifest.%s\t%s\n", $1, $2 }' | sort)"
+	local live declared bad=0 n key path row unresolved=0
+	# The live side names the GOVERNING registry row, not the raw URL path: a
+	# pin on a content-addressed member of api/archive/ is declared on the
+	# api/archive/ row, because that directory row is the only place the
+	# registry can carry a pinned_by for it. Comparing the member URL against
+	# publications[].path directly made a record pin undeclarable — the two
+	# sides could never agree, in either direction.
+	live=""
+	while IFS=$'\t' read -r key path; do
+		[ -n "$key" ] || continue
+		row="$(registry_row_for_path "$path")"
+		if [ -z "$row" ]; then
+			fail "T14 pin '${key}' targets ${path}, which no publications[] row governs (no exact row, no directory row whose member_pattern matches)"
+			unresolved=1
+			continue
+		fi
+		live="${live}api/identity.json#artifact_manifest.${key}	${row}"$'\n'
+	done <<< "$(identity_pins)"
+	live="$(printf '%s' "$live" | sort)"
+	[ "$unresolved" -eq 0 ] || bad=1
 	declared="$(jq -r '.publications[] | . as $p | .pinned_by[]? | [., $p.path] | @tsv' "$REGISTRY" | sort)"
 	if [ "$live" != "$declared" ]; then
 		fail "T14 pinned_by does not match identity.json's artifact_manifest"
@@ -567,6 +637,197 @@ t18() {
 t18
 
 # ---------------------------------------------------------------------------
+# T19 — forward regression: this suite must behave correctly against the
+# manifest the 2026-09-04 issuance will produce, not only against the one
+# committed today.
+#
+# Why this exists: T6/T7/T14 read the CURRENT signed identity.json, in which
+# every entry still carries a sha256. That made two defects invisible.
+#   (1) identity_pins() emitted a `.sha256` row per ENTRY rather than per
+#       PRESENT DIGEST, so against a post-C4 manifest T7 found a "live" pin for
+#       every acknowledged violation and passed while the manifest pinned no
+#       stream at all — a false pass on the expiry check itself.
+#   (2) T14 compared a pin's URL path against publications[].path by exact
+#       equality, so a pin on a content-addressed member of api/archive/ could
+#       not be declared by any row: the directory row is the only place a
+#       pinned_by can live for it.
+# Both would first have fired on transition day, inside the commit that lands
+# the re-issued manifest, where publication.json edits alone could not clear
+# them. The fixtures below are synthetic and hermetic; nothing here reads or
+# writes a real artifact.
+# ---------------------------------------------------------------------------
+t19() {
+	local fx_id="$TMPDIR_T/t19-identity.json"
+	local reg_stale="$TMPDIR_T/t19-registry-stale.json"
+	local reg_done="$TMPDIR_T/t19-registry-updated.json"
+	local arc_hex="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	local zero="1111111111111111111111111111111111111111111111111111111111111111"
+	local out bad=0
+
+	# A manifest in the post-C4 shape: streams listed without sha256, static
+	# and record entries pinned, plus the new incidents schema pin.
+	jq --arg h "$arc_hex" --arg z "$zero" '
+		["evidence_json","validator_json","cycle_history_jsonl","uptime_cycles_json"] as $streams
+		| .artifact_manifest |= with_entries(
+			. as $e
+			| if ($streams | index($e.key))
+			  then .value |= (del(.sha256) + {kind: "stream"})
+			  else .value |= (. + {kind: "static"})
+			  end)
+		| .artifact_manifest.incidents_json += {
+			schema_url: "https://metal.freedom-yield.com/api/incidents.schema.v1.json",
+			schema_sha256: $z }
+		| .artifact_manifest.anchor_source_archive_json = {
+			url: ("https://metal.freedom-yield.com/api/archive/anchor-source-" + $h + ".json"),
+			kind: "record",
+			sha256: $z }
+	' "$IDENTITY" > "$fx_id" || { fail "T19 could not build the post-C4 manifest fixture"; return; }
+
+	# The "stale" registry is SYNTHESISED into the pre-C4 shape, never copied
+	# from the live one. Copying it was the first version of this case and it
+	# was wrong in a way that only bites later: on 2026-09-04, the moment the
+	# operator performs the step-4b cleanup, the live registry stops being
+	# stale, the fixture stops being a stale fixture, and the two assertions
+	# below flip to red — inside the very commit that did the right thing.
+	# Measured on a tree with step 4b applied: "T7 did NOT flag the 4 expired
+	# violations" / "T14 did NOT flag the stale pinned_by set", PASS=23 FAIL=2.
+	# That is the same transition-day dead end this case exists to prevent,
+	# merely relocated into the test. Forcing both states here makes T19 give
+	# the same verdict before and after the cleanup.
+	jq '
+		.known_kind_violations.violations = {
+			"evidence_json.sha256":       { path: "api/evidence.json",       reason: "T19 fixture" },
+			"validator_json.sha256":      { path: "api/validator.json",      reason: "T19 fixture" },
+			"uptime_cycles_json.sha256":  { path: "api/uptime-cycles.json",  reason: "T19 fixture" },
+			"cycle_history_jsonl.sha256": { path: "api/cycle-history.jsonl", reason: "T19 fixture" }
+		}
+		| .publications |= map(
+			. as $row
+			| if   $row.path == "api/evidence.json"       then .pinned_by = ["api/identity.json#artifact_manifest.evidence_json.sha256"]
+			  elif $row.path == "api/validator.json"      then .pinned_by = ["api/identity.json#artifact_manifest.validator_json.sha256"]
+			  elif $row.path == "api/uptime-cycles.json"  then .pinned_by = ["api/identity.json#artifact_manifest.uptime_cycles_json.sha256"]
+			  elif $row.path == "api/cycle-history.jsonl" then .pinned_by = ["api/identity.json#artifact_manifest.cycle_history_jsonl.sha256"]
+			  elif $row.path == "api/incidents.schema.v1.json" then .pinned_by = []
+			  elif $row.path == "api/archive/"                 then .pinned_by = []
+			  else . end)
+	' "$REGISTRY" > "$reg_stale" || { fail "T19 could not synthesise the pre-C4 registry fixture"; return; }
+
+	# The registry as the 2026-09-04 commit must leave it — derived from the
+	# SYNTHETIC stale fixture, so this pair is a genuine before/after of the
+	# step-4b edit rather than a comparison against whatever is on disk today.
+	jq '
+		.known_kind_violations.violations = {}
+		| .publications |= map(
+			. as $row
+			| if (["api/evidence.json","api/validator.json","api/cycle-history.jsonl","api/uptime-cycles.json"] | index($row.path))
+			then .pinned_by = []
+			elif .path == "api/incidents.schema.v1.json"
+			then .pinned_by = ["api/identity.json#artifact_manifest.incidents_json.schema_sha256"]
+			elif .path == "api/archive/"
+			then .pinned_by = ["api/identity.json#artifact_manifest.anchor_source_archive_json.sha256"]
+			else . end)
+	' "$reg_stale" > "$reg_done" || { fail "T19 could not build the updated-registry fixture"; return; }
+
+	# The fixtures must actually contain what the case claims to exercise. A
+	# renamed or deleted publication row would otherwise silently shrink the
+	# test instead of failing it.
+	# n_pins counts PINS the way identity_pins() does — a payload sha256 and a
+	# schema_sha256 are each one pin — not entries.
+	local n_pins n_unpinned n_rows
+	n_pins="$(IDENTITY="$fx_id" identity_pins | grep -c .)"
+	n_unpinned="$(jq -r '[.artifact_manifest[] | select(has("sha256") | not)] | length' "$fx_id")"
+	[ "$n_pins" -eq 6 ] && [ "$n_unpinned" -eq 4 ] \
+		|| { fail "T19 manifest fixture is not the shape this case tests (${n_pins} pins / ${n_unpinned} unpinned entries, want 6/4) — a leaf was added or removed upstream"; return; }
+	n_rows="$(jq -r '[.publications[] | select(.path == "api/incidents.schema.v1.json" or .path == "api/archive/")] | length' "$reg_stale")"
+	[ "$n_rows" -eq 2 ] \
+		|| { fail "T19 registry fixture is missing api/incidents.schema.v1.json and/or api/archive/ (found ${n_rows} of 2) — the rows step 4b writes to no longer exist"; return; }
+
+	# The stale fixture must be STALE no matter what the live registry says.
+	# This is the assertion that would have caught the copy: on a tree where
+	# step 4b has already been applied, `cp "$REGISTRY"` yields 0 violations
+	# and 0 stream pins here, and the two comparisons below would then be
+	# checking nothing while still reporting green.
+	local n_viol n_streampins
+	n_viol="$(jq -r '.known_kind_violations.violations | length' "$reg_stale")"
+	n_streampins="$(jq -r '[ .publications[]
+		| select([.pinned_by[]? | test("artifact_manifest\\.(evidence_json|validator_json|uptime_cycles_json|cycle_history_jsonl)\\.sha256$")] | any)
+		] | length' "$reg_stale")"
+	if [ "$n_viol" -eq 4 ] && [ "$n_streampins" -eq 4 ]; then
+		pass "T19 the stale fixture is synthesised, not copied (4 violations + 4 stream pins, independent of the live registry)"
+	else
+		fail "T19 the stale fixture is not stale (${n_viol} violations / ${n_streampins} stream pins, want 4/4) — it is tracking the live registry instead of pinning the pre-C4 state"
+		return
+	fi
+
+	# Run the real checks against the fixtures in a subshell so their pass/fail
+	# counters and their globals cannot leak into this suite's own tally.
+	run_against() { ( IDENTITY="$1"; REGISTRY="$2"; PASS=0; FAIL=0; t6; t7; t14 ) 2>&1; }
+
+	# (1) post-C4 manifest + registry NOT yet updated: the suite must say so.
+	out="$(run_against "$fx_id" "$reg_stale")"
+	if printf '%s' "$out" | grep -q '^FAIL  T7 .*OBSOLETE baseline entry'; then
+		pass "T19 post-C4 manifest + stale registry: T7 reports the expired kind violations (no false pass)"
+	else
+		fail "T19 post-C4 manifest + stale registry: T7 did NOT flag the 4 expired violations"
+		note "$(printf '%s' "$out" | grep '^FAIL' | head -3 | tr '\n' '; ')"
+		bad=1
+	fi
+	if printf '%s' "$out" | grep -q '^FAIL  T14'; then
+		pass "T19 post-C4 manifest + stale registry: T14 reports the pinned_by drift"
+	else
+		fail "T19 post-C4 manifest + stale registry: T14 did NOT flag the stale pinned_by set"
+		bad=1
+	fi
+
+	# (2) post-C4 manifest + the registry edit the report prescribes: GREEN.
+	# This is the assertion that proves the target state is reachable, i.e.
+	# that transition day is not a dead end.
+	out="$(run_against "$fx_id" "$reg_done")"
+	if printf '%s' "$out" | grep -q '^FAIL'; then
+		fail "T19 post-C4 manifest + updated registry is NOT green — the 2026-09-04 target state is unreachable"
+		printf '%s\n' "$out" | grep -E '^(FAIL|      )' | head -8 | sed 's/^/      /'
+		bad=1
+	else
+		pass "T19 post-C4 manifest + updated registry: T6/T7/T14 all green (transition-day target state is reachable)"
+	fi
+
+	# (3) the record pin must resolve through the directory row, not by luck.
+	local row
+	row="$(registry_row_for_path "api/archive/anchor-source-${arc_hex}.json" "$reg_done")"
+	[ "$row" = "api/archive/" ] \
+		&& pass "T19 a content-addressed archive member resolves to the api/archive/ row" \
+		|| { fail "T19 archive member resolved to '${row:-<none>}', not api/archive/"; bad=1; }
+	row="$(registry_row_for_path "api/archive/not-a-digest.json" "$reg_done")"
+	[ -z "$row" ] \
+		&& pass "T19 a non-matching archive member resolves to NO row (member_pattern governs)" \
+		|| { fail "T19 'api/archive/not-a-digest.json' wrongly resolved to '${row}'"; bad=1; }
+
+	# (4) MUTATION: restore the old unconditional enumeration and require the
+	# false pass to come back. Without this, (1) could be passing for an
+	# unrelated reason.
+	identity_pins_unconditional() {
+		jq -r '
+			.artifact_manifest | to_entries[] |
+			( [ (.key + ".sha256"), (.value.url | sub("^https?://[^/]+/"; "")) ] | @tsv ),
+			( select(.value.schema_sha256 != null)
+			  | [ (.key + ".schema_sha256"), (.value.schema_url | sub("^https?://[^/]+/"; "")) ] | @tsv )
+		' "$IDENTITY"
+	}
+	out="$( ( IDENTITY="$fx_id"; REGISTRY="$reg_stale"; PASS=0; FAIL=0
+	          eval "$(declare -f identity_pins_unconditional | sed '1s/identity_pins_unconditional/identity_pins/')"
+	          t7 ) 2>&1 )"
+	if printf '%s' "$out" | grep -q '^PASS  T7'; then
+		pass "T19 MUTATION: the pre-fix enumeration reproduces the T7 false pass (the fix is load-bearing)"
+	else
+		fail "T19 MUTATION: the pre-fix enumeration did not reproduce the false pass — (1) may be passing for another reason"
+		bad=1
+	fi
+
+	[ "$bad" -eq 0 ] || true
+}
+t19
+
+# ---------------------------------------------------------------------------
 # T15 — mutation self-proof.
 # T1-T4 would still pass if the renderer ignored the registry and printed a
 # baked-in copy. Break the registry three ways and require the corresponding
@@ -608,7 +869,7 @@ t15() {
 	local found=0 key path kind
 	while IFS=$'\t' read -r key path; do
 		[ -n "$key" ] || continue
-		kind="$(jq -r --arg p "$path" '.publications[] | select(.path == $p) | .kind' "$mutant")"
+		kind="$(kind_of "$path" "$mutant")"
 		[ "$kind" = "stream" ] || continue
 		[ "$(jq -r --arg k "$key" '.known_kind_violations.violations[$k] // empty' "$mutant")" = "" ] && found=1
 	done <<< "$(identity_pins)"

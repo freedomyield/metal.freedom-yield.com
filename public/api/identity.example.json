@@ -1,5 +1,5 @@
 {
-	"_comment": "Synthetic schema example for /api/identity.schema.v1.json. This file is NOT a snapshot of any production identity — it is a fixed demonstration of the schema's shape. All sha256, fingerprint, hash, and timestamp values shown here are synthetic placeholders that document field formats only; they do not refer to any real artifact, key, or moment in time. Production runtime identity is published at /api/identity.json by scripts/operator-local/gen-identity.sh on the operator's local Mac (signed with the operator identity ed25519 key; the validator's staker.key / BLS signer.key are not used). Phase α A-chain anchoring is reached via the pointer field anchor_receipt_url (added 2026-06-21). The former dag_root_hash and cycles_history_url fields were RETIRED 2026-07-06 (design-stocktake #1 DAG-root collapse) — the single on-chain root is anchor-source.json.dag_root_computed (3-branch), surfaced via anchor-receipt.json, not a field on identity.json. See docs/IDENTITY_SCHEMA_CHANGELOG.md.",
+	"_comment": "Synthetic schema example for /api/identity.schema.v1.json. This file is NOT a snapshot of any production identity — it is a fixed demonstration of the schema's shape. It demonstrates the post-2026-08-14 kind discipline: entries whose kind is 'stream' carry NO sha256 on purpose (their bytes change without a commit, so a signed digest could not survive), while 'static' and 'record' entries do. The live /api/identity.json takes this shape from its first re-issue on or after 2026-08-14; manifests signed before that date pin every listed artifact, including streams, and those stream pins are known-stale by construction (deploy/identity-pin-baseline.json). All sha256, fingerprint, hash, and timestamp values shown here are synthetic placeholders that document field formats only; they do not refer to any real artifact, key, or moment in time. Production runtime identity is published at /api/identity.json by scripts/operator-local/gen-identity.sh on the operator's local Mac (signed with the operator identity ed25519 key; the validator's staker.key / BLS signer.key are not used). Phase α A-chain anchoring is reached via the pointer field anchor_receipt_url (added 2026-06-21). The former dag_root_hash and cycles_history_url fields were RETIRED 2026-07-06 (design-stocktake #1 DAG-root collapse) — the single on-chain root is anchor-source.json.dag_root_computed (3-branch), surfaced via anchor-receipt.json, not a field on identity.json. See docs/IDENTITY_SCHEMA_CHANGELOG.md.",
 	"schema_version": 1,
 	"brand": "Freedom Yield",
 	"node_id": "NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v",
@@ -21,34 +21,47 @@
 		"signature_url": "https://metal.freedom-yield.com/api/identity.json.sig"
 	},
 	"artifact_manifest": {
+		"anchor_source_archive_json": {
+			"url": "https://metal.freedom-yield.com/api/archive/anchor-source-0000000000000000000000000000000000000000000000000000000000000000.json",
+			"kind": "record",
+			"sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+		},
 		"evidence_json": {
 			"url": "https://metal.freedom-yield.com/api/evidence.json",
-			"sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+			"kind": "stream",
 			"schema_url": "https://metal.freedom-yield.com/api/evidence.schema.v1.json",
 			"schema_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
 		},
 		"validator_json": {
 			"url": "https://metal.freedom-yield.com/api/validator.json",
-			"sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+			"kind": "stream",
 			"schema_url": "https://metal.freedom-yield.com/api/validator.schema.v1.json",
 			"schema_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
 		},
 		"cycle_history_jsonl": {
 			"url": "https://metal.freedom-yield.com/api/cycle-history.jsonl",
-			"sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+			"kind": "stream",
 			"schema_url": "https://metal.freedom-yield.com/api/cycle-history.schema.v1.json",
 			"schema_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
 		},
 		"uptime_cycles_json": {
 			"url": "https://metal.freedom-yield.com/api/uptime-cycles.json",
-			"sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+			"kind": "stream"
 		},
 		"incidents_json": {
 			"url": "https://metal.freedom-yield.com/api/incidents.json",
-			"sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+			"kind": "static",
+			"sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+			"schema_url": "https://metal.freedom-yield.com/api/incidents.schema.v1.json",
+			"schema_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
 		}
 	},
 	"artifact_root": "0000000000000000000000000000000000000000000000000000000000000000",
+	"pin_policy": {
+		"source": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/deploy/publication.json",
+		"rule": "An artifact_manifest entry carries sha256 only when the publication registry declares its kind as 'static' (bytes change only when a commit changes them) or 'record' (immutable bytes at a URL that never resolves differently). Entries with kind 'stream' are published with url + kind and NO sha256: their bytes change without a commit, so a digest fixed at signing time would be false within minutes. The absence of sha256 is a deliberate declaration, not an omission, and a verifier MUST NOT treat it as a broken manifest. The same rule is applied independently to schema_url / schema_sha256.",
+		"merkle_leaves": "artifact_root is the Merkle root over exactly the sha256 values present in artifact_manifest, in alphabetical key order."
+	},
 	"anchor_receipt_url": "https://metal.freedom-yield.com/api/anchor-receipt.json",
 	"audit": {
 		"anchor_receipt": "https://metal.freedom-yield.com/api/anchor-receipt.json",

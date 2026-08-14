@@ -75,10 +75,20 @@ if ! ssh-keygen -t ed25519 -N "" -C "genid-guard-test" -f "$KEYDIR/opkey" >/dev/
 	skip_pass "ssh-keygen could not generate an ed25519 test key"
 fi
 
-# Stub docroot: one live leaf (evidence.json) so the artifact_manifest is
-# non-empty. cycle-history.jsonl is added/removed per case to drive the guard.
+# Stub docroot: two live leaves so the artifact_manifest is non-empty AND at
+# least one of them is pinnable. cycle-history.jsonl is added/removed per case
+# to drive the guard.
+#
+# incidents.json is required here since the C4 kind discipline (2026-08-14):
+# gen-identity.sh refuses (exit 10) when every live artifact is kind=stream,
+# because artifact_root would then commit to nothing. evidence.json alone is
+# kind=stream in deploy/publication.json, so the script would stop before ever
+# reaching the ordering guard this suite exists to test. incidents.json is
+# kind=static, so it supplies the one pinnable leaf. No assertion below is
+# changed — only the fixture is made sufficient to reach the code under test.
 DOCROOT="$WORK/docroot"; mkdir -p "$DOCROOT/api"
 printf '{"ok":true}\n' > "$DOCROOT/api/evidence.json"
+printf '{"incidents":[]}\n' > "$DOCROOT/api/incidents.json"
 
 # curl shim: serves fixtures from $FY_STUB_DOCROOT keyed by URL path. Handles the
 # two shapes gen-identity uses: `-sSLI -o /dev/null -w %{http_code}` (probe) and

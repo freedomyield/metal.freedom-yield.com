@@ -177,6 +177,21 @@ operating record honestly.
 
 ## Republishing a feed whose bytes are pinned by a signed manifest
 
+> **Scope note added 2026-08-14 (C4 kind discipline).** From that date
+> `scripts/operator-local/gen-identity.sh` no longer pins any publication whose
+> `deploy/publication.json` kind is `stream`, and `cycle-history.jsonl`,
+> `evidence.json`, `validator.json` and `uptime-cycles.json` are all `stream`.
+> **This section therefore applies to the manifest signed 2026-08-06**
+> (`generated_at` `2026-08-06T05:31:44Z`), which is still the one being served,
+> and thereafter only to `static` / `record` artifacts. Once the manifest is
+> re-issued — scheduled for the 2026-09-04 transition — a corrected
+> `cycle-history.jsonl` can be regenerated and pushed on its own, because no
+> signature will be claiming anything about its bytes. The chain-of-evidence
+> diagram below stays accurate for the anchor leg regardless: the point-in-time
+> digest of every public feed still lands in
+> `anchor-source.json .artifacts_branch`, which is what the on-chain root
+> commits to. Only the `identity.json` pin leg goes away, and only for streams.
+
 **A corrected feed cannot simply be regenerated and pushed.** Several public
 feeds are content-pinned by a signed manifest whose own hash is inscribed
 on-chain, so republishing one in isolation puts the published state into
