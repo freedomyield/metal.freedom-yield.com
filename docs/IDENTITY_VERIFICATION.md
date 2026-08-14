@@ -161,11 +161,23 @@ A digest inside a signed document is a claim about bytes. It can only hold for b
 
 | `kind` | What it means | `sha256` present? |
 |---|---|---|
-| `record` | Immutable bytes at a URL that never resolves to different bytes (content-addressed) | yes |
+| `record` | A URL named by a digest of what it contains — see the scope note below for exactly how far that name reaches | yes |
 | `static` | Bytes change only when a commit in the operator's repository changes them | yes |
 | `stream` | Bytes can change without any commit — host cron or runtime push rewrites them on their own cadence | **no** |
 
 `kind` is a **safe floor**, not a summary: a path is classified by its weakest moment, so a verifier that acts on `kind` alone always does the safe thing. The rule is also restated in-band, inside the signed bytes, as the top-level `pin_policy` object — so the manifest explains itself without reference to this document.
+
+#### Scope note on `record` — what the URL's name binds, and what it does not
+
+The only `record` in the manifest is `anchor_source_archive_json`, at `/api/archive/anchor-source-<64-hex>.json`. Stated plainly, because "content-addressed" reads stronger than what was measured (2026-08-14):
+
+- The `<64-hex>` in the name is `dag_root_computed`, derived from **the three branch objects and nothing else** (steps 4–5 above). You can recompute it from the fetched file and confirm it equals the name. `gen-identity.sh` does exactly that before agreeing to pin — re-deriving the three roots rather than reading the file's own `dag_root_computed` field, since a self-declared digest proves nothing about the bytes carrying it.
+- The file **also** carries `computed_at`, `computed_by_script` and `computed_from_git_commit`, and **none of those sits inside any branch**. Changing `computed_at` leaves the derived root — and therefore the file name — unchanged while the file's SHA-256 changes. The generator writes the archive with an unconditional overwrite. So the same URL can in principle serve different bytes under the same honest name.
+- Therefore: **the URL's name binds the three branch roots; the `sha256` in the manifest binds the whole file as of signing.** If you fetch this URL and the digest does not match, do not stop there — recompute the three branch roots. If they still fold to the value in the file name, the difference is confined to provenance fields and the anchored DAG is unaffected. If they do not fold to it, that is a real finding.
+
+The receipt half of `/api/archive/` (`anchor-receipt-<tx_id>.json`) is deliberately **not** pinned here: it is named by a transaction id rather than by a digest of itself, so its name binds nothing about its contents at all.
+
+Because `gen-identity.sh` runs before the current cycle's anchor is composed, the record pinned in any given manifest is **the pre-image of the previous cycle's anchor**, not of the cycle that manifest opens. Read its `observations_branch.cycle_number_observed` rather than assuming it is the newest.
 
 ### How to check the pinned entries
 
@@ -202,12 +214,12 @@ jq -r '.artifact_manifest | to_entries | sort_by(.key)[]
 
 ### Manifests issued before 2026-08-14
 
-This discipline is applied by the generator from 2026-08-14; a manifest takes the shape above from the operator's first re-issue on or after that date. **Measured 2026-08-14: the manifest currently served at `/api/identity.json` (`generated_at` `2026-08-06T05:31:44Z`) predates it.** It carries a `sha256` on all five of its entries, four of which are `kind: "stream"` (`evidence_json`, `validator_json`, `cycle_history_jsonl`, `uptime_cycles_json`), and it carries no `kind` and no `pin_policy` fields at all.
+This discipline is applied by the generator from 2026-08-14; a manifest takes the shape above from the operator's first re-issue on or after that date. **Measured 2026-08-14: the manifest currently served at `/api/identity.json` (`generated_at` `2026-08-06T05:31:44Z`) predates it.** It carries a `sha256` on all five of its entries, four of which are `kind: "stream"` in the registry (`evidence_json`, `validator_json`, `cycle_history_jsonl`, `uptime_cycles_json`), and it carries no `kind` and no `pin_policy` fields at all.
 
 For that manifest, and any older one, a verifier should:
 
-- treat a digest mismatch on those four artifacts as **expected**, not as a finding — the operator has published the same conclusion at [`deploy/identity-pin-baseline.json`](../deploy/identity-pin-baseline.json);
-- treat a mismatch on `incidents_json` or on any `schema_sha256` as a real finding, exactly as above.
+- treat a digest mismatch on those four artifacts as **carrying no information** — it is expected at an unpredictable rate, since the feeds are rewritten by host cron on their own cadence, and a momentary *match* is equally uninformative. All four are named as such in [`deploy/publication.json`](../deploy/publication.json) under `known_kind_violations`. [`deploy/identity-pin-baseline.json`](../deploy/identity-pin-baseline.json) names three of the four (`cycle_history_jsonl.sha256` is recorded only in the registry) and records specific digests from the **2026-08-04** manifest, not from the one served today — read the `c4_status` block there before comparing values;
+- treat a mismatch on `incidents_json` or on any `schema_sha256` as a real finding, exactly as above. One such break is already on record: an ordinary commit on 2026-08-05 edited a git-tracked schema and invalidated `cycle_history_jsonl.schema_sha256` in the manifest signed the day before. That failure mode is *not* addressed by the kind discipline — it is what `scripts/check-identity-pins.sh` exists to catch, and it is repaired by re-issuing the manifest.
 
 A manifest that carries `pin_policy` is post-discipline and every `sha256` in it is meant to hold.
 

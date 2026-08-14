@@ -285,6 +285,46 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    operator vigilance. Left unset, `gen-identity.sh` still runs (needed for
    first-run / bootstrap) but prints a loud stderr warning that the
    ordering guard is disabled for that run.
+
+   **Two other hard-stops fire in this step, both BEFORE the exit-7
+   ordering guard** (they sit in the artifact-probing section, which runs
+   first — so if you see one of these, the ordering guard has not been
+   evaluated yet and says nothing about your ledger):
+
+   | exit | meaning | fix |
+   |---|---|---|
+   | **9** | `deploy/publication.json` is unreadable / unparseable, or an artifact the manifest names has no row in it. The script will not guess whether a digest is safe to sign. | Restore or fix the registry (it is git-tracked), or add the missing publication row with its `kind`. |
+   | **10** | Artifacts are live, but every one of them is `kind=stream`, so `artifact_root` would commit to nothing. | Check that `/api/incidents.json` (kind=static) and the `/api/archive/` anchor-source record are actually being served. |
+
+   Neither has ever fired in production; both exist because signing a
+   manifest whose pins are unverifiable is worse than not signing one.
+
+4b. **Mac — the C4 post-issuance cleanup (MANDATORY, same commit as step 4).**
+   `gen-identity.sh` stopped pinning `kind=stream` publications on
+   2026-08-14, but the acknowledgement lists that describe the *old* pins
+   are not self-clearing. Land all of this in the commit that carries the
+   new `identity.json`, or `tests/publication-registry/` goes red on main:
+
+   - `deploy/identity-pin-baseline.json` — delete all three
+     `known_broken` entries (`evidence_json.sha256`,
+     `validator_json.sha256`, `uptime_cycles_json.sha256`) and the
+     `c4_status` block with them. Those pins no longer exist.
+   - `deploy/publication.json` — set
+     `known_kind_violations.violations` to `{}` (all four entries expire
+     at once), and clear `pinned_by` on `api/evidence.json`,
+     `api/validator.json`, `api/cycle-history.jsonl` and
+     `api/uptime-cycles.json`.
+   - `deploy/publication.json` — declare the two pins that are new:
+     `api/incidents.schema.v1.json` gains
+     `"pinned_by": ["api/identity.json#artifact_manifest.incidents_json.schema_sha256"]`,
+     and the `api/archive/` directory row gains
+     `"pinned_by": ["api/identity.json#artifact_manifest.anchor_source_archive_json.sha256"]`
+     (a content-addressed member is declared on its directory row —
+     that is the only row that can carry it).
+
+   Verify with `bash tests/publication-registry/test-publication-registry.sh`;
+   its `T19` case exercises exactly this before/after pair against synthetic
+   fixtures, so a green T19 today means this list is sufficient.
 5. **host —**
    ```sh
    FY_EXPECT_CYCLE=<N> bash scripts/gen-anchor-source.sh

@@ -601,13 +601,41 @@ resolve_archive_record() {
 		return 1
 	fi
 
-	# Content-addressing self-check — this is what earns the record classification.
+	# Content-addressing self-check — this is what earns the record
+	# classification. The three branch roots are RE-DERIVED from the fetched
+	# bytes (jq -cS canonical form including jq's trailing 0x0a, per
+	# docs/MERKLE_DAG_SPEC.md §2.1/§3/§4) and folded, instead of trusting the
+	# file's own .dag_root_computed field: a self-declared digest proves
+	# nothing about the bytes carrying it.
+	local id_root ob_root ar_root derived
+	id_root="$(jq -cS '.identity_branch'     "${arc_tmp}" 2>/dev/null | sha256_of_stdin || true)"
+	ob_root="$(jq -cS '.observations_branch' "${arc_tmp}" 2>/dev/null | sha256_of_stdin || true)"
+	ar_root="$(jq -cS '.artifacts_branch'    "${arc_tmp}" 2>/dev/null | sha256_of_stdin || true)"
+	derived="$(printf '%s%s%s' "${id_root}" "${ob_root}" "${ar_root}" | sha256_of_stdin || true)"
 	arc_root="$(jq -r '.dag_root_computed // empty' "${arc_tmp}" 2>/dev/null || true)"
-	if [ "${arc_root}" != "${hex}" ]; then
+	if [ "${derived}" != "${hex}" ]; then
 		rm -f "${arc_tmp}"
-		echo "  skip ${ARCHIVE_LEAF_KEY}: content does not address its own name (dag_root_computed='${arc_root:-<none>}' vs '${hex}')" >&2
+		echo "  skip ${ARCHIVE_LEAF_KEY}: re-derived DAG root does not address the file name (derived='${derived:-<none>}' vs '${hex}')" >&2
 		return 1
 	fi
+	if [ "${arc_root}" != "${derived}" ]; then
+		rm -f "${arc_tmp}"
+		echo "  skip ${ARCHIVE_LEAF_KEY}: declared dag_root_computed='${arc_root:-<none>}' disagrees with the re-derived root" >&2
+		return 1
+	fi
+
+	# HONEST SCOPE OF THE NAME (measured 2026-08-14). The file name binds the
+	# THREE BRANCHES and nothing else. anchor-source.json also carries
+	# computed_at / computed_by_script / computed_from_git_commit, and none of
+	# them sits inside a branch: editing computed_at leaves the re-derived root
+	# unchanged while the file's sha256 changes, and gen-anchor-source.sh mv's
+	# over an existing archive unconditionally. So this URL is NOT a promise
+	# that its bytes are fixed forever — the sha256 recorded below is what
+	# fixes them, as of this signing. deploy/publication.json's record_caveat
+	# currently calls the anchor-source half "STRUCTURALLY immutable" on the
+	# strength of a grep for `generated_at` (0 hits) — the field is spelled
+	# computed_at, so that grep missed it. Recorded here and in
+	# docs/IDENTITY_VERIFICATION.md rather than glossed.
 	arc_sha="$(sha256_of_stdin < "${arc_tmp}")"
 	rm -f "${arc_tmp}"
 	[ -n "${arc_sha}" ] || return 1

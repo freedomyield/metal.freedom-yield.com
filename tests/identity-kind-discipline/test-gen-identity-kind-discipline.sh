@@ -92,10 +92,44 @@ CURL
 chmod +x "$STUBBIN/curl"
 
 # ---- fixture docroot: the full real leaf catalog + the archive record --------
-# The archive record is content-addressed: its filename must carry the same
-# 64-hex value its body declares as .dag_root_computed. That equality is what
-# the script re-derives before it agrees to pin the file.
-ARCHIVE_ROOT="aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899aa"
+# The archive record is content-addressed. gen-identity.sh RE-DERIVES the three
+# branch roots from the fetched bytes (jq -cS canonical form incl. jq's
+# trailing 0x0a, folded as hex-ASCII concatenation — docs/MERKLE_DAG_SPEC.md
+# §2.1/§3/§4) and requires that they address the filename, AND that the file's
+# own .dag_root_computed agrees with that derivation. So the fixture cannot be
+# a hand-picked constant; it has to be built the way a real anchor-source is.
+ARCHIVE_BRANCHES='{"identity_branch":{"k":"id"},"observations_branch":{"cycle_number_observed":4},"artifacts_branch":{"public_api_files_hashed":[]}}'
+
+sha_stdin() {
+	if command -v shasum >/dev/null 2>&1; then shasum -a 256 | awk '{print $1}'
+	else sha256sum | awk '{print $1}'; fi
+}
+
+# derive_dag_root <file> -> the 64-hex root the published verifier recipe gives
+derive_dag_root() {
+	local f="$1" i o a
+	i="$(jq -cS '.identity_branch'     "$f" | sha_stdin)"
+	o="$(jq -cS '.observations_branch' "$f" | sha_stdin)"
+	a="$(jq -cS '.artifacts_branch'    "$f" | sha_stdin)"
+	printf '%s%s%s' "$i" "$o" "$a" | sha_stdin
+}
+
+# write_archive <archive-dir> <declared_root|AUTO> <filename_root|AUTO>
+# AUTO = the honestly derived root. Passing anything else is a deliberate lie,
+# used by M4/M5 below to prove each half of the check independently.
+ARCHIVE_ROOT=""
+write_archive() {
+	local dir="$1" declared="$2" fname="$3" tmp real
+	tmp="$(mktemp -t arcbody.XXXXXX)"
+	printf '%s' "$ARCHIVE_BRANCHES" \
+		| jq '. + {schema_version:1, computed_at:"2026-08-14T00:00:00Z"}' > "$tmp"
+	real="$(derive_dag_root "$tmp")"
+	[ "$declared" = "AUTO" ] && declared="$real"
+	[ "$fname" = "AUTO" ] && fname="$real"
+	jq --arg d "$declared" '. + {dag_root_computed:$d}' "$tmp" > "${dir}/anchor-source-${fname}.json"
+	rm -f "$tmp"
+	ARCHIVE_ROOT="$fname"
+}
 
 build_docroot() {
 	# $1 = docroot path. Rebuilt per case so mutations do not leak.
@@ -110,8 +144,7 @@ build_docroot() {
 	for s in evidence validator cycle-history incidents; do
 		printf '{"schema":"%s"}\n' "$s" > "$d/api/${s}.schema.v1.json"
 	done
-	printf '{"schema_version":1,"dag_root_computed":"%s"}\n' "$ARCHIVE_ROOT" \
-		> "$d/api/archive/anchor-source-${ARCHIVE_ROOT}.json"
+	write_archive "$d/api/archive" AUTO AUTO
 	printf '{"cycle_n":1,"dag_root_hash":"%s","archived_source_path":"api/archive/anchor-source-%s.json"}\n' \
 		"$ARCHIVE_ROOT" "$ARCHIVE_ROOT" > "$d/api/anchor-history.jsonl"
 }
@@ -297,23 +330,51 @@ else
 fi
 
 # =============================================================================
-# MUTATION M4 — an archive whose body does not address its own filename
-# must not be accepted as a record.
+# MUTATION M4 — an archive whose BRANCHES do not fold to its filename must not
+# be accepted as a record, even when the file's own dag_root_computed says they
+# do. This is the load-bearing case: the check re-derives the three branch
+# roots instead of reading .dag_root_computed, so a file that merely CLAIMS to
+# address itself is refused. A declaration-trusting implementation passes every
+# other case in this suite and fails only here.
 # =============================================================================
 build_docroot "$DOC"
-printf '{"schema_version":1,"dag_root_computed":"%s"}\n' \
-	"00000000000000000000000000000000000000000000000000000000deadbeef" \
-	> "$DOC/api/archive/anchor-source-${ARCHIVE_ROOT}.json"
+LIAR="00000000000000000000000000000000000000000000000000000000deadbeef"
+rm -f "$DOC/api/archive/"anchor-source-*.json
+write_archive "$DOC/api/archive" "$LIAR" "$LIAR"      # declared == filename, branches disagree
+printf '{"cycle_n":1,"archived_source_path":"api/archive/anchor-source-%s.json"}\n' "$LIAR" \
+	> "$DOC/api/anchor-history.jsonl"
 OUT="$(run_genid "$DOC" "$REAL_REGISTRY")"; RC=$?
 if [ -f "$OUT_JSON" ]; then
 	listed anchor_source_archive_json \
-		&& fail "M4 MUTATION: an archive that does not hash-address itself was pinned" \
-		|| pass "M4 MUTATION: archive whose dag_root_computed != filename digest is refused"
-	echo "$OUT" | grep -q 'does not address its own name' \
-		&& pass "M4 MUTATION: refusal names the content-addressing failure" \
-		|| fail "M4 MUTATION: refusal reason not printed"
+		&& fail "M4 MUTATION: an archive whose branches do not fold to its name was pinned (declared value trusted)" \
+		|| pass "M4 MUTATION: self-consistent LIE refused — the root is re-derived, not read"
+	echo "$OUT" | grep -q 're-derived DAG root does not address the file name' \
+		&& pass "M4 MUTATION: refusal names the re-derivation, not the declared field" \
+		|| fail "M4 MUTATION: refusal reason not printed: $(echo "$OUT" | grep skip | head -2 | tr '\n' '|')"
 else
 	fail "M4 MUTATION: run produced no manifest (rc=$RC)"
+fi
+
+# =============================================================================
+# MUTATION M5 — the other half: branches fold to the filename correctly, but
+# the file's declared dag_root_computed disagrees with them. The two must be
+# checked independently, so this is also a refusal.
+# =============================================================================
+build_docroot "$DOC"
+rm -f "$DOC/api/archive/"anchor-source-*.json
+write_archive "$DOC/api/archive" "$LIAR" AUTO         # filename honest, declared field lies
+printf '{"cycle_n":1,"archived_source_path":"api/archive/anchor-source-%s.json"}\n' "$ARCHIVE_ROOT" \
+	> "$DOC/api/anchor-history.jsonl"
+OUT="$(run_genid "$DOC" "$REAL_REGISTRY")"; RC=$?
+if [ -f "$OUT_JSON" ]; then
+	listed anchor_source_archive_json \
+		&& fail "M5 MUTATION: an archive whose declared dag_root_computed disagrees with its branches was pinned" \
+		|| pass "M5 MUTATION: declared root disagreeing with the re-derived root is refused"
+	echo "$OUT" | grep -q 'disagrees with the re-derived root' \
+		&& pass "M5 MUTATION: refusal names the declared/derived disagreement" \
+		|| fail "M5 MUTATION: refusal reason not printed"
+else
+	fail "M5 MUTATION: run produced no manifest (rc=$RC)"
 fi
 
 # =============================================================================

@@ -25,7 +25,7 @@
 		{
 			"date": "2026-08-14",
 			"tag": "kind-discipline",
-			"summary": "Compatible relaxation within v1 (every previously-valid document stays valid). artifact_manifest entries now require only `url`: `sha256` became optional so that an artifact whose bytes change without a commit (publication kind 'stream') can be LISTED without being pinned. Two additive fields carry the reason in-band: per-entry `kind` (stream / static / record, copied from deploy/publication.json) and top-level `pin_policy`. Motivation: a sha256 inside a signed manifest is a claim about bytes, and four of the eight pins in the manifest signed 2026-08-06 were measured wrong the same day because they pointed at host-cron-rewritten feeds. Consumers MUST NOT read a missing sha256 as a broken manifest — read `kind` and `pin_policy`. See docs/IDENTITY_VERIFICATION.md and docs/superpowers/specs/2026-08-06-single-source-of-truth-design.md (C4)."
+			"summary": "Compatible relaxation within v1 (every previously-valid document stays valid). artifact_manifest entries now require only `url`: `sha256` became optional so that an artifact whose bytes change without a commit (publication kind 'stream') can be LISTED without being pinned. Two additive fields carry the reason in-band: per-entry `kind` (stream / static / record, copied from deploy/publication.json) and top-level `pin_policy`. A conditional `allOf` keeps the relaxation from becoming a licence: where `kind` is present, 'stream' MUST NOT carry sha256 and 'static' / 'record' MUST carry it; documents predating `kind` are unconstrained by it and stay valid. Motivation, measured 2026-08-06 against the manifest signed two days earlier (2026-08-04): 4 of its 8 pins were already wrong. THREE were kind='stream' payload pins rewritten by host cron on their own cadence — that is the class this revision removes. The FOURTH was cycle_history_jsonl.schema_sha256, a GIT-TRACKED schema invalidated by an ordinary commit the day before; this revision does NOT address that class, which is detected by scripts/check-identity-pins.sh and repaired by re-issuing the manifest. Consumers MUST NOT read a missing sha256 as a broken manifest — read `kind` and `pin_policy`. See docs/IDENTITY_VERIFICATION.md and docs/superpowers/specs/2026-08-06-single-source-of-truth-design.md (C4)."
 		}
 	],
 	"x-format-guide": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md",
@@ -142,6 +142,18 @@
 				"type": "object",
 				"required": ["url"],
 				"additionalProperties": true,
+				"allOf": [
+					{
+						"$comment": "kind='stream' MUST NOT be pinned. This is the whole point of the 2026-08-14 relaxation; without it, dropping sha256 from `required` would also have legalised the defect being removed. Applies only when `kind` is present, so manifests issued before 2026-08-14 (which carry no kind) are unaffected and stay valid.",
+						"if": { "required": ["kind"], "properties": { "kind": { "const": "stream" } } },
+						"then": { "not": { "required": ["sha256"] } }
+					},
+					{
+						"$comment": "kind='static' / 'record' MUST be pinned. Without this, a pin silently dropped from a pinnable artifact would validate — the same silence the manifest exists to prevent.",
+						"if": { "required": ["kind"], "properties": { "kind": { "enum": ["static", "record"] } } },
+						"then": { "required": ["sha256"] }
+					}
+				],
 				"properties": {
 					"url": {
 						"type": "string",
