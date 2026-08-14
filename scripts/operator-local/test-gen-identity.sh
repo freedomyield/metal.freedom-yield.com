@@ -193,13 +193,30 @@ fi
 # 4. Independently re-fetch each leaf in the manifest and re-hash.
 echo
 echo "=== independent re-hash of each leaf in artifact_manifest ==="
+# Only entries that CARRY a sha256 are re-hashed. Since the C4 kind discipline
+# (2026-08-14) an entry whose deploy/publication.json kind is `stream` is listed
+# with url + kind and no digest, because the operator cannot sign a claim about
+# bytes a host cron rewrites. Re-hashing such an entry and comparing to an empty
+# string would manufacture a failure out of the correct behaviour. An unpinned
+# entry is instead asserted to BE a declared stream, so a pin silently dropped
+# from a static/record artifact still surfaces here as a failure.
 KEYS="$(jq -r '.artifact_manifest | keys[]' "${OUT_JSON}" | sort)"
 for k in ${KEYS}; do
 	url="$(jq -r --arg k "${k}" '.artifact_manifest[$k].url' "${OUT_JSON}")"
-	claimed_sha="$(jq -r --arg k "${k}" '.artifact_manifest[$k].sha256' "${OUT_JSON}")"
+	kind="$(jq -r --arg k "${k}" '.artifact_manifest[$k].kind // ""' "${OUT_JSON}")"
+	claimed_sha="$(jq -r --arg k "${k}" '.artifact_manifest[$k].sha256 // ""' "${OUT_JSON}")"
+	if [ -z "${claimed_sha}" ]; then
+		if [ "${kind}" = "stream" ]; then
+			echo "  OK   ${k}  unpinned by design (kind=stream)"
+		else
+			echo "  FAIL ${k}  has no sha256 but kind='${kind:-<absent>}' — only kind=stream may be unpinned" >&2
+			HAS_ERROR=1
+		fi
+		continue
+	fi
 	actual_sha="$(curl -sSLf "${url}" | shasum -a 256 | awk '{print $1}')"
 	if [ "${claimed_sha}" = "${actual_sha}" ]; then
-		echo "  OK   ${k}  sha256=${claimed_sha:0:16}…"
+		echo "  OK   ${k}  sha256=${claimed_sha:0:16}… (kind=${kind:-<absent>})"
 	else
 		echo "  FAIL ${k}  claimed=${claimed_sha}  actual=${actual_sha}" >&2
 		HAS_ERROR=1
@@ -210,7 +227,12 @@ done
 echo
 echo "=== independent Merkle root recompute ==="
 INDEP_LEAVES="$(mktemp -t indep-leaves.XXXXXX)"
-jq -r '.artifact_manifest | to_entries | sort_by(.key) | .[] | "\(.key)\t\(.value.sha256)"' "${OUT_JSON}" \
+# Leaves are the sha256 values that are PRESENT (C4, 2026-08-14): an entry
+# without one contributes no leaf, so selecting on has("sha256") is what
+# reproduces the generator's tree. Before that revision every listed entry
+# contributed a leaf and this selector was a no-op.
+jq -r '.artifact_manifest | to_entries | sort_by(.key) | .[]
+       | select(.value | has("sha256")) | "\(.key)\t\(.value.sha256)"' "${OUT_JSON}" \
 	> "${INDEP_LEAVES}"
 
 merkle_root_independent() {

@@ -5,7 +5,7 @@
 	"description": "Formal contract for /api/identity.json. Revised 2026-06-20 as a pre-production correction; further extended 2026-06-21 with additive Merkle DAG anchor fields (dag_root_hash, cycles_history_url, anchor_receipt_url) for Phase α A-chain anchoring per docs/MERKLE_DAG_SPEC.md. See docs/IDENTITY_SCHEMA_CHANGELOG.md for the full history. The model is an operator-signed artifact snapshot. The runtime manifest is generated and signed by scripts/operator-local/gen-identity.sh on the operator's local Mac, NEVER on the validator host or web host. Verification uses ssh-keygen -Y verify with namespace freedom-yield/validator-identity. Companion /api/identity.example.json is a synthetic schema example, NOT a production snapshot. Companion design changelog: docs/IDENTITY_SCHEMA_CHANGELOG.md. The schema URL is a stable discovery endpoint; consumers that need immutable schema semantics SHOULD pin the schema document SHA-256 or the repository commit (see CHANGELOG). A future breaking change will use a new major-version schema URL; retention and deprecation policy for superseded schema versions will be documented when such a version is introduced.",
 	"x-issued-at": "2026-06-21T00:00:00Z",
 	"x-stability": "additive-only-within-v1",
-	"x-baseline-revision": "2026-06-23-audit-pointer-additive",
+	"x-baseline-revision": "2026-08-14-kind-discipline",
 	"x-revision-history": [
 		{
 			"date": "2026-06-20",
@@ -21,6 +21,11 @@
 			"date": "2026-06-23",
 			"tag": "audit-pointer-additive",
 			"summary": "Additive within v1: audit object grouping anchor_receipt + anchor_history URL pointers. audit holds plain URLs only; identity.json MUST NOT carry a hash of anchor-receipt.json or anchor-history.jsonl (= circular hash dependency avoided). When the legacy top-level anchor_receipt_url is present alongside audit.anchor_receipt, both URLs MUST be equal."
+		},
+		{
+			"date": "2026-08-14",
+			"tag": "kind-discipline",
+			"summary": "Compatible relaxation within v1 (every previously-valid document stays valid). artifact_manifest entries now require only `url`: `sha256` became optional so that an artifact whose bytes change without a commit (publication kind 'stream') can be LISTED without being pinned. Two additive fields carry the reason in-band: per-entry `kind` (stream / static / record, copied from deploy/publication.json) and top-level `pin_policy`. Motivation: a sha256 inside a signed manifest is a claim about bytes, and four of the eight pins in the manifest signed 2026-08-06 were measured wrong the same day because they pointed at host-cron-rewritten feeds. Consumers MUST NOT read a missing sha256 as a broken manifest — read `kind` and `pin_policy`. See docs/IDENTITY_VERIFICATION.md and docs/superpowers/specs/2026-08-06-single-source-of-truth-design.md (C4)."
 		}
 	],
 	"x-format-guide": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md",
@@ -132,20 +137,25 @@
 		},
 		"artifact_manifest": {
 			"type": "object",
-			"description": "Merkle-rooted artifact manifest: each entry binds a leaf artifact's URL to its content sha256, and (where applicable) its schema URL and schema sha256. A consumer fetches each entry's url, computes sha256(content), and compares to entry.sha256. The set is committed to as a whole by artifact_root (see below). Additive: new artifacts may appear in this map within v1.",
+			"description": "Merkle-rooted artifact manifest: each entry binds a leaf artifact's URL to its publication kind and, WHEN THE KIND PERMITS IT, to the content sha256 of that artifact and of its companion schema. A consumer fetches an entry's url, computes sha256(content), and compares to entry.sha256 — but ONLY for entries that carry sha256. An entry without sha256 is a deliberate declaration that the artifact is a moving stream and that no digest of it could survive being signed; it is NOT a truncated or broken entry, and a consumer MUST NOT report it as a verification failure. See the top-level pin_policy object for the rule in the operator's own words, and deploy/publication.json for the declaration each kind is copied from. The set of entries that DO carry sha256 is committed to as a whole by artifact_root (see below). Additive: new artifacts may appear in this map within v1.",
 			"additionalProperties": {
 				"type": "object",
-				"required": ["url", "sha256"],
+				"required": ["url"],
 				"additionalProperties": true,
 				"properties": {
 					"url": {
 						"type": "string",
 						"format": "uri"
 					},
+					"kind": {
+						"type": "string",
+						"enum": ["stream", "static", "record"],
+						"description": "ADDITIVE (2026-08-14). The artifact's publication kind, copied from deploy/publication.json. 'stream' = the bytes can change without a commit to the operator's repository (host cron, runtime push), so this entry carries NO sha256. 'static' = the bytes change only when a commit changes them. 'record' = immutable bytes at a URL that never resolves to different bytes (content-addressed). 'static' and 'record' entries carry sha256. kind is a SAFE FLOOR, not a summary: a path is classified by its weakest moment, so a consumer that acts only on kind always does the safe thing."
+					},
 					"sha256": {
 						"type": "string",
 						"pattern": "^[a-f0-9]{64}$",
-						"description": "Hex-encoded SHA-256 of the artifact's raw bytes as published."
+						"description": "Hex-encoded SHA-256 of the artifact's raw bytes as published. OPTIONAL since 2026-08-14: present iff kind is 'static' or 'record'. Absent for kind 'stream' by design."
 					},
 					"schema_url": {
 						"type": "string",
@@ -153,15 +163,35 @@
 					},
 					"schema_sha256": {
 						"type": "string",
-						"pattern": "^[a-f0-9]{64}$"
+						"pattern": "^[a-f0-9]{64}$",
+						"description": "Hex-encoded SHA-256 of the companion schema document. Governed by the schema document's OWN publication kind, independently of the payload's: a stream payload with a static schema carries schema_sha256 but no sha256 — pinning the schema is meaningful even when pinning the payload is not."
 					}
+				}
+			}
+		},
+		"pin_policy": {
+			"type": "object",
+			"description": "ADDITIVE (2026-08-14). States, inside the signed bytes, the rule that decides which artifact_manifest entries carry a sha256. It exists so that a third party can tell a deliberately unpinned stream from a missing field without consulting anything outside the manifest.",
+			"additionalProperties": true,
+			"properties": {
+				"source": {
+					"type": "string",
+					"description": "URL of the machine-readable publication registry the kinds are copied from."
+				},
+				"rule": {
+					"type": "string",
+					"description": "The pinning rule in prose."
+				},
+				"merkle_leaves": {
+					"type": "string",
+					"description": "Which digests artifact_root is computed over."
 				}
 			}
 		},
 		"artifact_root": {
 			"type": "string",
 			"pattern": "^[a-f0-9]{64}$",
-			"description": "SHA-256 Merkle root computed over artifact_manifest entries: leaves are each entry.sha256, ordered alphabetically by key, odd counts duplicate the last leaf, parents are SHA-256(left || right) as raw bytes, hex-encoded at the root. In identity.example.json this field is set to all-zeros (sixty-four '0' characters) to indicate the schema-only preview state; the production runtime identity.json carries the real 64-hex Merkle root after gen-identity.sh computes it from the live artifact bytes. artifact_root commits to the CURRENT set of published artifacts. NOTE (2026-07-06 DAG-root collapse): the value inscribed on Metal A-chain is NOT this root — it is anchor-receipt.json.dag_root_hash (= anchor-source.json.dag_root_computed, a 3-branch Merkle DAG over identity/observations/artifacts, memo 'fya<S>c<N>:'). Reach it via anchor_receipt_url / audit.anchor_receipt. The formerly-published dag_root_hash field (a separate 2-branch root) is retired; see below."
+			"description": "SHA-256 Merkle root computed over the artifact_manifest entries THAT CARRY A sha256: leaves are each such entry.sha256, ordered alphabetically by key, odd counts duplicate the last leaf, parents are SHA-256(left || right) as raw bytes, hex-encoded at the root. A single leaf is its own root. Entries without sha256 (kind 'stream') contribute no leaf — before 2026-08-14 every listed entry contributed one, which is why the root changed shape at that revision even for an unchanged artifact set. In identity.example.json this field is set to all-zeros (sixty-four '0' characters) to indicate the schema-only preview state; the production runtime identity.json carries the real 64-hex Merkle root after gen-identity.sh computes it from the live artifact bytes. artifact_root commits to the CURRENT set of pinnable published artifacts. NOTE (2026-07-06 DAG-root collapse): the value inscribed on Metal A-chain is NOT this root — it is anchor-receipt.json.dag_root_hash (= anchor-source.json.dag_root_computed, a 3-branch Merkle DAG over identity/observations/artifacts, memo 'fya<S>c<N>:'). Reach it via anchor_receipt_url / audit.anchor_receipt. The formerly-published dag_root_hash field (a separate 2-branch root) is retired; see below."
 		},
 		"dag_root_hash": {
 			"type": "string",
