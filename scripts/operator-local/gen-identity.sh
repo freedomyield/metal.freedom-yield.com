@@ -35,8 +35,13 @@
 #                 A pin taken at signing time is stale by construction.
 #                 -> listed in artifact_manifest with url + kind, NO sha256.
 #   kind=static   changes only when a commit changes it. -> pinned.
-#   kind=record   immutable bytes at a URL that never resolves differently.
-#                 -> pinned.
+#   kind=record   the URL's name is derived from a digest of the content it
+#                 addresses, so whatever that digest covers cannot change
+#                 without the name changing. It need NOT cover the whole file
+#                 (for api/archive/ it is the three DAG branches and not the
+#                 provenance fields beside them) — the sha256 written into the
+#                 manifest is what binds every byte, as of signing.
+#                 -> pinned. See the archive resolver's scope note below.
 #
 # `kind` is the registry's SAFE FLOOR, never a summary: a path is classified by
 # its weakest moment. This script therefore reads `.kind` and nothing else — no
@@ -809,7 +814,7 @@ jq -n \
 	--argjson artifact_manifest "${ARTIFACT_MANIFEST_JSON}" \
 	--arg artifact_root "${ARTIFACT_ROOT}" \
 	--arg pin_policy_source "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/deploy/publication.json" \
-	--arg pin_policy_rule "An artifact_manifest entry carries sha256 only when the publication registry declares its kind as 'static' (bytes change only when a commit changes them) or 'record' (immutable bytes at a URL that never resolves differently). Entries with kind 'stream' are published with url + kind and NO sha256: their bytes change without a commit, so a digest fixed at signing time would be false within minutes. The absence of sha256 is a deliberate declaration, not an omission, and a verifier MUST NOT treat it as a broken manifest. The same rule is applied independently to schema_url / schema_sha256." \
+	--arg pin_policy_rule "An artifact_manifest entry carries sha256 only when the publication registry declares its kind as 'static' (bytes change only when a commit changes them) or 'record' (the URL's name is derived from a digest of the content it addresses, so whatever that digest covers cannot change without the name changing too). A record's name binds only what its digest covers, and that need NOT be the whole file: for /api/archive/anchor-source-<64-hex>.json the name is the fold of the three DAG branches and does not cover computed_at, computed_by_script or computed_from_git_commit sitting beside them. The sha256 recorded here is what binds every byte, as of signing. A verifier whose fetch disagrees with that digest should re-derive the three branch roots before concluding anything: if they still fold to the value in the file name, the three branch objects are canonically identical to the ones that were anchored and the anchored DAG is unaffected — the difference lies somewhere outside them, and the fold does not say where. Entries with kind 'stream' are published with url + kind and NO sha256: their bytes change without a commit, so a digest fixed at signing time would be false within minutes. The absence of sha256 is a deliberate declaration, not an omission, and a verifier MUST NOT treat it as a broken manifest. The same rule is applied independently to schema_url / schema_sha256." \
 	--arg pin_policy_root "artifact_root is the Merkle root over exactly the sha256 values present in artifact_manifest, in alphabetical key order." \
 	--arg anchor_receipt_url "https://metal.freedom-yield.com/api/anchor-receipt.json" \
 	--arg anchor_history_url "https://metal.freedom-yield.com/api/anchor-history.jsonl" \
