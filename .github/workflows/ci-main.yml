@@ -63,3 +63,58 @@ jobs:
       # broke the signed manifest on 2026-08-05.
       - name: identity artifact pins still describe the repo
         run: bash scripts/check-identity-pins.sh --mode=repo
+
+  publish-guard:
+    name: publish-guard (host identifier / PII) on pushed diff, fail-closed
+    # scripts/publish-guard.sh is enforced today only inside git hooks
+    # (.githooks/pre-commit, .githooks/pre-push), which are opt-in per clone
+    # (core.hooksPath is never committed). A push from a clone without hooks
+    # installed reaches main with ZERO layers of this guard having run. This
+    # job is the CI-side backstop: it re-scans the diff that actually landed
+    # on main, independent of whatever the pushing clone had configured.
+    # Mirrored in validate.yml (branches-ignore: [main]) for the same reason
+    # the other two mirrored jobs above are duplicated here — see their
+    # comments. A red run here never blocks deploy.yml (no `needs`).
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Run publish-guard --diff against the pushed diff (fail-closed)
+        env:
+          EVT_BEFORE: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          GUARD="scripts/publish-guard.sh"
+
+          # Fail-closed: an absent/non-executable guard must STOP the job,
+          # never be treated as "nothing to check, so allow". A guard this
+          # repo cannot run is a guard that caught nothing.
+          if [ ! -x "$GUARD" ]; then
+            echo "::error::${GUARD} is missing or not executable — cannot scan, failing closed." >&2
+            exit 1
+          fi
+
+          ZERO="0000000000000000000000000000000000000000"
+          BASE="${EVT_BEFORE:-}"
+
+          if [ -n "$BASE" ] && [ "$BASE" != "$ZERO" ] && git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+            echo "publish-guard: scanning pushed diff ${BASE}..${HEAD_SHA}"
+            if ! git diff -U0 "${BASE}" "${HEAD_SHA}" | "$GUARD" --diff; then
+              echo "::error::publish-guard detected a forbidden host identifier / PII literal in the pushed diff (see log above)." >&2
+              exit 1
+            fi
+          else
+            # No usable prior SHA (branch creation, force-push whose old tip
+            # is gone, or a shallow-history edge case) — a diff cannot be
+            # computed. Do NOT skip: fall back to scanning every tracked
+            # file's current content so this run still means something.
+            echo "publish-guard: no usable prior SHA for a diff — scanning the full tracked tree instead of skipping."
+            if ! git ls-files -z | xargs -0 cat -- | "$GUARD" --text; then
+              echo "::error::publish-guard detected a forbidden host identifier / PII literal in the tracked tree (see log above)." >&2
+              exit 1
+            fi
+          fi
+          echo "publish-guard: clean."
