@@ -41,16 +41,23 @@
 #
 # SAFETY OF THE T11 PROBES
 # ------------------------
-# T11 runs each script once with an unrecognized argument. In every one of
-# the ten scripts, argument parsing precedes any keystore, network or
-# broadcast step — verified by reading each script on 2026-08-14 — so the
-# probe exits during parsing. Three independent belts:
-#   1. Each probe asserts the script's own argument-error text on stderr. If
-#      a future edit moves argument parsing later, that assertion fails and
-#      this suite goes red.
-#   2. HOME is redirected to an empty temporary directory, so the
-#      Constitution 3.5 keystore-separation guard in the broadcast-capable
-#      scripts refuses (exit 8) rather than reaching any real keystore.
+# T11 runs each script once with an unrecognized argument. The probes exit
+# during argument handling. Three belts, stated as measured rather than as
+# assumed:
+#
+#   1. LOAD-BEARING. Each probe asserts the script's own argument-error text
+#      on stderr, so a future edit that moves argument parsing later turns
+#      this suite red instead of letting a probe run further than intended.
+#   2. HOME is redirected to an empty temporary directory, so no project
+#      keystore is reachable: the project keystores live under the LOGIN
+#      home, and a fresh temp dir contains neither of them.
+#      THIS DOES NOT TRIGGER THE CONSTITUTION 3.5 GUARD, and an earlier
+#      revision of this comment claimed it did. Measured 2026-08-14:
+#      require_project_keystore_home refuses only when HOME is unset/empty
+#      or EQUAL TO the login home; an arbitrary temp dir passes it. A probe
+#      with HOME=<temp> reaches argument parsing and exits 1, not 8. T11b
+#      below asserts both halves of that behaviour rather than asserting
+#      this paragraph.
 #   3. FY_LIVE is unset, so scripts/lib/side-effects.sh suppresses every
 #      notify, push and state write reachable from these scripts.
 #
@@ -397,7 +404,12 @@ fi
 
 echo
 echo "=== T6: usage errors ==="
-for call in "fyc_closed_cycle_count a b" "fyc_cycle_number_to_inscribe a b" "fyc_exit_meaning only-one" "fyc_phase_of" "fyc_exit_table extra"; do
+# The zero-argument cases matter more than they look: the ledger argument is
+# mandatory precisely because a default would be inert on a developer machine
+# (no public/api/cycle-history.jsonl) and load-bearing on the validator host
+# (where that file exists and is push-owned). A no-arg call must refuse on
+# BOTH machines, so it must refuse on arity, never on readability.
+for call in "fyc_closed_cycle_count" "fyc_cycle_number_to_inscribe" "fyc_closed_cycle_count a b" "fyc_cycle_number_to_inscribe a b" "fyc_exit_meaning only-one" "fyc_phase_of" "fyc_exit_table extra"; do
 	# shellcheck disable=SC2086
 	$call >/dev/null 2>&1; rc=$?
 	if [ "$rc" -eq 64 ]; then
@@ -411,6 +423,20 @@ if [ "$rc" -eq 67 ]; then pass "T6 unknown (script,code) -> rc 67"; else fail "T
 
 echo
 echo "=== T7: table shape integrity ==="
+# The library must PARSE, checked separately from sourcing it. The rows carry
+# English prose, so apostrophes are unavoidable, and an earlier revision held
+# them in `VAR=$(cat <<'EOF' … EOF)`: bash 3.2 counts quote characters inside
+# a quoted heredoc body while scanning for the closing `)` of the command
+# substitution, so one added row flipped the parity and the whole library
+# became a syntax error. `bash -n` catches that class immediately, whereas a
+# sourced-but-broken library shows up further down as a confusing cascade of
+# "command not found".
+if bash -n "$LIB" 2>/dev/null; then
+	pass "T7: the library parses (bash -n)"
+else
+	fail "T7: the library does NOT parse: $(bash -n "$LIB" 2>&1 | head -2 | tr '\n' ' ')"
+fi
+
 ROWS="$(fyc_exit_table)"
 row_count="$(printf '%s\n' "$ROWS" | grep -c . || true)"
 if [ "$row_count" -gt 0 ]; then
@@ -441,6 +467,20 @@ if [ -z "$dupes" ]; then
 	pass "T7: no duplicate (script, code) rows"
 else
 	fail "T7: duplicate (script, code) rows: $(printf '%s' "$dupes" | tr '\n' ' ')"
+fi
+
+# Every row of one script must carry the SAME (phase, step). Without this,
+# only the first row of each script is constrained: T9/T9b read one row per
+# script and fyc_phase_of returns the first match, so changing the phase on
+# (say) the exit-9 row alone went undetected. Measured 2026-08-14.
+#
+# The invariant is real, not a convenience: a script runs at one point in the
+# transition, so every exit code it can return belongs to that same phase.
+mixed="$(printf '%s\n' "$ROWS" | awk -F'|' 'NF{print $3"\t"$1"|"$2}' | sort -u | awk -F'\t' '{n[$1]++} END{for (s in n) if (n[s] > 1) print s}')"
+if [ -z "$mixed" ]; then
+	pass "T7: every script's rows all carry the same (phase, step)"
+else
+	fail "T7: script(s) with rows claiming more than one (phase, step): $(printf '%s' "$mixed" | tr '\n' ' ')"
 fi
 
 echo
@@ -647,6 +687,161 @@ else
 fi
 
 echo
+echo "=== T10b: each row's PROSE is anchored to its own exit site ==="
+# T10 above only constrains the SET of codes. Both text columns were entirely
+# unchecked: swapping the meaning AND recovery of gen-anchor-source's exit 7
+# and exit 9 left the suite green (measured 2026-08-14). That is the worst
+# available failure, because exit 9 is the guard that prevents re-inscribing a
+# memo prefix and the swapped text would tell the operator "atomic write
+# failed — check free space" at the moment before an irreversible inscription.
+#
+# Method: for each (script, code), collect the EVIDENCE the script itself
+# associates with that code — its header exit-table entry plus the lines
+# leading up to each literal `exit <code>`. Then require that the row's prose
+# matches ITS OWN evidence at least as well as any SIBLING code's evidence in
+# the same script.
+#
+# The test is comparative, not a fixed threshold. An absolute "must share N
+# words with its own evidence" was tried first and rejected: recovery text is
+# prescriptive ("Fix the argument.") and legitimately does not echo the
+# script's wording, so the threshold flagged 58 rows that were perfectly
+# correct. It measured writing style, not correctness. What actually matters
+# is the reviewer's failure mode — a row explaining the WRONG code — and that
+# is exactly what "no sibling explains this prose better" detects: exit 9's
+# text scores ~10 against exit 9's evidence and ~0 against exit 7's, so the
+# swap inverts the comparison whatever the absolute numbers are.
+#
+# Rows whose prose shares no vocabulary with ANY sibling's evidence are
+# SKIPPED with a named reason and counted, because there is genuinely nothing
+# to discriminate with — coverage is printed rather than implied.
+
+# evidence_for <script-path> <code> — the script's OWN header exit-table
+# entry for that code (plus its indented continuation lines), lowercased.
+# Empty when the script's header says nothing about the code.
+#
+# Only the header entry is used, and that narrowing was arrived at by
+# measurement, not taste. Two alternatives were tried and discarded:
+#
+#   * "the eight lines before each literal `exit <code>`" — polluted: codes
+#     with several exit sites accumulate unrelated neighbouring code, and
+#     sign-anchor-event's exit 4 came out better explained by exit 2.
+#   * the same, plus following single-line `fail()`-style helpers to their
+#     call sites — fixed that case but introduced a SIZE bias: a code whose
+#     helper has thirty call sites has thirty times the vocabulary of a code
+#     guarded by one line, so raw overlap favours it regardless of meaning.
+#     run-testnet-rehearsal's exit 8 then lost to its own exit 1.
+#
+# The header entry is the script's authoritative one-line statement of what
+# the code means, it is one comparable size per code, and it is written
+# independently of this table — so agreeing with it is evidence, not
+# tautology. Where a script documents nothing (gen-renewal-ics.sh and
+# run-testnet-rehearsal.sh have no exit table at all; append-anchor-history's
+# stops before 8), there is no claim to compare against and the row is
+# reported as UNPINNED rather than scored against a proxy.
+evidence_for() {
+	local path="$1" code="$2"
+	awk -v c="$code" '
+		/^#/ {
+			if ($0 ~ ("^#[ \t]+" c "[ \t]")) { g = 1; print; next }
+			if (g) {
+				if ($0 ~ /^#[ \t]+[0-9]+[ \t]/) { g = 0; next }
+				if ($0 ~ /^#[ \t][ \t][ \t]/)   { print; next }
+				g = 0
+			}
+			next
+		}
+		{ g = 0 }
+	' "$path" | tr '[:upper:]' '[:lower:]'
+}
+
+# words <<<text — content words, length >= 4, sorted unique.
+words() {
+	tr -c '[:alnum:]_' '\n' | tr '[:upper:]' '[:lower:]' \
+		| grep -E '^[a-z_][a-z0-9_]{3,}$' | LC_ALL=C sort -u
+}
+
+T10B_SKIPPED=0
+T10B_CHECKED=0
+for s in $BRIEF_SCRIPTS; do
+	path="${SCRIPTS_DIR}/${s}"
+	codes="$(printf '%s\n' "$ROWS" | awk -F'|' -v s="$s" '$3==s{print $4}' | LC_ALL=C sort -u)"
+
+	# Materialise each code's evidence vocabulary once.
+	for c in $codes; do
+		evidence_for "$path" "$c" | words > "$WORK/ev-${s}-${c}.txt"
+	done
+
+	for c in $codes; do
+		# A code with no evidence of its own cannot be discriminated. These
+		# are exactly the indirect-propagation codes whose header is silent
+		# (uptime-history 2 and 64) — the finding this task reported. Naming
+		# them here keeps the gap visible instead of scoring them at random
+		# against siblings.
+		if [ ! -s "$WORK/ev-${s}-${c}.txt" ]; then
+			echo "SKIP  T10b $s exit $c: UNPINNED — the script's header documents nothing for this code, so there is no independent claim to compare the row against"
+			T10B_SKIPPED=$((T10B_SKIPPED + 1))
+			continue
+		fi
+
+		# MEANING only. The same rule was tried on `recovery` and rejected:
+		# recovery is prescriptive and deliberately cross-references other
+		# steps ("the ordering guard here is 9, not 7"), so its vocabulary
+		# tracks the remedy rather than the condition and the comparison
+		# flags correct rows. Recovery is covered structurally below, and the
+		# library's header says plainly that its wording is not machine-
+		# verified — which is the honest position, not a silent gap.
+		text="$(printf '%s\n' "$ROWS" | awk -F'|' -v s="$s" -v c="$c" '$3==s && $4==c{print $5}')"
+		printf '%s' "$text" | words > "$WORK/row-words.txt"
+
+		own="$(comm -12 "$WORK/row-words.txt" "$WORK/ev-${s}-${c}.txt" | grep -c . || true)"
+		best_other=0
+		best_code=""
+		for d in $codes; do
+			[ "$d" = "$c" ] && continue
+			[ -s "$WORK/ev-${s}-${d}.txt" ] || continue
+			n="$(comm -12 "$WORK/row-words.txt" "$WORK/ev-${s}-${d}.txt" | grep -c . || true)"
+			if [ "$n" -gt "$best_other" ]; then
+				best_other="$n"
+				best_code="$d"
+			fi
+		done
+
+		if [ "$own" -eq 0 ] && [ "$best_other" -eq 0 ]; then
+			echo "SKIP  T10b $s exit $c meaning: shares no vocabulary with any sibling's evidence — nothing to discriminate"
+			T10B_SKIPPED=$((T10B_SKIPPED + 1))
+			continue
+		fi
+		T10B_CHECKED=$((T10B_CHECKED + 1))
+		if [ "$own" -ge "$best_other" ]; then
+			pass "T10b $s exit $c meaning: best match is its own exit code (own=$own, next best exit ${best_code:-none}=$best_other)"
+		else
+			fail "T10b $s exit $c meaning: this prose matches exit ${best_code}'s evidence BETTER than exit ${c}'s (own=$own, exit ${best_code}=$best_other). The row explains the wrong code — check it has not been swapped."
+		fi
+	done
+done
+echo "T10b coverage: $T10B_CHECKED meaning(s) compared against their own exit code, $T10B_SKIPPED skipped (see SKIP lines)."
+
+# Recovery is not content-verified (see above). What IS enforced: it must be
+# present, must not merely restate the meaning, and must not be shared with
+# another code of the same script — a recovery that is identical for two
+# different failures is either wrong for one of them or too vague to act on.
+dup_recov="$(printf '%s\n' "$ROWS" | awk -F'|' 'NF{print $3"\t"$6}' | LC_ALL=C sort | uniq -d | cut -f1 | LC_ALL=C sort -u)"
+if [ -z "$dup_recov" ]; then
+	pass "T10b: no two codes of the same script share a recovery procedure"
+else
+	fail "T10b: script(s) with two codes sharing one recovery procedure: $(printf '%s' "$dup_recov" | tr '\n' ' ')"
+fi
+
+# A row must not simply repeat itself across its two columns, which would
+# satisfy the check above twice while telling the operator nothing to do.
+same_cols="$(printf '%s\n' "$ROWS" | awk -F'|' 'NF && $5==$6 {print $3" exit "$4}')"
+if [ -z "$same_cols" ]; then
+	pass "T10b: no row has an identical meaning and recovery"
+else
+	fail "T10b: row(s) whose recovery merely repeats the meaning: $(printf '%s' "$same_cols" | tr '\n' ';')"
+fi
+
+echo
 echo "=== T11: observed exit codes, measured by running the scripts ==="
 # Each probe uses an unrecognized argument; see SAFETY OF THE T11 PROBES.
 # The assertion is that the code the script REALLY returns is one the table
@@ -694,6 +889,60 @@ probe sign-anchor-event.sh              "unknown arg"
 probe gen-cycle-history.sh              ""
 probe gen-renewal-ics.sh                ""
 probe uptime-history.sh                 ""
+
+echo
+echo "=== T11b: what the probe HOME actually does (belt 2, measured) ==="
+# The three probed scripts that carry the Constitution 3.5 keystore guard.
+# Asserting the guard's real behaviour here means the safety argument in this
+# file's header is checked by the suite instead of merely asserted in prose —
+# which is the failure this whole task is about.
+GUARD_PROVEN=0
+LOGIN_HOME_FOR_TEST="$(eval echo ~"$(id -un)" 2>/dev/null || printf '')"
+for s in preview-cycle-anchor-broadcast.sh run-testnet-rehearsal.sh sign-anchor-event.sh; do
+	# A temp HOME PASSES the guard — so belt 2 is "no keystore exists there",
+	# not "the guard refuses".
+	rc=0
+	env "HOME=${WORK}/probe-home" "FY_LIVE=" timeout 30 bash "${SCRIPTS_DIR}/${s}" \
+		--fyc-unrecognized-argument-probe </dev/null >/dev/null 2>&1 || rc=$?
+	if [ "$rc" -ne 8 ]; then
+		pass "T11b $s: a temp HOME does NOT trip the 3.5 guard (rc=$rc) — belt 2 is the absence of a keystore, not a refusal"
+	else
+		fail "T11b $s: expected a temp HOME to pass the 3.5 guard, got rc 8. The header's belt-2 description is now wrong in the other direction — re-measure and rewrite it."
+	fi
+
+	# Under the login home the run must stop at one of the two gates — the
+	# 3.5 guard (8) or argument handling (1) — and never past them.
+	#
+	# WHICH gate fires differs per script, measured 2026-08-14: only
+	# preview-cycle-anchor-broadcast.sh places the guard ahead of argument
+	# parsing, so it answers 8; run-testnet-rehearsal.sh and
+	# sign-anchor-event.sh parse arguments first and answer 1. That is not a
+	# defect — each guard only has to precede its own script's first keystore
+	# use — but an earlier revision of this suite asserted 8 for all three
+	# and was simply wrong about the ordering.
+	if [ -n "$LOGIN_HOME_FOR_TEST" ]; then
+		rc=0
+		env "HOME=${LOGIN_HOME_FOR_TEST}" "FY_LIVE=" timeout 30 bash "${SCRIPTS_DIR}/${s}" \
+			--fyc-unrecognized-argument-probe </dev/null >/dev/null 2>&1 || rc=$?
+		case "$rc" in
+			8) pass "T11b $s: login home stopped at the 3.5 guard (rc=8; this script guards before parsing)"
+			   GUARD_PROVEN=1 ;;
+			1) pass "T11b $s: login home stopped at argument handling (rc=1; this script parses before guarding)" ;;
+			*) fail "T11b $s: login home run stopped at NEITHER gate (rc=$rc) — it got further than this suite's safety argument allows" ;;
+		esac
+	fi
+done
+if [ "${GUARD_PROVEN:-0}" -eq 1 ]; then
+	pass "T11b: at least one probed script demonstrated the 3.5 guard actually refusing (rc=8), so the guard is live and not merely assumed"
+else
+	fail "T11b: no probed script demonstrated the 3.5 guard refusing — the guard may have stopped working, and this suite would not otherwise notice"
+fi
+# And the probe HOME really is empty of keystores.
+if [ -z "$(ls -A "${WORK}/probe-home" 2>/dev/null || true)" ]; then
+	pass "T11b: the probe HOME is empty — no project keystore is reachable from it"
+else
+	fail "T11b: the probe HOME is not empty: $(ls -A "${WORK}/probe-home" | tr '\n' ' ')"
+fi
 
 echo
 echo "=== T12: no broadcast-capable string reaches the library ==="

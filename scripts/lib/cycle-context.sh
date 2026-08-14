@@ -20,8 +20,9 @@
 # another". Both are true, and both were measured again on 2026-08-14 while
 # writing this file. See MEASURED FACTS below for what was actually found —
 # it is worse than "N vs N+1": there are THREE different ways to count the
-# same ledger, in three scripts that all compare their answer against the
-# SAME operator-supplied FY_EXPECT_CYCLE.
+# same ledger. Two of them (gen-anchor-source.sh, gen-identity.sh) are
+# machine-checked against the operator's declared FY_EXPECT_CYCLE; the third
+# (gen-renewal-ics.sh) is checked against nothing and publishes its answer.
 #
 # On transition day the number derived here becomes the memo prefix of an
 # append-only on-chain inscription. Getting it wrong is not recoverable.
@@ -34,8 +35,16 @@
 #     confused for each other (fyc_closed_cycle_count vs
 #     fyc_cycle_number_to_inscribe).
 #   * On a well-formed ledger, that derivation returns the SAME number as
-#     every existing derivation in the repo. tests/cycle-context/ proves this
-#     by re-implementing each script's idiom verbatim and comparing.
+#     every existing LEDGER-BASED derivation in the repo. tests/cycle-context/
+#     proves this by re-implementing each script's idiom verbatim and
+#     comparing.
+#     SCOPE, stated because the unqualified version of this sentence would be
+#     false: there is a FOURTH derivation that does not read the ledger at
+#     all. uptime-history.sh:263 computes CYCLE_N=$((PREV_CYCLE_N + 1)) from
+#     its own state file, and nothing reconciles that number against the
+#     published ledger. This library cannot equal it and does not try; the
+#     two are kept in step only by the operator running the transition steps
+#     in order. Reconciling them is a separate task.
 #   * On a ledger where those idioms would DISAGREE, it refuses (rc
 #     $FYC_DIVERGENT_RC) and names each idiom's answer, instead of silently
 #     picking one. That disagreement is precisely the state in which one of
@@ -64,24 +73,37 @@
 # ---------------------------------------------------------------------------
 # MEASURED FACTS (2026-08-14, this worktree)
 # ---------------------------------------------------------------------------
-# Three idioms count the same ledger, and all three are compared against the
-# same FY_EXPECT_CYCLE by their respective scripts:
+# Three idioms count the same ledger. They do NOT all feed the same consumer,
+# and saying so would overstate the coupling:
 #
 #   gen-anchor-source.sh      `wc -l < <ledger>`                    -> CLOSED_COUNT
-#   gen-renewal-ics.sh        `grep -cvE '^[[:space:]]*$' <ledger>` -> CLOSED_COUNT
+#                             compared against FY_EXPECT_CYCLE; +1 becomes the
+#                             ON-CHAIN memo prefix.
 #   operator-local/gen-identity.sh
 #                             `jq -s 'map(.cycle_n) | max'`         -> LAST_CYCLE_N
+#                             compared against FY_EXPECT_CYCLE.
+#   gen-renewal-ics.sh        `grep -cvE '^[[:space:]]*$' <ledger>` -> CLOSED_COUNT
+#                             NOT compared against anything: this script
+#                             contains no FY_EXPECT_CYCLE at all (the string
+#                             appears once, in a comment at :38). +1 becomes
+#                             NEXT_RENEWAL_N, which is published in the .ics
+#                             calendar subscribers read.
+#
+# So two scripts machine-check themselves against the operator's declared
+# cycle and one does not; a wrong count in the third is published silently.
 #
 # They agree on a well-formed ledger and diverge otherwise:
 #   * `wc -l` counts NEWLINES. A ledger whose last line has no trailing
 #     newline makes it answer N-1 — and gen-anchor-source.sh is the script
-#     whose answer becomes the on-chain memo prefix. gen-renewal-ics.sh's
-#     own comment (line 146) states it uses the blank-tolerant idiom "the
-#     same as gen-anchor-source.sh's M-2 fix"; gen-anchor-source.sh does NOT
-#     use it for this count. The comment describes a parity that does not
-#     exist. That comment is exactly the class of claim this file must not
-#     repeat, which is why the equality above is asserted by an executable
-#     test rather than stated here.
+#     whose answer becomes the on-chain memo prefix.
+#     The inaccurate comment about this is gen-renewal-ics.sh:38, which says
+#     its count uses "the same CLOSED_COUNT idiom as gen-anchor-source.sh's
+#     FY_EXPECT_CYCLE guard" — that guard uses `wc -l`, and this script
+#     deliberately does not. (gen-renewal-ics.sh:146-148, which cites
+#     gen-anchor-source.sh's M-2 fix as the blank-tolerant precedent, is
+#     ACCURATE: that fix at gen-anchor-source.sh:304 really does use
+#     `grep -vE '^[[:space:]]*$'`. An earlier revision of this header blamed
+#     the accurate comment and missed the inaccurate one.)
 #   * The line-count idioms answer "how many records are on the ledger". The
 #     jq idiom answers "what is the highest cycle number on it". Those are
 #     the same number only while the ledger is contiguous from 1 with no
@@ -89,8 +111,14 @@
 #     (see fyc_closed_cycle_count).
 #
 # The exit-code tables in the script headers do not match the code:
-#   * append-anchor-history.sh emits exit 8 (side-effects library missing).
-#     Its header's table stops at 7. Undocumented.
+#   * append-anchor-history.sh carries TWO exit-code lists that disagree with
+#     each other. The primary "Exit codes:" block at :24-37 stops at 7; a
+#     second prose list at :106-109 additionally names 8 (side-effects
+#     library missing), which is the code the script really emits at :118.
+#     An operator who reads the block that looks canonical does not learn
+#     that 8 exists. (An earlier revision of this header called exit 8
+#     undocumented outright; that was wrong, and the test that pins each row
+#     to the script's own documentation is what surfaced the second list.)
 #   * uptime-history.sh's header documents 0, 1, 3. It also exits 2 (jq's
 #     own code, leaked through `set -e` when validator.json is absent —
 #     measured, not inferred) and can exit 64 (fyd_state_dir's usage rc,
@@ -117,6 +145,15 @@
 # re-inscribe a memo prefix used months ago. A genuinely readable, genuinely
 # empty ledger IS a legitimate 0 and is accepted as such.
 #
+# THE LEDGER ARGUMENT IS MANDATORY. An earlier revision defaulted to this
+# repo's public/api/cycle-history.jsonl when called with no argument, which
+# contradicted the paragraph above: on a developer machine that path does not
+# exist and the call refuses (looking correct), but on the validator host it
+# DOES exist and is push-owned, so the same no-argument call would quietly
+# answer from a local mirror while the caller believed it had chosen nothing.
+# A default that is inert where it is tested and load-bearing where it runs is
+# the worst shape available, so there is no default.
+#
 # ---------------------------------------------------------------------------
 # CONTRACT
 # ---------------------------------------------------------------------------
@@ -131,10 +168,24 @@
 #                           or it cannot be parsed as JSONL at all.
 #   67  $FYC_NO_ROW_RC      no translation-table row for the (script, code)
 #                           asked about.
-# 64-67 sit outside the 0-11 range every script in the table uses, so a
-# caller can always tell "the library refused" from "the script it was
-# asking about failed". They are NOT part of the translation table and must
-# never be translated as if they were a script's code.
+# 65, 66 and 67 sit outside every code any script in the table can emit, so
+# for those three a caller can always tell "the library refused" from "the
+# script it was asking about failed".
+#
+# 64 IS AMBIGUOUS FOR EXACTLY ONE SCRIPT, and pretending otherwise would be
+# the kind of overclaim this file exists to avoid. uptime-history.sh can
+# itself exit 64 (table row `1|2|uptime-history.sh|64`), because it
+# propagates scripts/lib/side-effects.sh's usage rc verbatim — the same
+# number this library uses, for the same underlying condition ("a caller
+# passed something the library does not accept"). So a bare 64 observed
+# while running uptime-history.sh does not distinguish "cycle-context
+# refused my call" from "uptime-history's state-dir call was wrong"; both
+# are usage errors originating in a scripts/lib/ library, which is why they
+# share a number rather than despite it. Distinguish them by the stderr
+# prefix, which is unambiguous: `cycle-context:` vs `side-effects:`.
+#
+# 65-67 are NOT part of the translation table and must never be translated
+# as if they were a script's code.
 #
 # CALLERS WITHOUT `set -e` MUST CHECK THE RETURN CODE. A refusal prints its
 # reason to stderr and NOTHING to stdout, so
@@ -167,10 +218,8 @@ FYC_UNREADABLE_RC=65
 FYC_DIVERGENT_RC=66
 FYC_NO_ROW_RC=67
 
-# Default ledger path. Deliberately the repo-local one: it is the only path
-# this file can name without asserting something about the public site that
-# it has not checked. Override per call, or via this variable.
-FYC_CYCLE_HISTORY_JSONL="${FYC_CYCLE_HISTORY_JSONL:-${FYC_REPO_ROOT}/public/api/cycle-history.jsonl}"
+# There is deliberately NO default ledger path and no environment variable
+# that supplies one — see "THE LEDGER ARGUMENT IS MANDATORY" above.
 
 # ---------------------------------------------------------------------------
 # Internal helpers (fyc__ prefix — not part of the contract)
@@ -181,15 +230,15 @@ fyc__usage() {
 	return "$FYC_USAGE_RC"
 }
 
-# fyc__ledger_path <caller> [path] — validate arity and readability.
+# fyc__ledger_path <caller> <path> — validate arity and readability.
 fyc__ledger_path() {
 	local caller="$1"
 	shift
-	if [ "$#" -gt 1 ]; then
-		fyc__usage "${caller}: at most one argument (ledger path), got $#"
+	if [ "$#" -ne 1 ]; then
+		fyc__usage "${caller}: exactly one argument required (ledger path), got $#. There is no default: naming the ledger is the caller's decision, and a default would answer from a local mirror on the validator host while looking inert here."
 		return "$FYC_USAGE_RC"
 	fi
-	local path="${1:-$FYC_CYCLE_HISTORY_JSONL}"
+	local path="$1"
 	if [ -z "$path" ]; then
 		fyc__usage "${caller}: ledger path must not be empty"
 		return "$FYC_USAGE_RC"
@@ -241,7 +290,7 @@ fyc__max_cycle_n() {
 # The derivation (exactly one place)
 # ---------------------------------------------------------------------------
 
-# fyc_closed_cycle_count [<ledger>]
+# fyc_closed_cycle_count <ledger>
 #   Prints N — the number of cycles that have ALREADY CLOSED and are on the
 #   published ledger. This is the number FY_EXPECT_CYCLE is compared against
 #   in gen-anchor-source.sh, gen-renewal-ics.sh and gen-identity.sh. It is
@@ -312,7 +361,7 @@ fyc_closed_cycle_count() {
 	return 0
 }
 
-# fyc_cycle_number_to_inscribe [<ledger>]
+# fyc_cycle_number_to_inscribe <ledger>
 #   Prints N+1 — the number of the cycle that is ABOUT TO BE INSCRIBED, i.e.
 #   the one that becomes the memo prefix and appears as
 #   observations_branch.cycle_number_observed in anchor-source.json.
@@ -352,7 +401,19 @@ fyc_cycle_number_to_inscribe() {
 # broadcast/publish guards' 0/2 are an external hook contract.
 #
 # No field may contain `|`. The test enforces that.
-FYC_EXIT_TABLE_ROWS=$(cat <<'FYC_TABLE_EOF'
+#
+# The rows live in a FUNCTION rather than in a variable assigned from
+# `$(cat <<'EOF' … EOF)`. That earlier form was a landmine: bash 3.2 (the
+# macOS system bash this repo's tests run under) scans for the closing `)` of
+# a command substitution while tracking quote state, and it counts the quote
+# characters inside the heredoc body even though the heredoc is quoted and the
+# body is literal. The prose here is English, so apostrophes ("the caller's",
+# "jq's") are unavoidable; every added row flipped the parity, and the row
+# that finally made it odd turned the whole library into a syntax error at
+# source time. Measured 2026-08-14. A heredoc inside a function body is not
+# inside a command substitution, so the miscount cannot happen.
+fyc__table_rows() {
+	cat <<'FYC_TABLE_EOF'
 1|2|uptime-history.sh|0|Wrote the daily row, or it was already present. Also returned when the cycle gate deferred Job B, which is a NORMAL outcome and not proof that a cycle was closed.|Read stderr to tell the three apart. If this was the transition tick, confirm uptime-cycles.json gained exactly one closed-cycle record before moving to step 3.
 1|2|uptime-history.sh|1|validator.json is readable but is missing nodeId, endTime or uptime.|Wait for the node-info tick (step 1) to rewrite validator.json, confirm the three fields are present, then re-run.
 1|2|uptime-history.sh|2|UNDOCUMENTED in this script's header. jq's own exit code, leaked by set -e when an input file cannot be opened at all (validator.json absent, as opposed to present-but-incomplete which is exit 1). Measured 2026-08-14.|Check that VALIDATOR_JSON points at an existing file. This is a missing input, not bad data.
@@ -391,7 +452,7 @@ FYC_EXIT_TABLE_ROWS=$(cat <<'FYC_TABLE_EOF'
 5|7c|sign-anchor-event.sh|3|A config file is missing (the account or sink file).|Restore the operator config directory on this machine.
 5|7c|sign-anchor-event.sh|4|The broadcast helper under bin/ is missing or not executable.|Restore it from the repo. Do not substitute a direct call; the helper is where the authorization gates live.
 5|7c|sign-anchor-event.sh|5|The broadcast helper returned non-zero.|Read the helper's own output for the gate that refused. Do not retry blindly: a partially accepted transaction must be checked on-chain FIRST, because a second attempt could double-inscribe.
-5|7c|sign-anchor-event.sh|7|This is not the signing host. The signing key lives only on the operator machine.|Run this step on the operator machine. Do not move the key to the validator host to satisfy it.
+5|7c|sign-anchor-event.sh|7|The signing CLI is not on PATH. This is a PATH pre-flight, NOT an assertion about which machine you are on and NOT a keystore read: a Mac whose PATH lacks the CLI (a cron or other non-login shell) hits this too, and the message's "the operator's Mac" wording invites the wrong diagnosis.|First check PATH in THIS shell before concluding you are on the wrong machine; a non-login shell is the common cause. If you only need the composed transaction, --dry-run needs no signing key and never reaches this check. If you really are on the validator host, move the step, not the key.
 5|7c|sign-anchor-event.sh|8|Keystore separation guard failed (Constitution 3.5): HOME resolves to the default shared keystore.|Re-invoke with the project mainnet keystore HOME prefix.
 6|8|gen-anchor-receipt.sh|0|All seven verification gates passed and the receipt was written.|Proceed to the history append. The receipt is the input that append-anchor-history.sh validates against.
 6|8|gen-anchor-receipt.sh|1|Usage or argument error.|Fix the argument.
@@ -409,7 +470,7 @@ FYC_EXIT_TABLE_ROWS=$(cat <<'FYC_TABLE_EOF'
 6|8|append-anchor-history.sh|5|Atomic write failed.|Check free space and permissions, then re-run after confirming the last line.
 6|8|append-anchor-history.sh|6|The newly composed line failed schema validation.|Compare against the anchor-history schema. Reached through the shared validator helper, not a literal exit.
 6|8|append-anchor-history.sh|7|No JSON schema validator is available. Fail-closed rather than skip validation.|Provision a validator on this machine (scripts/setup-schema-validator.sh), then re-run.
-6|8|append-anchor-history.sh|8|UNDOCUMENTED in this script's header, whose table stops at 7. scripts/lib/side-effects.sh is not readable (structural).|Confirm scripts/lib/ reached this machine intact, then re-run.
+6|8|append-anchor-history.sh|8|scripts/lib/side-effects.sh is not readable (structural). Named only in the SECOND exit list at :106-109; the primary Exit codes block at :24-37 stops at 7, so the list that looks canonical omits this code.|Confirm scripts/lib/ reached this machine intact, then re-run. If you were reading the primary exit-code block and could not find 8, that is the script's two lists disagreeing, not a code from somewhere else.
 daily|-|check-identity-pins.sh|0|No NEW breakage. Pins match, or the only mismatches are baselined tracked pins or structural stream pins.|None.
 daily|-|check-identity-pins.sh|2|Cannot run: jq missing, the identity manifest is unreadable or empty, the baseline or feed-excludes list is unreadable, a pin URL is malformed, or no sha256 tool. A blind checker must never be mistaken for a healthy one.|Restore the missing tool or file. In live mode this condition also alerts, deliberately.
 daily|-|check-identity-pins.sh|3|NEW breakage on a tracked pin: the hash mismatches, or the pinned file is gone.|A commit changed a file the signed manifest pins. Either restore the bytes or re-sign the manifest; do not baseline it to make the alert stop.
@@ -418,7 +479,7 @@ daily|-|check-identity-pins.sh|5|scripts/lib/side-effects.sh is not readable (st
 daily|-|gen-renewal-ics.sh|0|The calendar was regenerated, OR the cycle gate deferred the run. Both are exit 0.|Read stderr to tell them apart. This script has no header exit table; these two rows were measured from the code.
 daily|-|gen-renewal-ics.sh|1|A required input is unreadable: the calendar token file, validator.json, or endTime within it.|Restore the named file. Note the renewal NUMBER can still be wrong without any non-zero exit - an unreadable ledger falls back to a cached or unconfirmed count and says so on stderr only.
 FYC_TABLE_EOF
-)
+}
 
 # fyc_exit_table
 #   Prints the raw table. One row per line, `phase|step|script|code|meaning|recovery`.
@@ -427,7 +488,7 @@ fyc_exit_table() {
 		fyc__usage "fyc_exit_table: takes no arguments (got $#)"
 		return "$FYC_USAGE_RC"
 	fi
-	printf '%s\n' "$FYC_EXIT_TABLE_ROWS"
+	fyc__table_rows
 	return 0
 }
 
@@ -442,9 +503,7 @@ fyc__row() {
 			printf '%s\n' "$line"
 			return 0
 		fi
-	done <<-FYC_ROWS_EOF
-	$FYC_EXIT_TABLE_ROWS
-	FYC_ROWS_EOF
+	done < <(fyc__table_rows)
 	return "$FYC_NO_ROW_RC"
 }
 
@@ -495,9 +554,7 @@ fyc_phase_of() {
 			printf '%s' "$line" | cut -d'|' -f1
 			return 0
 		fi
-	done <<-FYC_ROWS_EOF
-	$FYC_EXIT_TABLE_ROWS
-	FYC_ROWS_EOF
+	done < <(fyc__table_rows)
 	echo "cycle-context: ERROR: ${script} is not in the translation table." >&2
 	return "$FYC_NO_ROW_RC"
 }
@@ -508,7 +565,7 @@ fyc_scripts_in_table() {
 		fyc__usage "fyc_scripts_in_table: takes no arguments (got $#)"
 		return "$FYC_USAGE_RC"
 	fi
-	printf '%s\n' "$FYC_EXIT_TABLE_ROWS" | cut -d'|' -f3 | awk '!seen[$0]++'
+	fyc__table_rows | cut -d'|' -f3 | awk '!seen[$0]++'
 	return 0
 }
 
