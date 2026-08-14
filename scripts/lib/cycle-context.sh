@@ -293,8 +293,9 @@ fyc__max_cycle_n() {
 # fyc_closed_cycle_count <ledger>
 #   Prints N — the number of cycles that have ALREADY CLOSED and are on the
 #   published ledger. This is the number FY_EXPECT_CYCLE is compared against
-#   in gen-anchor-source.sh, gen-renewal-ics.sh and gen-identity.sh. It is
-#   NOT the number that gets inscribed.
+#   in gen-anchor-source.sh and gen-identity.sh — NOT in gen-renewal-ics.sh,
+#   which derives the same quantity and compares it against nothing (see
+#   MEASURED FACTS). It is NOT the number that gets inscribed.
 #
 #   The answer is the non-blank record count (gen-renewal-ics.sh's idiom),
 #   chosen because each line of cycle-history.jsonl IS one closed cycle and
