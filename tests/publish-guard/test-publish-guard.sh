@@ -593,11 +593,23 @@ run_json "multiedit public IP -> block"            2 "$(jq -nc --arg fp "$REPO_R
 run_json "read tool -> allow"                      0 "$(jq -nc '{tool_name:"Read",tool_input:{file_path:"/x"}}')"
 
 echo "== gitignore-skip =="
-# This section has to ADD A LINE to the repository's info/exclude, which lives
-# in the COMMON git dir shared by every worktree. All of the snapshot / restore
-# / self-heal / trap machinery for that lives in exclude-hygiene.sh so that the
-# hermetic assertions further down exercise the very code this section runs,
-# rather than a re-implementation that could drift away from it.
+# This section USED TO manufacture an ignored path by appending a line to the
+# repository's info/exclude. That file lives in the COMMON git dir shared by
+# every worktree of the repository, so the mutation was visible to — and
+# stompable by — every other checkout. Measured 2026-08-14 with two concurrent
+# runs: each run's xg_selfheal stripped the OTHER run's marker line before that
+# run's assertion could read it, and either run's xg_restore could overwrite
+# the other's line, so "is this path ignored?" was being answered by a race.
+#
+# It no longer manufactures anything. `*.log` is in the repository's TRACKED
+# .gitignore, so an ignored path inside the real repo is available without
+# writing to any shared state at all. G-0 below refuses to let the "allow" be
+# read as a pass unless git really does ignore that path, and G-2 pins the
+# allow to the ignore rule specifically.
+#
+# exclude-hygiene.sh is still sourced: pg_cleanup needs xg_install_traps (the
+# handler idiom that TERMINATES), and F2 further down still exercises the whole
+# snapshot / restore / self-heal machinery against a throwaway repository.
 . "${REPO_ROOT}/tests/publish-guard/exclude-hygiene.sh"
 H_ROOT=""
 DENY_TMP=""
@@ -615,14 +627,31 @@ pg_cleanup() {
 	DENY_TMP=""
 	return 0
 }
-xg_resolve "$REPO_ROOT"
-xg_selfheal
-xg_snapshot
 xg_install_traps pg_cleanup
-EXCL="$XG_EXCL"
-IGN_NAME="guardtest-ignored-$$.md"
-printf '%s\n' "$IGN_NAME" >> "$EXCL"
-run_json "write IP into gitignored file -> allow"  0 "$(jq -nc --arg fp "$REPO_ROOT/$IGN_NAME" --arg c "host $PUB_IP" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"
+
+# Resolve the shared info/exclude with the SHIPPED resolver (a linked worktree
+# spells it differently from a main checkout, which is the whole reason that
+# function exists), record its state, then blank XG_EXCL immediately. Nothing
+# from here on may write to it, and blanking it means xg_restore — which
+# removes the file outright when XG_EXISTED is 0 — can never reach it either.
+xg_resolve "$REPO_ROOT"
+SHARED_EXCL="$XG_EXCL"
+XG_EXCL=""
+if [ -f "$SHARED_EXCL" ]; then SHARED_EXCL_SHA0="$(shasum < "$SHARED_EXCL")"; else SHARED_EXCL_SHA0="ABSENT"; fi
+
+IGN_NAME="guardtest-ignored-$$.log"
+# G-0 is a precondition, not a behaviour: without it a green "allow" below
+# could equally mean the .gitignore rule this fixture relies on was removed and
+# the guard allowed the write for some entirely different reason.
+if git -C "$REPO_ROOT" check-ignore -q "$REPO_ROOT/$IGN_NAME" 2>/dev/null; then
+	printf 'PASS  %-62s\n' "G-0 fixture precondition: git really ignores the fixture path"; PASS=$((PASS+1))
+else
+	printf 'FAIL  %-62s (%s)\n' "G-0 fixture precondition: git really ignores the fixture path" "check-ignore says NOT ignored — has *.log left .gitignore?" >&2; FAIL=$((FAIL+1))
+fi
+run_json "G-1 write IP into gitignored file -> allow"  0 "$(jq -nc --arg fp "$REPO_ROOT/$IGN_NAME" --arg c "host $PUB_IP" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"
+# G-2 control: same payload, same repo, a path git does NOT ignore. Pins the
+# allow above to the ignore rule rather than to anything else about the path.
+run_json "G-2 control: same IP at a non-ignored path -> block" 2 "$(jq -nc --arg fp "$REPO_ROOT/guardtest-ignored-$$.md" --arg c "host $PUB_IP" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"
 pg_cleanup
 
 echo "== F2: the suite's own info/exclude hygiene (hermetic: throwaway repo) =="
@@ -673,8 +702,18 @@ xg_kill_harness() {   # $1 = trap|notrap  $2 = signal -> echoes "<rc> <verdict>"
 # make the "no stranded backup" assertion vacuous. Count in the real location,
 # and count rather than test existence so an unrelated leftover cannot mask a
 # new one.
+#
+# Scoped to $XG_BACKUP_PREFIX — this run's XG_RUN_ID, set in exclude-hygiene.sh
+# — instead of to every pubguard backup on the machine. A machine-wide glob
+# made all three of these assertions read, and the `rm -f` below DELETE, files
+# belonging to other concurrent runs of this suite. Measured 2026-08-14: two
+# parallel runs both failed F2-4, because the other run's backup was already
+# sitting there before the control had run; and a run whose backup is deleted
+# while its harness is still sleeping reports F2-1 as LEAKED, since xg_restore
+# then has nothing to copy back. The F2 harness inherits XG_RUN_ID, so the
+# backup the control must observe is still in scope here.
 XG_TMPD="${TMPDIR:-/tmp}"; XG_TMPD="${XG_TMPD%/}"
-xg_backups() { ls "$XG_TMPD"/pubguard-exclude-backup.* 2>/dev/null | wc -l | tr -d ' '; }
+xg_backups() { ls "$XG_TMPD"/"$XG_BACKUP_PREFIX".* 2>/dev/null | wc -l | tr -d ' '; }
 XG_BK0="$(xg_backups)"
 
 XG_R="$(xg_kill_harness trap TERM)"
@@ -701,7 +740,7 @@ esac
 [ "$(xg_backups)" -gt "$XG_BK0" ] \
 	&& { printf 'PASS  %-62s\n' "F2-4 control: no trap -> the mktemp backup is stranded"; PASS=$((PASS+1)); } \
 	|| { printf 'FAIL  %-62s (still %s)\n' "F2-4 control: no trap must strand a backup (else F2-2 pins nothing)" "$(xg_backups)" >&2; FAIL=$((FAIL+1)); }
-rm -f "$XG_TMPD"/pubguard-exclude-backup.*
+rm -f "$XG_TMPD"/"$XG_BACKUP_PREFIX".*
 
 # Self-heal: what F2-3 just produced is exactly what a SIGKILL leaves behind,
 # and no trap can cover that. Strand two more lines around it, then prove one
@@ -862,6 +901,24 @@ FYD_PUBLISH_DENYLIST="$DENY_TMP" bash "$GUARD" --text >/dev/null 2>&1 <<<"nothin
 [ "$rc" -eq 0 ] && { printf 'PASS  %-62s (rc=%d)\n' "denylist clean -> allow" "$rc"; PASS=$((PASS+1)); } \
 	|| { printf 'FAIL  %-62s (rc=%d, want 0)\n' "denylist clean -> allow" "$rc" >&2; FAIL=$((FAIL+1)); }
 rm -f "$DENY_TMP"
+
+echo "== shared state =="
+# The one file this suite can damage for EVERY OTHER checkout of the repository
+# is .git/info/exclude, which lives in the common git dir shared by all
+# worktrees. Nothing in this suite writes to it any more (see the gitignore-skip
+# section), and this turns that from a claim into a check — including against a
+# future case that reintroduces the write without noticing what it is touching.
+if [ -f "$SHARED_EXCL" ]; then SHARED_EXCL_SHA1="$(shasum < "$SHARED_EXCL")"; else SHARED_EXCL_SHA1="ABSENT"; fi
+# A path that never resolved would compare ABSENT to ABSENT and report a pass
+# having watched nothing, so resolution is checked before the comparison is
+# allowed to mean anything.
+if [ -z "$SHARED_EXCL" ] || [ ! -d "$(dirname "$SHARED_EXCL")" ]; then
+	printf 'FAIL  %-62s (%s)\n' "S-1 the shared info/exclude is byte-identical after the run" "path did not resolve: '${SHARED_EXCL}' — the comparison would be vacuous" >&2; FAIL=$((FAIL+1))
+elif [ "$SHARED_EXCL_SHA1" = "$SHARED_EXCL_SHA0" ]; then
+	printf 'PASS  %-62s\n' "S-1 the shared info/exclude is byte-identical after the run"; PASS=$((PASS+1))
+else
+	printf 'FAIL  %-62s (%s -> %s)\n' "S-1 the shared info/exclude is byte-identical after the run" "$SHARED_EXCL_SHA0" "$SHARED_EXCL_SHA1" >&2; FAIL=$((FAIL+1))
+fi
 
 echo
 echo "----------------------------------------"

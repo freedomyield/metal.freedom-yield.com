@@ -32,6 +32,25 @@ XG_EXCL=""
 XG_EXISTED=0
 XG_BACKUP=""
 
+# XG_RUN_ID scopes every temp file this machinery creates to ONE run.
+#
+# WHY. $TMPDIR is shared by every process on the machine, so a bare
+# "pubguard-exclude-backup.*" glob counts — and a bare `rm -f` on that glob
+# DELETES — the live backups of any other run of this suite happening at the
+# same time. This repository runs suites from several worktrees in parallel as
+# a matter of course, and the effect was measured: F2-4 fails (another run's
+# backup is already there, so "did the control strand one?" is answered by
+# somebody else's file), and F2-1 can fail LEAKED (another run deleted THIS
+# run's backup mid-sleep, so xg_restore had nothing to copy back). A run-scoped
+# infix makes both questions ask only about files this run created.
+#
+# EXPORTED, and resolved with :- so a child that sources this file again — the
+# F2 harness does exactly that — keeps the parent's id. That is required, not
+# incidental: the harness is the process whose backup F2-4 must be able to see.
+XG_RUN_ID="${XG_RUN_ID:-$$-$(date +%s)-${RANDOM:-0}}"
+export XG_RUN_ID
+XG_BACKUP_PREFIX="pubguard-exclude-backup-${XG_RUN_ID}"
+
 # xg_resolve <repo-dir>
 # `git rev-parse --git-path info/exclude` rather than a literal
 # "<repo>/.git/info/exclude": inside a linked worktree "<repo>/.git" is a FILE
@@ -58,7 +77,7 @@ xg_resolve() {
 xg_selfheal() {
 	local heal
 	if [ -n "$XG_EXCL" ] && [ -f "$XG_EXCL" ] && grep -q "^${XG_MARKER}" "$XG_EXCL"; then
-		heal="$(mktemp -t pubguard-exclude-heal.XXXXXX)"
+		heal="$(mktemp -t "pubguard-exclude-heal-${XG_RUN_ID}.XXXXXX")"
 		grep -v "^${XG_MARKER}" "$XG_EXCL" > "$heal"
 		cat "$heal" > "$XG_EXCL"
 		rm -f "$heal"
@@ -74,7 +93,7 @@ xg_snapshot() {
 	XG_BACKUP=""
 	if [ -n "$XG_EXCL" ] && [ -f "$XG_EXCL" ]; then
 		XG_EXISTED=1
-		XG_BACKUP="$(mktemp -t pubguard-exclude-backup.XXXXXX)"
+		XG_BACKUP="$(mktemp -t "${XG_BACKUP_PREFIX}.XXXXXX")"
 		cp "$XG_EXCL" "$XG_BACKUP"
 	fi
 	return 0

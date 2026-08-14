@@ -162,7 +162,7 @@
 					"kind": {
 						"type": "string",
 						"enum": ["stream", "static", "record"],
-						"description": "ADDITIVE (2026-08-14). The artifact's publication kind, copied from deploy/publication.json. 'stream' = the bytes can change without a commit to the operator's repository (host cron, runtime push), so this entry carries NO sha256. 'static' = the bytes change only when a commit changes them. 'record' = immutable bytes at a URL that never resolves to different bytes (content-addressed). 'static' and 'record' entries carry sha256. kind is a SAFE FLOOR, not a summary: a path is classified by its weakest moment, so a consumer that acts only on kind always does the safe thing."
+						"description": "ADDITIVE (2026-08-14). The artifact's publication kind, copied from deploy/publication.json. 'stream' = the bytes can change without a commit to the operator's repository (host cron, runtime push), so this entry carries NO sha256. 'static' = the bytes change only when a commit changes them. 'record' = the URL's name is derived from a digest of the content it addresses, so whatever that digest covers cannot change without the name changing too; the name need NOT cover the whole file, and the entry's sha256 is what binds every byte as of signing. 'static' and 'record' entries carry sha256. kind is a SAFE FLOOR, not a summary: a path is classified by its weakest moment, so a consumer that acts only on kind always does the safe thing."
 					},
 					"sha256": {
 						"type": "string",
