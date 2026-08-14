@@ -97,9 +97,17 @@ FY_LIVE=1
 10 7 * * * deploy cd /home/deploy/metal.freedom-yield.com && bash scripts/check-anomalies.sh 2>&1 | logger -t anomalies-pipe-chain
 EOF
 
-	# freedom-yield-* orphan (no repo installer) — must be in scope.
+	# freedom-yield-* orphan (no repo installer) — must be in scope. Real
+	# deployed shape (confirmed on host, 2026-08-14 — see
+	# docs/CRON_CONVENTIONS.md's "Alternative form: piping to logger"
+	# section): a single bash -c "..." invocation piped to logger, NOT a
+	# plain >>-redirecting command. The && chain inside bash -c's own
+	# quoted argument is opaque to cron (a single token from its
+	# perspective), so this line has no >> and no top-level && for Rule
+	# 2 to check — it is already fully compliant and this installer must
+	# leave it untouched, the same as metal-host-drift above.
 	cat > "$DIR/freedom-yield-peer-geo" <<'EOF'
-0 6 * * * deploy bash /home/deploy/metal.freedom-yield.com/scripts/peer-geo.py >> /home/deploy/metal.freedom-yield.com/logs/peer-geo.log 2>&1
+0 6 * * * deploy bash -c "cd /home/deploy/metal.freedom-yield.com && python3 scripts/peer-geo.py && bash scripts/push-to-web-host.sh peer-geo.json" 2>&1 | logger -t peer-geo
 EOF
 
 	# other project's file — out of scope, must never be touched.
@@ -278,12 +286,20 @@ echo "$OUT" | grep -qF 'cd /home/deploy/metal.freedom-yield.com && bash scripts/
 	|| ok "pipe-chain: no backup entry (file untouched)"
 teardown
 
-# ---- case 9: freedom-yield-* prefix is in scope ------------------------------
+# ---- case 9: freedom-yield-* prefix is in scope, and its real (bash -c |
+#              logger) shape is recognised as already compliant ------------
 setup
-run_installer >/dev/null 2>&1
-grep -qE 'echo "=== freedom-yield-peer-geo start' "$DIR/freedom-yield-peer-geo" \
-	&& ok "freedom-yield-*: orphan cron gets fixed too" \
-	|| bad "freedom-yield-*: orphan cron gets fixed too (content: $(cat "$DIR/freedom-yield-peer-geo"))"
+FYBEFORE="$(cat "$DIR/freedom-yield-peer-geo")"
+OUT="$(run_installer 2>&1)"
+[ "$(cat "$DIR/freedom-yield-peer-geo")" = "$FYBEFORE" ] \
+	&& ok "freedom-yield-*: byte-identical (bash -c | logger shape needs no fix)" \
+	|| bad "freedom-yield-*: byte-identical (bash -c | logger shape needs no fix) (content: $(cat "$DIR/freedom-yield-peer-geo"))"
+echo "$OUT" | grep -qF 'ok:      freedom-yield-peer-geo (no fix needed)' \
+	&& ok "freedom-yield-*: prefix is in scope (installer actually examined it, found it compliant)" \
+	|| bad "freedom-yield-*: prefix is in scope (out: $OUT)"
+[ -e "$BK/freedom-yield-peer-geo" ] \
+	&& bad "freedom-yield-*: no backup entry (file untouched)" \
+	|| ok "freedom-yield-*: no backup entry (file untouched)"
 teardown
 
 # ---- case 10: other-project file stays out of scope, untouched -------------
