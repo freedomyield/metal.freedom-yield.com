@@ -168,11 +168,26 @@ echo ""
 #     number of literal `"` characters still pairs up left-to-right into
 #     something that resolves the same top-level `&&`/sink either way. This
 #     is not a proof for every possible escaped-quote shape, only the ones
-#     tested; unlike a truly ambiguous case, an ODD/unbalanced literal quote
-#     count reliably leaves a stray `&&` or brace unmatched, which can only
-#     ever produce an EXTRA violation (fail closed), never a missed one —
-#     the same posture Rule 1 and Rule 6 already take toward input they
-#     cannot fully resolve.
+#     tested.
+#   - More generally, the stripper is not scope-aware: it pairs quote
+#     characters strictly left-to-right by TYPE, not by which shell-level
+#     string each one actually opens or closes. Confirmed 2026-08-14: a line
+#     with two SINGLE-quoted arguments that each contain one literal `"` —
+#     e.g. `cmd1 'the "word' && cmd2 'end" here' >> log 2>&1`, a genuinely
+#     valid, unwrapped, two-command chain — has those two `"` characters
+#     paired with EACH OTHER by the double-quote pass, which deletes
+#     everything between them, including the real top-level `&&`; the line
+#     then has zero `&&` left to find and Rule 2 skips it entirely. That
+#     line carries exactly two literal `"` characters (an EVEN count), so
+#     this is not an odd/unbalanced-quote problem, and the result is a
+#     MISSED violation, not the "extra violation, never missed" this comment
+#     previously claimed. The correct statement: left-to-right quote-pairing
+#     that spans a genuine top-level `&&` makes that `&&` invisible to Rule
+#     2, independent of whether the quote count on the line is odd or even.
+#     No safety issue today — no generator in this repo emits a line whose
+#     single-quoted arguments contain a literal double quote (or vice
+#     versa) — so this has never fired in practice; documented here rather
+#     than silently relied on.
 echo "[2] A chain's redirect/pipe must cover the WHOLE chain, not just its last command"
 ANY_CHAIN_NO_BRACES=0
 while IFS= read -r line; do

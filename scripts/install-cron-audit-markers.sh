@@ -115,11 +115,34 @@ is_comment_or_blank() { [[ "$1" =~ ^[[:space:]]*(#|$) ]]; }
 is_env_assignment()   { [[ "$1" =~ ^[A-Z_]+= ]]; }
 
 # line_is_compliant <line> — true (rc 0) iff this line needs no fix: either
-# it has no `>>` at all (Rules 2/3 do not apply), or it already carries
-# start/end markers + rc=$? capture, and (if it chains with &&) is already
-# brace-wrapped.
+# it has no `>>` at all (Rule 3's marker requirement does not apply), or it
+# already carries start/end markers + rc=$? capture; AND, independently, if
+# it carries a top-level && chain with a scope-sensitive sink (>> OR a |
+# pipe), that chain is already brace-wrapped. The two checks are independent
+# because Rule 3 (markers) only ever applies to a `>>` line, while Rule 2
+# (brace-wrap) applies to a `&&` chain regardless of which sink it uses —
+# same split as check-cron-file.sh's own Rule 2/Rule 3 comments.
+#
+# 2026-08-14 fix: this used to gate the ENTIRE function on `case "$line" in
+# *'>>'*)`, so a line with no `>>` at all returned "compliant" immediately —
+# including an unwrapped && chain piped straight to `logger` (no >> in
+# sight), which is exactly the shape check-cron-file.sh Rule 2 was widened
+# 2026-08-07 to catch. That silently reported a genuine violation as
+# "already compliant" instead of the "needs operator review" this installer
+# gives every other shape it cannot safely auto-fix (fix_line() only knows
+# how to rewrite the >> form). The check below runs BEFORE the `>>` gate and
+# does its own quote-stripping first (mirroring check-cron-file.sh's UNQUOTED
+# construction) so that a `bash -c "A && B" | logger` wrapper — whose && is
+# opaque inside a quoted argument, not a real top-level chain — is not
+# misclassified as a violation.
 line_is_compliant() {
-	local line="$1"
+	local line="$1" unquoted probe
+	unquoted="$(printf '%s' "$line" | sed -E "s/\"[^\"]*\"//g; s/'[^']*'//g")"
+	probe="$(printf '%s' "$unquoted" | sed -E 's/[0-9]*>&[0-9]+//g')"
+	if printf '%s' "$probe" | grep -q '&&' && printf '%s' "$probe" | grep -qE '[>|]'; then
+		printf '%s' "$probe" | grep -qE '\{[^}]*&&[^{]*\}[[:space:]]*[>|]' || return 1
+	fi
+
 	case "$line" in
 		*'>>'*) : ;;
 		*) return 0 ;;
@@ -127,11 +150,6 @@ line_is_compliant() {
 	printf '%s' "$line" | grep -qE 'echo[^|]*start' || return 1
 	printf '%s' "$line" | grep -qE 'echo[^|]*end' || return 1
 	printf '%s' "$line" | grep -qE 'rc=\$\?' || return 1
-	case "$line" in
-		*'&&'*)
-			printf '%s' "$line" | grep -qE '\{[^}]*&&[^{]*\}[[:space:]]*>>' || return 1
-			;;
-	esac
 	return 0
 }
 

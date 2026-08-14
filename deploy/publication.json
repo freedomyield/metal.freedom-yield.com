@@ -344,10 +344,10 @@
       "push_target": "/public/api/anchor-receipt.json",
       "push_content_check": "JSON-validated",
       "rsync_delete_exclude": true,
-      "gitignored": false,
+      "gitignored": true,
       "git_tracked": false,
       "pinned_by": [],
-      "note": "gitignored is FALSE and git_tracked is FALSE — measured with git check-ignore and git ls-files --error-unmatch on 2026-08-07. Nothing prevents this path from being committed, which would give it the deploy as a second owner. Recorded, not fixed: fixing it means editing .gitignore, which Phase 0 must not do."
+      "note": "gitignored was FALSE until 2026-08-14 — measured with git check-ignore and git ls-files --error-unmatch on 2026-08-07, when nothing prevented this path from being committed (which would have given it the deploy as a second owner). Fixed by adding public/api/anchor-receipt.json to .gitignore's runtime-generated-site-data section; T13 now holds gitignored=true to git check-ignore."
     },
     {
       "path": "api/anchor-history.jsonl",
@@ -365,10 +365,10 @@
       "push_target": "/public/api/anchor-history.jsonl",
       "push_content_check": "JSONL",
       "rsync_delete_exclude": true,
-      "gitignored": false,
+      "gitignored": true,
       "git_tracked": false,
       "pinned_by": [],
-      "note": "Same measured gap as api/anchor-receipt.json: excluded from --delete, on the push allowlist, but neither tracked nor ignored."
+      "note": "Same measured-then-fixed history as api/anchor-receipt.json: excluded from --delete, on the push allowlist, and added to .gitignore's runtime-generated-site-data section 2026-08-14 (was neither tracked nor ignored before that)."
     },
     {
       "path": "api/archive/",
@@ -410,7 +410,7 @@
       "git_tracked": false,
       "pinned_by": [],
       "becomes_record_after": "utc-day-close",
-      "note": "kind=stream, NOT record, and the date key does not make it one. Measured 2026-08-07: scripts/peer-validators.sh:254-256 recomputes SNAPSHOT=\"${SNAPSHOT_DIR}/peers-${TODAY}.json.gz\" and gzips peers.json over it on EVERY run, and :361 calls publish_snapshot_date \"$TODAY\" unconditionally — the PUBLISHED_LEDGER is consulted only to decide whether to APPEND a ledger line (:360) and to drive the past-day backlog loop (:373), never to decide whether to push today. So the published URL for the current UTC day resolves to different bytes several times a day, which is exactly what kind=record forbids. becomes_record_after=utc-day-close is the true, narrower fact: a member stops changing once its UTC day has passed. That qualifier is the only thing that may license pinning a closed day; .kind alone must never be read as permission (see kind_definitions._kind_is_the_floor). The master copy lives in the host state dir, not in the repo — the repo path is a staging mirror."
+      "note": "kind=stream, NOT record, and the date key does not make it one. Measured 2026-08-07: scripts/peer-validators.sh:254-256 recomputes SNAPSHOT=\"${SNAPSHOT_DIR}/peers-${TODAY}.json.gz\" and gzips peers.json over it on EVERY run, and :361 calls publish_snapshot_date \"$TODAY\" unconditionally — the PUBLISHED_LEDGER is consulted only to decide whether to APPEND a ledger line (:347) and to drive the past-day backlog loop (:372), never to decide whether to push today. So the published URL for the current UTC day resolves to different bytes several times a day, which is exactly what kind=record forbids. becomes_record_after=utc-day-close is the true, narrower fact: a member stops changing once its UTC day has passed. That qualifier is the only thing that may license pinning a closed day; .kind alone must never be read as permission (see kind_definitions._kind_is_the_floor). The master copy lives in the host state dir, not in the repo — the repo path is a staging mirror."
     },
     {
       "path": "calendar/",
@@ -523,36 +523,11 @@
   },
 
   "known_doc_drift": {
-    "_comment": "Documentation that this registry measured to be WRONG about a fact the registry itself now carries. Same expiry design as everything else here: each entry records the exact wrong text, and the test fails as OBSOLETE the moment the doc is corrected, so the registry cannot go on describing a defect that no longer exists. This block exists because the alternative — leaving the correction only in prose inside owner.producer_evidence — would turn silently false the day someone fixes the doc, which is the same failure mode the drift baselines were built to avoid.",
-    "deploy_ownership_matrix.wrong_producer": {
-      "target_file": "docs/DEPLOY_OWNERSHIP_MATRIX.md",
-      "measured_at": "2026-08-07",
-      "wrong_text": "`scripts/node-info.sh`",
-      "entries": [
-        { "path": "api/uptime-recent.json",        "measured_producer": "scripts/uptime-history.sh" },
-        { "path": "api/uptime-cycles.json",        "measured_producer": "scripts/uptime-history.sh" },
-        { "path": "api/fee-market.json",           "measured_producer": "scripts/peer-analytics.py" },
-        { "path": "api/fee-market-history.jsonl",  "measured_producer": "scripts/peer-analytics.py" }
-      ],
-      "evidence": "The matrix rows for all four name scripts/node-info.sh as canonical producer. Measured: node-info.sh:32 writes exactly one publication (public/api/validator.json) and contains zero occurrences of the string 'fee-market'; uptime-history.sh:86-87 writes the uptime pair; peer-analytics.py:256-262 writes the fee-market pair, invoked from peer-validators.sh:245.",
-      "consequence": "An operator debugging a stale uptime or fee-market feed is sent to the wrong script and the wrong cron.",
-      "resolution": "Correct the four matrix rows (a separate change — this task must not touch docs it did not measure end to end), then delete this entry.",
-      "expires_when": "any of the four matrix rows stops containing wrong_text"
-    }
+    "_comment": "Documentation that this registry measured to be WRONG about a fact the registry itself now carries. Same expiry design as everything else here: each entry records the exact wrong text, and the test fails as OBSOLETE the moment the doc is corrected, so the registry cannot go on describing a defect that no longer exists. This block exists because the alternative — leaving the correction only in prose inside owner.producer_evidence — would turn silently false the day someone fixes the doc, which is the same failure mode the drift baselines were built to avoid. Empty 2026-08-14: the one entry this block ever carried (deploy_ownership_matrix.wrong_producer) was resolved by correcting the four matrix rows in docs/DEPLOY_OWNERSHIP_MATRIX.md; T17 requires this block to be empty exactly when that is true."
   },
 
   "known_render_drift": {
-    "_comment": "Places where a target file's CURRENT bytes are not what this registry would render, recorded rather than fixed because Phase 0 must not modify the target files. Same expiry design as known_kind_violations: each entry pins both what is expected and what is there, so any change to either side makes the entry stop applying and the test reports it as OBSOLETE.",
-    "push_allowlist_doc.missing_rows": {
-      "target_file": "scripts/push-to-web-host.sh",
-      "region": "the 'Allowed targets' header comment table",
-      "measured_at": "2026-08-07",
-      "missing_rows": ["anchor-receipt.json", "anchor-history.jsonl"],
-      "evidence": "Both names are enforced by the flat-filename case branch of scripts/push-to-web-host.sh, and both are in deploy/feed-excludes.txt. Neither has a row in the header table — the same table whose own first line says it 'must stay in lock-step with the case statement below'. Counted: 16 case patterns, 14 api rows in the table.",
-      "consequence": "A reader of that header believes the wrapper cannot publish the anchor receipt or the anchor history. It can, and does.",
-      "resolution": "C1 Phase 1, when scripts/push-to-web-host.sh becomes a registry consumer and the table is rendered rather than typed. Fixing it here would mean editing the file, which Phase 0 forbids.",
-      "expires_when": "the header table gains a row for either name, or either name leaves the case statement"
-    }
+    "_comment": "Places where a target file's CURRENT bytes are not what this registry would render, recorded rather than fixed because Phase 0 must not modify the target files. Same expiry design as known_kind_violations: each entry pins both what is expected and what is there, so any change to either side makes the entry stop applying and the test reports it as OBSOLETE. Empty 2026-08-14: the one entry this block ever carried (push_allowlist_doc.missing_rows — scripts/push-to-web-host.sh's header table was missing the anchor-receipt.json / anchor-history.jsonl rows) was resolved by adding the two rows, so canonical and as-built render identically again; T5 requires this block to be empty exactly when that is true."
   },
 
   "derived": {
@@ -640,6 +615,10 @@
         { "path": "api/peers-gini.json" },
         { "path": "api/peers-gini-history.jsonl" },
         { "path": "api/peers-history-index.json" },
+        { "path": "api/anchor-receipt.json", "comment_before": [
+          "# R18 anchor receipt / history — on-chain anchor 確定後にのみ生成・push される",
+          "# (validator host, scripts/run-anchor-pipeline.sh 経由。cron 常駐ではない)" ] },
+        { "path": "api/anchor-history.jsonl" },
         { "path": "api/archive/", "comment_before": [
           "# R18 per-anchor archive (gen-anchor-source.sh / gen-anchor-receipt.sh が",
           "# content-addressed で書く anchor-source-<dag>.json / anchor-receipt-<tx>.json)。",

@@ -95,12 +95,12 @@ See [`docs/HOST_CHECKOUT_AUTO_ADVANCE.md`](HOST_CHECKOUT_AUTO_ADVANCE.md)
 | `public/.well-known/operator-identity.pub` | `cp` from `~/.ssh/freedom-yield-operator-identity.pub` (= operator's Mac) | operator Mac | YES | NO | YES | NO | From Git; can re-copy from Mac if needed. |
 | `public/api/validator.json` | `scripts/node-info.sh` | validator host | NO | YES | NO | YES (pre-existing) | Re-derive from metalgo RPC on validator host. |
 | `public/api/peer-geo.json` | `scripts/peer-geo.py` | validator host | NO | YES | NO | YES (pre-existing) | Re-derive on validator host. |
-| `public/api/uptime-recent.json` | `scripts/node-info.sh` (uptime track) | validator host | NO | YES | NO | YES (pre-existing) | Re-derive on validator host. |
-| `public/api/uptime-cycles.json` | `scripts/node-info.sh` (uptime per cycle) | validator host | NO | YES | NO | YES (pre-existing) | Re-derive on validator host. |
+| `public/api/uptime-recent.json` | `scripts/uptime-history.sh` (uptime track) | validator host | NO | YES | NO | YES (pre-existing) | Re-derive on validator host. |
+| `public/api/uptime-cycles.json` | `scripts/uptime-history.sh` (uptime per cycle) | validator host | NO | YES | NO | YES (pre-existing) | Re-derive on validator host. |
 | `public/api/peers.json` | `scripts/peer-validators.sh` | validator host | NO | YES | NO | YES (pre-existing) | Re-derive on validator host. |
 | `public/api/evidence.json` | `scripts/gen-evidence.sh` | validator host | NO | YES | NO | YES (pre-existing) | Re-derive on validator host. |
-| `public/api/fee-market.json` | `scripts/node-info.sh` | validator host | NO | YES | NO | YES (pre-existing) | Re-derive on validator host. |
-| `public/api/fee-market-history.jsonl` | `scripts/node-info.sh` (append) | validator host | NO | YES | NO | YES (pre-existing) | Append-only; loss of recent records is recoverable from metalgo RPC. |
+| `public/api/fee-market.json` | `scripts/peer-analytics.py` | validator host | NO | YES | NO | YES (pre-existing) | Re-derive on validator host. |
+| `public/api/fee-market-history.jsonl` | `scripts/peer-analytics.py` (append) | validator host | NO | YES | NO | YES (pre-existing) | Append-only; loss of recent records is recoverable from metalgo RPC. |
 | `public/api/node-health-recent.json` | `scripts/node-health-daily.sh` | validator host | NO | YES | NO | YES (pre-existing) | Re-derive on validator host. |
 | `public/api/peers-changes.json` | `scripts/peer-analytics.py` | validator host | NO | YES | NO | YES (pre-existing) | Re-derive on validator host. |
 | `public/api/peers-gini.json` | `scripts/peer-analytics.py` | validator host | NO | YES | NO | YES (pre-existing) | Re-derive on validator host. |

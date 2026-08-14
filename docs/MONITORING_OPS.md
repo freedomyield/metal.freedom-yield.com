@@ -382,12 +382,12 @@ chmod 0700 "$STATE_BASE/locks"
 # (scripts/lib/side-effects.sh) this script REFUSES with exit 6 rather than
 # running dry, so that a forgotten opt-in can never print "init complete"
 # while changing nothing.
-sudo -u "$DEPLOY_USER" FY_LIVE=1 bash scripts/anomaly-state-init.sh \
+sudo -u "$DEPLOY_USER" env FY_LIVE=1 bash scripts/anomaly-state-init.sh \
   --confirm \
   --baseline-status=running
 
 # Optional: wipe any prior quarantine dirs / reset counter at the same time.
-# sudo -u "$DEPLOY_USER" FY_LIVE=1 bash scripts/anomaly-state-init.sh \
+# sudo -u "$DEPLOY_USER" env FY_LIVE=1 bash scripts/anomaly-state-init.sh \
 #   --confirm --baseline-status=running \
 #   --clear-quarantine --clear-counter
 
@@ -442,7 +442,7 @@ stat -c '%U:%G %a' /var/lib/freedom-yield 2>/dev/null
 > "By hand" here means *not scheduled*; it does **not** mean "without side effects". Since the 2026-08-06 C3 inversion (`scripts/lib/side-effects.sh`) `FY_LIVE=1` is what turns notifies and state writes on, and this step needs them on for the `rc=7` / `rc=4` verdict below to be real. Drop `FY_LIVE=1` if you only want to look: the run then prints one `DRY: would …` line per suppressed effect and touches nothing.
 
 ```bash
-sudo -u deploy \
+sudo -u deploy env \
   FY_LIVE=1 ANOMALY_STATE_DIR=/var/lib/freedom-yield \
   bash /home/deploy/metal.freedom-yield.com/scripts/check-anomalies.sh; \
   echo "rc=$?"
@@ -494,7 +494,7 @@ ls /var/lib/freedom-yield/.missing-notified.marker 2>&1 | head -1
 ### Step 5 — re-run the cron and verify steady state
 
 ```bash
-sudo -u deploy \
+sudo -u deploy env \
   FY_LIVE=1 ANOMALY_STATE_DIR=/var/lib/freedom-yield \
   bash /home/deploy/metal.freedom-yield.com/scripts/check-anomalies.sh; \
   echo "rc=$?"
@@ -517,7 +517,7 @@ sudo -u deploy \
   flock -x 200; sleep 5
 ) 200>/var/lib/freedom-yield/locks/check-anomalies.lock &
 sleep 0.3
-sudo -u deploy \
+sudo -u deploy env \
   FY_LIVE=1 ANOMALY_STATE_DIR=/var/lib/freedom-yield \
   bash /home/deploy/metal.freedom-yield.com/scripts/check-anomalies.sh 2>&1 | head -3
 echo "rc=$?"

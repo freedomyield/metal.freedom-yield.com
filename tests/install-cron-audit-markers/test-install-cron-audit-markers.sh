@@ -78,9 +78,36 @@ PATH=/usr/local/bin:/usr/bin:/bin
 0 3 * * * deploy echo "start"; bash scripts/y.sh >> /var/log/y.log 2>&1
 EOF
 
-	# freedom-yield-* orphan (no repo installer) — must be in scope.
+	# pipe-form Rule 2 violation: an unwrapped && chain piped straight to
+	# logger, no >> anywhere on the line. Before the 2026-08-14 fix,
+	# line_is_compliant() only ever looked at whether the line contained
+	# `>>` and returned "compliant" immediately when it did not — so this
+	# genuinely-broken, unwrapped chain (only the last command's output
+	# reaches the tag; the earlier one is dropped, the exact defect Rule 2
+	# exists to catch) was silently reported "ok: ... (no fix needed)"
+	# instead of the "needs operator review" this installer gives every
+	# other shape it cannot safely auto-fix. This script never learned to
+	# REWRITE the pipe form (fix_line() only knows >>), so the correct
+	# post-fix behavior is the review path, not a fix — same as
+	# metal-partial above.
+	cat > "$DIR/metal-pipe-chain" <<'EOF'
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+FY_LIVE=1
+10 7 * * * deploy cd /home/deploy/metal.freedom-yield.com && bash scripts/check-anomalies.sh 2>&1 | logger -t anomalies-pipe-chain
+EOF
+
+	# freedom-yield-* orphan (no repo installer) — must be in scope. Real
+	# deployed shape (confirmed on host, 2026-08-14 — see
+	# docs/CRON_CONVENTIONS.md's "Alternative form: piping to logger"
+	# section): a single bash -c "..." invocation piped to logger, NOT a
+	# plain >>-redirecting command. The && chain inside bash -c's own
+	# quoted argument is opaque to cron (a single token from its
+	# perspective), so this line has no >> and no top-level && for Rule
+	# 2 to check — it is already fully compliant and this installer must
+	# leave it untouched, the same as metal-host-drift above.
 	cat > "$DIR/freedom-yield-peer-geo" <<'EOF'
-0 6 * * * deploy bash /home/deploy/metal.freedom-yield.com/scripts/peer-geo.py >> /home/deploy/metal.freedom-yield.com/logs/peer-geo.log 2>&1
+0 6 * * * deploy bash -c "cd /home/deploy/metal.freedom-yield.com && python3 scripts/peer-geo.py && bash scripts/push-to-web-host.sh peer-geo.json" 2>&1 | logger -t peer-geo
 EOF
 
 	# other project's file — out of scope, must never be touched.
@@ -229,20 +256,50 @@ echo "$OUT" | grep -q 'warn:.*metal-partial.*operator review required' \
 echo "$OUT" | grep -qF 'echo "start"; bash scripts/y.sh >> /var/log/y.log 2>&1' \
 	&& ok "ambiguous line: the offending line itself is echoed for review" \
 	|| bad "ambiguous line: the offending line itself is echoed for review"
-echo "$OUT" | grep -q 'needs operator review 1' \
-	&& ok "ambiguous line: summary counts 1 for operator review" \
-	|| bad "ambiguous line: summary counts 1 for operator review (out: $OUT)"
+echo "$OUT" | grep -q 'needs operator review 2' \
+	&& ok "ambiguous line: summary counts 2 for operator review (metal-partial + metal-pipe-chain)" \
+	|| bad "ambiguous line: summary counts 2 for operator review (out: $OUT)"
 [ -e "$BK/metal-partial" ] \
 	&& bad "ambiguous line: no backup entry (file untouched)" \
 	|| ok "ambiguous line: no backup entry (file untouched)"
 teardown
 
-# ---- case 9: freedom-yield-* prefix is in scope ------------------------------
+# ---- case 8b: pipe-form Rule 2 violation -> flagged for review, not silently
+#               marked compliant, and never auto-"fixed" into a wrong shape --
 setup
-run_installer >/dev/null 2>&1
-grep -qE 'echo "=== freedom-yield-peer-geo start' "$DIR/freedom-yield-peer-geo" \
-	&& ok "freedom-yield-*: orphan cron gets fixed too" \
-	|| bad "freedom-yield-*: orphan cron gets fixed too (content: $(cat "$DIR/freedom-yield-peer-geo"))"
+CBEFORE_PC="$(cat "$DIR/metal-pipe-chain")"
+OUT="$(run_installer 2>&1)"
+[ "$(cat "$DIR/metal-pipe-chain")" = "$CBEFORE_PC" ] \
+	&& ok "pipe-chain: file left byte-identical (this installer cannot rewrite pipe form)" \
+	|| bad "pipe-chain: file left byte-identical"
+echo "$OUT" | grep -qF 'ok:      metal-pipe-chain (no fix needed)' \
+	&& bad "pipe-chain: must NOT be silently reported as already compliant" \
+	|| ok "pipe-chain: not silently reported as already compliant"
+echo "$OUT" | grep -q 'warn:.*metal-pipe-chain.*operator review required' \
+	&& ok "pipe-chain: warn names the file + reason" \
+	|| bad "pipe-chain: warn names the file + reason (out: $OUT)"
+echo "$OUT" | grep -qF 'cd /home/deploy/metal.freedom-yield.com && bash scripts/check-anomalies.sh 2>&1 | logger -t anomalies-pipe-chain' \
+	&& ok "pipe-chain: the offending line itself is echoed for review" \
+	|| bad "pipe-chain: the offending line itself is echoed for review (out: $OUT)"
+[ -e "$BK/metal-pipe-chain" ] \
+	&& bad "pipe-chain: no backup entry (file untouched)" \
+	|| ok "pipe-chain: no backup entry (file untouched)"
+teardown
+
+# ---- case 9: freedom-yield-* prefix is in scope, and its real (bash -c |
+#              logger) shape is recognised as already compliant ------------
+setup
+FYBEFORE="$(cat "$DIR/freedom-yield-peer-geo")"
+OUT="$(run_installer 2>&1)"
+[ "$(cat "$DIR/freedom-yield-peer-geo")" = "$FYBEFORE" ] \
+	&& ok "freedom-yield-*: byte-identical (bash -c | logger shape needs no fix)" \
+	|| bad "freedom-yield-*: byte-identical (bash -c | logger shape needs no fix) (content: $(cat "$DIR/freedom-yield-peer-geo"))"
+echo "$OUT" | grep -qF 'ok:      freedom-yield-peer-geo (no fix needed)' \
+	&& ok "freedom-yield-*: prefix is in scope (installer actually examined it, found it compliant)" \
+	|| bad "freedom-yield-*: prefix is in scope (out: $OUT)"
+[ -e "$BK/freedom-yield-peer-geo" ] \
+	&& bad "freedom-yield-*: no backup entry (file untouched)" \
+	|| ok "freedom-yield-*: no backup entry (file untouched)"
 teardown
 
 # ---- case 10: other-project file stays out of scope, untouched -------------
@@ -307,9 +364,9 @@ OUT2="$(run_installer 2>&1)"
 [ "$(cat "$DIR/metal-server-status")" = "$SNAP_SS" ] \
 	&& ok "idempotent: single-command file identical after second run" \
 	|| bad "idempotent: single-command file identical after second run"
-echo "$OUT2" | grep -q 'summary: fixed 0, already compliant 5, needs operator review 1, skipped (not cron-executed) 3' \
-	&& ok "idempotent: second run reports fixed 0 / compliant 5 / review 1 / skipped 3" \
-	|| bad "idempotent: second run reports fixed 0 / compliant 5 / review 1 / skipped 3 (out: $OUT2)"
+echo "$OUT2" | grep -q 'summary: fixed 0, already compliant 5, needs operator review 2, skipped (not cron-executed) 3' \
+	&& ok "idempotent: second run reports fixed 0 / compliant 5 / review 2 / skipped 3" \
+	|| bad "idempotent: second run reports fixed 0 / compliant 5 / review 2 / skipped 3 (out: $OUT2)"
 teardown
 
 # ---- case 14: unknown arg -> exit 1 ------------------------------------------
