@@ -160,12 +160,14 @@ commands' output preserved).
 
 This block was captured on 2026-06-19 when the file was live-patched to
 fix the `/var/log` redirect bug (see "Related lessons" below) — compliant
-with every rule that existed at the time. **It was never updated for Rule
-6** (`FY_LIVE=1`, added 2026-08-06, above): the block as it stood until
-2026-08-17 invoked `push-to-web-host.sh` without the flag, and ran
-unchanged through `scripts/check-cron-file.sh` failing Rule 6
-(`references side-effecting script(s) (push-to-web-host.sh) but the file
-has no 'FY_LIVE=1' line`) — a worked example in the doc that teaches this
+with every rule that existed at the time, and a record of that day's edit
+rather than a transcript of what the host holds now (see the note below the
+block). **It was never updated for Rule 6** (`FY_LIVE=1`, added 2026-08-06,
+above): the block as it stood until 2026-08-17 invoked
+`push-to-web-host.sh` without the flag, so feeding it to
+`scripts/check-cron-file.sh` FAILED Rule 6 — measured, exact message
+`references side-effecting script(s) (push-to-web-host.sh) but the file has
+no 'FY_LIVE=1' line`. A worked example in the doc that teaches this
 project's cron conventions was, itself, non-compliant with one of the five
 rules it documents. Corrected below to also satisfy Rule 6.
 

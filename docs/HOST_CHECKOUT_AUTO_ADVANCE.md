@@ -172,14 +172,14 @@ ssh ... "$SSH_USER@$SSH_HOST" \
 this ssh command explicitly: "Both production callers carry it: the cron
 env header (`scripts/install-metal-host-advance-cron.sh`) and deploy.yml's
 'Advance host checkout' ssh command." Without it, this step's own promised
-alerts ("refused", "host is ahead") would silently downgrade to
-`DRY: would notify …` on the runner's own log — this step gets no cron env
-header to fall back on, so a missing flag here is not compensated by
-anything else the way §4.2's manual recovery is (that command has no
-production caller relying on its alerts either). As with the cron entry,
-the git mutations themselves are never gated either way — this only
-controls whether a genuine "cannot FF" / "host is ahead" failure also
-reaches ntfy, on top of failing the deploy step loudly regardless.
+alerts ("refused", "host is ahead") never reach ntfy: each one downgrades to
+a `DRY: would notify …` line, printed on the GitHub runner's log and nowhere
+else. The downgrade is loud — it is the *alert* that goes missing, not the
+line — and this step, unlike the cron entry, has no env header to fall back
+on. As with the cron entry, the git mutations themselves are never gated
+either way; the flag only controls whether a genuine "cannot FF" / "host is
+ahead" failure also reaches ntfy, on top of failing the deploy step loudly
+regardless.
 
 It pipes the **runner's own checked-out copy** of the script (`bash -s`
 over stdin) rather than invoking whatever copy already sits on the host —

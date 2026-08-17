@@ -17,8 +17,8 @@
 # check-cron-file.sh before every install — a lint failure aborts the install.
 #
 # 2026-08-06: env header now carries FY_LIVE=1. scripts/lib/side-effects.sh
-# (the C3 rollout) gates every production side effect — notify.sh,
-# push-to-web-host.sh, /var/lib/freedom-yield state writes — behind
+# (the C3 rollout) gates the production side effects that route THROUGH it —
+# a fyd_notify-wrapped ntfy push, a /var/lib/freedom-yield state write — behind
 # FY_LIVE=1; anything else is a loud dry no-op. This cron's chain notifies
 # and writes anchor-watcher-state.json, so it must carry the flag now, ahead
 # of watch-anchor-events.sh's own callers migrating onto the lib — landing

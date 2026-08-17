@@ -456,7 +456,11 @@ line prefix:
     to account — an entry that stops describing a real violation (the pin
     disappears, or the path's kind changes) is caught there as `OBSOLETE`,
     so do not leave a stale acknowledgement behind once the manifest is
-    re-issued.
+    re-issued. The checker tells you the same thing from its own side: it
+    prints an `OBSOLETE-KIND-ACK` line naming every expired entry —
+    report-only, no exit code, no push — so a run that is green apart from
+    those lines is telling you the acknowledgement list, not the manifest,
+    is what still needs the edit. See step 5 of Check 1 above.
 - **`KIND-UNKNOWN`** — the pin's target has NO row at all in
   `deploy/publication.json`'s `publications[]`, so the checker cannot tell
   whether pinning it is safe and refuses to guess. Add a row for the
@@ -476,7 +480,10 @@ line prefix:
 signed before C4 still carries: it clears
 `known_kind_violations.violations` to `{}` in the SAME commit as the new
 `identity.json`, because a re-issued manifest carrying none of those four
-pins makes the acknowledgement entries `OBSOLETE` the instant it lands.
+pins makes the acknowledgement entries `OBSOLETE` the instant it lands —
+`T7` says so as `OBSOLETE` in CI, the checker says so as `OBSOLETE-KIND-ACK`
+on the host. Landing only one half of that commit is exactly what makes
+either of them speak.
 
 ---
 

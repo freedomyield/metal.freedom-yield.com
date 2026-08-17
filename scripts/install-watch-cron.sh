@@ -23,8 +23,8 @@
 # install instead of writing a non-compliant cron.
 #
 # 2026-08-06: env header now also carries FY_LIVE=1. scripts/lib/side-effects.sh
-# (the C3 rollout) gates every production side effect — notify.sh,
-# push-to-web-host.sh, /var/lib/freedom-yield state writes — behind
+# (the C3 rollout) gates the production side effects that route THROUGH it —
+# a fyd_notify-wrapped ntfy push, a /var/lib/freedom-yield state write — behind
 # FY_LIVE=1; anything else is a loud dry no-op. check-watch-validators.sh
 # fires a notify.sh push and writes WATCH_STATE_DIR, so this cron must
 # carry the flag now, ahead of that script's own callers migrating onto the

@@ -11,8 +11,12 @@
 #
 # 2026-08-06: also closes the equivalent gap for FY_LIVE=1
 # (check-cron-file.sh Rule 6). scripts/lib/side-effects.sh (the C3 rollout)
-# gates every production side effect — notify.sh, push-to-web-host.sh,
-# /var/lib/freedom-yield state writes — behind FY_LIVE=1. The
+# gates the production side effects that route THROUGH it — a
+# fyd_notify-wrapped ntfy push, a /var/lib/freedom-yield state write — behind
+# FY_LIVE=1. It does not reach inside notify.sh or push-to-web-host.sh:
+# neither carries a gate of its own, and Rule 6 requires the flag on their
+# crons as allowlist POLICY rather than because either script reads it (the
+# settled account is docs/CRON_CONVENTIONS.md's Rule 6 section). The
 # scripts/install-*-cron.sh generators now write the flag into every NEW
 # install, but a file installed before this landed has no way to pick it up
 # except a full re-run of its (sometimes root-only, sometimes
