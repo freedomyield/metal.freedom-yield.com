@@ -362,6 +362,14 @@ republish whenever the underlying issue is resolved.
 
 ## Repairing a broken artifact pin
 
+`scripts/check-identity-pins.sh` runs TWO independent checks and can fail
+CI / push a live alert for either one. They look similar in the log (both
+name a pin id) but need different fixes — read the exit code and the line
+prefix (`MISMATCH`/`MISSING` vs `KIND-VIOLATION`/`KIND-UNKNOWN`/
+`KIND-INVALID`) before picking a repair path.
+
+### Check 1 — a pinned digest no longer matches (exit 3)
+
 `scripts/check-identity-pins.sh` fails CI (exit 3) when a **git-tracked**
 file pinned by `artifact_manifest` no longer hashes to its pinned value, and
 the daily `--mode=live` cron pushes one high-priority alert for the same
@@ -405,6 +413,57 @@ signing — the "time-of-flight skew" pitfall above, made permanent. Those are
 recorded as `STRUCTURAL` in the log and never alert or fail; re-signing does
 not fix them, because they break again immediately. Removing moving payloads
 from the signed manifest is tracked separately as C4.
+
+### Check 2 — the kind gate: a pin exists that should not (exit 6, added 2026-08-17)
+
+`scripts/check-identity-pins.sh` also fails CI / pushes a live alert (exit 6,
+line prefix `KIND-VIOLATION` / `KIND-UNKNOWN` / `KIND-INVALID`) when
+`artifact_manifest` pins a publication that `deploy/publication.json`'s
+`kind` says it must not, or cannot yet vouch for. Unlike Check 1, re-signing
+against the CURRENT bytes never fixes this — the problem is not that the
+digest is stale, it is that the digest should not exist at all. Read the
+line prefix:
+
+- **`KIND-VIOLATION`** — the pin targets a `kind=stream` publication (bytes
+  can change without a commit — host cron, runtime push) and it is not
+  acknowledged in `deploy/publication.json`'s `known_kind_violations`. Two
+  valid fixes:
+  - **Re-issue the manifest.** `scripts/operator-local/gen-identity.sh`
+    never pins a `kind=stream` publication by construction (its own C4
+    discipline), so simply re-running step B above (`gen-identity.sh` →
+    commit `identity.json` + `.sig`) drops the pin. This is the expected
+    fix for a NEW stream pin that should never have appeared.
+  - **Acknowledge it**, only if it is a still-open, already-understood case
+    (e.g. mid-transition, before the day's `gen-identity.sh` re-issue has
+    landed): add an entry to `deploy/publication.json`'s
+    `known_kind_violations.violations`, keyed by the EXACT pin id the
+    `KIND-VIOLATION` line names (e.g. `"evidence_json.sha256"`), following
+    the shape of the existing entries there. This is the SAME list
+    `tests/publication-registry/test-publication-registry.sh`'s `T7` holds
+    to account — an entry that stops describing a real violation (the pin
+    disappears, or the path's kind changes) is caught there as `OBSOLETE`,
+    so do not leave a stale acknowledgement behind once the manifest is
+    re-issued.
+- **`KIND-UNKNOWN`** — the pin's target has NO row at all in
+  `deploy/publication.json`'s `publications[]`, so the checker cannot tell
+  whether pinning it is safe and refuses to guess. Add a row for the
+  publication with its correct `kind`. If that turns out to be `stream`,
+  this becomes the `KIND-VIOLATION` case above.
+- **`KIND-INVALID`** — a row exists, but its `kind` value is none of
+  `stream` / `static` / `record` (a typo, or a genuinely new kind this
+  checker predates). Fix the typo, or — if a new kind is actually being
+  introduced — that requires a code change in BOTH
+  `scripts/check-identity-pins.sh` (the `case "$RKIND" in` allowlist) and
+  `scripts/operator-local/gen-identity.sh` (`kind_is_pinnable()`) in the
+  SAME change; this is not an operator-side fix on the day of a transition.
+
+**docs/CYCLE_GATE.md step 4b** (the mandatory post-issuance cleanup after
+`gen-identity.sh`'s C4 landing, 2026-08-14) is the concrete instance of the
+"re-issue the manifest" fix above, applied to the four pins the manifest
+signed before C4 still carries: it clears
+`known_kind_violations.violations` to `{}` in the SAME commit as the new
+`identity.json`, because a re-issued manifest carrying none of those four
+pins makes the acknowledgement entries `OBSOLETE` the instant it lands.
 
 ---
 

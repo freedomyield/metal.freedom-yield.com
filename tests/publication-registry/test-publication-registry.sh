@@ -867,33 +867,117 @@ t19
 #     case 1, not here.
 # ---------------------------------------------------------------------------
 t20() {
-	local phrase bad=0
+	local phrase bad=0 field_value
+
+	# Review finding (I-3, 2026-08-17): the original implementation grepped
+	# the WHOLE FILE for each source, then named a SPECIFIC field in its PASS
+	# message ("kind_definitions.record carries..."). A file-wide grep passes
+	# even when the phrase is moved to an unrelated key elsewhere in the same
+	# file — measured: relocating the clause from kind_definitions.record to
+	# a decoy key (_scratch_note) left T20 green. Fixed to extract the exact
+	# field's VALUE first (jq for the two JSON sources; the single physical
+	# line the --arg is declared on for the bash source, so a comment or an
+	# unrelated string elsewhere in gen-identity.sh cannot satisfy this
+	# either) and grep only that.
 	phrase="derived from a digest of the content it addresses, so whatever that digest covers cannot change without the name changing too"
 
-	if grep -qF -- "$phrase" "$REGISTRY"; then
-		pass "T20 deploy/publication.json's kind_definitions.record carries the canonical record clause"
+	field_value="$(jq -r '.kind_definitions.record // ""' "$REGISTRY")"
+	if printf '%s' "$field_value" | grep -qF -- "$phrase"; then
+		pass "T20 deploy/publication.json's .kind_definitions.record field (not just the file) carries the canonical record clause"
 	else
-		fail "T20 deploy/publication.json's kind_definitions.record does NOT carry the canonical record clause verbatim — has it been reworded without propagating?"
+		fail "T20 deploy/publication.json's .kind_definitions.record field does NOT carry the canonical record clause verbatim — has it been reworded without propagating?"
 		bad=1
 	fi
 
-	if grep -qF -- "$phrase" "$IDENTITY_SCHEMA"; then
-		pass "T20 public/api/identity.schema.v1.json's kind description carries the canonical record clause"
+	field_value="$(jq -r '.properties.artifact_manifest.additionalProperties.properties.kind.description // ""' "$IDENTITY_SCHEMA")"
+	if printf '%s' "$field_value" | grep -qF -- "$phrase"; then
+		pass "T20 public/api/identity.schema.v1.json's .kind.description field (not just the file) carries the canonical record clause"
 	else
-		fail "T20 public/api/identity.schema.v1.json's kind description does NOT carry the canonical record clause verbatim — DRIFTED from deploy/publication.json"
+		fail "T20 public/api/identity.schema.v1.json's .kind.description field does NOT carry the canonical record clause verbatim — DRIFTED from deploy/publication.json"
 		bad=1
 	fi
 
-	if grep -qF -- "$phrase" "$GEN_IDENTITY"; then
-		pass "T20 scripts/operator-local/gen-identity.sh's pin_policy_rule carries the canonical record clause"
+	# gen-identity.sh is bash, not JSON, so there is no field to jq out —
+	# but grepping the whole file has the same decoy risk (an unrelated
+	# comment mentioning the same words would satisfy a whole-file grep).
+	# Narrowed to the single physical line the --arg is declared on: this
+	# script writes pin_policy_rule as one unbroken line (measured), so a
+	# line-scoped grep is exactly field-scoped here.
+	field_value="$(grep -F -- 'pin_policy_rule "' "$GEN_IDENTITY")"
+	if [ -n "$field_value" ] && printf '%s' "$field_value" | grep -qF -- "$phrase"; then
+		pass "T20 scripts/operator-local/gen-identity.sh's pin_policy_rule line (not just the file) carries the canonical record clause"
 	else
-		fail "T20 scripts/operator-local/gen-identity.sh's pin_policy_rule does NOT carry the canonical record clause verbatim — DRIFTED from deploy/publication.json"
+		fail "T20 scripts/operator-local/gen-identity.sh's pin_policy_rule line does NOT carry the canonical record clause verbatim — DRIFTED from deploy/publication.json"
 		bad=1
 	fi
 
-	[ "$bad" -eq 0 ] && pass "T20 the record-kind defining clause is byte-identical across all 3 authoritative sources"
+	[ "$bad" -eq 0 ] && pass "T20 the record-kind defining clause is present verbatim, in the specific field/line, in all 3 authoritative sources"
 }
 t20
+
+# ---------------------------------------------------------------------------
+# T21 — cross-implementation agreement (I-5, 2026-08-17). registry_kind_of()
+# in scripts/check-identity-pins.sh is a HAND-COPY of this file's own
+# registry_row_for_path()/kind_of() (a THIRD copy exists in
+# scripts/operator-local/gen-identity.sh's registry_kind_of_path — outside
+# this task's edit scope and NOT covered here; that is a disclosed gap, not
+# a claim that all three agree). Nothing verified the two copies inside this
+# task's scope actually resolve the same path to the same kind before this
+# test existed, and they had in fact diverged once already: a
+# `select($p | startswith(.path))` bug in the checker's copy silently
+# rebound `.` to a string and errored on every directory-row (kind=record)
+# path, undetected until an unrelated case
+# (tests/identity-pins/test-check-identity-pins.sh's k7R) tripped over it by
+# accident. This extracts the CHECKER's ACTUAL jq program — the exact bytes
+# between the two T21-SENTINEL comment lines inside registry_kind_of(), not
+# a re-transcription of it — and runs it standalone via `jq -f` against
+# every path this registry declares, plus directory-member paths that do and
+# do not match api/archive/'s member_pattern, comparing each verdict to this
+# file's own kind_of().
+# ---------------------------------------------------------------------------
+t21() {
+	local prog_file bad=0 n=0 path own_kind checker_kind
+	prog_file="${TMPDIR_T}/checker-registry-kind-of.jq"
+	sed -n '/# T21-SENTINEL-BEGIN/,/# T21-SENTINEL-END/p' "${REPO_ROOT}/scripts/check-identity-pins.sh" > "$prog_file"
+	if [ ! -s "$prog_file" ]; then
+		fail "T21 could not extract registry_kind_of's jq program from scripts/check-identity-pins.sh — sentinel markers missing?"
+		return
+	fi
+
+	run_checker_kind_of() { jq -r --arg p "$1" -f "$prog_file" "$REGISTRY"; }
+
+	compare_one() {
+		n=$((n + 1))
+		own_kind="$(kind_of "$1")"
+		checker_kind="$(run_checker_kind_of "$1")"
+		if [ "$own_kind" != "$checker_kind" ]; then
+			fail "T21 ${1}: this suite's kind_of()='${own_kind}' but the checker's registry_kind_of()='${checker_kind}'"
+			bad=1
+		fi
+	}
+
+	# Every exact publications[] path (~40 rows: every kind=stream/static/record
+	# publication this registry declares).
+	while IFS= read -r path; do
+		[ -n "$path" ] || continue
+		compare_one "$path"
+	done <<< "$(jq -r '.publications[].path' "$REGISTRY")"
+
+	# Directory-member resolution: one path that matches api/archive/'s
+	# member_pattern (kind=record via the row) and one that does not
+	# (date-keyed — kind="", no row governs it, per M3 in
+	# tests/identity-kind-discipline/test-gen-identity-kind-discipline.sh),
+	# plus the same pair for api/peers-history/ (kind=stream).
+	compare_one "api/archive/anchor-source-0000000000000000000000000000000000000000000000000000000000000001.json"
+	compare_one "api/archive/anchor-source-2026-08-14.json"
+	compare_one "api/peers-history/peers-2026-08-14.json.gz"
+	compare_one "api/peers-history/not-a-date.json.gz"
+
+	[ "$bad" -eq 0 ] \
+		&& pass "T21 registry_kind_of() (scripts/check-identity-pins.sh, extracted verbatim) agrees with this suite's own kind_of() for all ${n} paths tried" \
+		|| note "T21 checked ${n} path(s); see FAIL lines above for the disagreements"
+}
+t21
 
 # ---------------------------------------------------------------------------
 # T15 — mutation self-proof.

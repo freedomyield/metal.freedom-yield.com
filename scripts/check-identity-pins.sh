@@ -71,12 +71,15 @@
 # Check 2 — THE KIND GATE: may this pin exist at all, independent of whether
 # its bytes currently match? Authority: deploy/publication.json's `kind` —
 # the SAME registry scripts/operator-local/gen-identity.sh reads when
-# composing a new manifest, so the generator and this checker can never
-# disagree about which publications are safe to pin. deploy/feed-excludes.txt
-# is NOT the authority for this check: it is a narrower list (push-owned
-# paths only) and carries no `kind` at all — api/archive/ is ON
-# feed-excludes.txt (git never carries it) but is kind=record (safe to pin),
-# which is exactly the distinction feed-excludes.txt cannot make.
+# composing a new manifest, so THIS checker's own kind resolution (below) is
+# INTENDED to agree with the generator's — but that intent is a hand-copy of
+# resolution logic, not a machine-enforced identity: see registry_kind_of()
+# further down for exactly what tests/publication-registry/'s T21 does and
+# does not verify about that. deploy/feed-excludes.txt is NOT the authority
+# for this check: it is a narrower list (push-owned paths only) and carries
+# no `kind` at all — api/archive/ is ON feed-excludes.txt (git never
+# carries it) but is kind=record (safe to pin), which is exactly the
+# distinction feed-excludes.txt cannot make.
 #
 #   kind=stream        MUST NOT be pinned (deploy/publication.json's own
 #                       kind_definitions). Checked against
@@ -97,17 +100,30 @@
 #                       same stance scripts/operator-local/gen-identity.sh
 #                       takes when composing a manifest (an undeclared
 #                       artifact is refused with exit 9, not guessed at).
+#   anything else       a row EXISTS but its `kind` is not stream/static/
+#                       record — a typo, or a future kind this checker does
+#                       not yet know. Reported as KIND-INVALID, a NEW break.
+#                       This is an ALLOWLIST (stream / static / record are
+#                       the only recognized shapes), not "everything not
+#                       stream is fine" — an earlier draft fell through
+#                       silently here, which is exactly the fail-open this
+#                       whole gate exists to prevent.
 #
 # The manifest currently served predates the kind gate entirely (see "Why
-# this exists" above), so it still pins all four kind=stream rows named
-# there — every one of them is already acknowledged in
-# deploy/publication.json's known_kind_violations, so this check is GREEN
-# today. It stays green after the operator's next issuance removes those
-# four pins, because there is then nothing left to gate. What it exists to
-# catch is a FUTURE pin over a kind=stream (or undeclared) target that
-# nobody acknowledged first — the exact way to re-break identity.json's
-# artifact_manifest that Check 1 alone cannot see coming, because a brand
-# new stream pin matches its own bytes at the moment it is taken.
+# this exists" above), so it still pins four kind=stream PAYLOAD pins: the
+# three named there (evidence_json.sha256, validator_json.sha256,
+# uptime_cycles_json.sha256) plus a fourth, cycle_history_jsonl.sha256 — NOT
+# the same entry as cycle_history_jsonl.schema_sha256, the git-tracked
+# SCHEMA mismatch "Why this exists" measured; that one is kind=static and
+# this check does not touch it. All four payload pins are already
+# acknowledged in deploy/publication.json's known_kind_violations, so this
+# check is GREEN today. It stays green after the operator's next issuance
+# removes those four pins, because there is then nothing left to gate. What
+# it exists to catch is a FUTURE pin over a kind=stream (or undeclared)
+# target that nobody acknowledged first — the exact way to re-break
+# identity.json's artifact_manifest that Check 1 alone cannot see coming,
+# because a brand new stream pin matches its own bytes at the moment it is
+# taken.
 #
 # ---------------------------------------------------------------------------
 # Repairing a red run (CI cannot do this for you)
@@ -146,6 +162,13 @@
 #   C. KIND-UNKNOWN (no registry row at all): add a row for the publication
 #      to deploy/publication.json's publications[] with the correct `kind`.
 #      If that turns out to be `stream`, this becomes outcome A or B.
+#   D. KIND-INVALID (a row exists but its `kind` is not stream/static/
+#      record): fix the typo, or — if this is genuinely a new kind this
+#      checker does not know yet — extend BOTH this script's allowlist
+#      (the `case "$RKIND" in` below) and scripts/operator-local/
+#      gen-identity.sh's kind_is_pinnable() in the same change. Never widen
+#      one without the other; that is exactly the disagreement Check 2
+#      exists to prevent.
 #
 # ---------------------------------------------------------------------------
 # Usage
@@ -182,20 +205,29 @@
 #      what a missing side-effects library makes impossible.
 #   6  NEW kind-gate break (Check 2, above): a pin exists over a kind=stream
 #      publication that is not acknowledged in deploy/publication.json's
-#      known_kind_violations, or over a publication with no row in
-#      deploy/publication.json at all. The kind gate is evaluated, and this
-#      exit is returned, BEFORE the exit-3/4 checks below: if a single run
-#      has both a kind-gate break and a mismatch, 6 is what is reported and
-#      alerted for that run — the mismatch is still visible in the printed
-#      report and summary line, just not in the alert title.
+#      known_kind_violations, over a publication with no row in
+#      deploy/publication.json at all, or over a row whose `kind` is none
+#      of stream/static/record. The kind gate is evaluated, and this exit
+#      is returned, BEFORE the exit-3/4 checks below: if a single run has
+#      both a kind-gate break and a mismatch, 6 is what this run exits
+#      with — but (--mode=live) the mismatch is NOT silently dropped: its
+#      first line is folded into the SAME ntfy push text and into the
+#      dedup signature (see Alerting below), specifically because under
+#      cron the printed report reaches only journald and a mismatch that
+#      never reaches ntfy is, to the operator, a mismatch that never
+#      happened.
 #
 # Alerting (--mode=live only):
 #   A new `tracked` break fires ONE high-priority ntfy push via notify.sh. A
 #   new kind-gate break (exit 6) fires the same way, deduped by the same
 #   signature/re-arm mechanism (should_alert below) as a mismatch break —
-#   they share one dedup state file, so a kind-gate break and a mismatch
-#   break in the same run alert as whichever this run exits with (see exit
-#   code 6 above), not both.
+#   they share one dedup state file, so only ONE push fires per run even
+#   when both a kind-gate break and a mismatch break are present at once.
+#   That push is NOT kind-gate-only text, though: when a mismatch is also
+#   present, its first line and its own break signature are folded into the
+#   kind-gate push and into the dedup signature, so the operator still
+#   learns about it from the single push this run sends, and the dedup
+#   window re-arms if EITHER the kind break or the mismatch details change.
 #   `stream` mismatches and baselined `tracked` mismatches are written to the
 #   log and never alert — they are known, structural, and pushing them would
 #   be exactly the false urgency the project forbids. The same is true of an
@@ -453,11 +485,21 @@ url_to_public_path() {
 # or "" if no publications[] row governs it. Exact path match wins; otherwise
 # a directory row (path ending "/") governs a member whose basename matches
 # that row's member_pattern — the SAME resolution rule
-# tests/publication-registry/test-publication-registry.sh (registry_row_for_path
-# / kind_of) and scripts/operator-local/gen-identity.sh apply, so the three
-# can never resolve the same path to a different kind.
+# tests/publication-registry/test-publication-registry.sh's registry_row_for_path
+# / kind_of applies. This is a HAND-COPY of that logic (a third one exists in
+# scripts/operator-local/gen-identity.sh's registry_kind_of_path), which is
+# itself the exact "正しい状態が1箇所に無い" pattern this whole task exists to
+# close — reintroducing it here without a check would be the same mistake in
+# a new place. tests/publication-registry/test-publication-registry.sh's T21
+# extracts the jq program between the two T21-SENTINEL markers below VERBATIM
+# (not a re-transcription) and cross-checks its verdict against that suite's
+# OWN kind_of() for every path in the real registry, so at least those two of
+# the three copies are machine-verified to agree. gen-identity.sh's copy is
+# NOT cross-checked here (it is outside this task's edit scope) — a real,
+# disclosed gap, not a "can never disagree" claim this repo cannot back up.
 registry_kind_of() {
 	printf '%s' "$REGISTRY_JSON" | jq -r --arg p "$1" '
+		# T21-SENTINEL-BEGIN
 		( [ .publications[] | select(.path == $p) | .kind ] | first // "" ) as $exact
 		| if $exact != "" then $exact
 		  else
@@ -472,6 +514,7 @@ registry_kind_of() {
 				| $row.kind
 			  ] | first // "" )
 		  end
+		# T21-SENTINEL-END
 	'
 }
 
@@ -499,21 +542,38 @@ while IFS=$'\t' read -r PIN_ID PIN_URL PIN_SHA; do
 	CLASS="$(classify_path "$REL")"
 
 	# ---- kind gate: may this pin exist at all? (independent of CLASS/MODE) --
+	# ALLOWLIST, not a two-way if: "stream" and "" (no row) are the only
+	# recognized non-pinnable shapes, and everything else used to fall
+	# through silently — a typo'd or future-added kind value (e.g. "steam",
+	# or a fifth kind this repo has not invented yet) passed the gate with
+	# no check at all. Fixed to match scripts/operator-local/gen-identity.sh's
+	# own allowlist shape (kind_is_pinnable: static|record, else refuse).
 	RKIND="$(registry_kind_of "$REL")"
-	if [ "$RKIND" = "stream" ]; then
-		if [ -n "$(known_kind_violation "$PIN_ID")" ]; then
-			N_KIND_BASELINED=$((N_KIND_BASELINED + 1))
-			emit "KIND-BASELINED    ${PIN_ID}  stream   ${REL} — kind=stream pin acknowledged in deploy/publication.json's known_kind_violations (C4)"
-		else
+	case "$RKIND" in
+		stream)
+			if [ -n "$(known_kind_violation "$PIN_ID")" ]; then
+				N_KIND_BASELINED=$((N_KIND_BASELINED + 1))
+				emit "KIND-BASELINED    ${PIN_ID}  stream   ${REL} — kind=stream pin acknowledged in deploy/publication.json's known_kind_violations (C4)"
+			else
+				N_KIND_NEW=$((N_KIND_NEW + 1))
+				KIND_NEW_BREAKS="${KIND_NEW_BREAKS}${PIN_ID}:kind=stream"$'\n'
+				emit "KIND-VIOLATION    ${PIN_ID}  stream   ${REL} — kind=stream MUST NOT be pinned (deploy/publication.json) and is not acknowledged in known_kind_violations — NEW break"
+			fi
+			;;
+		static|record)
+			: # pinnable; Check 1 above still verifies the bytes.
+			;;
+		"")
 			N_KIND_NEW=$((N_KIND_NEW + 1))
-			KIND_NEW_BREAKS="${KIND_NEW_BREAKS}${PIN_ID}:kind=stream"$'\n'
-			emit "KIND-VIOLATION    ${PIN_ID}  stream   ${REL} — kind=stream MUST NOT be pinned (deploy/publication.json) and is not acknowledged in known_kind_violations — NEW break"
-		fi
-	elif [ -z "$RKIND" ]; then
-		N_KIND_NEW=$((N_KIND_NEW + 1))
-		KIND_NEW_BREAKS="${KIND_NEW_BREAKS}${PIN_ID}:kind=unresolved"$'\n'
-		emit "KIND-UNKNOWN      ${PIN_ID}  ?        ${REL} has no publications[] row in deploy/publication.json — kind cannot be verified as safe to pin — NEW break"
-	fi
+			KIND_NEW_BREAKS="${KIND_NEW_BREAKS}${PIN_ID}:kind=unresolved"$'\n'
+			emit "KIND-UNKNOWN      ${PIN_ID}  ?        ${REL} has no publications[] row in deploy/publication.json — kind cannot be verified as safe to pin — NEW break"
+			;;
+		*)
+			N_KIND_NEW=$((N_KIND_NEW + 1))
+			KIND_NEW_BREAKS="${KIND_NEW_BREAKS}${PIN_ID}:kind=invalid:${RKIND}"$'\n'
+			emit "KIND-INVALID      ${PIN_ID}  ${RKIND}   ${REL} — deploy/publication.json declares kind=\"${RKIND}\", which is none of stream/static/record — refusing to treat an unrecognized kind as safe to pin — NEW break"
+			;;
+	esac
 
 	ACTUAL=""
 	if [ "$MODE" = "repo" ]; then
@@ -648,13 +708,29 @@ state_write() {
 }
 
 if [ "$N_KIND_NEW" -gt 0 ]; then
-	FIRST_KIND_LINE="$(printf '%s' "$REPORT" | grep -E '^(KIND-VIOLATION|KIND-UNKNOWN) ' | head -1)"
+	FIRST_KIND_LINE="$(printf '%s' "$REPORT" | grep -E '^(KIND-VIOLATION|KIND-UNKNOWN|KIND-INVALID) ' | head -1)"
 	log "ERROR ${N_KIND_NEW} NEW kind-gate break(s): a pin exists over a publication whose kind (deploy/publication.json) forbids pinning it, or whose kind could not be resolved at all (mode=${MODE}): ${FIRST_KIND_LINE}"
+	# A concurrent tracked-pin mismatch (Check 1) is folded into THIS alert
+	# rather than silently dropped: exit 6 is returned before the exit-3
+	# block below ever runs, and both share one dedup state file, so without
+	# this a mismatch that happens to coincide with a kind-gate break would
+	# never reach ntfy — only the printed report, which under cron reaches
+	# nobody but journald. See docs/check-identity-pins.sh header, exit 6.
+	MISMATCH_FOLD_MSG=""
+	if [ "$N_NEW" -gt 0 ]; then
+		FIRST_MISMATCH_LINE="$(printf '%s' "$REPORT" | grep -E '^(MISMATCH|MISSING) ' | head -1)"
+		log "ERROR ${N_NEW} NEW mismatch break(s) ALSO present in this run (folded into the kind-gate alert below, not pushed as a separate exit-3 alert): ${FIRST_MISMATCH_LINE}"
+		MISMATCH_FOLD_MSG=" ALSO: ${N_NEW} tracked-pin mismatch(es) in the same run — ${FIRST_MISMATCH_LINE}."
+	fi
 	if [ "$MODE" = "live" ]; then
 		KIND_SIG="$(printf '%s' "$KIND_NEW_BREAKS" | sort | tr '\n' ';')"
+		if [ "$N_NEW" -gt 0 ]; then
+			MISMATCH_SIG="$(printf '%s' "$NEW_BREAKS" | sort | tr '\n' ';')"
+			KIND_SIG="${KIND_SIG}||${MISMATCH_SIG}"
+		fi
 		if [ "$(should_alert "$KIND_SIG")" = "1" ]; then
 			alert high "identity-pins: kind gate broken (exit 6)" \
-				"${N_KIND_NEW} pin(s) in the signed identity.json target a publication deploy/publication.json marks kind=stream (must not be pinned) or does not declare at all. ${FIRST_KIND_LINE}. Acknowledge a still-open case in deploy/publication.json's known_kind_violations, or re-issue the manifest without the pin — see docs/OPERATOR_IDENTITY_SETUP.md."
+				"${N_KIND_NEW} pin(s) in the signed identity.json target a publication deploy/publication.json marks kind=stream (must not be pinned), does not declare at all, or declares an unrecognized kind.${MISMATCH_FOLD_MSG} ${FIRST_KIND_LINE}. Acknowledge a still-open case in deploy/publication.json's known_kind_violations, fix the registry row, or re-issue the manifest — see docs/OPERATOR_IDENTITY_SETUP.md."
 			state_write "$KIND_SIG"
 		else
 			log "INFO alert suppressed (dedup): same kind-break set already alerted within the last ${ALERT_REARM_SEC}s — set IDENTITY_PIN_ALERT_REARM_SEC to override"
