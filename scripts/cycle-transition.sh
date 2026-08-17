@@ -595,7 +595,7 @@ fyct__unit_commands() {
 		fyct__wrap "    " "(b) deploy/publication.json — set known_kind_violations.violations to {}, and clear pinned_by on api/evidence.json, api/validator.json, api/cycle-history.jsonl and api/uptime-cycles.json."
 		fyct__wrap "    " "(c) deploy/publication.json — add pinned_by for api/incidents.schema.v1.json and for the api/archive/ directory row."
 		fyct__cb
-		fyct__wrap "  " "docs/CYCLE_GATE.md step 4b also records an open item that must be corrected BEFORE this step runs: the record_caveat on the api/archive/ row still says STRUCTURALLY immutable on the basis of a grep for a field name that is actually spelled computed_at. Read that step before editing."
+		fyct__wrap "  " "The record_caveat on the api/archive/ row was CORRECTED 2026-08-14 (and again 2026-08-17) — the STRUCTURALLY immutable claim this step used to warn about is gone. Read deploy/publication.json's current record_caveat text directly before editing anything under this bullet; do not trust a cached summary of it."
 		fyct__cmd "$m" "bash tests/publication-registry/test-publication-registry.sh"
 		fyct__wrap "  " "public/api/identity.json.sig IS IN THIS LIST AND MUST STAY. gen-identity.sh writes the manifest and its detached signature as a pair (its atomic-publish block moves both), and the real cycle-4 transition commit 90bcdd9 carried exactly those two files. Staging the manifest without the signature publishes a NEW manifest under the PREVIOUS cycle's signature: the public ssh-keygen -Y verify then fails, and unit 9's Phase 1 identity signature check fails with it."
 		fyct__cmd "$m" "git add public/api/identity.json public/api/identity.json.sig deploy/identity-pin-baseline.json deploy/publication.json"
