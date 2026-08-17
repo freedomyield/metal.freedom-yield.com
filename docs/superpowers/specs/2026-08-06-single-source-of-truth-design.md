@@ -64,15 +64,20 @@ CI gate がこれを機械で強制する: `kind=stream` は `pinned_by` に入�
 
 ## 5. 転換当日のデータフロー (C2)
 
-13 実行単位を、人の介入点で切れる 6 phase に整理する。
+13 実行単位(2026-08-17 時点の既知の差分: `scripts/cycle-transition.sh:113-116`
+は 2026-08-14 追加の step 4b を含めて実質 **14** 単位と明記している。この節の
+「13」という数え方と、それに基づく phase 構成・番号自体は本タスクの是正対象外
+— brief の指示により変更しない。次回の spec 改版で 14 への更新を推奨する)を、
+人の介入点で切れる 6 phase に整理する。
 
-**読み方 (2026-08-17 是正)**: 各 `⏸ 停止N` は、直後に続く phase の**入口**
-(= その phase を実行するために先に必要な人の操作) として描く。「phase を
-終えてから止まる」という exit の読みは誤り — `docs/CYCLE_GATE.md` の当日
-step 順と付き合わせると 4 つとも entry gate である。停止 4 つが phase 6 個
-に均等に付くわけではない点にも注意: phase 3 (compose) と phase 6 (事後) は
-対応する停止を持たない (どちらも host/Mac 側の自動処理のみで、operator の
-判断待ちが無い)。
+**読み方 (2026-08-17 是正、同日中に再訂正)**: 各 `⏸ 停止N` は、直後に続く
+phase の**入口**(= その phase を実行するために先に必要な人の操作)として
+描く。「phase を終えてから止まる」という exit の読みは誤り。**ただし停止4
+だけは例外**: phase5 の入口ではなく phase5 **内部**(unit 7b と 7c の間)に
+位置し、かつ性質の異なる 2 つのタイミング (a)/(b) を束ねている — 詳細は
+下の根拠を参照。停止 4 つが phase 6 個に均等に付くわけではない点にも注意:
+phase 3 (compose) と phase 6 (事後) は対応する停止を持たない (どちらも
+host/Mac 側の自動処理のみで、operator の判断待ちが無い)。
 
 ```
 ⏸ 停止1: wallet 操作 (額の判断) → tx id
@@ -80,43 +85,73 @@ phase 1  記録      host: node-info tick → uptime-history → gen-cycle-histo
 ⏸ 停止2: identity 鍵 passphrase
 phase 2  identity  Mac: gen-identity → commit → push → deploy 着地確認
 phase 3  compose   host: gen-anchor-source → Mac へ転送 → commit → push → deploy 着地確認
-⏸ 停止3: testnet keystore unlock + broadcast 認可
+⏸ 停止3: testnet keystore unlock (broadcast 認可は script 起動そのもので自動成立)
 phase 4  rehearsal Mac: testnet 通し稽古 (コマンドを印字して停止)
-⏸ 停止4: mainnet broadcast 認可
-phase 5  刻印      Mac: preview → 署名 (印字して停止。orchestrator は実行しない)
+phase 5  刻印      Mac: preview(7b)
+   ⏸ 停止4a: mainnet keystore unlock + broadcast 認可(7b 完了後・7c 直前 —
+              phase5 の入口ではなく phase5 内部)
+              → 署名+broadcast(7c) → fragment 転送(7.5)
+   ⏸ 停止4b: explorer 目視確認(7c 完了後 — phase5 の外の事後確認)
 phase 6  事後      host: receipt 7-gate → history append → 公開 push → resume --apply
 ```
 
-根拠 (`docs/CYCLE_GATE.md` の step 番号で示す):
+根拠 (`docs/CYCLE_GATE.md` の step 番号 + `scripts/cycle-transition.sh` の
+unit 本文で示す):
 
 - **停止1 → phase1 の入口**: step 0 が「everything below の precondition」
   と明記。phase 1 の最初の単位 (step 1, node-info tick 待ち) は新
-  AddValidator entry が chain に出るまで意味を成さない。
+  AddValidator entry が chain に出るまで意味を成さない。`cycle-transition.sh`
+  の phase1 stop テキストも「the precondition for unit 1 below」と同じ位置
+  を明記しており、一致。
 - **停止2 → phase2 の入口**: phase 2 は `gen-identity.sh` (step 4) そのもの
   で、passphrase はその script 自身が実行中に prompt する入力。「phase 2
-  を終えてから passphrase」ではない。
-- **停止3 → phase4 の入口**: phase 4 (= testnet rehearsal, step 7a) は
-  unlock 済み keystore が無ければ実行できない (locked のまま叩くと
-  exit 2)。testnet broadcast 認可 (PRIME DIRECTIVE gate 2 の testnet 側)
-  も同じく実行前に必要。
-- **停止4 → phase5 の入口、ただし片側のみ**: mainnet broadcast 認可
-  (PRIME DIRECTIVE gate 2) は step 7c (署名+broadcast) の precondition で
-  あり phase 5 の入口として正しい。**一方 explorer 目視確認は逆で、
-  phase 5 が broadcast を終えた後にしか行えない** (`docs/CYCLE_GATE.md`
-  step 9 直後の結び文: 「AI reads back step 7's tx id and reports the
-  explorer URL … gate 2's authorization happens before that step runs,
-  not after」)。停止4 という 1 つのラベルが実際には性質の異なる 2 つの
-  操作 (broadcast 前の認可 / broadcast 後の目視) を束ねている — 図の
-  粒度では 1 点にまとめているが、「停止4 = phase5 の入口」と読むときは
-  認可の半分だけを指す。
+  を終えてから passphrase」ではない。`cycle-transition.sh` の phase2 stop
+  テキストも「a precondition of phase 2, not a review of it」と明記して
+  おり、一致(停止4 のような「(a) は不成立」式の打ち消しは無い)。
+- **停止3 → phase4 の入口。ただし「broadcast 認可」の書き方を訂正**:
+  phase 4 (= testnet rehearsal, unit 7a) は unlock 済み keystore が無ければ
+  実行できない (locked のまま叩くと exit 2) — ここは実装 (`cycle-transition.sh`
+  の phase4 stop テキスト、`run-testnet-rehearsal.sh:340,385`) と一致。
+  **前回の記述「testnet keystore unlock + broadcast 認可」は、認可を unlock
+  とは別の operator アクションであるかのように読めた点で不正確だった**:
+  `run-testnet-rehearsal.sh:41-45` によれば、testnet 側の broadcast 認可は
+  operator が別途宣言するものではなく、**unlock 済みキーストアでこの
+  script を起動すること自体が認可の成立経路**(script が
+  `/tmp/fyd-broadcast-token` を自動生成し、`bin/safe-broadcast` がそれを
+  admit する)。operator が手で行う前提条件は unlock のみ。
+- **停止4 → phase5 の入口ではない。unit 7b と 7c の間、かつ 2 つの異なる
+  タイミングを束ねている**(前回是正の Critical な誤り、今回訂正):
+  - **(a) mainnet keystore unlock + broadcast 認可**: `scripts/cycle-transition.sh:280`
+    が同じ stop についてこう明記している — `OPERATOR, TWICE — AND (a) IS
+    NOT DUE YET AT THIS LINE. (a) Between unit 7b and unit 7c, NOT before
+    7b: … give the PRIME DIRECTIVE gate-2 per-invocation authorization …
+    but 7b is a dry run that needs the mainnet keystore HOME only for the
+    separation guard, never an UNLOCKED one`。さらに
+    `preview-cycle-anchor-broadcast.sh:329-373` を読むと、7b は認可が名指す
+    対象そのもの(memo 4 本・`actor@permission`・quantity・`tx_sha256` に
+    content-bound された R16 token)を**自分で生成**し、unlock 行も自身が
+    印字する。認可の対象がまだ存在しない 7b の前で認可を与えることは
+    機構上できない。よって (a) は phase5 の入口ではなく、phase5 内部・
+    7b 完了後・7c 直前に位置する。
+  - **(b) explorer 目視確認**: 7c (broadcast) が終わった後にしか行えない、
+    正真正銘の事後確認。`docs/CYCLE_GATE.md` step 9 直後の結び文
+    (「AI reads back step 7's tx id and reports the explorer URL … gate
+    2's authorization happens before that step runs, not after」)が同じ
+    区別をしている。
 
-この是正は `scripts/cycle-transition.sh` (別タスクが実装中、本タスクは
-read-only 参照のみ) がすでに独立に到達している結論と一致する: 同ファイル
-冒頭のコメント「THE FOUR STOPS, AND WHERE THEY REALLY SIT」が同じ 4 件を
-同じ根拠で entry gate と結論しており、本 spec の図をそちらに合わせて
-是正した (逆ではない — 本 spec が canon で `docs/CYCLE_GATE.md` の当日 step
-順が一次情報、`cycle-transition.sh` 側の結論はその step 順から独立に
-導かれた傍証)。矛盾は見つからなかった。
+**前回是正の何が誤りだったか、正直に記録する**: 前回、停止4 を
+「phase5 の入口として正しい」と書いた。これは「phase を終えてから止まる」
+という**出口**の誤りを、「phase5 が始まる前に止まる」という**より具体的な
+入口の誤り**に置き換えただけだった — 実装 (`cycle-transition.sh:280`) が
+名指しで打ち消している位置に置いてしまっていた。`pstop` 列
+(`scripts/cycle-transition.sh:274-282`) だけを見て「stop4 は phase5 に
+対応する」という**phase 番号の対応**は合っていたが、phase5 の**どこ**に
+位置するかを本文まで読んで照合していなかった。「`scripts/cycle-transition.sh`
+と矛盾は見つからなかった」という前回の記述も、この (a)/(b) の打ち消し文を
+落とした上での一致主張であり、**撤回する**。`docs/CYCLE_GATE.md` が canon
+であることは `cycle-transition.sh:105` 自身が「docs/CYCLE_GATE.md — the
+canonical runbook」と明記しており、本 spec の記述はそれを言い換えたもの
+(逆ではない)。
 
 ### 再開は「記録を信じない」
 
