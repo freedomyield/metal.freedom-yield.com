@@ -41,10 +41,11 @@ sha() {
 
 # ---- harness -----------------------------------------------------------------
 # build_fake_repo: a minimal repo shaped like the real one.
-#   public/api/alpha.json           tracked  (pinned)
-#   public/api/alpha.schema.json    tracked  (pinned as schema_sha256)
-#   public/api/stream.json          stream   (listed in feed-excludes.txt)
+#   public/api/alpha.json           tracked  (pinned)   kind=static
+#   public/api/alpha.schema.json    tracked  (pinned as schema_sha256) kind=static
+#   public/api/stream.json          stream   (listed in feed-excludes.txt) kind=stream
 #   public/api/identity.json        the manifest under test
+#   deploy/publication.json         the kind-gate registry (see write_registry)
 # No baseline file is written by default; write_baseline adds one.
 BASE=""; FAKE=""; STUB_DIR=""; NOTIFY_STUB=""; NOTIFY_LOG=""; STATE=""; LOGFILE=""
 build_fake_repo() {
@@ -62,12 +63,44 @@ build_fake_repo() {
 	printf '{"schema":"alpha","v":1}\n' > "$FAKE/public/api/alpha.schema.json"
 	printf '{"moving":1}\n'           > "$FAKE/public/api/stream.json"
 
+	write_registry
 	write_identity
 	cat > "$NOTIFY_STUB" <<STUBEOF
 #!/usr/bin/env bash
 printf '%s|%s|%s\n' "\$1" "\$2" "\$3" >> "$NOTIFY_LOG"
 STUBEOF
 	chmod +x "$NOTIFY_STUB"
+}
+
+# write_registry — the kind-gate authority (deploy/publication.json), fully
+# SYNTHETIC (jq -n, never a `cp` of the real registry — see
+# scripts/check-identity-pins.sh's "THE KIND GATE" section header: a frozen
+# copy of the real file goes stale in the dangerous direction the day the
+# real file's SHAPE changes, which is the exact trap this repo's C4 T19
+# fixture fell into once before). Declares `kind` for exactly the three
+# fixture paths this harness uses, plus ONE pre-acknowledged kind=stream
+# violation for stream_json.sha256, mirroring the real repo's
+# deploy/publication.json known_kind_violations block. That acknowledgement
+# is required for every EXISTING case in this suite to keep passing: every
+# one of them pins stream_json by default (write_identity below), and
+# without an acknowledgement every one of them would go newly red for a
+# reason unrelated to what it tests.
+write_registry() {
+	jq -n '{
+		publications: [
+			{ path: "api/alpha.json",        kind: "static" },
+			{ path: "api/alpha.schema.json", kind: "static" },
+			{ path: "api/stream.json",       kind: "stream" }
+		],
+		known_kind_violations: {
+			violations: {
+				"stream_json.sha256": {
+					path: "api/stream.json",
+					reason: "test fixture: pre-existing acknowledged stream pin, mirrors the real registry known_kind_violations block"
+				}
+			}
+		}
+	}' > "$FAKE/deploy/publication.json"
 }
 
 # write_identity [alpha_sha] [alpha_schema_sha] [stream_sha]
@@ -107,6 +140,7 @@ teardown() { rm -rf "$BASE"; BASE=""; }
 
 run_repo() {
 	FYD_REPO_ROOT="$FAKE" \
+	FYD_REGISTRY="$FAKE/deploy/publication.json" \
 	IDENTITY_PIN_LOG="$LOGFILE" \
 	IDENTITY_PIN_ALERT_STATE="$STATE" \
 	FYD_NOTIFY="$NOTIFY_STUB" \
@@ -160,6 +194,7 @@ STUBEOF
 run_live() {
 	FY_LIVE=1 \
 	FYD_REPO_ROOT="$FAKE" \
+	FYD_REGISTRY="$FAKE/deploy/publication.json" \
 	FYD_IDENTITY_URL="https://example.test/api/identity.json" \
 	FYD_CURL="$BASE/curl-stub.sh" \
 	STUB_DIR="$STUB_DIR" \
@@ -456,6 +491,381 @@ OUT="$(bash "$CHECKER" --mode=repo 2>&1)"; RC=$?
 	|| bad "c24 real repo: --mode=repo gate is green (actual=$RC, out: $OUT)"
 echo "$OUT" | grep -q 'summary (mode=repo)' \
 	&& ok "c24 real repo: emits a summary line" || bad "c24 real repo: summary line (out: $OUT)"
+
+# c24b/c24c — S3 kind gate, acceptance criterion "today's state is green":
+# this is the REAL repo, REAL deploy/publication.json, REAL public/api/
+# identity.json — not a fixture standing in for them.
+#
+# c24c's expected KIND-BASELINED count is NOT hardcoded to today's value (4).
+# Review finding (C-1, 2026-08-17): a literal `-eq 4` here is exactly the
+# trap this task exists to close, moved from the fixture into the
+# assertion's constant — docs/CYCLE_GATE.md step 4b clears
+# known_kind_violations.violations AND removes the four stream pins in the
+# SAME commit, so the moment that lands this repo's true expected count
+# becomes 0, and a hardcoded 4 would fail the "post step 4b" half of
+# acceptance criterion 2 on the day it matters most. Instead the expected
+# count is DERIVED, at test-run time, as the intersection of two measured
+# sets: which pin ids the CURRENT manifest actually carries, and which pin
+# ids the CURRENT registry's known_kind_violations acknowledges. That
+# intersection is 4 today and 0 after step 4b, automatically, with no
+# assumption about which state this test is running in.
+echo "$OUT" | grep -q 'kind-new=0' \
+	&& ok "c24b real repo: kind gate reports kind-new=0 (nothing unacknowledged)" \
+	|| bad "c24b real repo: expected kind-new=0 (out: $OUT)"
+PINNED_KEYS="$(jq -r '
+	.artifact_manifest | to_entries[] |
+	(if .value.sha256 != null then (.key + ".sha256") else empty end),
+	(if .value.schema_sha256 != null then (.key + ".schema_sha256") else empty end)
+' "${REPO_ROOT}/public/api/identity.json" | LC_ALL=C sort)"
+ACK_KEYS="$(jq -r '.known_kind_violations.violations // {} | keys[]' "${REPO_ROOT}/deploy/publication.json" | LC_ALL=C sort)"
+EXPECT_BASELINED="$(comm -12 <(printf '%s\n' "$PINNED_KEYS") <(printf '%s\n' "$ACK_KEYS") | grep -c . || true)"
+N_KIND_BASELINE_LINES="$(echo "$OUT" | grep -c '^KIND-BASELINED ' || true)"
+[ "$N_KIND_BASELINE_LINES" -eq "$EXPECT_BASELINED" ] \
+	&& ok "c24c real repo: KIND-BASELINED count (${N_KIND_BASELINE_LINES}) matches pinned∩acknowledged (${EXPECT_BASELINED}), derived not hardcoded" \
+	|| bad "c24c real repo: expected ${EXPECT_BASELINED} KIND-BASELINED lines (pinned∩acknowledged), got ${N_KIND_BASELINE_LINES} (out: $OUT)"
+# A derived expectation that is ALWAYS 0 would be a tautology (any bug that
+# zeroes out KIND-BASELINED reporting would still "match"). Pin today's
+# concrete floor so the comparison stays load-bearing for as long as C4's
+# four rows remain unresigned; the moment they are is exactly what makes
+# EXPECT_BASELINED itself drop to 0, which the derivation above must also
+# see, and c24c would still pass.
+if [ "$EXPECT_BASELINED" -ge 1 ]; then
+	ok "c24c real repo: derived expectation is non-trivial today (${EXPECT_BASELINED} >= 1, not vacuously satisfied)"
+else
+	echo "NOTE  c24c real repo: derived expectation is 0 — the four rows have been re-signed away (docs/CYCLE_GATE.md step 4b has landed); this is the intended post-transition state, not a failure"
+fi
+
+# =============================================================================
+# kind gate (S3) — deploy/publication.json's `kind` decides whether a pin may
+# exist AT ALL, independent of the existing stream/tracked (feed-excludes)
+# byte-mismatch checks above. See scripts/check-identity-pins.sh's "THE KIND
+# GATE" section. Cases below use the synthetic fake-repo harness (k1-k7) plus
+# one case jq-DERIVED from the real repo (k8) — see that case's own comment
+# for why derivation, not a frozen fixture, is required here.
+# =============================================================================
+
+# ---- k1: default fixture (stream_json pre-acknowledged) -> green + KIND-BASELINED
+build_fake_repo
+OUT="$(run_repo)"; RC=$?
+[ "$RC" -eq 0 ] && ok "k1 baselined kind=stream pin: exit 0" || bad "k1 baselined kind=stream pin: exit 0 (actual=$RC)"
+echo "$OUT" | grep -q '^KIND-BASELINED .*stream_json.sha256' \
+	&& ok "k1 stream_json.sha256 reported as KIND-BASELINED" || bad "k1 KIND-BASELINED line (out: $OUT)"
+echo "$OUT" | grep -q 'kind-new=0' \
+	&& ok "k1 summary reports kind-new=0" || bad "k1 summary kind-new=0 (out: $OUT)"
+teardown
+
+# ---- k2 MUTATION: a brand-new, UNACKNOWLEDGED kind=stream pin -> red -------
+# This is the centrepiece proof (S3 acceptance #1): a pin over a kind=stream
+# publication that nobody acknowledged must turn the gate red, not merely get
+# noticed later as a byte mismatch.
+build_fake_repo
+jq '.publications += [{"path":"api/stream2.json","kind":"stream"}]' \
+	"$FAKE/deploy/publication.json" > "$BASE/reg.tmp" && mv "$BASE/reg.tmp" "$FAKE/deploy/publication.json"
+jq '.artifact_manifest.stream2_json = {url:"https://example.test/api/stream2.json", sha256:"deadbeef00000000000000000000000000000000000000000000000000000000"}' \
+	"$FAKE/public/api/identity.json" > "$BASE/id.tmp" && mv "$BASE/id.tmp" "$FAKE/public/api/identity.json"
+printf 'api/stream2.json\n' >> "$FAKE/deploy/feed-excludes.txt"
+OUT="$(run_repo)"; RC=$?
+[ "$RC" -eq 6 ] && ok "k2 MUTATION: new unacknowledged kind=stream pin -> exit 6" || bad "k2 MUTATION: new unacknowledged kind=stream pin -> exit 6 (actual=$RC)"
+echo "$OUT" | grep -q '^KIND-VIOLATION .*stream2_json.sha256' \
+	&& ok "k2 MUTATION: names the offending pin as KIND-VIOLATION" || bad "k2 MUTATION: KIND-VIOLATION line (out: $OUT)"
+echo "$OUT" | grep -q 'kind-new=1' \
+	&& ok "k2 MUTATION: summary reports kind-new=1" || bad "k2 MUTATION: summary kind-new=1 (out: $OUT)"
+teardown
+
+# ---- k3: acknowledging that SAME new pin in known_kind_violations -> green -
+# The other half of k2's proof: acknowledgement, not the pin's existence
+# alone, is what the gate acts on — exactly mirroring how the real repo's
+# four current stream pins stay green today.
+build_fake_repo
+jq '.publications += [{"path":"api/stream2.json","kind":"stream"}]
+    | .known_kind_violations.violations["stream2_json.sha256"] = {path:"api/stream2.json", reason:"test"}' \
+	"$FAKE/deploy/publication.json" > "$BASE/reg.tmp" && mv "$BASE/reg.tmp" "$FAKE/deploy/publication.json"
+jq '.artifact_manifest.stream2_json = {url:"https://example.test/api/stream2.json", sha256:"deadbeef00000000000000000000000000000000000000000000000000000000"}' \
+	"$FAKE/public/api/identity.json" > "$BASE/id.tmp" && mv "$BASE/id.tmp" "$FAKE/public/api/identity.json"
+# api/stream2.json is genuinely kind=stream, so — same as every real
+# kind=stream publication in this repo except api/archive/ — it also belongs
+# on feed-excludes.txt (never git-tracked). Without this the UNRELATED
+# mismatch check (Check 1, classify_path) sees a "tracked" pin over a file
+# that does not exist on disk and reports it MISSING, which would make this
+# case fail for a reason that has nothing to do with the kind gate.
+printf 'api/stream2.json\n' >> "$FAKE/deploy/feed-excludes.txt"
+OUT="$(run_repo)"; RC=$?
+[ "$RC" -eq 0 ] && ok "k3 newly-acknowledged kind=stream pin: exit 0" || bad "k3 newly-acknowledged kind=stream pin: exit 0 (actual=$RC)"
+echo "$OUT" | grep -q '^KIND-BASELINED .*stream2_json.sha256' \
+	&& ok "k3 reports the new acknowledgement as KIND-BASELINED" || bad "k3 KIND-BASELINED line (out: $OUT)"
+teardown
+
+# ---- k4: a pin targets a path with NO registry row at all -> red -----------
+# "Undeclared" must never read as "probably fine" — same stance
+# scripts/operator-local/gen-identity.sh takes (exit 9) when composing a
+# manifest over an artifact the registry does not mention.
+build_fake_repo
+jq '.artifact_manifest.mystery_json = {url:"https://example.test/api/mystery.json", sha256:"deadbeef00000000000000000000000000000000000000000000000000000000"}' \
+	"$FAKE/public/api/identity.json" > "$BASE/id.tmp" && mv "$BASE/id.tmp" "$FAKE/public/api/identity.json"
+OUT="$(run_repo)"; RC=$?
+[ "$RC" -eq 6 ] && ok "k4 pin with no publication.json row: exit 6" || bad "k4 pin with no publication.json row: exit 6 (actual=$RC)"
+echo "$OUT" | grep -q '^KIND-UNKNOWN .*mystery_json.sha256' \
+	&& ok "k4 names the unresolved pin as KIND-UNKNOWN" || bad "k4 KIND-UNKNOWN line (out: $OUT)"
+teardown
+
+# ---- k4I MUTATION: a row exists but its kind is an unrecognized value -----
+# Review finding (I-1, 2026-08-17): the original gate only branched on
+# RKIND="stream" and RKIND="" (no row) — any THIRD value (a typo, or a kind
+# this checker predates) fell through both arms and passed the gate with NO
+# check at all: measured exit 0, kind-new=0 against a registry row declaring
+# kind="steam". That is a fail-open on exactly the axis this gate exists to
+# close, and the repo's own schema (deploy/publication.schema.v1.json) only
+# protects the REAL registry — FYD_REGISTRY is a swappable env var, and this
+# suite's own synthetic fixtures never go through that schema either. Fixed
+# to an allowlist (case stream|static|record|""|*). This proves the closed
+# gate: an unrecognized kind must be a NEW break, never silent.
+build_fake_repo
+jq '(.publications[] | select(.path == "api/alpha.json") | .kind) = "steam"' \
+	"$FAKE/deploy/publication.json" > "$BASE/reg.tmp" && mv "$BASE/reg.tmp" "$FAKE/deploy/publication.json"
+OUT="$(run_repo)"; RC=$?
+[ "$RC" -eq 6 ] && ok "k4I MUTATION: unrecognized kind value ('steam') -> exit 6" || bad "k4I MUTATION: unrecognized kind value -> exit 6 (actual=$RC, out: $OUT)"
+echo "$OUT" | grep -q '^KIND-INVALID .*alpha_json.sha256' \
+	&& ok "k4I MUTATION: names the offending pin as KIND-INVALID" || bad "k4I MUTATION: KIND-INVALID line (out: $OUT)"
+echo "$OUT" | grep -q 'kind-new=1' \
+	&& ok "k4I MUTATION: summary reports kind-new=1" || bad "k4I MUTATION: summary kind-new=1 (out: $OUT)"
+teardown
+
+# ---- k5: registry file missing -> exit 2, cannot run (fail-closed) --------
+build_fake_repo
+rm -f "$FAKE/deploy/publication.json"
+OUT="$(run_repo)"; RC=$?
+[ "$RC" -eq 2 ] && ok "k5 missing publication.json: exit 2" || bad "k5 missing publication.json: exit 2 (actual=$RC)"
+teardown
+
+# ---- k6: registry file present but not JSON -> exit 2 ----------------------
+build_fake_repo
+printf 'not json {{{' > "$FAKE/deploy/publication.json"
+OUT="$(run_repo)"; RC=$?
+[ "$RC" -eq 2 ] && ok "k6 corrupt publication.json: exit 2" || bad "k6 corrupt publication.json: exit 2 (actual=$RC)"
+teardown
+
+# ---- k7: 'post-cleanup' SHAPE — empty known_kind_violations, no stream pin -
+# Models what step 4b of docs/CYCLE_GATE.md requires in the same commit: the
+# re-issued manifest carries no sha256 for the stream publication, AND the
+# acknowledgement that named it is deleted. Both together must stay green;
+# see k8 below for the same claim made against the REAL repo's files.
+build_fake_repo
+jq '.known_kind_violations.violations = {}' "$FAKE/deploy/publication.json" > "$BASE/reg.tmp" \
+	&& mv "$BASE/reg.tmp" "$FAKE/deploy/publication.json"
+jq 'del(.artifact_manifest.stream_json)' "$FAKE/public/api/identity.json" > "$BASE/id.tmp" \
+	&& mv "$BASE/id.tmp" "$FAKE/public/api/identity.json"
+OUT="$(run_repo)"; RC=$?
+[ "$RC" -eq 0 ] && ok "k7 post-cleanup shape (no ack list, no stream pin): exit 0" || bad "k7 post-cleanup shape: exit 0 (actual=$RC)"
+echo "$OUT" | grep -qE '^(KIND-BASELINED|KIND-VIOLATION|KIND-UNKNOWN) ' \
+	&& bad "k7 post-cleanup shape: unexpectedly still reports a kind-gate line" \
+	|| ok "k7 post-cleanup shape: no kind-gate line at all (nothing left to gate)"
+teardown
+
+# ---- k7R: a DIRECTORY row (kind=record via member_pattern) resolves cleanly
+# registry_kind_of() has TWO resolution paths: exact .path match (exercised
+# by every case above) and a directory row (path ending "/") whose
+# member_pattern matches the pin's basename — the SAME path
+# api/archive/anchor-source-<64-hex>.json takes in the real registry. Every
+# case above only exercised the exact-match path; this one is required, not
+# decorative — it caught a real bug during development (a `select($p |
+# startswith(.path))` that silently rebound `.` and made every directory-row
+# lookup error out as "cannot run", never reaching the exact-match fallback
+# used everywhere else, which is why every OTHER case here stayed green
+# while this one alone would have failed).
+build_fake_repo
+jq '.publications += [{"path":"api/archive/","kind":"record","member_pattern":"^anchor-source-[a-f0-9]{64}\\.json$"}]' \
+	"$FAKE/deploy/publication.json" > "$BASE/reg.tmp" && mv "$BASE/reg.tmp" "$FAKE/deploy/publication.json"
+mkdir -p "$FAKE/public/api/archive"
+RECORD_NAME="0000000000000000000000000000000000000000000000000000000000000001"
+printf '{"archived":true}\n' > "$FAKE/public/api/archive/anchor-source-${RECORD_NAME}.json"
+RECORD_SHA="$(sha "$FAKE/public/api/archive/anchor-source-${RECORD_NAME}.json")"
+jq --arg sha "$RECORD_SHA" --arg name "$RECORD_NAME" \
+	'.artifact_manifest.anchor_source_archive_json = {url: ("https://example.test/api/archive/anchor-source-" + $name + ".json"), sha256: $sha}' \
+	"$FAKE/public/api/identity.json" > "$BASE/id.tmp" && mv "$BASE/id.tmp" "$FAKE/public/api/identity.json"
+printf 'api/archive/\n' >> "$FAKE/deploy/feed-excludes.txt"
+OUT="$(run_repo)"; RC=$?
+[ "$RC" -eq 0 ] && ok "k7R directory-row kind=record pin: exit 0" || bad "k7R directory-row kind=record pin: exit 0 (actual=$RC, out: $OUT)"
+echo "$OUT" | grep -qE '^(KIND-VIOLATION|KIND-UNKNOWN) .*anchor_source_archive_json' \
+	&& bad "k7R directory-row kind=record pin: incorrectly flagged by the kind gate" \
+	|| ok "k7R directory-row kind=record pin: not flagged (record is pinnable, resolution worked)"
+teardown
+
+# ---- k7L live: a kind violation fires exactly one high-priority alert -----
+build_fake_repo
+jq '.publications += [{"path":"api/stream2.json","kind":"stream"}]' \
+	"$FAKE/deploy/publication.json" > "$BASE/reg.tmp" && mv "$BASE/reg.tmp" "$FAKE/deploy/publication.json"
+jq '.artifact_manifest.stream2_json = {url:"https://example.test/api/stream2.json", sha256:"deadbeef00000000000000000000000000000000000000000000000000000000"}' \
+	"$FAKE/public/api/identity.json" > "$BASE/id.tmp" && mv "$BASE/id.tmp" "$FAKE/public/api/identity.json"
+make_curl_stub
+serve "$FAKE/public/api/identity.json"     identity.json
+serve "$FAKE/public/api/alpha.json"        alpha.json
+serve "$FAKE/public/api/alpha.schema.json" alpha.schema.json
+serve "$FAKE/public/api/stream.json"       stream.json
+OUT="$(run_live)"; RC=$?
+[ "$RC" -eq 6 ] && ok "k7L live: kind violation exits 6" || bad "k7L live: kind violation exit 6 (actual=$RC)"
+[ "$(alert_count)" -eq 1 ] && ok "k7L live: kind violation fires exactly one push" || bad "k7L live: expected 1 push, got $(alert_count)"
+alerts | grep -q '^high|' && ok "k7L live: push is high priority" || bad "k7L live: push priority (log: $(alerts))"
+alerts | grep -q 'kind gate broken' && ok "k7L live: push names the kind gate" || bad "k7L live: push title (log: $(alerts))"
+teardown
+
+# ---- k7LM live: kind violation AND a tracked mismatch in the SAME run -----
+# Review finding (I-6, 2026-08-17): exit 6 returns before the exit-3 block
+# ever runs, and both share the ONE dedup state file, so without folding, a
+# tracked mismatch that happens to coincide with a kind-gate break would
+# never reach ntfy that run — only the printed report, which under cron
+# reaches nobody but journald. Proves the fold: still exactly one push (not
+# two), but its text names BOTH breaks, not just the kind one.
+build_fake_repo
+jq '.publications += [{"path":"api/stream2.json","kind":"stream"}]' \
+	"$FAKE/deploy/publication.json" > "$BASE/reg.tmp" && mv "$BASE/reg.tmp" "$FAKE/deploy/publication.json"
+jq '.artifact_manifest.stream2_json = {url:"https://example.test/api/stream2.json", sha256:"deadbeef00000000000000000000000000000000000000000000000000000000"}' \
+	"$FAKE/public/api/identity.json" > "$BASE/id.tmp" && mv "$BASE/id.tmp" "$FAKE/public/api/identity.json"
+make_curl_stub
+serve "$FAKE/public/api/identity.json"     identity.json
+serve "$FAKE/public/api/alpha.json"        alpha.json
+serve "$FAKE/public/api/stream.json"       stream.json
+printf '{"schema":"alpha","v":BROKEN}\n' > "$STUB_DIR/alpha.schema.json"
+OUT="$(run_live)"; RC=$?
+[ "$RC" -eq 6 ] && ok "k7LM live: kind violation still wins the exit code (6) over the concurrent mismatch" || bad "k7LM live: exit 6 (actual=$RC)"
+[ "$(alert_count)" -eq 1 ] && ok "k7LM live: exactly one push (not one per break)" || bad "k7LM live: expected 1 push, got $(alert_count)"
+alerts | grep -q 'kind gate broken' && ok "k7LM live: push names the kind gate" || bad "k7LM live: push title (log: $(alerts))"
+alerts | grep -q 'tracked-pin mismatch' && ok "k7LM live: the SAME push ALSO names the concurrent tracked mismatch (not silently dropped)" || bad "k7LM live: push text missing the folded mismatch mention (log: $(alerts))"
+teardown
+
+# =============================================================================
+# k8U / k8 — real repo, SIMULATED post-9/4 state. jq-DERIVED from the REAL
+# deploy/publication.json and the REAL public/api/identity.json — never a
+# `cp`. A frozen copy would silently stop describing "post cleanup" the day
+# the real files' SHAPE changes (this repo has hit exactly that trap before:
+# tests/identity-kind-discipline/test-gen-identity-kind-discipline.sh and
+# tests/publication-registry/test-publication-registry.sh T19 both exist
+# because an earlier fixture was a frozen snapshot instead of a derivation).
+# The derivation reproduces the two edits docs/CYCLE_GATE.md step 4b requires
+# in the SAME commit:
+#   (a) the re-issued manifest carries no sha256 for any publication the
+#       REGISTRY currently marks kind=stream (schema pins are untouched,
+#       since every schema in this repo is kind=static — C4's own
+#       "schema_sha256 kept" case);
+#   (b) known_kind_violations.violations is cleared, because the violations
+#       it names no longer exist once (a) has happened.
+# Asserting exit 0 here is the acceptance-criterion-2 "post step 4b" half;
+# c24/c24b/c24c above are the "today" half, against the same real files
+# unmodified.
+#
+# Review finding (C-2, 2026-08-17): the original "not a no-op" guard here
+# asserted `K8_REMOVED -gt 0` — pins-stripped-count derived from TODAY's
+# real manifest. That is itself a fact about today's data, not about the
+# transform: the moment docs/CYCLE_GATE.md step 4b actually lands, the real
+# manifest already carries zero kind=stream payload pins, derivation strips
+# nothing, and a `-gt 0` guard fails exactly the day the state it exists to
+# protect becomes real — the same shape of trap as the original stale
+# fixture, moved into an assertion constant instead of a fixture file. Fixed
+# by splitting the concern in two:
+#   k8U  proves the TRANSFORM logic itself strips a stream payload pin and
+#        preserves a static one, against small SYNTHETIC, time-invariant
+#        fixture data that has no connection to today's manifest shape and
+#        therefore cannot go stale on 9/4.
+#   k8   applies that SAME transform (one jq program, reused, not
+#        re-typed) to the real files and asserts the POSTCONDITION directly
+#        — zero remaining kind=stream sha256/schema_sha256 pins — which
+#        holds whether today's manifest had 4 pins to strip or (after step
+#        4b) 0.
+# =============================================================================
+
+# The ONE jq transform, shared verbatim by k8U (synthetic proof) and k8
+# (real-file application) — so k8U is proof about the ACTUAL code path k8
+# runs, not a second hand-typed copy of it (the same "untested duplicate
+# resolution logic" pattern flagged elsewhere, e.g. registry_kind_of, is
+# not worth reintroducing here).
+K8_DERIVE_JQ='
+	($reg[0].publications) as $pubs
+	| def kind_of($u): ( ($u // "") | sub("^https?://[^/]+/"; "") ) as $rel
+		| ( [ $pubs[] | select(.path == $rel) | .kind ] | first // "unknown" );
+	.artifact_manifest |= with_entries(
+		.value |= (
+			( if (kind_of(.url)) == "stream" then del(.sha256) else . end )
+			| ( if (has("schema_url") and (kind_of(.schema_url)) == "stream") then del(.schema_sha256) else . end )
+		)
+	)
+'
+
+# ---- k8U: unit-proof of K8_DERIVE_JQ on synthetic, time-invariant data ----
+K8U_BASE="$(mktemp -d -t identity-pins-k8u.XXXXXX)"
+K8U_REG="$K8U_BASE/publication.json"
+K8U_ID="$K8U_BASE/identity.json"
+jq -n '{publications: [
+	{path: "api/moving.json",        kind: "stream"},
+	{path: "api/moving.schema.json", kind: "static"},
+	{path: "api/fixed.json",         kind: "static"}
+]}' > "$K8U_REG"
+jq -n '{artifact_manifest: {
+	moving_json: {
+		url: "https://example.test/api/moving.json",
+		sha256: "1111111111111111111111111111111111111111111111111111111111111111",
+		schema_url: "https://example.test/api/moving.schema.json",
+		schema_sha256: "2222222222222222222222222222222222222222222222222222222222222222"
+	},
+	fixed_json: {
+		url: "https://example.test/api/fixed.json",
+		sha256: "3333333333333333333333333333333333333333333333333333333333333333"
+	}
+}}' > "$K8U_ID"
+jq --slurpfile reg "$K8U_REG" "$K8_DERIVE_JQ" "$K8U_ID" > "$K8U_BASE/derived.json"
+[ "$(jq -r '.artifact_manifest.moving_json.sha256 // "ABSENT"' "$K8U_BASE/derived.json")" = "ABSENT" ] \
+	&& ok "k8U unit: transform strips the kind=stream payload pin (moving_json.sha256)" \
+	|| bad "k8U unit: moving_json.sha256 should have been stripped"
+[ "$(jq -r '.artifact_manifest.moving_json.schema_sha256 // "ABSENT"' "$K8U_BASE/derived.json")" != "ABSENT" ] \
+	&& ok "k8U unit: transform KEEPS the kind=static schema pin on the same entry (moving_json.schema_sha256)" \
+	|| bad "k8U unit: moving_json.schema_sha256 should have survived"
+[ "$(jq -r '.artifact_manifest.fixed_json.sha256 // "ABSENT"' "$K8U_BASE/derived.json")" != "ABSENT" ] \
+	&& ok "k8U unit: transform KEEPS an unrelated kind=static payload pin (fixed_json.sha256)" \
+	|| bad "k8U unit: fixed_json.sha256 should have survived"
+rm -rf "$K8U_BASE"
+
+# ---- k8: apply the SAME transform to the real files, assert the postcondition
+K8_BASE="$(mktemp -d -t identity-pins-k8.XXXXXX)"
+K8_REG="$K8_BASE/publication.json"
+K8_ID="$K8_BASE/identity.json"
+
+jq '.known_kind_violations.violations = {}' "${REPO_ROOT}/deploy/publication.json" > "$K8_REG"
+jq --slurpfile reg "$K8_REG" "$K8_DERIVE_JQ" "${REPO_ROOT}/public/api/identity.json" > "$K8_ID"
+
+K8_STREAM_LEFT="$(jq -r --slurpfile reg "$K8_REG" '
+	($reg[0].publications) as $pubs
+	| def kind_of($u): ( ($u // "") | sub("^https?://[^/]+/"; "") ) as $rel
+		| ( [ $pubs[] | select(.path == $rel) | .kind ] | first // "unknown" );
+	[ .artifact_manifest | to_entries[]
+	  | select( (.value.sha256 != null and (kind_of(.value.url)) == "stream")
+	         or (.value.schema_sha256 != null and (kind_of(.value.schema_url)) == "stream") )
+	  | .key
+	] | length
+' "$K8_ID")"
+[ "$K8_STREAM_LEFT" -eq 0 ] \
+	&& ok "k8 postcondition: zero remaining kind=stream sha256/schema_sha256 pins after derivation" \
+	|| bad "k8 postcondition: ${K8_STREAM_LEFT} kind=stream pin(s) still carry a digest after derivation"
+
+# Informational only — NOT gating (this is the exact assertion C-2 removed
+# from the pass/fail path). Shows whether this run stripped real pins
+# (today) or found the manifest already clean (post step 4b); both are
+# legitimate, and which one is true on any given day does not change k8's
+# verdict.
+K8_REMOVED=$(( $(jq -r '.artifact_manifest | to_entries | map(select(.value.sha256 != null)) | length' "${REPO_ROOT}/public/api/identity.json") \
+             - $(jq -r '.artifact_manifest | to_entries | map(select(.value.sha256 != null)) | length' "$K8_ID") ))
+echo "NOTE  k8: derivation removed ${K8_REMOVED} sha256 pin(s) from today's real manifest (0 is the expected, correct value once docs/CYCLE_GATE.md step 4b has landed)"
+
+OUT="$(FYD_REPO_ROOT="$REPO_ROOT" FYD_REGISTRY="$K8_REG" FYD_IDENTITY_FILE="$K8_ID" \
+	IDENTITY_PIN_LOG="$K8_BASE/drift.log" IDENTITY_PIN_ALERT_STATE="$K8_BASE/state.json" \
+	FYD_NOTIFY="$K8_BASE/nonexistent-notify.sh" \
+	bash "$CHECKER" --mode=repo 2>&1)"; RC=$?
+[ "$RC" -eq 0 ] \
+	&& ok "k8 SIMULATED post-9/4 state (jq-derived from real files): exit 0" \
+	|| bad "k8 SIMULATED post-9/4 state: exit 0 (actual=$RC, out: $OUT)"
+echo "$OUT" | grep -qE '^(KIND-BASELINED|KIND-VIOLATION|KIND-UNKNOWN|KIND-INVALID) ' \
+	&& bad "k8 SIMULATED post-9/4 state: still reports a kind-gate line (cleanup incomplete in the simulation)" \
+	|| ok "k8 SIMULATED post-9/4 state: no kind-gate line remains (matches the intended step-4b end state)"
+echo "$OUT" | grep -q 'kind-new=0' \
+	&& ok "k8 SIMULATED post-9/4 state: summary reports kind-new=0" || bad "k8 summary kind-new=0 (out: $OUT)"
+rm -rf "$K8_BASE"
 
 echo
 echo "test-check-identity-pins.sh summary: ${PASS} PASS / ${FAIL} FAIL"

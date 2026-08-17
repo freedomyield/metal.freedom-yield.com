@@ -42,6 +42,10 @@
 # T19 forward regression: the suite behaves correctly against the post-C4
 #     manifest shape (streams listed unpinned, a record pinned on a directory
 #     row), including a mutation that reproduces the pre-fix T7 false pass
+# T20 pin_policy wording (S3): the record-kind defining clause is copied,
+#     not independently reworded, across deploy/publication.json,
+#     public/api/identity.schema.v1.json and
+#     scripts/operator-local/gen-identity.sh
 
 set -uo pipefail
 
@@ -52,6 +56,8 @@ RENDER="${REPO_ROOT}/scripts/deploy/render-publication.sh"
 IDENTITY="${REPO_ROOT}/public/api/identity.json"
 SENDER="${REPO_ROOT}/scripts/push-to-web-host.sh"
 RECEIVER="${REPO_ROOT}/scripts/deploy/receive-subdir-allowlist.snippet.sh"
+IDENTITY_SCHEMA="${REPO_ROOT}/public/api/identity.schema.v1.json"
+GEN_IDENTITY="${REPO_ROOT}/scripts/operator-local/gen-identity.sh"
 
 PASS=0
 FAIL=0
@@ -62,7 +68,7 @@ note() { printf '      %s\n' "$1"; }
 TMPDIR_T="$(mktemp -d -t fyd-pubreg.XXXXXX)"
 trap 'rm -rf "$TMPDIR_T"' EXIT
 
-for f in "$REGISTRY" "$SCHEMA" "$RENDER" "$IDENTITY" "$SENDER" "$RECEIVER"; do
+for f in "$REGISTRY" "$SCHEMA" "$RENDER" "$IDENTITY" "$SENDER" "$RECEIVER" "$IDENTITY_SCHEMA" "$GEN_IDENTITY"; do
 	[ -r "$f" ] || { echo "FATAL: missing prerequisite: $f" >&2; exit 2; }
 done
 command -v jq >/dev/null 2>&1 || { echo "FATAL: jq required" >&2; exit 2; }
@@ -826,6 +832,152 @@ t19() {
 	[ "$bad" -eq 0 ] || true
 }
 t19
+
+# ---------------------------------------------------------------------------
+# T20 — pin_policy wording (S3): the `record` kind's defining clause must not
+# drift into independently-reworded copies. deploy/publication.json's own
+# record_caveat text says as much by name ("docs/IDENTITY_VERIFICATION.md and
+# identity.json's pin_policy carry that same wording and must stay in step
+# with this row") — nothing checked that claim before this test existed.
+#
+# What IS checked here, and what is deliberately NOT:
+#   - kind_definitions.record (this registry, the taxonomy authority), the
+#     `kind` enum's description in public/api/identity.schema.v1.json, and
+#     the --arg pin_policy_rule literal in
+#     scripts/operator-local/gen-identity.sh must all contain the same
+#     canonical sentence VERBATIM (a substring check, not whole-block
+#     equality: the three documents are deliberately different lengths for
+#     different audiences — a terse schema one-liner, a verbose registry
+#     definition with its own correction history, and an operational rule
+#     embedded in signed output — so forcing them byte-identical end to end
+#     would make at least two of them unreadable).
+#   - docs/IDENTITY_VERIFICATION.md is judged NOT a fit for this check: it is
+#     operator-facing prose that explains the same facts in its own voice
+#     (see its own sentence: "The rule is also restated in-band ... so the
+#     manifest explains itself without reference to this document" — it
+#     explicitly does not claim to restate pin_policy verbatim). Forcing
+#     literal-text sync there would fight the document's own purpose. This
+#     was a judgment call, not an oversight — recorded here so it is
+#     reviewable rather than silent.
+#   - gen-identity.sh's literal pin_policy_* strings vs
+#     public/api/identity.example.json's pin_policy object ARE held to full
+#     byte equality, but as a RUNTIME-BEHAVIOUR case (does the actual
+#     generator output match the committed preview?) — see
+#     tests/identity-kind-discipline/test-gen-identity-kind-discipline.sh
+#     case 1, not here.
+# ---------------------------------------------------------------------------
+t20() {
+	local phrase bad=0 field_value
+
+	# Review finding (I-3, 2026-08-17): the original implementation grepped
+	# the WHOLE FILE for each source, then named a SPECIFIC field in its PASS
+	# message ("kind_definitions.record carries..."). A file-wide grep passes
+	# even when the phrase is moved to an unrelated key elsewhere in the same
+	# file — measured: relocating the clause from kind_definitions.record to
+	# a decoy key (_scratch_note) left T20 green. Fixed to extract the exact
+	# field's VALUE first (jq for the two JSON sources; the single physical
+	# line the --arg is declared on for the bash source, so a comment or an
+	# unrelated string elsewhere in gen-identity.sh cannot satisfy this
+	# either) and grep only that.
+	phrase="derived from a digest of the content it addresses, so whatever that digest covers cannot change without the name changing too"
+
+	field_value="$(jq -r '.kind_definitions.record // ""' "$REGISTRY")"
+	if printf '%s' "$field_value" | grep -qF -- "$phrase"; then
+		pass "T20 deploy/publication.json's .kind_definitions.record field (not just the file) carries the canonical record clause"
+	else
+		fail "T20 deploy/publication.json's .kind_definitions.record field does NOT carry the canonical record clause verbatim — has it been reworded without propagating?"
+		bad=1
+	fi
+
+	field_value="$(jq -r '.properties.artifact_manifest.additionalProperties.properties.kind.description // ""' "$IDENTITY_SCHEMA")"
+	if printf '%s' "$field_value" | grep -qF -- "$phrase"; then
+		pass "T20 public/api/identity.schema.v1.json's .kind.description field (not just the file) carries the canonical record clause"
+	else
+		fail "T20 public/api/identity.schema.v1.json's .kind.description field does NOT carry the canonical record clause verbatim — DRIFTED from deploy/publication.json"
+		bad=1
+	fi
+
+	# gen-identity.sh is bash, not JSON, so there is no field to jq out —
+	# but grepping the whole file has the same decoy risk (an unrelated
+	# comment mentioning the same words would satisfy a whole-file grep).
+	# Narrowed to the single physical line the --arg is declared on: this
+	# script writes pin_policy_rule as one unbroken line (measured), so a
+	# line-scoped grep is exactly field-scoped here.
+	field_value="$(grep -F -- 'pin_policy_rule "' "$GEN_IDENTITY")"
+	if [ -n "$field_value" ] && printf '%s' "$field_value" | grep -qF -- "$phrase"; then
+		pass "T20 scripts/operator-local/gen-identity.sh's pin_policy_rule line (not just the file) carries the canonical record clause"
+	else
+		fail "T20 scripts/operator-local/gen-identity.sh's pin_policy_rule line does NOT carry the canonical record clause verbatim — DRIFTED from deploy/publication.json"
+		bad=1
+	fi
+
+	[ "$bad" -eq 0 ] && pass "T20 the record-kind defining clause is present verbatim, in the specific field/line, in all 3 authoritative sources"
+}
+t20
+
+# ---------------------------------------------------------------------------
+# T21 — cross-implementation agreement (I-5, 2026-08-17). registry_kind_of()
+# in scripts/check-identity-pins.sh is a HAND-COPY of this file's own
+# registry_row_for_path()/kind_of() (a THIRD copy exists in
+# scripts/operator-local/gen-identity.sh's registry_kind_of_path — outside
+# this task's edit scope and NOT covered here; that is a disclosed gap, not
+# a claim that all three agree). Nothing verified the two copies inside this
+# task's scope actually resolve the same path to the same kind before this
+# test existed, and they had in fact diverged once already: a
+# `select($p | startswith(.path))` bug in the checker's copy silently
+# rebound `.` to a string and errored on every directory-row (kind=record)
+# path, undetected until an unrelated case
+# (tests/identity-pins/test-check-identity-pins.sh's k7R) tripped over it by
+# accident. This extracts the CHECKER's ACTUAL jq program — the exact bytes
+# between the two T21-SENTINEL comment lines inside registry_kind_of(), not
+# a re-transcription of it — and runs it standalone via `jq -f` against
+# every path this registry declares, plus directory-member paths that do and
+# do not match api/archive/'s member_pattern, comparing each verdict to this
+# file's own kind_of().
+# ---------------------------------------------------------------------------
+t21() {
+	local prog_file bad=0 n=0 path own_kind checker_kind
+	prog_file="${TMPDIR_T}/checker-registry-kind-of.jq"
+	sed -n '/# T21-SENTINEL-BEGIN/,/# T21-SENTINEL-END/p' "${REPO_ROOT}/scripts/check-identity-pins.sh" > "$prog_file"
+	if [ ! -s "$prog_file" ]; then
+		fail "T21 could not extract registry_kind_of's jq program from scripts/check-identity-pins.sh — sentinel markers missing?"
+		return
+	fi
+
+	run_checker_kind_of() { jq -r --arg p "$1" -f "$prog_file" "$REGISTRY"; }
+
+	compare_one() {
+		n=$((n + 1))
+		own_kind="$(kind_of "$1")"
+		checker_kind="$(run_checker_kind_of "$1")"
+		if [ "$own_kind" != "$checker_kind" ]; then
+			fail "T21 ${1}: this suite's kind_of()='${own_kind}' but the checker's registry_kind_of()='${checker_kind}'"
+			bad=1
+		fi
+	}
+
+	# Every exact publications[] path (~40 rows: every kind=stream/static/record
+	# publication this registry declares).
+	while IFS= read -r path; do
+		[ -n "$path" ] || continue
+		compare_one "$path"
+	done <<< "$(jq -r '.publications[].path' "$REGISTRY")"
+
+	# Directory-member resolution: one path that matches api/archive/'s
+	# member_pattern (kind=record via the row) and one that does not
+	# (date-keyed — kind="", no row governs it, per M3 in
+	# tests/identity-kind-discipline/test-gen-identity-kind-discipline.sh),
+	# plus the same pair for api/peers-history/ (kind=stream).
+	compare_one "api/archive/anchor-source-0000000000000000000000000000000000000000000000000000000000000001.json"
+	compare_one "api/archive/anchor-source-2026-08-14.json"
+	compare_one "api/peers-history/peers-2026-08-14.json.gz"
+	compare_one "api/peers-history/not-a-date.json.gz"
+
+	[ "$bad" -eq 0 ] \
+		&& pass "T21 registry_kind_of() (scripts/check-identity-pins.sh, extracted verbatim) agrees with this suite's own kind_of() for all ${n} paths tried" \
+		|| note "T21 checked ${n} path(s); see FAIL lines above for the disagreements"
+}
+t21
 
 # ---------------------------------------------------------------------------
 # T15 — mutation self-proof.

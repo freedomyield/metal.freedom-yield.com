@@ -213,6 +213,32 @@ if [ -f "$OUT_JSON" ]; then
 	else
 		fail "c1 pin_policy missing from the manifest"
 	fi
+
+	# S3: pin_policy wording lives in TWO places that must never drift apart —
+	# the three --arg pin_policy_* literals in this script (the source of
+	# truth: this is the code path that actually signs a manifest) and
+	# public/api/identity.example.json's pin_policy object (a committed
+	# preview of exactly what this script produces, read by third parties
+	# who want the shape without running the generator). Nothing enforced
+	# that agreement before this suite existed: identity.example.json could
+	# drift arbitrarily far from the real wording and nothing would notice.
+	# Compared against the REAL example.json (not a fixture copy) — there is
+	# nothing to derive here, the file under test either matches production
+	# or it does not.
+	EXAMPLE_JSON="${REPO_SRC}/public/api/identity.example.json"
+	if [ -r "$EXAMPLE_JSON" ]; then
+		for field in source rule merkle_leaves; do
+			PRODUCED="$(jq -r --arg f "$field" '.pin_policy[$f] // "ABSENT"' "$OUT_JSON")"
+			DECLARED="$(jq -r --arg f "$field" '.pin_policy[$f] // "ABSENT"' "$EXAMPLE_JSON")"
+			if [ "$PRODUCED" = "$DECLARED" ] && [ "$PRODUCED" != "ABSENT" ]; then
+				pass "c1 pin_policy.${field} matches public/api/identity.example.json byte-for-byte"
+			else
+				fail "c1 pin_policy.${field} DRIFTED from public/api/identity.example.json (produced ${#PRODUCED} chars, declared ${#DECLARED} chars)"
+			fi
+		done
+	else
+		fail "c1 public/api/identity.example.json not found at ${EXAMPLE_JSON} — cannot check pin_policy wording agreement"
+	fi
 else
 	fail "c1 no identity.json produced"
 fi
