@@ -87,11 +87,12 @@ phase 2  identity  Mac: gen-identity → commit → push → deploy 着地確認
 phase 3  compose   host: gen-anchor-source → Mac へ転送 → commit → push → deploy 着地確認
 ⏸ 停止3: testnet keystore unlock (broadcast 認可は script 起動そのもので自動成立)
 phase 4  rehearsal Mac: testnet 通し稽古 (コマンドを印字して停止)
-phase 5  刻印      Mac: preview(7b)
+phase 5  刻印      Mac: preview(7b) (印字して停止。orchestrator は実行しない)
    ⏸ 停止4a: mainnet keystore unlock + broadcast 認可(7b 完了後・7c 直前 —
               phase5 の入口ではなく phase5 内部)
               → 署名+broadcast(7c) → fragment 転送(7.5)
-   ⏸ 停止4b: explorer 目視確認(7c 完了後 — phase5 の外の事後確認)
+   ⏸ 停止4b: explorer 目視確認 → re-lock(空 Enter で新パスワード生成に注意)
+              (いずれも 7c 完了後。7.5 と並行/前後 — phase5 の外とまでは断定しない)
 phase 6  事後      host: receipt 7-gate → history append → 公開 push → resume --apply
 ```
 
@@ -133,11 +134,21 @@ unit 本文で示す):
     印字する。認可の対象がまだ存在しない 7b の前で認可を与えることは
     機構上できない。よって (a) は phase5 の入口ではなく、phase5 内部・
     7b 完了後・7c 直前に位置する。
-  - **(b) explorer 目視確認**: 7c (broadcast) が終わった後にしか行えない、
-    正真正銘の事後確認。`docs/CYCLE_GATE.md` step 9 直後の結び文
-    (「AI reads back step 7's tx id and reports the explorer URL … gate
-    2's authorization happens before that step runs, not after」)が同じ
-    区別をしている。
+  - **(b) explorer 目視確認 → mainnet keystore re-lock**:
+    `scripts/cycle-transition.sh:280` の (b) 全文は `AFTER unit 7c: confirm
+    the transaction on the explorer by eye, then re-lock the mainnet
+    keystore — its prompt reads "Enter 32 character password (leave empty
+    to create new)", and an empty Enter there creates a NEW password
+    instead of locking with the existing one.` — 目視確認だけでなく
+    re-lock と、その空 Enter が新パスワードを作ってしまう危険まで含む。
+    `docs/CYCLE_GATE.md` step 9 直後の結び文 (「AI reads back step 7's tx
+    id and reports the explorer URL … gate 2's authorization happens
+    before that step runs, not after」)も 7c より後であることを言っている。
+    **ただし「AFTER unit 7c」としか実装は言っておらず、「phase5 の外」とまで
+    は断定していない**: `:313` の `7.5|5` (fragment 転送 (7.5) も phase5 の
+    unit で、7c の後に来る) を踏まえると、(b) は 7c 完了後 — phase5 の残り
+    unit である 7.5 と並行、またはその前後 — に位置する事後アクションと
+    言うにとどめるのが正確。
 
 **前回是正の何が誤りだったか、正直に記録する**: 前回、停止4 を
 「phase5 の入口として正しい」と書いた。これは「phase を終えてから止まる」

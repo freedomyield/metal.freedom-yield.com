@@ -279,26 +279,39 @@ topology (validator host + operator Mac)**, in this fixed day-of order
 
    **To confirm a real (not dry) run, look for a positive signal — don't
    rely on the absence of `DRY:` alone.** `fyd_is_live`-guarded stdout lines
-   that only a live run prints: `Appended daily entry for <date> …` on every
-   run (`scripts/uptime-history.sh:167-169`), and on a cycle boundary
-   `Closed cycle #<N>: …` (`:259-261`) plus `Wrote <uptime-recent.json>
-   (<n> total …)` / `Wrote <uptime-cycles.json> (<n> cycles)` (`:287-290`).
-   `Closed cycle #<N>: …` in particular names the exact thing this step
-   exists to do — it is the strongest signal. The absence of `DRY:` lines is
-   a weaker, negative-only check: a second, unrelated exit-0-with-no-`DRY:`
-   path exists if `scripts/cycle-gate.sh` is missing or non-executable
-   (this doc's Rollback lever 2, `chmod -x` — see below) — the cycle-boundary
-   half of this script (Job B) then skips silently with no `DRY:` marker at
-   all (`:186-189`), independent of `FY_LIVE`.
+   that only a live run prints: `Appended daily entry for <date> …` on a run
+   that actually appends a new daily row — gated by the `EXISTING` check at
+   `scripts/uptime-history.sh:149`; a day that already has a row instead
+   prints `Daily entry for $TODAY already present, skipping append`
+   (`:171`), which is **not** gated on `fyd_is_live` and so appears in both
+   dry and live runs — and, on a cycle boundary, `Closed cycle #<N>: …`
+   (`:259-261`) plus `Wrote <uptime-recent.json> (<n> total …)` /
+   `Wrote <uptime-cycles.json> (<n> cycles)` (`:287-290`). `Closed cycle
+   #<N>: …` in particular names the exact thing this step exists to do —
+   it is the strongest signal. The absence of `DRY:` lines is a weaker,
+   negative-only check: a second, unrelated exit-0 path exists if
+   `scripts/cycle-gate.sh` is missing or non-executable (this doc's
+   Rollback lever 2, `chmod -x` — see below) — the cycle-boundary half of
+   this script (Job B) then skips, independent of `FY_LIVE`. This is not
+   silent: it prints its own named stderr line (`[uptime-history]
+   cycle-gate.sh missing or non-executable → skip Job B (fail-closed)`,
+   `:187`) — it simply carries no `DRY:` tag, so a check that greps only
+   for `DRY:` would miss it.
 
    Run this step verbatim without `FY_LIVE=1` and cycle N's uptime record is
    never closed — but this does **not** silently pollute step 3's output
    with a wrong row. `gen-cycle-history.sh` maps `uptime-cycles.json`'s
    `.cycles` array to output rows 1:1 (`sort_by(.cycle_n) | .[]`,
    `scripts/gen-cycle-history.sh:153-190`), so with no cycle-N element
-   present it emits **no cycle-N row at all** — the regenerated
-   `cycle-history.jsonl` is byte-identical to the previous run, not a stale
-   one. The failure surfaces downstream instead: `CLOSED_COUNT` stays at
+   present it emits **no cycle-N row at all** — no cycle-N row is added,
+   full stop. Whether the regenerated `cycle-history.jsonl` is
+   byte-identical to the previous run additionally depends on
+   `incidents.json`, `gen-cycle-history.sh`'s other canonical input
+   (`:105-106`): if that file is unchanged since the last regeneration the
+   output is byte-identical; if it changed, existing rows' incident fields
+   are recomputed and the bytes differ even though no cycle-N row exists.
+   Either way the row count for cycle N does not grow. The failure surfaces
+   downstream instead: `CLOSED_COUNT` stays at
    N-1, which step 3's own "grew by exactly one line" check (below) is
    designed to catch directly; even if that check were skipped, step 4's
    `gen-identity.sh` (**exit 7**) and step 5's `gen-anchor-source.sh`

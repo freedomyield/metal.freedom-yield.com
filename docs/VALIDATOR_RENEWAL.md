@@ -276,8 +276,10 @@ append / `current-cycle-state.json` / cycle-close summary / public preview
 の **4 write すべて**(3 ではない)が `DRY: would …` に化けて何も書かれない
 (`resume-after-cycle-start.sh`(手順⑨)の exit 6 拒否とは違う挙動)。
 「書けた」確認は `DRY:` 行が無いことだけに頼らない — `Closed cycle #<N>: …`
-等 live 実行時のみ出る成功行の方が強い証拠(cycle-gate.sh 欠落時は `DRY:`
-行自体が出ないまま Job B が skip される別経路もある)。この step が dry の
+等 live 実行時のみ出る成功行の方が強い証拠(cycle-gate.sh 欠落時は Job B が
+skip される別経路もあり、そのときも `[uptime-history] cycle-gate.sh missing
+or non-executable → skip Job B (fail-closed)` という別の stderr 行は出る —
+`DRY:` タグが付かないだけで無言ではない)。この step が dry の
 まま先へ進んでも手順③の「+1 行」検証や手順④⑤の exit 7 / exit 9 ガードが
 止める(**stale な行が公開される、ではなく行が増えないまま止まる**)。
 実測込みの詳細は `docs/CYCLE_GATE.md` step 2 参照
@@ -340,8 +342,11 @@ AI が応答不能な場合、 operator は本書「AI が裏で自走する技�
 # gen-cycle-history.sh → push-to-web-host.sh まで素通りする。ただし公開される
 # cycle-history.jsonl は「stale な行」ではない — gen-cycle-history.sh は
 # uptime-cycles.json の .cycles 配列を 1:1 で行に写すだけなので、cycle N の
-# 要素が無ければ cycle N の行は作られず、前回と byte 一致のまま止まる
-# (docs/CYCLE_GATE.md step 2 参照)。この場合に頼れるのは下の
+# 要素が無ければ cycle N の行は作られない(incidents.json も不変なら前回と
+# byte 一致、incidents.json 側だけ変化していれば既存行の incident 集計が
+# 再計算されて bytes は変わるが、cycle N の行数自体は増えない — いずれも
+# 「stale な cycle N 行が公開される」ではない。docs/CYCLE_GATE.md step 2
+# 参照)。この場合に頼れるのは下の
 # 「公開 cycle-history.jsonl が 1 行増えたことを実測確認」の一文と、
 # 手順④ gen-identity.sh の exit 7 / 手順⑤ gen-anchor-source.sh の exit 9 の
 # ordering guard — どちらも「行が増えていない」ことを機械的に検知する。
