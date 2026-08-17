@@ -12,10 +12,10 @@
 # (the C3 rollout) gates the production side effects that route THROUGH it —
 # a fyd_notify-wrapped ntfy push, a /var/lib/freedom-yield state write — behind
 # FY_LIVE=1; anything else is a loud dry no-op. advance-host-checkout.sh
-# fires notify.sh alerts on several paths, so this cron must carry the flag
-# now, ahead of that script's own callers migrating onto the lib — landing
-# the flag first avoids the cron silently going dry the day that migration
-# lands. Enforced by check-cron-file.sh Rule 6.
+# routes its alerts through the library's fyd_notify (measured 2026-08-17:
+# 5 side-effects.sh references, 2 fyd_notify call sites), so without the flag
+# on this cron every one of them is a DRY line and nothing reaches ntfy.
+# Enforced by check-cron-file.sh Rule 6.
 #
 # Schedule: 04:45 UTC daily — BEFORE check-host-drift.sh's 05:15 UTC tripwire
 # (scripts/install-metal-host-drift-cron.sh). This ordering is deliberate: a

@@ -864,6 +864,14 @@ teardown
 # The two MUTATION blocks at the end rule out a vacuous green from EITHER
 # side: widen the generator's allowlist, or narrow the checker's, and the
 # comparison has to notice.
+#
+# "Never re-transcribed" is about the ASSERTIONS. The two MUTATION seds below
+# and the shape quoted above do spell the allowlist out, because a mutation
+# OPERATOR and a prose citation are not comparisons — nothing is checked
+# against them. Each sed is followed by a `cmp -s` guard, so a literal that
+# stops matching FAILS the case instead of passing silently: measured
+# 2026-08-17, widening BOTH allowlists in lock step leaves the main
+# comparison green and turns both of those guards red.
 # =============================================================================
 K10_GEN="${REPO_ROOT}/scripts/operator-local/gen-identity.sh"
 if [ ! -f "$K10_GEN" ]; then
@@ -938,11 +946,15 @@ k10_checker_pinnable() {
 }
 
 # The probe kinds. The registry schema's `kind` enum (stream/static/record) is
-# the defined domain; the rest are the shapes that actually reach these two
-# allowlists in practice — a typo, a kind this repo has not invented yet, the
-# literal "unknown" gen-identity.sh substitutes when an archive row resolves
-# to nothing, and a path with no row at all (for which the generator's
-# resolver yields the empty string).
+# the defined domain; the rest are the shapes reachable around it — a typo, a
+# kind this repo has not invented yet, and the literal "unknown"
+# gen-identity.sh substitutes when an archive row resolves to nothing.
+# The empty string (a path with no row) reaches the CHECKER's arm for real —
+# that is its KIND-UNKNOWN case. On the GENERATOR side it is the bottom of
+# the domain rather than a live input: measured 2026-08-17,
+# `${arc_kind:-unknown}` collapses it at the archive call site and the other
+# two call sites die in resolve_kind_or_die (exit 9) before the allowlist is
+# reached. Probing it still holds the two ends of the domain together.
 K10_PROBES='static record stream archive steam unknown @NOROW'
 
 # k10_gen_arg <probe> — the kind string the generator's allowlist is handed

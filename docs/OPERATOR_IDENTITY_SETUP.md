@@ -482,8 +482,11 @@ signed before C4 still carries: it clears
 `identity.json`, because a re-issued manifest carrying none of those four
 pins makes the acknowledgement entries `OBSOLETE` the instant it lands —
 `T7` says so as `OBSOLETE` in CI, the checker says so as `OBSOLETE-KIND-ACK`
-on the host. Landing only one half of that commit is exactly what makes
-either of them speak.
+on the host. Landing the manifest half without the cleanup half is what
+makes either of them speak; the reverse order fails louder rather than
+quieter — with `violations` already `{}` and the old manifest still signed,
+no `OBSOLETE` line appears at all and the checker exits 6 and pushes on four
+`KIND-VIOLATION` lines instead.
 
 ---
 

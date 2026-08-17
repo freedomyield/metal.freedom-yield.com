@@ -1309,7 +1309,7 @@ t22() {
 		printf '%s|%s' "$rc" "$out"
 	}
 	# NAMED for what it is: the jq expression RE-TYPED here, not extracted
-	# from identity_pins() (copy 3) or K8_DERIVE_JQ (copy 4). Comparing
+	# from identity_pins() (copy 3) or K8_KIND_OF_JQ (copy 4). Comparing
 	# against it measures jq-vs-bash SEMANTICS, never that those two copies
 	# still spell it this way. See "What (b) does NOT check" in the header
 	# before strengthening any claim built on this.

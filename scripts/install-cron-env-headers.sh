@@ -14,9 +14,12 @@
 # gates the production side effects that route THROUGH it — a
 # fyd_notify-wrapped ntfy push, a /var/lib/freedom-yield state write — behind
 # FY_LIVE=1. It does not reach inside notify.sh or push-to-web-host.sh:
-# neither carries a gate of its own, and Rule 6 requires the flag on their
-# crons as allowlist POLICY rather than because either script reads it (the
-# settled account is docs/CRON_CONVENTIONS.md's Rule 6 section). The
+# neither carries a gate of its own. What covers that gap differs between the
+# two — every call site of notify.sh in this repo goes through the fyd_notify
+# wrapper, so the flag still bites there, while push-to-web-host.sh is
+# invoked directly everywhere and Rule 6 requires the flag on its crons as
+# allowlist POLICY rather than because the script reads it (the settled
+# account is docs/CRON_CONVENTIONS.md's Rule 6 section). The
 # scripts/install-*-cron.sh generators now write the flag into every NEW
 # install, but a file installed before this landed has no way to pick it up
 # except a full re-run of its (sometimes root-only, sometimes
