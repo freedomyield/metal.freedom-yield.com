@@ -96,6 +96,10 @@ logs/anchor-publish-health-mismatch-state.json
 # — 同じ理由で個別指定が必要。cron の live 実行が public repo の作業ツリーに
 # untracked JSON を落とさないようにする
 logs/identity-pin-alert-state.json
+# pulsevm 上流監視の前回観測 state (scripts/check-pulsevm-upstream.sh)
+# — 同じ理由で個別指定が必要。中身は「前回 upstream がどう見えたか」の観測記録
+# であって repo の成果物ではない(差分検知の基準そのものなので host ローカル)
+logs/pulsevm-upstream-state.json
 
 # ---- Local-only artifacts ----
 # CI/CD で deploy 時に生成、コミット不要
