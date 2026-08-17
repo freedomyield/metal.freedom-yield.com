@@ -81,7 +81,13 @@
 # $REGISTRY_JSON feed below are outside what T21 sees (measured: breaking the
 # --arg wiring leaves T21 green and is caught by tests/identity-pins/
 # instead). See registry_kind_of() further down for how each copy is
-# extracted. deploy/feed-excludes.txt is NOT the authority
+# extracted. Agreeing on the KIND is only half of it; agreeing on which kinds
+# may be pinned is the other half, and that allowlist is duplicated too (the
+# `case "$RKIND" in` below and the generator's kind_is_pinnable()). Since
+# 2026-08-17 tests/identity-pins/'s k10 holds those two together as well,
+# by running this script black-box over a probe set of kinds and comparing
+# each verdict with the generator's own extracted function.
+# deploy/feed-excludes.txt is NOT the authority
 # for this check: it is a narrower list (push-owned paths only) and carries
 # no `kind` at all — api/archive/ is ON feed-excludes.txt (git never
 # carries it) but is kind=record (safe to pin), which is exactly the
@@ -208,10 +214,13 @@
 #      (the `case "$RKIND" in` below) and scripts/operator-local/
 #      gen-identity.sh's kind_is_pinnable() in the same change. Never widen
 #      one without the other; that is exactly the disagreement Check 2
-#      exists to prevent. NOTE (2026-08-17): T21 machine-checks that the two
-#      scripts RESOLVE a path to the same kind, but nothing yet checks that
-#      the two PINNABILITY allowlists list the same kinds. Widening one
-#      alone is still caught only by this instruction, not by a test.
+#      exists to prevent. Since 2026-08-17 that is enforced as well as
+#      instructed: tests/identity-pins/'s k10 runs THIS script's gate
+#      black-box over a probe set of kinds and compares every verdict
+#      against gen-identity.sh's kind_is_pinnable(), extracted by name and
+#      executed. Widening one allowlist alone turns it red, and so does
+#      narrowing one alone — its MUTATION A and MUTATION B prove each
+#      direction. Extending both in the same change is what keeps it green.
 #
 # ---------------------------------------------------------------------------
 # Usage
@@ -742,7 +751,14 @@ EOF
 #   - pushing it would be exactly the false urgency this project forbids.
 # Same three conditions T7 uses, so the two can never disagree about what
 # "obsolete" means: the pin is gone, the declared path drifted away from the
-# pin's real target, or the target is no longer kind=stream.
+# pin's real target, or the target is no longer kind=stream. One measured
+# asymmetry, left in place deliberately (review finding M-5, 2026-08-17):
+# for an entry with no `path` key at all, the `// ""` + [ -n ] guard below
+# skips condition 2 and falls through to condition 3, while T7 reads `.path`
+# raw and fails. Unreachable — deploy/publication.schema.v1.json makes
+# `path` required there and T11 fails if the registry stops validating — and
+# T7's side is the stricter one, so aligning them would mean weakening a
+# live CI assertion to match a robustness guard. See T7's header.
 while IFS= read -r ACK_ID; do
 	[ -n "$ACK_ID" ] || continue
 	ACK_PATH="$(printf '%s' "$REGISTRY_JSON" | jq -r --arg id "$ACK_ID" '(.known_kind_violations.violations[$id].path) // ""')"

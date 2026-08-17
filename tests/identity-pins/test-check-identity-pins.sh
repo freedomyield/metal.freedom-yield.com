@@ -830,6 +830,215 @@ alerts | grep -q 'tracked-pin mismatch' && ok "k7LM live: the SAME push ALSO nam
 teardown
 
 # =============================================================================
+# k10 — THE PINNABILITY ALLOWLIST, held across BOTH scripts that own a copy of
+# it (S6 I-2, descoped there, closed 2026-08-17).
+#
+# tests/publication-registry/'s T21 machine-checks that this checker and
+# scripts/operator-local/gen-identity.sh RESOLVE a path to the same `kind`.
+# It says nothing about what each of them then DOES with that kind, and THAT
+# decision is duplicated too:
+#
+#   (1) scripts/check-identity-pins.sh's `case "$RKIND" in` — static and
+#       record pass the gate; stream, no-row, and any unrecognized value are
+#       refused.
+#   (2) scripts/operator-local/gen-identity.sh's kind_is_pinnable() — the same
+#       allowlist in the shape `static|record) return 0 ;; *) return 1`.
+#
+# (2) is the copy that decides which artifacts get a sha256 into a SIGNED
+# manifest. Widen one without the other and T21 stays green while the
+# generator signs what the gate refuses, or the gate refuses what the
+# generator signed. scripts/check-identity-pins.sh's outcome D already says
+# "never widen one without the other" — until this case existed, that
+# INSTRUCTION was the only thing holding it.
+#
+# Both sides are OBSERVED, never re-transcribed — a re-typed allowlist here
+# would be a third untested copy of the thing under test:
+#   (1) black box — the real checker is run against a synthetic fake repo
+#       whose registry declares the probe kind for the pinned path, and the
+#       checker's own output decides the verdict (a KIND-* refusal line
+#       naming that pin, or no line at all).
+#   (2) the generator's ACTUAL function, extracted BY NAME and sourced into a
+#       subshell, the same technique T21 uses for its copy (c). Nothing in
+#       scripts/ had to change for it to become covered.
+#
+# The two MUTATION blocks at the end rule out a vacuous green from EITHER
+# side: widen the generator's allowlist, or narrow the checker's, and the
+# comparison has to notice.
+# =============================================================================
+K10_GEN="${REPO_ROOT}/scripts/operator-local/gen-identity.sh"
+if [ ! -f "$K10_GEN" ]; then
+	bad "k10 scripts/operator-local/gen-identity.sh not found — the pinnability cross-check could not run"
+else
+
+K10_TMP="$(mktemp -d -t identity-pins-k10.XXXXXX)"
+
+# k10_extract_fn <file> <fn name> — the function's source verbatim, from its
+# `name() {` line to the first line that is exactly `}`. Same shape as
+# tests/publication-registry/test-publication-registry.sh's extract_shell_fn.
+# This is a generic TOOL, not a copy of any rule under test; what it must not
+# do is fail silently, and k10_assert_extraction plus MUTATION A below are
+# what stop a broken extraction from turning the comparison into a vacuous
+# green.
+k10_extract_fn() {
+	awk -v fn="$2" '
+		$0 == fn "() {"     { inside = 1 }
+		inside              { print }
+		inside && $0 == "}" { exit }
+	' "$1"
+}
+
+# k10_assert_extraction <file> <fn name> <label> -> 0 iff the extraction really
+# is that function. Empty, truncated, or gutted must FAIL here, never skip.
+k10_assert_extraction() {
+	local f="$1" fn="$2" label="$3" needle
+	if [ ! -s "$f" ]; then
+		bad "${label}: extraction of ${fn}() produced nothing — was it renamed or reshaped?"
+		return 1
+	fi
+	head -1 "$f" | grep -qxF -- "${fn}() {" || {
+		bad "${label}: extraction of ${fn}() does not begin at its definition line"; return 1; }
+	tail -1 "$f" | grep -qxF -- '}' || {
+		bad "${label}: extraction of ${fn}() does not end at its closing brace"; return 1; }
+	# Structural needles only — deliberately NOT the allowlist's contents,
+	# which are the thing being compared and must not be asserted here.
+	for needle in 'case "$1" in' 'return 0' 'return 1'; do
+		grep -qF -- "$needle" "$f" || {
+			bad "${label}: the extracted ${fn}() does not contain '${needle}' — the extraction is not the allowlist it claims to be"
+			return 1
+		}
+	done
+	return 0
+}
+
+# k10_gen_pinnable <extracted-fn-file> <kind> -> 0 pinnable / non-0 refused
+k10_gen_pinnable() { ( . "$1"; kind_is_pinnable "$2" ); }
+
+# k10_checker_pinnable <kind|@NOROW> <checker path> -> "<verdict> <exit code>"
+# Black-box: build a fake repo, declare <kind> for the pinned api/alpha.json
+# (or delete its row entirely for @NOROW), run the checker, and read the
+# verdict off its own report.
+k10_checker_pinnable() {
+	local kind="$1" checker="$2" out rc
+	build_fake_repo
+	if [ "$kind" = "@NOROW" ]; then
+		jq 'del(.publications[] | select(.path == "api/alpha.json"))' \
+			"$FAKE/deploy/publication.json" > "$BASE/reg.tmp"
+	else
+		jq --arg k "$kind" '(.publications[] | select(.path == "api/alpha.json") | .kind) = $k' \
+			"$FAKE/deploy/publication.json" > "$BASE/reg.tmp"
+	fi
+	mv "$BASE/reg.tmp" "$FAKE/deploy/publication.json"
+	out="$(CHECKER="$checker" run_repo)"; rc=$?
+	if printf '%s\n' "$out" | grep -qE '^KIND-(VIOLATION|UNKNOWN|INVALID) +alpha_json\.sha256'; then
+		printf 'refused %s' "$rc"
+	else
+		printf 'pinnable %s' "$rc"
+	fi
+	teardown
+}
+
+# The probe kinds. The registry schema's `kind` enum (stream/static/record) is
+# the defined domain; the rest are the shapes that actually reach these two
+# allowlists in practice — a typo, a kind this repo has not invented yet, the
+# literal "unknown" gen-identity.sh substitutes when an archive row resolves
+# to nothing, and a path with no row at all (for which the generator's
+# resolver yields the empty string).
+K10_PROBES='static record stream archive steam unknown @NOROW'
+
+# k10_gen_arg <probe> — the kind string the generator's allowlist is handed
+# for this probe.
+k10_gen_arg() { if [ "$1" = "@NOROW" ]; then printf ''; else printf '%s' "$1"; fi; }
+
+# k10_count_disagreements <extracted-fn-file> <checker path> -> how many probe
+# kinds the two allowlists disagree about.
+k10_count_disagreements() {
+	local gsrc="$1" checker="$2" probe gen chk rc d=0
+	for probe in $K10_PROBES; do
+		if k10_gen_pinnable "$gsrc" "$(k10_gen_arg "$probe")"; then gen=pinnable; else gen=refused; fi
+		read -r chk rc <<< "$(k10_checker_pinnable "$probe" "$checker")"
+		[ "$gen" = "$chk" ] || d=$((d + 1))
+	done
+	printf '%s' "$d"
+}
+
+K10_SRC="$K10_TMP/gen-kind-is-pinnable.sh"
+k10_extract_fn "$K10_GEN" kind_is_pinnable > "$K10_SRC"
+if k10_assert_extraction "$K10_SRC" kind_is_pinnable "k10"; then
+	k10_bad=0; k10_n=0; k10_npin=0; k10_nref=0
+	for K10_PROBE in $K10_PROBES; do
+		K10_ARG="$(k10_gen_arg "$K10_PROBE")"
+		if k10_gen_pinnable "$K10_SRC" "$K10_ARG"; then K10_GENV=pinnable; else K10_GENV=refused; fi
+		read -r K10_CHKV K10_RC <<< "$(k10_checker_pinnable "$K10_PROBE" "$CHECKER")"
+		k10_n=$((k10_n + 1))
+		if [ "$K10_GENV" != "$K10_CHKV" ]; then
+			bad "k10 kind='${K10_ARG}': gen-identity.sh's kind_is_pinnable() says ${K10_GENV} but scripts/check-identity-pins.sh's kind gate says ${K10_CHKV} — the two allowlists have drifted apart"
+			k10_bad=1
+		fi
+		case "$K10_CHKV" in
+			pinnable)
+				k10_npin=$((k10_npin + 1))
+				[ "$K10_RC" -eq 0 ] || { bad "k10 kind='${K10_ARG}': the checker raised no kind-gate line but exited ${K10_RC} (expected 0)"; k10_bad=1; }
+				;;
+			refused)
+				k10_nref=$((k10_nref + 1))
+				[ "$K10_RC" -eq 6 ] || { bad "k10 kind='${K10_ARG}': the checker refused the pin but exited ${K10_RC} (expected 6)"; k10_bad=1; }
+				;;
+		esac
+	done
+	# Measured, not assumed: agreement reached over one outcome alone would
+	# also hold for two allowlists that refuse (or accept) everything.
+	if [ "$k10_npin" -lt 2 ] || [ "$k10_nref" -lt 3 ]; then
+		bad "k10 the probe set is too weak to prove agreement (${k10_npin} pinnable / ${k10_nref} refused of ${k10_n}) — both outcomes must be exercised"
+		k10_bad=1
+	fi
+	[ "$k10_bad" -eq 0 ] && ok "k10 both pinnability allowlists agree on all ${k10_n} probe kinds (${k10_npin} pinnable, ${k10_nref} refused): scripts/check-identity-pins.sh's kind gate (observed black-box) and scripts/operator-local/gen-identity.sh's kind_is_pinnable() (function extracted by name)"
+
+	# ---- MUTATION A (generator side): widen kind_is_pinnable() to accept
+	# stream as well, extract THAT, and require the comparison to notice. This
+	# is the direction that would put a moving payload's digest into a signed
+	# manifest.
+	K10_MUT_GEN="$K10_TMP/gen-identity-mutant.sh"
+	K10_MUT_SRC="$K10_TMP/gen-kind-is-pinnable-mutant.sh"
+	sed 's/static|record) return 0/static|record|stream) return 0/' "$K10_GEN" > "$K10_MUT_GEN"
+	if cmp -s "$K10_MUT_GEN" "$K10_GEN"; then
+		bad "k10 MUTATION A could not widen gen-identity.sh's kind_is_pinnable() (its allowlist line was not found) — the mutation proof did not run"
+	else
+		k10_extract_fn "$K10_MUT_GEN" kind_is_pinnable > "$K10_MUT_SRC"
+		if k10_assert_extraction "$K10_MUT_SRC" kind_is_pinnable "k10 MUTATION A"; then
+			K10_NDIS="$(k10_count_disagreements "$K10_MUT_SRC" "$CHECKER")"
+			[ "$K10_NDIS" -ge 1 ] \
+				&& ok "k10 MUTATION A: widening the GENERATOR's allowlist to accept kind=stream is detected (${K10_NDIS} disagreement(s)) — the generator's real function is executed here, not assumed" \
+				|| bad "k10 MUTATION A: a generator that pins kind=stream still agreed with the checker on every probe — the cross-check is not load-bearing"
+		fi
+	fi
+
+	# ---- MUTATION B (checker side): narrow the checker's allowlist to drop
+	# `record`, run the REAL generator function against THAT, and require the
+	# comparison to notice. Mutation A alone cannot rule out a comparison that
+	# is blind in this direction. The mutant needs its sibling
+	# scripts/lib/side-effects.sh (the checker resolves that from its own
+	# dirname and exits 5 without it), so it is written into a scripts/ tree of
+	# its own with the real library SYMLINKED in — never copied, so it cannot
+	# go stale.
+	K10_MUT_DIR="$K10_TMP/scripts"
+	mkdir -p "$K10_MUT_DIR/lib"
+	ln -sf "${REPO_ROOT}/scripts/lib/side-effects.sh" "$K10_MUT_DIR/lib/side-effects.sh"
+	K10_MUT_CHECKER="$K10_MUT_DIR/check-identity-pins.sh"
+	sed 's/^\([[:space:]]*\)static|record)$/\1static)/' "$CHECKER" > "$K10_MUT_CHECKER"
+	if cmp -s "$K10_MUT_CHECKER" "$CHECKER"; then
+		bad "k10 MUTATION B could not narrow check-identity-pins.sh's kind-gate allowlist (the case arm was not found) — the mutation proof did not run"
+	else
+		K10_NDIS="$(k10_count_disagreements "$K10_SRC" "$K10_MUT_CHECKER")"
+		[ "$K10_NDIS" -ge 1 ] \
+			&& ok "k10 MUTATION B: narrowing the CHECKER's allowlist to drop kind=record is detected (${K10_NDIS} disagreement(s)) — the checker side of the comparison is load-bearing too" \
+			|| bad "k10 MUTATION B: a checker that refuses kind=record still agreed with the generator on every probe — the cross-check is blind in that direction"
+	fi
+fi
+
+rm -rf "$K10_TMP"
+fi
+
+# =============================================================================
 # k8U / k8 — real repo, SIMULATED post-9/4 state. jq-DERIVED from the REAL
 # deploy/publication.json and the REAL public/api/identity.json — never a
 # `cp`. A frozen copy would silently stop describing "post cleanup" the day
@@ -869,21 +1078,54 @@ teardown
 #        4b) 0.
 # =============================================================================
 
-# The ONE jq transform, shared verbatim by k8U (synthetic proof) and k8
-# (real-file application) — so k8U is proof about the ACTUAL code path k8
-# runs, not a second hand-typed copy of it (the same "untested duplicate
-# resolution logic" pattern flagged elsewhere, e.g. registry_kind_of, is
-# not worth reintroducing here).
-K8_DERIVE_JQ='
+# The ONE url -> kind prelude, shared verbatim by BOTH jq programs below: the
+# transform, AND the postcondition counter that checks the transform.
+#
+# Review finding (N-1, 2026-08-17): the counter used to carry its OWN
+# hand-typed copy of this def — a fifth spelling of the same rule, in no
+# enumeration and held by no assertion. Measured on the previous revision:
+# break that copy alone and the count answers 0 permanently, so the
+# postcondition reports "zero remaining kind=stream pins" whatever the
+# transform did, the suite stays 104 PASS / 0 FAIL, and the PASS line is
+# byte-identical to a healthy run — a 空振り PASS.
+#
+# Sharing one spelling removes that copy entirely, so there is no longer a
+# break that only the counter can suffer. The k8 postcondition line can
+# still print PASS when THIS prelude is broken — a prelude that resolves
+# nothing makes the transform a no-op and the count 0 together — but it is
+# no longer the only thing looking: the same break now turns k8U red in both
+# directions (it must count 1 before derivation and 0 after) and turns k8's
+# own checker run red as well. Measured after this change: the same
+# one-character break gives 104 PASS / 5 FAIL.
+K8_KIND_OF_JQ='
 	($reg[0].publications) as $pubs
 	| def kind_of($u): ( ($u // "") | sub("^https?://[^/]+/"; "") ) as $rel
 		| ( [ $pubs[] | select(.path == $rel) | .kind ] | first // "unknown" );
+'
+
+# The transform docs/CYCLE_GATE.md step 4b performs, shared verbatim by k8U
+# (synthetic proof) and k8 (real-file application) — so k8U is proof about the
+# ACTUAL code path k8 runs, not a second hand-typed copy of it (the same
+# "untested duplicate resolution logic" pattern flagged elsewhere, e.g.
+# registry_kind_of, is not worth reintroducing here).
+K8_DERIVE_JQ="${K8_KIND_OF_JQ}"'
 	.artifact_manifest |= with_entries(
 		.value |= (
 			( if (kind_of(.url)) == "stream" then del(.sha256) else . end )
 			| ( if (has("schema_url") and (kind_of(.schema_url)) == "stream") then del(.schema_sha256) else . end )
 		)
 	)
+'
+
+# The postcondition k8 asserts against the real files: how many manifest
+# entries still carry a digest whose target the registry calls kind=stream.
+# Same prelude as the transform, by construction.
+K8_COUNT_STREAM_PINS_JQ="${K8_KIND_OF_JQ}"'
+	[ .artifact_manifest | to_entries[]
+	  | select( (.value.sha256 != null and (kind_of(.value.url)) == "stream")
+	         or (.value.schema_sha256 != null and (kind_of(.value.schema_url)) == "stream") )
+	  | .key
+	] | length
 '
 
 # ---- k8U: unit-proof of K8_DERIVE_JQ on synthetic, time-invariant data ----
@@ -907,7 +1149,19 @@ jq -n '{artifact_manifest: {
 		sha256: "3333333333333333333333333333333333333333333333333333333333333333"
 	}
 }}' > "$K8U_ID"
+# The counter must be able to answer NON-ZERO, or k8's postcondition below
+# proves nothing (N-1). Run it first on the UNDERIVED synthetic manifest,
+# which carries exactly one kind=stream payload pin by construction.
+K8U_BEFORE="$(jq -r --slurpfile reg "$K8U_REG" "$K8_COUNT_STREAM_PINS_JQ" "$K8U_ID")"
+[ "$K8U_BEFORE" -eq 1 ] \
+	&& ok "k8U unit: the postcondition counter finds the 1 kind=stream payload pin BEFORE derivation (it can answer non-zero)" \
+	|| bad "k8U unit: the postcondition counter reported ${K8U_BEFORE} kind=stream pin(s) in the underived synthetic manifest, expected 1"
+
 jq --slurpfile reg "$K8U_REG" "$K8_DERIVE_JQ" "$K8U_ID" > "$K8U_BASE/derived.json"
+K8U_AFTER="$(jq -r --slurpfile reg "$K8U_REG" "$K8_COUNT_STREAM_PINS_JQ" "$K8U_BASE/derived.json")"
+[ "$K8U_AFTER" -eq 0 ] \
+	&& ok "k8U unit: the SAME counter reports 0 after derivation — transform and postcondition agree on data whose answer is known" \
+	|| bad "k8U unit: the postcondition counter reported ${K8U_AFTER} kind=stream pin(s) after derivation, expected 0"
 [ "$(jq -r '.artifact_manifest.moving_json.sha256 // "ABSENT"' "$K8U_BASE/derived.json")" = "ABSENT" ] \
 	&& ok "k8U unit: transform strips the kind=stream payload pin (moving_json.sha256)" \
 	|| bad "k8U unit: moving_json.sha256 should have been stripped"
@@ -927,16 +1181,7 @@ K8_ID="$K8_BASE/identity.json"
 jq '.known_kind_violations.violations = {}' "${REPO_ROOT}/deploy/publication.json" > "$K8_REG"
 jq --slurpfile reg "$K8_REG" "$K8_DERIVE_JQ" "${REPO_ROOT}/public/api/identity.json" > "$K8_ID"
 
-K8_STREAM_LEFT="$(jq -r --slurpfile reg "$K8_REG" '
-	($reg[0].publications) as $pubs
-	| def kind_of($u): ( ($u // "") | sub("^https?://[^/]+/"; "") ) as $rel
-		| ( [ $pubs[] | select(.path == $rel) | .kind ] | first // "unknown" );
-	[ .artifact_manifest | to_entries[]
-	  | select( (.value.sha256 != null and (kind_of(.value.url)) == "stream")
-	         or (.value.schema_sha256 != null and (kind_of(.value.schema_url)) == "stream") )
-	  | .key
-	] | length
-' "$K8_ID")"
+K8_STREAM_LEFT="$(jq -r --slurpfile reg "$K8_REG" "$K8_COUNT_STREAM_PINS_JQ" "$K8_ID")"
 [ "$K8_STREAM_LEFT" -eq 0 ] \
 	&& ok "k8 postcondition: zero remaining kind=stream sha256/schema_sha256 pins after derivation" \
 	|| bad "k8 postcondition: ${K8_STREAM_LEFT} kind=stream pin(s) still carry a digest after derivation"
