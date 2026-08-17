@@ -192,6 +192,28 @@ RC=$?
 	|| bad "generate: install-metal-identity-pins-cron.sh writes a candidate file (rc=$RC)"
 lint_file_is_clean "install-metal-identity-pins-cron.sh" "$IP_OUT"
 
+# ---- install-metal-pulsevm-watch-cron.sh --------------------------------------
+PV_OUT="$WORK/pulsevm-watch-cron-file"
+FYD_CRON_TARGET="$PV_OUT" FYD_REPO_PATH="$REPO_ROOT" FYD_BACKUP_DIR="$WORK/pv-backups" \
+	bash "${REPO_ROOT}/scripts/install-metal-pulsevm-watch-cron.sh" >/dev/null 2>&1
+RC=$?
+[ "$RC" -eq 0 ] && [ -f "$PV_OUT" ] \
+	&& ok "generate: install-metal-pulsevm-watch-cron.sh writes a candidate file" \
+	|| bad "generate: install-metal-pulsevm-watch-cron.sh writes a candidate file (rc=$RC)"
+lint_file_is_clean "install-metal-pulsevm-watch-cron.sh" "$PV_OUT"
+# Rule 6 is satisfied here DYNAMICALLY, not by an allowlist entry:
+# check-pulsevm-upstream.sh sources scripts/lib/side-effects.sh, so
+# check-cron-file.sh resolves it as side-effecting on its own. Assert both
+# halves — that the generated file carries FY_LIVE=1, and that the linter
+# names this script as the reason — so a future refactor that stops sourcing
+# the lib cannot quietly turn Rule 6 into a no-op for this cron.
+grep -qE '^FY_LIVE=1$' "$PV_OUT" \
+	&& ok "install-metal-pulsevm-watch-cron.sh: env header carries FY_LIVE=1" \
+	|| bad "install-metal-pulsevm-watch-cron.sh: env header missing FY_LIVE=1"
+bash "$CHECKER" "$PV_OUT" 2>&1 | grep -q 'FY_LIVE=1 present (required by:.*check-pulsevm-upstream.sh' \
+	&& ok "install-metal-pulsevm-watch-cron.sh: Rule 6 detects the checker dynamically (no allowlist entry needed)" \
+	|| bad "install-metal-pulsevm-watch-cron.sh: Rule 6 did not name check-pulsevm-upstream.sh as the reason"
+
 # =============================================================================
 # Group C: install-metal-anchor-publish-health-cron.sh — no FYD_* override
 # at all (always root, always /etc/cron.d/metal-anchor-publish-health), so
