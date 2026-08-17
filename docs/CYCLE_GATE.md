@@ -772,11 +772,27 @@ that actually runs on the day. `docs/PHASE_ALPHA_TESTNET_DRY_RUN.md`'s
 a single run's staleness window; this section extends it to the freeze
 window between a rehearsal and the transition it gates.
 
-The freeze does not block work outside the named execution units (e.g.
-`docs/STRATEGIC_TARGET_ALIGNMENT.md`, or tooling `docs/cycle-transition-steps.json`
-does not list) — only the scripts that file's `steps[].scripts` names.
+The freeze ALSO covers the enforcement / shared-library scripts the named
+execution units call, even where `docs/cycle-transition-steps.json`'s own
+`steps[].scripts` entries do not name them (that file has known gaps: unit
+1's entry is `[]` even though it reads `node-info.sh`'s output, unit 7.5's
+entry is `[]` even though it is an scp round-trip, and unit 7c's entry names
+only `sign-anchor-event.sh`, not the `bin/safe-broadcast` wrapper it always
+invokes). Specifically: `bin/safe-broadcast`, `scripts/lib/side-effects.sh`,
+`scripts/cycle-gate.sh`, and `scripts/node-info.sh` are in scope for the same
+freeze. This matters concretely: `bin/safe-broadcast`'s gate 1 / gate 4
+hardening is the one piece of code a testnet rehearsal cannot exercise at all
+(mainnet-only gates — see `docs/REHEARSAL_2026-09-01.md` F1), so its "0
+commits since the last hardening pass" is exactly the fact the freeze exists
+to protect; leaving it outside the freeze's named scope would have made that
+protection accidental rather than structural.
 
-This is the canonical statement of the rule. For the specific freeze window
+The freeze does not block work outside this scope (e.g.
+`docs/STRATEGIC_TARGET_ALIGNMENT.md`, or tooling neither
+`docs/cycle-transition-steps.json` nor the paragraph above names).
+
+This is the canonical statement of the rule — both the base scope
+(`steps[].scripts`) and the extension above. For the specific freeze window
 and rehearsal it currently gates, see `docs/REHEARSAL_2026-09-01.md` §5 —
 that section records the dates only and defers to this one for the rule
 itself.
