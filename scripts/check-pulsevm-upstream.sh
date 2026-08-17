@@ -16,23 +16,26 @@
 # rebuilt on it. If that happens, two things in this repo break at once:
 #
 #   * bin/safe-broadcast's gate 1 takes its testnet evidence from
-#     /v1/history/get_transaction, and gate 3 reads `proton chain:info`.
-#     The rebooted A-Chain Alpine testnet already exposes NEITHER (its own
-#     endpoints page says the Antelope-style /v1/chain REST "is not currently
-#     exposed"). A permanently-failing gate 1 is a permanent `exit 3`, which
+#     /v1/history/get_transaction (:266) and gate 3 reads `proton chain:info`
+#     (:549). The rebooted A-Chain Alpine testnet offers neither route: its
+#     own endpoints page states the Antelope-style /v1/chain REST "is not
+#     currently exposed" and directs history reads to the Hyperion /v2 API
+#     instead. A permanently-failing gate 1 is a permanent `exit 3`, which
 #     under the Prime Directive means mainnet anchoring stops being possible
 #     at all.
 #   * the public verification story survives, because
-#     scripts/gen-anchor-receipt.sh already prefers Hyperion /v2 and the
-#     chain_id is already externalised into FYD_*_CHAIN_ID.
+#     scripts/gen-anchor-receipt.sh already prefers Hyperion /v2 (:160) and
+#     the chain_id is already externalised into FYD_*_CHAIN_ID (:147-150).
 #
-# The migration has no published date. Metallicus's own properties
-# (metallicus.com, metalblockchain.org, docs.metalblockchain.org,
-# xprnetwork.org) do not mention PulseVM at all as of 2026-08-17; the only
-# place the A-Chain claim is written down is the community-run
-# pulsevm.dev docs site. So there is nothing to build against yet — only
-# something to WATCH. This script is that watch, and its entire design goal
-# is to be silent until one of four specific things becomes true.
+# The migration has no published date. As surveyed on 2026-08-17, Metallicus's
+# own properties (metallicus.com, metalblockchain.org,
+# docs.metalblockchain.org, xprnetwork.org) do not mention PulseVM at all, and
+# the only place the A-Chain claim is written down is the community-run
+# pulsevm.dev docs site — see docs/STRATEGIC_TARGET_ALIGNMENT.md "What PulseVM
+# changed" for that survey and which parts of it were re-measured directly.
+# So there is nothing to build against yet — only something to WATCH. This
+# script is that watch, and its entire design goal is to be silent until one
+# of four specific things becomes true.
 #
 # ---------------------------------------------------------------------------
 # WHAT IT READS (four sources — none of them a chain RPC; see below)
@@ -144,7 +147,14 @@
 #   4  a source did not return HTTP 200 after retrying
 #   5  a source returned 200 but its body could not be parsed (or jq is absent)
 #   6  scripts/lib/side-effects.sh is missing/unreadable
-#  64  this script called the side-effects library incorrectly (see that file)
+#
+# There is deliberately no 64 here. scripts/lib/side-effects.sh returns 64 for
+# "you called me wrong", but every call site in this file either swallows it
+# (alert(), by contract — a watch must not die because its alert channel is
+# down) or ignores it (state_write, whose failure is a logged WARN and never
+# an exit code, matching check-anchor-publish-health.sh's best-effort state
+# contract). So 64 cannot reach the caller, and listing it would describe a
+# path that does not exist.
 #
 # ---------------------------------------------------------------------------
 # ENV OVERRIDES

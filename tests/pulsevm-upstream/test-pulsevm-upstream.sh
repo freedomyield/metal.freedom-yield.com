@@ -198,7 +198,7 @@ seed_state() {
 }
 
 run_checker() {
-	FY_LIVE="${FY_LIVE_OVERRIDE:-1}" \
+	FY_LIVE="${FY_LIVE_OVERRIDE-1}" \
 	FYD_CURL="$STUB" \
 	FYD_NOTIFY="$NOTIFY_STUB" \
 	PULSEVM_UPSTREAM_LOG="$LOG" \
@@ -589,24 +589,34 @@ RC=0; run_checker >/dev/null 2>&1 || RC=$?
 	|| bad "exit5: expected exit 5, got $RC"
 teardown
 
-# ---- case 11 (DRY): without FY_LIVE=1 the repo's logs/ is untouched ---------
-# Run against the checker's OWN defaults (no LOG/STATE override) so this
-# measures the real production paths, and assert the directory listing is
-# byte-identical before and after. Nothing is deleted — if a developer has a
-# real log sitting there, the comparison still holds.
+# ---- case 11a (DRY): the repo's REAL logs/ is untouched ----------------------
+# Deliberately runs against the checker's OWN default LOG and STATE paths — no
+# override — so the containment claim is measured where it matters, and
+# compares a listing plus per-file checksums of logs/ before and after.
+# Nothing is created and nothing is deleted: if a developer (or an earlier
+# suite) has real files sitting there, the comparison still holds.
+#
+# --verbose on purpose. The two DRY notes asserted here are the ones this run
+# emits UNCONDITIONALLY: state_write() is reached on every successful path,
+# and --verbose guarantees at least one log() call whatever the verdict. The
+# notify note is NOT asserted here, because whether a trigger fires depends on
+# whatever state file happens to already exist — case 11b covers that on a
+# path we control. An earlier draft asserted exit 3 here and passed only
+# because logs/ happened to be empty; it went red the moment a previous run
+# left a state file behind, which is precisely the ambient coupling a
+# containment test must not have.
 setup
 LOGS_DIR="${REPO_ROOT}/logs"
 BEFORE="$(ls -A "$LOGS_DIR" 2>/dev/null | sort)"
 BEFORE_SUM="$(cd "$LOGS_DIR" 2>/dev/null && find . -type f -exec shasum {} + 2>/dev/null | sort)"
-OUT="$(FY_LIVE= FYD_CURL="$STUB" FYD_NOTIFY="$NOTIFY_STUB" \
+OUT="$(FY_LIVE='' FYD_CURL="$STUB" FYD_NOTIFY="$NOTIFY_STUB" \
 	PULSEVM_RELEASES_URL="https://example.test/repos/pulsevm/releases/latest" \
 	PULSEVM_ENDPOINTS_URL="https://example.test/network/endpoints.md" \
 	PULSEVM_HEALTH_URL="https://example.test/v2/health" \
 	PULSEVM_LLMS_URL="https://example.test/llms.txt" \
 	S1_BODY="$S1" S2_BODY="$S2" S3_BODY="$S3" S4_BODY="$S4" \
 	STUB_STATE_DIR="$BASE" FYD_RETRY_SLEEP=0 \
-	bash "$CHECKER" 2>&1)"
-RC=$?
+	bash "$CHECKER" --verbose 2>&1)"
 AFTER="$(ls -A "$LOGS_DIR" 2>/dev/null | sort)"
 AFTER_SUM="$(cd "$LOGS_DIR" 2>/dev/null && find . -type f -exec shasum {} + 2>/dev/null | sort)"
 [ "$BEFORE" = "$AFTER" ] \
@@ -615,27 +625,44 @@ AFTER_SUM="$(cd "$LOGS_DIR" 2>/dev/null && find . -type f -exec shasum {} + 2>/d
 [ "$BEFORE_SUM" = "$AFTER_SUM" ] \
 	&& ok "dry: every existing file under logs/ is byte-identical afterwards" \
 	|| bad "dry: an existing logs/ file was modified"
-[ "$RC" -eq 3 ] \
-	&& ok "dry: the verdict and exit code are unchanged by dry mode (still exit 3)" \
-	|| bad "dry: expected exit 3, got $RC (out: $OUT)"
 echo "$OUT" | grep -q 'DRY: would record the pulsevm upstream state' \
 	&& ok "dry: the suppressed state write announces itself" \
 	|| bad "dry: missing the state-write DRY line (out: $OUT)"
 echo "$OUT" | grep -q 'DRY: would append this run.s lines to' \
-	&& ok "dry: the suppressed file log announces itself exactly once" \
+	&& ok "dry: the suppressed file log announces itself" \
 	|| bad "dry: missing the log DRY line (out: $OUT)"
 [ "$(echo "$OUT" | grep -c 'DRY: would append this run')" -eq 1 ] \
 	&& ok "dry: the log DRY note is latched (one line per run, not one per log line)" \
 	|| bad "dry: expected exactly 1 log DRY note, got $(echo "$OUT" | grep -c 'DRY: would append this run')"
+teardown
+
+# ---- case 11b (DRY): the verdict survives dry mode; nothing is written ------
+# Same dry run, but on sandbox paths this suite owns and knows are absent, so
+# the trigger — and therefore the exit code and the suppressed notification —
+# are deterministic.
+setup
+OUT="$(FY_LIVE_OVERRIDE='' run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 3 ] \
+	&& ok "dry: the verdict and exit code are unchanged by dry mode (still exit 3)" \
+	|| bad "dry: expected exit 3, got $RC (out: $OUT)"
+echo "$OUT" | grep -q 'TRIGGER BASELINE' \
+	&& ok "dry: detection still happens — a dry tick is not a blind tick" \
+	|| bad "dry: no verdict emitted (out: $OUT)"
 echo "$OUT" | grep -q 'DRY: would notify' \
 	&& ok "dry: the suppressed ntfy push announces itself" \
 	|| bad "dry: missing the notify DRY line (out: $OUT)"
 [ "$(n_alerts)" -eq 0 ] \
 	&& ok "dry: no notification actually reached the delegate" \
 	|| bad "dry: the notify stub was invoked ($(alerts))"
-echo "$OUT" | grep -q 'TRIGGER BASELINE' \
-	&& ok "dry: detection still happens — a dry tick is not a blind tick" \
-	|| bad "dry: no verdict emitted (out: $OUT)"
+[ ! -e "$STATE" ] \
+	&& ok "dry: the state file was not created" \
+	|| bad "dry: a state file was written in dry mode ($(cat "$STATE" 2>/dev/null))"
+[ ! -e "$LOG" ] \
+	&& ok "dry: the log file was not created" \
+	|| bad "dry: a log file was written in dry mode"
+[ -z "$(find "$(dirname "$STATE")" -name '.pulsevm-upstream.*' 2>/dev/null)" ] \
+	&& ok "dry: no stray mktemp artifact left behind (the whole write body is gated, not just the rename)" \
+	|| bad "dry: a temp file survived the dry run"
 teardown
 
 # ---- case 12 (shape): the checker never names an /ext/bc/ URL ---------------
