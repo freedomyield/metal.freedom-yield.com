@@ -750,6 +750,37 @@ Phase 1 polling tolerates uncertain deploy timing: it polls up to 10 minutes
 for `anchor-source.json` to refresh before failing. To sanity-check first,
 substitute `--dry-run` for `--apply`.
 
+## Script freeze around a rehearsed transition
+
+Once a testnet rehearsal (`scripts/run-testnet-rehearsal.sh`) has been run
+against a specific upcoming cycle transition, any change to a script that
+`docs/cycle-transition-steps.json` names as one of that transition's
+execution units (its `steps[].scripts` entries — e.g.
+`run-testnet-rehearsal.sh`, `preview-cycle-anchor-broadcast.sh`,
+`sign-anchor-event.sh`, `gen-anchor-source.sh`,
+`operator-local/gen-identity.sh`, `uptime-history.sh`,
+`gen-cycle-history.sh`, `push-to-web-host.sh`, `gen-anchor-receipt.sh`,
+`append-anchor-history.sh`, `resume-after-cycle-start.sh`,
+`operator-local/commit-anchor-source.sh`) is permitted only together with a
+re-rehearsal of the affected execution unit(s).
+
+Rationale: a rehearsal's value — whether as PRIME DIRECTIVE gate-1 evidence
+for unit 7a specifically, or as evidence the pipeline shape has not silently
+drifted for the other units — depends on the rehearsed code being the code
+that actually runs on the day. `docs/PHASE_ALPHA_TESTNET_DRY_RUN.md`'s
+"Scope: what a rehearsal run actually proves" applies the same principle to
+a single run's staleness window; this section extends it to the freeze
+window between a rehearsal and the transition it gates.
+
+The freeze does not block work outside the named execution units (e.g.
+`docs/STRATEGIC_TARGET_ALIGNMENT.md`, or tooling `docs/cycle-transition-steps.json`
+does not list) — only the scripts that file's `steps[].scripts` names.
+
+This is the canonical statement of the rule. For the specific freeze window
+and rehearsal it currently gates, see `docs/REHEARSAL_2026-09-01.md` §5 —
+that section records the dates only and defers to this one for the rule
+itself.
+
 ## Rollback
 
 Independent rollback levers, in increasing severity:
