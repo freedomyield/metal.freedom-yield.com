@@ -1212,18 +1212,20 @@ t21
 #   (3) this file's identity_pins()       jq  sub("^https?://[^/]+/"; "")
 #   (4) tests/identity-pins/'s K8_KIND_OF_JQ  jq, the same sub()
 #
-# FOUR is measured, not asserted. `grep -rnF 'sub("^https?://[^/]+/"'` over
-# tests/ and scripts/ (2026-08-17, after N-1) returns EIGHT textual
-# occurrences: three belong to implementations (3) and (4) — identity_pins()
-# spells it twice, once per pin kind — and the other five are two lines of
-# T19's mutation fixture below (a deliberate reproduction of the OLD
-# implementation, not a copy of the current one), jq_spelling_retyped()
-# below (this case's own re-transcription, disclosed under "What (b) does NOT
-# check"), this comment line, and one line of prose in
-# scripts/check-identity-pins.sh. tests/identity-pins/ carried a FIFTH
-# implementation copy — its k8 postcondition counter — until N-1 collapsed it
-# into the shared K8_KIND_OF_JQ prelude named above; that copy was guarded by
-# nothing and produced a 空振り PASS.
+# FOUR is measured, not asserted. Grepping tests/ and scripts/ for the literal
+# jq expression sub("^https?://[^/]+/"; "") returns NINE lines (2026-08-17,
+# after N-1). THREE of them are implementations (3) and (4) — (3) spells it
+# twice, once per pin kind, and (4) once. The other six are not
+# implementations: two lines of T19's mutation fixture below (a deliberate
+# reproduction of the OLD implementation, not a copy of the current one),
+# jq_spelling_retyped() below (this case's own re-transcription, disclosed
+# under "What (b) does NOT check"), one line of prose in
+# scripts/check-identity-pins.sh, and two lines inside this comment block —
+# item (3) above and this sentence's own quotation of the pattern.
+# tests/identity-pins/ carried a FIFTH implementation copy — its k8
+# postcondition counter — until N-1 collapsed it into the shared
+# K8_KIND_OF_JQ prelude named above; that copy was guarded by nothing and
+# produced a 空振り PASS.
 #
 # The review that raised this left it as "duplication across a bash/jq
 # boundary, covered by text matching, do not force a single implementation".
@@ -1259,7 +1261,7 @@ t21
 # against is jq_spelling_retyped() below — the same expression TYPED OUT
 # AGAIN here, not extracted from either. So (b) measures "the jq semantics
 # and the bash semantics agree on the manifest's URLs"; it does NOT measure
-# "identity_pins() and K8_DERIVE_JQ still contain that expression".
+# "identity_pins() and K8_KIND_OF_JQ still contain that expression".
 #
 # This is the very re-transcription T21 refuses a few hundred lines up ("A
 # re-transcription would be a fourth untested copy and would prove nothing").
@@ -1277,7 +1279,7 @@ t21
 # So nothing is unguarded, but the guard is not here, and this case must not
 # be read as providing it. Extracting (3) and (4) the way T21 extracts the
 # two bash resolvers is entirely possible — identity_pins() is a shell
-# function in this file and K8_DERIVE_JQ is a plain variable assignment — and
+# function in this file and K8_KIND_OF_JQ is a plain variable assignment — and
 # is DESCOPED, not blocked. It is the obvious next revision of this case.
 #
 # So the honest summary, which the assertions below enforce rather than
@@ -1363,7 +1365,7 @@ t22() {
 		fail "T22 the signed manifest carried no URL to compare — this half of the case did not run"
 		bad=1
 	else
-		pass "T22 the jq sub() SEMANTICS agree with the bash form on all ${n_real} URL(s) the signed manifest carries (semantics only — this does not execute identity_pins() or K8_DERIVE_JQ; T7/T14 and k8U hold those)"
+		pass "T22 the jq sub() SEMANTICS agree with the bash form on all ${n_real} URL(s) the signed manifest carries (semantics only — this does not execute identity_pins() or K8_KIND_OF_JQ; T7/T14 and k8U hold those)"
 	fi
 
 	# ---- c. the reason for keeping them separate must still be true

@@ -1128,7 +1128,7 @@ K8_COUNT_STREAM_PINS_JQ="${K8_KIND_OF_JQ}"'
 	] | length
 '
 
-# ---- k8U: unit-proof of K8_DERIVE_JQ on synthetic, time-invariant data ----
+# ---- k8U: unit-proof of the transform AND its counter, on synthetic data ---
 K8U_BASE="$(mktemp -d -t identity-pins-k8u.XXXXXX)"
 K8U_REG="$K8U_BASE/publication.json"
 K8U_ID="$K8U_BASE/identity.json"
