@@ -93,6 +93,9 @@
 #                       to acknowledge a known-open kind violation, not two.
 #                         listed there   -> KIND-BASELINED, never alerts/fails
 #                         not listed     -> KIND-VIOLATION, a NEW break
+#                       Every entry in that list is separately checked for
+#                       having EXPIRED and reported as OBSOLETE-KIND-ACK —
+#                       see "Expiring the acknowledgement lists" below.
 #   kind=record/static  pinnable; this check does nothing further (Check 1
 #                       above still verifies the bytes).
 #   no row at all       the checker cannot tell whether pinning this target
@@ -125,6 +128,37 @@
 # identity.json's artifact_manifest that Check 1 alone cannot see coming,
 # because a brand new stream pin matches its own bytes at the moment it is
 # taken.
+#
+# ---------------------------------------------------------------------------
+# Expiring the acknowledgement lists (2026-08-17)
+# ---------------------------------------------------------------------------
+# Both lists exist to shrink to nothing, and neither is self-clearing. Each
+# gets a report line when an entry stops describing anything real:
+#
+#   OBSOLETE-BASELINE  deploy/identity-pin-baseline.json — the pin it records
+#                      as broken now matches.
+#   OBSOLETE-KIND-ACK  deploy/publication.json's known_kind_violations — the
+#                      pin no longer exists in the manifest, the entry's
+#                      declared path is not what the manifest pins, or the
+#                      target is no longer kind=stream. Same three conditions
+#                      tests/publication-registry/'s T7 applies, so the two
+#                      can never disagree about what "obsolete" means.
+#
+# BOTH are report-only: they do not change the exit code and they never push.
+# An expired acknowledgement is housekeeping, not breakage — nothing is
+# mis-pinned because a dead entry sits in a list, and failing on it would fail
+# a run that is more correct than the one before it. T7 is the CI gate that
+# does fail, inside the commit that leaves the entry behind, which is where
+# the fix belongs. What this adds is the CRON path: T7 runs in CI only, so
+# before this the daily live run could print KIND-BASELINED for entries that
+# muted nothing, indefinitely and silently.
+#
+# Expected reading at the 2026-09-04 transition: today all four entries are
+# real, so zero OBSOLETE-KIND-ACK lines. The moment step 4b of
+# docs/CYCLE_GATE.md lands (violations set to {} in the same commit as the
+# re-issued manifest) there are no entries left to expire, so still zero. The
+# lines appear exactly in the window where one half of that commit landed
+# without the other.
 #
 # ---------------------------------------------------------------------------
 # Repairing a red run (CI cannot do this for you)
@@ -303,7 +337,11 @@ for arg in "$@"; do
 	case "$arg" in
 		--mode=repo|--mode=live) MODE="${arg#--mode=}" ;;
 		--verbose|-v)            VERBOSE=1 ;;
-		-h|--help)               sed -n '2,174p' "$0" | sed 's/^# \?//'; exit 0 ;;
+		# Print the header down to the "Usage" heading. Addressed by that
+		# heading rather than by a line number: the literal `2,174p` this
+		# replaced was already one edit away from truncating mid-sentence,
+		# and did truncate the moment a section was added above it.
+		-h|--help)               sed -n '2,/^# Usage$/p' "$0" | sed 's/^# \?//'; exit 0 ;;
 		*) echo "ERROR: unknown arg: $arg (try --help)" >&2; exit 2 ;;
 	esac
 done
@@ -551,7 +589,7 @@ known_kind_violation() {
 
 # ---- 4. compare every pin ----------------------------------------------------
 N_OK=0; N_BASELINED=0; N_STRUCTURAL=0; N_NEW=0; N_SKIP=0; N_FETCHFAIL=0; N_OBSOLETE=0
-N_KIND_BASELINED=0; N_KIND_NEW=0
+N_KIND_BASELINED=0; N_KIND_NEW=0; N_KIND_OBSOLETE=0
 NEW_BREAKS=""
 KIND_NEW_BREAKS=""
 REPORT=""
@@ -671,8 +709,55 @@ done <<EOF
 ${PINS}
 EOF
 
+# ---- 4b. expire the kind acknowledgement list --------------------------------
+# The mismatch side of this checker has always reported OBSOLETE-BASELINE when
+# an entry in deploy/identity-pin-baseline.json stopped describing a real
+# break. The kind side had no counterpart: known_kind_violations could go
+# entirely stale — its pins re-signed away, its paths reclassified — and this
+# checker would keep printing KIND-BASELINED for entries that mute nothing.
+# tests/publication-registry/'s T7 does catch that, so CI has never been blind
+# to it; the CRON path was, and would have stayed so permanently. Reported
+# here for symmetry with OBSOLETE-BASELINE, and for the same reason: the
+# acknowledgement lists are meant to shrink to nothing, and a list that is
+# never told it has expired never does.
+#
+# Deliberately report-only — no exit code, no push:
+#   - an expired acknowledgement is housekeeping, not breakage. Nothing is
+#     mis-pinned because a dead entry sits in a list; the pin it named is
+#     gone. Failing on it would fail a run that is MORE correct than the one
+#     before it.
+#   - T7 is already the gate that fails CI, and it fails inside the commit
+#     that leaves the entry behind, which is where the fix belongs.
+#   - pushing it would be exactly the false urgency this project forbids.
+# Same three conditions T7 uses, so the two can never disagree about what
+# "obsolete" means: the pin is gone, the declared path drifted away from the
+# pin's real target, or the target is no longer kind=stream.
+while IFS= read -r ACK_ID; do
+	[ -n "$ACK_ID" ] || continue
+	ACK_PATH="$(printf '%s' "$REGISTRY_JSON" | jq -r --arg id "$ACK_ID" '(.known_kind_violations.violations[$id].path) // ""')"
+	ACK_URL="$(printf '%s\n' "$PINS" | awk -F'\t' -v k="$ACK_ID" '$1 == k { print $2; exit }')"
+	if [ -z "$ACK_URL" ]; then
+		N_KIND_OBSOLETE=$((N_KIND_OBSOLETE + 1))
+		emit "OBSOLETE-KIND-ACK ${ACK_ID}  —  the signed manifest no longer carries this pin — delete the entry from ${REGISTRY_FILE##*/}'s known_kind_violations"
+		continue
+	fi
+	ACK_REL="$(url_to_public_path "$ACK_URL" 2>/dev/null || true)"
+	if [ -n "$ACK_PATH" ] && [ "$ACK_REL" != "$ACK_PATH" ]; then
+		N_KIND_OBSOLETE=$((N_KIND_OBSOLETE + 1))
+		emit "OBSOLETE-KIND-ACK ${ACK_ID}  —  acknowledges ${ACK_PATH} but the manifest pins ${ACK_REL} — the entry no longer describes the pin it mutes"
+		continue
+	fi
+	ACK_KIND="$(registry_kind_of "$ACK_REL")"
+	if [ "$ACK_KIND" != "stream" ]; then
+		N_KIND_OBSOLETE=$((N_KIND_OBSOLETE + 1))
+		emit "OBSOLETE-KIND-ACK ${ACK_ID}  —  ${ACK_REL} is kind=${ACK_KIND:-<no row>}, not stream: there is no violation left to acknowledge — delete the entry from ${REGISTRY_FILE##*/}'s known_kind_violations"
+	fi
+done <<EOF
+$(printf '%s' "$REGISTRY_JSON" | jq -r '(.known_kind_violations.violations // {}) | keys[]' 2>/dev/null)
+EOF
+
 printf '%s' "$REPORT"
-echo "identity-pins summary (mode=${MODE}): ok=${N_OK} baselined=${N_BASELINED} structural=${N_STRUCTURAL} new=${N_NEW} skipped=${N_SKIP} fetch-fail=${N_FETCHFAIL} obsolete-baseline=${N_OBSOLETE} kind-baselined=${N_KIND_BASELINED} kind-new=${N_KIND_NEW}"
+echo "identity-pins summary (mode=${MODE}): ok=${N_OK} baselined=${N_BASELINED} structural=${N_STRUCTURAL} new=${N_NEW} skipped=${N_SKIP} fetch-fail=${N_FETCHFAIL} obsolete-baseline=${N_OBSOLETE} kind-baselined=${N_KIND_BASELINED} kind-new=${N_KIND_NEW} obsolete-kind-ack=${N_KIND_OBSOLETE}"
 
 # ---- 5. alert dedup (live mode only) ----------------------------------------
 # See "Alerting" in the header. Fails OPEN toward alerting on every
