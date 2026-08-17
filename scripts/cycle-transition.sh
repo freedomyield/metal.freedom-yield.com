@@ -5,9 +5,14 @@
 #
 # CHAIN: none — this script PRINTS text and exits. It runs no transition step,
 #        writes no production file, sends no notification, opens no shell on
-#        another machine, and holds no route to a broadcast: the strings that
-#        name broadcast tooling do not appear anywhere in this file, and
-#        tests/orchestrator-guard/ fails if one is added.
+#        another machine, and holds no route to a broadcast.
+#        Stated precisely, because the loose version is false: the
+#        broadcast-tool names DO occur here as SUBSTRINGS — the keystore paths
+#        the plan prints contain one inside a hyphenated directory name. What
+#        tests/orchestrator-guard/ forbids, and what is absent, is any
+#        occurrence its word-boundary scan accepts: the tool named as a
+#        command rather than buried in an identifier. That test fails if one
+#        is added.
 #        The two modes differ in what they READ, and the difference is stated
 #        rather than averaged: `--print-only` opens no socket and reads
 #        nothing but the ledger path it was handed. `--status` reads — an
@@ -249,7 +254,11 @@
 # --status before trusting an --expect-cycle you typed. --print-only on its
 # own still cannot tell you whether the number is right.
 #
-# Required environment (refused if unset — see fyct__require_env):
+# Required environment FOR --print-only ONLY (refused if unset — see
+# fyct__require_env). `--status` returns before that check and requires
+# NEITHER variable: it reaches no host, so host coordinates would be an input
+# it has no use for, and demanding them would imply an ssh route that does not
+# exist. Measured: a --status run with both unset succeeds.
 #   VALIDATOR_HOST       the validator host. Never literal in this repo
 #                        (memory/feedback_no_literal_host_identifier.md);
 #                        same convention as scripts/sync-to-validator-host.sh.
@@ -756,7 +765,7 @@ fyct_print_plan() {
 	fyct__wrap "  " "4. Unit 4b is a set of hand edits. Only its verification and commit are commands."
 	fyct__wrap "  " "5. The '~' in the keystore and identity-key paths is USER-RELATIVE, not resolved here. It expands to the home directory of whoever pastes it, which is correct on the operator's Mac and wrong anywhere else. Everything else on those lines is fully resolved."
 	fyct__wrap "  " "6. The host repo path (${REMOTE_REPO}) and the deploy user are assumed, not probed. If the host layout ever changes, these lines are wrong in a way this plan cannot detect."
-	fyct__wrap "  " "7. This plan does not execute, verify, or resume. Post-condition-driven resume is C2-3."
+	fyct__wrap "  " "7. This plan does not execute or verify anything — it is a plan. To find out how far the day actually got, run the SAME script with --status --expect-cycle=${N}: it re-measures each phase's post-condition against the published artifacts instead of trusting a record. It is read-only too, and it is the check this plan cannot make on the number you typed above."
 	fyct__c "============================================================================"
 	return 0
 }
@@ -889,8 +898,47 @@ fyct_print_plan() {
 # not run" — has no second observation and cannot have one: before the wallet
 # action, "cycle N closes today" and "cycle N closed a month ago and N+1
 # closes today" produce identical public state. What that branch cannot do is
-# derive an already-inscribed number by accident; it reports every phase as
-# not yet done, which is the safe direction.
+# derive an already-inscribed number by accident.
+#
+# AN EARLIER REVISION OF THIS PARAGRAPH ALSO CLAIMED that branch "reports every
+# phase as not yet done, which is the safe direction". THAT WAS FALSE, and it
+# was measured false by review: on transition morning, before the node-info
+# tick, phase 6 returned COMPLETE. The claim is removed rather than softened,
+# and the hole it papered over is closed below.
+#
+# ---------------------------------------------------------------------------
+# STALE-PASS: WHICH POST-CONDITIONS A PREVIOUS CYCLE CAN SATISFY
+# ---------------------------------------------------------------------------
+# The rule that decides it, applied to all five rather than to the one that was
+# caught:
+#
+#   A post-condition can be satisfied by last month's state exactly when it
+#   does NOT embed the identity of the cycle being transitioned.
+#
+#   phase 1  embeds N        (the record count must BE N)               safe
+#   phase 2  embeds cycle N's end boundary from the published ledger    safe
+#   phase 3  embeds N+1      (cycle_number_observed)                    safe
+#   phase 5  embeds N+1      (the memo prefix fya<S>c<N+1>)             safe
+#   phase 6  embeds NO cycle number. Its post-condition is "the         STALE-
+#            gate-state signature equals the CURRENT on-chain period",  ABLE
+#            and that is a time-varying quantity which lags: before the
+#            node-info tick reflects the new AddValidator, the previous
+#            cycle's approved signature still equals the still-current
+#            period. spec §5's row is faithful; the staleness is in the
+#            quantity, not in the implementation of it.
+#
+# So phase 6, and only phase 6, is gated: when phase 1 is not COMPLETE it
+# reports UNKNOWN, never COMPLETE. That gate is exactly sufficient rather than
+# merely conservative — unit 3 (which makes phase 1 COMPLETE) is downstream of
+# unit 1 (the tick), so phase 1 COMPLETE implies startTime has already
+# advanced, which is precisely the condition under which the previous cycle's
+# signature can no longer match.
+#
+# The other four are NOT gated on phase 1, deliberately. Each embeds a cycle
+# number that only today's work can produce, so gating them would hide a real
+# observation (e.g. an anchor-source already composed for N+1 while the ledger
+# publish failed) behind an UNKNOWN. Masking a genuine signal is not the same
+# kind of safety as refusing a stale one.
 
 # The two jq programs phase 5 runs over --tx-json. They are constants rather
 # than inline strings because the shape they have to survive was MEASURED, not
@@ -911,8 +959,18 @@ fyct_print_plan() {
 # repetition is an artefact of how the chain reports notifications, and
 # counting raw entries would make the answer depend on which endpoint the
 # response came from.
+#
+# THE PREFIX IS MATCHED WITH ITS SEPARATOR, not by bare startswith. `fya1c4`
+# is a prefix of `fya1c41`, so a bare startswith would accept cycle 41's memos
+# as cycle 4's the first time a two-digit cycle collides with a one-digit one.
+# The pack's four memos are `<p>-id:` `<p>-ob:` `<p>-ar:` `<p>:`
+# (gen-anchor-receipt.sh composes exactly these), so requiring the separator
+# makes the match exact, and requiring all four KINDS makes it the same set
+# assertion gen-anchor-receipt.sh's gate 5 makes — without needing the roots,
+# which this reading has no independent source for.
 FYCT_TXQ_ID='if ((.id? // "") | tostring) != "" then .id else ([(.actions // []), (.traces // [])] | add | map(.trx_id // empty) | first // "") end'
 FYCT_TXQ_MEMOS='[(.actions // []), (.traces // [])] | add | map(select((.trx_id // $t) == $t)) | map(.act.data.memo // empty) | unique'
+FYCT_TXQ_KINDS='map(if startswith($p + "-id:") then "id" elif startswith($p + "-ob:") then "ob" elif startswith($p + "-ar:") then "ar" elif startswith($p + ":") then "root" else empty end) | unique'
 
 fyct__have() { command -v "$1" >/dev/null 2>&1; }
 
@@ -972,10 +1030,26 @@ fyct__status_read() {
 	case "$FYCT_PUBLIC_BASE" in
 	http://* | https://*)
 		fyct__have curl || return 1
-		if ! curl -fsS --max-time 20 "${base}/${rel}" -o "$dest" 2>/dev/null; then
+		# Retried, not single-shot. This repo has already paid for the
+		# single-shot version once: the 2026-07-17 api_freshness false alarm
+		# was a transient fetch on a contended host, and the permanent fix was
+		# to retry (memory/project_fix_20260717_cf_cache_and_freshness_retry).
+		# A transient miss here would read as UNKNOWN rather than as a wrong
+		# verdict, so this is noise reduction on transition day, not a
+		# correctness fix — and the retries cannot mask a real outage, since
+		# exhausting them still returns non-zero.
+		local try=1
+		while [ "$try" -le 3 ]; do
+			if curl -fsS --max-time 20 "${base}/${rel}" -o "$dest" 2>/dev/null; then
+				break
+			fi
 			rm -f "$dest"
-			return 1
-		fi
+			if [ "$try" -eq 3 ]; then
+				return 1
+			fi
+			sleep 2
+			try=$((try + 1))
+		done
 		;;
 	*)
 		[ -r "${base}/${rel}" ] || return 1
@@ -1046,6 +1120,23 @@ fyct__status_units() {
 		fi
 	done < <(fyct_unit_ids)
 	printf '%s' "$out"
+}
+
+# fyct__status_next <phase> <verdict> <how-to-observe>
+#   The next-step line for one phase. INCOMPLETE gets the unit list; UNKNOWN
+#   gets the observation it is missing and NO unit list; COMPLETE gets
+#   nothing. See the call site for why the distinction is not cosmetic.
+fyct__status_next() {
+	local phase="$1" verdict="$2" howto="$3"
+	case "$verdict" in
+	INCOMPLETE)
+		printf 'to advance phase %-8s: units %s\n' "$phase" "$(fyct__status_units "$phase")"
+		;;
+	UNKNOWN)
+		printf 'to OBSERVE phase %-8s: not measured — %s\n' "$phase" "$howto"
+		;;
+	esac
+	return 0
 }
 
 # fyct__status_crosscheck <validator-json> <ledger> <have-validator>
@@ -1266,9 +1357,17 @@ fyct_status_report() {
 			if [ -z "$pub_sha" ] || [ -z "$loc_sha" ]; then
 				v3=UNKNOWN
 				d3="no sha256 tool on this machine (sha256sum / shasum), so byte equality cannot be decided"
+			elif [ -z "$cyc_obs" ]; then
+				# UNKNOWN, not INCOMPLETE: an absent field is a failure to
+				# observe, and this file's rule is that those never resolve to
+				# a verdict about the work. (INCOMPLETE would also be safe,
+				# but it asserts "the compose has not happened", which a
+				# missing field does not establish.)
+				v3=UNKNOWN
+				d3="the published anchor-source carries no observations_branch.cycle_number_observed, so which cycle it describes cannot be read"
 			elif [ "$cyc_obs" != "$INSCRIBE" ]; then
 				v3=INCOMPLETE
-				d3="the published anchor-source still describes cycle ${cyc_obs:-<absent>}, not ${INSCRIBE}"
+				d3="the published anchor-source still describes cycle ${cyc_obs}, not ${INSCRIBE}"
 			elif [ "$pub_sha" != "$loc_sha" ]; then
 				v3=INCOMPLETE
 				d3="published sha256 ${pub_sha} != local ${loc_sha}"
@@ -1299,7 +1398,7 @@ fyct_status_report() {
 			prefix="fya${schema_ver}c${INSCRIBE}"
 			tx_id="$(jq -r "$FYCT_TXQ_ID" "$FYCT_TX_JSON" 2>/dev/null || true)"
 			act_n="$(jq -r --arg t "$tx_id" "${FYCT_TXQ_MEMOS} | length" "$FYCT_TX_JSON" 2>/dev/null || true)"
-			match_n="$(jq -r --arg t "$tx_id" --arg p "$prefix" "${FYCT_TXQ_MEMOS} | map(select(startswith(\$p))) | length" "$FYCT_TX_JSON" 2>/dev/null || true)"
+			match_n="$(jq -r --arg t "$tx_id" --arg p "$prefix" "${FYCT_TXQ_MEMOS} | ${FYCT_TXQ_KINDS} | length" "$FYCT_TX_JSON" 2>/dev/null || true)"
 			[ -n "$act_n" ] || act_n=0
 			[ -n "$match_n" ] || match_n=0
 			if [ -z "$tx_id" ] || [ "$act_n" -eq 0 ]; then
@@ -1307,17 +1406,26 @@ fyct_status_report() {
 				d5="the response carries no memo for any transaction, so nothing is inscribed yet"
 			elif [ "$act_n" -eq 4 ] && [ "$match_n" -eq 4 ]; then
 				v5=COMPLETE
-				d5="tx ${tx_id} resolves 4 distinct memos, all carrying prefix ${prefix}"
+				d5="tx ${tx_id} resolves 4 distinct memos, one per branch, all under prefix ${prefix}"
 			else
 				v5=INCOMPLETE
-				d5="tx ${tx_id} resolves ${act_n} distinct memo(s), ${match_n} carrying prefix ${prefix} (4 of 4 required)"
+				d5="tx ${tx_id} resolves ${act_n} distinct memo(s), ${match_n} of the 4 branch memos under prefix ${prefix}"
 			fi
 		fi
 	fi
 
 	# ---- phase 6 -----------------------------------------------------------
 	local gate_sig="" gate_dag="" gate_schema="" want_sig="" node_id="" start_t=""
-	if [ ! -r "$FYCT_GATE_STATE" ]; then
+	if [ "$v1" != "COMPLETE" ]; then
+		# STALE-PASS GATE. See the header section of that name: phase 6 is the
+		# one post-condition that carries no cycle number, so before the
+		# node-info tick the PREVIOUS cycle's approved signature still equals
+		# the still-current period and this would answer COMPLETE on a day
+		# where nothing has happened yet. Measured by review on a
+		# transition-morning fixture. Same shape as phase 2's gate above.
+		v6=UNKNOWN
+		d6="phase 1 has not landed, so a signature matching the current period would be last cycle's, not this one's"
+	elif [ ! -r "$FYCT_GATE_STATE" ]; then
 		v6=UNKNOWN
 		d6="no cycle-gate state at ${FYCT_GATE_STATE} (it lives on the validator host)"
 	elif ! jq empty "$FYCT_GATE_STATE" >/dev/null 2>&1; then
@@ -1378,12 +1486,15 @@ fyct_status_report() {
 
 	printf '============================================================================\n'
 	printf 'WHERE THIS READING IS NOT A COMPLETE ACCOUNT OF THE DAY\n'
-	fyct__status_wrap "  " "1. Phase 4 has no post-condition, as stated above. Nothing here confirms the rehearsal ran."
-	fyct__status_wrap "  " "2. UNIT 8.5 IS COVERED BY NONE OF THE FIVE. Phase 6's post-condition is the gate-state signature, which unit 9 writes, and unit 9 polls only anchor-source.json freshness. So a skipped 8.5 leaves the published anchor-receipt.json and anchor-history.jsonl serving the PREVIOUS cycle while every post-condition above still reads COMPLETE. That gap is in the design doc's table, not introduced here; check those two feeds by eye before calling the day done."
-	fyct__status_wrap "  " "3. Phase 2 confirms that identity.json.sig published alongside the manifest. It does NOT verify the signature. Unit 9's Phase 1 is what performs the cryptographic check."
-	fyct__status_wrap "  " "4. Phase 3 compares the published bytes against the COMMITTED ones, not against the host's live file. See this script's header for why a live host comparison would be wrong rather than merely inconvenient."
-	fyct__status_wrap "  " "5. Phase 5 verifies the response it was handed, not its provenance. Capture it at the moment you run this; a response from another machine or another hour is not distinguishable here."
-	fyct__status_wrap "  " "6. Only the phase-1-HAS-landed reading of --expect-cycle has a second observation. The other reading has none and structurally cannot: before the wallet action the two candidate declarations produce identical public state."
+	fyct__status_wrap "  " "FIVE OF THE FOURTEEN EXECUTION UNITS ARE COVERED BY NO POST-CONDITION. The list below is the result of asking, for EVERY unit in the plan, \"if this were skipped, would all five still read COMPLETE?\" — not of noticing one. An earlier revision listed only 8.5, and review found a second (4b); the sweep that produced this list found three more."
+	fyct__status_wrap "  " "1. UNIT 7a (phase 4) has no post-condition at all. The rehearsal's only product is a transaction id on stdout, which nothing publishes."
+	fyct__status_wrap "  " "2. UNIT 7b (the mainnet dry run) is observed by nothing. Its --dry-run-log is an OPTIONAL argument to unit 7c, so skipping it does not even make 7c fail — it removes the gate-4 evidence silently."
+	fyct__status_wrap "  " "3. UNITS 7.5, 8 AND 8.5 are observed by nothing. Phase 6's post-condition is the gate-state signature written by unit 9, and unit 9 reads only the chain, the published anchor-source and the identity manifest — never the receipt or the anchor ledger. So a day where the signing fragment was never transferred, no receipt was verified, no history row was appended and nothing was published still reads COMPLETE here, with the public anchor-receipt.json and anchor-history.jsonl left serving the PREVIOUS cycle."
+	fyct__status_wrap "  " "4. UNIT 4b's REGISTRY EDITS are observed by nothing. Phase 2 reads generated_at and the presence of the .sig; identity.json carries no cycle number and no registry state. 4b's commit is needed to publish the manifest at all, so a wholly skipped 4b does show up — but doing the commit WITHOUT the deploy/identity-pin-baseline.json and deploy/publication.json edits leaves every post-condition here green while tests/publication-registry/ goes red on main."
+	fyct__status_wrap "  " "5. Phase 2 confirms that identity.json.sig published alongside the manifest. It does NOT verify the signature. Unit 9's Phase 1 is what performs the cryptographic check."
+	fyct__status_wrap "  " "6. Phase 3 compares the published bytes against the copy committed IN THE REPOSITORY THIS COMMAND IS RUNNING FROM — this machine's HEAD, not the host's and not the host's live file. Running it on a machine whose HEAD lags the one that committed unit 6 reports INCOMPLETE for a phase that is done. See this script's header for why comparing against a live host copy would be worse."
+	fyct__status_wrap "  " "7. Phase 5 verifies the response it was handed, not its provenance. Capture it at the moment you run this; a response from another machine or another hour is not distinguishable here."
+	fyct__status_wrap "  " "8. Only the phase-1-HAS-landed reading of --expect-cycle has a second observation. The other reading has none and structurally cannot: before the wallet action the two candidate declarations produce identical public state."
 	printf '============================================================================\n'
 
 	local p
@@ -1394,22 +1505,31 @@ fyct_status_report() {
 		esac
 	done
 
-	# Recovery, from the same unit table --print-only prints.
-	if [ "$v1" != "COMPLETE" ]; then
-		printf 'to advance phase 1       : units %s\n' "$(fyct__status_units 1)"
+	# ---- what to do next ---------------------------------------------------
+	# A UNIT LIST IS ONLY PRINTED FOR INCOMPLETE, NEVER FOR UNKNOWN. An earlier
+	# revision printed it for both, and the default live invocation (no
+	# --tx-json) therefore answered "PHASE 5 UNKNOWN" and, three lines later,
+	# "to advance phase 5: units 7b 7c 7.5" — telling the operator to re-run
+	# the day's one irreversible signing unit on the strength of an
+	# observation that was never made. "I did not look" and "it is not done"
+	# must not produce the same instruction. For UNKNOWN the only honest next
+	# step is to obtain the observation, so that is what is printed.
+	fyct__status_next 1 "$v1" "the published cycle-history must be readable from --public-base"
+	fyct__status_next 2 "$v2" "phase 1 must land first, and the published identity manifest and its .sig must be readable"
+	fyct__status_next 3 "$v3" "the published anchor-source and a local copy to compare it with must both be readable"
+	fyct__status_next 5 "$v5" "capture this cycle's mainnet transaction with a read-only history query and pass it as --tx-json=<path>"
+	fyct__status_next 6 "$v6" "BOTH are required: phase 1 landed, and the cycle-gate state readable (run this ON THE VALIDATOR HOST where it lives, or pass --gate-state=<path>). The verdict line above says which one is missing"
+
+	# Ordering guard on phase 3's advice. Unit 5 RE-COMPOSES anchor-source on
+	# the host, and a recompose changes dag_root_computed (this script's
+	# header says why). Run after the inscription and the pre-image that was
+	# signed stops being the one the site serves. So the advice is only safe
+	# while the inscription demonstrably has NOT happened, i.e. v5 INCOMPLETE.
+	# UNKNOWN counts as unsafe, not as permission.
+	if [ "$v3" = "INCOMPLETE" ] && [ "$v5" != "INCOMPLETE" ]; then
+		fyct__status_wrap "             " "STOP before unit 5: phase 5 reads ${v5}. Unit 5 recomposes anchor-source and a recompose changes dag_root_computed, so running it once the cycle is inscribed replaces the pre-image that was signed. Establish that phase 5 has NOT happened before re-running unit 5; unit 6 alone (re-fetch, verify, commit) is the safe half."
 	fi
-	if [ "$v2" != "COMPLETE" ]; then
-		printf 'to advance phase 2       : units %s\n' "$(fyct__status_units 2)"
-	fi
-	if [ "$v3" != "COMPLETE" ]; then
-		printf 'to advance phase 3       : units %s\n' "$(fyct__status_units 3)"
-	fi
-	if [ "$v5" != "COMPLETE" ]; then
-		printf 'to advance phase 5       : units %s\n' "$(fyct__status_units 5)"
-	fi
-	if [ "$v6" != "COMPLETE" ]; then
-		printf 'to advance phase 6       : units %s\n' "$(fyct__status_units 6)"
-	fi
+
 	fyct__status_wrap "" "The resolved command for every unit above is printed by --print-only. docs/CYCLE_GATE.md remains the canon; this reading restates where it stopped."
 
 	if [ "$n_unknown" -gt 0 ]; then
