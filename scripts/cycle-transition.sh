@@ -1,22 +1,38 @@
 #!/usr/bin/env bash
-# scripts/cycle-transition.sh — the cycle-transition orchestrator, phase C2-2:
-# the six-phase skeleton and the `--print-only` fallback.
+# scripts/cycle-transition.sh — the cycle-transition orchestrator, phases C2-2
+# and C2-3: the six-phase skeleton, the `--print-only` fallback, and the
+# post-condition `--status` reading.
 #
-# CHAIN: none — this script PRINTS text and exits. It runs no step, opens no
-#        socket, writes no file, sends no notification and reaches no host.
-#        It deliberately offers no route to a broadcast, and never will: the
-#        strings that name broadcast tooling do not appear anywhere in this
-#        file, and tests/orchestrator-guard/ fails if one is added.
-# PRIME_DIRECTIVE: TESTNET-FIRST — safe (read-only; prints a plan).
+# CHAIN: none — this script PRINTS text and exits. It runs no transition step,
+#        writes no production file, sends no notification, opens no shell on
+#        another machine, and holds no route to a broadcast: the strings that
+#        name broadcast tooling do not appear anywhere in this file, and
+#        tests/orchestrator-guard/ fails if one is added.
+#        The two modes differ in what they READ, and the difference is stated
+#        rather than averaged: `--print-only` opens no socket and reads
+#        nothing but the ledger path it was handed. `--status` reads — an
+#        HTTP GET of the published feeds (or a local directory of
+#        already-fetched bytes), `git show` of one committed blob, and local
+#        files named on the command line — into a private scratch directory
+#        it removes on exit. Neither mode ssh's, pushes, notifies, or writes
+#        anywhere else.
+# PRIME_DIRECTIVE: TESTNET-FIRST — safe (read-only; prints a plan or a
+#                  reading).
 #
 # ---------------------------------------------------------------------------
 # WHAT THIS IS, AND WHAT IT IS NOT (READ THIS BEFORE TRUSTING THE OUTPUT)
 # ---------------------------------------------------------------------------
-# This is phase 1 of component C2 in docs/superpowers/specs/
-# 2026-08-06-single-source-of-truth-design.md. Its ONLY mode is
-# `--print-only`, which prints the day-of plan. THERE IS NO EXECUTION PATH IN
-# THIS FILE. Not a disabled one, not a flag-guarded one — none. Execution
-# arrives in C2-3 together with the post-condition-driven resume.
+# This is component C2 in docs/superpowers/specs/
+# 2026-08-06-single-source-of-truth-design.md. It has exactly two modes:
+#
+#   --print-only  prints the day-of plan (C2-2).
+#   --status      re-measures each phase's POST-CONDITION and reports where
+#                 the day actually stopped (C2-3).
+#
+# THERE IS NO EXECUTION PATH IN THIS FILE. Not a disabled one, not a
+# flag-guarded one — none. `--status` decides where the day stopped; it does
+# not restart it, and nothing here invokes a transition step. Adding execution
+# is a later task and a separate decision, not a consequence of this one.
 #
 # `--print-only` is the spec's stated fallback (§8): "orchestrator が当日
 # 使えなくても、その出力をそのまま実行すれば現行手順と同一になる". So the
@@ -140,6 +156,17 @@
 #   bash scripts/cycle-transition.sh --print-only --expect-cycle=<N> \
 #        --ledger=<path> [--testnet-tx-id=<64hex>]
 #
+#   bash scripts/cycle-transition.sh --status --expect-cycle=<N> \
+#        [--public-base=<url|dir>] [--anchor-source-local=<path>] \
+#        [--tx-json=<path>] [--gate-state=<path>]
+#
+# The two modes take deliberately different inputs and neither accepts the
+# other's. `--print-only` is handed a ledger path because it prints a plan and
+# must not go looking for one; `--status` is NOT, because the published bytes
+# ARE its observation and reading a local mirror instead would answer the
+# wrong question. Passing --ledger to --status (or --testnet-tx-id) is refused
+# rather than ignored.
+#
 #   --expect-cycle=<N>       REQUIRED. The cycle that CLOSES today — exactly
 #                            the value units 4 and 5 pass as FY_EXPECT_CYCLE.
 #                            Why it is not derived: see THE OFF-BY-ONE below.
@@ -156,7 +183,24 @@
 #                            4 and 5 guard against that same copy, so a local
 #                            mirror could agree with the plan while the guards
 #                            still refuse.
-#   --testnet-tx-id=<64hex>  Optional. See "WHAT IS NOT RESOLVED" above.
+#   --testnet-tx-id=<64hex>  Optional, --print-only only. See "WHAT IS NOT
+#                            RESOLVED" above.
+#
+#   --public-base=<url|dir>  --status only. Where the PUBLISHED artifacts are
+#                            read from. Defaults to the live site. A value
+#                            that is not http(s) is treated as a local
+#                            DIRECTORY laid out like the site (api/…), so
+#                            already-fetched bytes can be re-read offline.
+#   --anchor-source-local=<path>
+#                            --status only. The local copy phase 3's published
+#                            bytes are compared against. Defaults to the
+#                            committed blob (git show HEAD:…).
+#   --tx-json=<path>         --status only. A chain response for this cycle's
+#                            mainnet transaction, already captured. Without
+#                            it phase 5 reads UNKNOWN — never COMPLETE.
+#   --gate-state=<path>      --status only. The cycle-gate state file.
+#                            Defaults to the FY_STATE_DIR resolution, which
+#                            only exists on the validator host.
 #
 # ---------------------------------------------------------------------------
 # THE OFF-BY-ONE, AND WHY --expect-cycle IS NOT DERIVED FROM THE LEDGER
@@ -188,19 +232,22 @@
 # memo prefix does not move under the operator while the day proceeds. The
 # test asserts exactly that.
 #
-# NOT CLOSED: whether the DECLARATION is right. The guard narrows the input to
-# two accepted values, it does not verify them. `--expect-cycle=3` against a
-# 3-row ledger is accepted, reports "phase 1 HAS landed", and derives 4 to
-# inscribe — and because gen-identity.sh and gen-anchor-source.sh compare
-# against that same not-yet-advanced ledger, both of them pass too. The first
-# thing that objects is append-anchor-history.sh's invariant 4, which runs
-# AFTER the irreversible broadcast. That is no worse than the current runbook,
-# where the same number is typed by hand into two scripts with no cross-check
-# at all — but it is not a solved problem, and nothing here should be read as
-# solving it. Closing it needs a SECOND, INDEPENDENT observation of which
-# cycle is current; the obvious candidate is the endTime in the validator.json
-# that step 0 already reads, which distinguishes the two states outright.
-# That belongs to C2-3 along with the post-condition resume.
+# NOT CLOSED BY THIS GUARD: whether the DECLARATION is right. The guard
+# narrows the input to two accepted values, it does not verify them.
+# `--expect-cycle=3` against a 3-row ledger is accepted here, reports "phase 1
+# HAS landed", and derives 4 to inscribe — and because gen-identity.sh and
+# gen-anchor-source.sh compare against that same not-yet-advanced ledger, both
+# of them pass too. The first thing that objects is append-anchor-history.sh's
+# invariant 4, which runs AFTER the irreversible broadcast.
+#
+# CLOSED BY --status, NOT BY --print-only. The second, independent observation
+# that separates the two states is implemented in --status (see THE SECOND
+# OBSERVATION further down), where it refuses with exit 71. It is deliberately
+# NOT wired into --print-only: that mode is the day's retreat path and must
+# keep working with nothing but a ledger file, offline, with no network and no
+# second feed to fetch. So the honest statement of today's coverage is: run
+# --status before trusting an --expect-cycle you typed. --print-only on its
+# own still cannot tell you whether the number is right.
 #
 # Required environment (refused if unset — see fyct__require_env):
 #   VALIDATOR_HOST       the validator host. Never literal in this repo
@@ -230,35 +277,66 @@
 #                        cannot be re-pointed by a later HOME= prefix.
 #
 # Exit codes:
-#   0   the plan was printed
-#   64  usage error (unknown flag, missing argument, missing required env)
+#   0   --print-only: the plan was printed.
+#       --status:     every post-condition was measured and all are COMPLETE.
+#   64  usage error (unknown flag, missing argument, missing required env,
+#       a flag belonging to the other mode)
 #   65  the ledger is unreadable        (propagated from cycle-context.sh)
 #   66  the ledger is self-inconsistent (propagated from cycle-context.sh)
 #   67  the phase cross-check against cycle-context.sh's table disagrees
 #   68  the ledger disagrees with --expect-cycle (see THE OFF-BY-ONE)
+#   69  --status only: measured, and at least one phase is NOT done. This is
+#       the ordinary mid-transition answer, not an error.
+#   70  --status only: at least one post-condition could NOT be observed. The
+#       report names each one. UNKNOWN is never resolved to COMPLETE.
+#   71  --status only: --expect-cycle reads as "phase 1 HAS landed" and the
+#       second observation contradicts that, or could not be made at all.
 
 # Self-locating, like scripts/lib/publish-scan.sh: the libraries are resolved
 # from THIS file's own path, never from the caller's CWD. There is deliberately
-# no repo-root variable — this script reads no repo file and executes no repo
-# script, and a path root it does not need is a path root a later edit could
-# quietly start executing from.
+# no repo-root variable, and this script executes no repo script. The one repo
+# artifact it reads is a COMMITTED blob, and even that is reached by handing
+# this directory to `git -C` rather than by computing a root: git resolves its
+# own toplevel, so no path root exists here that a later edit could quietly
+# start executing from.
 FYCT_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # shellcheck source=scripts/lib/cycle-context.sh
 . "${FYCT_SELF_DIR}/lib/cycle-context.sh"
 
-# scripts/lib/side-effects.sh is sourced for exactly one thing: fyd_is_live,
-# so that "what does live mean" is read from the one place that defines it
-# rather than re-spelled here. NO fyd_* side-effect function is called
-# anywhere in this file, because this phase performs no side effect to gate.
-# When C2-3 adds execution, every side effect it performs goes through this
-# library — that is the point of sourcing it now rather than later.
+# scripts/lib/side-effects.sh is sourced for exactly two READ-ONLY things:
+# fyd_is_live (so "what does live mean" is read from the one place that
+# defines it) and fyd_state_dir (so --status looks for the cycle-gate state
+# where the writers put it, rather than re-spelling the path). NO
+# side-effect-PERFORMING fyd_* function — fyd_live_write, fyd_live_run,
+# fyd_notify, fyd_push — is called anywhere in this file, because neither mode
+# performs a side effect to gate. Should a later phase ever add one, this is
+# already the library it must go through.
 # shellcheck source=scripts/lib/side-effects.sh
 . "${FYCT_SELF_DIR}/lib/side-effects.sh"
 
 FYCT_USAGE_RC=64
 FYCT_PHASE_MISMATCH_RC=67
 FYCT_LEDGER_DISAGREES_RC=68
+FYCT_STATUS_INCOMPLETE_RC=69
+FYCT_STATUS_UNKNOWN_RC=70
+FYCT_STATUS_UNCONFIRMED_RC=71
+
+# The published site. Only --status reads it, and only over GET.
+FYCT_PUBLIC_BASE_DEFAULT="https://metal.freedom-yield.com"
+
+# Thresholds for THE SECOND OBSERVATION (see the header). Both are derived
+# from measured values, not chosen for roundness:
+#   * a validation period is ~31 days (live pair 2026-08-17: startTime
+#     1785820477, endTime 1788498020 = 30.99 days), and a transition happens
+#     within hours of endTime, so nothing legitimate sits 7 days from the end
+#     while claiming the period already closed;
+#   * the ledger's end_iso for a closed cycle and the chain's startTime for
+#     the next one were 14 minutes apart in the live data (2026-08-04
+#     T05:00:25Z vs 2026-08-04T05:14:37Z), so 6 hours is ~25x the observed
+#     skew and still four orders of magnitude below a whole cycle.
+FYCT_STATUS_PERIOD_MARGIN_S=604800
+FYCT_STATUS_BOUNDARY_TOL_S=21600
 
 # ---------------------------------------------------------------------------
 # The phase table
@@ -684,18 +762,692 @@ fyct_print_plan() {
 }
 
 # ---------------------------------------------------------------------------
+# --status — "the record is not the evidence" (C2-3)
+# ---------------------------------------------------------------------------
+# docs/superpowers/specs/2026-08-06-single-source-of-truth-design.md §5 says
+# resume must not believe the state file: it re-measures each phase's
+# POST-CONDITION. This mode implements that reading and nothing else.
+#
+# The five post-conditions are the spec's table, with two substitutions this
+# machine forces. Both are stated here rather than smuggled in:
+#
+#   spec row                     -> implemented as
+#   ---------------------------------------------------------------------
+#   1  ledger gained exactly one    fyc_closed_cycle_count(PUBLISHED) == N.
+#      row, max cycle_n == N        That function already refuses unless the
+#                                   record count AND max(cycle_n) agree, so
+#                                   "one more row" and "max == N" are the
+#                                   same assertion once it returns.
+#
+#   2  identity generated_at        after the END of cycle N as the PUBLISHED
+#      after the cycle start,       LEDGER records it — NOT after the current
+#      and deploy succeeded         on-chain startTime. Measured 2026-08-17:
+#                                   the live manifest carries generated_at
+#                                   2026-08-06 while the period started
+#                                   2026-08-04, because it was re-signed
+#                                   mid-cycle. "After startTime" is therefore
+#                                   satisfied by a manifest from the WRONG
+#                                   cycle and would report phase 2 done before
+#                                   it ran. The two instants are 14 minutes
+#                                   apart in real data, so nothing is lost.
+#                                   "deploy success" is not a separate probe:
+#                                   these ARE the published bytes, so a fresh
+#                                   generated_at at that URL IS the deploy
+#                                   having landed. What is NOT checked is the
+#                                   ed25519 signature itself — only that the
+#                                   .sig published alongside it (see below).
+#
+#   3  published anchor-source      published sha256 == the COMMITTED bytes
+#      sha256 == host copy          (git show HEAD:public/api/anchor-source
+#                                   .json), or --anchor-source-local=<path>.
+#                                   NOT the host's live file: --status must
+#                                   not ssh, and unit 7b's own note records
+#                                   that a host-side recompose yields a
+#                                   DIFFERENT dag_root_computed because the
+#                                   5-minute crons rewrite the feeds the
+#                                   artifacts branch hashes — so comparing
+#                                   against a live host copy would go red on a
+#                                   correct transition. The committed bytes
+#                                   are what unit 6 verified the host copy
+#                                   into, and are the same comparison
+#                                   preview-cycle-anchor-broadcast.sh makes
+#                                   (its exit 9 / exit 10 pair).
+#                                   Byte equality ALONE is not enough and is
+#                                   not used alone: published and committed
+#                                   agree all month, so the cycle number in
+#                                   the published copy must ALSO have advanced
+#                                   to N+1. Without that, phase 3 would read
+#                                   COMPLETE before the day started.
+#
+#   5  mainnet tx resolves          the captured chain response passed as
+#      on-chain, memo prefix        --tx-json=<path> must resolve exactly four
+#      matches                      DISTINCT memos, all carrying fya<S>c<N+1>
+#                                   — S read from the PUBLISHED anchor-source,
+#                                   N+1 from --expect-cycle, neither taken
+#                                   from the response itself. Four DISTINCT
+#                                   memos rather than four entries, for the
+#                                   measured reason recorded at FYCT_TXQ_MEMOS
+#                                   below. This mode does
+#                                   NOT fetch it: the mainnet history endpoint
+#                                   cannot be named in this file at all
+#                                   (tests/orchestrator-guard/ fails on a
+#                                   substring of its hostname), and a second,
+#                                   unreviewed chain client is worse than
+#                                   re-reading the response the receipt step
+#                                   already knows how to obtain. What this
+#                                   therefore does NOT prove is provenance:
+#                                   it verifies the response, not that it came
+#                                   from mainnet a moment ago.
+#
+#   6  cycle-gate-state signature   approved_cycle_signature must equal
+#      matches the current cycle    <nodeId>-<startTime> from the PUBLISHED
+#                                   validator.json — the exact string
+#                                   cycle-gate.sh recomputes from the chain.
+#                                   The file lives in FY_STATE_DIR on the
+#                                   validator host, so off that host this
+#                                   reads UNKNOWN, never COMPLETE.
+#
+# PHASE 4 HAS NO POST-CONDITION AND NONE IS INVENTED HERE. The spec's table
+# has no row for it, and the rehearsal's only product is a transaction id on
+# stdout that nothing publishes. It prints as NO-POST-CONDITION and is
+# excluded from the arithmetic. Manufacturing one would be the fabrication
+# this repo's audit rules forbid.
+#
+# UNKNOWN IS NEVER COMPLETE. Any observation that cannot be made is reported
+# as UNKNOWN and raises the exit code (design doc §6 fail-closed rule (b)).
+#
+# ---------------------------------------------------------------------------
+# THE SECOND OBSERVATION (what closes the --expect-cycle hole)
+# ---------------------------------------------------------------------------
+# THE OFF-BY-ONE above records that the ledger narrows --expect-cycle to two
+# values without verifying either, and that the dangerous shape is a
+# declaration the ledger reads as "phase 1 HAS landed" when it has not.
+#
+# --status adds the independent observation that separates them, taken from
+# public/api/validator.json — the feed step 0 already reads. Measured
+# 2026-08-17 against the live site: startTime=1785820477, endTime=1788498020,
+# i.e. the CURRENT on-chain period, opening 2026-08-04 and closing 2026-09-04
+# 14:00 JST. Two consequences, and BOTH are checked whenever the ledger reads
+# as "phase 1 HAS landed":
+#
+#   (i)  The current period must not be about to end. Cycle N cannot have
+#        closed while the chain still says its period runs for another week.
+#        Catches the declaration made on transition morning, BEFORE the wallet
+#        action.
+#   (ii) The just-closed cycle must end where the current period began: the
+#        ledger row for cycle N must carry end_iso within
+#        FYCT_STATUS_BOUNDARY_TOL_S of validator.json's startTime.
+#        Catches the SAME declaration made after the wallet action but before
+#        unit 3 — where (i) passes, because the new period is a month long,
+#        while the ledger's last row is still a month old.
+#
+# Failing either is exit 71. So is being unable to make the observation at
+# all: a declaration that could not be confirmed has not been confirmed.
+#
+# WHAT IS STILL NOT CLOSED, stated because the half-statement is the overclaim
+# this repo keeps paying for. The OTHER branch — closed == N-1, "phase 1 has
+# not run" — has no second observation and cannot have one: before the wallet
+# action, "cycle N closes today" and "cycle N closed a month ago and N+1
+# closes today" produce identical public state. What that branch cannot do is
+# derive an already-inscribed number by accident; it reports every phase as
+# not yet done, which is the safe direction.
+
+# The two jq programs phase 5 runs over --tx-json. They are constants rather
+# than inline strings because the shape they have to survive was MEASURED, not
+# assumed, and the measurement is worth keeping next to them.
+#
+# Measured 2026-08-17 against the real cycle-4 anchor transaction:
+#   * the v1 history response carries NO top-level `.actions` at all. It
+#     carries `.traces`, and for the 4-action pack there are TWELVE of them —
+#     three per action, because a token transfer notifies both parties in
+#     addition to executing. `.trx.trx.actions` was present but empty. An
+#     earlier revision of this code counted `.actions[]` and would have
+#     reported UNKNOWN/INCOMPLETE on a perfectly good transaction.
+#   * the Hyperion v2 response (the path gen-anchor-receipt.sh prefers) is
+#     account-scoped and returns entries for many transactions, each carrying
+#     its own `.trx_id`.
+# So: take memos from `.actions` OR `.traces`, keep only the entries belonging
+# to this transaction, and UNIQUE them. The pack is four DISTINCT memos; the
+# repetition is an artefact of how the chain reports notifications, and
+# counting raw entries would make the answer depend on which endpoint the
+# response came from.
+FYCT_TXQ_ID='if ((.id? // "") | tostring) != "" then .id else ([(.actions // []), (.traces // [])] | add | map(.trx_id // empty) | first // "") end'
+FYCT_TXQ_MEMOS='[(.actions // []), (.traces // [])] | add | map(select((.trx_id // $t) == $t)) | map(.act.data.memo // empty) | unique'
+
+fyct__have() { command -v "$1" >/dev/null 2>&1; }
+
+# fyct__sha256 <file> — hex digest on stdout, or non-zero if no tool exists.
+# Same two-tool dance as gen-anchor-receipt.sh; fail-closed if neither is
+# present, never a silent "assume equal".
+fyct__sha256() {
+	if fyct__have sha256sum; then
+		sha256sum < "$1" | awk '{print $1}'
+	elif fyct__have shasum; then
+		shasum -a 256 < "$1" | awk '{print $1}'
+	else
+		return 1
+	fi
+}
+
+# ISO-8601 -> epoch. The `-u` on the BSD branch is load-bearing, not
+# decoration: BSD strptime treats the trailing "Z" as a literal, so without it
+# the wall-clock numbers are read in $TZ and the answer is off by the local
+# offset (9h under Asia/Tokyo). Verbatim from gen-renewal-ics.sh, which
+# documents the reviewer-measured 9-hour disagreement.
+fyct__date_from_iso() {
+	if date --version >/dev/null 2>&1; then
+		date -d "$1" +%s 2>/dev/null
+	else
+		date -j -u -f "%Y-%m-%dT%H:%M:%SZ" "$1" +%s 2>/dev/null
+	fi
+}
+
+# Accepts either an epoch integer (validator.json's form) or an ISO string
+# (cycle-history.jsonl's form).
+fyct__to_epoch() {
+	case "$1" in
+	'' | *[!0-9]*) fyct__date_from_iso "$1" ;;
+	*) printf '%s\n' "$1" ;;
+	esac
+}
+
+# fyct__status_read <relative-path> <dest>
+#   Reads one published artifact. An http(s) base is a plain GET; anything
+#   else is a local directory of already-fetched bytes. Returns non-zero and
+#   leaves NO file behind when the artifact cannot be read — a partial or
+#   absent read must never reach a comparison looking like data.
+#
+#   A ZERO-BYTE artifact is treated as unreadable, which is deliberately
+#   STRICTER than scripts/lib/cycle-context.sh, where a readable but
+#   genuinely empty ledger is a legitimate pre-genesis 0. The two are asking
+#   different questions: cycle-context is handed a path by a caller who chose
+#   it, while this reads a URL that a broken publish also answers with zero
+#   bytes. Genesis is long past, so on this path "empty" is overwhelmingly
+#   "the publish failed", and the answer it produces is UNKNOWN — never
+#   COMPLETE. Measured 2026-08-17: an empty published ledger yields
+#   "PHASE 1 record UNKNOWN" and exit 70, not a claim about the day.
+fyct__status_read() {
+	local rel="$1" dest="$2" base="${FYCT_PUBLIC_BASE%/}"
+	rm -f "$dest"
+	case "$FYCT_PUBLIC_BASE" in
+	http://* | https://*)
+		fyct__have curl || return 1
+		if ! curl -fsS --max-time 20 "${base}/${rel}" -o "$dest" 2>/dev/null; then
+			rm -f "$dest"
+			return 1
+		fi
+		;;
+	*)
+		[ -r "${base}/${rel}" ] || return 1
+		if ! cat "${base}/${rel}" > "$dest" 2>/dev/null; then
+			rm -f "$dest"
+			return 1
+		fi
+		;;
+	esac
+	if [ ! -s "$dest" ]; then
+		rm -f "$dest"
+		return 1
+	fi
+	return 0
+}
+
+# The one directory --status writes to, and the only thing it ever removes.
+# Held at file scope rather than in a `local` so the EXIT trap can still see
+# it after the function that created it has returned — a trap that references
+# an out-of-scope local fails under `set -u` and leaves the directory behind,
+# which is the opposite of what it is for.
+FYCT_STATUS_SCRATCH=""
+fyct__status_cleanup() {
+	if [ -n "${FYCT_STATUS_SCRATCH:-}" ] && [ -d "${FYCT_STATUS_SCRATCH}" ]; then
+		rm -rf "${FYCT_STATUS_SCRATCH}"
+	fi
+	return 0
+}
+
+# Like fyct__wrap, without the leading `# `: the status report is a report,
+# not a script to paste. Nothing in --status output is meant to be executed.
+fyct__status_wrap() {
+	local indent="$1" text="$2" line="" word
+	for word in $text; do
+		if [ -z "$line" ]; then
+			line="$word"
+		elif [ "${#line}" -ge 62 ]; then
+			printf '%s%s\n' "$indent" "$line"
+			line="$word"
+		else
+			line="$line $word"
+		fi
+	done
+	if [ -n "$line" ]; then
+		printf '%s%s\n' "$indent" "$line"
+	fi
+	return 0
+}
+
+# fyct__status_verdict <phase> <label> <verdict> <detail>
+fyct__status_verdict() {
+	printf 'PHASE %-3s %-11s %-18s %s\n' "$1" "$2" "$3" "$4"
+	return 0
+}
+
+# fyct__status_evidence <text> — an indented supporting line under a verdict.
+fyct__status_evidence() { fyct__status_wrap "             " "$*"; }
+
+# fyct__status_units <phase> — the unit ids that make up one phase, for the
+# recovery hint. Read from the SAME table --print-only prints, so a phase can
+# never be advised to re-run a step the plan does not contain.
+fyct__status_units() {
+	local want="$1" id out=""
+	while IFS= read -r id; do
+		[ -n "$id" ] || continue
+		if [ "$(fyct_unit_phase "$id")" = "$want" ]; then
+			out="${out:+$out }${id}"
+		fi
+	done < <(fyct_unit_ids)
+	printf '%s' "$out"
+}
+
+# fyct__status_crosscheck <validator-json> <ledger> <have-validator>
+#   THE SECOND OBSERVATION. Called only when the ledger reads as "phase 1 HAS
+#   landed". Returns 0 when that reading is confirmed, $FYCT_STATUS_UNCONFIRMED_RC
+#   otherwise — including when it cannot be checked.
+fyct__status_crosscheck() {
+	local valid_f="$1" ledger_f="$2" have_valid="$3"
+	local now end_time start_time row_end row_end_e delta
+
+	if [ "$have_valid" -ne 1 ]; then
+		echo "cycle-transition: ERROR: --expect-cycle=${N} reads as \"phase 1 HAS landed\", and that" >&2
+		echo "                  reading could not be confirmed: api/validator.json was not readable" >&2
+		echo "                  from ${FYCT_PUBLIC_BASE}." >&2
+		echo "                  An unconfirmed declaration is not a confirmed one. This number becomes" >&2
+		echo "                  the memo prefix of an append-only on-chain inscription." >&2
+		return "$FYCT_STATUS_UNCONFIRMED_RC"
+	fi
+
+	now="$(date -u +%s)"
+	end_time="$(jq -r '.endTime // empty' "$valid_f" 2>/dev/null || true)"
+	start_time="$(jq -r '.startTime // empty' "$valid_f" 2>/dev/null || true)"
+	end_time="$(fyct__to_epoch "$end_time" || true)"
+	start_time="$(fyct__to_epoch "$start_time" || true)"
+
+	if [ -z "$end_time" ] || [ -z "$start_time" ]; then
+		echo "cycle-transition: ERROR: --expect-cycle=${N} reads as \"phase 1 HAS landed\", and that" >&2
+		echo "                  reading could not be confirmed: api/validator.json carries no readable" >&2
+		echo "                  startTime/endTime pair, so the current on-chain period is unknown." >&2
+		return "$FYCT_STATUS_UNCONFIRMED_RC"
+	fi
+
+	# (i) the current period must not be about to end.
+	if [ "$end_time" -le "$((now + FYCT_STATUS_PERIOD_MARGIN_S))" ]; then
+		echo "cycle-transition: ERROR: --expect-cycle=${N} is contradicted by the chain." >&2
+		echo "                  The published ledger holds ${N} closed cycles, which with --expect-cycle=${N}" >&2
+		echo "                  reads as \"cycle ${N} has closed and unit 3 published its row\"." >&2
+		echo "                  But api/validator.json says the CURRENT on-chain period ends at ${end_time}" >&2
+		echo "                  (now ${now}) — within $((FYCT_STATUS_PERIOD_MARGIN_S / 86400)) days, so it has NOT rolled over yet." >&2
+		echo "                  A cycle closes at that rollover. Nothing closed today, and those ${N} rows" >&2
+		echo "                  are the previous transitions', not this one's." >&2
+		echo "                  --expect-cycle names the cycle CLOSING TODAY, which is the one still OPEN:" >&2
+		echo "                  $((N + 1)). Re-run with --expect-cycle=$((N + 1))." >&2
+		echo "                  Left uncorrected, this declaration derives $((N + 1)) as the number to INSCRIBE —" >&2
+		echo "                  one short of the cycle today's transition opens, and append-only." >&2
+		return "$FYCT_STATUS_UNCONFIRMED_RC"
+	fi
+
+	# (ii) the just-closed cycle must end where the current period began.
+	row_end="$(jq -r -s --argjson n "$N" 'map(select(.cycle_n == $n)) | .[0].end_iso // empty' "$ledger_f" 2>/dev/null || true)"
+	if [ -z "$row_end" ]; then
+		echo "cycle-transition: ERROR: --expect-cycle=${N} reads as \"phase 1 HAS landed\", and that" >&2
+		echo "                  reading could not be confirmed: the published ledger has no end_iso on" >&2
+		echo "                  its row for cycle ${N}, so the cycle boundary cannot be compared against" >&2
+		echo "                  the current on-chain period." >&2
+		return "$FYCT_STATUS_UNCONFIRMED_RC"
+	fi
+	row_end_e="$(fyct__to_epoch "$row_end" || true)"
+	if [ -z "$row_end_e" ]; then
+		echo "cycle-transition: ERROR: --expect-cycle=${N}: the ledger's end_iso for cycle ${N} (${row_end})" >&2
+		echo "                  could not be parsed as a timestamp, so the boundary check is unavailable." >&2
+		return "$FYCT_STATUS_UNCONFIRMED_RC"
+	fi
+	delta="$((row_end_e - start_time))"
+	if [ "$delta" -lt 0 ]; then
+		delta="$((0 - delta))"
+	fi
+	if [ "$delta" -gt "$FYCT_STATUS_BOUNDARY_TOL_S" ]; then
+		echo "cycle-transition: ERROR: --expect-cycle=${N} is contradicted by the cycle boundary." >&2
+		echo "                  The ledger's row for cycle ${N} ends at ${row_end} (epoch ${row_end_e}), but the" >&2
+		echo "                  CURRENT on-chain period began at ${start_time} — $((delta / 3600)) hours apart." >&2
+		echo "                  Cycle ${N} ends exactly where cycle $((N + 1)) begins, so if cycle ${N} really had just" >&2
+		echo "                  closed those two instants would coincide. They describe different cycles." >&2
+		echo "                  This is the shape of a declaration made after the new AddValidator was" >&2
+		echo "                  reflected but before unit 3 published the ledger row. Check which cycle" >&2
+		echo "                  closes today before proceeding." >&2
+		return "$FYCT_STATUS_UNCONFIRMED_RC"
+	fi
+
+	printf 'second observation       : CONFIRMED — current on-chain period runs to %s, and cycle %s ends at its start (%s s apart)\n' \
+		"$end_time" "$N" "$delta"
+	return 0
+}
+
+# ---------------------------------------------------------------------------
+# fyct_status_report — the whole reading. Reads globals set by main: N,
+# INSCRIBE, PRINTED_AT, FYCT_PUBLIC_BASE, FYCT_ANCHOR_LOCAL, FYCT_TX_JSON,
+# FYCT_GATE_STATE.
+# ---------------------------------------------------------------------------
+fyct_status_report() {
+	local scratch ledger_f ident_f sig_f anchor_f valid_f head_f local_src
+	local have_ledger=0 have_ident=0 have_sig=0 have_anchor=0 have_valid=0
+	local closed="" ledger_rc=0
+	local v1="" v2="" v3="" v5="" v6=""
+	local d1="" d2="" d3="" d5="" d6=""
+	local n_unknown=0 n_incomplete=0 rc=0
+
+	if ! fyct__have jq; then
+		echo "cycle-transition: ERROR: --status requires jq to read the published feeds." >&2
+		echo "                  Refusing rather than reporting phases it could not measure." >&2
+		return "$FYCT_STATUS_UNKNOWN_RC"
+	fi
+
+	# The ONLY directory this mode writes to, and it does not outlive the run.
+	FYCT_STATUS_SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/fyct-status.XXXXXX")"
+	scratch="$FYCT_STATUS_SCRATCH"
+	trap fyct__status_cleanup EXIT
+
+	ledger_f="${scratch}/cycle-history.jsonl"
+	ident_f="${scratch}/identity.json"
+	sig_f="${scratch}/identity.json.sig"
+	anchor_f="${scratch}/anchor-source.json"
+	valid_f="${scratch}/validator.json"
+	head_f="${scratch}/anchor-source.committed.json"
+
+	fyct__status_read api/cycle-history.jsonl "$ledger_f" && have_ledger=1
+	fyct__status_read api/identity.json "$ident_f" && have_ident=1
+	fyct__status_read api/identity.json.sig "$sig_f" && have_sig=1
+	fyct__status_read api/anchor-source.json "$anchor_f" && have_anchor=1
+	fyct__status_read api/validator.json "$valid_f" && have_valid=1
+
+	printf '============================================================================\n'
+	printf 'Metal Freedom Yield — cycle transition STATUS\n'
+	printf 'READ ONLY. This is a reading of what the published artifacts and the local\n'
+	printf 'inputs actually say. It runs no step, and this file holds no code path that\n'
+	printf 'could. It re-measures post-conditions; it does not trust a state file.\n'
+	printf '============================================================================\n'
+	printf 'read at                  : %s\n' "$PRINTED_AT"
+	printf 'published source         : %s\n' "$FYCT_PUBLIC_BASE"
+	printf 'cycle closing today (N)  : %s    (declared via --expect-cycle)\n' "$N"
+	printf 'cycle to inscribe (N+1)  : %s\n' "$INSCRIBE"
+
+	# ---- phase 1 -----------------------------------------------------------
+	if [ "$have_ledger" -ne 1 ]; then
+		v1=UNKNOWN
+		d1="the published cycle-history could not be read"
+	else
+		closed="$(fyc_closed_cycle_count "$ledger_f")" || ledger_rc=$?
+		if [ "$ledger_rc" -ne 0 ]; then
+			echo "cycle-transition: ERROR: the PUBLISHED cycle-history could not be interpreted." >&2
+			echo "                  cycle-context.sh refused with rc ${ledger_rc}; its reason is above." >&2
+			return "$ledger_rc"
+		fi
+		if [ "$closed" -eq "$N" ]; then
+			v1=COMPLETE
+			d1="published ledger holds ${closed} closed cycles, max cycle_n = ${closed}"
+		elif [ "$closed" -eq "$((N - 1))" ]; then
+			v1=INCOMPLETE
+			d1="published ledger still holds ${closed} closed cycles; cycle ${N} is not on it"
+		else
+			echo "cycle-transition: ERROR: the published ledger disagrees with --expect-cycle=${N}." >&2
+			echo "                  published closed-cycle count : ${closed}" >&2
+			echo "                  expected                     : $((N - 1)) (before phase 1) or ${N} (after unit 3)" >&2
+			echo "                  Neither matches, so one of the two is wrong. Do NOT proceed." >&2
+			return "$FYCT_LEDGER_DISAGREES_RC"
+		fi
+	fi
+
+	# ---- the second observation, before any verdict is printed -------------
+	if [ "$v1" = "COMPLETE" ]; then
+		fyct__status_crosscheck "$valid_f" "$ledger_f" "$have_valid" || return $?
+	else
+		printf 'second observation       : not applicable (the ledger does not claim phase 1 landed)\n'
+	fi
+	printf '============================================================================\n'
+
+	# ---- phase 2 -----------------------------------------------------------
+	local gen_at="" gen_e="" bound="" bound_e=""
+	if [ "$v1" != "COMPLETE" ]; then
+		v2=UNKNOWN
+		d2="phase 1 has not landed, so the cycle boundary to compare against is not published"
+	elif [ "$have_ident" -ne 1 ]; then
+		v2=UNKNOWN
+		d2="the published identity manifest could not be read"
+	else
+		gen_at="$(jq -r '.generated_at // empty' "$ident_f" 2>/dev/null || true)"
+		bound="$(jq -r -s --argjson n "$N" 'map(select(.cycle_n == $n)) | .[0].end_iso // empty' "$ledger_f" 2>/dev/null || true)"
+		gen_e="$(fyct__to_epoch "$gen_at" || true)"
+		bound_e="$(fyct__to_epoch "$bound" || true)"
+		if [ -z "$gen_e" ] || [ -z "$bound_e" ]; then
+			v2=UNKNOWN
+			d2="generated_at (${gen_at:-<absent>}) or the cycle ${N} boundary (${bound:-<absent>}) is unreadable"
+		elif [ "$gen_e" -le "$bound_e" ]; then
+			v2=INCOMPLETE
+			d2="published generated_at ${gen_at} is not after cycle ${N}'s end ${bound}"
+		elif [ "$have_sig" -ne 1 ]; then
+			v2=INCOMPLETE
+			d2="the manifest is fresh but api/identity.json.sig did not publish with it"
+		else
+			v2=COMPLETE
+			d2="published generated_at ${gen_at} is after cycle ${N}'s end ${bound}, and the .sig published with it"
+		fi
+	fi
+
+	# ---- phase 3 -----------------------------------------------------------
+	local pub_sha="" loc_sha="" cyc_obs=""
+	local_src=""
+	if [ "$have_anchor" -ne 1 ]; then
+		v3=UNKNOWN
+		d3="the published anchor-source could not be read"
+	else
+		cyc_obs="$(jq -r '.observations_branch.cycle_number_observed // empty' "$anchor_f" 2>/dev/null || true)"
+		if [ -n "$FYCT_ANCHOR_LOCAL" ]; then
+			local_src="$FYCT_ANCHOR_LOCAL"
+			if [ -r "$FYCT_ANCHOR_LOCAL" ]; then
+				cat "$FYCT_ANCHOR_LOCAL" > "$head_f" 2>/dev/null || rm -f "$head_f"
+			fi
+		else
+			local_src="git show HEAD:public/api/anchor-source.json"
+			git -C "$FYCT_SELF_DIR" show HEAD:public/api/anchor-source.json > "$head_f" 2>/dev/null || rm -f "$head_f"
+		fi
+		if [ ! -s "$head_f" ]; then
+			v3=UNKNOWN
+			d3="no local copy to compare against (${local_src})"
+		else
+			pub_sha="$(fyct__sha256 "$anchor_f" || true)"
+			loc_sha="$(fyct__sha256 "$head_f" || true)"
+			if [ -z "$pub_sha" ] || [ -z "$loc_sha" ]; then
+				v3=UNKNOWN
+				d3="no sha256 tool on this machine (sha256sum / shasum), so byte equality cannot be decided"
+			elif [ "$cyc_obs" != "$INSCRIBE" ]; then
+				v3=INCOMPLETE
+				d3="the published anchor-source still describes cycle ${cyc_obs:-<absent>}, not ${INSCRIBE}"
+			elif [ "$pub_sha" != "$loc_sha" ]; then
+				v3=INCOMPLETE
+				d3="published sha256 ${pub_sha} != local ${loc_sha}"
+			else
+				v3=COMPLETE
+				d3="published bytes equal the local copy (sha256 ${pub_sha}) and describe cycle ${INSCRIBE}"
+			fi
+		fi
+	fi
+
+	# ---- phase 5 -----------------------------------------------------------
+	local schema_ver="" prefix="" tx_id="" act_n="" match_n=""
+	if [ -z "$FYCT_TX_JSON" ]; then
+		v5=UNKNOWN
+		d5="no captured chain response supplied (--tx-json=<path>)"
+	elif [ ! -r "$FYCT_TX_JSON" ] || ! jq empty "$FYCT_TX_JSON" >/dev/null 2>&1; then
+		v5=UNKNOWN
+		d5="--tx-json=${FYCT_TX_JSON} is unreadable or is not JSON"
+	elif [ "$have_anchor" -ne 1 ]; then
+		v5=UNKNOWN
+		d5="the published anchor-source is unreadable, so the expected memo prefix cannot be derived"
+	else
+		schema_ver="$(jq -r '.schema_version // empty' "$anchor_f" 2>/dev/null || true)"
+		if [ -z "$schema_ver" ]; then
+			v5=UNKNOWN
+			d5="the published anchor-source carries no schema_version, so the memo prefix cannot be derived"
+		else
+			prefix="fya${schema_ver}c${INSCRIBE}"
+			tx_id="$(jq -r "$FYCT_TXQ_ID" "$FYCT_TX_JSON" 2>/dev/null || true)"
+			act_n="$(jq -r --arg t "$tx_id" "${FYCT_TXQ_MEMOS} | length" "$FYCT_TX_JSON" 2>/dev/null || true)"
+			match_n="$(jq -r --arg t "$tx_id" --arg p "$prefix" "${FYCT_TXQ_MEMOS} | map(select(startswith(\$p))) | length" "$FYCT_TX_JSON" 2>/dev/null || true)"
+			[ -n "$act_n" ] || act_n=0
+			[ -n "$match_n" ] || match_n=0
+			if [ -z "$tx_id" ] || [ "$act_n" -eq 0 ]; then
+				v5=INCOMPLETE
+				d5="the response carries no memo for any transaction, so nothing is inscribed yet"
+			elif [ "$act_n" -eq 4 ] && [ "$match_n" -eq 4 ]; then
+				v5=COMPLETE
+				d5="tx ${tx_id} resolves 4 distinct memos, all carrying prefix ${prefix}"
+			else
+				v5=INCOMPLETE
+				d5="tx ${tx_id} resolves ${act_n} distinct memo(s), ${match_n} carrying prefix ${prefix} (4 of 4 required)"
+			fi
+		fi
+	fi
+
+	# ---- phase 6 -----------------------------------------------------------
+	local gate_sig="" gate_dag="" gate_schema="" want_sig="" node_id="" start_t=""
+	if [ ! -r "$FYCT_GATE_STATE" ]; then
+		v6=UNKNOWN
+		d6="no cycle-gate state at ${FYCT_GATE_STATE} (it lives on the validator host)"
+	elif ! jq empty "$FYCT_GATE_STATE" >/dev/null 2>&1; then
+		v6=UNKNOWN
+		d6="${FYCT_GATE_STATE} is not valid JSON — cycle-gate.sh itself fails closed on this"
+	elif [ "$have_valid" -ne 1 ]; then
+		v6=UNKNOWN
+		d6="the published validator.json is unreadable, so the current cycle signature cannot be derived"
+	else
+		gate_schema="$(jq -r '.schemaVersion // empty' "$FYCT_GATE_STATE" 2>/dev/null || true)"
+		gate_sig="$(jq -r '.approved_cycle_signature // empty' "$FYCT_GATE_STATE" 2>/dev/null || true)"
+		gate_dag="$(jq -r '.approved_dag_root_hash // empty' "$FYCT_GATE_STATE" 2>/dev/null || true)"
+		node_id="$(jq -r '.nodeId // empty' "$valid_f" 2>/dev/null || true)"
+		start_t="$(jq -r '.startTime // empty' "$valid_f" 2>/dev/null || true)"
+		if [ "$gate_schema" != "1" ]; then
+			v6=UNKNOWN
+			d6="state file schemaVersion is '${gate_schema:-<absent>}', not 1 — cycle-gate.sh treats this as fail-closed, and so does this reading"
+		elif [ -z "$node_id" ] || [ -z "$start_t" ]; then
+			v6=UNKNOWN
+			d6="validator.json carries no nodeId/startTime pair, so the expected signature cannot be composed"
+		else
+			want_sig="${node_id}-${start_t}"
+			if [ "$gate_sig" = "$want_sig" ]; then
+				v6=COMPLETE
+				d6="approved_cycle_signature matches the current on-chain period"
+			else
+				v6=INCOMPLETE
+				d6="approved_cycle_signature is '${gate_sig:-<absent>}', the current cycle is '${want_sig}'"
+			fi
+		fi
+	fi
+
+	# ---- report ------------------------------------------------------------
+	fyct__status_verdict 1 "record" "$v1" "$d1"
+	fyct__status_verdict 2 "identity" "$v2" "$d2"
+	fyct__status_verdict 3 "compose" "$v3" "$d3"
+	fyct__status_verdict 4 "rehearsal" "NO-POST-CONDITION" "the design doc states none; none is invented here"
+	fyct__status_evidence "The spec's post-condition table has no row for phase 4. Unit 7a's only product is a testnet transaction id on stdout, which nothing publishes, so there is no artifact to re-measure. Confirm the rehearsal by its own sentinel line, not from here."
+	fyct__status_verdict 5 "inscribe" "$v5" "$d5"
+	fyct__status_verdict 6 "post" "$v6" "$d6"
+
+	# The supplementary observation phase 6 does NOT gate on. Reported because
+	# a disagreement here is worth seeing, and separated because the design
+	# doc's post-condition names the signature and nothing else — widening a
+	# stated post-condition on my own initiative is the kind of quiet drift
+	# this file's tables exist to prevent.
+	if [ -n "$gate_dag" ] && [ "$have_anchor" -eq 1 ]; then
+		local pub_dag
+		pub_dag="$(jq -r '.dag_root_computed // empty' "$anchor_f" 2>/dev/null || true)"
+		if [ -n "$pub_dag" ]; then
+			if [ "$pub_dag" = "$gate_dag" ]; then
+				fyct__status_evidence "supplementary (not part of the phase 6 verdict): approved_dag_root_hash equals the published dag_root_computed."
+			else
+				fyct__status_evidence "supplementary (not part of the phase 6 verdict): approved_dag_root_hash ${gate_dag} differs from the published dag_root_computed ${pub_dag}."
+			fi
+		fi
+	fi
+
+	printf '============================================================================\n'
+	printf 'WHERE THIS READING IS NOT A COMPLETE ACCOUNT OF THE DAY\n'
+	fyct__status_wrap "  " "1. Phase 4 has no post-condition, as stated above. Nothing here confirms the rehearsal ran."
+	fyct__status_wrap "  " "2. UNIT 8.5 IS COVERED BY NONE OF THE FIVE. Phase 6's post-condition is the gate-state signature, which unit 9 writes, and unit 9 polls only anchor-source.json freshness. So a skipped 8.5 leaves the published anchor-receipt.json and anchor-history.jsonl serving the PREVIOUS cycle while every post-condition above still reads COMPLETE. That gap is in the design doc's table, not introduced here; check those two feeds by eye before calling the day done."
+	fyct__status_wrap "  " "3. Phase 2 confirms that identity.json.sig published alongside the manifest. It does NOT verify the signature. Unit 9's Phase 1 is what performs the cryptographic check."
+	fyct__status_wrap "  " "4. Phase 3 compares the published bytes against the COMMITTED ones, not against the host's live file. See this script's header for why a live host comparison would be wrong rather than merely inconvenient."
+	fyct__status_wrap "  " "5. Phase 5 verifies the response it was handed, not its provenance. Capture it at the moment you run this; a response from another machine or another hour is not distinguishable here."
+	fyct__status_wrap "  " "6. Only the phase-1-HAS-landed reading of --expect-cycle has a second observation. The other reading has none and structurally cannot: before the wallet action the two candidate declarations produce identical public state."
+	printf '============================================================================\n'
+
+	local p
+	for p in "$v1" "$v2" "$v3" "$v5" "$v6"; do
+		case "$p" in
+		UNKNOWN) n_unknown=$((n_unknown + 1)) ;;
+		INCOMPLETE) n_incomplete=$((n_incomplete + 1)) ;;
+		esac
+	done
+
+	# Recovery, from the same unit table --print-only prints.
+	if [ "$v1" != "COMPLETE" ]; then
+		printf 'to advance phase 1       : units %s\n' "$(fyct__status_units 1)"
+	fi
+	if [ "$v2" != "COMPLETE" ]; then
+		printf 'to advance phase 2       : units %s\n' "$(fyct__status_units 2)"
+	fi
+	if [ "$v3" != "COMPLETE" ]; then
+		printf 'to advance phase 3       : units %s\n' "$(fyct__status_units 3)"
+	fi
+	if [ "$v5" != "COMPLETE" ]; then
+		printf 'to advance phase 5       : units %s\n' "$(fyct__status_units 5)"
+	fi
+	if [ "$v6" != "COMPLETE" ]; then
+		printf 'to advance phase 6       : units %s\n' "$(fyct__status_units 6)"
+	fi
+	fyct__status_wrap "" "The resolved command for every unit above is printed by --print-only. docs/CYCLE_GATE.md remains the canon; this reading restates where it stopped."
+
+	if [ "$n_unknown" -gt 0 ]; then
+		rc="$FYCT_STATUS_UNKNOWN_RC"
+		printf 'RESULT                   : %s post-condition(s) NOT OBSERVED, %s incomplete (exit %s)\n' \
+			"$n_unknown" "$n_incomplete" "$rc"
+		fyct__status_wrap "" "An observation that could not be made is reported as UNKNOWN and never resolved to COMPLETE. Supply the missing input, or re-run where the artifact lives, before concluding anything about those phases."
+	elif [ "$n_incomplete" -gt 0 ]; then
+		rc="$FYCT_STATUS_INCOMPLETE_RC"
+		printf 'RESULT                   : %s phase(s) not yet complete (exit %s)\n' "$n_incomplete" "$rc"
+	else
+		rc=0
+		printf 'RESULT                   : all five post-conditions measured and COMPLETE (exit 0)\n'
+	fi
+	printf '============================================================================\n'
+
+	fyct__status_cleanup
+	return "$rc"
+}
+
+# ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 fyct_main() {
 	set -euo pipefail
 
 	local mode="" ledger="" ttx="" expect=""
-	local usage="usage: bash scripts/cycle-transition.sh --print-only --expect-cycle=<N> --ledger=<path> [--testnet-tx-id=<64hex>]"
+	local pubbase="" anchor_local="" tx_json="" gate_state=""
+	local usage="usage: bash scripts/cycle-transition.sh {--print-only --ledger=<path> | --status} --expect-cycle=<N>"
 
 	while [ "$#" -gt 0 ]; do
 		case "$1" in
 		--print-only)
-			mode="print-only"
+			mode="${mode:+${mode}+}print-only"
+			shift
+			;;
+		--status)
+			mode="${mode:+${mode}+}status"
 			shift
 			;;
 		--expect-cycle=*)
@@ -710,10 +1462,30 @@ fyct_main() {
 			ttx="${1#--testnet-tx-id=}"
 			shift
 			;;
+		--public-base=*)
+			pubbase="${1#--public-base=}"
+			shift
+			;;
+		--anchor-source-local=*)
+			anchor_local="${1#--anchor-source-local=}"
+			shift
+			;;
+		--tx-json=*)
+			tx_json="${1#--tx-json=}"
+			shift
+			;;
+		--gate-state=*)
+			gate_state="${1#--gate-state=}"
+			shift
+			;;
 		-h | --help)
 			echo "$usage" >&2
-			echo "       --print-only is the only mode; this phase has no execution path." >&2
+			echo "       --print-only prints the day-of plan. --status re-measures each phase's" >&2
+			echo "       post-condition and reports where the day stopped. Neither executes a step;" >&2
+			echo "       there is no execution path in this file." >&2
 			echo "       --expect-cycle is the cycle CLOSING today (the FY_EXPECT_CYCLE value)." >&2
+			echo "       --status also takes --public-base=, --anchor-source-local=, --tx-json=," >&2
+			echo "       --gate-state=; see this script's USAGE header." >&2
 			return 0
 			;;
 		*)
@@ -724,13 +1496,53 @@ fyct_main() {
 		esac
 	done
 
-	if [ "$mode" != "print-only" ]; then
-		echo "cycle-transition: ERROR: --print-only is required." >&2
-		echo "                  It is the ONLY mode this script has. Execution is deliberately absent" >&2
-		echo "                  in this phase (C2-2); it arrives in C2-3 with the resume logic." >&2
+	if [ "$mode" = "" ]; then
+		echo "cycle-transition: ERROR: one of --print-only or --status is required." >&2
+		echo "                  There is no default mode, deliberately: a script whose no-argument" >&2
+		echo "                  behaviour has to be guessed is a script that will one day be run by" >&2
+		echo "                  accident on transition day." >&2
 		return "$FYCT_USAGE_RC"
 	fi
-	if [ -z "$ledger" ]; then
+	if [ "$mode" != "print-only" ] && [ "$mode" != "status" ]; then
+		echo "cycle-transition: ERROR: --print-only and --status are separate readings; pass one." >&2
+		echo "                  They take different inputs and answer different questions, and a" >&2
+		echo "                  combined invocation would have to guess which one you meant." >&2
+		return "$FYCT_USAGE_RC"
+	fi
+
+	# Cross-mode arguments are REFUSED, not ignored. Silently accepting a flag
+	# that does nothing is how an operator ends up believing an observation was
+	# made that never was.
+	if [ "$mode" = "status" ]; then
+		if [ -n "$ledger" ]; then
+			echo "cycle-transition: ERROR: --ledger is not accepted with --status." >&2
+			echo "                  --status reads the PUBLISHED ledger from --public-base, because the" >&2
+			echo "                  published bytes ARE the post-condition. Reading a local mirror instead" >&2
+			echo "                  would answer a different question and could report a phase complete" >&2
+			echo "                  that the site does not serve." >&2
+			return "$FYCT_USAGE_RC"
+		fi
+		if [ -n "$ttx" ]; then
+			echo "cycle-transition: ERROR: --testnet-tx-id is not accepted with --status." >&2
+			echo "                  It resolves two printed command lines in --print-only. Phase 4 has no" >&2
+			echo "                  post-condition to measure, so --status has nothing to do with it." >&2
+			return "$FYCT_USAGE_RC"
+		fi
+	else
+		local stray=""
+		[ -z "$pubbase" ] || stray="--public-base"
+		[ -z "$anchor_local" ] || stray="${stray:+$stray }--anchor-source-local"
+		[ -z "$tx_json" ] || stray="${stray:+$stray }--tx-json"
+		[ -z "$gate_state" ] || stray="${stray:+$stray }--gate-state"
+		if [ -n "$stray" ]; then
+			echo "cycle-transition: ERROR: ${stray} belong(s) to --status, not --print-only." >&2
+			echo "                  --print-only prints a plan from the ledger it was handed; it observes" >&2
+			echo "                  nothing and must keep working offline." >&2
+			return "$FYCT_USAGE_RC"
+		fi
+	fi
+
+	if [ "$mode" = "print-only" ] && [ -z "$ledger" ]; then
 		echo "cycle-transition: ERROR: --ledger=<path> is required." >&2
 		echo "                  There is no default, deliberately: on the validator host a defaulted" >&2
 		echo "                  path would silently answer from a local mirror while looking inert on" >&2
@@ -755,12 +1567,36 @@ fyct_main() {
 		return "$FYCT_USAGE_RC"
 	fi
 
+	# Globals both modes read.
+	N="$expect"
+	INSCRIBE="$((expect + 1))"
+	PRINTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+	if [ "$mode" = "status" ]; then
+		FYCT_PUBLIC_BASE="${pubbase:-$FYCT_PUBLIC_BASE_DEFAULT}"
+		FYCT_ANCHOR_LOCAL="$anchor_local"
+		FYCT_TX_JSON="$tx_json"
+		if [ -n "$gate_state" ]; then
+			FYCT_GATE_STATE="$gate_state"
+		else
+			# Resolved through the library that owns the path, so --status
+			# looks where the writers write. fyd_state_dir is a resolution,
+			# not a side effect; it announces the production default on
+			# stderr when FY_LIVE is unset, which is exactly the warning an
+			# operator wants to see before reading that file.
+			local state_dir
+			state_dir="$(fyd_state_dir cycle)" || return $?
+			FYCT_GATE_STATE="${state_dir}/cycle-gate-state.json"
+		fi
+		fyct__check_phase_agreement || return $?
+		fyct_status_report
+		return $?
+	fi
+
 	fyct__require_env || return $?
 
 	# Globals the command blocks read.
 	LEDGER="$ledger"
-	N="$expect"
-	INSCRIBE="$((expect + 1))"
 
 	# The ledger CHECKS the declaration; it does not supply it. See THE
 	# OFF-BY-ONE in the header for why both accepted states exist.
@@ -797,7 +1633,6 @@ fyct_main() {
 	TTX="$ttx"
 	TTX_KNOWN=0
 	[ -n "$ttx" ] && TTX_KNOWN=1
-	PRINTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 	fyct__check_phase_agreement || return $?
 

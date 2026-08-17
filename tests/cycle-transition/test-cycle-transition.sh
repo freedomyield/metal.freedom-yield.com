@@ -773,17 +773,24 @@ else
 fi
 
 # ===========================================================================
-# J. The orchestrator has no execution path at all in this phase
+# J. The orchestrator has no execution path — in either mode
 # ===========================================================================
 # Every external command the plan describes must reach the output as TEXT.
 # If any of them were invoked, section E's tattle log would be non-empty --
-# it is checked there. Here we pin the complementary structural fact: the
-# script never executes a repo script.
+# it is checked there, and section M repeats the measurement for --status.
+# Here we pin the complementary structural fact: no shell is ever spawned, so
+# no repo script can be run from this file.
 EXEC_HIT="$(grep -nE '^[[:space:]]*(bash|sh|eval)[[:space:]]' "$ORCH" || true)"
 if [ -z "$EXEC_HIT" ]; then
-	ok "the orchestrator contains no statement that executes another program"
+	# The claim is scoped to what the check actually proves, and the scope
+	# tightened when --status arrived: --status DOES invoke read-only tools
+	# (jq, curl or cat, git show, a sha256 tool), so "executes no program" is
+	# no longer true of the file and is not asserted. What this pins is the
+	# thing that matters — no shell is spawned to run a repo script, i.e. no
+	# transition step can be executed from here.
+	ok "the orchestrator never spawns a shell (no bash/sh/eval statement) — it cannot run a transition step"
 else
-	bad "the orchestrator executes something — this phase must not: $(printf '%s' "$EXEC_HIT" | head -1)"
+	bad "the orchestrator spawns a shell — neither mode may: $(printf '%s' "$EXEC_HIT" | head -1)"
 fi
 # ...and that scan must be capable of firing.
 EXEC_PROBE="${TMP}/exec-probe.sh"
@@ -794,5 +801,485 @@ if grep -qE '^[[:space:]]*(bash|sh|eval)[[:space:]]' "$EXEC_PROBE"; then
 else
 	bad "MUTATION NOT CAUGHT: the execution scan missed an added call to another script"
 fi
+
+# ===========================================================================
+# K. --status: the post-conditions are MEASURED, and every one is mutated
+# ===========================================================================
+# docs/superpowers/specs/2026-08-06-single-source-of-truth-design.md §5 lists
+# five post-conditions and none for phase 4. This section builds a fixture in
+# which all five hold, proves --status says so, then breaks each one
+# INDIVIDUALLY and proves the verdict stops saying COMPLETE. Without the
+# mutations the first case would pass just as happily against a --status that
+# printed COMPLETE unconditionally.
+#
+# Everything here is hermetic: --public-base points at a local directory, so
+# no request leaves this machine and no live feed can turn the suite red.
+
+if date --version >/dev/null 2>&1; then
+	epoch_iso() { date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ; }
+else
+	epoch_iso() { date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ; }
+fi
+
+# Never a real node id (memory/feedback_no_literal_host_identifier.md and the
+# public-repo sanitize rule): the string only has to round-trip through the
+# signature composition.
+STATUS_NODE="NodeID-fixtureonlyNOTaRealNodeIdentifier"
+STATUS_DAG="$(printf 'd%.0s' 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 \
+	17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 \
+	33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 \
+	49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64)"
+STATUS_TX="$(printf 'b%.0s' 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 \
+	17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 \
+	33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 \
+	49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64)"
+
+# make_status_pub <dir> <rows> <last_end_epoch> <start_epoch> <end_epoch> \
+#                 <generated_at_epoch> <cycle_number_observed>
+# Lays out a directory the same way the site does, so --public-base can read
+# it with no network.
+make_status_pub() {
+	local d="$1" rows="$2" last_end="$3" st="$4" en="$5" gen="$6" cyc="$7" i=1
+	mkdir -p "${d}/api"
+	: > "${d}/api/cycle-history.jsonl"
+	while [ "$i" -le "$rows" ]; do
+		if [ "$i" -eq "$rows" ]; then
+			printf '{"cycle_n":%d,"cycle_status":"closed","end_iso":"%s"}\n' \
+				"$i" "$(epoch_iso "$last_end")" >> "${d}/api/cycle-history.jsonl"
+		else
+			printf '{"cycle_n":%d,"cycle_status":"closed","end_iso":"1970-01-01T00:00:00Z"}\n' \
+				"$i" >> "${d}/api/cycle-history.jsonl"
+		fi
+		i=$((i + 1))
+	done
+	printf '{"schema_version":1,"nodeId":"%s","startTime":%s,"endTime":%s}\n' \
+		"$STATUS_NODE" "$st" "$en" > "${d}/api/validator.json"
+	printf '{"schema_version":1,"generated_at":"%s"}\n' "$(epoch_iso "$gen")" \
+		> "${d}/api/identity.json"
+	printf 'SSHSIG-fixture-not-a-real-signature\n' > "${d}/api/identity.json.sig"
+	printf '{"schema_version":1,"dag_root_computed":"%s","observations_branch":{"cycle_number_observed":%s}}\n' \
+		"$STATUS_DAG" "$cyc" > "${d}/api/anchor-source.json"
+}
+
+# make_status_tx <file> <memo-prefix>
+# The `traces` shape, with three entries per action. That is not an invention:
+# measured 2026-08-17 against the real cycle-4 anchor transaction, the v1
+# history response carried NO top-level `.actions` and TWELVE `.traces` — a
+# token transfer notifies both parties on top of executing. A fixture using
+# the shape the code WISHED for would have proved nothing about the shape the
+# chain actually returns.
+make_status_tx() {
+	local f="$1" p="$2" first=1 suffix i
+	{
+		printf '{"id":"%s","traces":[' "$STATUS_TX"
+		for suffix in "-id:aa" "-ob:bb" "-ar:cc" ":dd"; do
+			for i in 1 2 3; do
+				[ "$first" -eq 1 ] || printf ','
+				first=0
+				printf '{"trx_id":"%s","act":{"data":{"memo":"%s%s"}}}' \
+					"$STATUS_TX" "$p" "$suffix"
+			done
+		done
+		printf ']}\n'
+	} > "$f"
+}
+
+# make_status_gate <file> <signature>
+make_status_gate() {
+	printf '{"schemaVersion":1,"approved_cycle_signature":"%s","approved_dag_root_hash":"%s","approved_at":"1970-01-01T00:00:00Z"}\n' \
+		"$2" "$STATUS_DAG" > "$1"
+}
+
+STATUS_RC=0
+# run_status <outfile> <expect-cycle> [args...]
+run_status() {
+	local out="$1" ec="$2"
+	shift 2
+	env HOME="$SANDBOX_HOME" FY_STATE_DIR="${TMP}/no-state-dir" \
+		bash "$ORCH" --status --expect-cycle="$ec" "$@" > "$out" 2>"${out}.err"
+	STATUS_RC=$?
+}
+
+# verdict_of <plan> <phase> — the verdict word on that phase's line.
+verdict_of() {
+	awk -v p="PHASE $2 " 'index($0, p) == 1 { print $4 }' "$1"
+}
+
+ST_NOW="$(date -u +%s)"
+ST_START=$((ST_NOW - 86400))          # the new period opened yesterday
+ST_END=$((ST_NOW + 31 * 86400))       # and runs another month
+ST_GEN=$((ST_START + 3600))           # the manifest was re-signed after it
+ST_N=4
+ST_INSCRIBE=5
+
+STATUS_OK="${TMP}/status-ok"
+mkdir -p "$STATUS_OK"
+make_status_pub "${STATUS_OK}/pub" "$ST_N" "$ST_START" "$ST_START" "$ST_END" "$ST_GEN" "$ST_INSCRIBE"
+cp "${STATUS_OK}/pub/api/anchor-source.json" "${STATUS_OK}/anchor-local.json"
+make_status_tx "${STATUS_OK}/tx.json" "fya1c${ST_INSCRIBE}"
+make_status_gate "${STATUS_OK}/gate.json" "${STATUS_NODE}-${ST_START}"
+
+# ok_args — the full set of inputs under which all five post-conditions hold.
+ok_args() {
+	printf '%s\n' \
+		"--public-base=${STATUS_OK}/pub" \
+		"--anchor-source-local=${STATUS_OK}/anchor-local.json" \
+		"--tx-json=${STATUS_OK}/tx.json" \
+		"--gate-state=${STATUS_OK}/gate.json"
+}
+# shellcheck disable=SC2207
+OK_ARGS=($(ok_args))
+
+ST_ALL="${TMP}/status-all.txt"
+run_status "$ST_ALL" "$ST_N" "${OK_ARGS[@]}"
+if [ "$STATUS_RC" -eq 0 ]; then
+	ok "--status exits 0 when all five post-conditions hold"
+else
+	bad "--status returned ${STATUS_RC} on an all-complete fixture: $(head -3 "${ST_ALL}.err")"
+fi
+ALL_COMPLETE=1
+for ph in 1 2 3 5 6; do
+	v="$(verdict_of "$ST_ALL" "$ph")"
+	if [ "$v" != "COMPLETE" ]; then
+		bad "phase ${ph} read '${v}' on the all-complete fixture, expected COMPLETE"
+		ALL_COMPLETE=0
+	fi
+done
+if [ "$ALL_COMPLETE" -eq 1 ]; then
+	ok "all five measurable post-conditions read COMPLETE on the all-complete fixture"
+fi
+
+# Phase 4 is SKIPPED as having no post-condition — not invented, not silently
+# folded into the arithmetic.
+if [ "$(verdict_of "$ST_ALL" 4)" = "NO-POST-CONDITION" ]; then
+	ok "phase 4 is reported as NO-POST-CONDITION (the design doc states none)"
+else
+	bad "phase 4 read '$(verdict_of "$ST_ALL" 4)', expected NO-POST-CONDITION"
+fi
+if grep -q 'no row for phase 4' "$ST_ALL"; then
+	ok "the report says WHY phase 4 has no post-condition, rather than just omitting it"
+else
+	bad "phase 4 is skipped without stating why"
+fi
+if grep -q 'all five post-conditions measured and COMPLETE' "$ST_ALL"; then
+	ok "the summary counts five post-conditions, so phase 4 is excluded from the arithmetic"
+else
+	bad "the all-complete summary does not count exactly five post-conditions"
+fi
+
+# An all-COMPLETE reading must not read as "the day is finished": the design
+# doc's five post-conditions do not cover unit 8.5, and the report has to say
+# so ON THE ALL-GREEN PATH, which is the only path where it matters.
+if grep -q 'WHERE THIS READING IS NOT A COMPLETE ACCOUNT OF THE DAY' "$ST_ALL"; then
+	ok "the report states its own limits, including on the all-complete path"
+else
+	bad "the report omits its limits block"
+fi
+if grep -q 'UNIT 8.5 IS COVERED BY NONE OF THE FIVE' "$ST_ALL"; then
+	ok "the report names unit 8.5 as uncovered by any post-condition (the known runbook gap)"
+else
+	bad "the report does not disclose that unit 8.5 is covered by none of the five post-conditions"
+fi
+
+# ---- MUTATION: break each post-condition on its own -----------------------
+# mutate_case <name> <phase> <expected-verdict> <prep-fn>
+# Each prep function receives a fresh copy of the passing fixture and breaks
+# exactly one thing.
+MUT_DIR_N=0
+mutate_case() {
+	local name="$1" phase="$2" want="$3" prep="$4" got
+	MUT_DIR_N=$((MUT_DIR_N + 1))
+	local d="${TMP}/status-mut-${MUT_DIR_N}"
+	rm -rf "$d"
+	cp -R "$STATUS_OK" "$d"
+	"$prep" "$d"
+	local out="${TMP}/status-mut-${MUT_DIR_N}.txt"
+	# shellcheck disable=SC2207
+	local args=($(printf '%s\n' \
+		"--public-base=${d}/pub" \
+		"--anchor-source-local=${d}/anchor-local.json" \
+		"--tx-json=${d}/tx.json" \
+		"--gate-state=${d}/gate.json"))
+	if [ "$name" = "no --tx-json supplied" ]; then
+		args=("--public-base=${d}/pub" "--anchor-source-local=${d}/anchor-local.json" "--gate-state=${d}/gate.json")
+	fi
+	if [ "$name" = "no cycle-gate state file" ]; then
+		args=("--public-base=${d}/pub" "--anchor-source-local=${d}/anchor-local.json" "--tx-json=${d}/tx.json" "--gate-state=${d}/absent.json")
+	fi
+	run_status "$out" "$ST_N" "${args[@]}"
+	got="$(verdict_of "$out" "$phase")"
+	if [ "$got" = "$want" ]; then
+		ok "mutation: ${name} -> phase ${phase} reads ${got}"
+	else
+		bad "MUTATION NOT CAUGHT: ${name} -> phase ${phase} read '${got}', expected ${want}"
+	fi
+}
+
+mut_drop_row() { head -n $((ST_N - 1)) "${1}/pub/api/cycle-history.jsonl" > "${1}/tmp.jsonl"; mv "${1}/tmp.jsonl" "${1}/pub/api/cycle-history.jsonl"; }
+mut_stale_identity() { printf '{"schema_version":1,"generated_at":"%s"}\n' "$(epoch_iso $((ST_START - 3600)))" > "${1}/pub/api/identity.json"; }
+mut_drop_sig() { rm -f "${1}/pub/api/identity.json.sig"; }
+mut_local_bytes() { printf '\n' >> "${1}/anchor-local.json"; }
+mut_old_cycle() { printf '{"schema_version":1,"dag_root_computed":"%s","observations_branch":{"cycle_number_observed":%s}}\n' "$STATUS_DAG" "$ST_N" > "${1}/pub/api/anchor-source.json"; cp "${1}/pub/api/anchor-source.json" "${1}/anchor-local.json"; }
+mut_wrong_memo() { make_status_tx "${1}/tx.json" "fya1c${ST_N}"; }
+mut_noop() { :; }
+mut_wrong_sig() { make_status_gate "${1}/gate.json" "${STATUS_NODE}-1"; }
+
+mutate_case "the published ledger is one row short"        1 INCOMPLETE mut_drop_row
+mutate_case "identity generated_at predates the cycle end" 2 INCOMPLETE mut_stale_identity
+mutate_case "identity.json.sig did not publish"            2 INCOMPLETE mut_drop_sig
+mutate_case "the local anchor-source copy differs by one byte" 3 INCOMPLETE mut_local_bytes
+mutate_case "the published anchor-source still names the old cycle" 3 INCOMPLETE mut_old_cycle
+mutate_case "the transaction's memos carry the previous cycle's prefix" 5 INCOMPLETE mut_wrong_memo
+mutate_case "no --tx-json supplied"                        5 UNKNOWN    mut_noop
+mutate_case "the cycle-gate signature names another cycle" 6 INCOMPLETE mut_wrong_sig
+mutate_case "no cycle-gate state file"                     6 UNKNOWN    mut_noop
+
+# ---- exit-code arithmetic -------------------------------------------------
+# 69 (something incomplete) and 70 (something unobservable) must be
+# distinguishable, and UNKNOWN must dominate: "could not look" is never
+# allowed to read as "looked and it was fine".
+ST_69="${TMP}/status-69"
+rm -rf "$ST_69"
+cp -R "$STATUS_OK" "$ST_69"
+make_status_gate "${ST_69}/gate.json" "${STATUS_NODE}-1"
+run_status "${TMP}/status-69.txt" "$ST_N" \
+	"--public-base=${ST_69}/pub" "--anchor-source-local=${ST_69}/anchor-local.json" \
+	"--tx-json=${ST_69}/tx.json" "--gate-state=${ST_69}/gate.json"
+if [ "$STATUS_RC" -eq 69 ]; then
+	ok "one incomplete phase and nothing unobservable exits 69"
+else
+	bad "expected exit 69 for an incomplete-only reading, got ${STATUS_RC}"
+fi
+run_status "${TMP}/status-70.txt" "$ST_N" \
+	"--public-base=${STATUS_OK}/pub" "--anchor-source-local=${STATUS_OK}/anchor-local.json" \
+	"--gate-state=${STATUS_OK}/gate.json"
+if [ "$STATUS_RC" -eq 70 ]; then
+	ok "an unobservable post-condition exits 70, never 0"
+else
+	bad "expected exit 70 when a post-condition could not be observed, got ${STATUS_RC}"
+fi
+
+# The recovery hint has to come from the unit table, not from a second list
+# that could drift away from it.
+if grep -q 'to advance phase 5       : units 7b 7c 7.5' "${TMP}/status-70.txt"; then
+	ok "the recovery hint names phase 5's units from the same table --print-only prints"
+else
+	bad "the recovery hint for phase 5 does not match the unit table"
+fi
+
+# The status output must be as free of broadcast-tool literals as the plan.
+BC_ST="$(grep -inE '(^|[^A-Za-z0-9_.-])(proton|cleos|safe-broadcast)([^A-Za-z0-9_.-]|$)' "$ST_ALL" || true)"
+if [ -z "$BC_ST" ]; then
+	ok "the --status report contains no broadcast-tool literal either"
+else
+	bad "the --status report contains a broadcast-tool literal: $(printf '%s' "$BC_ST" | head -1)"
+fi
+
+# ===========================================================================
+# L. --status: the second observation closes the --expect-cycle hole
+# ===========================================================================
+# The C2-2 header records the shape it could not catch: a declaration the
+# ledger reads as "phase 1 HAS landed" when it has not. There are two moments
+# on transition day where that is possible, and they need DIFFERENT
+# observations, so both are exercised.
+
+# L1 — declared on transition morning, before the wallet action. The ledger
+# holds N-1 rows and --expect-cycle=N-1, so closed == declared; the chain says
+# the current period is about to end.
+ST_PRE="${TMP}/status-danger-pre"
+mkdir -p "$ST_PRE"
+make_status_pub "${ST_PRE}/pub" $((ST_N - 1)) $((ST_NOW - 31 * 86400)) $((ST_NOW - 31 * 86400)) $((ST_NOW + 3600)) "$ST_GEN" "$ST_N"
+run_status "${TMP}/status-danger-pre.txt" $((ST_N - 1)) "--public-base=${ST_PRE}/pub" "--gate-state=${TMP}/absent.json"
+if [ "$STATUS_RC" -eq 71 ]; then
+	ok "the dangerous declaration (ledger = N-1 rows, --expect-cycle = N-1) is refused with exit 71 before the wallet action"
+else
+	bad "the pre-wallet dangerous declaration returned ${STATUS_RC}, expected 71"
+fi
+if grep -q 'contradicted by the chain' "${TMP}/status-danger-pre.txt.err"; then
+	ok "the refusal names the chain observation that contradicts it"
+else
+	bad "the pre-wallet refusal does not say what contradicted the declaration"
+fi
+if grep -q -- "--expect-cycle=${ST_N}" "${TMP}/status-danger-pre.txt.err"; then
+	ok "the refusal names the number that should have been declared"
+else
+	bad "the refusal does not name the corrected --expect-cycle"
+fi
+
+# L2 — the SAME declaration made after the wallet action but before unit 3.
+# The period is now a month long, so L1's observation passes; what still
+# disagrees is where the ledger's last cycle ended.
+ST_MID="${TMP}/status-danger-mid"
+mkdir -p "$ST_MID"
+make_status_pub "${ST_MID}/pub" $((ST_N - 1)) $((ST_NOW - 31 * 86400)) $((ST_NOW - 3600)) "$ST_END" "$ST_GEN" "$ST_N"
+run_status "${TMP}/status-danger-mid.txt" $((ST_N - 1)) "--public-base=${ST_MID}/pub" "--gate-state=${TMP}/absent.json"
+if [ "$STATUS_RC" -eq 71 ]; then
+	ok "the same declaration is still refused after the wallet action, by the cycle-boundary observation"
+else
+	bad "the post-wallet dangerous declaration returned ${STATUS_RC}, expected 71"
+fi
+if grep -q 'contradicted by the cycle boundary' "${TMP}/status-danger-mid.txt.err"; then
+	ok "the second refusal names the boundary observation, not the period one"
+else
+	bad "the post-wallet refusal cites the wrong observation"
+fi
+
+# L3 — MUTATION IN THE OTHER DIRECTION. A guard that refuses everything would
+# pass L1 and L2 while being useless. The CORRECT declaration against the same
+# two fixtures must not be refused.
+run_status "${TMP}/status-pre-ok.txt" "$ST_N" "--public-base=${ST_PRE}/pub" "--gate-state=${TMP}/absent.json"
+PRE_OK_RC="$STATUS_RC"
+run_status "${TMP}/status-mid-ok.txt" "$ST_N" "--public-base=${ST_MID}/pub" "--gate-state=${TMP}/absent.json"
+MID_OK_RC="$STATUS_RC"
+if [ "$PRE_OK_RC" -ne 71 ] && [ "$MID_OK_RC" -ne 71 ]; then
+	ok "the CORRECT declaration against the same two fixtures is not refused (rc ${PRE_OK_RC} / ${MID_OK_RC}) — the guard discriminates"
+else
+	bad "the guard refused a correct declaration (rc ${PRE_OK_RC} / ${MID_OK_RC}) — it is refusing by reflex, not by observation"
+fi
+if grep -q 'PHASE 1   record      INCOMPLETE' "${TMP}/status-pre-ok.txt"; then
+	ok "under the correct declaration the pre-wallet fixture reads phase 1 as INCOMPLETE"
+else
+	bad "the pre-wallet fixture did not read phase 1 as INCOMPLETE under the correct declaration"
+fi
+
+# L4 — the observation itself missing must refuse too. "Could not confirm" is
+# not "confirmed" (design doc §6 fail-closed).
+ST_NOVAL="${TMP}/status-noval"
+rm -rf "$ST_NOVAL"
+cp -R "$STATUS_OK" "$ST_NOVAL"
+rm -f "${ST_NOVAL}/pub/api/validator.json"
+run_status "${TMP}/status-noval.txt" "$ST_N" "--public-base=${ST_NOVAL}/pub" "--gate-state=${TMP}/absent.json"
+if [ "$STATUS_RC" -eq 71 ]; then
+	ok "an unavailable second observation is refused with exit 71, not accepted"
+else
+	bad "a missing validator.json returned ${STATUS_RC}, expected 71"
+fi
+
+# A ledger matching neither accepted state is still exit 68 in this mode.
+ST_BAD="${TMP}/status-badledger"
+mkdir -p "$ST_BAD"
+make_status_pub "${ST_BAD}/pub" 9 "$ST_START" "$ST_START" "$ST_END" "$ST_GEN" "$ST_INSCRIBE"
+run_status "${TMP}/status-badledger.txt" "$ST_N" "--public-base=${ST_BAD}/pub" "--gate-state=${TMP}/absent.json"
+if [ "$STATUS_RC" -eq 68 ]; then
+	ok "--status refuses a ledger that agrees with neither N-1 nor N with exit 68"
+else
+	bad "--status returned ${STATUS_RC} for a disagreeing ledger, expected 68"
+fi
+
+# ===========================================================================
+# M. --status has no side effects either — measured, not asserted
+# ===========================================================================
+# Same tattling-stub method as section E. The claim being tested is narrower
+# and stated as such: in local-directory mode --status needs NO outbound
+# command at all, and in neither mode does it write, ssh, push or notify.
+ST_TATTLE="${TMP}/tattle-status.log"
+: > "$ST_TATTLE"
+STUBDIR2="${TMP}/stubs-status"
+mkdir -p "$STUBDIR2"
+for c in ssh scp curl wget rsync git ntfy mail sendmail; do
+	printf '#!/bin/sh\necho "%s $*" >> "%s"\nexit 0\n' "$c" "$ST_TATTLE" > "${STUBDIR2}/${c}"
+	chmod +x "${STUBDIR2}/${c}"
+done
+
+CANARY2="${TMP}/canary-status"
+mkdir -p "$CANARY2/sub"
+printf 'original\n' > "$CANARY2/file-a"
+printf 'original\n' > "$CANARY2/sub/file-b"
+CANARY2_BEFORE="$(snapshot "$CANARY2")"
+REPO_BEFORE2="$(cd "$REPO_ROOT" && git status --porcelain 2>/dev/null | sort)"
+HOME_BEFORE2="$(snapshot "$SANDBOX_HOME")"
+FIXTURE_BEFORE="$(snapshot "$STATUS_OK")"
+
+ST_SIDEFX="${TMP}/status-sidefx.txt"
+env PATH="${STUBDIR2}:${PATH}" \
+	HOME="$SANDBOX_HOME" \
+	FY_STATE_DIR="${CANARY2}/state" \
+	bash "$ORCH" --status --expect-cycle="$ST_N" "${OK_ARGS[@]}" > "$ST_SIDEFX" 2>/dev/null
+ST_SIDEFX_RC=$?
+
+if [ "$ST_SIDEFX_RC" -eq 0 ]; then
+	ok "--status still reads all five post-conditions with every outbound command stubbed"
+else
+	bad "--status returned ${ST_SIDEFX_RC} under a stubbed PATH — it depends on an outbound command it should not"
+fi
+if [ ! -s "$ST_TATTLE" ]; then
+	ok "--status against a local --public-base invoked no ssh / scp / curl / wget / rsync / git / notify at all"
+else
+	bad "--status invoked an outbound command: $(head -3 "$ST_TATTLE" | tr '\n' ';')"
+fi
+if [ "$(snapshot "$CANARY2")" = "$CANARY2_BEFORE" ]; then
+	ok "--status left the canary tree byte-identical"
+else
+	bad "--status modified the canary tree"
+fi
+if [ "$(snapshot "$SANDBOX_HOME")" = "$HOME_BEFORE2" ]; then
+	ok "--status wrote nothing into HOME"
+else
+	bad "--status wrote into HOME"
+fi
+if [ "$(cd "$REPO_ROOT" && git status --porcelain 2>/dev/null | sort)" = "$REPO_BEFORE2" ]; then
+	ok "--status changed nothing in the repository working tree"
+else
+	bad "--status changed the repository working tree"
+fi
+if [ "$(snapshot "$STATUS_OK")" = "$FIXTURE_BEFORE" ]; then
+	ok "--status left every artifact it READ byte-identical (it is a reader, not a repairer)"
+else
+	bad "--status modified one of the artifacts it read"
+fi
+# The private scratch directory is the one thing it writes, and it must not
+# outlive the run. Measured as a DIFFERENCE across one invocation, not as
+# "none exist anywhere": an absolute check reports a directory some earlier,
+# unrelated run abandoned as though this run had leaked it, which is a false
+# red — observed while mutation-testing this very assertion.
+scratch_dirs() { find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'fyct-status.*' 2>/dev/null | sort; }
+SCRATCH_BEFORE="$(scratch_dirs)"
+env HOME="$SANDBOX_HOME" FY_STATE_DIR="${TMP}/no-state-dir" \
+	bash "$ORCH" --status --expect-cycle="$ST_N" "${OK_ARGS[@]}" >/dev/null 2>&1
+NEW_SCRATCH="$(comm -13 <(printf '%s\n' "$SCRATCH_BEFORE") <(scratch_dirs) | grep . || true)"
+if [ -z "$NEW_SCRATCH" ]; then
+	ok "--status left no scratch directory behind"
+else
+	bad "--status left a scratch directory behind: $(printf '%s' "$NEW_SCRATCH" | tr '\n' ' ')"
+fi
+
+# In URL mode the ONLY outbound command may be a GET. Pointed at a stub, the
+# fetches come back empty and every phase falls to UNKNOWN — fail-closed —
+# while the tattle log proves nothing but curl was reached for.
+: > "$ST_TATTLE"
+env PATH="${STUBDIR2}:${PATH}" HOME="$SANDBOX_HOME" FY_STATE_DIR="${CANARY2}/state" \
+	bash "$ORCH" --status --expect-cycle="$ST_N" \
+	--public-base="https://example.invalid" --gate-state="${TMP}/absent.json" \
+	> "${TMP}/status-url.txt" 2>/dev/null
+ST_URL_RC=$?
+NON_CURL="$(grep -v '^curl ' "$ST_TATTLE" || true)"
+if [ -s "$ST_TATTLE" ] && [ -z "$NON_CURL" ]; then
+	ok "in URL mode the only outbound command reached for is curl — never ssh, scp, rsync, git or a notifier"
+else
+	bad "URL mode reached for something other than curl: $(printf '%s' "$NON_CURL" | head -2 | tr '\n' ';')"
+fi
+if [ "$ST_URL_RC" -eq 70 ]; then
+	ok "unreachable feeds make every post-condition UNKNOWN (exit 70), never COMPLETE"
+else
+	bad "unreachable feeds returned ${ST_URL_RC}, expected 70"
+fi
+
+# ===========================================================================
+# N. --status usage: the modes do not blur into each other
+# ===========================================================================
+expect_rc 64 "--status without --expect-cycle is refused with exit 64" -- \
+	--status
+expect_rc 64 "--ledger is refused with --status (it reads the PUBLISHED ledger)" -- \
+	--status --expect-cycle=4 --ledger="$LEDGER_POST"
+expect_rc 64 "--testnet-tx-id is refused with --status" -- \
+	--status --expect-cycle=4 --testnet-tx-id="$TX64"
+expect_rc 64 "--public-base is refused with --print-only" -- \
+	--print-only --expect-cycle=4 --ledger="$LEDGER_POST" --public-base=/tmp
+expect_rc 64 "--tx-json is refused with --print-only" -- \
+	--print-only --expect-cycle=4 --ledger="$LEDGER_POST" --tx-json=/tmp/x.json
+expect_rc 64 "asking for both modes at once is refused with exit 64" -- \
+	--print-only --status --expect-cycle=4 --ledger="$LEDGER_POST"
+expect_rc 64 "no mode at all is refused with exit 64" -- \
+	--expect-cycle=4
 
 finish
