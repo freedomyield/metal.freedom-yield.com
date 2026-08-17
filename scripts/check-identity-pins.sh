@@ -71,11 +71,12 @@
 # Check 2 — THE KIND GATE: may this pin exist at all, independent of whether
 # its bytes currently match? Authority: deploy/publication.json's `kind` —
 # the SAME registry scripts/operator-local/gen-identity.sh reads when
-# composing a new manifest, so THIS checker's own kind resolution (below) is
-# INTENDED to agree with the generator's — but that intent is a hand-copy of
-# resolution logic, not a machine-enforced identity: see registry_kind_of()
-# further down for exactly what tests/publication-registry/'s T21 does and
-# does not verify about that. deploy/feed-excludes.txt is NOT the authority
+# composing a new manifest, so THIS checker's own kind resolution (below) has
+# to agree with the generator's. That is no longer an intention held by a
+# hand-copy: since 2026-08-17 tests/publication-registry/'s T21 executes all
+# THREE copies of the rule — this one, the generator's, and its own — and
+# fails on any disagreement. See registry_kind_of() further down for how each
+# copy is extracted. deploy/feed-excludes.txt is NOT the authority
 # for this check: it is a narrower list (push-owned paths only) and carries
 # no `kind` at all — api/archive/ is ON feed-excludes.txt (git never
 # carries it) but is kind=record (safe to pin), which is exactly the
@@ -168,7 +169,10 @@
 #      (the `case "$RKIND" in` below) and scripts/operator-local/
 #      gen-identity.sh's kind_is_pinnable() in the same change. Never widen
 #      one without the other; that is exactly the disagreement Check 2
-#      exists to prevent.
+#      exists to prevent. NOTE (2026-08-17): T21 machine-checks that the two
+#      scripts RESOLVE a path to the same kind, but nothing yet checks that
+#      the two PINNABILITY allowlists list the same kinds. Widening one
+#      alone is still caught only by this instruction, not by a test.
 #
 # ---------------------------------------------------------------------------
 # Usage
@@ -464,6 +468,20 @@ classify_path() {
 }
 
 # url_to_public_path <url> -> path relative to public/ (e.g. api/evidence.json)
+#
+# A fourth-and-a-half copy of this exists as scripts/operator-local/
+# gen-identity.sh's url_to_registry_path(), and a jq spelling of the same
+# conversion — sub("^https?://[^/]+/"; "") — is used inside two test suites.
+# Reviewed 2026-08-17 (M-3) and deliberately NOT unified: the two bash copies
+# live in scripts that must each run standalone and share no library, and the
+# jq copies run INSIDE jq programs where a shell function cannot be called at
+# all. What changed instead is that the agreement stopped being a claim:
+# tests/publication-registry/'s T22 extracts BOTH bash copies by name and
+# requires identical (exit status, stdout) on every probe URL, requires the
+# jq form to agree with them on every URL the signed manifest actually
+# carries, and holds the reason for keeping them apart to an expiry check.
+# Refusing (return 1) on a URL with no path is the load-bearing behaviour
+# here: the caller die()s on it rather than comparing against nothing.
 url_to_public_path() {
 	local u="$1" rest
 	case "$u" in
@@ -491,12 +509,17 @@ url_to_public_path() {
 # itself the exact "正しい状態が1箇所に無い" pattern this whole task exists to
 # close — reintroducing it here without a check would be the same mistake in
 # a new place. tests/publication-registry/test-publication-registry.sh's T21
-# extracts the jq program between the two T21-SENTINEL markers below VERBATIM
-# (not a re-transcription) and cross-checks its verdict against that suite's
-# OWN kind_of() for every path in the real registry, so at least those two of
-# the three copies are machine-verified to agree. gen-identity.sh's copy is
-# NOT cross-checked here (it is outside this task's edit scope) — a real,
-# disclosed gap, not a "can never disagree" claim this repo cannot back up.
+# closes it for all three: it extracts the jq program between the two
+# T21-SENTINEL markers below VERBATIM (not a re-transcription), extracts
+# gen-identity.sh's registry_kind_of_path() BY FUNCTION NAME and runs the
+# generator's actual function, and requires both to return what that suite's
+# OWN kind_of() returns for every path in the real registry plus directory
+# members that do and do not match a member_pattern. Both sides of that
+# comparison carry a mutation proof, so an extraction that quietly stopped
+# resolving anything fails rather than passes. Until 2026-08-17 the
+# generator's copy was a disclosed uncovered gap; it is the copy that
+# composes a SIGNED manifest, so it was the last one that should have been
+# running unchecked.
 registry_kind_of() {
 	printf '%s' "$REGISTRY_JSON" | jq -r --arg p "$1" '
 		# T21-SENTINEL-BEGIN
@@ -715,7 +738,7 @@ if [ "$N_KIND_NEW" -gt 0 ]; then
 	# block below ever runs, and both share one dedup state file, so without
 	# this a mismatch that happens to coincide with a kind-gate break would
 	# never reach ntfy — only the printed report, which under cron reaches
-	# nobody but journald. See docs/check-identity-pins.sh header, exit 6.
+	# nobody but journald. See this file's own header, exit 6.
 	MISMATCH_FOLD_MSG=""
 	if [ "$N_NEW" -gt 0 ]; then
 		FIRST_MISMATCH_LINE="$(printf '%s' "$REPORT" | grep -E '^(MISMATCH|MISSING) ' | head -1)"
