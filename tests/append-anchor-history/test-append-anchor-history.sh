@@ -164,6 +164,30 @@ check_expr "genesis: event_type"       "cyclestart" \
 	"$(jq -r .event_type "$GENESIS_HIST")"
 check_expr "genesis: prev_anchor_tx_id null" "true" \
 	"$(jq '.prev_anchor_tx_id == null' "$GENESIS_HIST")"
+check_expr "genesis: chain_backend mirrored from receipt" "antelope" \
+	"$(jq -r .chain_backend "$GENESIS_HIST")"
+
+# ---- chain_backend fallback default (2026-08-17) ----------------------------
+# chain_backend is optional on the receipt, so this script carries its own
+# default for receipts that omit it. That default must stay equal to the
+# literal composed by scripts/gen-anchor-receipt.sh. Both were introduced as
+# "pulsevm" in ac2ef0c (2026-06-23) and corrected on 2026-08-17: PulseVM is the
+# engine Metallicus has announced for Metal A-chain, not the one observed
+# serving it, so the ledger was publishing a forward-looking label as fact.
+# Nothing derives this value at runtime, so only a pinned assertion catches it
+# drifting back.
+NO_BACKEND_HIST="$TEST_DIR/no-backend.jsonl"
+NO_BACKEND_RECEIPT="$TEST_DIR/no-backend-receipt.json"
+make_receipt "$NO_BACKEND_RECEIPT" \
+	"8181818181818181818181818181818181818181818181818181818181818181" \
+	100000001 3 "8888888888888888888888888888888888888888888888888888888888888888" \
+	"null" "cyclestart"
+jq 'del(.anchor.chain_backend)' "$NO_BACKEND_RECEIPT" > "${NO_BACKEND_RECEIPT}.tmp" \
+	&& mv "${NO_BACKEND_RECEIPT}.tmp" "$NO_BACKEND_RECEIPT"
+run_case "chain_backend: receipt omitting the field still appends" 0 \
+	--receipt="$NO_BACKEND_RECEIPT" --history="$NO_BACKEND_HIST" --event-type=cyclestart
+check_expr "chain_backend: fallback default is the observed stack, not 'pulsevm'" "antelope" \
+	"$(jq -r .chain_backend "$NO_BACKEND_HIST")"
 
 # ---- invariant 6 (genesis line must have prev_anchor_tx_id null) ----
 BAD_GENESIS_HIST="$TEST_DIR/bad-genesis.jsonl"
