@@ -281,10 +281,17 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    rely on the absence of `DRY:` alone.** `fyd_is_live`-guarded stdout lines
    that only a live run prints: `Appended daily entry for <date> …` on a run
    that actually appends a new daily row — gated by the `EXISTING` check at
-   `scripts/uptime-history.sh:149`; a day that already has a row instead
-   prints `Daily entry for $TODAY already present, skipping append`
-   (`:171`), which is **not** gated on `fyd_is_live` and so appears in both
-   dry and live runs — and, on a cycle boundary, `Closed cycle #<N>: …`
+   `scripts/uptime-history.sh:147-148`. **`EXISTING` is keyed on
+   date + `period_end_unix` together, not date alone**: the grep pattern
+   matches a row only if it has BOTH today's date AND the current run's
+   `period_end_unix`. The script's own comment (`:142-146`) says why: "if
+   the period rolled over today (rare), we accept two rows on the same
+   date — one for the old period (its closing snap) and one for the new
+   (its opening snap)." So the skip line, `Daily entry for $TODAY already
+   present, skipping append` (`:171`), only fires when a row for THAT SAME
+   `period_end_unix` is already present today — not merely "today already
+   has some row" — and is **not** gated on `fyd_is_live`, so it appears in
+   both dry and live runs — and, on a cycle boundary, `Closed cycle #<N>: …`
    (`:259-261`) plus `Wrote <uptime-recent.json> (<n> total …)` /
    `Wrote <uptime-cycles.json> (<n> cycles)` (`:287-290`). `Closed cycle
    #<N>: …` in particular names the exact thing this step exists to do —
@@ -319,6 +326,19 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    script does anything further. What to hunt for after a missed
    `FY_LIVE=1` is therefore a **missing** cycle-N row in
    `cycle-history.jsonl`, not a wrong one.
+
+   **2026-09-04 specifically needs care reading the `Appended daily entry`
+   signal above.** If cycle 4→5's `AddValidator` confirmation (step 1
+   above) lands mid-day, `uptime-history.sh` closing out cycle 4 in the
+   morning and a later run picking up cycle 5's new `period_end_unix` are
+   two DIFFERENT `EXISTING` combos on the SAME calendar date — the later
+   run legitimately prints a second `Appended daily entry for 2026-09-04 …`
+   line, not the skip line. **A second `Appended daily entry` for the same
+   date that day is the expected success signal, not a duplicate-run
+   symptom** — do not treat it as something to suppress or investigate on
+   its own; if in doubt, compare each run's `period_end_unix` (in its
+   `Appended …` line, or the corresponding `uptime-history.jsonl` row)
+   against step 1's confirmed `endTime`.
 3. **host — `gen-cycle-history.sh` + publish** appends cycle N's row to
    `cycle-history.jsonl` and ships it to the web host:
    ```sh

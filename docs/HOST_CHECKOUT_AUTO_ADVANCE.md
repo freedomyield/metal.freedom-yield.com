@@ -164,9 +164,22 @@ origin/main"** step runs before any rsync:
 
 ```sh
 ssh ... "$SSH_USER@$SSH_HOST" \
-  "FYD_REPO_DIR='$DEPLOY_PATH' FYD_NOTIFY='$DEPLOY_PATH/scripts/notify.sh' bash -s" \
+  "FY_LIVE=1 FYD_REPO_DIR='$DEPLOY_PATH' FYD_NOTIFY='$DEPLOY_PATH/scripts/notify.sh' bash -s" \
   < scripts/advance-host-checkout.sh
 ```
+
+`FY_LIVE=1` is not optional here — `advance-host-checkout.sh:147-149` names
+this ssh command explicitly: "Both production callers carry it: the cron
+env header (`scripts/install-metal-host-advance-cron.sh`) and deploy.yml's
+'Advance host checkout' ssh command." Without it, this step's own promised
+alerts ("refused", "host is ahead") would silently downgrade to
+`DRY: would notify …` on the runner's own log — this step gets no cron env
+header to fall back on, so a missing flag here is not compensated by
+anything else the way §4.2's manual recovery is (that command has no
+production caller relying on its alerts either). As with the cron entry,
+the git mutations themselves are never gated either way — this only
+controls whether a genuine "cannot FF" / "host is ahead" failure also
+reaches ntfy, on top of failing the deploy step loudly regardless.
 
 It pipes the **runner's own checked-out copy** of the script (`bash -s`
 over stdin) rather than invoking whatever copy already sits on the host —
@@ -258,10 +271,33 @@ ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HO
   'cd /home/deploy/metal.freedom-yield.com && sudo bash scripts/install-metal-host-advance-cron.sh'
 ```
 
-This writes `/etc/cron.d/metal-host-advance` (`45 4 * * * deploy bash
-.../scripts/advance-host-checkout.sh 2>&1 | logger -t host-advance`),
-lint-checked by `scripts/check-cron-file.sh` before it is written, and
-idempotent (a second run with unchanged content is a no-op). It requires
+This writes `/etc/cron.d/metal-host-advance` from
+`scripts/install-metal-host-advance-cron.sh:68-80`'s `EXPECTED` heredoc —
+**11 lines, not just the env header**: a 7-line explanatory comment
+(`:69-75`, `# Daily self-heal: ...` through `... design.md.`) followed by
+the 4-line env header + schedule (`:76-79`: `SHELL=/bin/bash`,
+`PATH=/usr/local/bin:/usr/bin:/bin`, `FY_LIVE=1`, and the schedule line
+itself, `45 4 * * * deploy bash .../scripts/advance-host-checkout.sh 2>&1
+| logger -t host-advance`). All 11 lines land in the installed file
+verbatim: `read -r -d '' EXPECTED <<CRON` (`:68`) captures the whole
+heredoc body as one string, `printf '%s\n' "$EXPECTED" > "$TMP"` (`:88`)
+writes it unmodified to a temp file, and `install ... "$TMP"
+"$CRON_TARGET"` (`:110`/`:114`) copies that file byte-for-byte to
+`/etc/cron.d/metal-host-advance` — cron itself treats the leading `#`
+lines as ordinary comments, so they are not stripped anywhere in this
+path. **Verified empirically, not just by reading the source**: ran this
+installer with `FYD_CRON_TARGET` pointed at a scratch file (never at a
+real `/etc/cron.d/` path) and `FYD_REPO_PATH` pointed at this worktree —
+the generated file was exactly those same 11 lines
+(`wc -l` → `11`), and separately passed `scripts/check-cron-file.sh` with
+`Result: 0 violation(s)`. `FY_LIVE=1` is required in the 4-line command
+segment: `advance-host-checkout.sh` calls `alert()` on its anomaly paths
+and is on `check-cron-file.sh` Rule 6's side-effecting allowlist, so this
+file would fail that lint without it (see `docs/CRON_CONVENTIONS.md`'s
+"Alternative form: piping to `logger`" section for what the flag does and
+does not gate on this specific script). Lint-checked by
+`scripts/check-cron-file.sh` before it is written, and idempotent (a
+second run with unchanged content is a no-op). It requires
 root (to write `/etc/cron.d/`) and requires
 `scripts/advance-host-checkout.sh` to already be present on the host at the
 resolved repo path — i.e. it must be run **after** a `main` merge that
@@ -286,6 +322,20 @@ Expected output on a healthy recovery: `advanced: behind <N> → 0
 force a merge or reset; that condition means the host authored commits
 that are not on `origin/main`, which needs a human read before any
 correction.
+
+This command carries no `FY_LIVE=1` — deliberately, not by oversight. Per
+`advance-host-checkout.sh:143-166`, `FY_LIVE` only gates the `alert()`/ntfy
+channel; the git mutations (fetch, discard, self-heal, `pull --ff-only`)
+that this recovery step exists to run are never gated, so the real FF-pull
+happens regardless. The only effect of the missing flag: if an anomaly path
+fires during this run (self-heal dirt, an `anchor-source.json` conflict, a
+lock timeout), its `alert()` prints `DRY: would notify … (FY_LIVE=<unset>)`
+to this SSH session's own stderr instead of reaching ntfy
+(`scripts/lib/side-effects.sh` `fyd_dry_note`). Since the operator is
+already watching this terminal for the expected-output line above, nothing
+is lost — it just is not pushed. Add `FY_LIVE=1` before `bash` in the
+command above only if you also want anomaly alerts pushed to ntfy during
+this one-time run.
 
 ### 4.3 Merging this mechanism to `main` (historical — completed 2026-07-10)
 

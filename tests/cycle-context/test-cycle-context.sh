@@ -542,19 +542,48 @@ echo "=== T9b: the phase number itself is checked, not just the step id ==="
 SPEC_DOC="${REPO_ROOT}/docs/superpowers/specs/2026-08-06-single-source-of-truth-design.md"
 
 # The phase -> step grouping transcribed from that block. Step 7.5 (the
-# Mac->host transfer of the signing fragment) carries no script and is not
-# named in the block at all; it is placed in phase 6 because phase 6 is what
-# consumes it. Every other pair is a direct reading.
-PHASE_STEP_PAIRS="1|1 1|2 1|3 2|4 3|5 3|6 4|7a 5|7b 5|7c 6|7.5 6|8 6|8.5 6|9"
+# Mac->host transfer of the signing fragment) carries no script, so it gets
+# no check_spec_phase() call below — that helper only reads the literal
+# "^phase N " line, and 7.5 is never named there. It IS named elsewhere in
+# the flow block's phase-5 interior, though (the 停止4a annotation reads
+# "→ 署名+broadcast(7c) → fragment 転送(7.5)", 2026-08-17 correction) —
+# placed under phase 5, not phase 6. `scripts/cycle-transition.sh`'s own
+# unit table agrees and is the authoritative source for this pair (its
+# header states in so many words that the table is "used by the test to
+# cross-check the phase"): `7.5|5|Mac|-|transfer the signing fragment...`
+# (`scripts/cycle-transition.sh:400`) — phase 5, not 6. The transcription
+# below previously said 6|7.5, reasoning that phase 6 "consumes" the
+# fragment; that reasoning no longer holds now that the flow block itself
+# places 7.5 inside phase 5. Every other pair is a direct reading.
+PHASE_STEP_PAIRS="1|1 1|2 1|3 2|4 3|5 3|6 4|7a 5|7b 5|7c 5|7.5 6|8 6|8.5 6|9"
 
 if [ ! -r "$SPEC_DOC" ]; then
 	fail "T9b: design doc not readable at ${SPEC_DOC#"${REPO_ROOT}"/} — the phase grouping has no authority to check against"
 else
+	# Isolate the flow block itself (the fenced ``` region right after the
+	# "## 5." heading) rather than grepping the whole document. Section 5's
+	# prose can — and, as of 2026-08-06, does — contain its own lines that
+	# start with "phase N " (e.g. "phase 3 (compose) と phase 6 (事後) は
+	# 対応する停止を持たない"), which would double-match a document-wide
+	# `grep -E "^phase N "` and let a future check_spec_phase call go green
+	# on a prose mention even if the flow block itself stopped naming the
+	# stem. Anchoring on the heading + fence structurally guarantees this
+	# section reads only the flow block, matching the comment above it.
+	FLOW_BLOCK="$(awk '
+		/^## 5\./ { in_section = 1 }
+		in_section && /^```$/ {
+			if (in_fence) { exit }
+			in_fence = 1
+			next
+		}
+		in_section && in_fence { print }
+	' "$SPEC_DOC")"
+
 	# Anchor the transcription to the document for every script the block
 	# names literally. The block writes bare stems, so match on those.
 	check_spec_phase() {
 		local stem="$1" want_phase="$2" line
-		line="$(grep -E "^phase ${want_phase} " "$SPEC_DOC" || true)"
+		line="$(printf '%s\n' "$FLOW_BLOCK" | grep -E "^phase ${want_phase} " || true)"
 		if [ -z "$line" ]; then
 			fail "T9b: design doc has no 'phase ${want_phase}' line — the flow block changed shape"
 		elif printf '%s' "$line" | grep -qF -- "$stem"; then
@@ -569,6 +598,48 @@ else
 	check_spec_phase "preview"           5
 	check_spec_phase "receipt"           6
 	check_spec_phase "history append"    6
+
+	# Step 7.5 carries no script, so check_spec_phase() above never
+	# exercises it — that helper only reads the literal "^phase N " line,
+	# and 7.5 is never named there. Verify it directly instead: (a) the
+	# flow block does name "7.5" somewhere inside phase 5's interior (not
+	# phase 6's), and (b) the transcribed pair in PHASE_STEP_PAIRS agrees
+	# with scripts/cycle-transition.sh's own unit table — the authoritative
+	# source for this phase assignment, per that file's own header comment
+	# ("Used by the test to cross-check the phase"). Without this pair of
+	# checks, PHASE_STEP_PAIRS' step-7.5 phase digit is never exercised by
+	# anything (fyc_exit_table() has no row for a scriptless step), so a
+	# future re-drift would stay green exactly like the 6|7.5 one this test
+	# just fixed.
+	PHASE5_BLOCK="$(printf '%s\n' "$FLOW_BLOCK" | awk '
+		/^phase 5 / { in_phase5 = 1; print; next }
+		/^phase [0-9]/ && in_phase5 { exit }
+		in_phase5 { print }
+	')"
+	if printf '%s' "$PHASE5_BLOCK" | grep -qF -- "7.5"; then
+		pass "T9b: design doc names '7.5' inside phase 5's interior, not phase 6's"
+	else
+		fail "T9b: design doc's phase 5 block no longer names '7.5' — re-check which phase it belongs to"
+	fi
+
+	CYCLE_TRANSITION_SH="${REPO_ROOT}/scripts/cycle-transition.sh"
+	ORCH_75_ROW="$(grep -E '^7\.5\|' "$CYCLE_TRANSITION_SH" 2>/dev/null || true)"
+	ORCH_75_PHASE="$(printf '%s' "$ORCH_75_ROW" | cut -d'|' -f2)"
+	PAIRS_75_PHASE=""
+	for p in $PHASE_STEP_PAIRS; do
+		case "$p" in
+			*'|7.5') PAIRS_75_PHASE="${p%%|*}" ;;
+		esac
+	done
+	if [ -z "$ORCH_75_ROW" ]; then
+		fail "T9b: scripts/cycle-transition.sh has no '7.5|...' unit row — cannot cross-check the phase transcription"
+	elif [ -z "$PAIRS_75_PHASE" ]; then
+		fail "T9b: PHASE_STEP_PAIRS above has no entry for step 7.5"
+	elif [ "$ORCH_75_PHASE" = "$PAIRS_75_PHASE" ]; then
+		pass "T9b: PHASE_STEP_PAIRS' phase for step 7.5 (${PAIRS_75_PHASE}) agrees with scripts/cycle-transition.sh's unit table (${ORCH_75_PHASE})"
+	else
+		fail "T9b: PHASE_STEP_PAIRS claims step 7.5 is phase ${PAIRS_75_PHASE}, but scripts/cycle-transition.sh's unit table says phase ${ORCH_75_PHASE} — transcription is stale"
+	fi
 
 	# Every table row's (phase, step) must be one of the transcribed pairs.
 	bad_pairs=0
