@@ -71,11 +71,17 @@
 # Check 2 — THE KIND GATE: may this pin exist at all, independent of whether
 # its bytes currently match? Authority: deploy/publication.json's `kind` —
 # the SAME registry scripts/operator-local/gen-identity.sh reads when
-# composing a new manifest, so THIS checker's own kind resolution (below) is
-# INTENDED to agree with the generator's — but that intent is a hand-copy of
-# resolution logic, not a machine-enforced identity: see registry_kind_of()
-# further down for exactly what tests/publication-registry/'s T21 does and
-# does not verify about that. deploy/feed-excludes.txt is NOT the authority
+# composing a new manifest, so THIS checker's own kind resolution (below) has
+# to agree with the generator's. Since 2026-08-17 that is machine-checked
+# rather than intended: tests/publication-registry/'s T21 runs this script's
+# resolution rule, the generator's, and its own, and fails on any
+# disagreement. Note the exact scope for THIS script's copy — T21 extracts
+# and runs only the jq PROGRAM between the T21-SENTINEL markers, not the
+# shell function wrapped around it, so the `--arg p` wiring and the
+# $REGISTRY_JSON feed below are outside what T21 sees (measured: breaking the
+# --arg wiring leaves T21 green and is caught by tests/identity-pins/
+# instead). See registry_kind_of() further down for how each copy is
+# extracted. deploy/feed-excludes.txt is NOT the authority
 # for this check: it is a narrower list (push-owned paths only) and carries
 # no `kind` at all — api/archive/ is ON feed-excludes.txt (git never
 # carries it) but is kind=record (safe to pin), which is exactly the
@@ -92,6 +98,9 @@
 #                       to acknowledge a known-open kind violation, not two.
 #                         listed there   -> KIND-BASELINED, never alerts/fails
 #                         not listed     -> KIND-VIOLATION, a NEW break
+#                       Every entry in that list is separately checked for
+#                       having EXPIRED and reported as OBSOLETE-KIND-ACK —
+#                       see "Expiring the acknowledgement lists" below.
 #   kind=record/static  pinnable; this check does nothing further (Check 1
 #                       above still verifies the bytes).
 #   no row at all       the checker cannot tell whether pinning this target
@@ -124,6 +133,37 @@
 # identity.json's artifact_manifest that Check 1 alone cannot see coming,
 # because a brand new stream pin matches its own bytes at the moment it is
 # taken.
+#
+# ---------------------------------------------------------------------------
+# Expiring the acknowledgement lists (2026-08-17)
+# ---------------------------------------------------------------------------
+# Both lists exist to shrink to nothing, and neither is self-clearing. Each
+# gets a report line when an entry stops describing anything real:
+#
+#   OBSOLETE-BASELINE  deploy/identity-pin-baseline.json — the pin it records
+#                      as broken now matches.
+#   OBSOLETE-KIND-ACK  deploy/publication.json's known_kind_violations — the
+#                      pin no longer exists in the manifest, the entry's
+#                      declared path is not what the manifest pins, or the
+#                      target is no longer kind=stream. Same three conditions
+#                      tests/publication-registry/'s T7 applies, so the two
+#                      can never disagree about what "obsolete" means.
+#
+# BOTH are report-only: they do not change the exit code and they never push.
+# An expired acknowledgement is housekeeping, not breakage — nothing is
+# mis-pinned because a dead entry sits in a list, and failing on it would fail
+# a run that is more correct than the one before it. T7 is the CI gate that
+# does fail, inside the commit that leaves the entry behind, which is where
+# the fix belongs. What this adds is the CRON path: T7 runs in CI only, so
+# before this the daily live run could print KIND-BASELINED for entries that
+# muted nothing, indefinitely and silently.
+#
+# Expected reading at the 2026-09-04 transition: today all four entries are
+# real, so zero OBSOLETE-KIND-ACK lines. The moment step 4b of
+# docs/CYCLE_GATE.md lands (violations set to {} in the same commit as the
+# re-issued manifest) there are no entries left to expire, so still zero. The
+# lines appear exactly in the window where one half of that commit landed
+# without the other.
 #
 # ---------------------------------------------------------------------------
 # Repairing a red run (CI cannot do this for you)
@@ -168,7 +208,10 @@
 #      (the `case "$RKIND" in` below) and scripts/operator-local/
 #      gen-identity.sh's kind_is_pinnable() in the same change. Never widen
 #      one without the other; that is exactly the disagreement Check 2
-#      exists to prevent.
+#      exists to prevent. NOTE (2026-08-17): T21 machine-checks that the two
+#      scripts RESOLVE a path to the same kind, but nothing yet checks that
+#      the two PINNABILITY allowlists list the same kinds. Widening one
+#      alone is still caught only by this instruction, not by a test.
 #
 # ---------------------------------------------------------------------------
 # Usage
@@ -299,7 +342,11 @@ for arg in "$@"; do
 	case "$arg" in
 		--mode=repo|--mode=live) MODE="${arg#--mode=}" ;;
 		--verbose|-v)            VERBOSE=1 ;;
-		-h|--help)               sed -n '2,174p' "$0" | sed 's/^# \?//'; exit 0 ;;
+		# Print the header down to the "Usage" heading. Addressed by that
+		# heading rather than by a line number: the literal `2,174p` this
+		# replaced was already one edit away from truncating mid-sentence,
+		# and did truncate the moment a section was added above it.
+		-h|--help)               sed -n '2,/^# Usage$/p' "$0" | sed 's/^# \?//'; exit 0 ;;
 		*) echo "ERROR: unknown arg: $arg (try --help)" >&2; exit 2 ;;
 	esac
 done
@@ -464,6 +511,23 @@ classify_path() {
 }
 
 # url_to_public_path <url> -> path relative to public/ (e.g. api/evidence.json)
+#
+# A fourth-and-a-half copy of this exists as scripts/operator-local/
+# gen-identity.sh's url_to_registry_path(), and a jq spelling of the same
+# conversion — sub("^https?://[^/]+/"; "") — is used inside two test suites.
+# Reviewed 2026-08-17 (M-3) and deliberately NOT unified: the two bash copies
+# live in scripts that must each run standalone and share no library, and the
+# jq copies run INSIDE jq programs where a shell function cannot be called at
+# all. What changed instead is that the agreement stopped being a claim:
+# tests/publication-registry/'s T22 extracts BOTH bash copies by name and
+# requires identical (exit status, stdout) on every probe URL, requires the
+# jq SEMANTICS to agree with them on every URL the signed manifest actually
+# carries (semantics only — T22 does not execute either jq copy; those are
+# carried behaviourally by that suite's T7/T14 and by k8U in
+# tests/identity-pins/), and holds the reason for keeping them apart to an
+# expiry check.
+# Refusing (return 1) on a URL with no path is the load-bearing behaviour
+# here: the caller die()s on it rather than comparing against nothing.
 url_to_public_path() {
 	local u="$1" rest
 	case "$u" in
@@ -491,12 +555,20 @@ url_to_public_path() {
 # itself the exact "正しい状態が1箇所に無い" pattern this whole task exists to
 # close — reintroducing it here without a check would be the same mistake in
 # a new place. tests/publication-registry/test-publication-registry.sh's T21
-# extracts the jq program between the two T21-SENTINEL markers below VERBATIM
-# (not a re-transcription) and cross-checks its verdict against that suite's
-# OWN kind_of() for every path in the real registry, so at least those two of
-# the three copies are machine-verified to agree. gen-identity.sh's copy is
-# NOT cross-checked here (it is outside this task's edit scope) — a real,
-# disclosed gap, not a "can never disagree" claim this repo cannot back up.
+# closes it for all three: it extracts the jq program between the two
+# T21-SENTINEL markers below VERBATIM (not a re-transcription), extracts
+# gen-identity.sh's registry_kind_of_path() BY FUNCTION NAME and runs the
+# generator's actual function, and requires both to return what that suite's
+# OWN kind_of() returns for every path in the real registry plus directory
+# members that do and do not match a member_pattern. An extraction that
+# quietly stopped resolving anything FAILS rather than passes (the extracted
+# text is shape- and content-checked before it is trusted), and the
+# comparison is mutation-proved from both ends: doctoring the generator's
+# resolver must be detected, and so must a regression in this suite's own
+# reference. Until 2026-08-17 the
+# generator's copy was a disclosed uncovered gap; it is the copy that
+# composes a SIGNED manifest, so it was the last one that should have been
+# running unchecked.
 registry_kind_of() {
 	printf '%s' "$REGISTRY_JSON" | jq -r --arg p "$1" '
 		# T21-SENTINEL-BEGIN
@@ -528,7 +600,7 @@ known_kind_violation() {
 
 # ---- 4. compare every pin ----------------------------------------------------
 N_OK=0; N_BASELINED=0; N_STRUCTURAL=0; N_NEW=0; N_SKIP=0; N_FETCHFAIL=0; N_OBSOLETE=0
-N_KIND_BASELINED=0; N_KIND_NEW=0
+N_KIND_BASELINED=0; N_KIND_NEW=0; N_KIND_OBSOLETE=0
 NEW_BREAKS=""
 KIND_NEW_BREAKS=""
 REPORT=""
@@ -648,8 +720,55 @@ done <<EOF
 ${PINS}
 EOF
 
+# ---- 4b. expire the kind acknowledgement list --------------------------------
+# The mismatch side of this checker has always reported OBSOLETE-BASELINE when
+# an entry in deploy/identity-pin-baseline.json stopped describing a real
+# break. The kind side had no counterpart: known_kind_violations could go
+# entirely stale — its pins re-signed away, its paths reclassified — and this
+# checker would keep printing KIND-BASELINED for entries that mute nothing.
+# tests/publication-registry/'s T7 does catch that, so CI has never been blind
+# to it; the CRON path was, and would have stayed so permanently. Reported
+# here for symmetry with OBSOLETE-BASELINE, and for the same reason: the
+# acknowledgement lists are meant to shrink to nothing, and a list that is
+# never told it has expired never does.
+#
+# Deliberately report-only — no exit code, no push:
+#   - an expired acknowledgement is housekeeping, not breakage. Nothing is
+#     mis-pinned because a dead entry sits in a list; the pin it named is
+#     gone. Failing on it would fail a run that is MORE correct than the one
+#     before it.
+#   - T7 is already the gate that fails CI, and it fails inside the commit
+#     that leaves the entry behind, which is where the fix belongs.
+#   - pushing it would be exactly the false urgency this project forbids.
+# Same three conditions T7 uses, so the two can never disagree about what
+# "obsolete" means: the pin is gone, the declared path drifted away from the
+# pin's real target, or the target is no longer kind=stream.
+while IFS= read -r ACK_ID; do
+	[ -n "$ACK_ID" ] || continue
+	ACK_PATH="$(printf '%s' "$REGISTRY_JSON" | jq -r --arg id "$ACK_ID" '(.known_kind_violations.violations[$id].path) // ""')"
+	ACK_URL="$(printf '%s\n' "$PINS" | awk -F'\t' -v k="$ACK_ID" '$1 == k { print $2; exit }')"
+	if [ -z "$ACK_URL" ]; then
+		N_KIND_OBSOLETE=$((N_KIND_OBSOLETE + 1))
+		emit "OBSOLETE-KIND-ACK ${ACK_ID}  —  the signed manifest no longer carries this pin — delete the entry from ${REGISTRY_FILE##*/}'s known_kind_violations"
+		continue
+	fi
+	ACK_REL="$(url_to_public_path "$ACK_URL" 2>/dev/null || true)"
+	if [ -n "$ACK_PATH" ] && [ "$ACK_REL" != "$ACK_PATH" ]; then
+		N_KIND_OBSOLETE=$((N_KIND_OBSOLETE + 1))
+		emit "OBSOLETE-KIND-ACK ${ACK_ID}  —  acknowledges ${ACK_PATH} but the manifest pins ${ACK_REL} — the entry no longer describes the pin it mutes"
+		continue
+	fi
+	ACK_KIND="$(registry_kind_of "$ACK_REL")"
+	if [ "$ACK_KIND" != "stream" ]; then
+		N_KIND_OBSOLETE=$((N_KIND_OBSOLETE + 1))
+		emit "OBSOLETE-KIND-ACK ${ACK_ID}  —  ${ACK_REL} is kind=${ACK_KIND:-<no row>}, not stream: there is no violation left to acknowledge — delete the entry from ${REGISTRY_FILE##*/}'s known_kind_violations"
+	fi
+done <<EOF
+$(printf '%s' "$REGISTRY_JSON" | jq -r '(.known_kind_violations.violations // {}) | keys[]' 2>/dev/null)
+EOF
+
 printf '%s' "$REPORT"
-echo "identity-pins summary (mode=${MODE}): ok=${N_OK} baselined=${N_BASELINED} structural=${N_STRUCTURAL} new=${N_NEW} skipped=${N_SKIP} fetch-fail=${N_FETCHFAIL} obsolete-baseline=${N_OBSOLETE} kind-baselined=${N_KIND_BASELINED} kind-new=${N_KIND_NEW}"
+echo "identity-pins summary (mode=${MODE}): ok=${N_OK} baselined=${N_BASELINED} structural=${N_STRUCTURAL} new=${N_NEW} skipped=${N_SKIP} fetch-fail=${N_FETCHFAIL} obsolete-baseline=${N_OBSOLETE} kind-baselined=${N_KIND_BASELINED} kind-new=${N_KIND_NEW} obsolete-kind-ack=${N_KIND_OBSOLETE}"
 
 # ---- 5. alert dedup (live mode only) ----------------------------------------
 # See "Alerting" in the header. Fails OPEN toward alerting on every
@@ -715,7 +834,7 @@ if [ "$N_KIND_NEW" -gt 0 ]; then
 	# block below ever runs, and both share one dedup state file, so without
 	# this a mismatch that happens to coincide with a kind-gate break would
 	# never reach ntfy — only the printed report, which under cron reaches
-	# nobody but journald. See docs/check-identity-pins.sh header, exit 6.
+	# nobody but journald. See this file's own header, exit 6.
 	MISMATCH_FOLD_MSG=""
 	if [ "$N_NEW" -gt 0 ]; then
 		FIRST_MISMATCH_LINE="$(printf '%s' "$REPORT" | grep -E '^(MISMATCH|MISSING) ' | head -1)"

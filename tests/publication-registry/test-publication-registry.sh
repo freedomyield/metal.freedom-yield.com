@@ -39,6 +39,10 @@
 # T13 declared git_tracked / gitignored match git
 # T14 pinned_by is exactly the pin set in identity.json's artifact_manifest
 # T15 mutation self-proof: break the registry three ways, each must go red
+# T16 enumeration closure over the prefixes the registry CLAIMS
+# T17 known_doc_drift is real and expiring
+# T18 kind=record is earned by a digest key, never a date key; and
+#     becomes_record_after only ever sits on a kind=stream row
 # T19 forward regression: the suite behaves correctly against the post-C4
 #     manifest shape (streams listed unpinned, a record pinned on a directory
 #     row), including a mutation that reproduces the pre-fix T7 false pass
@@ -46,6 +50,16 @@
 #     not independently reworded, across deploy/publication.json,
 #     public/api/identity.schema.v1.json and
 #     scripts/operator-local/gen-identity.sh
+# T21 all THREE copies of the registry-kind resolution rule agree — this
+#     file's kind_of(), scripts/check-identity-pins.sh's registry_kind_of()
+#     and scripts/operator-local/gen-identity.sh's registry_kind_of_path()
+#     (the copy that composes the signed manifest) — with a mutation proof on
+#     each side of the comparison
+# T22 the two bash url→path copies are behaviourally identical (extracted and
+#     executed), the jq SEMANTICS agree with them on every URL the signed
+#     manifest carries (semantics only — the two jq copies' own texts are held
+#     by T7/T14 and by k8U in tests/identity-pins/), and the recorded reason
+#     for not unifying all four is itself expiring
 
 set -uo pipefail
 
@@ -248,6 +262,65 @@ kind_of() {
 	row="$(registry_row_for_path "$1" "$reg")"
 	[ -n "$row" ] || return 0
 	jq -r --arg p "$row" '.publications[] | select(.path == $p) | .kind' "$reg"
+}
+
+# ---------------------------------------------------------------------------
+# Shared (T21/T22): run a foreign script's function without editing that script
+# ---------------------------------------------------------------------------
+# extract_shell_fn <file> <fn name> — print the function's SOURCE verbatim,
+# from its `name() {` line to the first line that is exactly `}`.
+#
+# Extraction BY NAME, rather than by a sentinel comment pair, is what makes it
+# possible to hold scripts/operator-local/gen-identity.sh's copies of shared
+# resolution logic to account from tests/ alone: the generator needs no marker
+# comments added to it, so nothing outside this directory has to change for
+# the third copy of a duplicated rule to become machine-checked. What this
+# suite then executes is the generator's ACTUAL function — its jq program, its
+# --arg wiring, its 2>/dev/null — not a re-transcription of it. A
+# re-transcription would merely be one more untested copy of the thing under
+# test, which is the defect being closed, not a check on it.
+extract_shell_fn() {
+	awk -v fn="$2" '
+		$0 == fn "() {"     { inside = 1 }
+		inside              { print }
+		inside && $0 == "}" { exit }
+	' "$1"
+}
+
+# assert_extracted_fn <file> <fn name> <label> — the extraction must be the
+# function it claims to be, or this suite FAILS.
+#
+# An extraction that silently comes up empty (the function was renamed, or its
+# closing brace moved) would otherwise turn every comparison built on it into
+# a vacuous green: two resolvers that are never run agree about everything.
+# That is the "空振り PASS" shape this whole task exists to remove, so a
+# broken extraction is a failure here, never a skip.
+assert_extracted_fn() {
+	local f="$1" fn="$2" label="$3" bad_x=0
+	if [ ! -s "$f" ]; then
+		fail "${label} extraction of ${fn}() from the source script produced nothing — was it renamed or reshaped?"
+		return 1
+	fi
+	head -1 "$f" | grep -qxF -- "${fn}() {" \
+		|| { fail "${label} extraction of ${fn}() does not begin at its definition line"; bad_x=1; }
+	tail -1 "$f" | grep -qxF -- '}' \
+		|| { fail "${label} extraction of ${fn}() does not end at its closing brace"; bad_x=1; }
+	[ "$bad_x" -eq 0 ]
+}
+
+# probe_paths — the public-relative paths every kind resolver in T21 is
+# compared over: every exact publications[] row this registry declares, plus
+# directory-member paths that DO and DO NOT match a directory row's
+# member_pattern. The member paths are the point: an exact-match-only
+# implementation, and the historical `select($p | startswith(.path))` bug,
+# are both invisible against exact rows alone.
+probe_paths() {
+	jq -r '.publications[].path' "$REGISTRY"
+	printf '%s\n' \
+		"api/archive/anchor-source-0000000000000000000000000000000000000000000000000000000000000001.json" \
+		"api/archive/anchor-source-2026-08-14.json" \
+		"api/peers-history/peers-2026-08-14.json.gz" \
+		"api/peers-history/not-a-date.json.gz"
 }
 
 # ---------------------------------------------------------------------------
@@ -835,10 +908,17 @@ t19
 
 # ---------------------------------------------------------------------------
 # T20 — pin_policy wording (S3): the `record` kind's defining clause must not
-# drift into independently-reworded copies. deploy/publication.json's own
-# record_caveat text says as much by name ("docs/IDENTITY_VERIFICATION.md and
-# identity.json's pin_policy carry that same wording and must stay in step
-# with this row") — nothing checked that claim before this test existed.
+# drift into independently-reworded copies. The api/archive/ row's
+# record_caveat originally asserted this obligation itself, naming
+# docs/IDENTITY_VERIFICATION.md and identity.json's pin_policy as carrying
+# "that same wording ... in step with this row" — an unchecked claim, which is
+# why this test was written. That sentence has since been corrected twice
+# against what T20 actually does: on 2026-08-17 for naming
+# docs/IDENTITY_VERIFICATION.md (not checked here — see below), and again the
+# same day for naming THIS ROW as the canonical source. It is not: the clause
+# T20 compares against lives in .kind_definitions.record, the taxonomy
+# authority at the top of the registry, and record_caveat is unchecked prose.
+# Do not re-derive the phrase below from record_caveat.
 #
 # What IS checked here, and what is deliberately NOT:
 #   - kind_definitions.record (this registry, the taxonomy authority), the
@@ -916,27 +996,56 @@ t20() {
 t20
 
 # ---------------------------------------------------------------------------
-# T21 — cross-implementation agreement (I-5, 2026-08-17). registry_kind_of()
-# in scripts/check-identity-pins.sh is a HAND-COPY of this file's own
-# registry_row_for_path()/kind_of() (a THIRD copy exists in
-# scripts/operator-local/gen-identity.sh's registry_kind_of_path — outside
-# this task's edit scope and NOT covered here; that is a disclosed gap, not
-# a claim that all three agree). Nothing verified the two copies inside this
-# task's scope actually resolve the same path to the same kind before this
-# test existed, and they had in fact diverged once already: a
-# `select($p | startswith(.path))` bug in the checker's copy silently
-# rebound `.` to a string and errored on every directory-row (kind=record)
-# path, undetected until an unrelated case
+# T21 — cross-implementation agreement (I-5, 2026-08-17; extended to the third
+# copy the same day, N-3).
+#
+# THREE copies of the same "which registry row governs this path, and what is
+# its kind" rule exist in this repository:
+#
+#   (a) this file's own registry_row_for_path() + kind_of() — bash driving two
+#       separate jq calls (find the governing row, then read that row's kind)
+#   (b) scripts/check-identity-pins.sh's registry_kind_of() — ONE jq program
+#       doing both, run by the CI gate and by the daily cron
+#   (c) scripts/operator-local/gen-identity.sh's registry_kind_of_path() — the
+#       same single-program shape, run by the operator on the Mac. This is the
+#       copy that COMPOSES the manifest: at the 2026-09-04 cycle transition it
+#       is what decides which artifacts get a sha256 into SIGNED output.
+#
+# "正しい状態が1箇所に無い" is the defect this refactor programme exists to
+# close, so a resolution rule living in three places is the pattern under
+# repair, and (c) is the copy with the most authority of the three. Unifying
+# them is not available: (a) is test-local bash, and (b) and (c) must each run
+# standalone — on the validator host and on the operator's Mac respectively —
+# with no shared library between them. What IS available is making the copies
+# machine-checked equal rather than hand-checked equal, which is this case.
+#
+# Nothing verified any of it before this test existed, and (a) vs (b) had in
+# fact diverged once already: a `select($p | startswith(.path))` bug in the
+# checker's copy silently rebound `.` to a string and errored on every
+# directory-row (kind=record) path, undetected until an unrelated case
 # (tests/identity-pins/test-check-identity-pins.sh's k7R) tripped over it by
-# accident. This extracts the CHECKER's ACTUAL jq program — the exact bytes
-# between the two T21-SENTINEL comment lines inside registry_kind_of(), not
-# a re-transcription of it — and runs it standalone via `jq -f` against
-# every path this registry declares, plus directory-member paths that do and
-# do not match api/archive/'s member_pattern, comparing each verdict to this
-# file's own kind_of().
+# accident. Until 2026-08-17 this case disclosed (c) as an uncovered gap; N-3
+# closed it, because the copy that composes a signed manifest is the last one
+# that should be running unchecked.
+#
+# Both foreign copies are EXTRACTED, never re-transcribed:
+#   (b) the exact bytes between the two T21-SENTINEL comment lines inside
+#       registry_kind_of(), run standalone via `jq -f`
+#   (c) the exact source lines of registry_kind_of_path(), located BY FUNCTION
+#       NAME and sourced into a subshell — so what runs here is the
+#       generator's actual function, and nothing in scripts/ had to be edited
+#       for it to be covered
+#
+# A re-transcription would be a fourth untested copy and would prove nothing.
+# The two MUTATION blocks at the end rule out the remaining way this could be
+# vacuous — extractor and extracted breaking the same way — by doctoring each
+# SIDE of the comparison in turn and requiring the disagreement to surface.
 # ---------------------------------------------------------------------------
 t21() {
-	local prog_file bad=0 n=0 path own_kind checker_kind
+	local prog_file gen_src mut_file mut_src needle ndis
+	local bad=0 n=0 n_record=0 n_norow=0 path own_kind checker_kind gen_kind
+
+	# ---- copy (b): the checker's jq program, verbatim between the sentinels
 	prog_file="${TMPDIR_T}/checker-registry-kind-of.jq"
 	sed -n '/# T21-SENTINEL-BEGIN/,/# T21-SENTINEL-END/p' "${REPO_ROOT}/scripts/check-identity-pins.sh" > "$prog_file"
 	if [ ! -s "$prog_file" ]; then
@@ -944,40 +1053,306 @@ t21() {
 		return
 	fi
 
+	# ---- copy (c): the generator's function, located by name
+	gen_src="${TMPDIR_T}/gen-registry-kind-of-path.sh"
+	extract_shell_fn "$GEN_IDENTITY" registry_kind_of_path > "$gen_src"
+	assert_extracted_fn "$gen_src" registry_kind_of_path "T21" || return
+	# The extraction must contain the parts that make it a registry resolver.
+	# A function that was gutted upstream (or an awk range that grabbed some
+	# other block that happens to end in a brace) would still satisfy the
+	# shape check above while resolving nothing.
+	for needle in 'publications[]' 'member_pattern' 'PUBLICATION_REGISTRY' '--arg p'; do
+		grep -qF -- "$needle" "$gen_src" || {
+			fail "T21 the extracted registry_kind_of_path() does not contain '${needle}' — the extraction is not the resolver it claims to be"
+			return
+		}
+	done
+
 	run_checker_kind_of() { jq -r --arg p "$1" -f "$prog_file" "$REGISTRY"; }
+	# gen_kind_via <extracted-resolver-file> <path> — run the generator's own
+	# function in a subshell, with the one variable it reads pointed at this
+	# suite's registry.
+	gen_kind_via() { ( PUBLICATION_REGISTRY="$REGISTRY"; . "$1"; registry_kind_of_path "$2" ); }
 
 	compare_one() {
 		n=$((n + 1))
 		own_kind="$(kind_of "$1")"
 		checker_kind="$(run_checker_kind_of "$1")"
+		gen_kind="$(gen_kind_via "$gen_src" "$1")"
 		if [ "$own_kind" != "$checker_kind" ]; then
-			fail "T21 ${1}: this suite's kind_of()='${own_kind}' but the checker's registry_kind_of()='${checker_kind}'"
+			fail "T21 ${1}: this suite's kind_of()='${own_kind}' but scripts/check-identity-pins.sh's registry_kind_of()='${checker_kind}'"
 			bad=1
 		fi
+		if [ "$own_kind" != "$gen_kind" ]; then
+			fail "T21 ${1}: this suite's kind_of()='${own_kind}' but scripts/operator-local/gen-identity.sh's registry_kind_of_path()='${gen_kind}'"
+			bad=1
+		fi
+		case "$own_kind" in
+			record) n_record=$((n_record + 1)) ;;
+			"")     n_norow=$((n_norow + 1)) ;;
+		esac
 	}
 
-	# Every exact publications[] path (~40 rows: every kind=stream/static/record
-	# publication this registry declares).
 	while IFS= read -r path; do
 		[ -n "$path" ] || continue
 		compare_one "$path"
-	done <<< "$(jq -r '.publications[].path' "$REGISTRY")"
+	done <<< "$(probe_paths)"
 
-	# Directory-member resolution: one path that matches api/archive/'s
-	# member_pattern (kind=record via the row) and one that does not
-	# (date-keyed — kind="", no row governs it, per M3 in
-	# tests/identity-kind-discipline/test-gen-identity-kind-discipline.sh),
-	# plus the same pair for api/peers-history/ (kind=stream).
-	compare_one "api/archive/anchor-source-0000000000000000000000000000000000000000000000000000000000000001.json"
-	compare_one "api/archive/anchor-source-2026-08-14.json"
-	compare_one "api/peers-history/peers-2026-08-14.json.gz"
-	compare_one "api/peers-history/not-a-date.json.gz"
+	# The comparison is only worth something if the probe set actually
+	# exercises BOTH resolution branches. Measured, not assumed: an agreement
+	# established over exact rows alone would hold for three implementations
+	# that all get directory members wrong in the same way.
+	if [ "$n" -lt 20 ] || [ "$n_record" -lt 1 ] || [ "$n_norow" -lt 1 ]; then
+		fail "T21 the probe set is too weak to prove agreement (${n} paths; ${n_record} resolving to kind=record, ${n_norow} resolving to no row at all) — the directory-row branch must be exercised in both outcomes"
+		bad=1
+	fi
 
-	[ "$bad" -eq 0 ] \
-		&& pass "T21 registry_kind_of() (scripts/check-identity-pins.sh, extracted verbatim) agrees with this suite's own kind_of() for all ${n} paths tried" \
-		|| note "T21 checked ${n} path(s); see FAIL lines above for the disagreements"
+	if [ "$bad" -eq 0 ]; then
+		pass "T21 all THREE registry-kind resolvers agree on all ${n} probe paths (${n_record} via a directory row, ${n_norow} governed by no row): this suite's kind_of(), scripts/check-identity-pins.sh's registry_kind_of() (jq extracted verbatim), scripts/operator-local/gen-identity.sh's registry_kind_of_path() (function extracted by name)"
+	else
+		note "T21 checked ${n} path(s); see FAIL lines above for the disagreements"
+	fi
+
+	# count_disagreements <resolver-file> [reference fn] — how many probe paths
+	# the extracted resolver and the reference disagree about.
+	count_disagreements() {
+		local src="$1" ref="${2:-kind_of}" p d=0
+		while IFS= read -r p; do
+			[ -n "$p" ] || continue
+			[ "$("$ref" "$p")" = "$(gen_kind_via "$src" "$p")" ] || d=$((d + 1))
+		done <<< "$(probe_paths)"
+		printf '%s' "$d"
+	}
+
+	# ---- MUTATION 1 (foreign side): doctor the GENERATOR's resolver so it
+	# ignores member_pattern, extract THAT, and require the comparison to
+	# notice. Without it, the agreement above could be an artifact of the
+	# extraction failing over to something that always matches.
+	mut_file="${TMPDIR_T}/gen-identity-mutant.sh"
+	mut_src="${TMPDIR_T}/gen-registry-kind-of-path-mutant.sh"
+	sed '/test(.*member_pattern/d' "$GEN_IDENTITY" > "$mut_file"
+	if cmp -s "$mut_file" "$GEN_IDENTITY"; then
+		fail "T21 MUTATION 1 could not doctor gen-identity.sh (its member_pattern guard line was not found) — the mutation proof did not run"
+		bad=1
+	else
+		extract_shell_fn "$mut_file" registry_kind_of_path > "$mut_src"
+		if assert_extracted_fn "$mut_src" registry_kind_of_path "T21 MUTATION 1"; then
+			ndis="$(count_disagreements "$mut_src")"
+			if [ "$ndis" -ge 1 ]; then
+				pass "T21 MUTATION 1: dropping the member_pattern guard from gen-identity.sh's resolver is detected (${ndis} disagreement(s)) — the third copy is really being executed here, not assumed"
+			else
+				fail "T21 MUTATION 1: a doctored gen-identity.sh resolver still agreed on every probe path — the cross-check of the third copy is not load-bearing"
+				bad=1
+			fi
+		else
+			bad=1
+		fi
+	fi
+
+	# ---- MUTATION 2 (reference side): hold the REAL extracted resolver against
+	# a deliberately weaker reference — exact-path matching only, the most
+	# plausible way this suite's own kind_of() could regress — and require the
+	# disagreement to surface. Mutation 1 alone cannot rule out a comparison
+	# that is blind in this direction.
+	kind_of_exact_only() {
+		jq -r --arg p "$1" '[ .publications[] | select(.path == $p) | .kind ] | first // ""' "$REGISTRY"
+	}
+	ndis="$(count_disagreements "$gen_src" kind_of_exact_only)"
+	if [ "$ndis" -ge 1 ]; then
+		pass "T21 MUTATION 2: an exact-match-only reference disagrees with the real gen-identity.sh resolver on ${ndis} probe path(s) — a regression on the reference side of the comparison is detected too"
+	else
+		fail "T21 MUTATION 2: an exact-match-only reference agreed with gen-identity.sh's resolver everywhere — the probe set never exercises directory-row resolution"
+		bad=1
+	fi
 }
 t21
+
+# ---------------------------------------------------------------------------
+# T22 — url→path normalisation (M-3, 2026-08-17): the DECISION not to unify,
+# made checkable instead of asserted.
+#
+# "Strip the scheme and host off a manifest URL to get a path relative to
+# public/" is implemented FOUR times:
+#
+#   (1) scripts/check-identity-pins.sh    url_to_public_path()    bash
+#   (2) scripts/operator-local/gen-identity.sh url_to_registry_path() bash
+#   (3) this file's identity_pins()       jq  sub("^https?://[^/]+/"; "")
+#   (4) tests/identity-pins/'s K8_DERIVE_JQ  jq, the same sub()
+#
+# The review that raised this left it as "duplication across a bash/jq
+# boundary, covered by text matching, do not force a single implementation".
+# That judgment is kept — (1) and (2) run inside two standalone scripts that
+# share no library, and (3)/(4) run INSIDE jq programs, where calling out to a
+# shell function is not available at all. Collapsing four into one would mean
+# either shelling out from jq or reimplementing jq's regex in bash: strictly
+# more machinery guarding a two-line string operation.
+#
+# What is NOT kept is leaving that judgment as prose. This case replaces the
+# text matching with measurement:
+#
+#   a. (1) and (2) are extracted BY NAME and required to return the same
+#      (exit status, stdout) pair for every probe URL — the equality the
+#      comment in each script asserts about the other, now checked.
+#   b. the jq SPELLING of the conversion is required to agree with (1) for
+#      every URL the SIGNED manifest actually carries — the only input domain
+#      where a disagreement could misclassify a real pin. READ THE LIMIT ON
+#      THIS CAREFULLY: see "What (b) does NOT check" below.
+#   c. the recorded REASON for keeping the jq form separate is that it
+#      deliberately behaves differently OUTSIDE that domain. Measured
+#      2026-08-17: for "ftp://h/api/x.json" the bash copies strip the host and
+#      return "api/x.json" while the jq sub() leaves the string untouched, and
+#      for an input with no path at all the bash copies REFUSE (exit 1, which
+#      is what makes check-identity-pins.sh die on a malformed pin url) while
+#      the jq sub() silently returns the input. If that divergence ever
+#      disappears, the justification for four implementations has expired and
+#      this case says so rather than staying quietly green.
+#
+# What (b) does NOT check (review finding I-1, 2026-08-17)
+# -------------------------------------------------------
+# (b) does NOT execute copy (3) or copy (4). The jq program it compares
+# against is jq_spelling_retyped() below — the same expression TYPED OUT
+# AGAIN here, not extracted from either. So (b) measures "the jq semantics
+# and the bash semantics agree on the manifest's URLs"; it does NOT measure
+# "identity_pins() and K8_DERIVE_JQ still contain that expression".
+#
+# This is the very re-transcription T21 refuses a few hundred lines up ("A
+# re-transcription would be a fourth untested copy and would prove nothing").
+# It is left standing here, knowingly, because copies (3) and (4) are already
+# carried behaviourally by other cases — measured 2026-08-17 by mutating each
+# one and observing which suite went red:
+#
+#   mutate identity_pins()'s sub()  -> T22 stays 4/4 PASS; T7 (4 FAIL), T14
+#                                      (9 FAIL), T19 and T15 go red
+#   mutate K8_DERIVE_JQ's sub()     -> this whole suite stays 37/0; the k8U
+#                                      unit case and k8 in
+#                                      tests/identity-pins/ go red (5 FAIL)
+#
+# So nothing is unguarded, but the guard is not here, and this case must not
+# be read as providing it. Extracting (3) and (4) the way T21 extracts the
+# two bash resolvers is entirely possible — identity_pins() is a shell
+# function in this file and K8_DERIVE_JQ is a plain variable assignment — and
+# is DESCOPED, not blocked. It is the obvious next revision of this case.
+#
+# So the honest summary, which the assertions below enforce rather than
+# claim: two of the four implementations are machine-checked identical to
+# each other, the jq SEMANTICS are machine-checked compatible with them on
+# the domain that matters (the two jq copies' own texts are held by T7/T14
+# and k8U instead), and the reason they are not one implementation is itself
+# an expiring declaration.
+# ---------------------------------------------------------------------------
+t22() {
+	local a_src b_src mut_src bad=0 n=0 n_refuse=0 n_real=0 n_div=0 mdiff=0 u
+
+	a_src="${TMPDIR_T}/checker-url-to-public-path.sh"
+	b_src="${TMPDIR_T}/gen-url-to-registry-path.sh"
+	extract_shell_fn "${REPO_ROOT}/scripts/check-identity-pins.sh" url_to_public_path   > "$a_src"
+	extract_shell_fn "$GEN_IDENTITY"                               url_to_registry_path > "$b_src"
+	assert_extracted_fn "$a_src" url_to_public_path   "T22" || return
+	assert_extracted_fn "$b_src" url_to_registry_path "T22" || return
+
+	# "<exit status>|<stdout>", so a REFUSAL and an empty result stay
+	# distinguishable — the refusal is the load-bearing half here (it is what
+	# makes check-identity-pins.sh die on a malformed pin url instead of
+	# comparing against nothing).
+	url_via() {
+		local out rc
+		out="$( . "$1"; "$2" "$3" )"; rc=$?
+		printf '%s|%s' "$rc" "$out"
+	}
+	# NAMED for what it is: the jq expression RE-TYPED here, not extracted
+	# from identity_pins() (copy 3) or K8_DERIVE_JQ (copy 4). Comparing
+	# against it measures jq-vs-bash SEMANTICS, never that those two copies
+	# still spell it this way. See "What (b) does NOT check" in the header
+	# before strengthening any claim built on this.
+	jq_spelling_retyped() { jq -rn --arg u "$1" '$u | sub("^https?://[^/]+/"; "")'; }
+
+	manifest_urls() { jq -r '.artifact_manifest[]? | (.url // empty), (.schema_url // empty)' "$IDENTITY"; }
+	url_probes() {
+		manifest_urls
+		printf '%s\n' \
+			"https://metal.freedom-yield.com/api/archive/anchor-source-0000000000000000000000000000000000000000000000000000000000000001.json" \
+			"http://example.test/a/b/c.json" \
+			"https://example.test/x" \
+			"https://example.test//api/x.json" \
+			"https://example.test/" \
+			"https://example.test" \
+			"ftp://example.test/api/x.json" \
+			"not-a-url"
+	}
+
+	# ---- a. the two bash copies must be behaviourally identical
+	while IFS= read -r u; do
+		[ -n "$u" ] || continue
+		n=$((n + 1))
+		local ra rb
+		ra="$(url_via "$a_src" url_to_public_path   "$u")"
+		rb="$(url_via "$b_src" url_to_registry_path "$u")"
+		case "$ra" in 1\|*) n_refuse=$((n_refuse + 1)) ;; esac
+		if [ "$ra" != "$rb" ]; then
+			fail "T22 '${u}': check-identity-pins.sh's url_to_public_path -> ${ra} but gen-identity.sh's url_to_registry_path -> ${rb} (rc|stdout)"
+			bad=1
+		fi
+	done <<< "$(url_probes)"
+	if [ "$n" -lt 8 ] || [ "$n_refuse" -lt 1 ]; then
+		fail "T22 the probe set is too weak (${n} URLs, ${n_refuse} of them refused) — a comparison that never exercises the refusal path proves nothing about the half that matters"
+		bad=1
+	elif [ "$bad" -eq 0 ]; then
+		pass "T22 the two BASH url→path copies agree on exit status AND stdout for all ${n} probe URLs (${n_refuse} of which they both refuse)"
+	fi
+
+	# ---- b. the jq SEMANTICS must agree on the domain that actually occurs.
+	# Not a check on copies (3)/(4) themselves — see "What (b) does NOT
+	# check" in the header. Those are carried by T7/T14 and by k8U in
+	# tests/identity-pins/.
+	while IFS= read -r u; do
+		[ -n "$u" ] || continue
+		n_real=$((n_real + 1))
+		if [ "$(url_via "$a_src" url_to_public_path "$u")" != "0|$(jq_spelling_retyped "$u")" ]; then
+			fail "T22 '${u}' is a URL the signed manifest carries, and the bash normalisation disagrees with the jq sub() semantics on it"
+			bad=1
+		fi
+	done <<< "$(manifest_urls)"
+	if [ "$n_real" -lt 1 ]; then
+		fail "T22 the signed manifest carried no URL to compare — this half of the case did not run"
+		bad=1
+	else
+		pass "T22 the jq sub() SEMANTICS agree with the bash form on all ${n_real} URL(s) the signed manifest carries (semantics only — this does not execute identity_pins() or K8_DERIVE_JQ; T7/T14 and k8U hold those)"
+	fi
+
+	# ---- c. the reason for keeping them separate must still be true
+	for u in "ftp://example.test/api/x.json" "https://example.test"; do
+		[ "$(url_via "$a_src" url_to_public_path "$u")" != "0|$(jq_spelling_retyped "$u")" ] && n_div=$((n_div + 1))
+	done
+	if [ "$n_div" -eq 2 ]; then
+		pass "T22 the recorded bash/jq divergence is still real (non-http(s) scheme, and a URL with no path) — the reason for not folding the jq copies in has not expired"
+	else
+		fail "T22 OBSOLETE justification: the bash and jq normalisations now agree even outside the manifest's URL domain (${n_div}/2 divergences left). The reason recorded above for keeping four implementations no longer holds — unify them, or rewrite the reason"
+		bad=1
+	fi
+
+	# ---- MUTATION: doctor one copy, require the pair comparison to notice
+	mut_src="${TMPDIR_T}/gen-url-to-registry-path-mutant.sh"
+	awk 'index($0, "rest=\"${rest#") { next } { print }' "$b_src" > "$mut_src"
+	if cmp -s "$mut_src" "$b_src"; then
+		fail "T22 MUTATION could not doctor the extracted url_to_registry_path() — the mutation proof did not run"
+		bad=1
+	elif assert_extracted_fn "$mut_src" url_to_registry_path "T22 MUTATION"; then
+		while IFS= read -r u; do
+			[ -n "$u" ] || continue
+			[ "$(url_via "$a_src" url_to_public_path "$u")" = "$(url_via "$mut_src" url_to_registry_path "$u")" ] \
+				|| mdiff=$((mdiff + 1))
+		done <<< "$(url_probes)"
+		if [ "$mdiff" -ge 1 ]; then
+			pass "T22 MUTATION: dropping the host-stripping step from gen-identity.sh's url_to_registry_path is detected on ${mdiff} probe URL(s) — both copies are really being executed here"
+		else
+			fail "T22 MUTATION: a doctored url_to_registry_path still matched on every probe URL — the pair comparison is not load-bearing"
+			bad=1
+		fi
+	else
+		bad=1
+	fi
+}
+t22
 
 # ---------------------------------------------------------------------------
 # T15 — mutation self-proof.

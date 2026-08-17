@@ -661,6 +661,103 @@ echo "$OUT" | grep -qE '^(KIND-BASELINED|KIND-VIOLATION|KIND-UNKNOWN) ' \
 	|| ok "k7 post-cleanup shape: no kind-gate line at all (nothing left to gate)"
 teardown
 
+# =============================================================================
+# k9 — OBSOLETE-KIND-ACK: the kind acknowledgement list must be told when it
+# has expired (M-2, 2026-08-17).
+#
+# deploy/publication.json's known_kind_violations is an acknowledgement, not a
+# mute button, and it is not self-clearing. tests/publication-registry/'s T7
+# fails CI when an entry goes stale, but T7 runs only in CI: the daily live
+# cron had no counterpart at all and would have kept printing KIND-BASELINED
+# for entries that mute nothing, indefinitely and silently. These cases pin
+# the three expiry conditions (identical to T7's, so the two can never
+# disagree) and — just as importantly — pin that the report is REPORT-ONLY:
+# an expired acknowledgement is housekeeping, and failing or paging on it
+# would fail a run that is more correct than the one before it.
+# =============================================================================
+
+# ---- k9a: the acknowledged pin is gone from the manifest -------------------
+build_fake_repo
+jq 'del(.artifact_manifest.stream_json)' "$FAKE/public/api/identity.json" > "$BASE/id.tmp" \
+	&& mv "$BASE/id.tmp" "$FAKE/public/api/identity.json"
+OUT="$(run_repo)"; RC=$?
+[ "$RC" -eq 0 ] && ok "k9a expired ack (pin removed): still exit 0 — report-only, never a break" || bad "k9a expired ack (pin removed): exit 0 (actual=$RC, out: $OUT)"
+echo "$OUT" | grep -q '^OBSOLETE-KIND-ACK .*stream_json.sha256.*no longer carries this pin' \
+	&& ok "k9a names the expired entry and why" || bad "k9a OBSOLETE-KIND-ACK line (out: $OUT)"
+echo "$OUT" | grep -q 'obsolete-kind-ack=1' \
+	&& ok "k9a summary counts it (obsolete-kind-ack=1)" || bad "k9a summary count (out: $OUT)"
+teardown
+
+# ---- k9b: the entry's declared path is not what the manifest pins ----------
+# The checker mutes by PIN ID, so an entry whose path drifted is still muting
+# something — just not the thing it says it describes. That is exactly when it
+# must be surfaced rather than trusted.
+build_fake_repo
+jq '.known_kind_violations.violations["stream_json.sha256"].path = "api/somewhere-else.json"' \
+	"$FAKE/deploy/publication.json" > "$BASE/reg.tmp" && mv "$BASE/reg.tmp" "$FAKE/deploy/publication.json"
+OUT="$(run_repo)"; RC=$?
+[ "$RC" -eq 0 ] && ok "k9b drifted ack path: still exit 0" || bad "k9b drifted ack path: exit 0 (actual=$RC, out: $OUT)"
+echo "$OUT" | grep -q '^OBSOLETE-KIND-ACK .*acknowledges api/somewhere-else.json but the manifest pins api/stream.json' \
+	&& ok "k9b names both the declared and the real path" || bad "k9b OBSOLETE-KIND-ACK line (out: $OUT)"
+teardown
+
+# ---- k9c: the target is no longer kind=stream ------------------------------
+build_fake_repo
+jq '(.publications[] | select(.path == "api/stream.json") | .kind) = "static"' \
+	"$FAKE/deploy/publication.json" > "$BASE/reg.tmp" && mv "$BASE/reg.tmp" "$FAKE/deploy/publication.json"
+OUT="$(run_repo)"; RC=$?
+[ "$RC" -eq 0 ] && ok "k9c reclassified target: still exit 0" || bad "k9c reclassified target: exit 0 (actual=$RC, out: $OUT)"
+echo "$OUT" | grep -q '^OBSOLETE-KIND-ACK .*is kind=static, not stream' \
+	&& ok "k9c names the new kind and that nothing is left to acknowledge" || bad "k9c OBSOLETE-KIND-ACK line (out: $OUT)"
+teardown
+
+# ---- k9d: NON-VACUITY — a live acknowledgement must NOT be reported --------
+# Without this, k9a-k9c would all pass against a checker that printed
+# OBSOLETE-KIND-ACK for every entry unconditionally.
+build_fake_repo
+OUT="$(run_repo)"; RC=$?
+[ "$(echo "$OUT" | grep -c '^OBSOLETE-KIND-ACK ')" -eq 0 ] \
+	&& ok "k9d a still-real acknowledgement produces no OBSOLETE-KIND-ACK line" || bad "k9d unexpected OBSOLETE-KIND-ACK on a live ack (out: $OUT)"
+echo "$OUT" | grep -q 'obsolete-kind-ack=0' \
+	&& ok "k9d summary reports obsolete-kind-ack=0" || bad "k9d summary count (out: $OUT)"
+echo "$OUT" | grep -q '^KIND-BASELINED .*stream_json.sha256' \
+	&& ok "k9d the live ack is still honoured (KIND-BASELINED, not expired)" || bad "k9d KIND-BASELINED line (out: $OUT)"
+teardown
+
+# ---- k9e: post-cleanup — an EMPTY ack list has nothing to expire -----------
+# The 2026-09-04 end state (docs/CYCLE_GATE.md step 4b sets violations to {}
+# in the same commit as the re-issued manifest) must be silent here, not
+# newly noisy. This is the half of the acceptance criterion that says the
+# check stays correct after the transition, not only before it.
+build_fake_repo
+jq '.known_kind_violations.violations = {}' "$FAKE/deploy/publication.json" > "$BASE/reg.tmp" \
+	&& mv "$BASE/reg.tmp" "$FAKE/deploy/publication.json"
+jq 'del(.artifact_manifest.stream_json)' "$FAKE/public/api/identity.json" > "$BASE/id.tmp" \
+	&& mv "$BASE/id.tmp" "$FAKE/public/api/identity.json"
+OUT="$(run_repo)"; RC=$?
+[ "$RC" -eq 0 ] && ok "k9e post-step-4b shape: exit 0" || bad "k9e post-step-4b shape: exit 0 (actual=$RC, out: $OUT)"
+[ "$(echo "$OUT" | grep -c '^OBSOLETE-KIND-ACK ')" -eq 0 ] \
+	&& ok "k9e post-step-4b shape: no OBSOLETE-KIND-ACK line (nothing left to expire)" || bad "k9e post-step-4b unexpectedly noisy (out: $OUT)"
+teardown
+
+# ---- k9L live: an expired ack is reported but NEVER pushed -----------------
+# Deliberate: pushing housekeeping is the false urgency this project forbids,
+# and tests/publication-registry/'s T7 is the gate that actually fails.
+build_fake_repo
+jq 'del(.artifact_manifest.stream_json)' "$FAKE/public/api/identity.json" > "$BASE/id.tmp" \
+	&& mv "$BASE/id.tmp" "$FAKE/public/api/identity.json"
+make_curl_stub
+serve "$FAKE/public/api/identity.json"     identity.json
+serve "$FAKE/public/api/alpha.json"        alpha.json
+serve "$FAKE/public/api/alpha.schema.json" alpha.schema.json
+OUT="$(run_live)"; RC=$?
+[ "$RC" -eq 0 ] && ok "k9L live: expired ack alone does not change the exit code" || bad "k9L live: exit 0 (actual=$RC, out: $OUT)"
+echo "$OUT" | grep -q '^OBSOLETE-KIND-ACK ' \
+	&& ok "k9L live: the expiry is still reported to the log" || bad "k9L live: OBSOLETE-KIND-ACK line (out: $OUT)"
+[ "$(alert_count)" -eq 0 ] \
+	&& ok "k9L live: fires no push (housekeeping is not an alert)" || bad "k9L live: expected 0 pushes, got $(alert_count) (log: $(alerts))"
+teardown
+
 # ---- k7R: a DIRECTORY row (kind=record via member_pattern) resolves cleanly
 # registry_kind_of() has TWO resolution paths: exact .path match (exercised
 # by every case above) and a directory row (path ending "/") whose
