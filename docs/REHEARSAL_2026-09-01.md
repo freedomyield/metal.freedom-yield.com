@@ -134,7 +134,8 @@ bytes into the repo path, `git add`, and a single-purpose commit …」) — た
 ssh-add ~/.ssh/freedom-yield-operator-identity
 ```
 
-- **Dashlane entry 名**: 「<entry name withheld - handed over in the operator ping>」
+- **Dashlane entry 名**: この文書には記載しない — ピング送付時に AI が添える
+  (②の testnet keystore password と同じ扱い)
 - **目視するもの**: `Identity added: /Users/…/freedom-yield-operator-identity`
   の 1 行。
 - **なぜこれをやるか**: `gen-identity.sh` は `ssh-keygen -Y sign -f
