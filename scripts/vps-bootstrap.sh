@@ -179,7 +179,7 @@ step_daily_status_cron() {
 # Aligned with the operator's quiet-hours window (notify.sh suppresses
 # non-urgent notifications 22:00–09:00 JST).
 # FY_LIVE=1 required: scripts/lib/side-effects.sh (C3 rollout, 2026-08-06)
-# gates every production side effect behind FY_LIVE=1; daily-status.sh
+# gates the side effects routed through it behind FY_LIVE=1; daily-status.sh
 # sends a real ntfy push. See check-cron-file.sh Rule 6.
 SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin
@@ -231,7 +231,7 @@ step_anomaly_cron() {
 # provisions the directory.
 #
 # FY_LIVE=1 required: scripts/lib/side-effects.sh (C3 rollout, 2026-08-06)
-# gates every production side effect behind FY_LIVE=1; check-anomalies.sh
+# gates the side effects routed through it behind FY_LIVE=1; check-anomalies.sh
 # sends real ntfy pushes and writes into ANOMALY_STATE_DIR. See
 # check-cron-file.sh Rule 6.
 SHELL=/bin/bash

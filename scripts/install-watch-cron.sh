@@ -23,13 +23,13 @@
 # install instead of writing a non-compliant cron.
 #
 # 2026-08-06: env header now also carries FY_LIVE=1. scripts/lib/side-effects.sh
-# (the C3 rollout) gates every production side effect — notify.sh,
-# push-to-web-host.sh, /var/lib/freedom-yield state writes — behind
+# (the C3 rollout) gates the production side effects that route THROUGH it —
+# a fyd_notify-wrapped ntfy push, a /var/lib/freedom-yield state write — behind
 # FY_LIVE=1; anything else is a loud dry no-op. check-watch-validators.sh
-# fires a notify.sh push and writes WATCH_STATE_DIR, so this cron must
-# carry the flag now, ahead of that script's own callers migrating onto the
-# lib — landing the flag first avoids the cron silently going dry the day
-# that migration lands. Enforced by check-cron-file.sh Rule 6.
+# routes its push through the library's fyd_notify and its WATCH_STATE_DIR
+# writes through fyd_live_* (measured 2026-08-17: 1 fyd_notify call site,
+# 5 fyd_live_*/fyd_state_dir), so without the flag on this cron both go dry.
+# Enforced by check-cron-file.sh Rule 6.
 #
 # Idempotent: identical content → no change. A differing existing file is
 # backed up OUTSIDE cron.d — under ${FYD_BACKUP_DIR:-/var/backups/metal-cron}

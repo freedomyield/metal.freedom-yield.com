@@ -208,8 +208,11 @@ t5
 # A PIN IS A PRESENT sha256, not a listed entry. Since the C4 kind discipline
 # (2026-08-14) an entry whose publication kind is `stream` is listed with url +
 # kind and NO sha256, so emitting a `.sha256` row for every entry would invent
-# pins that do not exist. scripts/check-identity-pins.sh:302-307 has always
-# gated on `(.value.sha256 // "") != ""`; this is the second implementation of
+# pins that do not exist. scripts/check-identity-pins.sh's own PINS
+# enumeration (the `jq -r` that builds "<pin_id>\t<url>\t<sha256>" rows) has
+# always gated on `(.value.sha256 // "") != ""` — cited by name rather than by
+# line number, which was already off by ~170 lines when this was measured on
+# 2026-08-17; this is the second implementation of
 # the same enumeration and the two must not disagree. Measured consequence of
 # the disagreement, before this fix: against a post-C4 manifest T7 reported
 # "all 4 known_kind_violations entries still describe a real violation" while
@@ -311,16 +314,28 @@ assert_extracted_fn() {
 # probe_paths — the public-relative paths every kind resolver in T21 is
 # compared over: every exact publications[] row this registry declares, plus
 # directory-member paths that DO and DO NOT match a directory row's
-# member_pattern. The member paths are the point: an exact-match-only
+# member_pattern, plus a member of the one directory row that has NO
+# member_pattern at all. The member paths are the point: an exact-match-only
 # implementation, and the historical `select($p | startswith(.path))` bug,
 # are both invisible against exact rows alone.
+#
+# The last one closes review finding M-1 (2026-08-17): `calendar/` is the
+# only directory row in this registry without a member_pattern, so it is the
+# only path that exercises each resolver's "member_pattern is empty -> this
+# row governs nothing" guard. Measured on a clone, both ways: doctor
+# gen-identity.sh's resolver to drop that guard and default the pattern to
+# "." (so `calendar/renewal.ics` resolves to `stream` instead of no row) and
+# WITHOUT this probe the suite is still 37 PASS / 0 FAIL, WITH it T21 names
+# the path and fails. The n>=20 / n_record>=1 / n_norow>=1 strength check
+# never reached the branch — the api/archive/ rows satisfy all three.
 probe_paths() {
 	jq -r '.publications[].path' "$REGISTRY"
 	printf '%s\n' \
 		"api/archive/anchor-source-0000000000000000000000000000000000000000000000000000000000000001.json" \
 		"api/archive/anchor-source-2026-08-14.json" \
 		"api/peers-history/peers-2026-08-14.json.gz" \
-		"api/peers-history/not-a-date.json.gz"
+		"api/peers-history/not-a-date.json.gz" \
+		"calendar/renewal.ics"
 }
 
 # ---------------------------------------------------------------------------
@@ -343,6 +358,24 @@ t6
 
 # ---------------------------------------------------------------------------
 # T7 — the baseline is an acknowledgement, not a mute: no obsolete entry
+#
+# scripts/check-identity-pins.sh's OBSOLETE-KIND-ACK block calls these "the
+# same three conditions T7 uses, so the two can never disagree". Review
+# finding M-5 (2026-08-17) measured one asymmetry in that claim and it is
+# left in place deliberately: for an ack entry with NO `path` key at all,
+# this test reads `.path` raw (jq -r yields the string "null", which never
+# equals a real pinned path, so condition 2 fires and CI goes red), while the
+# checker reads `.path // ""` and then guards on `[ -n "$ACK_PATH" ]`, so it
+# skips condition 2 and moves on to condition 3.
+#
+# Not aligned, for two reasons. It is unreachable: deploy/publication.schema
+# .v1.json makes `path` required under known_kind_violations.violations.*,
+# and T11 fails if the real registry stops validating against that schema.
+# And the direction of the difference is the safe one — T7 is the STRICTER
+# of the two, on the side that fails CI inside the offending commit; making
+# it match the checker would mean weakening a live assertion to match a guard
+# that exists only for robustness. If `path` ever stops being required, this
+# note is what says which of the two moves.
 # ---------------------------------------------------------------------------
 t7() {
 	local key declared_path live_path kind obsolete=0 n
@@ -1177,7 +1210,22 @@ t21
 #   (1) scripts/check-identity-pins.sh    url_to_public_path()    bash
 #   (2) scripts/operator-local/gen-identity.sh url_to_registry_path() bash
 #   (3) this file's identity_pins()       jq  sub("^https?://[^/]+/"; "")
-#   (4) tests/identity-pins/'s K8_DERIVE_JQ  jq, the same sub()
+#   (4) tests/identity-pins/'s K8_KIND_OF_JQ  jq, the same sub()
+#
+# FOUR is measured, not asserted. Grepping tests/ and scripts/ for the literal
+# jq expression sub("^https?://[^/]+/"; "") returns NINE lines (2026-08-17,
+# after N-1). THREE of them are implementations (3) and (4) — (3) spells it
+# twice, once per pin kind, and (4) once. The other six are not
+# implementations: two lines of T19's mutation fixture below (a deliberate
+# reproduction of the OLD implementation, not a copy of the current one),
+# jq_spelling_retyped() below (this case's own re-transcription, disclosed
+# under "What (b) does NOT check"), one line of prose in
+# scripts/check-identity-pins.sh, and two lines inside this comment block —
+# item (3) above and this sentence's own quotation of the pattern.
+# tests/identity-pins/ carried a FIFTH implementation copy — its k8
+# postcondition counter — until N-1 collapsed it into the shared
+# K8_KIND_OF_JQ prelude named above; that copy was guarded by nothing and
+# produced a 空振り PASS.
 #
 # The review that raised this left it as "duplication across a bash/jq
 # boundary, covered by text matching, do not force a single implementation".
@@ -1213,7 +1261,7 @@ t21
 # against is jq_spelling_retyped() below — the same expression TYPED OUT
 # AGAIN here, not extracted from either. So (b) measures "the jq semantics
 # and the bash semantics agree on the manifest's URLs"; it does NOT measure
-# "identity_pins() and K8_DERIVE_JQ still contain that expression".
+# "identity_pins() and K8_KIND_OF_JQ still contain that expression".
 #
 # This is the very re-transcription T21 refuses a few hundred lines up ("A
 # re-transcription would be a fourth untested copy and would prove nothing").
@@ -1223,14 +1271,15 @@ t21
 #
 #   mutate identity_pins()'s sub()  -> T22 stays 4/4 PASS; T7 (4 FAIL), T14
 #                                      (9 FAIL), T19 and T15 go red
-#   mutate K8_DERIVE_JQ's sub()     -> this whole suite stays 37/0; the k8U
-#                                      unit case and k8 in
-#                                      tests/identity-pins/ go red (5 FAIL)
+#   mutate K8_KIND_OF_JQ's sub()    -> this whole suite stays green; the k8U
+#                                      unit cases and k8 in
+#                                      tests/identity-pins/ go red (5 FAIL,
+#                                      re-measured 2026-08-17 after N-1)
 #
 # So nothing is unguarded, but the guard is not here, and this case must not
 # be read as providing it. Extracting (3) and (4) the way T21 extracts the
 # two bash resolvers is entirely possible — identity_pins() is a shell
-# function in this file and K8_DERIVE_JQ is a plain variable assignment — and
+# function in this file and K8_KIND_OF_JQ is a plain variable assignment — and
 # is DESCOPED, not blocked. It is the obvious next revision of this case.
 #
 # So the honest summary, which the assertions below enforce rather than
@@ -1260,7 +1309,7 @@ t22() {
 		printf '%s|%s' "$rc" "$out"
 	}
 	# NAMED for what it is: the jq expression RE-TYPED here, not extracted
-	# from identity_pins() (copy 3) or K8_DERIVE_JQ (copy 4). Comparing
+	# from identity_pins() (copy 3) or K8_KIND_OF_JQ (copy 4). Comparing
 	# against it measures jq-vs-bash SEMANTICS, never that those two copies
 	# still spell it this way. See "What (b) does NOT check" in the header
 	# before strengthening any claim built on this.
@@ -1316,7 +1365,7 @@ t22() {
 		fail "T22 the signed manifest carried no URL to compare — this half of the case did not run"
 		bad=1
 	else
-		pass "T22 the jq sub() SEMANTICS agree with the bash form on all ${n_real} URL(s) the signed manifest carries (semantics only — this does not execute identity_pins() or K8_DERIVE_JQ; T7/T14 and k8U hold those)"
+		pass "T22 the jq sub() SEMANTICS agree with the bash form on all ${n_real} URL(s) the signed manifest carries (semantics only — this does not execute identity_pins() or K8_KIND_OF_JQ; T7/T14 and k8U hold those)"
 	fi
 
 	# ---- c. the reason for keeping them separate must still be true

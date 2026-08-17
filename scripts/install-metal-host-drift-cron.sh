@@ -9,13 +9,13 @@
 # (rule: no redirect into /var/log paths the deploy user cannot create).
 #
 # 2026-08-06: env header now also carries FY_LIVE=1. scripts/lib/side-effects.sh
-# (the C3 rollout) gates every production side effect — notify.sh,
-# push-to-web-host.sh, /var/lib/freedom-yield state writes — behind
-# FY_LIVE=1; anything else is a loud dry no-op. check-host-drift.sh fires a
-# notify.sh alert on any drift condition, so this cron must carry the flag
-# now, ahead of that script's own callers migrating onto the lib — landing
-# the flag first avoids the cron silently going dry the day that migration
-# lands. Enforced by check-cron-file.sh Rule 6.
+# (the C3 rollout) gates the production side effects that route THROUGH it —
+# a fyd_notify-wrapped ntfy push, a /var/lib/freedom-yield state write — behind
+# FY_LIVE=1; anything else is a loud dry no-op. check-host-drift.sh routes
+# its drift alert through the library's fyd_notify (measured 2026-08-17:
+# 5 side-effects.sh references, 2 fyd_notify call sites), so without the flag
+# on this cron the alert is a DRY line and never reaches ntfy.
+# Enforced by check-cron-file.sh Rule 6.
 #
 # Schedule: 05:15 UTC daily — after the 04:00 feed batch and the deploy
 # window, so a healthy day reads "in sync" exactly once.

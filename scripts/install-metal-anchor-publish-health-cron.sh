@@ -7,13 +7,13 @@
 # Idempotent: if the file already contains the same content, no change.
 #
 # 2026-08-06: env header now carries FY_LIVE=1. scripts/lib/side-effects.sh
-# (the C3 rollout) gates every production side effect — notify.sh,
-# push-to-web-host.sh, /var/lib/freedom-yield state writes — behind
+# (the C3 rollout) gates the production side effects that route THROUGH it —
+# a fyd_notify-wrapped ntfy push, a /var/lib/freedom-yield state write — behind
 # FY_LIVE=1; anything else is a loud dry no-op. check-anchor-publish-health.sh
-# fires a notify.sh alert on failure, so this cron must carry the flag now,
-# ahead of that script's own callers migrating onto the lib — landing the
-# flag first avoids the cron silently going dry the day that migration
-# lands. Enforced by check-cron-file.sh Rule 6.
+# routes its failure alert through the library's fyd_notify and its state
+# writes through fyd_live_* (measured 2026-08-17: 2 fyd_notify call sites,
+# 4 fyd_live_*/fyd_state_dir), so without the flag on this cron both go dry.
+# Enforced by check-cron-file.sh Rule 6.
 
 set -euo pipefail
 
