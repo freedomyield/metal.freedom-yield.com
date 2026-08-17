@@ -50,7 +50,7 @@
 				"chain": {"type": "string", "const": "metal-a-chain"},
 				"chain_backend": {
 					"type": "string",
-					"description": "Label for the execution stack that actually served the inscribing transaction. For metal-a-chain this is 'antelope' (Antelope/EOSIO interfaces — /v1/chain, /v1/history, Hyperion /v2/history — and the Antelope action model this receipt's own verify gates assert). Receipts generated before 2026-08-17 carry 'pulsevm', which was a forward-looking label for the announced Metallicus execution engine rather than an observed fact; it becomes correct only once Metal A-chain actually runs PulseVM."
+					"description": "Names the protocol family observed serving the inscribing transaction — NOT an execution engine. For metal-a-chain this is 'antelope' (Antelope/EOSIO history interfaces — Hyperion /v2/history, /v1/history/get_transaction — plus the Antelope action model this receipt's own verify gates assert). Receipts published for the cycle 3 and cycle 4 anchors carry 'pulsevm' instead: a forward-looking label naming an announced future execution engine rather than the family observed serving the chain. Family and engine are different axes, so a later engine change does not by itself make 'antelope' false."
 				},
 				"network": {
 					"type": "string",

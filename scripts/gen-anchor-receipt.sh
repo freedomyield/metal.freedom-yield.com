@@ -286,14 +286,30 @@ RECEIPT_JSON="$(jq -n \
 		memo_prefix: $memo_prefix,
 		anchor: {
 			chain: "metal-a-chain",
-			# chain_backend = the execution stack that ACTUALLY served this tx.
-			# Evidenced by the dependencies of this very script: the tx is resolved
-			# through Antelope/EOSIO history APIs (Hyperion /v2/history, then
-			# /v1/history/get_transaction) and gates 3-4 above assert the Antelope
-			# action model (eosio.token::transfer + actor@permission authorization).
-			# MIGRATION POINT: when Metal A-chain actually runs PulseVM, change this
-			# literal (and only this literal) to "pulsevm". Until then "pulsevm" is a
-			# future-tense label and must not be published as present-tense fact.
+			# chain_backend names the PROTOCOL FAMILY this script observes, not an
+			# execution engine. Evidenced by the dependencies of this very script:
+			# the tx is resolved through Antelope/EOSIO history interfaces (Hyperion
+			# /v2/history/get_actions, then /v1/history/get_transaction) and gates
+			# 3-4 above assert the Antelope action model (eosio.token::transfer with
+			# actor@permission authorization). Everything published here is something
+			# the script actually checked.
+			#
+			# WHEN TO CHANGE THIS: family and engine are different axes, so a new
+			# engine underneath (PulseVM is the one announced for this chain) does
+			# NOT by itself make "antelope" false — it stays true for as long as the
+			# two gates above keep passing on Antelope-shaped actions. Change the
+			# literal only when this script can observe the difference: i.e. when
+			# the resolution path above stops being an Antelope/EOSIO interface, or
+			# when the script is extended to read an engine identifier from the
+			# chain (it reads none today — it never calls /v1/chain/get_info). Do
+			# not substitute an engine name for the family name on the strength of
+			# an announcement; that is the exact defect this literal used to carry.
+			# Changing it means updating, in the same commit:
+			#   scripts/append-anchor-history.sh   (fallback default)
+			#   tests/gen-anchor-receipt/test-r13-r18-schema-archive.sh   (pinned value)
+			#   tests/append-anchor-history/test-append-anchor-history.sh (pinned value)
+			#   public/api/anchor-{receipt,history}.schema.v{1,2}.json    (description)
+			#   public/api/anchor-receipt*.example.json, anchor-history.example.jsonl
 			chain_backend: "antelope",
 			network: $network,
 			method: "hc_single_4_action_pack",

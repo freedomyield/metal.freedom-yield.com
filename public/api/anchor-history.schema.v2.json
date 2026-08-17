@@ -71,7 +71,7 @@
 		"chain": {"type": "string", "const": "metal-a-chain"},
 		"chain_backend": {
 			"type": "string",
-			"description": "Execution-stack label mirrored from anchor-receipt.anchor.chain_backend. For metal-a-chain this is 'antelope'; lines appended before 2026-08-17 carry 'pulsevm', a forward-looking label for the announced Metallicus engine rather than an observed fact."
+			"description": "Protocol-family label mirrored from anchor-receipt.anchor.chain_backend — not an execution engine. For metal-a-chain this is 'antelope'; the lines published for the cycle 3 and cycle 4 anchors carry 'pulsevm', a forward-looking label naming an announced future execution engine rather than the family observed serving the chain. This ledger is append-only, so those lines keep the value they were published with."
 		},
 		"method": {"type": "string", "const": "hc_single_4_action_pack"},
 		"tx_id": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
