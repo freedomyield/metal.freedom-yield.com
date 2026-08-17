@@ -404,6 +404,19 @@ artifact. The pin becomes valid again with no re-signing.
    The checker prints an `OBSOLETE-BASELINE` line naming every entry that has
    become unnecessary — an obsolete entry is not an error, but leaving it
    there hides the next real break behind stale bookkeeping.
+5. Remove the now-obsolete entry from `deploy/publication.json`'s
+   `known_kind_violations.violations`. The checker prints an
+   `OBSOLETE-KIND-ACK` line for each one, naming why it expired: the manifest
+   no longer carries that pin, the entry's declared `path` is not what the
+   manifest actually pins, or the target is no longer `kind=stream`. Same
+   status as `OBSOLETE-BASELINE` — **report-only**: it never changes the exit
+   code and never pushes, because an expired acknowledgement is bookkeeping
+   rather than breakage. What *does* fail is `tests/publication-registry/`'s
+   `T7`, in CI, inside the commit that left the entry behind. **At the
+   2026-09-04 transition this is step 4b of `docs/CYCLE_GATE.md`** and the
+   whole list expires at once, so you should see zero `OBSOLETE-KIND-ACK`
+   lines both before that commit and after it — seeing them means one half of
+   that commit landed without the other.
 
 **What the checker deliberately stays quiet about.** Pins whose target is a
 push-owned feed (`deploy/feed-excludes.txt`: `evidence.json`,
