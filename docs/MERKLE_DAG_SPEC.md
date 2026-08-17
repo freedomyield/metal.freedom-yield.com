@@ -6,7 +6,7 @@
 >
 > **Supersedes the retired 2-branch `fyid1:` model.** Earlier revisions of this file defined a two-branch Merkle DAG (`identity` ‖ `cycles`) rooted at `dag_root_hash`, inscribed as `fyid1:<hex>`. That model is **retired** — it is no longer computed or inscribed. The single on-chain commitment is now the 3-branch `dag_root_computed` described below, inscribed with the `fya<schema>c<cycle>` memo family. See `docs/IDENTITY_SCHEMA_CHANGELOG.md`.
 
-This document defines the **three-branch DAG** rooted at `dag_root_computed`, the value anchored on Metal A-chain (PulseVM / XPRNetwork) via a set of `eosio.token::transfer` memos of the form `fya<schema>c<cycle>:<dag_root_computed 64hex>`.
+This document defines the **three-branch DAG** rooted at `dag_root_computed`, the value anchored on Metal A-chain (= XPR Network, Antelope/EOSIO family) via a set of `eosio.token::transfer` memos of the form `fya<schema>c<cycle>:<dag_root_computed 64hex>`.
 
 The DAG commits the operator to three parallel facts as of a given validation cycle: **who the operator is** (identity branch), **what was observed on-chain that cycle** (observations branch), and **which artifacts are published** (artifacts branch).
 
@@ -90,7 +90,7 @@ The branches are recomputed each cycle from live sources; `dag_root_computed` is
 
 ## 6. A-chain anchor binding
 
-The anchor is a set of **four** `eosio.token::transfer` actions on Metal A-chain (PulseVM / XPRNetwork), signed by the narrow `<xpr-account>@anchor` permission (config `xpr-account`), each a transfer of a small amount (default `0.0001 XPR`, config `xpr-quantity`) from `<xpr-account>` to a **dedicated sink account distinct from `<xpr-account>`** (config `anchor-sink`). Self-transfer (`from == to`) is rejected by `eosio.token` (`check(from != to, "cannot transfer to self")`), so a second account is required. The four memos carry the binding.
+The anchor is a set of **four** `eosio.token::transfer` actions on Metal A-chain (= XPR Network, Antelope/EOSIO family), signed by the narrow `<xpr-account>@anchor` permission (config `xpr-account`), each a transfer of a small amount (default `0.0001 XPR`, config `xpr-quantity`) from `<xpr-account>` to a **dedicated sink account distinct from `<xpr-account>`** (config `anchor-sink`). Self-transfer (`from == to`) is rejected by `eosio.token` (`check(from != to, "cannot transfer to self")`), so a second account is required. The four memos carry the binding.
 
 Let `schema` = `anchor-source.json .schema_version` (= 1) and `cycle` = `anchor-source.json .observations_branch.cycle_number_observed`. The memo prefix is:
 

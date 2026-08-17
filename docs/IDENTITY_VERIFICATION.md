@@ -25,7 +25,7 @@ A single signature does not by itself prove control of the validator. NodeID bin
 - `/api/identity.json.sig` — detached ed25519 signature
 - `/.well-known/operator-identity.pub` — current operator identity public key (its SHA-256 is committed inside the DAG's identity branch)
 - `/api/anchor-source.json` — the DAG source: the three branch objects (identity / observations / artifacts) and the combined `dag_root_computed`
-- `/api/anchor-receipt.json` — Metal A-chain (PulseVM / XPRNetwork) inscription receipt anchoring `dag_root_computed`
+- `/api/anchor-receipt.json` — Metal A-chain (= XPR Network, Antelope/EOSIO family) inscription receipt anchoring `dag_root_computed`
 - `/api/anchor-history.jsonl` — append-only log of every broadcast anchor (cycle → tx_id → dag)
 - `/api/evidence.json` — machine-readable selection-evidence manifest, documented at `docs/EVIDENCE_MANIFEST.md`
 - `/api/validator.json` — live validator state

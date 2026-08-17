@@ -22,8 +22,8 @@
 > `scripts/install-anchor-watch-alert-only.sh`): it notifies the
 > operator of a cycle transition, and the operator drives signing from
 > the Mac. The on-chain shape is an HC-single **4-action pack** in one
-> `eosio.token::transfer` transaction on Metal A-chain (= PulseVM /
-> XPRNetwork): three per-branch memos (`fya<S>c<N>-id:<hex>`,
+> `eosio.token::transfer` transaction on Metal A-chain (= XPR
+> Network, Antelope/EOSIO family): three per-branch memos (`fya<S>c<N>-id:<hex>`,
 > `-ob:<hex>`, `-ar:<hex>`) plus a summary memo
 > `fya<S>c<N>:<dag_root_computed_hex>` — e.g. the cycle-3 summary
 > `fya1c3:<dag_root_computed>`. The value committed on chain is
@@ -201,8 +201,8 @@ Expected tail (your `fingerprint` and `artifact_root` will differ):
   anchor summary memo:  fya<S>c<N>:<dag_root_computed>  (v2 A-chain inscription; historical fyid1: shape retired — see banner)
 ```
 
-Under the v2 pipeline the value inscribed on Metal A-chain (= PulseVM /
-XPRNetwork) is `anchor-source.json.dag_root_computed` (the 3-branch DAG
+Under the v2 pipeline the value inscribed on Metal A-chain (= XPR
+Network, Antelope/EOSIO family) is `anchor-source.json.dag_root_computed` (the 3-branch DAG
 root), signed on the operator's local Mac via
 `scripts/sign-anchor-event.sh` — NOT via the deleted
 `scripts/post-anchor-event.sh` host-cron path. Until an anchor is signed
@@ -484,7 +484,7 @@ pins makes the acknowledgement entries `OBSOLETE` the instant it lands.
 
 > This section is operationally distinct from the Phase 5 operator
 > identity ed25519 setup above: different chain (Metal A-chain =
-> PulseVM / XPRNetwork), different key family (EOSIO K1 secp256k1 +
+> XPR Network, Antelope/EOSIO family), different key family (EOSIO K1 secp256k1 +
 > WebAuth P-256), different tooling (`proton-cli` / webauth.com). The
 > `metalfreedom` XPR account is the on-chain anchor for the Merkle DAG
 > identity model; permission structure follows the design in
