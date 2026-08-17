@@ -552,9 +552,12 @@ url_to_public_path() {
 # gen-identity.sh's registry_kind_of_path() BY FUNCTION NAME and runs the
 # generator's actual function, and requires both to return what that suite's
 # OWN kind_of() returns for every path in the real registry plus directory
-# members that do and do not match a member_pattern. Both sides of that
-# comparison carry a mutation proof, so an extraction that quietly stopped
-# resolving anything fails rather than passes. Until 2026-08-17 the
+# members that do and do not match a member_pattern. An extraction that
+# quietly stopped resolving anything FAILS rather than passes (the extracted
+# text is shape- and content-checked before it is trusted), and the
+# comparison is mutation-proved from both ends: doctoring the generator's
+# resolver must be detected, and so must a regression in this suite's own
+# reference. Until 2026-08-17 the
 # generator's copy was a disclosed uncovered gap; it is the copy that
 # composes a SIGNED manifest, so it was the last one that should have been
 # running unchecked.

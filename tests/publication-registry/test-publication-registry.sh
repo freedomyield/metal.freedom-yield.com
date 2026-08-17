@@ -906,10 +906,17 @@ t19
 
 # ---------------------------------------------------------------------------
 # T20 — pin_policy wording (S3): the `record` kind's defining clause must not
-# drift into independently-reworded copies. deploy/publication.json's own
-# record_caveat text says as much by name ("docs/IDENTITY_VERIFICATION.md and
-# identity.json's pin_policy carry that same wording and must stay in step
-# with this row") — nothing checked that claim before this test existed.
+# drift into independently-reworded copies. The api/archive/ row's
+# record_caveat originally asserted this obligation itself, naming
+# docs/IDENTITY_VERIFICATION.md and identity.json's pin_policy as carrying
+# "that same wording ... in step with this row" — an unchecked claim, which is
+# why this test was written. That sentence has since been corrected twice
+# against what T20 actually does: on 2026-08-17 for naming
+# docs/IDENTITY_VERIFICATION.md (not checked here — see below), and again the
+# same day for naming THIS ROW as the canonical source. It is not: the clause
+# T20 compares against lives in .kind_definitions.record, the taxonomy
+# authority at the top of the registry, and record_caveat is unchecked prose.
+# Do not re-derive the phrase below from record_caveat.
 #
 # What IS checked here, and what is deliberately NOT:
 #   - kind_definitions.record (this registry, the taxonomy authority), the
