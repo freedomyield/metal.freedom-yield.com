@@ -6,7 +6,7 @@
 	"memo": "fyid1:0000000000000000000000000000000000000000000000000000000000000000",
 	"anchor": {
 		"chain": "metal-a-chain",
-		"chain_backend": "pulsevm",
+		"chain_backend": "antelope",
 		"network": "xpr-mainnet",
 		"method": "phase_alpha_token_transfer",
 		"tx_id": "0000000000000000000000000000000000000000000000000000000000000000",

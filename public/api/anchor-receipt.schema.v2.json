@@ -48,7 +48,10 @@
 			"additionalProperties": true,
 			"properties": {
 				"chain": {"type": "string", "const": "metal-a-chain"},
-				"chain_backend": {"type": "string"},
+				"chain_backend": {
+					"type": "string",
+					"description": "Names the protocol family observed serving the inscribing transaction — NOT an execution engine. For metal-a-chain this is 'antelope' (Antelope/EOSIO history interfaces — Hyperion /v2/history, /v1/history/get_transaction — plus the Antelope action model this receipt's own verify gates assert). Receipts published for the cycle 3 and cycle 4 anchors carry 'pulsevm' instead: a forward-looking label naming an announced future execution engine rather than the family observed serving the chain. Family and engine are different axes, so a later engine change does not by itself make 'antelope' false."
+				},
 				"network": {
 					"type": "string",
 					"enum": ["xpr-mainnet", "xpr-testnet", "mainnet-a", "testnet-a"]

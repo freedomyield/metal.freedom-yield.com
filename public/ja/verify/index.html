@@ -165,7 +165,7 @@ ssh-keygen -Y verify -f "$TMP/allowed" \
 				<h3>on-chain anchor receipt</h3>
 				<span class="data-tag">live</span>
 			</header>
-			<p>各 cycle transition で、 運用者は現在の <code>dag_root_computed</code> を Metal A-chain (PulseVM / XPRNetwork) に narrow 権限 <code>metalfreedom@anchor</code> で、4 つの <code>eosio.token::transfer</code> memo — 各 branch root(<code>fya1c&lt;N&gt;-id:</code> / <code>-ob:</code> / <code>-ar:</code>)と統合 DAG root(<code>fya1c&lt;N&gt;:&lt;dag_root_computed&gt;</code>)— として刻みます。 receipt JSON は audit-side の「最新 inscription を 1 件保持する」スナップショット。</p>
+			<p>各 cycle transition で、 運用者は現在の <code>dag_root_computed</code> を Metal A-chain (Antelope/EOSIO 系のチェーンで、XPR Network の endpoint から到達可能) に narrow 権限 <code>metalfreedom@anchor</code> で、4 つの <code>eosio.token::transfer</code> memo — 各 branch root(<code>fya1c&lt;N&gt;-id:</code> / <code>-ob:</code> / <code>-ar:</code>)と統合 DAG root(<code>fya1c&lt;N&gt;:&lt;dag_root_computed&gt;</code>)— として刻みます。 再検証は標準的な Antelope explorer または Hyperion history API だけで完結します。 receipt JSON は audit-side の「最新 inscription を 1 件保持する」スナップショット。</p>
 			<dl class="data-meta">
 				<dt>receipt</dt><dd><code>/api/anchor-receipt.json</code> (= 常に最新を保持; 初回 anchor は 2026-07-04 に刻印済、tx <a href="https://explorer.xprnetwork.org/transaction/0b70d2aa1d20bc5c4eca8ce7888a7ab6edb02316e927209f524114f1b647938f" rel="noopener noreferrer" target="_blank"><code>0b70d2aa…</code></a>)</dd>
 				<dt>スキーマ</dt><dd><a href="/api/anchor-receipt.schema.v2.json"><code>/api/anchor-receipt.schema.v2.json</code></a></dd>

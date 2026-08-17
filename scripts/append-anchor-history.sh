@@ -174,7 +174,12 @@ CYCLE_NUMBER="$(jq -r '.cycle_number // empty' "$RECEIPT")"
 DAG_ROOT="$(jq -r '.dag_root_hash' "$RECEIPT")"
 MEMO_PREFIX="$(jq -r '.memo_prefix' "$RECEIPT")"
 NETWORK="$(jq -r '.anchor.network' "$RECEIPT")"
-CHAIN_BACKEND="$(jq -r '.anchor.chain_backend // "pulsevm"' "$RECEIPT")"
+# Fallback mirrors the literal composed by scripts/gen-anchor-receipt.sh — see
+# the "WHEN TO CHANGE THIS" note there, which governs both. "antelope" names the
+# protocol family observed serving this chain, not an execution engine, so an
+# announced future engine does not make it false and must not be defaulted in
+# here.
+CHAIN_BACKEND="$(jq -r '.anchor.chain_backend // "antelope"' "$RECEIPT")"
 METHOD="$(jq -r '.anchor.method' "$RECEIPT")"
 EXPLORER_URL="$(jq -r '.anchor.explorer_url' "$RECEIPT")"
 ACTOR="$(jq -r '.signing_actor // .anchor.authorization.actor' "$RECEIPT")"

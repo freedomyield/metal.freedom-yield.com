@@ -8,7 +8,7 @@
 	"memo_prefix": "fya1c3",
 	"anchor": {
 		"chain": "metal-a-chain",
-		"chain_backend": "pulsevm",
+		"chain_backend": "antelope",
 		"network": "mainnet-a",
 		"method": "hc_single_4_action_pack",
 		"tx_id": "1111111111111111111111111111111111111111111111111111111111111111",

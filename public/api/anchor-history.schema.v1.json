@@ -9,10 +9,11 @@
 	"description": "RETIRED (2026-07-01) — superseded by /api/anchor-history.schema.v2.json; see x-retirement-note above. Formal contract for the v1 shape of /api/anchor-history.jsonl. Each LINE of the JSONL file is a JSON object matching this schema; the file as a whole is an append-only, monotonically cycle_n-ordered ledger of every anchor that has reached verification_status == 'live'. Companion to /api/anchor-receipt.json (= the always-latest single record) and /api/identity.json (= the snapshot manifest pointing at this history). Role separation: anchor-receipt.json is the CURRENT anchor; anchor-history.jsonl is the FULL TIMELINE. Each history line preserves the persistent identity of an anchor (cycle_n, dag_root_hash, tx_id, explorer_url, block_num/time, signer) without the volatile pointer / regeneration metadata of the receipt. Append-only invariants are enforced by scripts/append-anchor-history.sh: tx_id duplicate rejection, cycle_n duplicate rejection, cycle_n monotonic increase, schema validation at line append time, and final-line LF guarantee. The history file is published to /api/anchor-history.jsonl ONLY AFTER the first live anchor exists — pre-deployment evidence.json marks this artifact as in_preparation. Companion design: docs/MERKLE_DAG_SPEC.md, project memory project_phase_alpha_anchor_completion_2026_07_04.",
 	"x-issued-at": "2026-06-23T00:00:00Z",
 	"x-stability": "additive-only-within-v1",
-	"x-baseline-revision": "2026-06-23-initial",
+	"x-baseline-revision": "2026-08-17-chain-backend-family-correction",
 	"x-revision-history": [
 		{"date": "2026-06-23", "tag": "initial", "summary": "Initial v1 schema for the append-only anchor history ledger introduced as part of the 2026-07-04 cycle-3 anchor completion."},
-		{"date": "2026-06-25", "tag": "idrotate-conditional", "summary": "Per-event-type conditional required fields: idrotate entries carry key_seq (canonical reference for key-rotation events) and omit cycle_n; cyclestart/cycleend continue to carry cycle_n. Backward-compatible: existing cyclestart/cycleend entries still validate. Added key_seq property and allOf conditional. cycle_n removed from top-level required, replaced by event-type-discriminated requirement."}
+		{"date": "2026-06-25", "tag": "idrotate-conditional", "summary": "Per-event-type conditional required fields: idrotate entries carry key_seq (canonical reference for key-rotation events) and omit cycle_n; cyclestart/cycleend continue to carry cycle_n. Backward-compatible: existing cyclestart/cycleend entries still validate. Added key_seq property and allOf conditional. cycle_n removed from top-level required, replaced by event-type-discriminated requirement."},
+		{"date": "2026-08-17", "tag": "chain-backend-family-correction", "summary": "Descriptive correction, not a structural change: no property added, removed or constrained (chain_backend remains an unconstrained string), so every line that validated before still validates. chain_backend was described as the execution engine and documented as 'pulsevm'; it is now described as the protocol family observed serving the transaction, mirroring the corrected anchor-receipt contract. Lines already appended keep the value they were published with."}
 	],
 	"x-line-encoding": "JSONL — UTF-8, one JSON object per line, lines terminated by LF (0x0A) including the final line, no trailing blank lines. Schema describes the per-line object shape; consumers MUST validate each line independently.",
 	"x-append-only-invariants": [
@@ -98,7 +99,7 @@
 		},
 		"chain_backend": {
 			"type": "string",
-			"description": "Execution engine label, mirrors anchor-receipt.anchor.chain_backend. For metal-a-chain this is 'pulsevm'. Optional — included for completeness when present in the receipt."
+			"description": "Protocol-family label mirrored from anchor-receipt.anchor.chain_backend — not an execution engine. For metal-a-chain this is 'antelope'; the lines published for the cycle 3 and cycle 4 anchors carry 'pulsevm', a forward-looking label naming an announced future execution engine rather than the family observed serving the chain. This ledger is append-only, so those lines keep the value they were published with."
 		},
 		"method": {
 			"type": "string",
