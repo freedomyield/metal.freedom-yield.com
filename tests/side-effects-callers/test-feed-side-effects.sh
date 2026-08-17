@@ -319,6 +319,14 @@ setup_pins() {
 	mk_repo "$1" check-identity-pins.sh
 	mkdir -p "${S}/deploy" "${S}/served"
 	printf 'api/moving-feed.json\n' >"${S}/deploy/feed-excludes.txt"
+	# S3: check-identity-pins.sh's kind gate requires deploy/publication.json
+	# (the kind-gate authority) to be present and readable, unconditionally —
+	# see its die() call right after the FEED_EXCLUDES check. This sandbox's
+	# only pinned artifact is api/tracked.json, so a one-row synthetic
+	# registry declaring it kind=static is enough to keep the checker
+	# runnable here; nothing in this suite exercises the kind gate itself
+	# (that is tests/identity-pins/test-check-identity-pins.sh's job).
+	jq -n '{publications: [{path: "api/tracked.json", kind: "static"}]}' >"${S}/deploy/publication.json"
 	printf 'tracked bytes\n' >"${S}/public/api/tracked.json"
 	local sha
 	sha="$(printf 'DIFFERENT bytes\n' | (command -v shasum >/dev/null 2>&1 \

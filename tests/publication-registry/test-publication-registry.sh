@@ -42,6 +42,10 @@
 # T19 forward regression: the suite behaves correctly against the post-C4
 #     manifest shape (streams listed unpinned, a record pinned on a directory
 #     row), including a mutation that reproduces the pre-fix T7 false pass
+# T20 pin_policy wording (S3): the record-kind defining clause is copied,
+#     not independently reworded, across deploy/publication.json,
+#     public/api/identity.schema.v1.json and
+#     scripts/operator-local/gen-identity.sh
 
 set -uo pipefail
 
@@ -52,6 +56,8 @@ RENDER="${REPO_ROOT}/scripts/deploy/render-publication.sh"
 IDENTITY="${REPO_ROOT}/public/api/identity.json"
 SENDER="${REPO_ROOT}/scripts/push-to-web-host.sh"
 RECEIVER="${REPO_ROOT}/scripts/deploy/receive-subdir-allowlist.snippet.sh"
+IDENTITY_SCHEMA="${REPO_ROOT}/public/api/identity.schema.v1.json"
+GEN_IDENTITY="${REPO_ROOT}/scripts/operator-local/gen-identity.sh"
 
 PASS=0
 FAIL=0
@@ -62,7 +68,7 @@ note() { printf '      %s\n' "$1"; }
 TMPDIR_T="$(mktemp -d -t fyd-pubreg.XXXXXX)"
 trap 'rm -rf "$TMPDIR_T"' EXIT
 
-for f in "$REGISTRY" "$SCHEMA" "$RENDER" "$IDENTITY" "$SENDER" "$RECEIVER"; do
+for f in "$REGISTRY" "$SCHEMA" "$RENDER" "$IDENTITY" "$SENDER" "$RECEIVER" "$IDENTITY_SCHEMA" "$GEN_IDENTITY"; do
 	[ -r "$f" ] || { echo "FATAL: missing prerequisite: $f" >&2; exit 2; }
 done
 command -v jq >/dev/null 2>&1 || { echo "FATAL: jq required" >&2; exit 2; }
@@ -826,6 +832,68 @@ t19() {
 	[ "$bad" -eq 0 ] || true
 }
 t19
+
+# ---------------------------------------------------------------------------
+# T20 — pin_policy wording (S3): the `record` kind's defining clause must not
+# drift into independently-reworded copies. deploy/publication.json's own
+# record_caveat text says as much by name ("docs/IDENTITY_VERIFICATION.md and
+# identity.json's pin_policy carry that same wording and must stay in step
+# with this row") — nothing checked that claim before this test existed.
+#
+# What IS checked here, and what is deliberately NOT:
+#   - kind_definitions.record (this registry, the taxonomy authority), the
+#     `kind` enum's description in public/api/identity.schema.v1.json, and
+#     the --arg pin_policy_rule literal in
+#     scripts/operator-local/gen-identity.sh must all contain the same
+#     canonical sentence VERBATIM (a substring check, not whole-block
+#     equality: the three documents are deliberately different lengths for
+#     different audiences — a terse schema one-liner, a verbose registry
+#     definition with its own correction history, and an operational rule
+#     embedded in signed output — so forcing them byte-identical end to end
+#     would make at least two of them unreadable).
+#   - docs/IDENTITY_VERIFICATION.md is judged NOT a fit for this check: it is
+#     operator-facing prose that explains the same facts in its own voice
+#     (see its own sentence: "The rule is also restated in-band ... so the
+#     manifest explains itself without reference to this document" — it
+#     explicitly does not claim to restate pin_policy verbatim). Forcing
+#     literal-text sync there would fight the document's own purpose. This
+#     was a judgment call, not an oversight — recorded here so it is
+#     reviewable rather than silent.
+#   - gen-identity.sh's literal pin_policy_* strings vs
+#     public/api/identity.example.json's pin_policy object ARE held to full
+#     byte equality, but as a RUNTIME-BEHAVIOUR case (does the actual
+#     generator output match the committed preview?) — see
+#     tests/identity-kind-discipline/test-gen-identity-kind-discipline.sh
+#     case 1, not here.
+# ---------------------------------------------------------------------------
+t20() {
+	local phrase bad=0
+	phrase="derived from a digest of the content it addresses, so whatever that digest covers cannot change without the name changing too"
+
+	if grep -qF -- "$phrase" "$REGISTRY"; then
+		pass "T20 deploy/publication.json's kind_definitions.record carries the canonical record clause"
+	else
+		fail "T20 deploy/publication.json's kind_definitions.record does NOT carry the canonical record clause verbatim — has it been reworded without propagating?"
+		bad=1
+	fi
+
+	if grep -qF -- "$phrase" "$IDENTITY_SCHEMA"; then
+		pass "T20 public/api/identity.schema.v1.json's kind description carries the canonical record clause"
+	else
+		fail "T20 public/api/identity.schema.v1.json's kind description does NOT carry the canonical record clause verbatim — DRIFTED from deploy/publication.json"
+		bad=1
+	fi
+
+	if grep -qF -- "$phrase" "$GEN_IDENTITY"; then
+		pass "T20 scripts/operator-local/gen-identity.sh's pin_policy_rule carries the canonical record clause"
+	else
+		fail "T20 scripts/operator-local/gen-identity.sh's pin_policy_rule does NOT carry the canonical record clause verbatim — DRIFTED from deploy/publication.json"
+		bad=1
+	fi
+
+	[ "$bad" -eq 0 ] && pass "T20 the record-kind defining clause is byte-identical across all 3 authoritative sources"
+}
+t20
 
 # ---------------------------------------------------------------------------
 # T15 — mutation self-proof.
