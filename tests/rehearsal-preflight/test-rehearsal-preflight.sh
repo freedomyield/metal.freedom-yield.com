@@ -103,11 +103,25 @@ cat > "${STUB}/proton" <<'PROTON_STUB'
 # executed command look identical to grep, and only one of them is a
 # keystore operation.
 [ -n "${FYP_TEST_PROTON_LOG:-}" ] && printf '%s\n' "$*" >> "$FYP_TEST_PROTON_LOG"
-case "${FYP_TEST_PROTON_MODE:-list}" in
-	locked) exit 124 ;;
-	failed) exit 3 ;;
-	empty)  echo '[]' ; exit 0 ;;
-	*)      cat "${FYP_TEST_PROTON_KEYS:-/dev/null}" ; exit 0 ;;
+MODE="${FYP_TEST_PROTON_MODE:-list}"
+case "$1" in
+	key:list)
+		case "$MODE" in
+			locked) exit 124 ;;
+			failed) exit 3 ;;
+			empty)  echo '[]' ; exit 0 ;;
+			*)      cat "${FYP_TEST_PROTON_KEYS:-/dev/null}" ; exit 0 ;;
+		esac ;;
+	account)
+		# The rehearsal's SECOND lock probe. A keystore can list keys and
+		# still refuse a signing-adjacent read, which is the exact state the
+		# pre-flight has to catch before the operator is called.
+		case "$MODE" in
+			acctfail) exit 1 ;;
+			accthang) exit 124 ;;
+			*)        echo '{"account_name":"stub"}' ; exit 0 ;;
+		esac ;;
+	*)  echo "stub proton: unexpected subcommand: $*" >&2 ; exit 90 ;;
 esac
 PROTON_STUB
 chmod +x "${STUB}/proton"
@@ -262,19 +276,24 @@ fi
 # On a dress run the --status pointer must be a WARNING, not an instruction:
 # measured 2026-08-17, --status with the sibling value answers COMPLETE about
 # the PREVIOUS transition, which reads like confirmation of a pending one.
-if printf '%s' "$BASE_OUT" | grep -qF "Do NOT read scripts/cycle-transition.sh --status" \
+if printf '%s' "$BASE_OUT" | grep -qF "Do NOT reach for scripts/cycle-transition.sh --status" \
    && ! printf '%s' "$BASE_OUT" | grep -qF "Cross-check with: scripts/cycle-transition.sh"; then
 	pass "baseline: a dress run warns about --status instead of recommending it"
 else
 	bad "baseline: a dress run warns about --status instead of recommending it"
 fi
 
-# The meaning switch must be printed every run, not only on failure.
-if printf '%s' "$BASE_OUT" | grep -qF "sibling value:     $((CYCLE - 1))" \
-   && printf '%s' "$BASE_OUT" | grep -qF "cycle-transition.sh --expect-cycle for the same day would be $((CYCLE - 1)), not ${CYCLE}"; then
-	pass "baseline: both meanings of --expect-cycle are printed"
+# The meaning switch must be flagged on every run, but WITHOUT a number: on a
+# dress run "M-1" is last month's cycle wearing a "today" label, and that label
+# is the entry point to a double-inscription (see the script header). The
+# number itself belongs to check 8, after classification.
+if printf '%s' "$BASE_OUT" | grep -qF "paired flag:" \
+   && printf '%s' "$BASE_OUT" | grep -qF "is a DIFFERENT number" \
+   && ! printf '%s' "$BASE_OUT" | grep -qF "sibling value:" \
+   && ! printf '%s' "$BASE_OUT" | grep -qF "for the same day would be"; then
+	pass "baseline: the meaning switch is flagged in the banner, without a number"
 else
-	bad "baseline: both meanings of --expect-cycle are printed"
+	bad "baseline: the meaning switch is flagged in the banner, without a number"
 fi
 
 # ===========================================================================
@@ -303,6 +322,13 @@ for badval in not-a-number 0 007 -1 " "; do
 	fi
 done
 
+ES_OUT="$(run_pf "$GOOD" --source=)"; ES_RC=$?
+if [ "$ES_RC" -eq 1 ] && printf '%s' "$ES_OUT" | grep -qF "given with an empty value"; then
+	pass "usage: --source= with an empty value -> exit 1, not a silent default"
+else
+	bad "usage: --source= with an empty value -> exit 1, not a silent default" "rc=$ES_RC"
+fi
+
 B_OUT="$(run_pf "$GOOD" --bogus-flag-xyz)"; B_RC=$?
 if [ "$B_RC" -eq 1 ] && printf '%s' "$B_OUT" | grep -qF "unknown arg"; then
 	pass "usage: unknown flag -> exit 1"
@@ -323,7 +349,17 @@ fi
 # --help must print the header to its END, not to a hardcoded line number.
 # The last paragraph of that header is the limits section, which is the part
 # a truncation would silently drop and the part a reader least affords to lose.
-HDR_LAST="$(awk 'NR>1 { if ($0 ~ /^#/) last=$0; else if ($0 != "") exit } END{print last}' "$PREFLIGHT" | sed 's/^# \?//')"
+# `sed -E 's/^# ?//'` here too, matching what the script now does. The old
+# form used the GNU-only `\?`, which BSD sed leaves literal — and because BOTH
+# sides used it, the substring pin below matched a still-prefixed line and the
+# defect was structurally invisible. That is M1.
+HDR_LAST="$(awk 'NR>1 { if ($0 ~ /^#/) last=$0; else if ($0 != "") exit } END{print last}' "$PREFLIGHT" | sed -E 's/^# ?//')"
+if [ "$H_RC" -eq 0 ] && [ "$(printf '%s\n' "$H_OUT" | grep -c '^# ')" -eq 0 ]; then
+	pass "usage: --help strips the comment markers (BSD sed safe)"
+else
+	bad "usage: --help strips the comment markers (BSD sed safe)" \
+		"$(printf '%s\n' "$H_OUT" | grep -c '^# ') line(s) still start with '# '"
+fi
 if [ -n "$HDR_LAST" ] && printf '%s' "$H_OUT" | grep -qF "$HDR_LAST"; then
 	pass "usage: --help prints the header through its final line" "last=[${HDR_LAST:0:40}…]"
 else
@@ -536,10 +572,18 @@ else
 	bad "check 8: nothing inscribed for this cycle yet -> DAY-OF" "rc=$DO_RC"
 fi
 if printf '%s' "$DO_OUT" | grep -qF "Cross-check with: scripts/cycle-transition.sh --status --expect-cycle=$((CYCLE - 1))" \
-   && ! printf '%s' "$DO_OUT" | grep -qF "Do NOT read scripts/cycle-transition.sh"; then
+   && ! printf '%s' "$DO_OUT" | grep -qF "Do NOT reach for scripts/cycle-transition.sh"; then
 	pass "check 8: on a DAY-OF run --status IS recommended, with the -1 value"
 else
 	bad "check 8: on a DAY-OF run --status IS recommended, with the -1 value"
+fi
+# On DAY-OF the pairing IS M-1 and check 8 says so — the one branch on which
+# that arithmetic is true.
+if printf '%s' "$DO_OUT" | grep -qF "pairing: the cycle CLOSING today is $((CYCLE - 1))" \
+   && ! printf '%s' "$DO_OUT" | grep -qF "NO cycle closes today"; then
+	pass "check 8: DAY-OF states the pairing as the cycle closing today"
+else
+	bad "check 8: DAY-OF states the pairing as the cycle closing today"
 fi
 
 D="$(fresh hist-far-behind)"
@@ -558,6 +602,124 @@ expect_case "check 8: anchor-history unfetchable -> exit 9 (inconclusive)" "$D" 
 
 D="$(fresh val-gone)"; rm -f "$D/validator.json"
 expect_case "check 8: validator.json unfetchable -> exit 9 (inconclusive)" "$D" 9 "could not fetch the published validator.json"
+
+# ===========================================================================
+# Part 8b — C1 regression: the "9/4 morning" three-surface consistency proof
+# ===========================================================================
+# The state under test is the transition morning BEFORE the boundary:
+# endTime is still hours away, cycle M's anchor is already on-chain, and the
+# ledger has not moved. The pre-flight is GREEN/DRESS there — correctly. What
+# was wrong was the number it printed alongside: the banner and check 7 both
+# said the cycle-transition.sh value "for today" was M-1, and on 2026-09-04
+# the cycle that closes is M, not M-1. Feeding M-1 into
+# `cycle-transition.sh --print-only` is accepted (the ledger admits both
+# readings), and gen-anchor-source.sh's ordering guard accepts it too because
+# it compares against that same not-yet-advanced ledger — so the plan derives
+# an already-inscribed memo prefix and nothing objects until after the
+# irreversible broadcast.
+#
+# The assertion is therefore not "one line changed" but "all three surfaces
+# that mention the paired value now say the same thing".
+D="$(fresh dress-morning)"
+MORNING_END="$(( $(date -u +%s) + 6 * 3600 ))"   # boundary later today
+printf '{"endTime":%d,"startTime":%d}\n' "$MORNING_END" "$(( MORNING_END - 2592000 ))" > "$D/validator.json"
+printf '{"cycle_number":%d,"event_type":"cyclestart"}\n' "$CYCLE" > "$D/anchor-history.jsonl"
+MO_OUT="$(run_pf "$D")"; MO_RC=$?
+
+if [ "$MO_RC" -eq 0 ] && printf '%s' "$MO_OUT" | grep -qF "classification: DRESS"; then
+	pass "C1/9-4-morning: pre-boundary + already-inscribed -> GREEN, DRESS" "rc=$MO_RC"
+else
+	bad "C1/9-4-morning: pre-boundary + already-inscribed -> GREEN, DRESS" "rc=$MO_RC"
+fi
+
+# Surface 1 — banner: flags the meaning switch, commits to no number.
+if printf '%s' "$MO_OUT" | grep -qF "paired flag:" \
+   && ! printf '%s' "$MO_OUT" | grep -qF "sibling value:"; then
+	pass "C1 surface 1 (banner): meaning switch flagged, no paired number asserted"
+else
+	bad "C1 surface 1 (banner): meaning switch flagged, no paired number asserted"
+fi
+
+# Surface 2 — check 8: says no cycle closes today, and names M for the day.
+if printf '%s' "$MO_OUT" | grep -qF "pairing: NO cycle closes today" \
+   && printf '%s' "$MO_OUT" | grep -qF "On the transition day it will be ${CYCLE}" \
+   && printf '%s' "$MO_OUT" | grep -qF "this rehearsal flag will be $((CYCLE + 1))"; then
+	pass "C1 surface 2 (check 8): N/A today; transition-day values named"
+else
+	bad "C1 surface 2 (check 8): N/A today; transition-day values named"
+fi
+
+# Surface 3 — verdict: re-run with M+1, and --status is M on the day.
+if printf '%s' "$MO_OUT" | grep -qF -- "--expect-cycle=$((CYCLE + 1)). That second run is not optional." \
+   && printf '%s' "$MO_OUT" | grep -qF "is ${CYCLE} then — the cycle that closes that day"; then
+	pass "C1 surface 3 (verdict): day-of rehearsal M+1, day-of --status M"
+else
+	bad "C1 surface 3 (verdict): day-of rehearsal M+1, day-of --status M"
+fi
+
+# The consistency claim itself: on a DRESS run the number M-1 must not appear
+# anywhere as a cycle-transition.sh value, on ANY surface. This is the check
+# that would have caught the original defect on all three lines at once.
+if ! printf '%s' "$MO_OUT" | grep -qE "cycle-transition\.sh[^\n]*--expect-cycle=$((CYCLE - 1))" \
+   && ! printf '%s' "$MO_OUT" | grep -qE "would be $((CYCLE - 1))" \
+   && ! printf '%s' "$MO_OUT" | grep -qF "CLOSING today) : $((CYCLE - 1))"; then
+	pass "C1: on a DRESS run, $((CYCLE - 1)) is never presented as a cycle-transition.sh value"
+else
+	bad "C1: on a DRESS run, $((CYCLE - 1)) is never presented as a cycle-transition.sh value" \
+		"$(printf '%s' "$MO_OUT" | grep -nE -- "--expect-cycle=$((CYCLE - 1))|would be $((CYCLE - 1))" | tr '\n' '|')"
+fi
+
+# ===========================================================================
+# Part 8c — I1: provenance of every observation, and the NON-AUTHORITATIVE label
+# ===========================================================================
+# Every run in this suite is overridden, so every run must be labelled. The
+# failure mode being closed is a green transcript that never names what it
+# read, quoted to the operator as the live state.
+if printf '%s' "$BASE_OUT" | grep -qF "observations read from:" \
+   && printf '%s' "$BASE_OUT" | grep -qF "NON-AUTHORITATIVE RUN" \
+   && printf '%s' "$BASE_OUT" | grep -qF "VERDICT: PRE-FLIGHT GREEN — but NON-AUTHORITATIVE." \
+   && printf '%s' "$BASE_OUT" | grep -qF "NON-AUTHORITATIVE RUN — environment overrides in effect:"; then
+	pass "I1: an overridden green is labelled NON-AUTHORITATIVE in banner, summary and verdict"
+else
+	bad "I1: an overridden green is labelled NON-AUTHORITATIVE in banner, summary and verdict"
+fi
+
+# Each of the five sources is named, with the fixture paths visible.
+I1_NAMED=1
+for s_label in "cycle-history  :" "anchor-source  :" "anchor-history :" "validator      :" "testnet chain  :"; do
+	printf '%s' "$BASE_OUT" | grep -qF "$s_label" || I1_NAMED=0
+done
+if [ "$I1_NAMED" -eq 1 ] && [ "$(printf '%s' "$BASE_OUT" | grep -c 'LOCAL OVERRIDE')" -ge 4 ]; then
+	pass "I1: all five observation sources are named, local ones marked LOCAL OVERRIDE"
+else
+	bad "I1: all five observation sources are named, local ones marked LOCAL OVERRIDE" \
+		"named=$I1_NAMED overrides=$(printf '%s' "$BASE_OUT" | grep -c 'LOCAL OVERRIDE')"
+fi
+
+# The provenance label discriminates: an https source is marked `published`
+# even while the rest are local. Hermetic — the stub transport is what fails,
+# so no network call is made.
+D="$(fresh provenance)"
+PF_LEDGER="https://example.invalid/api/cycle-history.jsonl"; export PF_LEDGER
+PF_CURL_FAIL=1; export PF_CURL_FAIL
+PV_OUT="$(run_pf "$D")"; PV_RC=$?
+unset PF_LEDGER PF_CURL_FAIL
+if printf '%s' "$PV_OUT" | grep -qE 'cycle-history  : https://example\.invalid[^[]*\[published\]' \
+   && printf '%s' "$PV_OUT" | grep -qE 'validator      : [^[]*\[LOCAL OVERRIDE\]'; then
+	pass "I1: the provenance label discriminates published vs local per source" "rc=$PV_RC"
+else
+	bad "I1: the provenance label discriminates published vs local per source" "rc=$PV_RC"
+fi
+
+# ===========================================================================
+# Part 8d — M4: the published anchor-history must be monotonic to be read
+# ===========================================================================
+D="$(fresh hist-nonmonotonic)"
+{
+	printf '{"cycle_number":%d,"event_type":"cyclestart"}\n' "$((CYCLE + 2))"
+	printf '{"cycle_number":%d,"event_type":"cyclestart"}\n' "$CYCLE"
+} > "$D/anchor-history.jsonl"
+expect_case "check 8: non-monotonic anchor-history -> refused, exit 6" "$D" 6 "is not monotonic"
 
 # ===========================================================================
 # Part 9 — check 9 (the 2026-07-31 check itself)
@@ -604,6 +766,48 @@ expect_case "check 9: account carries no anchor permission -> exit 4" "$D" 4 "ca
 
 D="$(fresh acct-malformed)"; printf '{"nope":true}\n' > "$D/account.json"
 expect_case "check 9: malformed get_account response -> exit 9" "$D" 9 "malformed/unexpected"
+
+# I2 — the rehearsal's SECOND lock probe. `key:list` succeeding does not
+# establish that a signing-adjacent read works; the rehearsal exits 2 on this
+# at its step 4/10, and before this case existed the pre-flight reported GREEN
+# into that state.
+D="$(fresh acct-probe-fails)"
+PF_PROTON_MODE=acctfail; export PF_PROTON_MODE
+AF_OUT="$(run_pf "$D")"; AF_RC=$?
+unset PF_PROTON_MODE
+if [ "$AF_RC" -eq 7 ] \
+   && printf '%s' "$AF_OUT" | grep -qF "the anchor key IS present, but the signing-adjacent read" \
+   && printf '%s' "$AF_OUT" | grep -qF "chain:set writes config"; then
+	pass "check 9: key present but 'proton account' refuses -> exit 7, both causes named" "rc=$AF_RC"
+else
+	bad "check 9: key present but 'proton account' refuses -> exit 7, both causes named" "rc=$AF_RC"
+fi
+
+D="$(fresh acct-probe-hangs)"
+PF_PROTON_MODE=accthang; export PF_PROTON_MODE
+AH_OUT="$(run_pf "$D")"; AH_RC=$?
+unset PF_PROTON_MODE
+if [ "$AH_RC" -eq 7 ] && printf '%s' "$AH_OUT" | grep -qF "timed out"; then
+	pass "check 9: 'proton account' hangs (rc 124) -> exit 7, named as a timeout" "rc=$AH_RC"
+else
+	bad "check 9: 'proton account' hangs (rc 124) -> exit 7, named as a timeout" "rc=$AH_RC"
+fi
+
+# M5 — keys[0] is a faithful mirror of the rehearsal, so a multi-key anchor
+# permission makes BOTH partial. Say so rather than let a one-of-two match
+# read as "the keystore can sign".
+D="$(fresh multikey)"
+jq --arg k "$OTHER_K1" '(.permissions[] | select(.perm_name=="anchor") | .required_auth.keys) += [{key:$k}]
+   | (.permissions[] | select(.perm_name=="anchor") | .required_auth.threshold) = 2' \
+	"$D/account.json" > "$D/acct2.json" && mv "$D/acct2.json" "$D/account.json"
+MK_OUT="$(run_pf "$D")"; MK_RC=$?
+if [ "$MK_RC" -eq 0 ] \
+   && printf '%s' "$MK_OUT" | grep -qF "advisory: the anchor permission has 2 key(s), threshold 2" \
+   && printf '%s' "$MK_OUT" | grep -qF "neither is a complete answer"; then
+	pass "check 9: multi-key / threshold>1 anchor permission -> advisory, not a silent pass" "rc=$MK_RC"
+else
+	bad "check 9: multi-key / threshold>1 anchor permission -> advisory, not a silent pass" "rc=$MK_RC"
+fi
 
 # The cross-format match is the substance of check 9: the chain answers in
 # one encoding and the keystore lists the other. Prove the PASS is real by
@@ -702,15 +906,28 @@ PF_PROTON_LOG="$PROTON_LOG"; export PF_PROTON_LOG
 run_pf "$D" >/dev/null 2>&1
 unset PF_PROTON_LOG
 ARGV_LINES="$(grep -c '' "$PROTON_LOG" 2>/dev/null || echo 0)"
-ARGV_ONLY_LIST=1
+# Exactly two, and both READS: the key listing, and the signing-adjacent probe
+# carried over from the rehearsal's step 4/10. `chain:set` sits between them in
+# the rehearsal and is deliberately NOT carried, because it writes proton-cli's
+# config — a read-only pre-flight that mutates the tool it inspects is not
+# read-only. That absence is asserted here, not merely described in a comment.
+ARGV_OK=1
+ARGV_SAW_LIST=0
+ARGV_SAW_ACCOUNT=0
 while IFS= read -r line; do
 	[ -n "$line" ] || continue
-	[ "$line" = "key:list" ] || ARGV_ONLY_LIST=0
+	case "$line" in
+		"key:list")   ARGV_SAW_LIST=1 ;;
+		"account "*)  ARGV_SAW_ACCOUNT=1 ;;
+		*)            ARGV_OK=0 ;;
+	esac
 done < "$PROTON_LOG"
-if [ "$ARGV_LINES" -eq 1 ] && [ "$ARGV_ONLY_LIST" -eq 1 ]; then
-	pass "keystore safety: the only proton invocation of a whole run is 'key:list'" "invocations=$ARGV_LINES"
+if [ "$ARGV_LINES" -eq 2 ] && [ "$ARGV_OK" -eq 1 ] \
+   && [ "$ARGV_SAW_LIST" -eq 1 ] && [ "$ARGV_SAW_ACCOUNT" -eq 1 ] \
+   && ! grep -q 'chain:set' "$PROTON_LOG"; then
+	pass "keystore safety: a whole run invokes proton exactly twice, both reads" "invocations=$ARGV_LINES"
 else
-	bad "keystore safety: the only proton invocation of a whole run is 'key:list'" \
+	bad "keystore safety: a whole run invokes proton exactly twice, both reads" \
 		"invocations=$ARGV_LINES argv=[$(tr '\n' ';' < "$PROTON_LOG")]"
 fi
 

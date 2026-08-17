@@ -69,9 +69,19 @@
 # printed plan, deliberately.
 #
 # THIS SCRIPT TAKES THE REHEARSAL'S MEANING (M), because the thing it is
-# validating is the exact command the operator is about to type. It prints
-# the cycle-transition value (M-1) alongside, every run, so the two are never
-# confused in the operator's hands.
+# validating is the exact command the operator is about to type.
+#
+# IT DOES NOT PRINT "M-1" AS THE PAIRED VALUE, and an earlier revision did.
+# M-1 is the cycle-transition.sh value only on the DAY-OF run. On a dress run
+# no cycle closes today at all, so M-1 is last month's number wearing a
+# "today" label — and that label leads somewhere specific: a plan printed with
+# it is ACCEPTED (the ledger admits both readings), and gen-anchor-source.sh's
+# ordering guard agrees with it too, because the guard compares against the
+# same not-yet-advanced ledger. The first thing to object is
+# append-anchor-history.sh's invariant 4, which runs after the irreversible
+# broadcast. So the pairing is printed exactly once, by check 8, after the
+# classification that determines which number it is — and on a dress run the
+# answer printed is "N/A today; it will be M on the transition day".
 #
 # ---------------------------------------------------------------------------
 # USAGE
@@ -118,21 +128,45 @@
 #   3  an operator-local config/key file is missing or malformed (checks 3-5)
 #   4  the current on-chain anchor key is NOT in the testnet keystore, or the
 #      account carries no anchor permission      (check 9)
-#   5  the anchor-source could not be established as worktree == committed ==
-#      published: unreadable, unparseable, or the three disagree  (check 6)
+#   5  the anchor-source could not be established as worktree == committed
+#      (byte-for-byte) with the published copy's dag_root agreeing:
+#      unreadable, unparseable, or they disagree  (check 6). The published
+#      leg is a dag_root comparison, not a byte comparison, mirroring the
+#      guard it is the precursor of (preview-cycle-anchor-broadcast.sh's
+#      exit 10, which also compares dag_root).
+#      "the three disagree" would be a stronger claim than the code makes.
 #   6  the ledger, the anchor-source and --expect-cycle do not agree, or
 #      --expect-cycle does not sit where the published anchor-history says it
 #      should (checks 7-8)
-#   7  the testnet keystore is LOCKED (or lists nothing), so check 9 could
-#      not be made. INCONCLUSIVE, and inconclusive is not green.
+#   7  the testnet keystore could not be shown usable for signing: it is
+#      LOCKED, lists nothing, or answers the key listing but not the
+#      signing-adjacent read the rehearsal makes at its step 4/10. Check 9
+#      could not be completed. INCONCLUSIVE, and inconclusive is not green.
 #   8  keystore separation guard failed (Constitution §3.5) — same number and
 #      same meaning as bin/, sign-anchor-event.sh and run-testnet-rehearsal.sh
 #   9  an observation could not be made: an RPC or a published artifact was
 #      unreachable/unparseable. INCONCLUSIVE, and inconclusive is not green.
 #
-# There is no bypass flag, no --skip-*, and no --offline that returns 0. A
-# check that cannot be made is a failure, because the whole point is to find
-# out now rather than in front of the operator.
+# NO FLAG BYPASSES A CHECK: there is no --skip-*, no --offline and no
+# --allow-* anywhere in the argument parser. A check that cannot be made is a
+# failure, because the whole point is to find out now rather than in front of
+# the operator.
+#
+# THAT IS NOT THE SAME AS "THIS RUN CANNOT BE REDIRECTED", and an earlier
+# revision of this header said the stronger thing. Every override listed above
+# exists so the suite can run hermetically, and together they can point every
+# observation at a local file. So the honest mechanism is a LABEL, not an
+# impossibility: if ANY override is set, the banner marks each redirected
+# source and the run is declared NON-AUTHORITATIVE — in the summary block as
+# well as the verdict line, so the caveat travels with any quoted excerpt. An
+# unqualified "PRE-FLIGHT GREEN" is only printable when no override is in
+# effect, which is the state a report to the operator must be made from.
+#
+# DO NOT PASTE A GREEN TRANSCRIPT INTO THIS REPOSITORY. It names the rehearsal
+# actor account and 16 characters of the current on-chain anchor pubkey (as
+# run-testnet-rehearsal.sh's own output does). That is fine on a terminal and
+# forbidden in a tracked file, an audit note or a published report — this repo
+# is public and the sanitize rule has no "it is only a fragment" exception.
 #
 # WHAT THIS SCRIPT CANNOT TELL YOU (stated because the half-claim is the one
 # this repo keeps paying for):
@@ -141,6 +175,23 @@
 #     published artifacts read together (cycle-history, anchor-source,
 #     anchor-history), and check 8 states which of the two runs — dress or
 #     day-of — that makes it.
+#   * It does not carry ALL of the rehearsal's own pre-checks. It mirrors
+#     step 3/10 (the chain-derived key comparison) and step 4/10's SECOND lock
+#     probe (a read-only `proton account <actor>`), but NOT step 4/10's
+#     `proton chain:set proton-test` or the `proton chain:info` that follows
+#     it. That asymmetry is deliberate and not an oversight: chain:set WRITES
+#     proton-cli's own configuration, and a read-only pre-flight that mutates
+#     the tool it is inspecting is not read-only. The consequence is stated
+#     rather than hidden — the health of proton's own configured chain
+#     endpoint is still first observed on the day, and this script's chain
+#     reachability result (a direct curl to XPR_TESTNET_CHAIN_RPC) is a
+#     DIFFERENT resolution path that does not stand in for it.
+#   * The key comparison reads `required_auth.keys[0]` of the anchor
+#     permission, exactly as run-testnet-rehearsal.sh:300 does — faithful
+#     mirroring is the point, since the job is to predict THAT script. On a
+#     multi-key or threshold>1 anchor permission the comparison would
+#     therefore be partial; check 9 prints an advisory when it sees one
+#     instead of pretending the shape is simple.
 #   * On transition day, in the window AFTER the wallet re-registration has
 #     been picked up by validator.json but BEFORE phase 1 publishes, a run
 #     declaring the OLD number (the cycle that just closed) is still green,
@@ -211,13 +262,22 @@ SOURCE_PATH=""
 for arg in "$@"; do
 	case "$arg" in
 		--expect-cycle=*) EXPECT_CYCLE="${arg#--expect-cycle=}" ;;
+		# An EMPTY value is refused rather than silently falling back to the
+		# canonical default. `--source=$SOME_UNSET_VAR` in a pasted line is
+		# exactly the shape that produces one, and "the flag you passed was
+		# ignored, we used the default" is the wrong answer to it.
+		--source=)        echo "ERROR: --source= given with an empty value. Omit the flag to use the canonical ${CANONICAL_TRACKED_PATH}, or pass a path." >&2; exit 1 ;;
 		--source=*)       SOURCE_PATH="${arg#--source=}" ;;
 		# Print the WHOLE header, however long it grows: from line 2 up to
 		# the first line that is not a comment. A hardcoded line range here
 		# silently truncates the moment the header gains a paragraph, and the
 		# paragraphs most likely to be added are the ones recording a newly
 		# discovered limit — exactly what a reader must not lose.
-		-h|--help)        sed -n '2,$p' "$0" | sed -n '/^[^#]/q;p' | sed 's/^# \?//'; exit 0 ;;
+		# `sed -E 's/^# ?//'`, not `sed 's/^# \?//'`: `\?` is a GNU extension
+		# that BSD sed (the macOS system sed this script runs under) treats
+		# literally, so the comment markers survived and every header line came
+		# out still prefixed with `# `. Measured 2026-08-17.
+		-h|--help)        sed -n '2,$p' "$0" | sed -n '/^[^#]/q;p' | sed -E 's/^# ?//'; exit 0 ;;
 		*)                echo "ERROR: unknown arg: $arg" >&2; exit 1 ;;
 	esac
 done
@@ -295,6 +355,14 @@ chk_fail() { # <id> <code> <title> <reason...>
 	local id="$1" code="$2" title="$3"
 	shift 3
 	N_FAIL=$((N_FAIL + 1))
+	# A failure whose code is 0 would be counted as a failure and reported as
+	# a success by the exit status. No current call site passes 0; this is the
+	# guard at the source, and the N_FAIL condition in the verdict is the
+	# second layer. Neither is load-bearing today and both are one line.
+	if [ "$code" -eq 0 ]; then
+		printf '  INTERNAL: chk_fail called with code 0 for check [%s]; forcing 1.\n' "$id" >&2
+		code=1
+	fi
 	if [ "$FIRST_FAIL_CODE" -eq 0 ]; then
 		FIRST_FAIL_CODE="$code"
 		FIRST_FAIL_ID="$id"
@@ -337,6 +405,35 @@ fyp_fetch() {
 WORK="$(mktemp -d -t fya-rehearsal-preflight.XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT
 
+# ---------------------------------------------------------------------------
+# Provenance of every observation (see the header's "NO FLAG BYPASSES A CHECK")
+# ---------------------------------------------------------------------------
+# A green transcript has to say what it read. Before this existed, a run
+# against four local fixture files and a stub transport produced a green whose
+# output never named a single source, so it was indistinguishable from a run
+# against the live published surface — and green is exactly the state someone
+# quotes to the operator.
+#
+# The rule is deliberately coarse: ANY override in effect makes the whole run
+# NON-AUTHORITATIVE. A finer rule ("only the ones that redirect a public
+# feed") would need a judgement call per variable, and the variable that
+# redirects the transport is the one that hides the most.
+FYP_OVERRIDE_VARS="FYP_LEDGER_URL FYP_ANCHOR_SOURCE_URL FYP_ANCHOR_HISTORY_URL FYP_VALIDATOR_URL XPR_TESTNET_CHAIN_RPC FYP_CURL FYP_REHEARSAL_CFG FYP_MAINNET_CFG FYP_IDENTITY_KEY FYP_KEYSTORE_TESTNET FYP_KEYSTORE_MAINNET"
+OVERRIDES=""
+for v in $FYP_OVERRIDE_VARS; do
+	[ -n "${!v-}" ] && OVERRIDES="${OVERRIDES} ${v}"
+done
+NON_AUTHORITATIVE=0
+[ -n "$OVERRIDES" ] && NON_AUTHORITATIVE=1
+
+# fyp_provenance <value> — how a source will actually be read.
+fyp_provenance() {
+	case "$1" in
+		http://*|https://*) printf 'published' ;;
+		*)                  printf 'LOCAL OVERRIDE' ;;
+	esac
+}
+
 echo "════════════════════════════════════════════════════════════════"
 echo "  REHEARSAL PRE-FLIGHT — read-only, fail-closed, nothing broadcast"
 echo "════════════════════════════════════════════════════════════════"
@@ -344,7 +441,28 @@ echo "  repo:              $REPO_ROOT"
 echo "  keystore (HOME):   $HOME_REAL"
 echo "  anchor-source:     $SOURCE_PATH"
 echo "  --expect-cycle:    $EXPECT_CYCLE   (rehearsal meaning: the cycle to INSCRIBE)"
-echo "  sibling value:     $((EXPECT_CYCLE - 1))   (cycle-transition.sh --expect-cycle: the cycle CLOSING today)"
+# NOT "the cycle closing today minus one". scripts/cycle-transition.sh's
+# same-named flag is a DIFFERENT number, and which number depends on whether
+# this is a dress run or the day-of run — so it is printed once, by check 8,
+# after the classification that determines it. Printing it here with a "today"
+# label was wrong on every dress run, and the wrong value it produced is the
+# entry point to a known double-inscription path (a plan printed with that
+# number is accepted, and gen-anchor-source.sh's ordering guard agrees with it
+# because the guard compares against the same not-yet-advanced ledger).
+echo "  paired flag:       scripts/cycle-transition.sh --expect-cycle is a DIFFERENT number"
+echo "                     (the cycle CLOSING today). Its value is NOT ${EXPECT_CYCLE}-1 on every day —"
+echo "                     check 8 prints it once the run is classified."
+echo "  observations read from:"
+printf '    cycle-history  : %-58s [%s]\n' "$LEDGER_URL"             "$(fyp_provenance "$LEDGER_URL")"
+printf '    anchor-source  : %-58s [%s]\n' "$PUB_ANCHOR_URL"         "$(fyp_provenance "$PUB_ANCHOR_URL")"
+printf '    anchor-history : %-58s [%s]\n' "$PUB_ANCHOR_HISTORY_URL" "$(fyp_provenance "$PUB_ANCHOR_HISTORY_URL")"
+printf '    validator      : %-58s [%s]\n' "$PUB_VALIDATOR_URL"      "$(fyp_provenance "$PUB_VALIDATOR_URL")"
+printf '    testnet chain  : %-58s [%s] via %s\n' "${TESTNET_CHAIN_RPC}/v1/chain/get_account" "$(fyp_provenance "$TESTNET_CHAIN_RPC")" "$CURL_BIN"
+if [ "$NON_AUTHORITATIVE" -eq 1 ]; then
+	echo "  ⚠ NON-AUTHORITATIVE RUN — environment overrides in effect:${OVERRIDES}"
+	echo "    At least one observation does not come from the published surface or the"
+	echo "    real operator files. Do not report this run's result as the live state."
+fi
 echo
 
 # ===========================================================================
@@ -474,7 +592,7 @@ else
 fi
 
 # ===========================================================================
-# Check 6 — anchor-source bytes: worktree == committed == published
+# Check 6 — anchor-source: worktree == committed (bytes), published dag_root agrees
 # ===========================================================================
 echo "── check 6 — anchor-source bytes (worktree / committed / published) ──"
 SRC_PROBLEMS=""
@@ -518,7 +636,7 @@ else
 	fi
 fi
 if [ -z "$SRC_PROBLEMS" ]; then
-	chk_pass 6 "anchor-source: worktree == committed == published" \
+	chk_pass 6 "anchor-source: worktree == committed (bytes), published dag_root agrees" \
 		"cycle_number_observed=${SRC_CYCLE}  dag_root=${SRC_DAG:0:16}…"
 else
 	chk_fail 6 "$SRC_CODE" "anchor-source bytes disagree or are unobservable" "$SRC_PROBLEMS" \
@@ -559,7 +677,11 @@ fi
 if [ -z "$LED_PROBLEMS" ]; then
 	chk_pass 7 "ledger, anchor-source and --expect-cycle agree" \
 		"closed=${CLOSED} -> inscribe=${INSCRIBE} = --expect-cycle = anchor-source cycle_number_observed"
-	note "cycle-transition.sh --expect-cycle for the same day would be $((INSCRIBE - 1)), not ${INSCRIBE}."
+	# The cycle-transition.sh pairing is NOT printed here. This check knows
+	# the ledger, not the day: on a dress run "closed" is a month old and
+	# ${CLOSED} is not a cycle that closes today. Check 8 is the first place
+	# that knows which run this is, so it is the only place the pairing is
+	# stated. See the banner note above for why that matters.
 else
 	chk_fail 7 "$LED_CODE" "ledger / anchor-source / --expect-cycle disagree" "$LED_PROBLEMS" \
 		"If you meant the DAY-OF value, phase 1 (units 1-3) must land first: the rehearsal" \
@@ -607,10 +729,20 @@ elif ! fyp_fetch "$PUB_VALIDATOR_URL" "$VAL_TMP"; then
 	BND_CODE=9
 else
 	LAST_INSCRIBED="$(grep -vE '^[[:space:]]*$' "$HIST_TMP" | tail -1 | jq -r '.cycle_number // empty' 2>/dev/null)"
+	# `tail -1` answers "the last ROW", and this check needs "the highest cycle
+	# inscribed". Those are the same number only while the ledger is monotonic.
+	# append-anchor-history.sh's invariant 4 enforces that on write, but this
+	# script reads the PUBLISHED copy, which is a different artifact from the
+	# one that invariant guarded — so it is re-established here rather than
+	# assumed, and a disagreement refuses instead of picking the last row.
+	MAX_INSCRIBED="$(jq -s 'map(.cycle_number) | max // empty' "$HIST_TMP" 2>/dev/null | tr -d '[:space:]')"
 	END_EPOCH="$(jq -r '.endTime // empty' "$VAL_TMP" 2>/dev/null)"
 	if ! printf '%s' "$LAST_INSCRIBED" | grep -qE '^[0-9]+$'; then
 		BND_PROBLEMS="the published anchor-history's newest record has no numeric cycle_number — refusing to classify this run"
 		BND_CODE=9
+	elif [ "$MAX_INSCRIBED" != "$LAST_INSCRIBED" ]; then
+		BND_PROBLEMS="the published anchor-history is not monotonic: its last row says cycle ${LAST_INSCRIBED} but the highest cycle_number on it is ${MAX_INSCRIBED:-unreadable}. Refusing to treat the last row as the last inscribed cycle."
+		BND_CODE=6
 	elif ! printf '%s' "$END_EPOCH" | grep -qE '^[0-9]+$'; then
 		BND_PROBLEMS="the published validator.json has no numeric endTime — refusing to classify this run"
 		BND_CODE=9
@@ -634,6 +766,16 @@ fi
 if [ -z "$BND_PROBLEMS" ]; then
 	chk_pass 8 "--expect-cycle is placed against what is already inscribed" \
 		"last inscribed=${LAST_INSCRIBED}; registered period ends ${END_ISO}; classification: ${CLASSIFICATION}"
+	# THE ONLY PLACE THE cycle-transition.sh PAIRING IS STATED, because this is
+	# the first point at which the run is classified and the pairing is not the
+	# same arithmetic on both branches.
+	if [ "$CLASSIFICATION" = "DAY-OF" ]; then
+		note "pairing: the cycle CLOSING today is $((EXPECT_CYCLE - 1)) -> scripts/cycle-transition.sh --expect-cycle=$((EXPECT_CYCLE - 1))."
+	else
+		note "pairing: NO cycle closes today, so scripts/cycle-transition.sh --expect-cycle has no"
+		note "         value for today (N/A). On the transition day it will be ${EXPECT_CYCLE} — the cycle"
+		note "         that is open right now — and this rehearsal flag will be $((EXPECT_CYCLE + 1))."
+	fi
 else
 	chk_fail 8 "$BND_CODE" "--expect-cycle does not sit where the anchor ledger says it should" "$BND_PROBLEMS"
 fi
@@ -646,10 +788,11 @@ fi
 # it has already begun, and (from step 5 onward) on a path that ends in a
 # broadcast. This script's version stops at the comparison and has no
 # continuation.
-echo "── check 9 — current on-chain <actor>@anchor key present in the testnet keystore ──"
+echo "── check 9 — testnet keystore can sign for this actor (key present + signing-adjacent read) ──"
 KEY_PROBLEMS=""
 KEY_CODE=4
 KEY_DETAIL=""
+KEY_MULTIKEY_NOTE=""
 if [ -n "$RH_PROBLEMS" ]; then
 	KEY_PROBLEMS="skipped: check 3 did not yield an actor to look up"
 	KEY_CODE=3
@@ -673,6 +816,15 @@ else
 		KEY_CODE=9
 	else
 		CHAIN_KEY="$(jq -r '[.permissions[] | select(.perm_name=="anchor")][0].required_auth.keys[0].key // empty' "$ACCT_JSON")"
+		# Advisory, not a verdict: keys[0] mirrors run-testnet-rehearsal.sh:300
+		# on purpose (the job is to predict THAT script), so a multi-key or
+		# threshold>1 anchor permission would make both of them partial. Say so
+		# rather than let a one-of-three match read as "the keystore can sign".
+		ANCHOR_KEY_COUNT="$(jq -r '[.permissions[] | select(.perm_name=="anchor")][0].required_auth.keys | length' "$ACCT_JSON" 2>/dev/null | tr -d '[:space:]')"
+		ANCHOR_THRESHOLD="$(jq -r '[.permissions[] | select(.perm_name=="anchor")][0].required_auth.threshold // empty' "$ACCT_JSON" 2>/dev/null | tr -d '[:space:]')"
+		if [ "${ANCHOR_KEY_COUNT:-1}" != "1" ] || [ "${ANCHOR_THRESHOLD:-1}" != "1" ]; then
+			KEY_MULTIKEY_NOTE="advisory: the anchor permission has ${ANCHOR_KEY_COUNT:-?} key(s), threshold ${ANCHOR_THRESHOLD:-?}. This check compares keys[0] only, exactly as the rehearsal does — on this shape neither is a complete answer."
+		fi
 		if [ -z "$CHAIN_KEY" ]; then
 			KEY_PROBLEMS="the testnet account carries no 'anchor' permission with a key (expected owner->active->anchor per docs/ANCHOR_ACCOUNT_KEY_ROTATION.md)"
 			KEY_CODE=4
@@ -709,7 +861,31 @@ else
 						KEY_PROBLEMS="the CURRENT on-chain anchor key is NOT in the project testnet keystore"
 						KEY_CODE=4
 					else
-						KEY_DETAIL="present: ${MATCH:0:16}…  (matches the current on-chain key)"
+						# SECOND lock probe, carried over from the rehearsal's
+						# step 4/10 (`timeout 5 proton account "$XPR_ACCOUNT"`,
+						# run-testnet-rehearsal.sh:381-386, exit 2). The
+						# rehearsal keeps two probes because `key:list`
+						# succeeding does not establish that a
+						# SIGNING-ADJACENT read works — its own comment says a
+						# locked keystore hangs on "any signing-adjacent op".
+						# Without this, `key:list` passing and `proton account`
+						# failing is a state where the pre-flight says GREEN
+						# and the rehearsal exits 2 in front of the operator,
+						# which is the entire failure class this file exists
+						# to remove.
+						#
+						# `proton account` is a read. `proton chain:set` — the
+						# line that precedes it in the rehearsal — is NOT
+						# carried, because it writes proton-cli's own config;
+						# see the header for that asymmetry and its cost.
+						ACCT_RC=0
+						timeout 5 proton account "$RH_ACCOUNT" >/dev/null 2>&1 </dev/null || ACCT_RC=$?
+						if [ "$ACCT_RC" -ne 0 ]; then
+							KEY_PROBLEMS="the anchor key IS present, but the signing-adjacent read 'proton account <actor>' failed (rc=${ACCT_RC}$( [ "$ACCT_RC" = 124 ] && printf ', timed out' )). run-testnet-rehearsal.sh step 4/10 makes the same call and exits 2 on it, so the rehearsal would stop there. Two causes are indistinguishable from here: the keystore is locked for signing-adjacent operations, OR proton's configured chain for this keystore is not proton-test (the rehearsal sets it at step 4/10; this pre-flight deliberately does not, because chain:set writes config)."
+							KEY_CODE=7
+						else
+							KEY_DETAIL="present: ${MATCH:0:16}…  (matches the current on-chain key); signing-adjacent read OK"
+						fi
 					fi
 				fi
 			fi
@@ -718,9 +894,10 @@ else
 fi
 if [ -z "$KEY_PROBLEMS" ]; then
 	chk_pass 9 "current on-chain anchor key is in the testnet keystore" "$KEY_DETAIL"
+	[ -n "$KEY_MULTIKEY_NOTE" ] && note "$KEY_MULTIKEY_NOTE"
 else
 	case "$KEY_CODE" in
-		7) chk_fail 9 7 "keystore locked / empty listing — check could not be made" "$KEY_PROBLEMS" \
+		7) chk_fail 9 7 "keystore not usable for signing — check could not be made" "$KEY_PROBLEMS" \
 			"Operator action, in a separate terminal, one line:" \
 			"  HOME=~/.metal-fy-proton-test proton key:unlock" \
 			"then re-run this pre-flight. Do NOT follow the key-rotation runbook for this;" \
@@ -773,10 +950,27 @@ fi
 echo
 echo "════════════════════════════════════════════════════════════════"
 printf '%s' "$SUMMARY"
+if [ "$NON_AUTHORITATIVE" -eq 1 ]; then
+	# In the SUMMARY block too, not only the verdict line: the summary is the
+	# part that gets quoted, and a caveat that does not travel with the excerpt
+	# is not a caveat.
+	echo "NON-AUTHORITATIVE RUN — environment overrides in effect:${OVERRIDES}"
+fi
 echo "────────────────────────────────────────────────────────────────"
 echo "checks: PASS=${N_PASS}  FAIL=${N_FAIL}"
-if [ "$FIRST_FAIL_CODE" -eq 0 ]; then
-	echo "VERDICT: PRE-FLIGHT GREEN — every check above was MADE and PASSED."
+# Both conditions, not just the first. FIRST_FAIL_CODE is only set from a
+# chk_fail argument, so a future `chk_fail <id> 0` would print FAIL lines and
+# still fall into the GREEN branch. N_FAIL cannot be talked out of it.
+if [ "$FIRST_FAIL_CODE" -eq 0 ] && [ "$N_FAIL" -eq 0 ]; then
+	if [ "$NON_AUTHORITATIVE" -eq 1 ]; then
+		echo "VERDICT: PRE-FLIGHT GREEN — but NON-AUTHORITATIVE."
+		echo "  Overrides in effect:${OVERRIDES}"
+		echo "  At least one observation came from a local file or a substituted transport"
+		echo "  rather than the published surface, so this transcript says nothing about the"
+		echo "  live system. Re-run with no override before reporting green to the operator."
+	else
+		echo "VERDICT: PRE-FLIGHT GREEN — every check above was MADE and PASSED."
+	fi
 	if [ "$CLASSIFICATION" = "DRESS" ]; then
 		echo
 		echo "  CLASSIFICATION: DRESS REHEARSAL — the resulting tx is NOT gate-1 evidence."
@@ -802,18 +996,26 @@ if [ "$FIRST_FAIL_CODE" -eq 0 ]; then
 		echo "  (note the -1: that flag means the cycle CLOSING today, this one means the cycle"
 		echo "  being INSCRIBED). It re-measures the day's post-conditions independently."
 	else
-		echo "  Do NOT read scripts/cycle-transition.sh --status --expect-cycle=$((EXPECT_CYCLE - 1)) as a"
-		echo "  cross-check of a PENDING transition on a dress run. Measured 2026-08-17: with the"
-		echo "  ledger in this state it answers PHASE 1 COMPLETE and \"second observation:"
-		echo "  CONFIRMED\" — truthfully, about the transition that ALREADY happened and inscribed"
-		echo "  cycle ${EXPECT_CYCLE}. That is not evidence about today. On transition day it becomes the right"
-		echo "  cross-check, with --expect-cycle=${EXPECT_CYCLE} (one more than the value shown here)."
+		# Deliberately prints NO number for the dress case. The number that
+		# would go there is the one C1 was about; handing it to a reader who
+		# scrapes values — human or otherwise — is the whole failure mode,
+		# and a negative sentence around it does not stop the scraping.
+		echo "  Do NOT reach for scripts/cycle-transition.sh --status as a cross-check of a"
+		echo "  PENDING transition on a dress run. Measured 2026-08-17 against the live feeds:"
+		echo "  with the ledger in this state it answers PHASE 1 COMPLETE and \"second"
+		echo "  observation: CONFIRMED\" — truthfully, about the transition that ALREADY"
+		echo "  happened and inscribed cycle ${EXPECT_CYCLE}. That is not evidence about today."
+		echo "  On the transition day it becomes the right cross-check, and its --expect-cycle"
+		echo "  is ${EXPECT_CYCLE} then — the cycle that closes that day — not any number derived from today."
 	fi
 	echo "════════════════════════════════════════════════════════════════"
 	exit 0
 fi
-echo "VERDICT: PRE-FLIGHT RED — first failure was [${FIRST_FAIL_ID}], exiting ${FIRST_FAIL_CODE}."
+echo "VERDICT: PRE-FLIGHT RED — first failure was [${FIRST_FAIL_ID:-?}], exiting ${FIRST_FAIL_CODE}."
+[ "$NON_AUTHORITATIVE" -eq 1 ] && echo "         (NON-AUTHORITATIVE run — overrides:${OVERRIDES})"
 echo "         Do not call the operator until this is green. Every failure above is a way"
 echo "         the rehearsal fails after the operator is already standing there."
 echo "════════════════════════════════════════════════════════════════"
+# Never exit 0 from the RED branch, whatever FIRST_FAIL_CODE holds.
+[ "$FIRST_FAIL_CODE" -eq 0 ] && FIRST_FAIL_CODE=1
 exit "$FIRST_FAIL_CODE"
