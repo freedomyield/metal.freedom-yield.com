@@ -171,11 +171,12 @@ check_expr "genesis: chain_backend mirrored from receipt" "antelope" \
 # chain_backend is optional on the receipt, so this script carries its own
 # default for receipts that omit it. That default must stay equal to the
 # literal composed by scripts/gen-anchor-receipt.sh. Both were introduced as
-# "pulsevm" in ac2ef0c (2026-06-23) and corrected on 2026-08-17: PulseVM is the
-# engine Metallicus has announced for Metal A-chain, not the one observed
-# serving it, so the ledger was publishing a forward-looking label as fact.
-# Nothing derives this value at runtime, so only a pinned assertion catches it
-# drifting back.
+# "pulsevm" in ac2ef0c (2026-06-23) and corrected on 2026-08-17: "pulsevm" names
+# an announced future execution engine, whereas this field names the protocol
+# family observed serving the chain — so the ledger was publishing a
+# forward-looking label as fact. Nothing derives this value at runtime, so only
+# a pinned assertion catches it drifting back. Before changing it, read the
+# "WHEN TO CHANGE THIS" note in scripts/gen-anchor-receipt.sh.
 NO_BACKEND_HIST="$TEST_DIR/no-backend.jsonl"
 NO_BACKEND_RECEIPT="$TEST_DIR/no-backend-receipt.json"
 make_receipt "$NO_BACKEND_RECEIPT" \

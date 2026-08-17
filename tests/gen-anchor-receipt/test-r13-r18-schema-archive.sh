@@ -172,23 +172,22 @@ if [ "$RC1" -eq 0 ]; then
 	check_eq "happy path: tx_id round-trips" "$TX_ID" "$(jq -r .anchor.tx_id "$OUT1" 2>/dev/null)"
 	check_eq "happy path: dag_root_hash round-trips" "$DAG_ROOT" "$(jq -r .dag_root_hash "$OUT1" 2>/dev/null)"
 
-	# ---- chain_backend: published label must match the observed stack -------
+	# ---- chain_backend: published label must match what the script observes --
 	# The receipt is composed unconditionally: chain_backend is a hardcoded
 	# literal, not derived from the RPC response, so nothing else in this repo
 	# can catch it drifting from reality. From ac2ef0c (2026-06-23) to
-	# 2026-08-17 it read "pulsevm" — the engine Metallicus has announced for
-	# this chain, not the one observed serving it — so every receipt published
-	# from the first anchor
-	# (2026-07-04) onward carried a forward-looking label as present-tense fact,
-	# with no test asserting on it. Pin the value: a regression must be a red
-	# test, not a public claim.
+	# 2026-08-17 it read "pulsevm" — an announced future execution engine, not
+	# the protocol family this script observes — so every receipt published
+	# from the first anchor (2026-07-04) onward carried a forward-looking label
+	# as present-tense fact, with no test asserting on it. Pin the value: a
+	# regression must be a red test, not a public claim.
 	ACTUAL_BACKEND="$(jq -r '.anchor.chain_backend' "$OUT1" 2>/dev/null)"
-	check_eq "chain_backend: receipt declares the observed execution stack" \
-		"antelope" "$ACTUAL_BACKEND"
-	if [ "$ACTUAL_BACKEND" = "pulsevm" ]; then
-		fail "chain_backend: regressed to the forward-looking 'pulsevm' label (the engine announced for this chain, not the one serving it — must not be published as present-tense fact)"
+	if [ "$ACTUAL_BACKEND" = "antelope" ]; then
+		pass "chain_backend: receipt names the observed protocol family"
+	elif [ "$ACTUAL_BACKEND" = "pulsevm" ]; then
+		fail "chain_backend: regressed to 'pulsevm' — an announced engine, not the family this script observes (see the WHEN TO CHANGE THIS note in scripts/gen-anchor-receipt.sh)"
 	else
-		pass "chain_backend: not the forward-looking 'pulsevm' label"
+		fail "chain_backend: unexpected value '$ACTUAL_BACKEND' (expected 'antelope')"
 	fi
 	check_eq "chain_backend: chain field unchanged alongside the backend fix" \
 		"metal-a-chain" "$(jq -r '.anchor.chain' "$OUT1" 2>/dev/null)"
@@ -208,6 +207,30 @@ if [ "$RC1" -eq 0 ]; then
 else
 	fail "happy path: script failed unexpectedly; stderr: $(cat "$TMP/out/run1.stderr" 2>/dev/null | tr '\n' '|')"
 fi
+
+# ---- the same label on every PUBLISHED example artifact --------------------
+# These four files are kind=static / git-deploy in deploy/publication.json: they
+# are served from /api/ byte-for-byte as written here, so each one is a public
+# claim in its own right. Measured 2026-08-17 at 9d284bb, before this block
+# existed: reverting anchor-receipt.example.json,
+# anchor-receipt.phase-beta.example.json AND anchor-history.example.jsonl to
+# "pulsevm" all at once still produced total=94 pass=94 fail=0 across the whole
+# runner. Only anchor-receipt.v2.example.json was covered, and only
+# incidentally, because tests/append-anchor-history/ uses it as a receipt
+# template. Assert the value directly so "the published examples agree with
+# what the generator writes" is a test rather than a coincidence.
+EXPECTED_BACKEND="antelope"
+API_DIR="${REPO_ROOT}/public/api"
+for ex in anchor-receipt.example.json anchor-receipt.v2.example.json anchor-receipt.phase-beta.example.json; do
+	check_eq "published example: ${ex} chain_backend" \
+		"$EXPECTED_BACKEND" \
+		"$(jq -r '.anchor.chain_backend // "MISSING"' "${API_DIR}/${ex}" 2>/dev/null)"
+done
+# jq streams each JSONL line; sort -u collapses to one token only when every
+# line agrees, so a single stale line breaks the comparison.
+check_eq "published example: anchor-history.example.jsonl chain_backend (every line)" \
+	"$EXPECTED_BACKEND" \
+	"$(jq -r '.chain_backend // "MISSING"' "${API_DIR}/anchor-history.example.jsonl" 2>/dev/null | sort -u | tr '\n' ' ' | sed 's/ *$//')"
 
 # ---- case 2: validator says "invalid" -> exit 6, nothing written ----------
 OUT2="$TMP/out/anchor-receipt-run2.json"
