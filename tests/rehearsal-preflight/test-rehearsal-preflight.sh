@@ -259,6 +259,16 @@ else
 	bad "baseline: an already-inscribed cycle is classified DRESS, loudly"
 fi
 
+# On a dress run the --status pointer must be a WARNING, not an instruction:
+# measured 2026-08-17, --status with the sibling value answers COMPLETE about
+# the PREVIOUS transition, which reads like confirmation of a pending one.
+if printf '%s' "$BASE_OUT" | grep -qF "Do NOT read scripts/cycle-transition.sh --status" \
+   && ! printf '%s' "$BASE_OUT" | grep -qF "Cross-check with: scripts/cycle-transition.sh"; then
+	pass "baseline: a dress run warns about --status instead of recommending it"
+else
+	bad "baseline: a dress run warns about --status instead of recommending it"
+fi
+
 # The meaning switch must be printed every run, not only on failure.
 if printf '%s' "$BASE_OUT" | grep -qF "sibling value:     $((CYCLE - 1))" \
    && printf '%s' "$BASE_OUT" | grep -qF "cycle-transition.sh --expect-cycle for the same day would be $((CYCLE - 1)), not ${CYCLE}"; then
@@ -278,14 +288,20 @@ else
 	bad "usage: no --expect-cycle -> exit 1" "rc=$U_RC"
 fi
 
-PF_EXPECT_CYCLE="not-a-number" ; export PF_EXPECT_CYCLE
-N_OUT="$(run_pf "$GOOD")"; N_RC=$?
-unset PF_EXPECT_CYCLE
-if [ "$N_RC" -eq 1 ] && printf '%s' "$N_OUT" | grep -qF "must be a non-negative integer"; then
-	pass "usage: non-numeric --expect-cycle -> exit 1"
-else
-	bad "usage: non-numeric --expect-cycle -> exit 1" "rc=$N_RC"
-fi
+# The accepted form is a POSITIVE integer with no leading zero: cycle
+# numbering starts at 1, and "010" would be read as octal by $(( )) later.
+for badval in not-a-number 0 007 -1 " "; do
+	PF_EXPECT_CYCLE="$badval" ; export PF_EXPECT_CYCLE
+	N_OUT="$(run_pf "$GOOD")"; N_RC=$?
+	unset PF_EXPECT_CYCLE
+	if [ "$N_RC" -eq 1 ] \
+	   && { printf '%s' "$N_OUT" | grep -qF "must be a positive integer" \
+	        || printf '%s' "$N_OUT" | grep -qF "is required"; }; then
+		pass "usage: --expect-cycle='${badval}' -> exit 1"
+	else
+		bad "usage: --expect-cycle='${badval}' -> exit 1" "rc=$N_RC"
+	fi
+done
 
 B_OUT="$(run_pf "$GOOD" --bogus-flag-xyz)"; B_RC=$?
 if [ "$B_RC" -eq 1 ] && printf '%s' "$B_OUT" | grep -qF "unknown arg"; then
@@ -302,6 +318,16 @@ if [ "$H_RC" -eq 0 ] \
 	pass "usage: --help documents both meanings and the no-op nature"
 else
 	bad "usage: --help documents both meanings and the no-op nature" "rc=$H_RC"
+fi
+
+# --help must print the header to its END, not to a hardcoded line number.
+# The last paragraph of that header is the limits section, which is the part
+# a truncation would silently drop and the part a reader least affords to lose.
+HDR_LAST="$(awk 'NR>1 { if ($0 ~ /^#/) last=$0; else if ($0 != "") exit } END{print last}' "$PREFLIGHT" | sed 's/^# \?//')"
+if [ -n "$HDR_LAST" ] && printf '%s' "$H_OUT" | grep -qF "$HDR_LAST"; then
+	pass "usage: --help prints the header through its final line" "last=[${HDR_LAST:0:40}…]"
+else
+	bad "usage: --help prints the header through its final line" "missing: [$HDR_LAST]"
 fi
 
 # ===========================================================================
@@ -508,6 +534,12 @@ if [ "$DO_RC" -eq 0 ] \
 	pass "check 8: nothing inscribed for this cycle yet -> DAY-OF" "rc=$DO_RC"
 else
 	bad "check 8: nothing inscribed for this cycle yet -> DAY-OF" "rc=$DO_RC"
+fi
+if printf '%s' "$DO_OUT" | grep -qF "Cross-check with: scripts/cycle-transition.sh --status --expect-cycle=$((CYCLE - 1))" \
+   && ! printf '%s' "$DO_OUT" | grep -qF "Do NOT read scripts/cycle-transition.sh"; then
+	pass "check 8: on a DAY-OF run --status IS recommended, with the -1 value"
+else
+	bad "check 8: on a DAY-OF run --status IS recommended, with the -1 value"
 fi
 
 D="$(fresh hist-far-behind)"

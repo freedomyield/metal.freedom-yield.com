@@ -1051,7 +1051,14 @@ echo "=== T13: the library changes no existing script ==="
 # exist on disk (or the list rots into a blanket permission), and no
 # allowlisted name may be a script this library DESCRIBES — those are the
 # deployed ones C2-1 promised not to touch.
-T13_ALLOWED_CONSUMERS="cycle-transition.sh"
+# 2026-08-17: install-rehearsal-preflight.sh added. It is the second consumer
+# and qualifies under exactly the rule stated above — brand new, so it has no
+# prior behaviour to change, and it is not one of the scripts the table
+# describes (the loop below re-checks both properties rather than trusting
+# this comment). Deriving the cycle number any other way inside it would have
+# created a fourth idiom for counting the same ledger, which is the condition
+# this library exists to end.
+T13_ALLOWED_CONSUMERS="cycle-transition.sh install-rehearsal-preflight.sh"
 
 consumers="$(grep -rlF 'lib/cycle-context.sh' "${SCRIPTS_DIR}" 2>/dev/null | grep -vF 'lib/cycle-context.sh' || true)"
 t13_unexpected=""

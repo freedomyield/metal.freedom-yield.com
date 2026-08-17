@@ -6,12 +6,18 @@
 # CHAIN: none. This script has NO broadcast pathway. It does not invoke the
 #        sanctioned broadcast wrapper under bin/, does not invoke
 #        scripts/run-testnet-rehearsal.sh or scripts/sign-anchor-event.sh,
-#        does not create or touch an operator token, and issues exactly one
-#        chain call: a read-only POST to /v1/chain/get_account on a testnet
-#        RPC (permission/key lookup — the same call
-#        docs/ANCHOR_ACCOUNT_KEY_ROTATION.md established for this use).
-#        tests/rehearsal-preflight/ greps this file and fails if a
-#        broadcast-capable string appears in it.
+#        and does not create or touch an operator token. Its complete network
+#        surface is: (a) exactly ONE chain call — a read-only POST to
+#        /v1/chain/get_account on a testnet RPC (permission/key lookup, the
+#        same call docs/ANCHOR_ACCOUNT_KEY_ROTATION.md established for this
+#        use), and (b) up to four cache-busted GETs of this project's own
+#        PUBLISHED artifacts (cycle-history.jsonl, anchor-source.json,
+#        anchor-history.jsonl, validator.json). Both (a) and (b) are reads.
+#        tests/rehearsal-preflight/ scans this file for broadcast-capable
+#        INVOCATIONS (not mere mentions — this file cites the rehearsal and
+#        the signer by name, with line numbers, throughout) and separately
+#        asserts from a recording stub that the only proton invocation of a
+#        whole run is `key:list`.
 # PRIME_DIRECTIVE: TESTNET-FIRST — not applicable in the sense that there is
 #        nothing here to gate; this script's whole purpose is to make the
 #        gate-1 rehearsal fail EARLY (on a check) instead of LATE (in front
@@ -112,10 +118,11 @@
 #   3  an operator-local config/key file is missing or malformed (checks 3-5)
 #   4  the current on-chain anchor key is NOT in the testnet keystore, or the
 #      account carries no anchor permission      (check 9)
-#   5  the anchor-source bytes disagree (worktree vs committed vs published)
-#                                                (check 6)
-#   6  the ledger, the anchor-source, and --expect-cycle do not agree, or the
-#      published boundary says the ledger is stale (checks 7-8)
+#   5  the anchor-source could not be established as worktree == committed ==
+#      published: unreadable, unparseable, or the three disagree  (check 6)
+#   6  the ledger, the anchor-source and --expect-cycle do not agree, or
+#      --expect-cycle does not sit where the published anchor-history says it
+#      should (checks 7-8)
 #   7  the testnet keystore is LOCKED (or lists nothing), so check 9 could
 #      not be made. INCONCLUSIVE, and inconclusive is not green.
 #   8  keystore separation guard failed (Constitution §3.5) — same number and
@@ -133,8 +140,22 @@
 #     INTENT. It proves the number is the only one consistent with three
 #     published artifacts read together (cycle-history, anchor-source,
 #     anchor-history), and check 8 states which of the two runs — dress or
-#     day-of — that makes it. cycle-transition.sh --status remains the
-#     independent post-condition reading of the same day.
+#     day-of — that makes it.
+#   * On transition day, in the window AFTER the wallet re-registration has
+#     been picked up by validator.json but BEFORE phase 1 publishes, a run
+#     declaring the OLD number (the cycle that just closed) is still green,
+#     classified DRESS. It is not silently green: the DRESS banner names the
+#     day-of value explicitly and says the tx authorizes nothing. Closing this
+#     hole would need an observation nobody publishes — the operator's intent
+#     for the day. The refusal DOES fire in the same window when the old
+#     period is still what validator.json shows (check 8, exit 6).
+#   * cycle-transition.sh --status is NOT a cross-check of a pending
+#     transition on a dress run. Measured 2026-08-17 against the live feeds:
+#     `--status --expect-cycle=3` on a 3-row ledger answers PHASE 1 COMPLETE
+#     and "second observation: CONFIRMED" — truthfully, about the transition
+#     of 2026-08-04. Reading that as "today is done" is the trap; the verdict
+#     block below prints the warning only on a dress run, and the pointer only
+#     on a day-of run.
 #   * It cannot prove the rehearsal will SUCCEED. It proves a specific list
 #     of known ways it fails are not present right now.
 #   * It says nothing about mainnet gate 1 / gate 4, which testnet execution
@@ -191,7 +212,12 @@ for arg in "$@"; do
 	case "$arg" in
 		--expect-cycle=*) EXPECT_CYCLE="${arg#--expect-cycle=}" ;;
 		--source=*)       SOURCE_PATH="${arg#--source=}" ;;
-		-h|--help)        sed -n '2,140p' "$0" | sed 's/^# \?//'; exit 0 ;;
+		# Print the WHOLE header, however long it grows: from line 2 up to
+		# the first line that is not a comment. A hardcoded line range here
+		# silently truncates the moment the header gains a paragraph, and the
+		# paragraphs most likely to be added are the ones recording a newly
+		# discovered limit — exactly what a reader must not lose.
+		-h|--help)        sed -n '2,$p' "$0" | sed -n '/^[^#]/q;p' | sed 's/^# \?//'; exit 0 ;;
 		*)                echo "ERROR: unknown arg: $arg" >&2; exit 1 ;;
 	esac
 done
@@ -203,8 +229,14 @@ if [ -z "$EXPECT_CYCLE" ]; then
 	echo "       It is deliberately not derived — see this script's header." >&2
 	exit 1
 fi
-if ! printf '%s' "$EXPECT_CYCLE" | grep -qE '^[0-9]+$'; then
-	echo "ERROR: --expect-cycle must be a non-negative integer, got: $EXPECT_CYCLE" >&2
+# POSITIVE, not merely non-negative — a deliberate divergence from
+# run-testnet-rehearsal.sh's looser regex. Cycle numbering starts at 1
+# (sign-anchor-event.sh refuses a cycle_number_observed below 1 with exit 2),
+# and rejecting a leading zero at the same time keeps $(( )) from reading
+# "010" as octal further down.
+if ! printf '%s' "$EXPECT_CYCLE" | grep -qE '^[1-9][0-9]*$'; then
+	echo "ERROR: --expect-cycle must be a positive integer without leading zeros, got: $EXPECT_CYCLE" >&2
+	echo "       Cycle numbering starts at 1; sign-anchor-event.sh refuses anything below it." >&2
 	exit 1
 fi
 [ -n "$SOURCE_PATH" ] || SOURCE_PATH="${REPO_ROOT}/${CANONICAL_TRACKED_PATH}"
@@ -726,7 +758,11 @@ fi
 echo "          identity key in ssh-agent: ${AGENT_STATE}"
 if [ "$AGENT_STATE" != "LOADED" ]; then
 	echo "          Before unit 4 on transition day, operator runs (one line):"
-	echo "            ssh-add ~/.ssh/freedom-yield-operator-identity"
+	# The RESOLVED path, not the tilde form: an operator line that is wrong
+	# under an override is worse than one that is long, and a line broken
+	# across two has already cost this project a paste
+	# (memory/feedback_no_operator_paste_execution).
+	echo "            ssh-add ${IDENTITY_KEY}"
 	echo "          Dashlane entry: <entry name withheld - handed over in the operator ping>"
 	echo "          Not needed for the rehearsal itself; needed for gen-identity.sh."
 fi
@@ -761,9 +797,18 @@ if [ "$FIRST_FAIL_CODE" -eq 0 ]; then
 	echo "  does not prove the operator's intent — it means ${EXPECT_CYCLE} is the only number consistent"
 	echo "  with the published cycle-history ledger, the committed+published anchor-source,"
 	echo "  and the published anchor-history, all read within this run."
-	echo "  Run scripts/cycle-transition.sh --status --expect-cycle=$((EXPECT_CYCLE - 1)) for the"
-	echo "  independent post-condition reading of the same day (note the -1: that flag means"
-	echo "  the cycle CLOSING today, this one means the cycle being INSCRIBED)."
+	if [ "$CLASSIFICATION" = "DAY-OF" ]; then
+		echo "  Cross-check with: scripts/cycle-transition.sh --status --expect-cycle=$((EXPECT_CYCLE - 1))"
+		echo "  (note the -1: that flag means the cycle CLOSING today, this one means the cycle"
+		echo "  being INSCRIBED). It re-measures the day's post-conditions independently."
+	else
+		echo "  Do NOT read scripts/cycle-transition.sh --status --expect-cycle=$((EXPECT_CYCLE - 1)) as a"
+		echo "  cross-check of a PENDING transition on a dress run. Measured 2026-08-17: with the"
+		echo "  ledger in this state it answers PHASE 1 COMPLETE and \"second observation:"
+		echo "  CONFIRMED\" — truthfully, about the transition that ALREADY happened and inscribed"
+		echo "  cycle ${EXPECT_CYCLE}. That is not evidence about today. On transition day it becomes the right"
+		echo "  cross-check, with --expect-cycle=${EXPECT_CYCLE} (one more than the value shown here)."
+	fi
 	echo "════════════════════════════════════════════════════════════════"
 	exit 0
 fi
