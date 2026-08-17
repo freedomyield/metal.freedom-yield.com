@@ -66,18 +66,57 @@ CI gate がこれを機械で強制する: `kind=stream` は `pinned_by` に入�
 
 13 実行単位を、人の介入点で切れる 6 phase に整理する。
 
+**読み方 (2026-08-17 是正)**: 各 `⏸ 停止N` は、直後に続く phase の**入口**
+(= その phase を実行するために先に必要な人の操作) として描く。「phase を
+終えてから止まる」という exit の読みは誤り — `docs/CYCLE_GATE.md` の当日
+step 順と付き合わせると 4 つとも entry gate である。停止 4 つが phase 6 個
+に均等に付くわけではない点にも注意: phase 3 (compose) と phase 6 (事後) は
+対応する停止を持たない (どちらも host/Mac 側の自動処理のみで、operator の
+判断待ちが無い)。
+
 ```
+⏸ 停止1: wallet 操作 (額の判断) → tx id
 phase 1  記録      host: node-info tick → uptime-history → gen-cycle-history → 公開 push
-   ⏸ 停止1: wallet 操作 (額の判断) → tx id
+⏸ 停止2: identity 鍵 passphrase
 phase 2  identity  Mac: gen-identity → commit → push → deploy 着地確認
-   ⏸ 停止2: identity 鍵 passphrase
 phase 3  compose   host: gen-anchor-source → Mac へ転送 → commit → push → deploy 着地確認
+⏸ 停止3: testnet keystore unlock + broadcast 認可
 phase 4  rehearsal Mac: testnet 通し稽古 (コマンドを印字して停止)
-   ⏸ 停止3: testnet keystore unlock + broadcast 認可
+⏸ 停止4: mainnet broadcast 認可
 phase 5  刻印      Mac: preview → 署名 (印字して停止。orchestrator は実行しない)
-   ⏸ 停止4: mainnet broadcast 認可 + explorer 目視
 phase 6  事後      host: receipt 7-gate → history append → 公開 push → resume --apply
 ```
+
+根拠 (`docs/CYCLE_GATE.md` の step 番号で示す):
+
+- **停止1 → phase1 の入口**: step 0 が「everything below の precondition」
+  と明記。phase 1 の最初の単位 (step 1, node-info tick 待ち) は新
+  AddValidator entry が chain に出るまで意味を成さない。
+- **停止2 → phase2 の入口**: phase 2 は `gen-identity.sh` (step 4) そのもの
+  で、passphrase はその script 自身が実行中に prompt する入力。「phase 2
+  を終えてから passphrase」ではない。
+- **停止3 → phase4 の入口**: phase 4 (= testnet rehearsal, step 7a) は
+  unlock 済み keystore が無ければ実行できない (locked のまま叩くと
+  exit 2)。testnet broadcast 認可 (PRIME DIRECTIVE gate 2 の testnet 側)
+  も同じく実行前に必要。
+- **停止4 → phase5 の入口、ただし片側のみ**: mainnet broadcast 認可
+  (PRIME DIRECTIVE gate 2) は step 7c (署名+broadcast) の precondition で
+  あり phase 5 の入口として正しい。**一方 explorer 目視確認は逆で、
+  phase 5 が broadcast を終えた後にしか行えない** (`docs/CYCLE_GATE.md`
+  step 9 直後の結び文: 「AI reads back step 7's tx id and reports the
+  explorer URL … gate 2's authorization happens before that step runs,
+  not after」)。停止4 という 1 つのラベルが実際には性質の異なる 2 つの
+  操作 (broadcast 前の認可 / broadcast 後の目視) を束ねている — 図の
+  粒度では 1 点にまとめているが、「停止4 = phase5 の入口」と読むときは
+  認可の半分だけを指す。
+
+この是正は `scripts/cycle-transition.sh` (別タスクが実装中、本タスクは
+read-only 参照のみ) がすでに独立に到達している結論と一致する: 同ファイル
+冒頭のコメント「THE FOUR STOPS, AND WHERE THEY REALLY SIT」が同じ 4 件を
+同じ根拠で entry gate と結論しており、本 spec の図をそちらに合わせて
+是正した (逆ではない — 本 spec が canon で `docs/CYCLE_GATE.md` の当日 step
+順が一次情報、`cycle-transition.sh` 側の結論はその step 順から独立に
+導かれた傍証)。矛盾は見つからなかった。
 
 ### 再開は「記録を信じない」
 

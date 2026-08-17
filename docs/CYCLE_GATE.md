@@ -259,16 +259,45 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    actually on chain before any cycle-recording script below runs against
    it — recording against a stale `endTime` would misdate the cycle
    boundary.
-2. **host — `uptime-history.sh`** closes out cycle N's uptime record.
+2. **host — `uptime-history.sh`**
+   ```sh
+   FY_LIVE=1 bash scripts/uptime-history.sh
+   ```
+   closes out cycle N's uptime record: the append-only master ledger entry,
+   the cycle-close summary row appended to `uptime-cycles.json`, and the
+   refreshed public `uptime-recent.json` preview. **`FY_LIVE=1` is required
+   for all three writes** (C3 rollout, 2026-08-06) — but unlike step 9's
+   `resume-after-cycle-start.sh`, this script does **not refuse** without
+   it. Omitting the env var is a **loud dry no-op that still exits 0**:
+   every write becomes a `DRY: would …` line on stderr and the target file
+   is left byte-for-byte untouched (measured 2026-08-17 against a fixture
+   `validator.json`: no `FY_LIVE` → exit 0, zero files written, only `DRY:`
+   lines on stderr). Run this step verbatim without `FY_LIVE=1` and cycle
+   N's uptime record is never closed, no error is raised, and nothing stops
+   the runbook from continuing straight into step 3 — whose
+   `gen-cycle-history.sh` reads `uptime-cycles.json` as one of its two
+   canonical inputs, so it would silently compose cycle N's history row
+   from the *previous* cycle's stale summary. Check the log for `DRY:`
+   lines; their absence is the only positive confirmation this step wrote
+   for real.
 3. **host — `gen-cycle-history.sh` + publish** appends cycle N's row to
    `cycle-history.jsonl` and ships it to the web host:
    ```sh
    bash scripts/gen-cycle-history.sh
    bash scripts/push-to-web-host.sh cycle-history.jsonl
    ```
-   The publish step is **not optional and not automatic**: steps 4 and 5
-   read the *published* ledger, so without it `gen-identity.sh` (exit 7)
-   and `gen-anchor-source.sh` (exit 9) both count a stale
+   Neither script takes `FY_LIVE` — confirmed by reading both (2026-08-17):
+   `gen-cycle-history.sh`'s own header states in so many words that it is
+   "NOT GATED ON FY_LIVE" by deliberate design (it never touches
+   `${FY_STATE_DIR}`, sends no notification, and its only write is a
+   deterministic regeneration of a working-tree artifact already
+   fail-closed behind `cycle-gate.sh`); `push-to-web-host.sh` has no
+   `FY_LIVE` concept at all — every invocation pushes unconditionally. Do
+   **not** add `FY_LIVE=1` to either command; it would not be read by
+   either script and could be mistaken for a required gate that isn't
+   there. The publish step is **not optional and not automatic**: steps 4
+   and 5 read the *published* ledger, so without it `gen-identity.sh`
+   (exit 7) and `gen-anchor-source.sh` (exit 9) both count a stale
    `CLOSED_COUNT`. Verify the published file grew by exactly one line
    (curl the public URL and compare line counts) before continuing.
 4. **Mac —**
