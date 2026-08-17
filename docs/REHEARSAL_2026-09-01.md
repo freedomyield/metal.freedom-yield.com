@@ -247,11 +247,14 @@ locally. …)`)が続くが、これは同じ `✓` 行の説明であって別�
 
 ## 3. `--expect-cycle` の値
 
-<!-- A1 確定値をここに: 9/1 = __ (根拠: task-a1-report.md) -->
+**9/1 = 4** (A1 が 2026-08-17 に実測確定。根拠: task-a1-report.md — 独立 4 経路
+(cycle-context lib / committed anchor-source / 公開 anchor-history / --print-only) の
+一致をレビューが再現。転換当日 9/4 の rehearsal フラグは 5)。
 
-上記の値は別タスク(A1)が実測で確定する。**この文書の執筆時点では未確定 —
-推測値を書かない。** 9/1 当日にこのプレースホルダを A1 の確定値に置き換えて
-から operator へピングを送ること。
+**当日ピング送付前に、preflight (`scripts/install-rehearsal-preflight.sh`) を再実行
+して check 8 の pairing が同じ値を出すことを確認すること** — 9/1 までに公開台帳や
+canonical `anchor-source.json` が別の理由で更新される可能性があるため、確定値は
+「8/17 実測 + 当日再確認」の 2 点で成立する。値が食い違ったら送付を止めて調査。
 
 参考(未確定であることの根拠): canonical `anchor-source.json` の
 `cycle_number_observed` と公開 `cycle-history.jsonl` の行数は本書執筆時点でも
