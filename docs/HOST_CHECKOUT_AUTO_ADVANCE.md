@@ -164,9 +164,22 @@ origin/main"** step runs before any rsync:
 
 ```sh
 ssh ... "$SSH_USER@$SSH_HOST" \
-  "FYD_REPO_DIR='$DEPLOY_PATH' FYD_NOTIFY='$DEPLOY_PATH/scripts/notify.sh' bash -s" \
+  "FY_LIVE=1 FYD_REPO_DIR='$DEPLOY_PATH' FYD_NOTIFY='$DEPLOY_PATH/scripts/notify.sh' bash -s" \
   < scripts/advance-host-checkout.sh
 ```
+
+`FY_LIVE=1` is not optional here — `advance-host-checkout.sh:147-149` names
+this ssh command explicitly: "Both production callers carry it: the cron
+env header (`scripts/install-metal-host-advance-cron.sh`) and deploy.yml's
+'Advance host checkout' ssh command." Without it, this step's own promised
+alerts ("refused", "host is ahead") would silently downgrade to
+`DRY: would notify …` on the runner's own log — this step gets no cron env
+header to fall back on, so a missing flag here is not compensated by
+anything else the way §4.2's manual recovery is (that command has no
+production caller relying on its alerts either). As with the cron entry,
+the git mutations themselves are never gated either way — this only
+controls whether a genuine "cannot FF" / "host is ahead" failure also
+reaches ntfy, on top of failing the deploy step loudly regardless.
 
 It pipes the **runner's own checked-out copy** of the script (`bash -s`
 over stdin) rather than invoking whatever copy already sits on the host —
@@ -258,10 +271,19 @@ ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HO
   'cd /home/deploy/metal.freedom-yield.com && sudo bash scripts/install-metal-host-advance-cron.sh'
 ```
 
-This writes `/etc/cron.d/metal-host-advance` (`45 4 * * * deploy bash
-.../scripts/advance-host-checkout.sh 2>&1 | logger -t host-advance`),
-lint-checked by `scripts/check-cron-file.sh` before it is written, and
-idempotent (a second run with unchanged content is a no-op). It requires
+This writes `/etc/cron.d/metal-host-advance` with an env header carrying
+`SHELL=/bin/bash`, `PATH=/usr/local/bin:/usr/bin:/bin` and `FY_LIVE=1`,
+followed by the schedule line itself (`45 4 * * * deploy bash
+.../scripts/advance-host-checkout.sh 2>&1 | logger -t host-advance`) —
+`scripts/install-metal-host-advance-cron.sh:74-79`'s `EXPECTED` heredoc is
+the literal content installed, all four lines. `FY_LIVE=1` is required
+here: `advance-host-checkout.sh` calls `alert()` on its anomaly paths and
+is on `check-cron-file.sh` Rule 6's side-effecting allowlist, so this file
+would fail that lint without it (see `docs/CRON_CONVENTIONS.md`'s
+"Alternative form: piping to `logger`" section for what the flag does and
+does not gate on this specific script). Lint-checked by
+`scripts/check-cron-file.sh` before it is written, and idempotent (a
+second run with unchanged content is a no-op). It requires
 root (to write `/etc/cron.d/`) and requires
 `scripts/advance-host-checkout.sh` to already be present on the host at the
 resolved repo path — i.e. it must be run **after** a `main` merge that
