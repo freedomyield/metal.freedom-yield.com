@@ -164,7 +164,7 @@ HOME=~/.metal-fy-proton-test proton key:unlock
 #### ③ testnet 通し稽古を実行する(= testnet broadcast の per-invocation 認可そのもの)
 
 ```
-HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh --expect-cycle=<!-- A1 確定値をここに: 9/1 = __ (根拠: task-a1-report.md) -->
+HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh --expect-cycle=4
 ```
 
 - **なぜ operator が打つのか**: この script は `/tmp/fyd-broadcast-token` を
