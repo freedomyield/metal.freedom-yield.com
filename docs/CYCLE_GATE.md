@@ -750,6 +750,53 @@ Phase 1 polling tolerates uncertain deploy timing: it polls up to 10 minutes
 for `anchor-source.json` to refresh before failing. To sanity-check first,
 substitute `--dry-run` for `--apply`.
 
+## Script freeze around a rehearsed transition
+
+Once a testnet rehearsal (`scripts/run-testnet-rehearsal.sh`) has been run
+against a specific upcoming cycle transition, any change to a script that
+`docs/cycle-transition-steps.json` names as one of that transition's
+execution units (its `steps[].scripts` entries — e.g.
+`run-testnet-rehearsal.sh`, `preview-cycle-anchor-broadcast.sh`,
+`sign-anchor-event.sh`, `gen-anchor-source.sh`,
+`operator-local/gen-identity.sh`, `uptime-history.sh`,
+`gen-cycle-history.sh`, `push-to-web-host.sh`, `gen-anchor-receipt.sh`,
+`append-anchor-history.sh`, `resume-after-cycle-start.sh`,
+`operator-local/commit-anchor-source.sh`) is permitted only together with a
+re-rehearsal of the affected execution unit(s).
+
+Rationale: a rehearsal's value — whether as PRIME DIRECTIVE gate-1 evidence
+for unit 7a specifically, or as evidence the pipeline shape has not silently
+drifted for the other units — depends on the rehearsed code being the code
+that actually runs on the day. `docs/PHASE_ALPHA_TESTNET_DRY_RUN.md`'s
+"Scope: what a rehearsal run actually proves" applies the same principle to
+a single run's staleness window; this section extends it to the freeze
+window between a rehearsal and the transition it gates.
+
+The freeze ALSO covers the enforcement / shared-library scripts the named
+execution units call, even where `docs/cycle-transition-steps.json`'s own
+`steps[].scripts` entries do not name them (that file has known gaps: unit
+1's entry is `[]` even though it reads `node-info.sh`'s output, unit 7.5's
+entry is `[]` even though it is an scp round-trip, and unit 7c's entry names
+only `sign-anchor-event.sh`, not the `bin/safe-broadcast` wrapper it always
+invokes). Specifically: `bin/safe-broadcast`, `scripts/lib/side-effects.sh`,
+`scripts/cycle-gate.sh`, and `scripts/node-info.sh` are in scope for the same
+freeze. This matters concretely: `bin/safe-broadcast`'s gate 1 / gate 4
+hardening is the one piece of code a testnet rehearsal cannot exercise at all
+(mainnet-only gates — see `docs/REHEARSAL_2026-09-01.md` F1), so its "0
+commits since the last hardening pass" is exactly the fact the freeze exists
+to protect; leaving it outside the freeze's named scope would have made that
+protection accidental rather than structural.
+
+The freeze does not block work outside this scope (e.g.
+`docs/STRATEGIC_TARGET_ALIGNMENT.md`, or tooling neither
+`docs/cycle-transition-steps.json` nor the paragraph above names).
+
+This is the canonical statement of the rule — both the base scope
+(`steps[].scripts`) and the extension above. For the specific freeze window
+and rehearsal it currently gates, see `docs/REHEARSAL_2026-09-01.md` §5 —
+that section records the dates only and defers to this one for the rule
+itself.
+
 ## Rollback
 
 Independent rollback levers, in increasing severity:
