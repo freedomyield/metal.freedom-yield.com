@@ -47,6 +47,7 @@ This is the load-bearing finding. Every other assessment in this document is sub
 Direct implication for `docs/STRATEGIC_TARGET_ALIGNMENT.md`'s "reachable set":
 
 - Path (a) "Metallicus non-banking subnet selection" — **theoretical**, no subnets exist to be selected for as of this document.
+  - **Update (2026-08-17).** `STRATEGIC_TARGET_ALIGNMENT.md` v2 renamed this path to "selection into a public A-Chain subnet's validator set" and made its mechanism concrete: `pulsevm.dev/network/validator` states that the subnet owner adds a NodeID to the set and that "consortium governance decides who validates" — appointment, not application. The **"theoretical" grade is unchanged and was re-confirmed the same day**: Metal mainnet still shows zero subnets, and third-party node sync is "not yet supported" on the current A-Chain Alpine reset. What changed is that the path now has a named venue and a known selection mechanism, not that it became actionable.
 - Path (b) "Organic delegator inflow" — **empirically live**, evidenced by the 2026-06-08 receipt of 23,428 METAL (returned at duration expiry 2026-07-01). This is our only actively working path.
 - Path (c) "Data / tooling producer positioning" — **aspirational**, dependent on us publishing verifiable machine-readable artifacts (this repo already does), but no external consumer has cited them.
 - Path (d) "Foundation delegation" — **inactive**, no public program.
@@ -63,6 +64,8 @@ Because the current shortlist is empty, this document doesn't need per-item trac
 - Metallicus Discord / community channels — indirect signals (per `feedback_no_self_intro_to_metallicus`, we monitor, we do not participate).
 
 Suggested cadence: monthly re-run of this discovery. Faster if a Banking Innovation Program announcement surfaces.
+
+**Update (2026-08-17): part of this cadence is now automated.** `scripts/check-pulsevm-upstream.sh` runs daily (`/etc/cron.d/metal-pulsevm-watch`) and pushes only when the upstream changes in one of four ways — third-party node sync becoming supported, a mainnet section or an unseen chain id appearing on the endpoints page, a new documentation page, or A-Chain Alpine's head block actually advancing. It watches the PulseVM surfaces specifically; the four surfaces listed above are **not** covered by it and still need the manual monthly pass. Treat a push from that monitor as the trigger to re-run this discovery early.
 
 ## Non-goals
 
@@ -83,3 +86,4 @@ This document does not:
 ## Change log
 
 - **v1 (2026-07-01):** Initial discovery result. Empty shortlist confirmed; no subnets registered on Metal Blockchain beyond the Primary Network.
+- **v1.1 (2026-08-17):** No change to the shortlist — still empty, re-confirmed. Two additions only: path (a) is annotated with its new name and its now-documented appointment mechanism (see `STRATEGIC_TARGET_ALIGNMENT.md` v2), and the monitoring cadence records that `scripts/check-pulsevm-upstream.sh` now automates the PulseVM-facing part of it while leaving the four surfaces above manual.
