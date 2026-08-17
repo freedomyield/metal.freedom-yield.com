@@ -50,12 +50,22 @@
 #   S4  pulsevm.dev/llms.txt
 #         -> the site's own page list
 #
-# NOT READ, DELIBERATELY: the Alpine RPC endpoint. It is an AvalancheGo
-# per-blockchain alias URL, and scripts/broadcast-guard.sh blocks that path
-# shape unconditionally — read-only queries included — because a guard that
-# tries to tell a read from a write on that path is a guard with a hole in it.
-# This checker therefore takes every value it needs from GitHub, the docs
-# site, and Hyperion /v2, none of which carry that shape.
+# NOT READ, DELIBERATELY: the Alpine RPC endpoint, which is an AvalancheGo
+# per-blockchain URL. scripts/broadcast-guard.sh:98 refuses any command line
+# where curl or wget is followed by that per-blockchain path prefix and then
+# an X, a P or a C — read-only queries included, because a guard that tries to
+# tell a read from a write on that path is a guard with a hole in it.
+#
+# Be precise about how much that guard actually covers, because the margin is
+# thinner than it looks. Those three letters are the chain ALIASES. A full
+# blockchain ID is a base58 string, and the current Alpine ID is matched
+# solely because base58 happened to give it a leading "C" — a different reset
+# could produce an ID starting with any other base58 character and slip
+# straight past the pattern. Treating that as protection would be a safety
+# claim backed by luck. So this checker does not go near a chain RPC at all:
+# every value comes from GitHub, the docs site, and Hyperion /v2, none of
+# which carry the shape. The design is right whatever the guard happens to
+# cover, which is the point — it does not depend on the guard being right.
 #
 # The absence is load-bearing, not incidental, and it extends to this comment:
 # THIS FILE MUST NOT CONTAIN THE LITERAL PATH PREFIX AT ALL, not even in
@@ -70,21 +80,39 @@
 # ---------------------------------------------------------------------------
 # WHAT IT NOTIFIES ABOUT (and what it deliberately does not)
 # ---------------------------------------------------------------------------
-#   T1  the "third-party node sync is not yet supported" sentence is GONE
-#         from S2 -> we can stand up our own node. The single most important
-#         signal here, because it converts "watch" into "act".
-#   T2  S2 grew a mainnet section, or shows a chain id we have not seen
-#         before -> either the migration landed, or Alpine reset again (the
-#         page says resets change the chain id, and warns to expect more).
-#         The alert names which of the two sub-conditions fired.
-#   T3  S4's page list grew -> the site publishes migration/validator pages
-#         before anything else changes, so a new page is the earliest warning
-#         available.
-#   T4  S3's head block advanced by at least $PULSEVM_UPSTREAM_HEAD_BLOCK_DELTA
-#         since the last run -> Alpine started producing blocks for real.
+# Two channels. `high` means "the ground moved, go and act"; `default` means
+# "something changed, read it when you get to it". Which one a run uses is
+# decided by what fired ON THAT RUN — see the PRIORITY SPLIT comment above the
+# trigger block for the reasoning and for why a state-based test would be
+# wrong. A run that fires both kinds escalates to `high`.
 #
-#   BASELINE  no usable prior state -> fires once, says exactly that, and
-#         records a baseline. See "fail open" below.
+#   T1  [high]  the "third-party node sync is not yet supported" sentence is
+#         GONE from S2 -> we can stand up our own node. The single most
+#         important signal here, because it converts "watch" into "act".
+#   T2  S2 grew a mainnet section, or shows a chain id we have not seen
+#         before. These are two sub-conditions with two different weights and
+#         the alert names which one fired:
+#           mainnet section [high]  -> the migration landed.
+#           new chain id  [default] -> possibly the migration, but far more
+#             often just another Alpine reset. The page itself says resets
+#             change the chain id and warns to expect more of them during
+#             hardening, so this is the one path likely to be routine.
+#   T3  [default]  S4's page list grew -> the site publishes migration and
+#         validator pages before anything else changes, so a new page is the
+#         earliest warning available.
+#   T4  [default]  S3's head block advanced by at least
+#         $PULSEVM_UPSTREAM_HEAD_BLOCK_DELTA since the last run -> Alpine
+#         started producing blocks for real.
+#
+#   BASELINE  [high]  no usable prior state -> fires once, says exactly that,
+#         and records a baseline. High because until it runs, this monitor was
+#         not actually watching anything, and the operator should know that
+#         happened. See "fail open" below.
+#
+# Every alert body names the OBLIGATION, not just the observation — what to go
+# and re-check. The script's whole premise is "the changes that would oblige
+# this project to act", and a page that reports a fact without naming the
+# action makes the reader reconstruct it at the worst possible moment.
 #
 # NOT notified: a new release tag. Releases land roughly weekly and mean
 # nothing on their own; the tag is written to the log and to the state file
@@ -199,7 +227,17 @@
 #                               one-per-minute floor and far above the handful
 #                               of blocks a manual poke produces.
 #   PULSEVM_UPSTREAM_FAILURE_ALERT_AFTER  consecutive failures before the one
-#                               outage page (default 3)
+#                               outage page (default 3). MUST BE >= 1 to page
+#                               at all: the counter starts at 1 on the first
+#                               failed run and the comparison is `-eq`, so 0
+#                               can never be met. That is a legal way to
+#                               silence the outage page entirely — it is
+#                               documented rather than rejected, because
+#                               "never tell me about a third party's downtime"
+#                               is a reasonable thing to want — but it is NOT
+#                               a way to make it page sooner, and it does not
+#                               affect the T1-T4 triggers, which are never
+#                               gated by this value.
 #   PULSEVM_UPSTREAM_SYNC_NOTICE_RE  ERE for the T1 sentence (default
 #                               'third-party node sync is not yet supported',
 #                               matched case-insensitively). Any rewording
@@ -456,28 +494,56 @@ grep -oE 'https://[A-Za-z0-9._-]+/[A-Za-z0-9._/-]*\.md\b' "$TMP/s4.txt" | sort -
 [ -s "$TMP/cur_pages" ] || fail_and_exit 5 "S4 returned 200 but no page links could be parsed (${LLMS_URL})"
 
 # ---- evaluate triggers ---------------------------------------------------
+# PRIORITY SPLIT. Not every trigger deserves the same channel. Three of them
+# say "the ground moved, go and act": the sync notice disappearing (T1), a
+# mainnet section appearing (T2-mainnet), and a run with nothing to compare
+# against (BASELINE). Those page `high`.
+#
+# The rest are "something changed, read it when you get to it": a chain id we
+# have not seen (T2-chainid), a new docs page (T3), the head block moving
+# (T4). Those page `default`.
+#
+# The reason the split exists is specifically T2-chainid. The endpoints page
+# warns that Alpine "resets frequently during hardening" and that each reset
+# changes the chain id — and the repository is visibly in a hardening burst.
+# So the chain-id path is likely to be at its noisiest exactly when the
+# project starts moving, and if it arrives at the same priority as T1 then the
+# `high` channel stops meaning "act" and starts meaning "PulseVM did
+# something". That is how a high-priority channel is trained into background
+# noise, which is the harm behind the operator's standing no-false-urgency
+# rule. The outage page is already `default` (see fail_and_exit) for the same
+# reason; this makes the trigger path consistent with it.
+#
+# The flag records what fired ON THIS RUN, rather than testing $CUR_MAINNET at
+# dispatch time. Those differ: a mainnet section that appeared last week is
+# still present today, so a state-based test would keep escalating every later
+# T3/T4 to `high` forever. Only the transition is worth `high`.
 FIRED=""
 DETAIL=""
+FIRED_HIGH=0
 add_fire() { FIRED="${FIRED}${FIRED:+,}$1"; DETAIL="${DETAIL}${DETAIL:+ — }$2"; }
 
 if [ "$PREV_OK" -eq 0 ]; then
 	add_fire "BASELINE" "no usable prior state at ${STATE}; a baseline has been recorded (release=${CUR_TAG}, head_block=${CUR_HEAD}, chain_ids=$(wc -l < "$TMP/cur_chain_ids" | tr -d ' '), pages=$(wc -l < "$TMP/cur_pages" | tr -d ' ')). T3/T4 DEFERRED: nothing to diff against yet"
+	FIRED_HIGH=1
 fi
 
 # T1 — the sentence is gone. Evaluable from the current page alone, so it is
 # also checked on a baseline run.
 if [ "$CUR_SYNC_NOTICE" = "false" ] && { [ "$PREV_OK" -eq 0 ] || [ "$PREV_SYNC_NOTICE" = "true" ]; }; then
 	add_fire "T1" "the 'third-party node sync is not yet supported' notice is GONE from ${ENDPOINTS_URL} — running our own node may now be possible"
+	FIRED_HIGH=1
 fi
 
 # T2 — mainnet section, or a chain id we have not recorded before.
 if [ "$CUR_MAINNET" = "true" ] && { [ "$PREV_OK" -eq 0 ] || [ "$PREV_MAINNET" = "false" ]; }; then
-	add_fire "T2" "a mainnet section appeared in ${ENDPOINTS_URL}"
+	add_fire "T2" "a mainnet section appeared in ${ENDPOINTS_URL} — re-check bin/safe-broadcast gate 1 (/v1/history/get_transaction) and gate 3 (proton chain:info) endpoint assumptions BEFORE the next anchor"
+	FIRED_HIGH=1
 fi
 if [ "$PREV_OK" -eq 1 ]; then
 	NEW_CHAIN_IDS="$(comm -13 "$TMP/prev_chain_ids" "$TMP/cur_chain_ids" | head -3 | tr '\n' ' ')"
 	if [ -n "${NEW_CHAIN_IDS// /}" ]; then
-		add_fire "T2" "new chain id(s) on ${ENDPOINTS_URL}: ${NEW_CHAIN_IDS%% } (an Alpine reset changes the chain id too — check which)"
+		add_fire "T2" "new chain id(s) on ${ENDPOINTS_URL}: ${NEW_CHAIN_IDS%% } (an Alpine reset changes the chain id too — check which; if it is a migration rather than a reset, FYD_*_CHAIN_ID and safe-broadcast gate 3 need updating)"
 	fi
 fi
 
@@ -485,14 +551,14 @@ fi
 if [ "$PREV_OK" -eq 1 ]; then
 	NEW_PAGES="$(comm -13 "$TMP/prev_pages" "$TMP/cur_pages" | head -5 | tr '\n' ' ')"
 	if [ -n "${NEW_PAGES// /}" ]; then
-		add_fire "T3" "new page(s) in ${LLMS_URL}: ${NEW_PAGES%% }"
+		add_fire "T3" "new page(s) in ${LLMS_URL}: ${NEW_PAGES%% } — read for a migration date or a validator-onboarding route, the two things still unpublished"
 	fi
 fi
 
 # T4 — the head block moved for real.
 if [ "$PREV_OK" -eq 1 ] && [[ "$PREV_HEAD" =~ ^[0-9]+$ ]]; then
 	if [ "$CUR_HEAD" -gt "$PREV_HEAD" ] && [ $((CUR_HEAD - PREV_HEAD)) -ge "$HEAD_BLOCK_DELTA" ]; then
-		add_fire "T4" "A-Chain Alpine head block advanced ${PREV_HEAD} -> ${CUR_HEAD} (>= ${HEAD_BLOCK_DELTA}) — the testnet may be in real use"
+		add_fire "T4" "A-Chain Alpine head block advanced ${PREV_HEAD} -> ${CUR_HEAD} (>= ${HEAD_BLOCK_DELTA}) — the testnet may be in real use; re-check whether third-party node sync and a subnet ID are published yet"
 	fi
 fi
 
@@ -528,8 +594,16 @@ fi
 state_write "$CUR_OBS" 0
 
 if [ -n "$FIRED" ]; then
-	log "TRIGGER ${FIRED}: ${DETAIL}"
-	alert high "pulsevm-upstream: ${FIRED} (exit 3)" "${DETAIL}"
+	# Priority comes from FIRED_HIGH, set only by the three act-now triggers
+	# (T1 / T2-mainnet-section / BASELINE) at the point each one fires. See the
+	# PRIORITY SPLIT comment above the trigger block for why a routine
+	# chain-id change must not arrive on the same channel as T1. A run that
+	# fires BOTH kinds escalates to high, which is correct: the high one is
+	# still in there and still needs acting on.
+	PRIO=default
+	[ "$FIRED_HIGH" -eq 1 ] && PRIO=high
+	log "TRIGGER ${FIRED} (priority=${PRIO}): ${DETAIL}"
+	alert "$PRIO" "pulsevm-upstream: ${FIRED} (exit 3)" "${DETAIL}"
 	exit 3
 fi
 

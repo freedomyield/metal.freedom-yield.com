@@ -237,9 +237,12 @@ echo "$OUT" | grep -q 'TRIGGER BASELINE' \
 echo "$OUT" | grep -q 'T3/T4 DEFERRED' \
 	&& ok "baseline: says T3/T4 were DEFERRED rather than claiming they fired" \
 	|| bad "baseline: missing the DEFERRED disclaimer (out: $OUT)"
-echo "$OUT" | grep -qE 'TRIGGER BASELINE[,:]' \
+echo "$OUT" | grep -qE 'TRIGGER BASELINE \(priority=' \
 	&& ok "baseline: does NOT claim T1/T2 on an unchanged upstream" \
 	|| bad "baseline: unexpected extra trigger in the fired set (out: $OUT)"
+alerts | grep -q '^high|' \
+	&& ok "baseline: dispatched at HIGH — until this run the monitor was not watching anything" \
+	|| bad "baseline: expected high priority ($(alerts))"
 [ "$(n_alerts)" -eq 1 ] \
 	&& ok "baseline: exactly one alert" \
 	|| bad "baseline: expected 1 alert, got $(n_alerts) ($(alerts))"
@@ -284,6 +287,9 @@ echo "$OUT" | grep -q 'TRIGGER T1' \
 alerts | grep -q 'running our own node may now be possible' \
 	&& ok "T1: alert says what the operator can now do" \
 	|| bad "T1: alert body missing the action ($(alerts))"
+alerts | grep -q '^high|' \
+	&& ok "T1: dispatched at HIGH — this is the trigger that converts watch into act" \
+	|| bad "T1: expected high priority ($(alerts))"
 teardown
 
 # ---- case 3b (T1 near-miss): notice still present -> no fire ----------------
@@ -322,6 +328,12 @@ echo "$OUT" | grep -q 'TRIGGER T2' \
 alerts | grep -q 'mainnet section appeared' \
 	&& ok "T2a: alert names the mainnet-section sub-condition" \
 	|| bad "T2a: alert body wrong ($(alerts))"
+alerts | grep -q 'gate 1' \
+	&& ok "T2a: alert names the OBLIGATION (re-check the safe-broadcast gates), not just the observation" \
+	|| bad "T2a: alert body does not name what to go and do ($(alerts))"
+alerts | grep -q '^high|' \
+	&& ok "T2a: the mainnet-section sub-condition is HIGH" \
+	|| bad "T2a: expected high priority ($(alerts))"
 teardown
 
 # ---- case 4b (T2b): a new chain id appears ----------------------------------
@@ -338,6 +350,14 @@ alerts | grep -q "$CHAIN_B" \
 alerts | grep -q 'Alpine reset changes the chain id too' \
 	&& ok "T2b: alert distinguishes a reset from a migration instead of asserting one" \
 	|| bad "T2b: alert missing the reset caveat ($(alerts))"
+# The priority split's whole reason for existing. The endpoints page warns
+# resets are frequent during hardening and that each one changes the chain id,
+# so this path is the likeliest to be routine. If it arrived at `high` next to
+# T1, the high channel would be trained into background noise within a few
+# resets — which is the harm, not the noise itself.
+alerts | grep -q '^default|' \
+	&& ok "T2b: a chain-id-only change is DEFAULT — a routine Alpine reset must not share T1's channel" \
+	|| bad "T2b: expected default priority, got ($(alerts))"
 teardown
 
 # ---- case 4c (T2 near-miss): the word 'mainnet' in prose is not a section ----
@@ -365,6 +385,9 @@ echo "$OUT" | grep -q 'TRIGGER T3' \
 alerts | grep -q 'network/validator.md' \
 	&& ok "T3: alert names the new page" \
 	|| bad "T3: alert does not name the new page ($(alerts))"
+alerts | grep -q '^default|' \
+	&& ok "T3: a new docs page is DEFAULT" \
+	|| bad "T3: expected default priority ($(alerts))"
 teardown
 
 # ---- case 5b (T3 near-miss): a page REMOVED upstream is not a new page ------
@@ -391,6 +414,29 @@ echo "$OUT" | grep -q 'TRIGGER T4' \
 alerts | grep -q '3406 -> 9406' \
 	&& ok "T4: alert names both head blocks" \
 	|| bad "T4: alert missing the block pair ($(alerts))"
+alerts | grep -q '^default|' \
+	&& ok "T4: a head-block advance is DEFAULT" \
+	|| bad "T4: expected default priority ($(alerts))"
+teardown
+
+# ---- case 6d: a run firing BOTH kinds escalates to high ---------------------
+# T1 (high) and T4 (default) together must not be dispatched at default — the
+# act-now trigger is still in there and still needs acting on. Guards the
+# obvious wrong implementation, where the LAST trigger to fire wins.
+setup
+seed_state true false "$CHAIN_A" 3406 "v0.6.2"
+write_s2 "$S2" no-notice "$CHAIN_A" no-mainnet
+write_s3 "$S3" 9406
+OUT="$(run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 3 ] \
+	&& ok "priority-mix: T1 + T4 together -> exit 3" \
+	|| bad "priority-mix: expected exit 3, got $RC (out: $OUT)"
+echo "$OUT" | grep -q 'TRIGGER T1,T4' \
+	&& ok "priority-mix: both triggers are reported" \
+	|| bad "priority-mix: expected both T1 and T4 in the verdict (out: $OUT)"
+alerts | grep -q '^high|' \
+	&& ok "priority-mix: a mixed run escalates to HIGH (the act-now trigger wins, not the last one evaluated)" \
+	|| bad "priority-mix: expected high priority ($(alerts))"
 teardown
 
 # ---- case 6b (T4 near-miss): a sub-threshold advance is not a live chain ----
@@ -448,26 +494,58 @@ jq -e '.schema_version == 1' "$STATE" >/dev/null 2>&1 \
 teardown
 
 # ---- case 8b: a state file with the wrong schema_version also re-baselines ---
+# THE VERDICT IS ASSERTED, NOT JUST THE EXIT CODE. See case 8c's comment for
+# the mutant that made this necessary — it applies identically here.
+#
+# The fixture is a FULLY WELL-FORMED observations record whose only defect is
+# the schema_version. That is deliberate: with a malformed record the
+# field-type gate would reject it anyway, so removing the schema check alone
+# would change nothing and the case could not detect it. Because every field
+# here is valid and every value differs from what the fixtures serve, a
+# checker that accepted schema 99 would diff against it and report T2,T3 —
+# so the BASELINE assertion below is load-bearing rather than decorative.
 setup
-printf '{"schema_version":99,"observations":{"head_block":1}}' > "$STATE"
-RC=0; run_checker >/dev/null 2>&1 || RC=$?
-[ "$RC" -eq 3 ] \
-	&& ok "schema-guard: an unknown schema_version re-baselines instead of mis-reading fields" \
-	|| bad "schema-guard: expected exit 3, got $RC"
+jq -n '{schema_version: 99, checked_at: "2026-08-16T02:00:00Z", consecutive_failures: 0,
+        observations: {release_tag: "v0.0.1", sync_notice_present: true, mainnet_section_present: false,
+                       head_block: 1, chain_ids: ["0000000000000000000000000000000000000000000000000000000000000000"],
+                       pages: ["https://pulsevm.example.test/gone.md"]}}' > "$STATE"
+OUT="$(run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 3 ] && echo "$OUT" | grep -q 'TRIGGER BASELINE' \
+	&& ok "schema-guard: an unknown schema_version re-baselines and SAYS BASELINE, rather than mis-reading fields into a fabricated verdict" \
+	|| bad "schema-guard: expected exit 3 with a BASELINE verdict, got $RC (out: $OUT)"
 teardown
 
 # ---- case 8c: observations present but a trigger field missing -> fail open --
 # The first draft read the two booleans with `// empty`, which in jq collapses
 # a legitimate `false` into "missing" — T1/T2 could then never observe their
-# "was it true yesterday" transition. The type gate below is what makes a
-# malformed record re-baseline instead of being read with silent fallbacks.
+# "was it true yesterday" transition. The type gate at the top of the checker
+# is what makes a malformed record re-baseline instead of being read with
+# silent fallbacks.
+#
+# THE VERDICT ASSERTION IS THE POINT OF THIS CASE, not the exit code. An
+# earlier version checked only `RC -eq 3` and a reviewer's mutation walked
+# straight through it: weakening the gate to a bare `type == "object"` left
+# the suite 80/80 green, because the mutant still exits 3 — but for the
+# opposite reason. With the empty chain_ids/pages of a malformed record it
+# reports `TRIGGER T2,T3`, i.e. it FABRICATES "a new chain id and four new
+# pages appeared" out of a comparison it never made. In the same mutant
+# PREV_SYNC_NOTICE becomes the string "null", so the `= "true"` transition can
+# never hold and T1 — the trigger the header calls the single most important
+# signal — is silently disarmed forever. An exit code cannot tell those two
+# worlds apart; the verdict string can.
 setup
 jq -n '{schema_version: 1, checked_at: "2026-08-16T02:00:00Z", consecutive_failures: 0,
         observations: {release_tag: "v0.6.2", head_block: 3406, chain_ids: [], pages: []}}' > "$STATE"
-RC=0; run_checker >/dev/null 2>&1 || RC=$?
+OUT="$(run_checker 2>&1)"; RC=$?
 [ "$RC" -eq 3 ] \
 	&& ok "field-guard: observations missing a boolean trigger field re-baselines (fail open)" \
-	|| bad "field-guard: expected exit 3, got $RC"
+	|| bad "field-guard: expected exit 3, got $RC (out: $OUT)"
+echo "$OUT" | grep -q 'TRIGGER BASELINE' \
+	&& ok "field-guard: the verdict is BASELINE — a malformed record must not be diffed into a fabricated T2/T3" \
+	|| bad "field-guard: expected a BASELINE verdict, got (out: $OUT)"
+echo "$OUT" | grep -qE 'TRIGGER [^:]*T[234]' \
+	&& bad "field-guard: fabricated a T2/T3/T4 from a record that was never comparable (out: $OUT)" \
+	|| ok "field-guard: no T2/T3/T4 claimed from an uncomparable record"
 teardown
 
 # ---- case 8d: a false boolean must survive the round trip -------------------
@@ -587,6 +665,53 @@ RC=0; run_checker >/dev/null 2>&1 || RC=$?
 [ "$RC" -eq 5 ] \
 	&& ok "exit5: an empty 200 body (a docs shell instead of the document) -> exit 5" \
 	|| bad "exit5: expected exit 5, got $RC"
+teardown
+
+# ---- case 10d: S4 200 with no parseable page links -> exit 5 ----------------
+# The consequence if this guard were ever removed is specific and bad: an
+# llms.txt format change (or a 200 error page) would record `pages: []`, and
+# the NEXT healthy run would diff against that empty set and fire T3 naming
+# all ~46 pages as new. Refusing to record an unparseable page list is what
+# stops one upstream hiccup from manufacturing a trigger a day later.
+setup
+seed_state true false "$CHAIN_A" 3406 "v0.6.2"
+printf '<html><body>Service Temporarily Unavailable</body></html>\n' > "$S4"
+OUT="$(run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 5 ] \
+	&& ok "exit5: an llms.txt with no parseable page links -> exit 5 (never records an empty page set)" \
+	|| bad "exit5: expected exit 5, got $RC (out: $OUT)"
+echo "$OUT" | grep -q 'no page links could be parsed' \
+	&& ok "exit5: the log names S4 as the source that failed to parse" \
+	|| bad "exit5: log does not name S4 (out: $OUT)"
+[ "$(jq -r '.observations.pages | length' "$STATE")" -eq 4 ] \
+	&& ok "exit5: the previous page set survives — the next run cannot fire a fabricated T3 against an empty baseline" \
+	|| bad "exit5: page set was overwritten ($(jq -c '.observations.pages' "$STATE" 2>/dev/null))"
+teardown
+
+# ---- case 10e: S4 200 with a completely empty body -> exit 5 ----------------
+setup
+seed_state true false "$CHAIN_A" 3406 "v0.6.2"
+: > "$S4"
+RC=0; run_checker >/dev/null 2>&1 || RC=$?
+[ "$RC" -eq 5 ] \
+	&& ok "exit5: an empty llms.txt body -> exit 5" \
+	|| bad "exit5: expected exit 5, got $RC"
+teardown
+
+# ---- case 10f: the side-effects library is unreadable -> exit 6 -------------
+# Exercised on a COPY of the checker placed in a directory with no lib/
+# sibling, so the real scripts/lib/side-effects.sh is never touched or moved.
+setup
+COPY_DIR="$BASE/nolib"
+mkdir -p "$COPY_DIR"
+cp "$CHECKER" "$COPY_DIR/check-pulsevm-upstream.sh"
+OUT="$(bash "$COPY_DIR/check-pulsevm-upstream.sh" 2>&1)"; RC=$?
+[ "$RC" -eq 6 ] \
+	&& ok "exit6: an unreadable side-effects library refuses to run (exit 6) rather than silently un-gating" \
+	|| bad "exit6: expected exit 6, got $RC (out: $OUT)"
+echo "$OUT" | grep -q 'side-effects library not readable' \
+	&& ok "exit6: the refusal names the missing library" \
+	|| bad "exit6: refusal message missing (out: $OUT)"
 teardown
 
 # ---- case 11a (DRY): the repo's REAL logs/ is untouched ----------------------
