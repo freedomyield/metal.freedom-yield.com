@@ -91,6 +91,18 @@ syslog with its own timestamp, so there is no project log file to wrap a
 redirect around, and syslog already gives per-invocation boundaries (e.g.
 `journalctl -t host-advance`) without hand-rolled start/end markers.
 
+The line above elides the env header to keep the focus on the piping style —
+it is not the whole installed file. The real `/etc/cron.d/metal-host-advance`
+(written by `scripts/install-metal-host-advance-cron.sh`) DOES carry
+`FY_LIVE=1`, because `advance-host-checkout.sh` calls `alert()` on its
+anomaly paths and is on Rule 6's side-effecting allowlist. Do not read that
+as "the whole script is gated," though: per `advance-host-checkout.sh:143-166`,
+`FY_LIVE=1` governs only the `alert()`/ntfy channel — the git mutations
+(fetch, `checkout -- public/`, self-heal, `pull --ff-only`) that are this
+cron's entire purpose are deliberately ungated and run the same either way.
+A missing `FY_LIVE=1` here would silence anomaly alerts, not the advance
+itself.
+
 **What each rule actually checks, per line** (corrected 2026-08-07 — this
 section previously said Rule 2 only looks at `>>`, which stopped being true
 the day Rule 2 was widened to also catch a `&&` chain piped to `logger`):

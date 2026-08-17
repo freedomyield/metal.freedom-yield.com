@@ -287,6 +287,20 @@ force a merge or reset; that condition means the host authored commits
 that are not on `origin/main`, which needs a human read before any
 correction.
 
+This command carries no `FY_LIVE=1` — deliberately, not by oversight. Per
+`advance-host-checkout.sh:143-166`, `FY_LIVE` only gates the `alert()`/ntfy
+channel; the git mutations (fetch, discard, self-heal, `pull --ff-only`)
+that this recovery step exists to run are never gated, so the real FF-pull
+happens regardless. The only effect of the missing flag: if an anomaly path
+fires during this run (self-heal dirt, an `anchor-source.json` conflict, a
+lock timeout), its `alert()` prints `DRY: would notify … (FY_LIVE=<unset>)`
+to this SSH session's own stderr instead of reaching ntfy
+(`scripts/lib/side-effects.sh` `fyd_dry_note`). Since the operator is
+already watching this terminal for the expected-output line above, nothing
+is lost — it just is not pushed. Add `FY_LIVE=1` before `bash` in the
+command above only if you also want anomaly alerts pushed to ntfy during
+this one-time run.
+
 ### 4.3 Merging this mechanism to `main` (historical — completed 2026-07-10)
 
 The scripts and this doc lived on a feature branch (`fix/host-checkout-auto-advance`)
