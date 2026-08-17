@@ -286,7 +286,15 @@ RECEIPT_JSON="$(jq -n \
 		memo_prefix: $memo_prefix,
 		anchor: {
 			chain: "metal-a-chain",
-			chain_backend: "pulsevm",
+			# chain_backend = the execution stack that ACTUALLY served this tx.
+			# Evidenced by the dependencies of this very script: the tx is resolved
+			# through Antelope/EOSIO history APIs (Hyperion /v2/history, then
+			# /v1/history/get_transaction) and gates 3-4 above assert the Antelope
+			# action model (eosio.token::transfer + actor@permission authorization).
+			# MIGRATION POINT: when Metal A-chain actually runs PulseVM, change this
+			# literal (and only this literal) to "pulsevm". Until then "pulsevm" is a
+			# future-tense label and must not be published as present-tense fact.
+			chain_backend: "antelope",
 			network: $network,
 			method: "hc_single_4_action_pack",
 			tx_id: $tx_id,

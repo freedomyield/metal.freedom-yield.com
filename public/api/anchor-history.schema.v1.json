@@ -98,7 +98,7 @@
 		},
 		"chain_backend": {
 			"type": "string",
-			"description": "Execution engine label, mirrors anchor-receipt.anchor.chain_backend. For metal-a-chain this is 'pulsevm'. Optional — included for completeness when present in the receipt."
+			"description": "Execution-stack label, mirrors anchor-receipt.anchor.chain_backend. For metal-a-chain this is 'antelope'; lines appended before 2026-08-17 carry 'pulsevm', which was a forward-looking label for the announced Metallicus engine rather than an observed fact. Optional — included for completeness when present in the receipt."
 		},
 		"method": {
 			"type": "string",

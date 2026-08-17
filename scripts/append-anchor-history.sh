@@ -174,7 +174,12 @@ CYCLE_NUMBER="$(jq -r '.cycle_number // empty' "$RECEIPT")"
 DAG_ROOT="$(jq -r '.dag_root_hash' "$RECEIPT")"
 MEMO_PREFIX="$(jq -r '.memo_prefix' "$RECEIPT")"
 NETWORK="$(jq -r '.anchor.network' "$RECEIPT")"
-CHAIN_BACKEND="$(jq -r '.anchor.chain_backend // "pulsevm"' "$RECEIPT")"
+# Fallback mirrors the literal composed by scripts/gen-anchor-receipt.sh (see the
+# MIGRATION POINT comment there). "antelope" = the stack that actually serves
+# Metal A-chain today. PulseVM is the engine Metallicus has announced for this
+# chain, not the one serving it, so it must not be defaulted in as present-tense
+# fact.
+CHAIN_BACKEND="$(jq -r '.anchor.chain_backend // "antelope"' "$RECEIPT")"
 METHOD="$(jq -r '.anchor.method' "$RECEIPT")"
 EXPLORER_URL="$(jq -r '.anchor.explorer_url' "$RECEIPT")"
 ACTOR="$(jq -r '.signing_actor // .anchor.authorization.actor' "$RECEIPT")"

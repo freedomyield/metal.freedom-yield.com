@@ -69,7 +69,10 @@
 			"enum": ["xpr-mainnet", "xpr-testnet", "mainnet-a", "testnet-a"]
 		},
 		"chain": {"type": "string", "const": "metal-a-chain"},
-		"chain_backend": {"type": "string"},
+		"chain_backend": {
+			"type": "string",
+			"description": "Execution-stack label mirrored from anchor-receipt.anchor.chain_backend. For metal-a-chain this is 'antelope'; lines appended before 2026-08-17 carry 'pulsevm', a forward-looking label for the announced Metallicus engine rather than an observed fact."
+		},
 		"method": {"type": "string", "const": "hc_single_4_action_pack"},
 		"tx_id": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
 		"block_num": {"type": "integer", "minimum": 1},

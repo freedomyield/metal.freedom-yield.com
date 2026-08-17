@@ -48,7 +48,10 @@
 			"additionalProperties": true,
 			"properties": {
 				"chain": {"type": "string", "const": "metal-a-chain"},
-				"chain_backend": {"type": "string"},
+				"chain_backend": {
+					"type": "string",
+					"description": "Label for the execution stack that actually served the inscribing transaction. For metal-a-chain this is 'antelope' (Antelope/EOSIO interfaces — /v1/chain, /v1/history, Hyperion /v2/history — and the Antelope action model this receipt's own verify gates assert). Receipts generated before 2026-08-17 carry 'pulsevm', which was a forward-looking label for the announced Metallicus execution engine rather than an observed fact; it becomes correct only once Metal A-chain actually runs PulseVM."
+				},
 				"network": {
 					"type": "string",
 					"enum": ["xpr-mainnet", "xpr-testnet", "mainnet-a", "testnet-a"]
