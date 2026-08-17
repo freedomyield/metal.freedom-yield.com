@@ -7,6 +7,88 @@ schema v1 and the rationale for any future major version bump. It is
 not a chain-anchored attestation and not equivalent to an external
 append-only log: see the retention note below.
 
+## 2026-08-17 — `anchor.chain_backend` is a protocol family, not an execution engine
+
+### Summary
+
+`anchor-receipt.schema.v*.json` and `anchor-history.schema.v*.json` described
+`chain_backend` as "the execution engine running the chain" and documented its
+value for `metal-a-chain` as `pulsevm`. `scripts/gen-anchor-receipt.sh` wrote
+that literal unconditionally, and `scripts/append-anchor-history.sh` carried it
+as its fallback default. Both now write `antelope`, and the field is described
+as the **protocol family observed serving the inscribing transaction**.
+
+### Why
+
+PulseVM is an execution engine announced for Metal A-chain, not the stack
+observed serving it. The receipt generator resolves every transaction through
+Antelope/EOSIO history interfaces (Hyperion `/v2/history/get_actions`, then
+`/v1/history/get_transaction`) and its gates 3–4 assert the Antelope action
+model (`eosio.token::transfer` authorized by `actor@permission`). It reads no
+engine identifier at all — it never calls `/v1/chain/get_info`. So `antelope`
+is the strongest label the pipeline can actually support, and `pulsevm` was a
+forward-looking label published as present-tense fact, contrary to the public
+claims standard in `docs/CONSTITUTION.md`.
+
+Family and engine are different axes. A later engine change does **not** by
+itself make `antelope` false: it stays true for as long as the two gates keep
+passing on Antelope-shaped actions. `scripts/gen-anchor-receipt.sh` carries a
+`WHEN TO CHANGE THIS` note defining the change condition in terms the script
+can evaluate, plus the list of sites to update together.
+
+### Compatibility
+
+**No schema constraint changed.** `chain_backend` is `{"type": "string"}` with
+no enum in all four schemas, before and after; the edits are `description`
+text plus one `x-revision-history` entry and an `x-baseline-revision` bump in
+each v1 schema. Verified by validating a document carrying
+`chain_backend: "pulsevm"` against the revised `anchor-receipt.schema.v1.json`,
+`anchor-receipt.schema.v2.json` and `anchor-history.schema.v1.json` — all three
+still pass, so `x-stability: additive-only-within-v1` holds and every
+previously valid document remains valid.
+
+Already-published records are **not** rewritten and keep `pulsevm`: the two
+lines of `/api/anchor-history.jsonl` (the cycle 3 anchor of 2026-07-04 and the
+cycle 4 anchor of 2026-08-04) are append-only, and
+`api/archive/anchor-receipt-<tx_id>.json` is content-addressed. The first
+receipt carrying the corrected value is the cycle 5 anchor. Note the resulting
+asymmetry: regenerating a receipt from one of those older transactions after
+this change yields `antelope` in the archive while the corresponding ledger
+line keeps `pulsevm`; both schemas say so explicitly.
+
+Separately, the loose pairing `Metal A-chain (PulseVM / XPRNetwork)` is
+replaced everywhere by `Metal A-chain (an Antelope/EOSIO-family chain, reached
+at XPR Network endpoints)`. The intermediate wording `= XPR Network` was
+rejected: it asserts an identity that `public/about-metal/` contradicts, where
+the two are contrasted as Layer-0 and Layer-1.
+
+One instance remains in `docs/CONSTITUTION.md` §3.4 (the broadcast definition),
+which under §9 only the operator may amend — "AI assistance MAY draft proposed
+amendments but MAY NOT enact them." A drafted amendment has been prepared for
+the operator; this repository is unchanged there until the operator enacts it.
+
+### What changed
+
+| Surface | Change |
+| --- | --- |
+| `scripts/gen-anchor-receipt.sh` | composed literal `pulsevm` → `antelope`; provenance + `WHEN TO CHANGE THIS` note |
+| `scripts/append-anchor-history.sh` | fallback default `// "pulsevm"` → `// "antelope"` |
+| `public/api/anchor-receipt.schema.v1.json` | `chain` + `chain_backend` + top-level descriptions (no constraint change); `x-revision-history` entry |
+| `public/api/anchor-receipt.schema.v2.json` | `chain_backend` description added |
+| `public/api/anchor-history.schema.v1.json` | `chain_backend` description; `x-revision-history` entry |
+| `public/api/anchor-history.schema.v2.json` | `chain_backend` description added |
+| `public/api/anchor-receipt.example.json`, `.v2.example.json`, `.phase-beta.example.json` | example `chain_backend` value |
+| `public/api/anchor-history.example.jsonl` | example `chain_backend` value (all three lines) |
+| `public/verify/index.html` (en + ja) | chain identification; re-verification note moved out of the parenthetical |
+| `public/selection-evidence/index.html` (en + ja) | chain identification |
+| `docs/MERKLE_DAG_SPEC.md`, `docs/IDENTITY_VERIFICATION.md`, `docs/OPERATOR_IDENTITY_SETUP.md` | chain identification |
+| `tests/gen-anchor-receipt/test-r13-r18-schema-archive.sh` | pins the composed value; pins `chain_backend` across all four published examples |
+| `tests/append-anchor-history/test-append-anchor-history.sh` | pins the mirrored value and the fallback default |
+
+The value was a hardcoded literal that nothing derived at runtime and no test
+asserted on, which is why it survived from `ac2ef0c` (2026-06-23) unnoticed.
+The regression tests above close that specific gap.
+
 ## 2026-07-06 — Retire cycles-history.json + cycles_history_url (design-stocktake #1: single-DAG completion)
 
 ### Summary
