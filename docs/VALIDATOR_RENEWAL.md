@@ -269,7 +269,20 @@ State file: `/var/lib/freedom-yield/cycle-gate-state.json` (= operator 承認済
 
 **AI が chain 状態を確認する手段の注記**: `scripts/broadcast-guard.sh`(tier-1)は `/ext/bc/[XPC]` や bare `/ext/[XP]` 宛の `curl`/`wget` を **read/write を区別せず shape だけで無条件 block** する — `platform.getCurrentValidators` の読み取り専用クエリであっても、AI session からの素の `curl .../ext/bc/P` は broadcast 試行と同様に拒否される。採用済みの回避策は chain に直接問い合わせず、5 分毎の `metal-node-info` cron (`node-info.sh`) が既に書いている `public/api/validator.json` を read し、`endTime` / `observedAt` フィールドをファイルの mtime(≤5 分 = fresh、cron 周期と一致)と突き合わせて鮮度確認すること。**この目的で `broadcast-guard.sh` を無効化しない** — guard は設計上無条件であり、cron 生成物を read するのが AI session から chain 状態を見る正しい経路。
 ① validator host: node-info tick 待ち — `public/api/validator.json` に新 endTime が反映されたことを確認(古い endTime のまま cycle-recording を走らせると記録がずれるため)
-② validator host: `uptime-history.sh`(cycle N close)
+② validator host: `uptime-history.sh`(cycle N close)。実行コマンドは
+`FY_LIVE=1 bash scripts/uptime-history.sh`。**`FY_LIVE=1` 必須** —
+無いと script は exit 0 で正常終了したように**見える**が、実際は master ledger
+append / `current-cycle-state.json` / cycle-close summary / public preview
+の **4 write すべて**(3 ではない)が `DRY: would …` に化けて何も書かれない
+(`resume-after-cycle-start.sh`(手順⑨)の exit 6 拒否とは違う挙動)。
+「書けた」確認は `DRY:` 行が無いことだけに頼らない — `Closed cycle #<N>: …`
+等 live 実行時のみ出る成功行の方が強い証拠(cycle-gate.sh 欠落時は Job B が
+skip される別経路もあり、そのときも `[uptime-history] cycle-gate.sh missing
+or non-executable → skip Job B (fail-closed)` という別の stderr 行は出る —
+`DRY:` タグが付かないだけで無言ではない)。この step が dry の
+まま先へ進んでも手順③の「+1 行」検証や手順④⑤の exit 7 / exit 9 ガードが
+止める(**stale な行が公開される、ではなく行が増えないまま止まる**)。
+実測込みの詳細は `docs/CYCLE_GATE.md` step 2 参照
 ③ validator host: `gen-cycle-history.sh` + push — 公開 `cycle-history.jsonl` が 1 行増えたことを実測確認
 ④ Mac local: `FY_EXPECT_CYCLE=<N> OPERATOR_IDENTITY_KEY=~/.ssh/freedom-yield-operator-identity bash scripts/operator-local/gen-identity.sh`(= operator passphrase prompt 発生時に 3 番目の active action)。`FY_EXPECT_CYCLE=<N>` はサイクル切替時 **MANDATORY**(N = 直前に閉じた cycle 番号。手順③の公開反映前に実行すると exit 7 で hard-stop)。続けて `git add` + `git commit` + `git push origin main`、`gh run watch` で deploy 完了監視
 ⑤ validator host: `FY_EXPECT_CYCLE=<N> bash scripts/gen-anchor-source.sh`(cycle-4 当日の例: `FY_EXPECT_CYCLE=3`)— 新 `anchor-source.json`(3-branch DAG)を compose。`cycle_number_observed` は 公開 `cycle-history.jsonl` の CLOSED_COUNT+1 から自己導出するが、`FY_EXPECT_CYCLE` を渡すと ordering guard が有効になり、CLOSED_COUNT と 不一致(= 手順③がまだ公開反映されていない)なら compose 前に **exit 9** で hard-stop する(未設定なら警告バナーのみで継続、初回 bootstrap 用)。**gen-identity.sh の exit 7 とは別条件** — `gen-anchor-source.sh` では exit 7 は既に「atomic write failed」の意味で使用中のため、意図的に番号を揃えていない(exit 7 と exit 9 を同じ意味と読まない)
@@ -320,10 +333,32 @@ AI が応答不能な場合、 operator は本書「AI が裏で自走する技�
 #   これが済むまで ⑤ は exit 4、⑨ は exit 2 で hard-block する。
 
 # ①②③ validator host で cycle-recording を閉じる(node-info tick 確認 → uptime-history → gen-cycle-history → 公開 push)
+# 注意: 下の 4 本は `&&` で連結されている。`&&` は「直前のコマンドが exit 0 で
+# 終わったら次へ進む」としか見ておらず、「意図した write が実際に起きたか」は見ない。
+# uptime-history.sh は FY_LIVE=1 が無いと全 write が `DRY: would …` に化ける
+# loud dry no-op で、それでも exit 0 を返す(docs/CYCLE_GATE.md step 2 で実測済み、
+# resume-after-cycle-start.sh の exit 6 拒否とは違う挙動)。`FY_LIVE=1` を書き忘れると、
+# cycle N の uptime record が閉じられないまま `&&` チェーンは「成功」として
+# gen-cycle-history.sh → push-to-web-host.sh まで素通りする。ただし公開される
+# cycle-history.jsonl は「stale な行」ではない — gen-cycle-history.sh は
+# uptime-cycles.json の .cycles 配列を 1:1 で行に写すだけなので、cycle N の
+# 要素が無ければ cycle N の行は作られない(incidents.json も不変なら前回と
+# byte 一致、incidents.json 側だけ変化していれば既存行の incident 集計が
+# 再計算されて bytes は変わるが、cycle N の行数自体は増えない — いずれも
+# 「stale な cycle N 行が公開される」ではない。docs/CYCLE_GATE.md step 2
+# 参照)。この場合に頼れるのは下の
+# 「公開 cycle-history.jsonl が 1 行増えたことを実測確認」の一文と、
+# 手順④ gen-identity.sh の exit 7 / 手順⑤ gen-anchor-source.sh の exit 9 の
+# ordering guard — どちらも「行が増えていない」ことを機械的に検知する。
+# **緊急 fallback (= 通常経路が壊れている日に使う)** で `FY_LIVE=1` を
+# 書き忘れた場合、これらの下流チェックに気づかず読み飛ばすと発覚が遅れる。
+# node-info.sh / gen-cycle-history.sh / push-to-web-host.sh の 3 本は
+# FY_LIVE の概念自体を持たない(無条件実行、または意図的に非 gate — 詳細は
+# docs/CYCLE_GATE.md step 1/3)ため、この 3 本に `FY_LIVE=1` を足す必要はない。
 ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
     'sudo -u deploy bash -c "cd /home/deploy/metal.freedom-yield.com && \
        bash scripts/node-info.sh && \
-       bash scripts/uptime-history.sh && \
+       FY_LIVE=1 bash scripts/uptime-history.sh && \
        bash scripts/gen-cycle-history.sh && \
        bash scripts/push-to-web-host.sh cycle-history.jsonl"'
 # push-to-web-host.sh が無いと公開 URL の cycle-history.jsonl が進まず、手順④の exit 7 /

@@ -259,16 +259,84 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    actually on chain before any cycle-recording script below runs against
    it — recording against a stale `endTime` would misdate the cycle
    boundary.
-2. **host — `uptime-history.sh`** closes out cycle N's uptime record.
+2. **host — `uptime-history.sh`**
+   ```sh
+   FY_LIVE=1 bash scripts/uptime-history.sh
+   ```
+   closes out cycle N's uptime record: the append-only master ledger entry,
+   the in-flight `current-cycle-state.json`, the cycle-close summary row
+   appended to `uptime-cycles.json`, and the refreshed public
+   `uptime-recent.json` preview — **four artefacts**, not three (the script's
+   own header, `scripts/uptime-history.sh:40-45`, is explicit: "before ANY of
+   the four artefacts above is written"). **`FY_LIVE=1` is required for all
+   four writes** (C3 rollout, 2026-08-06) — but unlike step 9's
+   `resume-after-cycle-start.sh`, this script does **not refuse** without
+   it. Omitting the env var is a **loud dry no-op that still exits 0**:
+   every write becomes a `DRY: would …` line on stderr and the target file
+   is left byte-for-byte untouched (measured 2026-08-17 against a fixture
+   `validator.json`: no `FY_LIVE` → exit 0, zero files written, only `DRY:`
+   lines on stderr).
+
+   **To confirm a real (not dry) run, look for a positive signal — don't
+   rely on the absence of `DRY:` alone.** `fyd_is_live`-guarded stdout lines
+   that only a live run prints: `Appended daily entry for <date> …` on a run
+   that actually appends a new daily row — gated by the `EXISTING` check at
+   `scripts/uptime-history.sh:149`; a day that already has a row instead
+   prints `Daily entry for $TODAY already present, skipping append`
+   (`:171`), which is **not** gated on `fyd_is_live` and so appears in both
+   dry and live runs — and, on a cycle boundary, `Closed cycle #<N>: …`
+   (`:259-261`) plus `Wrote <uptime-recent.json> (<n> total …)` /
+   `Wrote <uptime-cycles.json> (<n> cycles)` (`:287-290`). `Closed cycle
+   #<N>: …` in particular names the exact thing this step exists to do —
+   it is the strongest signal. The absence of `DRY:` lines is a weaker,
+   negative-only check: a second, unrelated exit-0 path exists if
+   `scripts/cycle-gate.sh` is missing or non-executable (this doc's
+   Rollback lever 2, `chmod -x` — see below) — the cycle-boundary half of
+   this script (Job B) then skips, independent of `FY_LIVE`. This is not
+   silent: it prints its own named stderr line (`[uptime-history]
+   cycle-gate.sh missing or non-executable → skip Job B (fail-closed)`,
+   `:187`) — it simply carries no `DRY:` tag, so a check that greps only
+   for `DRY:` would miss it.
+
+   Run this step verbatim without `FY_LIVE=1` and cycle N's uptime record is
+   never closed — but this does **not** silently pollute step 3's output
+   with a wrong row. `gen-cycle-history.sh` maps `uptime-cycles.json`'s
+   `.cycles` array to output rows 1:1 (`sort_by(.cycle_n) | .[]`,
+   `scripts/gen-cycle-history.sh:153-190`), so with no cycle-N element
+   present it emits **no cycle-N row at all** — no cycle-N row is added,
+   full stop. Whether the regenerated `cycle-history.jsonl` is
+   byte-identical to the previous run additionally depends on
+   `incidents.json`, `gen-cycle-history.sh`'s other canonical input
+   (`:105-106`): if that file is unchanged since the last regeneration the
+   output is byte-identical; if it changed, existing rows' incident fields
+   are recomputed and the bytes differ even though no cycle-N row exists.
+   Either way the row count for cycle N does not grow. The failure surfaces
+   downstream instead: `CLOSED_COUNT` stays at
+   N-1, which step 3's own "grew by exactly one line" check (below) is
+   designed to catch directly; even if that check were skipped, step 4's
+   `gen-identity.sh` (**exit 7**) and step 5's `gen-anchor-source.sh`
+   (**exit 9**) ordering guards hard-stop on the stale count before either
+   script does anything further. What to hunt for after a missed
+   `FY_LIVE=1` is therefore a **missing** cycle-N row in
+   `cycle-history.jsonl`, not a wrong one.
 3. **host — `gen-cycle-history.sh` + publish** appends cycle N's row to
    `cycle-history.jsonl` and ships it to the web host:
    ```sh
    bash scripts/gen-cycle-history.sh
    bash scripts/push-to-web-host.sh cycle-history.jsonl
    ```
-   The publish step is **not optional and not automatic**: steps 4 and 5
-   read the *published* ledger, so without it `gen-identity.sh` (exit 7)
-   and `gen-anchor-source.sh` (exit 9) both count a stale
+   Neither script takes `FY_LIVE` — confirmed by reading both (2026-08-17):
+   `gen-cycle-history.sh`'s own header states in so many words that it is
+   "NOT GATED ON FY_LIVE" by deliberate design (it never touches
+   `${FY_STATE_DIR}`, sends no notification, and its only write is a
+   deterministic regeneration of a working-tree artifact already
+   fail-closed behind `cycle-gate.sh`); `push-to-web-host.sh` has no
+   `FY_LIVE` concept at all — every invocation pushes unconditionally. Do
+   **not** add `FY_LIVE=1` to either command; it would not be read by
+   either script and could be mistaken for a required gate that isn't
+   there. The publish step is **not optional and not automatic**: steps 4
+   and 5 read the *published* ledger, so without it `gen-identity.sh`
+   (exit 7) and `gen-anchor-source.sh` (exit 9) both count a stale
    `CLOSED_COUNT`. Verify the published file grew by exactly one line
    (curl the public URL and compare line counts) before continuing.
 4. **Mac —**
