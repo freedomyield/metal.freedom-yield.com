@@ -72,11 +72,16 @@
 # its bytes currently match? Authority: deploy/publication.json's `kind` —
 # the SAME registry scripts/operator-local/gen-identity.sh reads when
 # composing a new manifest, so THIS checker's own kind resolution (below) has
-# to agree with the generator's. That is no longer an intention held by a
-# hand-copy: since 2026-08-17 tests/publication-registry/'s T21 executes all
-# THREE copies of the rule — this one, the generator's, and its own — and
-# fails on any disagreement. See registry_kind_of() further down for how each
-# copy is extracted. deploy/feed-excludes.txt is NOT the authority
+# to agree with the generator's. Since 2026-08-17 that is machine-checked
+# rather than intended: tests/publication-registry/'s T21 runs this script's
+# resolution rule, the generator's, and its own, and fails on any
+# disagreement. Note the exact scope for THIS script's copy — T21 extracts
+# and runs only the jq PROGRAM between the T21-SENTINEL markers, not the
+# shell function wrapped around it, so the `--arg p` wiring and the
+# $REGISTRY_JSON feed below are outside what T21 sees (measured: breaking the
+# --arg wiring leaves T21 green and is caught by tests/identity-pins/
+# instead). See registry_kind_of() further down for how each copy is
+# extracted. deploy/feed-excludes.txt is NOT the authority
 # for this check: it is a narrower list (push-owned paths only) and carries
 # no `kind` at all — api/archive/ is ON feed-excludes.txt (git never
 # carries it) but is kind=record (safe to pin), which is exactly the
@@ -516,8 +521,11 @@ classify_path() {
 # all. What changed instead is that the agreement stopped being a claim:
 # tests/publication-registry/'s T22 extracts BOTH bash copies by name and
 # requires identical (exit status, stdout) on every probe URL, requires the
-# jq form to agree with them on every URL the signed manifest actually
-# carries, and holds the reason for keeping them apart to an expiry check.
+# jq SEMANTICS to agree with them on every URL the signed manifest actually
+# carries (semantics only — T22 does not execute either jq copy; those are
+# carried behaviourally by that suite's T7/T14 and by k8U in
+# tests/identity-pins/), and holds the reason for keeping them apart to an
+# expiry check.
 # Refusing (return 1) on a URL with no path is the load-bearing behaviour
 # here: the caller die()s on it rather than comparing against nothing.
 url_to_public_path() {

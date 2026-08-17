@@ -55,9 +55,11 @@
 #     and scripts/operator-local/gen-identity.sh's registry_kind_of_path()
 #     (the copy that composes the signed manifest) — with a mutation proof on
 #     each side of the comparison
-# T22 the two bash url→path copies are behaviourally identical, the jq form
-#     agrees with them on every URL the signed manifest carries, and the
-#     recorded reason for not unifying all four is itself expiring
+# T22 the two bash url→path copies are behaviourally identical (extracted and
+#     executed), the jq SEMANTICS agree with them on every URL the signed
+#     manifest carries (semantics only — the two jq copies' own texts are held
+#     by T7/T14 and by k8U in tests/identity-pins/), and the recorded reason
+#     for not unifying all four is itself expiring
 
 set -uo pipefail
 
@@ -1191,23 +1193,52 @@ t21
 #   a. (1) and (2) are extracted BY NAME and required to return the same
 #      (exit status, stdout) pair for every probe URL — the equality the
 #      comment in each script asserts about the other, now checked.
-#   b. (3) is required to agree with (1) for every URL the SIGNED manifest
-#      actually carries — the only input domain where a disagreement could
-#      misclassify a real pin.
-#   c. the recorded REASON for keeping (3) separate is that it deliberately
-#      behaves differently OUTSIDE that domain. Measured 2026-08-17: for
-#      "ftp://h/api/x.json" the bash copies strip the host and return
-#      "api/x.json" while the jq sub() leaves the string untouched, and for
-#      an input with no path at all the bash copies REFUSE (exit 1, which is
-#      what makes check-identity-pins.sh die on a malformed pin url) while
+#   b. the jq SPELLING of the conversion is required to agree with (1) for
+#      every URL the SIGNED manifest actually carries — the only input domain
+#      where a disagreement could misclassify a real pin. READ THE LIMIT ON
+#      THIS CAREFULLY: see "What (b) does NOT check" below.
+#   c. the recorded REASON for keeping the jq form separate is that it
+#      deliberately behaves differently OUTSIDE that domain. Measured
+#      2026-08-17: for "ftp://h/api/x.json" the bash copies strip the host and
+#      return "api/x.json" while the jq sub() leaves the string untouched, and
+#      for an input with no path at all the bash copies REFUSE (exit 1, which
+#      is what makes check-identity-pins.sh die on a malformed pin url) while
 #      the jq sub() silently returns the input. If that divergence ever
 #      disappears, the justification for four implementations has expired and
 #      this case says so rather than staying quietly green.
 #
+# What (b) does NOT check (review finding I-1, 2026-08-17)
+# -------------------------------------------------------
+# (b) does NOT execute copy (3) or copy (4). The jq program it compares
+# against is jq_spelling_retyped() below — the same expression TYPED OUT
+# AGAIN here, not extracted from either. So (b) measures "the jq semantics
+# and the bash semantics agree on the manifest's URLs"; it does NOT measure
+# "identity_pins() and K8_DERIVE_JQ still contain that expression".
+#
+# This is the very re-transcription T21 refuses a few hundred lines up ("A
+# re-transcription would be a fourth untested copy and would prove nothing").
+# It is left standing here, knowingly, because copies (3) and (4) are already
+# carried behaviourally by other cases — measured 2026-08-17 by mutating each
+# one and observing which suite went red:
+#
+#   mutate identity_pins()'s sub()  -> T22 stays 4/4 PASS; T7 (4 FAIL), T14
+#                                      (9 FAIL), T19 and T15 go red
+#   mutate K8_DERIVE_JQ's sub()     -> this whole suite stays 37/0; the k8U
+#                                      unit case and k8 in
+#                                      tests/identity-pins/ go red (5 FAIL)
+#
+# So nothing is unguarded, but the guard is not here, and this case must not
+# be read as providing it. Extracting (3) and (4) the way T21 extracts the
+# two bash resolvers is entirely possible — identity_pins() is a shell
+# function in this file and K8_DERIVE_JQ is a plain variable assignment — and
+# is DESCOPED, not blocked. It is the obvious next revision of this case.
+#
 # So the honest summary, which the assertions below enforce rather than
-# claim: two of the four are now machine-checked identical, the other two are
-# machine-checked compatible on the domain that matters, and the reason they
-# are not one implementation is itself an expiring declaration.
+# claim: two of the four implementations are machine-checked identical to
+# each other, the jq SEMANTICS are machine-checked compatible with them on
+# the domain that matters (the two jq copies' own texts are held by T7/T14
+# and k8U instead), and the reason they are not one implementation is itself
+# an expiring declaration.
 # ---------------------------------------------------------------------------
 t22() {
 	local a_src b_src mut_src bad=0 n=0 n_refuse=0 n_real=0 n_div=0 mdiff=0 u
@@ -1228,7 +1259,12 @@ t22() {
 		out="$( . "$1"; "$2" "$3" )"; rc=$?
 		printf '%s|%s' "$rc" "$out"
 	}
-	jq_norm() { jq -rn --arg u "$1" '$u | sub("^https?://[^/]+/"; "")'; }
+	# NAMED for what it is: the jq expression RE-TYPED here, not extracted
+	# from identity_pins() (copy 3) or K8_DERIVE_JQ (copy 4). Comparing
+	# against it measures jq-vs-bash SEMANTICS, never that those two copies
+	# still spell it this way. See "What (b) does NOT check" in the header
+	# before strengthening any claim built on this.
+	jq_spelling_retyped() { jq -rn --arg u "$1" '$u | sub("^https?://[^/]+/"; "")'; }
 
 	manifest_urls() { jq -r '.artifact_manifest[]? | (.url // empty), (.schema_url // empty)' "$IDENTITY"; }
 	url_probes() {
@@ -1264,12 +1300,15 @@ t22() {
 		pass "T22 the two BASH url→path copies agree on exit status AND stdout for all ${n} probe URLs (${n_refuse} of which they both refuse)"
 	fi
 
-	# ---- b. the jq form must agree on the domain that actually occurs
+	# ---- b. the jq SEMANTICS must agree on the domain that actually occurs.
+	# Not a check on copies (3)/(4) themselves — see "What (b) does NOT
+	# check" in the header. Those are carried by T7/T14 and by k8U in
+	# tests/identity-pins/.
 	while IFS= read -r u; do
 		[ -n "$u" ] || continue
 		n_real=$((n_real + 1))
-		if [ "$(url_via "$a_src" url_to_public_path "$u")" != "0|$(jq_norm "$u")" ]; then
-			fail "T22 '${u}' is a URL the signed manifest carries, and the bash normalisation disagrees with the jq sub() that identity_pins()/K8_DERIVE_JQ use on it"
+		if [ "$(url_via "$a_src" url_to_public_path "$u")" != "0|$(jq_spelling_retyped "$u")" ]; then
+			fail "T22 '${u}' is a URL the signed manifest carries, and the bash normalisation disagrees with the jq sub() semantics on it"
 			bad=1
 		fi
 	done <<< "$(manifest_urls)"
@@ -1277,12 +1316,12 @@ t22() {
 		fail "T22 the signed manifest carried no URL to compare — this half of the case did not run"
 		bad=1
 	else
-		pass "T22 the jq sub() form agrees with the bash form on all ${n_real} URL(s) the signed manifest actually carries"
+		pass "T22 the jq sub() SEMANTICS agree with the bash form on all ${n_real} URL(s) the signed manifest carries (semantics only — this does not execute identity_pins() or K8_DERIVE_JQ; T7/T14 and k8U hold those)"
 	fi
 
 	# ---- c. the reason for keeping them separate must still be true
 	for u in "ftp://example.test/api/x.json" "https://example.test"; do
-		[ "$(url_via "$a_src" url_to_public_path "$u")" != "0|$(jq_norm "$u")" ] && n_div=$((n_div + 1))
+		[ "$(url_via "$a_src" url_to_public_path "$u")" != "0|$(jq_spelling_retyped "$u")" ] && n_div=$((n_div + 1))
 	done
 	if [ "$n_div" -eq 2 ]; then
 		pass "T22 the recorded bash/jq divergence is still real (non-http(s) scheme, and a URL with no path) — the reason for not folding the jq copies in has not expired"
