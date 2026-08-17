@@ -27,7 +27,7 @@
       },
       {
         "surface": "/etc/cron.d on the validator host — the cron files that actually invoke the producers.",
-        "measured": "Six cron basenames have a creating installer in this repo (metal-host-advance, metal-anchor-watch, metal-anchor-publish-health, metal-identity-pins, metal-host-drift, metal-watch-validators — grep of scripts/install-*.sh for cron.d/, 2026-08-07). NONE of them produces a publication listed here. Of the 20 push-owned publications (publisher push / push-subdir / push-out-of-band), 17 name a cron and ALL 17 carry owner.cron_installer_in_repo=false, i.e. zero of them have a repo-verifiable command body. The other 3 — api/anchor-receipt.json, api/anchor-history.jsonl, api/archive/ — are on NO cron at all and carry cron_installer_in_repo=null; they are produced by hand through scripts/run-anchor-pipeline.sh after an on-chain broadcast. Do not read this as 'push implies cron'.",
+        "measured": "Seven cron basenames have a creating installer in this repo (metal-host-advance, metal-anchor-watch, metal-anchor-publish-health, metal-identity-pins, metal-host-drift, metal-watch-validators, metal-pulsevm-watch — grep of scripts/install-*.sh for cron.d/, re-measured 2026-08-17 when metal-pulsevm-watch landed; the same grep returned six on 2026-08-07). NONE of them produces a publication listed here. Of the 20 push-owned publications (publisher push / push-subdir / push-out-of-band), 17 name a cron and ALL 17 carry owner.cron_installer_in_repo=false, i.e. zero of them have a repo-verifiable command body. The other 3 — api/anchor-receipt.json, api/anchor-history.jsonl, api/archive/ — are on NO cron at all and carry cron_installer_in_repo=null; they are produced by hand through scripts/run-anchor-pipeline.sh after an on-chain broadcast. Do not read this as 'push implies cron'.",
         "why_excluded": "A registry cannot govern text it cannot read. The spec (§9) records that 15 project cron files run in production and 7 have no repo installer; that count was measured on the host, not by this file, and is not re-measured here. What IS measured here is the repo side: the schedule, the arguments, and the environment that decide when and where a producer writes are outside this file for every push-owned publication. Do not read owner.producer as 'the registry controls this artifact' — it means only 'this script contains the write'."
       },
       {
@@ -642,7 +642,11 @@
           "# identity-pins の alert dedup state (scripts/check-identity-pins.sh --mode=live)",
           "# — 同じ理由で個別指定が必要。cron の live 実行が public repo の作業ツリーに",
           "# untracked JSON を落とさないようにする",
-          "logs/identity-pin-alert-state.json"
+          "logs/identity-pin-alert-state.json",
+          "# pulsevm 上流監視の前回観測 state (scripts/check-pulsevm-upstream.sh)",
+          "# — 同じ理由で個別指定が必要。中身は「前回 upstream がどう見えたか」の観測記録",
+          "# であって repo の成果物ではない(差分検知の基準そのものなので host ローカル)",
+          "logs/pulsevm-upstream-state.json"
         ]
       }
     },
