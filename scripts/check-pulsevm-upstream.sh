@@ -139,6 +139,12 @@
 # here, and stated so the reader does not expect a test to observe it without
 # setting FY_LIVE=1 and a sandbox state path.
 #
+# One failure path is outside the counter: a missing jq. That exits 5 before
+# the state file is even read, and it could not write the counter afterwards
+# either, since composing the state needs jq. A host without jq has bigger
+# problems than this watch (the anchor pipeline needs it too), so it is left
+# as a loud exit rather than given a jq-free counter of its own.
+#
 # ---------------------------------------------------------------------------
 # EXIT CODES
 # ---------------------------------------------------------------------------
