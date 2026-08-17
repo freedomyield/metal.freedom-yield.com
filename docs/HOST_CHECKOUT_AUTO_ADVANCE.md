@@ -271,15 +271,29 @@ ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HO
   'cd /home/deploy/metal.freedom-yield.com && sudo bash scripts/install-metal-host-advance-cron.sh'
 ```
 
-This writes `/etc/cron.d/metal-host-advance` with an env header carrying
-`SHELL=/bin/bash`, `PATH=/usr/local/bin:/usr/bin:/bin` and `FY_LIVE=1`,
-followed by the schedule line itself (`45 4 * * * deploy bash
-.../scripts/advance-host-checkout.sh 2>&1 | logger -t host-advance`) —
-`scripts/install-metal-host-advance-cron.sh:74-79`'s `EXPECTED` heredoc is
-the literal content installed, all four lines. `FY_LIVE=1` is required
-here: `advance-host-checkout.sh` calls `alert()` on its anomaly paths and
-is on `check-cron-file.sh` Rule 6's side-effecting allowlist, so this file
-would fail that lint without it (see `docs/CRON_CONVENTIONS.md`'s
+This writes `/etc/cron.d/metal-host-advance` from
+`scripts/install-metal-host-advance-cron.sh:68-80`'s `EXPECTED` heredoc —
+**11 lines, not just the env header**: a 7-line explanatory comment
+(`:69-75`, `# Daily self-heal: ...` through `... design.md.`) followed by
+the 4-line env header + schedule (`:76-79`: `SHELL=/bin/bash`,
+`PATH=/usr/local/bin:/usr/bin:/bin`, `FY_LIVE=1`, and the schedule line
+itself, `45 4 * * * deploy bash .../scripts/advance-host-checkout.sh 2>&1
+| logger -t host-advance`). All 11 lines land in the installed file
+verbatim: `read -r -d '' EXPECTED <<CRON` (`:68`) captures the whole
+heredoc body as one string, `printf '%s\n' "$EXPECTED" > "$TMP"` (`:88`)
+writes it unmodified to a temp file, and `install ... "$TMP"
+"$CRON_TARGET"` (`:110`/`:114`) copies that file byte-for-byte to
+`/etc/cron.d/metal-host-advance` — cron itself treats the leading `#`
+lines as ordinary comments, so they are not stripped anywhere in this
+path. **Verified empirically, not just by reading the source**: ran this
+installer with `FYD_CRON_TARGET` pointed at a scratch file (never at a
+real `/etc/cron.d/` path) and `FYD_REPO_PATH` pointed at this worktree —
+the generated file was exactly those same 11 lines
+(`wc -l` → `11`), and separately passed `scripts/check-cron-file.sh` with
+`Result: 0 violation(s)`. `FY_LIVE=1` is required in the 4-line command
+segment: `advance-host-checkout.sh` calls `alert()` on its anomaly paths
+and is on `check-cron-file.sh` Rule 6's side-effecting allowlist, so this
+file would fail that lint without it (see `docs/CRON_CONVENTIONS.md`'s
 "Alternative form: piping to `logger`" section for what the flag does and
 does not gate on this specific script). Lint-checked by
 `scripts/check-cron-file.sh` before it is written, and idempotent (a
