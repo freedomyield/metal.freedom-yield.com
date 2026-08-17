@@ -70,7 +70,9 @@ FY_LIVE=1
 15 5 * * * deploy bash /home/deploy/.../scripts/check-host-drift.sh 2>&1 | logger -t host-drift
 ```
 
-`scripts/lib/side-effects.sh` (2026-08-06) gates every production side effect — an `ntfy` push via `notify.sh`, a web-host publish via `push-to-web-host.sh`, or a `/var/lib/freedom-yield` state-dir write — behind `FY_LIVE=1`. Anything else (unset, `0`, anything but the literal `1`) is a loud dry no-op: the suppressed action logs one `DRY: would ...` line to stderr and returns success. Only cron env headers are meant to carry `FY_LIVE=1`; a test or an interactive shell that doesn't set it stays hermetic by default.
+`scripts/lib/side-effects.sh` (2026-08-06) gates production side effects that actually go through it — an `ntfy` push via `notify.sh` (when a caller routes it through the library's `fyd_notify` wrapper), or a `/var/lib/freedom-yield` state-dir write — behind `FY_LIVE=1`. Anything else (unset, `0`, anything but the literal `1`) is a loud dry no-op: the suppressed action logs one `DRY: would ...` line to stderr and returns success. Only cron env headers are meant to carry `FY_LIVE=1`; a test or an interactive shell that doesn't set it stays hermetic by default.
+
+**`push-to-web-host.sh` is the one exception worth naming explicitly, because it is easy to misread as gated too.** Despite being on Rule 6's side-effecting allowlist below, the script itself never reads `FY_LIVE` or sources `scripts/lib/side-effects.sh` — confirmed by reading it end to end — and `docs/CYCLE_GATE.md` step 3 states the same thing independently: "`push-to-web-host.sh` has no `FY_LIVE` concept at all — every invocation pushes unconditionally." Rule 6 still requires the flag on any cron that invokes it, but that requirement is allowlist POLICY (any cron doing a publish is worth the discipline of an explicit `FY_LIVE=1`), not a functional gate this specific script honors. See the worked example below for what this means in practice for a cron that chains it.
 
 A cron whose invoked command never notifies, never pushes, and never touches `/var/lib/freedom-yield` does not need the line. `scripts/check-cron-file.sh` Rule 6 enforces this: it fails a candidate cron whose command references a known side-effecting script (or one that sources `scripts/lib/side-effects.sh`) without a `FY_LIVE=1` line, and passes everything else without requiring the line.
 
@@ -151,11 +153,31 @@ commands' output preserved).
 
 ## Worked example: `/etc/cron.d/metal-evidence`
 
-This is the file that exists today, post-fix:
+This block was captured on 2026-06-19 when the file was live-patched to
+fix the `/var/log` redirect bug (see "Related lessons" below) — compliant
+with every rule that existed at the time. **It was never updated for Rule
+6** (`FY_LIVE=1`, added 2026-08-06, above): the block as it stood until
+2026-08-17 invoked `push-to-web-host.sh` without the flag, and ran
+unchanged through `scripts/check-cron-file.sh` failing Rule 6
+(`references side-effecting script(s) (push-to-web-host.sh) but the file
+has no 'FY_LIVE=1' line`) — a worked example in the doc that teaches this
+project's cron conventions was, itself, non-compliant with one of the five
+rules it documents. Corrected below to also satisfy Rule 6.
+
+**This is a reference shape, not a live transcript of the deployed file.**
+This repo has no host access to confirm byte-for-byte what
+`/etc/cron.d/metal-evidence` holds on the validator host at any given
+moment — read the block below as "what a compliant `metal-evidence` cron
+file must contain," not as a current-state claim about production. (The
+mechanisms that keep a doc's prescribed shape and the deployed file in
+sync at all — `scripts/check-cron-file.sh` at install time, and this doc's
+own review process — are the actual guarantee; this doc cannot substitute
+for re-reading the live file when that matters.)
 
 ```cron
 SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin
+FY_LIVE=1
 WEB_PUSH_KEY=/home/deploy/.ssh/<key>
 WEB_HOST_FILE=/etc/freedom-yield/<host-file>
 30 1 * * * deploy { \
@@ -168,7 +190,25 @@ WEB_HOST_FILE=/etc/freedom-yield/<host-file>
 } >> /home/deploy/metal.freedom-yield.com/logs/gen-evidence.log 2>&1
 ```
 
-(The file as installed is one logical line; the line continuations above are for readability.)
+`FY_LIVE=1` is required here because `push-to-web-host.sh` is on Rule 6's
+side-effecting allowlist above — not because either script this cron runs
+actually reads the variable. Neither does: `push-to-web-host.sh` has zero
+`FY_LIVE`/`side-effects.sh` references (see the note under Rule 6 above),
+and `gen-evidence.sh` likewise has zero. Both scripts run identically with
+or without the flag; the flag's only effect here is satisfying Rule 6's
+allowlist policy.
+
+(The file as installed is one logical line; the line continuations above
+are for readability — and that distinction is not cosmetic for testing:
+feeding `scripts/check-cron-file.sh` the pretty-printed multi-line form
+above verbatim fails Rule 3 (it inspects the physical line carrying the
+redirect in isolation and does not see the start/end markers and `rc=$?`
+that sit on earlier physical lines of the same logical command); joining
+it back to one physical line first, exactly as it would be installed, is
+required before linting. Verified with the two `<placeholder>` values
+filled in and the continuations joined: `Result: 0 violation(s)`
+(measured 2026-08-17). If you copy this block to test it, join it to one
+line first, the same way you would before installing it.)
 
 ## Before installing a new cron file
 
