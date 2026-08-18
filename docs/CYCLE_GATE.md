@@ -471,10 +471,11 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    手順 (この順序で。実行者ラベルは上の「実行者と実行場所」節):
 
    0. **本文は `docs/pending-disclosures/<id>.json` に tracked で置いてある。**
-      scratch から拾わない。`ls docs/pending-disclosures/*.json` がその cycle に
-      流す全量で、**2026-09-04 は `docs/pending-disclosures/2026-08-17-01.json`
-      の 1 件**。ファイルが 1 つも無ければ step 2.5 は非該当 (= 上の「該当が
-      無い cycle」)。各ファイルは `incidents[]` に**そのまま入る entry
+      scratch から拾わない。`find docs/pending-disclosures -name '*.json'` が
+      その cycle に流す全量で、**2026-09-04 は
+      `docs/pending-disclosures/2026-08-17-01.json` の 1 件**
+      (`README.md` は常駐の説明文なので数えない)。**`*.json` が 1 件も
+      返らなければ step 2.5 は非該当** (= 上の「該当が無い cycle」)。各ファイルは `incidents[]` に**そのまま入る entry
       オブジェクト**で、公開される bytes と同一 — 当日に整形し直す前提のもの
       ではない。中身は `tests/incidents/test-schema.sh` が毎回
       schema validate + 二重公開チェックにかけている。
@@ -517,17 +518,32 @@ topology (validator host + operator Mac)**, in this fixed day-of order
       ならない形で**配信されている」と主張する。その主張は**公開面を curl して
       初めて真偽が決まる**:
       ```sh
+      B=https://metal.freedom-yield.com/api
+      # ③-1 example 4 本 (= chain_backend は全部で 6 値)
       for f in anchor-receipt.example.json anchor-receipt.v2.example.json \
                anchor-receipt.phase-beta.example.json; do
-        curl -s https://metal.freedom-yield.com/api/$f | jq -r '.anchor.chain_backend'
+        curl -s "$B/$f" | jq -r '.anchor.chain_backend'
       done
-      curl -s https://metal.freedom-yield.com/api/anchor-history.example.jsonl \
-        | jq -r '.chain_backend'
-      curl -s https://metal.freedom-yield.com/api/anchor-receipt.schema.v1.json \
-        | jq -r '.["x-revision-history"][-1].date'
+      curl -s "$B/anchor-history.example.jsonl" | jq -r '.chain_backend'
+      # ③-2 schema 4 本 — 訂正は description の書き換えなので文字列で見る
+      #     (receipt 側は "NOT an execution engine"、history 側は小文字 → -i)
+      for f in anchor-receipt.schema.v1.json anchor-receipt.schema.v2.json \
+               anchor-history.schema.v1.json anchor-history.schema.v2.json; do
+        printf '%s ' "$f"; curl -s "$B/$f" | grep -ci 'not an execution engine'
+      done
+      # ③-3 dated revision entry を持つのは v1 の 2 本だけ (v2 は x-revision-history 無し)
+      for f in anchor-receipt.schema.v1.json anchor-history.schema.v1.json; do
+        curl -s "$B/$f" | jq -r '.["x-revision-history"][-1].date'
+      done
       ```
-      **6 つの `chain_backend` がすべて `antelope`、revision date が `2026-08-17`**
-      なら主張は成立している。**まだ `pulsevm` が返るなら**、訂正 commit が
+      合格条件は 3 つとも: **③-1 の 6 値がすべて `antelope`** /
+      **③-2 の 4 行がすべて 1 以上** / **③-3 の 2 行がどちらも `2026-08-17`**。
+      本文は「schemas と examples」と複数形で主張するので、**example だけ見て
+      通さない** (2026-08-18 レビュー N3)。なお `scripts/` 配下の generator と
+      ledger writer は**公開面に存在しない** (rsync 脚は `public/`-rooted、
+      `deploy.yml:304` `:373`。2026-08-18 に 2 本とも **HTTP 404** を実測) ので、
+      本文もそれらを「配信されている」側には数えていない — ここを確認対象に
+      加えない。**まだ `pulsevm` が返るなら**、訂正 commit が
       公開面に届いていない (= main が未 push、または deploy 未完) ということ。
       その場合は **手順 4 の push が同じ deploy で訂正も配信する**ので、
       **手順 6 の配信確認でこの curl を再実行して `antelope` を確認するまで
@@ -585,19 +601,21 @@ topology (validator host + operator Mac)**, in this fixed day-of order
       host 側: host repo の `public/api/incidents.json` を
       `jq -r '.incidents[0].id'`。**両方**が新 entry の id を返して初めて次へ。
       公開側だけ通っても host 側が古ければ step 3 は過少のまま確定する。
-      **手順 1 の③がまだ `pulsevm` を返していた場合は、ここで③の curl を
-      再実行する。** 同じ deploy が訂正済み example も配信しているので、
-      **6 つとも `antelope` / revision date `2026-08-17`** になっていなければ
-      ならない。なっていなければ公開した本文が偽のまま出ているということなので、
-      step 3 に進まずその場で扱う。
+      **手順 1 の③がまだ `pulsevm` を返していた場合は、ここで③-1〜③-3 を
+      まるごと再実行する。** 同じ deploy が訂正済みの example と schema も
+      配信しているので、**③の合格条件 3 つがすべて満たされて**いなければ
+      ならない。満たされていなければ公開した本文が偽のまま出ているという
+      ことなので、step 3 に進まずその場で扱う。
    7. → ここで **step 3** へ。書かれたその cycle の行が
       `incidents_in_cycle_ids` に**新 entry を含んで**いることを確認する
       (2026-09-04 なら新 entry + `2026-08-06-01` の 2 件)。1 件しか無ければ
       手順 5/6 が効いていない。
-   8. 終了状態の確認: `ls docs/pending-disclosures/*.json` が**その cycle 分に
-      ついて空**になっている (手順 1 の `git rm` の結果)。**step 4b では何も
-      しない** — pending file の後片付けは step 2.5 の中で閉じている。
-      同じ本文を 2 箇所に残さないための削除であって、公開後の掃除ではない。
+   8. 終了状態の確認: `find docs/pending-disclosures -name '*.json'` が
+      **1 件も返さない** (手順 1 の `git rm` の結果)。`README.md` は常駐
+      するので「ディレクトリが空」ではなく「**`*.json` が無い**」が正しい
+      終了状態 (2026-08-18 レビュー N4/N5)。**step 4b では何もしない** —
+      pending file の後片付けは step 2.5 の中で閉じている。同じ本文を
+      2 箇所に残さないための削除であって、公開後の掃除ではない。
 
    **一時 baseline entry (手順 3 の中身)。** `public/api/incidents.json` は
    `deploy/feed-excludes.txt` に載っていない = **`tracked` 級**で、署名済み

@@ -29,7 +29,9 @@
 # any other staged entry), and its id must NOT already be published — the
 # runbook deletes the staged file in the same commit that publishes it, so
 # "published and still staged" is never a legitimate intermediate state.
-# An empty directory asserts nothing.
+# No *.json means nothing is asserted. (The directory's README.md always
+# stays, so "no staged entries" is not the same as "empty directory" — the
+# glob below is *.json precisely so the README is never read as an entry.)
 #
 # Setup: lazily creates /tmp/incidents-schema-venv with jsonschema if not
 # present. No production state touched.
@@ -448,8 +450,9 @@ validate_input "REJECT: missing top-level validatorSince" fail '{
 # incident objects until docs/CYCLE_GATE.md step 2.5 inserts them into
 # public/api/incidents.json (see docs/INCIDENT_RESPONSE.md §6).
 #
-# The directory is EMPTY in steady state, and this block then asserts nothing
-# — it is self-retiring, not a permanent requirement that some file exist.
+# The directory holds NO *.json in steady state (only its README.md), and this
+# block then asserts nothing — it is self-retiring, not a permanent
+# requirement that some staged file exist.
 # When something IS staged, it must be publishable as-is on the day: the
 # runbook says "insert it, do not retype it", so the bytes have to be right
 # now rather than on the morning of a cycle transition.

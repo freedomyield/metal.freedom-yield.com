@@ -282,8 +282,10 @@ docker compose -f docker-compose.metalgo.yml -f docker-compose.metalgo.prod.yml 
   各ファイルは schema の incident 定義に適合しなければならず、ファイル名と
   `id` は一致していなければならず、newest-first を壊してはならず (staged が
   複数あるときは staged 同士も)、**その id が既に `incidents.json` に publish
-  されていたら FAIL**。ディレクトリが空なら検査は 0 件で通る = 平常時は
-  何も要求しない。
+  されていたら FAIL**。**`*.json` が 1 つも無ければ検査は 0 件で通る** =
+  平常時は何も要求しない。`README.md` はこのディレクトリに常駐するが、
+  glob が `*.json` なので検査対象に入らない (= 「ディレクトリが空」ではなく
+  「`*.json` が無い」が定常状態)。
 
 ## 7. 関連
 

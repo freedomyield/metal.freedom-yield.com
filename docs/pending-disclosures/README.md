@@ -22,6 +22,8 @@ time pressure. The full rules are in
 procedure is [`docs/CYCLE_GATE.md`](../CYCLE_GATE.md) step 2.5.
 
 Publication deletes the file from this directory in the same commit that inserts
-it into `incidents.json`, so this directory is empty in steady state.
-`tests/incidents/test-schema.sh` enforces that: a staged id that already appears
-in `incidents.json` fails the build.
+it into `incidents.json`, so in steady state this directory holds **no `*.json`
+at all** — only this README, which stays. `tests/incidents/test-schema.sh`
+enforces that: a staged id that already appears in `incidents.json` fails the
+build. This README is not a staged entry; the guard globs `*.json` and never
+reads it.
