@@ -185,6 +185,11 @@
 # run-testnet-rehearsal.sh's own output does). That is fine on a terminal and
 # forbidden in a tracked file, an audit note or a published report — this repo
 # is public and the sanitize rule has no "it is only a fragment" exception.
+# The same applies to any credential-store entry NAME the operator ping adds
+# alongside a transcript: this script no longer prints one (2026-08-18), and
+# none may be reintroduced here or in any doc — the AI supplies it in the
+# ping, out of band. A repo/wallet association is itself the protected thing,
+# so "it is only the label, not the secret" is not an exception either.
 #
 # WHAT THIS SCRIPT CANNOT TELL YOU (stated because the half-claim is the one
 # this repo keeps paying for):
@@ -958,7 +963,13 @@ if [ "$AGENT_STATE" != "LOADED" ]; then
 	# across two has already cost this project a paste
 	# (memory/feedback_no_operator_paste_execution).
 	echo "            ssh-add ${IDENTITY_KEY}"
-	echo "          Dashlane entry: <entry name withheld - handed over in the operator ping>"
+	# The Dashlane entry NAME is deliberately not printed and not stored in
+	# this repo (2026-08-18). It was removed from docs/REHEARSAL_2026-09-01.md
+	# on 2026-08-17 (6e172a2) but survived here — the worse of the two
+	# surfaces, because this line was echoed to the terminal on EVERY run and
+	# a pasted transcript carries it out of the machine. The AI attaches the
+	# entry name to the operator ping instead.
+	echo "          Dashlane entry name: supplied by the AI in the operator ping (never stored in this repo)."
 	echo "          Not needed for the rehearsal itself; needed for gen-identity.sh."
 fi
 

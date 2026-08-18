@@ -243,6 +243,10 @@ Exit codes:
 ("THIS SCRIPT TAKES THE REHEARSAL'S MEANING (M)" = 刻む cycle =
 `cycle-transition.sh` の値より 1 大きい)。
 
+> **2026-09-04 は step 2.5 (開示 incident の公開) が該当する。** step 2 の末尾に
+> あり、**step 3 より前に**通す必要がある — 飛ばすと cycle 4 の incident 件数が
+> 1 件過少のまま append-only 台帳に確定し、後から直せない。
+>
 > **9/1 の稽古で渡す値はこの表ではない** — 9/1 の rehearsal フラグは **4**
 > (`docs/REHEARSAL_2026-09-01.md` §3)。9/1 と 9/4 で 1 ずれる。
 
@@ -294,8 +298,10 @@ broadcast (mainnet) の per-invocation 認可は code block ではなく chat �
 Under model α (= AI full orchestration; see
 `feedback_ai_full_orchestration_default` memo), the operator's active steps
 are: ask AI to start, do the Metal Wallet web flow, supply two keystore
-passwords + the identity-key passphrase when prompted, and authorize the
-mainnet anchor broadcast per invocation. Everything else — including which
+passwords + the identity-key passphrase when prompted, launch the testnet
+rehearsal in 7a (its per-invocation authorization IS the operator having
+started it — see the actor section above), and authorize the mainnet anchor
+broadcast per invocation. Everything else — including which
 machine each command runs on — is AI-orchestrated across a **2-host
 topology (validator host + operator Mac)**, in this fixed day-of order
 (cf. the cycle-3 → cycle-4 transition, `N=3`):
@@ -348,6 +354,8 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    ③ 付け忘れの被害は step 3 の行が「間違う」ことではなく「**出ない**」こと
    (探すのは誤った行ではなく**欠けた行**)。④ **2026-09-04 は同じ日付で
    `Appended daily entry` が 2 回出るのが正常** — 重複実行ではない。
+   ⑤ **この step の末尾に 2.5 (開示 incident の公開) がある。step 3 へ進む前に
+   必ず読む** — 2026-09-04 は該当する。
 
    closes out cycle N's uptime record: the append-only master ledger entry,
    the in-flight `current-cycle-state.json`, the cycle-close summary row
@@ -456,9 +464,19 @@ topology (validator host + operator Mac)**, in this fixed day-of order
       の**先頭**に挿入する (newest-first)。適用直前に `resolutionDate` が実際の
       配信日と一致するか確認する (ずれるなら書き換えてから進む)。
    2. **AI@Mac** — `public/api/incidents.schema.v1.json` に対して validate する。
+      **検証単位は entry 単体ではなく `incidents.json` 文書全体** (entry 単体だと
+      `'validatorSince' is a required property` で落ちる)。
    3. **AI@Mac** — **同じ commit に `deploy/identity-pin-baseline.json` の一時
       entry を同梱する** (次の小節)。これを忘れると main の CI が step 4 まで
       数時間赤くなる。
+   3.5 **AI@Mac** — **push する前にローカルで CI gate を回す**:
+      `bash scripts/check-identity-pins.sh --mode=repo`。
+      **`BASELINED incidents_json.sha256` の 1 行が出て exit 0** なら正しい。
+      **exit 3 (`MISMATCH …`) が返るなら push しない** — 原因は ①entry を
+      `known_broken` の下ではなく top level に置いた ②2 つの sha256 の採り違え
+      ③コピペ崩れ、のいずれか。この 1 コマンドが 3 つとも push 前に捕まえる。
+      (これを省くと「push して CI が赤くなって初めて気づく」= step 2.5 が
+      防ごうとしている事象そのものになる。)
    4. **AI@Mac** — commit → push。**`push-to-web-host.sh` は使わない**:
       `deploy/publication.json` の `api/incidents.json` は
       `publisher: git-deploy` / `git_tracked: true` で、`push-to-web-host.sh` の
@@ -496,9 +514,13 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    この赤は順序を入れ替えても消えない: `gen-identity.sh` は leaf を**公開 URL
    から curl** して pin するので、incidents.json は配信済みでなければならず、
    identity.json と同一 commit には入れられない。`deploy/identity-pin-baseline.json`
-   はまさにこの acknowledgement のために存在する。同じ commit に次を足す:
+   はまさにこの acknowledgement のために存在する。同じ commit に、そのファイルの
+   **`known_broken` オブジェクトの下に** (top level ではない) 次の entry を足す:
 
    ```json
+   // deploy/identity-pin-baseline.json — "known_broken": { … } の中に足す。
+   // top level に置くと check-identity-pins.sh:504 が読まず、exit 3 のまま
+   // (= この step が塞ごうとしている赤窓が開く)。
    "incidents_json.sha256": {
      "path": "public/api/incidents.json",
      "class": "tracked",
@@ -525,6 +547,11 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    同じ中間状態で `tests/identity-pins/` 109/109、
    `tests/publication-registry/` 37/37、`tests/cycle-transition/` 125/125 も
    すべて緑であることを確認済み — この一時 entry は他の gate を壊さない。
+
+   **step 3 に進む前に**: 直上の **step 2.5 (開示 incident の公開)** を通過したか
+   確認する。該当 incident が無い cycle なら「無いことを確認した」で通過扱い。
+   **ここを素通りすると incident 件数が過少のまま台帳に確定する** (step 2.5 の
+   「なぜ step 3 より前でなければならないか」)。
 
 3. **host — `gen-cycle-history.sh` + publish** appends cycle N's row to
    `cycle-history.jsonl` and ships it to the web host:
@@ -1055,7 +1082,9 @@ needed for them.
   3 点で `ssh-keygen -Y verify` が通ること
   (`docs/IDENTITY_VERIFICATION.md` の手順)。かつ
   `bash scripts/check-identity-pins.sh --mode=repo` が **exit 0**
-  (= step 2.5 の一時 baseline entry が 4b で消えていることの確認も兼ねる)。
+  **かつ出力に `OBSOLETE-BASELINE` の行が無いこと** (= step 2.5 の一時 baseline
+  entry が 4b で消えていることの確認)。**exit code だけでは兼ねられない** —
+  削除を忘れても exit は 0 のままで、差が出るのは出力行だけ (2026-08-18 実測)。
 - **⑤ keystore が 2 つとも locked** — testnet (7a) と mainnet (7c) の両方。
   片方だけ re-lock して終える取りこぼしがいちばん起きやすい。
 
