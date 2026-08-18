@@ -262,10 +262,20 @@ Exit codes:
 | **AI@Mac** | AI が実行する。operator は出力を読むだけ | Mac の repo working copy |
 | **AI@host** | AI が SSH 経由で実行する。operator は出力を読むだけ | validator host |
 
-**operator@TTY はこの runbook 全体で 5 箇所だけ**: step 4 前の `ssh-add`、
-7a の testnet keystore unlock、**7a の `run-testnet-rehearsal.sh` 本体**、
-7c の mainnet keystore unlock、7c 末尾の mainnet keystore re-lock。
+**operator@TTY はこの runbook 全体で 6 箇所**: ① step 4 前の `ssh-add`、
+② 7a の testnet keystore unlock、③ **7a の `run-testnet-rehearsal.sh` 本体**、
+④ 7c の mainnet keystore unlock、⑤ 7c 末尾の mainnet keystore re-lock、
+⑥ **7c 末尾の testnet keystore re-lock** (② で開けたものを閉じる)。
 **残りの code block はすべて AI が実行する。**
+
+> ⑥ は 2026-08-18 の三面突合 (K-7) で足した。それ以前この列挙は 5 箇所と
+> 書いており、**testnet の re-lock だけが落ちていた** — 7c 末尾の散文
+> (mainnet re-lock bullet の末尾に「7a の testnet keystore も同様に」と
+> 1 節だけ埋まっていた) と完了 checklist ⑤ (`:1144-1145`) は最初から
+> 要求していたのに、operator が当日数える一覧にだけ無かった。
+> **canon 自身が「いちばん起きやすい取りこぼし」と呼んでいる操作を、canon の
+> 操作一覧が落としていた**という形なので、数を書き換えるだけでなく 7c 末尾を
+> 独立 bullet に分けた。
 
 > 7a の rehearsal 本体が operator@TTY なのは password を伴うからではない。
 > この script は `/tmp/fyd-broadcast-token` を**自分で**作り
@@ -979,7 +989,20 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    - **絶対にやらないこと**: **空 Enter**。既存 password でロックする代わりに
      **新しい password を作成してしまう** — 次回の unlock が通らなくなる。
    - **なぜこれをやるか**: mainnet keystore を unlock したまま放置しない
-     (Constitution §3.5)。7a の testnet keystore も同様に re-lock する。
+     (Constitution §3.5)。
+
+   **後操作 2 (operator@TTY) — testnet keystore も re-lock する。**
+   `HOME=~/.metal-fy-proton-test proton key:lock`。
+
+   - **打つ人**: **operator 自身** (password を打つため)。7a の ② で開けた
+     keystore がここまで開いたままなので、mainnet と同じ扱いで閉じる。
+   - **空 Enter は同じく禁止** — 新しい password を作ってしまい、次回の 7a が
+     通らなくなる。
+   - **これは独立した 6 番目の operator 操作**であって mainnet re-lock の
+     付随事項ではない。完了 checklist ⑤ が「**片方だけ re-lock して終える
+     取りこぼしがいちばん起きやすい**」と名指ししているのがこの 1 手。
+     以前はこの要求が mainnet 側 bullet の末尾 1 節に埋もれており、
+     冒頭の operator@TTY 列挙からも落ちていた (2026-08-18 K-7)。
 
 7.5. **Mac → host — scp the signing fragment.** Step 7c's
    `sign-anchor-event.sh` output landed on the **Mac** (its default
