@@ -657,14 +657,16 @@ fi
 # The check covers a non-empty set of scripts — otherwise it would pass
 # vacuously if the table stopped naming any of them.
 CHECKED=0
-while IFS= read -r line; do
-	[ -n "$line" ] || continue
-	# Field 5, not 4: the unit table is `id|phase|machine|actor|scripts|title`.
-	# Read through the accessor's index, not a remembered one — when the actor
-	# column was added, this raw cut was the single thing that broke, and it
-	# broke SILENTLY into "0 scripts checked", which is exactly the vacuous
-	# pass the guard below exists to catch. It caught it.
-	scripts_field="$(printf '%s' "$line" | cut -d'|' -f5)"
+# The scripts are read through the orchestrator's OWN accessor, not by column
+# number. An earlier revision cut field 4 literally; when the actor column was
+# inserted, the field moved and this loop silently checked nothing — exactly
+# the vacuous pass the CHECKED floor below exists to catch, and it did catch
+# it. Going through fyct_unit_scripts means the next column change cannot
+# reproduce that. Only the id is read positionally, and it is field 1.
+while IFS= read -r id; do
+	[ -n "$id" ] || continue
+	scripts_field="$(bash -c '. "$1"; fyct_unit_scripts "$2"' _ "$ORCH" "$id" 2>/dev/null)"
+	[ -n "$scripts_field" ] || continue
 	[ "$scripts_field" = "-" ] && continue
 	for s in $scripts_field; do
 		s="${s##*/}"
@@ -672,7 +674,7 @@ while IFS= read -r line; do
 			CHECKED=$((CHECKED + 1))
 		fi
 	done
-done < "$ROWS"
+done < <(cut -d'|' -f1 "$ROWS")
 if [ "$CHECKED" -ge 8 ]; then
 	ok "the phase cross-check covers ${CHECKED} script(s) present in cycle-context.sh's table"
 else
@@ -1504,6 +1506,27 @@ expect_rc 64 "no mode at all is refused with exit 64" -- \
 # plan with the rehearsal tx supplied, used where the assertion is about a
 # command line that only exists resolved.
 
+# flatten — undo the ~68-column comment wrapping, so a phrase can be matched
+# whether or not the printer split it across two lines. Every assertion on
+# PROSE below goes through this; forgetting it is why three earlier drafts of
+# this section reported red against correct output.
+flatten() { sed 's/^#[[:space:]]*//' | tr '\n' ' ' | tr -s ' '; }
+num_word() {
+	case "$1" in
+	1) printf 'one' ;; 2) printf 'two' ;; 3) printf 'three' ;;
+	4) printf 'four' ;; 5) printf 'five' ;; 6) printf 'six' ;;
+	*) printf '%s' "$1" ;;
+	esac
+}
+# The closing self-assessment, isolated once for the several cases that read it.
+CLOSING="$(awk '/^# WHERE THIS PLAN IS NOT A COMPLETE SUBSTITUTE/{f=1} f' "$PLAN")"
+CLOSING_FLAT="$(printf '%s\n' "$CLOSING" | flatten)"
+if [ -n "$CLOSING" ]; then
+	ok "the closing self-assessment block was isolated for inspection"
+else
+	bad "could not isolate the closing self-assessment — the cases reading it would be vacuous"
+fi
+
 # --- Actor is printed, closed, and consistent with the machine -------------
 # The finding: the plan labelled machines only, so unit 7a — where the
 # operator personally starting the script IS the testnet broadcast
@@ -1750,6 +1773,64 @@ else
 	bad "unit 7.5 does not disclose the coupling to 7c's output path"
 fi
 
+# --- The 7c hardening must not be cancelled by "prefer 7b's line" ----------
+# preview-cycle-anchor-broadcast.sh prints its own rendering of the 7c
+# command, and that rendering has neither --output= nor an absolute
+# FY_CONFIG_DIR — it is the home-relative form the canon warns about at
+# length. Telling the operator to prefer it undoes both fixes on this line,
+# so the plan has to send them for the VALUES and keep them on the printed
+# command. Measured against the real script, not assumed.
+PREVIEW_SH="${REPO_ROOT}/scripts/preview-cycle-anchor-broadcast.sh"
+PREVIEW_7C="$(sed -n '/^ *bash scripts\/sign-anchor-event.sh/,/dry-run-log/p' "$PREVIEW_SH")"
+if [ -n "$PREVIEW_7C" ] && ! printf '%s' "$PREVIEW_7C" | grep -qF -- '--output='; then
+	ok "measured: unit 7b's printed 7c command really does omit --output="
+else
+	bad "unit 7b's printed 7c command now carries --output= — the plan's warning may be stale"
+fi
+if grep -qF 'FY_CONFIG_DIR=\$HOME/.fy-mainnet-broadcast/config' "$PREVIEW_SH"; then
+	ok "measured: unit 7b's printed 7c command really does write FY_CONFIG_DIR home-relative"
+else
+	bad "unit 7b's printed 7c command no longer writes FY_CONFIG_DIR home-relative — re-check the plan's warning"
+fi
+# Neither unit may tell the reader to prefer that rendering wholesale.
+U7B_FLAT="$(awk -v want="# [unit 7b] " 'index($0,want)==1{f=1;next} index($0,"# [unit ")==1{f=0} f' "$PLAN" | flatten)"
+U7C_FLAT="$(awk -v want="# [unit 7c] " 'index($0,want)==1{f=1;next} index($0,"# [unit ")==1{f=0} f' "$PLAN" | flatten)"
+STALE=""
+printf '%s' "$U7B_FLAT" | grep -qiF 'prefer ITS output over the line printed below' && STALE="${STALE} 7b"
+printf '%s' "$U7C_FLAT" | grep -qiF 'that printed form is the one to prefer' && STALE="${STALE} 7c"
+if [ -z "$STALE" ]; then
+	ok "no unit tells the operator to prefer unit 7b's rendering of the 7c command"
+else
+	bad "unit(s)${STALE} still recommend pasting 7b's 7c line, which drops --output= and the absolute FY_CONFIG_DIR"
+fi
+# ...and both must say what to take from 7b instead: the values.
+if printf '%s' "$U7B_FLAT" | grep -qiF 'TAKE THE VALUES FROM IT, NOT THE LINE'; then
+	ok "unit 7b directs the reader to take the values from its output, not the command line"
+else
+	bad "unit 7b does not distinguish taking 7b's VALUES from pasting 7b's command"
+fi
+if printf '%s' "$U7C_FLAT" | grep -qiF 'copy them from there INTO THE LINE BELOW'; then
+	ok "unit 7c says to copy the gate args into the printed line rather than replace it"
+else
+	bad "unit 7c does not say to copy 7b's gate args into this line"
+fi
+if printf '%s' "$U7C_FLAT" | grep -qiF 'home-relative'; then
+	ok "unit 7c names the home-relative FY_CONFIG_DIR trap it closes"
+else
+	bad "unit 7c does not name the trap that makes its line differ from 7b's"
+fi
+
+# --- F4: the day's pauses are counted, and the checkpoint is one of them ---
+# "The four STOP blocks are human actions" read as "there are four places the
+# day pauses", which silently excludes CHECKPOINT 2.5 — the one pause that is
+# irreversible if missed.
+HEADER_FLAT="$(sed -n '/^# HOW TO READ THIS/,/^# ======/p' "$PLAN" | flatten)"
+if printf '%s' "$HEADER_FLAT" | grep -qiF 'FIVE PLACES'; then
+	ok "the header counts five pauses, not four, and names the checkpoint as the fifth"
+else
+	bad "the header still counts only the four STOP blocks as the day's pauses"
+fi
+
 # --- K-5: unit 4b quotes the canon's whole list ----------------------------
 # The plan called its 4b checklist a verbatim quote while carrying three of
 # the canon's bullets. The two that were missing are the CHECKPOINT 2.5
@@ -1820,6 +1901,37 @@ else
 	bad "unit 4b does not distinguish the bullet CI cannot fail on from the ones it can"
 fi
 
+# --- Every count the plan states about 4b must match the bullets it printed --
+# The plan said "two of its five bullets" in the closing summary while unit 4b
+# itself said four, and the truth was four with ONE conditional. Prose counts
+# in this repo have been wrong repeatedly ("4 lines" for 11, "5 places" for
+# 6), so they are derived here and compared rather than read.
+B4_COND="$(printf '%s\n' "$B4_BLOCK" | grep -cF 'ONLY IF CHECKPOINT 2.5' || true)"
+if [ "$B4_COND" -ge 1 ]; then
+	ok "measured: ${B4_COND} of unit 4b's ${PLAN_4B_BULLETS} bullets are marked CHECKPOINT-2.5-conditional"
+else
+	bad "no unit 4b bullet is marked CHECKPOINT-2.5-conditional — the counts below would be vacuous"
+fi
+B4_FLAT="$(printf '%s\n' "$B4_BLOCK" | flatten)"
+# Unit 4b's own header count.
+if printf '%s' "$B4_FLAT" | grep -qiF "carries $(num_word "$PLAN_4B_BULLETS") bullets"; then
+	ok "unit 4b's header states the number of bullets it actually prints ($(num_word "$PLAN_4B_BULLETS"))"
+else
+	bad "unit 4b's header does not say 'carries $(num_word "$PLAN_4B_BULLETS") bullets' — it printed ${PLAN_4B_BULLETS}"
+fi
+# The closing summary's count of the same list, which is where they diverged.
+if printf '%s' "$CLOSING_FLAT" | grep -qiF "$(num_word "$B4_COND") of its $(num_word "$PLAN_4B_BULLETS") bullets"; then
+	ok "the closing summary agrees: $(num_word "$B4_COND") of $(num_word "$PLAN_4B_BULLETS") bullets is conditional"
+else
+	bad "the closing summary's 4b count disagrees with the plan: it printed ${PLAN_4B_BULLETS} bullets, ${B4_COND} of them conditional"
+fi
+# Cheap, and it is the exact wrong number that shipped.
+if printf '%s' "$CLOSING_FLAT" | grep -qiF 'five bullets'; then
+	bad "the closing summary still says 'five bullets' — unit 4b prints ${PLAN_4B_BULLETS}"
+else
+	ok "the closing summary no longer claims five 4b bullets"
+fi
+
 # --- K-7: both keystores are re-locked, and the plan says so ---------------
 # The canon requires two re-locks and its own completion checklist calls
 # closing only one "the likeliest omission of the day". The plan's stop 4
@@ -1853,7 +1965,6 @@ fi
 # The closing summary is the reader's map of where the printout stops being a
 # faithful copy. It has to mention the checkpoint it summarises rather than
 # reproduces, or the omission is undisclosed all over again.
-CLOSING="$(awk '/^# WHERE THIS PLAN IS NOT A COMPLETE SUBSTITUTE/{f=1} f' "$PLAN")"
 if printf '%s' "$CLOSING" | grep -qF 'CHECKPOINT 2.5'; then
 	ok "the closing summary discloses that CHECKPOINT 2.5 is summarised, not reproduced"
 else
