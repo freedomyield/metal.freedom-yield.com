@@ -272,13 +272,18 @@ docker compose -f docker-compose.metalgo.yml -f docker-compose.metalgo.prod.yml 
   に入っているので、**ここに置いても公開面は動かない**し、署名済み manifest の
   pin も破らない。公開は step 2.5 で `public/api/incidents.json` に入った時に
   初めて起きる。
-- 公開したら **step 4b の commit でこのファイルを削除する**。本文が 2 箇所に
-  あると必ず片方が古くなる。
+- **`incidents.json` へ挿入するのと同じ commit でこのファイルを削除する。**
+  後片付けとして後の commit に回さない — 「publish 済みなのに staged が残って
+  いる」状態は下の test が FAIL にするので、間に挟まる commit の数だけ
+  `ci-main.yml` が赤くなる (2026-08-18 レビュー I2)。挿入と削除で 1 操作。
+- 本文が 2 箇所にあると必ず片方が古くなる。公開後の唯一の本文は
+  `public/api/incidents.json`。
 - `tests/incidents/test-schema.sh` がこのディレクトリを毎回検査する:
   各ファイルは schema の incident 定義に適合しなければならず、ファイル名と
-  `id` は一致していなければならず、**その id が既に `incidents.json` に
-  publish されていたら FAIL** (= 削除忘れの検出)。ディレクトリが空なら
-  検査は 0 件で通る = 平常時は何も要求しない。
+  `id` は一致していなければならず、newest-first を壊してはならず (staged が
+  複数あるときは staged 同士も)、**その id が既に `incidents.json` に publish
+  されていたら FAIL**。ディレクトリが空なら検査は 0 件で通る = 平常時は
+  何も要求しない。
 
 ## 7. 関連
 

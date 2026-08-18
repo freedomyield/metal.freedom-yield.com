@@ -25,8 +25,11 @@
 # Plus a guard over docs/pending-disclosures/ — disclosure entries staged for
 # a future publication date (docs/CYCLE_GATE.md step 2.5). Each staged file
 # must validate as part of the document it will become, its name must equal
-# its id, and its id must NOT already be published (= the step-4b deletion was
-# forgotten). An empty directory asserts nothing.
+# its id, it must not break newest-first (against the live head AND against
+# any other staged entry), and its id must NOT already be published — the
+# runbook deletes the staged file in the same commit that publishes it, so
+# "published and still staged" is never a legitimate intermediate state.
+# An empty directory asserts nothing.
 #
 # Setup: lazily creates /tmp/incidents-schema-venv with jsonschema if not
 # present. No production state touched.
@@ -451,26 +454,30 @@ validate_input "REJECT: missing top-level validatorSince" fail '{
 # runbook says "insert it, do not retype it", so the bytes have to be right
 # now rather than on the morning of a cycle transition.
 #
-# "The id is already published" is deliberately a FAILURE: that is the step-4b
-# deletion having been forgotten, which leaves two copies of the same
-# disclosure text and guarantees one of them goes stale.
+# "The id is already published" is deliberately a FAILURE: the runbook deletes
+# the staged file in the SAME commit that inserts the entry, so "published and
+# still staged" is never a legitimate intermediate state — it means two copies
+# of the same disclosure text exist and one of them will go stale.
 echo ""
 echo "=== staged disclosures (docs/pending-disclosures/) ==="
 
 PENDING_DIR="$REPO/docs/pending-disclosures"
 LIVE="$REPO/public/api/incidents.json"
 PENDING_COUNT=0
+PREV_STAGED=""   # previous file in glob order — staged entries are also
+                 # ordered against each other, not just against the live head
 
 if [ -d "$PENDING_DIR" ]; then
   for pf in "$PENDING_DIR"/*.json; do
     [ -e "$pf" ] || continue   # no matches: the glob stays literal — skip it
     PENDING_COUNT=$((PENDING_COUNT + 1))
     pname="$(basename "$pf")"
-    if "$PY" - "$SCHEMA" "$LIVE" "$pf" >"$TMP/pending.out" 2>&1 <<'PYEOF'
+    if "$PY" - "$SCHEMA" "$LIVE" "$pf" "$PREV_STAGED" >"$TMP/pending.out" 2>&1 <<'PYEOF'
 import json, os, sys
 import jsonschema
 
 schema_path, live_path, pending_path = sys.argv[1], sys.argv[2], sys.argv[3]
+prev_path = sys.argv[4] if len(sys.argv) > 4 else ''
 schema = json.load(open(schema_path))
 live = json.load(open(live_path))
 entry = json.load(open(pending_path))
@@ -487,7 +494,8 @@ if entry.get('id') != stem:
 published = [i.get('id') for i in live.get('incidents', [])]
 if entry['id'] in published:
     sys.exit("%s is ALREADY published in public/api/incidents.json — delete "
-             "the staged copy (CYCLE_GATE step 4b)" % entry['id'])
+             "the staged copy in the same commit that inserts it "
+             "(CYCLE_GATE step 2.5 手順 1)" % entry['id'])
 
 # A bare entry cannot be validated on its own: the schema requires
 # validatorSince at the document level. Validate the exact document that
@@ -508,6 +516,18 @@ if rest and entry['detectionDate'] < rest[0]['detectionDate']:
              "insertion would break newest-first"
              % (entry['detectionDate'], rest[0]['detectionDate']))
 
+# ...and when more than one entry is staged, they are inserted one after the
+# other, so they must be ordered against EACH OTHER too. Files arrive here in
+# glob (ascending id) order, so each one must be at least as new as the one
+# before it; otherwise inserting them in that order leaves the list unsorted.
+if prev_path:
+    prev = json.load(open(prev_path))
+    if entry['detectionDate'] < prev['detectionDate']:
+        sys.exit("detectionDate %s is older than staged %s (%s) — inserting "
+                 "them in id order would break newest-first"
+                 % (entry['detectionDate'], prev.get('id'),
+                    prev['detectionDate']))
+
 print('OK')
 PYEOF
     then
@@ -518,6 +538,7 @@ PYEOF
       FAILURES+=("staged disclosure $pname: $(cat "$TMP/pending.out")")
       printf '  FAIL  staged %-46s %s\n' "$pname" "$(cat "$TMP/pending.out")"
     fi
+    PREV_STAGED="$pf"
   done
 fi
 printf '  INFO  %d staged disclosure(s) awaiting publication\n' "$PENDING_COUNT"
