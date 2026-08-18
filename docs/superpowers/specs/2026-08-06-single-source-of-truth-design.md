@@ -64,8 +64,9 @@ CI gate がこれを機械で強制する: `kind=stream` は `pinned_by` に入�
 
 ## 5. 転換当日のデータフロー (C2)
 
-13 実行単位(2026-08-17 時点の既知の差分: `scripts/cycle-transition.sh:113-116`
-は 2026-08-14 追加の step 4b を含めて実質 **14** 単位と明記している。この節の
+13 実行単位(2026-08-17 時点の既知の差分: `scripts/cycle-transition.sh` の
+unit 表ヘッダにある「The two sources do not agree with each other …」の注記
+が、2026-08-14 追加の step 4b を含めて実質 **14** 単位と明記している。この節の
 「13」という数え方と、それに基づく phase 構成・番号自体は本タスクの是正対象外
 — brief の指示により変更しない。次回の spec 改版で 14 への更新を推奨する)を、
 人の介入点で切れる 6 phase に整理する。

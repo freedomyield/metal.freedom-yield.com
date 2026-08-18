@@ -23,6 +23,24 @@
 #        gate-1 rehearsal fail EARLY (on a check) instead of LATE (in front
 #        of the operator, mid-run).
 #
+# THIS IS NOT THE PRIME DIRECTIVE'S "pre-flight". Two different things in
+# this repo are called pre-flight, and they must never be substituted for
+# each other:
+#
+#   (a) PRIME DIRECTIVE gate 3 — the `chain:get` verification performed
+#       IMMEDIATELY BEFORE a broadcast, inside the sanctioned broadcast
+#       wrapper under bin/. It is what the 2026-07-01 incident lacked.
+#   (b) THIS SCRIPT — a read-only readiness check run DAYS EARLIER, so the
+#       rehearsal does not fail in front of the operator.
+#
+# This script carries NO `proton chain:set` and NO `chain:get` verification
+# (the omission is deliberate — chain:set writes proton-cli's config), it is
+# not invoked by the broadcast wrapper, and IT SATISFIES NO BROADCAST GATE.
+# A green run of this script is NOT evidence for any of the four gates. In
+# particular, "the pre-flight was green yesterday" must never be offered as
+# gate 3 having been met: gate 3 is measured at broadcast time, by the
+# wrapper under bin/, and by nothing else.
+#
 # IT INSTALLS NOTHING. The scripts/install-*.sh name is this repo's
 # convention for "the one command that replaces a manual operator ritual"
 # (memory/feedback_installer_script_first_for_operator_manual_actions), and
