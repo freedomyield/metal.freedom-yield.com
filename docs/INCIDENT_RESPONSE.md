@@ -249,7 +249,45 @@ docker compose -f docker-compose.metalgo.yml -f docker-compose.metalgo.prod.yml 
 (同様のインシデントを次回どう避けるか、運用知見として)
 ```
 
-## 6. 関連
+## 6. 未公開の開示 entry の staging (`docs/pending-disclosures/`)
+
+開示すると決まったが**公開のタイミングが先の日付に固定されている** entry は、
+`docs/pending-disclosures/<incident-id>.json` に git-tracked で置く。
+
+なぜこのディレクトリが要るか: 開示は通常「決めた日にそのまま
+`public/api/incidents.json` へ append する」(2026-06-24-01 / 2026-08-06-01 は
+どちらもそうした) が、cycle 転換に紐づく開示だけは
+[`CYCLE_GATE.md`](CYCLE_GATE.md) の step 2.5 で **step 3 より前**という順序制約
+を負う。当日まで本文が repo の外 (session の scratch) にあると、当日それを
+探すところから始まる = 事故の元。
+
+ルール:
+
+- ファイルの中身は **`incidents[]` にそのまま入る entry オブジェクト 1 個**。
+  ラッパーもメタデータも付けない。公開される bytes と同一にしておき、当日は
+  挿入するだけにする (step 2.5 手順 1 の `jq --slurpfile`)。
+- ファイル名は `<incident-id>.json`。id は `public/api/incidents.json` の
+  `id` と同じ `YYYY-MM-DD-NN` 形式。
+- `docs/**` は [`deploy.yml`](../.github/workflows/deploy.yml) の `paths-ignore`
+  に入っているので、**ここに置いても公開面は動かない**し、署名済み manifest の
+  pin も破らない。公開は step 2.5 で `public/api/incidents.json` に入った時に
+  初めて起きる。
+- **`incidents.json` へ挿入するのと同じ commit でこのファイルを削除する。**
+  後片付けとして後の commit に回さない — 「publish 済みなのに staged が残って
+  いる」状態は下の test が FAIL にするので、間に挟まる commit の数だけ
+  `ci-main.yml` が赤くなる (2026-08-18 レビュー I2)。挿入と削除で 1 操作。
+- 本文が 2 箇所にあると必ず片方が古くなる。公開後の唯一の本文は
+  `public/api/incidents.json`。
+- `tests/incidents/test-schema.sh` がこのディレクトリを毎回検査する:
+  各ファイルは schema の incident 定義に適合しなければならず、ファイル名と
+  `id` は一致していなければならず、newest-first を壊してはならず (staged が
+  複数あるときは staged 同士も)、**その id が既に `incidents.json` に publish
+  されていたら FAIL**。**`*.json` が 1 つも無ければ検査は 0 件で通る** =
+  平常時は何も要求しない。`README.md` はこのディレクトリに常駐するが、
+  glob が `*.json` なので検査対象に入らない (= 「ディレクトリが空」ではなく
+  「`*.json` が無い」が定常状態)。
+
+## 7. 関連
 
 - [docs/KEY_ROTATION.md](KEY_ROTATION.md) — staking key 取扱・漏洩対応
 - [docs/DEPLOY_SETUP.md](DEPLOY_SETUP.md) — VPS 設定・GH Actions 接続

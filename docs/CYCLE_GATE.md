@@ -262,10 +262,20 @@ Exit codes:
 | **AI@Mac** | AI が実行する。operator は出力を読むだけ | Mac の repo working copy |
 | **AI@host** | AI が SSH 経由で実行する。operator は出力を読むだけ | validator host |
 
-**operator@TTY はこの runbook 全体で 5 箇所だけ**: step 4 前の `ssh-add`、
-7a の testnet keystore unlock、**7a の `run-testnet-rehearsal.sh` 本体**、
-7c の mainnet keystore unlock、7c 末尾の mainnet keystore re-lock。
+**operator@TTY はこの runbook 全体で 6 箇所**: ① step 4 前の `ssh-add`、
+② 7a の testnet keystore unlock、③ **7a の `run-testnet-rehearsal.sh` 本体**、
+④ 7c の mainnet keystore unlock、⑤ 7c 末尾の mainnet keystore re-lock、
+⑥ **7c 末尾の testnet keystore re-lock** (② で開けたものを閉じる)。
 **残りの code block はすべて AI が実行する。**
+
+> ⑥ は 2026-08-18 の三面突合 (K-7) で足した。それ以前この列挙は 5 箇所と
+> 書いており、**testnet の re-lock だけが落ちていた** — 7c 末尾の散文
+> (mainnet re-lock bullet の末尾に「7a の testnet keystore も同様に」と
+> 1 節だけ埋まっていた) と完了 checklist ⑤ (`:1144-1145`) は最初から
+> 要求していたのに、operator が当日数える一覧にだけ無かった。
+> **canon 自身が「いちばん起きやすい取りこぼし」と呼んでいる操作を、canon の
+> 操作一覧が落としていた**という形なので、数を書き換えるだけでなく 7c 末尾を
+> 独立 bullet に分けた。
 
 > 7a の rehearsal 本体が operator@TTY なのは password を伴うからではない。
 > この script は `/tmp/fyd-broadcast-token` を**自分で**作り
@@ -460,21 +470,112 @@ topology (validator host + operator Mac)**, in this fixed day-of order
 
    手順 (この順序で。実行者ラベルは上の「実行者と実行場所」節):
 
-   1. **AI@Mac** — 開示 entry を `public/api/incidents.json` の `incidents[]`
-      の**先頭**に挿入する (newest-first)。適用直前に `resolutionDate` が実際の
-      配信日と一致するか確認する (ずれるなら書き換えてから進む)。
+   0. **本文は `docs/pending-disclosures/<id>.json` に tracked で置いてある。**
+      scratch から拾わない。`find docs/pending-disclosures -name '*.json'` が
+      その cycle に流す全量で、**2026-09-04 は
+      `docs/pending-disclosures/2026-08-17-01.json` の 1 件**
+      (`README.md` は常駐の説明文なので数えない)。**`*.json` が 1 件も
+      返らなければ step 2.5 は非該当** (= 上の「該当が無い cycle」)。各ファイルは `incidents[]` に**そのまま入る entry
+      オブジェクト**で、公開される bytes と同一 — 当日に整形し直す前提のもの
+      ではない。中身は `tests/incidents/test-schema.sh` が毎回
+      schema validate + 二重公開チェックにかけている。
+   1. **AI@Mac** — その entry を `public/api/incidents.json` の `incidents[]`
+      の**先頭**に挿入する (newest-first)。**手で貼らない**:
+      ```sh
+      P=docs/pending-disclosures/2026-08-17-01.json
+      jq --slurpfile e "$P" '.incidents = ($e + .incidents)' \
+        public/api/incidents.json > /tmp/incidents.new \
+        && mv /tmp/incidents.new public/api/incidents.json
+      ```
+      `jq .` は現行の `incidents.json` を byte-for-byte round-trip する
+      (2026-08-18 実測) ので、この 1 行の差分は **entry の挿入だけ**になる。
+      **続けて同じ working tree で pending 側を消す** — 挿入と削除は
+      **同じ commit** に入れる:
+      ```sh
+      git rm -q "$P"
+      ```
+      なぜ同じ commit か: pending file が残ったまま push すると、
+      `tests/incidents/test-schema.sh` の「staged id が既に publish されている」
+      検査が **exit 1** を返し、`ci-main.yml` (main 直 push を見る唯一の CI 経路、
+      `find` の自動 discovery でこの suite を拾う) が **step 4b まで数時間赤くなる**。
+      それは直下の一時 baseline entry が塞いでいるのと**同じ赤窓**で、片方を
+      塞ぎながらもう片方を開けることになる。挿入と同じ commit で消せば窓は
+      開かない (2026-08-18 に scratch clone で 3 gate 緑を実測)。**この削除は
+      「公開後の後片付け」ではなく「公開そのものの一部」**と読むこと。
+
+      **適用直前チェック (3 点)** — いずれも記憶で判断しない:
+
+      ① `resolutionDate` が実際の配信日と一致するか
+      (ずれるなら**先に pending 側を**直してから進む)。
+
+      ② entry 本文が repo の現況とまだ合っているか。`2026-08-17-01` は
+      「governing document に 1 箇所残る記述は operator の改定待ち」と書いて
+      いるので、`grep -n PulseVM docs/CONSTITUTION.md` が **0 hit になっていたら
+      その 1 文を削ってから**公開する (公開面に古い約束を残さない)。
+
+      ③ **entry が「もう公開されている」と書いている事実を、公開面で裏取りする。**
+      `2026-08-17-01` は「訂正済みの schema と example は**この記録より後には
+      ならない形で**配信されている」と主張する。その主張は**公開面を curl して
+      初めて真偽が決まる**:
+      ```sh
+      B=https://metal.freedom-yield.com/api
+      # ③-1 example 4 本 (= chain_backend は全部で 6 値)
+      for f in anchor-receipt.example.json anchor-receipt.v2.example.json \
+               anchor-receipt.phase-beta.example.json; do
+        curl -s "$B/$f" | jq -r '.anchor.chain_backend'
+      done
+      curl -s "$B/anchor-history.example.jsonl" | jq -r '.chain_backend'
+      # ③-2 schema 4 本 — 訂正は description の書き換えなので文字列で見る
+      #     (receipt 側は "NOT an execution engine"、history 側は小文字 → -i)
+      for f in anchor-receipt.schema.v1.json anchor-receipt.schema.v2.json \
+               anchor-history.schema.v1.json anchor-history.schema.v2.json; do
+        printf '%s ' "$f"; curl -s "$B/$f" | grep -ci 'not an execution engine'
+      done
+      # ③-3 dated revision entry を持つのは v1 の 2 本だけ (v2 は x-revision-history 無し)
+      for f in anchor-receipt.schema.v1.json anchor-history.schema.v1.json; do
+        curl -s "$B/$f" | jq -r '.["x-revision-history"][-1].date'
+      done
+      ```
+      合格条件は 3 つとも: **③-1 の 6 値がすべて `antelope`** /
+      **③-2 の 4 行がすべて 1 以上** / **③-3 の 2 行がどちらも `2026-08-17`**。
+      本文は「schemas と examples」と複数形で主張するので、**example だけ見て
+      通さない** (2026-08-18 レビュー N3)。なお `scripts/` 配下の generator と
+      ledger writer は**公開面に存在しない** (rsync 脚は `public/`-rooted、
+      `deploy.yml:304` `:373`。2026-08-18 に 2 本とも **HTTP 404** を実測) ので、
+      本文もそれらを「配信されている」側には数えていない — ここを確認対象に
+      加えない。**まだ `pulsevm` が返るなら**、訂正 commit が
+      公開面に届いていない (= main が未 push、または deploy 未完) ということ。
+      その場合は **手順 4 の push が同じ deploy で訂正も配信する**ので、
+      **手順 6 の配信確認でこの curl を再実行して `antelope` を確認するまで
+      step 3 へ進まない**。どちらでも駄目なら、その 1 文を書き換えてから公開する。
+      **「たぶんもう出ている」で通さない** — この entry が開示しているのは
+      「将来形を現在形として公開した」ことそのもので、同じ形の文を載せたまま
+      公開すると開示の信頼性を自分で壊す (2026-08-18 のレビュー I1)。
    2. **AI@Mac** — `public/api/incidents.schema.v1.json` に対して validate する。
       **検証単位は entry 単体ではなく `incidents.json` 文書全体** (entry 単体だと
       `'validatorSince' is a required property` で落ちる)。
    3. **AI@Mac** — **同じ commit に `deploy/identity-pin-baseline.json` の一時
       entry を同梱する** (次の小節)。これを忘れると main の CI が step 4 まで
-      数時間赤くなる。
-   3.5 **AI@Mac** — **push する前にローカルで CI gate を回す**:
-      `bash scripts/check-identity-pins.sh --mode=repo`。
-      **`BASELINED incidents_json.sha256` の 1 行が出て exit 0** なら正しい。
-      **exit 3 (`MISMATCH …`) が返るなら push しない** — 原因は ①entry を
-      `known_broken` の下ではなく top level に置いた ②2 つの sha256 の採り違え
-      ③コピペ崩れ、のいずれか。この 1 コマンドが 3 つとも push 前に捕まえる。
+      数時間赤くなる。**この commit が運ぶのは 3 つ**:
+      `public/api/incidents.json` (entry 挿入) /
+      `docs/pending-disclosures/<id>.json` (削除) /
+      `deploy/identity-pin-baseline.json` (一時 entry 追加)。
+   3.5 **AI@Mac** — **push する前にローカルで CI gate を 2 本回す**。
+      片方だけでは赤窓の片側しか見えない:
+      ```sh
+      bash scripts/check-identity-pins.sh --mode=repo
+      bash tests/incidents/test-schema.sh
+      ```
+      - 1 本目: **`BASELINED incidents_json.sha256` の 1 行が出て exit 0** なら
+        正しい。**exit 3 (`MISMATCH …`) が返るなら push しない** — 原因は ①entry を
+        `known_broken` の下ではなく top level に置いた ②2 つの sha256 の採り違え
+        ③コピペ崩れ、のいずれか。この 1 コマンドが 3 つとも push 前に捕まえる。
+      - 2 本目: **`INFO 0 staged disclosure(s) awaiting publication` が出て
+        exit 0** なら正しい。`… is ALREADY published … delete the staged copy`
+        で **exit 1** なら手順 1 の `git rm` を忘れている。**ここで捕まえないと
+        push 後に main の CI が赤くなる** (この suite は
+        `tests/run-all-tests.sh` の `find` 自動 discovery に乗っている)。
+
       (これを省くと「push して CI が赤くなって初めて気づく」= step 2.5 が
       防ごうとしている事象そのものになる。)
    4. **AI@Mac** — commit → push。**`push-to-web-host.sh` は使わない**:
@@ -500,10 +601,21 @@ topology (validator host + operator Mac)**, in this fixed day-of order
       host 側: host repo の `public/api/incidents.json` を
       `jq -r '.incidents[0].id'`。**両方**が新 entry の id を返して初めて次へ。
       公開側だけ通っても host 側が古ければ step 3 は過少のまま確定する。
+      **手順 1 の③がまだ `pulsevm` を返していた場合は、ここで③-1〜③-3 を
+      まるごと再実行する。** 同じ deploy が訂正済みの example と schema も
+      配信しているので、**③の合格条件 3 つがすべて満たされて**いなければ
+      ならない。満たされていなければ公開した本文が偽のまま出ているという
+      ことなので、step 3 に進まずその場で扱う。
    7. → ここで **step 3** へ。書かれたその cycle の行が
       `incidents_in_cycle_ids` に**新 entry を含んで**いることを確認する
       (2026-09-04 なら新 entry + `2026-08-06-01` の 2 件)。1 件しか無ければ
       手順 5/6 が効いていない。
+   8. 終了状態の確認: `find docs/pending-disclosures -name '*.json'` が
+      **1 件も返さない** (手順 1 の `git rm` の結果)。`README.md` は常駐
+      するので「ディレクトリが空」ではなく「**`*.json` が無い**」が正しい
+      終了状態 (2026-08-18 レビュー N4/N5)。**step 4b では何もしない** —
+      pending file の後片付けは step 2.5 の中で閉じている。同じ本文を
+      2 箇所に残さないための削除であって、公開後の掃除ではない。
 
    **一時 baseline entry (手順 3 の中身)。** `public/api/incidents.json` は
    `deploy/feed-excludes.txt` に載っていない = **`tracked` 級**で、署名済み
@@ -946,7 +1058,25 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    - **絶対にやらないこと**: **空 Enter**。既存 password でロックする代わりに
      **新しい password を作成してしまう** — 次回の unlock が通らなくなる。
    - **なぜこれをやるか**: mainnet keystore を unlock したまま放置しない
-     (Constitution §3.5)。7a の testnet keystore も同様に re-lock する。
+     (Constitution §3.5)。
+
+   **後操作 2 (operator@TTY) — testnet keystore も re-lock する。**
+   `HOME=~/.metal-fy-proton-test proton key:lock`。
+
+   - **打つ人**: **operator 自身** (password を打つため)。7a の ② で開けた
+     keystore がここまで開いたままなので、mainnet と同じ扱いで閉じる。
+   - **目視するもの**: ⑤ と同じプロンプト `Enter 32 character password (leave
+     empty to create new)`。ただし入れるのは **testnet keystore の 32 文字**で、
+     ⑤ で打った mainnet のものではない (keystore は HOME ごと別、
+     Constitution §3.5)。**プロンプト文字列が同一なので、直前に打った mainnet
+     の password をそのまま繰り返す取り違えがここで起きうる。**
+   - **空 Enter は同じく禁止** — 新しい password を作ってしまい、次回の 7a が
+     通らなくなる。
+   - **これは独立した 6 番目の operator 操作**であって mainnet re-lock の
+     付随事項ではない。完了 checklist ⑤ が「**片方だけ re-lock して終える
+     取りこぼしがいちばん起きやすい**」と名指ししているのがこの 1 手。
+     以前はこの要求が mainnet 側 bullet の末尾 1 節に埋もれており、
+     冒頭の operator@TTY 列挙からも落ちていた (2026-08-18 K-7)。
 
 7.5. **Mac → host — scp the signing fragment.** Step 7c's
    `sign-anchor-event.sh` output landed on the **Mac** (its default

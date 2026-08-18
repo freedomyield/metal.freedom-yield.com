@@ -22,6 +22,17 @@
 #   - bad id pattern → REJECTED
 #   - missing required field → REJECTED
 #
+# Plus a guard over docs/pending-disclosures/ — disclosure entries staged for
+# a future publication date (docs/CYCLE_GATE.md step 2.5). Each staged file
+# must validate as part of the document it will become, its name must equal
+# its id, it must not break newest-first (against the live head AND against
+# any other staged entry), and its id must NOT already be published — the
+# runbook deletes the staged file in the same commit that publishes it, so
+# "published and still staged" is never a legitimate intermediate state.
+# No *.json means nothing is asserted. (The directory's README.md always
+# stays, so "no staged entries" is not the same as "empty directory" — the
+# glob below is *.json precisely so the README is never read as an entry.)
+#
 # Setup: lazily creates /tmp/incidents-schema-venv with jsonschema if not
 # present. No production state touched.
 
@@ -433,6 +444,107 @@ validate_input "REJECT: confirmedPauseWindowStart is date-only" fail '{
 validate_input "REJECT: missing top-level validatorSince" fail '{
   "incidents": []
 }'
+
+# === Staged disclosures in docs/pending-disclosures/ ====================
+# Entries whose publication date is fixed in the future live there as bare
+# incident objects until docs/CYCLE_GATE.md step 2.5 inserts them into
+# public/api/incidents.json (see docs/INCIDENT_RESPONSE.md §6).
+#
+# The directory holds NO *.json in steady state (only its README.md), and this
+# block then asserts nothing — it is self-retiring, not a permanent
+# requirement that some staged file exist.
+# When something IS staged, it must be publishable as-is on the day: the
+# runbook says "insert it, do not retype it", so the bytes have to be right
+# now rather than on the morning of a cycle transition.
+#
+# "The id is already published" is deliberately a FAILURE: the runbook deletes
+# the staged file in the SAME commit that inserts the entry, so "published and
+# still staged" is never a legitimate intermediate state — it means two copies
+# of the same disclosure text exist and one of them will go stale.
+echo ""
+echo "=== staged disclosures (docs/pending-disclosures/) ==="
+
+PENDING_DIR="$REPO/docs/pending-disclosures"
+LIVE="$REPO/public/api/incidents.json"
+PENDING_COUNT=0
+PREV_STAGED=""   # previous file in glob order — staged entries are also
+                 # ordered against each other, not just against the live head
+
+if [ -d "$PENDING_DIR" ]; then
+  for pf in "$PENDING_DIR"/*.json; do
+    [ -e "$pf" ] || continue   # no matches: the glob stays literal — skip it
+    PENDING_COUNT=$((PENDING_COUNT + 1))
+    pname="$(basename "$pf")"
+    if "$PY" - "$SCHEMA" "$LIVE" "$pf" "$PREV_STAGED" >"$TMP/pending.out" 2>&1 <<'PYEOF'
+import json, os, sys
+import jsonschema
+
+schema_path, live_path, pending_path = sys.argv[1], sys.argv[2], sys.argv[3]
+prev_path = sys.argv[4] if len(sys.argv) > 4 else ''
+schema = json.load(open(schema_path))
+live = json.load(open(live_path))
+entry = json.load(open(pending_path))
+
+stem = os.path.basename(pending_path)[: -len('.json')]
+
+if not isinstance(entry, dict):
+    sys.exit("staged file must be a single incident OBJECT, got %s"
+             % type(entry).__name__)
+
+if entry.get('id') != stem:
+    sys.exit("filename stem %r != .id %r" % (stem, entry.get('id')))
+
+published = [i.get('id') for i in live.get('incidents', [])]
+if entry['id'] in published:
+    sys.exit("%s is ALREADY published in public/api/incidents.json — delete "
+             "the staged copy in the same commit that inserts it "
+             "(CYCLE_GATE step 2.5 手順 1)" % entry['id'])
+
+# A bare entry cannot be validated on its own: the schema requires
+# validatorSince at the document level. Validate the exact document that
+# step 2.5 will produce instead.
+merged = dict(live)
+merged['incidents'] = [entry] + live.get('incidents', [])
+try:
+    jsonschema.validate(instance=merged, schema=schema)
+except jsonschema.ValidationError as e:
+    sys.exit("schema INVALID once merged: %s (at %s)"
+             % (e.message, '/'.join(str(p) for p in e.absolute_path) or '<root>'))
+
+# Newest-first is the rendering convention /incidents/ relies on; head
+# insertion only preserves it if the staged entry really is the newest.
+rest = merged['incidents'][1:]
+if rest and entry['detectionDate'] < rest[0]['detectionDate']:
+    sys.exit("detectionDate %s is older than the current head %s — head "
+             "insertion would break newest-first"
+             % (entry['detectionDate'], rest[0]['detectionDate']))
+
+# ...and when more than one entry is staged, they are inserted one after the
+# other, so they must be ordered against EACH OTHER too. Files arrive here in
+# glob (ascending id) order, so each one must be at least as new as the one
+# before it; otherwise inserting them in that order leaves the list unsorted.
+if prev_path:
+    prev = json.load(open(prev_path))
+    if entry['detectionDate'] < prev['detectionDate']:
+        sys.exit("detectionDate %s is older than staged %s (%s) — inserting "
+                 "them in id order would break newest-first"
+                 % (entry['detectionDate'], prev.get('id'),
+                    prev['detectionDate']))
+
+print('OK')
+PYEOF
+    then
+      PASS=$((PASS + 1))
+      printf '  PASS  staged %-46s validates, name==id, not yet published\n' "$pname"
+    else
+      FAIL=$((FAIL + 1))
+      FAILURES+=("staged disclosure $pname: $(cat "$TMP/pending.out")")
+      printf '  FAIL  staged %-46s %s\n' "$pname" "$(cat "$TMP/pending.out")"
+    fi
+    PREV_STAGED="$pf"
+  done
+fi
+printf '  INFO  %d staged disclosure(s) awaiting publication\n' "$PENDING_COUNT"
 
 echo ""
 echo "Total: PASS=$PASS FAIL=$FAIL"
