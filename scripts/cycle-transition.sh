@@ -136,6 +136,23 @@
 # neither "4b silently disappears" nor "some other step quietly joins the
 # plan" can pass.
 #
+# WHAT THE DRIFT GATE DELIBERATELY DOES NOT COVER, stated here because the
+# gap is load-bearing rather than accidental. docs/CYCLE_GATE.md carries one
+# procedure that is NOT a top-level step marker: step 2.5, the publication of
+# a disclosure incident, written as a sub-block at the end of step 2. It is
+# skipped on most cycles, so giving it a unit id would put a mostly-inert row
+# into a table whose value is that every row runs — and the drift gate, which
+# demands set EQUALITY, would then fail on every cycle that skips it.
+#
+# The consequence is that a day driven from this printout can reach unit 3
+# without ever hearing of 2.5, and unit 3 is the point of no return for it:
+# the ledger row is appended with the incident count one short, append-only,
+# with the bytes flowing into the DAG. So this file prints CHECKPOINT 2.5 as
+# a plain comment block at the end of unit 2 — comment lines, never a
+# `# [unit …]` header, which is the exact string the test extracts to build
+# the plan's side of the set. The block therefore reaches the operator
+# without joining the unit table, and the gate stays green.
+#
 # A THIRD source is cross-checked for free: scripts/lib/cycle-context.sh's
 # translation table carries a phase column per script. Every script named
 # here that also appears there must agree on the phase, and the check is
@@ -350,8 +367,21 @@ FYCT_STATUS_BOUNDARY_TOL_S=21600
 # ---------------------------------------------------------------------------
 # The phase table
 # ---------------------------------------------------------------------------
-# Rows are `phase|label|stop_number|stop_text`. A stop_number of `-` means the
-# phase has no human intervention on entry. Held in a function rather than a
+# Rows are `phase|label|stop_number|stop_text|stop_cmd`. A stop_number of `-`
+# means the phase has no human intervention on entry; a stop_cmd of `-` means
+# the stop is prose only.
+#
+# WHY A STOP CAN CARRY A COMMAND. Stop 2 does, and it is the reason the column
+# exists. The operator's action there is `ssh-add`, which is neither secret nor
+# a signing-CLI invocation, so — unlike the keystore unlock/lock — there is no
+# reason to withhold it, and withholding it is what went wrong: an earlier
+# revision of this plan described stop 2 as "unit 4 will prompt you for the
+# passphrase" and never printed ssh-add at all. That is the OPPOSITE of the
+# canon's model. The canon loads the key into the agent BEFORE unit 4 precisely
+# so that gen-identity.sh does NOT prompt, because it is the AI that runs unit
+# 4 non-interactively and a prompt there stops the session dead
+# (docs/CYCLE_GATE.md step 4's 前操作 block says so in as many words). Held in a
+# function rather than a
 # `$(cat <<EOF)` variable for the bash 3.2 reason documented in
 # scripts/lib/cycle-context.sh's fyc__table_rows: on the macOS system bash,
 # apostrophes inside a quoted heredoc that sits inside a command substitution
@@ -360,19 +390,19 @@ FYCT_STATUS_BOUNDARY_TOL_S=21600
 # substitution, so it cannot happen. No field may contain `|`.
 fyct__phase_rows() {
 	cat <<'FYCT_PHASE_EOF'
-1|記録 / record|1|OPERATOR, IN THE METAL WALLET WEB UI. Submit the new AddValidator (the stake amount is decided on the day, by the operator, and by nobody else), watch the tx reach Committed on the explorer, and confirm the new entry is visible in the current validator set. This is the one human-driven state change of the day and the precondition for unit 1 below, which waits for that entry to appear. Do NOT start phase 1 on the submit alone. Full field-by-field form: docs/VALIDATOR_RENEWAL.md Step 2.
-2|identity|2|OPERATOR, AT A TTY. Unit 4 prompts for the operator identity key passphrase; it is held in Dashlane (see docs/OPERATOR_IDENTITY_SETUP.md). The prompt appears when gen-identity.sh runs, so the passphrase is a precondition of phase 2, not a review of it.
-3|compose|-|-
-4|rehearsal|3|OPERATOR, AT A TTY. Unlock the PROJECT TESTNET keystore (HOME=~/.metal-fy-proton-test) — the unlock command itself is handed over in chat, not printed here (see this script's header, "WHY THE KEYSTORE UNLOCK COMMANDS ARE NOT PRINTED"; exact wording in docs/CYCLE_GATE.md step 7a). Unit 7a cannot run against a locked keystore: it exits 2. This is also where testnet broadcast authorization is given.
-5|刻印 / inscribe|4|OPERATOR, TWICE — AND (a) IS NOT DUE YET AT THIS LINE. (a) Between unit 7b and unit 7c, NOT before 7b: unlock the SEPARATE MAINNET keystore (HOME=~/.metal-fy-proton) and give the PRIME DIRECTIVE gate-2 per-invocation authorization, naming chain, actor, permission, action, memo and quantity explicitly. Gate 2 is a precondition of 7c, not a review of it — but 7b is a dry run that needs the mainnet keystore HOME only for the separation guard, never an UNLOCKED one, so unlocking here would leave the keystore open one unit longer than necessary. Unit 7b prints the exact unlock line and token ritual itself when it finishes, which is the moment to do this. (b) AFTER unit 7c: confirm the transaction on the explorer by eye, then re-lock the mainnet keystore — its prompt reads "Enter 32 character password (leave empty to create new)", and an empty Enter there creates a NEW password instead of locking with the existing one.
-6|事後 / post|-|-
+1|記録 / record|1|OPERATOR, IN THE METAL WALLET WEB UI. Submit the new AddValidator (the stake amount is decided on the day, by the operator, and by nobody else), watch the tx reach Committed on the explorer, and confirm the new entry is visible in the current validator set. This is the one human-driven state change of the day and the precondition for unit 1 below, which waits for that entry to appear. Do NOT start phase 1 on the submit alone. Full field-by-field form: docs/VALIDATOR_RENEWAL.md Step 2.|-
+2|identity|2|OPERATOR, AT A TTY — TYPE THE LINE BELOW YOURSELF, BEFORE UNIT 4. It loads the operator identity key into the ssh-agent; the passphrase is held in Dashlane (see docs/OPERATOR_IDENTITY_SETUP.md) and the AI never receives it. Expect one line back: "Identity added: …". A wrong passphrase breaks nothing and can be retried. WHY IT IS DONE HERE AND NOT INSIDE UNIT 4: gen-identity.sh signs by calling ssh-keygen -Y sign with the private-key PATH, so if the key is not already in the agent it prompts — and unit 4 is run by the AI, non-interactively, where a prompt is a dead stop, not a question. Loading it first is what makes unit 4 runnable at all. The agent does NOT survive across sessions, so a rehearsal that did this last week does not count: it is needed again today.|ssh-add ~/.ssh/freedom-yield-operator-identity
+3|compose|-|-|-
+4|rehearsal|3|OPERATOR, AT A TTY. Unlock the PROJECT TESTNET keystore (HOME=~/.metal-fy-proton-test) — the unlock command itself is handed over in chat, not printed here (see this script's header, "WHY THE KEYSTORE UNLOCK COMMANDS ARE NOT PRINTED"; exact wording in docs/CYCLE_GATE.md step 7a). Unit 7a cannot run against a locked keystore: it exits 2. This is also where testnet broadcast authorization is given — and note that the authorization is not this unlock but the operator personally STARTING unit 7a, which is why unit 7a is the one execution unit marked operator@TTY. Whatever you unlock here, you close at stop 4(b): the testnet keystore stays open from now until then.|-
+5|刻印 / inscribe|4|OPERATOR, THREE TIMES — AND (a) IS NOT DUE YET AT THIS LINE. (a) Between unit 7b and unit 7c, NOT before 7b: unlock the SEPARATE MAINNET keystore (HOME=~/.metal-fy-proton) and give the PRIME DIRECTIVE gate-2 per-invocation authorization, naming chain, actor, permission, action, memo and quantity explicitly. Gate 2 is a precondition of 7c, not a review of it — but 7b is a dry run that needs the mainnet keystore HOME only for the separation guard, never an UNLOCKED one, so unlocking here would leave the keystore open one unit longer than necessary. Unit 7b prints the exact unlock line and token ritual itself when it finishes, which is the moment to do this. (b) AFTER unit 7c, confirm the transaction on the explorer by eye, then re-lock BOTH keystores — TWO separate actions, not one: the MAINNET keystore opened at (a), and the TESTNET keystore opened at stop 3, which is still open. Closing only the mainnet one and calling the day done is the single likeliest omission of the transition, and the canon's completion checklist exists to catch it: both must read locked. Both prompts read "Enter 32 character password (leave empty to create new)", and an empty Enter at either creates a NEW password instead of locking with the existing one — which silently breaks the next cycle's unlock for that keystore.|-
+6|事後 / post|-|-|-
 FYCT_PHASE_EOF
 }
 
 # ---------------------------------------------------------------------------
 # The unit table
 # ---------------------------------------------------------------------------
-# Rows are `id|phase|machine|scripts|title`.
+# Rows are `id|phase|machine|actor|scripts|title`.
 #
 #   id       matches docs/cycle-transition-steps.json, plus 4b from
 #            docs/CYCLE_GATE.md (see THE DRIFT GATE in the header).
@@ -380,6 +410,16 @@ FYCT_PHASE_EOF
 #            enforces the closed set, because "which machine" is the single
 #            most consequential fact on each line and a typo'd third spelling
 #            would read as a new machine rather than as a mistake.
+#   actor    exactly `AI@host`, `AI@Mac` or `operator@TTY` — docs/CYCLE_GATE
+#            .md's own three values, from its "実行者と実行場所 (actor /
+#            location)" section, which states in so many words that the
+#            machine label is "**マシン**の指定であって実行者ではない".
+#            THE MACHINE ALONE WAS A DAY-OF HAZARD, and closing it is why this
+#            column exists: unit 7a is a `Mac` line like six others, yet an
+#            AI-started 7a IS NOT AUTHORIZED however green it runs — the
+#            authorization IS the operator having started it. The test pins
+#            the closed set AND that each actor's machine suffix agrees with
+#            the machine column, so the two cannot drift apart in silence.
 #   scripts  space-separated, `-` when the unit runs no repo script. Used by
 #            the test to cross-check the phase against
 #            scripts/lib/cycle-context.sh's translation table.
@@ -387,20 +427,20 @@ FYCT_PHASE_EOF
 # ORDER IS LOAD-BEARING and is docs/CYCLE_GATE.md's order verbatim.
 fyct__unit_rows() {
 	cat <<'FYCT_UNIT_EOF'
-1|1|host|-|wait for the node-info tick to reflect the new AddValidator endTime
-2|1|host|uptime-history.sh|close out the just-ended cycle's uptime record
-3|1|host|gen-cycle-history.sh push-to-web-host.sh|append the cycle row to the ledger and publish it
-4|2|Mac|operator-local/gen-identity.sh|regenerate the signed identity manifest for the new cycle
-4b|2|Mac|-|C4 post-issuance cleanup, then commit + push + wait for deploy
-5|3|host|gen-anchor-source.sh|compose the fresh 3-branch anchor-source DAG
-6|3|Mac|operator-local/commit-anchor-source.sh|fetch + verify + commit the host-composed anchor-source, push, wait for deploy
-7a|4|Mac|run-testnet-rehearsal.sh|testnet rehearsal of this cycle's exact memo shape (gate-1 material)
-7b|5|Mac|preview-cycle-anchor-broadcast.sh|mainnet dry run from the committed bytes (gate-4 material)
-7c|5|Mac|sign-anchor-event.sh|sign the 4-action anchor pack
-7.5|5|Mac|-|transfer the signing fragment from the Mac to the host
-8|6|host|gen-anchor-receipt.sh append-anchor-history.sh|7-gate verify the transaction, then append it to the anchor ledger
-8.5|6|host|push-to-web-host.sh|publish the two canonical flat files
-9|6|host|resume-after-cycle-start.sh|record the cycle-gate approval state
+1|1|host|AI@host|-|wait for the node-info tick to reflect the new AddValidator endTime
+2|1|host|AI@host|uptime-history.sh|close out the just-ended cycle's uptime record
+3|1|host|AI@host|gen-cycle-history.sh push-to-web-host.sh|append the cycle row to the ledger and publish it
+4|2|Mac|AI@Mac|operator-local/gen-identity.sh|regenerate the signed identity manifest for the new cycle
+4b|2|Mac|AI@Mac|-|C4 post-issuance cleanup, then commit + push + wait for deploy
+5|3|host|AI@host|gen-anchor-source.sh|compose the fresh 3-branch anchor-source DAG
+6|3|Mac|AI@Mac|operator-local/commit-anchor-source.sh|fetch + verify + commit the host-composed anchor-source, push, wait for deploy
+7a|4|Mac|operator@TTY|run-testnet-rehearsal.sh|testnet rehearsal of this cycle's exact memo shape (gate-1 material)
+7b|5|Mac|AI@Mac|preview-cycle-anchor-broadcast.sh|mainnet dry run from the committed bytes (gate-4 material)
+7c|5|Mac|AI@Mac|sign-anchor-event.sh|sign the 4-action anchor pack
+7.5|5|Mac|AI@Mac|-|transfer the signing fragment from the Mac to the host
+8|6|host|AI@host|gen-anchor-receipt.sh append-anchor-history.sh|7-gate verify the transaction, then append it to the anchor ledger
+8.5|6|host|AI@host|push-to-web-host.sh|publish the two canonical flat files
+9|6|host|AI@host|resume-after-cycle-start.sh|record the cycle-gate approval state
 FYCT_UNIT_EOF
 }
 
@@ -425,8 +465,9 @@ fyct__unit_field() {
 
 fyct_unit_phase()   { fyct__unit_field "$1" 2; }
 fyct_unit_machine() { fyct__unit_field "$1" 3; }
-fyct_unit_scripts() { fyct__unit_field "$1" 4; }
-fyct_unit_title()   { fyct__unit_field "$1" 5; }
+fyct_unit_actor()   { fyct__unit_field "$1" 4; }
+fyct_unit_scripts() { fyct__unit_field "$1" 5; }
+fyct_unit_title()   { fyct__unit_field "$1" 6; }
 
 # ---------------------------------------------------------------------------
 # Print-time consistency check against scripts/lib/cycle-context.sh
@@ -574,14 +615,32 @@ fyct__unit_commands() {
 		fyct__host_cd "bash scripts/node-info.sh && jq -r .endTime,.observedAt public/api/validator.json"
 		;;
 	2)
-		fyct__wrap "  " "FY_LIVE=1 is REQUIRED, and docs/CYCLE_GATE.md step 2 does not show it — that step carries no command block at all. Measured 2026-08-14: uptime-history.sh routes every persistent write through fyd_live_write / fyd_live_run (91, 92, 106, 107, 108, 166), and its only two raw redirects go to mktemp paths (253 to the temp from 234, 283 to the temp from 280) whose install mv is itself gated (257, 284). So without the opt-in nothing lands anywhere and the cycle simply never closes."
+		fyct__wrap "  " "FY_LIVE=1 is REQUIRED. docs/CYCLE_GATE.md step 2 shows the same opt-in in its own command block, so this line is the canon's, not an addition — an earlier revision of this plan claimed that step 'carries no command block at all', which was simply wrong and is corrected here. Measured 2026-08-14: uptime-history.sh routes every persistent write through fyd_live_write / fyd_live_run (91, 92, 106, 107, 108, 166), and its only two raw redirects go to mktemp paths (253 to the temp from 234, 283 to the temp from 280) whose install mv is itself gated (257, 284). So without the opt-in nothing lands anywhere and the cycle simply never closes."
+		fyct__wrap "  " "CONFIRM SUCCESS POSITIVELY, not by the absence of 'DRY:'. Forgetting the opt-in still exits 0. The line that names this step's whole reason for existing is 'Closed cycle #<N>: …' — look for THAT. The damage from a forgotten opt-in is not a wrong row in unit 3, it is a MISSING one, so what you are hunting for later is an absent line, not an incorrect one."
 		fyct__host_env "FY_LIVE=1" "scripts/uptime-history.sh"
+		fyct__wrap "  " "ON A TRANSITION DAY, TWO 'Appended daily entry' LINES FOR THE SAME DATE ARE CORRECT. That is the expected success signal of a cycle boundary, not a double-run to suppress or investigate. If unsure, compare each run's period_end_unix against the endTime unit 1 confirmed."
+		fyct__cb
+		fyct__rule
+		fyct__c "⛔ CHECKPOINT 2.5 — PUBLISH THE DISCLOSURE INCIDENT (before unit 3)"
+		fyct__wrap "  " "NOT AN EXECUTION UNIT, AND THAT IS WHY IT IS EASY TO LOSE. It has no id in this plan's table and it is not in docs/cycle-transition-steps.json, on purpose: it runs only on cycles that have one, so giving it a unit id would put a mostly-skipped step into a table whose whole value is that every row runs. The cost of that choice is this block, which exists so that a day driven from this printout still reaches it."
+		fyct__wrap "  " "IT IS THE ONE THING TODAY THAT CANNOT BE CORRECTED AFTERWARDS. gen-cycle-history.sh attributes an incident to a cycle by detectionDate, and it reads the HOST repo's public/api/incidents.json — not the public URL. If the entry is not there when unit 3 runs, that cycle's row is written with incidents_in_cycle_count one short and appended to an append-only ledger whose bytes flow into the DAG. Its own conservation check cannot see the omission: both sides of it are computed from the same pre-append file."
+		fyct__wrap "  " "DECIDE WHETHER IT APPLIES — do not assume it does not. The tracked payloads are the whole answer; there is nothing to compose by hand and nothing to fetch from scratch:"
+		fyct__cmd Mac "ls -1 docs/pending-disclosures/*.json 2>/dev/null || echo 'none — CHECKPOINT 2.5 does not apply to this cycle'"
+		fyct__wrap "  " "If that lists nothing, record that you checked and go to unit 3. If it lists a file, DO NOT improvise from this summary: run the procedure in docs/CYCLE_GATE.md step 2.5 (the sub-block at the end of step 2). It is ordered, it publishes via git-deploy rather than push-to-web-host.sh, and it requires confirming delivery on BOTH the public URL and the host copy — the public side alone passing is exactly the state that still leaves unit 3 short."
+		fyct__wrap "  " "IT PUBLISHES IN ONE COMMIT, AND THAT COMMIT CARRIES THREE THINGS, not one: the entry appended to public/api/incidents.json, a TEMPORARY entry added to deploy/identity-pin-baseline.json (without it, main's CI is red from this push until unit 4 re-signs, hours later), and the DELETION of the pending payload the entry came from. Keeping the payload after publishing leaves the same text in two places and fails tests/incidents/."
+		fyct__wrap "  " "IT ALSO LEAVES ONE ITEM FOR UNIT 4b, AND CI WILL NOT CATCH THAT ONE. The temporary baseline entry has to be deleted in unit 4b's commit, because unit 4's re-signing is what makes it obsolete. check-identity-pins.sh then reports it as OBSOLETE-BASELINE — but report-only, without changing its exit code. It is bullet (b) of the 4b checklist below; nothing goes red if you skip it."
+		fyct__rule
 		;;
 	3)
+		fyct__wrap "  " "TAKE THE BASELINE FIRST — RUN THIS BEFORE THE HOST COMMAND BELOW, AND WRITE THE NUMBER DOWN. 'grew by exactly one line' is a claim about a DIFFERENCE, and the after-reading alone cannot support it; this plan used to print only the after-reading, which left the check unfalsifiable. Expect $((N - 1)) here and ${N} afterwards."
+		fyct__cmd Mac "curl -fsS 'https://metal.freedom-yield.com/api/cycle-history.jsonl' | grep -cve '^[[:space:]]*\$' || true"
+		fyct__wrap "  " "A READING OF 0 MEANS THE FETCH FAILED, not that the ledger is empty: on a curl error the count still prints as 0 rather than erroring out. Treat 0 as no reading at all and take it again before continuing."
 		fyct__wrap "  " "The publish is neither optional nor automatic: units 4 and 5 read the PUBLISHED ledger, so skipping it makes gen-identity.sh exit 7 and gen-anchor-source.sh exit 9 against a stale count."
 		fyct__host_cd "bash scripts/gen-cycle-history.sh && bash scripts/push-to-web-host.sh cycle-history.jsonl"
-		fyct__wrap "  " "Then confirm the PUBLISHED copy grew by exactly one line and now holds ${N} records. Deliberately checked from the Mac, not the host: units 4 and 5 guard against what the site actually serves, so the host's own copy is not the thing that matters here."
+		fyct__wrap "  " "Now re-read the PUBLISHED copy with the SAME command and compare against the baseline: the difference must be exactly 1, and the absolute value ${N}. Deliberately checked from the Mac, not the host: units 4 and 5 guard against what the site actually serves, so the host's own copy is not the thing that matters here."
 		fyct__cmd Mac "curl -fsS 'https://metal.freedom-yield.com/api/cycle-history.jsonl' | grep -cve '^[[:space:]]*\$' || true"
+		fyct__wrap "  " "docs/CYCLE_GATE.md spells this count 'wc -l'. This plan counts non-blank lines instead, which agrees with wc -l on a file that ends in a newline and is right rather than one short on a file that does not. Either is fine for the DIFFERENCE as long as both readings use the same one — so use the line printed here for both, and do not mix the two spellings."
+		fyct__wrap "  " "If CHECKPOINT 2.5 applied this cycle, also confirm the new row's incidents_in_cycle_ids CONTAINS the entry you published. A row that is present but one incident short is the failure 2.5 exists to prevent, and it is final once written."
 		;;
 	4)
 		fyct__wrap "  " "FY_EXPECT_CYCLE is the CLOSED-cycle count (${N}), not the number being inscribed. It is mandatory at a transition: it hard-stops with exit 7 if unit 3's publish has not landed."
@@ -589,16 +648,20 @@ fyct__unit_commands() {
 		fyct__cmd "$m" "FY_EXPECT_CYCLE=${N} OPERATOR_IDENTITY_KEY=~/.ssh/freedom-yield-operator-identity bash scripts/operator-local/gen-identity.sh"
 		;;
 	4b)
-		fyct__wrap "  " "MANDATORY, and it must land in the SAME COMMIT as unit 4's identity.json or tests/publication-registry/ goes red on main. These are hand edits, not commands — quoted from docs/CYCLE_GATE.md step 4b, which is the canonical wording:"
+		fyct__wrap "  " "MANDATORY, and it must land in the SAME COMMIT as unit 4's identity.json or tests/publication-registry/ goes red on main. These are hand edits, not commands. docs/CYCLE_GATE.md step 4b is the canonical wording and carries FOUR bullets; all four are summarised here, but read the canon before editing — an earlier revision of this plan listed only three while calling itself a verbatim quote."
 		fyct__cb
 		fyct__wrap "    " "(a) deploy/identity-pin-baseline.json — delete all three known_broken entries (evidence_json.sha256, validator_json.sha256, uptime_cycles_json.sha256) and the c4_status block with them."
-		fyct__wrap "    " "(b) deploy/publication.json — set known_kind_violations.violations to {}, and clear pinned_by on api/evidence.json, api/validator.json, api/cycle-history.jsonl and api/uptime-cycles.json."
-		fyct__wrap "    " "(c) deploy/publication.json — add pinned_by for api/incidents.schema.v1.json and for the api/archive/ directory row."
+		fyct__wrap "    " "(b) deploy/identity-pin-baseline.json — ONLY IF CHECKPOINT 2.5 RAN THIS CYCLE: delete the temporary incidents_json.sha256 entry it added. Unit 4's re-signing moves pinned_sha256, so the entry stops suppressing anything and check-identity-pins.sh starts printing 'OBSOLETE-BASELINE incidents_json.sha256 … delete this entry'. THAT LINE DOES NOT CHANGE THE EXIT CODE — this is the one bullet on the list that CI will not fail on, so it is the one to check by eye."
+		fyct__wrap "    " "(c) deploy/publication.json — set known_kind_violations.violations to {}, and clear pinned_by on api/evidence.json, api/validator.json, api/cycle-history.jsonl and api/uptime-cycles.json."
+		fyct__wrap "    " "(d) deploy/publication.json — add pinned_by for api/incidents.schema.v1.json and for the api/archive/ directory row."
 		fyct__cb
+		fyct__wrap "  " "A GREEN tests/publication-registry/ IS NOT PROOF THE LIST IS COMPLETE. Its T19 case synthesises both registry fixtures, so it returns the same verdict before and after these edits; what actually reads the real registry and the real manifest is T6, T7 and T14. And neither that suite nor any other exit code covers bullet (b) — for that, read the check-identity-pins.sh output for OBSOLETE-BASELINE."
 		fyct__wrap "  " "The record_caveat on the api/archive/ row was CORRECTED 2026-08-14 (and again 2026-08-17) — the STRUCTURALLY immutable claim this step used to warn about is gone. Read deploy/publication.json's current record_caveat text directly before editing anything under this bullet; do not trust a cached summary of it."
 		fyct__cmd "$m" "bash tests/publication-registry/test-publication-registry.sh"
 		fyct__wrap "  " "public/api/identity.json.sig IS IN THIS LIST AND MUST STAY. gen-identity.sh writes the manifest and its detached signature as a pair (its atomic-publish block moves both), and the real cycle-4 transition commit 90bcdd9 carried exactly those two files. Staging the manifest without the signature publishes a NEW manifest under the PREVIOUS cycle's signature: the public ssh-keygen -Y verify then fails, and unit 9's Phase 1 identity signature check fails with it."
 		fyct__cmd "$m" "git add public/api/identity.json public/api/identity.json.sig deploy/identity-pin-baseline.json deploy/publication.json"
+		fyct__wrap "  " "Then read the staged set back before committing. Expect exactly those FOUR entries, on a checkpoint-2.5 cycle as much as on an ordinary one. Nothing from checkpoint 2.5 is staged here: it committed and pushed public/api/incidents.json, the temporary baseline entry this commit now removes, and the deletion of its own pending payload — all in its own commit, hours earlier."
+		fyct__cmd "$m" "git diff --cached --name-status"
 		fyct__cmd "$m" "git commit -m 'chore(identity): cycle ${INSCRIBE} identity manifest + C4 post-issuance cleanup'"
 		fyct__cmd "$m" "git push"
 		fyct__cmd "$m" "gh run watch"
@@ -618,6 +681,7 @@ fyct__unit_commands() {
 		fyct__cmd "$m" "gh run watch"
 		;;
 	7a)
+		fyct__wrap "  " "THE OPERATOR STARTS THIS ONE PERSONALLY. It is the only execution unit in the whole plan that the AI must not launch, and the reason is not a password — the script writes its own broadcast token and calls the broadcast helper non-interactively, so it will never pause to ask anyone. THE OPERATOR HAVING STARTED IT IS THE PER-INVOCATION AUTHORIZATION FOR THE TESTNET BROADCAST. An AI-launched run can print every gate green and still not be authorized, and there is no later check that can tell the two apart. If in doubt about who ran it: do it again, started by the operator."
 		fyct__wrap "  " "Run this only AFTER unit 6 has landed. Against the real committed file the default source selection is correct, so no --source= and no fixture override is needed. Running it earlier against a hand-built fixture is what cost an extra reconciliation on 2026-08-04."
 		fyct__cmd "$m" "HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh --expect-cycle=${INSCRIBE}"
 		fyct__wrap "  " "Copy the closing 'TESTNET REHEARSAL COMPLETE testnet_tx_id=<64hex>' line verbatim — it is the gate-1 input for units 7b and 7c, and it is valid only for cycle ${INSCRIBE}. Re-run this script with --testnet-tx-id=<that id> to print 7b and 7c fully resolved."
@@ -628,7 +692,8 @@ fyct__unit_commands() {
 		fyct__wrap "  " "From the ALREADY-COMMITTED bytes, with no recompose. It refuses with exit 9 if the source differs from git show HEAD:public/api/anchor-source.json, and with exit 10 if the live public copy does not yet serve those same bytes. It composes nothing and sends nothing."
 		fyct__wrap "  " "Do not run it on the validator host: the keystore separation guard refuses a login-HOME invocation with exit 8, and a host-side recompose would produce a different dag_root_computed because the artifacts branch hashes feeds the 5-minute crons rewrite."
 		fyct__wrap "  " "FY_CONFIG_DIR is printed as an absolute path on purpose: that sidesteps the zsh left-to-right assignment-ordering trap that silently relocates the config dir inside the keystore when it is written home-relative."
-		fyct__wrap "  " "This unit needs the mainnet keystore HOME (the separation guard refuses otherwise with exit 8) but NOT an unlocked keystore, no signing key, and no authorization — it is a dry run that touches no operator token. It also prints the stop-4(a) unlock line, the token ritual and the unit 7c command with both gate args filled in, so prefer ITS output over the line printed below."
+		fyct__wrap "  " "This unit needs the mainnet keystore HOME (the separation guard refuses otherwise with exit 8) but NOT an unlocked keystore, no signing key, and no authorization — it is a dry run that touches no operator token."
+		fyct__wrap "  " "IT PRINTS A UNIT 7c COMMAND. TAKE THE VALUES FROM IT, NOT THE LINE. Its output is the only source for the stop-4(a) unlock line, the token ritual, and the tx_sha256 that binds the token — this plan cannot know any of them, so read them there. But its version of the 7c command itself writes FY_CONFIG_DIR HOME-RELATIVE and passes no --output=, which re-opens the two traps unit 7c's line below has already closed (the zsh assignment-ordering trap, and the fragment path moving under FY_SIGN_OUTPUT_DIR). Copy the values across INTO the 7c line below; do not paste 7b's rendering of the command."
 		if [ "$TTX_KNOWN" = "1" ]; then
 			fyct__cmd "$m" "FY_CONFIG_DIR=${CFG} HOME=~/.metal-fy-proton bash scripts/preview-cycle-anchor-broadcast.sh --source=public/api/anchor-source.json --testnet-tx-id=${TTX}"
 		else
@@ -637,17 +702,19 @@ fyct__unit_commands() {
 		fi
 		;;
 	7c)
-		fyct__wrap "  " "Requires the stop-4(a) authorization above. Both gate args are mandatory; unit 7b prints this same command with them already filled in, and that printed form is the one to prefer on the day."
-		fyct__wrap "  " "Its stdout is additionally saved to /tmp/fya-mainnet-sign-output.json, which is unit 7.5's input."
+		fyct__wrap "  " "Requires the stop-4(a) authorization above. Both gate args are mandatory and only unit 7b's output can supply them — copy them from there INTO THE LINE BELOW. THIS is the line to run: 7b renders the same command with FY_CONFIG_DIR written home-relative and with no --output=, and both of those are traps this line has already closed."
+		fyct__wrap "  " "WHY FY_CONFIG_DIR IS ABSOLUTE HERE. Written home-relative, it is expanded against the keystore HOME set on the same line rather than the operator's own, so the config directory silently relocates INSIDE the keystore. docs/CYCLE_GATE.md spends about thirty lines on this trap; resolving the path at print time removes it, which is why this line looks different from 7b's."
+		fyct__wrap "  " "WHY --output= IS PINNED HERE. Its stdout is additionally saved to /tmp/fya-mainnet-sign-output.json, which is unit 7.5's input. Left to the default, that directory is whatever FY_SIGN_OUTPUT_DIR says (it exists so tests can redirect it), and a value still exported in this terminal would send the fragment elsewhere while unit 7.5 goes on scp'ing the literal /tmp path — shipping the PREVIOUS cycle's fragment, which the implementation itself warns is a live artifact on the operator's Mac and not disposable scratch. Unit 8's 7-gate would catch the mismatch, but only after the irreversible broadcast."
 		if [ "$TTX_KNOWN" = "1" ]; then
-			fyct__cmd "$m" "FY_CONFIG_DIR=${CFG} HOME=~/.metal-fy-proton bash scripts/sign-anchor-event.sh --chain=mainnet-a --anchor-source=public/api/anchor-source.json --testnet-tx-id=${TTX} --dry-run-log=/tmp/fya-mainnet-dryrun.json"
+			fyct__cmd "$m" "FY_CONFIG_DIR=${CFG} HOME=~/.metal-fy-proton bash scripts/sign-anchor-event.sh --chain=mainnet-a --anchor-source=public/api/anchor-source.json --testnet-tx-id=${TTX} --dry-run-log=/tmp/fya-mainnet-dryrun.json --output=/tmp/fya-mainnet-sign-output.json"
 		else
 			fyct__wrap "  " "NOT RESOLVED: same reason as unit 7b. Commented out deliberately."
-			fyct__cmd_pending "$m" "NEEDS 7a TX ID" "FY_CONFIG_DIR=${CFG} HOME=~/.metal-fy-proton bash scripts/sign-anchor-event.sh --chain=mainnet-a --anchor-source=public/api/anchor-source.json --testnet-tx-id=<64hex from unit 7a> --dry-run-log=/tmp/fya-mainnet-dryrun.json"
+			fyct__cmd_pending "$m" "NEEDS 7a TX ID" "FY_CONFIG_DIR=${CFG} HOME=~/.metal-fy-proton bash scripts/sign-anchor-event.sh --chain=mainnet-a --anchor-source=public/api/anchor-source.json --testnet-tx-id=<64hex from unit 7a> --dry-run-log=/tmp/fya-mainnet-dryrun.json --output=/tmp/fya-mainnet-sign-output.json"
 		fi
 		;;
 	7.5)
 		fyct__wrap "  " "Typed on the Mac, lands on the host. Unit 8 reads the destination path. The chmod is defensive: this connects as root while unit 8 runs as the deploy user, and a restrictive root umask would otherwise leave the file unreadable to it."
+		fyct__wrap "  " "THE SOURCE PATH BELOW MUST BE THE SAME STRING AS UNIT 7c's --output=. They are coupled by nothing but that agreement — this is a literal path, not a value read back from 7c — so if you changed one, change the other. A /tmp file left over from a previous cycle has the right name and the wrong contents, and it will scp perfectly happily."
 		fyct__cmd "$m" "scp -i ${VHK} /tmp/fya-mainnet-sign-output.json ${VHU}@${VH}:/home/deploy/.fya-sign-output.json"
 		fyct__cmd "$m" "ssh -i ${VHK} ${VHU}@${VH} 'chmod 644 /home/deploy/.fya-sign-output.json'"
 		;;
@@ -677,7 +744,7 @@ fyct__unit_commands() {
 # The plan
 # ---------------------------------------------------------------------------
 fyct_print_plan() {
-	local id phase machine title last_phase="" prow plabel pstop ptext
+	local id phase machine actor title last_phase="" prow plabel pstop ptext pcmd
 
 	fyct__c "============================================================================"
 	fyct__c "Metal Freedom Yield — cycle transition plan"
@@ -713,8 +780,15 @@ fyct_print_plan() {
 	fi
 	fyct__cb
 	fyct__c "HOW TO READ THIS"
-	fyct__wrap "  " "TYPE EVERYTHING ON THE MAC. Each command ends with the machine it EXECUTES on: '# Mac' runs locally; '# host' already carries the ssh and the sudo -u deploy that take it to the validator host and run it as the deploy user (with a cd into the repo where the unit needs one). There is no third machine, and you should not need a second terminal on the host."
-	fyct__wrap "  " "The four STOP blocks are human actions. This script performs none of them, and it holds no route to a broadcast — phases 4 and 5 print and stop, permanently, enforced by tests/orchestrator-guard/."
+	fyct__wrap "  " "EVERY COMMAND IS TYPED ON THE MAC — there is no third machine and you should not need a second terminal on the host. Each command ends with the machine it EXECUTES on: '# Mac' runs locally; '# host' already carries the ssh and the sudo -u deploy that take it to the validator host and run it as the deploy user (with a cd into the repo where the unit needs one)."
+	fyct__wrap "  " "WHICH MACHINE IS NOT WHO TYPES, and reading the machine as the actor is a real day-of hazard. docs/CYCLE_GATE.md's 'actor / location' section keeps them apart, so every unit header below names an ACTOR as well as a machine:"
+	fyct__wrap "    " "AI@host      — the AI runs it over ssh. The operator reads the output."
+	fyct__wrap "    " "AI@Mac       — the AI runs it in the Mac working copy. The operator reads the output."
+	fyct__wrap "    " "operator@TTY — THE OPERATOR TYPES IT PERSONALLY. Exactly one execution unit carries this: unit 7a. The canon's other operator@TTY actions are the ssh-add and the keystore unlock/lock, and those are STOP blocks here, not units."
+	fyct__wrap "  " "operator@TTY on unit 7a is not a formality. The rehearsal writes its own broadcast token and calls the broadcast helper non-interactively, so nothing will pause and ask: THE OPERATOR HAVING STARTED IT IS THE AUTHORIZATION. A run the AI started passes every gate and is still not authorized."
+	fyct__wrap "  " "Counting the operator's own keystrokes for the whole day: SIX. In canon order — (1) the ssh-add at stop 2, (2) the testnet keystore unlock at stop 3, (3) unit 7a itself, (4) the mainnet keystore unlock at stop 4(a), (5) the mainnet re-lock at stop 4(b), (6) the TESTNET re-lock at stop 4(b). Six, not five: the testnet re-lock is an independent action, and leaving it out is the omission the canon's completion checklist names as the likeliest of the day."
+	fyct__wrap "  " "THE DAY PAUSES IN FIVE PLACES, AND ONLY FOUR OF THEM ARE ⏸ STOP BLOCKS. The fifth is ⛔ CHECKPOINT 2.5, printed at the end of unit 2: a canon-only step that is not an execution unit and has no id in the table below. It is not a STOP because the work is the AI's, not the operator's — but it is a full halt to the sequence all the same. Read it before unit 3. On a cycle where it applies, skipping it is the one thing today that cannot be corrected afterwards."
+	fyct__wrap "  " "The four ⏸ STOP blocks are the operator's own actions. This script performs none of them, and it holds no route to a broadcast — phases 4 and 5 print and stop, permanently, enforced by tests/orchestrator-guard/."
 	fyct__wrap "  " "docs/CYCLE_GATE.md remains the canon. This plan restates it with values filled in; where the two differ, an inline comment says so."
 	fyct__c "============================================================================"
 	printf '\n'
@@ -723,6 +797,7 @@ fyct_print_plan() {
 		[ -n "$id" ] || continue
 		phase="$(fyct_unit_phase "$id")"
 		machine="$(fyct_unit_machine "$id")"
+		actor="$(fyct_unit_actor "$id")"
 		title="$(fyct_unit_title "$id")"
 
 		if [ "$phase" != "$last_phase" ]; then
@@ -730,11 +805,20 @@ fyct_print_plan() {
 			plabel="$(printf '%s' "$prow" | cut -d'|' -f2)"
 			pstop="$(printf '%s' "$prow" | cut -d'|' -f3)"
 			ptext="$(printf '%s' "$prow" | cut -d'|' -f4)"
+			pcmd="$(printf '%s' "$prow" | cut -d'|' -f5)"
 
 			if [ "$pstop" != "-" ]; then
 				fyct__rule
-				fyct__c "⏸ STOP ${pstop} — entry gate of phase ${phase}"
+				# "OPERATOR ACTION" rather than the actor value operator@TTY:
+				# stop 1 happens in the Metal Wallet web UI, not at a terminal,
+				# so the actor vocabulary the unit table uses does not fit it.
+				# Each stop's own text names where it happens.
+				fyct__c "⏸ STOP ${pstop} — entry gate of phase ${phase} — OPERATOR ACTION, NOT THE AI"
 				fyct__wrap "  " "$ptext"
+				if [ "$pcmd" != "-" ]; then
+					fyct__cb
+					fyct__cmd Mac "$pcmd"
+				fi
 				fyct__rule
 				printf '\n'
 			fi
@@ -744,7 +828,7 @@ fyct_print_plan() {
 		fi
 
 		fyct__cb
-		fyct__c "[unit ${id}] ${machine} — ${title}"
+		fyct__c "[unit ${id}] ${machine} — ${actor} — ${title}"
 		fyct__unit_commands "$id"
 		printf '\n'
 	done < <(fyct_unit_ids)
@@ -755,14 +839,15 @@ fyct_print_plan() {
 	fyct__c "============================================================================"
 	fyct__c "WHERE THIS PLAN IS NOT A COMPLETE SUBSTITUTE FOR docs/CYCLE_GATE.md"
 	fyct__cb
-	fyct__wrap "  " "1. The keystore unlock and re-lock commands for stops 3 and 4 are NOT printed here. tests/orchestrator-guard/ fails this file if it names the signing CLI, and those are the operator's own manual actions, handed over in chat. Measured relief: the phase scripts print them themselves — unit 7b prints the MAINNET unlock line plus the token ritual, and unit 7a prints the TESTNET unlock line whenever it detects a locked keystore. So the only step of the day with no printed source anywhere is the FINAL RE-LOCK after unit 7c, which is also the one where an empty Enter silently sets a new password. Get its wording from docs/CYCLE_GATE.md step 7c."
+	fyct__wrap "  " "1. The keystore unlock and re-lock commands for stops 3 and 4 are NOT printed here. tests/orchestrator-guard/ fails this file if it names the signing CLI, and those are the operator's own manual actions, handed over in chat. Measured relief: the phase scripts print them themselves — unit 7b prints the MAINNET unlock line plus the token ritual, and unit 7a prints the TESTNET unlock line whenever it detects a locked keystore. So the steps of the day with no printed source anywhere are the TWO RE-LOCKS after unit 7c (mainnet and testnet), which are also the two where an empty Enter silently sets a new password. Get their wording from docs/CYCLE_GATE.md step 7c."
+	fyct__wrap "  " "1b. CHECKPOINT 2.5 is summarised above but NOT reproduced. Its procedure is ordered, it has a JSON template, and it publishes by a different route than the rest of the day — copying it here would be the drift this plan exists to avoid. What is printed is enough to know it exists, to decide whether it applies, and to know what it adds to unit 4b. The steps themselves are in docs/CYCLE_GATE.md step 2.5."
 	if [ "$TTX_KNOWN" != "1" ]; then
 		fyct__wrap "  " "2. Units 7b and 7c are commented out because the rehearsal tx id does not exist yet. Re-run with --testnet-tx-id=<64hex> once unit 7a has printed its sentinel."
 	else
 		fyct__wrap "  " "2. Units 7b and 7c are resolved against the supplied rehearsal tx id. Verify it is THIS cycle's (cycle ${INSCRIBE}) — a stale id from an earlier rehearsal satisfies the shape check and fails gate 1."
 	fi
 	fyct__wrap "  " "3. Unit 8's PREV_TX resolves on the host at paste time, by design; it is not a value this plan could know. It is the one escaped variable in the output."
-	fyct__wrap "  " "4. Unit 4b is a set of hand edits. Only its verification and commit are commands."
+	fyct__wrap "  " "4. Unit 4b is a set of hand edits. Only its verification and commit are commands. One of its four bullets — (b) — applies only when CHECKPOINT 2.5 ran, and that same bullet is the single item on the list no exit code enforces. The other three are unconditional: do them on every cycle."
 	fyct__wrap "  " "5. The '~' in the keystore and identity-key paths is USER-RELATIVE, not resolved here. It expands to the home directory of whoever pastes it, which is correct on the operator's Mac and wrong anywhere else. Everything else on those lines is fully resolved."
 	fyct__wrap "  " "6. The host repo path (${REMOTE_REPO}) and the deploy user are assumed, not probed. If the host layout ever changes, these lines are wrong in a way this plan cannot detect."
 	fyct__wrap "  " "7. This plan does not execute or verify anything — it is a plan. To find out how far the day actually got, run the SAME script with --status --expect-cycle=${N}: it re-measures each phase's post-condition against the published artifacts instead of trusting a record. It is read-only too, and it is the check this plan cannot make on the number you typed above."
