@@ -460,9 +460,30 @@ topology (validator host + operator Mac)**, in this fixed day-of order
 
    手順 (この順序で。実行者ラベルは上の「実行者と実行場所」節):
 
-   1. **AI@Mac** — 開示 entry を `public/api/incidents.json` の `incidents[]`
-      の**先頭**に挿入する (newest-first)。適用直前に `resolutionDate` が実際の
-      配信日と一致するか確認する (ずれるなら書き換えてから進む)。
+   0. **本文は `docs/pending-disclosures/<id>.json` に tracked で置いてある。**
+      scratch から拾わない。`ls docs/pending-disclosures/*.json` がその cycle に
+      流す全量で、**2026-09-04 は `docs/pending-disclosures/2026-08-17-01.json`
+      の 1 件**。ファイルが 1 つも無ければ step 2.5 は非該当 (= 上の「該当が
+      無い cycle」)。各ファイルは `incidents[]` に**そのまま入る entry
+      オブジェクト**で、公開される bytes と同一 — 当日に整形し直す前提のもの
+      ではない。中身は `tests/incidents/test-schema.sh` が毎回
+      schema validate + 二重公開チェックにかけている。
+   1. **AI@Mac** — その entry を `public/api/incidents.json` の `incidents[]`
+      の**先頭**に挿入する (newest-first)。**手で貼らない**:
+      ```sh
+      P=docs/pending-disclosures/2026-08-17-01.json
+      jq --slurpfile e "$P" '.incidents = ($e + .incidents)' \
+        public/api/incidents.json > /tmp/incidents.new \
+        && mv /tmp/incidents.new public/api/incidents.json
+      ```
+      `jq .` は現行の `incidents.json` を byte-for-byte round-trip する
+      (2026-08-18 実測) ので、この 1 行の差分は **entry の挿入だけ**になる。
+      適用直前に 2 点確認する: ① `resolutionDate` が実際の配信日と一致するか
+      (ずれるなら**先に pending 側を**直してから進む)。② entry 本文が repo の
+      現況とまだ合っているか — `2026-08-17-01` は「governing document に 1 箇所
+      残る記述は operator の改定待ち」と書いているので、
+      `grep -n PulseVM docs/CONSTITUTION.md` が **0 hit になっていたらその 1 文を
+      削ってから**公開する (公開面に古い約束を残さない)。
    2. **AI@Mac** — `public/api/incidents.schema.v1.json` に対して validate する。
       **検証単位は entry 単体ではなく `incidents.json` 文書全体** (entry 単体だと
       `'validatorSince' is a required property` で落ちる)。
@@ -504,6 +525,11 @@ topology (validator host + operator Mac)**, in this fixed day-of order
       `incidents_in_cycle_ids` に**新 entry を含んで**いることを確認する
       (2026-09-04 なら新 entry + `2026-08-06-01` の 2 件)。1 件しか無ければ
       手順 5/6 が効いていない。
+   8. 公開が届いた時点で `docs/pending-disclosures/<id>.json` は**役目を終える**。
+      削除は step 4b の commit でまとめて行う (一時 baseline entry と同じ
+      タイミング)。同じ本文を 2 箇所に残さない。削除を忘れると
+      `tests/incidents/test-schema.sh` が
+      `pending disclosure … is ALREADY published` で落ちる。
 
    **一時 baseline entry (手順 3 の中身)。** `public/api/incidents.json` は
    `deploy/feed-excludes.txt` に載っていない = **`tracked` 級**で、署名済み
@@ -653,6 +679,13 @@ topology (validator host + operator Mac)**, in this fixed day-of order
      (2026-08-18 に scratch clone で実測)。**ただしこの行は exit code を変えない
      report-only なので、削除忘れを CI は落としてくれない** — この bullet で
      必ず落とす。
+   - `docs/pending-disclosures/<id>.json` — **step 2.5 を実行した cycle では、
+     そこで公開した entry の pending ファイルもこの commit で削除する**
+     (2026-09-04 なら `2026-08-17-01.json`)。公開後は
+     `public/api/incidents.json` が唯一の本文で、pending 側は複製にすぎない。
+     こちらは `tests/incidents/test-schema.sh` が
+     「pending の id が既に `incidents.json` に居る」を **FAIL にする**ので、
+     削除忘れは CI で落ちる。
    - `deploy/publication.json` — set
      `known_kind_violations.violations` to `{}` (all four entries expire
      at once), and clear `pinned_by` on `api/evidence.json`,
