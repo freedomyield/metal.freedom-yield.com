@@ -23,6 +23,24 @@
 #        gate-1 rehearsal fail EARLY (on a check) instead of LATE (in front
 #        of the operator, mid-run).
 #
+# THIS IS NOT THE PRIME DIRECTIVE'S "pre-flight". Two different things in
+# this repo are called pre-flight, and they must never be substituted for
+# each other:
+#
+#   (a) PRIME DIRECTIVE gate 3 — the `chain:get` verification performed
+#       IMMEDIATELY BEFORE a broadcast, inside the sanctioned broadcast
+#       wrapper under bin/. It is what the 2026-07-01 incident lacked.
+#   (b) THIS SCRIPT — a read-only readiness check run DAYS EARLIER, so the
+#       rehearsal does not fail in front of the operator.
+#
+# This script carries NO `proton chain:set` and NO `chain:get` verification
+# (the omission is deliberate — chain:set writes proton-cli's config), it is
+# not invoked by the broadcast wrapper, and IT SATISFIES NO BROADCAST GATE.
+# A green run of this script is NOT evidence for any of the four gates. In
+# particular, "the pre-flight was green yesterday" must never be offered as
+# gate 3 having been met: gate 3 is measured at broadcast time, by the
+# wrapper under bin/, and by nothing else.
+#
 # IT INSTALLS NOTHING. The scripts/install-*.sh name is this repo's
 # convention for "the one command that replaces a manual operator ritual"
 # (memory/feedback_installer_script_first_for_operator_manual_actions), and
@@ -167,6 +185,11 @@
 # run-testnet-rehearsal.sh's own output does). That is fine on a terminal and
 # forbidden in a tracked file, an audit note or a published report — this repo
 # is public and the sanitize rule has no "it is only a fragment" exception.
+# The same applies to any credential-store entry NAME the operator ping adds
+# alongside a transcript: this script no longer prints one (2026-08-18), and
+# none may be reintroduced here or in any doc — the AI supplies it in the
+# ping, out of band. A repo/wallet association is itself the protected thing,
+# so "it is only the label, not the secret" is not an exception either.
 #
 # WHAT THIS SCRIPT CANNOT TELL YOU (stated because the half-claim is the one
 # this repo keeps paying for):
@@ -940,7 +963,13 @@ if [ "$AGENT_STATE" != "LOADED" ]; then
 	# across two has already cost this project a paste
 	# (memory/feedback_no_operator_paste_execution).
 	echo "            ssh-add ${IDENTITY_KEY}"
-	echo "          Dashlane entry: <entry name withheld - handed over in the operator ping>"
+	# The Dashlane entry NAME is deliberately not printed and not stored in
+	# this repo (2026-08-18). It was removed from docs/REHEARSAL_2026-09-01.md
+	# on 2026-08-17 (6e172a2) but survived here — the worse of the two
+	# surfaces, because this line was echoed to the terminal on EVERY run and
+	# a pasted transcript carries it out of the machine. The AI attaches the
+	# entry name to the operator ping instead.
+	echo "          Dashlane entry name: supplied by the AI in the operator ping (never stored in this repo)."
 	echo "          Not needed for the rehearsal itself; needed for gen-identity.sh."
 fi
 

@@ -25,10 +25,39 @@
 ### 1.1 preflight
 
 9/1 に operator へ最初のピングを送る前に、AI は `scripts/install-rehearsal-preflight.sh`
-(別タスクが用意する read-only installer)を実行し、出力が全 green であることを
-確認する。個別の検査項目はここに転記しない — preflight 自身の出力に従う。green
-にならない項目があれば、operator へピングする前に原因を特定し是正する(この
-script 自体は何も変更しない)。
+(read-only。何も install しない)を実行する。
+
+**開始条件 = 「check 9 以外のすべてが green」。「全 green」ではない。**
+個別の検査項目はここに転記しない (preflight 自身の出力に従う) が、この 1 点だけは
+例外として書く — **check 9 は原理的にピング前に green にできない**ため:
+
+- check 9 は testnet keystore が署名可能かを見る。keystore が locked だと
+  `PRE-FLIGHT RED — first failure was [9], exiting 7` になり、出力自身が
+  「Do not call the operator until this is green」と指示する。
+- **その唯一の解消手段が `HOME=~/.metal-fy-proton-test proton key:unlock`**
+  = **操作②そのもの**、つまりピング 1 の中身。AI は passphrase を持たないので
+  unlock できない (憲法「operator 手動 = keystore の unlock / lock のみ」)。
+- → 「ピングの前に green にせよ / green にする手段はピングの中にしかない」という
+  デッドロック。**字義どおり実行すると 9/1 の稽古は開始できない。**
+  (2026-08-18 に前倒し実走して実測: `exit 7 / PASS=8 FAIL=1`、赤は check 9 のみ。)
+
+したがって 9/1 の運用はこうする:
+
+1. AI は preflight を実行し、**check 1-8 がすべて green** で、**唯一の赤が
+   check 9 の `LOCKED`** であることを確認する。この状態が**正常な開始条件**。
+2. check 1-8 に赤がある / check 9 の赤が `LOCKED` 以外 (鍵が無い等) の場合は、
+   **ピングを送らずに**原因を特定して是正する。ここが本来の「事前に潰す」対象。
+3. ピング 1 (操作①②③④) を送る。**操作②の unlock が check 9 の解消そのもの。**
+4. 操作②の完了後に preflight を再実行すれば check 9 も green になる。
+   9/1 はこれを必須としない (操作③自身が locked keystore を exit 2 で弾くため
+   二重の確認になる) が、値の再確認 (§3) を兼ねて回すなら**このタイミング**。
+
+> **8/29 の unlock 確認ピングとの関係** (§6 の実行順表も参照)。8/29 のピングは
+> 「9/1 に unlock できる状態か」と **entry 名**を確かめるためのもので、そこで
+> 一度 unlock してもらっても **9/1 朝に check 9 が green である保証にはならない**
+> — 再 lock されていれば同じ exit 7 に戻る。**8/29 が満たすのは entry 名の入手
+> (ピング 1 を送れるようにすること) であって、check 9 の事前解消ではない。**
+> 両者を混同して「8/29 に green を見たから 9/1 も green のはず」と考えないこと。
 
 この script が 9/1 までに main へ着地していない場合、本節の手順は成立しない —
 その場合は AI が個別に前提確認を行った上で、実行可否を先に報告する。
@@ -60,14 +89,43 @@ recomposed.」)が、**9/1 に AI がこの STAGE 2 ブロックの中身を実�
 `:332` — 下記 §2 ピング 2)だけであり、AI はこの STAGE 2 ブロックを実行せず、
 operator にも見せない(視認を求めるのは §2 ピング 2 の 3 行のみ)。
 
+> **🔴 なぜ禁止なのか — スコープの話ではない。9/1 の STAGE 2 は「既に mainnet に
+> 刻印済みの cycle 4 を二重刻印する」コマンドであり、しかも 4 gate をすべて通る。**
+>
+> 9/1 時点の canonical `anchor-source.json` は cycle 4 を指し (2026-08-18 実走で
+> `memo_prefix = fya1c4` を確認)、cycle 4 の anchor は **2026-08-04 に mainnet へ
+> 刻印済み** (preflight check 8 が `last inscribed=4 / classification: DRESS` と
+> 実測する)。`bin/safe-broadcast` に**既刻印を照合する gate は存在しない**
+> (`already` / `duplicate` / `replay` の類は 1 つも無いことを grep 実測):
+> gate 1 は memo prefix 集合の一致しか見ないので、操作③を `--expect-cycle=4` で
+> 実行した 9/1 は testnet 側も `fya1c4` になり **一致して PASS する**。gate 3 は
+> chain_id 一致で PASS、gate 4 は dry-run log との一致で PASS、gate 2 の token は
+> STAGE 2 ブロック自身が生成手順を印字している。単調増加を見る
+> `append-anchor-history.sh` の invariant 4 は **broadcast の後**に走る = 手遅れ。
+>
+> → **実行すれば「全 gate 通過の、取り消し不能な二重刻印」**。2026-07-01 に実際に
+> 起きた anchor namespace 汚染 (CLAUDE.md 冒頭の事案) と**同一クラス**。
+>
+> **同じ見た目のブロックが 9/1 は禁忌・9/4 は正解**という反転が起きる点に注意
+> (9/4 の STAGE 2 は `fya1c5` = 未刻印なので正当)。見分けるのは見た目ではなく
+> **memo prefix の cycle 番号が既刻印かどうか**。
+>
+> **9/4 後送り (凍結領域)**: `bin/safe-broadcast` に「既刻印 cycle の再 broadcast を
+> 拒否する gate」を足すのが恒久策だが、9/1 の稽古対象 script の凍結ポリシー (§5) に
+> 触れるため**このサイクルでは入れない**。9/4 後の SDD で拾う。それまでは
+> 本節の禁止と §2 の「9/1 に mainnet keystore を unlock しない」が唯一の防壁。
+
 実行タイミングは operator の操作③(下記 §2)が出す testnet tx id に依存する。
 操作③の完了後、AI は次を実行する。`DRYLOG` は 9/4 が使う既定 path
-(`/tmp/fya-mainnet-dryrun.json`)と衝突しない scratch path に明示的に向ける
-(理由は下記の後始末を参照):
+(`/tmp/fya-mainnet-dryrun.json`)と**別ディレクトリ**の scratch path に明示的に
+向ける。**名前を変えるだけで `/tmp` に置くのでは不十分** — `rm -f` を忘れた場合、
+9/4 に「gate-4 材料らしきファイルが `/tmp` に既にある」という囮が残り、防いでいる
+のがファイル名の違いだけになる。ディレクトリごと分ければ、消し忘れても 9/4 の
+`/tmp` は素のままになる(理由は下記の後始末を参照):
 
 ```
 FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton \
-  DRYLOG=/tmp/fya-mainnet-dryrun-rehearsal-0901.json \
+  DRYLOG=<repo 外 scratch dir>/fya-mainnet-dryrun-rehearsal-0901.json \
   bash scripts/preview-cycle-anchor-broadcast.sh \
     --source=public/api/anchor-source.json \
     --testnet-tx-id=<操作③の testnet_tx_id>
@@ -76,13 +134,13 @@ FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton \
 このコマンドは **broadcast も recompose もしない**(script 自身のヘッダより)。
 operator の視認対象は §2 ピング 2 の 3 行(出力の中ほど、末尾ではない)。
 
-**後始末(AI が行う)**: ピング 2 の視認が済んだら
-`rm -f /tmp/fya-mainnet-dryrun-rehearsal-0901.json`。この dry-run log は
-今日の cycle 用の `memo_prefix` を記録したものであり、**9/4 の gate-4 材料
-ではない**(9/4 は改めて同じ script を実行して新しい log を作る — 9/4 用の
-`DRYLOG` は既定 path のままでよい)。`/tmp` に残しておくと、9/4 に「gate-4
-材料らしきファイルが既にある」と誤認される囮になり得る — RH 調査が 7b の
-実行そのものを見送った理由(付録「しなかったこと」)はまさにこれ。
+**後始末(AI が行う)**: ピング 2 の視認が済んだら、上で指定した scratch path を
+`rm -f` する。この dry-run log は今日の cycle 用の `memo_prefix` を記録したもので
+あり、**9/4 の gate-4 材料ではない**(9/4 は改めて同じ script を実行して新しい
+log を作る — 9/4 用の `DRYLOG` は既定 path のままでよい)。消し忘れても
+`/tmp` の外なので 9/4 の誤認にはつながらないが、消すのが規律 — RH 調査が 7b の
+実行そのものを見送った理由(付録「しなかったこと」)はこの囮リスクだった。
+**`/tmp/fya-mainnet-dryrun.json`(9/4 既定 path)には 9/1 に一切書かない。**
 
 ### 1.3 変更が集中した unit の dry 実行 + 既存 test での被覆確認
 
@@ -92,11 +150,11 @@ operator の視認対象は §2 ピング 2 の 3 行(出力の中ほど、末�
 
 | unit | script | 9/1 に AI が安全に確認できること | 既存 test |
 |---|---|---|---|
-| 2 | `uptime-history.sh` | `FY_LIVE` を付けずに実行し、script のヘッダが列挙する 4 artefact(master ledger append / `current-cycle-state.json` / cycle-close summary / 公開 `uptime-recent.json` preview)がすべて `DRY: would …` になり実ファイルが 1 バイトも変わらないことを確認する(`FY_LIVE` 無しは書込ゼロの loud dry no-op — `docs/CYCLE_GATE.md` 該当節参照)。cycle 境界 (Job B) は 9/4 まで発火しないため、この確認は「今日は何も壊れない」の確認であって cycle-close 経路の稽古ではない | `tests/side-effects-callers/`、`tests/cycle-gate/run-tests.sh` |
-| 3 | `gen-cycle-history.sh` | **`push-to-web-host.sh` は実行しない**(公開先への実書込のため)。`gen-cycle-history.sh` 単体は `FY_LIVE` の概念を持たず決定的再生成(script 自身のヘッダで明言)だが、既定では host の `public/api/cycle-history.jsonl` に実書込する(`gen-cycle-history.sh:107`)。**`OUT_JSONL=<scratch path>` を付けて実行し**(同ファイル同行の env override)、canonical ファイルに触れずに出力を得た上で、公開版(`curl` で取得)と byte 同一であることを確認する | `tests/gen-cycle-history/test-incident-attribution.sh` |
-| 5 | `gen-anchor-source.sh` | `FY_EXPECT_CYCLE` の意味は「**閉じているはずの cycle 番号**」(`gen-anchor-source.sh:365`「Set `FY_EXPECT_CYCLE=<the cycle that should already be closed>`」)= `CLOSED_COUNT` と直接比較される(`:392`)。**9/1 の稽古では §3 のプレースホルダをそのまま使う**: 9/1 時点の `CLOSED_COUNT` は台帳未前進のため §3 の値(`run-testnet-rehearsal.sh --expect-cycle` = `CLOSED_COUNT + 1`)とは一致せず、guard が**期待どおり exit 9** を出す(RH §3.1 A5 と同じ選び方)。**「§3 の値 − 1」を使うのは 9/4 当日のみ**(台帳前進後は `CLOSED_COUNT` = その日閉じた cycle = §3 の値 − 1 になり、guard は**通るのが正常**)— 9/1 にこの「−1」を使うと `CLOSED_COUNT` と偶然一致して guard が**発火せず compose に進んでしまう**(9/1 用と 9/4 用で意味が違う値を取り違えていた記述をここで訂正)。実行は **`--dry-run` を必ず付ける**(`:106` で受理、ordering guard `:391` より**後**の `:737-742` で「DRY-RUN: not writing to $OUT_FILE」を印字して exit 0 — guard がどちらに転んでも実書込(`:751` の `mv`)に到達しないため、guard の挙動を稽古したままで読取専用にできる。`OUT_FILE=<scratch path>` の併用でも canonical ファイルは守れるが `--dry-run` の方が確実)。exit 9 以外(とくに exit 0 で `✓ ordering guard` が出た場合)は値の取り違え・台帳が想定外に進んでいる兆候なので即座に AI から報告する | `tests/test-gen-anchor-source-ordering-guard.sh` |
-| 8 | `gen-anchor-receipt.sh` / `append-anchor-history.sh` | **実行しない** — 実 signed input(mainnet broadcast の出力)が無いと意味のある検証にならず、本物の `--input=` を用意する手段が 9/1 には無い。`FYD_HISTORY_FILE` によるscratch 台帳退避と `FYD_PUBLISH_ARCHIVES=0` による R18 push 抑止の**機構自体**が存在することだけを、実装読解で確認する(`scripts/append-anchor-history.sh:78,124-128,574-575`) | `tests/gen-anchor-receipt/`、`tests/append-anchor-history/` |
-| 8.5 | `push-to-web-host.sh` | **実行しない** — 公開先への実書込のため。既存 test で冪等性(同一 byte の再 push が副作用を生まないこと)が確認されていることのみ確認する | `tests/push-to-web-host/test-push-to-web-host.sh` |
+| 2 | `uptime-history.sh` | **実行場所 = host。Mac では完走しない** — 入力の `public/api/validator.json` は host 生成 feed で `.gitignore:51` により Mac に存在せず、`jq: error: Could not open file …` で **exit 2** になる (2026-08-18 実測)。この exit 2 は unit 9 の exit 2 と番号が同じで紛らわしいが**別物**。<br>`FY_LIVE` を付けずに実行し、**実書込がゼロであること**を確認する。**合否は `DRY: would …` の本数で数えない** — ヘッダが列挙する 4 artefact(master ledger append `:166` / cycle-close summary `:257` / `current-cycle-state.json` `:275` / 公開 `uptime-recent.json` preview `:284`)と、実際に印字される `DRY:` 行(bootstrap の mkdir・空ファイル生成を含む)は**1 対 1 対応しない** (Mac 実走では 5 本出たがその内訳は bootstrap 分のみで、4 artefact には 1 行も到達していなかった)。**合否条件 = 実行前後で `git status --porcelain` が一致し、上記 4 path が 1 バイトも変わっていないこと。** cycle 境界 (Job B) は 9/4 まで発火しないため、この確認は「今日は何も壊れない」の確認であって cycle-close 経路の稽古ではない | `tests/side-effects-callers/`、`tests/cycle-gate/run-tests.sh` |
+| 3 | `gen-cycle-history.sh` | **実行場所 = host。Mac では完走しない** — 入力の `public/api/uptime-cycles.json` は host 生成 feed で `.gitignore:58` により Mac に存在せず、`ERROR: missing input …` で **exit 1** になる (2026-08-18 実測)。したがって「公開版と byte 同一」の比較は Mac では到達できない。<br>**`push-to-web-host.sh` は実行しない**(公開先への実書込のため)。`gen-cycle-history.sh` 単体は `FY_LIVE` の概念を持たず決定的再生成(script 自身のヘッダで明言)だが、既定では host の `public/api/cycle-history.jsonl` に実書込する(`gen-cycle-history.sh:107`)。**`OUT_JSONL=<scratch path>` を付けて実行し**(同ファイル同行の env override)、canonical ファイルに触れずに出力を得た上で、公開版(`curl` で取得)と byte 同一であることを確認する | `tests/gen-cycle-history/test-incident-attribution.sh` |
+| 5 | `gen-anchor-source.sh` | `FY_EXPECT_CYCLE` の意味は「**閉じているはずの cycle 番号**」(`gen-anchor-source.sh:365`「Set `FY_EXPECT_CYCLE=<the cycle that should already be closed>`」)= `CLOSED_COUNT` と直接比較される(`:392`)。**9/1 の稽古では §3 の確定値をそのまま使う**: 9/1 時点の `CLOSED_COUNT` は台帳未前進のため §3 の値(`run-testnet-rehearsal.sh --expect-cycle` = `CLOSED_COUNT + 1`)とは一致せず、guard が**期待どおり exit 9** を出す(RH §3.1 A5 と同じ選び方)。**「§3 の値 − 1」を使うのは 9/4 当日のみ**(台帳前進後は `CLOSED_COUNT` = その日閉じた cycle = §3 の値 − 1 になり、guard は**通るのが正常**)— 9/1 にこの「−1」を使うと `CLOSED_COUNT` と偶然一致して guard が**発火せず compose に進んでしまう**(9/1 用と 9/4 用で意味が違う値を取り違えていた記述をここで訂正)。実行は **`--dry-run` を必ず付ける**(`:106` で受理、ordering guard `:391` より**後**の `:737-742` で「DRY-RUN: not writing to $OUT_FILE」を印字して exit 0 — guard がどちらに転んでも実書込(`:751` の `mv`)に到達しないため、guard の挙動を稽古したままで読取専用にできる。`OUT_FILE=<scratch path>` の併用でも canonical ファイルは守れるが `--dry-run` の方が確実)。**合否条件は「exit 9」だけでは足りない**: 台帳解決は (1) 公開 URL → (2) repo-local → (3) どれも駄目なら **`CLOSED_COUNT=0`** の順にフォールバックする(`gen-anchor-source.sh:377-386`)ので、**ネットワーク全断でも `CLOSED_COUNT=0` ≠ `FY_EXPECT_CYCLE` となり同じ exit 9 が出る**。→ **exit 9 かつ stderr に `cycle-history: CLOSED_COUNT=<§3 の値 − 1> (source: public URL …)` が出ていること**を合否とする(この 1 行が「guard が実台帳を読んで発火した」ことの唯一の証拠。2026-08-18 実測では `CLOSED_COUNT=3 (source: public URL (…))`)。exit 9 以外(とくに exit 0 で `✓ ordering guard` が出た場合)は値の取り違え・台帳が想定外に進んでいる兆候なので即座に AI から報告する | `tests/test-gen-anchor-source-ordering-guard.sh` |
+| 8 | `gen-anchor-receipt.sh` / `append-anchor-history.sh` | **実行しない** — 実 signed input(mainnet broadcast の出力)が無いと意味のある検証にならず、本物の `--input=` を用意する手段が 9/1 には無い。`FYD_HISTORY_FILE` によるscratch 台帳退避と `FYD_PUBLISH_ARCHIVES=0` による R18 push 抑止の**機構自体**が存在することだけを、実装読解で確認する(`scripts/append-anchor-history.sh:78` の説明、`:124-128` の `FYD_HISTORY_FILE`、`:579-580` の `FYD_PUBLISH_ARCHIVES=0` 分岐 — gate 本体は `:579` であって `:574-575` はその手前の説明コメント) | `tests/gen-anchor-receipt/`、`tests/append-anchor-history/` |
+| 8.5 | `push-to-web-host.sh` | **実行しない** — 公開先への実書込のため。**「既存 test で冪等性が確認されている」という以前の記述は誤りだったので撤回する**: 当該 suite に冪等性の case は 1 つも無い(`grep -ci idempot` = **0**。他 10 以上の test dir には存在するので語彙の問題ではない。2026-08-18 実測)。最も近い case 31 は「走査した bytes と送信した bytes が同一か」= 走査と送信の間の差し替え防止 (TOCTOU) であって、「同一 byte を 2 回 push しても副作用が無い」ではない。→ **9/1 に確認できるのは suite が緑であること(93 assertion)だけで、冪等性は稽古でも test でも未被覆**。§4 の限界として扱う(冪等性 test の追加は 9/4 後送り) | `tests/push-to-web-host/test-push-to-web-host.sh`(冪等性は**非**被覆) |
 | 9 | `resume-after-cycle-start.sh --dry-run` | **host 上で**実行してよい(`FY_LIVE` 無しの `--dry-run` は state dir の mkdir すら行わない設計 — script ヘッダ「the one write it used to make regardless of mode … is now gated too」、`:139`)。**ただし cycle 4 の承認 state は 2026-08-04 の転換時点で既に書かれているため、host 上で今日実行すると idempotency check (`:194-198`) が freshness poll (`:210-240`) と identity 署名検証 (`:243-279`) より先に一致し、`PASS: idempotent skip` で即終了する** — この 2 つは 9/1 には 1 行も動かない(§4-F3 参照)。**Mac 上では実行しない** — idempotency check(`:194`)より**前**の step (2)(`:164`、metalgo RPC への `platform.getCurrentValidators` 問い合わせ、既定 `METALGO_RPC=http://127.0.0.1:9650`、`:166-168`)が host 上でしか通らないため、Mac では idempotency check にも freshness poll にも到達せず `:170-172` で **exit 2**(`FAIL: metalgo RPC unreachable`)になる。稽古としての意味を成さない(freshness poll(`:215`)が実際に問い合わせるのは `PUBLIC_BASE` であって `METALGO_RPC` ではない) | `tests/cycle-gate/run-tests.sh`(状態遷移の mock 検証) |
 
 unit 4(`gen-identity.sh`)と unit 6(`commit-anchor-source.sh`)はこの一覧から
@@ -121,6 +179,14 @@ bytes into the repo path, `git add`, and a single-purpose commit …」) — た
 ある)。
 
 ### ピング 1 — 操作①②③④(連続してやる。unlock したまま放置しない)
+
+> **9/1 に unlock するのは testnet keystore (操作②) だけ。mainnet keystore
+> (`HOME=~/.metal-fy-proton`) は 9/1 に一度も unlock しない。** 9/1 の AI 作業
+> (§1.2 の 7b) は mainnet keystore の unlock を要求しない設計で、7b の出力末尾に
+> 印字される STAGE 2 ブロックは **既刻印の cycle 4 を二重刻印するコマンド**
+> (§1.2 の 🔴 ブロック)。unlock しないことが、その誤実行に対する最後の物理的な
+> 歯止めになる。**「①〜④以外に unlock を求められたら、それは手順ではない」**
+> と考えてよい。
 
 ①→②→③→④の順に自分の terminal で続けて実行し、**すべて終わってから**③の
 末尾の `TESTNET REHEARSAL COMPLETE testnet_tx_id=…` の 1 行(と、途中で何か
@@ -165,8 +231,14 @@ HOME=~/.metal-fy-proton-test proton key:unlock
 #### ③ testnet 通し稽古を実行する(= testnet broadcast の per-invocation 認可そのもの)
 
 ```
-HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh --expect-cycle=4
+cd ~/htdocs/01_PROJECTS/metal.freedom-yield.com && HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh --expect-cycle=4
 ```
+
+- **実行場所**: repo の working copy の root。上の 1 行は `cd` を含む**最短の
+  1 行形**なので、**改行で分けずにこのまま**貼る(行を割ると片方だけ実行されて
+  しまう事故がこのプロジェクトで実際に起きている)。`cd` を省いて別の場所で打つと
+  `bash: scripts/run-testnet-rehearsal.sh: No such file or directory` になり、
+  これは下の失敗コード表のどれにも載っていない。
 
 - **なぜ operator が打つのか**: この script は `/tmp/fyd-broadcast-token` を
   自分で作って `bin/safe-broadcast` に渡す
@@ -252,17 +324,46 @@ locally. …)`)が続くが、これは同じ `✓` 行の説明であって別�
 (cycle-context lib / committed anchor-source / 公開 anchor-history / --print-only) の
 一致をレビューが再現。転換当日 9/4 の rehearsal フラグは 5)。
 
+> **上の `4` は確定値であって placeholder ではない。** 9/1 に別の値へ
+> 差し替わることは想定していない — 下の再確認は「同じ値が出ること」の
+> 検証であって、値を決める作業ではない。`:167` の `--expect-cycle=4` は
+> そのまま打ってよい。
+
 **当日ピング送付前に、preflight (`scripts/install-rehearsal-preflight.sh`) を再実行
-して check 8 の pairing が同じ値を出すことを確認すること** — 9/1 までに公開台帳や
-canonical `anchor-source.json` が別の理由で更新される可能性があるため、確定値は
+して確定値を再確認すること** — 9/1 までに公開台帳や canonical
+`anchor-source.json` が別の理由で更新される可能性があるため、確定値は
 「8/17 実測 + 当日再確認」の 2 点で成立する。値が食い違ったら送付を止めて調査。
 
-参考(未確定であることの根拠): canonical `anchor-source.json` の
-`cycle_number_observed` と公開 `cycle-history.jsonl` の行数は本書執筆時点でも
-実測可能だが、**この文書には値を書かない** — 執筆時点の実測値をそのまま 9/1
-当日の `--expect-cycle` に対応付けるのは早計であるため(9/1 までに公開台帳や
-canonical `anchor-source.json` が別の理由で更新される可能性がある)。A1 が
-当日直前に再実測して確定する。
+**再確認先は check 7。check 8 の pairing ではない**(2026-08-18 訂正 — 以前は
+check 8 と書いていたが、それは別の量を見ていた):
+
+- **check 7** (`ledger vs anchor-source vs --expect-cycle`) が印字する
+  `closed=<n> -> inscribe=<m> = --expect-cycle = anchor-source cycle_number_observed`
+  の **`inscribe=<m>`** が、この節の値。9/1 は `closed=3 -> inscribe=4` が出れば
+  一致 (2026-08-18 の前倒し実走で実測)。**これが再確認すべき唯一の行。**
+- **check 8** の `pairing:` 行が印字する数字は **9/4 の
+  `cycle-transition.sh --expect-cycle` の値**であって、この節の値ではない。
+  DRESS 日の実出力は「NO cycle closes today … On the transition day it will be
+  **4** … and this rehearsal flag will be **5**」— つまり **9/1 の値 4 とは
+  別の量の 4** が並ぶ。**突き合わせると「一致した」と読めてしまうが検証に
+  なっていない。** 今日の日付ではたまたま両方 4 になるので、この罠は静かに通る。
+- preflight のヘッダ自身が「IT DOES NOT PRINT "M-1" AS THE PAIRED VALUE, and an
+  earlier revision did」と、まさにこの取り違えを避けるために設計を変えた経緯を
+  記録している。
+
+**check 8 に対して確認するのは値ではなく分類**: `classification: DRESS` と
+出ること (9/1 は既刻印 cycle の再稽古なので DRESS が正。ここが `DAY-OF` に
+なっていたら台帳が想定外に進んでいる)。
+
+**走らせるのも出力を読むのも AI** で、operator が自分で見る画面ではない。
+この節は operator が読む節なので、operator 側の持ち物は「AI から
+『check 7 の `inscribe` も 4、check 8 は DRESS だった』の報告が来ること」
+だけでよい。
+
+参考(この値がどう確定したか): canonical `anchor-source.json` の
+`cycle_number_observed` と公開 `cycle-history.jsonl` の行数から導出される。
+執筆時点の実測値をそのまま当日の値と決め打ちしないために、A1 が当日直前に
+再実測して上の確定値と一致することを確認する運用にしてある。
 
 ---
 
@@ -298,10 +399,18 @@ enforcement / 共有ライブラリの範囲)。凍結の対象外への変更(�
 
 ## 6. 当日(9/1)の推奨実行順
 
+> **8/29 の返信がピング 1 の前提 (blocking)。** 操作②の testnet keystore
+> password は Dashlane にあるが、**その entry 名はこの repo にも AI の memory
+> にも無い**。8/29 に AI が送る unlock 確認ピングへ operator が entry 名を
+> 返信しない限り、9/1 のピング 1 は**送れない**(①の identity 鍵側には
+> entry 名の手当てがあり、②には無い、という非対称がある)。返信が無いまま
+> 9/1 を迎えたら、AI はピング 1 を送る前にその旨を先に報告する。
+
 | 誰 | 何 |
 |---|---|
-| AI(9/1 前) | §1.1 preflight を全 green にする。§3 のプレースホルダを A1 の確定値に置き換える |
-| AI(9/1 午前) | §1.3 の dry 実行(unit 2/3/5/9)を行い、結果を記録する |
+| operator(8/29) | AI からの unlock 確認ピングに返信する — **②の testnet keystore password の Dashlane entry 名**。これが無いとピング 1 を送れない |
+| AI(9/1 前) | §1.1 preflight を実行し、**check 9 (LOCKED) 以外がすべて green** であることを確認する(「全 green」は原理的に不可能 — §1.1)。§3 の確定値を **check 7 の `inscribe=`** で再確認する(check 8 の pairing ではない。値が食い違ったら送付を止めて調査) |
+| AI(9/1 午前) | §1.3 の dry 実行を行い、結果を記録する。**実行場所で分ける — Mac で完走するのは unit 5 だけ / unit 2・3・9 は host** (Mac だと 2 は exit 2、3 は exit 1 で入力 feed 不在のため死ぬ。§1.3 の各行参照) |
 | operator(ピング 1) | 操作①→②→③→④(連続、passphrase 系のみ 3 分程度。③自体の所要は未実測) |
 | AI | ③の testnet tx id を受け取り、§1.2(unit 7b)を丸ごと実行する |
 | operator(ピング 2) | 操作⑤ — 7b 出力の 3 行を目視する |
@@ -316,5 +425,11 @@ enforcement / 共有ライブラリの範囲)。凍結の対象外への変更(�
 - `docs/PHASE_ALPHA_TESTNET_DRY_RUN.md` — `run-testnet-rehearsal.sh` の詳細
   runbook。「Scope: what a rehearsal run actually proves」節は本書 §4 の F1/F2
   と同じ原則を単発の稽古実行に適用したもの。
-- `docs/cycle-transition-steps.json` — 当日 14 実行単位の機械可読な一覧。§5
-  凍結ポリシーの対象範囲の定義そのもの。
+- `docs/cycle-transition-steps.json` — 当日の実行単位の機械可読な一覧。この
+  JSON の `.steps` は **13** 要素で、**step 4b を持たない**
+  (`scripts/cycle-transition.sh:124` 自身がこれを「the 13 machine-checked
+  execution units」と呼ぶ)。本書が他所で言う「14」は
+  **13 + `scripts/cycle-transition.sh` の unit 表が持つ 4b** のこと
+  (同 `:131-137` が差分を明記し、機械検査がその差分を `{4b}` に固定している)。
+  §5 の凍結ポリシーを宣言するときは、**この JSON だけを見て 4b を対象外と
+  読まないこと** — 凍結範囲は 4b を含む 14。

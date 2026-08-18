@@ -213,11 +213,95 @@ Exit codes:
 
 ## Operator runbook (= cycle transitions, model α)
 
+### 当日に渡す実値 (day-of value sheet)
+
+各 step の本文は `<N>` / `<N+1>` の記法を保つが、**その意味は step 5 と step 6
+の間で意図的に反転する** (step 6 の "Deliberate meaning switch from step 5")。
+当日は暗算せず、この表を引く。誤った側を渡した場合の戻り値が step ごとに
+別番号 (exit 7 / exit 9 / exit 5) なので、暗算違いは症状からは読み取れない。
+
+**2026-09-04** — cycle 4 が閉じ、cycle 5 が刻まれる日:
+
+| step | 変数 / フラグ | 意味 | 2026-09-04 の値 |
+|---|---|---|---|
+| — | `<N>` | その日 **閉じる** cycle | **4** |
+| — | `<N+1>` | その日 **刻む** cycle | **5** |
+| 4 | `FY_EXPECT_CYCLE=` | 閉じた cycle (= 公開台帳の `CLOSED_COUNT`) | **4** |
+| 5 | `FY_EXPECT_CYCLE=` | 同上 | **4** |
+| 6 | `commit-anchor-source.sh --expect-cycle=` | 刻む cycle | **5** |
+| 7a | `run-testnet-rehearsal.sh --expect-cycle=` | 刻む cycle | **5** |
+| (runbook 外) | `cycle-transition.sh --expect-cycle=` | 閉じる cycle | **4** |
+| (runbook 外) | `install-rehearsal-preflight.sh --expect-cycle=` | 刻む cycle | **5** |
+
+導出の根拠 (2026-08-18 実測): committed `public/api/anchor-source.json` の
+`observations_branch.cycle_number_observed` = **4** = 現に刻まれている cycle。
+`gen-anchor-source.sh` はこれを `CLOSED_COUNT + 1` として composeするので、
+9/4 の朝の `CLOSED_COUNT` は **3**、step 3 が走った後に **4** になる。
+意味の権威は 2 系統: `scripts/cycle-transition.sh:175`
+(`--expect-cycle` = "The cycle that CLOSES today") と
+`scripts/install-rehearsal-preflight.sh` の header
+("THIS SCRIPT TAKES THE REHEARSAL'S MEANING (M)" = 刻む cycle =
+`cycle-transition.sh` の値より 1 大きい)。
+
+> **2026-09-04 は step 2.5 (開示 incident の公開) が該当する。** step 2 の末尾に
+> あり、**step 3 より前に**通す必要がある — 飛ばすと cycle 4 の incident 件数が
+> 1 件過少のまま append-only 台帳に確定し、後から直せない。
+>
+> **9/1 の稽古で渡す値はこの表ではない** — 9/1 の rehearsal フラグは **4**
+> (`docs/REHEARSAL_2026-09-01.md` §3)。9/1 と 9/4 で 1 ずれる。
+
+### 実行者と実行場所 (actor / location)
+
+各 step の見出しにある「Mac」「host」は**マシン**の指定であって実行者では
+ない。当日は次の 3 値で読む (憲法「operator 手動 = keystore の unlock / lock
+のみ」と整合させるため):
+
+| ラベル | 誰が打つか | どこで |
+|---|---|---|
+| **operator@TTY** | operator 自身が自分の terminal に打つ (password / passphrase を伴うため) | Mac |
+| **AI@Mac** | AI が実行する。operator は出力を読むだけ | Mac の repo working copy |
+| **AI@host** | AI が SSH 経由で実行する。operator は出力を読むだけ | validator host |
+
+**operator@TTY はこの runbook 全体で 5 箇所だけ**: step 4 前の `ssh-add`、
+7a の testnet keystore unlock、**7a の `run-testnet-rehearsal.sh` 本体**、
+7c の mainnet keystore unlock、7c 末尾の mainnet keystore re-lock。
+**残りの code block はすべて AI が実行する。**
+
+> 7a の rehearsal 本体が operator@TTY なのは password を伴うからではない。
+> この script は `/tmp/fyd-broadcast-token` を**自分で**作り
+> (`scripts/run-testnet-rehearsal.sh:413-428`)、`bin/safe-broadcast` を
+> `--non-interactive` で呼ぶ (`:439-442`) ので、確認プロンプトが出ない。「**operator 自身がこの script を起動したこと**」が testnet
+> broadcast の per-invocation 認可の実体であり
+> (`docs/PHASE_ALPHA_TESTNET_DRY_RUN.md`「What an AI session can verify, and
+> what only the operator can」)、AI が起動した run は全 gate を通っても
+> 認可にならない。
+
+broadcast (mainnet) の per-invocation 認可は code block ではなく chat での
+応答 — step 7c の「per-invocation 認可の手順」節。
+
+**実行ディレクトリと実行ユーザ** (各 code block には `cd` を書かない — 既定は
+ここで一度だけ宣言する):
+
+- **operator@TTY / AI@Mac** — Mac の repo working copy の root。本文中の
+  `bash scripts/…` という相対パスはすべてここが起点。別の場所で打つと
+  `bash: scripts/…: No such file or directory` になる (どの step の exit 表にも
+  無い症状なので、迷ったらまず現在地を疑う)。
+- **AI@host** — repo は `/home/deploy/metal.freedom-yield.com`、**実行ユーザは
+  `deploy`**。SSH は `root` で入るので、host 側の code block は実際には
+  `sudo -u deploy bash -c 'cd /home/deploy/metal.freedom-yield.com && <block の中身>'`
+  の形になる (この repo の host 実行の慣行 — `docs/CRON_CONVENTIONS.md:19-20`、
+  `docs/HOST_CHECKOUT_AUTO_ADVANCE.md:316`)。**素の `bash` (= root) で走らせない**
+  — 生成物の所有者が `deploy` から変わり、以降の cron 書き込みが落ちる。
+  下の Emergency fallback 節が絶対パス + `sudo -u deploy env …` の形で書いて
+  いるのは同じことを指しており、2 つの流儀があるわけではない。
+
 Under model α (= AI full orchestration; see
 `feedback_ai_full_orchestration_default` memo), the operator's active steps
 are: ask AI to start, do the Metal Wallet web flow, supply two keystore
-passwords + the identity-key passphrase when prompted, and authorize the
-mainnet anchor broadcast per invocation. Everything else — including which
+passwords + the identity-key passphrase when prompted, launch the testnet
+rehearsal in 7a (its per-invocation authorization IS the operator having
+started it — see the actor section above), and authorize the mainnet anchor
+broadcast per invocation. Everything else — including which
 machine each command runs on — is AI-orchestrated across a **2-host
 topology (validator host + operator Mac)**, in this fixed day-of order
 (cf. the cycle-3 → cycle-4 transition, `N=3`):
@@ -263,6 +347,16 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    ```sh
    FY_LIVE=1 bash scripts/uptime-history.sh
    ```
+   **要点 (根拠と例外は以下の長い節に書いてある — 当日はまずこの 4 行)**:
+   ① **`FY_LIVE=1` は必須**。② 付け忘れても **exit 0 で静かに通る** ので、
+   成功は「`DRY:` が無いこと」ではなく**肯定的な signal** で確認する —
+   `Closed cycle #<N>: …` がこの step の存在理由そのものを名指しする最強の行。
+   ③ 付け忘れの被害は step 3 の行が「間違う」ことではなく「**出ない**」こと
+   (探すのは誤った行ではなく**欠けた行**)。④ **2026-09-04 は同じ日付で
+   `Appended daily entry` が 2 回出るのが正常** — 重複実行ではない。
+   ⑤ **この step の末尾に 2.5 (開示 incident の公開) がある。step 3 へ進む前に
+   必ず読む** — 2026-09-04 は該当する。
+
    closes out cycle N's uptime record: the append-only master ledger entry,
    the in-flight `current-cycle-state.json`, the cycle-close summary row
    appended to `uptime-cycles.json`, and the refreshed public
@@ -339,6 +433,126 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    its own; if in doubt, compare each run's `period_end_unix` (in its
    `Appended …` line, or the corresponding `uptime-history.jsonl` row)
    against step 1's confirmed `endTime`.
+   **2.5 — 開示 incident の公開 (該当する cycle だけ。2026-09-04 は該当する)。**
+   その cycle に属する未公開の開示 incident があるなら、**step 3 より前に**
+   `public/api/incidents.json` へ append し、公開まで届かせてから step 3 に進む。
+   該当が無い cycle ではこのブロックは丸ごと飛ばしてよい。逆に、**step 3 の
+   直前に「当 cycle 分の未 append entry が無いこと」を必ず 1 度確認する** —
+   これが飛ばして良いかどうかの判定そのもの。
+
+   > この節がトップレベルの `2.5.` マーカーではなく step 2 の sub-block として
+   > 書かれているのは意図的。`tests/cycle-transition/` の drift gate が、この
+   > runbook のトップレベル step マーカー集合を `scripts/cycle-transition.sh`
+   > の unit 表と完全一致させている
+   > (`tests/cycle-transition/test-cycle-transition.sh:286-300`)。これは毎 cycle
+   > 走る実行単位ではなく該当時のみの挿入なので、orchestrator の unit を
+   > 増やさずに canon 側だけに置く。
+
+   **なぜ step 3 より前でなければならないか**: `gen-cycle-history.sh` は
+   incident の cycle 帰属を `detectionDate` で決め
+   (`scripts/gen-cycle-history.sh:175-184`)、その入力は **validator host の
+   repo 内 `public/api/incidents.json`** (`:106`) であって公開 URL ではない。
+   step 3 の時点で entry が無ければ、その cycle の行は
+   `incidents_in_cycle_count` を 1 件過少にしたまま **append-only 台帳に確定**
+   する。しかも同 `:205-214` の conservation check は**両辺とも append 前の
+   同じファイル**から計算するので、この取りこぼしを検出できない。台帳の bytes
+   は DAG に流れ込むので、後から直せない。
+
+   手順 (この順序で。実行者ラベルは上の「実行者と実行場所」節):
+
+   1. **AI@Mac** — 開示 entry を `public/api/incidents.json` の `incidents[]`
+      の**先頭**に挿入する (newest-first)。適用直前に `resolutionDate` が実際の
+      配信日と一致するか確認する (ずれるなら書き換えてから進む)。
+   2. **AI@Mac** — `public/api/incidents.schema.v1.json` に対して validate する。
+      **検証単位は entry 単体ではなく `incidents.json` 文書全体** (entry 単体だと
+      `'validatorSince' is a required property` で落ちる)。
+   3. **AI@Mac** — **同じ commit に `deploy/identity-pin-baseline.json` の一時
+      entry を同梱する** (次の小節)。これを忘れると main の CI が step 4 まで
+      数時間赤くなる。
+   3.5 **AI@Mac** — **push する前にローカルで CI gate を回す**:
+      `bash scripts/check-identity-pins.sh --mode=repo`。
+      **`BASELINED incidents_json.sha256` の 1 行が出て exit 0** なら正しい。
+      **exit 3 (`MISMATCH …`) が返るなら push しない** — 原因は ①entry を
+      `known_broken` の下ではなく top level に置いた ②2 つの sha256 の採り違え
+      ③コピペ崩れ、のいずれか。この 1 コマンドが 3 つとも push 前に捕まえる。
+      (これを省くと「push して CI が赤くなって初めて気づく」= step 2.5 が
+      防ごうとしている事象そのものになる。)
+   4. **AI@Mac** — commit → push。**`push-to-web-host.sh` は使わない**:
+      `deploy/publication.json` の `api/incidents.json` は
+      `publisher: git-deploy` / `git_tracked: true` で、`push-to-web-host.sh` の
+      allowlist に `incidents` は無く `ERROR: unrecognized filename` になる。
+      配信経路は git-deploy 一本。
+   5. **AI@Mac** — **deploy workflow の完了を `gh run watch` で待つ。これが
+      本当の依存。** `.github/workflows/deploy.yml` の "Advance host checkout to
+      origin/main" step (`:242`) が **push ごとに** host の checkout を前進させ、
+      同 `:283` が `merge-base --is-ancestor $GITHUB_SHA HEAD` で到達を
+      fail-closed に assert する (`docs/HOST_CHECKOUT_AUTO_ADVANCE.md:27-31`
+      — 「not just once a day」)。したがって **`advance-host-checkout.sh` を
+      手で叩く必要はなく** (叩いても `behind == 0` で exit 0 する冪等 no-op)、
+      日次 cron `45 4 * * *` を待つ話でもない。手動実行は deploy が失敗した
+      ときの fallback としてのみ。**deploy を待たずに手動前進で済ませると、
+      rsync による公開面配信が起きないので手順 6 の `curl` が通らない。**
+      なお `deploy.yml:24-29` の `paths-ignore` は `README*` / `.gitignore` /
+      `CLAUDE.md` / `docs/**` だけなので、`public/api/incidents.json` の push は
+      確実に deploy を trigger する。
+   6. **AI@Mac + AI@host** — 配信確認を**両側**で取る。公開側:
+      `curl -s https://metal.freedom-yield.com/api/incidents.json | jq -r '.incidents[0].id'`。
+      host 側: host repo の `public/api/incidents.json` を
+      `jq -r '.incidents[0].id'`。**両方**が新 entry の id を返して初めて次へ。
+      公開側だけ通っても host 側が古ければ step 3 は過少のまま確定する。
+   7. → ここで **step 3** へ。書かれたその cycle の行が
+      `incidents_in_cycle_ids` に**新 entry を含んで**いることを確認する
+      (2026-09-04 なら新 entry + `2026-08-06-01` の 2 件)。1 件しか無ければ
+      手順 5/6 が効いていない。
+
+   **一時 baseline entry (手順 3 の中身)。** `public/api/incidents.json` は
+   `deploy/feed-excludes.txt` に載っていない = **`tracked` 級**で、署名済み
+   manifest の `artifact_manifest.incidents_json.sha256` に pin されている。
+   手順 4 の push から step 4 の再署名までの数時間、repo 内の pin と実ファイル
+   が乖離し、`scripts/check-identity-pins.sh --mode=repo` が **exit 3** を返す
+   = `ci-main.yml` (main への直 push を見る唯一の CI 経路) が赤くなる。
+   この赤は順序を入れ替えても消えない: `gen-identity.sh` は leaf を**公開 URL
+   から curl** して pin するので、incidents.json は配信済みでなければならず、
+   identity.json と同一 commit には入れられない。`deploy/identity-pin-baseline.json`
+   はまさにこの acknowledgement のために存在する。同じ commit に、そのファイルの
+   **`known_broken` オブジェクトの下に** (top level ではない) 次の entry を足す:
+
+   ```json
+   // deploy/identity-pin-baseline.json — "known_broken": { … } の中に足す。
+   // top level に置くと check-identity-pins.sh:504 が読まず、exit 3 のまま
+   // (= この step が塞ごうとしている赤窓が開く)。
+   "incidents_json.sha256": {
+     "path": "public/api/incidents.json",
+     "class": "tracked",
+     "pinned_sha256": "<現行 identity.json の artifact_manifest.incidents_json.sha256>",
+     "observed_sha256": "<append 後の public/api/incidents.json の sha256>",
+     "reason": "TEMPORARY, this cycle transition only. The disclosure entry must be published before step 3 reads it, but gen-identity.sh pins this file by curling the PUBLISHED copy, so the new sha256 cannot be re-signed in the same commit.",
+     "resolution": "Deleted in the step-4 commit (step 4b). The step-4 re-issue pins the new bytes.",
+     "gate_effect": "suppresses-exit-3-until-reissue"
+   }
+   ```
+
+   2 つの sha256 は**記憶から書かない** —
+   `jq -r '.artifact_manifest.incidents_json.sha256' public/api/identity.json` と
+   `shasum -a 256 public/api/incidents.json` で当日採る。suppression の scope は
+   この `(pinned_sha256, observed_sha256)` の pair に閉じている:
+   `scripts/check-identity-pins.sh:719` が `class == "tracked"` **かつ**両方の
+   sha が一致するときだけ suppress するので、どちらか一方でも動けば即座に赤へ
+   戻る (= mute button ではない)。
+
+   **実測 (2026-08-18、`6e172a2` の scratch clone で実走)**: 同一の
+   `incidents.json` を置いた 2 arm で —
+   entry **あり** → `BASELINED incidents_json.sha256 tracked …` / **exit 0**、
+   entry **なし** → `MISMATCH … NEW break of the signed manifest` / **exit 3**。
+   同じ中間状態で `tests/identity-pins/` 109/109、
+   `tests/publication-registry/` 37/37、`tests/cycle-transition/` 125/125 も
+   すべて緑であることを確認済み — この一時 entry は他の gate を壊さない。
+
+   **step 3 に進む前に**: 直上の **step 2.5 (開示 incident の公開)** を通過したか
+   確認する。該当 incident が無い cycle なら「無いことを確認した」で通過扱い。
+   **ここを素通りすると incident 件数が過少のまま台帳に確定する** (step 2.5 の
+   「なぜ step 3 より前でなければならないか」)。
+
 3. **host — `gen-cycle-history.sh` + publish** appends cycle N's row to
    `cycle-history.jsonl` and ships it to the web host:
    ```sh
@@ -359,12 +573,46 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    (exit 7) and `gen-anchor-source.sh` (exit 9) both count a stale
    `CLOSED_COUNT`. Verify the published file grew by exactly one line
    (curl the public URL and compare line counts) before continuing.
+   **「exactly one line 増えた」は事前の基準値が無ければ検証できない** — この
+   step を実行する**前に**公開版の行数を 1 度採って控えておく
+   (`curl -s https://metal.freedom-yield.com/api/cycle-history.jsonl | wc -l`)。
+   この基準値は step 2 の完了確認としても使える。2026-09-04 の期待値は
+   実行前 **3 行 → 実行後 4 行** (day-of value sheet の `CLOSED_COUNT`
+   3 → 4 と同じこと)。
 4. **Mac —**
+
+   **前操作 (operator@TTY) — identity 鍵を ssh-agent に載せる。**
+
+   ```sh
+   ssh-add ~/.ssh/freedom-yield-operator-identity
+   ```
+
+   - **打つ人**: **operator 自身**。passphrase を入力するため、AI には渡さない。
+     Dashlane の entry 名はこの repo には書かない — ピング送付時に AI が添える。
+   - **目視するもの**: `Identity added: /Users/…/freedom-yield-operator-identity`
+     の 1 行。
+   - **失敗したら**: `Bad passphrase` → entry 名を AI に確認して打ち直す。
+     何も壊れないし何度でもやり直せる。
+   - **なぜこれをやるか**: 下の `gen-identity.sh` は
+     `ssh-keygen -Y sign -f "${OPERATOR_IDENTITY_KEY}"` を秘密鍵の path 直指定で
+     呼ぶ (`scripts/operator-local/gen-identity.sh:895`)。agent に載っていれば
+     以降の呼び出しで passphrase プロンプトが出ず、**AI が gen-identity を
+     最後まで実行できる**。載せないと AI の非対話セッションがプロンプトで
+     止まる。agent はセッションを跨がないので、**転換当日に改めて必要**
+     (9/1 の稽古で 1 度やっていても、9/4 にもう 1 度要る)。
+
+   **本体 (AI@Mac):**
+
    ```sh
    FY_EXPECT_CYCLE=<N> OPERATOR_IDENTITY_KEY=~/.ssh/freedom-yield-operator-identity \
      bash scripts/operator-local/gen-identity.sh
    ```
    then commit, push, `gh run watch` until deploy completes.
+   **push は 4b の編集を取り込んでから** — step 4b は "MANDATORY, same commit
+   as step 4" なので、正しい順序は「step 4 で生成 → 4b の registry 編集 →
+   `tests/publication-registry/` を回す → **まとめて 1 commit** → push →
+   deploy 待ち」。この行を読んだ時点で commit + push まで走ると、4b が次の
+   commit に落ちて main が赤くなる (4b 自身の警告と同じ状態)。
    `FY_EXPECT_CYCLE=<N>` is **mandatory** at a cycle transition (N = the
    cycle that just closed, e.g. `FY_EXPECT_CYCLE=3` at the cycle-3 →
    cycle-4 transition): it hard-stops (exit 7) if step 3's published ledger
@@ -397,6 +645,14 @@ topology (validator host + operator Mac)**, in this fixed day-of order
      `known_broken` entries (`evidence_json.sha256`,
      `validator_json.sha256`, `uptime_cycles_json.sha256`) and the
      `c4_status` block with them. Those pins no longer exist.
+   - `deploy/identity-pin-baseline.json` — **step 2.5 を実行した cycle では、
+     そこで足した一時 entry `incidents_json.sha256` もこの commit で削除する。**
+     step 4 の再署名で `pinned_sha256` 側が新しい値に変わるため entry は
+     suppress しなくなり、`check-identity-pins.sh` は
+     `OBSOLETE-BASELINE incidents_json.sha256 … delete this entry` を印字する
+     (2026-08-18 に scratch clone で実測)。**ただしこの行は exit code を変えない
+     report-only なので、削除忘れを CI は落としてくれない** — この bullet で
+     必ず落とす。
    - `deploy/publication.json` — set
      `known_kind_violations.violations` to `{}` (all four entries expire
      at once), and clear `pinned_by` on `api/evidence.json`,
@@ -479,6 +735,12 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    composes as `CLOSED_COUNT + 1`), so passing `<N>` here exits 5
    (mismatch). Push + wait for deploy is a separate, subsequent action
    (same pattern as step 4).
+   **step 6 の完了条件は「push した」ではなく「公開サイトが同じ bytes を
+   配っている」**: `gh run watch` で deploy の完了まで待ち、公開反映を
+   確認してから step 7 へ進む。待たずに進むと **7b が exit 10** で落ちる
+   (7b は LIVE な公開 `anchor-source.json` を cache-bust して取得し、
+   committed bytes と一致しなければ拒否する)。exit 10 は 7b の説明中に
+   あるが、**それは落ちてから読む場所**なので、ここで待つ。
    **Not optional**: `anchor-source.json` publishes via the normal
    git-deploy path, and until that deploy lands, step 9's Phase 1 polling
    never observes a fresh `dag_root_computed` and times out (exit 3).
@@ -493,10 +755,32 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    this cycle's exact memo shape. The day-of invocation MUST carry
    `--expect-cycle=<N+1>` (mandatory per
    `docs/PHASE_ALPHA_TESTNET_DRY_RUN.md`; cycle-4 day example: `4`):
+   **この 2 行はどちらも operator@TTY** (打つのは operator、AI ではない):
+
    ```sh
    HOME=~/.metal-fy-proton-test proton key:unlock
    HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh --expect-cycle=<N+1>
    ```
+
+   - **目視するもの (この順で)**: ① `step 1/10` の `cycle_number_observed:` と
+     `derived memo_prefix:` ② `step 3/10` の
+     `present: … (matches current on-chain key)` ③ `step 7/10` の
+     `BROADCAST OK  tx_id=<64hex>` ④ `step 9/10` の `7-gate PASS`
+     ⑤ 末尾の `TESTNET REHEARSAL COMPLETE testnet_tx_id=<64hex>`。
+   - **AI に渡すもの**: ⑤の 1 行を**そのまま chat に貼る**。これは script が
+     自動で引き継ぐものではなく、**人が目で拾って貼る手渡し**であり、貼り
+     間違いを検出する機構は無い (7b/7c の `--testnet-tx-id=` の入力になる)。
+   - **失敗したら**: exit **2** = keystore が locked → 上の unlock をやり直す。
+     exit **8** = `HOME=` prefix の付け忘れ → 付けて再実行。exit **1** は
+     原因が多岐 (`fail()` 全部) に潰れるので、**まず「`step 7/10` の行が
+     画面に出ていたか?」を確認する** — 出ていなければ broadcast は未発生、
+     出ていれば testnet 上に tx が残っている場合がある。この 1 問が
+     「やり直してよいか」の分岐そのもの。
+   - **なぜ operator が打つのか**: 上の「実行者と実行場所」節の引用ブロック
+     (認可の実体が「operator 自身の起動」であること)。
+   - **中止したくなったら**: 打たなければよい。この時点では mainnet 側は
+     何も起きていない。
+
    Its closing `TESTNET REHEARSAL COMPLETE testnet_tx_id=<64hex>` line is
    the `--testnet-tx-id` gate-1 input below. Its own dry-run log is
    **testnet-side evidence only** — it records `target_chain: "testnet-a"`,
@@ -566,7 +850,16 @@ topology (validator host + operator Mac)**, in this fixed day-of order
 
    **7c — sign + broadcast.** Unlock the **separate** mainnet keystore, then
    sign. `bin/safe-broadcast` gate 1 and gate 4 both REFUSE without
-   `--testnet-tx-id` / `--dry-run-log`:
+   `--testnet-tx-id` / `--dry-run-log`.
+
+   **この code block は 2 人で分担する**: **1 行目
+   (`HOME=~/.metal-fy-proton proton key:unlock`) は operator@TTY** — 32 文字 password を打つのは operator。**2 行目以降
+   (`sign-anchor-event.sh` の呼び出し) は AI@Mac** — ただし実行は下の
+   「per-invocation 認可の手順」が済んでから。
+   unlock の **目視するもの**: エラーなくシェルに戻ること。
+   **失敗したら**: 以降の署名が keystore locked で止まるだけで、何も壊れない
+   (やり直せる)。**Dashlane entry 名はこの repo には書かない** — ピング時に
+   AI が添える。
    ```sh
    HOME=~/.metal-fy-proton proton key:unlock
    FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton \
@@ -605,6 +898,38 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    DIRECTIVE). Testnet and mainnet are **two distinct keystores**
    (`HOME=~/.metal-fy-proton-test` / `HOME=~/.metal-fy-proton`) — never
    interchangeable (Constitution §3.5).
+
+   **per-invocation 認可の手順 (当日 operator が実際にやること)。** 上の段落は
+   認可の**性質**の説明であって手順ではない。当日の唯一の不可逆な承認なので、
+   ここで手順として書き下す:
+
+   - **AI が提示するもの (5 点)** — いずれも `bin/safe-broadcast:567-577` の
+     `BROADCAST CONFIRMATION` ブロックと 7b の出力から取る、**AI の要約では
+     なく実出力**: ① `chain:` (= `mainnet-a`)、② `token binding:`
+     (`chain=…, tx_sha256=…` — R16 の content binding)、③ `action count:` と
+     `actions:` 各行の `memo=…` (**anchor は 4 本**)、④ 同じ行の
+     `authorization=<actor>@<permission>`、⑤ 7b が印字した
+     `<actor>@<permission> → <to>  <quantity>` の `quantity`
+     (`scripts/preview-cycle-anchor-broadcast.sh:340`)。
+     加えて `MAINNET gates verified: testnet-tx-id=… / dry-run-log=…` の 2 行。
+   - **operator が照合するもの** — ① memo prefix が**その日刻む cycle のもの**
+     であること (day-of value sheet の `<N+1>`。2026-09-04 なら cycle 5 側)、
+     ② `chain` が `mainnet-a` であること、③ `quantity` が想定どおりであること、
+     ④ `tx_sha256` が空 (`<unbound-legacy>`) でないこと。
+     **1 つでも読めない・違って見えたら照合は不成立** — 「たぶん合っている」で
+     通さない。
+   - **認可の返答形式** — chat で、提示された
+     `{chain, actor, permission, action, memo, quantity}` を**自分の言葉で
+     復唱した上で**「認可する」と書く。「OK」「はい」だけでは認可にしない
+     (復唱が PRIME DIRECTIVE gate 2 の実体)。認可が成立して初めて AI は
+     上の `sign-anchor-event.sh` を実行してよい。実行すると
+     `bin/safe-broadcast` が対話プロンプトを出し、確認フレーズは
+     **`BROADCAST mainnet-a` の完全一致**である (`:579-584`)。
+   - **中止の言い方** — chat で「**中止**」または「**止めて**」の一言で足りる。
+     理由の説明は要らないし、求められない。プロンプトまで進んでいた場合は
+     **確認フレーズ以外の任意の入力**が abort になる (exit 5)。中止で失われる
+     のは 7b の dry-run log だけで、作り直せる。**broadcast は起きていない。**
+     迷ったら中止が既定。
    `sign-anchor-event.sh` also accepts `--output=<path>`; left unset, its
    stdout is additionally saved to a default path
    `/tmp/fya-<testnet|mainnet>-sign-output.json` — `/tmp/fya-mainnet-sign-output.json`
@@ -612,11 +937,16 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    and must reach the host before step 8 runs, where it becomes step 8's
    `--input=` value below — step 7.5, immediately following, is that
    transfer.
-   After the broadcast, re-lock the mainnet keystore:
-   `HOME=~/.metal-fy-proton proton key:lock`. Its prompt reads `Enter 32
-   character password (leave empty to create new)` — an **empty Enter
-   here creates a NEW password** instead of locking with the existing one;
-   always enter the same 32-character password used to unlock.
+   **後操作 (operator@TTY) — mainnet keystore を re-lock する。**
+   `HOME=~/.metal-fy-proton proton key:lock`。
+
+   - **打つ人**: **operator 自身** (password を打つため)。
+   - **目視するもの**: プロンプト `Enter 32 character password (leave empty to
+     create new)` に、**unlock と同じ 32 文字を入れる**。
+   - **絶対にやらないこと**: **空 Enter**。既存 password でロックする代わりに
+     **新しい password を作成してしまう** — 次回の unlock が通らなくなる。
+   - **なぜこれをやるか**: mainnet keystore を unlock したまま放置しない
+     (Constitution §3.5)。7a の testnet keystore も同様に re-lock する。
 
 7.5. **Mac → host — scp the signing fragment.** Step 7c's
    `sign-anchor-event.sh` output landed on the **Mac** (its default
@@ -730,6 +1060,37 @@ authorization happens before that step runs, not after). Step 0 is the
 operator's own wallet action (no script, no gate). Steps 1-3 and 8-9 pass
 the always-green `cycle-artifact-write` gate; no cycle-gate approval is
 needed for them.
+
+### 完了判定 checklist (この 5 点が揃ったら当日終了)
+
+**`scripts/cycle-transition.sh --status` が全 green でも「終わった」ことには
+ならない。** 14 実行単位のうち 5 つ (7a / 7b / {7.5, 8, 8.5}) はどの事後条件にも
+入っておらず、7.5 / 8 / 8.5 を丸ごと飛ばしても `--status` は緑を返しうる
+(その場合 on-chain には刻まれているのに公開 `anchor-receipt.json` /
+`anchor-history.jsonl` は前 cycle を配り続ける)。また 4b の registry 編集を
+**部分的に**やり忘れた場合も `--status` は気づかない。だから目視で 5 点を取る:
+
+- **① `--status` が全 green** — `bash scripts/cycle-transition.sh --status
+  --expect-cycle=<N>` (2026-09-04 なら `4`)。必要条件であって十分条件では
+  ないので、これ**だけ**では終了判定にしない。
+- **② 公開 `cycle-history.jsonl` が 1 行増えている** — step 3 の前に控えた
+  基準行数 +1 であること (2026-09-04 なら 3 → **4**)。かつ増えた行の
+  `incidents_in_cycle_ids` が step 2.5 の entry を含むこと。
+- **③ explorer で anchor tx を目視** — step 7 の tx id を AI が読み返し、
+  explorer URL 上で確認する。
+- **④ identity 署名が検証できる** — 公開 `identity.json` / `.sig` / pubkey の
+  3 点で `ssh-keygen -Y verify` が通ること
+  (`docs/IDENTITY_VERIFICATION.md` の手順)。かつ
+  `bash scripts/check-identity-pins.sh --mode=repo` が **exit 0**
+  **かつ出力に `OBSOLETE-BASELINE` の行が無いこと** (= step 2.5 の一時 baseline
+  entry が 4b で消えていることの確認)。**exit code だけでは兼ねられない** —
+  削除を忘れても exit は 0 のままで、差が出るのは出力行だけ (2026-08-18 実測)。
+- **⑤ keystore が 2 つとも locked** — testnet (7a) と mainnet (7c) の両方。
+  片方だけ re-lock して終える取りこぼしがいちばん起きやすい。
+
+公開面の 3 ファイル (`anchor-receipt.json` / `anchor-history.jsonl` /
+`cycle-history.jsonl`) が**当 cycle の内容を配っていること**を curl で 1 度
+確かめると、②と③を同時に満たせる。
 
 ## Emergency fallback (= AI unavailable)
 
