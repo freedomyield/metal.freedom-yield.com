@@ -659,7 +659,12 @@ fi
 CHECKED=0
 while IFS= read -r line; do
 	[ -n "$line" ] || continue
-	scripts_field="$(printf '%s' "$line" | cut -d'|' -f4)"
+	# Field 5, not 4: the unit table is `id|phase|machine|actor|scripts|title`.
+	# Read through the accessor's index, not a remembered one — when the actor
+	# column was added, this raw cut was the single thing that broke, and it
+	# broke SILENTLY into "0 scripts checked", which is exactly the vacuous
+	# pass the guard below exists to catch. It caught it.
+	scripts_field="$(printf '%s' "$line" | cut -d'|' -f5)"
 	[ "$scripts_field" = "-" ] && continue
 	for s in $scripts_field; do
 		s="${s##*/}"
@@ -1488,5 +1493,376 @@ expect_rc 64 "asking for both modes at once is refused with exit 64" -- \
 	--print-only --status --expect-cycle=4 --ledger="$LEDGER_POST"
 expect_rc 64 "no mode at all is refused with exit 64" -- \
 	--expect-cycle=4
+
+# ===========================================================================
+# O. Actor, and the canon-only checkpoint (the 2026-08-18 three-way audit)
+# ===========================================================================
+# The audit compared the printed plan, docs/CYCLE_GATE.md and the
+# implementations against each other and found the plan silent on things the
+# canon requires. Each case below pins one of those, so the plan cannot go
+# quiet on it again. `$PLAN` is the un-resolved print; `$PLAN_TX` is the same
+# plan with the rehearsal tx supplied, used where the assertion is about a
+# command line that only exists resolved.
+
+# --- Actor is printed, closed, and consistent with the machine -------------
+# The finding: the plan labelled machines only, so unit 7a — where the
+# operator personally starting the script IS the testnet broadcast
+# authorization — read exactly like the six other `Mac` lines the AI runs.
+ACTORS="$(grep -oE '^# \[unit [^]]+\] (host|Mac) — [^ ]+' "$PLAN" | awk '{print $NF}')"
+ACTOR_N="$(printf '%s\n' "$ACTORS" | grep -c . || true)"
+if [ "$ACTOR_N" -eq 14 ]; then
+	ok "all 14 unit headers name an actor as well as a machine"
+else
+	bad "expected 14 unit headers carrying an actor, found ${ACTOR_N}"
+fi
+BAD_ACTOR="$(printf '%s\n' "$ACTORS" | grep -vxE 'AI@host|AI@Mac|operator@TTY' || true)"
+if [ -z "$BAD_ACTOR" ]; then
+	ok "every actor is one of the canon's three values (AI@host / AI@Mac / operator@TTY)"
+else
+	bad "unrecognized actor value(s): $(printf '%s' "$BAD_ACTOR" | tr '\n' ' ')"
+fi
+
+# The actor's machine suffix must agree with the machine column. Without
+# this the two labels could drift apart and each would look self-consistent.
+ACTOR_MISMATCH=""
+while IFS= read -r hdr; do
+	[ -n "$hdr" ] || continue
+	h_machine="$(printf '%s' "$hdr" | awk '{print $4}')"
+	h_actor="$(printf '%s' "$hdr" | awk '{print $NF}')"
+	case "$h_actor" in
+	AI@*)
+		[ "${h_actor#AI@}" = "$h_machine" ] || ACTOR_MISMATCH="${ACTOR_MISMATCH} ${hdr}"
+		;;
+	operator@TTY)
+		# The operator sits at the Mac; there is no operator@TTY on the host.
+		[ "$h_machine" = "Mac" ] || ACTOR_MISMATCH="${ACTOR_MISMATCH} ${hdr}"
+		;;
+	esac
+done < <(grep -oE '^# \[unit [^]]+\] (host|Mac) — [^ ]+' "$PLAN")
+if [ -z "$ACTOR_MISMATCH" ]; then
+	ok "every actor's machine agrees with the unit's machine column"
+else
+	bad "actor / machine disagreement:${ACTOR_MISMATCH}"
+fi
+
+# Exactly one unit is the operator's, and it is 7a. Both halves matter: "at
+# least one" would pass if every unit were mislabelled operator@TTY, and
+# "7a is operator@TTY" would pass if 7b had quietly become one too.
+OP_UNITS="$(grep -oE '^# \[unit [^]]+\] (host|Mac) — operator@TTY' "$PLAN" | sed 's/^# \[unit //; s/\].*$//')"
+if [ "$OP_UNITS" = "7a" ]; then
+	ok "exactly one execution unit is operator@TTY, and it is unit 7a"
+else
+	bad "expected exactly unit 7a to be operator@TTY, got '$(printf '%s' "$OP_UNITS" | tr '\n' ' ')'"
+fi
+if unit_block "$PLAN" 7a >/dev/null && \
+	awk -v want="# [unit 7a] " 'index($0,want)==1{f=1;next} index($0,"# [unit ")==1{f=0} f' "$PLAN" \
+	| grep -qi 'THE OPERATOR HAVING STARTED IT IS THE PER-INVOCATION AUTHORIZATION'; then
+	ok "unit 7a states that the operator having started it IS the authorization"
+else
+	bad "unit 7a does not say why it must be the operator who starts it"
+fi
+
+# ---- MUTATION: the actor scan must be able to fail ------------------------
+ACTOR_MUT="${TMP}/plan-actor-mut.txt"
+sed 's/^# \[unit 7a\] Mac — operator@TTY/# [unit 7a] Mac — AI@Mac/' "$PLAN" > "$ACTOR_MUT"
+MUT_OP="$(grep -oE '^# \[unit [^]]+\] (host|Mac) — operator@TTY' "$ACTOR_MUT" | sed 's/^# \[unit //; s/\].*$//')"
+if [ "$MUT_OP" != "7a" ]; then
+	ok "mutation: relabelling unit 7a as AI@Mac is detected by the operator@TTY check"
+else
+	bad "MUTATION NOT CAUGHT: unit 7a still read as operator@TTY after being relabelled"
+fi
+
+# --- CHECKPOINT 2.5: printed, and still not a unit -------------------------
+# The finding: docs/CYCLE_GATE.md step 2.5 (publish the disclosure incident)
+# appeared nowhere in the plan — not as a step, and not in the plan's own
+# list of what it omits. It is the one step of the day that cannot be
+# corrected afterwards, because unit 3 writes the incident count into an
+# append-only ledger.
+if grep -q '^# ⛔ CHECKPOINT 2\.5 ' "$PLAN"; then
+	ok "CHECKPOINT 2.5 is printed in the plan"
+else
+	bad "CHECKPOINT 2.5 is MISSING from the plan — a day driven from this printout would skip it"
+fi
+# It must reach the operator WITHOUT joining the unit table: the drift gate
+# above demands set equality with the canon's top-level markers, and 2.5 is
+# deliberately a sub-block there. A `# [unit 2.5]` header would turn section
+# B red on every cycle. This is the constraint that dictated the comment form.
+if ! plan_unit_ids "$PLAN" | grep -qxF '2.5'; then
+	ok "CHECKPOINT 2.5 is not a unit id, so the drift gate's set equality is untouched"
+else
+	bad "CHECKPOINT 2.5 became a unit id — the drift gate will now fail against the canon"
+fi
+# Printed where it is due: after unit 2, before unit 3. Ordering is the whole
+# point — read after unit 3 it is already too late to act on.
+CP_LINE="$(grep -n '^# ⛔ CHECKPOINT 2\.5 ' "$PLAN" | head -1 | cut -d: -f1)"
+U2_LINE="$(grep -n '^# \[unit 2\] ' "$PLAN" | head -1 | cut -d: -f1)"
+U3_LINE="$(grep -n '^# \[unit 3\] ' "$PLAN" | head -1 | cut -d: -f1)"
+if [ -n "$CP_LINE" ] && [ -n "$U2_LINE" ] && [ -n "$U3_LINE" ] &&
+	[ "$CP_LINE" -gt "$U2_LINE" ] && [ "$CP_LINE" -lt "$U3_LINE" ]; then
+	ok "CHECKPOINT 2.5 is printed between unit 2 and unit 3, where it is actionable"
+else
+	bad "CHECKPOINT 2.5 is not positioned between unit 2 and unit 3 (cp=${CP_LINE} u2=${U2_LINE} u3=${U3_LINE})"
+fi
+# It must be decidable from the printout, not from memory: the tracked
+# payload directory is the go/no-go, and the canon is named for the rest.
+if grep -q 'docs/pending-disclosures' "$PLAN" && grep -q 'docs/CYCLE_GATE.md step 2.5' "$PLAN"; then
+	ok "CHECKPOINT 2.5 names both its go/no-go input and the canonical procedure"
+else
+	bad "CHECKPOINT 2.5 omits the pending-disclosures input or the canon pointer"
+fi
+
+# --- K-2: the plan must not contradict the canon about step 2 --------------
+# The plan's own header promises "where the two differ, an inline comment
+# says so". That comment said docs/CYCLE_GATE.md step 2 "carries no command
+# block at all", which was false — it carries the FY_LIVE=1 line verbatim.
+if ! grep -qF 'that step carries no command block at all' "$PLAN"; then
+	ok "the plan no longer claims docs/CYCLE_GATE.md step 2 has no command block"
+else
+	bad "the plan still claims canon step 2 carries no command block — it does (the FY_LIVE=1 line)"
+fi
+# ...and the claim is checked against the canon rather than merely deleted.
+RUNBOOK_STEP2="$(awk '/^2\. \*\*host — .uptime-history/{f=1;next} /^3\. \*\*/{f=0} f' "$RUNBOOK")"
+if printf '%s' "$RUNBOOK_STEP2" | grep -qF 'bash scripts/uptime-history.sh'; then
+	ok "measured: docs/CYCLE_GATE.md step 2 really does carry a uptime-history.sh command block"
+else
+	bad "docs/CYCLE_GATE.md step 2 has no uptime-history.sh command block — re-check the plan's note"
+fi
+# The transition-day false alarm the plan used to drop with it. Matched on a
+# short fragment on purpose: the plan wraps prose at ~68 columns, so any
+# phrase long enough to be distinctive is also long enough to be split across
+# two comment lines and never matched.
+U2_BLOCK="$(awk -v want="# [unit 2] " 'index($0,want)==1{f=1;next} index($0,"# [unit ")==1{f=0} f' "$PLAN")"
+if printf '%s' "$U2_BLOCK" | grep -qF "Appended daily entry"; then
+	ok "unit 2 warns that a second 'Appended daily entry' is the expected boundary signal"
+else
+	bad "unit 2 omits the same-date duplicate-append note (a transition-day false alarm)"
+fi
+if printf '%s' "$U2_BLOCK" | grep -qF 'Closed cycle #'; then
+	ok "unit 2 names the positive success signal rather than the absence of 'DRY:'"
+else
+	bad "unit 2 does not name the 'Closed cycle #<N>' success signal"
+fi
+
+# --- K-3: ssh-add is printed, at stop 2, as the operator's own action ------
+# The finding: the plan described stop 2 as "unit 4 will prompt you", the
+# opposite of the canon, where the key is loaded into the agent BEFORE unit 4
+# precisely so the AI's non-interactive run of gen-identity.sh does not stop
+# at a prompt.
+if grep -qE '^ssh-add .*  # Mac$' "$PLAN"; then
+	ok "the plan prints the ssh-add line as a command"
+else
+	bad "the plan does not print ssh-add — the AI's unit 4 would stop at a passphrase prompt"
+fi
+SSHADD_LINE="$(grep -n '^ssh-add ' "$PLAN" | head -1 | cut -d: -f1)"
+U4_LINE="$(grep -n '^# \[unit 4\] ' "$PLAN" | head -1 | cut -d: -f1)"
+if [ -n "$SSHADD_LINE" ] && [ -n "$U4_LINE" ] && [ "$SSHADD_LINE" -lt "$U4_LINE" ]; then
+	ok "ssh-add is printed BEFORE unit 4, which is the whole point of it"
+else
+	bad "ssh-add is not printed before unit 4 (ssh-add=${SSHADD_LINE} unit4=${U4_LINE})"
+fi
+if grep -q 'freedom-yield-operator-identity' "$PLAN"; then
+	ok "the ssh-add line names the operator identity key"
+else
+	bad "the ssh-add line does not name the operator identity key"
+fi
+# The canon is the source of that path; a drifting copy here would be worse
+# than none, so the two are compared rather than trusted.
+if grep -qF 'ssh-add ~/.ssh/freedom-yield-operator-identity' "$CYCLE_GATE_DOC"; then
+	ok "measured: the ssh-add line matches docs/CYCLE_GATE.md's step 4 前操作 block"
+else
+	bad "docs/CYCLE_GATE.md no longer carries this ssh-add line — the plan's copy may have drifted"
+fi
+# The old, inverted model must be gone, not merely supplemented.
+if ! grep -qF 'Unit 4 prompts for the operator identity key passphrase' "$PLAN"; then
+	ok "the superseded \"unit 4 will prompt you\" model is no longer printed"
+else
+	bad "stop 2 still describes unit 4 as prompting, which inverts the canon's model"
+fi
+
+# --- K-6: step 3 is verifiable, because a baseline is taken ----------------
+# "grew by exactly one line" is a claim about a difference; the plan printed
+# only the after-reading, so nothing in it could support the claim.
+LEDGER_READS="$(grep -c "^curl -fsS 'https://metal.freedom-yield.com/api/cycle-history.jsonl'" "$PLAN" || true)"
+if [ "$LEDGER_READS" -eq 2 ]; then
+	ok "unit 3 prints two published-ledger readings (a baseline and an after)"
+else
+	bad "expected 2 published-ledger readings in unit 3, found ${LEDGER_READS}"
+fi
+# The baseline is worthless unless it is taken BEFORE the publish. Anchored
+# to the COMMAND line, not to any mention of the script: CHECKPOINT 2.5 also
+# names gen-cycle-history.sh in prose (explaining why it must run first), and
+# matching that instead put the "publish" earlier than the baseline.
+GEN_HIST_LINE="$(grep -n '^ssh .*gen-cycle-history\.sh' "$PLAN" | head -1 | cut -d: -f1)"
+FIRST_READ="$(grep -n "^curl -fsS 'https://metal.freedom-yield.com/api/cycle-history.jsonl'" "$PLAN" | head -1 | cut -d: -f1)"
+LAST_READ="$(grep -n "^curl -fsS 'https://metal.freedom-yield.com/api/cycle-history.jsonl'" "$PLAN" | tail -1 | cut -d: -f1)"
+if [ -n "$GEN_HIST_LINE" ] && [ "$FIRST_READ" -lt "$GEN_HIST_LINE" ] && [ "$LAST_READ" -gt "$GEN_HIST_LINE" ]; then
+	ok "one ledger reading is taken before the publish and one after it"
+else
+	bad "the ledger readings do not straddle the publish (first=${FIRST_READ} publish=${GEN_HIST_LINE} last=${LAST_READ})"
+fi
+# Both readings must COUNT THE SAME WAY, or the difference is meaningless.
+UNIQ_READS="$(grep "^curl -fsS 'https://metal.freedom-yield.com/api/cycle-history.jsonl'" "$PLAN" | sort -u | grep -c . || true)"
+if [ "$UNIQ_READS" -eq 1 ]; then
+	ok "the two ledger readings are the identical command, so their difference is meaningful"
+else
+	bad "the two ledger readings use ${UNIQ_READS} different commands — the difference would not be comparable"
+fi
+# The expected before/after pair is stated, not left to the reader.
+if grep -qF "Expect $((EXPECT_CYCLE - 1)) here and ${EXPECT_CYCLE} afterwards" "$PLAN"; then
+	ok "unit 3 states the expected before/after counts ($((EXPECT_CYCLE - 1)) -> ${EXPECT_CYCLE})"
+else
+	bad "unit 3 does not state the expected before/after ledger counts"
+fi
+# The `|| true` trap is disclosed rather than silently carried.
+if grep -q 'A READING OF 0 MEANS THE FETCH FAILED' "$PLAN"; then
+	ok "unit 3 discloses that a failed fetch also prints 0"
+else
+	bad "unit 3 does not warn that a failed fetch prints 0 rather than erroring"
+fi
+
+# --- K-8: the signing fragment path is pinned, not defaulted ---------------
+# sign-anchor-event.sh composes its default output path under
+# FY_SIGN_OUTPUT_DIR. With the default in force and that variable exported,
+# 7c writes elsewhere while 7.5 scp's the literal /tmp path — shipping the
+# previous cycle's fragment, caught only by unit 8, after the broadcast.
+SIGN_LINE="$(grep -E '^FY_CONFIG_DIR=.*sign-anchor-event\.sh' "$PLAN_TX" || true)"
+if printf '%s' "$SIGN_LINE" | grep -qF -- '--output=/tmp/fya-mainnet-sign-output.json'; then
+	ok "unit 7c pins its output path with an explicit --output="
+else
+	bad "unit 7c does not pin --output= — FY_SIGN_OUTPUT_DIR could relocate the fragment"
+fi
+# --output= must be a real flag, not a plausible one this plan invented.
+if grep -qE '^[[:space:]]*--output=\*\)' "${REPO_ROOT}/scripts/sign-anchor-event.sh"; then
+	ok "measured: sign-anchor-event.sh really parses --output="
+else
+	bad "sign-anchor-event.sh does not parse --output= — the pinned flag would be ignored"
+fi
+# The pinned path and 7.5's scp source are coupled by string equality alone.
+SCP_SRC="$(grep -E '^scp -i .* /tmp/fya-mainnet-sign-output\.json ' "$PLAN_TX" || true)"
+if [ -n "$SCP_SRC" ]; then
+	ok "unit 7.5 scp's exactly the path unit 7c was pinned to"
+else
+	bad "unit 7.5's scp source does not match unit 7c's --output= path"
+fi
+if grep -q 'MUST BE THE SAME STRING AS UNIT 7c' "$PLAN"; then
+	ok "unit 7.5 states that its literal source path is coupled to 7c's --output="
+else
+	bad "unit 7.5 does not disclose the coupling to 7c's output path"
+fi
+
+# --- K-5: unit 4b quotes the canon's whole list ----------------------------
+# The plan called its 4b checklist a verbatim quote while carrying three of
+# the canon's bullets. The two that were missing are the CHECKPOINT 2.5
+# follow-ups, and one of them is the only item on the list no exit code
+# covers.
+CANON_4B="$(awk '/^4b\. \*\*Mac —/{f=1;next} /^5\. \*\*/{f=0} f' "$RUNBOOK")"
+CANON_4B_BULLETS="$(printf '%s\n' "$CANON_4B" | grep -cE '^   - ' || true)"
+B4_BLOCK="$(awk -v want="# [unit 4b] " 'index($0,want)==1{f=1;next} index($0,"# [unit ")==1{f=0} f' "$PLAN")"
+PLAN_4B_BULLETS="$(printf '%s\n' "$B4_BLOCK" | grep -cE '^#     \([a-e]\) ' || true)"
+if [ "$CANON_4B_BULLETS" -ge 4 ]; then
+	ok "measured: docs/CYCLE_GATE.md step 4b carries ${CANON_4B_BULLETS} bullets"
+else
+	bad "docs/CYCLE_GATE.md step 4b's bullet list read as only ${CANON_4B_BULLETS} bullets — the comparison below would be vacuous"
+fi
+# NOT equality, and the asymmetry is deliberate rather than a loosened test.
+# The failure this guards against is the plan carrying FEWER items than the
+# canon: that is how a mandatory edit gets dropped on the day. The plan
+# carrying more is not the same kind of defect — an extra caution in a
+# printout costs a few seconds of reading, and forbidding it would make this
+# suite go red for exactly as long as it takes a canon edit and a plan edit
+# to reach main, i.e. it would manufacture the "known red we ignore" state
+# this repo has already paid for once.
+if [ "$PLAN_4B_BULLETS" -ge "$CANON_4B_BULLETS" ]; then
+	ok "unit 4b prints ${PLAN_4B_BULLETS} bullets, covering the canon's ${CANON_4B_BULLETS}"
+else
+	bad "unit 4b prints only ${PLAN_4B_BULLETS} bullets but docs/CYCLE_GATE.md step 4b carries ${CANON_4B_BULLETS} — a mandatory edit would be dropped"
+fi
+# Counting alone would pass on three right bullets and two invented ones, so
+# the two that were actually missing are named.
+if printf '%s' "$B4_BLOCK" | grep -qF 'incidents_json.sha256' &&
+	printf '%s' "$B4_BLOCK" | grep -qF 'OBSOLETE-BASELINE'; then
+	ok "unit 4b carries the temporary-baseline bullet and names the report-only signal for it"
+else
+	bad "unit 4b omits the temporary incidents_json.sha256 baseline bullet"
+fi
+# The published payload IS deleted — but in checkpoint 2.5's own commit, not
+# in 4b's. Deferring it to 4b was measured to leave ci-main.yml red for the
+# hours between the 2.5 push and unit 4, so the deletion travels with the
+# publish. The plan has to place it where the canon does, or the operator
+# stages it in the wrong commit.
+if printf '%s' "$B4_BLOCK" | grep -qF 'docs/pending-disclosures'; then
+	bad "unit 4b claims the pending payload is deleted here — the canon deletes it in checkpoint 2.5's own commit"
+else
+	ok "unit 4b does not claim the pending-payload deletion (it belongs to checkpoint 2.5's commit)"
+fi
+# Range-extracted from its header to the rule that closes it. Matched on
+# single words, because the plan re-wraps prose at ~68 columns and any phrase
+# worth asserting on is long enough to be split across two comment lines.
+CP_BLOCK="$(sed -n '/^# ⛔ CHECKPOINT 2\.5 /,/^# ----------/p' "$PLAN")"
+if [ -z "$CP_BLOCK" ]; then
+	bad "could not isolate the CHECKPOINT 2.5 block — the assertions below would be vacuous"
+elif printf '%s\n' "$CP_BLOCK" | grep -qF 'DELETION' &&
+	printf '%s\n' "$CP_BLOCK" | grep -qF 'pending payload'; then
+	ok "CHECKPOINT 2.5 states that its own commit carries the pending-payload deletion"
+else
+	bad "CHECKPOINT 2.5 does not say the pending payload is deleted in its commit"
+fi
+# 4b's staged set must therefore stay at the four always-staged files.
+if printf '%s\n' "$B4_BLOCK" | grep -qF 'FOUR entries'; then
+	ok "unit 4b states that its staged set is four files, on a 2.5 cycle as well"
+else
+	bad "unit 4b does not state the expected staged set"
+fi
+# And the bullet that no exit code covers must be flagged as such.
+if printf '%s' "$B4_BLOCK" | grep -qF 'DOES NOT CHANGE THE EXIT CODE'; then
+	ok "unit 4b flags the one bullet CI cannot fail on"
+else
+	bad "unit 4b does not distinguish the bullet CI cannot fail on from the ones it can"
+fi
+
+# --- K-7: both keystores are re-locked, and the plan says so ---------------
+# The canon requires two re-locks and its own completion checklist calls
+# closing only one "the likeliest omission of the day". The plan's stop 4
+# mentioned only the mainnet keystore.
+STOP4="$(awk '/^# ⏸ STOP 4 /{f=1;next} /^# === PHASE/{f=0} f' "$PLAN")"
+if printf '%s' "$STOP4" | grep -qi 'TESTNET keystore' &&
+	printf '%s' "$STOP4" | grep -qi 're-lock BOTH keystores'; then
+	ok "stop 4 requires re-locking BOTH keystores, not only the mainnet one"
+else
+	bad "stop 4 does not require re-locking the testnet keystore as well"
+fi
+# The plan's own count of the operator's keystrokes must match the canon's.
+if grep -qF 'Counting the operator' "$PLAN" && grep -qF 'the whole day: SIX' "$PLAN"; then
+	ok "the plan counts six operator@TTY actions, matching the canon"
+else
+	bad "the plan does not count the operator's six manual actions"
+fi
+# Checked against what the canon REQUIRES, not against its prose count. The
+# count sentence has itself been wrong (it said five while three other
+# passages demanded six), so pinning the plan to that sentence would pin it to
+# whichever of the two the canon happens to be asserting today. The
+# requirement is stable and is what the operator is actually measured against:
+# the completion checklist demands both keystores locked.
+if grep -qF 'keystore が 2 つとも locked' "$CYCLE_GATE_DOC"; then
+	ok "measured: docs/CYCLE_GATE.md's completion checklist requires BOTH keystores locked"
+else
+	bad "docs/CYCLE_GATE.md no longer requires both keystores locked — re-check stop 4"
+fi
+
+# --- The plan still discloses what it omits --------------------------------
+# The closing summary is the reader's map of where the printout stops being a
+# faithful copy. It has to mention the checkpoint it summarises rather than
+# reproduces, or the omission is undisclosed all over again.
+CLOSING="$(awk '/^# WHERE THIS PLAN IS NOT A COMPLETE SUBSTITUTE/{f=1} f' "$PLAN")"
+if printf '%s' "$CLOSING" | grep -qF 'CHECKPOINT 2.5'; then
+	ok "the closing summary discloses that CHECKPOINT 2.5 is summarised, not reproduced"
+else
+	bad "the closing summary does not mention CHECKPOINT 2.5"
+fi
+if printf '%s' "$CLOSING" | grep -qF 'TWO RE-LOCKS'; then
+	ok "the closing summary names both unprinted re-locks, not one"
+else
+	bad "the closing summary still describes a single unprinted re-lock"
+fi
 
 finish
