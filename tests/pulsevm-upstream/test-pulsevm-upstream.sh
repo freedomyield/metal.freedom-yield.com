@@ -1493,6 +1493,197 @@ LEDGER_OVERCLAIM="$(grep -inE "$OVERCLAIM_RE" "$ALL_ALERTS" | head -3)"
 	&& ok "population: no alert body anywhere in the suite claims a capability the run did not measure" \
 	|| bad "population: an alert body over-claims -> ${LEDGER_OVERCLAIM}"
 
+# ---- case 16 (shape, SOURCE): every alert body the checker CAN send ---------
+# Case 15 tests the population this suite EMITS. That is not the same
+# population as the bodies the checker CONTAINS, and the difference is a hole
+# rather than a nuance: an alert whose firing condition no fixture creates is
+# never emitted, never reaches the ledger, and passes. Measured, not theorised
+# — a sixth alert added behind `[ "${CUR_HEAD:-0}" -gt 900000 ]`, carrying two
+# phrases off the denylist in its body, left this suite 200/200 green. The
+# checker's header meanwhile declared that an alert added without the shape
+# fails "even if nobody remembers to assert it", which was true only of alerts
+# that something fires. Same declaration-stronger-than-implementation failure
+# the ledger was built to end, one level up, inside the correction itself.
+#
+# The two layers are complementary and both are needed:
+#   case 15  bodies AFTER expansion — what an operator would actually receive
+#   case 16  bodies that exist to be sent, whether or not anything fires them
+#
+# This one is static, reading the checker the same way case 14q reads the
+# shipped affiliation default instead of trusting a case to reach it.
+#
+# The extractor joins backslash continuations (the outage alert spans two
+# lines), skips comments and the alert()/add_fire() definitions, and reports
+# anything ELSE mentioning either name as UNREADABLE rather than passing it
+# silently — a call site this check cannot parse is exactly the thing it exists
+# to refuse.
+ALERT_SITES="$(awk '
+	/^alert\(\) \{/     { in_def = 1 }
+	in_def && /^\}/     { in_def = 0; next }
+	in_def              { next }
+	cont {
+		line = line " " $0
+		if ($0 ~ /\\[ \t]*$/) next
+		cont = 0
+		print "SITE " start ": " line
+		next
+	}
+	/^[ \t]*#/          { next }
+	/^[ \t]*(alert|add_fire)[ \t]/ {
+		line = $0; start = NR
+		if ($0 ~ /\\[ \t]*$/) { cont = 1; next }
+		print "SITE " NR ": " line
+		next
+	}
+	/^add_fire\(\) \{/  { next }
+	/(^|[^A-Za-z_])(alert|add_fire)([^A-Za-z_]|$)/ { print "UNREADABLE " NR ": " $0 }
+' "$CHECKER")"
+
+SRC_UNREADABLE="$(printf '%s\n' "$ALERT_SITES" | grep '^UNREADABLE ' | head -3 | cut -c1-160)"
+[ -z "$SRC_UNREADABLE" ] \
+	&& ok "source: every alert/add_fire mention in the checker sits where this check can read it" \
+	|| bad "source: an alert construction this check cannot read -> ${SRC_UNREADABLE}"
+
+SRC_SITES="$(printf '%s\n' "$ALERT_SITES" | grep '^SITE ')"
+SRC_SITE_N="$(printf '%s' "$SRC_SITES" | grep -c . || true)"
+[ "${SRC_SITE_N:-0}" -ge 12 ] \
+	&& ok "source: ${SRC_SITE_N} alert-body construction sites read out of the checker (a vacuous pass on an empty extraction is not possible)" \
+	|| bad "source: expected at least 12 alert-body sites in the checker, found ${SRC_SITE_N:-0} — did the extractor stop matching?"
+
+# One site carries no literal body: the trigger dispatch sends $DETAIL, which
+# add_fire composed out of the bodies checked below. Exempting it is only safe
+# while add_fire is the ONLY writer of DETAIL — otherwise a `DETAIL="…"`
+# somewhere else would launder an unchecked body straight through the
+# exemption — so that is asserted rather than assumed.
+SRC_COMPOSED="$(printf '%s' "$SRC_SITES" | grep -F '"${DETAIL}"')"
+SRC_COMPOSED_N="$(printf '%s' "$SRC_COMPOSED" | grep -c . || true)"
+[ "${SRC_COMPOSED_N:-0}" -eq 1 ] && printf '%s' "$SRC_COMPOSED" | grep -q 'alert "\$PRIO"' \
+	&& ok "source: exactly one site passes a composed body, and it is the trigger dispatch" \
+	|| bad "source: expected exactly one composed-body site (the trigger dispatch), found ${SRC_COMPOSED_N:-0} -> ${SRC_COMPOSED}"
+
+SRC_DETAIL_WRITERS="$(grep -vE '^[[:space:]]*#' "$CHECKER" | grep 'DETAIL=' | grep -vxF 'DETAIL=""' | grep -v '^add_fire() {' | cut -c1-160)"
+[ -z "$SRC_DETAIL_WRITERS" ] \
+	&& ok "source: DETAIL is written only by add_fire and its empty initialiser, so every contributor to the composed body is checked below" \
+	|| bad "source: something other than add_fire writes DETAIL, which would bypass the body checks -> ${SRC_DETAIL_WRITERS}"
+
+# The same three checks case 15 applies to the emitted population, applied to
+# the literal text instead. Deliberately the SAME three and no more: a static
+# check stricter than the ledger would put the two layers out of step and
+# re-open the gap in the other direction.
+SRC_LITERAL="$(printf '%s' "$SRC_SITES" | grep -vF '"${DETAIL}"')"
+
+SRC_NO_OBSERVED="$(printf '%s\n' "$SRC_LITERAL" | grep -v 'OBSERVED:' | grep . | head -3 | cut -c1-160)"
+[ -z "$SRC_NO_OBSERVED" ] \
+	&& ok "source: EVERY alert body the checker can construct states what was OBSERVED — including any no fixture here fires" \
+	|| bad "source: an alert body in the checker has no OBSERVED label -> ${SRC_NO_OBSERVED}"
+
+SRC_NO_OBLIGATION="$(printf '%s\n' "$SRC_LITERAL" | grep -v 'OBLIGATION:' | grep . | head -3 | cut -c1-160)"
+[ -z "$SRC_NO_OBLIGATION" ] \
+	&& ok "source: EVERY alert body the checker can construct names the OBLIGATION" \
+	|| bad "source: an alert body in the checker has no OBLIGATION label -> ${SRC_NO_OBLIGATION}"
+
+SRC_OVERCLAIM="$(printf '%s\n' "$SRC_LITERAL" | grep -inE "$OVERCLAIM_RE" | head -3 | cut -c1-160)"
+[ -z "$SRC_OVERCLAIM" ] \
+	&& ok "source: no alert body in the checker over-claims, whether or not anything here fires it" \
+	|| bad "source: an alert body in the checker over-claims -> ${SRC_OVERCLAIM}"
+
+# ---- case 17 (header): the counts in the header are DERIVED, not typed ------
+# Adding S5/T5 left three counts in the checker's header stale — "four specific
+# things", "all four sources", and an exit-3 list with no T5 in it. That is the
+# same defect as the alert bodies above, in prose. Restating the numbers would
+# only reset the clock, so the suite counts them out of the checker itself and
+# requires the header to agree.
+#
+# Accepted false alarm, in the safe direction: a legitimate SUBSET phrase on
+# one line ("the other four sources") would fail here. Today's one such phrase
+# wraps across two lines and so does not match. Re-word the header or split the
+# line; do not widen the check into something that cannot see a stale total.
+num_word() {
+	case "$1" in
+		1) echo one   ;; 2) echo two   ;; 3) echo three ;;
+		4) echo four  ;; 5) echo five  ;; 6) echo six   ;;
+		7) echo seven ;; 8) echo eight ;; 9) echo nine  ;;
+		*) echo "$1" ;;
+	esac
+}
+
+# Tags = what the checker's own add_fire calls are labelled with.
+SRC_ALL_TAGS="$(printf '%s\n' "$SRC_SITES" | grep -oE 'add_fire "[A-Z0-9]+"' | grep -oE '"[A-Z0-9]+"' | tr -d '"' | sort -u)"
+SRC_TRIG_TAGS="$(printf '%s\n' "$SRC_ALL_TAGS" | grep -E '^T[0-9]+$' || true)"
+SRC_TRIG_N="$(printf '%s' "$SRC_TRIG_TAGS" | grep -c . || true)"
+SRC_TRIG_WORD="$(num_word "$SRC_TRIG_N")"
+[ "${SRC_TRIG_N:-0}" -ge 2 ] \
+	&& ok "header: ${SRC_TRIG_N} trigger tags read out of the checker's add_fire calls ($(printf '%s' "$SRC_TRIG_TAGS" | tr '\n' ' '))" \
+	|| bad "header: expected at least 2 trigger tags in the checker, found ${SRC_TRIG_N:-0}"
+
+HDR_TRIG_PHRASE="$(grep -nEi '(one|two|three|four|five|six|seven|eight|nine) specific things' "$CHECKER")"
+[ -n "$HDR_TRIG_PHRASE" ] \
+	&& ok "header: the 'silent until one of N specific things' claim is present to be checked" \
+	|| bad "header: no 'N specific things' phrase in the checker — the count assertion would pass vacuously"
+HDR_TRIG_STALE="$(printf '%s\n' "$HDR_TRIG_PHRASE" | grep -vi "${SRC_TRIG_WORD} specific things" | grep .)"
+[ -z "$HDR_TRIG_STALE" ] \
+	&& ok "header: the trigger count spells ${SRC_TRIG_WORD}, matching the ${SRC_TRIG_N} tags in the checker's own add_fire calls" \
+	|| bad "header: a trigger count disagrees with the ${SRC_TRIG_N} add_fire tags -> ${HDR_TRIG_STALE}"
+
+# Sources = the S<n> rows the header's own WHAT IT READS block enumerates.
+SRC_SOURCE_N="$(grep -cE '^#   S[0-9]+  ' "$CHECKER" || true)"
+SRC_SOURCE_WORD="$(num_word "$SRC_SOURCE_N")"
+[ "${SRC_SOURCE_N:-0}" -ge 2 ] \
+	&& ok "header: ${SRC_SOURCE_N} sources enumerated in the checker's WHAT IT READS block" \
+	|| bad "header: expected at least 2 enumerated sources, found ${SRC_SOURCE_N:-0} — did the block's layout change?"
+
+HDR_SRC_PHRASE="$(grep -nEi '(one|two|three|four|five|six|seven|eight|nine) sources' "$CHECKER")"
+[ -n "$HDR_SRC_PHRASE" ] \
+	&& ok "header: at least one 'N sources' claim is present to be checked" \
+	|| bad "header: no 'N sources' phrase in the checker — the count assertion would pass vacuously"
+HDR_SRC_STALE="$(printf '%s\n' "$HDR_SRC_PHRASE" | grep -vi "${SRC_SOURCE_WORD} sources" | grep .)"
+[ -z "$HDR_SRC_STALE" ] \
+	&& ok "header: every 'N sources' claim spells ${SRC_SOURCE_WORD}, matching the enumeration" \
+	|| bad "header: a source count disagrees with the ${SRC_SOURCE_N} enumerated sources -> ${HDR_SRC_STALE}"
+
+# A list is a count in another grammar: the exit-3 line went the whole S5
+# change without naming T5.
+HDR_EXIT3="$(grep -E '^#   3  at least one trigger fired' "$CHECKER")"
+[ -n "$HDR_EXIT3" ] \
+	&& ok "header: the exit-3 description is present to be checked" \
+	|| bad "header: no exit-3 description in the checker's EXIT CODES block"
+HDR_EXIT3_MISSING=""
+for _tag in $SRC_ALL_TAGS; do
+	printf '%s' "$HDR_EXIT3" | grep -q "$_tag" || HDR_EXIT3_MISSING="${HDR_EXIT3_MISSING} ${_tag}"
+done
+[ -z "$HDR_EXIT3_MISSING" ] \
+	&& ok "header: the exit-3 line names every tag the checker's add_fire calls can raise" \
+	|| bad "header: the exit-3 line omits${HDR_EXIT3_MISSING} -> ${HDR_EXIT3}"
+
+# ---- case 18 (harness): the ambient-clearing list cannot fall behind --------
+# run_checker reads its knobs as ${NAME-default}, so an exported NAME in a
+# developer's shell would silently change what a case measures. The suite
+# clears them at the top — but that list is hand-maintained and parallel to the
+# defaults, which is precisely the shape that put stale counts in the header.
+# So the list is not trusted: both sets are read out of this file and the
+# defaults must be a subset of the cleared names. Adding a knob without
+# clearing it fails here, rather than on whichever machine happens to export
+# it. (The failure direction was always red rather than green — hence a guard
+# and not a repair — but a red that appears on one machine only is the
+# expensive kind.)
+RC_DEFAULTED="$(awk '/^run_checker\(\) \{/,/^\}/' "$0" \
+	| grep -oE '\$\{[A-Za-z_][A-Za-z_0-9]*:?-' \
+	| sed -e 's/^\${//' -e 's/:\{0,1\}-$//' | sort -u)"
+RC_DEFAULTED_N="$(printf '%s' "$RC_DEFAULTED" | grep -c . || true)"
+[ "${RC_DEFAULTED_N:-0}" -ge 8 ] \
+	&& ok "harness: ${RC_DEFAULTED_N} ambient-readable knobs found in run_checker" \
+	|| bad "harness: expected at least 8 defaulted knobs in run_checker, found ${RC_DEFAULTED_N:-0} — did the extraction stop matching?"
+
+RC_CLEARED="$(awk '/^unset /{f=1} f{print; if ($0 !~ /\\[ \t]*$/) f=0}' "$0" \
+	| tr ' \t\\' '\n\n\n' | grep -E '^[A-Za-z_][A-Za-z_0-9]*$' | grep -vx 'unset' | sort -u)"
+RC_UNCLEARED=""
+for _knob in $RC_DEFAULTED; do
+	printf '%s\n' "$RC_CLEARED" | grep -qx "$_knob" || RC_UNCLEARED="${RC_UNCLEARED} ${_knob}"
+done
+[ -z "$RC_UNCLEARED" ] \
+	&& ok "harness: every knob run_checker defaults is cleared at suite start, so no case can be steered by an ambient export" \
+	|| bad "harness: run_checker reads these from the ambient environment without clearing them first:${RC_UNCLEARED}"
+
 # ---- summary ---------------------------------------------------------------
 echo "test-pulsevm-upstream.sh summary: PASS=$PASS  FAIL=$FAIL"
 if [ "$FAIL" -eq 0 ]; then
