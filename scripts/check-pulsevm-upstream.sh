@@ -54,10 +54,13 @@
 #     releases at GitHub". It stopped saying no; it did not start saying yes.
 #     This distinction is the whole reason the T1 alert body is written as
 #     OBSERVED / NOT ESTABLISHED / OBLIGATION rather than as a conclusion.
-#   * Alpine reset again: most recent genesis 2026-08-05, chain id
-#     193526980f523c07a567dda80f5f543e2356518ce1475cf3e03d98ca740b3f67. The
-#     page's own tip says it "upgrades frequently as development ships" —
-#     which is exactly why the chain-id sub-condition of T2 pages `default`.
+#   * The page states its most recent genesis as 2026-08-05, chain id
+#     193526980f523c07a567dda80f5f543e2356518ce1475cf3e03d98ca740b3f67 — the
+#     SAME id the 2026-08-17 survey recorded, so this is the reset that
+#     preceded that survey and NOT a further one. (Said precisely because
+#     "Alpine reset again" is the easy thing to write and would have been
+#     wrong.) The page's own tip says it "upgrades frequently as development
+#     ships", which is why the chain-id sub-condition of T2 pages `default`.
 #   * "Antelope-style /v1/chain REST is not currently exposed on the testnet"
 #     — still true, and still the single most consequential line on the page
 #     for this repo: that REST surface is what bin/safe-broadcast's gate 3
@@ -240,15 +243,35 @@
 #
 #   OBSERVED      the literal thing this run compared, and nothing else
 #   NOT ESTABLISHED  the conclusion a reader would jump to, explicitly denied
-#                 (only where such a jump is available; T4 words it as the
-#                 alternative reading rather than as a denial)
+#                 (T4 words it as the alternative reading rather than as a
+#                 denial, which is the same move in the other grammar)
 #   OBLIGATION    what to go and read or re-check, in order to find out
 #
-# tests/pulsevm-upstream/test-pulsevm-upstream.sh greps the alert body of every
-# trigger against a denylist of capability-asserting phrases, so a future edit
-# that puts the conclusion back goes red. That denylist is a backstop, not the
-# rule: it can only catch the phrasings someone thought to list. The rule is
-# the shape above.
+# EVERY means every: the three shipped by an alert() call are the trigger page,
+# the first-run BASELINE page, and the outage page, and ALL THREE carry all
+# three labels. The first draft of this rule exempted the latter two without
+# saying so — the header claimed "every alert body" while eight of the suite's
+# twenty-three bodies had neither label, and the suite could not catch it
+# because the shape assertion was only wired to seven trigger cases. That is
+# the same declaration-stronger-than-implementation failure this whole block
+# exists to end, reproduced inside its own correction. The two that were
+# missing are, on inspection, the two that most needed it:
+#
+#   BASELINE  pages `high` and reports a page full of values. Without the
+#             disclaimer a reader takes them for changes. They are first
+#             readings, compared against nothing.
+#   outage    is the single easiest alert in this file to misread as "checked,
+#             nothing changed". A run that could not read a source compared
+#             NOTHING, and the body now says so in those words.
+#
+# The enforcement is structural rather than per-case, for the same reason:
+# tests/pulsevm-upstream/test-pulsevm-upstream.sh tees every notification the
+# whole suite emits into one ledger that survives teardown, then asserts at the
+# end that EVERY line carries OBSERVED and OBLIGATION and matches no phrase on
+# the over-claim denylist. A new alert added without the shape fails even if
+# nobody remembers to assert it — which is exactly what went wrong here. The
+# denylist itself is a backstop, not the rule: it can only catch the phrasings
+# someone thought to list. The rule is the shape above.
 #
 # NOT notified: a new release tag. Releases land roughly weekly and mean
 # nothing on their own; the tag is written to the log and to the state file
@@ -385,6 +408,19 @@
 # The first run after this change therefore pages once on any host that
 # already had a state file. Expected, not a defect; same contract as a fresh
 # install.
+#
+# DEPLOY HOLD (2026-08-19). Be concrete about what that page will say, because
+# it is louder than "a baseline was recorded". A version-1 file forces
+# PREV_OK=0, and T1 is re-evaluated from the CURRENT page alone on a baseline
+# run — and the live endpoints page no longer carries the sync notice. So the
+# first run on the validator host sends `BASELINE,T1` at **high**: a verbatim
+# resend of the T1 body the operator already received today. That is a
+# duplicate act-now page, not a routine first-run notice.
+#
+# This branch is therefore merged but NOT deployed to the host. Deployment
+# waits until after the 2026-09-04 cycle transition and is announced in
+# advance as "this will page once, and it is the known T1 resend". Do not
+# install it on the host before then.
 #
 # ---------------------------------------------------------------------------
 # ENV OVERRIDES
@@ -722,7 +758,7 @@ fail_and_exit() {
 	consec=$((PREV_CONSEC + 1))
 	if [ "$consec" -eq "$FAILURE_ALERT_AFTER" ]; then
 		alert default "pulsevm-upstream: source unreachable (exit ${rc})" \
-			"${consec} consecutive failed runs — ${summary}. Alerting once per outage; a successful run re-arms it."
+			"OBSERVED: ${consec} consecutive failed runs — ${summary}. NOT ESTABLISHED: anything at all about the upstream — a run that could not read a source compared nothing, so this is emphatically NOT evidence that nothing changed. OBLIGATION: check whether the URL moved or the third party is simply down. Alerting once per outage; a successful run re-arms it."
 	else
 		log "INFO consecutive_failures=${consec} (page fires only on the run that reaches ${FAILURE_ALERT_AFTER})"
 	fi
@@ -927,7 +963,7 @@ FIRED_HIGH=0
 add_fire() { FIRED="${FIRED}${FIRED:+,}$1"; DETAIL="${DETAIL}${DETAIL:+ — }$2"; }
 
 if [ "$PREV_OK" -eq 0 ]; then
-	add_fire "BASELINE" "no usable prior state at ${STATE}; a baseline has been recorded (release=${CUR_TAG}, head_block=${CUR_HEAD}, chain_ids=$(wc -l < "$TMP/cur_chain_ids" | tr -d ' '), pages=$(wc -l < "$TMP/cur_pages" | tr -d ' '), npm_watched=$(grep -c . < "$TMP/cur_npm_watch.jsonl" | tr -d ' '), npm_found=${NPM_FOUND_N}). T3/T4 DEFERRED — and so are T5's transitions: nothing to diff against yet"
+	add_fire "BASELINE" "OBSERVED: no usable prior state at ${STATE}; a baseline has been recorded (release=${CUR_TAG}, head_block=${CUR_HEAD}, chain_ids=$(wc -l < "$TMP/cur_chain_ids" | tr -d ' '), pages=$(wc -l < "$TMP/cur_pages" | tr -d ' '), npm_watched=$(grep -c . < "$TMP/cur_npm_watch.jsonl" | tr -d ' '), npm_found=${NPM_FOUND_N}). NOT ESTABLISHED: that any of those values is NEW — this run compared them against nothing, so each is a first reading and not a change. T3/T4 DEFERRED — and so are T5's transitions: nothing to diff against yet. OBLIGATION: none IF this is a first run; if it is not, the state file was lost or rejected, and that is the thing to go and find out about"
 	FIRED_HIGH=1
 fi
 

@@ -47,6 +47,34 @@ FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "PASS  $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL  $1"; }
 
+# Ambient values for any stub knob would silently change what this suite
+# measures — an exported S1_CODE in a developer's shell would 403 every run.
+# Cleared once, here; cases set them as command prefixes, which bash scopes to
+# the call. (The failure direction was always red rather than green, so this is
+# hygiene, not a repair.)
+unset S1_CODE S2_CODE S3_CODE S4_CODE \
+      S1_CODE_SEQ S2_CODE_SEQ S3_CODE_SEQ S4_CODE_SEQ \
+      NPM_TS_CODE NPM_TSC_CODE NPM_TS_CODE_SEQ NPM_TSC_CODE_SEQ \
+      NPMSEARCH_CODE NPMSEARCH_CODE_SEQ \
+      PULSEVM_NPM_PACKAGES PULSEVM_NPM_OFFICIAL_RE \
+      FY_LIVE_OVERRIDE FYD_FETCH_ATTEMPTS \
+      PULSEVM_UPSTREAM_HEAD_BLOCK_DELTA PULSEVM_UPSTREAM_FAILURE_ALERT_AFTER 2>/dev/null
+
+# ---- the suite-wide alert ledger --------------------------------------------
+# Every notification any case emits is teed here as well as into its own
+# per-case log, and this file OUTLIVES teardown. Case 15 checks the whole
+# population at the end.
+#
+# Why a ledger and not more assertion call sites: the first version of the
+# shape rule was enforced by calling assert_alert_shape inside each case, and
+# it reached seven of them. The BASELINE and outage bodies were never checked,
+# shipped without the labels, and the header meanwhile declared that EVERY
+# alert body carried them. Per-case assertions can only test the cases someone
+# remembered; a ledger tests the population, so an alert added later without
+# the shape fails whether or not anybody thinks to assert it.
+ALL_ALERTS="$(mktemp -t pulsevm-all-alerts.XXXXXX)"
+trap 'rm -f "$ALL_ALERTS"' EXIT
+
 # The chain id A-Chain Alpine actually served on 2026-08-17, and a second one
 # standing in for "the next reset, or mainnet".
 CHAIN_A="193526980f523c07a567dda80f5f543e2356518ce1475cf3e03d98ca740b3f67"
@@ -86,6 +114,7 @@ setup() {
 	cat > "$NOTIFY_STUB" <<NOTIFYEOF
 #!/usr/bin/env bash
 printf '%s|%s|%s\n' "\$1" "\$2" "\$3" >> "$NOTIFY_LOG"
+printf '%s|%s|%s\n' "\$1" "\$2" "\$3" >> "$ALL_ALERTS"
 NOTIFYEOF
 	chmod +x "$NOTIFY_STUB"
 
@@ -341,7 +370,9 @@ assert_no_overclaim() {
 
 # assert_alert_shape <label> — OBSERVED / OBLIGATION are mandatory in every
 # body; NOT ESTABLISHED is asserted separately by the cases where a reader has
-# an obvious wrong conclusion available to jump to.
+# an obvious wrong conclusion available to jump to. These per-case calls give
+# a failure a name and a location; case 15's ledger check is what guarantees
+# the COVERAGE, and neither replaces the other.
 assert_alert_shape() {
 	local label="$1"
 	alerts | grep -q 'OBSERVED:' \
@@ -376,6 +407,14 @@ alerts | grep -q '^high|' \
 alerts | grep -q '^high|' \
 	&& ok "baseline: alert is high priority" \
 	|| bad "baseline: alert not high priority ($(alerts))"
+assert_alert_shape "baseline"
+# BASELINE pages `high` and hands the reader a line full of numbers. Without
+# this disclaimer they read as changes; they are first readings compared
+# against nothing. This body shipped without either label while the header
+# claimed every body had them.
+alerts | grep -q 'NOT ESTABLISHED: that any of those values is NEW' \
+	&& ok "baseline: the recorded values are marked as first readings, not as changes" \
+	|| bad "baseline: numbers presented without the not-a-change disclaimer ($(alerts))"
 assert_no_overclaim "baseline"
 [ -r "$STATE" ] && [ "$(jq -r '.observations.head_block' "$STATE")" = "3406" ] \
 	&& ok "baseline: state recorded with the observed head block" \
@@ -773,6 +812,15 @@ RC=0; S2_CODE=500 run_checker >/dev/null 2>&1 || RC=$?
 alerts | grep -q '^default|' \
 	&& ok "outage-page: the outage page is 'default' priority, not 'high'" \
 	|| bad "outage-page: wrong priority ($(alerts))"
+assert_alert_shape "outage-page"
+# The single easiest alert in this file to misread as "checked, nothing
+# changed". A run that could not read a source compared NOTHING, and silence
+# about that is the most consequential over-claim available here — it is the
+# one that would let a real upstream change sit unnoticed behind an outage.
+alerts | grep -q 'NOT ESTABLISHED: anything at all about the upstream' \
+	&& ok "outage-page: says outright that a failed run is not evidence the upstream is unchanged" \
+	|| bad "outage-page: an unreadable source is reported without denying the 'nothing changed' reading ($(alerts))"
+assert_no_overclaim "outage-page"
 teardown
 
 # ---- case 9d: a FOURTH consecutive failure stays quiet ----------------------
@@ -1410,6 +1458,40 @@ if grep -vE '^\s*#' "$CHECKER" | grep -q 'push-to-web-host'; then
 else
 	ok "wiring: no push-to-web-host.sh call (this monitor publishes nothing)"
 fi
+
+# ---- case 15 (shape, POPULATION): every alert this suite ever emitted -------
+# The coverage guarantee. Everything above tests the cases someone wrote an
+# assertion for; this tests the whole population, including any alert a future
+# case emits without asserting anything about it.
+#
+# It exists because the per-case version silently missed two of the three
+# bodies the checker can send — BASELINE and the outage page — while the
+# checker's header declared that EVERY alert body carried the shape. The suite
+# was 188/188 green throughout. A green suite that cannot see a whole class of
+# output is worth less than it looks, and the fix is to assert on the
+# population rather than to add a ninth call site and hope.
+LEDGER_N="$(grep -c . "$ALL_ALERTS" 2>/dev/null || true)"
+[ "${LEDGER_N:-0}" -ge 20 ] \
+	&& ok "population: the ledger captured ${LEDGER_N} alerts across the suite (a vacuous pass on an empty ledger is not possible)" \
+	|| bad "population: expected at least 20 alerts in the ledger, got ${LEDGER_N:-0} — did the notify stub stop teeing?"
+grep -q '^high|' "$ALL_ALERTS" && grep -q '^default|' "$ALL_ALERTS" \
+	&& ok "population: both channels are represented, so neither is being checked in the abstract" \
+	|| bad "population: the ledger is missing one of the two channels"
+
+LEDGER_NO_OBSERVED="$(grep -vn 'OBSERVED:' "$ALL_ALERTS" | head -3)"
+[ -z "$LEDGER_NO_OBSERVED" ] \
+	&& ok "population: EVERY alert body states what was OBSERVED — triggers, the first-run baseline, and the outage page alike" \
+	|| bad "population: $(grep -vc 'OBSERVED:' "$ALL_ALERTS") alert body(ies) have no OBSERVED label -> ${LEDGER_NO_OBSERVED}"
+
+LEDGER_NO_OBLIGATION="$(grep -vn 'OBLIGATION:' "$ALL_ALERTS" | head -3)"
+[ -z "$LEDGER_NO_OBLIGATION" ] \
+	&& ok "population: EVERY alert body names the OBLIGATION" \
+	|| bad "population: $(grep -vc 'OBLIGATION:' "$ALL_ALERTS") alert body(ies) have no OBLIGATION label -> ${LEDGER_NO_OBLIGATION}"
+
+LEDGER_OVERCLAIM="$(grep -inE "$OVERCLAIM_RE" "$ALL_ALERTS" | head -3)"
+[ -z "$LEDGER_OVERCLAIM" ] \
+	&& ok "population: no alert body anywhere in the suite claims a capability the run did not measure" \
+	|| bad "population: an alert body over-claims -> ${LEDGER_OVERCLAIM}"
 
 # ---- summary ---------------------------------------------------------------
 echo "test-pulsevm-upstream.sh summary: PASS=$PASS  FAIL=$FAIL"
