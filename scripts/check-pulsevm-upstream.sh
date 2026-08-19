@@ -36,7 +36,7 @@
 # changed" for that survey and which parts of it were re-measured directly.
 # So there is nothing to build against yet — only something to WATCH. This
 # script is that watch, and its entire design goal is to be silent until one
-# of four specific things becomes true.
+# of five specific things becomes true.
 #
 # ---------------------------------------------------------------------------
 # THE ENDPOINTS PAGE AS MEASURED 2026-08-19 (S2, fetched and read directly)
@@ -264,14 +264,33 @@
 #             nothing changed". A run that could not read a source compared
 #             NOTHING, and the body now says so in those words.
 #
-# The enforcement is structural rather than per-case, for the same reason:
-# tests/pulsevm-upstream/test-pulsevm-upstream.sh tees every notification the
-# whole suite emits into one ledger that survives teardown, then asserts at the
-# end that EVERY line carries OBSERVED and OBLIGATION and matches no phrase on
-# the over-claim denylist. A new alert added without the shape fails even if
-# nobody remembers to assert it — which is exactly what went wrong here. The
-# denylist itself is a backstop, not the rule: it can only catch the phrasings
-# someone thought to list. The rule is the shape above.
+# The enforcement is structural rather than per-case, for the same reason, and
+# it is in TWO layers, because one of them was measured and found insufficient.
+# tests/pulsevm-upstream/test-pulsevm-upstream.sh applies the same three checks
+# (OBSERVED present, OBLIGATION present, no phrase from the over-claim
+# denylist) to two different populations:
+#
+#   POPULATION  every notification the whole suite emits, teed into one ledger
+#               that survives teardown. These are bodies AFTER every ${var}
+#               expanded — the only view of what an operator would actually
+#               receive.
+#   SOURCE      every statement in THIS FILE that constructs an alert body:
+#               each add_fire call and each alert call, read statically out of
+#               the script. These are bodies no fixture has to reach.
+#
+# The second layer exists because the first has a blind spot that a mutation
+# demonstrated rather than argued: an alert placed behind a condition no test
+# case creates is never emitted, never lands in the ledger, and passes. Adding
+# one — with two denylisted phrases in its body — left the suite 200/200 green.
+# The sentence that used to sit here, "a new alert added without the shape
+# fails even if nobody remembers to assert it", was therefore itself broader
+# than what was implemented: it was true only of alerts something fires. That
+# is the same declaration-stronger-than-implementation failure this whole block
+# exists to end, reproduced one level up inside its own correction. With both
+# layers the sentence is true as written; with either one alone it is not.
+#
+# The denylist itself is a backstop, not the rule: it can only catch the
+# phrasings someone thought to list. The rule is the shape above.
 #
 # NOT notified: a new release tag. Releases land roughly weekly and mean
 # nothing on their own; the tag is written to the log and to the state file
@@ -380,8 +399,8 @@
 # ---------------------------------------------------------------------------
 # EXIT CODES
 # ---------------------------------------------------------------------------
-#   0  all four sources read, nothing fired (verbose: one heartbeat line)
-#   3  at least one trigger fired (T1 / T2 / T3 / T4 / BASELINE) — alerts
+#   0  all five sources read, nothing fired (verbose: one heartbeat line)
+#   3  at least one trigger fired (T1 / T2 / T3 / T4 / T5 / BASELINE) — alerts
 #   4  a source did not return HTTP 200 after retrying
 #   5  a source returned 200 but its body could not be parsed (or jq is absent)
 #   6  scripts/lib/side-effects.sh is missing/unreadable
@@ -409,18 +428,29 @@
 # already had a state file. Expected, not a defect; same contract as a fresh
 # install.
 #
-# DEPLOY HOLD (2026-08-19). Be concrete about what that page will say, because
-# it is louder than "a baseline was recorded". A version-1 file forces
-# PREV_OK=0, and T1 is re-evaluated from the CURRENT page alone on a baseline
-# run — and the live endpoints page no longer carries the sync notice. So the
-# first run on the validator host sends `BASELINE,T1` at **high**: a verbatim
-# resend of the T1 body the operator already received today. That is a
-# duplicate act-now page, not a routine first-run notice.
+# WHAT THAT ONE PAGE SAYS (2026-08-19). Be concrete, because it is louder than
+# "a baseline was recorded". A version-1 file forces PREV_OK=0, and T1 is
+# re-evaluated from the CURRENT page alone on a baseline run — and the live
+# endpoints page no longer carries the sync notice. So the first run against a
+# version-1 state file sends `BASELINE,T1` at **high**: a verbatim resend of
+# the T1 body the operator already received on 2026-08-19. It is a duplicate
+# act-now page, not a routine first-run notice — announce it, do not
+# investigate it.
 #
-# This branch is therefore merged but NOT deployed to the host. Deployment
-# waits until after the 2026-09-04 cycle transition and is announced in
-# advance as "this will page once, and it is the known T1 resend". Do not
-# install it on the host before then.
+# It happens exactly once. logs/pulsevm-upstream-state.json is untracked
+# (.gitignore), and scripts/advance-host-checkout.sh discards nothing outside
+# public/, so the run that pages also writes a version-2 file and every run
+# after it compares normally.
+#
+# An earlier draft of this block held deployment back until after the
+# 2026-09-04 transition. THAT HOLD WAS NOT REAL, and recording why is the point
+# of keeping this paragraph: /etc/cron.d/metal-host-advance pulls main daily,
+# so the host follows a push whether or not anyone installs anything, and step
+# 2.5 of the transition requires a push on the day regardless. Holding would
+# not have prevented the page — it would have MOVED it to 02:00 UTC on
+# 2026-09-04, three hours before an irreversible broadcast, which is the most
+# expensive minute of the year to send a known duplicate. Landing it early is
+# what spends the page harmlessly.
 #
 # ---------------------------------------------------------------------------
 # ENV OVERRIDES
@@ -484,7 +514,11 @@
 #                               per-version manifest, not the full packument,
 #                               which carries the whole readme and would be an
 #                               order of magnitude more bytes to pull daily
-#                               for the same four fields.
+#                               for the same publisher fields npm_fingerprint()
+#                               reads. (Named rather than counted: the count
+#                               was wrong here for as long as it was written
+#                               down, and the function is the only place that
+#                               can answer it without going stale again.)
 #   PULSEVM_NPM_SEARCH_URL  the S5b discovery query (default: the registry
 #                               search API for "pulsevm", size 50). NOTE: the
 #                               registry search API has NO `scope:` qualifier

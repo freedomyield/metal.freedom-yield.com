@@ -65,7 +65,9 @@ Because the current shortlist is empty, this document doesn't need per-item trac
 
 Suggested cadence: monthly re-run of this discovery. Faster if a Banking Innovation Program announcement surfaces.
 
-**Update (2026-08-17): part of this cadence is now automated.** `scripts/check-pulsevm-upstream.sh` runs daily (`/etc/cron.d/metal-pulsevm-watch`) and pushes only when the upstream changes in one of four ways — third-party node sync becoming supported, a mainnet section or an unseen chain id appearing on the endpoints page, a new documentation page, or A-Chain Alpine's head block actually advancing. It watches the PulseVM surfaces specifically; the four surfaces listed above are **not** covered by it and still need the manual monthly pass. Treat a push from that monitor as the trigger to re-run this discovery early.
+**Update (2026-08-17): part of this cadence is now automated.** `scripts/check-pulsevm-upstream.sh` runs daily (`/etc/cron.d/metal-pulsevm-watch`) and pushes only when the upstream changes in one of five ways — **T1** the endpoints page's "third-party node sync is not yet supported" sentence no longer matching (a sentence stopping, which is *not* the same as support starting), **T2** a mainnet section or an unseen chain id appearing on that page, **T3** a new documentation page, **T4** A-Chain Alpine's head block actually advancing, and — added 2026-08-19 — **T5** the npm surface the docs tell people to install moving. It watches the PulseVM surfaces specifically; the four surfaces listed above are **not** covered by it and still need the manual monthly pass. Treat a push from that monitor as the trigger to re-run this discovery early.
+
+**Update (2026-08-19).** T1 has since fired for real, on its first cron run against the live page: the sync-notice sentence is gone. The "theoretical" grade above is nonetheless unchanged, because the page stopped saying no without starting to say yes — see `docs/STRATEGIC_TARGET_ALIGNMENT.md` "What this does NOT change today". A T1 page is the trigger to re-read, not a finding on its own.
 
 ## Non-goals
 

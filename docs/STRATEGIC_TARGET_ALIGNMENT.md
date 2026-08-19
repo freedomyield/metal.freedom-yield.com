@@ -80,7 +80,9 @@ PulseVM is a metalgo VM plugin that runs the Antelope execution model (Leap 5.0.
 
 **The official backing is thin.** `metallicus.com`, `metalblockchain.org`, `docs.metalblockchain.org`, `xprnetwork.org` and `MetalBlockchain/metal-docs` do not mention PulseVM at all. The "A-Chain will be PulseVM" claim exists in exactly one place — `pulsevm.dev`, a community developer's site. Metallicus's own primary statement is a single line in a 2025 Q3 report ("internal testing continues for PulseVM"). **No date has been published anywhere.** Treat the migration as certain in direction and unknown in timing.
 
-*Provenance note.* Three rows above were re-measured directly in this checkout at implementation time on 2026-08-17 — the Alpine head block (3406), the chain ID, and the "third-party node sync is not yet supported" sentence — because `tests/pulsevm-upstream/` builds its fixtures from those exact response bodies. The remaining rows come from the same day's investigation and are recorded here without being re-measured. Do not cite the un-re-measured rows as current without re-running them.
+*Provenance note.* Three rows above were re-measured directly in this checkout at implementation time on 2026-08-17 — the Alpine head block, the chain ID, and the "third-party node sync is not yet supported" sentence — because `tests/pulsevm-upstream/` builds its fixtures from those exact response bodies. The remaining rows come from the same day's investigation and are recorded here without being re-measured.
+
+**Re-measured means measured on 2026-08-17, not still true, and that distinction has already bitten.** This whole table is a dated survey. Two of those three re-measured rows are known to have moved since: the sync-notice sentence is gone from the endpoints page (`scripts/check-pulsevm-upstream.sh` fired T1 on it on 2026-08-19), and a head block is a live counter that any later sample will disagree with by construction. Do not cite **any** row here as current without re-running it — including the re-measured ones. The daily checker, not this table, is what tracks the present state.
 
 ### (A) The public venue is an A-Chain subnet, and its validator set is appointed
 
@@ -100,7 +102,11 @@ If Freedom Yield ever launches its own PulseVM network, **cycle anchors do not m
 
 ### What this does NOT change today
 
-No date is published, third-party node sync is not yet supported, and Alpine has no third-party accounts — so there is nothing to build against, and no pre-emptive rewiring of the anchor pipeline is justified yet. The structural exposure is recorded (`bin/safe-broadcast` gate 1 reads `/v1/history/get_transaction` and gate 3 reads `proton chain:info`; PulseVM offers neither, and a permanently-failing gate 1 is a permanent `exit 3` under the Prime Directive) and the trigger to act is mechanical rather than a calendar reminder: `scripts/check-pulsevm-upstream.sh` watches daily and fires on T1 (third-party sync becomes supported) or T2 (a mainnet section or a new chain id appears).
+No date is published, no route to running a third-party node is described anywhere, and Alpine has no third-party accounts — so there is nothing to build against, and no pre-emptive rewiring of the anchor pipeline is justified yet.
+
+**Corrected 2026-08-19.** This paragraph used to read "third-party node sync is not yet supported", which is no longer what the page says: that sentence is gone, and `scripts/check-pulsevm-upstream.sh` fired T1 on its disappearance that morning. The conclusion is unchanged, and the reason it is unchanged is the whole point — **the page stopped saying no without starting to say yes.** Its node row still routes readers to the public RPC and names GitHub for validator releases; it does not describe running one. Absence of a prohibition is not a capability, and reading it as one is the specific error T1's alert body is written to prevent.
+
+The structural exposure is recorded (`bin/safe-broadcast` gate 1 reads `/v1/history/get_transaction` and gate 3 reads `proton chain:info`; PulseVM offers neither, and a permanently-failing gate 1 is a permanent `exit 3` under the Prime Directive) and the trigger to act is mechanical rather than a calendar reminder: `scripts/check-pulsevm-upstream.sh` watches daily and fires on T1 (the sync-notice sentence no longer matching), T2 (a mainnet section or a chain id not seen before), T3 (a new page in `llms.txt`), T4 (Alpine's head block advancing past a threshold) or T5 (the npm surface the docs tell people to install moving).
 
 ## Explicit unreachable set (under current policy)
 
