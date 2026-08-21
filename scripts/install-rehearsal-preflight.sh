@@ -143,7 +143,9 @@
 #   0  every check PASSED
 #   1  usage error
 #   2  a prerequisite tool is missing            (check 1)
-#   3  an operator-local config/key file is missing or malformed (checks 3-5)
+#   3  an operator-local config/key file is missing or malformed, including a
+#      proton-cli.json chain endpoint that is not on the fixed allowlist
+#      (checks 3-5, 10)
 #   4  the current on-chain anchor key is NOT in the testnet keystore, or the
 #      account carries no anchor permission      (check 9)
 #   5  the anchor-source could not be established as worktree == committed
@@ -931,6 +933,195 @@ else
 			"The chain is the authority here — nothing is pinned in this script." ;;
 		*) chk_fail 9 "$KEY_CODE" "anchor key check could not be completed" "$KEY_PROBLEMS" ;;
 	esac
+fi
+
+# ===========================================================================
+# Check 10 — chain endpoint allowlist (clone-network defense)
+# ===========================================================================
+# On 2026-08-21 PulseVM published a "XPR 1:1 demo network": it ingests XPR
+# Network testnet state byte-for-byte and replays it on PulseVM, and upstream
+# states outright that it answers the SAME chain_id as the real XPR testnet:
+#
+#   Chain ID  71ee83bcf52142d61019d95f9cc5427ba6a0d7ff8accd9e2088ae2abeaf3d3dd
+#   (same as XPR testnet — the state is the point)
+#
+# Its endpoint is https://xpr-rpc-testnet.pulsevm.dev, with a working
+# /v1/chain REST surface. That is a genuine clone, not a lookalike, and it
+# quietly defeats the two checks in this repo that a reader would reach for
+# first:
+#   - PRIME DIRECTIVE gate 3 (in the sanctioned broadcast wrapper under bin/)
+#     compares `proton chain:info`'s chain_id against FYD_TESTNET_CHAIN_ID.
+#     The clone returns the identical value BY DESIGN, so gate 3 passes
+#     against it.
+#   - Check 9 above compares the on-chain <actor>@anchor key against this
+#     project's testnet keystore. The clone's state is byte-identical to
+#     the real testnet's, so the key matches too, and check 9 passes
+#     against it as well.
+# Neither chain_id nor the anchor key is a usable discriminator once a
+# byte-identical clone exists — both are, by construction, shared with it.
+# DO NOT "simplify" this check away as redundant with either of them: it is
+# the one thing here that is NOT reproduced by the clone, because the clone
+# cannot reach into this repo's or proton-cli's own config and rewrite which
+# hostname they point at. The only discriminator left standing is WHICH HOST
+# actually answered — so this check is a small, fixed allowlist of hosts,
+# applied at every point this repo (or proton-cli, on its behalf) resolves
+# an endpoint to call. FYD_TESTNET_CHAIN_ID keeps its correct value
+# (71ee83bc…) unchanged by this check — it was never wrong; the premise
+# that a chain_id names a network uniquely was.
+#
+# Two places pick an endpoint. Both are read-only from here; neither
+# involves invoking `proton`:
+#   (1) $TESTNET_CHAIN_RPC (env XPR_TESTNET_CHAIN_RPC) — what check 9's
+#       curl above posts /v1/chain/get_account to.
+#   (2) <keystore-HOME>/Library/Preferences/@proton/cli-nodejs/proton-cli.json
+#       — networks[].endpoints. This file is user-editable, and it is what
+#       `proton chain:info` (PRIME DIRECTIVE gate 3 itself) and every other
+#       proton invocation actually resolves against — not (1). It is read
+#       from BOTH project keystores, $KEYSTORE_TESTNET and $KEYSTORE_MAINNET
+#       (see check 2), because a clone endpoint sitting unused in the
+#       mainnet keystore's config today is one `chain:set`-adjacent edit
+#       away from being live on transition day.
+# The file also holds `privateKeys`. Only `currentChain` and `networks` are
+# ever extracted below (via jq, into $WORK) — nothing else is read into a
+# shell variable, printed, or written anywhere.
+echo "── check 10 — chain endpoint allowlist (clone-network defense) ──"
+
+# Fixed, not an env override: an allowlist that widens by exporting a
+# variable is not an allowlist. Values as read 2026-08-21 from this
+# machine's actual proton-cli.json — proton-cli's own shipped default set.
+TESTNET_HOST_ALLOWLIST="rpc.api.testnet.metalx.com proton-testnet.eoscafeblock.com test.proton.eosusa.io"
+MAINNET_HOST_ALLOWLIST="rpc.api.mainnet.metalx.com proton.cryptolions.io proton.eosusa.io"
+
+# fyp_host_of <url-or-bare-host[:port][/path...]> — host only, scheme/port/
+# path stripped. Every comparison downstream is exact-string on this output,
+# never substring: a suffix/contains match would let
+# evil-rpc.api.testnet.metalx.com.attacker.tld through as if it equalled
+# rpc.api.testnet.metalx.com.
+fyp_host_of() {
+	local v="$1"
+	case "$v" in
+		http://*)  v="${v#http://}" ;;
+		https://*) v="${v#https://}" ;;
+	esac
+	v="${v%%/*}"
+	v="${v%%\?*}"
+	v="${v%%:*}"
+	printf '%s' "$v"
+}
+
+fyp_host_allowed() { # <host> <space-separated allowlist> — exact match only
+	local host="$1" list="$2" h
+	for h in $list; do
+		[ "$host" = "$h" ] && return 0
+	done
+	return 1
+}
+
+# fyp_scan_proton_cli <home> <label> <require-proton-test> <require-proton>
+#   Extracts ONLY currentChain+networks from <home>'s proton-cli.json into
+#   $WORK (never privateKeys), then checks every endpoint under
+#   chain=="proton-test" against the testnet allowlist and every endpoint
+#   under chain=="proton" against the mainnet allowlist. <require-*> is 1 if
+#   that chain's network entry must exist (its absence is then a problem) or
+#   0 if it is optional (its absence is silently skipped — used for the
+#   mainnet keystore's optional proton-test entry). Missing file, unparseable
+#   file, a required-but-absent entry, and an entry with zero endpoints are
+#   ALL problems: an observation that could not be made is never a pass.
+#   Prints space-separated problem tokens (possibly none) on stdout.
+fyp_scan_proton_cli() {
+	local home="$1" label="$2" require_test="$3" require_main="$4"
+	local cfg out problems="" exists ep host chain req allowlist tag
+	cfg="${home}/Library/Preferences/@proton/cli-nodejs/proton-cli.json"
+	out="${WORK}/proton-cli-${label}.json"
+	if [ ! -r "$cfg" ]; then
+		printf 'unreadable:%s:%s' "$label" "$cfg"
+		return
+	fi
+	if ! jq -c '{currentChain: (.currentChain // empty), networks: (.networks // [])}' "$cfg" > "$out" 2>/dev/null; then
+		printf 'unparseable:%s:%s' "$label" "$cfg"
+		return
+	fi
+	for chain in proton-test proton; do
+		if [ "$chain" = proton-test ]; then
+			req="$require_test"; allowlist="$TESTNET_HOST_ALLOWLIST"; tag=testnet
+		else
+			req="$require_main"; allowlist="$MAINNET_HOST_ALLOWLIST"; tag=mainnet
+		fi
+		exists="$(jq -e --arg c "$chain" '[.networks[]? | select(.chain==$c)] | length > 0' "$out" 2>/dev/null)"
+		if [ "$exists" != "true" ]; then
+			[ "$req" = "1" ] && problems="${problems} ${label}-no-chain-entry:${chain}"
+			continue
+		fi
+		ep="$(jq -r --arg c "$chain" '[.networks[]? | select(.chain==$c)][0].endpoints[]? // empty' "$out" 2>/dev/null)"
+		if [ -z "$ep" ]; then
+			problems="${problems} ${label}-${chain}-no-endpoints"
+			continue
+		fi
+		while IFS= read -r e; do
+			[ -n "$e" ] || continue
+			host="$(fyp_host_of "$e")"
+			if ! fyp_host_allowed "$host" "$allowlist"; then
+				problems="${problems} ${label}-${chain}-host-not-allowlisted(${tag}):${host}"
+			fi
+		done <<-LIST
+		$ep
+		LIST
+	done
+	printf '%s' "$problems"
+}
+
+EP_PROBLEMS=""
+
+# --- exposure path (1): XPR_TESTNET_CHAIN_RPC ------------------------------
+RPC_HOST="$(fyp_host_of "$TESTNET_CHAIN_RPC")"
+if [ -z "$RPC_HOST" ] || ! fyp_host_allowed "$RPC_HOST" "$TESTNET_HOST_ALLOWLIST"; then
+	EP_PROBLEMS="${EP_PROBLEMS} XPR_TESTNET_CHAIN_RPC-host-not-allowlisted:${RPC_HOST:-<empty>}"
+fi
+
+# --- exposure path (2): proton-cli.json, both project keystores -----------
+TESTNET_CFG_PATH="${KEYSTORE_TESTNET}/Library/Preferences/@proton/cli-nodejs/proton-cli.json"
+MAINNET_CFG_PATH="${KEYSTORE_MAINNET}/Library/Preferences/@proton/cli-nodejs/proton-cli.json"
+
+# testnet HOME: BOTH the proton-test and proton entries are required —
+# proton-cli ships both stanzas even though only one of them is current.
+TESTNET_HOME_RESULT="$(fyp_scan_proton_cli "$KEYSTORE_TESTNET" testnet-HOME 1 1)"
+[ -n "$TESTNET_HOME_RESULT" ] && EP_PROBLEMS="${EP_PROBLEMS} ${TESTNET_HOME_RESULT}"
+
+# mainnet HOME: the proton entry is required; a proton-test entry is
+# optional but is checked against the testnet allowlist if present.
+MAINNET_HOME_RESULT="$(fyp_scan_proton_cli "$KEYSTORE_MAINNET" mainnet-HOME 0 1)"
+[ -n "$MAINNET_HOME_RESULT" ] && EP_PROBLEMS="${EP_PROBLEMS} ${MAINNET_HOME_RESULT}"
+
+# testnet HOME's currentChain must select the testnet network. mainnet
+# HOME's currentChain is read for the detail line only and is NOT judged
+# here — today's mainnet keystore selection is out of scope for a testnet
+# rehearsal's pre-flight (it is still reported, per the provenance rule).
+TESTNET_CURRENT_CHAIN=""
+[ -r "$TESTNET_CFG_PATH" ] && TESTNET_CURRENT_CHAIN="$(jq -r '.currentChain // empty' "$TESTNET_CFG_PATH" 2>/dev/null)"
+if [ "$TESTNET_CURRENT_CHAIN" != "proton-test" ]; then
+	EP_PROBLEMS="${EP_PROBLEMS} testnet-HOME-currentChain-is-not-proton-test:${TESTNET_CURRENT_CHAIN:-<unobservable>}"
+fi
+MAINNET_CURRENT_CHAIN=""
+[ -r "$MAINNET_CFG_PATH" ] && MAINNET_CURRENT_CHAIN="$(jq -r '.currentChain // empty' "$MAINNET_CFG_PATH" 2>/dev/null)"
+
+if [ -z "$EP_PROBLEMS" ]; then
+	chk_pass 10 "chain endpoint allowlist: XPR_TESTNET_CHAIN_RPC + both keystores' proton-cli.json" \
+		"testnet-HOME: ${TESTNET_CFG_PATH}  (currentChain=${TESTNET_CURRENT_CHAIN})"
+	note "mainnet-HOME: ${MAINNET_CFG_PATH}  (currentChain=${MAINNET_CURRENT_CHAIN}, not judged)"
+	note "hosts checked — RPC:${RPC_HOST}; testnet-HOME networks[proton-test,proton]; mainnet-HOME networks[proton, proton-test if present]"
+else
+	chk_fail 10 3 "chain endpoint allowlist violation — a config points off the fixed allowlist" \
+		"problems:${EP_PROBLEMS}" \
+		"read (testnet HOME): ${TESTNET_CFG_PATH}" \
+		"read (mainnet HOME): ${MAINNET_CFG_PATH}" \
+		"2026-08-21: PulseVM's XPR 1:1 demo network answers the SAME chain_id as the real" \
+		"XPR testnet on purpose ('same as XPR testnet — the state is the point', upstream's" \
+		"own words) and mirrors on-chain state byte-for-byte, so gate 3's chain_id compare" \
+		"and check 9's anchor-key compare both PASS against it. The host is the only thing" \
+		"it cannot fake into this repo's own config — fix the named host(s) above, never" \
+		"widen the allowlist to make this pass." \
+		"testnet allowlist: ${TESTNET_HOST_ALLOWLIST}" \
+		"mainnet allowlist: ${MAINNET_HOST_ALLOWLIST}"
 fi
 
 # ===========================================================================
