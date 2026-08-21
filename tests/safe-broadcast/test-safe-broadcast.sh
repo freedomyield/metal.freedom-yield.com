@@ -421,6 +421,23 @@ run_case "arg: --tx file not readable" 2 --tx=/nonexistent/path --chain=testnet-
 run_case "arg: --tx missing .actions" 2 --tx="$TEST_TX_EMPTY" --chain=testnet-a
 run_case "arg: unknown flag" 2 --tx="$TEST_TX_VALID" --chain=testnet-a --foo
 
+# ---- --endpoint=<url> regression (removed 2026-08-21) ----
+# CUSTOM_ENDPOINT used to be accepted with zero validation and appended via
+# `-u` at broadcast time, while gate 3 verified chain identity WITHOUT `-u`
+# — i.e. against a DIFFERENT endpoint than the one the push actually used.
+# See the "--endpoint=<url> REMOVED" section in bin/safe-broadcast's usage
+# header for the full incident context (a byte-exact chain clone that
+# deliberately advertises a real chain's chain_id, published 2026-08-21).
+# The flag must be an EXPLICIT, named refusal — not fall through to the
+# generic "unknown arg" branch above and not be silently accepted — so a
+# future re-add attempt is caught here before it ever reaches gate 3.
+run_case_grep "arg: --endpoint= is an explicit named refusal, not silently accepted" 2 \
+	"is refused (removed 2026-08-21" \
+	--tx="$TEST_TX_VALID" --chain=testnet-a --endpoint=https://example.invalid
+run_case_grep "arg: --endpoint= alone (no other args) still refuses explicitly" 2 \
+	"is refused (removed 2026-08-21" \
+	--endpoint=https://example.invalid
+
 # ---- gate 2 (token) failure paths (exit 3) ----
 rm -f "$TEST_TOKEN"
 run_case "gate 2: testnet, token missing" 3 --tx="$TEST_TX_VALID" --chain=testnet-a --non-interactive

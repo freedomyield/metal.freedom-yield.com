@@ -19,7 +19,6 @@
 #                      [--dry-run-log=<log-file>]
 #                      [--operator-token=<file>]
 #                      [--non-interactive]
-#                      [--endpoint=<url>]
 #
 # Required:
 #   --tx=<json-file>              Path to transaction JSON containing actions[].
@@ -54,8 +53,6 @@
 #   --non-interactive             Skip the interactive confirmation prompt.
 #                                 In non-interactive mode, the token file mtime
 #                                 must be within the last 60 seconds (tighter TTL).
-#   --endpoint=<url>              Override proton RPC endpoint.
-#                                 Default: proton-cli current chain endpoint.
 #
 # ---- R16 (2026-07-08): operator token CONTENT binding ----
 #   The operator token used to prove authorization by FRESHNESS alone (mtime
@@ -143,6 +140,37 @@
 #   These reuse the SAME anchor-shape/prefix derivation as gate 1 above, so
 #   the two gates cannot disagree about what "the outgoing shape" is.
 #
+# ---- --endpoint=<url> REMOVED (2026-08-21) ----
+#   This wrapper used to accept --endpoint=<url> into an override variable
+#   with ZERO validation, then append it via `-u <that value>` to the
+#   proton transaction:push args at broadcast time (below). Gate 3 verifies
+#   chain identity by running `proton chain:set` + `proton chain:info`
+#   WITHOUT `-u` — it measures whatever endpoint proton-cli resolves from
+#   ITS OWN config. A caller who also passed --endpoint= therefore made
+#   gate 3 verify chain_id at endpoint A while the irreversible push went
+#   to endpoint B: the flag silently defeated the one gate it should have
+#   been subject to.
+#
+#   This stopped being a theoretical gap on 2026-08-21, when an upstream
+#   project published a byte-exact clone of a real chain's state that
+#   DELIBERATELY advertises the SAME chain_id as the chain it clones. A
+#   chain_id match is therefore no longer proof of which network answered —
+#   the endpoint is. Gate 3 checking identity at a different endpoint than
+#   the one the broadcast actually uses is not merely inelegant, it is
+#   defeated by a network that exists today.
+#
+#   A repo-wide grep (2026-08-21) found NOTHING that ever passed
+#   --endpoint= to this wrapper — the flag existed only in its own
+#   declaration/parsing/help text. Removing it costs no functionality, and
+#   deleting the code path is lower-risk than adding same-endpoint
+#   validation to a day-of executable. --endpoint=* is now an EXPLICIT,
+#   named refusal (exit 2, see the arg-parse `case` below) rather than
+#   falling through to the generic "unknown arg" branch — a future reader
+#   must be TOLD why, not left to rediscover it by reading git blame. Do
+#   NOT re-add this flag as a convenience without ALSO making gate 3
+#   verify identity at the EXACT endpoint the broadcast will use — anything
+#   less reopens this exact gap.
+#
 # Environment overrides:
 #   FYD_MAINNET_CHAIN_ID  — expected chain_id for mainnet-a (gate 3 identity
 #                           check). Default: the authoritative Proton mainnet
@@ -180,7 +208,6 @@ TESTNET_TX_ID=""
 DRY_RUN_LOG=""
 OPERATOR_TOKEN_FILE="${FYD_BROADCAST_TOKEN_FILE:-/tmp/fyd-broadcast-token}"
 INTERACTIVE=1
-CUSTOM_ENDPOINT=""
 
 # Audit log path (matches broadcast-guard.sh convention). Resolved
 # against the LOGIN home (fyd_login_home, from require-keystore-home.sh
@@ -192,7 +219,7 @@ AUDIT_LOG_PRIMARY="${FYD_BROADCAST_AUDIT_LOG:-/var/log/fyd-broadcast-audit.log}"
 _AUDIT_LOG_LOGIN_HOME="$(fyd_login_home || true)"
 AUDIT_LOG_FALLBACK="${_AUDIT_LOG_LOGIN_HOME:-/tmp}/.fyd-broadcast-audit.log"
 
-usage() { sed -n '2,168p' "$0" | sed 's/^# \?//'; }
+usage() { sed -n '2,196p' "$0" | sed 's/^# \?//'; }
 
 # ---- arg parse ----
 for arg in "$@"; do
@@ -202,7 +229,22 @@ for arg in "$@"; do
 		--testnet-tx-id=*)   TESTNET_TX_ID="${arg#*=}" ;;
 		--dry-run-log=*)     DRY_RUN_LOG="${arg#*=}" ;;
 		--operator-token=*)  OPERATOR_TOKEN_FILE="${arg#*=}" ;;
-		--endpoint=*)        CUSTOM_ENDPOINT="${arg#*=}" ;;
+		--endpoint=*)
+			# REMOVED 2026-08-21 (see the "--endpoint=<url> REMOVED" usage-header
+			# section above) — this is a NAMED refusal, not the generic
+			# "unknown arg" branch below, so a future reader is TOLD why rather
+			# than left to guess. Gate 3 (below) verifies the chain_id
+			# proton-cli resolves from its OWN config; this flag used to push
+			# to a DIFFERENT endpoint than the one just verified, so gate 3
+			# proved nothing about where the broadcast actually went. There is
+			# no safe way to accept this flag without also making gate 3
+			# verify identity at that same overridden endpoint.
+			echo "ERROR: --endpoint=<url> is refused (removed 2026-08-21, not merely unrecognized)" >&2
+			echo "       reason: gate 3 verifies the chain_id proton-cli resolves from its own" >&2
+			echo "       config; overriding the broadcast destination separately would let the" >&2
+			echo "       push go to a DIFFERENT endpoint than the one gate 3 just verified." >&2
+			exit 2
+			;;
 		--non-interactive)   INTERACTIVE=0 ;;
 		-h|--help)           usage; exit 0 ;;
 		*)                   echo "ERROR: unknown arg: $arg" >&2; usage; exit 2 ;;
@@ -612,9 +654,10 @@ BROADCAST_ERR="$(mktemp -t safe-broadcast.XXXXXX)"
 trap 'rm -f "$BROADCAST_OUT" "$BROADCAST_ERR"' EXIT
 
 PROTON_ARGS=(transaction:push "$(cat "$TX_JSON_FILE")")
-if [ -n "$CUSTOM_ENDPOINT" ]; then
-	PROTON_ARGS+=(-u "$CUSTOM_ENDPOINT")
-fi
+# No -u/--endpoint override is ever appended here — see the "--endpoint=<url>
+# REMOVED" usage-header section above. This always pushes to whatever
+# endpoint proton-cli resolves from its own config, which is EXACTLY the
+# endpoint gate 3 (above) already verified the chain_id of.
 
 BROADCAST_RC=0
 proton "${PROTON_ARGS[@]}" > "$BROADCAST_OUT" 2> "$BROADCAST_ERR" || BROADCAST_RC=$?
