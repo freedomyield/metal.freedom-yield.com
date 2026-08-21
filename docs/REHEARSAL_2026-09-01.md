@@ -27,9 +27,11 @@
 9/1 に operator へ最初のピングを送る前に、AI は `scripts/install-rehearsal-preflight.sh`
 (read-only。何も install しない)を実行する。
 
-**開始条件 = 「check 9 以外のすべてが green」。「全 green」ではない。**
-個別の検査項目はここに転記しない (preflight 自身の出力に従う) が、この 1 点だけは
-例外として書く — **check 9 は原理的にピング前に green にできない**ため:
+**開始条件 = 「`FAIL` の個数が厳密に 1、かつその唯一の赤が check 9 の
+`LOCKED`」。「全 green」ではないし、`exit` コードだけでも判定できない** —
+後者の理由は check 10 (chain endpoint allowlist、2026-08-21 追加) にある。
+個別の検査項目はここに転記しない (preflight 自身の出力に従う) が、この 2 点
+だけは例外として書く:
 
 - check 9 は testnet keystore が署名可能かを見る。keystore が locked だと
   `PRE-FLIGHT RED — first failure was [9], exiting 7` になり、出力自身が
@@ -39,18 +41,37 @@
   unlock できない (憲法「operator 手動 = keystore の unlock / lock のみ」)。
 - → 「ピングの前に green にせよ / green にする手段はピングの中にしかない」という
   デッドロック。**字義どおり実行すると 9/1 の稽古は開始できない。**
-  (2026-08-18 に前倒し実走して実測: `exit 7 / PASS=8 FAIL=1`、赤は check 9 のみ。)
+  (2026-08-18 に前倒し実走で実測: `exit 7 / PASS=8 FAIL=1`、赤は check 9 のみ
+  — 当時は check 10 が存在せず全 9 check だった。2026-08-21、check 10 追加後に
+  本タスクで再実測: `exit 7 / PASS=9 FAIL=1`、赤は依然 check 9 のみで残り 9 個
+  [check 1-8, 10] は green。**これが今後の正常な開始条件の数値。**)
+- **⚠ check 10 は listing 順で check 9 より後ろにある。exit コードは「listing
+  順で最初に落ちた check の番号」を返す仕様なので、check 9 が `LOCKED` のまま
+  check 10 も red になっても exit は 7 から変わらない** — 見た目の唯一の違いは
+  `FAIL=1` が `FAIL=2` になることだけ。**つまり `exit 7` はもはや「check 9 だけ
+  が赤」の証拠にならない。`exit 7` かつ `FAIL=2` は STOP**(ピングを送らない)。
+  この組合せで最も疑うべきは **check 10** — chain endpoint allowlist 違反、
+  すなわち `XPR_TESTNET_CHAIN_RPC` / `XPR_TESTNET_RPC` / 両 keystore の
+  `proton-cli.json` のいずれかが固定 allowlist 外のホストを指している状態
+  (2026-08-21 に公開された PulseVM の "1:1 demo network" — 実チェーンと同一
+  chain_id を意図的に名乗る clone で、on-chain の鍵も byte 同一 — が筆頭。
+  check 9 の on-chain 鍵比較も gate 3 の chain_id 比較もこの clone は素通り
+  させる。ホスト名だけが最後の見分け手段)。
 
 したがって 9/1 の運用はこうする:
 
-1. AI は preflight を実行し、**check 1-8 がすべて green** で、**唯一の赤が
-   check 9 の `LOCKED`** であることを確認する。この状態が**正常な開始条件**。
-2. check 1-8 に赤がある / check 9 の赤が `LOCKED` 以外 (鍵が無い等) の場合は、
-   **ピングを送らずに**原因を特定して是正する。ここが本来の「事前に潰す」対象。
+1. AI は preflight を実行し、**`PASS=9 FAIL=1` ちょうど**で、**唯一の赤が
+   check 9 の `LOCKED`**(check 1-8 と check 10 がすべて green)であることを
+   確認する。この状態が**正常な開始条件**。
+2. `FAIL` が 1 でない (とくに `exit 7` のまま `FAIL=2` になっている場合 — 上記の
+   check 10 が疑わしい) / check 1-8 か check 10 に赤がある / check 9 の赤が
+   `LOCKED` 以外 (鍵が無い等) の場合は、**ピングを送らずに**原因を特定して
+   是正する。ここが本来の「事前に潰す」対象。
 3. ピング 1 (操作①②③④) を送る。**操作②の unlock が check 9 の解消そのもの。**
-4. 操作②の完了後に preflight を再実行すれば check 9 も green になる。
-   9/1 はこれを必須としない (操作③自身が locked keystore を exit 2 で弾くため
-   二重の確認になる) が、値の再確認 (§3) を兼ねて回すなら**このタイミング**。
+4. 操作②の完了後に preflight を再実行すれば **`PASS=10 FAIL=0`**(全 green)に
+   なる。9/1 はこれを必須としない (操作③自身が locked keystore を exit 2 で
+   弾くため二重の確認になる) が、値の再確認 (§3) を兼ねて回すなら
+   **このタイミング**。
 
 > **8/29 の unlock 確認ピングとの関係** (§6 の実行順表も参照)。8/29 のピングは
 > 「9/1 に unlock できる状態か」と **entry 名**を確かめるためのもので、そこで
@@ -409,7 +430,7 @@ enforcement / 共有ライブラリの範囲)。凍結の対象外への変更(�
 | 誰 | 何 |
 |---|---|
 | operator(8/29) | AI からの unlock 確認ピングに返信する — **②の testnet keystore password の Dashlane entry 名**。これが無いとピング 1 を送れない |
-| AI(9/1 前) | §1.1 preflight を実行し、**check 9 (LOCKED) 以外がすべて green** であることを確認する(「全 green」は原理的に不可能 — §1.1)。§3 の確定値を **check 7 の `inscribe=`** で再確認する(check 8 の pairing ではない。値が食い違ったら送付を止めて調査) |
+| AI(9/1 前) | §1.1 preflight を実行し、**`PASS=9 FAIL=1` ちょうど(唯一の赤が check 9 の `LOCKED`)** であることを確認する(「全 green」も「`exit 7` というコードだけ」も判定には不十分 — §1.1。`FAIL=2` は check 10 red の疑いで送付前に STOP)。§3 の確定値を **check 7 の `inscribe=`** で再確認する(check 8 の pairing ではない。値が食い違ったら送付を止めて調査) |
 | AI(9/1 午前) | §1.3 の dry 実行を行い、結果を記録する。**実行場所で分ける — Mac で完走するのは unit 5 だけ / unit 2・3・9 は host** (Mac だと 2 は exit 2、3 は exit 1 で入力 feed 不在のため死ぬ。§1.3 の各行参照) |
 | operator(ピング 1) | 操作①→②→③→④(連続、passphrase 系のみ 3 分程度。③自体の所要は未実測) |
 | AI | ③の testnet tx id を受け取り、§1.2(unit 7b)を丸ごと実行する |

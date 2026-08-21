@@ -127,6 +127,14 @@
 # is made at all, the same convention as cycle-transition.sh --public-base):
 #   XPR_TESTNET_CHAIN_RPC   chain API base for get_account (shared spelling
 #                           with run-testnet-rehearsal.sh, on purpose)
+#   XPR_TESTNET_RPC         NOT a fetch transport for this script (no local-
+#                           path acceptance, nothing is ever fetched from it
+#                           here) — check 10 only reads and validates its
+#                           HOST, because run-testnet-rehearsal.sh:174 passes
+#                           it to gen-anchor-receipt.sh for the rehearsal's
+#                           7-gate receipt verification. Shared spelling with
+#                           that script, on purpose; that script is unread by
+#                           this variable's presence — it is not modified.
 #   FYP_LEDGER_URL          published cycle-history.jsonl  (URL or path)
 #   FYP_ANCHOR_SOURCE_URL   published anchor-source.json   (URL or path)
 #   FYP_ANCHOR_HISTORY_URL  published anchor-history.jsonl (URL or path)
@@ -143,7 +151,11 @@
 #   0  every check PASSED
 #   1  usage error
 #   2  a prerequisite tool is missing            (check 1)
-#   3  an operator-local config/key file is missing or malformed (checks 3-5)
+#   3  an operator-local config/key file is missing or malformed (checks 3-5),
+#      or check 10's chain endpoint allowlist is violated by a proton-cli.json
+#      entry OR by an XPR_TESTNET_CHAIN_RPC/XPR_TESTNET_RPC value (the latter
+#      two are env vars, not files — "config" here is used in the broad
+#      sense, not literally "a file")
 #   4  the current on-chain anchor key is NOT in the testnet keystore, or the
 #      account carries no anchor permission      (check 9)
 #   5  the anchor-source could not be established as worktree == committed
@@ -441,7 +453,12 @@ trap 'rm -rf "$WORK"' EXIT
 # NON-AUTHORITATIVE. A finer rule ("only the ones that redirect a public
 # feed") would need a judgement call per variable, and the variable that
 # redirects the transport is the one that hides the most.
-FYP_OVERRIDE_VARS="FYP_LEDGER_URL FYP_ANCHOR_SOURCE_URL FYP_ANCHOR_HISTORY_URL FYP_VALIDATOR_URL XPR_TESTNET_CHAIN_RPC FYP_CURL FYP_REHEARSAL_CFG FYP_MAINNET_CFG FYP_IDENTITY_KEY FYP_KEYSTORE_TESTNET FYP_KEYSTORE_MAINNET"
+# XPR_TESTNET_RPC (M7, 2026-08-21): documented above as an override and read
+# by check 10, but omitted from this list on first add — a run with only
+# that variable set was not labelled NON-AUTHORITATIVE, contradicting this
+# section's own "ANY override" rule. No test caught it because every case in
+# the suite already sets several other overrides at once.
+FYP_OVERRIDE_VARS="FYP_LEDGER_URL FYP_ANCHOR_SOURCE_URL FYP_ANCHOR_HISTORY_URL FYP_VALIDATOR_URL XPR_TESTNET_CHAIN_RPC XPR_TESTNET_RPC FYP_CURL FYP_REHEARSAL_CFG FYP_MAINNET_CFG FYP_IDENTITY_KEY FYP_KEYSTORE_TESTNET FYP_KEYSTORE_MAINNET"
 OVERRIDES=""
 for v in $FYP_OVERRIDE_VARS; do
 	[ -n "${!v-}" ] && OVERRIDES="${OVERRIDES} ${v}"
@@ -931,6 +948,424 @@ else
 			"The chain is the authority here — nothing is pinned in this script." ;;
 		*) chk_fail 9 "$KEY_CODE" "anchor key check could not be completed" "$KEY_PROBLEMS" ;;
 	esac
+fi
+
+# ===========================================================================
+# Check 10 — chain endpoint allowlist (clone-network defense)
+# ===========================================================================
+# On 2026-08-21 PulseVM published a "XPR 1:1 demo network": it ingests XPR
+# Network testnet state byte-for-byte and replays it on PulseVM, and upstream
+# states outright that it answers the SAME chain_id as the real XPR testnet:
+#
+#   Chain ID  71ee83bcf52142d61019d95f9cc5427ba6a0d7ff8accd9e2088ae2abeaf3d3dd
+#   (same as XPR testnet — the state is the point)
+#
+# Its endpoint is https://xpr-rpc-testnet.pulsevm.dev, with a working
+# /v1/chain REST surface. That is a genuine clone, not a lookalike, and it
+# quietly defeats the two checks in this repo that a reader would reach for
+# first:
+#   - PRIME DIRECTIVE gate 3 (in the sanctioned broadcast wrapper under bin/)
+#     compares `proton chain:info`'s chain_id against FYD_TESTNET_CHAIN_ID.
+#     The clone returns the identical value BY DESIGN, so gate 3 passes
+#     against it.
+#   - Check 9 above compares the on-chain <actor>@anchor key against this
+#     project's testnet keystore. The clone's state is byte-identical to
+#     the real testnet's, so the key matches too, and check 9 passes
+#     against it as well.
+# Neither chain_id nor the anchor key is a usable discriminator once a
+# byte-identical clone exists — both are, by construction, shared with it.
+# DO NOT "simplify" this check away as redundant with either of them: it is
+# the one thing here that is NOT reproduced by the clone, because the clone
+# cannot reach into this repo's or proton-cli's own config and rewrite which
+# hostname they point at. The only discriminator left standing is WHICH HOST
+# actually answered — so this check is a small, fixed allowlist of hosts,
+# applied at every point this repo (or proton-cli, on its behalf) resolves
+# an endpoint to call. FYD_TESTNET_CHAIN_ID keeps its correct value
+# (71ee83bc…) unchanged by this check — it was never wrong; the premise
+# that a chain_id names a network uniquely was.
+#
+# ---------------------------------------------------------------------------
+# CORRECTION (2026-08-21, same day): where proton-cli ACTUALLY resolves from
+# ---------------------------------------------------------------------------
+# An earlier revision of this check read ONLY the config's top-level
+# `networks` key and stated that it was "what `proton chain:info` … actually
+# resolves against". That sentence was FALSE, and load-bearing — it named
+# the wrong storage as the thing this check defends. Verified directly
+# against the installed package,
+# `@proton/cli/lib/storage/networks.js`, the `Network.network` getter:
+#
+#   get network() {
+#       const chain = this.chain;
+#       const endpoints = config.get('endpoints') || [];      // <- runtime authority
+#       const currentEndpoint = endpoints.find(e => e.chain === chain);
+#       if (!currentEndpoint) return networks.find(n => n.chain === chain);  // built-in default
+#       return currentEndpoint;
+#   }
+#
+# proton-cli resolves the active endpoint from the TOP-LEVEL `endpoints` key.
+# `networks` is a SCHEMA DEFAULT (`lib/storage/config.js`'s `defaults.networks`,
+# which is why a freshly-initialized proton-cli.json already has it populated
+# with the correct hosts) and is read at runtime in exactly one other place:
+# a same-named migration in `config.js` that copies it back onto itself. It
+# is NEVER consulted for endpoint resolution. The write path for `endpoints`
+# is `proton endpoint:set` → `overrideEndpoint()` → `config.set('endpoints', …)`
+# (`networks.js`), and it needs no passphrase and no unlocked keystore — a
+# world-writable config file (both real project keystores are currently
+# mode `-rw-rw-rw-`) is sufficient. If `endpoints` is absent, proton-cli falls
+# back to its own COMPILED-IN default list (`constants.networks`), which is
+# safe — this project's real configs currently have no `endpoints` key at
+# all, so today this exposure path is unguarded rather than mis-guarded, not
+# actively pointed at anything.
+#
+# Consequently this check now reads TWO top-level keys, in this priority:
+#   PRIMARY   `endpoints` — what proton-cli actually resolves against. Its
+#             mere PRESENCE is itself an anomaly worth reporting: in this
+#             project's default operation nothing ever calls
+#             `proton endpoint:set`, so a populated `endpoints` key means
+#             that command (or an equivalent hand-edit of a world-writable
+#             file) has run at least once. Flagged regardless of whether its
+#             current hosts happen to be allowlisted — presence alone is the
+#             signal, because a compliant-today override can be silently
+#             re-pointed tomorrow with the same command, and this check does
+#             not have a "diff since last run" to catch that.
+#   SECONDARY `networks` — kept as a second layer purely as insurance against
+#             a future proton-cli version that DOES consult it (or a hand-
+#             edit that touches it), even though the installed version never
+#             reads it for resolution. Costs nothing to keep checking.
+#
+# Two ENV-VAR exposure paths are checked too, neither read at the level of
+# `proton` — both are read-only from here:
+#   (1) $TESTNET_CHAIN_RPC (env XPR_TESTNET_CHAIN_RPC) — what check 9's curl
+#       above posts /v1/chain/get_account to.
+#   (2) $TESTNET_HYPERION_RPC (env XPR_TESTNET_RPC, default
+#       https://test.proton.eosusa.io) — scripts/run-testnet-rehearsal.sh:174
+#       passes this to gen-anchor-receipt.sh --rpc= at its step 9/10, which
+#       performs the rehearsal's 7-gate confirmation-receipt verification.
+#       Pointed at a clone, the "this tx was confirmed on-chain" evidence the
+#       rehearsal produces would itself be clone-sourced.
+#       run-testnet-rehearsal.sh is NOT modified here; this script only reads
+#       the same variable to cross-check it before the rehearsal ever runs.
+#
+# `endpoints`/`networks` config-file entries are read from BOTH project
+# keystores, $KEYSTORE_TESTNET and $KEYSTORE_MAINNET (see check 2), because a
+# clone endpoint sitting unused in the mainnet keystore's config today is one
+# `endpoint:set`-adjacent edit away from being live on transition day.
+#
+# The file also holds `privateKeys`. Only `currentChain`, `networks` and
+# `endpoints` are ever extracted below (via jq, into $WORK) — nothing else is
+# read into a shell variable, printed, or written anywhere.
+#
+# The mainnet leg has a known, DELIBERATE gap: unlike $KEYSTORE_TESTNET (hard-
+# pinned to $HOME by the §3.5 guard above check 1), $KEYSTORE_MAINNET carries
+# no equivalent pin — this pre-flight is for the TESTNET rehearsal and by
+# §3.5 design never unlocks or authenticates against the mainnet keystore, so
+# there is no guard that could prove "this IS the real mainnet directory"
+# without overreaching into mainnet territory a testnet pre-flight has no
+# business asserting control over. Concretely: pointing FYP_KEYSTORE_MAINNET
+# at a clean scratch directory makes the mainnet leg read that directory
+# instead, and it will report green without ever touching the real mainnet
+# keystore. This is NOT silent: FYP_KEYSTORE_MAINNET is already in
+# FYP_OVERRIDE_VARS, so any such run is already banner-labelled
+# NON-AUTHORITATIVE — but that label is a general announcement covering many
+# unrelated variables, not a statement specific to this check. So check 10
+# ALSO prints, on every run, whether the mainnet HOME it is inspecting is the
+# project default or came from an override — see MAINNET_HOME_PINNED below.
+echo "── check 10 — chain endpoint allowlist (clone-network defense) ──"
+
+# Fixed, not an env override: an allowlist that widens by exporting a
+# variable is not an allowlist. Values as read 2026-08-21 from this
+# machine's actual proton-cli.json / @proton/cli's constants.js — proton-
+# cli's own shipped default set.
+TESTNET_HOST_ALLOWLIST="rpc.api.testnet.metalx.com proton-testnet.eoscafeblock.com test.proton.eosusa.io"
+MAINNET_HOST_ALLOWLIST="rpc.api.mainnet.metalx.com proton.cryptolions.io proton.eosusa.io"
+
+# fyp_host_of <value> — the host, or EMPTY if the value is rejected outright
+# (no https:// scheme, or userinfo (`user@`/`user:pass@`) survives stripping).
+# Every comparison downstream is exact-string on this output, never
+# substring: a suffix/contains match would let
+# evil-rpc.api.testnet.metalx.com.attacker.tld through as if it equalled
+# rpc.api.testnet.metalx.com. Order matters and is deliberate:
+#   1. lower-case the WHOLE value first (M1: DNS is case-insensitive; a
+#      differently-cased real host must not read as a false-positive red).
+#   2. require an explicit https:// scheme (I1). The allowlist only proves
+#      "who we intended to call" — TLS is the only thing that closes "who
+#      actually answered", and the threat this check exists for (a DIFFERENT
+#      network answering with the SAME chain_id) makes that gap load-
+#      bearing: a plain-http allowlisted-looking URL hands an on-path device
+#      the same free pass.
+#   3. ISOLATE THE AUTHORITY COMPONENT FIRST: strip everything from the
+#      first '/', '?', '#' OR '\' onward, whichever comes earliest — i.e.
+#      drop path, query and fragment BEFORE touching userinfo. The '\' is
+#      not a typo: per the WHATWG URL Standard, a "special" scheme (https
+#      is one) treats backslash as a fourth authority terminator, normalized
+#      to '/' — confirmed against `new URL()` directly, which reports host
+#      `<clone>` and a path starting `/@<allowlisted-host>` for
+#      `https://<clone>\@<allowlisted-host>`. A prior revision covered only
+#      three of the four terminators, and separately (an earlier revision
+#      still) stripped userinfo before isolating the authority at all, so a
+#      path/query/fragment containing its own '@' hijacked extraction:
+#      `https://<clone>/@<allowlisted-host>` has no userinfo at all (the '@'
+#      is inside the PATH), but stripping at the last '@' in the WHOLE value
+#      read off "<allowlisted-host>" as if it were the authority, when curl
+#      (and any WHATWG-compliant client) connects to <clone> — the part
+#      before the first terminator. Confirmed via same-day repros: PASS
+#      against the live script for both gaps, with the provenance line
+#      naming the wrong host. The backslash gap was latent rather than live:
+#      the two env-var legs are curl-consumed and curl agrees with this
+#      extractor on backslash handling, and the `endpoints` leg is caught by
+#      the presence flag regardless of host — it is the `networks[]` leg
+#      (kept only as insurance against proton-cli changing which key it
+#      reads) that had no coverage against this specific shape.
+#   4. NOW strip userinfo from the isolated authority, by removing the
+#      LONGEST prefix ending in '@': `${v##*@}`. This must run AFTER step 3,
+#      not before — reordering these two was the entire fix. Within the
+#      authority component alone this still correctly resolves
+#      `a@b@c` to `c` (host is after the LAST '@', matching a WHATWG URL
+#      parser), which step 3 does not disturb since by then there is no '/'
+#      left to find. If '@' still remains after this step (should be
+#      structurally impossible now, kept as a backstop), reject rather than
+#      compare a string that still contains it. This backstop has NO test
+#      coverage — it is genuinely unreachable given the current ordering
+#      (deleting it leaves the suite green), so it is not a defect. It is
+#      the guard that would matter if this ordering were disturbed a fourth
+#      time (there have been three revisions of this function so far), and
+#      nothing would tell a future editor that it had stopped mattering —
+#      hence the comment instead of a contorted test to reach it.
+#   5. strip the port.
+#   6. strip exactly ONE trailing dot (DNS FQDN root-label form: `host.` and
+#      `host` name the identical host, so refusing to normalize it would be
+#      a false-positive red for a legitimately dot-terminated value — the
+#      other half of M1).
+fyp_host_of() {
+	local raw="$1" v
+	v="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')"
+	case "$v" in
+		https://*) v="${v#https://}" ;;
+		*) printf ''; return 1 ;;
+	esac
+	v="${v%%[/?#\\]*}"
+	v="${v##*@}"
+	case "$v" in
+		*@*) printf ''; return 1 ;;
+	esac
+	v="${v%%:*}"
+	v="${v%.}"
+	printf '%s' "$v"
+}
+
+fyp_host_allowed() { # <host> <space-separated allowlist> — exact match only
+	local host="$1" list="$2" h
+	for h in $list; do
+		[ "$host" = "$h" ] && return 0
+	done
+	return 1
+}
+
+# fyp_scan_chain_key <jsonfile> <topkey> <chain> <allowlist> <label> <tag> <require>
+#   Checks EVERY stanza matching <chain> under top-level <topkey> (never just
+#   the first — a duplicate stanza is not the same as an absent one: proton-
+#   cli's own overrideEndpoint() builds `endpoints` as an array and a
+#   hand-edit or a bygone version can leave more than one stanza per chain).
+#   Every `.endpoints[]` string in every matching stanza is checked; a
+#   non-string entry is flagged rather than silently skipped or allowed to
+#   corrupt the host-naming output. <require>=1 means an absent chain entry
+#   under <topkey> is itself a problem; 0 means silently skip (used for
+#   `endpoints`, whose ABSENCE is the safe default, and for the mainnet
+#   keystore's optional proton-test entry under `networks`).
+fyp_scan_chain_key() {
+	local jsonfile="$1" topkey="$2" chain="$3" allowlist="$4" label="$5" tag="$6" require="$7"
+	local n_stanzas n_bad_type ep host e bad=""
+	n_stanzas="$(jq -r --arg k "$topkey" --arg c "$chain" \
+		'[(.[$k] // [])[]? | select(.chain==$c)] | length' "$jsonfile" 2>/dev/null | tr -d '[:space:]')"
+	if [ -z "$n_stanzas" ] || [ "$n_stanzas" = "0" ]; then
+		[ "$require" = "1" ] && printf ' %s-no-chain-entry(%s):%s' "$label" "$topkey" "$chain"
+		return
+	fi
+	n_bad_type="$(jq -r --arg k "$topkey" --arg c "$chain" \
+		'[(.[$k] // [])[]? | select(.chain==$c) | .endpoints[]? | select(type!="string")] | length' \
+		"$jsonfile" 2>/dev/null | tr -d '[:space:]')"
+	if [ -n "$n_bad_type" ] && [ "$n_bad_type" != "0" ]; then
+		bad="${bad} ${label}-${chain}-non-string-endpoint-in-${topkey}"
+	fi
+	ep="$(jq -r --arg k "$topkey" --arg c "$chain" \
+		'(.[$k] // [])[]? | select(.chain==$c) | .endpoints[]? | select(type=="string")' \
+		"$jsonfile" 2>/dev/null)"
+	if [ -z "$ep" ]; then
+		[ -z "$n_bad_type" ] || [ "$n_bad_type" = "0" ] && bad="${bad} ${label}-${chain}-no-endpoints-in-${topkey}"
+	else
+		while IFS= read -r e; do
+			[ -n "$e" ] || continue
+			host="$(fyp_host_of "$e")"
+			if [ -z "$host" ] || ! fyp_host_allowed "$host" "$allowlist"; then
+				bad="${bad} ${label}-${chain}-host-rejected-in-${topkey}(${tag}):${host:-RAW(${e})}"
+			fi
+		done <<-LIST
+		$ep
+		LIST
+	fi
+	printf '%s' "$bad"
+}
+
+# fyp_scan_proton_cli <home> <label> <require-proton-test-in-networks> <require-proton-in-networks>
+#   Extracts ONLY currentChain+networks+endpoints from <home>'s
+#   proton-cli.json into $WORK (never privateKeys), then scans `endpoints`
+#   (primary authority) and `networks` (secondary/insurance) per
+#   fyp_scan_chain_key. Missing file, unparseable file, a required-but-
+#   absent `networks` chain entry, and a disallowed/malformed endpoint are
+#   ALL problems: an observation that could not be made is never a pass.
+#   Prints space-separated problem tokens (possibly none) on stdout.
+fyp_scan_proton_cli() {
+	local home="$1" label="$2" require_test="$3" require_main="$4"
+	local cfg out problems=""
+	cfg="${home}/Library/Preferences/@proton/cli-nodejs/proton-cli.json"
+	out="${WORK}/proton-cli-${label}.json"
+	if [ ! -r "$cfg" ]; then
+		printf 'unreadable:%s:%s' "$label" "$cfg"
+		return
+	fi
+	# `// null`, NOT `// empty`: `empty` in a VALUE position of an object
+	# literal makes the WHOLE object construction produce zero outputs (a
+	# 0-byte $out) whenever `currentChain` is absent, which `jq`'s own exit
+	# code does not flag as failure — the "unparseable" branch below would
+	# never fire and a later read of $out would misreport "no chain entry"
+	# for a file that, in fact, could not be summarized at all. `null` is a
+	# real value, so the object always materializes.
+	if ! jq -c '{currentChain: (.currentChain // null), networks: (.networks // []), endpoints: (.endpoints // null)}' \
+		"$cfg" > "$out" 2>/dev/null || ! jq -e 'type=="object"' "$out" >/dev/null 2>&1; then
+		printf 'unparseable:%s:%s' "$label" "$cfg"
+		return
+	fi
+
+	# PRIMARY authority — see the header's CORRECTION section. Presence
+	# alone is flagged, regardless of content — EXCEPT an empty array, which
+	# is what `proton endpoint:default` actually leaves behind. Verified
+	# against the installed package: `resetEndpoint()` in
+	# lib/storage/networks.js calls `config.set('endpoints', filtered)` —
+	# it SETS the key to `[]` (or to whatever stanzas remain for OTHER
+	# chains), it never DELETES it. Treating any non-null value as "present"
+	# made a machine that had been reset to safe defaults report an
+	# unclearable red with no host to name and no way to satisfy it short of
+	# hand-editing the config — worse than the thing this check defends
+	# against. `null` and `[]` are both the safe/default state; a non-empty
+	# array is the only state that means `endpoint:set` (or an equivalent
+	# hand-edit) actually changed something.
+	local ep_present
+	ep_present="$(jq -r 'if (.endpoints == null) or (.endpoints == []) then "absent" else "present" end' "$out" 2>/dev/null)"
+	if [ "$ep_present" = "present" ]; then
+		# I10: name the chain(s) actually carrying a stanza. `proton
+		# endpoint:default` (resetEndpoint()) filters out ONLY the
+		# CURRENT chain's stanza — a populated stanza for a DIFFERENT
+		# chain survives it untouched, so a remedy that does not say
+		# WHICH chain is live sends the operator to run a command that
+		# reports success while this stays red. Reproduced: currentChain
+		# proton-test, a populated stanza for chain "proton" only —
+		# `endpoint:default` printed "Success: Endpoints restored to
+		# default" and the "…-key-present" problem persisted, unnamed.
+		local ep_chains
+		ep_chains="$(jq -r '[.endpoints[]?.chain // "unknown"] | unique | join(",")' "$out" 2>/dev/null)"
+		[ -n "$ep_chains" ] || ep_chains="unknown"
+		problems="${problems} ${label}-endpoints-override-key-present:${ep_chains}"
+		problems="${problems}$(fyp_scan_chain_key "$out" endpoints proton-test "$TESTNET_HOST_ALLOWLIST" "$label" testnet 0)"
+		problems="${problems}$(fyp_scan_chain_key "$out" endpoints proton "$MAINNET_HOST_ALLOWLIST" "$label" mainnet 0)"
+	fi
+
+	# SECONDARY / insurance — not consulted by the installed proton-cli's
+	# runtime resolver, kept as a second layer regardless.
+	problems="${problems}$(fyp_scan_chain_key "$out" networks proton-test "$TESTNET_HOST_ALLOWLIST" "$label" testnet "$require_test")"
+	problems="${problems}$(fyp_scan_chain_key "$out" networks proton "$MAINNET_HOST_ALLOWLIST" "$label" mainnet "$require_main")"
+
+	printf '%s' "$problems"
+}
+
+EP_PROBLEMS=""
+
+# --- exposure path (1): XPR_TESTNET_CHAIN_RPC (check 9's transport) -------
+RPC_HOST="$(fyp_host_of "$TESTNET_CHAIN_RPC")"
+if [ -z "$RPC_HOST" ] || ! fyp_host_allowed "$RPC_HOST" "$TESTNET_HOST_ALLOWLIST"; then
+	EP_PROBLEMS="${EP_PROBLEMS} XPR_TESTNET_CHAIN_RPC-rejected:${RPC_HOST:-RAW(${TESTNET_CHAIN_RPC})}"
+fi
+
+# --- exposure path (2): XPR_TESTNET_RPC (I2 — run-testnet-rehearsal.sh's
+# receipt-verification RPC, read here for cross-check only; that script is
+# not modified) -------------------------------------------------------------
+TESTNET_HYPERION_RPC="${XPR_TESTNET_RPC:-https://test.proton.eosusa.io}"
+HYPERION_HOST="$(fyp_host_of "$TESTNET_HYPERION_RPC")"
+if [ -z "$HYPERION_HOST" ] || ! fyp_host_allowed "$HYPERION_HOST" "$TESTNET_HOST_ALLOWLIST"; then
+	EP_PROBLEMS="${EP_PROBLEMS} XPR_TESTNET_RPC-rejected:${HYPERION_HOST:-RAW(${TESTNET_HYPERION_RPC})}"
+fi
+
+# --- exposure path (3): proton-cli.json, both project keystores -----------
+TESTNET_CFG_PATH="${KEYSTORE_TESTNET}/Library/Preferences/@proton/cli-nodejs/proton-cli.json"
+MAINNET_CFG_PATH="${KEYSTORE_MAINNET}/Library/Preferences/@proton/cli-nodejs/proton-cli.json"
+
+# testnet HOME: under `networks` (secondary), BOTH proton-test and proton
+# entries are required — proton-cli ships both stanzas even though only one
+# is current. Under `endpoints` (primary), no entry is ever REQUIRED to
+# exist (its total absence is the safe default); presence of the key at all
+# is what gets flagged, inside fyp_scan_proton_cli.
+TESTNET_HOME_RESULT="$(fyp_scan_proton_cli "$KEYSTORE_TESTNET" testnet-HOME 1 1)"
+[ -n "$TESTNET_HOME_RESULT" ] && EP_PROBLEMS="${EP_PROBLEMS} ${TESTNET_HOME_RESULT}"
+
+# mainnet HOME: under `networks`, the proton entry is required; a
+# proton-test entry is optional but is checked against the testnet allowlist
+# if present.
+MAINNET_HOME_RESULT="$(fyp_scan_proton_cli "$KEYSTORE_MAINNET" mainnet-HOME 0 1)"
+[ -n "$MAINNET_HOME_RESULT" ] && EP_PROBLEMS="${EP_PROBLEMS} ${MAINNET_HOME_RESULT}"
+
+# testnet HOME's currentChain must select the testnet network. mainnet
+# HOME's currentChain is read for the detail line only and is NOT judged
+# here — today's mainnet keystore selection is out of scope for a testnet
+# rehearsal's pre-flight (it is still reported, per the provenance rule).
+TESTNET_CURRENT_CHAIN=""
+[ -r "$TESTNET_CFG_PATH" ] && TESTNET_CURRENT_CHAIN="$(jq -r '.currentChain // empty' "$TESTNET_CFG_PATH" 2>/dev/null)"
+if [ "$TESTNET_CURRENT_CHAIN" != "proton-test" ]; then
+	EP_PROBLEMS="${EP_PROBLEMS} testnet-HOME-currentChain-is-not-proton-test:${TESTNET_CURRENT_CHAIN:-<unobservable>}"
+fi
+MAINNET_CURRENT_CHAIN=""
+[ -r "$MAINNET_CFG_PATH" ] && MAINNET_CURRENT_CHAIN="$(jq -r '.currentChain // empty' "$MAINNET_CFG_PATH" 2>/dev/null)"
+
+# I6 — $KEYSTORE_MAINNET carries no §3.5 pin (unlike $KEYSTORE_TESTNET,
+# enforced above check 1). Reported on every run, PASS or FAIL, rather than
+# silently relying on the general NON-AUTHORITATIVE banner (which covers many
+# unrelated variables and is a label, not a refusal — see the header).
+MAINNET_HOME_PINNED="yes (project default, no override in effect)"
+[ -n "${FYP_KEYSTORE_MAINNET:-}" ] && MAINNET_HOME_PINNED="NO — FYP_KEYSTORE_MAINNET override in effect; this leg does not prove the real mainnet keystore was inspected"
+
+if [ -z "$EP_PROBLEMS" ]; then
+	chk_pass 10 "chain endpoint allowlist: XPR_TESTNET_CHAIN_RPC + XPR_TESTNET_RPC + both keystores' proton-cli.json" \
+		"testnet-HOME: ${TESTNET_CFG_PATH}  (currentChain=${TESTNET_CURRENT_CHAIN})"
+	note "mainnet-HOME: ${MAINNET_CFG_PATH}  (currentChain=${MAINNET_CURRENT_CHAIN}, not judged)"
+	note "mainnet HOME pinned: ${MAINNET_HOME_PINNED}"
+	note "hosts checked — chain RPC:${RPC_HOST}; receipt RPC:${HYPERION_HOST}; testnet-HOME[endpoints?,networks: proton-test,proton]; mainnet-HOME[endpoints?,networks: proton, proton-test if present]"
+else
+	chk_fail 10 3 "chain endpoint allowlist violation — a config or env value points off the fixed allowlist" \
+		"problems:${EP_PROBLEMS}" \
+		"read (testnet HOME): ${TESTNET_CFG_PATH}" \
+		"read (mainnet HOME): ${MAINNET_CFG_PATH}" \
+		"mainnet HOME pinned: ${MAINNET_HOME_PINNED}" \
+		"2026-08-21: PulseVM's XPR 1:1 demo network answers the SAME chain_id as the real" \
+		"XPR testnet on purpose ('same as XPR testnet — the state is the point', upstream's" \
+		"own words) and mirrors on-chain state byte-for-byte, so gate 3's chain_id compare" \
+		"and check 9's anchor-key compare both PASS against it. The host is the only thing" \
+		"it cannot fake into this repo's own config — fix the named host(s) above, never" \
+		"widen the allowlist to make this pass. proton-cli resolves endpoints from the" \
+		"top-level 'endpoints' key, not 'networks' — see this check's header CORRECTION." \
+		"If the problem above is '…-endpoints-override-key-present:<chain(s)>':" \
+		"that machine's proton-cli has a non-empty top-level 'endpoints' override in effect" \
+		"for the chain(s) named after the colon (from a prior 'proton endpoint:set'). The" \
+		"remedy is 'proton endpoint:default', but it clears ONLY the CURRENTLY SELECTED" \
+		"chain's stanza (verified: resetEndpoint() filters by this.chain) — running it while" \
+		"on the wrong chain prints \"Success: Endpoints restored to default\" and changes" \
+		"nothing, leaving this exact red. Run PER NAMED CHAIN, in a separate terminal:" \
+		"  HOME=~/.metal-fy-proton-test proton chain:set <named-chain>" \
+		"  HOME=~/.metal-fy-proton-test proton endpoint:default" \
+		"then, if <named-chain> was not proton-test, switch back — this keystore's" \
+		"currentChain must stay proton-test:" \
+		"  HOME=~/.metal-fy-proton-test proton chain:set proton-test" \
+		"(mainnet-keystore equivalent, HOME=~/.metal-fy-proton, if that leg names a chain)." \
+		"Do NOT hand-edit the config file to fix this." \
+		"testnet allowlist: ${TESTNET_HOST_ALLOWLIST}" \
+		"mainnet allowlist: ${MAINNET_HOST_ALLOWLIST}"
 fi
 
 # ===========================================================================
