@@ -453,7 +453,12 @@ trap 'rm -rf "$WORK"' EXIT
 # NON-AUTHORITATIVE. A finer rule ("only the ones that redirect a public
 # feed") would need a judgement call per variable, and the variable that
 # redirects the transport is the one that hides the most.
-FYP_OVERRIDE_VARS="FYP_LEDGER_URL FYP_ANCHOR_SOURCE_URL FYP_ANCHOR_HISTORY_URL FYP_VALIDATOR_URL XPR_TESTNET_CHAIN_RPC FYP_CURL FYP_REHEARSAL_CFG FYP_MAINNET_CFG FYP_IDENTITY_KEY FYP_KEYSTORE_TESTNET FYP_KEYSTORE_MAINNET"
+# XPR_TESTNET_RPC (M7, 2026-08-21): documented above as an override and read
+# by check 10, but omitted from this list on first add — a run with only
+# that variable set was not labelled NON-AUTHORITATIVE, contradicting this
+# section's own "ANY override" rule. No test caught it because every case in
+# the suite already sets several other overrides at once.
+FYP_OVERRIDE_VARS="FYP_LEDGER_URL FYP_ANCHOR_SOURCE_URL FYP_ANCHOR_HISTORY_URL FYP_VALIDATOR_URL XPR_TESTNET_CHAIN_RPC XPR_TESTNET_RPC FYP_CURL FYP_REHEARSAL_CFG FYP_MAINNET_CFG FYP_IDENTITY_KEY FYP_KEYSTORE_TESTNET FYP_KEYSTORE_MAINNET"
 OVERRIDES=""
 for v in $FYP_OVERRIDE_VARS; do
 	[ -n "${!v-}" ] && OVERRIDES="${OVERRIDES} ${v}"
@@ -1088,15 +1093,28 @@ MAINNET_HOST_ALLOWLIST="rpc.api.mainnet.metalx.com proton.cryptolions.io proton.
 #      network answering with the SAME chain_id) makes that gap load-
 #      bearing: a plain-http allowlisted-looking URL hands an on-path device
 #      the same free pass.
-#   3. strip userinfo BEFORE the port, by removing the LONGEST prefix ending
-#      in '@': `${v##*@}`. The original bug stripped at the FIRST colon,
-#      so `real-host:443@clone-host` extracted "real-host" — an attacker
-#      need only prepend `<allowlisted-host>:<anything>@` to any clone URL.
-#      If '@' still remains after that (should be structurally impossible,
-#      kept as a backstop), reject rather than compare a string that still
-#      contains it.
-#   4. strip path, query, then port.
-#   5. strip exactly ONE trailing dot (DNS FQDN root-label form: `host.` and
+#   3. ISOLATE THE AUTHORITY COMPONENT FIRST: strip everything from the
+#      first '/', '?' or '#' onward, whichever comes earliest — i.e. drop
+#      path, query and fragment BEFORE touching userinfo. A prior revision
+#      stripped userinfo first, so a path/query/fragment containing its own
+#      '@' hijacked extraction: `https://<clone>/@<allowlisted-host>` has no
+#      userinfo at all (the '@' is inside the PATH), but stripping at the
+#      last '@' in the WHOLE value read off "<allowlisted-host>" as if it
+#      were the authority, when curl (and any WHATWG-compliant client)
+#      connects to <clone> — the part before the first '/'. Confirmed via a
+#      same-day repro: PASS against the live script, with the provenance
+#      line naming the wrong host, on both the env-var and networks[] paths.
+#   4. NOW strip userinfo from the isolated authority, by removing the
+#      LONGEST prefix ending in '@': `${v##*@}`. This must run AFTER step 3,
+#      not before — reordering these two was the entire fix. Within the
+#      authority component alone this still correctly resolves
+#      `a@b@c` to `c` (host is after the LAST '@', matching a WHATWG URL
+#      parser), which step 3 does not disturb since by then there is no '/'
+#      left to find. If '@' still remains after this step (should be
+#      structurally impossible now, kept as a backstop), reject rather than
+#      compare a string that still contains it.
+#   5. strip the port.
+#   6. strip exactly ONE trailing dot (DNS FQDN root-label form: `host.` and
 #      `host` name the identical host, so refusing to normalize it would be
 #      a false-positive red for a legitimately dot-terminated value — the
 #      other half of M1).
@@ -1107,12 +1125,11 @@ fyp_host_of() {
 		https://*) v="${v#https://}" ;;
 		*) printf ''; return 1 ;;
 	esac
+	v="${v%%[/?#]*}"
 	v="${v##*@}"
 	case "$v" in
 		*@*) printf ''; return 1 ;;
 	esac
-	v="${v%%/*}"
-	v="${v%%\?*}"
 	v="${v%%:*}"
 	v="${v%.}"
 	printf '%s' "$v"
@@ -1202,9 +1219,20 @@ fyp_scan_proton_cli() {
 	fi
 
 	# PRIMARY authority — see the header's CORRECTION section. Presence
-	# alone is flagged, regardless of content.
+	# alone is flagged, regardless of content — EXCEPT an empty array, which
+	# is what `proton endpoint:default` actually leaves behind. Verified
+	# against the installed package: `resetEndpoint()` in
+	# lib/storage/networks.js calls `config.set('endpoints', filtered)` —
+	# it SETS the key to `[]` (or to whatever stanzas remain for OTHER
+	# chains), it never DELETES it. Treating any non-null value as "present"
+	# made a machine that had been reset to safe defaults report an
+	# unclearable red with no host to name and no way to satisfy it short of
+	# hand-editing the config — worse than the thing this check defends
+	# against. `null` and `[]` are both the safe/default state; a non-empty
+	# array is the only state that means `endpoint:set` (or an equivalent
+	# hand-edit) actually changed something.
 	local ep_present
-	ep_present="$(jq -r 'if .endpoints == null then "absent" else "present" end' "$out" 2>/dev/null)"
+	ep_present="$(jq -r 'if (.endpoints == null) or (.endpoints == []) then "absent" else "present" end' "$out" 2>/dev/null)"
 	if [ "$ep_present" = "present" ]; then
 		problems="${problems} ${label}-endpoints-override-key-present"
 		problems="${problems}$(fyp_scan_chain_key "$out" endpoints proton-test "$TESTNET_HOST_ALLOWLIST" "$label" testnet 0)"
@@ -1292,6 +1320,12 @@ else
 		"it cannot fake into this repo's own config — fix the named host(s) above, never" \
 		"widen the allowlist to make this pass. proton-cli resolves endpoints from the" \
 		"top-level 'endpoints' key, not 'networks' — see this check's header CORRECTION." \
+		"If the problem above is '…-endpoints-override-key-present' with NO host named:" \
+		"that machine's proton-cli has a non-empty top-level 'endpoints' override in effect" \
+		"(from a prior 'proton endpoint:set'). The clean remedy is" \
+		"  HOME=~/.metal-fy-proton-test proton endpoint:default" \
+		"(and the mainnet-keystore equivalent if that leg names it), which restores the" \
+		"safe built-in defaults — do NOT hand-edit the config file to fix this." \
 		"testnet allowlist: ${TESTNET_HOST_ALLOWLIST}" \
 		"mainnet allowlist: ${MAINNET_HOST_ALLOWLIST}"
 fi

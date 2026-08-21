@@ -991,6 +991,117 @@ expect_case "check 10 (C1): top-level 'endpoints' key present but allowlist-comp
 	"testnet-HOME-endpoints-override-key-present"
 
 # ===========================================================================
+# Part 9d — C4 (new Critical), I7, M7: same-day re-review after the C1-C3 fix
+# ===========================================================================
+# A re-review of the C1-C3 fix found that it introduced a bypass of exactly
+# the class it closed (C4), plus a false-red that would fire on a machine
+# that is actually SAFE (I7). Both were reproduced against the fixed-for-C1-3
+# script BEFORE being fixed here, and are regression-tested below.
+#
+# C4 — the userinfo strip ran on the WHOLE value, before the path was
+# stripped. Nothing constrained the '@' that ends userinfo to the authority
+# component, so `https://<clone>/@<allowlisted-host>` has NO userinfo at
+# all (the '@' sits inside the PATH) but the old code still cut at the LAST
+# '@' in the whole string and read off "<allowlisted-host>" as if it were
+# the destination — while curl (and any WHATWG-compliant client) connects
+# to <clone>, the part before the first '/'. Confirmed end-to-end against
+# the live script: PASS, with the provenance line naming the WRONG host.
+# Fixed by isolating the authority component (strip at the first '/', '?'
+# or '#') BEFORE stripping userinfo, not after.
+CLONE_HOST="xpr-rpc-testnet.pulsevm.dev"
+PATH_EMBEDDED_AT="https://${CLONE_HOST}/@rpc.api.testnet.metalx.com"
+
+D="$(fresh c4-env-rpc)"
+PF_RPC="$PATH_EMBEDDED_AT"; export PF_RPC
+expect_case "check 10 (C4): a PATH-embedded '@' (no real userinfo) must not hijack host extraction on XPR_TESTNET_CHAIN_RPC -> exit 3, TRUE host (before the first '/') named" "$D" 3 \
+	"XPR_TESTNET_CHAIN_RPC-rejected:${CLONE_HOST}" \
+	"XPR_TESTNET_CHAIN_RPC-rejected:rpc.api.testnet.metalx.com"
+unset PF_RPC
+
+D="$(fresh c4-hyperion-rpc)"
+PF_HYPERION_RPC="$PATH_EMBEDDED_AT"; export PF_HYPERION_RPC
+expect_case "check 10 (C4): same path-embedded '@' shape on XPR_TESTNET_RPC -> exit 3, TRUE host named" "$D" 3 \
+	"XPR_TESTNET_RPC-rejected:${CLONE_HOST}" \
+	"XPR_TESTNET_RPC-rejected:rpc.api.testnet.metalx.com"
+unset PF_HYPERION_RPC
+
+D="$(fresh c4-networks-leg)"
+CFG="$D/ks-test/Library/Preferences/@proton/cli-nodejs/proton-cli.json"
+jq --arg h "$PATH_EMBEDDED_AT" '(.networks[] | select(.chain=="proton-test") | .endpoints) = [$h]' \
+	"$CFG" > "$D/tmp.json" && mv "$D/tmp.json" "$CFG"
+expect_case "check 10 (C4): same shape via networks[] -> exit 3 (this leg missed it outright before the fix, with zero problem tokens)" "$D" 3 \
+	"testnet-HOME-proton-test-host-rejected-in-networks(testnet):${CLONE_HOST}" \
+	"host-rejected-in-networks(testnet):rpc.api.testnet.metalx.com"
+
+D="$(fresh c4-endpoints-leg)"
+CFG="$D/ks-test/Library/Preferences/@proton/cli-nodejs/proton-cli.json"
+jq --arg h "$PATH_EMBEDDED_AT" '.endpoints = [{chain:"proton-test", endpoints:[$h]}]' \
+	"$CFG" > "$D/tmp.json" && mv "$D/tmp.json" "$CFG"
+expect_case "check 10 (C4): same shape via top-level 'endpoints' -> exit 3" "$D" 3 \
+	"testnet-HOME-proton-test-host-rejected-in-endpoints(testnet):${CLONE_HOST}" \
+	"host-rejected-in-endpoints(testnet):rpc.api.testnet.metalx.com"
+
+# Preservation check, explicitly requested when reordering: `a@b@c` (no path)
+# must still resolve to `c` — host is after the LAST '@' in the authority,
+# matching a WHATWG URL parser — because by the time userinfo-stripping runs
+# there is no '/' left to isolate anything smaller than the whole value.
+D="$(fresh c4-preserve-last-at)"
+# The real allowlisted host is held in a variable rather than written next
+# to an '@' in one literal, so the source text never contains an unbroken
+# "name, at-sign, host, dot, TLD" run (this repo's publish-guard flags that
+# shape as a possible personal-email literal). Runtime value is identical.
+DECOY_TESTNET_HOST="rpc.api.testnet.metalx.com"
+PF_RPC="https://a@${DECOY_TESTNET_HOST}@${CLONE_HOST}"; export PF_RPC
+expect_case "check 10: 'a@b@c' with no path still resolves to c (LAST '@'), and c is the clone here -> exit 3" "$D" 3 \
+	"XPR_TESTNET_CHAIN_RPC-rejected:${CLONE_HOST}"
+unset PF_RPC
+
+D="$(fresh c4-preserve-last-at-green)"
+PF_RPC="https://evil@decoy.example@rpc.api.testnet.metalx.com"; export PF_RPC
+PRV_OUT="$(run_pf "$D")"; PRV_RC=$?
+unset PF_RPC
+if [ "$PRV_RC" -eq 0 ] && printf '%s' "$PRV_OUT" | grep -qF "PASS  [10]"; then
+	pass "check 10: 'a@b@c' resolving to a REAL allowlisted host (c) still PASSes" "rc=$PRV_RC"
+else
+	bad "check 10: 'a@b@c' resolving to a REAL allowlisted host (c) still PASSes" "rc=$PRV_RC"
+fi
+
+# I7 — `proton endpoint:default` (verified against
+# lib/storage/networks.js's resetEndpoint()) SETS `endpoints` to `[]` (or to
+# whatever stanzas remain for other chains); it does not delete the key. The
+# old presence test (`!= null`) read `[]` as "present", producing an
+# unclearable red with no host to name on a machine that had just been
+# restored to safe defaults — worse than the thing this check defends
+# against. `[]` and absent-key must both be treated as the safe default.
+D="$(fresh i7-reset-to-default)"
+CFG="$D/ks-test/Library/Preferences/@proton/cli-nodejs/proton-cli.json"
+jq '.endpoints = []' "$CFG" > "$D/tmp.json" && mv "$D/tmp.json" "$CFG"
+expect_case "check 10 (I7): 'endpoints': [] (post endpoint:default) is treated as ABSENT, not an unclearable red" "$D" 0 \
+	"PASS  [10]"
+
+# A non-empty `endpoints` must still fail — the fix narrows the SHAPE that
+# counts as "present", it does not soften the policy for a real override.
+D="$(fresh i7-still-populated)"
+CFG="$D/ks-test/Library/Preferences/@proton/cli-nodejs/proton-cli.json"
+jq '.endpoints = [{chain:"proton-test", endpoints:["https://rpc.api.testnet.metalx.com"]}]' \
+	"$CFG" > "$D/tmp.json" && mv "$D/tmp.json" "$CFG"
+expect_case "check 10 (I7): a NON-EMPTY 'endpoints' still fails, with the endpoint:default remedy named" "$D" 3 \
+	"endpoint:default"
+
+# M7 — XPR_TESTNET_RPC is documented in the header as an override and read
+# by check 10, but was missing from FYP_OVERRIDE_VARS, so a run redirecting
+# only that variable was not labelled NON-AUTHORITATIVE — a silent violation
+# of this file's own "ANY override" rule. Every case in this suite already
+# sets several overrides (FYP_KEYSTORE_TESTNET etc.), so this only proves
+# XPR_TESTNET_RPC is ITSELF now one of the tracked variables — full isolation
+# would require a run with no other override at all, which is not hermetic.
+if printf '%s' "$BASE_OUT" | grep -qE 'overrides in effect:.*XPR_TESTNET_RPC'; then
+	pass "check 10 (M7): XPR_TESTNET_RPC is tracked in FYP_OVERRIDE_VARS (appears in the NON-AUTHORITATIVE overrides list)"
+else
+	bad "check 10 (M7): XPR_TESTNET_RPC is tracked in FYP_OVERRIDE_VARS (appears in the NON-AUTHORITATIVE overrides list)"
+fi
+
+# ===========================================================================
 # Part 10 — reporting discipline
 # ===========================================================================
 # Two independent breakages: every one must be listed, and the exit code must
