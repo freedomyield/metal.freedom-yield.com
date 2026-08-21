@@ -249,6 +249,7 @@ run_pf() {
 		FYP_ANCHOR_HISTORY_URL="${PF_HISTORY:-$d/anchor-history.jsonl}" \
 		FYP_VALIDATOR_URL="${PF_VALIDATOR:-$d/validator.json}" \
 		XPR_TESTNET_CHAIN_RPC="${PF_RPC:-https://rpc.api.testnet.metalx.com}" \
+		XPR_TESTNET_RPC="${PF_HYPERION_RPC:-https://test.proton.eosusa.io}" \
 		FYP_CURL="${STUB}/curl-stub" \
 		FYP_TEST_ACCOUNT_JSON="${PF_ACCOUNT:-$d/account.json}" \
 		FYP_TEST_PROTON_KEYS="${PF_KEYS:-$d/keys.txt}" \
@@ -851,25 +852,96 @@ fi
 # 2026-08-21: a clone network started answering the SAME chain_id as the
 # real XPR testnet, on purpose, and mirrors its state byte-for-byte — so
 # neither PRIME DIRECTIVE gate 3's chain_id compare nor check 9's on-chain
-# key compare can tell the two apart. The endpoint host is what is left, so
-# these cases exercise both places a host is read (XPR_TESTNET_CHAIN_RPC,
-# and both project keystores' proton-cli.json) and the exact-match discipline
-# (a suffix-spoofed host must not slip through as if it equalled the real one).
+# key compare can tell the two apart. The endpoint host is what is left.
+#
+# A same-day independent review found three Critical bypasses in the first
+# cut of check 10, all reproduced below as regression cases BEFORE being
+# fixed in scripts/install-rehearsal-preflight.sh, then confirmed to flip
+# from FAIL to a false PASS when the corresponding fix is removed (see the
+# "intentional destruction" cases at the end of this part) — a case that
+# cannot be shown to fail is not evidence of anything:
+#   C1 proton-cli resolves the active endpoint from the TOP-LEVEL `endpoints`
+#      key at runtime, not `networks` (verified against the installed
+#      package's lib/storage/networks.js). The first cut read only
+#      `networks`, so `proton endpoint:set <clone>` — no passphrase, no
+#      unlock, just a write to a world-writable file — was invisible to it.
+#   C2 `fyp_host_of` stripped the port at the FIRST colon, so a userinfo
+#      prefix shaped like an allowlisted host
+#      (`https://rpc.api.testnet.metalx.com:443@<clone>`) extracted the FAKE
+#      host and reported it as "checked", actively misleading the operator.
+#   C3 the chain-stanza lookup indexed `[0]`, so a clone in a SECOND stanza
+#      for the same chain (which is exactly the shape
+#      proton-cli's own overrideEndpoint() builds) was never inspected.
 CLONE_HOST="xpr-rpc-testnet.pulsevm.dev"
 CLONE_RPC="https://${CLONE_HOST}"
 
+# --- exposure path 1: XPR_TESTNET_CHAIN_RPC, direct -------------------------
 D="$(fresh ep-rpc-clone)"
 PF_RPC="$CLONE_RPC"; export PF_RPC
-expect_case "check 10: XPR_TESTNET_CHAIN_RPC pointed at the clone host -> exit 3, host named" "$D" 3 \
-	"$CLONE_HOST"
+expect_case "check 10: XPR_TESTNET_CHAIN_RPC pointed at the clone host -> exit 3, FULL token named (not merely a substring the banner would also contain)" "$D" 3 \
+	"XPR_TESTNET_CHAIN_RPC-rejected:${CLONE_HOST}"
 unset PF_RPC
 
+# --- C2 regression: userinfo bypass (the most important case here — this is
+# the exact shape the review demonstrated end-to-end against the live curl
+# transport) ------------------------------------------------------------
+D="$(fresh ep-rpc-userinfo-bypass)"
+PF_RPC="https://rpc.api.testnet.metalx.com:443@${CLONE_HOST}"; export PF_RPC
+expect_case "check 10 (C2): userinfo shaped like an allowlisted host must not defeat extraction -> exit 3, TRUE destination host named, not the userinfo decoy" "$D" 3 \
+	"XPR_TESTNET_CHAIN_RPC-rejected:${CLONE_HOST}" \
+	"XPR_TESTNET_CHAIN_RPC-rejected:rpc.api.testnet.metalx.com"
+unset PF_RPC
+
+# --- I2: the second env-var exposure path (run-testnet-rehearsal.sh's
+# receipt-verification RPC) --------------------------------------------------
+D="$(fresh ep-hyperion-clone)"
+PF_HYPERION_RPC="$CLONE_RPC"; export PF_HYPERION_RPC
+expect_case "check 10 (I2): XPR_TESTNET_RPC (receipt-verification RPC) pointed at the clone -> exit 3" "$D" 3 \
+	"XPR_TESTNET_RPC-rejected:${CLONE_HOST}"
+unset PF_HYPERION_RPC
+
+# --- I1: plaintext http:// on an otherwise-allowlisted host -----------------
+D="$(fresh ep-rpc-plaintext)"
+PF_RPC="http://rpc.api.testnet.metalx.com"; export PF_RPC
+expect_case "check 10 (I1): http:// (not https://) on an allowlisted host -> exit 3, https required" "$D" 3 \
+	"XPR_TESTNET_CHAIN_RPC-rejected:RAW(http://rpc.api.testnet.metalx.com)"
+unset PF_RPC
+
+# --- M1: uppercase host and a trailing dot must NOT be false-positive reds -
+D="$(fresh ep-rpc-uppercase)"
+PF_RPC="HTTPS://RPC.API.TESTNET.METALX.COM"; export PF_RPC
+UC_OUT="$(run_pf "$D")"; UC_RC=$?
+unset PF_RPC
+if [ "$UC_RC" -eq 0 ] && printf '%s' "$UC_OUT" | grep -qF "PASS  [10]"; then
+	pass "check 10 (M1): an uppercase-scheme/uppercase-host RPC is NOT a false-positive red" "rc=$UC_RC"
+else
+	bad "check 10 (M1): an uppercase-scheme/uppercase-host RPC is NOT a false-positive red" "rc=$UC_RC"
+fi
+
+D="$(fresh ep-rpc-trailing-dot)"
+PF_RPC="https://rpc.api.testnet.metalx.com."; export PF_RPC
+TD_OUT="$(run_pf "$D")"; TD_RC=$?
+unset PF_RPC
+if [ "$TD_RC" -eq 0 ] && printf '%s' "$TD_OUT" | grep -qF "PASS  [10]"; then
+	pass "check 10 (M1): a trailing-dot (FQDN root-label) RPC is NOT a false-positive red" "rc=$TD_RC"
+else
+	bad "check 10 (M1): a trailing-dot (FQDN root-label) RPC is NOT a false-positive red" "rc=$TD_RC"
+fi
+
+# --- exposure path 3: proton-cli.json — `networks` (secondary/insurance) ---
 D="$(fresh ep-ks-test-clone)"
 CFG="$D/ks-test/Library/Preferences/@proton/cli-nodejs/proton-cli.json"
 jq --arg h "$CLONE_RPC" '(.networks[] | select(.chain=="proton-test") | .endpoints) += [$h]' \
 	"$CFG" > "$D/tmp.json" && mv "$D/tmp.json" "$CFG"
-expect_case "check 10: ks-test proton-test endpoints include the clone host -> exit 3" "$D" 3 \
-	"testnet-HOME-proton-test-host-not-allowlisted(testnet):${CLONE_HOST}"
+expect_case "check 10: ks-test networks[].proton-test.endpoints include the clone host -> exit 3" "$D" 3 \
+	"testnet-HOME-proton-test-host-rejected-in-networks(testnet):${CLONE_HOST}"
+
+D="$(fresh ep-ks-main-clone)"
+CFG="$D/ks-main/Library/Preferences/@proton/cli-nodejs/proton-cli.json"
+jq --arg h "$CLONE_RPC" '(.networks[] | select(.chain=="proton") | .endpoints) += [$h]' \
+	"$CFG" > "$D/tmp.json" && mv "$D/tmp.json" "$CFG"
+expect_case "check 10: ks-main networks[].proton.endpoints include the clone host -> exit 3 (mainnet-side coverage)" "$D" 3 \
+	"mainnet-HOME-proton-host-rejected-in-networks(mainnet):${CLONE_HOST}"
 
 D="$(fresh ep-ks-test-currentchain)"
 CFG="$D/ks-test/Library/Preferences/@proton/cli-nodejs/proton-cli.json"
@@ -886,15 +958,37 @@ D="$(fresh ep-suffix-spoof)"
 CFG="$D/ks-test/Library/Preferences/@proton/cli-nodejs/proton-cli.json"
 jq '(.networks[] | select(.chain=="proton-test") | .endpoints) += ["https://rpc.api.testnet.metalx.com.evil.tld"]' \
 	"$CFG" > "$D/tmp.json" && mv "$D/tmp.json" "$CFG"
-expect_case "check 10: suffix-spoofed host (allowlisted host + evil suffix) -> exit 3, not accepted as a prefix match" "$D" 3 \
-	"rpc.api.testnet.metalx.com.evil.tld"
+expect_case "check 10: suffix-spoofed host (allowlisted host + evil suffix) -> exit 3, not accepted as a prefix/suffix match" "$D" 3 \
+	"testnet-HOME-proton-test-host-rejected-in-networks(testnet):rpc.api.testnet.metalx.com.evil.tld"
 
-D="$(fresh ep-ks-main-clone)"
-CFG="$D/ks-main/Library/Preferences/@proton/cli-nodejs/proton-cli.json"
-jq --arg h "$CLONE_RPC" '(.networks[] | select(.chain=="proton") | .endpoints) += [$h]' \
+# --- C3 regression: duplicate stanza for the same chain, clone in the SECOND
+# one. This is exactly the shape proton-cli's own overrideEndpoint() builds
+# (filter out the current chain's old stanza, then push a new one) — a stale
+# stanza left behind by a hand-edit or an older code path is not implausible.
+D="$(fresh ep-dup-stanza)"
+CFG="$D/ks-test/Library/Preferences/@proton/cli-nodejs/proton-cli.json"
+jq --arg h "$CLONE_RPC" '.networks += [{chain:"proton-test", endpoints:[$h]}]' \
 	"$CFG" > "$D/tmp.json" && mv "$D/tmp.json" "$CFG"
-expect_case "check 10: ks-main proton endpoints include the clone host -> exit 3 (mainnet-side coverage)" "$D" 3 \
-	"mainnet-HOME-proton-host-not-allowlisted(mainnet):${CLONE_HOST}"
+expect_case "check 10 (C3): a SECOND proton-test stanza (not [0]) carries the clone -> exit 3" "$D" 3 \
+	"testnet-HOME-proton-test-host-rejected-in-networks(testnet):${CLONE_HOST}"
+
+# --- exposure path 3: proton-cli.json — `endpoints` (PRIMARY authority, C1) -
+# In this project's default operation this key never exists at all (both
+# real project keystores currently have no `endpoints` key) — so its mere
+# presence is flagged regardless of the hosts it names.
+D="$(fresh ep-endpoints-key-clone)"
+CFG="$D/ks-test/Library/Preferences/@proton/cli-nodejs/proton-cli.json"
+jq --arg h "$CLONE_RPC" '.endpoints = [{chain:"proton-test", endpoints:[$h]}]' \
+	"$CFG" > "$D/tmp.json" && mv "$D/tmp.json" "$CFG"
+expect_case "check 10 (C1): top-level 'endpoints' key present, pointed at the clone -> exit 3, PRIMARY authority checked (not just 'networks')" "$D" 3 \
+	"testnet-HOME-proton-test-host-rejected-in-endpoints(testnet):${CLONE_HOST}"
+
+D="$(fresh ep-endpoints-key-compliant)"
+CFG="$D/ks-test/Library/Preferences/@proton/cli-nodejs/proton-cli.json"
+jq '.endpoints = [{chain:"proton-test", endpoints:["https://rpc.api.testnet.metalx.com"]}]' \
+	"$CFG" > "$D/tmp.json" && mv "$D/tmp.json" "$CFG"
+expect_case "check 10 (C1): top-level 'endpoints' key present but allowlist-compliant -> still exit 3 (mere presence means 'proton endpoint:set' ran at least once, never true in default operation)" "$D" 3 \
+	"testnet-HOME-endpoints-override-key-present"
 
 # ===========================================================================
 # Part 10 — reporting discipline
