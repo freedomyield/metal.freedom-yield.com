@@ -219,7 +219,19 @@ AUDIT_LOG_PRIMARY="${FYD_BROADCAST_AUDIT_LOG:-/var/log/fyd-broadcast-audit.log}"
 _AUDIT_LOG_LOGIN_HOME="$(fyd_login_home || true)"
 AUDIT_LOG_FALLBACK="${_AUDIT_LOG_LOGIN_HOME:-/tmp}/.fyd-broadcast-audit.log"
 
-usage() { sed -n '2,196p' "$0" | sed 's/^# \?//'; }
+# Print the WHOLE header, however long it grows: from line 2 up to the first
+# line that is not a comment. A hardcoded line range silently truncates the
+# moment the header gains a paragraph — and the paragraphs most likely to be
+# added here are incident records (e.g. the "--endpoint=<url> REMOVED"
+# section above), exactly the ones a reader must not lose. This wrapper
+# shipped with a hardcoded '2,168p' that its own --endpoint removal had to
+# bump to '2,196p' by hand; self-terminating removes that failure mode.
+# `sed -E 's/^# ?//'`, not `sed 's/^# \?//'`: `\?` is a GNU extension that
+# BSD sed (the macOS system sed this repo runs under) treats literally, so
+# the comment markers survived and every header line came out still
+# prefixed with `# ` — the exact bug measured 2026-08-17 in
+# scripts/install-rehearsal-preflight.sh and reproduced here on 2026-08-21.
+usage() { sed -n '2,$p' "$0" | sed -n '/^[^#]/q;p' | sed -E 's/^# ?//'; }
 
 # ---- arg parse ----
 for arg in "$@"; do
@@ -229,7 +241,7 @@ for arg in "$@"; do
 		--testnet-tx-id=*)   TESTNET_TX_ID="${arg#*=}" ;;
 		--dry-run-log=*)     DRY_RUN_LOG="${arg#*=}" ;;
 		--operator-token=*)  OPERATOR_TOKEN_FILE="${arg#*=}" ;;
-		--endpoint=*)
+		--endpoint|--endpoint=*|-u|-u=*)
 			# REMOVED 2026-08-21 (see the "--endpoint=<url> REMOVED" usage-header
 			# section above) — this is a NAMED refusal, not the generic
 			# "unknown arg" branch below, so a future reader is TOLD why rather
@@ -239,7 +251,16 @@ for arg in "$@"; do
 			# proved nothing about where the broadcast actually went. There is
 			# no safe way to accept this flag without also making gate 3
 			# verify identity at that same overridden endpoint.
-			echo "ERROR: --endpoint=<url> is refused (removed 2026-08-21, not merely unrecognized)" >&2
+			#
+			# Matches every spelling someone reaching for the flag by muscle
+			# memory could plausibly try: bare --endpoint (no value attached,
+			# distinct from the --endpoint=* form below), --endpoint=<url>
+			# (this wrapper's own former flag), and -u / -u=<url> — proton-cli's
+			# OWN underlying flag for the exact same override (see the "actual
+			# broadcast" section below: PROTON_ARGS never carries -u). Someone
+			# who knows proton's CLI and reaches for -u directly deserves the
+			# SAME explanation, not a generic "unknown arg".
+			echo "ERROR: --endpoint=<url> / -u <url> is refused (removed 2026-08-21, not merely unrecognized)" >&2
 			echo "       reason: gate 3 verifies the chain_id proton-cli resolves from its own" >&2
 			echo "       config; overriding the broadcast destination separately would let the" >&2
 			echo "       push go to a DIFFERENT endpoint than the one gate 3 just verified." >&2

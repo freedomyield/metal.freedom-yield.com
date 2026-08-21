@@ -438,6 +438,53 @@ run_case_grep "arg: --endpoint= alone (no other args) still refuses explicitly" 
 	"is refused (removed 2026-08-21" \
 	--endpoint=https://example.invalid
 
+# Every OTHER spelling someone reaching for the flag by muscle memory could
+# plausibly try must land on the SAME named refusal, not the generic
+# "unknown arg" branch above (M12, 2026-08-21 review round 2): bare
+# --endpoint (no value attached — a distinct case pattern from --endpoint=*
+# above), and -u / -u=<url> — proton-cli's OWN underlying flag for this
+# exact override, which this wrapper's PROTON_ARGS never carries (see the
+# "actual broadcast" section of bin/safe-broadcast). Someone who knows
+# proton's CLI and reaches for -u directly deserves the same explanation.
+run_case_grep "arg: bare --endpoint (no value) still refuses explicitly" 2 \
+	"is refused (removed 2026-08-21" \
+	--endpoint
+run_case_grep "arg: bare -u (proton's own endpoint flag) refuses explicitly" 2 \
+	"is refused (removed 2026-08-21" \
+	-u
+run_case_grep "arg: -u=<url> refuses explicitly" 2 \
+	"is refused (removed 2026-08-21" \
+	-u=https://example.invalid
+
+# ---- --help self-terminating header (M11, 2026-08-21 review round 2) ----
+# bin/safe-broadcast's usage() used to hardcode a line range ('2,168p', then
+# '2,196p' after this branch's own --endpoint removal added header
+# paragraphs) and stripped comment markers with `sed 's/^# \?//'` — `\?` is
+# a GNU extension that BSD sed (the macOS system sed this repo runs under)
+# treats literally, so --help printed every line still prefixed with `# `.
+# Fixed by adopting the same self-terminating pattern already proven in
+# scripts/install-rehearsal-preflight.sh (measured there 2026-08-17):
+# `sed -n '2,$p' | sed -n '/^[^#]/q;p' | sed -E 's/^# ?//'`. Assert BOTH
+# halves: no line starts with a literal `# ` marker, AND the newest header
+# section (the "--endpoint=<url> REMOVED" note this same commit added) is
+# actually present — proving a hardcoded range was not silently
+# reintroduced and re-truncating the header.
+HELP_OUT="$(bash "$WRAPPER" --help 2>&1)"
+if printf '%s\n' "$HELP_OUT" | grep -qE '^# '; then
+	printf 'FAIL  %-70s (found a line still prefixed with "# ")\n' "help: no line retains a literal comment-marker prefix" >&2
+	FAIL=$((FAIL + 1))
+else
+	printf 'PASS  %-70s\n' "help: no line retains a literal comment-marker prefix"
+	PASS=$((PASS + 1))
+fi
+if printf '%s\n' "$HELP_OUT" | grep -qF -- "--endpoint=<url> REMOVED"; then
+	printf 'PASS  %-70s\n' "help: reaches the newest header section (not truncated by a stale hardcoded range)"
+	PASS=$((PASS + 1))
+else
+	printf 'FAIL  %-70s (newest header section missing from --help output)\n' "help: reaches the newest header section" >&2
+	FAIL=$((FAIL + 1))
+fi
+
 # ---- gate 2 (token) failure paths (exit 3) ----
 rm -f "$TEST_TOKEN"
 run_case "gate 2: testnet, token missing" 3 --tx="$TEST_TX_VALID" --chain=testnet-a --non-interactive
