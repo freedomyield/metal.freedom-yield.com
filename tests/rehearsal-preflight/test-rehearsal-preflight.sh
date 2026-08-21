@@ -151,6 +151,31 @@ make_fixture() { # <dir>
 	local d="$1" i
 	mkdir -p "$d/ks-test" "$d/ks-main" "$d/rehearsal-config" "$d/mainnet-config"
 
+	# proton-cli.json under BOTH project keystore HOMEs. Check 10 reads
+	# ONLY currentChain + networks[].endpoints from here (never privateKeys,
+	# which is deliberately omitted below — no need to resemble the real
+	# file beyond what is read). This is a SPECIMEN of a config that PASSES
+	# the fixed host allowlist, not a bypass of it: every endpoint below is
+	# a real allowlisted host. See check 10's own comment in
+	# scripts/install-rehearsal-preflight.sh for why — on 2026-08-21 a clone
+	# network started answering the real XPR testnet's chain_id on purpose,
+	# which defeats both the chain_id compare (PRIME DIRECTIVE gate 3) and
+	# check 9's on-chain key compare; the endpoint host is the one thing a
+	# byte-identical clone cannot fake into this repo's or proton-cli's own
+	# config, so this allowlist must never be softened for a fixture's
+	# convenience.
+	for ks in ks-test ks-main; do
+		mkdir -p "$d/$ks/Library/Preferences/@proton/cli-nodejs"
+	done
+	jq -nc '{currentChain:"proton-test", networks:[
+		{chain:"proton-test", endpoints:["https://rpc.api.testnet.metalx.com","https://proton-testnet.eoscafeblock.com","https://test.proton.eosusa.io"]},
+		{chain:"proton", endpoints:["https://rpc.api.mainnet.metalx.com","https://proton.cryptolions.io","https://proton.eosusa.io"]}
+	]}' > "$d/ks-test/Library/Preferences/@proton/cli-nodejs/proton-cli.json"
+	jq -nc '{currentChain:"proton", networks:[
+		{chain:"proton-test", endpoints:["https://rpc.api.testnet.metalx.com","https://proton-testnet.eoscafeblock.com","https://test.proton.eosusa.io"]},
+		{chain:"proton", endpoints:["https://rpc.api.mainnet.metalx.com","https://proton.cryptolions.io","https://proton.eosusa.io"]}
+	]}' > "$d/ks-main/Library/Preferences/@proton/cli-nodejs/proton-cli.json"
+
 	printf 'testactor11\n' > "$d/rehearsal-config/xpr-account"
 	printf 'testsink111\n' > "$d/rehearsal-config/anchor-sink"
 	printf 'proton-test\n' > "$d/rehearsal-config/xpr-chain"
@@ -223,6 +248,7 @@ run_pf() {
 		FYP_ANCHOR_SOURCE_URL="${PF_PUB_SRC:-$d/published-anchor-source.json}" \
 		FYP_ANCHOR_HISTORY_URL="${PF_HISTORY:-$d/anchor-history.jsonl}" \
 		FYP_VALIDATOR_URL="${PF_VALIDATOR:-$d/validator.json}" \
+		XPR_TESTNET_CHAIN_RPC="${PF_RPC:-https://rpc.api.testnet.metalx.com}" \
 		FYP_CURL="${STUB}/curl-stub" \
 		FYP_TEST_ACCOUNT_JSON="${PF_ACCOUNT:-$d/account.json}" \
 		FYP_TEST_PROTON_KEYS="${PF_KEYS:-$d/keys.txt}" \
@@ -258,11 +284,11 @@ expect_case() {
 BASE_OUT="$(run_pf "$GOOD")"; BASE_RC=$?
 if [ "$BASE_RC" -eq 0 ] \
    && printf '%s' "$BASE_OUT" | grep -qF "VERDICT: PRE-FLIGHT GREEN" \
-   && [ "$(printf '%s' "$BASE_OUT" | grep -c '^  PASS  \[')" -eq 9 ] \
+   && [ "$(printf '%s' "$BASE_OUT" | grep -c '^  PASS  \[')" -eq 10 ] \
    && ! printf '%s' "$BASE_OUT" | grep -q '^  FAIL  \['; then
-	pass "baseline: all nine checks PASS on a good fixture" "rc=$BASE_RC"
+	pass "baseline: all ten checks PASS on a good fixture" "rc=$BASE_RC"
 else
-	bad "baseline: all nine checks PASS on a good fixture" \
+	bad "baseline: all ten checks PASS on a good fixture" \
 		"rc=$BASE_RC passes=$(printf '%s' "$BASE_OUT" | grep -c '^  PASS  \[') $(printf '%s' "$BASE_OUT" | grep '^  FAIL' | tr '\n' ' ')"
 fi
 
@@ -818,6 +844,57 @@ if printf '%s' "$BASE_OUT" | grep -qF "matches the current on-chain key"; then
 else
 	bad "check 9: EOS-format chain key matched against a PUB_K1_-format keystore entry"
 fi
+
+# ===========================================================================
+# Part 9b — check 10 (chain endpoint allowlist / clone-network defense)
+# ===========================================================================
+# 2026-08-21: a clone network started answering the SAME chain_id as the
+# real XPR testnet, on purpose, and mirrors its state byte-for-byte — so
+# neither PRIME DIRECTIVE gate 3's chain_id compare nor check 9's on-chain
+# key compare can tell the two apart. The endpoint host is what is left, so
+# these cases exercise both places a host is read (XPR_TESTNET_CHAIN_RPC,
+# and both project keystores' proton-cli.json) and the exact-match discipline
+# (a suffix-spoofed host must not slip through as if it equalled the real one).
+CLONE_HOST="xpr-rpc-testnet.pulsevm.dev"
+CLONE_RPC="https://${CLONE_HOST}"
+
+D="$(fresh ep-rpc-clone)"
+PF_RPC="$CLONE_RPC"; export PF_RPC
+expect_case "check 10: XPR_TESTNET_CHAIN_RPC pointed at the clone host -> exit 3, host named" "$D" 3 \
+	"$CLONE_HOST"
+unset PF_RPC
+
+D="$(fresh ep-ks-test-clone)"
+CFG="$D/ks-test/Library/Preferences/@proton/cli-nodejs/proton-cli.json"
+jq --arg h "$CLONE_RPC" '(.networks[] | select(.chain=="proton-test") | .endpoints) += [$h]' \
+	"$CFG" > "$D/tmp.json" && mv "$D/tmp.json" "$CFG"
+expect_case "check 10: ks-test proton-test endpoints include the clone host -> exit 3" "$D" 3 \
+	"testnet-HOME-proton-test-host-not-allowlisted(testnet):${CLONE_HOST}"
+
+D="$(fresh ep-ks-test-currentchain)"
+CFG="$D/ks-test/Library/Preferences/@proton/cli-nodejs/proton-cli.json"
+jq '.currentChain = "proton"' "$CFG" > "$D/tmp.json" && mv "$D/tmp.json" "$CFG"
+expect_case "check 10: ks-test currentChain is not proton-test -> exit 3" "$D" 3 \
+	"testnet-HOME-currentChain-is-not-proton-test:proton"
+
+D="$(fresh ep-ks-test-cfg-gone)"
+rm -f "$D/ks-test/Library/Preferences/@proton/cli-nodejs/proton-cli.json"
+expect_case "check 10: ks-test proton-cli.json missing -> exit 3, fail-closed (never falls to PASS)" "$D" 3 \
+	"unreadable:testnet-HOME:"
+
+D="$(fresh ep-suffix-spoof)"
+CFG="$D/ks-test/Library/Preferences/@proton/cli-nodejs/proton-cli.json"
+jq '(.networks[] | select(.chain=="proton-test") | .endpoints) += ["https://rpc.api.testnet.metalx.com.evil.tld"]' \
+	"$CFG" > "$D/tmp.json" && mv "$D/tmp.json" "$CFG"
+expect_case "check 10: suffix-spoofed host (allowlisted host + evil suffix) -> exit 3, not accepted as a prefix match" "$D" 3 \
+	"rpc.api.testnet.metalx.com.evil.tld"
+
+D="$(fresh ep-ks-main-clone)"
+CFG="$D/ks-main/Library/Preferences/@proton/cli-nodejs/proton-cli.json"
+jq --arg h "$CLONE_RPC" '(.networks[] | select(.chain=="proton") | .endpoints) += [$h]' \
+	"$CFG" > "$D/tmp.json" && mv "$D/tmp.json" "$CFG"
+expect_case "check 10: ks-main proton endpoints include the clone host -> exit 3 (mainnet-side coverage)" "$D" 3 \
+	"mainnet-HOME-proton-host-not-allowlisted(mainnet):${CLONE_HOST}"
 
 # ===========================================================================
 # Part 10 — reporting discipline
