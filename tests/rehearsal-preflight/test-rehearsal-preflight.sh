@@ -988,7 +988,7 @@ CFG="$D/ks-test/Library/Preferences/@proton/cli-nodejs/proton-cli.json"
 jq '.endpoints = [{chain:"proton-test", endpoints:["https://rpc.api.testnet.metalx.com"]}]' \
 	"$CFG" > "$D/tmp.json" && mv "$D/tmp.json" "$CFG"
 expect_case "check 10 (C1): top-level 'endpoints' key present but allowlist-compliant -> still exit 3 (mere presence means 'proton endpoint:set' ran at least once, never true in default operation)" "$D" 3 \
-	"testnet-HOME-endpoints-override-key-present"
+	"testnet-HOME-endpoints-override-key-present:proton-test"
 
 # ===========================================================================
 # Part 9d — C4 (new Critical), I7, M7: same-day re-review after the C1-C3 fix
@@ -1100,6 +1100,38 @@ if printf '%s' "$BASE_OUT" | grep -qE 'overrides in effect:.*XPR_TESTNET_RPC'; t
 else
 	bad "check 10 (M7): XPR_TESTNET_RPC is tracked in FYP_OVERRIDE_VARS (appears in the NON-AUTHORITATIVE overrides list)"
 fi
+
+# ===========================================================================
+# Part 9e — I9, I10: second re-review, same day
+# ===========================================================================
+# I9 — for a WHATWG "special" scheme (https is one), the authority component
+# terminates at '/', '?', '#' OR '\' (backslash normalizes to '/'). The fix
+# for C4 covered only three of the four. The env-var legs are curl-consumed
+# and curl already agrees with this extractor on backslash handling, and the
+# `endpoints` leg is caught by the presence flag regardless of host — so the
+# `networks[]` leg (kept only as insurance against proton-cli changing which
+# key it reads) is the one with no coverage, and the one exercised here.
+D="$(fresh i9-backslash-networks)"
+CFG="$D/ks-test/Library/Preferences/@proton/cli-nodejs/proton-cli.json"
+jq --arg h "https://${CLONE_HOST}\\@rpc.api.testnet.metalx.com" \
+	'(.networks[] | select(.chain=="proton-test") | .endpoints) = [$h]' \
+	"$CFG" > "$D/tmp.json" && mv "$D/tmp.json" "$CFG"
+expect_case "check 10 (I9): backslash as a 4th authority terminator via networks[] -> exit 3, TRUE host (before the backslash) named, not the string after it" "$D" 3 \
+	"testnet-HOME-proton-test-host-rejected-in-networks(testnet):${CLONE_HOST}" \
+	"host-rejected-in-networks(testnet):rpc.api.testnet.metalx.com"
+
+# I10 — `proton endpoint:default` (resetEndpoint()) filters out ONLY the
+# CURRENTLY SELECTED chain's stanza. A populated `endpoints` stanza for a
+# DIFFERENT chain than currentChain survives it untouched: the operator runs
+# the remedy, proton prints success, and this stays red with no chain named
+# to explain why — the I7 dead-end again, displaced by one chain. Fixed by
+# naming the chain(s) actually carrying a stanza in the problem token.
+D="$(fresh i10-noncurrent-chain)"
+CFG="$D/ks-test/Library/Preferences/@proton/cli-nodejs/proton-cli.json"
+jq '.endpoints = [{chain:"proton", endpoints:["https://rpc.api.mainnet.metalx.com"]}]' \
+	"$CFG" > "$D/tmp.json" && mv "$D/tmp.json" "$CFG"
+expect_case "check 10 (I10): a populated 'endpoints' stanza for a chain OTHER than currentChain (proton, while currentChain=proton-test) -> exit 3, that chain named so a per-chain 'endpoint:default' targets the right one" "$D" 3 \
+	"testnet-HOME-endpoints-override-key-present:proton"
 
 # ===========================================================================
 # Part 10 — reporting discipline

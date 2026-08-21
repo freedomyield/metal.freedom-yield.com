@@ -1094,16 +1094,28 @@ MAINNET_HOST_ALLOWLIST="rpc.api.mainnet.metalx.com proton.cryptolions.io proton.
 #      bearing: a plain-http allowlisted-looking URL hands an on-path device
 #      the same free pass.
 #   3. ISOLATE THE AUTHORITY COMPONENT FIRST: strip everything from the
-#      first '/', '?' or '#' onward, whichever comes earliest — i.e. drop
-#      path, query and fragment BEFORE touching userinfo. A prior revision
-#      stripped userinfo first, so a path/query/fragment containing its own
-#      '@' hijacked extraction: `https://<clone>/@<allowlisted-host>` has no
-#      userinfo at all (the '@' is inside the PATH), but stripping at the
-#      last '@' in the WHOLE value read off "<allowlisted-host>" as if it
-#      were the authority, when curl (and any WHATWG-compliant client)
-#      connects to <clone> — the part before the first '/'. Confirmed via a
-#      same-day repro: PASS against the live script, with the provenance
-#      line naming the wrong host, on both the env-var and networks[] paths.
+#      first '/', '?', '#' OR '\' onward, whichever comes earliest — i.e.
+#      drop path, query and fragment BEFORE touching userinfo. The '\' is
+#      not a typo: per the WHATWG URL Standard, a "special" scheme (https
+#      is one) treats backslash as a fourth authority terminator, normalized
+#      to '/' — confirmed against `new URL()` directly, which reports host
+#      `<clone>` and a path starting `/@<allowlisted-host>` for
+#      `https://<clone>\@<allowlisted-host>`. A prior revision covered only
+#      three of the four terminators, and separately (an earlier revision
+#      still) stripped userinfo before isolating the authority at all, so a
+#      path/query/fragment containing its own '@' hijacked extraction:
+#      `https://<clone>/@<allowlisted-host>` has no userinfo at all (the '@'
+#      is inside the PATH), but stripping at the last '@' in the WHOLE value
+#      read off "<allowlisted-host>" as if it were the authority, when curl
+#      (and any WHATWG-compliant client) connects to <clone> — the part
+#      before the first terminator. Confirmed via same-day repros: PASS
+#      against the live script for both gaps, with the provenance line
+#      naming the wrong host. The backslash gap was latent rather than live:
+#      the two env-var legs are curl-consumed and curl agrees with this
+#      extractor on backslash handling, and the `endpoints` leg is caught by
+#      the presence flag regardless of host — it is the `networks[]` leg
+#      (kept only as insurance against proton-cli changing which key it
+#      reads) that had no coverage against this specific shape.
 #   4. NOW strip userinfo from the isolated authority, by removing the
 #      LONGEST prefix ending in '@': `${v##*@}`. This must run AFTER step 3,
 #      not before — reordering these two was the entire fix. Within the
@@ -1112,7 +1124,13 @@ MAINNET_HOST_ALLOWLIST="rpc.api.mainnet.metalx.com proton.cryptolions.io proton.
 #      parser), which step 3 does not disturb since by then there is no '/'
 #      left to find. If '@' still remains after this step (should be
 #      structurally impossible now, kept as a backstop), reject rather than
-#      compare a string that still contains it.
+#      compare a string that still contains it. This backstop has NO test
+#      coverage — it is genuinely unreachable given the current ordering
+#      (deleting it leaves the suite green), so it is not a defect. It is
+#      the guard that would matter if this ordering were disturbed a fourth
+#      time (there have been three revisions of this function so far), and
+#      nothing would tell a future editor that it had stopped mattering —
+#      hence the comment instead of a contorted test to reach it.
 #   5. strip the port.
 #   6. strip exactly ONE trailing dot (DNS FQDN root-label form: `host.` and
 #      `host` name the identical host, so refusing to normalize it would be
@@ -1125,7 +1143,7 @@ fyp_host_of() {
 		https://*) v="${v#https://}" ;;
 		*) printf ''; return 1 ;;
 	esac
-	v="${v%%[/?#]*}"
+	v="${v%%[/?#\\]*}"
 	v="${v##*@}"
 	case "$v" in
 		*@*) printf ''; return 1 ;;
@@ -1234,7 +1252,19 @@ fyp_scan_proton_cli() {
 	local ep_present
 	ep_present="$(jq -r 'if (.endpoints == null) or (.endpoints == []) then "absent" else "present" end' "$out" 2>/dev/null)"
 	if [ "$ep_present" = "present" ]; then
-		problems="${problems} ${label}-endpoints-override-key-present"
+		# I10: name the chain(s) actually carrying a stanza. `proton
+		# endpoint:default` (resetEndpoint()) filters out ONLY the
+		# CURRENT chain's stanza — a populated stanza for a DIFFERENT
+		# chain survives it untouched, so a remedy that does not say
+		# WHICH chain is live sends the operator to run a command that
+		# reports success while this stays red. Reproduced: currentChain
+		# proton-test, a populated stanza for chain "proton" only —
+		# `endpoint:default` printed "Success: Endpoints restored to
+		# default" and the "…-key-present" problem persisted, unnamed.
+		local ep_chains
+		ep_chains="$(jq -r '[.endpoints[]?.chain // "unknown"] | unique | join(",")' "$out" 2>/dev/null)"
+		[ -n "$ep_chains" ] || ep_chains="unknown"
+		problems="${problems} ${label}-endpoints-override-key-present:${ep_chains}"
 		problems="${problems}$(fyp_scan_chain_key "$out" endpoints proton-test "$TESTNET_HOST_ALLOWLIST" "$label" testnet 0)"
 		problems="${problems}$(fyp_scan_chain_key "$out" endpoints proton "$MAINNET_HOST_ALLOWLIST" "$label" mainnet 0)"
 	fi
@@ -1320,12 +1350,20 @@ else
 		"it cannot fake into this repo's own config — fix the named host(s) above, never" \
 		"widen the allowlist to make this pass. proton-cli resolves endpoints from the" \
 		"top-level 'endpoints' key, not 'networks' — see this check's header CORRECTION." \
-		"If the problem above is '…-endpoints-override-key-present' with NO host named:" \
+		"If the problem above is '…-endpoints-override-key-present:<chain(s)>':" \
 		"that machine's proton-cli has a non-empty top-level 'endpoints' override in effect" \
-		"(from a prior 'proton endpoint:set'). The clean remedy is" \
+		"for the chain(s) named after the colon (from a prior 'proton endpoint:set'). The" \
+		"remedy is 'proton endpoint:default', but it clears ONLY the CURRENTLY SELECTED" \
+		"chain's stanza (verified: resetEndpoint() filters by this.chain) — running it while" \
+		"on the wrong chain prints \"Success: Endpoints restored to default\" and changes" \
+		"nothing, leaving this exact red. Run PER NAMED CHAIN, in a separate terminal:" \
+		"  HOME=~/.metal-fy-proton-test proton chain:set <named-chain>" \
 		"  HOME=~/.metal-fy-proton-test proton endpoint:default" \
-		"(and the mainnet-keystore equivalent if that leg names it), which restores the" \
-		"safe built-in defaults — do NOT hand-edit the config file to fix this." \
+		"then, if <named-chain> was not proton-test, switch back — this keystore's" \
+		"currentChain must stay proton-test:" \
+		"  HOME=~/.metal-fy-proton-test proton chain:set proton-test" \
+		"(mainnet-keystore equivalent, HOME=~/.metal-fy-proton, if that leg names a chain)." \
+		"Do NOT hand-edit the config file to fix this." \
 		"testnet allowlist: ${TESTNET_HOST_ALLOWLIST}" \
 		"mainnet allowlist: ${MAINNET_HOST_ALLOWLIST}"
 fi
