@@ -1126,13 +1126,15 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    needs no opt-in.
    **Gate 1 can fail transiently right after the broadcast.** Hyperion
    indexes a tx some tens of seconds behind the chain, and
-   `gen-anchor-receipt.sh` queries it exactly once (`:159-183`, v2 then v1,
+   `gen-anchor-receipt.sh` queries it exactly once (`:159-197`, v2 then v1,
    no wait, no retry) — so it exits 3 with `gate 1 — tx_id … not resolvable`
    even though the tx is on-chain. Observed on the 2026-09-01 testnet
    rehearsal: both v2 and v1 resolved the same tx about a minute later.
-   **If step 7c printed `BROADCAST OK  tx_id=…`, the tx exists: wait about a
+   **If step 7c exited 0 — `sign-anchor-event.sh` wrote its JSON receipt
+   fragment with a 64-hex `tx_id` to stdout — the tx exists: wait about a
    minute and re-run THIS step 8 only. Never re-run 7c — that is a second
-   inscription of the same cycle, and no gate refuses it.**
+   inscription of the same cycle, and no gate refuses it.** (Only the
+   testnet rehearsal script prints a `BROADCAST OK` banner; 7c does not.)
    `--prev-anchor-tx-id=` is **not derived from anything else** —
    `gen-anchor-receipt.sh` only reads it from this flag (or treats it as
    `null` if omitted); get the value from the host's own
