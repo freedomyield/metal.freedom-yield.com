@@ -287,6 +287,7 @@ cd ~/htdocs/01_PROJECTS/metal.freedom-yield.com && HOME=~/.metal-fy-proton-test 
   | exit | 意味 | 対処 |
   |---|---|---|
   | **1** | `fail()` が呼ばれた全て — step 1/10 の `--expect-cycle` 不一致 / config 欠落 / fixture 拒否、step 7/10 の `bin/safe-broadcast` 失敗(`:451`。直前に `safe-broadcast exit rc=<内部の rc>` 行が出る — 内部 rc 自体は表からは読めないのでこの行を見る)、step 8/10 の tx_id 抽出失敗(`:456`、broadcast は既に成功している)、または step 9/10 (`gen-anchor-receipt.sh`) 内部の 7-gate 不通過など、原因は様々でも**すべて exit 1 に潰れる**。メッセージに従って修正し再実行する。**step 7/10 より前(safe-broadcast 呼び出し前)の exit 1 なら broadcast は未発生。step 7/10 以降(safe-broadcast 自体の失敗を含む)の exit 1 は broadcast が既に成功している場合がある**(tx は testnet 上に残る) | メッセージ(と `safe-broadcast exit rc=` 行があればその値)を読んで修正、再実行 |
+  | **1**(step 9/10 で `ERROR (3): gate 1 — tx_id … not resolvable`) | **Hyperion の索引遅延。broadcast は成功している。** 2026-09-01 の稽古で実測: `BROADCAST OK` 直後は v2/v1 とも未索引、約 1 分後に両方で解決。`gen-anchor-receipt.sh` は 1 回しか問い合わせず待機もリトライもしない(`:159-183`) | **③ を再実行しない**(同じ cycle の二重 broadcast になり、gate は止めない)。約 1 分待って **AI が step 9 (`gen-anchor-receipt.sh`) だけ**を再実行する — step 8 の入力 JSON は `~/.fya-testnet-dryrun-log.json` から同じ jq で再構成できる |
   | **2** | keystore が locked(step 3/10 または 4/10) | 操作②をやり直す |
   | **8** | §3.5 keystore guard — `HOME=` prefix を付け忘れた(`:188`) | `HOME=~/.metal-fy-proton-test` を付けて再実行 |
 
