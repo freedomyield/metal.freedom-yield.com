@@ -157,7 +157,8 @@
 #   3  scripts/lib/side-effects.sh missing (structural)
 #   4  scripts/lib/reward-calculator.sh or reward-utxo-decode.sh missing (structural)
 #   5  --backfill: cycle_n not found in uptime-cycles.json
-#   6  --backfill: txID already recorded in rewards-history.jsonl (idempotent no-op, not an error — see the branch for why this is rc 0 instead)
+#   (--backfill against an already-recorded txID is exit 0, an idempotent no-op — not a distinct exit code, since it is not an error)
+#   7  cannot open the flock lock file (structural — locks/ directory unwritable)
 
 set -uo pipefail
 
@@ -286,6 +287,12 @@ history_count() {
 # Returns 0 iff the line was (or, in dry mode, would be) appended.
 append_reward_line() {
 	local cn="$1" reward="$2" self_stake="$3" su="$4" eu="$5" tx="$6"
+	# jq 1.8's decNumber backend renders an exact-zero decimal like
+	# "0.000000000" back out as "0E-9" — valid JSON, numerically identical,
+	# but inconsistent with every non-zero row's plain decimal form.
+	# `if . == 0 then 0 else .` normalizes only the exact-zero case (a real
+	# 0-reward cycle — see the header note on why that is a legitimate,
+	# non-racy outcome, not a "not yet paid" race) to a plain 0.
 	local line
 	line=$(jq -nc \
 		--argjson cn "$cn" \
@@ -295,9 +302,38 @@ append_reward_line() {
 		--argjson eu "$eu" \
 		--arg tx "$tx" \
 		--arg obs "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-		'{cycle_n:$cn, reward_metal:$reward, self_stake_metal:$self, start_unix:$su, end_unix:$eu, add_validator_tx:$tx, observed_at:$obs}')
+		'{cycle_n:$cn, reward_metal:($reward|if . == 0 then 0 else . end), self_stake_metal:($self|if . == 0 then 0 else . end), start_unix:$su, end_unix:$eu, add_validator_tx:$tx, observed_at:$obs}')
 	printf '%s\n' "$line" | fyd_live_write --append "the matured-cycle reward record" "$REWARDS_HISTORY"
 }
+
+# ============================================================================
+# non-blocking flock (mirrors check-anomalies.sh's K-4 pattern)
+# ============================================================================
+# At most one reward-tracker.sh runs concurrently — a slow RPC call (or a
+# manual re-run overlapping a cron tick) must not let a second invocation
+# interleave reads/writes of reward-tracker-state.json / rewards-
+# history.jsonl / reward-digest-line.txt with it. Held for the WHOLE run
+# (both --backfill and the normal daily run touch state), released only on
+# process exit — same shape as check-anomalies.sh's K-4 lock, minus that
+# script's separate operator-run init-script requirement: this subsystem
+# has no equivalent to anomaly-state-init.sh, so the lock directory is
+# created here rather than assumed pre-provisioned. The lock file itself
+# carries no content and is never deleted (flock holds the fd, not the
+# directory entry) — same FYD-GATE(exempt) categorization check-
+# anomalies.sh uses for its own lock backing file: infrastructure, not
+# state, so this mkdir/open is intentionally NOT behind fyd_live_run.
+LOCK_DIR="${STATE_DIR}/locks"
+# FYD-GATE(exempt): lock-dir infra, no content — see the paragraph above.
+mkdir -p "$LOCK_DIR" 2>/dev/null || true
+LOCK_FILE="${REWARD_TRACKER_LOCK_FILE:-${LOCK_DIR}/reward-tracker.lock}"
+if ! exec 9>"$LOCK_FILE"; then
+	echo "reward-tracker: FATAL: cannot open lock file: $LOCK_FILE" >&2
+	exit 7
+fi
+if ! flock -n 9; then
+	echo "reward-tracker: previous run still holds the lock ($LOCK_FILE) — skipping this run (exit 0, not an error)" >&2
+	exit 0
+fi
 
 # ============================================================================
 # --backfill mode
@@ -438,7 +474,7 @@ else
 				echo "reward-tracker: appended matured cycle record"
 				write_state
 
-				# ---- 🎉 notification --------------------------------------
+				# ---- 🎉 / ⚠ notification ------------------------------------
 				# Called unconditionally (live or dry): fyd_notify's own
 				# FY_LIVE gate decides whether this actually reaches ntfy or
 				# prints a "DRY: would notify …" byte-count-only note (see
@@ -454,19 +490,46 @@ else
 				REACHED=$(awk -v q="$MILESTONE_QTY" -v m="$FY_REWARD_MILESTONE" 'BEGIN{print (q>=m)?"1":"0"}')
 				REMAIN=$(awk -v q="$MILESTONE_QTY" -v m="$FY_REWARD_MILESTONE" 'BEGIN{v=m-q; if(v<0)v=0; printf "%.2f", v}')
 
-				LINE1="Cycle ${CYCLE_N} reward: 累積 $(fmt_metal "$CUM_METAL" 2) METAL (+$(fmt_metal "$REWARD_METAL" 2) this cycle)"
+				LINE2_TAIL=""
 				if [ "$REACHED" = "1" ]; then
-					LINE2="${COUNT} cycles · self-stake $(fmt_metal "$RC_MIN_VALIDATOR_STAKE_METAL" 0) → $(fmt_metal "$NOW_SELF_STAKE" 0) · $(fmt_metal "$FY_REWARD_MILESTONE" 0) 到達 🎉"
+					LINE2_TAIL="$(fmt_metal "$FY_REWARD_MILESTONE" 0) 到達 🎉"
 				else
-					LINE2="${COUNT} cycles · self-stake $(fmt_metal "$RC_MIN_VALIDATOR_STAKE_METAL" 0) → $(fmt_metal "$NOW_SELF_STAKE" 0) · $(fmt_metal "$FY_REWARD_MILESTONE" 0) まで残り $(fmt_metal "$REMAIN" 2)"
+					LINE2_TAIL="$(fmt_metal "$FY_REWARD_MILESTONE" 0) まで残り $(fmt_metal "$REMAIN" 2)"
 				fi
-				BODY="${LINE1}
+				LINE2="${COUNT} cycles · self-stake $(fmt_metal "$RC_MIN_VALIDATOR_STAKE_METAL" 0) → $(fmt_metal "$NOW_SELF_STAKE" 0) · ${LINE2_TAIL}"
+
+				# REWARD_METAL == 0 is NOT a "not yet paid" race: metalgo's
+				# rewardValidatorTx() writes the reward UTXOs (zero of them, if
+				# the 80% uptime requirement was missed) IN THE SAME onCommitState
+				# transition that removes the staker from getCurrentValidators —
+				# there is no block where the entry is gone but the reward is
+				# still pending, so a same-run getRewardUTXOs read right after
+				# detecting the disappearance can never observe a stale zero.
+				REWARD_IS_ZERO=$(awk -v r="$REWARD_METAL" 'BEGIN{print (r+0==0)?"1":"0"}')
+				if [ "$REWARD_IS_ZERO" = "1" ]; then
+					# No reward this cycle almost always means the 80% uptime
+					# threshold was missed (see StakingConfig.UptimeRequirement in
+					# reward-calculator.sh's header citation) — a degraded outcome,
+					# not a celebration. Coordinator-decided (2026-09-04 review):
+					# no 🎉, no tada tag — omitting --tags lets fyd_notify fall back
+					# to the priority-derived default (high → "warning"), matching
+					# check-anomalies.sh's own "drop the override, let the default
+					# stand" pattern for a non-celebratory high-priority push.
+					LINE1="Cycle ${CYCLE_N} reward: 0 METAL — check uptime"
+					BODY="${LINE1}
 ${LINE2}"
-				# tada tag, unconditionally — unlike check-anomalies.sh's
-				# delegation push (which withdraws the celebration when
-				# count and amount move opposite ways), a matured reward
-				# has no "net negative" case: reward_metal is always >= 0.
-				fyd_notify --tags=tada high "🎉 Cycle ${CYCLE_N} reward matured" "$BODY" >/dev/null
+					fyd_notify high "⚠ Cycle ${CYCLE_N} reward: 0 METAL" "$BODY" >/dev/null
+				else
+					LINE1="Cycle ${CYCLE_N} reward: 累積 $(fmt_metal "$CUM_METAL" 2) METAL (+$(fmt_metal "$REWARD_METAL" 2) this cycle)"
+					BODY="${LINE1}
+${LINE2}"
+					# tada tag: unlike check-anomalies.sh's delegation push (which
+					# withdraws the celebration when count and amount move opposite
+					# ways), a NON-ZERO matured reward has no "net negative" case —
+					# reward_metal is always >= 0, and this branch is only reached
+					# when it is strictly > 0.
+					fyd_notify --tags=tada high "🎉 Cycle ${CYCLE_N} reward matured" "$BODY" >/dev/null
+				fi
 			fi
 		fi
 	fi
