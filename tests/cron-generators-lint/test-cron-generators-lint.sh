@@ -214,6 +214,34 @@ bash "$CHECKER" "$PV_OUT" 2>&1 | grep -q 'FY_LIVE=1 present (required by:.*check
 	&& ok "install-metal-pulsevm-watch-cron.sh: Rule 6 detects the checker dynamically (no allowlist entry needed)" \
 	|| bad "install-metal-pulsevm-watch-cron.sh: Rule 6 did not name check-pulsevm-upstream.sh as the reason"
 
+# ---- install-reward-tracker-cron.sh -----------------------------------------
+RT_OUT="$WORK/reward-tracker-cron-file"
+FYD_CRON_TARGET="$RT_OUT" FYD_REPO_PATH="$REPO_ROOT" FYD_BACKUP_DIR="$WORK/rt-backups" \
+	bash "${REPO_ROOT}/scripts/install-reward-tracker-cron.sh" >/dev/null 2>&1
+RC=$?
+[ "$RC" -eq 0 ] && [ -f "$RT_OUT" ] \
+	&& ok "generate: install-reward-tracker-cron.sh writes a candidate file" \
+	|| bad "generate: install-reward-tracker-cron.sh writes a candidate file (rc=$RC)"
+lint_file_is_clean "install-reward-tracker-cron.sh" "$RT_OUT"
+# Same dynamic-Rule-6 shape as install-metal-pulsevm-watch-cron.sh above:
+# reward-tracker.sh sources scripts/lib/side-effects.sh, so check-cron-file.sh
+# resolves it as side-effecting without an allowlist entry.
+grep -qE '^FY_LIVE=1$' "$RT_OUT" \
+	&& ok "install-reward-tracker-cron.sh: env header carries FY_LIVE=1" \
+	|| bad "install-reward-tracker-cron.sh: env header missing FY_LIVE=1"
+bash "$CHECKER" "$RT_OUT" 2>&1 | grep -q 'FY_LIVE=1 present (required by:.*reward-tracker.sh' \
+	&& ok "install-reward-tracker-cron.sh: Rule 6 detects the checker dynamically (no allowlist entry needed)" \
+	|| bad "install-reward-tracker-cron.sh: Rule 6 did not name reward-tracker.sh as the reason"
+# Idempotency (task brief requirement: "既存 install script と同じ冪等性") —
+# re-running against the SAME target with no change must report clean rather
+# than re-writing.
+RT_REPEAT_OUT="$(FYD_CRON_TARGET="$RT_OUT" FYD_REPO_PATH="$REPO_ROOT" FYD_BACKUP_DIR="$WORK/rt-backups" \
+	bash "${REPO_ROOT}/scripts/install-reward-tracker-cron.sh" 2>&1)"
+printf '%s' "$RT_REPEAT_OUT" | grep -q 'already up to date' \
+	&& ok "install-reward-tracker-cron.sh: re-running with no change is idempotent (no-op)" \
+	|| bad "install-reward-tracker-cron.sh: re-run did not report idempotent no-op" "$RT_REPEAT_OUT"
+
+
 # =============================================================================
 # Group C: install-metal-anchor-publish-health-cron.sh — no FYD_* override
 # at all (always root, always /etc/cron.d/metal-anchor-publish-health), so

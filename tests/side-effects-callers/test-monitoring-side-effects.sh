@@ -1,14 +1,29 @@
 #!/usr/bin/env bash
 # tests/side-effects-callers/test-monitoring-side-effects.sh
 #
-# C3-2a acceptance suite: the seven MONITORING callers of
+# C3-2a acceptance suite: the eight MONITORING callers of
 # scripts/lib/side-effects.sh must be dry by default and gated by
 # construction.
 #
 #   scripts/check-anomalies.sh          scripts/daily-status.sh
 #   scripts/anomaly-state-init.sh       scripts/node-health-daily.sh
 #   scripts/check-watch-validators.sh   scripts/notify-evidence-health.sh
-#   scripts/check-host-drift.sh
+#   scripts/check-host-drift.sh         scripts/reward-tracker.sh
+#
+# reward-tracker.sh (added 2026-09-04, coordinator review follow-up) is
+# registered here ONLY for the TARGETS-driven, list-generic checks — the
+# file-existence precheck below and Part 3/4's static gate (G1/G2/G3; G4 is
+# vacuously clean for it, see the note at the DURABLE/DURABLE_DIR
+# definitions). It has no hand-written Part 1/2 (dry/live) section of its
+# own here: its RPC surface (platform.getCurrentValidators /
+# getRewardUTXOs / getCurrentSupply, all JSON-RPC POSTs to a single
+# endpoint) does not fit this suite's shared curl stub, which only
+# special-cases file:// and ntfy.sh — see "WHY THIS SUITE DOES NOT STUB
+# notify.sh" above for why that stub is deliberately dumb. Its own
+# dedicated, far more thorough dry/live coverage (60 assertions, including
+# the exact four dry-mode properties — no append, no notify, no digest
+# write, no numeric leak — Part 1 checks generically here) lives in
+# tests/reward-tracker/test-reward-tracker.sh.
 #
 # CHAIN: none — no case reaches a broadcast-capable command.
 # PRIME_DIRECTIVE: TESTNET-FIRST — safe (no chain interaction at all).
@@ -65,7 +80,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 SCRIPTS="${REPO_ROOT}/scripts"
 LIB="${SCRIPTS}/lib/side-effects.sh"
 
-TARGETS="check-anomalies.sh anomaly-state-init.sh check-watch-validators.sh check-host-drift.sh daily-status.sh node-health-daily.sh notify-evidence-health.sh"
+TARGETS="check-anomalies.sh anomaly-state-init.sh check-watch-validators.sh check-host-drift.sh daily-status.sh node-health-daily.sh notify-evidence-health.sh reward-tracker.sh"
 
 for f in $TARGETS; do
 	if [ ! -r "${SCRIPTS}/${f}" ]; then
@@ -569,8 +584,15 @@ gate_stream() {
 
 DELEGATE_RE='(^[0-9]+:|[[:space:]{(;&|])(bash|sh|exec)[[:space:]]+"?[^"[:space:]]*(notify|push-to-web-host)\.sh'
 DELEGATE_VAR_RE='(bash|sh|exec)[[:space:]]+"?\$\{?(NOTIFY|FYD_NOTIFY|ANCHOR_NOTIFY|WATCH_NOTIFY|FYD_PUSH_TO_WEB_HOST)\}?"?'
-DURABLE='STATE_FILE|PREV_FILE|HIST_JSONL|MISSING_MARKER|OUT_PUBLIC|COUNTER_FILE|CONTENTION_COUNTER|DELEGATOR_EVENTS_LOG|quar_target'
-DURABLE_DIR='STATE_DIR|QUAR_DIR'
+# REWARDS_HISTORY|TRACKER_STATE|DIGEST_FILE added for reward-tracker.sh —
+# currently a vacuous addition (that script never redirects `>>`/mv/cp
+# straight into them; every durable write goes through fyd_live_write
+# with the path passed as an ARGUMENT, which this regex family does not
+# match at all — see WRITE_RE below), but present so a future regression
+# that DOES introduce a raw redirect gets caught instead of silently
+# passing G4 for a name this list never knew about.
+DURABLE='STATE_FILE|PREV_FILE|HIST_JSONL|MISSING_MARKER|OUT_PUBLIC|COUNTER_FILE|CONTENTION_COUNTER|DELEGATOR_EVENTS_LOG|quar_target|REWARDS_HISTORY|TRACKER_STATE|DIGEST_FILE'
+DURABLE_DIR='STATE_DIR|QUAR_DIR|LOCK_DIR'
 WRITE_RE="(>>?[[:space:]]*\"?\\\$\{?(${DURABLE}))|(\\b(mv|cp|rm|chmod|touch)\\b[^|;&]*\\\$\{?(${DURABLE})\\}?)|(\\b(mkdir|rm)\\b[^|;&]*\\\$\{?(${DURABLE_DIR})\\}?)"
 
 # gate_check <file> — prints one line per violation; silence means clean.
