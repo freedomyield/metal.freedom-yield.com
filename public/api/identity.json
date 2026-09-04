@@ -23,36 +23,49 @@
   "artifact_manifest": {
     "evidence_json": {
       "url": "https://metal.freedom-yield.com/api/evidence.json",
-      "sha256": "5173ba5acd73102be6b445fc7e98eb98abbe9406973c4467b38baa072066d271",
+      "kind": "stream",
       "schema_url": "https://metal.freedom-yield.com/api/evidence.schema.v1.json",
       "schema_sha256": "13d0a02c830051e75d945c3ceece3212c8099a51725f858ecedc1a0f6a1ccb5e"
     },
     "validator_json": {
       "url": "https://metal.freedom-yield.com/api/validator.json",
-      "sha256": "21640cd087db99d627c0b531ad1de919f3fbc8af824f9c377fe9ad957b4de3e0",
+      "kind": "stream",
       "schema_url": "https://metal.freedom-yield.com/api/validator.schema.v1.json",
       "schema_sha256": "6bc5d50d2fcf8dc6485b09ce96df53eca649e71ea9831ddf64abc00d62650c1f"
     },
     "cycle_history_jsonl": {
       "url": "https://metal.freedom-yield.com/api/cycle-history.jsonl",
-      "sha256": "e8001d204a8dd0ed41a5755a84dadd36814b4dfda4a394db569449351e210765",
+      "kind": "stream",
       "schema_url": "https://metal.freedom-yield.com/api/cycle-history.schema.v1.json",
       "schema_sha256": "8a023ad9f13bf7ba9918cbfe94f583815ee67c76655ec68cbe815a341c751540"
     },
     "uptime_cycles_json": {
       "url": "https://metal.freedom-yield.com/api/uptime-cycles.json",
-      "sha256": "e47eb045e0c07882b3191571d871243a30d5162ac53fb25d1c1d8e0d117ffb3d"
+      "kind": "stream"
     },
     "incidents_json": {
       "url": "https://metal.freedom-yield.com/api/incidents.json",
-      "sha256": "44baa57ddb7b237b7d5b0aed39d6e522376feddadd8becf2db4ba86a568f6ec0"
+      "kind": "static",
+      "sha256": "c42d2ea9ec51e7a23e765d2094a2a72d37ddc2fb5e06afd969f630501baaa42e",
+      "schema_url": "https://metal.freedom-yield.com/api/incidents.schema.v1.json",
+      "schema_sha256": "422e46f67869f7335bb95e34871331126a902c59ea3c684c17d984ce7db3141b"
+    },
+    "anchor_source_archive_json": {
+      "url": "https://metal.freedom-yield.com/api/archive/anchor-source-063f753ebb79229064375b967db59421ba4f8e9e30c194a92d9c326e08f96dd1.json",
+      "kind": "record",
+      "sha256": "66987e95f457cb256c1e0ef69e54642f12a5fd0db664b92706b663108cbcf5ce"
     }
   },
-  "artifact_root": "78bcdb39f5c22dc09c499e868e41692528f7cf24ef7dd0920294c24be52a3b02",
+  "artifact_root": "f89608eeb60b30387a01ede879626c54b47225a69a56d941a064b50692baee19",
+  "pin_policy": {
+    "source": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/deploy/publication.json",
+    "rule": "An artifact_manifest entry carries sha256 only when the publication registry declares its kind as 'static' (bytes change only when a commit changes them) or 'record' (the URL's name is derived from a digest of the content it addresses, so whatever that digest covers cannot change without the name changing too). A record's name binds only what its digest covers, and that need NOT be the whole file: for /api/archive/anchor-source-<64-hex>.json the name is the fold of the three DAG branches and does not cover computed_at, computed_by_script or computed_from_git_commit sitting beside them. The sha256 recorded here is what binds every byte, as of signing. A verifier whose fetch disagrees with that digest should re-derive the three branch roots before concluding anything: if they still fold to the value in the file name, the three branch objects are canonically identical to the ones that were anchored and the anchored DAG is unaffected — the difference lies somewhere outside them, and the fold does not say where. Entries with kind 'stream' are published with url + kind and NO sha256: their bytes change without a commit, so a digest fixed at signing time would be false within minutes. The absence of sha256 is a deliberate declaration, not an omission, and a verifier MUST NOT treat it as a broken manifest. The same rule is applied independently to schema_url / schema_sha256.",
+    "merkle_leaves": "artifact_root is the Merkle root over exactly the sha256 values present in artifact_manifest, in alphabetical key order."
+  },
   "anchor_receipt_url": "https://metal.freedom-yield.com/api/anchor-receipt.json",
   "audit": {
     "anchor_receipt": "https://metal.freedom-yield.com/api/anchor-receipt.json",
     "anchor_history": "https://metal.freedom-yield.com/api/anchor-history.jsonl"
   },
-  "generated_at": "2026-08-06T05:31:44Z"
+  "generated_at": "2026-09-04T05:21:15Z"
 }

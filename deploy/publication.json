@@ -61,7 +61,7 @@
       "rsync_delete_exclude": true,
       "gitignored": true,
       "git_tracked": false,
-      "pinned_by": ["api/identity.json#artifact_manifest.validator_json.sha256"]
+      "pinned_by": []
     },
     {
       "path": "api/server-status.json",
@@ -136,7 +136,7 @@
       "rsync_delete_exclude": true,
       "gitignored": true,
       "git_tracked": false,
-      "pinned_by": ["api/identity.json#artifact_manifest.uptime_cycles_json.sha256"]
+      "pinned_by": []
     },
     {
       "path": "api/peers.json",
@@ -174,7 +174,7 @@
       "rsync_delete_exclude": true,
       "gitignored": true,
       "git_tracked": false,
-      "pinned_by": ["api/identity.json#artifact_manifest.evidence_json.sha256"]
+      "pinned_by": []
     },
     {
       "path": "api/fee-market.json",
@@ -326,7 +326,7 @@
       "rsync_delete_exclude": true,
       "gitignored": true,
       "git_tracked": false,
-      "pinned_by": ["api/identity.json#artifact_manifest.cycle_history_jsonl.sha256"]
+      "pinned_by": []
     },
     {
       "path": "api/anchor-receipt.json",
@@ -387,7 +387,7 @@
       "rsync_delete_exclude": true,
       "gitignored": true,
       "git_tracked": false,
-      "pinned_by": [],
+      "pinned_by": ["api/identity.json#artifact_manifest.anchor_source_archive_json.sha256"],
       "record_caveat": "CORRECTED 2026-08-14 — neither half of this prefix is immutable by construction, and the superseded text claimed the anchor-source half was. anchor-source-<dag_root>.json: the <dag_root> in the name is dag_root_computed, and scripts/gen-anchor-source.sh:638-641 folds it from the three branch objects and nothing else (identity_branch, observations_branch, artifacts_branch each jq -cS then sha256; dag_root = sha256 of the three hex digests concatenated in that order). The same file also carries computed_at, computed_by_script and computed_from_git_commit as top-level siblings of those branches (scripts/gen-anchor-source.sh:656-658), and none of the three enters the fold; the archive copy is then written with an unconditional rename (:780 builds ARCHIVE_FILE as anchor-source-<DAG_ROOT>.json, :787 renames the temp file onto it), which overwrites whatever already sits at that name. Measured 2026-08-14 against the tracked public/api/anchor-source.json: editing only the computed_at value leaves the root re-derived from the three branches — and therefore the file name — unchanged, while the file's sha256 changes. Reproduce by hashing each of the three branch objects with jq -cS piped to sha256, concatenating the three hex digests in identity/observations/artifacts order and hashing that string. So the URL's name binds the three branch roots; a sha256 in a signed manifest binds the whole file as of signing. identity.json's pin_policy (scripts/operator-local/gen-identity.sh) carries that same wording verbatim, machine-checked against kind_definitions.record by tests/publication-registry/ (T20) and against public/api/identity.example.json by tests/identity-kind-discipline/. CORRECTED 2026-08-17 (the reference in the preceding sentence): the canonical clause T20 compares against lives in kind_definitions.record -- the taxonomy authority at the top of this registry -- and NOT in this row. The earlier text said 'machine-checked against this row's canonical clause', which named the wrong field: T20's phrase is extracted from exactly three places, .kind_definitions.record here, .properties.artifact_manifest.additionalProperties.properties.kind.description in public/api/identity.schema.v1.json, and the pin_policy_rule --arg line in scripts/operator-local/gen-identity.sh. record_caveat is not one of the three, and a scan of this registry finds the clause in kind_definitions.record only. This row's record_caveat is UNCHECKED prose about how far the api/archive/ naming scheme reaches, and describing it as machine-checked claimed a guarantee nothing provides. Do not restore the earlier claim. docs/IDENTITY_VERIFICATION.md explains the same facts in its own operator-facing prose, deliberately not verbatim -- it says plainly that pin_policy explains itself without reference to that document -- so it must not contradict this row, but is not held to matching it word for word. CORRECTED 2026-08-17: an earlier draft of this sentence claimed docs/IDENTITY_VERIFICATION.md also carries the same wording and must stay in step; that overstated what T20 actually enforces (T20 does not check that file) and understated the gap between a declared obligation and a checked one. Do not restore the earlier claim. anchor-receipt-<tx_id>.json is weaker again: it is named by the transaction id (scripts/gen-anchor-receipt.sh:405), which binds nothing at all about its contents, and it carries generated_at (:314) under the same unconditional rename (:412), so re-running the generator for one tx writes different bytes to the same URL. In practice each receipt is produced once, immediately after its broadcast, so that URL is stable by operating discipline only. Whoever acts on kind=record for this prefix (C4) pins the anchor-source half only, re-derives the three roots from the fetched bytes rather than trusting the file's own dag_root_computed field, and treats a regeneration of either half as a re-pin event. The superseded text justified STRUCTURALLY immutable with a grep of gen-anchor-source.sh for generated_at returning zero hits: the grep was accurate, the field is spelled computed_at, and the conclusion did not follow. Do not restore it.",
       "note": "kind=record for the prefix. This is the shape the spec's kind discipline wants api/anchor-source.json to move to (C4). Read record_caveat before pinning anything here: the naming scheme reaches less far than kind=record on its own suggests, and it reaches nothing at all on the receipt half."
     },
@@ -454,7 +454,7 @@
     { "path": "api/evidence.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": ["api/identity.json#artifact_manifest.evidence_json.schema_sha256"] },
     { "path": "api/identity-history.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
     { "path": "api/identity.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
-    { "path": "api/incidents.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/incidents.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": ["api/identity.json#artifact_manifest.incidents_json.schema_sha256"] },
     { "path": "api/validator.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": ["api/identity.json#artifact_manifest.validator_json.schema_sha256"] },
 
     { "path": "api/anchor-history.example.jsonl", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
@@ -497,29 +497,7 @@
       "pin_count": 8,
       "method": "jq over .artifact_manifest of public/api/identity.json; each entry contributes <key>.sha256 and, where present, <key>.schema_sha256"
     },
-    "violations": {
-      "evidence_json.sha256": {
-        "path": "api/evidence.json",
-        "reason": "Push-owned stream regenerated by scripts/gen-evidence.sh on the metal-evidence cron.",
-        "also_in_identity_pin_baseline": true
-      },
-      "validator_json.sha256": {
-        "path": "api/validator.json",
-        "reason": "Push-owned stream rewritten by scripts/node-info.sh from live metalgo RPC.",
-        "also_in_identity_pin_baseline": true
-      },
-      "uptime_cycles_json.sha256": {
-        "path": "api/uptime-cycles.json",
-        "reason": "Push-owned stream appended by scripts/uptime-history.sh.",
-        "also_in_identity_pin_baseline": true
-      },
-      "cycle_history_jsonl.sha256": {
-        "path": "api/cycle-history.jsonl",
-        "reason": "Push-owned stream regenerated by scripts/gen-cycle-history.sh on the metal-cycle-history cron. Same structural class as the three above.",
-        "also_in_identity_pin_baseline": false,
-        "note": "This is the fourth stream pin and the only one deploy/identity-pin-baseline.json does not list. That is a documentation gap, NOT a gate gap: scripts/check-identity-pins.sh classifies it as stream from deploy/feed-excludes.txt and stream-class pins never alert there, so nothing was being suppressed. Recording it here makes all four visible in one place."
-      }
-    }
+    "violations": {}
   },
 
   "known_doc_drift": {
