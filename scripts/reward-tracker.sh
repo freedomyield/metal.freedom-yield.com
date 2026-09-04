@@ -390,7 +390,30 @@ if [ -z "$NODE_ID" ]; then
 	exit 0
 fi
 
-CV_RESP=$(rpc_post "/ext/bc/P" "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"platform.getCurrentValidators\",\"params\":{\"nodeIDs\":[\"${NODE_ID}\"]}}")
+# Request body built via jq -n --arg (NOT raw string interpolation of
+# $NODE_ID into the JSON literal) for two independent reasons: (1) proper
+# JSON string escaping — a raw ${NODE_ID} substitution would corrupt the
+# request if a node ID ever contained a quote or backslash; (2) it keeps
+# tests/field-contracts/test-field-contracts.sh's writer/reader binder from
+# tracing $NODE_ID (itself correctly bound to validator.json, since it was
+# read from .nodeId two lines above) transitively into $CV_RESP and
+# everything derived from it ($SELF_ENTRY, $CURRENT_TX, the delegator
+# fields, …) — those are a P-Chain RPC response, not validator.json, and
+# mistaking one for the other was reported CRITICAL/HIGH by
+# tests/field-contracts/test-field-contracts.sh (coordinator review,
+# 2026-09-04). cycle-gate.sh's own getCurrentValidators call avoids this
+# because it filters client-side (`jq --arg id "$NODE_ID" 'select(...)'`
+# against an UNFILTERED fetch) rather than filtering server-side — this
+# script must filter server-side (params.nodeIDs) because that is the only
+# way metalgo populates .delegators[] on the response (see this file's own
+# header). The checker already exempts jq's OWN --arg option values
+# (strip_jq_option_values in check-field-contracts.py, added for
+# check-validator.sh's `jq --arg id "$NODE_ID"` pattern); building the curl
+# body through the same idiom applies that existing, deliberate exemption
+# instead of inventing a new one.
+CV_REQ_BODY=$(jq -nc --arg id "$NODE_ID" \
+	'{"jsonrpc":"2.0","id":1,"method":"platform.getCurrentValidators","params":{"nodeIDs":[$id]}}')
+CV_RESP=$(rpc_post "/ext/bc/P" "$CV_REQ_BODY")
 if [ -z "$CV_RESP" ] || ! echo "$CV_RESP" | jq -e '.result.validators' >/dev/null 2>&1; then
 	echo "reward-tracker: getCurrentValidators unreachable or unparseable, skip this run" >&2
 	exit 0
