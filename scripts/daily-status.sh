@@ -236,6 +236,32 @@ ${EVIDENCE_SUMMARY}"
   fi
 fi
 
+# Morning slot also carries the reward-tracker digest line (累積 reward +
+# in-progress-cycle projection + self-stake milestone — see
+# scripts/reward-tracker.sh), when that script has produced one. The file
+# is REGENERATED (not append-only) by reward-tracker.sh's daily cron;
+# absence just means that cron has not run yet (fresh deploy) or FY_LIVE
+# was never set there — never an error condition for daily-status.sh, so a
+# missing file yields no line and no warning, matching the task brief
+# ("ファイル無し → 行なし（エラーにしない）"). fyd_state_dir with no role
+# resolves the same FY_STATE_DIR reward-tracker.sh itself writes to (its
+# own subsystem — see that script's header on why it does not use a named
+# role here).
+REWARD_BLOCK=""
+if [ "$SLOT" = "morning" ]; then
+  REWARD_STATE_DIR="$(fyd_state_dir 2>/dev/null || true)"
+  REWARD_DIGEST_FILE="${REWARD_STATE_DIR}/reward-digest-line.txt"
+  if [ -n "$REWARD_STATE_DIR" ] && [ -s "$REWARD_DIGEST_FILE" ]; then
+    REWARD_LINE="$(head -n 1 "$REWARD_DIGEST_FILE")"
+    if [ -n "$REWARD_LINE" ]; then
+      REWARD_BLOCK="
+
+[Reward]
+${REWARD_LINE}"
+    fi
+  fi
+fi
+
 # Priority escalation: high when validator state is degraded (= OVERALL is
 # ⚠ 要確認 or worse) or when the morning evidence-pipeline check returned
 # non-zero. Otherwise default. urgent is reserved for separate alerters
@@ -274,7 +300,7 @@ metalgo: ${METALGO_S}
 caddy: ${CADDY_S}
 
 [NodeID]
-${NODE_SHORT}${EVIDENCE_BLOCK}
+${NODE_SHORT}${REWARD_BLOCK}${EVIDENCE_BLOCK}
 EOF
 )
 
