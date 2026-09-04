@@ -50,6 +50,15 @@
       "reason": "Push-owned feed (deploy/feed-excludes.txt): appended by scripts/uptime-history.sh as cycles accumulate.",
       "resolution": "C4 landed 2026-08-14 in scripts/operator-local/gen-identity.sh: the generator reads deploy/publication.json and refuses to pin any kind=stream publication, so this pin id disappears from artifact_manifest at the next issuance. This entry retires then - see c4_status.retire_when.",
       "gate_effect": "not-gated-structural"
+    },
+    "incidents_json.sha256": {
+      "path": "public/api/incidents.json",
+      "class": "tracked",
+      "pinned_sha256": "44baa57ddb7b237b7d5b0aed39d6e522376feddadd8becf2db4ba86a568f6ec0",
+      "observed_sha256": "c42d2ea9ec51e7a23e765d2094a2a72d37ddc2fb5e06afd969f630501baaa42e",
+      "reason": "TEMPORARY, this cycle transition only. The disclosure entry must be published before step 3 reads it, but gen-identity.sh pins this file by curling the PUBLISHED copy, so the new sha256 cannot be re-signed in the same commit.",
+      "resolution": "Deleted in the step-4 commit (step 4b). The step-4 re-issue pins the new bytes.",
+      "gate_effect": "suppresses-exit-3-until-reissue"
     }
   }
 }
