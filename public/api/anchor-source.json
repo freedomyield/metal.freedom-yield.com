@@ -1,23 +1,23 @@
 {
   "$schema": "https://metal.freedom-yield.com/api/anchor-source.schema.v1.json",
   "schema_version": 1,
-  "computed_at": "2026-08-04T05:46:13Z",
+  "computed_at": "2026-09-04T05:24:17Z",
   "computed_by_script": "gen-anchor-source.sh v1.0",
-  "computed_from_git_commit": "50354d528d296f0059584991a727c58c720d10a1",
+  "computed_from_git_commit": "7558a8ef7840072964d929b32c655e98850822b4",
   "identity_branch": {
     "operator_ed25519_pubkey_sha256_hex": "fbe80f02216fe82d06e5ef5cf20e75f14df7e85c42dd068c00436c9e7d863ffe",
     "operator_asserts_node_id": "NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v",
-    "prev_anchor_root": "1862466b64ddd628df84d3e789d88f7366ec18912e7e4ed4f174b2716f2332dc",
-    "prev_anchor_tx": "0b70d2aa1d20bc5c4eca8ce7888a7ab6edb02316e927209f524114f1b647938f",
+    "prev_anchor_root": "063f753ebb79229064375b967db59421ba4f8e9e30c194a92d9c326e08f96dd1",
+    "prev_anchor_tx": "32529f4aadee1ef9906fd6be5253ceb9ea9a5b8b76b55c0cf41770ec36eefc4c",
     "key_seq": 1,
     "identity_history_root": "0021e4d21564c3ed5ccfbdd836d11e805b8b667d0b200f9cc55e3133a18c5856"
   },
   "observations_branch": {
-    "cycle_number_observed": 4,
-    "cycle_start_time_observed": "2026-08-04T05:14:37Z",
-    "cycle_end_time_observed": "2026-09-04T05:00:20Z",
-    "self_stake_observed_metal": 21640,
-    "self_stake_observed_nmetal": "21640000000000",
+    "cycle_number_observed": 5,
+    "cycle_start_time_observed": "2026-09-04T05:13:50Z",
+    "cycle_end_time_observed": "2026-10-07T04:30:08Z",
+    "self_stake_observed_metal": 23750,
+    "self_stake_observed_nmetal": "23750000000000",
     "fee_percent_observed_at_cycle_start": 3,
     "delegator_lifecycle_observation_window_started_at": "2026-07-01T06:02:00Z",
     "delegator_lifecycle_events_in_cycle_observed": [],
@@ -31,11 +31,11 @@
     "subnet_targets_declared_by_operator": []
   },
   "artifacts_branch": {
-    "public_api_manifest_root": "118af137d078b4bfcd3ee10c013efbd8bce11e874c0b98ae100edc8c8f73c48f",
+    "public_api_manifest_root": "ac7b4afcc4a261f4378f4ecc73155e9af085a5e637d5eeaa3074be1c790350da",
     "public_api_files_hashed": [
       {
         "path": "evidence.json",
-        "sha256": "12a6d8601eac1a4515e5ffaa932156451fc17a14f835e38606d7743cd035f077"
+        "sha256": "47f6cfbcd22411d52991e46f907d6a7575a528affcd35855a607ce4ff91393f1"
       },
       {
         "path": "identity-history.jsonl",
@@ -43,31 +43,31 @@
       },
       {
         "path": "identity.json",
-        "sha256": "e0693626e3cbbd5d67b956fc6f5735f8e82d0ab7ba5463acbec4d0813a6c6526"
+        "sha256": "862992d8abcccddf0e3a8c914215afc464b538d6c6325a8849ed4c365ddc97d4"
       },
       {
         "path": "peer-geo.json",
-        "sha256": "53faca3c6ed1c90bc6f3499284d5c76dcc7058c46cb22ebb3a315aeecc1afb05"
+        "sha256": "1b89172ab904d8df30331e09757ba797450149a31b99c3f878839d4f0bcaec19"
       },
       {
         "path": "peers.json",
-        "sha256": "d05f36609379686e1a71006ec7f6aa62ed8cab199ee35156ecaa5ece44b3762b"
+        "sha256": "07f039464a478b88c8b64228c495c6b2a0c2833eb9be3c6f4b30a683fc2a8cfc"
       },
       {
         "path": "uptime-cycles.json",
-        "sha256": "f021ab899bfe1cc06b8a9bbf3c217f5893fc51acd76372fd56be5b8181315b11"
+        "sha256": "e47eb045e0c07882b3191571d871243a30d5162ac53fb25d1c1d8e0d117ffb3d"
       },
       {
         "path": "uptime-recent.json",
-        "sha256": "b164d4b4c36a26cf31e7c50b6550f4a37070e866cc14064f3358130b2480ab69"
+        "sha256": "9b05993cd6542abf7a4579e94bfae1b5816bd94cf3d1d20c01eb84e62a3bdbbd"
       },
       {
         "path": "validator.json",
-        "sha256": "769a014c096924e19bed4ba4346af3a1d3a70431a3a84af303e2c4cbdc0ffd34"
+        "sha256": "cf543c92c176d53c72c60dfcbeb387ef5967a0e09ead673c25d1ed28994eb390"
       }
     ],
     "period_uptime_observed_pct": 100.0000,
     "period_incident_count_observed": 0
   },
-  "dag_root_computed": "063f753ebb79229064375b967db59421ba4f8e9e30c194a92d9c326e08f96dd1"
+  "dag_root_computed": "bc947ee67ace9ba95aa4af79745fa004f9ef9accdfd7313cafe647c70d16c886"
 }
