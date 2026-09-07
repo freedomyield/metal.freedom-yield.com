@@ -875,6 +875,56 @@ assert_eq "single output LARGER than potentialReward -> self 0 / fee 70, known (
 	"$(single_output_maturity "$(build_utxo_hex 70000000000 2)")"
 
 echo ""
+echo "=== corrupt ledger: one non-JSON line makes EVERY path fail closed (exit 10) ==="
+# Sandbox with a ledger of one valid v2 row (cycle 3, TX_C) followed by one
+# line that is not JSON. Nothing may be appended to, deduplicated against,
+# or summarized from such a file — a parse failure is structural, not
+# "no rows" (review I-4: it used to re-append the recorded txID under a
+# second cycle_n and print 累積 0).
+corrupt_ledger_run() {
+	# $1 = sandbox dir (created here), rest = tracker args
+	local d="$1"; shift
+	local st="$d/state" ust="$d/ustate" fx="$d/fx"
+	mkdir -p "$st" "$ust" "$fx"
+	echo "{\"nodeId\":\"$NODE_ID\",\"stake\":{\"self\":2000}}" > "$d/validator.json"
+	echo '{"cycle_n":7}' > "$st/current-cycle-state.json"
+	cat > "$d/uptime-cycles.json" <<JSON
+{"cycles":[{"cycle_n":3,"start_unix":1600000000,"end_unix":1602800000,"final_self_stake_metal":1500},{"cycle_n":2,"start_unix":1597000000,"end_unix":1599800000,"final_self_stake_metal":1500}]}
+JSON
+	printf '%s\n' "{\"cycle_n\":3,\"reward_metal\":9.990000000,\"self_stake_metal\":1500,\"start_unix\":1600000000,\"end_unix\":1602800000,\"add_validator_tx\":\"$TX_C\",\"observed_at\":\"2026-09-04T00:00:00Z\",\"schema_version\":2,\"self_reward_metal\":null,\"fee_income_metal\":null,\"split_known\":false,\"split_basis\":\"refused:single-no-hint\"}" > "$st/rewards-history.jsonl"
+	printf 'this line is not json\n' >> "$st/rewards-history.jsonl"
+	cp "$FIX_DIR/getCurrentSupply.json" "$fx/getCurrentSupply.json"
+	cat > "$fx/getCurrentValidators.json" <<JSON
+{"jsonrpc":"2.0","id":1,"result":{"validators":[{"nodeID":"$NODE_ID","txID":"$TX1","startTime":"$TRACKED_START","endTime":"$TRACKED_END","weight":"2000000000000","delegationFee":3.0,"delegators":[],"potentialReward":"$SELF_REWARD_N","accruedDelegateeReward":"0"}]}}
+JSON
+	python3 -c "
+import json
+print(json.dumps({'jsonrpc':'2.0','id':1,'result':{'numFetched':'1','utxos':['$(build_utxo_hex 9990000000 2)'],'encoding':'hex'}}))
+" > "$fx/getRewardUTXOs.json"
+	set +e
+	STUB_FIXTURE_DIR="$fx" STUB_RECORD_DIR="$d" PATH="$TMP/bin:$PATH" \
+		METALGO_RPC="http://127.0.0.1:9650" VALIDATOR_JSON="$d/validator.json" \
+		UPTIME_CYCLES_JSON="$d/uptime-cycles.json" FY_STATE_DIR="$st" \
+		UPTIME_STATE_DIR="$ust" NTFY_TOPIC_FILE="$TMP/ntfy-topic" FY_LIVE=1 \
+		bash "$TRACKER" "$@" > "$d/out.txt" 2>&1
+	CORRUPT_RC=$?
+	set -e
+}
+TX_C="txCorruptLedgerProbeCycle3333333333"
+
+CL1="$TMP/corrupt-backfill"
+corrupt_ledger_run "$CL1" --backfill "$TX_C" 2
+assert_eq "corrupt ledger: --backfill of the already-recorded txID under another cycle_n exits 10" "10" "$CORRUPT_RC"
+assert_eq "corrupt ledger: --backfill appended nothing (still 2 lines)" "2" "$(wc -l < "$CL1/state/rewards-history.jsonl" | tr -d ' ')"
+assert_true "corrupt ledger: --backfill names the structural failure on stderr" "$(grep -q 'ledger unparseable' "$CL1/out.txt" && echo 1 || echo 0)"
+
+CL2="$TMP/corrupt-daily"
+corrupt_ledger_run "$CL2"
+assert_eq "corrupt ledger: the normal daily run exits 10" "10" "$CORRUPT_RC"
+assert_true "corrupt ledger: no digest block was generated (累積 0 is never shown for an unreadable ledger)" "$([ ! -e "$CL2/state/reward-digest-line.txt" ] && echo 1 || echo 0)"
+assert_true "corrupt ledger: no in-flight state was written either (nothing runs past the gate)" "$([ ! -e "$CL2/state/reward-tracker-state.json" ] && echo 1 || echo 0)"
+
+echo ""
 echo "=== numeric non-leak: no METAL amount ever appears in stdout/stderr ==="
 # Re-run the full scenario sequence once more end-to-end, capturing every
 # invocation's combined output into one aggregate log, then grep it. A

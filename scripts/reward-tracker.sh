@@ -283,6 +283,11 @@
 #      or could not be evaluated (single output outside the tolerance band
 #      of the calculator's estimate, or getCurrentSupply unreachable).
 #      Nothing appended
+#  10  rewards-history.jsonl is unparseable (a line is not JSON) —
+#      structural, fail-closed on EVERY path: no --backfill append, no
+#      live-maturity append or dedupe, no digest block (the morning push
+#      must not show 累積 0 for a ledger that could not be read). Repair
+#      the file by hand; the good rows are append-only and stay as they are
 
 set -uo pipefail
 
@@ -400,53 +405,84 @@ else
 fi
 
 # ---- rewards-history.jsonl helpers --------------------------------------
-# All readers below go through history_effective_rows: the LAST row per
-# cycle_n is the effective one (append-only supersession — see the header's
-# "LEDGER SCHEMA v2"). None of them ever echo an amount to this script's
-# own stdout/stderr; their output is consumed only by ntfy/digest builders.
+# ONE parse site (history_load_all) feeds every reader below, and a parse
+# failure is a STRUCTURAL error (exit 10), never "no rows" (2026-09-07
+# review I-4: with `jq … 2>/dev/null` treated as "no match", a single
+# non-JSON line made --backfill re-append a recorded txID and the digest
+# report 累積 0 — a corrupt ledger was silently fail-open). Every reader
+# returns 10 on that failure and every CALL SITE checks it (`|| exit $?`),
+# because an `exit` inside `$(…)` only leaves the subshell; on top of that
+# the ledger is validated ONCE right after the lock is taken, so neither
+# the --backfill, the live-maturity nor the digest path ever runs against
+# an unparseable file. Readers that answer a yes/no question print "1"/"0"
+# rather than using their return code for it, so rc is free to carry the
+# structural failure. The LAST row per cycle_n is the effective one
+# (append-only supersession — see the header's "LEDGER SCHEMA v2"). None
+# of these ever echo an amount to this script's own stdout/stderr; their
+# output is consumed only by ntfy/digest builders.
 
-# history_has_tx <txID> — true (rc 0) iff ANY line with this
-# add_validator_tx exists (v1 or v2). Guards the LIVE path against a
-# double-append if the state advance is interrupted between the append and
-# the state write. --backfill uses history_effective_line_for_tx instead,
-# because it must distinguish "recorded as v1 only" from "recorded as v2".
-history_has_tx() {
-	local tx="$1"
-	[ -f "$REWARDS_HISTORY" ] || return 1
-	grep -qF "\"add_validator_tx\":\"${tx}\"" "$REWARDS_HISTORY"
+LEDGER_UNPARSEABLE_RC=10
+
+# history_load_all — prints the whole ledger as one JSON array ("[]" when
+# the file is absent or empty). rc 10 + stderr note if any line fails to
+# parse; nothing is printed in that case.
+history_load_all() {
+	if [ ! -f "$REWARDS_HISTORY" ] || [ ! -s "$REWARDS_HISTORY" ]; then
+		echo "[]"
+		return 0
+	fi
+	local all
+	if ! all=$(jq -sc '.' "$REWARDS_HISTORY" 2>/dev/null) || [ -z "$all" ]; then
+		echo "reward-tracker: FATAL: ledger unparseable (${REWARDS_HISTORY}) — refusing to read, append to, or summarize a corrupt ledger; repair it by hand (append-only: do not rewrite good rows)" >&2
+		return "$LEDGER_UNPARSEABLE_RC"
+	fi
+	printf '%s\n' "$all"
 }
 
-# history_tx_under_other_cycle <txID> <cycle_n> — true (rc 0) iff ANY row
+# history_has_tx <txID> — prints 1 iff ANY row with this add_validator_tx
+# exists (v1 or v2), else 0. Guards the LIVE path against a double-append
+# if the state advance is interrupted between the append and the state
+# write. --backfill uses history_effective_line_for_cycle instead, because
+# it must distinguish "recorded as v1 only" from "recorded as v2".
+history_has_tx() {
+	local all
+	all=$(history_load_all) || return $?
+	jq -r --arg tx "$1" 'if any(.[]; .add_validator_tx == $tx) then 1 else 0 end' <<< "$all"
+}
+
+# history_tx_under_other_cycle <txID> <cycle_n> — prints 1 iff ANY row
 # (v1 or v2, effective or superseded) carries this add_validator_tx with a
-# cycle_n other than the given one. --backfill's txID-uniqueness guard.
+# cycle_n other than the given one, else 0. --backfill's txID-uniqueness
+# guard.
 history_tx_under_other_cycle() {
-	local tx="$1" cn="$2"
-	[ -f "$REWARDS_HISTORY" ] && [ -s "$REWARDS_HISTORY" ] || return 1
-	jq -se --arg tx "$tx" --argjson cn "$cn" \
-		'[.[] | select(.add_validator_tx == $tx and .cycle_n != $cn)] | length > 0' \
-		"$REWARDS_HISTORY" >/dev/null 2>&1
+	local all
+	all=$(history_load_all) || return $?
+	jq -r --arg tx "$1" --argjson cn "$2" \
+		'if any(.[]; .add_validator_tx == $tx and .cycle_n != $cn) then 1 else 0 end' <<< "$all"
 }
 
 # history_effective_rows — prints a JSON array of the effective rows (last
 # line per cycle_n, file order decides "last"). [] if the file is absent
 # or empty.
 history_effective_rows() {
-	if [ ! -f "$REWARDS_HISTORY" ] || [ ! -s "$REWARDS_HISTORY" ]; then
-		echo "[]"
-		return 0
-	fi
-	jq -sc 'reduce .[] as $r ({}; .[($r.cycle_n | tostring)] = $r) | [.[]]' "$REWARDS_HISTORY"
+	local all
+	all=$(history_load_all) || return $?
+	jq -c 'reduce .[] as $r ({}; .[($r.cycle_n | tostring)] = $r) | [.[]]' <<< "$all"
 }
 
 # history_effective_line_for_cycle <cycle_n> — the effective row for that
 # cycle_n as one compact JSON object, or empty output if none.
 history_effective_line_for_cycle() {
-	history_effective_rows | jq -c --argjson cn "$1" '[.[] | select(.cycle_n == $cn)] | last // empty'
+	local rows
+	rows=$(history_effective_rows) || return $?
+	jq -c --argjson cn "$1" '[.[] | select(.cycle_n == $cn)] | last // empty' <<< "$rows"
 }
 
 # history_cumulative_metal — sum of reward_metal over effective rows.
 history_cumulative_metal() {
-	history_effective_rows | jq '[.[].reward_metal] | add // 0'
+	local rows
+	rows=$(history_effective_rows) || return $?
+	jq '[.[].reward_metal] | add // 0' <<< "$rows"
 }
 
 # history_cumulative_breakdown — prints "<self> <fee> <unknown>" over the
@@ -455,16 +491,20 @@ history_cumulative_metal() {
 # rows recorded with split_known:false). self + fee + unknown == the
 # cumulative total by construction.
 history_cumulative_breakdown() {
-	history_effective_rows | jq -r '
+	local rows
+	rows=$(history_effective_rows) || return $?
+	jq -r '
 		([.[] | select(.split_known == true) | .self_reward_metal] | add // 0) as $s
 		| ([.[] | select(.split_known == true) | .fee_income_metal] | add // 0) as $f
 		| ([.[] | select(.split_known != true) | .reward_metal] | add // 0) as $u
-		| "\($s) \($f) \($u)"'
+		| "\($s) \($f) \($u)"' <<< "$rows"
 }
 
 # history_count — number of effective rows (= distinct cycles recorded).
 history_count() {
-	history_effective_rows | jq 'length'
+	local rows
+	rows=$(history_effective_rows) || return $?
+	jq 'length' <<< "$rows"
 }
 
 # ---- append one matured-cycle line (shared by live tracking + --backfill)
@@ -541,6 +581,12 @@ if ! flock -n 9; then
 	exit 0
 fi
 
+# Validate the ledger ONCE, under the lock, before any path reads it (see
+# the helpers' header): a corrupt file stops --backfill, the live maturity
+# check AND the digest here, so nothing is appended to, deduplicated
+# against, or summarized from it. Every reader re-checks anyway.
+history_load_all >/dev/null || exit $?
+
 # ============================================================================
 # --backfill mode
 # ============================================================================
@@ -558,11 +604,12 @@ if [ "$BACKFILL" -eq 1 ]; then
 	# would count one reward twice in every cumulative figure. Checked over
 	# ALL rows, not just effective ones — a tx's cycle never legitimately
 	# changes in an append-only ledger.
-	if history_tx_under_other_cycle "$BACKFILL_TX" "$BACKFILL_CYCLE_N"; then
+	TX_ELSEWHERE=$(history_tx_under_other_cycle "$BACKFILL_TX" "$BACKFILL_CYCLE_N") || exit $?
+	if [ "$TX_ELSEWHERE" = "1" ]; then
 		echo "reward-tracker: ERROR: this txID is already recorded under a different cycle_n — refusing to count one reward twice" >&2
 		exit 6
 	fi
-	EFFECTIVE_ROW=$(history_effective_line_for_cycle "$BACKFILL_CYCLE_N")
+	EFFECTIVE_ROW=$(history_effective_line_for_cycle "$BACKFILL_CYCLE_N") || exit $?
 	if [ -n "$EFFECTIVE_ROW" ]; then
 		EFFECTIVE_TX=$(echo "$EFFECTIVE_ROW" | jq -r '.add_validator_tx // empty')
 		EFFECTIVE_SCHEMA=$(echo "$EFFECTIVE_ROW" | jq -r '.schema_version // 1')
@@ -764,9 +811,12 @@ else
 	else
 		LAST_CLOSED=$(jq -c '.cycles[-1]? // empty' "$UPTIME_CYCLES_JSON")
 		LAST_CLOSED_END=$(echo "$LAST_CLOSED" | jq -r '.end_unix // empty' 2>/dev/null)
+		# Structural ledger failure here is a hard stop (exit 10), never a
+		# "not recorded yet" that would append on top of a corrupt file.
+		TRACKED_RECORDED=$(history_has_tx "$TRACKED_TX") || exit $?
 		if [ -z "$LAST_CLOSED" ] || [ "$LAST_CLOSED_END" != "$TRACKED_END" ]; then
 			echo "reward-tracker: uptime-cycles.json last-closed row does not yet match the tracked cycle's end_unix, deferring to next run" >&2
-		elif history_has_tx "$TRACKED_TX"; then
+		elif [ "$TRACKED_RECORDED" = "1" ]; then
 			# Already recorded (e.g. a previous run appended but died before
 			# advancing state). Advance state now and move on.
 			echo "reward-tracker: matured cycle already recorded, advancing tracked state"
@@ -803,8 +853,8 @@ else
 				# dry では DRY: 行" contract from the task brief. Gating this
 				# a second time on fyd_is_live here would be redundant (and
 				# would suppress the dry note the brief explicitly wants).
-				CUM_METAL=$(history_cumulative_metal)
-				COUNT=$(history_count)
+				CUM_METAL=$(history_cumulative_metal) || exit $?
+				COUNT=$(history_count) || exit $?
 				NOW_SELF_STAKE=$(jq -r '.stake.self // 0' "$VALIDATOR_JSON")
 				MILESTONE_QTY=$(awk -v s="$NOW_SELF_STAKE" -v x="$REWARD_METAL" 'BEGIN{printf "%.9f", s+x}')
 				REACHED=$(awk -v q="$MILESTONE_QTY" -v m="$FY_REWARD_MILESTONE" 'BEGIN{print (q>=m)?"1":"0"}')
@@ -957,9 +1007,13 @@ compute_and_write_digest() {
 	fi
 
 	# ---- line 1: cumulative with breakdown (effective ledger rows) ----
-	local cum cum_self cum_fee cum_unknown unknown_tail=""
-	cum=$(history_cumulative_metal)
-	read -r cum_self cum_fee cum_unknown <<< "$(history_cumulative_breakdown)"
+	# Ledger readers: a structural failure returns 10 out of this function
+	# (the caller exits with it) — the block is NOT written, so the morning
+	# push never shows 累積 0 for a ledger that could not be read.
+	local cum cum_self cum_fee cum_unknown breakdown unknown_tail=""
+	cum=$(history_cumulative_metal) || return $?
+	breakdown=$(history_cumulative_breakdown) || return $?
+	read -r cum_self cum_fee cum_unknown <<< "$breakdown"
 	if [ "$(awk -v u="$cum_unknown" 'BEGIN{print (u+0>0)?"1":"0"}')" = "1" ]; then
 		unknown_tail=" / 内訳不明 $(fmt_metal "$cum_unknown" 1)"
 	fi
@@ -988,5 +1042,5 @@ compute_and_write_digest() {
 	fi | fyd_live_write "the reward digest block" "$DIGEST_FILE"
 }
 
-compute_and_write_digest
+compute_and_write_digest || exit $?
 echo "reward-tracker: digest block updated"
