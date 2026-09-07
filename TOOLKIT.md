@@ -79,6 +79,12 @@ Severity model: **CRITICAL** = unknown key guarded by a default (`// ""`, `|| "â
 **Dependencies:** `curl`, `jq`. Read-only access to `validator.json`.
 **Cron:** daily, off-peak.
 
+### `scripts/reward-backfill-discover.sh`
+**Purpose:** One-shot, read-only recovery of your validator's historical `AddValidatorTx` txIDs for `reward-tracker.sh --backfill` (cycles that matured before that tracker existed have their txID recorded nowhere). Walks input-UTXO references backwards from the current staking tx via `platform.getCurrentValidators` + `platform.getTx` only, matches candidates exactly (start AND end) against `uptime-cycles.json`, prints `cycle_n<TAB>txID<TAB>start<TAB>end<TAB>matched` rows (plus `UNMATCHED` / `NOT-FOUND`). Never prints raw tx JSON or any address. Exit 4 if a closed cycle went undiscovered; RPC failure is fail-closed.
+**Dependencies:** `curl`, `jq`. Read-only access to `validator.json` and `uptime-cycles.json`.
+**Env:** `METALGO_RPC`, `MAX_DEPTH` (BFS cap, default 8), `FY_RPC_TIMEOUT`.
+**Cron:** none â€” run by hand once per backfill.
+
 ### `scripts/node-health-daily.sh`
 **Purpose:** Once-a-day snapshot of host + `metalgo` health, kept forever. Master JSONL on the validator host (includes load, CPU, RAM, disk for ops use), plus a sanitized public subset (peer count, chain heights, bootstrap, container status) suitable for publication.
 **Dependencies:** `curl`, `jq`, `docker` (for container status).
