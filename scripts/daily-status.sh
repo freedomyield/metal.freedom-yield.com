@@ -137,7 +137,6 @@ NODE_SHORT="${NODE_ID:0:24}…"
 P_BOOT=$(jq -r '.bootstrap.pChain' "$VALIDATOR_JSON")
 X_BOOT=$(jq -r '.bootstrap.xChain' "$VALIDATOR_JSON")
 C_BOOT=$(jq -r '.bootstrap.cChain' "$VALIDATOR_JSON")
-UPTIME=$(jq -r '.uptime.network // 0' "$VALIDATOR_JSON")
 SELF_STAKE=$(jq -r '.stake.self // 0' "$VALIDATOR_JSON")
 TOTAL_RECEIVED=$(jq -r '.stake.totalReceived // 0' "$VALIDATOR_JSON")
 TOTAL_WEIGHT_METAL=$(awk -v s="$SELF_STAKE" -v d="$TOTAL_RECEIVED" 'BEGIN{printf "%.4f", s+d}' | sed -E 's/\.?0+$//')
@@ -249,8 +248,11 @@ fi
 # own subsystem — see that script's header on why it does not use a named
 # role here).
 #
-# Contract (2026-09-07): the file holds up to FOUR lines (2 in the
-# projection-unavailable fallback). EVERY non-empty line is spliced, in
+# Contract (2026-09-07, phone-width layout): the file holds SIX lines
+# (three in the projection-unavailable fallback), plus one more for each
+# breakdown line the writer had to split to stay <= 30 columns — an
+# unsplit 不明 cycle or five-digit amounts make it 7. Never hard-code the
+# count here: EVERY non-empty line is spliced, in
 # file order, under [Reward]; empty/whitespace-only lines are dropped and
 # the command substitution strips the trailing newline, so the block never
 # ends in a blank line however the writer terminated the file. A file
