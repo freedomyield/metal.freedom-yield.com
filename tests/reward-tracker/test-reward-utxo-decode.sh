@@ -41,28 +41,30 @@ assert_rc() {
 	fi
 }
 
-# build_utxo_hex <amt_nmetal> <type_id> — constructs a hex-encoded UTXO blob
-# byte-for-byte in the same field order metalgo's codec would produce for a
-# TransferOutput (or a caller-chosen type_id, to build the wrong-type
-# fixture). TxID/AssetID/Addrs bytes are arbitrary fill (0x11/0x22/0x33) —
-# decode_reward_utxo_nmetal never reads them.
+# build_utxo_hex <amt_nmetal> [type_id] [output_index] — constructs a
+# hex-encoded UTXO blob byte-for-byte in the same field order metalgo's
+# codec would produce for a TransferOutput (or a caller-chosen type_id, to
+# build the wrong-type fixture). TxID/AssetID/Addrs bytes are arbitrary fill
+# (0x11/0x22/0x33) — the decoder never reads them. output_index (default 0)
+# is the UTXOID.OutputIndex field the 2026-09-07 self/fee split reads.
 build_utxo_hex() {
-	local amt_nmetal="$1" type_id="${2:-7}"
-	python3 - "$amt_nmetal" "$type_id" <<'PY'
+	local amt_nmetal="$1" type_id="${2:-7}" out_idx="${3:-0}"
+	python3 - "$amt_nmetal" "$type_id" "$out_idx" <<'PY'
 import sys
 amt = int(sys.argv[1])
 type_id = int(sys.argv[2])
+out_idx = int(sys.argv[3])
 parts = [
-    b'\x00\x00',                 # codec version
-    bytes([0x11]) * 32,          # TxID
-    (0).to_bytes(4, 'big'),      # OutputIndex
-    bytes([0x22]) * 32,          # AssetID
-    type_id.to_bytes(4, 'big'),  # Out type ID
-    amt.to_bytes(8, 'big'),      # Amt
-    (0).to_bytes(8, 'big'),      # Locktime
-    (1).to_bytes(4, 'big'),      # Threshold
-    (1).to_bytes(4, 'big'),      # len(Addrs)
-    bytes([0x33]) * 20,          # Addrs[0]
+    b'\x00\x00',                    # codec version
+    bytes([0x11]) * 32,             # TxID
+    out_idx.to_bytes(4, 'big'),     # OutputIndex
+    bytes([0x22]) * 32,             # AssetID
+    type_id.to_bytes(4, 'big'),     # Out type ID
+    amt.to_bytes(8, 'big'),         # Amt
+    (0).to_bytes(8, 'big'),         # Locktime
+    (1).to_bytes(4, 'big'),         # Threshold
+    (1).to_bytes(4, 'big'),         # len(Addrs)
+    bytes([0x33]) * 20,             # Addrs[0]
 ]
 print('0x' + b''.join(parts).hex())
 PY
@@ -106,6 +108,90 @@ assert_eq "no UTXOs -> 0.000000000 (a legitimate outcome, not an error)" "0.0000
 # fail-loud-but-partial rationale.
 SUM_PARTIAL="$(printf '%s\n%s\n' "$UTXO_5_METAL" "$UTXO_WRONG_TYPE" | sum_reward_utxos_metal 2>/dev/null)"
 assert_eq "one good + one refused UTXO -> sums the decodable one, not zero" "5.000000000" "$SUM_PARTIAL"
+
+echo ""
+echo "=== decode_reward_utxo_output_index() ==="
+
+UTXO_IDX2="$(build_utxo_hex 5000000000 7 2)"
+UTXO_IDX3="$(build_utxo_hex 1000000000 7 3)"
+UTXO_IDX_MAX="$(build_utxo_hex 1 7 4294967295)"
+assert_eq "OutputIndex 2 decodes to 2" "2" "$(decode_reward_utxo_output_index "$UTXO_IDX2")"
+assert_eq "OutputIndex 3 decodes to 3" "3" "$(decode_reward_utxo_output_index "$UTXO_IDX3")"
+assert_eq "OutputIndex uint32 max decodes exactly" "4294967295" "$(decode_reward_utxo_output_index "$UTXO_IDX_MAX")"
+assert_eq "OutputIndex: no 0x prefix also accepted" "2" "$(decode_reward_utxo_output_index "${UTXO_IDX2#0x}")"
+decode_reward_utxo_output_index "0x1234" >/dev/null 2>&1
+assert_rc "OutputIndex: too-short blob refused" "2" "$?"
+decode_reward_utxo_output_index "$UTXO_WRONG_TYPE" >/dev/null 2>&1
+assert_rc "OutputIndex: wrong Out type ID refused (same guard as the amount decoder)" "3" "$?"
+
+echo ""
+echo "=== split_reward_utxos_metal() — self / fee by relative OutputIndex ==="
+# Shapes traced from metalgo's rewardValidatorTx() (see the lib header):
+#   commit: self at index K (== PotentialReward), fee at K+1 iff accrued > 0
+#   abort:  fee ONLY, at index K (no self output)
+# Output: "<total> <self> <fee> <known>"; self/fee are "-" when known=0.
+SELF_K2="$(build_utxo_hex 50500000000 7 2)"    # 50.5 METAL @ index 2
+FEE_K3="$(build_utxo_hex 12250000000 7 3)"     # 12.25 METAL @ index 3
+FEE_K5="$(build_utxo_hex 12250000000 7 5)"     # 12.25 METAL @ index 5 (gap)
+EXTRA_K4="$(build_utxo_hex 1000000000 7 4)"    # a third output — unknown shape
+
+assert_eq "0 UTXOs -> 0 total, self 0, fee 0, known" \
+	"0.000000000 0.000000000 0.000000000 1" "$(printf '' | split_reward_utxos_metal)"
+
+assert_eq "2 UTXOs, consecutive: lower index = self, higher = fee, known" \
+	"62.750000000 50.500000000 12.250000000 1" "$(printf '%s\n%s\n' "$SELF_K2" "$FEE_K3" | split_reward_utxos_metal)"
+assert_eq "2 UTXOs given in reverse order still split by index, not by input order" \
+	"62.750000000 50.500000000 12.250000000 1" "$(printf '%s\n%s\n' "$FEE_K3" "$SELF_K2" | split_reward_utxos_metal)"
+assert_eq "2 UTXOs, consecutive, lower amount == potentialReward hint: known" \
+	"62.750000000 50.500000000 12.250000000 1" "$(printf '%s\n%s\n' "$SELF_K2" "$FEE_K3" | split_reward_utxos_metal 50500000000)"
+assert_eq "2 UTXOs, consecutive, lower amount != potentialReward hint: total kept, split refused" \
+	"62.750000000 - - 0" "$(printf '%s\n%s\n' "$SELF_K2" "$FEE_K3" | split_reward_utxos_metal 999)"
+assert_eq "2 UTXOs, NON-consecutive indices (2,5): total kept, split refused" \
+	"62.750000000 - - 0" "$(printf '%s\n%s\n' "$SELF_K2" "$FEE_K5" | split_reward_utxos_metal)"
+assert_eq "2 UTXOs, SAME index: total kept, split refused" \
+	"101.000000000 - - 0" "$(printf '%s\n%s\n' "$SELF_K2" "$SELF_K2" | split_reward_utxos_metal)"
+assert_eq "3 UTXOs: total kept, split refused" \
+	"63.750000000 - - 0" "$(printf '%s\n%s\n%s\n' "$SELF_K2" "$FEE_K3" "$EXTRA_K4" | split_reward_utxos_metal)"
+
+assert_eq "1 UTXO, no potentialReward hint: total kept, split refused (commit-self vs abort-fee is undecidable)" \
+	"50.500000000 - - 0" "$(printf '%s\n' "$SELF_K2" | split_reward_utxos_metal)"
+assert_eq "1 UTXO == potentialReward hint: self = all, fee 0, known (commit path)" \
+	"50.500000000 50.500000000 0.000000000 1" "$(printf '%s\n' "$SELF_K2" | split_reward_utxos_metal 50500000000)"
+assert_eq "1 UTXO != potentialReward hint: self 0, fee = all, known (abort path pays the delegatee cut only)" \
+	"12.250000000 0.000000000 12.250000000 1" "$(printf '%s\n' "$FEE_K3" | split_reward_utxos_metal 50500000000)"
+assert_eq "1 UTXO, non-numeric hint is treated as absent (split refused, not crashed)" \
+	"50.500000000 - - 0" "$(printf '%s\n' "$SELF_K2" | split_reward_utxos_metal abc 2>/dev/null)"
+
+# A refused UTXO poisons the split (never guess around a blob we could not
+# read) but the total still carries the decodable part, matching
+# sum_reward_utxos_metal's fail-loud-but-partial contract.
+assert_eq "one good + one refused UTXO: partial total, split refused" \
+	"50.500000000 - - 0" "$(printf '%s\n%s\n' "$SELF_K2" "$UTXO_WRONG_TYPE" | split_reward_utxos_metal 2>/dev/null)"
+
+echo ""
+echo "=== mutation kill check (split): the consecutive-index guard has teeth ==="
+SPLIT_MUTANT="$(mktemp)"
+sed 's/\[ "$((hi_idx - lo_idx))" -ne 1 \]/[ "0" -ne 0 ]/' "$LIB" > "$SPLIT_MUTANT"
+if ! diff -q "$LIB" "$SPLIT_MUTANT" >/dev/null 2>&1; then
+	SPLIT_MUTANT_OUT="$(
+		# shellcheck disable=SC1090
+		. "$SPLIT_MUTANT"
+		printf '%s\n%s\n' "$SELF_K2" "$FEE_K5" | split_reward_utxos_metal
+	)"
+	if [ "$SPLIT_MUTANT_OUT" = "62.750000000 50.500000000 12.250000000 1" ]; then
+		PASS=$((PASS + 1))
+		echo "  PASS  mutant (consecutive-index guard disabled) SPLITS the (2,5) gap pair as if adjacent — the guard is load-bearing"
+	else
+		FAIL=$((FAIL + 1))
+		FAILURES+=("split mutation kill: mutant still refused the gap pair (out=$SPLIT_MUTANT_OUT)")
+		echo "  FAIL  split mutant unexpectedly still refused: $SPLIT_MUTANT_OUT"
+	fi
+else
+	FAIL=$((FAIL + 1))
+	FAILURES+=("split mutation kill: sed did not change the file — guard not found at expected shape")
+	echo "  FAIL  split mutant sed produced no diff — guard not matched"
+fi
+rm -f "$SPLIT_MUTANT"
 
 echo ""
 echo "=== mutation kill check ==="

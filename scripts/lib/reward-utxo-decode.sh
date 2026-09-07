@@ -40,6 +40,51 @@
 #   type tag, Amt) — everything after Amt (locktime/threshold/addresses) is
 #   irrelevant to "how much METAL did this UTXO carry" and is not parsed.
 #
+# ---------------------------------------------------------------------------
+# SELF / FEE SPLIT BY RELATIVE OutputIndex (added 2026-09-07)
+# ---------------------------------------------------------------------------
+# reward-tracker.sh originally recorded one combined reward_metal because the
+# ABSOLUTE OutputIndex of each reward output depends on the original
+# AddValidatorTx's own output/stake count, which this repo never decodes.
+# The split below needs only the RELATIVE order, which is fixed by
+# vms/platformvm/txs/executor/proposal_tx_executor.go rewardValidatorTx()
+# (fetched from https://github.com/MetalBlockchain/metalgo master on
+# 2026-09-07 — read, not assumed):
+#
+#   K := len(outputs) + len(stake)          (the unknown absolute base)
+#   COMMIT (uptime met):
+#     if PotentialReward > 0:  self  UTXO at index K         (utxosOffset++)
+#     if delegateeReward > 0:  fee   UTXO at index K+offset  (= K+1 when both)
+#   ABORT (uptime missed):
+#     validator reward NOT paid; if delegateeReward > 0:
+#                              fee   UTXO at index K  ("no [offset] if the
+#                              RewardValidatorTx is aborted")
+#
+# Consequences this lib encodes, and nothing more:
+#   2 UTXOs at consecutive indices  -> lower = self, higher = fee. Only the
+#                                      commit path can produce two outputs.
+#   1 UTXO                          -> AMBIGUOUS by shape alone: commit-with-
+#                                      no-fee (self) and abort-with-fee (fee)
+#                                      both put one output at index K. It is
+#                                      decidable only against the validator's
+#                                      PotentialReward, which the commit path
+#                                      pays EXACTLY (`reward :=
+#                                      validator.PotentialReward`): equal ->
+#                                      self; different -> the abort-path fee
+#                                      output. platform.getCurrentValidators
+#                                      exposes that value as `potentialReward`
+#                                      while the tx is current; reward-
+#                                      tracker.sh records it in its in-flight
+#                                      state for exactly this comparison.
+#                                      Without the hint the split is REFUSED.
+#   0 UTXOs                         -> self 0 / fee 0, known (nothing paid).
+#   3+ UTXOs, a gap, a duplicate
+#   index, an undecodable blob,
+#   or a hint the lower output
+#   contradicts                     -> split REFUSED (total still summed).
+#                                      No shape the cited source produces
+#                                      looks like this; do not guess.
+#
 #   TYPE-ID CHECK IS NOT OPTIONAL. The out-type tag at offset 70 must equal
 #   7 (secp256k1fx.TransferOutput's registration slot in
 #   vms/platformvm/txs/codec.go's RegisterApricotTypes — traced by hand from
@@ -56,6 +101,57 @@
 #   number. See decode_reward_utxo_nmetal's exit code 3.
 #
 # ---------------------------------------------------------------------------
+
+# reward_utxo__checked_hex <caller> <hex_utxo>
+#   Shared header validation for every decoder below: strips an optional
+#   0x/0X prefix, refuses non-hex, refuses a blob too short to reach the end
+#   of Amt, refuses any Out type ID other than 7. Prints the normalized hex
+#   on success. Exit codes are the decoders' documented 1 / 2 / 3. The
+#   type-ID guard applies to the OutputIndex decoder too, even though the
+#   index lives before the type tag: a blob whose output is not a
+#   secp256k1fx.TransferOutput is not a reward UTXO this lib understands,
+#   and the self/fee split must not order outputs it would refuse to sum.
+reward_utxo__checked_hex() {
+	local caller="$1" hex="$2"
+	hex="${hex#0x}"
+	hex="${hex#0X}"
+	if ! [[ "$hex" =~ ^[0-9a-fA-F]*$ ]]; then
+		echo "${caller}: not a hex string" >&2
+		return 1
+	fi
+	# 82 bytes = 164 hex chars is the minimum to reach the end of Amt.
+	if [ "${#hex}" -lt 164 ]; then
+		echo "${caller}: too short (${#hex} hex chars, need >= 164) to hold TxID+OutputIndex+AssetID+TypeID+Amt" >&2
+		return 2
+	fi
+
+	# Out type ID: hex chars [140,148) = bytes [70,74).
+	local type_id_hex="${hex:140:8}"
+	local type_id=$((16#${type_id_hex}))
+	if [ "$type_id" -ne 7 ]; then
+		echo "${caller}: unsupported Out type ID ${type_id} (expected 7 = secp256k1fx.TransferOutput) — refusing to guess an amount" >&2
+		return 3
+	fi
+	printf '%s\n' "$hex"
+	return 0
+}
+
+# decode_reward_utxo_output_index <hex_utxo>
+#   Prints the UTXO's UTXOID.OutputIndex (uint32, decimal) to stdout. Same
+#   input rules and exit codes as decode_reward_utxo_nmetal (usage 1 / too
+#   short 2 / wrong type 3). Offset: hex chars [68,76) = bytes [34,38) —
+#   see the BYTE LAYOUT table in this file's header.
+decode_reward_utxo_output_index() {
+	if [ "$#" -ne 1 ]; then
+		echo "decode_reward_utxo_output_index: usage: decode_reward_utxo_output_index <hex_utxo>" >&2
+		return 1
+	fi
+	local hex
+	hex="$(reward_utxo__checked_hex "decode_reward_utxo_output_index" "$1")" || return $?
+	local idx_hex="${hex:68:8}"
+	echo $((16#${idx_hex}))
+	return 0
+}
 
 # decode_reward_utxo_nmetal <hex_utxo>
 #   Prints the UTXO's amount in nMETAL (integer) to stdout. <hex_utxo> may
@@ -74,26 +170,8 @@ decode_reward_utxo_nmetal() {
 		echo "decode_reward_utxo_nmetal: usage: decode_reward_utxo_nmetal <hex_utxo>" >&2
 		return 1
 	fi
-	local hex="$1"
-	hex="${hex#0x}"
-	hex="${hex#0X}"
-	if ! [[ "$hex" =~ ^[0-9a-fA-F]*$ ]]; then
-		echo "decode_reward_utxo_nmetal: not a hex string" >&2
-		return 1
-	fi
-	# 82 bytes = 164 hex chars is the minimum to reach the end of Amt.
-	if [ "${#hex}" -lt 164 ]; then
-		echo "decode_reward_utxo_nmetal: too short (${#hex} hex chars, need >= 164) to hold TxID+OutputIndex+AssetID+TypeID+Amt" >&2
-		return 2
-	fi
-
-	# Out type ID: hex chars [140,148) = bytes [70,74).
-	local type_id_hex="${hex:140:8}"
-	local type_id=$((16#${type_id_hex}))
-	if [ "$type_id" -ne 7 ]; then
-		echo "decode_reward_utxo_nmetal: unsupported Out type ID ${type_id} (expected 7 = secp256k1fx.TransferOutput) — refusing to guess an amount" >&2
-		return 3
-	fi
+	local hex
+	hex="$(reward_utxo__checked_hex "decode_reward_utxo_nmetal" "$1")" || return $?
 
 	# Amt: hex chars [148,164) = bytes [74,82), uint64 big-endian.
 	local amt_hex="${hex:148:16}"
@@ -135,5 +213,112 @@ sum_reward_utxos_metal() {
 	local frac=$((total_n % 1000000000))
 	printf '%d.%09d\n' "$whole" "$frac"
 	[ "$any_hit" -eq 1 ] || return 0
+	return 0
+}
+
+# reward_utxo__nmetal_to_metal <nmetal_int> — "W.FFFFFFFFF" fixed 9 places.
+reward_utxo__nmetal_to_metal() {
+	printf '%d.%09d\n' "$(($1 / 1000000000))" "$(($1 % 1000000000))"
+}
+
+# split_reward_utxos_metal [potential_reward_nmetal]
+#   Reads hex UTXO strings, one per line, from stdin (same input contract as
+#   sum_reward_utxos_metal) and prints ONE line:
+#
+#       <total_metal> <self_metal> <fee_metal> <known>
+#
+#   known=1: self/fee are 9-place METAL strings and self+fee == total.
+#   known=0: self/fee are the literal "-" — the split was REFUSED; total is
+#            still the (possibly partial) sum, exactly what
+#            sum_reward_utxos_metal would have printed.
+#
+#   The decision table is the "SELF / FEE SPLIT" block in this file's header
+#   — every branch below is one row of it, nothing is inferred beyond what
+#   rewardValidatorTx() is cited as doing. The optional argument is the
+#   validator's PotentialReward in nMETAL (metalgo's `potentialReward`
+#   field); a non-integer argument is treated as absent (with a stderr
+#   note), never as a value to compare against.
+#
+#   Always returns 0 — "refused" is a data outcome (known=0), not an error;
+#   a caller that cannot read the line at all sees an empty stdout only if
+#   this function was never reached.
+split_reward_utxos_metal() {
+	local hint="${1:-}"
+	if [ -n "$hint" ] && ! [[ "$hint" =~ ^[0-9]+$ ]]; then
+		echo "split_reward_utxos_metal: potential_reward_nmetal is not an unsigned integer — treating the hint as absent" >&2
+		hint=""
+	fi
+
+	local line n=0 refused=0 total_n=0
+	local -a idxs=() amts=()
+	while IFS= read -r line; do
+		[ -z "$line" ] && continue
+		local amt idx
+		if amt="$(decode_reward_utxo_nmetal "$line")" \
+			&& idx="$(decode_reward_utxo_output_index "$line" 2>/dev/null)"; then
+			total_n=$((total_n + amt))
+			idxs+=("$idx")
+			amts+=("$amt")
+			n=$((n + 1))
+		else
+			refused=1
+			echo "split_reward_utxos_metal: skipped one undecodable UTXO — split refused, total is partial" >&2
+		fi
+	done
+
+	local total self fee known=0
+	total="$(reward_utxo__nmetal_to_metal "$total_n")"
+	self="-"
+	fee="-"
+
+	if [ "$refused" -eq 0 ]; then
+		case "$n" in
+			0)
+				self="$(reward_utxo__nmetal_to_metal 0)"
+				fee="$self"
+				known=1
+				;;
+			1)
+				if [ -n "$hint" ]; then
+					if [ "${amts[0]}" = "$hint" ]; then
+						# commit path, no delegatee reward: the one output IS the
+						# validator's own PotentialReward.
+						self="$(reward_utxo__nmetal_to_metal "${amts[0]}")"
+						fee="$(reward_utxo__nmetal_to_metal 0)"
+					else
+						# abort path: the validator reward is not paid; the only
+						# output the cited source can emit is the delegatee cut.
+						self="$(reward_utxo__nmetal_to_metal 0)"
+						fee="$(reward_utxo__nmetal_to_metal "${amts[0]}")"
+					fi
+					known=1
+				fi
+				;;
+			2)
+				local lo_idx hi_idx lo_amt hi_amt
+				if [ "${idxs[0]}" -le "${idxs[1]}" ]; then
+					lo_idx="${idxs[0]}"; lo_amt="${amts[0]}"
+					hi_idx="${idxs[1]}"; hi_amt="${amts[1]}"
+				else
+					lo_idx="${idxs[1]}"; lo_amt="${amts[1]}"
+					hi_idx="${idxs[0]}"; hi_amt="${amts[0]}"
+				fi
+				if [ "$((hi_idx - lo_idx))" -ne 1 ]; then
+					echo "split_reward_utxos_metal: two outputs at non-consecutive indices — not the commit-path self+fee pair, split refused" >&2
+				elif [ -n "$hint" ] && [ "$lo_amt" != "$hint" ]; then
+					echo "split_reward_utxos_metal: lower output does not equal the recorded potentialReward — split refused" >&2
+				else
+					self="$(reward_utxo__nmetal_to_metal "$lo_amt")"
+					fee="$(reward_utxo__nmetal_to_metal "$hi_amt")"
+					known=1
+				fi
+				;;
+			*)
+				echo "split_reward_utxos_metal: ${n} reward outputs — the cited source emits at most two, split refused" >&2
+				;;
+		esac
+	fi
+
+	printf '%s %s %s %d\n' "$total" "$self" "$fee" "$known"
 	return 0
 }
