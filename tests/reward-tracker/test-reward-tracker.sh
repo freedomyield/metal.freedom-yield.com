@@ -517,7 +517,12 @@ assert_true "ntfy body was recorded (notify fired)" "$([ -s "$NTFY_LOG" ] && ech
 # Push body (phone-width layout): one fact per line, 累積 before the
 # delta (operator's ordering requirement), no parentheses.
 MATURITY_BODY="$TMP/record/maturity-body.txt"
-sed -n '/^---$/,$p' "$NTFY_LOG" | tail -n +2 | grep -v '^Priority:\|^Title:\|^Tags:\|^Content-Type:\|^Authorization:' > "$MATURITY_BODY"
+# A bare pipeline (not an assignment, so no `&&`-list exemption): with no
+# ntfy log the sed fails, and with a header-only log grep -v selects
+# nothing and exits 1 — either way pipefail + set -e would abort the suite
+# here. Guard it so a missing/empty push leaves an EMPTY body file and the
+# assertions below fail cleanly instead.
+[ -f "$NTFY_LOG" ] && { sed -n '/^---$/,$p' "$NTFY_LOG" | tail -n +2 | grep -v '^Priority:\|^Title:\|^Tags:\|^Content-Type:\|^Authorization:' > "$MATURITY_BODY"; } || : > "$MATURITY_BODY"
 EXPECTED_MATURITY_BODY="Cycle 7 reward
 累積 62.75 METAL
 　自己 50.50 / 手数料 12.25
@@ -757,7 +762,10 @@ assert_true "zero-reward push title carries no 🎉" "$(printf '%s' "$ZERO_PUSH"
 # requirement) — a 0-METAL cycle still leads with 累積, with the zero delta
 # and the uptime warning folded into the parenthetical tail.
 ZERO_BODY="$TMP/record/zero-body.txt"
-printf '%s\n' "$ZERO_PUSH" | tail -n +2 | grep -v '^Priority:\|^Title:\|^Tags:\|^Content-Type:\|^Authorization:' > "$ZERO_BODY"
+# Same bare-pipeline hazard as the maturity body above: an empty
+# $ZERO_PUSH makes grep -v select nothing (exit 1) and pipefail + set -e
+# would abort here. Empty push -> empty body file -> clean FAILs below.
+[ -n "$ZERO_PUSH" ] && { printf '%s\n' "$ZERO_PUSH" | tail -n +2 | grep -v '^Priority:\|^Title:\|^Tags:\|^Content-Type:\|^Authorization:' > "$ZERO_BODY"; } || : > "$ZERO_BODY"
 ZERO_LAYOUT_OK=$(python3 - "$ZERO_BODY" <<'PY'
 import re, sys
 b = open(sys.argv[1], encoding="utf-8").read()
