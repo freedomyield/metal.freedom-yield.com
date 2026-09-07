@@ -575,6 +575,7 @@ if [ "$BACKFILL" -eq 1 ]; then
 			exit 0
 		fi
 		echo "reward-tracker: --backfill effective row is v1 — appending a v2 row with the self/fee split (v1 row left in place)" >&2
+		EFFECTIVE_V1_TOTAL=$(echo "$EFFECTIVE_ROW" | jq -r '.reward_metal // empty')
 	fi
 	if [ ! -r "$UPTIME_CYCLES_JSON" ]; then
 		echo "reward-tracker: ERROR: uptime-cycles.json not readable at ${UPTIME_CYCLES_JSON}" >&2
@@ -634,6 +635,14 @@ if [ "$BACKFILL" -eq 1 ]; then
 				B_BASIS="operator-asserted-no-delegators+self-sanity"
 				;;
 		esac
+	fi
+
+	# v1 -> v2 upgrade: the v2 row records the CHAIN's total. If the v1 row
+	# disagreed, say so (cycle_n only — never the amounts) so the operator
+	# reviews the pair instead of trusting the supersession silently.
+	if [ -n "${EFFECTIVE_V1_TOTAL:-}" ] \
+		&& [ "$(awk -v a="$EFFECTIVE_V1_TOTAL" -v b="$B_REWARD" 'BEGIN{print (a+0 == b+0) ? "1" : "0"}')" != "1" ]; then
+		echo "reward-tracker: NOTE: cycle_n=${BACKFILL_CYCLE_N}: the v1 row's total differs from the chain's total — the v2 row records the chain's; review the pair by hand" >&2
 	fi
 
 	if append_reward_line "$BACKFILL_CYCLE_N" "$B_REWARD" "$B_SELF_STAKE" "$B_START" "$B_END" "$BACKFILL_TX" "$B_SELF_R" "$B_FEE_R" "$B_KNOWN" "$B_BASIS"; then

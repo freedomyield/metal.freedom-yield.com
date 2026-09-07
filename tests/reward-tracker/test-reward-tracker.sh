@@ -279,6 +279,19 @@ assert_true "no rewards-history.jsonl yet (nothing matured)" "$([ ! -s "$REWARDS
 assert_true "digest file was written" "$([ -s "$DIGEST_FILE" ] && echo 1 || echo 0)"
 
 echo ""
+echo "=== state self-heal: a pre-v2 state file gains the hint fields on the no-change branch ==="
+# Production's in-flight state for the current cycle was written before
+# tracked_potential_reward_nmetal / tracked_accrued_delegatee_reward_nmetal
+# existed. The no-change branch must rewrite the state every run so the
+# hint is on hand by the time the tx matures — never only at bootstrap.
+jq 'del(.tracked_potential_reward_nmetal, .tracked_accrued_delegatee_reward_nmetal)' "$TRACKER_STATE" > "$TRACKER_STATE.tmp" && mv "$TRACKER_STATE.tmp" "$TRACKER_STATE"
+assert_eq "(setup) hint fields stripped from the state file" "null null" "$(jq -r '"\(.tracked_potential_reward_nmetal) \(.tracked_accrued_delegatee_reward_nmetal)"' "$TRACKER_STATE")"
+run_tracker 1
+assert_eq "no-change run exits 0" "0" "$LAST_RC"
+assert_true "no-change run took the 'still in flight' branch" "$(grep -q 'no change — current cycle still in flight' "$LAST_OUT" && echo 1 || echo 0)"
+assert_eq "no-change run restored both hint fields (self-heal)" "$SELF_REWARD_N 0" "$(jq -r '"\(.tracked_potential_reward_nmetal) \(.tracked_accrued_delegatee_reward_nmetal)"' "$TRACKER_STATE")"
+
+echo ""
 echo "=== flock (K-4-style non-blocking exclusion) ==="
 LOCK_FILE_PATH="$STATE_DIR/locks/reward-tracker.lock"
 assert_true "lock file was created under state/locks/" "$([ -e "$LOCK_FILE_PATH" ] && echo 1 || echo 0)"
@@ -531,6 +544,7 @@ assert_eq "appended v2 row: cycle_n 2" "2" "$(echo "$LINE4_JSON" | jq -r '.cycle
 assert_eq "appended v2 row: split_known true" "true" "$(echo "$LINE4_JSON" | jq -r '.split_known')"
 assert_eq "appended v2 row: self 4.0 / fee 1.0" "4.000000000 1.000000000" "$(echo "$LINE4_JSON" | jq -r '"\(.self_reward_metal) \(.fee_income_metal)"')"
 assert_eq "v1 row (line 3) is byte-for-byte untouched (append-only)" "1" "$(sed -n '3p' "$REWARDS_HISTORY" | grep -qF "\"add_validator_tx\":\"$TX_V1\",\"observed_at\":\"2026-09-04T00:00:00Z\"}" && echo 1 || echo 0)"
+assert_true "v1->v2 with AGREEING totals: no 'differs' note" "$(grep -q "v1 row's total differs" "$LAST_OUT" && echo 0 || echo 1)"
 run_tracker 1 --backfill "$TX_V1" 2
 assert_eq "re-running the v1->v2 backfill exits 0" "0" "$LAST_RC"
 assert_eq "rewards-history.jsonl still 4 lines (v2 row appended exactly once)" "4" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
@@ -620,10 +634,15 @@ assert_eq "flag + 1 output at 1.2E (inside the band): exit 0, appended" "0 $((PR
 
 # (7) v1-only effective row + flag: exactly one v2 row appended, then no-op
 TX_ND6="txNoDelegatorsLegacyV1Cycle666666"
-printf '%s\n' "{\"cycle_n\":6,\"reward_metal\":$E4_METAL,\"self_stake_metal\":1500,\"start_unix\":1608400000,\"end_unix\":1611200000,\"add_validator_tx\":\"$TX_ND6\",\"observed_at\":\"2026-09-04T00:00:00Z\"}" >> "$REWARDS_HISTORY"
+# The seeded v1 total deliberately DISAGREES with the chain (0.9E vs E):
+# the v2 row must record the chain's total and stderr must flag the pair
+# (cycle_n only, no amounts).
+printf '%s\n' "{\"cycle_n\":6,\"reward_metal\":$(python3 -c "from decimal import Decimal; print(Decimal('$E4_METAL') * Decimal('0.9'))"),\"self_stake_metal\":1500,\"start_unix\":1608400000,\"end_unix\":1611200000,\"add_validator_tx\":\"$TX_ND6\",\"observed_at\":\"2026-09-04T00:00:00Z\"}" >> "$REWARDS_HISTORY"
 write_getRewardUTXOs "$(build_utxo_hex "$E4_N" 2)"
 run_tracker 1 --backfill "$TX_ND6" 6 --assert-no-delegators
 assert_eq "flag + v1-only row: exit 0, one v2 row appended (v1 kept)" "0 $((PRE_ND_LINES + 4))" "$LAST_RC $(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+assert_true "v1->v2 with DIFFERING totals: stderr notes cycle_n=6 (no amount printed)" "$(grep -q "cycle_n=6: the v1 row's total differs" "$LAST_OUT" && ! grep -qE '[0-9]\.[0-9]' "$LAST_OUT" && echo 1 || echo 0)"
+assert_eq "v1->v2 with DIFFERING totals: the v2 row records the chain's total" "$E4_METAL" "$(tail -n 1 "$REWARDS_HISTORY" | jq -r '.reward_metal')"
 assert_eq "flag + v1-only row: appended row is the split one" "true operator-asserted-no-delegators+self-sanity" "$(tail -n 1 "$REWARDS_HISTORY" | jq -r '"\(.split_known) \(.split_basis)"')"
 run_tracker 1 --backfill "$TX_ND6" 6 --assert-no-delegators
 assert_eq "flag + v1-only row re-run: no-op" "$((PRE_ND_LINES + 4))" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
@@ -850,6 +869,10 @@ assert_eq "single output == TX1's STORED potentialReward -> self 50.5 / fee 0, k
 	"$(single_output_maturity "$SELF_REWARD_HEX")"
 assert_eq "single output != potentialReward -> self 0 / fee 12.25, known (abort path)" "true 0 12.250000000" \
 	"$(single_output_maturity "$FEE_REWARD_HEX")"
+# m-2: LARGER than the hint is equally "not the self reward" — equality,
+# never an ordering, decides the single-output case.
+assert_eq "single output LARGER than potentialReward -> self 0 / fee 70, known (equality, not >=)" "true 0 70.000000000" \
+	"$(single_output_maturity "$(build_utxo_hex 70000000000 2)")"
 
 echo ""
 echo "=== numeric non-leak: no METAL amount ever appears in stdout/stderr ==="
