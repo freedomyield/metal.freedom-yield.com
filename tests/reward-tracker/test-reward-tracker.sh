@@ -97,6 +97,11 @@ PY
 SELF_REWARD_N=50500000000                            # 50.5 METAL
 SELF_REWARD_HEX="$(build_utxo_hex "$SELF_REWARD_N" 2)"
 FEE_REWARD_HEX="$(build_utxo_hex 12250000000 3)"     # 12.25 METAL
+# Every LATER cycle's potentialReward is deliberately a DIFFERENT value
+# from TX1's: the maturity run must compare TX1's outputs against the hint
+# stored when TX1 was tracked, never against the hint of the cycle that
+# replaced it. With equal values that mix-up is invisible (review I-2).
+NEXT_POTENTIAL_N=99900000000                         # 99.9 METAL, != SELF_REWARD_N
 # Expected combined reward for TX1's maturity: 50.5 + 12.25 = 62.75 METAL
 EXPECTED_REWARD="62.750000000"
 
@@ -359,7 +364,7 @@ assert_eq "digest is back to 4 lines once supply answers again" "4" "$(wc -l < "
 
 echo ""
 echo "=== maturity: TX1 disappears, TX2 takes over, uptime-cycles.json NOT yet updated ==="
-write_getCurrentValidators "$TX2" "$TRACKED_END" "$CYCLE2_END" "2000000000000" "3.0" "[]"
+write_getCurrentValidators "$TX2" "$TRACKED_END" "$CYCLE2_END" "2000000000000" "3.0" "[]" "$NEXT_POTENTIAL_N"
 run_tracker 1
 assert_eq "run with stale uptime-cycles.json still exits 0 (defers, not an error)" "0" "$LAST_RC"
 STILL_TX1="$(jq -r '.tracked_tx' "$TRACKER_STATE")"
@@ -446,6 +451,10 @@ assert_eq "line (v2): split_known true (two adjacent outputs, lower == potential
 assert_eq "line (v2): self_reward_metal = lower-index output (50.5)" "50.500000000" "$(echo "$LINE1_JSON" | jq -r '.self_reward_metal')"
 assert_eq "line (v2): fee_income_metal = higher-index output (12.25)" "12.250000000" "$(echo "$LINE1_JSON" | jq -r '.fee_income_metal')"
 assert_eq "line (v2): self + fee == reward_metal" "true" "$(echo "$LINE1_JSON" | jq -r '(.self_reward_metal + .fee_income_metal) == .reward_metal')"
+# The state now tracks TX2, whose potentialReward differs from TX1's; the
+# split above was decided against TX1's STORED hint (lower output 50.5 ==
+# stored 50.5), which is only observable because the two hints differ.
+assert_eq "state now carries TX2's (different) potentialReward, proving the maturity split used the stored TX1 hint" "$NEXT_POTENTIAL_N" "$(jq -r '.tracked_potential_reward_nmetal' "$TRACKER_STATE")"
 
 NEW_TRACKED="$(jq -r '.tracked_tx' "$TRACKER_STATE")"
 assert_eq "state advanced to TX2 after recording TX1's maturity" "$TX2" "$NEW_TRACKED"
@@ -559,7 +568,7 @@ CYCLE3_END=$((CYCLE2_END + 2800000))
 cat > "$UPTIME_CYCLES_JSON" <<JSON
 {"cycles":[{"cycle_n":7,"start_unix":$TRACKED_START,"end_unix":$TRACKED_END,"final_self_stake_metal":2000},{"cycle_n":8,"start_unix":$TRACKED_END,"end_unix":$CYCLE2_END,"final_self_stake_metal":2000}]}
 JSON
-write_getCurrentValidators "$TX3" "$CYCLE2_END" "$CYCLE3_END" "2000000000000" "3.0" "[]"
+write_getCurrentValidators "$TX3" "$CYCLE2_END" "$CYCLE3_END" "2000000000000" "3.0" "[]" "$NEXT_POTENTIAL_N"
 write_getRewardUTXOs ""
 NTFY_LINES_BEFORE_ZERO=$(wc -l < "$NTFY_LOG" | tr -d ' ')
 run_tracker 1
@@ -613,7 +622,7 @@ else
 	cat > "$UPTIME_CYCLES_JSON" <<JSON
 {"cycles":[{"cycle_n":7,"start_unix":$TRACKED_START,"end_unix":$TRACKED_END,"final_self_stake_metal":2000},{"cycle_n":8,"start_unix":$TRACKED_END,"end_unix":$CYCLE2_END,"final_self_stake_metal":2000},{"cycle_n":9,"start_unix":$CYCLE2_END,"end_unix":$CYCLE3_END,"final_self_stake_metal":2000}]}
 JSON
-	write_getCurrentValidators "$TX4" "$CYCLE3_END" "$CYCLE4_END" "2000000000000" "3.0" "[]"
+	write_getCurrentValidators "$TX4" "$CYCLE3_END" "$CYCLE4_END" "2000000000000" "3.0" "[]" "$NEXT_POTENTIAL_N"
 	write_getRewardUTXOs ""
 	NTFY_LINES_BEFORE_MUTANT=$(wc -l < "$NTFY_LOG" | tr -d ' ')
 	set +e
@@ -721,7 +730,7 @@ JSON
 		UPTIME_STATE_DIR="$ust" NTFY_TOPIC_FILE="$TMP/ntfy-topic" FY_LIVE=1 \
 		bash "$TRACKER" > "$d/o1.txt" 2>&1
 	cat > "$fx/getCurrentValidators.json" <<JSON
-{"jsonrpc":"2.0","id":1,"result":{"validators":[{"nodeID":"$NODE_ID","txID":"$TX2","startTime":"$TRACKED_END","endTime":"$CYCLE2_END","weight":"2000000000000","delegationFee":3.0,"delegators":[],"potentialReward":"$SELF_REWARD_N"}]}}
+{"jsonrpc":"2.0","id":1,"result":{"validators":[{"nodeID":"$NODE_ID","txID":"$TX2","startTime":"$TRACKED_END","endTime":"$CYCLE2_END","weight":"2000000000000","delegationFee":3.0,"delegators":[],"potentialReward":"$NEXT_POTENTIAL_N"}]}}
 JSON
 	cat > "$d/uptime-cycles.json" <<JSON
 {"cycles":[{"cycle_n":7,"start_unix":$TRACKED_START,"end_unix":$TRACKED_END,"final_self_stake_metal":2000}]}
@@ -737,7 +746,7 @@ print(json.dumps({'jsonrpc':'2.0','id':1,'result':{'numFetched':str(len(sys.argv
 		bash "$TRACKER" > "$d/o2.txt" 2>&1
 	jq -r '"\(.split_known) \(.self_reward_metal) \(.fee_income_metal)"' "$st/rewards-history.jsonl"
 }
-assert_eq "single output == potentialReward -> self 50.5 / fee 0, known" "true 50.500000000 0" \
+assert_eq "single output == TX1's STORED potentialReward -> self 50.5 / fee 0, known (TX2's differing hint is not what is compared)" "true 50.500000000 0" \
 	"$(single_output_maturity "$SELF_REWARD_HEX")"
 assert_eq "single output != potentialReward -> self 0 / fee 12.25, known (abort path)" "true 0 12.250000000" \
 	"$(single_output_maturity "$FEE_REWARD_HEX")"
@@ -775,7 +784,7 @@ JSON
 	cat "$out1" >> "$AGG_LOG"
 
 	cat > "$fx/getCurrentValidators.json" <<JSON
-{"jsonrpc":"2.0","id":1,"result":{"validators":[{"nodeID":"$NODE_ID","txID":"$TX2","startTime":"$TRACKED_END","endTime":"$CYCLE2_END","weight":"2000000000000","delegationFee":3.0,"delegators":[]}]}}
+{"jsonrpc":"2.0","id":1,"result":{"validators":[{"nodeID":"$NODE_ID","txID":"$TX2","startTime":"$TRACKED_END","endTime":"$CYCLE2_END","weight":"2000000000000","delegationFee":3.0,"delegators":[],"potentialReward":"$NEXT_POTENTIAL_N"}]}}
 JSON
 	cat > "$out_dir/uptime-cycles.json" <<JSON
 {"cycles":[{"cycle_n":7,"start_unix":$TRACKED_START,"end_unix":$TRACKED_END,"final_self_stake_metal":2000}]}
