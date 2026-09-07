@@ -68,6 +68,20 @@ assert_true() {
 	fi
 }
 
+# max_display_width <file> — widest line in phone columns (East Asian
+# Width W/F/A = 2, else 1), the same rule scripts/reward-tracker.sh's
+# display_width applies. The operator's Android ntfy wraps at ~40; the
+# script promises <= 30 on every line it writes.
+max_display_width() {
+	python3 - "$1" <<'PY'
+import sys, unicodedata
+w = 0
+for line in open(sys.argv[1], encoding="utf-8").read().split("\n"):
+    w = max(w, sum(2 if unicodedata.east_asian_width(c) in ("W", "F", "A") else 1 for c in line))
+print(w)
+PY
+}
+
 # ===========================================================================
 # Fixture UTXO hex — hand-built the same way tests/reward-tracker/
 # test-reward-utxo-decode.sh does (see that file for the byte-layout
@@ -330,7 +344,7 @@ assert_eq "same-cycle run exits 0" "0" "$LAST_RC"
 assert_true "still no rewards-history.jsonl (nothing matured)" "$([ ! -s "$REWARDS_HISTORY" ] && echo 1 || echo 0)"
 
 echo ""
-echo "=== digest block format (four lines) ==="
+echo "=== digest block format (six lines, phone-width) ==="
 echo "  (captured, format-checked below — not printed raw to avoid a false leak-check trip in THIS echo; see the grep assertions)"
 # TRACKED_START/END span 2,849,105 s = 32.976 days -> "33" after rounding
 # (the 2026-09-04 int() gave 32). The fixture start is in 2023, so elapsed
@@ -342,13 +356,19 @@ e = int(sys.argv[1])
 d = datetime.datetime.fromtimestamp(e, datetime.timezone(datetime.timedelta(hours=9)))
 print(f'{d.month}/{d.day}')
 " "$TRACKED_END")"
-assert_eq "digest has exactly 4 lines" "4" "$(wc -l < "$DIGEST_FILE" | tr -d ' ')"
-D_L1="$(sed -n '1p' "$DIGEST_FILE")"; D_L2="$(sed -n '2p' "$DIGEST_FILE")"; D_L3="$(sed -n '3p' "$DIGEST_FILE")"; D_L4="$(sed -n '4p' "$DIGEST_FILE")"
-assert_true "line 1: 累積 N METAL (自己 a / 手数料 b) — one decimal each" "$(printf '%s' "$D_L1" | grep -qE '^累積 [0-9,]+\.[0-9] METAL \(自己 [0-9,]+\.[0-9] / 手数料 [0-9,]+\.[0-9]\)$' && echo 1 || echo 0)"
-assert_true "line 2: Cycle 7 見込み +M METAL (自己 +a / 手数料 +b)" "$(printf '%s' "$D_L2" | grep -qE '^Cycle 7 見込み \+[0-9,]+\.[0-9] METAL \(自己 \+[0-9,]+\.[0-9] / 手数料 \+[0-9,]+\.[0-9]\)$' && echo 1 || echo 0)"
-assert_eq "line 3: full-width-space indent + JST maturity date + elapsed/rounded days" "　${EXPECTED_MD} 満期・経過 33/33 日" "$D_L3"
-assert_true "line 4: 25,000 まで残り R (one decimal) | 到達 🎉" "$(printf '%s' "$D_L4" | grep -qE '^25,000 (まで残り [0-9,]+\.[0-9]|到達 🎉)$' && echo 1 || echo 0)"
+assert_eq "digest has exactly 6 lines" "6" "$(wc -l < "$DIGEST_FILE" | tr -d ' ')"
+D_L1="$(sed -n '1p' "$DIGEST_FILE")"; D_L2="$(sed -n '2p' "$DIGEST_FILE")"; D_L3="$(sed -n '3p' "$DIGEST_FILE")"
+D_L4="$(sed -n '4p' "$DIGEST_FILE")"; D_L5="$(sed -n '5p' "$DIGEST_FILE")"; D_L6="$(sed -n '6p' "$DIGEST_FILE")"
+assert_true "line 1: 累積 N METAL — one decimal, nothing else" "$(printf '%s' "$D_L1" | grep -qE '^累積 [0-9,]+\.[0-9] METAL$' && echo 1 || echo 0)"
+assert_true "line 2: 　自己 a / 手数料 b (full-width-space indent, no parentheses)" "$(printf '%s' "$D_L2" | grep -qE '^　自己 [0-9,]+\.[0-9] / 手数料 [0-9,]+\.[0-9]$' && echo 1 || echo 0)"
+assert_true "line 3: Cycle 7 見込み +M METAL" "$(printf '%s' "$D_L3" | grep -qE '^Cycle 7 見込み \+[0-9,]+\.[0-9] METAL$' && echo 1 || echo 0)"
+assert_true "line 4: 　自己 +a / 手数料 +b" "$(printf '%s' "$D_L4" | grep -qE '^　自己 \+[0-9,]+\.[0-9] / 手数料 \+[0-9,]+\.[0-9]$' && echo 1 || echo 0)"
+assert_eq "line 5: full-width-space indent + JST maturity date + elapsed/rounded days" "　${EXPECTED_MD} 満期・経過 33/33 日" "$D_L5"
+assert_true "line 6: 25,000 まで残り R (one decimal) | 到達 🎉" "$(printf '%s' "$D_L6" | grep -qE '^25,000 (まで残り [0-9,]+\.[0-9]|到達 🎉)$' && echo 1 || echo 0)"
 assert_true "no '(d/D days)' date-lookalike anywhere in the digest" "$(grep -qE '[0-9]+/[0-9]+ days' "$DIGEST_FILE" && echo 0 || echo 1)"
+assert_true "no parentheses anywhere in the digest (the 4-line form wrapped on a phone)" "$(grep -qE '[()（）]' "$DIGEST_FILE" && echo 0 || echo 1)"
+assert_true "every digest line is <= 30 display columns (full-width = 2)" "$([ "$(max_display_width "$DIGEST_FILE")" -le 30 ] && echo 1 || echo 0)"
+assert_eq "indented lines are exactly lines 2, 4 and 5" "2 4 5" "$(grep -n '^　' "$DIGEST_FILE" | cut -d: -f1 | tr '\n' ' ' | sed 's/ $//')"
 # The projection is the FULL-CYCLE estimate: self = estimate_reward(2000,
 # dur) at the fixture supply, fee = estimate_reward(8845 * 0.03, dur) —
 # both computed here through the same library, no elapsed factor applied.
@@ -357,25 +377,30 @@ assert_true "no '(d/D days)' date-lookalike anywhere in the digest" "$(grep -qE 
 EXP_SELF_FULL="$(estimate_reward 2000 $((TRACKED_END - TRACKED_START)) 350000000)"
 EXP_FEE_FULL="$(estimate_reward "$(awk 'BEGIN{printf "%.9f", 8845*0.03}')" $((TRACKED_END - TRACKED_START)) 350000000)"
 EXP_TOTAL_FULL="$(awk -v s="$EXP_SELF_FULL" -v f="$EXP_FEE_FULL" 'BEGIN{printf "%.9f", s+f}')"
-fmt1() { python3 -c "import sys; print(f'{float(sys.argv[1]):,.1f}')" "$1"; }
-assert_eq "line 2 amounts == full-cycle estimate_reward (self / fee / total), not scaled by elapsed" \
-	"Cycle 7 見込み +$(fmt1 "$EXP_TOTAL_FULL") METAL (自己 +$(fmt1 "$EXP_SELF_FULL") / 手数料 +$(fmt1 "$EXP_FEE_FULL"))" "$D_L2"
+fmt1() { python3 -c "
+from decimal import Decimal, ROUND_HALF_UP
+import sys
+print(f'{Decimal(sys.argv[1]).quantize(Decimal(\"0.1\"), rounding=ROUND_HALF_UP):,.1f}')" "$1"; }
+assert_eq "line 3 total == full-cycle estimate_reward (self + fee), not scaled by elapsed" \
+	"Cycle 7 見込み +$(fmt1 "$EXP_TOTAL_FULL") METAL" "$D_L3"
+assert_eq "line 4 halves == full-cycle estimate_reward self / fee" \
+	"　自己 +$(fmt1 "$EXP_SELF_FULL") / 手数料 +$(fmt1 "$EXP_FEE_FULL")" "$D_L4"
 EXP_REMAIN="$(awk -v t="$EXP_TOTAL_FULL" 'BEGIN{printf "%.9f", 25000 - (2000 + t)}')"
-assert_eq "line 4 remaining == milestone - (self_stake + full-cycle projection)" "25,000 まで残り $(fmt1 "$EXP_REMAIN")" "$D_L4"
-assert_eq "line 1 with an empty ledger reads 累積 0.0 (自己 0.0 / 手数料 0.0)" "累積 0.0 METAL (自己 0.0 / 手数料 0.0)" "$D_L1"
+assert_eq "line 6 remaining == milestone - (self_stake + full-cycle projection)" "25,000 まで残り $(fmt1 "$EXP_REMAIN")" "$D_L6"
+assert_eq "lines 1-2 with an empty ledger read 累積 0.0 / 自己 0.0 / 手数料 0.0" "累積 0.0 METAL|　自己 0.0 / 手数料 0.0" "$D_L1|$D_L2"
 
 echo ""
-echo "=== digest: RPC-gap fallback keeps lines 1 + 4 only ==="
+echo "=== digest: RPC-gap fallback keeps 累積 + breakdown + milestone only ==="
 cp "$FIX_DIR/getCurrentSupply.json" "$TMP/record/getCurrentSupply.keep"
 echo '{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"stub outage"}}' > "$FIX_DIR/getCurrentSupply.json"
 run_tracker 1
 assert_eq "gap run exits 0" "0" "$LAST_RC"
-assert_eq "gap digest has exactly 2 lines (no fabricated projection)" "2" "$(wc -l < "$DIGEST_FILE" | tr -d ' ')"
-assert_true "gap digest line 1 is still 累積 with breakdown" "$(sed -n '1p' "$DIGEST_FILE" | grep -qE '^累積 [0-9,]+\.[0-9] METAL \(自己' && echo 1 || echo 0)"
-assert_eq "gap digest line 2 is the milestone against self-stake alone (25,000 - 2,000)" "25,000 まで残り 23,000.0" "$(sed -n '2p' "$DIGEST_FILE")"
+assert_eq "gap digest has exactly 3 lines (no fabricated projection)" "3" "$(wc -l < "$DIGEST_FILE" | tr -d ' ')"
+assert_true "gap digest lines 1-2 are still 累積 + its breakdown" "$(sed -n '1p' "$DIGEST_FILE" | grep -qE '^累積 [0-9,]+\.[0-9] METAL$' && sed -n '2p' "$DIGEST_FILE" | grep -qE '^　自己 ' && echo 1 || echo 0)"
+assert_eq "gap digest line 3 is the milestone against self-stake alone (25,000 - 2,000)" "25,000 まで残り 23,000.0" "$(sed -n '3p' "$DIGEST_FILE")"
 cp "$TMP/record/getCurrentSupply.keep" "$FIX_DIR/getCurrentSupply.json"
 run_tracker 1
-assert_eq "digest is back to 4 lines once supply answers again" "4" "$(wc -l < "$DIGEST_FILE" | tr -d ' ')"
+assert_eq "digest is back to 6 lines once supply answers again" "6" "$(wc -l < "$DIGEST_FILE" | tr -d ' ')"
 
 echo ""
 echo "=== maturity: TX1 disappears, TX2 takes over, uptime-cycles.json NOT yet updated ==="
@@ -475,12 +500,23 @@ NEW_TRACKED="$(jq -r '.tracked_tx' "$TRACKER_STATE")"
 assert_eq "state advanced to TX2 after recording TX1's maturity" "$TX2" "$NEW_TRACKED"
 
 assert_true "ntfy body was recorded (notify fired)" "$([ -s "$NTFY_LOG" ] && echo 1 || echo 0)"
-CUM_BEFORE_THIS_CYCLE_OK=$(grep -qE '累積 [0-9,.]+ METAL \(\+[0-9,.]+ this cycle: ' "$NTFY_LOG" && echo 1 || echo 0)
-assert_true "notify body: 累積 comes before this-cycle delta (operator's ordering requirement)" "$CUM_BEFORE_THIS_CYCLE_OK"
-assert_true "notify body: names Cycle 7" "$(grep -q 'Cycle 7 reward' "$NTFY_LOG" && echo 1 || echo 0)"
-assert_true "notify body: this-cycle delta carries the self/fee breakdown" "$(grep -qF 'Cycle 7 reward: 累積 62.75 METAL (+62.75 this cycle: 自己 +50.50 / 手数料 +12.25)' "$NTFY_LOG" && echo 1 || echo 0)"
-assert_true "notify body: cycle count line counts 1 cycle" "$(grep -qE '^1 cycles · ' "$NTFY_LOG" && echo 1 || echo 0)"
-assert_true "digest line 1 after maturity: 累積 62.8 (自己 50.5 / 手数料 12.3), one decimal" "$(sed -n '1p' "$DIGEST_FILE" | grep -qF '累積 62.8 METAL (自己 50.5 / 手数料 12.3)' && echo 1 || echo 0)"
+# Push body (phone-width layout): one fact per line, 累積 before the
+# delta (operator's ordering requirement), no parentheses.
+MATURITY_BODY="$TMP/record/maturity-body.txt"
+sed -n '/^---$/,$p' "$NTFY_LOG" | tail -n +2 | grep -v '^Priority:\|^Title:\|^Tags:\|^Content-Type:\|^Authorization:' > "$MATURITY_BODY"
+EXPECTED_MATURITY_BODY="Cycle 7 reward
+累積 62.75 METAL
+　自己 50.50 / 手数料 12.25
+この cycle +62.75 METAL
+　自己 +50.50 / 手数料 +12.25
+1 cycles recorded
+self-stake 2,000 → 2,000
+25,000 まで残り 22,937.25"
+assert_true "notify body: names Cycle 7" "$(grep -q '^Cycle 7 reward$' "$MATURITY_BODY" && echo 1 || echo 0)"
+assert_eq "notify body: exact eight-line phone-width layout (累積 first, breakdowns indented, tail split)" "$EXPECTED_MATURITY_BODY" "$(cat "$MATURITY_BODY")"
+assert_true "notify body: every line <= 30 display columns" "$([ "$(max_display_width "$MATURITY_BODY")" -le 30 ] && echo 1 || echo 0)"
+assert_true "notify body: no parentheses" "$(grep -qE '[()（）]' "$MATURITY_BODY" && echo 0 || echo 1)"
+assert_eq "digest lines 1-2 after maturity: 累積 62.8 / 自己 50.5 / 手数料 12.3, one decimal" "累積 62.8 METAL|　自己 50.5 / 手数料 12.3" "$(sed -n '1p' "$DIGEST_FILE")|$(sed -n '2p' "$DIGEST_FILE")"
 
 echo ""
 echo "=== append-only: re-run against the now-matured TX1 does not duplicate ==="
@@ -525,7 +561,11 @@ assert_eq "backfill never sends a notification (see header rationale)" "$NTFY_CO
 # Digest line 1 must surface the unsplit backfilled cycle as 内訳不明,
 # never fold it into either half: 累積 72.7 = 62.75 + 9.99.
 run_tracker 1
-assert_eq "digest line 1 shows the unsplit cycle as 内訳不明" "累積 72.7 METAL (自己 50.5 / 手数料 12.3 / 内訳不明 10.0)" "$(sed -n '1p' "$DIGEST_FILE")"
+# "　自己 50.5 / 手数料 12.3 / 不明 10.0" would be 37 columns, so the
+# breakdown splits: 不明 moves to its own indented line (7-line digest).
+assert_eq "digest shows the unsplit cycle as 不明 on its own indented line (width rule)" "累積 72.7 METAL|　自己 50.5 / 手数料 12.3|　不明 10.0" "$(sed -n '1p' "$DIGEST_FILE")|$(sed -n '2p' "$DIGEST_FILE")|$(sed -n '3p' "$DIGEST_FILE")"
+assert_eq "digest with a 不明 line has 7 lines" "7" "$(wc -l < "$DIGEST_FILE" | tr -d ' ')"
+assert_true "digest with a 不明 line still <= 30 columns everywhere" "$([ "$(max_display_width "$DIGEST_FILE")" -le 30 ] && echo 1 || echo 0)"
 
 echo ""
 echo "=== --backfill: v1-only cycle gets ONE v2 row appended; last row wins ==="
@@ -552,7 +592,7 @@ assert_true "repeat run logged the v2 no-op, not another append" "$(grep -q 'alr
 # Last-wins cumulative: 62.75 + 9.99 + 5.0 = 77.74 (cycle 2 counted ONCE,
 # with its v2 breakdown): 自己 54.5 / 手数料 13.25 / 内訳不明 9.99.
 run_tracker 1
-assert_eq "digest 累積 counts cycle 2 once, with the v2 breakdown (last row wins)" "累積 77.7 METAL (自己 54.5 / 手数料 13.3 / 内訳不明 10.0)" "$(sed -n '1p' "$DIGEST_FILE")"
+assert_eq "digest 累積 counts cycle 2 once, with the v2 breakdown (last row wins)" "累積 77.7 METAL|　自己 54.5 / 手数料 13.3|　不明 10.0" "$(sed -n '1p' "$DIGEST_FILE")|$(sed -n '2p' "$DIGEST_FILE")|$(sed -n '3p' "$DIGEST_FILE")"
 
 echo ""
 echo "=== --backfill: a different txID for an already-recorded cycle is refused ==="
@@ -702,8 +742,17 @@ assert_true "zero-reward push title carries no 🎉" "$(printf '%s' "$ZERO_PUSH"
 # Same cumulative-first ordering the >0 push enforces above (operator's
 # requirement) — a 0-METAL cycle still leads with 累積, with the zero delta
 # and the uptime warning folded into the parenthetical tail.
-ZERO_CUM_FIRST_OK=$(printf '%s' "$ZERO_PUSH" | grep -qE 'Cycle 8 reward: 累積 [0-9,.]+ METAL \(\+0 this cycle: 自己 \+0 / 手数料 \+0 — check uptime\)' && echo 1 || echo 0)
-assert_true "zero-reward push body: 累積 first, then '+0 this cycle: 自己 +0 / 手数料 +0 — check uptime' tail" "$ZERO_CUM_FIRST_OK"
+ZERO_BODY="$TMP/record/zero-body.txt"
+printf '%s\n' "$ZERO_PUSH" | tail -n +2 | grep -v '^Priority:\|^Title:\|^Tags:\|^Content-Type:\|^Authorization:' > "$ZERO_BODY"
+ZERO_LAYOUT_OK=$(python3 - "$ZERO_BODY" <<'PY'
+import re, sys
+b = open(sys.argv[1], encoding="utf-8").read()
+ok = re.search(r"^Cycle 8 reward\n累積 [0-9,.]+ METAL\n　自己 [0-9,.]+ / 手数料 [0-9,.]+(\n　不明 [0-9,.]+)?\nこの cycle \+0 METAL\n　check uptime\n[0-9]+ cycles recorded\nself-stake ", b, re.M)
+print(1 if ok else 0)
+PY
+)
+assert_eq "zero-reward push body: 累積 first, then 'この cycle +0 METAL' with an indented 'check uptime' sub-line" "1" "$ZERO_LAYOUT_OK"
+assert_true "zero-reward push body: every line <= 30 display columns" "$([ "$(max_display_width "$ZERO_BODY")" -le 30 ] && echo 1 || echo 0)"
 assert_true "zero-reward push Tags header is NOT tada" "$(printf '%s' "$ZERO_PUSH" | grep -qx 'Tags: tada' && echo 0 || echo 1)"
 # No --tags override was passed, so notify.sh falls back to its own
 # priority-derived default for "high" — see notify.sh's TAGS case block.
@@ -770,10 +819,11 @@ echo "=== digest probes: rounding, JST date, maturity-horizon projection ==="
 # assertions below only ever compare digest lines against each other or
 # against values computed here.
 probe_digest() {
-	local su="$1" eu="$2" dels="${3:-[]}" adr="${4:-0}"
+	local su="$1" eu="$2" dels="${3:-[]}" adr="${4:-0}" self_stake="${5:-2000}" ledger_seed="${6:-}"
 	local d="$TMP/probe-$$-$RANDOM"
 	mkdir -p "$d/state" "$d/ustate" "$d/fx"
-	echo "{\"nodeId\":\"$NODE_ID\",\"stake\":{\"self\":2000}}" > "$d/validator.json"
+	echo "{\"nodeId\":\"$NODE_ID\",\"stake\":{\"self\":$self_stake}}" > "$d/validator.json"
+	[ -n "$ledger_seed" ] && cp "$ledger_seed" "$d/state/rewards-history.jsonl"
 	printf '{"cycles":[]}\n' > "$d/uptime-cycles.json"
 	echo '{"cycle_n":5}' > "$d/state/current-cycle-state.json"
 	cat > "$d/fx/getCurrentValidators.json" <<JSON
@@ -794,7 +844,7 @@ NOW_EPOCH=$(date -u +%s)
 P_START=$((NOW_EPOCH - 3 * 86400))
 P_END=$((P_START + 1382832))                    # 16.005 days
 PROBE_A="$(probe_digest "$P_START" "$P_END")"
-assert_eq "16.005-day cycle renders as 16 days (round, not ceil); elapsed 3" "経過 3/16 日" "$(printf '%s' "$PROBE_A" | sed -n '3p' | sed 's/.*満期・//')"
+assert_eq "16.005-day cycle renders as 16 days (round, not ceil); elapsed 3" "経過 3/16 日" "$(printf '%s' "$PROBE_A" | sed -n '5p' | sed 's/.*満期・//')"
 
 # (b) JST maturity date strips leading zeros in BOTH month and day:
 #     2030-03-05 00:30 JST == 2030-03-04T15:30:00Z -> "3/5".
@@ -802,7 +852,7 @@ JST_END=$(python3 -c "
 import datetime
 print(int(datetime.datetime(2030, 3, 4, 15, 30, 0, tzinfo=datetime.timezone.utc).timestamp()))")
 PROBE_B="$(probe_digest $((JST_END - 33 * 86400)) "$JST_END")"
-assert_eq "maturity date is JST M/D with no leading zeros (UTC 3/4 15:30 -> JST 3/5)" "　3/5 満期・経過 0/33 日" "$(printf '%s' "$PROBE_B" | sed -n '3p')"
+assert_eq "maturity date is JST M/D with no leading zeros (UTC 3/4 15:30 -> JST 3/5)" "　3/5 満期・経過 0/33 日" "$(printf '%s' "$PROBE_B" | sed -n '5p')"
 
 # (c) The 見込み is the reward AT MATURITY: two cycles of IDENTICAL length
 #     but different elapsed fractions (5 vs 20 days in) must print the SAME
@@ -814,14 +864,14 @@ C2_START=$((NOW_EPOCH - 20 * 86400)); C2_END=$((C2_START + 33 * 86400))
 PROBE_C1="$(probe_digest "$C1_START" "$C1_END" "$(printf "$DELS_C" "$C1_START" "$C1_END")")"
 # shellcheck disable=SC2059
 PROBE_C2="$(probe_digest "$C2_START" "$C2_END" "$(printf "$DELS_C" "$C2_START" "$C2_END")")"
-assert_eq "line 2 (見込み) is identical at 5 and 20 elapsed days — no elapsed factor" \
-	"$(printf '%s' "$PROBE_C1" | sed -n '2p')" "$(printf '%s' "$PROBE_C2" | sed -n '2p')"
-assert_eq "line 4 (milestone remaining) is identical too — it is built from the same projection" \
-	"$(printf '%s' "$PROBE_C1" | sed -n '4p')" "$(printf '%s' "$PROBE_C2" | sed -n '4p')"
-assert_eq "line 3 differs only in elapsed: 5/33 vs 20/33" "経過 5/33 日|経過 20/33 日" \
-	"$(printf '%s' "$PROBE_C1" | sed -n '3p' | sed 's/.*満期・//')|$(printf '%s' "$PROBE_C2" | sed -n '3p' | sed 's/.*満期・//')"
-assert_true "line 2 fee part is non-zero with a delegator present (the fee projection is wired)" \
-	"$(printf '%s' "$PROBE_C1" | sed -n '2p' | grep -qE '手数料 \+0\.0\)' && echo 0 || echo 1)"
+assert_eq "lines 3-4 (見込み + halves) are identical at 5 and 20 elapsed days — no elapsed factor" \
+	"$(printf '%s' "$PROBE_C1" | sed -n '3,4p')" "$(printf '%s' "$PROBE_C2" | sed -n '3,4p')"
+assert_eq "line 6 (milestone remaining) is identical too — it is built from the same projection" \
+	"$(printf '%s' "$PROBE_C1" | sed -n '6p')" "$(printf '%s' "$PROBE_C2" | sed -n '6p')"
+assert_eq "line 5 differs only in elapsed: 5/33 vs 20/33" "経過 5/33 日|経過 20/33 日" \
+	"$(printf '%s' "$PROBE_C1" | sed -n '5p' | sed 's/.*満期・//')|$(printf '%s' "$PROBE_C2" | sed -n '5p' | sed 's/.*満期・//')"
+assert_true "line 4 fee part is non-zero with a delegator present (the fee projection is wired)" \
+	"$(printf '%s' "$PROBE_C1" | sed -n '4p' | grep -qE '手数料 \+0\.0$' && echo 0 || echo 1)"
 
 # (d) accruedDelegateeReward (fee cut already credited from delegations
 #     that matured mid-cycle, absent from .delegators[]) is ADDED to the
@@ -831,15 +881,32 @@ assert_true "line 2 fee part is non-zero with a delegator present (the fee proje
 PROBE_D0="$(probe_digest "$C1_START" "$C1_END" "$(printf "$DELS_C" "$C1_START" "$C1_END")" 0)"
 # shellcheck disable=SC2059
 PROBE_D7="$(probe_digest "$C1_START" "$C1_END" "$(printf "$DELS_C" "$C1_START" "$C1_END")" 7000000000)"
-fee_of() { printf '%s' "$1" | sed -n '2p' | sed -E 's/.*手数料 \+([0-9,.]+)\).*/\1/' | tr -d ','; }
-total_of() { printf '%s' "$1" | sed -n '2p' | sed -E 's/.*見込み \+([0-9,.]+) METAL.*/\1/' | tr -d ','; }
-assert_eq "line 2 手数料 rises by exactly the accruedDelegateeReward (7.0 METAL)" "7.0" \
+fee_of() { printf '%s' "$1" | sed -n '4p' | sed -E 's/.*手数料 \+([0-9,.]+)$/\1/' | tr -d ','; }
+total_of() { printf '%s' "$1" | sed -n '3p' | sed -E 's/.*見込み \+([0-9,.]+) METAL$/\1/' | tr -d ','; }
+assert_eq "line 4 手数料 rises by exactly the accruedDelegateeReward (7.0 METAL)" "7.0" \
 	"$(awk -v a="$(fee_of "$PROBE_D7")" -v b="$(fee_of "$PROBE_D0")" 'BEGIN{printf "%.1f", a-b}')"
-assert_eq "line 2 見込み total rises by the same 7.0" "7.0" \
+assert_eq "line 3 見込み total rises by the same 7.0" "7.0" \
 	"$(awk -v a="$(total_of "$PROBE_D7")" -v b="$(total_of "$PROBE_D0")" 'BEGIN{printf "%.1f", a-b}')"
-assert_eq "line 2 自己 is unchanged by accruedDelegateeReward" \
-	"$(printf '%s' "$PROBE_D0" | sed -n '2p' | sed -E 's/.*\(自己 ([^ ]+) .*/\1/')" \
-	"$(printf '%s' "$PROBE_D7" | sed -n '2p' | sed -E 's/.*\(自己 ([^ ]+) .*/\1/')"
+assert_eq "line 4 自己 is unchanged by accruedDelegateeReward" \
+	"$(printf '%s' "$PROBE_D0" | sed -n '4p' | sed -E 's/^　自己 ([^ ]+) .*/\1/')" \
+	"$(printf '%s' "$PROBE_D7" | sed -n '4p' | sed -E 's/^　自己 ([^ ]+) .*/\1/')"
+
+# (e) WIDE fixture: five-digit amounts everywhere (a seeded ledger with
+#     自己 12,345.6 / 手数料 12,345.6 and a self-stake whose full-cycle
+#     estimate is five digits). The one-line breakdown would be 33+
+#     columns, so it must split into one indented line per half — and
+#     every line must still be <= 30 columns.
+WIDE_LEDGER="$TMP/wide-ledger.jsonl"
+printf '%s\n' "{\"cycle_n\":4,\"reward_metal\":24691.2,\"self_stake_metal\":1500,\"start_unix\":1602800000,\"end_unix\":1605600000,\"add_validator_tx\":\"txWideFixtureCycle44444444444444\",\"observed_at\":\"2026-09-04T00:00:00Z\",\"schema_version\":2,\"self_reward_metal\":12345.6,\"fee_income_metal\":12345.6,\"split_known\":true,\"split_basis\":\"utxo-order\"}" > "$WIDE_LEDGER"
+# shellcheck disable=SC2059
+PROBE_W="$(probe_digest "$C1_START" "$C1_END" "$(printf "$DELS_C" "$C1_START" "$C1_END")" 0 1480000 "$WIDE_LEDGER")"
+printf '%s\n' "$PROBE_W" > "$TMP/wide-digest.txt"
+assert_true "wide fixture: 累積 is five digits (the fixture is actually wide)" "$(sed -n '1p' "$TMP/wide-digest.txt" | grep -qE '^累積 [0-9]{2},[0-9]{3}\.[0-9] METAL$' && echo 1 || echo 0)"
+assert_eq "wide fixture: the 累積 breakdown splits into one indented line per half" "　自己 12,345.6|　手数料 12,345.6" "$(sed -n '2p' "$TMP/wide-digest.txt")|$(sed -n '3p' "$TMP/wide-digest.txt")"
+assert_true "wide fixture: 見込み is five digits too" "$(grep -qE '^Cycle 5 見込み \+[0-9]{2},[0-9]{3}\.[0-9] METAL$' "$TMP/wide-digest.txt" && echo 1 || echo 0)"
+assert_true "wide fixture: every line <= 30 display columns" "$([ "$(max_display_width "$TMP/wide-digest.txt")" -le 30 ] && echo 1 || echo 0)"
+assert_true "wide fixture: every indented line starts with the full-width space" "$(grep -E '^[^　]' "$TMP/wide-digest.txt" | grep -qE '^(自己|手数料|不明)' && echo 0 || echo 1)"
+assert_eq "realistic fixture (probe C1) has exactly 6 lines" "6" "$(printf '%s\n' "$PROBE_C1" | wc -l | tr -d ' ')"
 
 echo ""
 echo "=== live maturity, single output: split decided by the stored potentialReward ==="

@@ -22,7 +22,7 @@
 # Cases:
 #   1. SLOT=morning, reward-digest-line.txt present -> [Reward] block IS in
 #      the push body, containing EVERY non-empty line of the file in order
-#      (the file is a four-line block since 2026-09-07), with no blank line
+#      (the file is a six-line block since 2026-09-07), with no blank line
 #      left between the block's last line and whatever follows it
 #   2. SLOT=evening, same file present -> [Reward] block is ABSENT (morning-
 #      only gate)
@@ -119,18 +119,22 @@ CURLEOF
 chmod +x "${BIN}/curl"
 export PATH="${BIN}:${PATH}"
 
-# Four-line digest block (2026-09-07 contract) — the third line carries the
-# full-width-space indent reward-tracker.sh writes, so the splice is proven
-# to keep it verbatim. Written with an extra trailing blank line below to
-# prove the splice drops it.
-DIGEST_L1="累積 1,234.5 METAL (自己 1,000.0 / 手数料 234.5)"
-DIGEST_L2="Cycle 9 見込み +5.5 METAL (自己 +4.0 / 手数料 +1.5)"
-DIGEST_L3="　10/7 満期・経過 3/33 日"
-DIGEST_L4="25,000 まで残り 23,760.5"
+# Six-line digest block (2026-09-07 phone-width contract) — the indented
+# lines carry the full-width-space indent reward-tracker.sh writes, so the
+# splice is proven to keep it verbatim. Written with an extra trailing
+# blank line below to prove the splice drops it.
+DIGEST_L1="累積 1,234.5 METAL"
+DIGEST_L2="　自己 1,000.0 / 手数料 234.5"
+DIGEST_L3="Cycle 9 見込み +5.5 METAL"
+DIGEST_L4="　自己 +4.0 / 手数料 +1.5"
+DIGEST_L5="　10/7 満期・経過 3/33 日"
+DIGEST_L6="25,000 まで残り 23,760.5"
 DIGEST_CONTENT="${DIGEST_L1}
 ${DIGEST_L2}
 ${DIGEST_L3}
-${DIGEST_L4}"
+${DIGEST_L4}
+${DIGEST_L5}
+${DIGEST_L6}"
 
 run_daily_status() {
 	# $1 = slot, $2 = state dir (reward-digest-line.txt lives here, or is
@@ -151,18 +155,18 @@ RC1=$?
 assert_eq "case 1: daily-status.sh exits 0" "0" "$RC1"
 PUSH1="$(cat "$NTFY_BODY_LOG")"
 assert_true "case 1: push body contains [Reward] section header" "$(printf '%s' "$PUSH1" | grep -qF '[Reward]' && echo 1 || echo 0)"
-for i in 1 2 3 4; do
+for i in 1 2 3 4 5 6; do
 	eval "L=\${DIGEST_L$i}"
 	assert_true "case 1: push body contains digest line $i verbatim" "$(printf '%s' "$PUSH1" | grep -qF "$L" && echo 1 || echo 0)"
 done
-# Order + no stray blank: the exact multi-line block "[Reward]\nL1\nL2\nL3\nL4"
-# must appear contiguously, and what follows L4 must be exactly ONE blank
+# Order + no stray blank: the exact multi-line block "[Reward]\nL1…L6"
+# must appear contiguously, and what follows L6 must be exactly ONE blank
 # line and then the next section header ([Evidence health] from the stub
-# above) — "L4\n\n\n[Evidence" would be the trailing-blank bug.
-SPLICE_OK="$(python3 - "$NTFY_BODY_LOG" "$DIGEST_L1" "$DIGEST_L2" "$DIGEST_L3" "$DIGEST_L4" <<'PYEOF'
+# above) — "L6\n\n\n[Evidence" would be the trailing-blank bug.
+SPLICE_OK="$(python3 - "$NTFY_BODY_LOG" "$DIGEST_L1" "$DIGEST_L2" "$DIGEST_L3" "$DIGEST_L4" "$DIGEST_L5" "$DIGEST_L6" <<'PYEOF'
 import sys
 body = open(sys.argv[1], encoding="utf-8").read()
-block = "[Reward]\n" + "\n".join(sys.argv[2:6])
+block = "[Reward]\n" + "\n".join(sys.argv[2:8])
 i = body.find(block)
 if i < 0:
     print(0); sys.exit()
@@ -170,7 +174,7 @@ tail = body[i + len(block):]
 print(1 if tail.startswith("\n\n[Evidence health]") else 0)
 PYEOF
 )"
-assert_eq "case 1: the four lines are spliced contiguously, in order, with exactly one blank line before the next section" "1" "$SPLICE_OK"
+assert_eq "case 1: the six lines are spliced contiguously, in order, with exactly one blank line before the next section" "1" "$SPLICE_OK"
 
 echo ""
 echo "=== case 2: SLOT=evening, same file present -> [Reward] absent (morning-only) ==="
@@ -194,21 +198,21 @@ assert_true "case 3: a push still went out (morning digest itself is unaffected)
 assert_true "case 3: push body has NO [Reward] section" "$(printf '%s' "$PUSH3" | grep -qF '[Reward]' && echo 0 || echo 1)"
 
 echo ""
-echo "=== case 4: two-line fallback digest (projection unavailable) splices both lines ==="
+echo "=== case 4: three-line fallback digest (projection unavailable) splices all three ==="
 STATE4="${TMP}/state4"
 mkdir -p "$STATE4"
-printf '%s\n%s\n' "$DIGEST_L1" "$DIGEST_L4" > "${STATE4}/reward-digest-line.txt"
+printf '%s\n%s\n%s\n' "$DIGEST_L1" "$DIGEST_L2" "$DIGEST_L6" > "${STATE4}/reward-digest-line.txt"
 run_daily_status morning "$STATE4" > "${TMP}/case4.out" 2>"${TMP}/case4.err"
 RC4=$?
 assert_eq "case 4: daily-status.sh exits 0" "0" "$RC4"
 PUSH4="$(cat "$NTFY_BODY_LOG")"
-FALLBACK_OK="$(python3 - "$NTFY_BODY_LOG" "$DIGEST_L1" "$DIGEST_L4" <<'PYEOF'
+FALLBACK_OK="$(python3 - "$NTFY_BODY_LOG" "$DIGEST_L1" "$DIGEST_L2" "$DIGEST_L6" <<'PYEOF'
 import sys
 body = open(sys.argv[1], encoding="utf-8").read()
-print(1 if ("[Reward]\n" + sys.argv[2] + "\n" + sys.argv[3] + "\n\n[Evidence health]") in body else 0)
+print(1 if ("[Reward]\n" + "\n".join(sys.argv[2:5]) + "\n\n[Evidence health]") in body else 0)
 PYEOF
 )"
-assert_eq "case 4: both fallback lines spliced contiguously, nothing else in between or after" "1" "$FALLBACK_OK"
+assert_eq "case 4: all three fallback lines spliced contiguously, nothing else in between or after" "1" "$FALLBACK_OK"
 assert_true "case 4: no projection line was invented" "$(printf '%s' "$PUSH4" | grep -qF '見込み' && echo 0 || echo 1)"
 
 echo ""

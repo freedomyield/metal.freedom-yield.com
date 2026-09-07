@@ -2,9 +2,10 @@
 # reward-tracker.sh — detects a matured validator cycle's confirmed reward,
 # records it append-only (split into self-stake reward / delegation-fee
 # income where the chain's own output order makes that certain), pushes a
-# one-time "🎉 cycle reward" notification, and maintains the four-line
+# one-time "🎉 cycle reward" notification, and maintains the six-line
 # morning-digest block: cumulative reward, the IN-PROGRESS cycle's expected
-# reward at maturity, elapsed days, and the self-stake milestone.
+# reward at maturity (each with its self / fee halves), elapsed days, and
+# the self-stake milestone.
 #
 # CHAIN: none — every RPC call is a read-only POST against the LOCAL metalgo
 #        node (platform.getCurrentValidators / getRewardUTXOs /
@@ -151,16 +152,22 @@
 #                             latest run). Advances only
 #                             after a maturity is either recorded or
 #                             confirmed to need no recording.
-#   reward-digest-line.txt    Up to FOUR lines, REGENERATED every run (not
-#                             append-only): the morning digest block
-#                             daily-status.sh splices into its morning push
-#                             under [Reward]. Shape (2026-09-07):
-#                               累積 N METAL (自己 a / 手数料 b)
-#                               Cycle 5 見込み +M METAL (自己 +a / 手数料 +b)
+#   reward-digest-line.txt    SIX lines (three in the fallback), REGENERATED
+#                             every run (not append-only): the morning
+#                             digest block daily-status.sh splices into its
+#                             morning push under [Reward]. Shape (2026-09-07,
+#                             phone-width: every line <= 30 columns, a
+#                             full-width character counting 2):
+#                               累積 N METAL
+#                               　自己 a / 手数料 b
+#                               Cycle 5 見込み +M METAL
+#                               　自己 +a / 手数料 +b
 #                               　10/7 満期・経過 3/33 日
 #                               25,000 まで残り R
-#                             Lines 2–3 are omitted (never fabricated) when
-#                             the projection cannot be computed this run.
+#                             The projection lines (3–5) are omitted (never
+#                             fabricated) when it cannot be computed this
+#                             run; a breakdown line that would exceed the
+#                             width is split into more indented lines.
 #
 # ---------------------------------------------------------------------------
 # NUMERIC NON-LEAK (constitution: no METAL amount on this script's own
@@ -401,6 +408,54 @@ except InvalidOperation:
 q = Decimal(1).scaleb(-d)
 print(f'{x.quantize(q, rounding=ROUND_HALF_UP):,.{d}f}')
 " "$1" "$2"
+}
+
+# ---- phone-width rendering (2026-09-07 operator request) -----------------
+# The morning digest and the maturity push are read on a phone (ntfy on
+# Android), which wraps at roughly 40 columns counting a full-width
+# character as 2; a wrapped line breaks the "one fact per line" reading.
+# Every line either script produces is kept within DIGEST_MAX_COLS by
+# construction: no parentheses, one number pair per line, and a breakdown
+# line that would exceed the limit is split further (breakdown_lines).
+DIGEST_MAX_COLS=30
+DIGEST_INDENT="　"   # one full-width space (U+3000) marks a sub-line
+
+# display_width <string> — columns as a phone renders them: East Asian
+# Width W/F = 2, A (ambiguous — "→", "—", "・" in CJK fonts) = 2 to be
+# safe, everything else 1.
+display_width() {
+	python3 -c "
+import sys, unicodedata
+print(sum(2 if unicodedata.east_asian_width(c) in ('W', 'F', 'A') else 1 for c in sys.argv[1]))
+" "$1"
+}
+
+# breakdown_lines <sign> <self> <fee> <unknown|""> <decimals> — prints the
+# indented self / fee [/ 不明] breakdown as ONE line when it fits in
+# DIGEST_MAX_COLS, otherwise progressively split: first 不明 moves to its
+# own line, then self and fee each get one. <sign> is "" (a balance) or
+# "+" (a delta). Every printed line starts with DIGEST_INDENT.
+breakdown_lines() {
+	local sign="$1" self="$2" fee="$3" unknown="$4" d="$5"
+	local s f u=""
+	s="${sign}$(fmt_metal "$self" "$d")"
+	f="${sign}$(fmt_metal "$fee" "$d")"
+	[ -n "$unknown" ] && u="${sign}$(fmt_metal "$unknown" "$d")"
+	local one="${DIGEST_INDENT}自己 ${s} / 手数料 ${f}"
+	[ -n "$u" ] && one="${one} / 不明 ${u}"
+	if [ "$(display_width "$one")" -le "$DIGEST_MAX_COLS" ]; then
+		printf '%s\n' "$one"
+		return 0
+	fi
+	local two="${DIGEST_INDENT}自己 ${s} / 手数料 ${f}"
+	if [ "$(display_width "$two")" -le "$DIGEST_MAX_COLS" ]; then
+		printf '%s\n' "$two"
+		[ -n "$u" ] && printf '%s\n' "${DIGEST_INDENT}不明 ${u}"
+		return 0
+	fi
+	printf '%s\n' "${DIGEST_INDENT}自己 ${s}" "${DIGEST_INDENT}手数料 ${f}"
+	[ -n "$u" ] && printf '%s\n' "${DIGEST_INDENT}不明 ${u}"
+	return 0
 }
 
 # jst_md_of_epoch <epoch> — "M/D" in JST, no leading zeros (the digest's
@@ -872,19 +927,34 @@ else
 				# a second time on fyd_is_live here would be redundant (and
 				# would suppress the dry note the brief explicitly wants).
 				CUM_METAL=$(history_cumulative_metal) || exit $?
+				CUM_BREAKDOWN=$(history_cumulative_breakdown) || exit $?
+				read -r CUM_SELF CUM_FEE CUM_UNKNOWN <<< "$CUM_BREAKDOWN"
 				COUNT=$(history_count) || exit $?
 				NOW_SELF_STAKE=$(jq -r '.stake.self // 0' "$VALIDATOR_JSON")
 				MILESTONE_QTY=$(awk -v s="$NOW_SELF_STAKE" -v x="$REWARD_METAL" 'BEGIN{printf "%.9f", s+x}')
 				REACHED=$(awk -v q="$MILESTONE_QTY" -v m="$FY_REWARD_MILESTONE" 'BEGIN{print (q>=m)?"1":"0"}')
 				REMAIN=$(awk -v q="$MILESTONE_QTY" -v m="$FY_REWARD_MILESTONE" 'BEGIN{v=m-q; if(v<0)v=0; printf "%.2f", v}')
 
-				LINE2_TAIL=""
+				# Body (2026-09-07 phone-width layout — see the helpers above):
+				#   Cycle N reward
+				#   累積 X METAL
+				#   　自己 A / 手数料 B [/ 不明 C]      (split further if > 30 cols)
+				#   この cycle +Y METAL
+				#   　自己 +a / 手数料 +b | 　内訳不明   (zero branch: 　check uptime)
+				#   N cycles recorded
+				#   self-stake 2,000 → S
+				#   25,000 まで残り R | 25,000 到達 🎉
+				CUM_UNKNOWN_ARG=""
+				[ "$(awk -v u="$CUM_UNKNOWN" 'BEGIN{print (u+0>0)?"1":"0"}')" = "1" ] && CUM_UNKNOWN_ARG="$CUM_UNKNOWN"
+				CUM_LINES="$(breakdown_lines "" "$CUM_SELF" "$CUM_FEE" "$CUM_UNKNOWN_ARG" 2)"
 				if [ "$REACHED" = "1" ]; then
-					LINE2_TAIL="$(fmt_metal "$FY_REWARD_MILESTONE" 0) 到達 🎉"
+					MILESTONE_LINE="$(fmt_metal "$FY_REWARD_MILESTONE" 0) 到達 🎉"
 				else
-					LINE2_TAIL="$(fmt_metal "$FY_REWARD_MILESTONE" 0) まで残り $(fmt_metal "$REMAIN" 2)"
+					MILESTONE_LINE="$(fmt_metal "$FY_REWARD_MILESTONE" 0) まで残り $(fmt_metal "$REMAIN" 2)"
 				fi
-				LINE2="${COUNT} cycles · self-stake $(fmt_metal "$RC_MIN_VALIDATOR_STAKE_METAL" 0) → $(fmt_metal "$NOW_SELF_STAKE" 0) · ${LINE2_TAIL}"
+				TAIL_LINES="${COUNT} cycles recorded
+self-stake $(fmt_metal "$RC_MIN_VALIDATOR_STAKE_METAL" 0) → $(fmt_metal "$NOW_SELF_STAKE" 0)
+${MILESTONE_LINE}"
 
 				# REWARD_METAL == 0 is NOT a "not yet paid" race: metalgo's
 				# rewardValidatorTx() writes the reward UTXOs (zero of them, if
@@ -894,14 +964,6 @@ else
 				# still pending, so a same-run getRewardUTXOs read right after
 				# detecting the disappearance can never observe a stale zero.
 				REWARD_IS_ZERO=$(awk -v r="$REWARD_METAL" 'BEGIN{print (r+0==0)?"1":"0"}')
-				# This-cycle breakdown tail (2026-09-07): "自己 +a / 手数料 +b"
-				# when the split is known, "内訳不明" when it was refused —
-				# the push never shows a guessed half.
-				if [ "$SPLIT_KNOWN" = "1" ]; then
-					SPLIT_TAIL="自己 +$(fmt_metal "$SELF_REWARD_METAL" 2) / 手数料 +$(fmt_metal "$FEE_INCOME_METAL" 2)"
-				else
-					SPLIT_TAIL="内訳不明"
-				fi
 				if [ "$REWARD_IS_ZERO" = "1" ]; then
 					# No reward this cycle almost always means the 80% uptime
 					# threshold was missed (see StakingConfig.UptimeRequirement in
@@ -915,19 +977,30 @@ else
 					# operator's requirement is cumulative first, regardless
 					# of this cycle's outcome — CUM_METAL is computed above,
 					# before this fork, from the history that now includes
-					# this 0 line). The uptime warning moves into the delta
-					# tail so the ordering stays identical across branches.
-					# Zero total: 0 outputs is always a KNOWN split (0/0), so the
-					# breakdown is spelled with the same bare "+0" the delta
-					# uses, not "+0.00" — one visual convention per branch.
-					LINE1="Cycle ${CYCLE_N} reward: 累積 $(fmt_metal "$CUM_METAL" 2) METAL (+0 this cycle: 自己 +0 / 手数料 +0 — check uptime)"
-					BODY="${LINE1}
-${LINE2}"
+					# this 0 line). The uptime warning is its own indented
+					# sub-line: "この cycle +0 METAL — check uptime" on one line
+					# is 34 columns, over the phone-width limit.
+					BODY="Cycle ${CYCLE_N} reward
+累積 $(fmt_metal "$CUM_METAL" 2) METAL
+${CUM_LINES}
+この cycle +0 METAL
+${DIGEST_INDENT}check uptime
+${TAIL_LINES}"
 					fyd_notify high "⚠ Cycle ${CYCLE_N} reward: 0 METAL" "$BODY" >/dev/null
 				else
-					LINE1="Cycle ${CYCLE_N} reward: 累積 $(fmt_metal "$CUM_METAL" 2) METAL (+$(fmt_metal "$REWARD_METAL" 2) this cycle: ${SPLIT_TAIL})"
-					BODY="${LINE1}
-${LINE2}"
+					# This-cycle breakdown: "自己 +a / 手数料 +b" when the split is
+					# known, "内訳不明" when it was refused — never a guessed half.
+					if [ "$SPLIT_KNOWN" = "1" ]; then
+						DELTA_LINES="$(breakdown_lines "+" "$SELF_REWARD_METAL" "$FEE_INCOME_METAL" "" 2)"
+					else
+						DELTA_LINES="${DIGEST_INDENT}内訳不明"
+					fi
+					BODY="Cycle ${CYCLE_N} reward
+累積 $(fmt_metal "$CUM_METAL" 2) METAL
+${CUM_LINES}
+この cycle +$(fmt_metal "$REWARD_METAL" 2) METAL
+${DELTA_LINES}
+${TAIL_LINES}"
 					# tada tag: unlike check-anomalies.sh's delegation push (which
 					# withdraws the celebration when count and amount move opposite
 					# ways), a NON-ZERO matured reward has no "net negative" case —
@@ -943,16 +1016,19 @@ fi
 # ============================================================================
 # Morning digest block (regenerated every run, independent of maturity above)
 # ============================================================================
-# Four lines (2026-09-07 operator format — see the header's STATE section):
-#   1  累積 N METAL (自己 a / 手数料 b[ / 内訳不明 c])
-#   2  Cycle N 見込み +M METAL (自己 +a / 手数料 +b)
-#   3  　M/D 満期・経過 d/D 日            (full-width-space indent)
-#   4  25,000 まで残り R  |  25,000 到達 🎉
+# Six lines (2026-09-07 operator format, phone-width — see the helpers
+# above; the 4-line parenthesised form wrapped on Android at ~40 columns):
+#   1  累積 N METAL
+#   2  　自己 a / 手数料 b [/ 不明 c]      (breakdown_lines: split if > 30 cols)
+#   3  Cycle N 見込み +M METAL
+#   4  　自己 +a / 手数料 +b                (breakdown_lines)
+#   5  　M/D 満期・経過 d/D 日
+#   6  25,000 まで残り R  |  25,000 到達 🎉
 # Every amount is fmt_metal'd to ONE decimal (the milestone constant itself
-# stays a bare integer). Lines 2–3 exist only when the projection could be
+# stays a bare integer). Lines 3–5 exist only when the projection could be
 # computed this run (cycle_n known, getCurrentSupply answered, calculator
-# ran); otherwise the block is lines 1 + 4 with line 4 measured against the
-# current self-stake alone — never a fabricated projection.
+# ran); otherwise the block is lines 1, 2 and 6, with line 6 measured
+# against the current self-stake alone — never a fabricated projection.
 #
 # Day arithmetic: D (cycle length) is ROUNDED to the nearest day —
 # int(x + 0.5) — because a 32.97-day cycle is "33 days" to a human (the
@@ -961,7 +1037,7 @@ fi
 # with no leading zeros (jst_md_of_epoch).
 compute_and_write_digest() {
 	local now_self_stake now_start now_end supply_resp supply_n supply_metal
-	local line1 line2="" line3="" line4=""
+	local line1 proj_head="" proj_lines="" line_days="" line_ms=""
 	local proj_total=""
 
 	now_self_stake=$(jq -r '.stake.self // empty' "$VALIDATOR_JSON")
@@ -1018,27 +1094,29 @@ compute_and_write_digest() {
 				d_days=$(awk -v now="$big_now" -v s="$now_start" -v dd="$big_d" 'BEGIN{v=int((now-s)/86400); if(v<0)v=0; if(v>dd)v=dd; print v}')
 				md=$(jst_md_of_epoch "$now_end")
 
-				line2="Cycle ${cycle_n_now} 見込み +$(fmt_metal "$proj_total" 1) METAL (自己 +$(fmt_metal "$self_full" 1) / 手数料 +$(fmt_metal "$fee_full" 1))"
-				line3="　${md} 満期・経過 ${d_days}/${big_d} 日"
+				proj_head="Cycle ${cycle_n_now} 見込み +$(fmt_metal "$proj_total" 1) METAL"
+				proj_lines="$(breakdown_lines "+" "$self_full" "$fee_full" "" 1)"
+				line_days="${DIGEST_INDENT}${md} 満期・経過 ${d_days}/${big_d} 日"
 			fi
 		fi
 	fi
 
-	# ---- line 1: cumulative with breakdown (effective ledger rows) ----
+	# ---- lines 1–2: cumulative + breakdown (effective ledger rows) ----
 	# Ledger readers: a structural failure returns 10 out of this function
 	# (the caller exits with it) — the block is NOT written, so the morning
 	# push never shows 累積 0 for a ledger that could not be read.
-	local cum cum_self cum_fee cum_unknown breakdown unknown_tail=""
+	local cum cum_self cum_fee cum_unknown breakdown cum_lines unknown_arg=""
 	cum=$(history_cumulative_metal) || return $?
 	breakdown=$(history_cumulative_breakdown) || return $?
 	read -r cum_self cum_fee cum_unknown <<< "$breakdown"
 	if [ "$(awk -v u="$cum_unknown" 'BEGIN{print (u+0>0)?"1":"0"}')" = "1" ]; then
-		unknown_tail=" / 内訳不明 $(fmt_metal "$cum_unknown" 1)"
+		unknown_arg="$cum_unknown"
 	fi
-	line1="累積 $(fmt_metal "$cum" 1) METAL (自己 $(fmt_metal "$cum_self" 1) / 手数料 $(fmt_metal "$cum_fee" 1)${unknown_tail})"
+	line1="累積 $(fmt_metal "$cum" 1) METAL"
+	cum_lines="$(breakdown_lines "" "$cum_self" "$cum_fee" "$unknown_arg" 1)"
 
-	# ---- line 4: milestone. Against self-stake + full-cycle projection when
-	# one exists, against self-stake alone otherwise (fallback, never
+	# ---- last line: milestone. Against self-stake + full-cycle projection
+	# when one exists, against self-stake alone otherwise (fallback, never
 	# fabricated). ----
 	local base_self milestone_qty reached remain
 	base_self=$(jq -r '.stake.self // 0' "$VALIDATOR_JSON")
@@ -1046,17 +1124,17 @@ compute_and_write_digest() {
 	reached=$(awk -v q="$milestone_qty" -v m="$FY_REWARD_MILESTONE" 'BEGIN{print (q>=m)?"1":"0"}')
 	remain=$(awk -v q="$milestone_qty" -v m="$FY_REWARD_MILESTONE" 'BEGIN{v=m-q; if(v<0)v=0; printf "%.9f", v}')
 	if [ "$reached" = "1" ]; then
-		line4="$(fmt_metal "$FY_REWARD_MILESTONE" 0) 到達 🎉"
+		line_ms="$(fmt_metal "$FY_REWARD_MILESTONE" 0) 到達 🎉"
 	else
-		line4="$(fmt_metal "$FY_REWARD_MILESTONE" 0) まで残り $(fmt_metal "$remain" 1)"
+		line_ms="$(fmt_metal "$FY_REWARD_MILESTONE" 0) まで残り $(fmt_metal "$remain" 1)"
 	fi
 
 	# Exactly one trailing newline, no blank lines: the consumer
 	# (daily-status.sh) splices every non-empty line as-is.
-	if [ -n "$line2" ]; then
-		printf '%s\n%s\n%s\n%s\n' "$line1" "$line2" "$line3" "$line4"
+	if [ -n "$proj_head" ]; then
+		printf '%s\n' "$line1" "$cum_lines" "$proj_head" "$proj_lines" "$line_days" "$line_ms"
 	else
-		printf '%s\n%s\n' "$line1" "$line4"
+		printf '%s\n' "$line1" "$cum_lines" "$line_ms"
 	fi | fyd_live_write "the reward digest block" "$DIGEST_FILE"
 }
 
