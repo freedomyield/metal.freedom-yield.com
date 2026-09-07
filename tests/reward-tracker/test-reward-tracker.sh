@@ -327,7 +327,12 @@ DRY_PRE_HISTORY_LINES=$([ -f "$REWARDS_HISTORY" ] && wc -l < "$REWARDS_HISTORY" 
 DRY_PRE_TRACKED_TX="$(jq -r '.tracked_tx' "$TRACKER_STATE")"
 DRY_PRE_NTFY_LINES=$([ -f "$NTFY_LOG" ] && wc -l < "$NTFY_LOG" | tr -d ' ' || echo 0)
 DRY_PRE_DIGEST_MTIME=""
-[ -f "$DIGEST_FILE" ] && DRY_PRE_DIGEST_MTIME="$(stat -f '%m' "$DIGEST_FILE" 2>/dev/null || stat -c '%Y' "$DIGEST_FILE" 2>/dev/null)"
+# GNU-first stat order (repo convention — broadcast-guard.sh / check-cron-file.sh).
+# GNU stat parses `-f '%m' FILE` as --file-system with '%m' as a file operand:
+# rc!=0 (the fallback IS reached), but FILE's multi-line filesystem dump (free
+# blocks etc., varies per call) is still captured ahead of the fallback's mtime,
+# so a BSD-first probe's pre/post comparison never matches on Linux.
+[ -f "$DIGEST_FILE" ] && DRY_PRE_DIGEST_MTIME="$(stat -c '%Y' "$DIGEST_FILE" 2>/dev/null || stat -f '%m' "$DIGEST_FILE" 2>/dev/null)"
 
 run_tracker 0
 assert_eq "dry run exits 0" "0" "$LAST_RC"
@@ -350,7 +355,7 @@ assert_eq "(b) dry run: no ntfy push recorded (fyd_notify never invokes the dele
 # (c) no digest write — fyd_live_write's dry path never creates a file that
 # did not already exist, and never touches the mtime of one that did.
 if [ -n "$DRY_PRE_DIGEST_MTIME" ]; then
-	DRY_POST_DIGEST_MTIME="$(stat -f '%m' "$DIGEST_FILE" 2>/dev/null || stat -c '%Y' "$DIGEST_FILE" 2>/dev/null)"
+	DRY_POST_DIGEST_MTIME="$(stat -c '%Y' "$DIGEST_FILE" 2>/dev/null || stat -f '%m' "$DIGEST_FILE" 2>/dev/null)"
 	assert_eq "(c) dry run: digest file mtime unchanged (not rewritten)" "$DRY_PRE_DIGEST_MTIME" "$DRY_POST_DIGEST_MTIME"
 else
 	assert_true "(c) dry run: digest file still does not exist (never created while dry)" "$([ ! -e "$DIGEST_FILE" ] && echo 1 || echo 0)"
