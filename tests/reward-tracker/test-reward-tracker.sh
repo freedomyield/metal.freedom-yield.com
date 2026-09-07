@@ -266,13 +266,17 @@ if command -v flock >/dev/null 2>&1 && [ "$(command -v flock)" != "$TMP/bin/floc
 	# reward-tracker.sh's own -n flock on fd 9 must fail while we hold it.
 	exec 8>"$LOCK_FILE_PATH"
 	flock -n 8
-	PRE_LINES="$(wc -l < "$REWARDS_HISTORY" 2>/dev/null | tr -d " ")"
-	[ -z "$PRE_LINES" ] && PRE_LINES=0
+	# $REWARDS_HISTORY does not exist yet at this point (nothing has matured),
+	# and under `set -e` + pipefail a bare `wc -l < missing-file` assignment
+	# kills the whole suite (the `<` redirect fails, pipefail propagates it out
+	# of the command substitution). Guard with the same [ -f ] idiom the dry-
+	# mode section below already uses. Mac never reaches this branch (no
+	# genuine flock), so this only ever bit on Linux (CI / validator host).
+	PRE_LINES=$([ -f "$REWARDS_HISTORY" ] && wc -l < "$REWARDS_HISTORY" | tr -d ' ' || echo 0)
 	run_tracker 1
 	assert_eq "held-lock run exits 0 (skip, not an error)" "0" "$LAST_RC"
 	assert_true "held-lock run logged a skip, not a normal completion" "$(grep -q 'still holds the lock' "$LAST_OUT" && echo 1 || echo 0)"
-	POST_LINES="$(wc -l < "$REWARDS_HISTORY" 2>/dev/null | tr -d " ")"
-	[ -z "$POST_LINES" ] && POST_LINES=0
+	POST_LINES=$([ -f "$REWARDS_HISTORY" ] && wc -l < "$REWARDS_HISTORY" | tr -d ' ' || echo 0)
 	assert_eq "held-lock run did not append (state untouched)" "$PRE_LINES" "$POST_LINES"
 	exec 8>&-
 else
