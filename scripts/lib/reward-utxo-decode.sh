@@ -221,29 +221,62 @@ reward_utxo__nmetal_to_metal() {
 	printf '%d.%09d\n' "$(($1 / 1000000000))" "$(($1 % 1000000000))"
 }
 
-# split_reward_utxos_metal [potential_reward_nmetal]
+# split_reward_utxos_metal [potential_reward_nmetal] [--assert-no-delegators]
 #   Reads hex UTXO strings, one per line, from stdin (same input contract as
 #   sum_reward_utxos_metal) and prints ONE line:
 #
-#       <total_metal> <self_metal> <fee_metal> <known>
+#       <total_metal> <self_metal> <fee_metal> <known> <basis>
 #
 #   known=1: self/fee are 9-place METAL strings and self+fee == total.
 #   known=0: self/fee are the literal "-" — the split was REFUSED; total is
 #            still the (possibly partial) sum, exactly what
 #            sum_reward_utxos_metal would have printed.
+#   basis:   ONE token naming the evidence the split rests on (recorded in
+#            the ledger row as split_basis — evidence-based discipline):
+#              zero-outputs                  n=0, self 0 / fee 0
+#              utxo-order                    n=2 adjacent, no hint
+#              utxo-order+potential-reward   n=2 adjacent, lower == hint
+#              potential-reward-match        n=1, == hint  -> self
+#              potential-reward-mismatch     n=1, != hint  -> fee (abort)
+#              operator-asserted-no-delegators
+#                                            n=1, no hint, --assert-no-
+#                                            delegators given -> self. The
+#                                            CALLER must still apply a
+#                                            magnitude sanity check before
+#                                            recording this (see reward-
+#                                            tracker.sh --backfill).
+#            and for known=0, "refused:<reason>" with reason one of
+#              undecodable / single-no-hint / nonadjacent / too-many /
+#              hint-contradicted / no-delegators-contradicted.
 #
 #   The decision table is the "SELF / FEE SPLIT" block in this file's header
 #   — every branch below is one row of it, nothing is inferred beyond what
-#   rewardValidatorTx() is cited as doing. The optional argument is the
-#   validator's PotentialReward in nMETAL (metalgo's `potentialReward`
+#   rewardValidatorTx() is cited as doing. The first optional argument is
+#   the validator's PotentialReward in nMETAL (metalgo's `potentialReward`
 #   field); a non-integer argument is treated as absent (with a stderr
 #   note), never as a value to compare against.
+#
+#   --assert-no-delegators (2026-09-07): the caller vouches that NO
+#   delegation existed during the cycle, so delegateeReward == 0. From the
+#   cited source that leaves exactly two shapes: commit -> ONE self output;
+#   abort -> ZERO outputs (`if delegateeReward == 0 { return nil }` runs
+#   after the validator-reward block, so no fee output can exist). Hence
+#   under the flag one output IS the self reward, and two or more outputs
+#   PROVE the assertion false — refused, never partially honoured. A hint,
+#   when also given, still takes precedence (it is chain evidence; the
+#   flag is operator testimony).
 #
 #   Always returns 0 — "refused" is a data outcome (known=0), not an error;
 #   a caller that cannot read the line at all sees an empty stdout only if
 #   this function was never reached.
 split_reward_utxos_metal() {
-	local hint="${1:-}"
+	local hint="" no_delegators=0 a
+	for a in "$@"; do
+		case "$a" in
+			--assert-no-delegators) no_delegators=1 ;;
+			*) hint="$a" ;;
+		esac
+	done
 	if [ -n "$hint" ] && ! [[ "$hint" =~ ^[0-9]+$ ]]; then
 		echo "split_reward_utxos_metal: potential_reward_nmetal is not an unsigned integer — treating the hint as absent" >&2
 		hint=""
@@ -266,7 +299,7 @@ split_reward_utxos_metal() {
 		fi
 	done
 
-	local total self fee known=0
+	local total self fee known=0 basis="refused:undecodable"
 	total="$(reward_utxo__nmetal_to_metal "$total_n")"
 	self="-"
 	fee="-"
@@ -277,6 +310,7 @@ split_reward_utxos_metal() {
 				self="$(reward_utxo__nmetal_to_metal 0)"
 				fee="$self"
 				known=1
+				basis="zero-outputs"
 				;;
 			1)
 				if [ -n "$hint" ]; then
@@ -285,40 +319,69 @@ split_reward_utxos_metal() {
 						# validator's own PotentialReward.
 						self="$(reward_utxo__nmetal_to_metal "${amts[0]}")"
 						fee="$(reward_utxo__nmetal_to_metal 0)"
+						basis="potential-reward-match"
+						known=1
+					elif [ "$no_delegators" -eq 1 ]; then
+						# The operator says no delegators, the chain says this is
+						# not the self reward: the two cannot both hold. Refuse.
+						echo "split_reward_utxos_metal: single output does not equal potentialReward while --assert-no-delegators is set — contradiction, split refused" >&2
+						basis="refused:hint-contradicted"
 					else
 						# abort path: the validator reward is not paid; the only
 						# output the cited source can emit is the delegatee cut.
 						self="$(reward_utxo__nmetal_to_metal 0)"
 						fee="$(reward_utxo__nmetal_to_metal "${amts[0]}")"
+						basis="potential-reward-mismatch"
+						known=1
 					fi
+				elif [ "$no_delegators" -eq 1 ]; then
+					self="$(reward_utxo__nmetal_to_metal "${amts[0]}")"
+					fee="$(reward_utxo__nmetal_to_metal 0)"
+					basis="operator-asserted-no-delegators"
 					known=1
+				else
+					basis="refused:single-no-hint"
 				fi
 				;;
 			2)
-				local lo_idx hi_idx lo_amt hi_amt
-				if [ "${idxs[0]}" -le "${idxs[1]}" ]; then
-					lo_idx="${idxs[0]}"; lo_amt="${amts[0]}"
-					hi_idx="${idxs[1]}"; hi_amt="${amts[1]}"
+				if [ "$no_delegators" -eq 1 ]; then
+					echo "split_reward_utxos_metal: two outputs contradict --assert-no-delegators (a fee output exists) — split refused" >&2
+					basis="refused:no-delegators-contradicted"
 				else
-					lo_idx="${idxs[1]}"; lo_amt="${amts[1]}"
-					hi_idx="${idxs[0]}"; hi_amt="${amts[0]}"
-				fi
-				if [ "$((hi_idx - lo_idx))" -ne 1 ]; then
-					echo "split_reward_utxos_metal: two outputs at non-consecutive indices — not the commit-path self+fee pair, split refused" >&2
-				elif [ -n "$hint" ] && [ "$lo_amt" != "$hint" ]; then
-					echo "split_reward_utxos_metal: lower output does not equal the recorded potentialReward — split refused" >&2
-				else
-					self="$(reward_utxo__nmetal_to_metal "$lo_amt")"
-					fee="$(reward_utxo__nmetal_to_metal "$hi_amt")"
-					known=1
+					local lo_idx hi_idx lo_amt hi_amt
+					if [ "${idxs[0]}" -le "${idxs[1]}" ]; then
+						lo_idx="${idxs[0]}"; lo_amt="${amts[0]}"
+						hi_idx="${idxs[1]}"; hi_amt="${amts[1]}"
+					else
+						lo_idx="${idxs[1]}"; lo_amt="${amts[1]}"
+						hi_idx="${idxs[0]}"; hi_amt="${amts[0]}"
+					fi
+					if [ "$((hi_idx - lo_idx))" -ne 1 ]; then
+						echo "split_reward_utxos_metal: two outputs at non-consecutive indices — not the commit-path self+fee pair, split refused" >&2
+						basis="refused:nonadjacent"
+					elif [ -n "$hint" ] && [ "$lo_amt" != "$hint" ]; then
+						echo "split_reward_utxos_metal: lower output does not equal the recorded potentialReward — split refused" >&2
+						basis="refused:hint-contradicted"
+					else
+						self="$(reward_utxo__nmetal_to_metal "$lo_amt")"
+						fee="$(reward_utxo__nmetal_to_metal "$hi_amt")"
+						known=1
+						if [ -n "$hint" ]; then basis="utxo-order+potential-reward"; else basis="utxo-order"; fi
+					fi
 				fi
 				;;
 			*)
-				echo "split_reward_utxos_metal: ${n} reward outputs — the cited source emits at most two, split refused" >&2
+				if [ "$no_delegators" -eq 1 ]; then
+					echo "split_reward_utxos_metal: ${n} outputs contradict --assert-no-delegators — split refused" >&2
+					basis="refused:no-delegators-contradicted"
+				else
+					echo "split_reward_utxos_metal: ${n} reward outputs — the cited source emits at most two, split refused" >&2
+					basis="refused:too-many"
+				fi
 				;;
 		esac
 	fi
 
-	printf '%s %s %s %d\n' "$total" "$self" "$fee" "$known"
+	printf '%s %s %s %d %s\n' "$total" "$self" "$fee" "$known" "$basis"
 	return 0
 }

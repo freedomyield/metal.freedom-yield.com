@@ -560,6 +560,84 @@ assert_eq "same-tx-other-cycle backfill appended nothing (still 4 lines)" "4" "$
 assert_true "same-tx-other-cycle refusal names the reason (different cycle_n)" "$(grep -q 'already recorded under a different cycle_n' "$LAST_OUT" && echo 1 || echo 0)"
 
 echo ""
+echo "=== --backfill --assert-no-delegators: operator testimony + self-reward sanity band ==="
+# E = the calculator's self-reward estimate for the cycle at the fixture
+# supply (same library the script uses; uptime-cycles.json row values).
+# shellcheck source=scripts/lib/reward-calculator.sh
+. "$REPO/scripts/lib/reward-calculator.sh"
+E4_METAL="$(estimate_reward 1500 $((1605600000 - 1602800000)) 350000000)"
+E4_N="$(python3 -c "from decimal import Decimal; print(int(Decimal('$E4_METAL') * 10**9))")"
+scale_n() { python3 -c "from decimal import Decimal; print(int(Decimal('$1') * Decimal('$2')))"; }
+TX_ND="txNoDelegatorsAssertedCycle4444444"
+PRE_ND_LINES=$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')
+
+# (1) two outputs under the flag: the assertion is provably false -> exit 8
+write_getRewardUTXOs "$(build_utxo_hex "$E4_N" 2) $(build_utxo_hex 1000000000 3)"
+run_tracker 1 --backfill "$TX_ND" 4 --assert-no-delegators
+assert_eq "flag + 2 outputs: exit 8 (assertion contradicted)" "8" "$LAST_RC"
+assert_eq "flag + 2 outputs: nothing appended" "$PRE_ND_LINES" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+
+# (2) one output at 2% of E — fee-only magnitude (abort path) -> exit 9
+write_getRewardUTXOs "$(build_utxo_hex "$(scale_n "$E4_N" 0.02)" 2)"
+run_tracker 1 --backfill "$TX_ND" 4 --assert-no-delegators
+assert_eq "flag + 1 output at 2% of E: exit 9 (self-reward sanity check failed)" "9" "$LAST_RC"
+assert_eq "flag + 2%-of-E: nothing appended" "$PRE_ND_LINES" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+assert_true "flag + 2%-of-E: stderr names the cycle and the check, no amount" "$(grep -q 'cycle_n=4: self-reward sanity check failed' "$LAST_OUT" && ! grep -qE '[0-9]\.[0-9]' "$LAST_OUT" && echo 1 || echo 0)"
+
+# (3) one output at 1.5E — outside the band on the high side -> exit 9
+write_getRewardUTXOs "$(build_utxo_hex "$(scale_n "$E4_N" 1.5)" 2)"
+run_tracker 1 --backfill "$TX_ND" 4 --assert-no-delegators
+assert_eq "flag + 1 output at 1.5E: exit 9" "9" "$LAST_RC"
+assert_eq "flag + 1.5E: nothing appended" "$PRE_ND_LINES" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+
+# (4) supply RPC down: E cannot be computed -> exit 9, never "assume fine"
+write_getRewardUTXOs "$(build_utxo_hex "$E4_N" 2)"
+cp "$FIX_DIR/getCurrentSupply.json" "$TMP/record/getCurrentSupply.keep2"
+echo '{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"stub outage"}}' > "$FIX_DIR/getCurrentSupply.json"
+run_tracker 1 --backfill "$TX_ND" 4 --assert-no-delegators
+assert_eq "flag + supply RPC down: exit 9 (check not evaluable)" "9" "$LAST_RC"
+assert_eq "flag + supply RPC down: nothing appended" "$PRE_ND_LINES" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+cp "$TMP/record/getCurrentSupply.keep2" "$FIX_DIR/getCurrentSupply.json"
+
+# (5) one output == E exactly -> appended as self, basis on record
+run_tracker 1 --backfill "$TX_ND" 4 --assert-no-delegators
+assert_eq "flag + 1 output == E: exit 0" "0" "$LAST_RC"
+assert_eq "flag + 1 output == E: exactly one row appended" "$((PRE_ND_LINES + 1))" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+ND_ROW="$(tail -n 1 "$REWARDS_HISTORY")"
+assert_eq "flag row: split_known true, self == total, fee 0" "true $E4_METAL 0" "$(echo "$ND_ROW" | jq -r '"\(.split_known) \(.self_reward_metal) \(.fee_income_metal)"')"
+assert_eq "flag row: split_basis records operator testimony + the sanity check" "operator-asserted-no-delegators+self-sanity" "$(echo "$ND_ROW" | jq -r '.split_basis')"
+run_tracker 1 --backfill "$TX_ND" 4 --assert-no-delegators
+assert_eq "flag re-run on the v2 row: no-op" "$((PRE_ND_LINES + 1))" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+
+# (6) one output at 1.2E — inside the default 25% band -> appended (cycle 5)
+cat > "$UPTIME_CYCLES_JSON" <<JSON
+{"cycles":[{"cycle_n":7,"start_unix":$TRACKED_START,"end_unix":$TRACKED_END,"final_self_stake_metal":2000},{"cycle_n":3,"start_unix":1600000000,"end_unix":1602800000,"final_self_stake_metal":1500},{"cycle_n":2,"start_unix":1597000000,"end_unix":1599800000,"final_self_stake_metal":1500},{"cycle_n":4,"start_unix":1602800000,"end_unix":1605600000,"final_self_stake_metal":1500},{"cycle_n":5,"start_unix":1605600000,"end_unix":1608400000,"final_self_stake_metal":1500},{"cycle_n":6,"start_unix":1608400000,"end_unix":1611200000,"final_self_stake_metal":1500}]}
+JSON
+TX_ND5="txNoDelegatorsAssertedCycle5555555"
+write_getRewardUTXOs "$(build_utxo_hex "$(scale_n "$E4_N" 1.2)" 2)"
+run_tracker 1 --backfill "$TX_ND5" 5 --assert-no-delegators
+assert_eq "flag + 1 output at 1.2E (inside the band): exit 0, appended" "0 $((PRE_ND_LINES + 2))" "$LAST_RC $(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+
+# (7) v1-only effective row + flag: exactly one v2 row appended, then no-op
+TX_ND6="txNoDelegatorsLegacyV1Cycle666666"
+printf '%s\n' "{\"cycle_n\":6,\"reward_metal\":$E4_METAL,\"self_stake_metal\":1500,\"start_unix\":1608400000,\"end_unix\":1611200000,\"add_validator_tx\":\"$TX_ND6\",\"observed_at\":\"2026-09-04T00:00:00Z\"}" >> "$REWARDS_HISTORY"
+write_getRewardUTXOs "$(build_utxo_hex "$E4_N" 2)"
+run_tracker 1 --backfill "$TX_ND6" 6 --assert-no-delegators
+assert_eq "flag + v1-only row: exit 0, one v2 row appended (v1 kept)" "0 $((PRE_ND_LINES + 4))" "$LAST_RC $(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+assert_eq "flag + v1-only row: appended row is the split one" "true operator-asserted-no-delegators+self-sanity" "$(tail -n 1 "$REWARDS_HISTORY" | jq -r '"\(.split_known) \(.split_basis)"')"
+run_tracker 1 --backfill "$TX_ND6" 6 --assert-no-delegators
+assert_eq "flag + v1-only row re-run: no-op" "$((PRE_ND_LINES + 4))" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+
+# (8) unknown --backfill option is a usage error, not silently ignored
+run_tracker 1 --backfill "$TX_ND6" 6 --assert-something-else
+assert_eq "unknown --backfill option: exit 1" "1" "$LAST_RC"
+
+# The non-flag single-output path (cycle 3 above) recorded its refusal
+# reason as evidence too.
+assert_eq "non-flag single-output row carries split_basis refused:single-no-hint" "refused:single-no-hint" "$(sed -n '2p' "$REWARDS_HISTORY" | jq -r '.split_basis')"
+assert_eq "live two-output row carries split_basis utxo-order+potential-reward" "utxo-order+potential-reward" "$(sed -n '1p' "$REWARDS_HISTORY" | jq -r '.split_basis')"
+
+echo ""
 echo "=== zero-reward maturity: no tada, no 🎉, warning-tagged push ==="
 # TX2 (currently tracked, per the crash-recovery section above) matures with
 # ZERO reward UTXOs — the shape metalgo produces when the 80% uptime
@@ -573,14 +651,16 @@ JSON
 write_getCurrentValidators "$TX3" "$CYCLE2_END" "$CYCLE3_END" "2000000000000" "3.0" "[]" "$NEXT_POTENTIAL_N"
 write_getRewardUTXOs ""
 NTFY_LINES_BEFORE_ZERO=$(wc -l < "$NTFY_LOG" | tr -d ' ')
+PRE_ZERO_LINES=$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')
 run_tracker 1
 assert_eq "zero-reward maturity run exits 0" "0" "$LAST_RC"
-assert_eq "rewards-history.jsonl now has 5 lines" "5" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
-LINE3_JSON="$(sed -n '5p' "$REWARDS_HISTORY")"
+assert_eq "rewards-history.jsonl grew by exactly 1 line" "$((PRE_ZERO_LINES + 1))" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+LINE3_JSON="$(tail -n 1 "$REWARDS_HISTORY")"
 assert_eq "zero-reward line: cycle_n=8" "8" "$(echo "$LINE3_JSON" | jq -r '.cycle_n')"
 assert_eq "zero-reward line: reward_metal=0 (jq-normalized, not 0E-9)" "0" "$(echo "$LINE3_JSON" | jq -r '.reward_metal')"
 assert_eq "zero-reward line: add_validator_tx=TX2" "$TX2" "$(echo "$LINE3_JSON" | jq -r '.add_validator_tx')"
 assert_eq "zero-reward line (v2): split_known true, self 0, fee 0 (plain 0, not 0E-9)" "true 0 0" "$(echo "$LINE3_JSON" | jq -r '"\(.split_known) \(.self_reward_metal) \(.fee_income_metal)"')"
+assert_eq "zero-reward line (v2): split_basis zero-outputs" "zero-outputs" "$(echo "$LINE3_JSON" | jq -r '.split_basis')"
 
 ZERO_PUSH="$(tail -n +"$((NTFY_LINES_BEFORE_ZERO + 1))" "$NTFY_LOG")"
 assert_true "zero-reward push recorded" "$([ -n "$ZERO_PUSH" ] && echo 1 || echo 0)"

@@ -131,9 +131,16 @@
 #                                "schema_version":2,
 #                                "self_reward_metal":a|null,
 #                                "fee_income_metal":b|null,
-#                                "split_known":true|false}
-#                             v1 rows (no schema_version) lack the last
-#                             four keys. Existing lines are NEVER rewritten
+#                                "split_known":true|false,
+#                                "split_basis":"<evidence token>"}
+#                             split_basis names the evidence the halves
+#                             rest on (see reward-utxo-decode.sh's
+#                             split_reward_utxos_metal for the tokens;
+#                             "operator-asserted-no-delegators+self-sanity"
+#                             is this script's own, from --backfill
+#                             --assert-no-delegators after the sanity
+#                             check). v1 rows (no schema_version) lack the
+#                             last five keys. Existing lines are NEVER rewritten
 #                             — only appended to, and only under FY_LIVE=1.
 #                             Readers take the LAST row per cycle_n as the
 #                             effective one (see "LEDGER SCHEMA v2" above).
@@ -203,7 +210,41 @@
 #                                             hint is available for a
 #                                             historical tx, so a single-
 #                                             output backfill records
-#                                             split_known:false.
+#                                             split_known:false — unless
+#                                             --assert-no-delegators is given.
+#   reward-tracker.sh --backfill <txID> <cycle_n> --assert-no-delegators
+#                                             The operator vouches that NO
+#                                             delegation existed during that
+#                                             cycle. Per rewardValidatorTx()
+#                                             that leaves one self output
+#                                             (commit) or none (abort), so a
+#                                             single output is recorded as
+#                                             self reward — but ONLY after
+#                                             the self-reward sanity check
+#                                             below passes. Two or more
+#                                             outputs prove the assertion
+#                                             false: exit 8, nothing
+#                                             appended. Ledger rows carry
+#                                             split_basis
+#                                             "operator-asserted-no-delegators
+#                                             +self-sanity" so the evidence
+#                                             is on record.
+#
+#   SELF-REWARD SANITY CHECK (why the flag alone is not enough): if the
+#   operator's assertion is WRONG and the cycle went down the abort path
+#   (uptime missed), the chain paid the delegatee cut ALONE as one output
+#   at the self output's index — exactly the shape the flag would record
+#   as self reward, split_known:true. To close that residual, the single
+#   output's amount A is compared with E = estimate_reward(
+#   final_self_stake_metal, end_unix - start_unix) at the CURRENT supply
+#   (uptime-cycles.json values, scripts/lib/reward-calculator.sh). E is an
+#   approximation (the chain used the supply at registration), but a
+#   fee-only output is orders of magnitude smaller than the self reward
+#   (delegated stake x 3% x reward rate), so a relative band —
+#   |A - E| / E <= BACKFILL_SELF_TOLERANCE, default 0.25 — separates them
+#   cleanly. Outside the band, or when E cannot be computed (supply RPC
+#   down): exit 9, nothing appended, and the stderr note names only the
+#   cycle_n ("self-reward sanity check failed") — never an amount or ratio.
 #
 # Env:
 #   METALGO_RPC          metalgo RPC base URL        (default http://127.0.0.1:9650)
@@ -211,6 +252,9 @@
 #   VALIDATOR_JSON        path to validator.json      (default public/api/validator.json)
 #   UPTIME_CYCLES_JSON    path to uptime-cycles.json  (default public/api/uptime-cycles.json)
 #   FY_REWARD_MILESTONE   self-stake milestone, METAL (default 25000)
+#   BACKFILL_SELF_TOLERANCE
+#                         --assert-no-delegators sanity band, relative
+#                         (default 0.25 — see the Usage note above)
 #   FY_LIVE=1              REQUIRED before the rewards-history append, the
 #                          state write, the digest-file write, or the ntfy
 #                          push happen for real (scripts/lib/side-effects.sh).
@@ -231,6 +275,14 @@
 #      count one reward twice; resolve by hand before retrying
 #   (--backfill against an already-recorded v2 txID is exit 0, an idempotent no-op — not a distinct exit code, since it is not an error)
 #   7  cannot open the flock lock file (structural — locks/ directory unwritable)
+#   8  --backfill --assert-no-delegators: the reward outputs contradict the
+#      assertion (two or more outputs = a fee output exists, or a single
+#      output that a potentialReward hint says is not the self reward).
+#      Nothing appended
+#   9  --backfill --assert-no-delegators: self-reward sanity check failed
+#      or could not be evaluated (single output outside the tolerance band
+#      of the calculator's estimate, or getCurrentSupply unreachable).
+#      Nothing appended
 
 set -uo pipefail
 
@@ -260,6 +312,7 @@ RPC_TIMEOUT="${FY_RPC_TIMEOUT:-6}"
 VALIDATOR_JSON="${VALIDATOR_JSON:-$ROOT/public/api/validator.json}"
 UPTIME_CYCLES_JSON="${UPTIME_CYCLES_JSON:-$ROOT/public/api/uptime-cycles.json}"
 FY_REWARD_MILESTONE="${FY_REWARD_MILESTONE:-25000}"
+BACKFILL_SELF_TOLERANCE="${BACKFILL_SELF_TOLERANCE:-0.25}"
 
 STATE_DIR="$(fyd_state_dir)" || exit $?
 REWARDS_HISTORY="${STATE_DIR}/rewards-history.jsonl"
@@ -278,12 +331,19 @@ fyd_live_run "create the state dir ${STATE_DIR}" mkdir -p "$STATE_DIR"
 BACKFILL=0
 BACKFILL_TX=""
 BACKFILL_CYCLE_N=""
+BACKFILL_NO_DELEGATORS=0
 if [ "${1:-}" = "--backfill" ]; then
 	BACKFILL=1
 	BACKFILL_TX="${2:-}"
 	BACKFILL_CYCLE_N="${3:-}"
 	if [ -z "$BACKFILL_TX" ] || [ -z "$BACKFILL_CYCLE_N" ]; then
-		echo "reward-tracker: usage: reward-tracker.sh --backfill <txID> <cycle_n>" >&2
+		echo "reward-tracker: usage: reward-tracker.sh --backfill <txID> <cycle_n> [--assert-no-delegators]" >&2
+		exit 1
+	fi
+	if [ "${4:-}" = "--assert-no-delegators" ]; then
+		BACKFILL_NO_DELEGATORS=1
+	elif [ $# -gt 3 ]; then
+		echo "reward-tracker: unknown --backfill option: $4 (only --assert-no-delegators is accepted)" >&2
 		exit 1
 	fi
 elif [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
@@ -410,13 +470,16 @@ history_count() {
 # ---- append one matured-cycle line (shared by live tracking + --backfill)
 # append_reward_line <cycle_n> <reward_metal> <self_stake_metal> \
 #                     <start_unix> <end_unix> <add_validator_tx> \
-#                     <self_reward_metal|-> <fee_income_metal|-> <split_known 0|1>
-# The last three come straight from split_reward_utxos_metal's output
-# line ("-" = refused → recorded as JSON null with split_known:false).
+#                     <self_reward_metal|-> <fee_income_metal|-> <split_known 0|1> \
+#                     <split_basis>
+# The last four come straight from split_reward_utxos_metal's output line
+# ("-" = refused → recorded as JSON null with split_known:false; basis is
+# the evidence token, recorded verbatim so a reader can see WHY a row's
+# halves are what they are — evidence-based discipline).
 # Returns 0 iff the line was (or, in dry mode, would be) appended.
 append_reward_line() {
 	local cn="$1" reward="$2" self_stake="$3" su="$4" eu="$5" tx="$6"
-	local self_r="$7" fee_r="$8" known="$9"
+	local self_r="$7" fee_r="$8" known="$9" basis="${10}"
 	local self_json="null" fee_json="null" known_json="false"
 	if [ "$known" = "1" ]; then
 		self_json="$self_r"
@@ -442,9 +505,10 @@ append_reward_line() {
 		--argjson self_r "$self_json" \
 		--argjson fee_r "$fee_json" \
 		--argjson known "$known_json" \
+		--arg basis "$basis" \
 		'def z: if . == 0 then 0 else . end;
 		 {cycle_n:$cn, reward_metal:($reward|z), self_stake_metal:($self|z), start_unix:$su, end_unix:$eu, add_validator_tx:$tx, observed_at:$obs,
-		  schema_version:2, self_reward_metal:($self_r|z), fee_income_metal:($fee_r|z), split_known:$known}')
+		  schema_version:2, self_reward_metal:($self_r|z), fee_income_metal:($fee_r|z), split_known:$known, split_basis:$basis}')
 	printf '%s\n' "$line" | fyd_live_write --append "the matured-cycle reward record" "$REWARDS_HISTORY"
 }
 
@@ -533,10 +597,46 @@ if [ "$BACKFILL" -eq 1 ]; then
 	fi
 	# No potentialReward hint exists for a historical tx (it is only
 	# exposed while the tx is current), so a single-output cycle is
-	# recorded with split_known:false here — see reward-utxo-decode.sh.
-	read -r B_REWARD B_SELF_R B_FEE_R B_KNOWN <<< "$(echo "$UTXO_RESP" | jq -r '.result.utxos[]?' | split_reward_utxos_metal)"
+	# recorded with split_known:false here — unless the operator asserted
+	# --assert-no-delegators, in which case the lib labels it self reward
+	# and the sanity check below must still pass. See reward-utxo-decode.sh.
+	# ${arr[@]+"${arr[@]}"}: an empty array under set -u is an "unbound
+	# variable" on bash < 4.4 (macOS /bin/bash is 3.2) — this idiom expands
+	# to nothing there instead of aborting.
+	SPLIT_FLAG=()
+	[ "$BACKFILL_NO_DELEGATORS" -eq 1 ] && SPLIT_FLAG=(--assert-no-delegators)
+	read -r B_REWARD B_SELF_R B_FEE_R B_KNOWN B_BASIS \
+		<<< "$(echo "$UTXO_RESP" | jq -r '.result.utxos[]?' | split_reward_utxos_metal ${SPLIT_FLAG[@]+"${SPLIT_FLAG[@]}"})"
 
-	if append_reward_line "$BACKFILL_CYCLE_N" "$B_REWARD" "$B_SELF_STAKE" "$B_START" "$B_END" "$BACKFILL_TX" "$B_SELF_R" "$B_FEE_R" "$B_KNOWN"; then
+	if [ "$BACKFILL_NO_DELEGATORS" -eq 1 ]; then
+		case "$B_BASIS" in
+			refused:no-delegators-contradicted|refused:hint-contradicted)
+				echo "reward-tracker: ERROR: cycle_n=${BACKFILL_CYCLE_N}: the reward outputs contradict --assert-no-delegators — nothing appended" >&2
+				exit 8
+				;;
+			operator-asserted-no-delegators)
+				# SELF-REWARD SANITY CHECK — see the Usage section. E at the
+				# current supply; A is the single output (== B_REWARD).
+				B_SUPPLY_RESP=$(rpc_post "/ext/bc/P" '{"jsonrpc":"2.0","id":1,"method":"platform.getCurrentSupply","params":{}}')
+				B_SUPPLY_N=$(echo "$B_SUPPLY_RESP" | jq -r '.result.supply // empty' 2>/dev/null)
+				if [ -z "$B_SUPPLY_N" ]; then
+					echo "reward-tracker: ERROR: cycle_n=${BACKFILL_CYCLE_N}: self-reward sanity check could not be evaluated (getCurrentSupply unreachable) — nothing appended" >&2
+					exit 9
+				fi
+				RC_CURRENT_SUPPLY_METAL=$(awk -v n="$B_SUPPLY_N" 'BEGIN{printf "%.9f", n/1000000000}')
+				B_EXPECTED=$(estimate_reward "$B_SELF_STAKE" "$((B_END - B_START))" 2>/dev/null) || B_EXPECTED=""
+				B_SANE=$(awk -v a="$B_REWARD" -v e="${B_EXPECTED:-0}" -v t="$BACKFILL_SELF_TOLERANCE" \
+					'BEGIN{ if (e <= 0) { print "0"; exit } d = a - e; if (d < 0) d = -d; print (d / e <= t) ? "1" : "0" }')
+				if [ "$B_SANE" != "1" ]; then
+					echo "reward-tracker: ERROR: cycle_n=${BACKFILL_CYCLE_N}: self-reward sanity check failed (single output is not within the tolerance band of the calculator's self-reward estimate) — nothing appended" >&2
+					exit 9
+				fi
+				B_BASIS="operator-asserted-no-delegators+self-sanity"
+				;;
+		esac
+	fi
+
+	if append_reward_line "$BACKFILL_CYCLE_N" "$B_REWARD" "$B_SELF_STAKE" "$B_START" "$B_END" "$BACKFILL_TX" "$B_SELF_R" "$B_FEE_R" "$B_KNOWN" "$B_BASIS"; then
 		if fyd_is_live; then
 			echo "reward-tracker: backfilled cycle ${BACKFILL_CYCLE_N} (no notification sent — see header)"
 		else
@@ -670,14 +770,14 @@ else
 			if [ -z "$UTXO_RESP" ] || ! echo "$UTXO_RESP" | jq -e '.result.utxos' >/dev/null 2>&1; then
 				echo "reward-tracker: getRewardUTXOs unreachable or unparseable, deferring to next run" >&2
 			else
-				# split_reward_utxos_metal prints "<total> <self> <fee> <known>";
+				# split_reward_utxos_metal prints "<total> <self> <fee> <known> <basis>";
 				# self/fee are "-" when the split was refused (known=0). The
 				# potentialReward hint is what makes a single output decidable —
 				# empty (pre-v2 state file) simply means "refuse", never guess.
-				read -r REWARD_METAL SELF_REWARD_METAL FEE_INCOME_METAL SPLIT_KNOWN \
+				read -r REWARD_METAL SELF_REWARD_METAL FEE_INCOME_METAL SPLIT_KNOWN SPLIT_BASIS \
 					<<< "$(echo "$UTXO_RESP" | jq -r '.result.utxos[]?' | split_reward_utxos_metal "$TRACKED_POTENTIAL_N")"
 
-				if ! append_reward_line "$CYCLE_N" "$REWARD_METAL" "$SELF_STAKE_METAL" "$TRACKED_START" "$TRACKED_END" "$TRACKED_TX" "$SELF_REWARD_METAL" "$FEE_INCOME_METAL" "$SPLIT_KNOWN"; then
+				if ! append_reward_line "$CYCLE_N" "$REWARD_METAL" "$SELF_STAKE_METAL" "$TRACKED_START" "$TRACKED_END" "$TRACKED_TX" "$SELF_REWARD_METAL" "$FEE_INCOME_METAL" "$SPLIT_KNOWN" "$SPLIT_BASIS"; then
 					echo "reward-tracker: ERROR: append_reward_line failed, NOT advancing tracked state (will retry next run)" >&2
 					exit 1
 				fi

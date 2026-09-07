@@ -129,44 +129,70 @@ echo "=== split_reward_utxos_metal() — self / fee by relative OutputIndex ==="
 # Shapes traced from metalgo's rewardValidatorTx() (see the lib header):
 #   commit: self at index K (== PotentialReward), fee at K+1 iff accrued > 0
 #   abort:  fee ONLY, at index K (no self output)
-# Output: "<total> <self> <fee> <known>"; self/fee are "-" when known=0.
+# Output: "<total> <self> <fee> <known> <basis>"; self/fee are "-" when known=0.
 SELF_K2="$(build_utxo_hex 50500000000 7 2)"    # 50.5 METAL @ index 2
 FEE_K3="$(build_utxo_hex 12250000000 7 3)"     # 12.25 METAL @ index 3
 FEE_K5="$(build_utxo_hex 12250000000 7 5)"     # 12.25 METAL @ index 5 (gap)
 EXTRA_K4="$(build_utxo_hex 1000000000 7 4)"    # a third output — unknown shape
 
 assert_eq "0 UTXOs -> 0 total, self 0, fee 0, known" \
-	"0.000000000 0.000000000 0.000000000 1" "$(printf '' | split_reward_utxos_metal)"
+	"0.000000000 0.000000000 0.000000000 1 zero-outputs" "$(printf '' | split_reward_utxos_metal)"
 
 assert_eq "2 UTXOs, consecutive: lower index = self, higher = fee, known" \
-	"62.750000000 50.500000000 12.250000000 1" "$(printf '%s\n%s\n' "$SELF_K2" "$FEE_K3" | split_reward_utxos_metal)"
+	"62.750000000 50.500000000 12.250000000 1 utxo-order" "$(printf '%s\n%s\n' "$SELF_K2" "$FEE_K3" | split_reward_utxos_metal)"
 assert_eq "2 UTXOs given in reverse order still split by index, not by input order" \
-	"62.750000000 50.500000000 12.250000000 1" "$(printf '%s\n%s\n' "$FEE_K3" "$SELF_K2" | split_reward_utxos_metal)"
+	"62.750000000 50.500000000 12.250000000 1 utxo-order" "$(printf '%s\n%s\n' "$FEE_K3" "$SELF_K2" | split_reward_utxos_metal)"
 assert_eq "2 UTXOs, consecutive, lower amount == potentialReward hint: known" \
-	"62.750000000 50.500000000 12.250000000 1" "$(printf '%s\n%s\n' "$SELF_K2" "$FEE_K3" | split_reward_utxos_metal 50500000000)"
+	"62.750000000 50.500000000 12.250000000 1 utxo-order+potential-reward" "$(printf '%s\n%s\n' "$SELF_K2" "$FEE_K3" | split_reward_utxos_metal 50500000000)"
 assert_eq "2 UTXOs, consecutive, lower amount != potentialReward hint: total kept, split refused" \
-	"62.750000000 - - 0" "$(printf '%s\n%s\n' "$SELF_K2" "$FEE_K3" | split_reward_utxos_metal 999)"
+	"62.750000000 - - 0 refused:hint-contradicted" "$(printf '%s\n%s\n' "$SELF_K2" "$FEE_K3" | split_reward_utxos_metal 999)"
 assert_eq "2 UTXOs, NON-consecutive indices (2,5): total kept, split refused" \
-	"62.750000000 - - 0" "$(printf '%s\n%s\n' "$SELF_K2" "$FEE_K5" | split_reward_utxos_metal)"
+	"62.750000000 - - 0 refused:nonadjacent" "$(printf '%s\n%s\n' "$SELF_K2" "$FEE_K5" | split_reward_utxos_metal)"
 assert_eq "2 UTXOs, SAME index: total kept, split refused" \
-	"101.000000000 - - 0" "$(printf '%s\n%s\n' "$SELF_K2" "$SELF_K2" | split_reward_utxos_metal)"
+	"101.000000000 - - 0 refused:nonadjacent" "$(printf '%s\n%s\n' "$SELF_K2" "$SELF_K2" | split_reward_utxos_metal)"
 assert_eq "3 UTXOs: total kept, split refused" \
-	"63.750000000 - - 0" "$(printf '%s\n%s\n%s\n' "$SELF_K2" "$FEE_K3" "$EXTRA_K4" | split_reward_utxos_metal)"
+	"63.750000000 - - 0 refused:too-many" "$(printf '%s\n%s\n%s\n' "$SELF_K2" "$FEE_K3" "$EXTRA_K4" | split_reward_utxos_metal)"
 
 assert_eq "1 UTXO, no potentialReward hint: total kept, split refused (commit-self vs abort-fee is undecidable)" \
-	"50.500000000 - - 0" "$(printf '%s\n' "$SELF_K2" | split_reward_utxos_metal)"
+	"50.500000000 - - 0 refused:single-no-hint" "$(printf '%s\n' "$SELF_K2" | split_reward_utxos_metal)"
 assert_eq "1 UTXO == potentialReward hint: self = all, fee 0, known (commit path)" \
-	"50.500000000 50.500000000 0.000000000 1" "$(printf '%s\n' "$SELF_K2" | split_reward_utxos_metal 50500000000)"
+	"50.500000000 50.500000000 0.000000000 1 potential-reward-match" "$(printf '%s\n' "$SELF_K2" | split_reward_utxos_metal 50500000000)"
 assert_eq "1 UTXO != potentialReward hint: self 0, fee = all, known (abort path pays the delegatee cut only)" \
-	"12.250000000 0.000000000 12.250000000 1" "$(printf '%s\n' "$FEE_K3" | split_reward_utxos_metal 50500000000)"
+	"12.250000000 0.000000000 12.250000000 1 potential-reward-mismatch" "$(printf '%s\n' "$FEE_K3" | split_reward_utxos_metal 50500000000)"
 assert_eq "1 UTXO, non-numeric hint is treated as absent (split refused, not crashed)" \
-	"50.500000000 - - 0" "$(printf '%s\n' "$SELF_K2" | split_reward_utxos_metal abc 2>/dev/null)"
+	"50.500000000 - - 0 refused:single-no-hint" "$(printf '%s\n' "$SELF_K2" | split_reward_utxos_metal abc 2>/dev/null)"
 
 # A refused UTXO poisons the split (never guess around a blob we could not
 # read) but the total still carries the decodable part, matching
 # sum_reward_utxos_metal's fail-loud-but-partial contract.
 assert_eq "one good + one refused UTXO: partial total, split refused" \
-	"50.500000000 - - 0" "$(printf '%s\n%s\n' "$SELF_K2" "$UTXO_WRONG_TYPE" | split_reward_utxos_metal 2>/dev/null)"
+	"50.500000000 - - 0 refused:undecodable" "$(printf '%s\n%s\n' "$SELF_K2" "$UTXO_WRONG_TYPE" | split_reward_utxos_metal 2>/dev/null)"
+
+# m-2: a single output LARGER than the hint is just as much "not the self
+# reward" as a smaller one — the comparison is equality, not ordering.
+BIG_K2="$(build_utxo_hex 70000000000 7 2)"        # 70 METAL > hint 50.5
+assert_eq "1 UTXO > potentialReward hint: self 0, fee = all (equality, not >=)" \
+	"70.000000000 0.000000000 70.000000000 1 potential-reward-mismatch" "$(printf '%s\n' "$BIG_K2" | split_reward_utxos_metal 50500000000)"
+
+echo ""
+echo "=== split_reward_utxos_metal --assert-no-delegators ==="
+# Under the operator's "no delegation existed" assertion, the cited source
+# leaves ONE self output (commit) or ZERO outputs (abort) — anything else
+# proves the assertion false and is refused outright.
+assert_eq "flag, 1 UTXO, no hint: self = all, basis operator-asserted-no-delegators" \
+	"50.500000000 50.500000000 0.000000000 1 operator-asserted-no-delegators" "$(printf '%s\n' "$SELF_K2" | split_reward_utxos_metal --assert-no-delegators)"
+assert_eq "flag, 0 UTXOs: zero-outputs, known" \
+	"0.000000000 0.000000000 0.000000000 1 zero-outputs" "$(printf '' | split_reward_utxos_metal --assert-no-delegators)"
+assert_eq "flag, 2 UTXOs: assertion contradicted, refused (total kept)" \
+	"62.750000000 - - 0 refused:no-delegators-contradicted" "$(printf '%s\n%s\n' "$SELF_K2" "$FEE_K3" | split_reward_utxos_metal --assert-no-delegators 2>/dev/null)"
+assert_eq "flag, 3 UTXOs: assertion contradicted, refused" \
+	"63.750000000 - - 0 refused:no-delegators-contradicted" "$(printf '%s\n%s\n%s\n' "$SELF_K2" "$FEE_K3" "$EXTRA_K4" | split_reward_utxos_metal --assert-no-delegators 2>/dev/null)"
+assert_eq "flag + matching hint: chain evidence wins the basis (potential-reward-match)" \
+	"50.500000000 50.500000000 0.000000000 1 potential-reward-match" "$(printf '%s\n' "$SELF_K2" | split_reward_utxos_metal 50500000000 --assert-no-delegators)"
+assert_eq "flag + contradicting hint: refused (operator testimony vs chain evidence)" \
+	"12.250000000 - - 0 refused:hint-contradicted" "$(printf '%s\n' "$FEE_K3" | split_reward_utxos_metal 50500000000 --assert-no-delegators 2>/dev/null)"
+assert_eq "flag given before the hint is parsed the same way" \
+	"50.500000000 50.500000000 0.000000000 1 potential-reward-match" "$(printf '%s\n' "$SELF_K2" | split_reward_utxos_metal --assert-no-delegators 50500000000)"
 
 echo ""
 echo "=== mutation kill check (split): the consecutive-index guard has teeth ==="
@@ -178,7 +204,7 @@ if ! diff -q "$LIB" "$SPLIT_MUTANT" >/dev/null 2>&1; then
 		. "$SPLIT_MUTANT"
 		printf '%s\n%s\n' "$SELF_K2" "$FEE_K5" | split_reward_utxos_metal
 	)"
-	if [ "$SPLIT_MUTANT_OUT" = "62.750000000 50.500000000 12.250000000 1" ]; then
+	if [ "$SPLIT_MUTANT_OUT" = "62.750000000 50.500000000 12.250000000 1 utxo-order" ]; then
 		PASS=$((PASS + 1))
 		echo "  PASS  mutant (consecutive-index guard disabled) SPLITS the (2,5) gap pair as if adjacent — the guard is load-bearing"
 	else
