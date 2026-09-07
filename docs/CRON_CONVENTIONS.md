@@ -81,6 +81,8 @@ Rule 6 still requires the flag on any cron invoking either script, but for `push
 
 A cron whose invoked command never notifies, never pushes, and never touches `/var/lib/freedom-yield` does not need the line. `scripts/check-cron-file.sh` Rule 6 enforces this: it fails a candidate cron whose command references a known side-effecting script (or one that sources `scripts/lib/side-effects.sh`) without a `FY_LIVE=1` line, and passes everything else without requiring the line.
 
+`/etc/cron.d/metal-reward-tracker` (2026-09-07, written by `scripts/install-reward-tracker-cron.sh`) is in Rule 6's scope through the second, dynamic layer, not the allowlist: `reward-tracker.sh` sources `scripts/lib/side-effects.sh` and routes its ledger append, state write, digest-file write AND its one-per-matured-cycle ntfy push through it, so without `FY_LIVE=1` every one of those is a dry no-op and a matured cycle's reward would never be recorded. The installer runs the linter as its pre-flight (exit 4 on failure); the generated file passes with Rule 6 reporting `FY_LIVE=1 present (required by: reward-tracker.sh)` (measured 2026-09-07, `Result: 0 violation(s)`).
+
 **This is a per-file judgment, not a per-script one — distinguish the TEMPLATE from what is actually DEPLOYED.** `scripts/vps-bootstrap.sh`'s `step_node_info_cron` / `step_server_status_cron` templates, as currently written, only run `node-info.sh` / `server-status.sh` and overwrite a `public/api/*.json` file directly — no notify, no push, no state dir — so a cron generated fresh from either template does not need `FY_LIVE=1`. But the 2026-07-07 host audit (`docs/audits/constitution-2026-07-07-host-state-audit.md:36`) found the **live, deployed** `metal-node-info` cron additionally chains a `push-to-web-host.sh` publish leg that the template does not generate (one of 9 "publish 系" crons on that host). That deployed file DOES need `FY_LIVE=1` — Rule 6 already detects this correctly, because it reads the actual command line in front of it (`push-to-web-host.sh` is on Rule 6's allowlist) rather than trusting a script-name-based rule of thumb. `metal-server-status` is not on that publish list and remains genuinely out of scope in both the template and (per the same audit) the deployed file. Do not use "`node-info` is out of scope" as a general statement when reasoning about a specific host's cron — always check what that file's command line actually invokes.
 
 ## Alternative form: piping to `logger` instead of a log file
@@ -109,6 +111,13 @@ as "the whole script is gated," though: per `advance-host-checkout.sh:143-166`,
 cron's entire purpose are deliberately ungated and run the same either way.
 A missing `FY_LIVE=1` here would silence anomaly alerts, not the advance
 itself.
+
+`/etc/cron.d/metal-reward-tracker` is the same shape — a single
+`bash <repo>/scripts/reward-tracker.sh 2>&1 | logger -t reward-tracker`
+line (no `&&` chain, so Rule 2 has nothing to check; syslog via
+`journalctl -t reward-tracker`) under an env header that carries
+`FY_LIVE=1`, which there gates every write the script performs, not just
+its alert channel (see Rule 6 above).
 
 **What each rule actually checks, per line** (corrected 2026-08-07 — this
 section previously said Rule 2 only looks at `>>`, which stopped being true
