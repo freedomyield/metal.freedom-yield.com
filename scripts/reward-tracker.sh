@@ -538,7 +538,13 @@ else
 					# to the priority-derived default (high → "warning"), matching
 					# check-anomalies.sh's own "drop the override, let the default
 					# stand" pattern for a non-celebratory high-priority push.
-					LINE1="Cycle ${CYCLE_N} reward: 0 METAL — check uptime"
+					# Same 累積-first ordering as the >0 branch below (the
+					# operator's requirement is cumulative first, regardless
+					# of this cycle's outcome — CUM_METAL is computed above,
+					# before this fork, from the history that now includes
+					# this 0 line). The uptime warning moves into the delta
+					# tail so the ordering stays identical across branches.
+					LINE1="Cycle ${CYCLE_N} reward: 累積 $(fmt_metal "$CUM_METAL" 2) METAL (+0 this cycle — check uptime)"
 					BODY="${LINE1}
 ${LINE2}"
 					fyd_notify high "⚠ Cycle ${CYCLE_N} reward: 0 METAL" "$BODY" >/dev/null

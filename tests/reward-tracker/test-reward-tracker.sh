@@ -449,7 +449,11 @@ assert_eq "zero-reward line: add_validator_tx=TX2" "$TX2" "$(echo "$LINE3_JSON" 
 ZERO_PUSH="$(tail -n +"$((NTFY_LINES_BEFORE_ZERO + 1))" "$NTFY_LOG")"
 assert_true "zero-reward push recorded" "$([ -n "$ZERO_PUSH" ] && echo 1 || echo 0)"
 assert_true "zero-reward push title carries no 🎉" "$(printf '%s' "$ZERO_PUSH" | grep -q '🎉' && echo 0 || echo 1)"
-assert_true "zero-reward push body: '0 METAL — check uptime'" "$(printf '%s' "$ZERO_PUSH" | grep -q 'reward: 0 METAL — check uptime' && echo 1 || echo 0)"
+# Same cumulative-first ordering the >0 push enforces above (operator's
+# requirement) — a 0-METAL cycle still leads with 累積, with the zero delta
+# and the uptime warning folded into the parenthetical tail.
+ZERO_CUM_FIRST_OK=$(printf '%s' "$ZERO_PUSH" | grep -qE 'Cycle 8 reward: 累積 [0-9,.]+ METAL \(\+0 this cycle — check uptime\)' && echo 1 || echo 0)
+assert_true "zero-reward push body: 累積 first, then '+0 this cycle — check uptime' tail" "$ZERO_CUM_FIRST_OK"
 assert_true "zero-reward push Tags header is NOT tada" "$(printf '%s' "$ZERO_PUSH" | grep -qx 'Tags: tada' && echo 0 || echo 1)"
 # No --tags override was passed, so notify.sh falls back to its own
 # priority-derived default for "high" — see notify.sh's TAGS case block.
