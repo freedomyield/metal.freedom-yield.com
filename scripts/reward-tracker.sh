@@ -82,9 +82,23 @@
 # shown on their own line instead):
 #
 #   self_estimate = estimate_reward(self_stake_metal, cycle_duration_sec)
-#   fee_estimate  = Σ_delegators estimate_reward(delegator_stake_metal * fee_fraction,
-#                                                delegator_duration_sec)
+#   fee_estimate  = accruedDelegateeReward
+#                 + Σ_current_delegators estimate_reward(delegator_stake_metal * fee_fraction,
+#                                                        delegator_duration_sec)
 #   digest_estimate = self_estimate + fee_estimate
+#
+# accruedDelegateeReward (2026-09-07 review I-3): `.delegators[]` lists
+# only delegations that are STILL staking. A delegation that already
+# matured mid-cycle has had its fee cut credited to this validator in
+# state (rewardDelegatorTx -> SetDelegateeReward), which
+# platform.getCurrentValidators exposes as `accruedDelegateeReward`
+# (metalgo api/validator.go / service.go, read 2026-09-07). Without that
+# term the projection silently forgets every delegation that ended before
+# the morning it is computed. It is exact (already credited, not
+# estimated) and is added in full; the Σ term covers only what is still
+# accruing. The same value is stored in reward-tracker-state.json
+# (tracked_accrued_delegatee_reward_nmetal) as a record — it is NOT used
+# for the maturity split, which stays on potentialReward alone.
 #
 # The `delegator_stake_metal * fee_fraction` term (not
 # `estimate_reward(delegator_stake) * fee_fraction`) is deliberate and
@@ -125,8 +139,9 @@
 #                             effective one (see "LEDGER SCHEMA v2" above).
 #   reward-tracker-state.json In-flight tracking: which AddValidatorTx this
 #                             script is currently waiting to mature (txID,
-#                             its startTime/endTime/weight/potentialReward
-#                             as observed on the latest run). Advances only
+#                             its startTime/endTime/weight/potentialReward/
+#                             accruedDelegateeReward as observed on the
+#                             latest run). Advances only
 #                             after a maturity is either recorded or
 #                             confirmed to need no recording.
 #   reward-digest-line.txt    Up to FOUR lines, REGENERATED every run (not
@@ -590,6 +605,9 @@ CURRENT_WEIGHT_N=$(echo "$SELF_ENTRY" | jq -r '.weight')
 # on the no-change branch too), so a state file written before this field
 # existed self-heals on the next daily tick, well before the tx matures.
 CURRENT_POTENTIAL_N=$(echo "$SELF_ENTRY" | jq -r '.potentialReward // empty')
+# accruedDelegateeReward = fee income already credited from delegations
+# that matured during this cycle (see the header's PROJECTION section).
+CURRENT_ACCRUED_N=$(echo "$SELF_ENTRY" | jq -r '.accruedDelegateeReward // empty')
 
 [ -f "$TRACKER_STATE" ] || printf '%s\n' '{}' | fyd_live_write "an empty reward-tracker state" "$TRACKER_STATE"
 STATE_JSON=$(cat "$TRACKER_STATE" 2>/dev/null || echo '{}')
@@ -603,8 +621,9 @@ write_state() {
 		--argjson eu "$CURRENT_END" \
 		--arg w "$CURRENT_WEIGHT_N" \
 		--arg pr "$CURRENT_POTENTIAL_N" \
+		--arg adr "$CURRENT_ACCRUED_N" \
 		--arg obs "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-		'{tracked_tx:$tx, tracked_node_id:$nid, tracked_start_unix:$su, tracked_end_unix:$eu, tracked_weight_nmetal:$w, tracked_potential_reward_nmetal:$pr, updated_at:$obs}' \
+		'{tracked_tx:$tx, tracked_node_id:$nid, tracked_start_unix:$su, tracked_end_unix:$eu, tracked_weight_nmetal:$w, tracked_potential_reward_nmetal:$pr, tracked_accrued_delegatee_reward_nmetal:$adr, updated_at:$obs}' \
 		| fyd_live_write "the reward-tracker in-flight state" "$TRACKER_STATE"
 }
 
@@ -788,8 +807,13 @@ compute_and_write_digest() {
 			local self_full
 			self_full=$(estimate_reward "$now_self_stake" "$dur_sec" 2>/dev/null) || self_full=""
 			if [ -n "$self_full" ]; then
-				# ---- fee projection: full-period estimate per delegator ----
+				# ---- fee projection: already-credited accrued fee (delegations
+				# that matured mid-cycle) + full-period estimate per CURRENT
+				# delegator — see the header's PROJECTION section. ----
 				local fee_pct fee_frac fee_full="0"
+				if [ -n "$CURRENT_ACCRUED_N" ]; then
+					fee_full=$(awk -v n="$CURRENT_ACCRUED_N" 'BEGIN{printf "%.9f", n/1000000000}')
+				fi
 				fee_pct=$(echo "$SELF_ENTRY" | jq -r '.delegationFee // 0')
 				fee_frac=$(awk -v f="$fee_pct" 'BEGIN{printf "%.9f", f/100}')
 				local n_del i

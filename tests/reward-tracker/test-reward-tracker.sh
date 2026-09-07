@@ -207,15 +207,16 @@ fi
 
 echo "test-topic" > "$TMP/ntfy-topic"
 
-# write_getCurrentValidators <txID> <start> <end> <weight_nmetal> <fee_pct> <delegators_json_array> [potentialReward_nmetal]
+# write_getCurrentValidators <txID> <start> <end> <weight_nmetal> <fee_pct> <delegators_json_array> [potentialReward_nmetal] [accruedDelegateeReward_nmetal]
 # potentialReward defaults to the self-reward fixture so the live maturity
 # split has its hint; pass "" to model a node response without it.
+# accruedDelegateeReward defaults to 0 (no delegation matured mid-cycle).
 write_getCurrentValidators() {
-	local tx="$1" su="$2" eu="$3" w="$4" fee="$5" delegators="$6" pr="${7-$SELF_REWARD_N}"
+	local tx="$1" su="$2" eu="$3" w="$4" fee="$5" delegators="$6" pr="${7-$SELF_REWARD_N}" adr="${8-0}"
 	local pr_field=""
 	[ -n "$pr" ] && pr_field=",\"potentialReward\":\"$pr\""
 	cat > "$FIX_DIR/getCurrentValidators.json" <<JSON
-{"jsonrpc":"2.0","id":1,"result":{"validators":[{"nodeID":"$NODE_ID","txID":"$tx","startTime":"$su","endTime":"$eu","weight":"$w","delegationFee":$fee,"delegators":$delegators$pr_field}]}}
+{"jsonrpc":"2.0","id":1,"result":{"validators":[{"nodeID":"$NODE_ID","txID":"$tx","startTime":"$su","endTime":"$eu","weight":"$w","delegationFee":$fee,"delegators":$delegators$pr_field,"accruedDelegateeReward":"$adr"}]}}
 JSON
 }
 
@@ -273,6 +274,7 @@ assert_eq "bootstrap run exits 0" "0" "$LAST_RC"
 TRACKED_TX_AFTER_BOOTSTRAP="$(jq -r '.tracked_tx' "$TRACKER_STATE" 2>/dev/null)"
 assert_eq "state now tracks TX1" "$TX1" "$TRACKED_TX_AFTER_BOOTSTRAP"
 assert_eq "state captured potentialReward (the single-output split hint)" "$SELF_REWARD_N" "$(jq -r '.tracked_potential_reward_nmetal' "$TRACKER_STATE")"
+assert_eq "state recorded accruedDelegateeReward (record only, not used for the split)" "0" "$(jq -r '.tracked_accrued_delegatee_reward_nmetal' "$TRACKER_STATE")"
 assert_true "no rewards-history.jsonl yet (nothing matured)" "$([ ! -s "$REWARDS_HISTORY" ] && echo 1 || echo 0)"
 assert_true "digest file was written" "$([ -s "$DIGEST_FILE" ] && echo 1 || echo 0)"
 
@@ -654,14 +656,14 @@ echo "=== digest probes: rounding, JST date, maturity-horizon projection ==="
 # assertions below only ever compare digest lines against each other or
 # against values computed here.
 probe_digest() {
-	local su="$1" eu="$2" dels="${3:-[]}"
+	local su="$1" eu="$2" dels="${3:-[]}" adr="${4:-0}"
 	local d="$TMP/probe-$$-$RANDOM"
 	mkdir -p "$d/state" "$d/ustate" "$d/fx"
 	echo "{\"nodeId\":\"$NODE_ID\",\"stake\":{\"self\":2000}}" > "$d/validator.json"
 	printf '{"cycles":[]}\n' > "$d/uptime-cycles.json"
 	echo '{"cycle_n":5}' > "$d/state/current-cycle-state.json"
 	cat > "$d/fx/getCurrentValidators.json" <<JSON
-{"jsonrpc":"2.0","id":1,"result":{"validators":[{"nodeID":"$NODE_ID","txID":"$TX1","startTime":"$su","endTime":"$eu","weight":"2000000000000","delegationFee":3.0,"delegators":$dels,"potentialReward":"$SELF_REWARD_N"}]}}
+{"jsonrpc":"2.0","id":1,"result":{"validators":[{"nodeID":"$NODE_ID","txID":"$TX1","startTime":"$su","endTime":"$eu","weight":"2000000000000","delegationFee":3.0,"delegators":$dels,"potentialReward":"$SELF_REWARD_N","accruedDelegateeReward":"$adr"}]}}
 JSON
 	cp "$FIX_DIR/getCurrentSupply.json" "$d/fx/getCurrentSupply.json"
 	STUB_FIXTURE_DIR="$d/fx" STUB_RECORD_DIR="$d" PATH="$TMP/bin:$PATH" \
@@ -706,6 +708,24 @@ assert_eq "line 3 differs only in elapsed: 5/33 vs 20/33" "経過 5/33 日|経�
 	"$(printf '%s' "$PROBE_C1" | sed -n '3p' | sed 's/.*満期・//')|$(printf '%s' "$PROBE_C2" | sed -n '3p' | sed 's/.*満期・//')"
 assert_true "line 2 fee part is non-zero with a delegator present (the fee projection is wired)" \
 	"$(printf '%s' "$PROBE_C1" | sed -n '2p' | grep -qE '手数料 \+0\.0\)' && echo 0 || echo 1)"
+
+# (d) accruedDelegateeReward (fee cut already credited from delegations
+#     that matured mid-cycle, absent from .delegators[]) is ADDED to the
+#     fee projection: same cycle, same delegator, accrued 0 vs 7 METAL ->
+#     line 2's 手数料 differs by exactly 7.0 (and 見込み total by 7.0).
+# shellcheck disable=SC2059
+PROBE_D0="$(probe_digest "$C1_START" "$C1_END" "$(printf "$DELS_C" "$C1_START" "$C1_END")" 0)"
+# shellcheck disable=SC2059
+PROBE_D7="$(probe_digest "$C1_START" "$C1_END" "$(printf "$DELS_C" "$C1_START" "$C1_END")" 7000000000)"
+fee_of() { printf '%s' "$1" | sed -n '2p' | sed -E 's/.*手数料 \+([0-9,.]+)\).*/\1/' | tr -d ','; }
+total_of() { printf '%s' "$1" | sed -n '2p' | sed -E 's/.*見込み \+([0-9,.]+) METAL.*/\1/' | tr -d ','; }
+assert_eq "line 2 手数料 rises by exactly the accruedDelegateeReward (7.0 METAL)" "7.0" \
+	"$(awk -v a="$(fee_of "$PROBE_D7")" -v b="$(fee_of "$PROBE_D0")" 'BEGIN{printf "%.1f", a-b}')"
+assert_eq "line 2 見込み total rises by the same 7.0" "7.0" \
+	"$(awk -v a="$(total_of "$PROBE_D7")" -v b="$(total_of "$PROBE_D0")" 'BEGIN{printf "%.1f", a-b}')"
+assert_eq "line 2 自己 is unchanged by accruedDelegateeReward" \
+	"$(printf '%s' "$PROBE_D0" | sed -n '2p' | sed -E 's/.*\(自己 ([^ ]+) .*/\1/')" \
+	"$(printf '%s' "$PROBE_D7" | sed -n '2p' | sed -E 's/.*\(自己 ([^ ]+) .*/\1/')"
 
 echo ""
 echo "=== live maturity, single output: split decided by the stored potentialReward ==="
