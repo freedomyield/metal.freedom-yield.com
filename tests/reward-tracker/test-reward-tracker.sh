@@ -16,12 +16,21 @@
 #   3. maturity detection fires exactly when the tracked AddValidatorTx
 #      disappears from getCurrentValidators AND uptime-cycles.json's most
 #      recently closed row confirms the same end_unix
-#   4. digest-line format (累積 first, per the operator's ordering
-#      requirement; projection segment; milestone tail)
+#   4. digest block format (2026-09-07 four-line shape: 累積 with self/fee
+#      breakdown, full-cycle 見込み with breakdown, JST maturity date +
+#      elapsed/rounded days, milestone tail) — including that the 見込み
+#      is the reward AT MATURITY (does not move with elapsed days), that
+#      the cycle length rounds (32.97 -> 33, 16.005 -> 16), and that the
+#      RPC-gap fallback keeps lines 1 + 4 only
 #   5. numeric non-leak: reward-tracker.sh's own combined stdout+stderr,
 #      across every scenario below, never contains a METAL amount — proven
 #      with a mutation-kill check (a MUTANT copy with one added debug echo
 #      of the reward amount must fail this exact grep)
+#   6. ledger schema v2: self_reward_metal / fee_income_metal / split_known /
+#      schema_version on every appended row; the LAST row per cycle_n is
+#      the effective one for every cumulative figure; --backfill appends a
+#      v2 row over a v1-only cycle exactly once and refuses a conflicting
+#      txID; the maturity push carries the self/fee breakdown
 
 set -uo pipefail
 
@@ -67,12 +76,17 @@ assert_true() {
 # shape metalgo's rewardValidatorTx() produces (see reward-tracker.sh's own
 # header for the citation).
 # ===========================================================================
+# build_utxo_hex <amt_nmetal> [output_index] — OutputIndex (default 0) is
+# what the 2026-09-07 self/fee split orders by: self at K, fee at K+1
+# (K = 2 below, i.e. one tx output + one stake output — any K works, only
+# adjacency matters).
 build_utxo_hex() {
-	python3 - "$1" <<'PY'
+	python3 - "$1" "${2:-0}" <<'PY'
 import sys
 amt = int(sys.argv[1])
+idx = int(sys.argv[2])
 parts = [
-    b'\x00\x00', bytes([0x11]) * 32, (0).to_bytes(4, 'big'),
+    b'\x00\x00', bytes([0x11]) * 32, idx.to_bytes(4, 'big'),
     bytes([0x22]) * 32, (7).to_bytes(4, 'big'), amt.to_bytes(8, 'big'),
     (0).to_bytes(8, 'big'), (1).to_bytes(4, 'big'), (1).to_bytes(4, 'big'),
     bytes([0x33]) * 20,
@@ -80,8 +94,9 @@ parts = [
 print('0x' + b''.join(parts).hex())
 PY
 }
-SELF_REWARD_HEX="$(build_utxo_hex 50500000000)"   # 50.5 METAL
-FEE_REWARD_HEX="$(build_utxo_hex 12250000000)"    # 12.25 METAL
+SELF_REWARD_N=50500000000                            # 50.5 METAL
+SELF_REWARD_HEX="$(build_utxo_hex "$SELF_REWARD_N" 2)"
+FEE_REWARD_HEX="$(build_utxo_hex 12250000000 3)"     # 12.25 METAL
 # Expected combined reward for TX1's maturity: 50.5 + 12.25 = 62.75 METAL
 EXPECTED_REWARD="62.750000000"
 
@@ -187,11 +202,15 @@ fi
 
 echo "test-topic" > "$TMP/ntfy-topic"
 
-# write_getCurrentValidators <txID> <start> <end> <weight_nmetal> <fee_pct> <delegators_json_array>
+# write_getCurrentValidators <txID> <start> <end> <weight_nmetal> <fee_pct> <delegators_json_array> [potentialReward_nmetal]
+# potentialReward defaults to the self-reward fixture so the live maturity
+# split has its hint; pass "" to model a node response without it.
 write_getCurrentValidators() {
-	local tx="$1" su="$2" eu="$3" w="$4" fee="$5" delegators="$6"
+	local tx="$1" su="$2" eu="$3" w="$4" fee="$5" delegators="$6" pr="${7-$SELF_REWARD_N}"
+	local pr_field=""
+	[ -n "$pr" ] && pr_field=",\"potentialReward\":\"$pr\""
 	cat > "$FIX_DIR/getCurrentValidators.json" <<JSON
-{"jsonrpc":"2.0","id":1,"result":{"validators":[{"nodeID":"$NODE_ID","txID":"$tx","startTime":"$su","endTime":"$eu","weight":"$w","delegationFee":$fee,"delegators":$delegators}]}}
+{"jsonrpc":"2.0","id":1,"result":{"validators":[{"nodeID":"$NODE_ID","txID":"$tx","startTime":"$su","endTime":"$eu","weight":"$w","delegationFee":$fee,"delegators":$delegators$pr_field}]}}
 JSON
 }
 
@@ -248,6 +267,7 @@ run_tracker 1
 assert_eq "bootstrap run exits 0" "0" "$LAST_RC"
 TRACKED_TX_AFTER_BOOTSTRAP="$(jq -r '.tracked_tx' "$TRACKER_STATE" 2>/dev/null)"
 assert_eq "state now tracks TX1" "$TX1" "$TRACKED_TX_AFTER_BOOTSTRAP"
+assert_eq "state captured potentialReward (the single-output split hint)" "$SELF_REWARD_N" "$(jq -r '.tracked_potential_reward_nmetal' "$TRACKER_STATE")"
 assert_true "no rewards-history.jsonl yet (nothing matured)" "$([ ! -s "$REWARDS_HISTORY" ] && echo 1 || echo 0)"
 assert_true "digest file was written" "$([ -s "$DIGEST_FILE" ] && echo 1 || echo 0)"
 
@@ -290,15 +310,52 @@ assert_eq "same-cycle run exits 0" "0" "$LAST_RC"
 assert_true "still no rewards-history.jsonl (nothing matured)" "$([ ! -s "$REWARDS_HISTORY" ] && echo 1 || echo 0)"
 
 echo ""
-echo "=== digest line format ==="
-DIGEST_CONTENT="$(cat "$DIGEST_FILE")"
+echo "=== digest block format (four lines) ==="
 echo "  (captured, format-checked below — not printed raw to avoid a false leak-check trip in THIS echo; see the grep assertions)"
-CUM_FIRST_OK=$(printf '%s' "$DIGEST_CONTENT" | grep -qE '^累積 [0-9,]+ METAL' && echo 1 || echo 0)
-assert_true "digest line starts with 累積 (cumulative-first ordering)" "$CUM_FIRST_OK"
-PROJECTION_OK=$(printf '%s' "$DIGEST_CONTENT" | grep -qE 'Cycle 7 見込み \+[0-9.]+ \([0-9]+/[0-9]+ days\)' && echo 1 || echo 0)
-assert_true "digest line carries the Cycle N 見込み +X.X (d/D days) segment" "$PROJECTION_OK"
-MILESTONE_OK=$(printf '%s' "$DIGEST_CONTENT" | grep -qE '25,000 (まで残り [0-9,.]+|到達 🎉)$' && echo 1 || echo 0)
-assert_true "digest line ends with the 25,000 milestone tail" "$MILESTONE_OK"
+# TRACKED_START/END span 2,849,105 s = 32.976 days -> "33" after rounding
+# (the 2026-09-04 int() gave 32). The fixture start is in 2023, so elapsed
+# clamps to the full length. Maturity date = TRACKED_END in JST, M/D with
+# no leading zeros, computed here independently of the script's shim.
+EXPECTED_MD="$(python3 -c "
+import datetime, sys
+e = int(sys.argv[1])
+d = datetime.datetime.fromtimestamp(e, datetime.timezone(datetime.timedelta(hours=9)))
+print(f'{d.month}/{d.day}')
+" "$TRACKED_END")"
+assert_eq "digest has exactly 4 lines" "4" "$(wc -l < "$DIGEST_FILE" | tr -d ' ')"
+D_L1="$(sed -n '1p' "$DIGEST_FILE")"; D_L2="$(sed -n '2p' "$DIGEST_FILE")"; D_L3="$(sed -n '3p' "$DIGEST_FILE")"; D_L4="$(sed -n '4p' "$DIGEST_FILE")"
+assert_true "line 1: 累積 N METAL (自己 a / 手数料 b) — one decimal each" "$(printf '%s' "$D_L1" | grep -qE '^累積 [0-9,]+\.[0-9] METAL \(自己 [0-9,]+\.[0-9] / 手数料 [0-9,]+\.[0-9]\)$' && echo 1 || echo 0)"
+assert_true "line 2: Cycle 7 見込み +M METAL (自己 +a / 手数料 +b)" "$(printf '%s' "$D_L2" | grep -qE '^Cycle 7 見込み \+[0-9,]+\.[0-9] METAL \(自己 \+[0-9,]+\.[0-9] / 手数料 \+[0-9,]+\.[0-9]\)$' && echo 1 || echo 0)"
+assert_eq "line 3: full-width-space indent + JST maturity date + elapsed/rounded days" "　${EXPECTED_MD} 満期・経過 33/33 日" "$D_L3"
+assert_true "line 4: 25,000 まで残り R (one decimal) | 到達 🎉" "$(printf '%s' "$D_L4" | grep -qE '^25,000 (まで残り [0-9,]+\.[0-9]|到達 🎉)$' && echo 1 || echo 0)"
+assert_true "no '(d/D days)' date-lookalike anywhere in the digest" "$(grep -qE '[0-9]+/[0-9]+ days' "$DIGEST_FILE" && echo 0 || echo 1)"
+# The projection is the FULL-CYCLE estimate: self = estimate_reward(2000,
+# dur) at the fixture supply, fee = estimate_reward(8845 * 0.03, dur) —
+# both computed here through the same library, no elapsed factor applied.
+# shellcheck source=scripts/lib/reward-calculator.sh
+. "$REPO/scripts/lib/reward-calculator.sh"
+EXP_SELF_FULL="$(estimate_reward 2000 $((TRACKED_END - TRACKED_START)) 350000000)"
+EXP_FEE_FULL="$(estimate_reward "$(awk 'BEGIN{printf "%.9f", 8845*0.03}')" $((TRACKED_END - TRACKED_START)) 350000000)"
+EXP_TOTAL_FULL="$(awk -v s="$EXP_SELF_FULL" -v f="$EXP_FEE_FULL" 'BEGIN{printf "%.9f", s+f}')"
+fmt1() { python3 -c "import sys; print(f'{float(sys.argv[1]):,.1f}')" "$1"; }
+assert_eq "line 2 amounts == full-cycle estimate_reward (self / fee / total), not scaled by elapsed" \
+	"Cycle 7 見込み +$(fmt1 "$EXP_TOTAL_FULL") METAL (自己 +$(fmt1 "$EXP_SELF_FULL") / 手数料 +$(fmt1 "$EXP_FEE_FULL"))" "$D_L2"
+EXP_REMAIN="$(awk -v t="$EXP_TOTAL_FULL" 'BEGIN{printf "%.9f", 25000 - (2000 + t)}')"
+assert_eq "line 4 remaining == milestone - (self_stake + full-cycle projection)" "25,000 まで残り $(fmt1 "$EXP_REMAIN")" "$D_L4"
+assert_eq "line 1 with an empty ledger reads 累積 0.0 (自己 0.0 / 手数料 0.0)" "累積 0.0 METAL (自己 0.0 / 手数料 0.0)" "$D_L1"
+
+echo ""
+echo "=== digest: RPC-gap fallback keeps lines 1 + 4 only ==="
+cp "$FIX_DIR/getCurrentSupply.json" "$TMP/record/getCurrentSupply.keep"
+echo '{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"stub outage"}}' > "$FIX_DIR/getCurrentSupply.json"
+run_tracker 1
+assert_eq "gap run exits 0" "0" "$LAST_RC"
+assert_eq "gap digest has exactly 2 lines (no fabricated projection)" "2" "$(wc -l < "$DIGEST_FILE" | tr -d ' ')"
+assert_true "gap digest line 1 is still 累積 with breakdown" "$(sed -n '1p' "$DIGEST_FILE" | grep -qE '^累積 [0-9,]+\.[0-9] METAL \(自己' && echo 1 || echo 0)"
+assert_eq "gap digest line 2 is the milestone against self-stake alone (25,000 - 2,000)" "25,000 まで残り 23,000.0" "$(sed -n '2p' "$DIGEST_FILE")"
+cp "$TMP/record/getCurrentSupply.keep" "$FIX_DIR/getCurrentSupply.json"
+run_tracker 1
+assert_eq "digest is back to 4 lines once supply answers again" "4" "$(wc -l < "$DIGEST_FILE" | tr -d ' ')"
 
 echo ""
 echo "=== maturity: TX1 disappears, TX2 takes over, uptime-cycles.json NOT yet updated ==="
@@ -384,14 +441,22 @@ assert_eq "line: end_unix" "$TRACKED_END" "$(echo "$LINE1_JSON" | jq -r '.end_un
 assert_eq "line: add_validator_tx" "$TX1" "$(echo "$LINE1_JSON" | jq -r '.add_validator_tx')"
 HAS_OBSERVED_AT=$(echo "$LINE1_JSON" | jq -r 'has("observed_at")')
 assert_eq "line: has observed_at" "true" "$HAS_OBSERVED_AT"
+assert_eq "line (v2): schema_version" "2" "$(echo "$LINE1_JSON" | jq -r '.schema_version')"
+assert_eq "line (v2): split_known true (two adjacent outputs, lower == potentialReward)" "true" "$(echo "$LINE1_JSON" | jq -r '.split_known')"
+assert_eq "line (v2): self_reward_metal = lower-index output (50.5)" "50.500000000" "$(echo "$LINE1_JSON" | jq -r '.self_reward_metal')"
+assert_eq "line (v2): fee_income_metal = higher-index output (12.25)" "12.250000000" "$(echo "$LINE1_JSON" | jq -r '.fee_income_metal')"
+assert_eq "line (v2): self + fee == reward_metal" "true" "$(echo "$LINE1_JSON" | jq -r '(.self_reward_metal + .fee_income_metal) == .reward_metal')"
 
 NEW_TRACKED="$(jq -r '.tracked_tx' "$TRACKER_STATE")"
 assert_eq "state advanced to TX2 after recording TX1's maturity" "$TX2" "$NEW_TRACKED"
 
 assert_true "ntfy body was recorded (notify fired)" "$([ -s "$NTFY_LOG" ] && echo 1 || echo 0)"
-CUM_BEFORE_THIS_CYCLE_OK=$(grep -qE '累積 [0-9,.]+ METAL \(\+[0-9,.]+ this cycle\)' "$NTFY_LOG" && echo 1 || echo 0)
+CUM_BEFORE_THIS_CYCLE_OK=$(grep -qE '累積 [0-9,.]+ METAL \(\+[0-9,.]+ this cycle: ' "$NTFY_LOG" && echo 1 || echo 0)
 assert_true "notify body: 累積 comes before this-cycle delta (operator's ordering requirement)" "$CUM_BEFORE_THIS_CYCLE_OK"
 assert_true "notify body: names Cycle 7" "$(grep -q 'Cycle 7 reward' "$NTFY_LOG" && echo 1 || echo 0)"
+assert_true "notify body: this-cycle delta carries the self/fee breakdown" "$(grep -qF 'Cycle 7 reward: 累積 62.75 METAL (+62.75 this cycle: 自己 +50.50 / 手数料 +12.25)' "$NTFY_LOG" && echo 1 || echo 0)"
+assert_true "notify body: cycle count line counts 1 cycle" "$(grep -qE '^1 cycles · ' "$NTFY_LOG" && echo 1 || echo 0)"
+assert_true "digest line 1 after maturity: 累積 62.8 (自己 50.5 / 手数料 12.3), one decimal" "$(sed -n '1p' "$DIGEST_FILE" | grep -qF '累積 62.8 METAL (自己 50.5 / 手数料 12.3)' && echo 1 || echo 0)"
 
 echo ""
 echo "=== append-only: re-run against the now-matured TX1 does not duplicate ==="
@@ -409,10 +474,10 @@ RECOVERED_TX="$(jq -r '.tracked_tx' "$TRACKER_STATE")"
 assert_eq "state re-advanced to TX2 without a second append" "$TX2" "$RECOVERED_TX"
 
 echo ""
-echo "=== --backfill ==="
-write_getRewardUTXOs "$(build_utxo_hex 9990000000)"   # 9.99 METAL, single UTXO
+echo "=== --backfill (single output, no potentialReward hint -> split refused) ==="
+write_getRewardUTXOs "$(build_utxo_hex 9990000000 2)"   # 9.99 METAL, single UTXO
 cat > "$UPTIME_CYCLES_JSON" <<JSON
-{"cycles":[{"cycle_n":7,"start_unix":$TRACKED_START,"end_unix":$TRACKED_END,"final_self_stake_metal":2000},{"cycle_n":3,"start_unix":1600000000,"end_unix":1602800000,"final_self_stake_metal":1500}]}
+{"cycles":[{"cycle_n":7,"start_unix":$TRACKED_START,"end_unix":$TRACKED_END,"final_self_stake_metal":2000},{"cycle_n":3,"start_unix":1600000000,"end_unix":1602800000,"final_self_stake_metal":1500},{"cycle_n":2,"start_unix":1597000000,"end_unix":1599800000,"final_self_stake_metal":1500}]}
 JSON
 run_tracker 1 --backfill "$TX_BACKFILL" 3
 assert_eq "backfill run exits 0" "0" "$LAST_RC"
@@ -421,13 +486,54 @@ LINE2_JSON="$(sed -n '2p' "$REWARDS_HISTORY")"
 assert_eq "backfilled line: cycle_n=3" "3" "$(echo "$LINE2_JSON" | jq -r '.cycle_n')"
 assert_eq "backfilled line: reward_metal=9.99 METAL" "9.990000000" "$(echo "$LINE2_JSON" | jq -r '.reward_metal')"
 assert_eq "backfilled line: self_stake_metal from uptime-cycles.json (1500)" "1500" "$(echo "$LINE2_JSON" | jq -r '.self_stake_metal')"
+assert_eq "backfilled line (v2): schema_version 2" "2" "$(echo "$LINE2_JSON" | jq -r '.schema_version')"
+assert_eq "backfilled line (v2): split_known false (one output, no hint — never guessed)" "false" "$(echo "$LINE2_JSON" | jq -r '.split_known')"
+assert_eq "backfilled line (v2): self_reward_metal null" "null" "$(echo "$LINE2_JSON" | jq -r '.self_reward_metal')"
+assert_eq "backfilled line (v2): fee_income_metal null" "null" "$(echo "$LINE2_JSON" | jq -r '.fee_income_metal')"
 NTFY_COUNT_BEFORE_BACKFILL=$(grep -c '^---$' "$NTFY_LOG" || true)
 
 run_tracker 1 --backfill "$TX_BACKFILL" 3
-assert_eq "re-running the SAME backfill exits 0 (idempotent no-op)" "0" "$LAST_RC"
+assert_eq "re-running the SAME backfill exits 0 (idempotent no-op on a v2 row)" "0" "$LAST_RC"
 assert_eq "rewards-history.jsonl still 2 lines after repeat backfill" "2" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
 NTFY_COUNT_AFTER_BACKFILL=$(grep -c '^---$' "$NTFY_LOG" || true)
 assert_eq "backfill never sends a notification (see header rationale)" "$NTFY_COUNT_BEFORE_BACKFILL" "$NTFY_COUNT_AFTER_BACKFILL"
+
+# Digest line 1 must surface the unsplit backfilled cycle as 内訳不明,
+# never fold it into either half: 累積 72.7 = 62.75 + 9.99.
+run_tracker 1
+assert_eq "digest line 1 shows the unsplit cycle as 内訳不明" "累積 72.7 METAL (自己 50.5 / 手数料 12.3 / 内訳不明 10.0)" "$(sed -n '1p' "$DIGEST_FILE")"
+
+echo ""
+echo "=== --backfill: v1-only cycle gets ONE v2 row appended; last row wins ==="
+# Seed a v1 row (2026-09-04 schema, no schema_version) for cycle 2 — the
+# shape already on disk for cycles recorded before this change.
+TX_V1="txV1LegacyCycleTwo22222222222222"
+printf '%s\n' "{\"cycle_n\":2,\"reward_metal\":5.000000000,\"self_stake_metal\":1500,\"start_unix\":1597000000,\"end_unix\":1599800000,\"add_validator_tx\":\"$TX_V1\",\"observed_at\":\"2026-09-04T00:00:00Z\"}" >> "$REWARDS_HISTORY"
+# The chain answers with two adjacent outputs summing to 5.0 (the v1 row's
+# total is unchanged; only the breakdown is new).
+write_getRewardUTXOs "$(build_utxo_hex 4000000000 2) $(build_utxo_hex 1000000000 3)"
+run_tracker 1 --backfill "$TX_V1" 2
+assert_eq "v1->v2 backfill exits 0" "0" "$LAST_RC"
+assert_eq "rewards-history.jsonl now has 4 lines (v1 row kept, v2 row appended)" "4" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+LINE4_JSON="$(sed -n '4p' "$REWARDS_HISTORY")"
+assert_eq "appended v2 row: cycle_n 2" "2" "$(echo "$LINE4_JSON" | jq -r '.cycle_n')"
+assert_eq "appended v2 row: split_known true" "true" "$(echo "$LINE4_JSON" | jq -r '.split_known')"
+assert_eq "appended v2 row: self 4.0 / fee 1.0" "4.000000000 1.000000000" "$(echo "$LINE4_JSON" | jq -r '"\(.self_reward_metal) \(.fee_income_metal)"')"
+assert_eq "v1 row (line 3) is byte-for-byte untouched (append-only)" "1" "$(sed -n '3p' "$REWARDS_HISTORY" | grep -qF "\"add_validator_tx\":\"$TX_V1\",\"observed_at\":\"2026-09-04T00:00:00Z\"}" && echo 1 || echo 0)"
+run_tracker 1 --backfill "$TX_V1" 2
+assert_eq "re-running the v1->v2 backfill exits 0" "0" "$LAST_RC"
+assert_eq "rewards-history.jsonl still 4 lines (v2 row appended exactly once)" "4" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+assert_true "repeat run logged the v2 no-op, not another append" "$(grep -q 'already recorded as a v2 row' "$LAST_OUT" && echo 1 || echo 0)"
+# Last-wins cumulative: 62.75 + 9.99 + 5.0 = 77.74 (cycle 2 counted ONCE,
+# with its v2 breakdown): 自己 54.5 / 手数料 13.25 / 内訳不明 9.99.
+run_tracker 1
+assert_eq "digest 累積 counts cycle 2 once, with the v2 breakdown (last row wins)" "累積 77.7 METAL (自己 54.5 / 手数料 13.3 / 内訳不明 10.0)" "$(sed -n '1p' "$DIGEST_FILE")"
+
+echo ""
+echo "=== --backfill: a different txID for an already-recorded cycle is refused ==="
+run_tracker 1 --backfill "txOtherClaimantForCycle2xxxxxxxxx" 2
+assert_eq "conflicting-tx backfill exits 6" "6" "$LAST_RC"
+assert_eq "conflicting-tx backfill appended nothing" "4" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
 
 echo ""
 echo "=== zero-reward maturity: no tada, no 🎉, warning-tagged push ==="
@@ -445,11 +551,12 @@ write_getRewardUTXOs ""
 NTFY_LINES_BEFORE_ZERO=$(wc -l < "$NTFY_LOG" | tr -d ' ')
 run_tracker 1
 assert_eq "zero-reward maturity run exits 0" "0" "$LAST_RC"
-assert_eq "rewards-history.jsonl now has 3 lines" "3" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
-LINE3_JSON="$(sed -n '3p' "$REWARDS_HISTORY")"
+assert_eq "rewards-history.jsonl now has 5 lines" "5" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+LINE3_JSON="$(sed -n '5p' "$REWARDS_HISTORY")"
 assert_eq "zero-reward line: cycle_n=8" "8" "$(echo "$LINE3_JSON" | jq -r '.cycle_n')"
 assert_eq "zero-reward line: reward_metal=0 (jq-normalized, not 0E-9)" "0" "$(echo "$LINE3_JSON" | jq -r '.reward_metal')"
 assert_eq "zero-reward line: add_validator_tx=TX2" "$TX2" "$(echo "$LINE3_JSON" | jq -r '.add_validator_tx')"
+assert_eq "zero-reward line (v2): split_known true, self 0, fee 0 (plain 0, not 0E-9)" "true 0 0" "$(echo "$LINE3_JSON" | jq -r '"\(.split_known) \(.self_reward_metal) \(.fee_income_metal)"')"
 
 ZERO_PUSH="$(tail -n +"$((NTFY_LINES_BEFORE_ZERO + 1))" "$NTFY_LOG")"
 assert_true "zero-reward push recorded" "$([ -n "$ZERO_PUSH" ] && echo 1 || echo 0)"
@@ -457,8 +564,8 @@ assert_true "zero-reward push title carries no 🎉" "$(printf '%s' "$ZERO_PUSH"
 # Same cumulative-first ordering the >0 push enforces above (operator's
 # requirement) — a 0-METAL cycle still leads with 累積, with the zero delta
 # and the uptime warning folded into the parenthetical tail.
-ZERO_CUM_FIRST_OK=$(printf '%s' "$ZERO_PUSH" | grep -qE 'Cycle 8 reward: 累積 [0-9,.]+ METAL \(\+0 this cycle — check uptime\)' && echo 1 || echo 0)
-assert_true "zero-reward push body: 累積 first, then '+0 this cycle — check uptime' tail" "$ZERO_CUM_FIRST_OK"
+ZERO_CUM_FIRST_OK=$(printf '%s' "$ZERO_PUSH" | grep -qE 'Cycle 8 reward: 累積 [0-9,.]+ METAL \(\+0 this cycle: 自己 \+0 / 手数料 \+0 — check uptime\)' && echo 1 || echo 0)
+assert_true "zero-reward push body: 累積 first, then '+0 this cycle: 自己 +0 / 手数料 +0 — check uptime' tail" "$ZERO_CUM_FIRST_OK"
 assert_true "zero-reward push Tags header is NOT tada" "$(printf '%s' "$ZERO_PUSH" | grep -qx 'Tags: tada' && echo 0 || echo 1)"
 # No --tags override was passed, so notify.sh falls back to its own
 # priority-derived default for "high" — see notify.sh's TAGS case block.
@@ -518,6 +625,111 @@ fi
 
 
 echo ""
+echo "=== digest probes: rounding, JST date, maturity-horizon projection ==="
+# probe_digest <start_unix> <end_unix> [delegators_json] — runs the tracker
+# once in a FRESH sandbox (bootstrap run: no ledger, no prior state) and
+# prints the digest file's content. Each probe is independent, so the
+# assertions below only ever compare digest lines against each other or
+# against values computed here.
+probe_digest() {
+	local su="$1" eu="$2" dels="${3:-[]}"
+	local d="$TMP/probe-$$-$RANDOM"
+	mkdir -p "$d/state" "$d/ustate" "$d/fx"
+	echo "{\"nodeId\":\"$NODE_ID\",\"stake\":{\"self\":2000}}" > "$d/validator.json"
+	printf '{"cycles":[]}\n' > "$d/uptime-cycles.json"
+	echo '{"cycle_n":5}' > "$d/state/current-cycle-state.json"
+	cat > "$d/fx/getCurrentValidators.json" <<JSON
+{"jsonrpc":"2.0","id":1,"result":{"validators":[{"nodeID":"$NODE_ID","txID":"$TX1","startTime":"$su","endTime":"$eu","weight":"2000000000000","delegationFee":3.0,"delegators":$dels,"potentialReward":"$SELF_REWARD_N"}]}}
+JSON
+	cp "$FIX_DIR/getCurrentSupply.json" "$d/fx/getCurrentSupply.json"
+	STUB_FIXTURE_DIR="$d/fx" STUB_RECORD_DIR="$d" PATH="$TMP/bin:$PATH" \
+		METALGO_RPC="http://127.0.0.1:9650" VALIDATOR_JSON="$d/validator.json" \
+		UPTIME_CYCLES_JSON="$d/uptime-cycles.json" FY_STATE_DIR="$d/state" \
+		UPTIME_STATE_DIR="$d/ustate" NTFY_TOPIC_FILE="$TMP/ntfy-topic" FY_LIVE=1 \
+		bash "$TRACKER" > "$d/out.txt" 2>&1
+	cat "$d/state/reward-digest-line.txt"
+}
+
+# (a) 16.005 days must round DOWN to 16 (int(x+0.5) — not ceil), while
+#     32.97 rounds UP to 33 (asserted in the main flow above).
+NOW_EPOCH=$(date -u +%s)
+P_START=$((NOW_EPOCH - 3 * 86400))
+P_END=$((P_START + 1382832))                    # 16.005 days
+PROBE_A="$(probe_digest "$P_START" "$P_END")"
+assert_eq "16.005-day cycle renders as 16 days (round, not ceil); elapsed 3" "経過 3/16 日" "$(printf '%s' "$PROBE_A" | sed -n '3p' | sed 's/.*満期・//')"
+
+# (b) JST maturity date strips leading zeros in BOTH month and day:
+#     2030-03-05 00:30 JST == 2030-03-04T15:30:00Z -> "3/5".
+JST_END=$(python3 -c "
+import datetime
+print(int(datetime.datetime(2030, 3, 4, 15, 30, 0, tzinfo=datetime.timezone.utc).timestamp()))")
+PROBE_B="$(probe_digest $((JST_END - 33 * 86400)) "$JST_END")"
+assert_eq "maturity date is JST M/D with no leading zeros (UTC 3/4 15:30 -> JST 3/5)" "　3/5 満期・経過 0/33 日" "$(printf '%s' "$PROBE_B" | sed -n '3p')"
+
+# (c) The 見込み is the reward AT MATURITY: two cycles of IDENTICAL length
+#     but different elapsed fractions (5 vs 20 days in) must print the SAME
+#     line 2 and line 4, differing only in line 3's elapsed count.
+DELS_C="[{\"weight\":\"8845000000000\",\"startTime\":\"%s\",\"endTime\":\"%s\"}]"
+C1_START=$((NOW_EPOCH - 5 * 86400));  C1_END=$((C1_START + 33 * 86400))
+C2_START=$((NOW_EPOCH - 20 * 86400)); C2_END=$((C2_START + 33 * 86400))
+# shellcheck disable=SC2059  # DELS_C is a format template on purpose
+PROBE_C1="$(probe_digest "$C1_START" "$C1_END" "$(printf "$DELS_C" "$C1_START" "$C1_END")")"
+# shellcheck disable=SC2059
+PROBE_C2="$(probe_digest "$C2_START" "$C2_END" "$(printf "$DELS_C" "$C2_START" "$C2_END")")"
+assert_eq "line 2 (見込み) is identical at 5 and 20 elapsed days — no elapsed factor" \
+	"$(printf '%s' "$PROBE_C1" | sed -n '2p')" "$(printf '%s' "$PROBE_C2" | sed -n '2p')"
+assert_eq "line 4 (milestone remaining) is identical too — it is built from the same projection" \
+	"$(printf '%s' "$PROBE_C1" | sed -n '4p')" "$(printf '%s' "$PROBE_C2" | sed -n '4p')"
+assert_eq "line 3 differs only in elapsed: 5/33 vs 20/33" "経過 5/33 日|経過 20/33 日" \
+	"$(printf '%s' "$PROBE_C1" | sed -n '3p' | sed 's/.*満期・//')|$(printf '%s' "$PROBE_C2" | sed -n '3p' | sed 's/.*満期・//')"
+assert_true "line 2 fee part is non-zero with a delegator present (the fee projection is wired)" \
+	"$(printf '%s' "$PROBE_C1" | sed -n '2p' | grep -qE '手数料 \+0\.0\)' && echo 0 || echo 1)"
+
+echo ""
+echo "=== live maturity, single output: split decided by the stored potentialReward ==="
+# Two fresh end-to-end runs (bootstrap -> maturity) with ONE reward output
+# each: equal to potentialReward -> self; different -> the abort-path fee
+# output. Same fixture plumbing as replay_full_scenario below, but with a
+# caller-chosen UTXO set and a captured ledger row.
+single_output_maturity() {
+	local hexes="$1" d="$TMP/single-$$-$RANDOM"
+	local st="$d/state" ust="$d/ustate" fx="$d/fx"
+	mkdir -p "$st" "$ust" "$fx"
+	echo "{\"nodeId\":\"$NODE_ID\",\"stake\":{\"self\":2000}}" > "$d/validator.json"
+	echo '{"cycle_n":7}' > "$st/current-cycle-state.json"
+	printf '{"cycles":[]}\n' > "$d/uptime-cycles.json"
+	cp "$FIX_DIR/getCurrentSupply.json" "$fx/getCurrentSupply.json"
+	cat > "$fx/getCurrentValidators.json" <<JSON
+{"jsonrpc":"2.0","id":1,"result":{"validators":[{"nodeID":"$NODE_ID","txID":"$TX1","startTime":"$TRACKED_START","endTime":"$TRACKED_END","weight":"2000000000000","delegationFee":3.0,"delegators":[],"potentialReward":"$SELF_REWARD_N"}]}}
+JSON
+	STUB_FIXTURE_DIR="$fx" STUB_RECORD_DIR="$d" PATH="$TMP/bin:$PATH" \
+		METALGO_RPC="http://127.0.0.1:9650" VALIDATOR_JSON="$d/validator.json" \
+		UPTIME_CYCLES_JSON="$d/uptime-cycles.json" FY_STATE_DIR="$st" \
+		UPTIME_STATE_DIR="$ust" NTFY_TOPIC_FILE="$TMP/ntfy-topic" FY_LIVE=1 \
+		bash "$TRACKER" > "$d/o1.txt" 2>&1
+	cat > "$fx/getCurrentValidators.json" <<JSON
+{"jsonrpc":"2.0","id":1,"result":{"validators":[{"nodeID":"$NODE_ID","txID":"$TX2","startTime":"$TRACKED_END","endTime":"$CYCLE2_END","weight":"2000000000000","delegationFee":3.0,"delegators":[],"potentialReward":"$SELF_REWARD_N"}]}}
+JSON
+	cat > "$d/uptime-cycles.json" <<JSON
+{"cycles":[{"cycle_n":7,"start_unix":$TRACKED_START,"end_unix":$TRACKED_END,"final_self_stake_metal":2000}]}
+JSON
+	python3 -c "
+import json, sys
+print(json.dumps({'jsonrpc':'2.0','id':1,'result':{'numFetched':str(len(sys.argv[1:])),'utxos':sys.argv[1:],'encoding':'hex'}}))
+" $hexes > "$fx/getRewardUTXOs.json"
+	STUB_FIXTURE_DIR="$fx" STUB_RECORD_DIR="$d" PATH="$TMP/bin:$PATH" \
+		METALGO_RPC="http://127.0.0.1:9650" VALIDATOR_JSON="$d/validator.json" \
+		UPTIME_CYCLES_JSON="$d/uptime-cycles.json" FY_STATE_DIR="$st" \
+		UPTIME_STATE_DIR="$ust" NTFY_TOPIC_FILE="$TMP/ntfy-topic" FY_LIVE=1 \
+		bash "$TRACKER" > "$d/o2.txt" 2>&1
+	jq -r '"\(.split_known) \(.self_reward_metal) \(.fee_income_metal)"' "$st/rewards-history.jsonl"
+}
+assert_eq "single output == potentialReward -> self 50.5 / fee 0, known" "true 50.500000000 0" \
+	"$(single_output_maturity "$SELF_REWARD_HEX")"
+assert_eq "single output != potentialReward -> self 0 / fee 12.25, known (abort path)" "true 0 12.250000000" \
+	"$(single_output_maturity "$FEE_REWARD_HEX")"
+
+echo ""
 echo "=== numeric non-leak: no METAL amount ever appears in stdout/stderr ==="
 # Re-run the full scenario sequence once more end-to-end, capturing every
 # invocation's combined output into one aggregate log, then grep it. A
@@ -537,7 +749,7 @@ replay_full_scenario() {
 	printf '{"cycles":[]}\n' > "$out_dir/uptime-cycles.json"
 
 	cat > "$fx/getCurrentValidators.json" <<JSON
-{"jsonrpc":"2.0","id":1,"result":{"validators":[{"nodeID":"$NODE_ID","txID":"$TX1","startTime":"$TRACKED_START","endTime":"$TRACKED_END","weight":"2000000000000","delegationFee":3.0,"delegators":[{"weight":"8845000000000","startTime":"$TRACKED_START","endTime":"$TRACKED_END"}]}]}}
+{"jsonrpc":"2.0","id":1,"result":{"validators":[{"nodeID":"$NODE_ID","txID":"$TX1","startTime":"$TRACKED_START","endTime":"$TRACKED_END","weight":"2000000000000","delegationFee":3.0,"delegators":[{"weight":"8845000000000","startTime":"$TRACKED_START","endTime":"$TRACKED_END"}],"potentialReward":"$SELF_REWARD_N"}]}}
 JSON
 	echo "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"supply\":\"350000000000000000\",\"height\":\"1\"}}" > "$fx/getCurrentSupply.json"
 
