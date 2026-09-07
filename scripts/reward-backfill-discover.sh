@@ -80,7 +80,13 @@ UPTIME_CYCLES_JSON="${UPTIME_CYCLES_JSON:-$ROOT/public/api/uptime-cycles.json}"
 MAX_DEPTH="${MAX_DEPTH:-8}"
 
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-	sed -n '2,76p' "$0" | sed 's/^# \?//'
+	# Header block = line 2 through the first blank line (the one above
+	# `set -uo pipefail`); no hard-coded line count to rot when the header
+	# grows. Every separator inside the header is a bare "#", never blank.
+	# Two plain substitutions rather than `s/^# \?//`: `\?` is a GNU-sed
+	# extension that BSD sed (macOS, where the test suite runs) treats as a
+	# literal, leaving the "# " prefix in place.
+	sed -n '2,/^$/p' "$0" | sed -e 's/^# //' -e 's/^#$//'
 	exit 0
 elif [ $# -gt 0 ]; then
 	echo "reward-backfill-discover: unknown argument: $1 (this script takes no arguments — see --help)" >&2
