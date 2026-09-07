@@ -168,6 +168,12 @@
 #                             fabricated) when it cannot be computed this
 #                             run; a breakdown line that would exceed the
 #                             width is split into more indented lines.
+#                             The head line 3 (`Cycle N 見込み +M METAL`) does
+#                             NOT go through breakdown_lines, so it does not
+#                             adapt: <= 30 holds while cycle <= 99 and the
+#                             見込み has <= 4 integer digits (`Cycle 99 見込み
+#                             +9,999.9 METAL` is exactly 30); either one
+#                             larger makes it 31.
 #
 # ---------------------------------------------------------------------------
 # NUMERIC NON-LEAK (constitution: no METAL amount on this script's own
