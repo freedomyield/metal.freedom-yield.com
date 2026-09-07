@@ -236,28 +236,37 @@ ${EVIDENCE_SUMMARY}"
   fi
 fi
 
-# Morning slot also carries the reward-tracker digest line (累積 reward +
-# in-progress-cycle projection + self-stake milestone — see
+# Morning slot also carries the reward-tracker digest block (累積 reward
+# with self/fee breakdown, in-progress-cycle projection at maturity, JST
+# maturity date + elapsed days, self-stake milestone — see
 # scripts/reward-tracker.sh), when that script has produced one. The file
 # is REGENERATED (not append-only) by reward-tracker.sh's daily cron;
 # absence just means that cron has not run yet (fresh deploy) or FY_LIVE
 # was never set there — never an error condition for daily-status.sh, so a
-# missing file yields no line and no warning, matching the task brief
+# missing file yields no block and no warning, matching the task brief
 # ("ファイル無し → 行なし（エラーにしない）"). fyd_state_dir with no role
 # resolves the same FY_STATE_DIR reward-tracker.sh itself writes to (its
 # own subsystem — see that script's header on why it does not use a named
 # role here).
+#
+# Contract (2026-09-07): the file holds up to FOUR lines (2 in the
+# projection-unavailable fallback). EVERY non-empty line is spliced, in
+# file order, under [Reward]; empty/whitespace-only lines are dropped and
+# the command substitution strips the trailing newline, so the block never
+# ends in a blank line however the writer terminated the file. A file
+# that contains only blank lines yields no block at all (same as absent).
 REWARD_BLOCK=""
 if [ "$SLOT" = "morning" ]; then
+  # shellcheck disable=SC2119  # no role on purpose: the reward subsystem's own dir
   REWARD_STATE_DIR="$(fyd_state_dir 2>/dev/null || true)"
   REWARD_DIGEST_FILE="${REWARD_STATE_DIR}/reward-digest-line.txt"
   if [ -n "$REWARD_STATE_DIR" ] && [ -s "$REWARD_DIGEST_FILE" ]; then
-    REWARD_LINE="$(head -n 1 "$REWARD_DIGEST_FILE")"
-    if [ -n "$REWARD_LINE" ]; then
+    REWARD_LINES="$(grep -v '^[[:space:]]*$' "$REWARD_DIGEST_FILE" || true)"
+    if [ -n "$REWARD_LINES" ]; then
       REWARD_BLOCK="
 
 [Reward]
-${REWARD_LINE}"
+${REWARD_LINES}"
     fi
   fi
 fi

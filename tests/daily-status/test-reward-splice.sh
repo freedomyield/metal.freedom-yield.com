@@ -21,7 +21,9 @@
 #
 # Cases:
 #   1. SLOT=morning, reward-digest-line.txt present -> [Reward] block IS in
-#      the push body, containing the digest line's own content
+#      the push body, containing EVERY non-empty line of the file in order
+#      (the file is a four-line block since 2026-09-07), with no blank line
+#      left between the block's last line and whatever follows it
 #   2. SLOT=evening, same file present -> [Reward] block is ABSENT (morning-
 #      only gate)
 #   3. SLOT=morning, reward-digest-line.txt ABSENT -> no [Reward] block, and
@@ -65,6 +67,12 @@ cp "${SCRIPTS}/notify.sh" "${S}/scripts/notify.sh"
 cp "${SCRIPTS}/daily-status.sh" "${S}/scripts/daily-status.sh"
 printf '#!/usr/bin/env bash\nexit 0\n' > "${S}/scripts/cycle-gate.sh"
 chmod +x "${S}/scripts/cycle-gate.sh"
+# Stub evidence-health summary so the morning body has a block AFTER
+# [Reward] (as in production). This is what makes a stray trailing newline
+# in the reward block observable: with [Reward] last in the body, the
+# BODY=$(cat <<EOF ...) substitution would silently strip it.
+printf '#!/usr/bin/env bash\necho "evidence-health stub: ok"\nexit 0\n' > "${S}/scripts/notify-evidence-health.sh"
+chmod +x "${S}/scripts/notify-evidence-health.sh"
 
 cat > "${S}/public/api/server-status.json" <<JSON
 {
@@ -111,7 +119,18 @@ CURLEOF
 chmod +x "${BIN}/curl"
 export PATH="${BIN}:${PATH}"
 
-DIGEST_CONTENT="累積 1,234 METAL · Cycle 9 見込み +5.5 (10/33 days) · 25,000 まで残り 23,766.00"
+# Four-line digest block (2026-09-07 contract) — the third line carries the
+# full-width-space indent reward-tracker.sh writes, so the splice is proven
+# to keep it verbatim. Written with an extra trailing blank line below to
+# prove the splice drops it.
+DIGEST_L1="累積 1,234.5 METAL (自己 1,000.0 / 手数料 234.5)"
+DIGEST_L2="Cycle 9 見込み +5.5 METAL (自己 +4.0 / 手数料 +1.5)"
+DIGEST_L3="　10/7 満期・経過 3/33 日"
+DIGEST_L4="25,000 まで残り 23,760.5"
+DIGEST_CONTENT="${DIGEST_L1}
+${DIGEST_L2}
+${DIGEST_L3}
+${DIGEST_L4}"
 
 run_daily_status() {
 	# $1 = slot, $2 = state dir (reward-digest-line.txt lives here, or is
@@ -126,13 +145,32 @@ run_daily_status() {
 echo "=== case 1: SLOT=morning, reward-digest-line.txt present -> [Reward] included ==="
 STATE1="${TMP}/state1"
 mkdir -p "$STATE1"
-printf '%s\n' "$DIGEST_CONTENT" > "${STATE1}/reward-digest-line.txt"
+printf '%s\n\n' "$DIGEST_CONTENT" > "${STATE1}/reward-digest-line.txt"
 run_daily_status morning "$STATE1" > "${TMP}/case1.out" 2>"${TMP}/case1.err"
 RC1=$?
 assert_eq "case 1: daily-status.sh exits 0" "0" "$RC1"
 PUSH1="$(cat "$NTFY_BODY_LOG")"
 assert_true "case 1: push body contains [Reward] section header" "$(printf '%s' "$PUSH1" | grep -qF '[Reward]' && echo 1 || echo 0)"
-assert_true "case 1: push body contains the digest line's own content" "$(printf '%s' "$PUSH1" | grep -qF "$DIGEST_CONTENT" && echo 1 || echo 0)"
+for i in 1 2 3 4; do
+	eval "L=\${DIGEST_L$i}"
+	assert_true "case 1: push body contains digest line $i verbatim" "$(printf '%s' "$PUSH1" | grep -qF "$L" && echo 1 || echo 0)"
+done
+# Order + no stray blank: the exact multi-line block "[Reward]\nL1\nL2\nL3\nL4"
+# must appear contiguously, and what follows L4 must be exactly ONE blank
+# line and then the next section header ([Evidence health] from the stub
+# above) — "L4\n\n\n[Evidence" would be the trailing-blank bug.
+SPLICE_OK="$(python3 - "$NTFY_BODY_LOG" "$DIGEST_L1" "$DIGEST_L2" "$DIGEST_L3" "$DIGEST_L4" <<'PYEOF'
+import sys
+body = open(sys.argv[1], encoding="utf-8").read()
+block = "[Reward]\n" + "\n".join(sys.argv[2:6])
+i = body.find(block)
+if i < 0:
+    print(0); sys.exit()
+tail = body[i + len(block):]
+print(1 if tail.startswith("\n\n[Evidence health]") else 0)
+PYEOF
+)"
+assert_eq "case 1: the four lines are spliced contiguously, in order, with exactly one blank line before the next section" "1" "$SPLICE_OK"
 
 echo ""
 echo "=== case 2: SLOT=evening, same file present -> [Reward] absent (morning-only) ==="
@@ -141,7 +179,7 @@ RC2=$?
 assert_eq "case 2: daily-status.sh exits 0" "0" "$RC2"
 PUSH2="$(cat "$NTFY_BODY_LOG")"
 assert_true "case 2: push body has NO [Reward] section on a non-morning slot" "$(printf '%s' "$PUSH2" | grep -qF '[Reward]' && echo 0 || echo 1)"
-assert_true "case 2: push body does not leak the digest content either" "$(printf '%s' "$PUSH2" | grep -qF "$DIGEST_CONTENT" && echo 0 || echo 1)"
+assert_true "case 2: push body does not leak the digest content either" "$(printf '%s' "$PUSH2" | grep -qF "$DIGEST_L1" && echo 0 || echo 1)"
 
 echo ""
 echo "=== case 3: SLOT=morning, reward-digest-line.txt ABSENT -> no [Reward], no error ==="
@@ -154,6 +192,34 @@ assert_eq "case 3: daily-status.sh still exits 0 (file absence is never an error
 PUSH3="$(cat "$NTFY_BODY_LOG")"
 assert_true "case 3: a push still went out (morning digest itself is unaffected)" "$([ -n "$PUSH3" ] && echo 1 || echo 0)"
 assert_true "case 3: push body has NO [Reward] section" "$(printf '%s' "$PUSH3" | grep -qF '[Reward]' && echo 0 || echo 1)"
+
+echo ""
+echo "=== case 4: two-line fallback digest (projection unavailable) splices both lines ==="
+STATE4="${TMP}/state4"
+mkdir -p "$STATE4"
+printf '%s\n%s\n' "$DIGEST_L1" "$DIGEST_L4" > "${STATE4}/reward-digest-line.txt"
+run_daily_status morning "$STATE4" > "${TMP}/case4.out" 2>"${TMP}/case4.err"
+RC4=$?
+assert_eq "case 4: daily-status.sh exits 0" "0" "$RC4"
+PUSH4="$(cat "$NTFY_BODY_LOG")"
+FALLBACK_OK="$(python3 - "$NTFY_BODY_LOG" "$DIGEST_L1" "$DIGEST_L4" <<'PYEOF'
+import sys
+body = open(sys.argv[1], encoding="utf-8").read()
+print(1 if ("[Reward]\n" + sys.argv[2] + "\n" + sys.argv[3] + "\n\n[Evidence health]") in body else 0)
+PYEOF
+)"
+assert_eq "case 4: both fallback lines spliced contiguously, nothing else in between or after" "1" "$FALLBACK_OK"
+assert_true "case 4: no projection line was invented" "$(printf '%s' "$PUSH4" | grep -qF '見込み' && echo 0 || echo 1)"
+
+echo ""
+echo "=== case 5: a file of blank lines only -> no [Reward] block (same as absent) ==="
+STATE5="${TMP}/state5"
+mkdir -p "$STATE5"
+printf '\n\n \n' > "${STATE5}/reward-digest-line.txt"
+run_daily_status morning "$STATE5" > "${TMP}/case5.out" 2>"${TMP}/case5.err"
+RC5=$?
+assert_eq "case 5: daily-status.sh exits 0" "0" "$RC5"
+assert_true "case 5: push body has NO [Reward] section" "$(grep -qF '[Reward]' "$NTFY_BODY_LOG" && echo 0 || echo 1)"
 
 echo ""
 echo "=== mutation kill check: the morning-only gate must have teeth ==="
