@@ -613,13 +613,28 @@ assert_eq "flag + supply RPC down: exit 9 (check not evaluable)" "9" "$LAST_RC"
 assert_eq "flag + supply RPC down: nothing appended" "$PRE_ND_LINES" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
 cp "$TMP/record/getCurrentSupply.keep2" "$FIX_DIR/getCurrentSupply.json"
 
+# (4b) one UNDECODABLE output (wrong Out type) under the flag: the split
+#      is refused, and under the assertion a refusal is exit 8 — never an
+#      unlabelled split_known:false row appended in its place (m-7).
+write_getRewardUTXOs "$(python3 - <<'PY'
+parts = [b'\x00\x00', bytes([0x11]) * 32, (2).to_bytes(4, 'big'), bytes([0x22]) * 32,
+         (22).to_bytes(4, 'big'), (5000000000).to_bytes(8, 'big'), (0).to_bytes(8, 'big'),
+         (1).to_bytes(4, 'big'), (1).to_bytes(4, 'big'), bytes([0x33]) * 20]
+print('0x' + b''.join(parts).hex())
+PY
+)"
+run_tracker 1 --backfill "$TX_ND" 4 --assert-no-delegators
+assert_eq "flag + undecodable output: exit 8 (refused split is never appended under the assertion)" "8" "$LAST_RC"
+assert_eq "flag + undecodable output: nothing appended" "$PRE_ND_LINES" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+write_getRewardUTXOs "$(build_utxo_hex "$E4_N" 2)"
+
 # (5) one output == E exactly -> appended as self, basis on record
 run_tracker 1 --backfill "$TX_ND" 4 --assert-no-delegators
 assert_eq "flag + 1 output == E: exit 0" "0" "$LAST_RC"
 assert_eq "flag + 1 output == E: exactly one row appended" "$((PRE_ND_LINES + 1))" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
 ND_ROW="$(tail -n 1 "$REWARDS_HISTORY")"
 assert_eq "flag row: split_known true, self == total, fee 0" "true $E4_METAL 0" "$(echo "$ND_ROW" | jq -r '"\(.split_known) \(.self_reward_metal) \(.fee_income_metal)"')"
-assert_eq "flag row: split_basis records operator testimony + the sanity check" "operator-asserted-no-delegators+self-sanity" "$(echo "$ND_ROW" | jq -r '.split_basis')"
+assert_eq "flag row: split_basis records operator testimony + the sanity check + the band applied" "operator-asserted-no-delegators+self-sanity(0.25)" "$(echo "$ND_ROW" | jq -r '.split_basis')"
 run_tracker 1 --backfill "$TX_ND" 4 --assert-no-delegators
 assert_eq "flag re-run on the v2 row: no-op" "$((PRE_ND_LINES + 1))" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
 
@@ -643,7 +658,7 @@ run_tracker 1 --backfill "$TX_ND6" 6 --assert-no-delegators
 assert_eq "flag + v1-only row: exit 0, one v2 row appended (v1 kept)" "0 $((PRE_ND_LINES + 4))" "$LAST_RC $(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
 assert_true "v1->v2 with DIFFERING totals: stderr notes cycle_n=6 (no amount printed)" "$(grep -q "cycle_n=6: the v1 row's total differs" "$LAST_OUT" && ! grep -qE '[0-9]\.[0-9]' "$LAST_OUT" && echo 1 || echo 0)"
 assert_eq "v1->v2 with DIFFERING totals: the v2 row records the chain's total" "$E4_METAL" "$(tail -n 1 "$REWARDS_HISTORY" | jq -r '.reward_metal')"
-assert_eq "flag + v1-only row: appended row is the split one" "true operator-asserted-no-delegators+self-sanity" "$(tail -n 1 "$REWARDS_HISTORY" | jq -r '"\(.split_known) \(.split_basis)"')"
+assert_eq "flag + v1-only row: appended row is the split one" "true operator-asserted-no-delegators+self-sanity(0.25)" "$(tail -n 1 "$REWARDS_HISTORY" | jq -r '"\(.split_known) \(.split_basis)"')"
 run_tracker 1 --backfill "$TX_ND6" 6 --assert-no-delegators
 assert_eq "flag + v1-only row re-run: no-op" "$((PRE_ND_LINES + 4))" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
 

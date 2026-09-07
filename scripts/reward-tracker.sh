@@ -136,7 +136,7 @@
 #                             split_basis names the evidence the halves
 #                             rest on (see reward-utxo-decode.sh's
 #                             split_reward_utxos_metal for the tokens;
-#                             "operator-asserted-no-delegators+self-sanity"
+#                             "operator-asserted-no-delegators+self-sanity(<tol>)"
 #                             is this script's own, from --backfill
 #                             --assert-no-delegators after the sanity
 #                             check). v1 rows (no schema_version) lack the
@@ -227,8 +227,8 @@
 #                                             appended. Ledger rows carry
 #                                             split_basis
 #                                             "operator-asserted-no-delegators
-#                                             +self-sanity" so the evidence
-#                                             is on record.
+#                                             +self-sanity(<tolerance>)" so
+#                                             the evidence is on record.
 #
 #   SELF-REWARD SANITY CHECK (why the flag alone is not enough): if the
 #   operator's assertion is WRONG and the cycle went down the abort path
@@ -245,6 +245,15 @@
 #   cleanly. Outside the band, or when E cannot be computed (supply RPC
 #   down): exit 9, nothing appended, and the stderr note names only the
 #   cycle_n ("self-reward sanity check failed") — never an amount or ratio.
+#   The row's split_basis records the band that was applied, e.g.
+#   "operator-asserted-no-delegators+self-sanity(0.25)".
+#
+#   SEPARATION PREMISE (re-check if either input changes): a fee-only
+#   output is at most delegationFee x (max delegated weight / self stake)
+#   of E — currently 3% x 5 = 0.15 of E — which must stay well below the
+#   band's lower edge, 1 - tolerance = 0.75. Raising the fee%, the
+#   delegation multiplier, or the tolerance narrows that gap; the default
+#   tolerance is only valid while fee% x multiplier << 1 - tolerance.
 #
 # Env:
 #   METALGO_RPC          metalgo RPC base URL        (default http://127.0.0.1:9650)
@@ -657,9 +666,18 @@ if [ "$BACKFILL" -eq 1 ]; then
 		<<< "$(echo "$UTXO_RESP" | jq -r '.result.utxos[]?' | split_reward_utxos_metal ${SPLIT_FLAG[@]+"${SPLIT_FLAG[@]}"})"
 
 	if [ "$BACKFILL_NO_DELEGATORS" -eq 1 ]; then
+		# Under the assertion EVERY refusal is a hard stop (exit 8): the
+		# operator asked for a labelled row, so an unlabelled one
+		# (split_known:false) must never be appended in its place — that
+		# includes an undecodable output, not only a contradiction
+		# (review m-7).
 		case "$B_BASIS" in
 			refused:no-delegators-contradicted|refused:hint-contradicted)
 				echo "reward-tracker: ERROR: cycle_n=${BACKFILL_CYCLE_N}: the reward outputs contradict --assert-no-delegators — nothing appended" >&2
+				exit 8
+				;;
+			refused:*)
+				echo "reward-tracker: ERROR: cycle_n=${BACKFILL_CYCLE_N}: the split was refused (${B_BASIS}) while --assert-no-delegators is set — nothing appended" >&2
 				exit 8
 				;;
 			operator-asserted-no-delegators)
@@ -679,7 +697,7 @@ if [ "$BACKFILL" -eq 1 ]; then
 					echo "reward-tracker: ERROR: cycle_n=${BACKFILL_CYCLE_N}: self-reward sanity check failed (single output is not within the tolerance band of the calculator's self-reward estimate) — nothing appended" >&2
 					exit 9
 				fi
-				B_BASIS="operator-asserted-no-delegators+self-sanity"
+				B_BASIS="operator-asserted-no-delegators+self-sanity(${BACKFILL_SELF_TOLERANCE})"
 				;;
 		esac
 	fi
