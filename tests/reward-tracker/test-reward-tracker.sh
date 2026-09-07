@@ -536,6 +536,19 @@ assert_eq "conflicting-tx backfill exits 6" "6" "$LAST_RC"
 assert_eq "conflicting-tx backfill appended nothing" "4" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
 
 echo ""
+echo "=== --backfill: the SAME txID under a different cycle_n is refused (one tx = one cycle) ==="
+# TX_BACKFILL is recorded as cycle 3 above. cycle 4 has no row yet, so the
+# per-cycle effective-row check alone would let this through and count
+# the same reward twice — the txID-uniqueness guard must refuse it.
+cat > "$UPTIME_CYCLES_JSON" <<JSON
+{"cycles":[{"cycle_n":7,"start_unix":$TRACKED_START,"end_unix":$TRACKED_END,"final_self_stake_metal":2000},{"cycle_n":3,"start_unix":1600000000,"end_unix":1602800000,"final_self_stake_metal":1500},{"cycle_n":2,"start_unix":1597000000,"end_unix":1599800000,"final_self_stake_metal":1500},{"cycle_n":4,"start_unix":1602800000,"end_unix":1605600000,"final_self_stake_metal":1500}]}
+JSON
+run_tracker 1 --backfill "$TX_BACKFILL" 4
+assert_eq "same-tx-other-cycle backfill exits 6" "6" "$LAST_RC"
+assert_eq "same-tx-other-cycle backfill appended nothing (still 4 lines)" "4" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+assert_true "same-tx-other-cycle refusal names the reason (different cycle_n)" "$(grep -q 'already recorded under a different cycle_n' "$LAST_OUT" && echo 1 || echo 0)"
+
+echo ""
 echo "=== zero-reward maturity: no tada, no 🎉, warning-tagged push ==="
 # TX2 (currently tracked, per the crash-recovery section above) matures with
 # ZERO reward UTXOs — the shape metalgo produces when the 80% uptime

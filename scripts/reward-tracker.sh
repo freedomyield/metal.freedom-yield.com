@@ -209,9 +209,11 @@
 #   3  scripts/lib/side-effects.sh missing (structural)
 #   4  scripts/lib/reward-calculator.sh or reward-utxo-decode.sh missing (structural)
 #   5  --backfill: cycle_n not found in uptime-cycles.json
-#   6  --backfill: cycle_n's effective ledger row belongs to a DIFFERENT
-#      txID (refused — the append-only ledger cannot have two txIDs claim
-#      one cycle; resolve by hand before retrying)
+#   6  --backfill: txID/cycle_n conflict, either direction — cycle_n's
+#      effective ledger row belongs to a DIFFERENT txID, or this txID is
+#      already recorded (any row) under a DIFFERENT cycle_n. Refused: one
+#      AddValidatorTx is one cycle, and the append-only ledger must never
+#      count one reward twice; resolve by hand before retrying
 #   (--backfill against an already-recorded v2 txID is exit 0, an idempotent no-op — not a distinct exit code, since it is not an error)
 #   7  cannot open the flock lock file (structural — locks/ directory unwritable)
 
@@ -339,6 +341,17 @@ history_has_tx() {
 	grep -qF "\"add_validator_tx\":\"${tx}\"" "$REWARDS_HISTORY"
 }
 
+# history_tx_under_other_cycle <txID> <cycle_n> — true (rc 0) iff ANY row
+# (v1 or v2, effective or superseded) carries this add_validator_tx with a
+# cycle_n other than the given one. --backfill's txID-uniqueness guard.
+history_tx_under_other_cycle() {
+	local tx="$1" cn="$2"
+	[ -f "$REWARDS_HISTORY" ] && [ -s "$REWARDS_HISTORY" ] || return 1
+	jq -se --arg tx "$tx" --argjson cn "$cn" \
+		'[.[] | select(.add_validator_tx == $tx and .cycle_n != $cn)] | length > 0' \
+		"$REWARDS_HISTORY" >/dev/null 2>&1
+}
+
 # history_effective_rows — prints a JSON array of the effective rows (last
 # line per cycle_n, file order decides "last"). [] if the file is absent
 # or empty.
@@ -457,7 +470,19 @@ if [ "$BACKFILL" -eq 1 ]; then
 	#   effective row is v2 and carries this txID  -> no-op
 	#   effective row is v1 and carries this txID  -> append one v2 row
 	#   effective row carries a DIFFERENT txID     -> refuse (exit 6)
+	#   this txID already recorded under ANOTHER
+	#   cycle_n (any row, v1 or v2)                -> refuse (exit 6)
 	#   no row                                     -> append
+	# The second refusal is the txID-uniqueness guard the 2026-09-04
+	# history_has_tx short-circuit used to provide for --backfill: one
+	# AddValidatorTx is one cycle, so the same txID under two cycle_n values
+	# would count one reward twice in every cumulative figure. Checked over
+	# ALL rows, not just effective ones — a tx's cycle never legitimately
+	# changes in an append-only ledger.
+	if history_tx_under_other_cycle "$BACKFILL_TX" "$BACKFILL_CYCLE_N"; then
+		echo "reward-tracker: ERROR: this txID is already recorded under a different cycle_n — refusing to count one reward twice" >&2
+		exit 6
+	fi
 	EFFECTIVE_ROW=$(history_effective_line_for_cycle "$BACKFILL_CYCLE_N")
 	if [ -n "$EFFECTIVE_ROW" ]; then
 		EFFECTIVE_TX=$(echo "$EFFECTIVE_ROW" | jq -r '.add_validator_tx // empty')
