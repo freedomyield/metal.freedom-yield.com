@@ -21,6 +21,12 @@
 #       must trip the same grep)
 #   (f) the script contains no broadcast-shape string, and the only RPC
 #       methods it can form are the two read-only ones
+#   (g) the matching rule is end-EXACT + start-WINDOW: real fixtures carry
+#       the observed +298 s wallet-requested skew on tx.start; decoys pin
+#       each half of the rule; the window's three boundary points
+#       (+901 / +900 / -1) and the START_TOLERANCE_SEC env plumbing are
+#       measured directly; two matcher mutants (end-only, window-only)
+#       are killed in-suite
 
 set -uo pipefail
 
@@ -72,17 +78,20 @@ TX2="txFix2ClosedCycleEEEEEEEEEEEEEEEEE"
 TX1="txFix1ClosedCycleFFFFFFFFFFFFFFFFF"
 TXIMPORT="txFixImportDeadEndGGGGGGGGGGGGGG"  # no fixture -> RPC "not found"
 TXGHOST="txFixGhostRootHHHHHHHHHHHHHHHHHHH"  # unreadable BFS root for (d)
-# Decoys — own-NodeID staking-shaped txs that match a closed cycle on ONE
-# time boundary only. They are the teeth of the "start_unix AND end_unix
-# BOTH equal" matching rule: a correct implementation lists both as
-# UNMATCHED; a start-only (or end-only) matcher wrongly claims one of
-# them for cycle 2 (or cycle 1). They hang off the BaseTx hop so the BFS
-# visits them BEFORE the real TX2 / TX1 (shallower depth) — otherwise a
-# first-match-wins mutant would still find the real tx first and this
-# check would have no bite. Reviewer-measured 2026-09-07: without these
-# decoys, deleting `&& $3 == e` from the matcher left all 36 cases green.
-TXDECOY_S="txFixDecoyStartOnlyIIIIIIIIIIIIIII"  # start == cycle 2's start, end differs
-TXDECOY_E="txFixDecoyEndOnlyJJJJJJJJJJJJJJJJJ"  # end == cycle 1's end, start differs
+# Decoys — own-NodeID staking-shaped txs that satisfy ONE half of the
+# matching rule only. The rule is "tx.end == end_unix EXACTLY, and
+# 0 <= tx.start - start_unix <= START_TOLERANCE_SEC": a correct
+# implementation lists both decoys as UNMATCHED; a matcher that drops
+# the end key wrongly claims TXDECOY_S for cycle 2, and one that drops
+# the start window wrongly claims TXDECOY_E for cycle 1. They hang off
+# the BaseTx hop so the BFS visits them BEFORE the real TX2 / TX1
+# (shallower depth) — otherwise a first-match-wins mutant would still
+# find the real tx first and this check would have no bite.
+# Reviewer-measured 2026-09-07 (under the earlier exact-match rule):
+# without these decoys, deleting the end half of the matcher left all 36
+# cases green.
+TXDECOY_S="txFixDecoyStartOnlyIIIIIIIIIIIIIII"  # start inside cycle 2's window, end differs
+TXDECOY_E="txFixDecoyEndOnlyJJJJJJJJJJJJJJJJJ"  # end == cycle 1's end, start OUTSIDE the window
 LEAK_ADDR="P-metal1fixtureleakcanaryzzzzzzzzzzzz"
 
 DUR=2764800   # 32 days, fictional
@@ -91,6 +100,18 @@ C2S=$C1E;       C2E=$((C2S + DUR))
 C3S=$C2E;       C3E=$((C3S + DUR))
 C4S=$C3E;       C4E=$((C4S + DUR))
 C5S=$C4E;       C5E=$((C5S + DUR))
+
+# Real-world shape of a staking tx's start (measured on the validator
+# host 2026-09-07, all 5 real cycles): platform.getTx's `start` is the
+# wallet-REQUESTED time (Metal Wallet web UI: now+5min), +298..299 s
+# above the EFFECTIVE start that getCurrentValidators / uptime-cycles.json
+# carry. Every real fixture below reproduces that skew, so the earlier
+# exact start match fails this suite (measured 2026-09-07 by restoring
+# `$2 == s && $3 == e` in the real script: 21 of 62 assertions red,
+# beginning with all 4 matched rows). The value is only the FORM of the
+# real skew; no real txID / real timestamp appears in any fixture.
+START_SKEW=298
+TOL_DEFAULT=900   # the script's default START_TOLERANCE_SEC (pinned here)
 
 FIX_DIR="$TMP/fixtures"
 mkdir -p "$FIX_DIR" "$TMP/bin" "$TMP/record"
@@ -190,15 +211,21 @@ JSON
 #                   '----> TXDECOY_E (end-only decoy, no inputs)
 # Cycles 1-3 are reachable ONLY through the BaseTx hop — case (b). Both
 # decoys sit at BFS depth 3, shallower than TX2 (4) and TX1 (5).
+# Every real staking tx carries tx.start = start_unix + START_SKEW (the
+# observed wallet-requested skew); tx.end == end_unix exactly.
 write_cv "$TX5"
-write_staking_tx "$TX5" "$TX4"     "$C5S" "$C5E"
-write_staking_tx "$TX4" "$TXBASE"  "$C4S" "$C4E"
+write_staking_tx "$TX5" "$TX4"     "$((C5S + START_SKEW))" "$C5E"
+write_staking_tx "$TX4" "$TXBASE"  "$((C4S + START_SKEW))" "$C4E"
 write_base_tx    "$TXBASE" "$TX3" "$TXDECOY_S" "$TXDECOY_E"
-write_staking_tx "$TX3" "$TX2"     "$C3S" "$C3E"
-write_staking_tx "$TX2" "$TX1"     "$C2S" "$C2E"
-write_staking_tx "$TX1" "$TXIMPORT" "$C1S" "$C1E"
-write_staking_tx "$TXDECOY_S" "" "$C2S" "$((C2S + 1000))"   # start hit, end miss
-write_staking_tx "$TXDECOY_E" "" "$((C1E - 1000))" "$C1E"   # end hit, start miss
+write_staking_tx "$TX3" "$TX2"     "$((C3S + START_SKEW))" "$C3E"
+write_staking_tx "$TX2" "$TX1"     "$((C2S + START_SKEW))" "$C2E"
+write_staking_tx "$TX1" "$TXIMPORT" "$((C1S + START_SKEW))" "$C1E"
+# start-only decoy: start INSIDE cycle 2's window (same skew as the real
+# tx), end differs -> only the end key rejects it
+write_staking_tx "$TXDECOY_S" "" "$((C2S + START_SKEW))" "$((C2S + 1000))"
+# end-only decoy: end == cycle 1's end exactly, start 3600 s BEFORE
+# start_unix (well outside [0, 900]) -> only the start window rejects it
+write_staking_tx "$TXDECOY_E" "" "$((C1S - 3600))" "$C1E"
 
 # run_discover <script_path> [extra VAR=val ...] — stdout/stderr captured
 # separately (format checks need pure stdout), both appended to the
@@ -241,11 +268,13 @@ assert_true "cycle 4 -> TX4 matched row" "$(has_line "$LAST_OUT" "$(printf '4\t%
 assert_true "cycle 3 -> TX3 matched row (reached THROUGH the BaseTx hop)" "$(has_line "$LAST_OUT" "$(printf '3\t%s\t%s\t%s\tmatched' "$TX3" "$C3S" "$C3E")")"
 assert_true "cycle 2 -> TX2 matched row" "$(has_line "$LAST_OUT" "$(printf '2\t%s\t%s\t%s\tmatched' "$TX2" "$C2S" "$C2E")")"
 assert_true "cycle 1 -> TX1 matched row" "$(has_line "$LAST_OUT" "$(printf '1\t%s\t%s\t%s\tmatched' "$TX1" "$C1S" "$C1E")")"
-assert_true "in-flight TX5 listed as UNMATCHED (no closed row for cycle 5)" "$(has_line "$LAST_OUT" "$(printf 'UNMATCHED\t%s\t%s\t%s\tunmatched' "$TX5" "$C5S" "$C5E")")"
-# The two decoys are the teeth of the end- and start-boundary halves of the
-# exact-match rule (see their definition above): each must be UNMATCHED.
-assert_true "start-only decoy listed as UNMATCHED (end boundary is load-bearing)" "$(has_line "$LAST_OUT" "$(printf 'UNMATCHED\t%s\t%s\t%s\tunmatched' "$TXDECOY_S" "$C2S" "$((C2S + 1000))")")"
-assert_true "end-only decoy listed as UNMATCHED (start boundary is load-bearing)" "$(has_line "$LAST_OUT" "$(printf 'UNMATCHED\t%s\t%s\t%s\tunmatched' "$TXDECOY_E" "$((C1E - 1000))" "$C1E")")"
+# UNMATCHED rows print the tx's OWN start/end (the skewed advisory start),
+# matched rows print the closed-cycle row's effective values.
+assert_true "in-flight TX5 listed as UNMATCHED (no closed row for cycle 5)" "$(has_line "$LAST_OUT" "$(printf 'UNMATCHED\t%s\t%s\t%s\tunmatched' "$TX5" "$((C5S + START_SKEW))" "$C5E")")"
+# The two decoys are the teeth of the end-key and start-window halves of
+# the matching rule (see their definition above): each must be UNMATCHED.
+assert_true "start-only decoy listed as UNMATCHED (end key is load-bearing)" "$(has_line "$LAST_OUT" "$(printf 'UNMATCHED\t%s\t%s\t%s\tunmatched' "$TXDECOY_S" "$((C2S + START_SKEW))" "$((C2S + 1000))")")"
+assert_true "end-only decoy listed as UNMATCHED (start window is load-bearing)" "$(has_line "$LAST_OUT" "$(printf 'UNMATCHED\t%s\t%s\t%s\tunmatched' "$TXDECOY_E" "$((C1S - 3600))" "$C1E")")"
 assert_eq "exactly 3 UNMATCHED rows (in-flight + 2 decoys)" "3" "$(grep -c '^UNMATCHED' "$LAST_OUT" || true)"
 assert_eq "no NOT-FOUND row" "0" "$(grep -c 'NOT-FOUND' "$LAST_OUT" || true)"
 assert_eq "exactly 4 matched rows" "4" "$(grep -c $'\tmatched$' "$LAST_OUT" || true)"
@@ -255,18 +284,29 @@ FORMAT_OK=$(awk -F'\t' '!( NF == 5 || (NF == 2 && $2 == "NOT-FOUND") ) { bad = 1
 assert_true "every stdout row is 5 tab-fields (or the 2-field NOT-FOUND shape)" "$FORMAT_OK"
 
 echo ""
-echo "=== matcher mutation kill: the exact-match rule must have teeth on BOTH boundaries ==="
-# Two MUTANTS of the script's awk matcher — start-only and end-only. Each
-# must be caught by the decoy assertions above (the decoy gets claimed and
-# the real tx is pushed out of its row). This is the in-suite, permanent
-# form of the reviewer's 2026-09-07 measurement.
+echo "=== matcher mutation kill: BOTH halves of the end-exact + start-window rule must have teeth ==="
+# Two MUTANTS of the script's awk matcher — end-only (start window dropped)
+# and window-only (end key dropped). Each must be caught by the decoy
+# assertions above (the decoy gets claimed and the real tx is pushed out
+# of its row). Permanent in-suite form of the 2026-09-07 measurements:
+# each mutant was first applied to the REAL script and the suite run
+# before being wired in here. end-only: 14 assertions red — the cycle 1
+# matched row, the end-only decoy's UNMATCHED row, every (g-1)/(g-2)
+# window case, plus this block's two "sed produced no diff" sentinels.
+# window-only: 4 red — the cycle 2 matched row, the start-only decoy's
+# UNMATCHED row, plus the same two sentinels. (The matched/UNMATCHED
+# COUNTS stay green under both: the decoy takes the real tx's seat, so
+# only the row-identity assertions see it — that is why they exist.)
+MATCHER_EXPR='$3 == e && $2 - s >= 0 && $2 - s <= tol'
 run_matcher_mutant() {
 	# run_matcher_mutant <label> <awk-replacement> <decoy> <victim cycle_n> <victim tx> <victim start> <victim end>
 	local label="$1" repl="$2" decoy="$3" cn="$4" vtx="$5" vs="$6" ve="$7"
 	local mut="$TMP/mutant-matcher-$cn.sh"
-	# (regex side: `&` and a mid-pattern `$` are both literal in BRE; the
-	#  replacement side carries no `&`, so nothing needs escaping)
-	sed "s|\$2 == s && \$3 == e|$repl|" "$SCRIPT" > "$mut"
+	# (regex side: `&`, `-`, `<`, `>` and a mid-pattern `$` are all literal
+	#  in BRE; on the replacement side `&` means "the whole match", so the
+	#  window-only replacement's `&&` is escaped to `\&\&` here)
+	local repl_esc="${repl//&/\\&}"
+	sed "s|${MATCHER_EXPR}|${repl_esc}|" "$SCRIPT" > "$mut"
 	if diff -q "$SCRIPT" "$mut" >/dev/null 2>&1; then
 		FAIL=$((FAIL + 1))
 		FAILURES+=("$label: sed produced no diff — matcher not matched, mutation not applied")
@@ -290,8 +330,52 @@ run_matcher_mutant() {
 		printf '  FAIL  %s: mutant still correct for cycle %s (real_row_present=%s decoy_claimed=%s)\n' "$label" "$cn" "$real_row_present" "$decoy_claimed"
 	fi
 }
-run_matcher_mutant "start-only matcher (&& \$3 == e deleted)" '$2 == s' "$TXDECOY_S" 2 "$TX2" "$C2S" "$C2E"
-run_matcher_mutant "end-only matcher (\$2 == s && deleted)"   '$3 == e' "$TXDECOY_E" 1 "$TX1" "$C1S" "$C1E"
+run_matcher_mutant "window-only matcher (end key dropped)"     '$2 - s >= 0 && $2 - s <= tol' "$TXDECOY_S" 2 "$TX2" "$C2S" "$C2E"
+run_matcher_mutant "end-only matcher (start window dropped)"  '$3 == e'                       "$TXDECOY_E" 1 "$TX1" "$C1S" "$C1E"
+
+echo ""
+echo "=== (g-1) START_TOLERANCE_SEC window boundary: +901 / +900 / -1 on cycle 3 ==="
+# The real TX3 fixture is rewritten with tx.start at each boundary point
+# (end stays exact) and restored afterwards. +900 is the last value the
+# default window admits; +901 and -1 fall outside it on either side.
+write_staking_tx "$TX3" "$TX2" "$((C3S + TOL_DEFAULT + 1))" "$C3E"
+run_discover "$SCRIPT"
+assert_eq "start = start_unix + 901: run exits 4" "4" "$LAST_RC"
+assert_true "start = start_unix + 901: cycle 3 NOT-FOUND" "$(has_line "$LAST_OUT" "$(printf '3\tNOT-FOUND')")"
+assert_true "start = start_unix + 901: TX3 listed as UNMATCHED" "$(has_line "$LAST_OUT" "$(printf 'UNMATCHED\t%s\t%s\t%s\tunmatched' "$TX3" "$((C3S + TOL_DEFAULT + 1))" "$C3E")")"
+assert_eq "start = start_unix + 901: the other 3 cycles still matched" "3" "$(grep -c $'\tmatched$' "$LAST_OUT" || true)"
+
+write_staking_tx "$TX3" "$TX2" "$((C3S + TOL_DEFAULT))" "$C3E"
+run_discover "$SCRIPT"
+assert_eq "start = start_unix + 900: run exits 0" "0" "$LAST_RC"
+assert_true "start = start_unix + 900: cycle 3 -> TX3 matched (window is inclusive)" "$(has_line "$LAST_OUT" "$(printf '3\t%s\t%s\t%s\tmatched' "$TX3" "$C3S" "$C3E")")"
+assert_eq "start = start_unix + 900: all 4 cycles matched" "4" "$(grep -c $'\tmatched$' "$LAST_OUT" || true)"
+
+write_staking_tx "$TX3" "$TX2" "$((C3S - 1))" "$C3E"
+run_discover "$SCRIPT"
+assert_eq "start = start_unix - 1: run exits 4" "4" "$LAST_RC"
+assert_true "start = start_unix - 1: cycle 3 NOT-FOUND (window has no negative side)" "$(has_line "$LAST_OUT" "$(printf '3\tNOT-FOUND')")"
+assert_true "start = start_unix - 1: TX3 listed as UNMATCHED" "$(has_line "$LAST_OUT" "$(printf 'UNMATCHED\t%s\t%s\t%s\tunmatched' "$TX3" "$((C3S - 1))" "$C3E")")"
+
+write_staking_tx "$TX3" "$TX2" "$((C3S + START_SKEW))" "$C3E"   # restore
+run_discover "$SCRIPT"
+assert_eq "TX3 fixture restored: happy path exits 0 again" "0" "$LAST_RC"
+
+echo ""
+echo "=== (g-2) START_TOLERANCE_SEC env plumbing reaches the matcher ==="
+# With the real fixtures' +298 skew, a window of 297 must reject every
+# real cycle and a window of 298 must admit every one — the env value is
+# what the matcher compares against, not a hard-coded constant.
+run_discover "$SCRIPT" START_TOLERANCE_SEC=$((START_SKEW - 1))
+assert_eq "START_TOLERANCE_SEC=297: run exits 4" "4" "$LAST_RC"
+assert_eq "START_TOLERANCE_SEC=297: all 4 cycles NOT-FOUND" "4" "$(grep -c 'NOT-FOUND' "$LAST_OUT" || true)"
+assert_eq "START_TOLERANCE_SEC=297: 0 matched rows" "0" "$(grep -c $'\tmatched$' "$LAST_OUT" || true)"
+run_discover "$SCRIPT" START_TOLERANCE_SEC=$START_SKEW
+assert_eq "START_TOLERANCE_SEC=298: run exits 0" "0" "$LAST_RC"
+assert_eq "START_TOLERANCE_SEC=298: all 4 cycles matched" "4" "$(grep -c $'\tmatched$' "$LAST_OUT" || true)"
+run_discover "$SCRIPT" START_TOLERANCE_SEC=abc
+assert_eq "START_TOLERANCE_SEC=abc: usage error exit 1" "1" "$LAST_RC"
+assert_true "START_TOLERANCE_SEC=abc: prints NO result rows" "$([ ! -s "$LAST_OUT" ] && echo 1 || echo 0)"
 
 echo ""
 echo "=== --help prints the header block only (no hard-coded line count) ==="

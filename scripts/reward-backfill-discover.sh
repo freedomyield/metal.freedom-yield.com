@@ -27,11 +27,35 @@
 #      probed flexibly (jq recursion over the unsigned body, accepting
 #      start/startTime and end/endTime spellings) rather than hard-coded
 #      to one metalgo JSON marshalling version.
-#   4. Candidates are matched EXACTLY (start_unix AND end_unix both
-#      equal) against uptime-cycles.json's closed-cycle rows.
+#   4. Candidates are matched against uptime-cycles.json's closed-cycle
+#      rows on TWO conditions:
+#        - tx.end == end_unix, EXACTLY. This is the primary key: among
+#          the NodeID-gated staking txs the end time is unique per cycle.
+#        - 0 <= tx.start - start_unix <= START_TOLERANCE_SEC (default
+#          900). A sanity check, not a key — see below for why start is
+#          NOT compared exactly.
+#      OBSERVED (validator host, real chain, 2026-09-07): the walk found
+#      all 5 cycles' staking txs; tx.end equalled the row's end_unix
+#      exactly in all 5, while tx.start sat uniformly +298..299 s ABOVE
+#      the row's start_unix. For the in-flight cycle the SAME tx reads
+#      298 s apart between platform.getCurrentValidators (startTime —
+#      the value uptime-cycles.json carries) and platform.getTx (start).
+#      INTERPRETATION: getTx's start is the value the wallet requested
+#      (this project registers via the Metal Wallet web UI, which has no
+#      Start field and submits now+5min), whereas getCurrentValidators
+#      and uptime-cycles.json carry the EFFECTIVE start — the time the
+#      tx was accepted — consistent with post-Durango semantics where a
+#      staking tx's start is advisory and the effective start is the
+#      acceptance time. An exact start match therefore left every real
+#      cycle UNMATCHED (exit 4); end-exact + start-window fixes that
+#      without loosening the key.
 #
 # OUTPUT (stdout, tab-separated; nothing else ever goes to stdout)
 #   <cycle_n> <txID> <start_unix> <end_unix> matched   resolved closed cycle
+#                                                      (start/end are the
+#                                                      row's effective
+#                                                      values, not the tx's
+#                                                      advisory start)
 #   UNMATCHED <txID> <start> <end> unmatched           staking candidate with
 #                                                      no closed-cycle row
 #                                                      (e.g. the in-flight
@@ -58,10 +82,12 @@
 #   VALIDATOR_JSON        path to validator.json     (default public/api/validator.json)
 #   UPTIME_CYCLES_JSON    path to uptime-cycles.json (default public/api/uptime-cycles.json)
 #   MAX_DEPTH             BFS depth cap              (default 8)
+#   START_TOLERANCE_SEC   max allowed tx.start - start_unix, in seconds,
+#                         non-negative integer     (default 900)
 #
 # Exit codes:
 #   0  every closed cycle in uptime-cycles.json was discovered and matched
-#   1  usage error
+#   1  usage error (unknown argument, non-integer START_TOLERANCE_SEC)
 #   2  RPC unreachable / response unparseable / own NodeID absent from the
 #      current validator set / current staking tx unreadable (fail-closed)
 #   3  validator.json or uptime-cycles.json missing, unreadable, or
@@ -78,6 +104,7 @@ RPC_TIMEOUT="${FY_RPC_TIMEOUT:-6}"
 VALIDATOR_JSON="${VALIDATOR_JSON:-$ROOT/public/api/validator.json}"
 UPTIME_CYCLES_JSON="${UPTIME_CYCLES_JSON:-$ROOT/public/api/uptime-cycles.json}"
 MAX_DEPTH="${MAX_DEPTH:-8}"
+START_TOLERANCE_SEC="${START_TOLERANCE_SEC:-900}"
 
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
 	# Header block = line 2 through the first blank line (the one above
@@ -92,6 +119,12 @@ elif [ $# -gt 0 ]; then
 	echo "reward-backfill-discover: unknown argument: $1 (this script takes no arguments — see --help)" >&2
 	exit 1
 fi
+case "$START_TOLERANCE_SEC" in
+	''|*[!0-9]*)
+		echo "reward-backfill-discover: START_TOLERANCE_SEC must be a non-negative integer (got '${START_TOLERANCE_SEC}')" >&2
+		exit 1
+		;;
+esac
 
 # ---- read-only RPC composers ---------------------------------------------
 # Exactly TWO functions may build a request body, each with its method name
@@ -234,11 +267,19 @@ while [ "$QHEAD" -lt "${#QUEUE[@]}" ]; do
 	fi
 done
 
-# ---- step 4: exact start/end match against closed cycles -----------------
+# ---- step 4: end-exact + start-window match against closed cycles --------
+# end: exact (the key — unique per cycle among our own staking txs).
+# start: tx.start - start_unix must lie in [0, START_TOLERANCE_SEC]. The
+# on-chain start is the wallet-REQUESTED time (Metal Wallet web UI:
+# now+5min, no Start field); the row's start_unix is the EFFECTIVE start
+# (acceptance time), measured +298..299 s earlier on every real cycle
+# (2026-09-07). Exact start equality never holds and is not the key, so
+# it is a bounded sanity window, never a second key. See the header.
 MISSING=0
 while IFS=$'\t' read -r CN CS CE; do
 	[ -n "$CN" ] || continue
-	M_TX=$(awk -F'\t' -v s="$CS" -v e="$CE" '$2 == s && $3 == e { print $1; exit }' "$CAND_FILE")
+	M_TX=$(awk -F'\t' -v s="$CS" -v e="$CE" -v tol="$START_TOLERANCE_SEC" \
+		'$3 == e && $2 - s >= 0 && $2 - s <= tol { print $1; exit }' "$CAND_FILE")
 	if [ -n "$M_TX" ]; then
 		printf '%s\t%s\t%s\t%s\tmatched\n' "$CN" "$M_TX" "$CS" "$CE"
 		printf '%s\n' "$M_TX" >> "$MATCHED_TX_FILE"
