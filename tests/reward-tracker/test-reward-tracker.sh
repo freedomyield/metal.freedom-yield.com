@@ -72,6 +72,10 @@ assert_true() {
 # Width W/F/A = 2, else 1), the same rule scripts/reward-tracker.sh's
 # display_width applies. The operator's Android ntfy wraps at ~40; the
 # script promises <= 30 on every line it writes.
+# Counting A (ambiguous width: → — etc.) as 2 is a deliberate safety
+# margin, not a property this suite defends: no line containing an A
+# character sits near the 30-column threshold, so mutating A to 1 is
+# indistinguishable here (every <= 30 assertion still passes either way).
 max_display_width() {
 	python3 - "$1" <<'PY'
 import sys, unicodedata
@@ -285,7 +289,16 @@ write_getCurrentValidators "$TX1" "$TRACKED_START" "$TRACKED_END" "2000000000000
 write_getCurrentSupply "350000000000000000"
 run_tracker 1
 assert_eq "bootstrap run exits 0" "0" "$LAST_RC"
-TRACKED_TX_AFTER_BOOTSTRAP="$(jq -r '.tracked_tx' "$TRACKER_STATE" 2>/dev/null)"
+# From here on `set -e` is live (run_tracker's tail re-enables it). Every
+# bare `VAR=$(jq|sed|tail|wc … <file-the-tracker-should-have-written>)`
+# below is guarded with the same `[ -f "$f" ] && … || echo …` idiom the
+# flock / dry-mode sections use: without it, a tracker run that failed to
+# write the file (rc!=0 above) turns the NEXT line into a raw crash of the
+# whole suite (jq exit 2 / failed `<` redirect / sed+tail exit 1) instead
+# of a clean FAIL line. Reads that sit inside an assert_* argument are not
+# affected (the substitution's status is masked by the function call) and
+# are left as they are.
+TRACKED_TX_AFTER_BOOTSTRAP="$([ -f "$TRACKER_STATE" ] && jq -r '.tracked_tx' "$TRACKER_STATE" || echo '')"
 assert_eq "state now tracks TX1" "$TX1" "$TRACKED_TX_AFTER_BOOTSTRAP"
 assert_eq "state captured potentialReward (the single-output split hint)" "$SELF_REWARD_N" "$(jq -r '.tracked_potential_reward_nmetal' "$TRACKER_STATE")"
 assert_eq "state recorded accruedDelegateeReward (record only, not used for the split)" "0" "$(jq -r '.tracked_accrued_delegatee_reward_nmetal' "$TRACKER_STATE")"
@@ -357,8 +370,9 @@ d = datetime.datetime.fromtimestamp(e, datetime.timezone(datetime.timedelta(hour
 print(f'{d.month}/{d.day}')
 " "$TRACKED_END")"
 assert_eq "digest has exactly 6 lines" "6" "$(wc -l < "$DIGEST_FILE" | tr -d ' ')"
-D_L1="$(sed -n '1p' "$DIGEST_FILE")"; D_L2="$(sed -n '2p' "$DIGEST_FILE")"; D_L3="$(sed -n '3p' "$DIGEST_FILE")"
-D_L4="$(sed -n '4p' "$DIGEST_FILE")"; D_L5="$(sed -n '5p' "$DIGEST_FILE")"; D_L6="$(sed -n '6p' "$DIGEST_FILE")"
+digest_line() { [ -f "$DIGEST_FILE" ] && sed -n "${1}p" "$DIGEST_FILE" || echo ''; }
+D_L1="$(digest_line 1)"; D_L2="$(digest_line 2)"; D_L3="$(digest_line 3)"
+D_L4="$(digest_line 4)"; D_L5="$(digest_line 5)"; D_L6="$(digest_line 6)"
 assert_true "line 1: 累積 N METAL — one decimal, nothing else" "$(printf '%s' "$D_L1" | grep -qE '^累積 [0-9,]+\.[0-9] METAL$' && echo 1 || echo 0)"
 assert_true "line 2: 　自己 a / 手数料 b (full-width-space indent, no parentheses)" "$(printf '%s' "$D_L2" | grep -qE '^　自己 [0-9,]+\.[0-9] / 手数料 [0-9,]+\.[0-9]$' && echo 1 || echo 0)"
 assert_true "line 3: Cycle 7 見込み +M METAL" "$(printf '%s' "$D_L3" | grep -qE '^Cycle 7 見込み \+[0-9,]+\.[0-9] METAL$' && echo 1 || echo 0)"
@@ -407,7 +421,7 @@ echo "=== maturity: TX1 disappears, TX2 takes over, uptime-cycles.json NOT yet u
 write_getCurrentValidators "$TX2" "$TRACKED_END" "$CYCLE2_END" "2000000000000" "3.0" "[]" "$NEXT_POTENTIAL_N"
 run_tracker 1
 assert_eq "run with stale uptime-cycles.json still exits 0 (defers, not an error)" "0" "$LAST_RC"
-STILL_TX1="$(jq -r '.tracked_tx' "$TRACKER_STATE")"
+STILL_TX1="$([ -f "$TRACKER_STATE" ] && jq -r '.tracked_tx' "$TRACKER_STATE" || echo '')"
 assert_eq "state NOT advanced while uptime-cycles.json is stale (retries next run)" "$TX1" "$STILL_TX1"
 assert_true "no reward recorded yet (deferred, correctly)" "$([ ! -s "$REWARDS_HISTORY" ] && echo 1 || echo 0)"
 
@@ -426,7 +440,7 @@ echo "    side effect must be suppressed ==="
 # (uptime-cycles.json caught up two lines above, getRewardUTXOs set) — dry
 # mode must recognize it (same detection logic) but touch nothing durable.
 DRY_PRE_HISTORY_LINES=$([ -f "$REWARDS_HISTORY" ] && wc -l < "$REWARDS_HISTORY" | tr -d ' ' || echo 0)
-DRY_PRE_TRACKED_TX="$(jq -r '.tracked_tx' "$TRACKER_STATE")"
+DRY_PRE_TRACKED_TX="$([ -f "$TRACKER_STATE" ] && jq -r '.tracked_tx' "$TRACKER_STATE" || echo '')"
 DRY_PRE_NTFY_LINES=$([ -f "$NTFY_LOG" ] && wc -l < "$NTFY_LOG" | tr -d ' ' || echo 0)
 DRY_PRE_DIGEST_MTIME=""
 # GNU-first stat order (repo convention — broadcast-guard.sh / check-cron-file.sh).
@@ -447,7 +461,7 @@ assert_eq "(a) dry run: rewards-history.jsonl line count unchanged" "$DRY_PRE_HI
 # untouched (see scripts/lib/side-effects.sh), so tracked_tx must still read
 # whatever it was before this dry run (TX1 — the maturity was DETECTED, per
 # the "DRY:" note in stdout below, but never recorded).
-DRY_POST_TRACKED_TX="$(jq -r '.tracked_tx' "$TRACKER_STATE")"
+DRY_POST_TRACKED_TX="$([ -f "$TRACKER_STATE" ] && jq -r '.tracked_tx' "$TRACKER_STATE" || echo '')"
 assert_eq "(a) dry run: tracked_tx state file left untouched" "$DRY_PRE_TRACKED_TX" "$DRY_POST_TRACKED_TX"
 
 # (b) no notify
@@ -477,7 +491,7 @@ run_tracker 1
 assert_eq "maturity run exits 0" "0" "$LAST_RC"
 assert_eq "rewards-history.jsonl now has exactly 1 line" "1" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
 
-LINE1_JSON="$(sed -n '1p' "$REWARDS_HISTORY")"
+LINE1_JSON="$([ -f "$REWARDS_HISTORY" ] && sed -n '1p' "$REWARDS_HISTORY" || echo '')"
 assert_eq "line: cycle_n" "7" "$(echo "$LINE1_JSON" | jq -r '.cycle_n')"
 assert_eq "line: reward_metal (self 50.5 + fee 12.25)" "$EXPECTED_REWARD" "$(echo "$LINE1_JSON" | jq -r '.reward_metal')"
 assert_eq "line: self_stake_metal (tracked weight 2000 METAL)" "2000.000000000" "$(echo "$LINE1_JSON" | jq -r '.self_stake_metal')"
@@ -496,14 +510,19 @@ assert_eq "line (v2): self + fee == reward_metal" "true" "$(echo "$LINE1_JSON" |
 # stored 50.5), which is only observable because the two hints differ.
 assert_eq "state now carries TX2's (different) potentialReward, proving the maturity split used the stored TX1 hint" "$NEXT_POTENTIAL_N" "$(jq -r '.tracked_potential_reward_nmetal' "$TRACKER_STATE")"
 
-NEW_TRACKED="$(jq -r '.tracked_tx' "$TRACKER_STATE")"
+NEW_TRACKED="$([ -f "$TRACKER_STATE" ] && jq -r '.tracked_tx' "$TRACKER_STATE" || echo '')"
 assert_eq "state advanced to TX2 after recording TX1's maturity" "$TX2" "$NEW_TRACKED"
 
 assert_true "ntfy body was recorded (notify fired)" "$([ -s "$NTFY_LOG" ] && echo 1 || echo 0)"
 # Push body (phone-width layout): one fact per line, 累積 before the
 # delta (operator's ordering requirement), no parentheses.
 MATURITY_BODY="$TMP/record/maturity-body.txt"
-sed -n '/^---$/,$p' "$NTFY_LOG" | tail -n +2 | grep -v '^Priority:\|^Title:\|^Tags:\|^Content-Type:\|^Authorization:' > "$MATURITY_BODY"
+# A bare pipeline (not an assignment, so no `&&`-list exemption): with no
+# ntfy log the sed fails, and with a header-only log grep -v selects
+# nothing and exits 1 — either way pipefail + set -e would abort the suite
+# here. Guard it so a missing/empty push leaves an EMPTY body file and the
+# assertions below fail cleanly instead.
+[ -f "$NTFY_LOG" ] && { sed -n '/^---$/,$p' "$NTFY_LOG" | tail -n +2 | grep -v '^Priority:\|^Title:\|^Tags:\|^Content-Type:\|^Authorization:' > "$MATURITY_BODY"; } || : > "$MATURITY_BODY"
 EXPECTED_MATURITY_BODY="Cycle 7 reward
 累積 62.75 METAL
 　自己 50.50 / 手数料 12.25
@@ -530,7 +549,7 @@ jq --arg tx "$TX1" '.tracked_tx = $tx | .tracked_end_unix = '"$TRACKED_END" "$TR
 run_tracker 1
 assert_eq "recovery run exits 0" "0" "$LAST_RC"
 assert_eq "rewards-history.jsonl STILL exactly 1 line (dedupe via history_has_tx)" "1" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
-RECOVERED_TX="$(jq -r '.tracked_tx' "$TRACKER_STATE")"
+RECOVERED_TX="$([ -f "$TRACKER_STATE" ] && jq -r '.tracked_tx' "$TRACKER_STATE" || echo '')"
 assert_eq "state re-advanced to TX2 without a second append" "$TX2" "$RECOVERED_TX"
 
 echo ""
@@ -542,7 +561,7 @@ JSON
 run_tracker 1 --backfill "$TX_BACKFILL" 3
 assert_eq "backfill run exits 0" "0" "$LAST_RC"
 assert_eq "rewards-history.jsonl now has 2 lines" "2" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
-LINE2_JSON="$(sed -n '2p' "$REWARDS_HISTORY")"
+LINE2_JSON="$([ -f "$REWARDS_HISTORY" ] && sed -n '2p' "$REWARDS_HISTORY" || echo '')"
 assert_eq "backfilled line: cycle_n=3" "3" "$(echo "$LINE2_JSON" | jq -r '.cycle_n')"
 assert_eq "backfilled line: reward_metal=9.99 METAL" "9.990000000" "$(echo "$LINE2_JSON" | jq -r '.reward_metal')"
 assert_eq "backfilled line: self_stake_metal from uptime-cycles.json (1500)" "1500" "$(echo "$LINE2_JSON" | jq -r '.self_stake_metal')"
@@ -579,7 +598,7 @@ write_getRewardUTXOs "$(build_utxo_hex 4000000000 2) $(build_utxo_hex 1000000000
 run_tracker 1 --backfill "$TX_V1" 2
 assert_eq "v1->v2 backfill exits 0" "0" "$LAST_RC"
 assert_eq "rewards-history.jsonl now has 4 lines (v1 row kept, v2 row appended)" "4" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
-LINE4_JSON="$(sed -n '4p' "$REWARDS_HISTORY")"
+LINE4_JSON="$([ -f "$REWARDS_HISTORY" ] && sed -n '4p' "$REWARDS_HISTORY" || echo '')"
 assert_eq "appended v2 row: cycle_n 2" "2" "$(echo "$LINE4_JSON" | jq -r '.cycle_n')"
 assert_eq "appended v2 row: split_known true" "true" "$(echo "$LINE4_JSON" | jq -r '.split_known')"
 assert_eq "appended v2 row: self 4.0 / fee 1.0" "4.000000000 1.000000000" "$(echo "$LINE4_JSON" | jq -r '"\(.self_reward_metal) \(.fee_income_metal)"')"
@@ -623,7 +642,7 @@ E4_METAL="$(estimate_reward 1500 $((1605600000 - 1602800000)) 350000000)"
 E4_N="$(python3 -c "from decimal import Decimal; print(int(Decimal('$E4_METAL') * 10**9))")"
 scale_n() { python3 -c "from decimal import Decimal; print(int(Decimal('$1') * Decimal('$2')))"; }
 TX_ND="txNoDelegatorsAssertedCycle4444444"
-PRE_ND_LINES=$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')
+PRE_ND_LINES=$([ -f "$REWARDS_HISTORY" ] && wc -l < "$REWARDS_HISTORY" | tr -d ' ' || echo 0)
 
 # (1) two outputs under the flag: the assertion is provably false -> exit 8
 write_getRewardUTXOs "$(build_utxo_hex "$E4_N" 2) $(build_utxo_hex 1000000000 3)"
@@ -672,7 +691,7 @@ write_getRewardUTXOs "$(build_utxo_hex "$E4_N" 2)"
 run_tracker 1 --backfill "$TX_ND" 4 --assert-no-delegators
 assert_eq "flag + 1 output == E: exit 0" "0" "$LAST_RC"
 assert_eq "flag + 1 output == E: exactly one row appended" "$((PRE_ND_LINES + 1))" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
-ND_ROW="$(tail -n 1 "$REWARDS_HISTORY")"
+ND_ROW="$([ -f "$REWARDS_HISTORY" ] && tail -n 1 "$REWARDS_HISTORY" || echo '')"
 assert_eq "flag row: split_known true, self == total, fee 0" "true $E4_METAL 0" "$(echo "$ND_ROW" | jq -r '"\(.split_known) \(.self_reward_metal) \(.fee_income_metal)"')"
 assert_eq "flag row: split_basis records operator testimony + the sanity check + the band applied" "operator-asserted-no-delegators+self-sanity(0.25)" "$(echo "$ND_ROW" | jq -r '.split_basis')"
 run_tracker 1 --backfill "$TX_ND" 4 --assert-no-delegators
@@ -724,26 +743,29 @@ cat > "$UPTIME_CYCLES_JSON" <<JSON
 JSON
 write_getCurrentValidators "$TX3" "$CYCLE2_END" "$CYCLE3_END" "2000000000000" "3.0" "[]" "$NEXT_POTENTIAL_N"
 write_getRewardUTXOs ""
-NTFY_LINES_BEFORE_ZERO=$(wc -l < "$NTFY_LOG" | tr -d ' ')
-PRE_ZERO_LINES=$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')
+NTFY_LINES_BEFORE_ZERO=$([ -f "$NTFY_LOG" ] && wc -l < "$NTFY_LOG" | tr -d ' ' || echo 0)
+PRE_ZERO_LINES=$([ -f "$REWARDS_HISTORY" ] && wc -l < "$REWARDS_HISTORY" | tr -d ' ' || echo 0)
 run_tracker 1
 assert_eq "zero-reward maturity run exits 0" "0" "$LAST_RC"
 assert_eq "rewards-history.jsonl grew by exactly 1 line" "$((PRE_ZERO_LINES + 1))" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
-LINE3_JSON="$(tail -n 1 "$REWARDS_HISTORY")"
+LINE3_JSON="$([ -f "$REWARDS_HISTORY" ] && tail -n 1 "$REWARDS_HISTORY" || echo '')"
 assert_eq "zero-reward line: cycle_n=8" "8" "$(echo "$LINE3_JSON" | jq -r '.cycle_n')"
 assert_eq "zero-reward line: reward_metal=0 (jq-normalized, not 0E-9)" "0" "$(echo "$LINE3_JSON" | jq -r '.reward_metal')"
 assert_eq "zero-reward line: add_validator_tx=TX2" "$TX2" "$(echo "$LINE3_JSON" | jq -r '.add_validator_tx')"
 assert_eq "zero-reward line (v2): split_known true, self 0, fee 0 (plain 0, not 0E-9)" "true 0 0" "$(echo "$LINE3_JSON" | jq -r '"\(.split_known) \(.self_reward_metal) \(.fee_income_metal)"')"
 assert_eq "zero-reward line (v2): split_basis zero-outputs" "zero-outputs" "$(echo "$LINE3_JSON" | jq -r '.split_basis')"
 
-ZERO_PUSH="$(tail -n +"$((NTFY_LINES_BEFORE_ZERO + 1))" "$NTFY_LOG")"
+ZERO_PUSH="$([ -f "$NTFY_LOG" ] && tail -n +"$((NTFY_LINES_BEFORE_ZERO + 1))" "$NTFY_LOG" || echo '')"
 assert_true "zero-reward push recorded" "$([ -n "$ZERO_PUSH" ] && echo 1 || echo 0)"
 assert_true "zero-reward push title carries no 🎉" "$(printf '%s' "$ZERO_PUSH" | grep -q '🎉' && echo 0 || echo 1)"
 # Same cumulative-first ordering the >0 push enforces above (operator's
 # requirement) — a 0-METAL cycle still leads with 累積, with the zero delta
 # and the uptime warning folded into the parenthetical tail.
 ZERO_BODY="$TMP/record/zero-body.txt"
-printf '%s\n' "$ZERO_PUSH" | tail -n +2 | grep -v '^Priority:\|^Title:\|^Tags:\|^Content-Type:\|^Authorization:' > "$ZERO_BODY"
+# Same bare-pipeline hazard as the maturity body above: an empty
+# $ZERO_PUSH makes grep -v select nothing (exit 1) and pipefail + set -e
+# would abort here. Empty push -> empty body file -> clean FAILs below.
+[ -n "$ZERO_PUSH" ] && { printf '%s\n' "$ZERO_PUSH" | tail -n +2 | grep -v '^Priority:\|^Title:\|^Tags:\|^Content-Type:\|^Authorization:' > "$ZERO_BODY"; } || : > "$ZERO_BODY"
 ZERO_LAYOUT_OK=$(python3 - "$ZERO_BODY" <<'PY'
 import re, sys
 b = open(sys.argv[1], encoding="utf-8").read()
@@ -789,7 +811,7 @@ else
 JSON
 	write_getCurrentValidators "$TX4" "$CYCLE3_END" "$CYCLE4_END" "2000000000000" "3.0" "[]" "$NEXT_POTENTIAL_N"
 	write_getRewardUTXOs ""
-	NTFY_LINES_BEFORE_MUTANT=$(wc -l < "$NTFY_LOG" | tr -d ' ')
+	NTFY_LINES_BEFORE_MUTANT=$([ -f "$NTFY_LOG" ] && wc -l < "$NTFY_LOG" | tr -d ' ' || echo 0)
 	set +e
 	STUB_FIXTURE_DIR="$FIX_DIR" STUB_RECORD_DIR="$TMP/record" PATH="$TMP/bin:$PATH" \
 		METALGO_RPC="http://127.0.0.1:9650" VALIDATOR_JSON="$VALIDATOR_JSON" \
@@ -799,7 +821,7 @@ JSON
 	ZERO_MUTANT_RC=$?
 	set -e
 	assert_eq "zero-reward mutant ran to completion (rc=0, not crashed)" "0" "$ZERO_MUTANT_RC"
-	MUTANT_ZERO_PUSH="$(tail -n +"$((NTFY_LINES_BEFORE_MUTANT + 1))" "$NTFY_LOG")"
+	MUTANT_ZERO_PUSH="$([ -f "$NTFY_LOG" ] && tail -n +"$((NTFY_LINES_BEFORE_MUTANT + 1))" "$NTFY_LOG" || echo '')"
 	if printf '%s' "$MUTANT_ZERO_PUSH" | grep -q '🎉'; then
 		PASS=$((PASS + 1))
 		printf '  PASS  mutant (REWARD_IS_ZERO guard disabled) sends the celebratory 🎉 push for a 0-METAL cycle — the guard is load-bearing\n'

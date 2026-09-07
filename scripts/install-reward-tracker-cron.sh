@@ -91,7 +91,8 @@ read -r -d '' EXPECTED <<CRON || true
 # where that is certain — see reward-tracker.sh's own header), record it
 # append-only to /var/lib/freedom-yield/rewards-history.jsonl, push one
 # "🎉 cycle reward" ntfy notification on maturity, and regenerate the
-# four-line morning-digest block daily-status.sh's morning slot includes.
+# six-line (three in the fallback) phone-width morning-digest block
+# daily-status.sh's morning slot includes.
 #
 # Why this matters here: this is the only automated observer of confirmed
 # validator + delegation-fee reward income for this project (Constitution
@@ -154,5 +155,5 @@ fi
 echo "installed: ${CRON_TARGET} (daily 22:35 UTC = 07:35 JST)"
 echo "alerts:    high-priority ntfy push only when a tracked cycle actually matures (zero otherwise)"
 echo "ledger:    /var/lib/freedom-yield/rewards-history.jsonl (append-only)"
-echo "digest:    /var/lib/freedom-yield/reward-digest-line.txt (four-line block, regenerated every run; consumed by daily-status.sh's morning slot)"
+echo "digest:    /var/lib/freedom-yield/reward-digest-line.txt (six-line phone-width block, three in the fallback; regenerated every run; consumed by daily-status.sh's morning slot)"
 echo "note:      run AFTER scripts/install-host-log-dir.sh + FY_STATE_DIR must be writable by 'deploy' (default /var/lib/freedom-yield, shared with uptime-history.sh)"
