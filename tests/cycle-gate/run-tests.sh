@@ -572,7 +572,11 @@ ln -s "${REPO_ROOT}/scripts/check-anomalies.sh" "${TMP_REPO_BASE}/scripts/check-
 # it, so the isolated REPO_BASE needs it too. FY_LIVE stays unset: this case
 # asserts the cycle-gate suppression marker, and the script must reach that
 # consultation without performing any production side effect.
-ln -s "${REPO_ROOT}/scripts/lib/side-effects.sh" "${TMP_REPO_BASE}/scripts/lib/side-effects.sh"
+# All of scripts/lib/, not a hand-picked file: check-anomalies.sh also
+# sources scripts/lib/web-probe.sh (2026-09-24).
+for lib in "${REPO_ROOT}"/scripts/lib/*.sh; do
+	ln -s "$lib" "${TMP_REPO_BASE}/scripts/lib/$(basename "$lib")"
+done
 echo '{}' > "${TMP_REPO_BASE}/public/api/validator.json"
 OUT="$(FY_STATE_DIR="${STATE_DIR}" \
 	METALGO_RPC="http://127.0.0.1:${PORT}" \

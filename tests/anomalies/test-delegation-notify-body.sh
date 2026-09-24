@@ -166,7 +166,10 @@ build_sandbox() {
 	rm -rf "$S"; : >"$LOG"
 	mkdir -p "${S}/scripts/lib" "${S}/public/api" "${S}/state/locks"
 	cp "$script_src" "${S}/scripts/check-anomalies.sh"
-	cp "${REPO}/scripts/lib/side-effects.sh" "${S}/scripts/lib/side-effects.sh"
+	# scripts/lib/ is mirrored as a WHOLE DIRECTORY: check-anomalies.sh sources
+	# side-effects.sh AND web-probe.sh, and naming files one by one is the bug
+	# tests/side-effects-callers/test-monitoring-side-effects.sh mk_repo records.
+	cp -R "${REPO}/scripts/lib/." "${S}/scripts/lib/"
 	# TAGS is recorded FIRST and BODY LAST: the bodies are multi-line, so
 	# actual_body() reads from BODY<< to EOF and anything appended after it
 	# would be swallowed into the body.

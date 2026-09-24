@@ -591,7 +591,10 @@ DELEGATE_VAR_RE='(bash|sh|exec)[[:space:]]+"?\$\{?(NOTIFY|FYD_NOTIFY|ANCHOR_NOTI
 # match at all — see WRITE_RE below), but present so a future regression
 # that DOES introduce a raw redirect gets caught instead of silently
 # passing G4 for a name this list never knew about.
-DURABLE='STATE_FILE|PREV_FILE|HIST_JSONL|MISSING_MARKER|OUT_PUBLIC|COUNTER_FILE|CONTENTION_COUNTER|DELEGATOR_EVENTS_LOG|quar_target|REWARDS_HISTORY|TRACKER_STATE|DIGEST_FILE'
+# WEB_DIAG_LOG|WEB_BLIP_LOG added 2026-09-24 for check-anomalies.sh's public-site
+# probe logs: both are appended through fyd_live_write today, and the Part 4
+# mutation below proves a raw redirect into either would be caught.
+DURABLE='STATE_FILE|PREV_FILE|HIST_JSONL|MISSING_MARKER|OUT_PUBLIC|COUNTER_FILE|CONTENTION_COUNTER|DELEGATOR_EVENTS_LOG|quar_target|REWARDS_HISTORY|TRACKER_STATE|DIGEST_FILE|WEB_DIAG_LOG|WEB_BLIP_LOG'
 DURABLE_DIR='STATE_DIR|QUAR_DIR|LOCK_DIR'
 WRITE_RE="(>>?[[:space:]]*\"?\\\$\{?(${DURABLE}))|(\\b(mv|cp|rm|chmod|touch)\\b[^|;&]*\\\$\{?(${DURABLE})\\}?)|(\\b(mkdir|rm)\\b[^|;&]*\\\$\{?(${DURABLE_DIR})\\}?)"
 
@@ -675,6 +678,14 @@ mutate "G4 — a gated baseline write reverts to a raw redirect" \
 mutate "G4 — a gated ledger append reverts to a raw redirect" \
 	"${SCRIPTS}/node-health-daily.sh" \
 	's@^printf .*fyd_live_write.*@echo "$ENTRY" >> "$HIST_JSONL"@'
+
+mutate "G4 — the web-probe diagnostics append reverts to a raw redirect" \
+	"${SCRIPTS}/check-anomalies.sh" \
+	's@^    | fyd_live_write --append "the web-probe diagnostics block" "\$WEB_DIAG_LOG"@    >> "$WEB_DIAG_LOG"@'
+
+mutate "G4 — the web blip-log append reverts to a raw redirect" \
+	"${SCRIPTS}/check-anomalies.sh" \
+	's@^    | fyd_live_write --append "the web incident blip-log line" "\$WEB_BLIP_LOG"@    >> "$WEB_BLIP_LOG"@'
 
 mutate "G4/G5 — the hard-refusal marker is removed from anomaly-state-init" \
 	"${SCRIPTS}/anomaly-state-init.sh" \
