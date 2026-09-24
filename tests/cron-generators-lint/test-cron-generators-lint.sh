@@ -241,6 +241,27 @@ printf '%s' "$RT_REPEAT_OUT" | grep -q 'already up to date' \
 	&& ok "install-reward-tracker-cron.sh: re-running with no change is idempotent (no-op)" \
 	|| bad "install-reward-tracker-cron.sh: re-run did not report idempotent no-op" "$RT_REPEAT_OUT"
 
+# ---- install-anomalies-web-origin-env.sh -------------------------------------
+# Not a whole-file generator: it edits the metal-anomalies file that
+# vps-bootstrap.sh generates, adding the WEB_ORIGIN_IP env line (web-probe
+# design spec 2026-09-24 §3.6). So lint the COMPOSITION — bootstrap's rendered
+# metal-anomalies with the installer applied — which is exactly the file the
+# validator host ends up carrying. 192.0.2.10 is an RFC 5737 doc address.
+WO_OUT="$WORK/web-origin-env-cron-file"
+render_bootstrap_cron metal-anomalies > "$WO_OUT"
+FYD_CRON_TARGET="$WO_OUT" FYD_BACKUP_DIR="$WORK/wo-backups" \
+	bash "${REPO_ROOT}/scripts/install-anomalies-web-origin-env.sh" --origin-ip=192.0.2.10 >/dev/null 2>&1
+RC=$?
+[ "$RC" -eq 0 ] && grep -qxF 'WEB_ORIGIN_IP=192.0.2.10' "$WO_OUT" \
+	&& ok "generate: install-anomalies-web-origin-env.sh adds WEB_ORIGIN_IP to bootstrap's metal-anomalies" \
+	|| bad "generate: install-anomalies-web-origin-env.sh adds WEB_ORIGIN_IP to bootstrap's metal-anomalies (rc=$RC)"
+lint_file_is_clean "install-anomalies-web-origin-env.sh (on vps-bootstrap.sh:metal-anomalies)" "$WO_OUT"
+WO_REPEAT_OUT="$(FYD_CRON_TARGET="$WO_OUT" FYD_BACKUP_DIR="$WORK/wo-backups" \
+	bash "${REPO_ROOT}/scripts/install-anomalies-web-origin-env.sh" --origin-ip=192.0.2.10 2>&1)"
+printf '%s' "$WO_REPEAT_OUT" | grep -q 'no change' \
+	&& ok "install-anomalies-web-origin-env.sh: re-running with the same value is idempotent (no-op)" \
+	|| bad "install-anomalies-web-origin-env.sh: re-run did not report idempotent no-op"
+
 
 # =============================================================================
 # Group C: install-metal-anchor-publish-health-cron.sh — no FYD_* override
