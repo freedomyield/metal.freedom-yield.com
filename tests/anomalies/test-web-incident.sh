@@ -62,6 +62,16 @@ assert_has() {   # <label> <fixed string> <text>
 		printf '  FAIL  %s — missing [%s]\n' "$1" "$2"
 	fi
 }
+assert_not_has() {   # <label> <fixed string> <text>  — I1: no origin-IP leak
+	if grep -qF -- "$2" <<<"$3"; then
+		FAIL=$((FAIL + 1))
+		FAILURES+=("$1 (unexpectedly contains '$2')")
+		printf '  FAIL  %s — unexpectedly contains [%s]\n' "$1" "$2"
+	else
+		PASS=$((PASS + 1))
+		printf '  PASS  %s\n' "$1"
+	fi
+}
 assert_re() {    # <label> <ERE> <text>
 	if grep -qE -- "$2" <<<"$3"; then
 		PASS=$((PASS + 1))
@@ -214,7 +224,7 @@ run_check() {
 	env PATH="${BIN}:${PATH}" FY_LIVE=1 NTFY_TAGS= \
 		NOTIFY= FYD_NOTIFY= ANCHOR_NOTIFY= WATCH_NOTIFY= FY_STATE_DIR= \
 		ANOMALY_STATE_DIR="${S}/state" METALGO_API="http://127.0.0.1:1" \
-		WEB_URL="https://example.invalid" WEB_ORIGIN_IP="192.0.2.10" \
+		WEB_URL="https://example.invalid" WEB_ORIGIN_IP="${WEB_ORIGIN_IP_VALUE:-192.0.2.10}" \
 		WEB_DIAG_LOG= WEB_BLIP_LOG= FRESH_REPROBE_SLEEP=0 \
 		STUB_LOG="$STUB_LOG" CF_QUEUE="$CF_QUEUE" DIRECT_CODE_FILE="$DIRECT_CODE_FILE" \
 		NOTIFY_RC_FILE="$NOTIFY_RC_FILE" NOTIFY_DIR="$NOTIFY_DIR" \
@@ -241,6 +251,9 @@ blip_lines()    { count_in 'duration_s=' "$BLIP_LOG"; }
 OUTAGE_TITLE='公開サイトが応答しない (5 分以上継続)'
 CF_TITLE='公開サイト: Cloudflare 経路で失敗継続 (origin は正常)'
 RECOVERY_TITLE='公開サイト復旧'
+# I1: the fixed WEB_ORIGIN_IP run_check() sets below — no push body, in any
+# class (cf_path / origin_or_path / unknown / recovery), may ever contain it.
+WEB_ORIGIN_IP_VALUE='192.0.2.10'
 
 echo "=== healthy steady state: one request, nothing else ==="
 new_sandbox steady
@@ -307,6 +320,7 @@ assert_has "c3 run2: body carries the duration" '継続: 約 ' "$B"
 assert_has "c3 run2: body quotes the P_cf timing" 'Cloudflare 経由: http_code=000' "$B"
 assert_has "c3 run2: body quotes the P_direct timing" 'origin 直接: http_code=000' "$B"
 assert_has "c3 run2: body points at the diagnostics file" "診断: ${DIAG_LOG}" "$B"
+assert_not_has "c3 run2 (I1): body carries no origin IP (origin_or_path)" "$WEB_ORIGIN_IP_VALUE" "$B"
 assert_eq "c3 run2: .web=warn" '"warn"' "$(st '.web')"
 assert_eq "c3 run2: pushed=true runs=2" '{"pushed":true,"runs":2}' "$(st '.web_incident | {pushed, runs}')"
 run_check; rc=$?
@@ -325,6 +339,7 @@ assert_eq "c5: recovery title" "$RECOVERY_TITLE" "$(push_title 1)"
 B="$(push_body 1)"
 assert_has "c5: body carries the duration as an observation bound" '継続: 約 10 分 (5 分刻みの観測)' "$B"
 assert_has "c5: body carries the classes seen" '観測した分類: origin 停止 または シンガポール経路 (未判別)' "$B"
+assert_not_has "c5 (I1): body carries no origin IP (recovery)" "$WEB_ORIGIN_IP_VALUE" "$B"
 assert_eq "c5: .web back to ok" '"ok"' "$(st '.web')"
 assert_eq "c5: incident cleared" null "$(st '.web_incident')"
 assert_eq "c5: one blip line" 1 "$(blip_lines)"
@@ -343,6 +358,7 @@ assert_eq "c4 run2: Cloudflare title" "$CF_TITLE" "$(push_title 1)"
 B="$(push_body 1)"
 assert_has "c4 run2: body names the class" '分類: Cloudflare 経路 (origin は正常)' "$B"
 assert_has "c4 run2: body carries the cf-ray colo" 'cf-ray colo: SIN' "$B"
+assert_not_has "c4 run2 (I1): body carries no origin IP (cf_path)" "$WEB_ORIGIN_IP_VALUE" "$B"
 assert_eq "c4 run2: .web=warn" '"warn"' "$(st '.web')"
 
 echo "=== case 6: outage push fails → pushed stays false, next run pushes ==="
@@ -364,6 +380,30 @@ assert_eq "c6 run3: outage title" "$OUTAGE_TITLE" "$(push_title 1)"
 assert_eq "c6 run3: pushed=true" true "$(st '.web_incident.pushed')"
 assert_eq "c6 run3: .web=warn" '"warn"' "$(st '.web')"
 
+echo "=== case 6b (I2): recovery push fails → .web/web_incident held, next run recovers ==="
+new_sandbox c6b
+set_cf 000 000; set_direct 000
+run_check
+set_cf 000
+run_check
+assert_eq "c6b setup: outage push delivered, .web=warn" '"warn"' "$(st '.web')"
+assert_eq "c6b setup: web_incident pushed=true" true "$(st '.web_incident.pushed')"
+set_cf 200; set_notify_rc 2
+run_check; rc=$?
+assert_eq "c6b run3: rc=6 (recovery notify permanently failed)" 6 "$rc"
+assert_eq "c6b run3: two attempts (rc 2 is retried once)" 2 "$(pushes)"
+assert_eq "c6b run3: .web stays warn (K-3: no commit on a failed push)" '"warn"' "$(st '.web')"
+assert_eq "c6b run3: web_incident is kept (not cleared)" no "$([ "$(st '.web_incident')" = null ] && echo yes || echo no)"
+assert_eq "c6b run3: 0 blip lines (recovery not yet delivered)" 0 "$(blip_lines)"
+set_notify_rc 0
+run_check; rc=$?
+assert_eq "c6b run4: rc=0" 0 "$rc"
+assert_eq "c6b run4: exactly one recovery push" 1 "$(pushes)"
+assert_eq "c6b run4: recovery title" "$RECOVERY_TITLE" "$(push_title 1)"
+assert_eq "c6b run4: exactly one blip line" 1 "$(blip_lines)"
+assert_eq "c6b run4: .web=ok" '"ok"' "$(st '.web')"
+assert_eq "c6b run4: incident cleared" null "$(st '.web_incident')"
+
 echo "=== case 7: WEB_ORIGIN_IP unset → P_direct skipped, class unknown, high push ==="
 new_sandbox c7
 set_cf 000 000
@@ -377,7 +417,9 @@ run_check WEB_ORIGIN_IP=; rc=$?
 assert_eq "c7 run2: rc=0" 0 "$rc"
 assert_eq "c7 run2: priority high" high "$(push_prio 1)"
 assert_eq "c7 run2: outage title" "$OUTAGE_TITLE" "$(push_title 1)"
-assert_has "c7 run2: body names the class" '分類: 判別不能 (origin 直接確認なし)' "$(push_body 1)"
+B="$(push_body 1)"
+assert_has "c7 run2: body names the class" '分類: 判別不能 (origin 直接確認なし)' "$B"
+assert_not_has "c7 run2 (I1): body carries no origin IP (unknown)" "$WEB_ORIGIN_IP_VALUE" "$B"
 
 echo "=== case 7b: a malformed WEB_ORIGIN_IP is refused, not used ==="
 new_sandbox c7b

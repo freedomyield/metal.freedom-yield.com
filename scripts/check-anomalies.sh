@@ -723,12 +723,18 @@ if [ "$OBS_WEB_STATUS" != "200" ]; then
 
   WEB_CF_LAST="${WEB_PROBE_DIR}/cf1"
   [ -f "${WEB_PROBE_DIR}/cf2.w" ] && WEB_CF_LAST="${WEB_PROBE_DIR}/cf2"
-  WEB_CF_LINE=$(web_timing_line "$WEB_CF_LAST")
+  # remote_ip is stripped from both lines before they can reach a push body
+  # (below): the diagnostics block above already captured the raw .w files
+  # verbatim (host-only log), so nothing is lost there. P_direct's remote_ip
+  # is WEB_ORIGIN_IP itself — the origin address the whole probe exists to
+  # keep out of any public ntfy.sh push. P_cf's remote_ip gets the same
+  # treatment rather than special-casing which of the two lines is "safe".
+  WEB_CF_LINE=$(web_timing_line "$WEB_CF_LAST" | sed 's/ remote_ip=[^ ]*//')
   WEB_COLO=$(web_cf_colo "${WEB_CF_LAST}.h")
   if [ "$OBS_WEB_DIRECT" = "skipped" ]; then
     WEB_DIRECT_LINE='skipped (WEB_ORIGIN_IP 未設定 または IPv4 でない)'
   else
-    WEB_DIRECT_LINE=$(web_timing_line "${WEB_PROBE_DIR}/direct")
+    WEB_DIRECT_LINE=$(web_timing_line "${WEB_PROBE_DIR}/direct" | sed 's/ remote_ip=[^ ]*//')
   fi
 
   # Diagnostics (spec §3.5): one block per failed observation. A write
