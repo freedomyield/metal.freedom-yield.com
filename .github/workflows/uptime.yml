@@ -45,7 +45,12 @@ jobs:
 
           echo "::group::GET body content check"
           body=$(curl -sS --max-time 15 "$SITE_URL")
-          if ! echo "$body" | grep -q "$EXPECTED_TOKEN"; then
+          # パイプを使わず here-string で渡す。`echo "$body" | grep -q` だと
+          # grep -q がトークン発見で即 exit → body がパイプバッファより大きいと
+          # echo が SIGPIPE で死に、pipefail でパイプ全体が非 0 になり
+          # 「トークンがあるのに missing」と誤報する(2026-09-20/22 の赤)。
+          # tests/uptime-workflow/ がこの行を抽出して回帰を検査している。
+          if ! grep -q -- "$EXPECTED_TOKEN" <<<"$body"; then
             echo "::error::Body missing expected token '$EXPECTED_TOKEN' — site may be defaced or returning stale page"
             exit 1
           fi
