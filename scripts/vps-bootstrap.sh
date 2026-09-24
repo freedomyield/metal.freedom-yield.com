@@ -244,16 +244,11 @@ EOF
   touch /var/log/anomalies.log
   chown "$DEPLOY_USER:$DEPLOY_USER" /var/log/anomalies.log
   chmod 644 /var/log/anomalies.log
-  cat > /etc/logrotate.d/anomalies <<EOF
-/var/log/anomalies.log {
-  daily
-  rotate 7
-  compress
-  missingok
-  notifempty
-  create 644 $DEPLOY_USER $DEPLOY_USER
-}
-EOF
+  # 90-day retention for anomalies.log plus the public-site probe's
+  # diagnostics / blip logs (web-probe design spec 2026-09-24 §3.5). Single
+  # source: the installer also provisions the two web-probe logs
+  # deploy-writable, as the touch/chown above does for anomalies.log.
+  FYD_DEPLOY_USER="$DEPLOY_USER" bash "$DEPLOY_DIR/scripts/install-anomalies-logrotate.sh"
   systemctl restart cron
 }
 
