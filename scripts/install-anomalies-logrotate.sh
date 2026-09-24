@@ -29,21 +29,36 @@
 # "*.bak-<stamp>" sidecar is not on its taboo-extension list, so it would be
 # loaded as a second config for the same logs.
 #
-# Validation context (2026-09-24 fix): `logrotate -d` on the candidate
-# standalone is the WRONG check. On the validator host /var/log is
+# Validation context (2026-09-24 fix, round 1): `logrotate -d` on the
+# candidate standalone is the WRONG check. On the validator host /var/log is
 # `root:syslog 0775` (group-writable), which logrotate treats as insecure
 # UNLESS a `su` directive is in effect — and the host's `su root adm` lives
 # in the global section of /etc/logrotate.conf, not in this snippet. A
 # standalone check never sees that global `su`, so it fails with "parent
 # directory has insecure permissions" even though the real daily run (which
 # always goes through logrotate.conf's `include /etc/logrotate.d`) rotates
-# fine. So the candidate is validated joined to the host's main config's
-# global directives (every `include` line dropped, so validation never
-# depends on the state of any other snippet in /etc/logrotate.d), in a
-# throwaway temp file, against a throwaway state file — the installed
-# snippet content itself is unaffected; only how it is checked changes. If
-# the main config is missing, validation falls back to the candidate alone
-# (the pre-fix behavior).
+# fine.
+#
+# "Every global directive in the main config" is ALSO the wrong join,
+# because logrotate applies directives top-to-bottom and only in lexical
+# scope: a directive placed AFTER `include /etc/logrotate.d` does not apply
+# to files pulled in by that include (verified empirically — `su` placed
+# after the include still leaves those files "insecure"; a stanza placed
+# after the include, e.g. some hosts' trailing `/var/log/wtmp {...}`, is
+# also never in scope for our snippet). So the candidate is validated
+# joined only to the main config's lines that appear BEFORE the include
+# line that pulls in the candidate's own directory (`dirname` of TARGET —
+# `/etc/logrotate.d` in production); any OTHER `include` line before that
+# point is also dropped, since it would only pull in unrelated snippets we
+# have no reason to validate against. Everything from the matching include
+# line onward is never part of the join. If no include of the target's
+# directory is found in the main config at all, this falls back to
+# treating every non-include line as in scope (better than skipping
+# validation outright over an atypically-structured main config). Either
+# way this all happens in a throwaway temp file, against a throwaway state
+# file — the installed snippet content itself is unaffected; only how it is
+# checked changes. If the main config is missing entirely, validation falls
+# back further, to the candidate alone (the pre-2026-09-24 behavior).
 #
 # Usage (validator host, as root):
 #   sudo bash scripts/install-anomalies-logrotate.sh
@@ -107,6 +122,7 @@ ${LOG_DIR}/anomalies.log ${LOG_DIR}/anomalies-web-diag.log ${LOG_DIR}/anomalies-
 CONF
 
 MAIN_CONF="${FYD_LOGROTATE_MAIN_CONF:-/etc/logrotate.conf}"
+TARGET_DIR="$(dirname "$TARGET")"
 
 TMP="$(mktemp)"
 VALIDATE_TMP="$(mktemp)"
@@ -115,22 +131,53 @@ printf '%s\n' "$EXPECTED" >"$TMP"
 
 # Parse check with logrotate itself (debug mode changes nothing; a scratch
 # state file keeps /var/lib/logrotate/status untouched) — but not the
-# candidate alone. It is validated in the same context the daily run gives
-# it: joined to the host's main config's global directives (see the
-# "Validation context" header comment above for why). Runs for the real
-# target always; for a test-harness target only when FYD_LOGROTATE_MAIN_CONF
-# was explicitly set, so the default sandboxed run (fake `create` owner, no
-# real main config) keeps skipping validation exactly as before.
+# candidate alone, and not the whole main config either. It is validated in
+# the same context the daily run gives it: joined only to the main config's
+# lines that precede its `include` of the candidate's own directory (see
+# the "Validation context" header comment above for why position matters).
+# Runs for the real target always; for a test-harness target only when
+# FYD_LOGROTATE_MAIN_CONF was explicitly set, so the default sandboxed run
+# (fake `create` owner, no real main config) keeps skipping validation
+# exactly as before.
 if command -v logrotate >/dev/null 2>&1 \
 	&& { [ "$TARGET" = "$PROD_TARGET" ] || [ -n "${FYD_LOGROTATE_MAIN_CONF:-}" ]; }; then
 	if [ -f "$MAIN_CONF" ]; then
-		grep -Ev '^[[:space:]]*include([[:space:]]|$)' "$MAIN_CONF" >"$VALIDATE_TMP" || true
+		# Line number of the `include <TARGET_DIR>` directive, if any —
+		# exact string match on the include's argument (after trimming
+		# surrounding whitespace), not a path-prefix or glob match.
+		TARGET_INCLUDE_LINE="$(awk -v d="$TARGET_DIR" '
+			{
+				line = $0
+				sub(/^[ \t]+/, "", line)
+				sub(/[ \t]+$/, "", line)
+				if (line ~ /^include[ \t]+/) {
+					arg = line
+					sub(/^include[ \t]+/, "", arg)
+					if (arg == d) { print NR; exit }
+				}
+			}
+		' "$MAIN_CONF")"
+		if [ -n "$TARGET_INCLUDE_LINE" ]; then
+			# Only what precedes that include is in scope for our snippet —
+			# logrotate reads top-to-bottom, so anything after (including
+			# the include line itself, and any trailing host-specific
+			# stanza some main configs put after their
+			# `include /etc/logrotate.d`) never applies to files it pulls
+			# in. Any OTHER include line before that point is still
+			# dropped: it would only pull in unrelated snippets.
+			head -n "$((TARGET_INCLUDE_LINE - 1))" "$MAIN_CONF" \
+				| grep -Ev '^[[:space:]]*include([[:space:]]|$)' >"$VALIDATE_TMP" || true
+		else
+			# No include of our directory found at all — fall back to
+			# treating every non-include line as in scope.
+			grep -Ev '^[[:space:]]*include([[:space:]]|$)' "$MAIN_CONF" >"$VALIDATE_TMP" || true
+		fi
 		printf '%s\n' "$EXPECTED" >>"$VALIDATE_TMP"
 	else
 		cp "$TMP" "$VALIDATE_TMP"
 	fi
 	if ! logrotate -d -s "${VALIDATE_TMP}.state" "$VALIDATE_TMP" >/dev/null 2>&1; then
-		echo "ERROR: generated config failed 'logrotate -d' (validated against ${MAIN_CONF}'s global directives) — nothing changed" >&2
+		echo "ERROR: generated config failed 'logrotate -d' (validated against ${MAIN_CONF}'s directives preceding its include of ${TARGET_DIR}) — nothing changed" >&2
 		logrotate -d -s "${VALIDATE_TMP}.state" "$VALIDATE_TMP" 2>&1 | tail -5 >&2 || true
 		exit 4
 	fi

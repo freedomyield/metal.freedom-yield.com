@@ -126,17 +126,27 @@ else
 	skip "T8 logrotate -d" "logrotate not installed here (verified on the validator host at rollout)"
 fi
 
-# --- T9 validation runs joined with the host's main config, not standalone --------
-# Reproduces the validator host (2026-09-24 fix): the log dir is
+# --- T9/T10/T11: validation is joined with the host's main config POSITIONALLY ----
+# Reproduces the validator host (2026-09-24 fix, round 1): the log dir is
 # group-writable by a group that is not "root" (/var/log there is
 # root:syslog 0775), which logrotate treats as insecure UNLESS a `su`
 # directive is in effect. On the host that `su root adm` lives in
-# /etc/logrotate.conf's global section, not in this snippet, so a standalone
-# `logrotate -d` on the candidate alone false-positives — this is also true
-# of the config's `include` line: it must NOT be honored during validation,
-# so a broken sibling snippet can never block this installer.
-if command -v logrotate >/dev/null 2>&1; then
-	mkdir -p "$WORK/t9/log" "$WORK/t9/broken-includes"
+# /etc/logrotate.conf's global section, BEFORE its `include /etc/logrotate.d`
+# — and logrotate applies directives top-to-bottom, so only what precedes an
+# `include` applies to what it pulls in. T9 is the "found, before" case
+# (must pass); T10 moves `su` to AFTER the include (must fail, matching real
+# logrotate); T11 adds a trailing broken stanza after the include (must not
+# affect validation, since it's never in scope either).
+#
+# All three share one sandbox shape: <base>/log (group-writable, the log
+# dir) and <base>/logrotate.d (the directory the candidate is installed
+# into AND that the main config's `include` names — mirroring
+# /var/log + /etc/logrotate.d exactly), with a broken sibling snippet
+# pre-seeded in <base>/logrotate.d so a real `include` of that directory
+# would fail hard.
+t9_family_setup() {
+	base="$WORK/$1"
+	mkdir -p "$base/log" "$base/logrotate.d"
 	TESTUSER="$(id -un)"
 	TESTGRP="$(id -gn)"
 	# Must not be "root": logrotate only calls a group-writable dir insecure
@@ -144,74 +154,71 @@ if command -v logrotate >/dev/null 2>&1; then
 	# defeat the reproduction when this suite runs as root (as the task's
 	# docker instructions do).
 	[ "$TESTGRP" = "root" ] && TESTGRP="nogroup"
-
-	chmod 0775 "$WORK/t9/log"
-	chgrp "$TESTGRP" "$WORK/t9/log"
-
-	# A stanza that fails validation hard (unresolvable create user) if it is
-	# ever actually read.
-	cat >"$WORK/t9/broken-includes/broken" <<BROKEN
-${WORK}/t9/log/does-not-exist-either.log {
+	chmod 0775 "$base/log"
+	chgrp "$TESTGRP" "$base/log"
+	# A sibling stanza that fails validation hard (unresolvable create user)
+	# if the directory it lives in is ever actually included.
+	cat >"$base/logrotate.d/broken" <<BROKEN
+${base}/log/does-not-exist-either.log {
   create 644 totally-bogus-nonexistent-user totally-bogus-nonexistent-group
 }
 BROKEN
+}
 
-	# su targets the CURRENT user, not a literal "root": logrotate can only
-	# switch euid/egid to an identity the invoking process can actually hold
-	# (a no-op switch to itself, or anything at all if already root). On the
-	# real host the daily cron job already runs as root, so its `su root
-	# adm` is exactly this same pattern — a same-euid switch plus an egid
-	# change to a group root can always assume.
-	cat >"$WORK/t9/main.conf" <<MAINCONF
-su ${TESTUSER} ${TESTGRP}
-weekly
-rotate 4
-create
-compress
-include ${WORK}/t9/broken-includes
-MAINCONF
-
-	EXPECTED9="$(cat <<CONF
+t9_family_expected() {
+	cat <<CONF
 # Managed by scripts/install-anomalies-logrotate.sh — edit the installer, not this file.
 # 90-day retention: web-probe design spec 2026-09-24 §3.5 (G5).
-${WORK}/t9/log/anomalies.log ${WORK}/t9/log/anomalies-web-diag.log ${WORK}/t9/log/anomalies-web-blips.log {
+${1}/log/anomalies.log ${1}/log/anomalies-web-diag.log ${1}/log/anomalies-web-blips.log {
   daily
   rotate 90
   compress
   missingok
   notifempty
-  create 644 ${TESTUSER} ${TESTUSER}
+  create 644 ${2} ${2}
 }
 CONF
-)"
+}
 
-	OUT="$(FYD_LOGROTATE_TARGET="$WORK/t9/anomalies" FYD_LOG_DIR="$WORK/t9/log" FYD_DEPLOY_USER="$TESTUSER" \
-		FYD_BACKUP_DIR="$WORK/t9-backups" FYD_LOGROTATE_MAIN_CONF="$WORK/t9/main.conf" bash "$INSTALLER" 2>&1)"; RC=$?
+if command -v logrotate >/dev/null 2>&1; then
+	# === T9: su BEFORE the include of the candidate's directory → PASS ===
+	t9_family_setup t9
+	# su targets the CURRENT user, not a literal "root": logrotate can only
+	# switch euid/egid to an identity the invoking process can actually hold
+	# (a no-op switch to itself, or anything at all if already root). On the
+	# real host the daily cron job already runs as root, so its `su root
+	# adm` is exactly this same pattern.
+	cat >"$base/main.conf" <<MAINCONF
+su ${TESTUSER} ${TESTGRP}
+weekly
+rotate 4
+create
+compress
+include ${base}/logrotate.d
+MAINCONF
+	EXPECTED9="$(t9_family_expected "$base" "$TESTUSER")"
+
+	OUT="$(FYD_LOGROTATE_TARGET="$base/logrotate.d/anomalies" FYD_LOG_DIR="$base/log" FYD_DEPLOY_USER="$TESTUSER" \
+		FYD_BACKUP_DIR="$WORK/t9-backups" FYD_LOGROTATE_MAIN_CONF="$base/main.conf" bash "$INSTALLER" 2>&1)"; RC=$?
 	[ "$RC" -eq 0 ] \
-		&& ok "T9 install succeeds on a group-writable log dir whose safety comes only from the main config's su" \
-		|| bad "T9 install succeeds on a group-writable log dir whose safety comes only from the main config's su" "rc=$RC $OUT"
-	[ "$(cat "$WORK/t9/anomalies" 2>/dev/null)" = "$EXPECTED9" ] \
+		&& ok "T9 (su before include) install succeeds on a group-writable log dir whose safety comes only from the main config's su" \
+		|| bad "T9 (su before include) install succeeds" "rc=$RC $OUT"
+	[ "$(cat "$base/logrotate.d/anomalies" 2>/dev/null)" = "$EXPECTED9" ] \
 		&& ok "T9 installed snippet is still exactly the 90-day contract (validation context change doesn't alter it)" \
-		|| bad "T9 installed snippet is still exactly the 90-day contract" "$(diff <(printf '%s\n' "$EXPECTED9") "$WORK/t9/anomalies" 2>&1 | head -5)"
+		|| bad "T9 installed snippet is still exactly the 90-day contract" "$(diff <(printf '%s\n' "$EXPECTED9") "$base/logrotate.d/anomalies" 2>&1 | head -5)"
 	for name in anomalies-web-diag.log anomalies-web-blips.log; do
-		[ -f "$WORK/t9/log/$name" ] \
-			&& ok "T9 ${name} provisioned" \
-			|| bad "T9 ${name} provisioned"
+		[ -f "$base/log/$name" ] && ok "T9 ${name} provisioned" || bad "T9 ${name} provisioned"
 	done
 
 	# Proof this scenario is real, not vacuous: the exact installed candidate,
 	# checked fully standalone (no main config at all), must fail on this
-	# group-writable dir — otherwise T9 passing would prove nothing about the
-	# fix. logrotate's insecure-permissions check is skipped when the
-	# checking process is itself a member of the directory's group (no
-	# escalation risk), so this only reproduces when run as root: root has
-	# no such membership in a group it didn't create for itself (e.g.
-	# "nogroup"), which is exactly why the real host — root's cron running
-	# logrotate against a syslog-group /var/log — needs the main config's
-	# `su` at all. Non-root can't construct that condition (chgrp to a
-	# foreign group requires root), so it's skipped rather than asserted.
+	# group-writable dir. Root-only: logrotate's insecure-permissions check
+	# is skipped when the checking process is itself a member of the
+	# directory's group (no escalation risk), so a non-root process can
+	# never construct a directory whose group it isn't a member of (chgrp to
+	# a foreign group requires root) — verified empirically, not assumed.
 	if [ "$(id -u)" -eq 0 ]; then
-		if logrotate -d -s "$WORK/t9-standalone.state" "$WORK/t9/anomalies" >/tmp/t9-standalone.out 2>&1; then
+		if logrotate -d -s "$WORK/t9-standalone.state" "$base/logrotate.d/anomalies" >/tmp/t9-standalone.out 2>&1; then
 			bad "T9 sanity: the installed candidate is insecure when checked standalone (no su in scope)" \
 				"expected logrotate -d to fail standalone but it passed"
 		else
@@ -221,20 +228,98 @@ CONF
 		skip "T9 sanity: standalone-insecure reproduction" "needs root (non-root is always a member of its own group, so it can't construct a foreign-group-writable dir)"
 	fi
 
-	# Proof the include line was not honored: had it been read, the broken
-	# sibling snippet above would fail validation hard. Build that "include
-	# honored" variant by hand (the installer's own logic must NOT do this)
-	# and confirm it fails, which — together with T9's rc=0 above — proves
-	# the installer skipped it.
-	cat "$WORK/t9/main.conf" "$WORK/t9/anomalies" >"$WORK/t9-include-honored.conf"
-	if logrotate -d -s "$WORK/t9-include-honored.state" "$WORK/t9-include-honored.conf" >/tmp/t9-include-honored.out 2>&1; then
+	# Proof the include was not honored: the candidate is now physically
+	# installed in the SAME directory as the pre-seeded broken sibling, so
+	# running logrotate natively on the real main.conf (which does contain a
+	# real `include` of that directory) exercises actual logrotate
+	# semantics, not a hand-built approximation. It must fail — and since
+	# the installer's own run above (rc=0) used the identical main.conf and
+	# succeeded, that proves its join never let the include take effect.
+	if logrotate -d -s "$WORK/t9-native-include.state" "$base/main.conf" >/tmp/t9-native-include.out 2>&1; then
 		bad "T9 include line was not honored during validation" \
-			"expected the broken included snippet to fail validation if it were ever read, but it passed"
+			"expected a native logrotate run on the real main.conf (which does include the broken sibling) to fail, but it passed"
 	else
-		ok "T9 include line was not honored during validation (the installer's own run above succeeded only because it drops include lines)"
+		ok "T9 include line was not honored during validation (native run on the real main.conf, which does include the broken sibling, fails; the installer's own run above used the same main.conf and succeeded)"
+	fi
+
+	# === T10: su AFTER the include of the candidate's directory → FAIL, nothing installed ===
+	# Root-only, for the same reason as the "T9 sanity" check above: this
+	# scenario's failure mode IS the insecure-permissions check, which
+	# logrotate skips whenever the checking process is itself a member of
+	# the directory's group. A non-root process's own primary group is
+	# always "trusted" that way, so a non-root run of this exact scenario
+	# would validate successfully with or without su in scope, before or
+	# after the include — it would prove nothing about position. Verified
+	# empirically (see the "Fix round 1" section of the SDD report), not
+	# assumed.
+	if [ "$(id -u)" -eq 0 ]; then
+		t9_family_setup t10
+		cat >"$base/main.conf" <<MAINCONF
+weekly
+rotate 4
+create
+compress
+include ${base}/logrotate.d
+su ${TESTUSER} ${TESTGRP}
+MAINCONF
+
+		OUT="$(FYD_LOGROTATE_TARGET="$base/logrotate.d/anomalies" FYD_LOG_DIR="$base/log" FYD_DEPLOY_USER="$TESTUSER" \
+			FYD_BACKUP_DIR="$WORK/t10-backups" FYD_LOGROTATE_MAIN_CONF="$base/main.conf" bash "$INSTALLER" 2>&1)"; RC=$?
+		[ "$RC" -eq 4 ] \
+			&& ok "T10 (su AFTER include) install refuses (exit 4) — matches real logrotate, which never applies a directive placed after the include to files it pulls in" \
+			|| bad "T10 (su AFTER include) install refuses (exit 4)" "rc=$RC $OUT"
+		[ ! -e "$base/logrotate.d/anomalies" ] \
+			&& ok "T10 nothing installed" \
+			|| bad "T10 nothing installed" "found $base/logrotate.d/anomalies"
+		for name in anomalies-web-diag.log anomalies-web-blips.log; do
+			[ ! -e "$base/log/$name" ] \
+				&& ok "T10 ${name} NOT provisioned (validation failed before provisioning)" \
+				|| bad "T10 ${name} NOT provisioned" "found $base/log/$name"
+		done
+	else
+		skip "T10 (su AFTER include) install refuses (exit 4)" "needs root (non-root is always a member of its own group, so the group-writable dir here is never actually insecure to it, with or without su)"
+		skip "T10 nothing installed" "needs root (see above)"
+		for name in anomalies-web-diag.log anomalies-web-blips.log; do
+			skip "T10 ${name} NOT provisioned" "needs root (see above)"
+		done
+	fi
+
+	# === T11: su BEFORE include, but a broken stanza AFTER include → PASS, unaffected ===
+	t9_family_setup t11
+	cat >"$base/main.conf" <<MAINCONF
+su ${TESTUSER} ${TESTGRP}
+weekly
+rotate 4
+create
+compress
+include ${base}/logrotate.d
+${base}/log/some-other-host-log-does-not-exist.log {
+  create 644 totally-bogus-nonexistent-user totally-bogus-nonexistent-group
+}
+MAINCONF
+	EXPECTED11="$(t9_family_expected "$base" "$TESTUSER")"
+
+	OUT="$(FYD_LOGROTATE_TARGET="$base/logrotate.d/anomalies" FYD_LOG_DIR="$base/log" FYD_DEPLOY_USER="$TESTUSER" \
+		FYD_BACKUP_DIR="$WORK/t11-backups" FYD_LOGROTATE_MAIN_CONF="$base/main.conf" bash "$INSTALLER" 2>&1)"; RC=$?
+	[ "$RC" -eq 0 ] \
+		&& ok "T11 (broken inline stanza after include) install succeeds — the trailing stanza is never in scope" \
+		|| bad "T11 install succeeds despite a broken inline stanza after the include" "rc=$RC $OUT"
+	[ "$(cat "$base/logrotate.d/anomalies" 2>/dev/null)" = "$EXPECTED11" ] \
+		&& ok "T11 installed snippet is still exactly the 90-day contract" \
+		|| bad "T11 installed snippet is still exactly the 90-day contract" "$(diff <(printf '%s\n' "$EXPECTED11") "$base/logrotate.d/anomalies" 2>&1 | head -5)"
+	for name in anomalies-web-diag.log anomalies-web-blips.log; do
+		[ -f "$base/log/$name" ] && ok "T11 ${name} provisioned" || bad "T11 ${name} provisioned"
+	done
+	# Proof the trailing stanza is real (not vacuously harmless): a native
+	# run on the real main.conf (broken trailing stanza included) must fail.
+	if logrotate -d -s "$WORK/t11-native.state" "$base/main.conf" >/tmp/t11-native.out 2>&1; then
+		bad "T11 sanity: the trailing broken stanza would fail validation if it were in scope" \
+			"expected a native logrotate run on the real main.conf to fail, but it passed"
+	else
+		ok "T11 sanity: the trailing broken stanza would fail validation if it were in scope — proves T11's exclusion of it is doing real work"
 	fi
 else
-	skip "T9 validation joined with main config" "logrotate not installed here (verified on the validator host at rollout)"
+	skip "T9/T10/T11 validation joined with main config" "logrotate not installed here (verified on the validator host at rollout)"
 fi
 
 echo "test-install-anomalies-logrotate.sh summary: PASS=$PASS  FAIL=$FAIL  SKIP=$SKIP"
