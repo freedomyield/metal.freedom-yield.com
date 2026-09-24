@@ -15,7 +15,7 @@ The doc covers design only. It does not change cron schedules, production state 
 **Out of scope (= tracked elsewhere)**
 
 - The validator itself, its on-chain artefacts, the renewal pipeline, the anchor pipeline, the cycle history pipeline.
-- The site / web host / Caddy / nginx layer.
+- The site / web host / Caddy / nginx layer itself. (Probing it from the validator host *is* in scope — see §6.7.)
 - The disaster-recovery drill (= separate workstream, tracked in `docs/DISASTER_RECOVERY.md` + the residual T1 follow-up).
 
 ## 2. Pipeline overview
@@ -172,6 +172,7 @@ The state JSON must be parseable and must contain at least:
   "peers": "ok|warn",
   "web": "ok|warn",
   "api_freshness": "ok|warn",
+  "web_incident": null,            // OPTIONAL — see below and §6.7
   "validator_present": "yes|no",
   "last_known_end_time": <integer or null>,
   "delegator_count": <integer or null>,
@@ -183,6 +184,8 @@ The state JSON must be parseable and must contain at least:
 ```
 
 K-3.5 validation: top-level fields present with the expected types. The script's K-3 transition logic relies on every top-level field; missing field → schema fail → quarantine.
+
+`web_incident` (added 2026-09-24, §6.7) is the one **optional** field. It may be absent or `null`, meaning no public-site incident is open; `anomaly-state-init.sh` writes `null`. When present and not `null` it must be an object with `started_at` (number: epoch of the first failed observation), `last_class` (`cf_path` | `origin_or_path` | `unknown`), `classes` (array of strings, the classes seen in order of first appearance), `runs` (number: consecutive failed runs) and `pushed` (boolean: the outage push was delivered). Any other shape is a schema mismatch and is quarantined like every other mismatch (§5.1). A state file written before the field existed therefore stays valid.
 
 ### 5.5 Bootstrap is operator-only
 
@@ -281,6 +284,56 @@ The `delegator_count` and `delegator_total_nmetal` fields are written as a **pai
 
 The pairing is load-bearing, not incidental. `delegator_total_nmetal` is read back as the baseline for the `新規 / 離脱 / 差引 <amount>` line in the delegation push, so the stored value means **"the cumulative as of the last push the operator actually received"**, and the printed delta means "what moved since then". A missed push folds its amount into the next one rather than losing it — true only because the two fields advance together with the notification, and broken if either were written unconditionally.
 
+### 6.7 Public-site probe (`web`): classification, persistence gate, diagnostics
+
+Design: [`docs/superpowers/specs/2026-09-24-web-probe-path-classification-design.md`](superpowers/specs/2026-09-24-web-probe-path-classification-design.md). Measuring, classifying and text rendering live in `scripts/lib/web-probe.sh`, which has no side effects. Every state change and every write stays in the `# === observation: web URL availability` and `# === transition: web` blocks of `scripts/check-anomalies.sh`.
+
+**Probes.**
+
+| Probe | When | What it tells |
+|---|---|---|
+| `P_cf` — `GET ${WEB_URL}/health`, 10 s cap | every run | what a visitor sees through Cloudflare |
+| `P_cf` re-probe after `WEB_REPROBE_SLEEP` (30 s) | first probe failed, no incident open, `.web == ok` | absorbs sub-30 s blips |
+| `P_direct` — same URL with `curl --resolve <host>:<port>:${WEB_ORIGIN_IP}` | `P_cf` still failing | whether the origin answers when Cloudflare is bypassed |
+
+A healthy run makes exactly one request. `WEB_ORIGIN_IP` comes only from the cron env (installed by `scripts/install-anomalies-web-origin-env.sh`) and is never committed. When it is unset or not a dotted-quad IPv4, `P_direct` is skipped and logged.
+
+**Classification** (uses the last `P_cf` result and `P_direct`):
+
+| `P_cf` | `P_direct` | class | label in pushes |
+|---|---|---|---|
+| fail | 200 | `cf_path` | Cloudflare 経路 (origin は正常) |
+| fail | fail | `origin_or_path` | origin 停止 または シンガポール経路 (未判別) |
+| fail | skipped | `unknown` | 判別不能 (origin 直接確認なし) |
+
+**Transitions** (`web_incident` is described in §5.4):
+
+1. `P_cf` 200, no incident → nothing.
+2. `P_cf` 200, incident open, `pushed=false` → no push; one blip-log line; incident cleared.
+3. `P_cf` 200, incident open, `pushed=true` → `公開サイト復旧` (default) with `継続: 約 N 分 (5 分刻みの観測)` and the classes seen. On a delivered push: `.web=ok`, one blip-log line, incident cleared.
+4. `P_cf` fails, no incident → incident opened (`runs=1`, `pushed=false`), diagnostics appended, **no push**.
+5. `P_cf` fails, incident open, `pushed=false` → `runs+1` and a push chosen by the current class: `公開サイトが応答しない (5 分以上継続)` (high) for `origin_or_path` / `unknown`, `公開サイト: Cloudflare 経路で失敗継続 (origin は正常)` (default) for `cf_path`. On a delivered push: `pushed=true`, `.web=warn`.
+6. `P_cf` fails, incident open, `pushed=true` → `runs+1`, diagnostics only.
+
+`pushed` and `.web` advance only after `notify_or_keep` succeeds (K-3, §6.1); a failed push is retried by the next run. `started_at`, `runs`, `classes` and `last_class` are observations and advance every run. A legacy state (`.web=warn` without `web_incident`, written before 2026-09-24) is treated as open and already pushed: no re-probe, no second outage push, and a recovery push that says `継続: 不明` with no blip line.
+
+Every push body that quotes a probe's timing line (transitions 3 and 5 above) has `remote_ip=…` stripped from both the `P_cf` and the `P_direct` line before the body is composed (`sed 's/ remote_ip=[^ ]*//'` in the `# === transition: web` block) — the origin address never reaches an ntfy.sh push, in any class, including `cf_path`, where the origin answering 200 might otherwise tempt a body to quote it. The diagnostics log below is the only place the raw `remote_ip=` (the origin's own address, for `P_direct`) is kept, and it is host-only.
+
+**Logs** (production paths; any other state dir puts them beside that state dir, so a test sandbox never writes `/var/log`):
+
+| File | Content | Written by |
+|---|---|---|
+| `/var/log/anomalies-web-diag.log` | one block per failed observation, header `=== web-diag <UTC ISO> class=<c> ===`, then both `P_cf` runs, `P_direct` (timing line with `curl_rc`, response headers incl. `cf-ray`, curl error) and `mtr -r -n -c 5 -w ${WEB_ORIGIN_IP}` under `timeout 25` | `fyd_live_write --append` |
+| `/var/log/anomalies-web-blips.log` | one line per closed incident: `<start UTC> <end UTC> duration_s=<n> classes=<a,b> pushed=<bool>` | `fyd_live_write --append` |
+
+`scripts/install-anomalies-logrotate.sh` keeps both and `anomalies.log` for 90 days (`daily`, `rotate 90`, `compress`) and creates the two new files as deploy:deploy 0644, because the cron user cannot create files in `/var/log`. A failed append is reported on stderr and never blocks the transition. If `mtr` is not installed, the block records `skipped (mtr not installed)`.
+
+**Env knobs:** `WEB_URL`, `WEB_ORIGIN_IP`, `WEB_REPROBE_SLEEP` (30), `WEB_PROBE_MAX_TIME` (10), `WEB_DIAG_TIMEOUT` (25), `WEB_DIAG_LOG`, `WEB_BLIP_LOG`. Only `WEB_ORIGIN_IP` is set in production; the rest exist for tests.
+
+**Latency and runtime.** A real outage now pages on the second failed run, about 5 minutes after the first instead of about 30 s. This is accepted (spec G2). Worst-case run time is about 85 s (10 + 30 + 10 + 10 + 25), well inside the 5-minute cadence, and K-4 (§4) prevents overlap.
+
+**Tests:** `tests/anomalies/test-web-probe-lib.sh` (library), `tests/anomalies/test-web-incident.sh` (multi-run end-to-end in a sandbox), `tests/anomalies/integration-linux.sh` case I9 (real HTTP server going down for two runs).
+
 ## 7. anomaly-state-init.sh (operator-only)
 
 ### 7.1 Purpose
@@ -361,6 +414,8 @@ This pipeline maintains three on-disk JSON shapes that consumers depend on:
 - `${ANOMALY_STATE_DIR}/anomaly-state.json` — the live state; consumed only by `check-anomalies.sh` itself, so the shape is private to this pipeline. Changes that add fields are additive; changes that remove fields require migration of all in-the-wild state files.
 - `${ANOMALY_STATE_DIR}/quarantine/<sha>/state.json` — exact copy of the corrupted state file; no schema (= it is by construction not conformant).
 - `${ANOMALY_STATE_DIR}/quarantine/<sha>/diag.txt` — free-form diagnostic; not schema-stable.
+- `/var/log/anomalies-web-diag.log` — public-site diagnostics blocks (§6.7); free-form below the `=== web-diag <UTC ISO> class=<c> ===` header line, which is stable.
+- `/var/log/anomalies-web-blips.log` — one line per closed public-site incident (§6.7); the line format `<start UTC> <end UTC> duration_s=<n> classes=<a,b> pushed=<bool>` is stable, because a later digest or a support inquiry reads it.
 
 The cron writes ISO-8601 UTC for the few timestamp fields it owns (= `first-seen-at.txt`).
 
@@ -395,6 +450,15 @@ sudo -u "$DEPLOY_USER" env FY_LIVE=1 bash scripts/anomaly-state-init.sh \
 sudo -u "$DEPLOY_USER" jq . "$STATE_BASE/anomaly-state.json"
 ls -la "$STATE_BASE/locks/"
 [ -f "$STATE_BASE/.missing-notified.marker" ] && echo "marker still present (bug)" || echo "marker cleared OK"
+
+# Public-site probe (2026-09-24, §6.7). Run as root after the repo is on the
+# host. The origin address is typed here and lands only in the cron file; it
+# is never committed and the installer does not echo it back.
+bash scripts/install-anomalies-logrotate.sh
+bash scripts/install-anomalies-web-origin-env.sh --origin-ip=<origin IPv4>
+logrotate -d /etc/logrotate.d/anomalies 2>&1 | tail -3
+grep -c '^WEB_ORIGIN_IP=' /etc/cron.d/metal-anomalies     # expect 1
+bash scripts/check-cron-file.sh /etc/cron.d/metal-anomalies
 ```
 
 After this setup, the cron line in `/etc/cron.d/metal-anomalies` may be un-commented by the operator. The cron uses the same `ANOMALY_STATE_DIR=/var/lib/freedom-yield` env (= or whatever path the operator standardised).
