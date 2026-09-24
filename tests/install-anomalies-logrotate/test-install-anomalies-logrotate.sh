@@ -126,6 +126,117 @@ else
 	skip "T8 logrotate -d" "logrotate not installed here (verified on the validator host at rollout)"
 fi
 
+# --- T9 validation runs joined with the host's main config, not standalone --------
+# Reproduces the validator host (2026-09-24 fix): the log dir is
+# group-writable by a group that is not "root" (/var/log there is
+# root:syslog 0775), which logrotate treats as insecure UNLESS a `su`
+# directive is in effect. On the host that `su root adm` lives in
+# /etc/logrotate.conf's global section, not in this snippet, so a standalone
+# `logrotate -d` on the candidate alone false-positives — this is also true
+# of the config's `include` line: it must NOT be honored during validation,
+# so a broken sibling snippet can never block this installer.
+if command -v logrotate >/dev/null 2>&1; then
+	mkdir -p "$WORK/t9/log" "$WORK/t9/broken-includes"
+	TESTUSER="$(id -un)"
+	TESTGRP="$(id -gn)"
+	# Must not be "root": logrotate only calls a group-writable dir insecure
+	# when the writing group isn't "root", so root's own primary group would
+	# defeat the reproduction when this suite runs as root (as the task's
+	# docker instructions do).
+	[ "$TESTGRP" = "root" ] && TESTGRP="nogroup"
+
+	chmod 0775 "$WORK/t9/log"
+	chgrp "$TESTGRP" "$WORK/t9/log"
+
+	# A stanza that fails validation hard (unresolvable create user) if it is
+	# ever actually read.
+	cat >"$WORK/t9/broken-includes/broken" <<BROKEN
+${WORK}/t9/log/does-not-exist-either.log {
+  create 644 totally-bogus-nonexistent-user totally-bogus-nonexistent-group
+}
+BROKEN
+
+	# su targets the CURRENT user, not a literal "root": logrotate can only
+	# switch euid/egid to an identity the invoking process can actually hold
+	# (a no-op switch to itself, or anything at all if already root). On the
+	# real host the daily cron job already runs as root, so its `su root
+	# adm` is exactly this same pattern — a same-euid switch plus an egid
+	# change to a group root can always assume.
+	cat >"$WORK/t9/main.conf" <<MAINCONF
+su ${TESTUSER} ${TESTGRP}
+weekly
+rotate 4
+create
+compress
+include ${WORK}/t9/broken-includes
+MAINCONF
+
+	EXPECTED9="$(cat <<CONF
+# Managed by scripts/install-anomalies-logrotate.sh — edit the installer, not this file.
+# 90-day retention: web-probe design spec 2026-09-24 §3.5 (G5).
+${WORK}/t9/log/anomalies.log ${WORK}/t9/log/anomalies-web-diag.log ${WORK}/t9/log/anomalies-web-blips.log {
+  daily
+  rotate 90
+  compress
+  missingok
+  notifempty
+  create 644 ${TESTUSER} ${TESTUSER}
+}
+CONF
+)"
+
+	OUT="$(FYD_LOGROTATE_TARGET="$WORK/t9/anomalies" FYD_LOG_DIR="$WORK/t9/log" FYD_DEPLOY_USER="$TESTUSER" \
+		FYD_BACKUP_DIR="$WORK/t9-backups" FYD_LOGROTATE_MAIN_CONF="$WORK/t9/main.conf" bash "$INSTALLER" 2>&1)"; RC=$?
+	[ "$RC" -eq 0 ] \
+		&& ok "T9 install succeeds on a group-writable log dir whose safety comes only from the main config's su" \
+		|| bad "T9 install succeeds on a group-writable log dir whose safety comes only from the main config's su" "rc=$RC $OUT"
+	[ "$(cat "$WORK/t9/anomalies" 2>/dev/null)" = "$EXPECTED9" ] \
+		&& ok "T9 installed snippet is still exactly the 90-day contract (validation context change doesn't alter it)" \
+		|| bad "T9 installed snippet is still exactly the 90-day contract" "$(diff <(printf '%s\n' "$EXPECTED9") "$WORK/t9/anomalies" 2>&1 | head -5)"
+	for name in anomalies-web-diag.log anomalies-web-blips.log; do
+		[ -f "$WORK/t9/log/$name" ] \
+			&& ok "T9 ${name} provisioned" \
+			|| bad "T9 ${name} provisioned"
+	done
+
+	# Proof this scenario is real, not vacuous: the exact installed candidate,
+	# checked fully standalone (no main config at all), must fail on this
+	# group-writable dir — otherwise T9 passing would prove nothing about the
+	# fix. logrotate's insecure-permissions check is skipped when the
+	# checking process is itself a member of the directory's group (no
+	# escalation risk), so this only reproduces when run as root: root has
+	# no such membership in a group it didn't create for itself (e.g.
+	# "nogroup"), which is exactly why the real host — root's cron running
+	# logrotate against a syslog-group /var/log — needs the main config's
+	# `su` at all. Non-root can't construct that condition (chgrp to a
+	# foreign group requires root), so it's skipped rather than asserted.
+	if [ "$(id -u)" -eq 0 ]; then
+		if logrotate -d -s "$WORK/t9-standalone.state" "$WORK/t9/anomalies" >/tmp/t9-standalone.out 2>&1; then
+			bad "T9 sanity: the installed candidate is insecure when checked standalone (no su in scope)" \
+				"expected logrotate -d to fail standalone but it passed"
+		else
+			ok "T9 sanity: the installed candidate is insecure when checked standalone (no su in scope) — proves T9's join is doing real work"
+		fi
+	else
+		skip "T9 sanity: standalone-insecure reproduction" "needs root (non-root is always a member of its own group, so it can't construct a foreign-group-writable dir)"
+	fi
+
+	# Proof the include line was not honored: had it been read, the broken
+	# sibling snippet above would fail validation hard. Build that "include
+	# honored" variant by hand (the installer's own logic must NOT do this)
+	# and confirm it fails, which — together with T9's rc=0 above — proves
+	# the installer skipped it.
+	cat "$WORK/t9/main.conf" "$WORK/t9/anomalies" >"$WORK/t9-include-honored.conf"
+	if logrotate -d -s "$WORK/t9-include-honored.state" "$WORK/t9-include-honored.conf" >/tmp/t9-include-honored.out 2>&1; then
+		bad "T9 include line was not honored during validation" \
+			"expected the broken included snippet to fail validation if it were ever read, but it passed"
+	else
+		ok "T9 include line was not honored during validation (the installer's own run above succeeded only because it drops include lines)"
+	fi
+else
+	skip "T9 validation joined with main config" "logrotate not installed here (verified on the validator host at rollout)"
+fi
+
 echo "test-install-anomalies-logrotate.sh summary: PASS=$PASS  FAIL=$FAIL  SKIP=$SKIP"
 if [ "$FAIL" -eq 0 ]; then
 	echo "RESULT: PASS"
