@@ -199,3 +199,15 @@ Two properties worth stating once, since they are what keeps this addition quiet
 
 - **Steady state is silent.** `reward-tracker.sh` pushes only on the run that records a matured cycle (one push per cycle, priority `high`); the digest block is a file write consumed by caller #4's existing morning push, not a second push. `install-reward-tracker-cron.sh`'s header states the same discipline.
 - **Nothing here bypasses `FY_LIVE`.** Both the push (`fyd_notify`) and the digest write (`fyd_live_write`, `reward-tracker.sh:1144`) go through `scripts/lib/side-effects.sh`; without `FY_LIVE=1` each is a `DRY: would …` note. The cron file therefore carries `FY_LIVE=1`, enforced by `check-cron-file.sh` Rule 6 (see `docs/CRON_CONVENTIONS.md`).
+
+## Addendum (2026-09-24) — public-site probe titles in `check-anomalies.sh`
+
+Sections 1–7 above and the 2026-09-07 addendum are left as written. The public-site transition in `scripts/check-anomalies.sh` (the `# === transition: web` block) changed: it no longer pages on the first failed run, and it has three titles instead of two. It is the same caller shape as every other K-3 transition — `notify_or_keep <prio> <title> <body>` → `fyd_notify --strict` → `notify.sh`, with in-run retry on rc 2/4/5 (§6) — so there is no new exit-code handling. Design: `docs/superpowers/specs/2026-09-24-web-probe-path-classification-design.md`; behaviour: `docs/MONITORING_OPS.md` §6.7.
+
+| Title | Priority | When | State advanced only on delivery |
+|---|---|---|---|
+| `公開サイトが応答しない (5 分以上継続)` | high | 2nd consecutive failed run, class `origin_or_path` or `unknown` | `web_incident.pushed=true`, `.web=warn` |
+| `公開サイト: Cloudflare 経路で失敗継続 (origin は正常)` | default | 2nd consecutive failed run, class `cf_path` | `web_incident.pushed=true`, `.web=warn` |
+| `公開サイト復旧` | default | first healthy run after a delivered outage push | `.web=ok`, `web_incident` cleared, one blip-log line |
+
+The pre-2026-09-24 title `公開サイトが応答しない` (without the suffix) is no longer sent. A failure that clears before the next run sends nothing; it is recorded in `/var/log/anomalies-web-blips.log` with `pushed=false`. Bodies carry the class label, `継続: 約 N 分 (5 分刻みの観測)`, the key timings of `P_cf` and `P_direct` (each with `remote_ip=…` stripped — added 2026-09-24 review, so the origin address never reaches ntfy.sh, in any class), the `cf-ray` colo, and the path of the diagnostics log.
