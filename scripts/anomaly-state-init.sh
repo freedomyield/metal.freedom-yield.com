@@ -196,6 +196,7 @@ cat > "$TMP" <<EOF
   "peers": "ok",
   "web": "ok",
   "api_freshness": "ok",
+  "web_incident": null,
   "validator_present": "yes",
   "last_known_end_time": null,
   "delegator_count": null,

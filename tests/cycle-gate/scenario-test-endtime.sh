@@ -92,7 +92,11 @@ done
 # DEFERRAL markers, and the scripts must reach their gate consultation without
 # performing a single production side effect on the way.
 mkdir -p "${TMP_REPO_BASE}/scripts/lib"
-ln -s "${REPO_ROOT}/scripts/lib/side-effects.sh" "${TMP_REPO_BASE}/scripts/lib/side-effects.sh"
+# All of scripts/lib/, not a hand-picked file: check-anomalies.sh also
+# sources scripts/lib/web-probe.sh (2026-09-24).
+for lib in "${REPO_ROOT}"/scripts/lib/*.sh; do
+	ln -s "$lib" "${TMP_REPO_BASE}/scripts/lib/$(basename "$lib")"
+done
 
 # Minimal fixture data so scripts that read these don't crash before
 # reaching their cycle-gate consultation.

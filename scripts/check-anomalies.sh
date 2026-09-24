@@ -12,9 +12,12 @@
 #   - validator entry missing from getCurrentValidators (= dropped from consensus)
 #   - period remaining: T-7 day / T-1 day / T-0 day / T-10min before endTime
 #     (date-matched JST for the day-based three; second-precision for T-10min)
-#   - public web URL (web host, behind edge CDN) returns non-200 — 1 回目で fail したら
-#     30 秒後に即再確認、2 回連続で fail なら alert(transient blip は ~50 秒で
-#     黙ってミュート、本物の障害は ~50 秒で検知)
+#   - public web URL (web host, behind edge CDN) /health non-200 — 1 回目で fail
+#     したら 30 秒後に再確認。再確認でも fail なら web_incident を開き (push なし)、
+#     origin 直接 probe (WEB_ORIGIN_IP) で cf_path / origin_or_path / unknown に
+#     分類して診断を /var/log/anomalies-web-diag.log に残す。次の cron run でも
+#     fail なら分類別の priority で push (≈5 分の持続 gate)、復旧 push は継続時間と
+#     分類を載せる。docs/superpowers/specs/2026-09-24-web-probe-path-classification-design.md
 #   - public /api/validator.json observedAt > 15 min stale (= push pipeline stuck)
 #
 # State file: /var/lib/freedom-yield/anomaly-state.json
@@ -24,7 +27,9 @@
 #     "disk":    "ok",        ← "ok" or "warn"
 #     "memory":  "ok",
 #     "peers":   "ok",
-#     "web":     "ok",        ← web host(web 配信) の公開到達性
+#     "web":     "ok",        ← web host(web 配信) の公開到達性 (warn = outage push 済)
+#     "web_incident": null,   ← optional; open public-site incident
+#                               {started_at, last_class, classes, runs, pushed}
 #     "api_freshness": "ok",  ← validator.json の observedAt 鮮度
 #     "validator_present": "yes",
 #     "period_alert_sent": { "7": false, "1": false, "0": false, "10min": false }
@@ -61,6 +66,14 @@ if [ ! -r "$FYD_LIB" ]; then
 fi
 # shellcheck source=scripts/lib/side-effects.sh
 . "$FYD_LIB"
+
+WEB_PROBE_LIB="${ROOT}/scripts/lib/web-probe.sh"
+if [ ! -r "$WEB_PROBE_LIB" ]; then
+  echo "[check-anomalies] FATAL: web-probe library not readable at $WEB_PROBE_LIB" >&2
+  exit 1
+fi
+# shellcheck source=scripts/lib/web-probe.sh
+. "$WEB_PROBE_LIB"
 
 # -------- cycle-gate (= partial gate、 cycle-aware-notify only) --------
 # Host monitoring (= metalgo / caddy / disk / memory / peers / web probe)
@@ -413,7 +426,16 @@ if ! jq -e '
     (.period_alert_sent|has("7")) and
     (.period_alert_sent|has("1")) and
     (.period_alert_sent|has("0")) and
-    (.period_alert_sent|has("10min"))
+    (.period_alert_sent|has("10min")) and
+    ((if has("web_incident") then .web_incident else null end) as $wi |
+      ($wi == null) or (
+        ($wi|type=="object") and
+        ($wi.started_at|type=="number") and
+        ($wi.last_class as $c | ["cf_path","origin_or_path","unknown"] | any(.[]; . == $c)) and
+        ($wi.classes|type=="array") and
+        ($wi.classes|all(.[]; type=="string")) and
+        ($wi.runs|type=="number") and
+        ($wi.pushed|type=="boolean")))
   ' "$STATE_FILE" >/dev/null 2>&1; then
   quarantine_corrupt_state "schema-mismatch"
 fi
@@ -462,6 +484,11 @@ CANDIDATE_STATE=$(mktemp -p "$STATE_DIR" .candidate.XXXXXX) || {
 }
 cleanup_k3() {
   rm -f "$ORIGINAL_STATE" "$CANDIDATE_STATE" "${CANDIDATE_STATE}.swp" 2>/dev/null || true
+  # Web-probe scratch (mktemp -d under TMPDIR, not the state dir; see the
+  # web observation block). /dev/null is the "mktemp failed" sentinel.
+  if [ -n "${WEB_PROBE_DIR:-}" ] && [ "${WEB_PROBE_DIR}" != /dev/null ] && [ -d "${WEB_PROBE_DIR}" ]; then
+    rm -rf "${WEB_PROBE_DIR}" 2>/dev/null || true
+  fi
 }
 trap cleanup_k3 EXIT
 # FYD-GATE(exempt): $STATE_FILE is the SOURCE here; nothing is written to it.
@@ -628,30 +655,162 @@ elif [ "${OBS_PEERS:-0}" -ge 50 ] && [ "$ORIG_PEERS" = "warn" ]; then
     && candidate_set '.peers' '"ok"'
 fi
 
-# === observation: web URL availability (with blip-mitigation re-check) ==
-# Re-probe only when prior state was ok; if already warn, skip the 30s
-# sleep because the outage is already confirmed. Re-probe is part of the
-# OBSERVATION phase, not the transition decision.
+# === observation: web URL availability (probe + path classification) ===
+# Design: docs/superpowers/specs/2026-09-24-web-probe-path-classification-design.md
+# P_cf is what a visitor sees (through Cloudflare). If it fails while no web
+# incident is open and .web is ok, it is re-probed once after
+# WEB_REPROBE_SLEEP (30 s). If it is still failing, P_direct probes the
+# origin directly (curl --resolve to WEB_ORIGIN_IP, supplied by the cron env
+# and never committed) and the failure is classified (spec §3.2). A healthy
+# run makes exactly one request. Probing, classification and text rendering
+# live in scripts/lib/web-probe.sh; every side effect and every state change
+# stays in this file.
 WEB_URL="${WEB_URL:-https://metal.freedom-yield.com}"
-web_probe() {
-  local s
-  s=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 "${WEB_URL}/health" 2>/dev/null)
-  echo "${s:-000}"
-}
-OBS_WEB_STATUS=$(web_probe)
+WEB_ORIGIN_IP="${WEB_ORIGIN_IP:-}"
+# Log defaults follow the RESOLVED state dir, like LOCK_FILE above: with the
+# production state dir they are the /var/log files logrotate keeps 90 days
+# (scripts/install-anomalies-logrotate.sh); with any other state dir — every
+# test sandbox — they land beside that state instead of reaching into
+# /var/log.
+if [ "$STATE_DIR" = "$FYD_STATE_DIR_DEFAULT" ]; then
+  WEB_LOG_DIR_DEFAULT=/var/log
+else
+  WEB_LOG_DIR_DEFAULT="$STATE_DIR"
+fi
+WEB_DIAG_LOG="${WEB_DIAG_LOG:-${WEB_LOG_DIR_DEFAULT}/anomalies-web-diag.log}"
+WEB_BLIP_LOG="${WEB_BLIP_LOG:-${WEB_LOG_DIR_DEFAULT}/anomalies-web-blips.log}"
+WEB_NOW=$(date +%s)
+WEB_NOW_ISO=$(date -u -d "@${WEB_NOW}" +%Y-%m-%dT%H:%M:%SZ)
+
 ORIG_WEB=$(orig_get '.web'); [ "$ORIG_WEB" = "null" ] && ORIG_WEB="ok"
-if [ "$OBS_WEB_STATUS" != "200" ] && [ "$ORIG_WEB" = "ok" ]; then
-  sleep 30
-  OBS_WEB_STATUS=$(web_probe)
+ORIG_WI=$(orig_get '(.web_incident // empty) | tojson')
+WI_OPEN=0; WI_STARTED=""; WI_RUNS=0; WI_PUSHED=false; WI_CLASSES='[]'; WI_LEGACY=0
+if [ -n "$ORIG_WI" ]; then
+  WI_OPEN=1
+  WI_STARTED=$(printf '%s' "$ORIG_WI" | jq -r '.started_at')
+  WI_RUNS=$(printf '%s' "$ORIG_WI" | jq -r '.runs')
+  WI_PUSHED=$(printf '%s' "$ORIG_WI" | jq -r '.pushed')
+  WI_CLASSES=$(printf '%s' "$ORIG_WI" | jq -c '.classes')
+elif [ "$ORIG_WEB" = "warn" ]; then
+  # .web=warn written before web_incident existed: an outage push already
+  # went out, but its start is unknown. Treated as open + pushed (no second
+  # outage push, no re-probe); see the transition block.
+  WI_OPEN=1; WI_PUSHED=true; WI_LEGACY=1
 fi
 
-# === transition: web (notify-gated) =====================================
-if [ "$OBS_WEB_STATUS" != "200" ] && [ "$ORIG_WEB" = "ok" ]; then
-  body=$(printf 'GET %s/health -> HTTP %s (期待: 200)\n30 秒後の再確認でも失敗 = transient blip ではない\n対処:\n1) web host に SSH してログ確認\n2) docker ps | grep caddy-static\n3) systemctl status nginx\n4) tail /var/log/nginx/error.log\n5) edge provider status page 確認(edge provider outageの可能性)\n影響: 閲覧者がサイトに到達不能、validator は無事' "$WEB_URL" "$OBS_WEB_STATUS")
-  notify_or_keep high "公開サイトが応答しない" "$body" && candidate_set '.web' '"warn"'
-elif [ "$OBS_WEB_STATUS" = "200" ] && [ "$ORIG_WEB" = "warn" ]; then
-  notify_or_keep default "公開サイト復旧" "GET ${WEB_URL}/health -> 200 OK" \
-    && candidate_set '.web' '"ok"'
+WEB_PROBE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fy-web-probe.XXXXXX" 2>/dev/null) || WEB_PROBE_DIR=/dev/null
+OBS_WEB_STATUS=$(web_probe "${WEB_PROBE_DIR}/cf1" "${WEB_URL}/health")
+if [ "$OBS_WEB_STATUS" != "200" ] && [ "$WI_OPEN" = "0" ] && [ "$ORIG_WEB" = "ok" ]; then
+  sleep "${WEB_REPROBE_SLEEP:-30}"
+  OBS_WEB_STATUS=$(web_probe "${WEB_PROBE_DIR}/cf2" "${WEB_URL}/health")
+fi
+
+OBS_WEB_DIRECT=""
+OBS_WEB_CLASS=""
+if [ "$OBS_WEB_STATUS" != "200" ]; then
+  OBS_WEB_DIRECT=skipped
+  WEB_TRACE_IP=""
+  if [ -n "$WEB_ORIGIN_IP" ]; then
+    if WEB_RESOLVE=$(web_resolve_spec "$WEB_URL" "$WEB_ORIGIN_IP"); then
+      WEB_TRACE_IP="$WEB_ORIGIN_IP"
+      OBS_WEB_DIRECT=$(web_probe "${WEB_PROBE_DIR}/direct" "${WEB_URL}/health" "$WEB_RESOLVE")
+    else
+      echo "[web] WEB_ORIGIN_IP is not a dotted-quad IPv4 address; P_direct skipped" >&2
+    fi
+  fi
+  OBS_WEB_CLASS=$(web_classify "$OBS_WEB_STATUS" "$OBS_WEB_DIRECT")
+  web_mtr_capture "$WEB_TRACE_IP" "${WEB_PROBE_DIR}/mtr"
+
+  WEB_CF_LAST="${WEB_PROBE_DIR}/cf1"
+  [ -f "${WEB_PROBE_DIR}/cf2.w" ] && WEB_CF_LAST="${WEB_PROBE_DIR}/cf2"
+  WEB_CF_LINE=$(web_timing_line "$WEB_CF_LAST")
+  WEB_COLO=$(web_cf_colo "${WEB_CF_LAST}.h")
+  if [ "$OBS_WEB_DIRECT" = "skipped" ]; then
+    WEB_DIRECT_LINE='skipped (WEB_ORIGIN_IP 未設定 または IPv4 でない)'
+  else
+    WEB_DIRECT_LINE=$(web_timing_line "${WEB_PROBE_DIR}/direct")
+  fi
+
+  # Diagnostics (spec §3.5): one block per failed observation. A write
+  # failure is reported and never blocks the transition below.
+  web_render_diag "$WEB_PROBE_DIR" "$OBS_WEB_CLASS" "$WEB_NOW_ISO" "$OBS_WEB_DIRECT" \
+    | fyd_live_write --append "the web-probe diagnostics block" "$WEB_DIAG_LOG" \
+    || echo "[web] diagnostics append to ${WEB_DIAG_LOG} failed; transition continues" >&2
+fi
+
+# === transition: web (notify-gated, persistence-gated) ==================
+# Spec §3.4. The outage push fires on the SECOND consecutive failed run,
+# never the first, so a path blip shorter than one cron interval is logged
+# (blip log + diagnostics) but never pages. .web keeps its meaning — "warn"
+# only once an outage push was delivered — and, like .web, the incident's
+# `pushed` flag advances only on a successful notify (K-3). started_at /
+# runs / classes / last_class are observations and advance unconditionally.
+WEB_CLASSES_CSV=$(printf '%s' "$WI_CLASSES" | jq -r 'join(",")' 2>/dev/null)
+web_append_blip() {  # <pushed: true|false>
+  web_render_blip_line "$WI_STARTED" "$WEB_NOW" "$WEB_CLASSES_CSV" "$1" \
+    | fyd_live_write --append "the web incident blip-log line" "$WEB_BLIP_LOG" \
+    || echo "[web] blip-log append to ${WEB_BLIP_LOG} failed; transition continues" >&2
+}
+if [ "$OBS_WEB_STATUS" = "200" ]; then
+  if [ "$WI_OPEN" = "1" ] && [ "$WI_PUSHED" = "true" ]; then
+    if [ "$WI_LEGACY" = "1" ]; then
+      WEB_DUR_TXT='不明 (旧形式の state から継続)'
+      WEB_CLASS_TXT='-'
+    else
+      WEB_DUR_TXT="約 $(web_duration_min $((WEB_NOW - WI_STARTED))) 分 (5 分刻みの観測)"
+      WEB_CLASS_TXT=$(web_class_labels_csv "$WEB_CLASSES_CSV")
+    fi
+    body=$(printf 'GET %s/health -> 200 OK\n継続: %s\n観測した分類: %s\n診断: %s' \
+      "$WEB_URL" "$WEB_DUR_TXT" "$WEB_CLASS_TXT" "$WEB_DIAG_LOG")
+    if notify_or_keep default "公開サイト復旧" "$body"; then
+      candidate_set '.web' '"ok"'
+      if [ "$WI_LEGACY" = "0" ]; then
+        # Blip line only after the recovery push is delivered: a failed push
+        # keeps the incident open and the next run retries, and writing the
+        # line now would duplicate it then.
+        web_append_blip true
+        candidate_set '.web_incident' 'null'
+      fi
+    fi
+  elif [ "$WI_OPEN" = "1" ]; then
+    # Outlived the 30 s re-probe but not a whole cron interval: log, no push.
+    web_append_blip false
+    candidate_set '.web_incident' 'null'
+  fi
+elif [ "$WI_LEGACY" = "1" ]; then
+  # Legacy .web=warn: the outage push already went out; stay silent, as the
+  # old code did for "already warn". Diagnostics above are still captured.
+  :
+elif [ "$WI_OPEN" = "0" ]; then
+  # First failed run (after the re-probe): open the incident, no push.
+  candidate_set '.web_incident' "$(jq -cn --argjson s "$WEB_NOW" --arg c "$OBS_WEB_CLASS" \
+    '{started_at: $s, last_class: $c, classes: [$c], runs: 1, pushed: false}')"
+else
+  WEB_PUSHED_NEXT="$WI_PUSHED"
+  if [ "$WI_PUSHED" != "true" ]; then
+    case "$OBS_WEB_CLASS" in
+      cf_path)
+        WEB_PRIO=default
+        WEB_TITLE='公開サイト: Cloudflare 経路で失敗継続 (origin は正常)'
+        WEB_ACTION=$'対処:\n1) Cloudflare の status page で SIN colo の障害有無を確認\n2) origin は直接確認で 200 のため web host 側の作業は不要\n影響: Cloudflare 経由の閲覧者が到達できない可能性、validator は無事'
+        ;;
+      *)
+        WEB_PRIO=high
+        WEB_TITLE='公開サイトが応答しない (5 分以上継続)'
+        WEB_ACTION=$'対処:\n1) web host に SSH してログ確認\n2) docker ps | grep caddy-static\n3) systemctl status nginx\n4) tail /var/log/nginx/error.log\n影響: 閲覧者がサイトに到達不能な可能性、validator は無事'
+        ;;
+    esac
+    body=$(printf '分類: %s\n継続: 約 %s 分 (5 分刻みの観測)\nCloudflare 経由: %s\ncf-ray colo: %s\norigin 直接: %s\n診断: %s の "=== web-diag %s" ブロック\n%s' \
+      "$(web_class_label "$OBS_WEB_CLASS")" "$(web_duration_min $((WEB_NOW - WI_STARTED)))" \
+      "$WEB_CF_LINE" "$WEB_COLO" "$WEB_DIRECT_LINE" "$WEB_DIAG_LOG" "$WEB_NOW_ISO" "$WEB_ACTION")
+    if notify_or_keep "$WEB_PRIO" "$WEB_TITLE" "$body"; then
+      WEB_PUSHED_NEXT=true
+      candidate_set '.web' '"warn"'
+    fi
+  fi
+  candidate_set '.web_incident' "$(jq -cn --argjson s "$WI_STARTED" --arg c "$OBS_WEB_CLASS" \
+    --argjson cl "$WI_CLASSES" --argjson r "$((WI_RUNS + 1))" --argjson p "$WEB_PUSHED_NEXT" \
+    '{started_at: $s, last_class: $c, classes: (if any($cl[]; . == $c) then $cl else $cl + [$c] end), runs: $r, pushed: $p}')"
 fi
 
 # === transition: api_freshness (= push pipeline health, web-gated) ======

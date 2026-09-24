@@ -32,6 +32,9 @@
 #   I6  full SHA-256 (64-char) used as quarantine dedup directory name
 #   I7  recovery after lock release (= contention resolves)
 #   I8  post-test verification: production paths NOT touched
+#   I9  public-site outage across runs: no push on run 1, one high push on
+#       run 2 (P_direct also fails → origin_or_path), recovery push on run 3
+#       (web-probe design spec 2026-09-24 §5)
 
 set -uo pipefail
 
@@ -69,6 +72,8 @@ PROD_PATHS=(
   /etc/freedom-yield
   /etc/cron.d/metal-anomalies
   /var/log/anomalies.log
+  /var/log/anomalies-web-diag.log
+  /var/log/anomalies-web-blips.log
 )
 PROD_REPO_PATHS=(
   "$REPO/public/api"
@@ -132,6 +137,10 @@ PROD_COUNTER_HASH=$(sha256sum "$PROD_COUNTER" 2>/dev/null | awk '{print $1}' || 
 PROD_MARKER_PRESENT=$( [ -f "$PROD_MARKER" ] && echo present || echo absent )
 PROD_CRON_HASH=$(sha256sum "$PROD_CRON" 2>/dev/null | awk '{print $1}' || echo "missing")
 PROD_TOPIC_HASH=$(sha256sum "$PROD_TOPIC" 2>/dev/null | awk '{print $1}' || echo "missing")
+PROD_WEB_DIAG=/var/log/anomalies-web-diag.log
+PROD_WEB_BLIP=/var/log/anomalies-web-blips.log
+PROD_WEB_DIAG_HASH=$(sha256sum "$PROD_WEB_DIAG" 2>/dev/null | awk '{print $1}' || echo "missing")
+PROD_WEB_BLIP_HASH=$(sha256sum "$PROD_WEB_BLIP" 2>/dev/null | awk '{print $1}' || echo "missing")
 ls -1 /var/lib/freedom-yield/quarantine 2>/dev/null > "$PROD_QUAR_LS" || : > "$PROD_QUAR_LS"
 
 # === sandbox dirs ======================================================
@@ -211,8 +220,9 @@ cp "$CHECK" "$SBX_REPO/scripts/check-anomalies.sh"
 cp "$INIT"  "$SBX_REPO/scripts/anomaly-state-init.sh"
 # Both scripts source scripts/lib/side-effects.sh relative to their own repo
 # root (C3 rollout, 2026-08-06) and refuse to run without it, so the sandbox
-# repo has to carry it too.
-cp "$REPO/scripts/lib/side-effects.sh" "$SBX_REPO/scripts/lib/side-effects.sh"
+# repo has to carry it too — and check-anomalies.sh also sources
+# scripts/lib/web-probe.sh (2026-09-24), so the whole directory is mirrored.
+cp -R "$REPO/scripts/lib/." "$SBX_REPO/scripts/lib/"
 # Real notify.sh isn't needed inside the sandbox repo because we override
 # NOTIFY env to point at the stub.
 ln -sf "$SBX_STATUS"    "$SBX_REPO/public/api/server-status.json"
@@ -226,11 +236,14 @@ SBX_INIT="$SBX_REPO/scripts/anomaly-state-init.sh"
 # /health and /api/validator.json with a custom handler so neither fires
 # a transition. Bound to localhost to avoid any external exposure.
 WEB_PORT=$(( 19000 + RANDOM % 1000 ))
+# /health answers 503 while $TMP/health-down exists (I9 toggles it).
 python3 -u -c "
-import http.server, socketserver, sys
+import http.server, socketserver, sys, os
 class H(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/health':
+            if os.path.exists('$TMP/health-down'):
+                self.send_response(503); self.end_headers(); return
             self.send_response(200); self.end_headers(); self.wfile.write(b'')
         elif self.path == '/api/validator.json':
             # No observedAt → script skips api_freshness transition.
@@ -535,6 +548,43 @@ run_check; rc=$?
 assert "I7b lock released → next run completes, rc=0"          0 "$rc"
 
 # ===========================================================================
+# I9  public-site outage across runs (persistence gate + direct probe +
+#     recovery). The mini server's /health goes down for two runs; P_direct
+#     reaches the SAME server via --resolve to 127.0.0.1, so it fails too and
+#     the class is origin_or_path.
+# ===========================================================================
+echo ""
+echo "=== I9: public-site outage across runs ==="
+bootstrap_baseline
+: > "$SBX_NOTIFY_LOG"
+cat > "$SBX_NOTIFY" <<'BASH'
+#!/usr/bin/env bash
+echo "title=$2 prio=$1" >> "${STUB_NOTIFY_LOG:-/dev/null}"
+exit 0
+BASH
+chmod +x "$SBX_NOTIFY"
+export WEB_REPROBE_SLEEP=0 WEB_ORIGIN_IP=127.0.0.1
+touch "$TMP/health-down"
+run_check; rc=$?
+assert "I9 run 1 (outage opens) rc=0"                           0 "$rc"
+assert "I9 run 1: no public-site push"                          0 "$(grep -c 'title=公開サイト' "$SBX_NOTIFY_LOG" || true)"
+assert "I9 run 1: incident open, runs=1, pushed=false"          "1 false" "$(jq -r '"\(.web_incident.runs) \(.web_incident.pushed)"' "$SBX_STATE/anomaly-state.json")"
+run_check; rc=$?
+assert "I9 run 2 rc=0"                                          0 "$rc"
+assert "I9 run 2: one high outage push"                         1 "$(grep -c 'title=公開サイトが応答しない (5 分以上継続) prio=high' "$SBX_NOTIFY_LOG" || true)"
+assert "I9 run 2: class origin_or_path (P_direct failed too)"   origin_or_path "$(jq -r '.web_incident.last_class' "$SBX_STATE/anomaly-state.json")"
+assert "I9 run 2: .web=warn"                                    warn "$(jq -r '.web' "$SBX_STATE/anomaly-state.json")"
+rm -f "$TMP/health-down"
+run_check; rc=$?
+assert "I9 run 3 rc=0"                                          0 "$rc"
+assert "I9 run 3: one recovery push"                            1 "$(grep -c 'title=公開サイト復旧 prio=default' "$SBX_NOTIFY_LOG" || true)"
+assert "I9 run 3: .web=ok"                                      ok "$(jq -r '.web' "$SBX_STATE/anomaly-state.json")"
+assert "I9 run 3: incident cleared"                             null "$(jq -r '.web_incident' "$SBX_STATE/anomaly-state.json")"
+assert "I9: two diagnostics blocks in the sandbox log"          2 "$(grep -c '^=== web-diag ' "$SBX_STATE/anomalies-web-diag.log" 2>/dev/null || true)"
+assert "I9: one blip line, pushed=true"                         1 "$(grep -c 'classes=origin_or_path pushed=true$' "$SBX_STATE/anomalies-web-blips.log" 2>/dev/null || true)"
+unset WEB_REPROBE_SLEEP WEB_ORIGIN_IP
+
+# ===========================================================================
 # I8  post-test verification: production paths NOT touched.
 # ===========================================================================
 echo ""
@@ -553,6 +603,8 @@ assert "I8 production counter SHA unchanged"         "$PROD_COUNTER_HASH" "$PROD
 assert "I8 production marker presence unchanged"     "$PROD_MARKER_PRESENT" "$PROD_MARKER_PRESENT_AFTER"
 assert "I8 production cron file SHA unchanged"       "$PROD_CRON_HASH"    "$PROD_CRON_HASH_AFTER"
 assert "I8 production topic file SHA unchanged"      "$PROD_TOPIC_HASH"   "$PROD_TOPIC_HASH_AFTER"
+assert "I8 production web-diag log SHA unchanged"    "$PROD_WEB_DIAG_HASH" "$(sha256sum "$PROD_WEB_DIAG" 2>/dev/null | awk '{print $1}' || echo "missing")"
+assert "I8 production web-blip log SHA unchanged"    "$PROD_WEB_BLIP_HASH" "$(sha256sum "$PROD_WEB_BLIP" 2>/dev/null | awk '{print $1}' || echo "missing")"
 if diff -q "$PROD_QUAR_LS" "$PROD_QUAR_LS_AFTER" >/dev/null 2>&1; then
   PASS=$((PASS + 1))
   printf '  PASS  %-60s\n' "I8 production quarantine dir listing unchanged"
