@@ -719,15 +719,20 @@ Everything lives under `$HOME/metal-fy-watch/` of the site account: directories 
 | `state/` | `state.json`, the RPC cache, the lock |
 | `log/watch.log` | one line per run; capped at 1 MiB (see below) |
 | `log/cron.err` | stderr of the cron job (including `DRY:` lines); capped at 1 MiB (see below) |
-| `backup/` | crontab backups taken by the installer; newest 10 files kept |
+| `backup/` | backups taken by the installer: `crontab.bak-<ts>` and, when a re-install replaces them, `external-watch.sh.bak-<ts>`, `notify.sh.bak-<ts>`, `watch.env.bak-<ts>`; the newest 10 `*.bak-*` files are kept, counted **across all kinds** |
 
-**Size caps.** Every run, once it holds the lock, the script bounds every file it writes on the shared host, so a long-lived watch can never fill the site account's quota:
+**Size caps.** The script caps the files it writes under `metal-fy-watch/`, so a long-lived watch does not grow without limit in the site account's quota. Housekeeping deletes or truncates only the files listed here (subject to the residual risk below):
 
-- `log/watch.log` and `log/cron.err`: when a file exceeds 1 MiB (1048576 bytes) only its newest half is kept, cut at a line boundary (no partial first line). `cron.err` is rewritten **in place** (same inode): the cron shell holds it open for append during the run, and replacing the file would orphan that descriptor and lose the run's stderr.
-- `backup/`: the newest 10 regular files by modification time are kept; older ones are deleted. Symlinks are never followed, directories are never touched, nothing outside `backup/` is ever deleted.
+- `log/watch.log` and `log/cron.err`: when a file exceeds 1 MiB (1048576 bytes), it is cut to the newest **512 KiB (half the cap)**, starting at a line boundary. Exception: when the newest line alone is longer than 512 KiB (or unterminated), its last 512 KiB are kept verbatim, so the first line may be partial rather than the file emptied. Both files are rewritten **in place** (same inode): the cron shell holds `cron.err` open for append during the run, and replacing the file would orphan that descriptor and lose the run's stderr. A file that is a symlink, sits in a symlinked `log/`, or has more than one hard link is **not** trimmed (an in-place write would reach the other file sharing the inode); a hard link is reported with the note below.
+- `log/cron.err` is trimmed twice per run: at the very start, before the config is parsed (so a run that exits on a config error, a missing dependency or an unset variable still keeps it bounded; this early trim never creates a directory and never changes the exit code), and again in the end-of-run housekeeping. A cron.err at the cap can therefore exceed it by at most one run's output until the next run.
+- `backup/`: the newest 10 regular files named `*.bak-*` (the only names the installer writes there) by modification time are kept; older ones are deleted. Symlinks, directories and other names are never touched. The count is shared by all backup kinds (see the table), so after a few re-installs the oldest `crontab.bak-*` (the crontab as it was before the first install) is pruned too. Nothing depends on it: a failed crontab write restores from the copy taken in the same run.
 - `state/state.json.corrupt-*`: the newest 10 are kept. `state.json`, `lock`, `rpc-cache.json` and every other file in `state/` are never touched.
-- A housekeeping failure never changes alerting or the exit code; it writes one `note: housekeeping incomplete` line to `watch.log`.
+- Leaked temp files of a killed run are swept: `log/.trim.XXXXXX`, `state/state.XXXXXX`, `state/rpc-cache.XXXXXX` (exactly `mktemp`'s 6-character suffix, regular files only).
+- Outside `metal-fy-watch/`, `--uninstall` writes one `~/metal-fy-watch-crontab.bak-<ts>` per run and keeps the newest 3 regular files of exactly that name; nothing else in the home is touched.
+- A housekeeping failure or refusal never changes alerting or the exit code; it writes one `note: housekeeping incomplete` line to `watch.log`.
 - The caps have test-only environment overrides (`WATCH_LOG_MAX_BYTES`, `WATCH_CRONERR_MAX_BYTES`, `WATCH_KEEP_BACKUPS`, `WATCH_KEEP_CORRUPT`); production uses the defaults. A value that is not a positive integer falls back to the default.
+
+**Residual risk (deletion safety).** Checks and actions are separate system calls, so a process running **as the site account itself** can still race them: swap a checked file for a symlink or hard link in the instant between the final re-check and the write, or retarget `WATCH_HOME` by hand. The windows are narrowed: the trim re-verifies (no symlink, same device/inode, link count 1) immediately before its single write; the prune deletes `./<name>` from inside the directory after verifying it is physically `<parent>/backup` (or `state`); the temp sweeps use `find -delete`. Such an actor already has the account's full rights over every file the race could reach, so no privilege boundary is crossed; the protection is against mistakes and stray links, not against that account.
 
 Log line format:
 
@@ -790,7 +795,7 @@ WEB_HOST=<web host> WEB_HOST_KEY=<path> \
   bash scripts/install-web-host-external-watch.sh --uninstall
 ```
 
-The installer backs up the crontab, removes only the marker-delimited block (same byte-identical verification for everything outside it), then removes `metal-fy-watch/`, **including the watch's topic**. A later install generates a new topic, which must be saved and subscribed to again (the old subscription in the ntfy app can be removed).
+The installer backs up the crontab to `~/metal-fy-watch-crontab.bak-<ts>` in the site account's home (only the newest 3 of those are kept), removes only the marker-delimited block (same byte-identical verification for everything outside it), then removes `metal-fy-watch/`, **including the watch's topic**. A later install generates a new topic, which must be saved and subscribed to again (the old subscription in the ntfy app can be removed).
 
 ### 14.6 Backstop and known gap
 
