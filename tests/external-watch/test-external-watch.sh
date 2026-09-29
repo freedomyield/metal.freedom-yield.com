@@ -18,8 +18,14 @@ LISTENER_PID=""
 cleanup() { [ -n "$LISTENER_PID" ] && { kill "$LISTENER_PID"; wait "$LISTENER_PID"; } 2>/dev/null; rm -rf "$TMP"; }
 trap cleanup EXIT
 
+# A SKIP must never read as green in CI (GitHub sets CI=true): there a
+# missing tool is a failure, locally it is a loud SKIP.
+skip_or_fail() {
+  if [ -n "${CI:-}" ]; then echo "FAIL: $1 (CI must run this suite)"; exit 1; fi
+  echo "SKIP: $1"; exit 0
+}
 for t in jq python3 timeout; do
-  command -v "$t" >/dev/null 2>&1 || { echo "SKIP: $t not available"; exit 0; }
+  command -v "$t" >/dev/null 2>&1 || skip_or_fail "$t not available"
 done
 REAL_TIMEOUT="$(command -v timeout)"
 
@@ -53,6 +59,7 @@ printf '%s\n' "$1" >> "$STUB_SLEEP_LOG"
 STUB
 cat > "$BIN/timeout" <<STUB
 #!/usr/bin/env bash
+printf '%s\n' "\$*" >> "\${STUB_TIMEOUT_ARGV_LOG:-/dev/null}"
 # STUB_TIMEOUT_FAIL_FIRST=1: the first invocation (first p2p probe) fails.
 if [ "\${STUB_TIMEOUT_FAIL_FIRST:-0}" = 1 ]; then
   n=0; [ -s "\$STUB_TIMEOUT_COUNTER" ] && n=\$(cat "\$STUB_TIMEOUT_COUNTER")
@@ -98,8 +105,8 @@ new_case() { # sets C, HOMEDIR; p2p defaults to the open port
   printf 'fy-test-topic\n' > "$C/topic"; chmod 600 "$C/topic"
   P2P_PORT="$OPEN_PORT"
   write_config
-  : > "$C/notify.log"; : > "$C/sleep.log"; : > "$C/curl.log"; rm -f "$C/curl.count" "$C/timeout.count"
-  JSON_AGE=""; JSON_END=""; RPC_BODY="$BODY_CONNECTED"; RPC_RC=0; NOTIFY_RC=0; LIVE=1; FAIL_FIRST=0
+  : > "$C/notify.log"; : > "$C/sleep.log"; : > "$C/curl.log"; : > "$C/timeout.argv"; rm -f "$C/curl.count" "$C/timeout.count"
+  JSON_AGE=""; JSON_END=""; RPC_BODY="$BODY_CONNECTED"; RPC_RC=0; NOTIFY_RC=0; LIVE=1; FAIL_FIRST=0; EXTRA_PATH=""
 }
 write_config() {
   cat > "$C/etc/watch.env" <<CFG
@@ -129,11 +136,11 @@ run_watch() { # [NOW override]; sets RC, ERR
   local now="${1:-$NOW}"
   write_json "$now"
   local live_env=(); [ "$LIVE" = 1 ] && live_env=(WATCH_LIVE=1)
-  ERR="$(env ${live_env[@]+"${live_env[@]}"} PATH="$BIN:$PATH" WATCH_HOME="$C/home" WATCH_CONFIG="$C/etc/watch.env" \
+  ERR="$(env ${live_env[@]+"${live_env[@]}"} PATH="${EXTRA_PATH:+$EXTRA_PATH:}$BIN:$PATH" WATCH_HOME="$C/home" WATCH_CONFIG="$C/etc/watch.env" \
     WATCH_NOTIFY="$BIN/notify" WATCH_NOW_EPOCH="$now" P2P_REPROBE_SLEEP=7 WATCH_NOTIFY_RETRY_SLEEP=5 \
     STUB_CURL_LOG="$C/curl.log" STUB_CURL_COUNTER="$C/curl.count" STUB_CURL_BODY="$RPC_BODY" STUB_CURL_RC="$RPC_RC" \
     STUB_NOTIFY_LOG="$C/notify.log" STUB_NOTIFY_RC="$NOTIFY_RC" STUB_SLEEP_LOG="$C/sleep.log" \
-    STUB_TIMEOUT_FAIL_FIRST="$FAIL_FIRST" STUB_TIMEOUT_COUNTER="$C/timeout.count" \
+    STUB_TIMEOUT_FAIL_FIRST="$FAIL_FIRST" STUB_TIMEOUT_COUNTER="$C/timeout.count" STUB_TIMEOUT_ARGV_LOG="$C/timeout.argv" \
     bash "$SCRIPT" 2>&1 >/dev/null)"
   RC=$?
 }
@@ -200,7 +207,10 @@ assert_contains "just after window is FAIL" "fresh=FAIL" "$(last_log)"
 echo "== p2p =="
 new_case; make_json 10; run_watch
 assert_contains "p2p PASS against listener" "p2p=PASS" "$(last_log)"
-assert_eq "  no re-probe sleep" "0" "$(grep -c 7 "$C/sleep.log")"
+assert_eq "  no re-probe sleep (sleep never called)" "" "$(cat "$C/sleep.log")"
+assert_eq "  probe ran (timeout called)" "1" "$(grep -c . "$C/timeout.argv")"
+assert_not_contains "  host not in the probe's argv" "127.0.0.1" "$(cat "$C/timeout.argv")"
+assert_not_contains "  port not in the probe's argv" "$OPEN_PORT" "$(cat "$C/timeout.argv")"
 new_case; P2P_PORT="$CLOSED_PORT"; write_config; make_json 10; run_watch
 assert_contains "p2p FAIL against closed port" "p2p=FAIL" "$(last_log)"
 assert_eq "  re-probe waited P2P_REPROBE_SLEEP once" "7" "$(cat "$C/sleep.log")"
@@ -216,6 +226,8 @@ new_case; make_json 10; run_watch
 assert_contains "connected=true is PASS" "chain=PASS" "$(last_log)"
 assert_contains "  request filters by nodeIDs" "nodeIDs" "$(cat "$C/curl.log")"
 assert_contains "  request has max-time 10" "--max-time 10" "$(cat "$C/curl.log")"
+assert_contains "  request pinned to https" "--proto =https" "$(cat "$C/curl.log")"
+assert_contains "  response size capped" "--max-filesize 1048576" "$(cat "$C/curl.log")"
 new_case; make_json 10; RPC_RC=28; RPC_BODY=""; run_watch
 assert_contains "curl error is UNKNOWN" "chain=UNKNOWN" "$(last_log)"
 assert_eq "  no counter change" "0" "$(st chain fails)"
@@ -232,6 +244,11 @@ new_case; make_json 10; run_watch; make_json 10; run_watch "$((NOW + 899))"
 assert_eq "cache honoured within 900 s (1 curl call)" "1" "$(curl_calls)"
 make_json 10; run_watch "$((NOW + 900))"
 assert_eq "cache expired at 900 s (2 curl calls)" "2" "$(curl_calls)"
+new_case; make_json 10; mkdir -p "$C/home/state"
+printf '%s\n' "$(jq -c --argjson t "$((NOW + 1000))" '. + {fetchedAt:$t}' <<<"$BODY_DISCONNECTED")" > "$C/home/state/rpc-cache.json"
+run_watch
+assert_eq "cache stamped in the future is ignored (fresh RPC call)" "1" "$(curl_calls)"
+assert_contains "  and the fresh sample is used" "chain=PASS" "$(last_log)"
 
 # ============================ 5. 2-consecutive + push ============================
 echo "== 2-consecutive rule =="
@@ -307,6 +324,52 @@ assert_eq "transport failure retried once (2 attempts)" "2" "$(pushes)"
 assert_contains "  retry waited 5 s" "5" "$(cat "$C/sleep.log")"
 assert_eq "  exit 6" "6" "$RC"
 
+echo "== recovery push failure keeps alerting =="
+new_case; P2P_PORT="$CLOSED_PORT"; write_config; make_json 10
+run_watch; run_watch "$((NOW + 300))"
+assert_eq "p2p alerting after 2 fails" "alerting" "$(st p2p status)"
+P2P_PORT="$OPEN_PORT"; write_config; NOTIFY_RC=3
+run_watch "$((NOW + 600))"
+assert_eq "failed recovery push: exit 6" "6" "$RC"
+assert_eq "  status still alerting (not cleared)" "alerting" "$(st p2p status)"
+NOTIFY_RC=0; run_watch "$((NOW + 900))"
+assert_eq "  next PASS retries the recovery push" "外部見張り: 復旧 (p2p)" "$(tail -n 1 "$C/notify.log" | cut -f2)"
+assert_eq "  and only then clears" "ok|0" "$(st p2p status)|$(st p2p fails)"
+
+echo "== state cannot be saved (B2) =="
+# A state dir the watch can no longer write to (disk full, quota, perms).
+# chmod is stubbed so the watch's own `chmod 700 state` cannot undo it.
+if [ "$(id -u)" = 0 ]; then
+  [ -n "${CI:-}" ] && bad "state-save case" "root ignores dir modes; run as non-root in CI"
+  echo "  SKIP  state-save failure (root ignores directory modes)"
+else
+  NOCHMOD="$TMP/nochmod"; mkdir -p "$NOCHMOD"; printf '#!/bin/sh\nexit 0\n' > "$NOCHMOD/chmod"; chmod +x "$NOCHMOD/chmod"
+  new_case; make_json 10                      # every check PASSes: the only push is the save alert
+  run_watch                                   # creates state/ and the lock file
+  chmod 500 "$C/home/state"; EXTRA_PATH="$NOCHMOD"
+  : > "$C/notify.log"
+  run_watch "$((NOW + 300))"
+  assert_eq "state unwritable: exit 7" "7" "$RC"
+  assert_eq "  exactly one push" "1" "$(pushes)"
+  assert_eq "  urgent, fixed title" "urgent	外部見張り: 状態を保存できない (ディスク等)" "$(cut -f1,2 "$C/notify.log")"
+  assert_contains "  stderr says so" "state save failed" "$ERR"
+  assert_eq "  no temp left behind" "0" "$(count_files "$C/home/state" 'state.??????')"
+  SAVEALL="$(cat "$C/notify.log" "$C/home/log/watch.log")$ERR"
+  assert_not_contains "  no host in push/log/stderr" "127.0.0.1" "$SAVEALL"
+  assert_not_contains "  no port in push/log/stderr" "$P2P_PORT" "$SAVEALL"
+  assert_not_contains "  no path in push/log/stderr" "$C" "$(cat "$C/notify.log")"
+  run_watch "$((NOW + 600))"
+  assert_eq "  not debounced: next run pushes again" "7|2" "$RC|$(grep -c '状態を保存できない' "$C/notify.log")"
+  NOTIFY_RC=3; run_watch "$((NOW + 900))"
+  assert_eq "  that push failing too: exit 6" "6" "$RC"
+  NOTIFY_RC=0; LIVE=0; : > "$C/notify.log"; run_watch "$((NOW + 1200))"
+  assert_eq "  DRY: exit 7, nothing sent" "7|0" "$RC|$(pushes)"
+  assert_contains "  DRY: would-notify line" "DRY: would notify urgent 外部見張り: 状態を保存できない" "$ERR"
+  chmod 700 "$C/home/state"; EXTRA_PATH=""; LIVE=1
+  run_watch "$((NOW + 1500))"
+  assert_eq "  writable again: back to normal exit" "0" "$RC"
+fi
+
 # ============================ 7. DRY ============================
 echo "== side-effect gate =="
 new_case; LIVE=0; make_json 901
@@ -337,6 +400,37 @@ assert_not_contains "push has no path" "$C" "$PUSHALL"
 assert_contains "push says detected from outside" "validator host の外 (web host) から検知" "$PUSHALL"
 assert_not_contains "stderr has no host" "127.0.0.1" "$ERR"
 
+# Every other text path: log notes (rpc unavailable, validator absent, state
+# corrupt), the DRY stderr line and the permanent-push-failure stderr line.
+leak_check() { # label -> asserts on log + stderr + pushes of the current case
+  local all; all="$(cat "$C/home/log/watch.log" "$C/notify.log" 2>/dev/null)$ERR"
+  assert_not_contains "$1: no host" "127.0.0.1" "$all"
+  assert_not_contains "$1: no port" "$P2P_PORT" "$all"
+  assert_not_contains "$1: no rpc host" "rpc.invalid" "$all"
+  assert_not_contains "$1: no topic" "fy-test-topic" "$all"
+}
+new_case; make_json 10; RPC_RC=28; RPC_BODY=""; run_watch
+assert_contains "note rpc unavailable written" "note: chain rpc unavailable" "$(cat "$C/home/log/watch.log")"
+leak_check "note rpc unavailable"
+new_case; make_json 10; RPC_BODY="$BODY_ABSENT"; run_watch
+assert_contains "note validator absent written" "note: chain: validator absent" "$(cat "$C/home/log/watch.log")"
+leak_check "note validator absent"
+new_case; make_json 10; mkdir -p "$C/home/state"; echo '{garbage' > "$C/home/state/state.json"; run_watch
+leak_check "note state corrupt"
+new_case; LIVE=0; P2P_PORT="$CLOSED_PORT"; write_config; make_json 10; run_watch; run_watch "$((NOW + 300))"
+assert_contains "DRY line printed" "DRY: would notify urgent" "$ERR"
+leak_check "DRY stderr"
+new_case; P2P_PORT="$CLOSED_PORT"; write_config; make_json 10; NOTIFY_RC=3; run_watch; run_watch "$((NOW + 300))"
+assert_contains "permanent-fail line printed" "notify permanent fail" "$ERR"
+leak_check "permanent-fail stderr"
+
+echo "== WATCH_NOW_EPOCH is digits only =="
+new_case; make_json 10
+# shellcheck disable=SC2016  # the payload must reach the script unexpanded
+run_watch 'x[$(touch '"$C"'/pwned)]'
+assert_eq "non-digit WATCH_NOW_EPOCH: exit 1" "1" "$RC"
+absent "  arithmetic payload not executed" "$C/pwned"
+
 # ============================ 9. lock ============================
 echo "== lock =="
 if [ "$HAVE_REAL_FLOCK" = 1 ]; then
@@ -350,6 +444,7 @@ if [ "$HAVE_REAL_FLOCK" = 1 ]; then
   run_watch
   assert_eq "after release the run proceeds" "1" "$(grep -c . "$C/home/log/watch.log")"
 else
+  [ -n "${CI:-}" ] && bad "lock contention" "no real flock in CI"
   echo "  SKIP  lock contention (no real flock on this host; verified on Linux CI)"
 fi
 
