@@ -433,6 +433,22 @@ check "uninstall: crontab backup kept in the home (600)" \
 run --uninstall
 check "uninstall again: no-op" '[ "$RC" -eq 0 ] && printf "%s" "$OUT" | grep -q "no metal-fy-external-watch block" && cmp -s "$STORE" "$T/orig"'
 
+# ---- uninstall keeps only the newest 3 of its own crontab backups (F6) ----------
+fresh_fixture; cotenant_crontab
+for ts in 20250101-000001 20250101-000002 20250101-000003 20250101-000004; do printf 'old\n' > "$H/metal-fy-watch-crontab.bak-$ts"; done
+printf 'keep\n' > "$H/metal-fy-watch-crontab.bak-0notes"; printf 'keep\n' > "$H/other.bak-20200101-000000"
+printf 'precious\n' > "$T/outside-f6"; ln -s "$T/outside-f6" "$H/metal-fy-watch-crontab.bak-20000101-000000"
+run; run --uninstall
+check "uninstall prune: exit 0" '[ "$RC" -eq 0 ]' "rc=$RC"
+check "uninstall prune: the 2 oldest of 5 own backups removed" \
+	'[ ! -e "$H/metal-fy-watch-crontab.bak-20250101-000001" ] && [ ! -e "$H/metal-fy-watch-crontab.bak-20250101-000002" ]'
+check "uninstall prune: newest 3 kept (2 old + this uninstall's)" \
+	'[ -f "$H/metal-fy-watch-crontab.bak-20250101-000003" ] && [ -f "$H/metal-fy-watch-crontab.bak-20250101-000004" ] && new_bak="$(ls "$H" | grep -E "^metal-fy-watch-crontab\.bak-[0-9]{8}-[0-9]{6}\$" | grep -vE "^metal-fy-watch-crontab\.bak-(20250101-00000[1-4]|20000101-000000)\$")" && [ "$(nbegin "$H/$new_bak")" = 1 ]'
+check "uninstall prune: other names in the home untouched" \
+	'[ "$(cat "$H/metal-fy-watch-crontab.bak-0notes")" = keep ] && [ "$(cat "$H/other.bak-20200101-000000")" = keep ]'
+check "uninstall prune: a symlink of that name (oldest) is neither removed nor followed" \
+	'[ -L "$H/metal-fy-watch-crontab.bak-20000101-000000" ] && [ "$(cat "$T/outside-f6")" = precious ]'
+
 # ---- local preconditions --------------------------------------------------------
 fresh_fixture
 EXTRA_ENV="WATCH_ACCOUNT=Bad;name" run

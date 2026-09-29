@@ -68,7 +68,8 @@
 #      the ntfy app.
 #
 # --uninstall: remove the crontab block (same verification, crontab backed up
-# to ~WATCH_ACCOUNT/metal-fy-watch-crontab.bak-<ts> first), then remove
+# to ~WATCH_ACCOUNT/metal-fy-watch-crontab.bak-<ts> first; only the newest 3
+# files of exactly that name are kept, nothing else is touched), then remove
 # ~WATCH_ACCOUNT/metal-fy-watch/ (including the watch's topic: a later
 # install generates a new one, to be saved and subscribed to again).
 # Needs only the WEB_HOST_* variables.
@@ -402,6 +403,24 @@ write_and_verify() {
 }
 
 # ---- mode: uninstall -------------------------------------------------------
+# Uninstall crontab backups live in the account home (the watch dir is being
+# removed), one per uninstall. Keep the newest 3 regular files of exactly the
+# name shape written above (the timestamps sort as names, LC_ALL=C); never a
+# symlink, never any other name. Runs as the account, from inside the home
+# verified above, removing "./<name>". A failure is reported, never fatal.
+prune_uninstall_backups() {
+	as_account env LC_ALL=C bash -c '
+		cd -P -- "$1" || exit 1
+		k=()
+		for b in metal-fy-watch-crontab.bak-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]; do
+			if [ -f "$b" ] && [ ! -L "$b" ]; then k+=("$b"); fi
+		done
+		n=$(( ${#k[@]} - 3 )); i=0; r=0
+		while [ "$i" -lt "$n" ]; do rm -f -- "./${k[$i]}" || r=1; i=$((i + 1)); done
+		exit "$r"' _ "$ACCT_HOME" \
+		|| echo "WARNING: could not prune old ~$ACCT/metal-fy-watch-crontab.bak-* (left as is)" >&2
+}
+
 if [ "$MODE" = uninstall ]; then
 	echo "--- crontab of $ACCT ---"
 	read_crontab "$TMP/before"; ORIG_HAD_CRONTAB="$HAD_CRONTAB"
@@ -420,6 +439,7 @@ if [ "$MODE" = uninstall ]; then
 		as_account bash -c 'umask 077; cat > "$1"' _ "$CRONTAB_BAK" < "$TMP/before"
 		echo "backup: $CRONTAB_BAK_SHOW"
 		write_and_verify "$TMP/new" absent
+		prune_uninstall_backups
 	fi
 	if as_account test -e "$W"; then as_account rm -rf -- "$W"; echo "removed: $SHOW/"; fi
 	echo "OK: external watch uninstalled"
