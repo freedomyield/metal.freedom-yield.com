@@ -11,11 +11,12 @@ The doc covers design only. It does not change cron schedules, production state 
 - The flow used by `scripts/check-anomalies.sh` (= 5-minute cron on the validator host) to read inputs, validate state, process transitions, and emit notifications.
 - The supporting operator-only script `scripts/anomaly-state-init.sh` used to bootstrap or reset the baseline state.
 - The lock, counter, and quarantine files that live outside the state file but are part of the pipeline's persistent footprint.
+- The off-host external watch (`scripts/external-watch.sh`, run from the web host, §14): a second, independent watchdog that observes the validator host strictly from the outside. It exists because everything above runs on the validator host and cannot report that host's own silence.
 
 **Out of scope (= tracked elsewhere)**
 
 - The validator itself, its on-chain artefacts, the renewal pipeline, the anchor pipeline, the cycle history pipeline.
-- The site / web host / Caddy / nginx layer itself. (Probing it from the validator host *is* in scope — see §6.7.)
+- The site / web host / Caddy / nginx layer itself. (Probing it from the validator host *is* in scope — see §6.7; the external watch that runs *on* the web host is in scope — see §14.)
 - The disaster-recovery drill (= separate workstream, tracked in `docs/DISASTER_RECOVERY.md` + the residual T1 follow-up).
 
 ## 2. Pipeline overview
@@ -665,3 +666,125 @@ These are tracked separately and require additional operator approval before the
 - `docs/INCIDENT_RESPONSE.md` — operator playbook for SEV-1..4 events; the cron's role is detection, not response.
 - `docs/DISASTER_RECOVERY.md` — separate workstream; not invoked by this pipeline.
 - `docs/CRON_CONVENTIONS.md` — output capture, log paths, env injection conventions used by every cron entry on the validator host.
+
+## 14. Off-host external watch
+
+`scripts/external-watch.sh` is a watchdog that runs on the **web host**, not on the validator host, and observes the validator from the outside. Its installer is `scripts/install-web-host-external-watch.sh`, run from the operator's Mac.
+
+### 14.1 Why
+
+Starting 2026-09-24 the validator host lost connectivity beyond its provider edge for roughly 100 hours. Every push-capable monitor at the time (§2, the daily digest, the renewal and anchor watches) ran on that same host, so none could deliver an alert about the host being unreachable. A monitor on the silent host cannot report the silence. The only off-host check, the GitHub `uptime.yml` workflow, merely warned after 24 h and stayed green. The external watch moves detection to a host that does not share that failure domain.
+
+It holds no credentials toward the validator host and never listens on a port. Per run it reads one local file (the pushed `validator.json`), opens one TCP connection to the public p2p port (a second one after a 10 s re-probe if the first fails; no payload, no credentials), and makes at most one public RPC call.
+
+It pushes to **its own ntfy topic**, never the validator host's. The web host is shared with other projects; a compromise there can then read or forge only the watch's channel, and that topic can be rotated on its own.
+
+### 14.2 The three checks
+
+Each check yields `PASS`, `FAIL` or `UNKNOWN`. `UNKNOWN` never changes state: it neither counts toward an alert nor clears one.
+
+| Check | Observes | FAIL | UNKNOWN / suppression | Alert priority |
+|---|---|---|---|---|
+| `fresh` | `observedAt` of the pushed `validator.json` on the web host | file unreadable, `observedAt` missing or unparseable, or age > 900 s | inside the renewal window (`endTime - 1800 s` to `endTime + 21600 s`), because `node-info.sh` legitimately stops refreshing then | `high` |
+| `p2p` | TCP connect to the validator p2p port | connect fails, then fails again after a 10 s re-probe (5 s timeout each) | none | `urgent` |
+| `chain` | public P-chain RPC `platform.getCurrentValidators`, filtered by `nodeIDs`, field `connected` | `connected` is `false` | RPC unreachable or malformed, validator absent from the response, or `connected` not a boolean | `urgent` |
+
+The RPC response sits behind a 900 s TTL cache (OPERATING_MODEL W9, polite external access); requests filter by `nodeIDs` because otherwise delegators are omitted from the response.
+
+### 14.3 Debounce, recovery and gating
+
+- **2 consecutive observations.** A push fires only when the same check has failed on 2 consecutive observations. `fresh` and `p2p` are observed on every 5-minute run, so they alert after about 5-10 minutes.
+- **A cached RPC sample is counted once.** `chain` observations are 900 s samples, not runs: the sample time is remembered in state, and a run that re-reads the same cached sample does not add a failure. Two failures therefore always mean two distinct samples, and `chain` alerts 15-20 minutes after the first failing sample, which is up to about 30 minutes after the outage begins (the RPC must first report `connected=false`). That latency is the price of RPC politeness and is accepted.
+- **Recovery push.** The first passing run after an alert sends a `default` recovery push with the outage duration and resets the check.
+- **State advances only if the push was delivered** (same principle as `notify_or_keep` in `check-anomalies.sh`): a failed push is retried on the next run and never silently swallowed.
+- **DRY vs `WATCH_LIVE`.** Nothing is sent unless `WATCH_LIVE=1`; otherwise the script prints `DRY: would notify <priority> <title>` to stderr. A DRY run persists the failure counters and `first_fail_at` (so the alert path is reachable in a rehearsal) but never sets a check to `alerting` and never clears an existing `alerting`. Consequence: a LIVE run right after two DRY failing runs alerts on its **first** run, because DRY already advanced the counters. The installer's one-off verification run is DRY, so it is itself subject to this.
+- **Dependency preflight.** `jq`, `curl`, `timeout` and `flock` are all required. A missing one exits 1 with a message instead of degrading into a silent no-op or a false alert.
+
+### 14.4 Exit codes, log, state
+
+| Exit | Meaning |
+|---|---|
+| 0 | Run completed (including runs that were skipped because another instance held the lock) |
+| 1 | Configuration error or missing dependency |
+| 6 | A push failed permanently. The failure counters still advance; only the status change to (or from) `alerting` is withheld, so the next run retries the push |
+| 7 | The state could not be saved (disk full, quota, permissions). That run sends **only** one `urgent` push `外部見張り: 状態を保存できない (ディスク等)`, whose body lists the names of the checks failing in this run (`失敗中の確認: p2p, fresh`, or `なし`; names only, no host values); the per-check alert and recovery pushes are held back for that run, so a failing check cannot double the push rate. The save push is **not** debounced and repeats on every such run, because without saved state no check can ever reach 2 consecutive failures. If that push also fails, the exit is 6. Residual case: the hold-back is decided by a write probe at the start of the run, so if the probe passes but the real save then fails, the per-check push and the save push can both go out in that one run |
+
+Everything lives under `$HOME/metal-fy-watch/` of the site account: directories are mode 700, the scripts in `bin/` are mode 700, and the files in `etc/` are mode 600. (Publishing this relative layout is recorded under "Reclassifications" in `docs/CONSTITUTION.md`, 2026-09-29.)
+
+| Path (relative to `$HOME/metal-fy-watch/`) | Content |
+|---|---|
+| `bin/` | `external-watch.sh` and its bundled copy of `notify.sh` |
+| `etc/watch.env` | strict `KEY=VALUE` config (parsed, never sourced) |
+| `etc/ntfy-topic` | the watch's own ntfy topic, generated on the web host by the installer (bearer secret, `docs/CONSTITUTION.md` §4.1 S5; never in the repo, never printed) |
+| `state/` | `state.json`, the RPC cache, the lock |
+| `log/watch.log` | one line per run; trimmed to the last 5000 lines when it exceeds 6000 |
+| `log/cron.err` | stderr of the cron job (including `DRY:` lines) |
+| `backup/` | crontab backups taken by the installer |
+
+Log line format:
+
+```
+<UTC ISO time> fresh=<PASS|FAIL|UNKNOWN>(<age>s) p2p=<...> chain=<...>[(cached)] pushes=<n>
+```
+
+Healthy looks like `fresh=PASS(<age under 900>s) p2p=PASS chain=PASS pushes=0`. `chain=PASS(cached)` means the run re-read a sample already counted. Free-text lines start with `note:` (chain RPC unavailable, validator absent, state file corrupt and re-initialised, state save failed).
+
+### 14.5 Operator runbook
+
+All commands run **on the operator's Mac** from the repository root. Host values are typed as environment variables for that one command; they are not committed and the installer does not echo them (output shows `<validator host>` and `<web host>`).
+
+**Install**
+
+```bash
+# Plan only: prints what would change (including whether a topic would be
+# generated), changes nothing.
+WEB_HOST=<web host> WEB_HOST_KEY=<path> VALIDATOR_HOST=<validator host> \
+  bash scripts/install-web-host-external-watch.sh --dry-run
+
+# Apply: same environment, no flag.
+WEB_HOST=<web host> WEB_HOST_KEY=<path> VALIDATOR_HOST=<validator host> \
+  bash scripts/install-web-host-external-watch.sh
+```
+
+Optional variables: `WEB_HOST_USER` (login used for the installation), `WATCH_ACCOUNT` (the site account that owns the job; defaults to the site account), `FY_WEB_API_DIR` (override of the detected `validator.json` location). `--print-remote` prints the remote script text only. The installer **never contacts the validator host**: `VALIDATOR_HOST` is only written into `etc/watch.env` for the TCP probe. It must run on the Mac, because the topic hand-over needs `pbcopy`/`pbpaste`; without them it refuses.
+
+The installer:
+
+1. **Topic.** On the first install it generates the watch's own topic **on the web host** (`fy-metal-` + 32 hex from `/dev/urandom`, written as the site account, mode 600). If a valid watch topic already exists it is kept; a file of any other shape is refused and left untouched (it is never adopted or silently replaced).
+2. Installs `bin/` and `etc/watch.env`.
+3. Runs the watch once **without** `WATCH_LIVE` and prints its log line (a `WARNING:` line if a check FAILed).
+4. Edits the site account's crontab only between the markers `# BEGIN metal-fy-external-watch` and `# END metal-fy-external-watch` (one `*/5` line with `WATCH_LIVE=1`), after backing the crontab up and verifying that lines outside the markers are byte-identical (abort and restore otherwise).
+5. **Hand-over (first install only).** It copies the new topic straight from the web host into the Mac clipboard and prints only `topic copied to clipboard (not shown)`. The topic is never displayed, never written to the Mac's disk and never in any argv.
+
+**Right after a first install (operator)**
+
+1. Paste the topic into the **password manager** as a **new entry** (separate from the validator host's topic).
+2. In the **ntfy app** on the phone, subscribe to it (paste it as the topic name).
+3. Overwrite the clipboard with something else.
+
+Until step 2 is done the watch's alerts reach nobody. To hand the topic over again later (new phone, lost entry):
+
+```bash
+WEB_HOST=<web host> WEB_HOST_KEY=<path> \
+  bash scripts/install-web-host-external-watch.sh --copy-topic
+```
+
+**Verify**
+
+1. Read the log line the installer printed. Healthy is `fresh=PASS(<age under 900>s) p2p=PASS chain=PASS pushes=0`. During a renewal window `fresh=UNKNOWN` is expected.
+2. After the first cron tick (up to 5 minutes), `log/watch.log` under `$HOME/metal-fy-watch/` (site account) gains a new line; `log/cron.err` stays empty (the cron job is LIVE, so no `DRY:` lines).
+3. Remember the DRY caveat in §14.3 before re-running by hand during an outage.
+
+**Uninstall**
+
+```bash
+WEB_HOST=<web host> WEB_HOST_KEY=<path> \
+  bash scripts/install-web-host-external-watch.sh --uninstall
+```
+
+The installer backs up the crontab, removes only the marker-delimited block (same byte-identical verification for everything outside it), then removes `metal-fy-watch/`, **including the watch's topic**. A later install generates a new topic, which must be saved and subscribed to again (the old subscription in the ntfy app can be removed).
+
+### 14.6 Backstop and known gap
+
+- **GitHub backstop.** `.github/workflows/uptime.yml` fails when `validator.json` is more than 1 hour stale, except inside the renewal window (where it emits a notice). It is slow (scheduled GitHub runs in practice fire only every few hours) but independent of both hosts and of their provider.
+- **Known gap: no self-heartbeat.** The watchdog does not report its own death. If the web host itself dies, the validator host's existing public-site probe (§6.7) alerts. If both hosts are silent, only the GitHub backstop remains.

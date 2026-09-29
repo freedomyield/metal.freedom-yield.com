@@ -182,6 +182,10 @@ retired to idempotent removal installers so a wrapper that was ever
 extended with these dead names can be cleaned back to the sender's real
 allowlist. See those scripts' headers for detail.
 
+## Note — the web host runs one project-scoped cron job (off-host external watch)
+
+Since 2026-09-29 the web host runs one project-scoped cron job: the off-host external watch (`scripts/external-watch.sh`, see `docs/MONITORING_OPS.md` §14). It lives in the site account's crontab as a single marker-delimited block (`# BEGIN metal-fy-external-watch` … `# END metal-fy-external-watch`) with its files under `$HOME/metal-fy-watch/` (including the watch's own ntfy topic, generated there). It is installed by the Mac-run `scripts/install-web-host-external-watch.sh`, **not** by the CI deploy: CI still only rsyncs `public/`, and nothing in this matrix's delivery model changed. No system-wide change is involved (no `/etc/cron.d`, no service, no firewall or web-server configuration); lines outside the markers are verified byte-identical by the installer. The installer never contacts the validator host.
+
 ## Cross-check protocol
 
 Add a new artifact to `public/api/` only after deciding its row in this

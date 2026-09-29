@@ -88,18 +88,37 @@ jobs:
             fi
           done
 
-          # observedAt が 24 時間以内かを軽くチェック(stale データの検出)
-          observed=$(echo "$json" | jq -r '.observedAt')
-          if [ "$observed" != "null" ] && [ -n "$observed" ]; then
-            obs_epoch=$(date -d "$observed" +%s 2>/dev/null || echo 0)
-            now_epoch=$(date +%s)
-            age_hours=$(( (now_epoch - obs_epoch) / 3600 ))
-            if [ "$obs_epoch" -gt 0 ] && [ "$age_hours" -gt 24 ]; then
-              echo "::warning::validator.json observedAt is ${age_hours}h old — node-info.sh may not be refreshing"
-            else
-              echo "validator.json age: ${age_hours}h (fresh)"
-            fi
+          # BEGIN freshness-check (extracted verbatim by tests/uptime-workflow/test-uptime-freshness.sh)
+          # observedAt freshness is a hard gate: this job is the slow,
+          # provider-independent backstop that must go red when the validator
+          # host stops refreshing the feed (2026-09-24: ~100 h of silence stayed
+          # green because a stale feed only warned after 24 h). Missing or
+          # unparseable observedAt is a failure, never a pass.
+          # Only exception: the renewal window around endTime, when the feed is
+          # legitimately quiet (endTime-1800 <= now <= endTime+21600).
+          now_epoch="${NOW_EPOCH:-$(date +%s)}"
+          observed=$(echo "$json" | jq -r '.observedAt // empty')
+          obs_epoch=$(date -d "$observed" +%s 2>/dev/null || echo 0)
+          if [ -z "$observed" ] || ! [ "$obs_epoch" -gt 0 ] 2>/dev/null; then
+            echo "::error::validator.json observedAt is missing or unparseable ('${observed}')"
+            exit 1
           fi
+          age_s=$(( now_epoch - obs_epoch ))
+          if [ "$age_s" -gt 3600 ]; then
+            end_epoch=$(echo "$json" | jq -r '.endTime // empty')
+            case "$end_epoch" in ''|*[!0-9]*) end_epoch="" ;; esac
+            if [ -n "$end_epoch" ] \
+              && [ "$now_epoch" -ge $(( end_epoch - 1800 )) ] \
+              && [ "$now_epoch" -le $(( end_epoch + 21600 )) ]; then
+              echo "::notice::validator.json observedAt is ${age_s}s old, tolerated inside the renewal window"
+            else
+              echo "::error::validator.json observedAt is ${age_s}s old (limit 3600s) — validator host may have stopped refreshing"
+              exit 1
+            fi
+          else
+            echo "validator.json age: ${age_s}s (fresh)"
+          fi
+          # END freshness-check
 
       - name: Note validator period status
         run: |
