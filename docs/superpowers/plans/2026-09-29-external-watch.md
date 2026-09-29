@@ -25,6 +25,10 @@ G1. **Public repo.** No IP address, hostname of either host, ntfy topic,
     from install-time env on the operator's Mac and are stored only on the web
     host in mode-600 files. Tests use RFC5737 addresses (192.0.2.x /
     198.51.100.x / 203.0.113.x) and obviously fake topics.
+    *Note (2026-09-29, final audit):* the relative web-host watch layout
+    `$HOME/metal-fy-watch/{bin,etc,state,log,backup}` is published with
+    operator approval (no host, no account identity); see the 2026-09-29
+    entry under "Reclassifications" in `docs/CONSTITUTION.md`.
 G2. **Provider/region names** (Constitution §4.2 C1) do not appear in new
     prose, identifiers, file names, titles or push bodies. Say "validator host"
     / "web host" / "外部見張り". (Existing `install-xserver-*` names are legacy;
@@ -133,6 +137,13 @@ push failure keeps state and exits 6; DRY without WATCH_LIVE; log line
 contains no `VALIDATOR_HOST` value; lock contention exits 0. Apply G9.
 
 ### Task 2: `scripts/install-web-host-external-watch.sh` + tests (after Task 1)
+> **Superseded in part (operator decision 2026-09-29, final fix wave):** the
+> watch gets its OWN ntfy topic, generated on the web host by the installer
+> and handed to the operator only through the Mac clipboard (`--copy-topic`).
+> The installer never contacts the validator host: `VALIDATOR_SSH_USER`,
+> `VALIDATOR_SSH_KEY` and step (1) below no longer exist. The current
+> behaviour is documented in `docs/MONITORING_OPS.md` §14.5.
+
 Mac-run installer, pattern of `scripts/install-xserver-subdir-allowlist.sh`
 (ssh BatchMode, heredoc remote, `--dry-run`, `--print-remote`, backups,
 idempotent, unified diff) plus `--uninstall`.

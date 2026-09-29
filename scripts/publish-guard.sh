@@ -507,12 +507,15 @@ SCAN_RAW="$(
 			next if $dom =~ /\.(?:invalid|test|example|localhost|local)$/;   # RFC 6761/6762 reserved (placeholder), never real
 			push @hits, "personal-email literal (redacted)";
 		}
-		# A5. ntfy topic literal (fy-metal-<32 hex>). The topic is the only
-		# credential of a push channel (anyone who knows it can read/publish),
-		# and it lives only in mode-600 env files on the operator side. Constitution
-		# 4.1: never in a public file. Case-insensitive; boundaries keep a longer
-		# hex run (e.g. a hash) from matching a 32-char slice of itself only when
-		# it is glued to more hex, but a topic embedded in a URL still matches.
+		# A5. ntfy topic literal (fy-metal-<32 hex>). A topic is the only
+		# credential of a push channel (anyone who knows it can read/publish);
+		# the real ones live only in mode-600 files on the hosts (the validator
+		# host, and the web-host watch with a topic of its own). Constitution
+		# 4.1 S5: never in a public file. Case-insensitive. A match needs a
+		# non-alphanumeric character (or line start/end) on both sides, so a
+		# topic inside a URL, a quote or KEY=VALUE is caught, while a 32-hex
+		# run glued to more alphanumerics (a longer hash, or a letter right
+		# before fy-metal-) is intentionally NOT matched: not a topic of this shape.
 		while (/(?<![0-9A-Za-z])fy-metal-[0-9a-f]{32}(?![0-9A-Za-z])/gi) {
 			push @hits, "ntfy-topic literal (redacted)";
 		}

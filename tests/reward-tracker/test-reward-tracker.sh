@@ -161,6 +161,15 @@ echo '{"cycle_n":7}' > "$STATE_DIR/current-cycle-state.json"
 # without a real ntfy.sh delivery.
 cat > "$TMP/bin/curl" <<'STUB'
 #!/usr/bin/env bash
+# notify.sh hands curl the ntfy URL in a -K config on a pipe, never in argv
+# (2026-09-29). Fold that url back into argv so routing and the tripwire
+# still see every ntfy call.
+_a=(); _p=""
+for _x in "$@"; do
+	if [ "$_p" = -K ] || [ "$_p" = --config ]; then _x="$(sed -n 's/^url = "\(.*\)"$/\1/p' "$_x")"; fi
+	_a+=("$_x"); _p="$_x"
+done
+set -- "${_a[@]}"
 URL=""
 DATA=""
 HEADERS=""

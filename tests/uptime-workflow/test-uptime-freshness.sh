@@ -9,8 +9,9 @@
 #
 # The block between the `BEGIN/END freshness-check` markers is EXTRACTED from
 # the workflow (never copied here), exactly one block required.
-# Mutation proof: see the task report (old 24h-warning logic makes cases 2-5,
-# 8 fail).
+# Mutation proof (G9): restoring the old 24 h ::warning:: logic fails the
+# stale cases; removing, weakening (-z only) or de-fanging (no exit) the
+# missing/unparseable-observedAt guard fails the "inside the window" cases.
 #
 # CHAIN: none — no network. Synthetic JSON + a fixed NOW_EPOCH only.
 # PRIME_DIRECTIVE: TESTNET-FIRST — safe.
@@ -101,6 +102,16 @@ expect_pass "stale at window lower bound (endTime-1800) passes with ::notice::" 
 expect_fail "stale 1 s before window opens fails"           "$(mk $((NOW-7200)) $((NOW+1801)))" $NOW
 expect_pass "stale at window upper bound (endTime+21600) passes with ::notice::" "$(mk $((NOW-40000)) $((NOW-21600)))" $NOW "^::notice::"
 expect_fail "stale 1 s after window closes fails"           "$(mk $((NOW-40000)) $((NOW-21601)))" $NOW
+# The observedAt guard must hold on its own: inside the renewal window a
+# missing/unparseable observedAt would otherwise be tolerated as "quiet".
+IN_WIN_END=$((NOW + 600))
+expect_fail_guard() { # name json
+	expect_fail "$1" "$2" $NOW
+	if printf '%s\n' "$OUT" | grep -q 'missing or unparseable'; then ok "  $1: guard names the cause"
+	else bad "  $1: guard names the cause — out: $OUT"; fi
+}
+expect_fail_guard "missing observedAt inside the window fails"      "{\"phase\":\"x\",\"network\":\"n\",\"endTime\":$IN_WIN_END}"
+expect_fail_guard "unparseable observedAt inside the window fails"  "{\"phase\":\"x\",\"network\":\"n\",\"observedAt\":\"not-a-date\",\"endTime\":$IN_WIN_END}"
 expect_fail "non-numeric endTime gives no window"           "{\"phase\":\"x\",\"network\":\"n\",\"observedAt\":\"$(iso $((NOW-7200)))\",\"endTime\":\"soon\"}" $NOW
 
 echo "test-uptime-freshness.sh summary: PASS=$PASS  FAIL=$FAIL"

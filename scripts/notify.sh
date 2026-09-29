@@ -101,6 +101,18 @@ if [ -r "$VALIDATOR_JSON" ]; then
   fi
 fi
 
+# The topic is a bearer secret, so it must never appear in curl's argv:
+# argv is world-readable on a shared host (/proc/<pid>/cmdline, ps). curl
+# reads the URL from a config handed over an anonymous pipe (-K <(...)), and
+# printf is a bash builtin, so the topic is in no process's argv at all.
+# `\` and `"` are escaped for curl's quoted-string syntax, so the URL curl
+# uses is byte-for-byte the one the old argv form produced.
+ntfy_url_config() {
+  local t="${TOPIC//\\/\\\\}"
+  t="${t//\"/\\\"}"
+  printf 'url = "https://ntfy.sh/%s"\n' "$t"
+}
+
 if [ "$STRICT" = "1" ]; then
   # Strict mode: capture both curl exit code and HTTP status. Bound the
   # request with --max-time so a hung ntfy.sh server doesn't stall the
@@ -110,7 +122,7 @@ if [ "$STRICT" = "1" ]; then
   # `set +e` around the capture so the non-zero curl exit doesn't trip
   # the script-wide `set -e`. We classify the failure explicitly below.
   set +e
-  HTTP_CODE=$(curl -sS -X POST "https://ntfy.sh/${TOPIC}" \
+  HTTP_CODE=$(curl -K <(ntfy_url_config) -sS -X POST \
     -H "Title: ${TITLE}" \
     -H "Priority: ${PRIO}" \
     -H "Tags: ${TAGS}" \
@@ -142,11 +154,12 @@ if [ "$STRICT" = "1" ]; then
   esac
 fi
 
-# Default mode (= byte-identical to historical behaviour). curl's own exit
+# Default mode (= historical exit/stdout contract, unchanged; only the URL
+# moved from argv into the -K config, see ntfy_url_config). curl's own exit
 # code propagates via set -euo pipefail; HTTP status is printed via -w but
 # does NOT affect the script exit. Existing callers (daily-status,
 # notify-evidence-health, K-3.5 best-effort paths) observe no change.
-curl -sS -X POST "https://ntfy.sh/${TOPIC}" \
+curl -K <(ntfy_url_config) -sS -X POST \
   -H "Title: ${TITLE}" \
   -H "Priority: ${PRIO}" \
   -H "Tags: ${TAGS}" \

@@ -28,7 +28,11 @@
 # Config: ${WATCH_CONFIG:-$HOME/metal-fy-watch/etc/watch.env}, strict
 # KEY=VALUE lines, never sourced. See parse_config below for the keys.
 #
-# Exit: 0 ok | 1 config error | 6 a push failed permanently.
+# Exit: 0 ok | 1 config error | 6 a push failed permanently (including the
+# state-save alert below) | 7 state could not be saved (disk full, quota,
+# permissions): one urgent push was sent, NOT debounced, on every such run —
+# without saved state the 2-consecutive rule can never fire, so staying quiet
+# would silently disable every alert.
 #
 # Test/ops overrides (env): WATCH_HOME WATCH_CONFIG WATCH_LIVE WATCH_NOTIFY
 # WATCH_NOW_EPOCH P2P_REPROBE_SLEEP WATCH_NOTIFY_RETRY_SLEEP
@@ -123,6 +127,8 @@ exec 9>"$STATE_DIR/lock"
 flock -n 9 || exit 0
 
 NOW="${WATCH_NOW_EPOCH:-$(date +%s)}"
+# Digits only: NOW is used in $((...)), which would evaluate any expression.
+[[ "$NOW" =~ ^[0-9]+$ ]] || die_config "WATCH_NOW_EPOCH must be digits"
 LIVE="${WATCH_LIVE:-0}"
 
 iso() { jq -nr --argjson t "$1" '$t | todate'; }
@@ -146,7 +152,11 @@ load_state() {
 commit_state() {
   local tmp
   tmp="$(mktemp "$STATE_DIR/state.XXXXXX")" || return 1
-  printf '%s\n' "$STATE" > "$tmp" && chmod 600 "$tmp" && mv "$tmp" "$STATE_FILE"
+  if printf '%s\n' "$STATE" > "$tmp" && chmod 600 "$tmp" && mv "$tmp" "$STATE_FILE"; then
+    return 0
+  fi
+  rm -f "$tmp"   # a half-written temp must not pile up (e.g. disk full)
+  return 1
 }
 
 st_get() { jq -r --arg c "$1" --arg f "$2" '.[$c][$f] // empty' <<<"$STATE"; }
@@ -220,8 +230,10 @@ check_fresh() {
 }
 
 p2p_probe() {
-  # shellcheck disable=SC2016  # $0/$1 expand inside the child bash, by design
-  timeout 5 bash -c 'exec 3<>"/dev/tcp/$0/$1"' "$VALIDATOR_HOST" "$VALIDATOR_P2P_PORT" >/dev/null 2>&1
+  # Host and port travel in the environment (readable only by this UID), not
+  # in argv (readable by every local user on the shared web host).
+  # shellcheck disable=SC2016  # $H/$P expand inside the child bash, by design
+  H="$VALIDATOR_HOST" P="$VALIDATOR_P2P_PORT" timeout 5 bash -c 'exec 3<>"/dev/tcp/$H/$P"' >/dev/null 2>&1
 }
 
 check_p2p() {
@@ -248,6 +260,7 @@ rpc_response() {
     fi
   fi
   resp="$(curl -sS -X POST -H 'content-type:application/json' --max-time 10 \
+    --proto =https --max-filesize 1048576 \
     --data "$(jq -nc --arg id "$NODE_ID" '{jsonrpc:"2.0",id:1,method:"platform.getCurrentValidators",params:{nodeIDs:[$id]}}')" \
     "$RPC_URL" 2>/dev/null)" || return 1
   jq -e '.result.validators | type=="array"' <<<"$resp" >/dev/null 2>&1 || return 1
@@ -334,7 +347,18 @@ check_chain
 apply_check fresh "$FRESH_RES"
 apply_check p2p "$P2P_RES"
 apply_check chain "$CHAIN_RES" "$CHAIN_OBS"
-commit_state
+STATE_SAVE_FAILED=0
+if ! commit_state 2>/dev/null; then
+  # Without saved state every run re-reads the old counters, so no check can
+  # ever reach 2 consecutive failures: alerting is silently dead. Say so on
+  # every such run (deliberately not debounced or deduplicated: there is no
+  # state to dedupe with). The body names no host, path or value.
+  STATE_SAVE_FAILED=1
+  echo "[external-watch] state save failed" >&2
+  log_note "state save failed" 2>/dev/null
+  notify_or_keep urgent "外部見張り: 状態を保存できない (ディスク等)" \
+    "$(printf '見張りの状態を保存できず、警報を出せない状態です。\nweb host の空き容量・権限を確認してください。\nvalidator host の外 (web host) から検知')"
+fi
 
 printf '%s fresh=%s(%ss) p2p=%s chain=%s pushes=%d\n' "$(iso "$NOW")" \
   "$FRESH_RES" "$FRESH_AGE" "$P2P_RES" "$CHAIN_RES$CHAIN_NOTE" "$PUSHES" >> "$LOG_FILE"
@@ -343,4 +367,5 @@ if [ "$(wc -l < "$LOG_FILE")" -gt 6000 ]; then
 fi
 
 [ "$PUSH_FAILED" = "1" ] && exit 6
+[ "$STATE_SAVE_FAILED" = "1" ] && exit 7
 exit 0
