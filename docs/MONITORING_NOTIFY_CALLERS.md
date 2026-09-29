@@ -214,7 +214,7 @@ The pre-2026-09-24 title `公開サイトが応答しない` (without the suffix
 
 ## Addendum (2026-09-29) — `external-watch.sh` (off-host watch on the web host)
 
-Sections 1–7 above and the earlier addenda are left as written. `scripts/external-watch.sh` is a new caller of `notify.sh`. It runs on the web host, not the validator host, and calls its own bundled copy of `notify.sh` (installed next to it by `scripts/install-web-host-external-watch.sh`) through `notify_or_keep`, the same delivered-or-keep discipline as caller #1's `notify_or_keep`. Nothing is sent unless `WATCH_LIVE=1` (otherwise `DRY: would notify …` on stderr); a permanent push failure exits 6 and leaves state un-advanced. Design and runbook: `docs/MONITORING_OPS.md` §14.
+Sections 1–7 above and the earlier addenda are left as written. `scripts/external-watch.sh` is a new caller of `notify.sh`. It runs on the web host, not the validator host, and calls its own bundled copy of `notify.sh` (installed next to it by `scripts/install-web-host-external-watch.sh`) through `notify_or_keep`, the same delivered-or-keep discipline as the `notify_or_keep` of `scripts/check-anomalies.sh`. It pushes to **its own ntfy topic** (generated on the web host by the installer), never the validator host's. Nothing is sent unless `WATCH_LIVE=1` (otherwise `DRY: would notify …` on stderr). A permanent push failure exits 6: the failure counters advance, only the status change is withheld, so the next run retries. Since 2026-09-29 `notify.sh` hands curl the ntfy URL through a `-K` config on an anonymous pipe, so the topic is never in any process's argv (this applies to every caller; exit codes and stdout are unchanged). Design and runbook: `docs/MONITORING_OPS.md` §14.
 
 | Title | Priority | When | State advanced only on delivery |
 |---|---|---|---|
@@ -222,4 +222,5 @@ Sections 1–7 above and the earlier addenda are left as written. `scripts/exter
 | `外部見張り: ネットワーク上で未接続 (connected=false)` | urgent | `chain` failed on 2 distinct RPC samples | `chain.status=alerting` |
 | `外部見張り: validator.json の更新が止まっている` | high | `fresh` failed on 2 consecutive runs (not in the renewal window) | `fresh.status=alerting` |
 | `外部見張り: 復旧 (<check>)` | default | first passing run of `<check>` after a delivered alert; body includes the outage duration | check reset to `ok` |
+| `外部見張り: 状態を保存できない (ディスク等)` | urgent | the run's state could not be saved (disk full, quota, permissions); sent on **every** such run, not debounced, exit 7 (6 if this push fails) | nothing (there is no saved state) |
 
