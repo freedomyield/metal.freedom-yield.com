@@ -45,6 +45,76 @@ WATCH_CONFIG="${WATCH_CONFIG:-$WATCH_HOME/etc/watch.env}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 NOTIFY="${WATCH_NOTIFY:-$SCRIPT_DIR/notify.sh}"
 
+# --- size caps: shared helpers ---------------------------------------------
+# Every file this script writes on the shared host has an upper bound. The
+# overrides exist for tests; production runs on the defaults. A value that is
+# not a positive integer falls back to the default.
+DEFAULT_MAX_BYTES=1048576
+DEFAULT_KEEP=10
+cap_value() { # env-value default
+  if [[ "$1" =~ ^[1-9][0-9]{0,14}$ ]]; then printf '%s' "$1"; else printf '%s' "$2"; fi
+}
+file_size() { wc -c < "$1" 2>/dev/null | tr -d ' '; }
+# file_id path -> "<device>:<inode>:<link count>" (GNU stat, BSD fallback). On
+# GNU a failed `stat -c` falls through to `stat -f` (file-system status), whose
+# output never ends in ":1", so a failure always reads as "refuse".
+file_id() { stat -c '%d:%i:%h' "$1" 2>/dev/null || stat -f '%d:%i:%l' "$1" 2>/dev/null; }
+
+# trim_tail file max: when the file exceeds max bytes keep only its newest
+# max/2 bytes, cut at a line boundary; if the newest line alone is longer
+# than that, its tail is kept verbatim (a partial first line) rather than
+# emptying the file. The file is rewritten IN PLACE (cat tmp > file, never
+# mv): cron.err is held open with O_APPEND by the cron shell for the whole
+# run, and replacing the inode would orphan that descriptor and lose this
+# run's stderr. Because the write goes to the inode, the file must be a
+# regular file with exactly one link, reached through no symlink (file or
+# its directory): a hard link would make the write truncate another file of
+# the account. Refusals: symlink -> 0 (silently skipped); link count != 1 ->
+# 1 (the caller reports it). Temp files go next to the file (.trim.XXXXXX).
+trim_tail() {
+  local f="$1" max="$2" d="${1%/*}" id size half raw kept rc=1
+  [ -f "$f" ] && [ ! -L "$f" ] && [ ! -L "$d" ] || return 0
+  id="$(file_id "$f")"
+  [[ "$id" =~ ^[0-9]+:[0-9]+:1$ ]] || return 1
+  size="$(file_size "$f")"
+  [[ "$size" =~ ^[0-9]+$ ]] || return 1
+  [ "$size" -gt "$max" ] || return 0
+  half=$((max / 2))
+  raw="$(mktemp "$d/.trim.XXXXXX")" || return 1
+  kept="$(mktemp "$d/.trim.XXXXXX")" || { rm -f "$raw"; return 1; }
+  # One byte more than half: if it is a newline, the rest starts on a line.
+  if tail -c $((half + 1)) "$f" > "$raw" 2>/dev/null; then
+    if [ "$(head -c 1 "$raw" | od -An -tx1 | tr -d ' \n')" = "0a" ]; then
+      tail -c +2 "$raw" > "$kept"
+    else
+      tail -n +2 "$raw" > "$kept"
+    fi
+    # A last line longer than half the cap (or unterminated) would leave
+    # nothing: keep the newest half verbatim rather than lose the newest line.
+    [ -s "$kept" ] || tail -c "$half" "$f" > "$kept" 2>/dev/null
+    # Re-verify immediately before the write (narrows the check-to-write
+    # window to this one line): still the same singly linked inode, reached
+    # through no symlink. `< kept` is opened first, so a vanished temp can
+    # never truncate the file to nothing.
+    if [ -s "$kept" ] && [ ! -L "$d" ] && [ ! -L "$f" ] && [ -f "$f" ] \
+       && [ "$(file_id "$f")" = "$id" ]; then
+      cat < "$kept" > "$f" && rc=0
+    fi
+  fi
+  rm -f "$raw" "$kept"
+  return "$rc"
+}
+
+# cron.err first, before anything that can exit: a run that dies before
+# housekeeping (config error, missing dependency, set -u abort) still keeps
+# cron.err bounded. Never creates a directory, never fails the run.
+early_trim_cronerr() {
+  local d="$WATCH_HOME/log"
+  [ -d "$d" ] && [ ! -L "$d" ] || return 0
+  trim_tail "$d/cron.err" "$(cap_value "${WATCH_CRONERR_MAX_BYTES:-}" "$DEFAULT_MAX_BYTES")"
+}
+( early_trim_cronerr ) >/dev/null 2>&1 || true
+
 FRESH_MAX_AGE=900
 RPC_CACHE_TTL=900
 RENEW_BEFORE=1800
@@ -362,51 +432,22 @@ apply_check() { # check result [observation-epoch]
 }
 
 # --- housekeeping (size caps) --------------------------------------------
-# Every file this script writes on the shared host has an upper bound. The
-# overrides exist for tests; production runs on the defaults. A value that is
-# not a positive integer falls back to the default.
-cap_value() { # env-value default
-  if [[ "$1" =~ ^[1-9][0-9]{0,14}$ ]]; then printf '%s' "$1"; else printf '%s' "$2"; fi
-}
-file_size() { wc -c < "$1" 2>/dev/null | tr -d ' '; }
+# cap_value / file_size / file_id / trim_tail and the defaults live at the top
+# of the script (the cron.err trim runs before the config is parsed).
 file_mtime() { stat -c '%Y' "$1" 2>/dev/null || stat -f '%m' "$1" 2>/dev/null; }
-
-# trim_tail file max: when the file exceeds max bytes keep only its newest
-# half, cut at a line boundary (no partial first line). The file is rewritten
-# IN PLACE (cat tmp > file, never mv): cron.err is held open with O_APPEND by
-# the cron shell for the whole run, and replacing the inode would orphan that
-# descriptor and lose this run's stderr.
-trim_tail() {
-  local f="$1" max="$2" size half raw kept rc=1
-  [ -f "$f" ] && [ ! -L "$f" ] || return 0
-  size="$(file_size "$f")"
-  [[ "$size" =~ ^[0-9]+$ ]] || return 1
-  [ "$size" -gt "$max" ] || return 0
-  half=$((max / 2))
-  raw="$(mktemp "$LOG_DIR/.trim.XXXXXX")" || return 1
-  kept="$(mktemp "$LOG_DIR/.trim.XXXXXX")" || { rm -f "$raw"; return 1; }
-  # One byte more than half: if it is a newline, the rest starts on a line.
-  if tail -c $((half + 1)) "$f" > "$raw" 2>/dev/null; then
-    if [ "$(head -c 1 "$raw" | od -An -tx1 | tr -d ' \n')" = "0a" ]; then
-      tail -c +2 "$raw" > "$kept"
-    else
-      tail -n +2 "$raw" > "$kept"
-    fi
-    # A last line longer than half the cap (or unterminated) would leave
-    # nothing: keep the newest half verbatim rather than lose the newest line.
-    [ -s "$kept" ] || tail -c "$half" "$f" > "$kept" 2>/dev/null
-    cat "$kept" > "$f" && rc=0
-  fi
-  rm -f "$raw" "$kept"
-  return "$rc"
-}
 
 # prune_dir dir pattern keep: delete all but the newest KEEP regular files
 # (not symlinks, not directories) directly inside dir whose name matches
-# pattern. Nothing outside dir is ever touched.
+# pattern. The deletions run inside a subshell that has changed into dir and
+# verified that it really is <physical parent>/<name> (not a symlink swapped
+# in after the listing), and they remove "./<name>", so a race can at most
+# make the prune refuse, never delete in another directory.
 prune_dir() {
-  local dir="$1" pat="$2" keep="$3" list ordered f m rc=0
+  local dir="$1" pat="$2" keep="$3" list ordered f m parent want rc=0
   [ -d "$dir" ] && [ ! -L "$dir" ] || return 0
+  parent="${dir%/*}"; [ -n "$parent" ] || parent=/
+  parent="$(cd -P -- "$parent" 2>/dev/null && pwd -P)" || return 1
+  want="${parent%/}/${dir##*/}"
   list="$(mktemp "$LOG_DIR/.trim.XXXXXX")" || return 1
   ordered="$(mktemp "$LOG_DIR/.trim.XXXXXX")" || { rm -f "$list"; return 1; }
   if ! find "$dir" -maxdepth 1 -type f -name "$pat" -print0 > "$list" 2>/dev/null; then
@@ -417,9 +458,14 @@ prune_dir() {
     m="$(file_mtime "$f")"; [[ "$m" =~ ^[0-9]+$ ]] || continue
     printf '%s\t%s\n' "$m" "$f"
   done < "$list" | sort -t $'\t' -k1,1nr -k2,2r > "$ordered"
-  while IFS=$'\t' read -r _ f; do
-    rm -f -- "$f" || rc=1
-  done < <(tail -n +$((keep + 1)) "$ordered")
+  tail -n +$((keep + 1)) "$ordered" | (
+    cd -P -- "$dir" 2>/dev/null && [ "$(pwd -P)" = "$want" ] || exit 1
+    r=0
+    while IFS=$'\t' read -r _ f; do
+      rm -f -- "./${f##*/}" || r=1
+    done
+    exit "$r"
+  ) || rc=1
   rm -f "$list" "$ordered"
   return "$rc"
 }
@@ -428,16 +474,25 @@ prune_dir() {
 # folded into one host-free note line.
 housekeeping() {
   local max_log max_err keep_bak keep_cor bad=0
-  max_log="$(cap_value "${WATCH_LOG_MAX_BYTES:-}" 1048576)"
-  max_err="$(cap_value "${WATCH_CRONERR_MAX_BYTES:-}" 1048576)"
-  keep_bak="$(cap_value "${WATCH_KEEP_BACKUPS:-}" 10)"
-  keep_cor="$(cap_value "${WATCH_KEEP_CORRUPT:-}" 10)"
-  # A run killed mid-trim leaves its temp files behind; sweep exactly that
-  # name shape (regular files only, so symlinks are never followed) first.
-  find "$LOG_DIR" -maxdepth 1 -type f -name '.trim.??????' -exec rm -f -- {} + 2>/dev/null || bad=1
+  max_log="$(cap_value "${WATCH_LOG_MAX_BYTES:-}" "$DEFAULT_MAX_BYTES")"
+  max_err="$(cap_value "${WATCH_CRONERR_MAX_BYTES:-}" "$DEFAULT_MAX_BYTES")"
+  keep_bak="$(cap_value "${WATCH_KEEP_BACKUPS:-}" "$DEFAULT_KEEP")"
+  keep_cor="$(cap_value "${WATCH_KEEP_CORRUPT:-}" "$DEFAULT_KEEP")"
+  # A run killed mid-write leaves its temp files behind; sweep exactly the
+  # name shapes this script creates (mktemp's 6-character suffix), regular
+  # files only, so symlinks are never followed. -delete unlinks relative to
+  # the directory find walked. This runs under the lock; every state/ temp is
+  # created under the lock, so no running instance's state/ temp is hit. The
+  # early cron.err trim of an overlapping run creates log/ temps outside the
+  # lock; if this sweep removes them, that trim refuses or keeps the verbatim
+  # tail (trim_tail never writes an empty file) — nothing outside log/ is hit.
+  find "$LOG_DIR" -maxdepth 1 -type f -name '.trim.??????' -delete 2>/dev/null || bad=1
+  find "$STATE_DIR" -maxdepth 1 -type f \( -name 'state.??????' -o -name 'rpc-cache.??????' \) \
+    -delete 2>/dev/null || bad=1
   trim_tail "$LOG_FILE" "$max_log" 2>/dev/null || bad=1
   trim_tail "$LOG_DIR/cron.err" "$max_err" 2>/dev/null || bad=1
-  prune_dir "$WATCH_HOME/backup" '*' "$keep_bak" 2>/dev/null || bad=1
+  # Only the names the installer writes there (<file>.bak-<timestamp>).
+  prune_dir "$WATCH_HOME/backup" '*.bak-*' "$keep_bak" 2>/dev/null || bad=1
   prune_dir "$STATE_DIR" 'state.json.corrupt-*' "$keep_cor" 2>/dev/null || bad=1
   [ "$bad" = 0 ] || log_note "housekeeping incomplete" 2>/dev/null
   return 0

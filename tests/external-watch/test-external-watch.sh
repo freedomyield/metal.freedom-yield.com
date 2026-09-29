@@ -150,6 +150,10 @@ last_log() { tail -n 1 "$C/home/log/watch.log" 2>/dev/null; }
 st() { jq -r ".$1.$2" "$C/home/state/state.json" 2>/dev/null; }
 curl_calls() { grep -c . "$C/curl.log"; }
 
+# WATCH_TEST_ONLY_CAPS=1 runs only the size-cap sections (10 onwards): the
+# fast loop for mutation runs against the housekeeping code. CI and
+# run-all-tests.sh never set it, so the full suite always runs there.
+if [ "${WATCH_TEST_ONLY_CAPS:-0}" != 1 ]; then
 # ============================ 1. config ============================
 echo "== config parser =="
 new_case; MARK="$C/pwned"
@@ -493,6 +497,8 @@ for missing in jq curl timeout flock; do
   absent "  nothing created before the check" "$C/home"
 done
 
+fi   # WATCH_TEST_ONLY_CAPS
+
 # ============================ 10. state / log housekeeping ============================
 echo "== corrupt state / log trim =="
 new_case; make_json 10; mkdir -p "$C/home/state"; echo '{garbage' > "$C/home/state/state.json"
@@ -504,11 +510,11 @@ assert_contains "  logged" "state corrupt" "$(cat "$C/home/log/watch.log")"
 # ---- size caps (C1-C7): small override values keep the fixtures tiny ----
 inode_of() { ls -i "$1" | awk '{print $1}'; }
 size_of() { wc -c < "$1" | tr -d ' '; }
-mk_files() { # dir count  -> hk-01..hk-NN, higher NN = newer mtime, name order == age order
+mk_files() { # dir count  -> hk-01.bak-t..hk-NN.bak-t (the installer's <file>.bak-<ts> shape), higher NN = newer mtime
   local d="$1" n="$2" i
   for i in $(seq 1 "$n"); do
-    printf 'x%s\n' "$i" > "$d/hk-$(printf %02d "$i")"
-    touch -t "$(printf '20260101%02d00' "$i")" "$d/hk-$(printf %02d "$i")"
+    printf 'x%s\n' "$i" > "$d/hk-$(printf %02d "$i").bak-t"
+    touch -t "$(printf '20260101%02d00' "$i")" "$d/hk-$(printf %02d "$i").bak-t"
   done
 }
 echo "== log caps: watch.log =="
@@ -546,15 +552,15 @@ echo "== backup/ retention =="
 new_case; make_json 10; mkdir -p "$C/home/backup/keepdir"; mk_files "$C/home/backup" 12
 run_watch
 assert_eq "12 backups -> newest 10 kept" "10" "$(count_files "$C/home/backup" 'hk-*')"
-absent "  oldest gone" "$C/home/backup/hk-01"; absent "  2nd oldest gone" "$C/home/backup/hk-02"
-[ -e "$C/home/backup/hk-03" ] && [ -e "$C/home/backup/hk-12" ] && ok "  newest 10 survive" || bad "  newest 10 survive" "hk-03/hk-12 missing"
+absent "  oldest gone" "$C/home/backup/hk-01.bak-t"; absent "  2nd oldest gone" "$C/home/backup/hk-02.bak-t"
+[ -e "$C/home/backup/hk-03.bak-t" ] && [ -e "$C/home/backup/hk-12.bak-t" ] && ok "  newest 10 survive" || bad "  newest 10 survive" "hk-03/hk-12 missing"
 [ -d "$C/home/backup/keepdir" ] && ok "  directory untouched" || bad "  directory untouched" "gone"
 # order is by mtime, not by name: name order reversed against age
 new_case; make_json 10; mkdir -p "$C/home/backup"
-for i in $(seq 1 12); do n="$(printf %02d $((13 - i)))"; echo x > "$C/home/backup/rv-$n"; touch -t "$(printf '20260101%02d00' "$i")" "$C/home/backup/rv-$n"; done
+for i in $(seq 1 12); do n="$(printf %02d $((13 - i)))"; echo x > "$C/home/backup/rv-$n.bak-t"; touch -t "$(printf '20260101%02d00' "$i")" "$C/home/backup/rv-$n.bak-t"; done
 run_watch
-absent "mtime order: rv-12 (oldest mtime) gone" "$C/home/backup/rv-12"; absent "  rv-11 gone" "$C/home/backup/rv-11"
-[ -e "$C/home/backup/rv-01" ] && ok "  rv-01 (newest mtime) kept" || bad "  rv-01 kept" "gone"
+absent "mtime order: rv-12 (oldest mtime) gone" "$C/home/backup/rv-12.bak-t"; absent "  rv-11 gone" "$C/home/backup/rv-11.bak-t"
+[ -e "$C/home/backup/rv-01.bak-t" ] && ok "  rv-01 (newest mtime) kept" || bad "  rv-01 kept" "gone"
 new_case; make_json 10; mkdir -p "$C/home/backup"; mk_files "$C/home/backup" 5
 HK_ENV=(WATCH_KEEP_BACKUPS=2); run_watch
 assert_eq "override WATCH_KEEP_BACKUPS=2 honoured" "2" "$(count_files "$C/home/backup" 'hk-*')"
@@ -562,13 +568,13 @@ assert_eq "override WATCH_KEEP_BACKUPS=2 honoured" "2" "$(count_files "$C/home/b
 echo "== backup/ symlinks are never followed =="
 new_case; make_json 10; mkdir -p "$C/home/backup" "$C/outside/d"; echo precious > "$C/outside/file"; echo precious > "$C/outside/d/inner"
 touch -t 200001010000 "$C/outside/file"
-ln -s "$C/outside/file" "$C/home/backup/aa-link-file"; ln -s "$C/outside/d" "$C/home/backup/aa-link-dir"
-touch -h -t 200001010000 "$C/home/backup/aa-link-file" "$C/home/backup/aa-link-dir" 2>/dev/null
+ln -s "$C/outside/file" "$C/home/backup/aa-link-file.bak-t"; ln -s "$C/outside/d" "$C/home/backup/aa-link-dir.bak-t"
+touch -h -t 200001010000 "$C/home/backup/aa-link-file.bak-t" "$C/home/backup/aa-link-dir.bak-t" 2>/dev/null
 mk_files "$C/home/backup" 12
 run_watch
 assert_eq "  12 regular files -> 10 kept, links not counted" "10" "$(count_files "$C/home/backup" 'hk-*')"
 [ "$(cat "$C/outside/file")" = precious ] && [ "$(cat "$C/outside/d/inner")" = precious ] && ok "  link targets survive" || bad "  link targets survive" "deleted"
-[ -L "$C/home/backup/aa-link-file" ] && [ -L "$C/home/backup/aa-link-dir" ] && ok "  links themselves untouched" || bad "  links themselves untouched" "removed"
+[ -L "$C/home/backup/aa-link-file.bak-t" ] && [ -L "$C/home/backup/aa-link-dir.bak-t" ] && ok "  links themselves untouched" || bad "  links themselves untouched" "removed"
 new_case; make_json 10; mkdir -p "$C/home" "$C/outside2"; mk_files "$C/outside2" 12; ln -s "$C/outside2" "$C/home/backup"
 run_watch
 assert_eq "backup/ itself a symlink: nothing outside deleted" "12" "$(count_files "$C/outside2" 'hk-*')"
@@ -634,17 +640,145 @@ assert_eq "  cron.err untouched" "old" "$(cat "$C/home/log/cron.err")"
 assert_eq "  symlink target survives" "outside" "$(cat "$C/outside_t")"
 [ -L "$C/home/log/.trim.LNK000" ] && ok "  symlink named like a temp is not followed or removed" || bad "  symlink temp" "removed"
 new_case; make_json 10; mkdir -p "$C/home/backup"; mk_files "$C/home/backup" 12
-TABNAME="$C/home/backup/$(printf 'aa-tab\t')"; echo x > "$TABNAME"; touch -t 200001010000 "$TABNAME"
-echo innocent > "$C/home/backup/aa-tab"; touch -t 203001010000 "$C/home/backup/aa-tab"   # what a mangled (tab-stripped) name would hit
+TABNAME="$C/home/backup/$(printf 'aa.bak-tab\t')"; echo x > "$TABNAME"; touch -t 200001010000 "$TABNAME"
+echo innocent > "$C/home/backup/aa.bak-tab"; touch -t 203001010000 "$C/home/backup/aa.bak-tab"   # what a mangled (tab-stripped) name would hit
 run_watch
 [ -e "$TABNAME" ] && ok "tab-suffixed name skipped (not pruned)" || bad "tab name skipped" "gone"
-assert_eq "  tab-stripped twin (newest file) not deleted by mistake" "innocent" "$(cat "$C/home/backup/aa-tab")"
+assert_eq "  tab-stripped twin (newest file) not deleted by mistake" "innocent" "$(cat "$C/home/backup/aa.bak-tab")"
 assert_eq "  regular files still pruned (13 -> 10)" "9" "$(count_files "$C/home/backup" 'hk-*')"
 new_case; make_json 10; mkdir -p "$C/home/log"; { printf 'short\n'; head -c 1500 /dev/zero | tr '\0' 'z'; } > "$C/home/log/cron.err"
 HK_ENV=(WATCH_CRONERR_MAX_BYTES=1000); run_watch
 [ -s "$C/home/log/cron.err" ] && ok "line longer than cap/2: file not emptied" || bad "long last line" "empty"
 [ "$(size_of "$C/home/log/cron.err")" -le 1000 ] && ok "  size <= cap" || bad "  size <= cap" "$(size_of "$C/home/log/cron.err")"
 assert_eq "  ends with that line's tail" "zzzzzzzzzz" "$(tail -c 10 "$C/home/log/cron.err")"
+
+# ============================ 11. final-audit fixes ============================
+# Helpers: a co-tenant file of 300 lines, a PATH shim that runs once before
+# the real tool (race injection), and a cksum shortcut.
+sum_of() { cksum < "$1"; }
+mk_cotenant() { for i in $(seq 1 300); do echo "cotenant line $i"; done > "$1"; }
+race_shim() { # tool action-script  -> EXTRA_PATH shim: runs action once, then the real tool
+  local real; real="$(command -v "$1")"; mkdir -p "$C/racebin"
+  printf '#!/usr/bin/env bash\nif [ ! -e "%s/raced" ]; then : > "%s/raced"; %s; fi\nexec "%s" "$@"\n' \
+    "$C" "$C" "$2" "$real" > "$C/racebin/$1"
+  chmod +x "$C/racebin/$1"; EXTRA_PATH="$C/racebin"
+}
+
+echo "== hard links are never trimmed through (F1) =="
+new_case; make_json 10; mkdir -p "$C/home/log"; mk_cotenant "$C/cotenant"; SUM="$(sum_of "$C/cotenant")"
+ln "$C/cotenant" "$C/home/log/cron.err"
+HK_ENV=(WATCH_CRONERR_MAX_BYTES=2000); run_watch
+assert_eq "cron.err hard-linked to a co-tenant file: co-tenant byte-identical" "$SUM" "$(sum_of "$C/cotenant")"
+assert_eq "  rc 0" "0" "$RC"
+assert_contains "  refusal reported as a note" "housekeeping incomplete" "$(cat "$C/home/log/watch.log")"
+new_case; make_json 10; mkdir -p "$C/home/log"; mk_cotenant "$C/cotenant"
+ln "$C/cotenant" "$C/home/log/watch.log"
+HK_ENV=(WATCH_LOG_MAX_BYTES=2000); run_watch
+assert_eq "watch.log hard-linked: co-tenant first line kept (not trimmed)" "cotenant line 1" "$(head -n 1 "$C/cotenant")"
+assert_eq "  co-tenant only gained this run's appends (run line + note)" "302" "$(wc -l < "$C/cotenant" | tr -d ' ')"
+
+echo "== cron.err stays bounded when the run dies before housekeeping (F2) =="
+new_case; printf 'BROKEN LINE;\n' >> "$C/etc/watch.env"
+early_env=(PATH="$BIN:$PATH" WATCH_HOME="$C/home" WATCH_CONFIG="$C/etc/watch.env" WATCH_CRONERR_MAX_BYTES=1000)
+PER="$(env "${early_env[@]}" bash "$SCRIPT" 2>&1 | wc -c | tr -d ' ')"   # one run's output; no log/ yet
+absent "  config-error run creates nothing (early trim never mkdirs)" "$C/home"
+mkdir -p "$C/home/log"
+for _ in $(seq 1 200); do env "${early_env[@]}" bash "$SCRIPT" >> "$C/home/log/cron.err" 2>&1; RC=$?; done
+assert_eq "200 config-error runs: every run still exits 1" "1" "$RC"
+SZ="$(size_of "$C/home/log/cron.err")"
+[ "$SZ" -le $((1000 + PER)) ] && ok "  cron.err <= cap + one run's output ($SZ <= 1000+$PER; unbounded would be $((200 * PER)))" \
+  || bad "  cron.err bounded" "$SZ > 1000+$PER"
+assert_contains "  newest message kept" "config error" "$(tail -n 1 "$C/home/log/cron.err")"
+assert_eq "  no temp left in log/" "0" "$(count_files "$C/home/log" '.trim.*')"
+
+echo "== backup/ prunes only <file>.bak-<ts> names (F3) =="
+new_case; make_json 10; mkdir -p "$C/home/backup"; mk_files "$C/home/backup" 12
+echo keep > "$C/home/backup/notes.txt"; touch -t 200001010000 "$C/home/backup/notes.txt"
+run_watch
+assert_eq "unrelated (and oldest) file in backup/ survives" "keep" "$(cat "$C/home/backup/notes.txt" 2>/dev/null)"
+assert_eq "  .bak- files still pruned to 10" "10" "$(count_files "$C/home/backup" 'hk-*')"
+
+echo "== races: a swap after the check is refused (F4) =="
+for kind in "ln -s" "ln"; do
+  new_case; make_json 10; mkdir -p "$C/home/log"; for i in $(seq 1 300); do echo "err line $i"; done > "$C/home/log/cron.err"
+  mk_cotenant "$C/cotenant"; SUM="$(sum_of "$C/cotenant")"
+  race_shim od "mv '$C/home/log/cron.err' '$C/home/log/cron.err.orig'; $kind '$C/cotenant' '$C/home/log/cron.err'"
+  HK_ENV=(WATCH_CRONERR_MAX_BYTES=2000); run_watch
+  [ -e "$C/raced" ] && ok "cron.err swapped mid-trim ($kind): race injected" || bad "race injected ($kind)" "shim never ran"
+  assert_eq "  co-tenant byte-identical" "$SUM" "$(sum_of "$C/cotenant")"
+  assert_eq "  rc 0" "0" "$RC"
+done
+new_case; make_json 10; mkdir -p "$C/home/backup" "$C/outside3"; mk_files "$C/home/backup" 12; mk_files "$C/outside3" 12
+race_shim sort "mv '$C/home/backup' '$C/home/backup.real'; ln -s '$C/outside3' '$C/home/backup'"
+run_watch
+[ -e "$C/raced" ] && ok "backup/ swapped for a symlink after the listing: race injected" || bad "race injected (sort)" "shim never ran"
+assert_eq "  nothing deleted in the swapped-in directory" "12" "$(count_files "$C/outside3" 'hk-*')"
+assert_contains "  refusal reported as a note" "housekeeping incomplete" "$(cat "$C/home/log/watch.log")"
+assert_eq "  rc 0" "0" "$RC"
+
+echo "== state/ temp sweep (F5) =="
+new_case; make_json 10; mkdir -p "$C/home/state"; echo outside > "$C/outside_s"
+for n in state.AbC123 rpc-cache.xYz789 state.AbC1234 rpc-cache.ab12 state.json.old other.keep; do echo x > "$C/home/state/$n"; done
+ln -s "$C/outside_s" "$C/home/state/state.LNK000"
+run_watch
+absent "leaked state.XXXXXX swept" "$C/home/state/state.AbC123"; absent "  leaked rpc-cache.XXXXXX swept" "$C/home/state/rpc-cache.xYz789"
+[ -e "$C/home/state/state.AbC1234" ] && [ -e "$C/home/state/rpc-cache.ab12" ] && ok "  other suffix lengths untouched" || bad "  suffix width" "removed"
+[ -e "$C/home/state/state.json.old" ] && [ -e "$C/home/state/other.keep" ] && [ -e "$C/home/state/state.json" ] && ok "  state.json and other files untouched" || bad "  state/ files" "removed"
+[ -L "$C/home/state/state.LNK000" ] && [ "$(cat "$C/outside_s")" = outside ] && ok "  symlink named like a temp: neither it nor its target touched" || bad "  symlink temp" "touched"
+
+echo "== size-cap test gaps (F7) =="
+# exact-cap boundary (cron.err gets no line from the run itself)
+new_case; make_json 10; mkdir -p "$C/home/log"; yes 'e123456789' | head -c 2000 > "$C/home/log/cron.err"; SUM="$(sum_of "$C/home/log/cron.err")"
+HK_ENV=(WATCH_CRONERR_MAX_BYTES=2000); run_watch
+assert_eq "cron.err exactly at the cap: byte-identical" "$SUM" "$(sum_of "$C/home/log/cron.err")"
+new_case; make_json 10; mkdir -p "$C/home/log"; yes 'e123456789' | head -c 2001 > "$C/home/log/cron.err"
+HK_ENV=(WATCH_CRONERR_MAX_BYTES=2000); run_watch
+[ "$(size_of "$C/home/log/cron.err")" -le 1000 ] && ok "cron.err one byte over: trimmed to <= cap/2" || bad "cap+1 trimmed" "$(size_of "$C/home/log/cron.err")"
+# aligned 10-byte lines: exactly cap/2 bytes (100 whole lines) are kept
+new_case; make_json 10; mkdir -p "$C/home/log"; for i in $(seq 1 300); do printf 'e%08d\n' "$i"; done > "$C/home/log/cron.err"
+HK_ENV=(WATCH_CRONERR_MAX_BYTES=2000); run_watch
+assert_eq "aligned cut: exactly cap/2 bytes kept" "1000" "$(size_of "$C/home/log/cron.err")"
+assert_eq "  first kept line is the aligned one (not dropped)" "e00000201" "$(head -n 1 "$C/home/log/cron.err")"
+# symlinked watch.log / cron.err: the target is never trimmed
+new_case; make_json 10; mkdir -p "$C/home/log"; mk_cotenant "$C/cotenant"; SUM="$(sum_of "$C/cotenant")"
+ln -s "$C/cotenant" "$C/home/log/cron.err"
+HK_ENV=(WATCH_CRONERR_MAX_BYTES=2000); run_watch
+assert_eq "cron.err a symlink: target byte-identical" "$SUM" "$(sum_of "$C/cotenant")"
+new_case; make_json 10; mkdir -p "$C/home/log"; mk_cotenant "$C/cotenant"
+ln -s "$C/cotenant" "$C/home/log/watch.log"
+HK_ENV=(WATCH_LOG_MAX_BYTES=2000); run_watch
+assert_eq "watch.log a symlink: target not trimmed (first line kept)" "cotenant line 1" "$(head -n 1 "$C/cotenant")"
+# sweep glob width: exactly .trim. + 6 characters
+new_case; make_json 10; mkdir -p "$C/home/log"; for n in .trim.ab12CD .trim.ABCDEFG .trim.abc; do echo x > "$C/home/log/$n"; done
+run_watch
+absent "sweep: .trim.<6 chars> removed" "$C/home/log/.trim.ab12CD"
+[ -e "$C/home/log/.trim.ABCDEFG" ] && [ -e "$C/home/log/.trim.abc" ] && ok "  .trim.<7 chars> and .trim.<3 chars> untouched" || bad "  sweep glob width" "removed"
+# nested directories are never descended into
+new_case; make_json 10; mkdir -p "$C/home/backup/sub"; mk_files "$C/home/backup" 12; mk_files "$C/home/backup/sub" 12
+touch -t 200001010000 "$C/home/backup/sub"/*
+run_watch
+assert_eq "backup/sub/: nested files (all older) untouched" "12" "$(count_files "$C/home/backup/sub" 'hk-*')"
+assert_eq "  top level pruned to 10" "10" "$(count_files "$C/home/backup" 'hk-*')"
+# a failing temp sweep alone is reported
+new_case; make_json 10; mkdir -p "$C/fbin"
+printf '#!/usr/bin/env bash\ncase "$*" in *.trim.*) exit 1 ;; esac\nexec %s "$@"\n' "$(command -v find)" > "$C/fbin/find"; chmod +x "$C/fbin/find"; EXTRA_PATH="$C/fbin"
+run_watch
+assert_contains "temp sweep failing: note logged" "housekeeping incomplete" "$(cat "$C/home/log/watch.log")"
+assert_eq "  rc 0" "0" "$RC"
+# production defaults (no overrides): 1048576 bytes, exact boundary
+new_case; make_json 10; mkdir -p "$C/home/log"; yes 'default cap filler line' | head -c 1048576 > "$C/home/log/cron.err"; SUM="$(sum_of "$C/home/log/cron.err")"
+run_watch
+assert_eq "default cron.err cap: exactly 1048576 bytes untouched" "$SUM" "$(sum_of "$C/home/log/cron.err")"
+new_case; make_json 10; mkdir -p "$C/home/log"; yes 'default cap filler line' | head -c 1048577 > "$C/home/log/cron.err"
+run_watch
+[ "$(size_of "$C/home/log/cron.err")" -le 524288 ] && ok "  1048577 bytes: trimmed to <= 524288" || bad "  default cron.err cap" "$(size_of "$C/home/log/cron.err")"
+new_case; make_json 10; run_watch; L="$(size_of "$C/home/log/watch.log")"   # one run's log line, deterministic
+new_case; make_json 10; mkdir -p "$C/home/log"; yes 'default cap filler line' | head -c $((1048576 - L)) > "$C/home/log/watch.log"
+run_watch
+assert_eq "default watch.log cap: exactly 1048576 after this run's line, untouched" "1048576" "$(size_of "$C/home/log/watch.log")"
+new_case; make_json 10; mkdir -p "$C/home/log"; yes 'default cap filler line' | head -c $((1048577 - L)) > "$C/home/log/watch.log"
+run_watch
+[ "$(size_of "$C/home/log/watch.log")" -le 524288 ] && ok "  one byte more: trimmed to <= 524288" || bad "  default watch.log cap" "$(size_of "$C/home/log/watch.log")"
 
 echo
 echo "RESULT: $PASS passed, $FAIL failed"
