@@ -15,7 +15,7 @@
 # What it changes on the web host (and nothing else):
 #   ~WATCH_ACCOUNT/metal-fy-watch/            dir 700, owner WATCH_ACCOUNT
 #     bin/external-watch.sh  bin/notify.sh    700
-#     etc/watch.env  etc/ntfy-topic           600
+#     etc/watch.env  etc/ntfy-topic           600  (ntfy-topic: the watch's OWN topic)
 #     state/ log/ backup/                     700
 #   WATCH_ACCOUNT's crontab, strictly between the lines
 #     # BEGIN metal-fy-external-watch
@@ -26,21 +26,34 @@
 #   Does not touch other projects, /etc, system cron, users, services,
 #   firewall or web server configuration. No sudo, no useradd.
 #
+# The validator host is NEVER contacted by this installer (no ssh, no key,
+# no command). VALIDATOR_HOST is only written into watch.env for the watch's
+# own TCP reachability probe.
+#
 # Secrets handling:
-#   - The ntfy topic is streamed validator host -> web host over two ssh
-#     connections joined by a pipe. It never lands on the Mac's disk, never
-#     appears in any argv, and is never printed. The web host side verifies
-#     it is non-empty and well-formed and writes it mode 600.
+#   - The watch has its OWN ntfy topic, never the validator host's: a
+#     compromise of the shared web host can then read or forge only the
+#     watch's channel, and it can be rotated on its own. On the first install
+#     it is generated ON THE WEB HOST, as the account, from /dev/urandom
+#     (fy-metal-<32 hex>; the prefix keeps publish-guard rule A5 effective),
+#     written umask 077 / mode 600. An existing valid topic is kept (never
+#     rotated silently); an existing file of any other shape is refused.
+#   - Hand-over to the operator never displays it: --copy-topic (run
+#     automatically after a first install) streams it from the web host over
+#     ssh stdout straight into the Mac clipboard (pbcopy). It never lands on
+#     the Mac's disk, never appears in any argv, and is never printed. Without
+#     pbcopy the installer refuses (it never falls back to printing).
 #   - The validator host address is delivered on the remote session's stdin,
 #     not in argv, and is never printed: output shows `<validator host>`.
-#     Web host address and key paths are masked the same way.
+#     Web host address and key path are masked the same way.
 #   - Every file under metal-fy-watch/ is written AS the site account (the
 #     root session only reads account data through that account), so a
 #     planted symlink there can never make root write elsewhere.
 #
 # Steps (install):
-#   1. ssh pre-check of both hosts (BatchMode; no password prompts).
-#   2. topic: validator host `cat` | web host receiver  (skipped by --dry-run)
+#   1. ssh pre-check of the web host (BatchMode; no password prompts).
+#   2. topic: keep the existing dedicated topic, or generate one on the web
+#      host (--dry-run only reports which).
 #   3. detect VALIDATOR_JSON from the push wrapper's `__fy_root='<dir>'`
 #      line (~WATCH_ACCOUNT/bin/receive-metal-push), or FY_WEB_API_DIR.
 #   4. install bin/ + etc/watch.env (existing files backed up to backup/).
@@ -50,24 +63,31 @@
 #   6. crontab block (backup to backup/crontab.bak-<ts>, write, verify,
 #      restore on failure). The armed line is:
 #      */5 * * * * WATCH_LIVE=1 /bin/bash $HOME/metal-fy-watch/bin/external-watch.sh >>$HOME/metal-fy-watch/log/cron.err 2>&1
+#   7. only if step 2 generated a new topic: --copy-topic (see above), then
+#      the operator saves it in the password manager and subscribes to it in
+#      the ntfy app.
 #
 # --uninstall: remove the crontab block (same verification, crontab backed up
 # to ~WATCH_ACCOUNT/metal-fy-watch-crontab.bak-<ts> first), then remove
-# ~WATCH_ACCOUNT/metal-fy-watch/. Needs only the WEB_HOST_* variables.
+# ~WATCH_ACCOUNT/metal-fy-watch/ (including the watch's topic: a later
+# install generates a new one, to be saved and subscribed to again).
+# Needs only the WEB_HOST_* variables.
 #
 # Usage (operator, from the Mac):
 #   WEB_HOST=<addr> WEB_HOST_KEY=<key> VALIDATOR_HOST=<addr> \
-#   VALIDATOR_SSH_USER=<user> VALIDATOR_SSH_KEY=<key> \
-#   VALIDATOR_TOPIC_FILE=<abs path on the validator host> \
 #     bash scripts/install-web-host-external-watch.sh [--dry-run]
+#   WEB_HOST=<addr> WEB_HOST_KEY=<key> \
+#     bash scripts/install-web-host-external-watch.sh --copy-topic
 #   WEB_HOST=<addr> WEB_HOST_KEY=<key> \
 #     bash scripts/install-web-host-external-watch.sh --uninstall [--dry-run]
 #
 # Options:
 #   --dry-run        Connect + inspect + print what would change. Writes
-#                    nothing on either host; the topic is not read.
+#                    nothing; no topic is generated, read or copied.
 #   --print-remote   Print the remote script and exit. No SSH, no env needed,
 #                    no host values embedded (they travel on stdin at run time).
+#   --copy-topic     Copy the watch's installed topic into the Mac clipboard
+#                    (pbcopy) without displaying it. Needs only WEB_HOST_*.
 #   --uninstall      Remove the crontab block and ~WATCH_ACCOUNT/metal-fy-watch.
 #
 # Env (none is ever echoed):
@@ -75,31 +95,33 @@
 #   WEB_HOST_USER        default root (crontab -u needs it)
 #   WEB_HOST_KEY         required, no default
 #   WATCH_ACCOUNT        default deploy
-#   VALIDATOR_HOST       required for install (written to watch.env only)
-#   VALIDATOR_SSH_USER   required for install
-#   VALIDATOR_SSH_KEY    required for install
-#   VALIDATOR_TOPIC_FILE required for install; no default (absolute path)
+#   VALIDATOR_HOST       required for install (written to watch.env only;
+#                        never contacted)
 #   FY_WEB_API_DIR       web host api/ dir holding validator.json; skips
 #                        auto-detection from the push wrapper
 #
 # Test mode: SKIP_SSH=1 runs both remote halves locally with `bash -c` (no
 # host contacted). Only then are these honoured: SKIP_SSH_HOME (fake account
 # home), SKIP_SSH_SELFTEST_PATH (PATH for the self-test, e.g. with stubs),
-# SKIP_SSH_WATCH_SRC (substitute watch script). VALIDATOR_TOPIC_FILE is read
-# as a local file. Tests put a fake `crontab` on PATH.
+# SKIP_SSH_WATCH_SRC (substitute watch script). Tests put a fake `crontab`,
+# `pbcopy` and `pbpaste` on PATH.
 #
 # Exit codes:
 #   0  installed / already up to date / uninstalled / dry-run / print done
-#   2  local precondition failed (env, key unreadable, bad arg, bad source)
-#   3  ssh pre-check failed (either host)
+#   2  local precondition failed (env, key unreadable, bad arg, bad source,
+#      pbcopy/pbpaste missing)
+#   3  ssh pre-check failed
 #   4  account, its home, or runuser not usable on the web host
-#   5  topic transfer failed, or topic empty/malformed (nothing written)
+#   5  topic: generation failed, an existing topic file is not a dedicated
+#      watch topic (refused, left as is), or none installed (--copy-topic)
 #   6  VALIDATOR_JSON dir undeterminable (pass FY_WEB_API_DIR) or invalid
 #   7  crontab verification failed — original crontab RESTORED
 #   8  watch self-test failed (crontab not armed)
 #   9  crontab unreadable or its markers malformed — nothing written
 #   10 CRITICAL: crontab restore could not be verified (backup path printed)
 #   11 installed layout failed mode/owner verification
+#   12 topic hand-over to the clipboard failed (nothing printed; re-run
+#      --copy-topic)
 
 set -euo pipefail
 
@@ -108,15 +130,23 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MODE=install
 DRY_RUN=0
 PRINT_REMOTE=0
+COPY_ONLY=0
 for arg in "$@"; do
 	case "$arg" in
 		--dry-run)      DRY_RUN=1 ;;
 		--print-remote) PRINT_REMOTE=1 ;;
 		--uninstall)    MODE=uninstall ;;
-		-h|--help)      sed -n '2,105p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+		--copy-topic)   COPY_ONLY=1 ;;
+		-h|--help)      sed -n '2,130p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 		*)              echo "ERROR (2): unknown arg: $arg" >&2; exit 2 ;;
 	esac
 done
+if [ "$COPY_ONLY" = 1 ]; then
+	if [ "$MODE" != install ] || [ "$DRY_RUN" = 1 ]; then
+		echo "ERROR (2): --copy-topic cannot be combined with --uninstall or --dry-run" >&2; exit 2
+	fi
+	MODE=copy-topic
+fi
 
 # The remote half. Runs as WEB_HOST_USER (root) on the web host via
 # `bash -c <script> _ <args>`; data (validator host, file contents, or the
@@ -199,26 +229,76 @@ ensure_layout() {
 	as_account chmod 700 "$W" "$W/bin" "$W/etc" "$W/state" "$W/log" "$W/backup"
 }
 
-# ---- mode: topic (stdin = the topic; never echoed) ------------------------
+# ---- mode: topic (keep the existing dedicated topic, or generate one) -------
+# The value never leaves the web host here: it is generated file-to-file
+# (od | tr into the file; printf is a builtin, so it is in no argv) and only
+# ever checked by shape. It is never echoed.
+TF="$W/etc/ntfy-topic"
+TOPIC_RE='^fy-metal-[0-9a-f]{32}$'
+topic_shape_ok() { # file -> 0 if it holds exactly one dedicated watch topic
+	as_account bash -c 'v="$(tr -d "[:space:]" < "$1")"; [[ "$v" =~ $2 ]]' _ "$1" "$TOPIC_RE"
+}
 if [ "$MODE" = topic ]; then
+	if [ "$DRY_RUN" = 1 ]; then
+		if as_account test -L "$W" || as_account test -L "$W/etc" || as_account test -L "$TF"; then
+			echo "ERROR (5): a symlink under $SHOW — refusing" >&2; exit 5
+		fi
+		if ! as_account test -e "$TF"; then
+			echo "topic: none yet — would generate a new dedicated watch topic on the web host (DRY-RUN: nothing generated)"
+		elif as_account test -f "$TF" && topic_shape_ok "$TF"; then
+			echo "topic: existing dedicated watch topic — would keep it (value not shown)"
+		else
+			echo "ERROR (5): existing etc/ntfy-topic is not a dedicated watch topic (fy-metal-<32 hex>) — the installer would refuse" >&2; exit 5
+		fi
+		exit 0
+	fi
 	ensure_layout
-	T="$(as_account mktemp "$W/etc/.ntfy-topic.XXXXXX")"
-	as_account bash -c 'umask 077; head -c 4096 > "$1"' _ "$T"
-	if ! as_account bash -c 'v="$(tr -d "[:space:]" < "$1")"; [[ "$v" =~ ^[A-Za-z0-9_-]{1,64}$ ]]' _ "$T"; then
-		as_account rm -f "$T"
-		echo "ERROR (5): streamed topic is empty or malformed — nothing written" >&2
-		exit 5
+	if as_account test -L "$TF"; then
+		echo "ERROR (5): $SHOW/etc/ntfy-topic is a symlink — refusing, nothing written" >&2; exit 5
 	fi
-	STATE=new
-	if as_account test -e "$W/etc/ntfy-topic"; then
-		if as_account cmp -s "$T" "$W/etc/ntfy-topic"; then STATE=unchanged; else STATE=updated; fi
+	if as_account test -e "$TF"; then
+		# Never rotate silently, and never adopt a topic of another shape (for
+		# example the validator host's): the operator decides by hand.
+		if ! as_account test -f "$TF" || ! topic_shape_ok "$TF"; then
+			echo "ERROR (5): existing etc/ntfy-topic is not a dedicated watch topic (fy-metal-<32 hex>) — refusing to use or replace it." >&2
+			echo "           Inspect $SHOW/etc/ntfy-topic by hand (or --uninstall), then re-run." >&2
+			exit 5
+		fi
+		as_account chmod 600 "$TF"
+		STATE=kept
+	else
+		T="$(as_account mktemp "$W/etc/.ntfy-topic.XXXXXX")"
+		as_account bash -c 'umask 077; { printf "fy-metal-"; od -An -N16 -tx1 /dev/urandom | tr -d " \n"; printf "\n"; } > "$1"' _ "$T"
+		if ! topic_shape_ok "$T"; then
+			as_account rm -f "$T"
+			echo "ERROR (5): topic generation failed — nothing written" >&2; exit 5
+		fi
+		as_account chmod 600 "$T"
+		# -n: a topic that appeared meanwhile is never overwritten.
+		as_account mv -n "$T" "$TF"
+		if as_account test -e "$T"; then
+			as_account rm -f "$T"
+			echo "ERROR (5): a topic file appeared while generating — left as is; re-run" >&2; exit 5
+		fi
+		STATE=generated
 	fi
-	as_account chmod 600 "$T"
-	as_account mv -f "$T" "$W/etc/ntfy-topic"
-	if ! as_account test -s "$W/etc/ntfy-topic" || [ "$(file_meta "$W/etc/ntfy-topic")" != "600 $ACCT_UID" ]; then
+	if ! as_account test -s "$TF" || [ "$(file_meta "$TF")" != "600 $ACCT_UID" ]; then
 		echo "ERROR (5): topic file verification failed (non-empty / 600 / owner)" >&2; exit 5
 	fi
-	echo "topic: $STATE — non-empty, mode 600, owner $ACCT (value not shown)"
+	echo "topic: $STATE — dedicated watch topic, mode 600, owner $ACCT (value not shown)"
+	exit 0
+fi
+
+# ---- mode: copy-topic (stdout = the topic, and nothing else) ----------------
+# The Mac side pipes this session's stdout straight into pbcopy.
+if [ "$MODE" = copy-topic ]; then
+	if as_account test -L "$W" || as_account test -L "$W/etc" || as_account test -L "$TF" \
+		|| ! as_account test -f "$TF"; then
+		echo "ERROR (5): no watch topic installed under $SHOW/etc" >&2; exit 5
+	fi
+	if ! as_account bash -c 'v="$(tr -d "[:space:]" < "$1")"; [[ "$v" =~ $2 ]] || exit 1; printf "%s" "$v"' _ "$TF" "$TOPIC_RE"; then
+		echo "ERROR (5): installed etc/ntfy-topic is not a dedicated watch topic — not copied" >&2; exit 5
+	fi
 	exit 0
 fi
 
@@ -279,7 +359,7 @@ restore_crontab() {
 	fi
 	read_crontab "$TMP/restored" critical
 	if cmp -s "$TMP/before" "$TMP/restored"; then
-		echo "restored: crontab of $ACCT is byte-identical to the backup" >&2
+		echo "restored: crontab of $ACCT is byte-identical to the backup ($CRONTAB_BAK_SHOW)" >&2
 	else
 		echo "CRITICAL (10): restore could not be verified. Backup: $CRONTAB_BAK_SHOW" >&2
 		exit 10
@@ -313,6 +393,8 @@ write_and_verify() {
 	fi
 	if [ -n "$why" ]; then
 		echo "ERROR (7): crontab verification failed: $why" >&2
+		echo "           (a co-tenant edit made in the same instant would be rolled back too —" >&2
+		echo "            compare the crontab with the backup below after the restore)" >&2
 		restore_crontab
 		exit 7
 	fi
@@ -503,12 +585,19 @@ as_account env -i HOME="$ACCT_HOME" PATH="$SELFTEST_PATH" LANG=C.UTF-8 \
 	/bin/bash "$W/bin/external-watch.sh" > "$TMP/st.out" 2> "$TMP/st.err"
 ST_RC=$?
 set -e
-sed 's/^/  watch: /' "$TMP/st.err"
+# Account-controlled bytes: control characters (terminal escapes) are
+# dropped before they reach the operator's terminal; UTF-8 text is kept.
+no_ctrl() { LC_ALL=C tr -d '\000-\010\013-\037\177'; }
+sed 's/^/  watch: /' "$TMP/st.err" | no_ctrl
 if [ "$ST_RC" -ne 0 ]; then
 	echo "watch self-test failed: rc=$ST_RC (crontab not armed)" >&2
 	exit 8
 fi
-echo "  log: $(as_account tail -n 1 "$W/log/watch.log" 2>/dev/null || echo '(no log line)')"
+ST_LOG="$(as_account tail -n 1 "$W/log/watch.log" 2>/dev/null | no_ctrl || true)"
+echo "  log: ${ST_LOG:-(no log line)}"
+case "$ST_LOG" in
+	*=FAIL*) echo "WARNING: a check FAILed in the self-test — the first live run (within 5 min) may push an alert" >&2 ;;
+esac
 
 echo
 echo "--- crontab of $ACCT ---"
@@ -539,9 +628,6 @@ WEB_HOST_USER="${WEB_HOST_USER:-root}"
 WEB_HOST_KEY="${WEB_HOST_KEY:-}"
 WATCH_ACCOUNT="${WATCH_ACCOUNT:-deploy}"
 VALIDATOR_HOST="${VALIDATOR_HOST:-}"
-VALIDATOR_SSH_USER="${VALIDATOR_SSH_USER:-}"
-VALIDATOR_SSH_KEY="${VALIDATOR_SSH_KEY:-}"
-VALIDATOR_TOPIC_FILE="${VALIDATOR_TOPIC_FILE:-}"
 FY_WEB_API_DIR="${FY_WEB_API_DIR:-}"
 WATCH_SRC="${REPO_ROOT}/scripts/external-watch.sh"
 NOTIFY_SRC="${REPO_ROOT}/scripts/notify.sh"
@@ -567,18 +653,19 @@ if [ "$SKIP_SSH" != 1 ]; then
 	[ -r "$WEB_HOST_KEY" ] || die2 "WEB_HOST_KEY not readable"
 	printf '%s' "$WEB_HOST_USER" | grep -qE '^[a-z_][a-z0-9_-]{0,31}$' || die2 "WEB_HOST_USER malformed"
 fi
+if [ -n "${VALIDATOR_SSH_USER:-}${VALIDATOR_SSH_KEY:-}${VALIDATOR_TOPIC_FILE:-}" ]; then
+	echo "note: VALIDATOR_SSH_USER / VALIDATOR_SSH_KEY / VALIDATOR_TOPIC_FILE are no longer used (the validator host is never contacted) — ignored" >&2
+fi
+# The topic is handed over only through the Mac clipboard; there is no
+# printing fallback, so refuse before touching any host.
+if [ "$MODE" = copy-topic ] || { [ "$MODE" = install ] && [ "$DRY_RUN" != 1 ]; }; then
+	if ! command -v pbcopy >/dev/null 2>&1 || ! command -v pbpaste >/dev/null 2>&1; then
+		die2 "pbcopy/pbpaste not found — the watch topic is handed over only through the Mac clipboard and is never printed; run this on the Mac"
+	fi
+fi
 if [ "$MODE" = install ]; then
 	printf '%s' "$VALIDATOR_HOST" | grep -qE '^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$' \
 		|| die2 "VALIDATOR_HOST missing or malformed"
-	printf '%s' "$VALIDATOR_TOPIC_FILE" | grep -qE '^/[A-Za-z0-9._/-]+$' \
-		|| die2 "VALIDATOR_TOPIC_FILE missing or not an absolute path of [A-Za-z0-9._/-]"
-	if [ "$SKIP_SSH" != 1 ]; then
-		printf '%s' "$VALIDATOR_SSH_USER" | grep -qE '^[a-z_][a-z0-9_-]{0,31}$' \
-			|| die2 "VALIDATOR_SSH_USER missing or malformed"
-		if [ -z "$VALIDATOR_SSH_KEY" ] || [ ! -r "$VALIDATOR_SSH_KEY" ]; then
-			die2 "VALIDATOR_SSH_KEY missing or unreadable"
-		fi
-	fi
 	for f in "$WATCH_SRC" "$NOTIFY_SRC"; do
 		if [ ! -s "$f" ] || ! bash -n "$f" 2>/dev/null; then
 			die2 "source script missing or fails bash -n: $(basename "$f")"
@@ -587,17 +674,16 @@ if [ "$MODE" = install ]; then
 fi
 
 # mask: replace every host-specific value with a placeholder. Literals (key
-# paths first, since they may contain a user name, then hosts, then ssh users)
+# path first, since it may contain a user name, then hosts, then the ssh user)
 # reach awk through ENVIRON, not argv. Then any IPv4 dotted quad and anything
 # shaped like an IPv6 address is masked generically, so a name ssh resolved
 # to an address we never saw is still hidden. Applied to every byte coming
 # back from a host.
 mask() {
-	M1="$WEB_HOST_KEY" M2="$VALIDATOR_SSH_KEY" M3="$WEB_HOST" M4="$VALIDATOR_HOST" \
-	M5="$WEB_HOST_USER" M6="$VALIDATOR_SSH_USER" \
+	M1="$WEB_HOST_KEY" M3="$WEB_HOST" M4="$VALIDATOR_HOST" M5="$WEB_HOST_USER" \
 	LC_ALL=C awk 'BEGIN {
-		n = split("M1 M2 M3 M4 M5 M6", k, " ")
-		split("<ssh key>|<ssh key>|<web host>|<validator host>|<ssh user>|<ssh user>", r, "|")
+		n = split("M1 M3 M4 M5", k, " ")
+		split("<ssh key>|<web host>|<validator host>|<ssh user>", r, "|")
 	}
 	{
 		for (i = 1; i <= n; i++) {
@@ -635,17 +721,32 @@ web_run() {
 			"bash -c $(shq "$REMOTE_SCRIPT") _ ${args}"
 	fi
 }
-# validator_run <command>: a fixed read-only command on the validator host.
-validator_run() {
-	if [ "$SKIP_SSH" = 1 ]; then
-		bash -c "$1"
-	else
-		ssh -i "$VALIDATOR_SSH_KEY" "${SSH_OPTS[@]}" "${VALIDATOR_SSH_USER}@${VALIDATOR_HOST}" "$1"
+
+# copy_topic: web host stdout -> pbcopy, never displayed, never on disk. The
+# clipboard is then checked by shape only (pbpaste | grep -q), not shown.
+copy_topic() {
+	local rcs
+	set +e
+	web_run copy-topic < /dev/null 2> >(mask >&2) | pbcopy
+	rcs=("${PIPESTATUS[@]}")
+	set -e
+	if [ "${rcs[0]}" -ne 0 ] || [ "${rcs[1]}" -ne 0 ]; then
+		echo "ERROR (12): topic not copied (web host rc=${rcs[0]}, pbcopy rc=${rcs[1]}) — nothing printed; fix and re-run --copy-topic" >&2
+		exit 12
 	fi
+	if ! pbpaste | LC_ALL=C grep -Eqx 'fy-metal-[0-9a-f]{32}'; then
+		echo "ERROR (12): the clipboard does not hold a watch topic after copying — re-run --copy-topic" >&2
+		exit 12
+	fi
+	echo "topic copied to clipboard (not shown)"
+	echo "次の手順 (topic は画面にもファイルにも出していません):"
+	echo "  1. password manager に「新しい項目」として貼り付けて保存する (validator host の topic とは別の項目)"
+	echo "  2. スマートフォンの ntfy アプリで、この topic を購読する (Subscribe to topic に貼り付け)"
+	echo "  3. 保存と購読が済んだら、クリップボードを別の文字列で上書きする"
 }
 
 echo "==> web host:       <web host> (account $WATCH_ACCOUNT)"
-[ "$MODE" = install ] && echo "==> validator host: <validator host>"
+[ "$MODE" = install ] && echo "==> validator host: <validator host> (written to watch.env only; never contacted)"
 echo "==> mode:           $MODE$([ "$DRY_RUN" = 1 ] && echo ' (DRY-RUN)')"
 echo
 
@@ -657,34 +758,24 @@ if [ "$SKIP_SSH" != 1 ]; then
 	rc=$?
 	set -e
 	if [ "$rc" -ne 0 ]; then echo "ERROR (3): ssh pre-check failed: <web host> (ssh rc=$rc)" >&2; exit 3; fi
-	if [ "$MODE" = install ]; then
-		set +e
-		ssh -i "$VALIDATOR_SSH_KEY" "${SSH_OPTS[@]}" "${VALIDATOR_SSH_USER}@${VALIDATOR_HOST}" 'exit 0' > /dev/null 2>&1 < /dev/null
-		rc=$?
-		set -e
-		if [ "$rc" -ne 0 ]; then echo "ERROR (3): ssh pre-check failed: <validator host> (ssh rc=$rc)" >&2; exit 3; fi
-	fi
 	echo "==> ssh pre-check OK"
 fi
 
-TOPIC_READ="cat -- $(shq "$VALIDATOR_TOPIC_FILE")"
+if [ "$MODE" = copy-topic ]; then
+	copy_topic
+	exit 0
+fi
+
+TOPIC_STATE=""
 if [ "$MODE" = install ]; then
-	if [ "$DRY_RUN" = 1 ]; then
-		set +e
-		validator_run "test -s $(shq "$VALIDATOR_TOPIC_FILE")" < /dev/null 2>&1 | mask
-		rc="${PIPESTATUS[0]}"
-		set -e
-		if [ "$rc" -ne 0 ]; then echo "ERROR (5): topic file on the validator host missing or empty" >&2; exit 5; fi
-		echo "==> topic: present on the validator host (DRY-RUN: not read, not transferred)"
-	else
-		echo "==> streaming the ntfy topic validator host -> web host (never on this Mac's disk)"
-		set +e
-		validator_run "$TOPIC_READ" < /dev/null 2> >(mask >&2) | web_run topic 2>&1 | mask
-		rcs=("${PIPESTATUS[@]}")
-		set -e
-		if [ "${rcs[0]}" -ne 0 ]; then echo "ERROR (5): could not read the topic on the validator host (rc=${rcs[0]})" >&2; exit 5; fi
-		if [ "${rcs[1]}" -ne 0 ]; then echo "ERROR (5): web host rejected the topic (rc=${rcs[1]})" >&2; exit "${rcs[1]}"; fi
-	fi
+	echo "==> watch topic (dedicated to the watch; never the validator host's)"
+	set +e
+	TOPIC_OUT="$(web_run topic < /dev/null 2>&1 | mask)"
+	rcs=("${PIPESTATUS[@]}")
+	set -e
+	printf '%s\n' "$TOPIC_OUT"
+	if [ "${rcs[0]}" -ne 0 ]; then echo "ERROR (5): watch topic step failed (rc=${rcs[0]}) — nothing else written" >&2; exit "${rcs[0]}"; fi
+	case "$TOPIC_OUT" in *"topic: generated "*) TOPIC_STATE=generated ;; *"topic: kept "*) TOPIC_STATE=kept ;; esac
 	echo
 	WATCH_B64="$(base64 < "$WATCH_SRC" | tr -d '\n')"
 	NOTIFY_B64="$(base64 < "$NOTIFY_SRC" | tr -d '\n')"
@@ -692,6 +783,15 @@ if [ "$MODE" = install ]; then
 	printf '%s\n%s\n%s\n' "$VALIDATOR_HOST" "$WATCH_B64" "$NOTIFY_B64" | web_run install 2>&1 | mask
 	RC="${PIPESTATUS[1]}"
 	set -e
+	# A topic generated in this run must reach the operator even if a later
+	# step failed: the next run keeps it and would not copy it again.
+	if [ "$TOPIC_STATE" = generated ]; then
+		echo
+		echo "==> new watch topic: copying it to the clipboard"
+		copy_topic
+	elif [ "$TOPIC_STATE" = kept ]; then
+		echo "==> existing watch topic kept (run --copy-topic to hand it over again)"
+	fi
 else
 	set +e
 	web_run uninstall < /dev/null 2>&1 | mask
