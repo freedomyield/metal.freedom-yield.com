@@ -183,7 +183,18 @@ fi
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
+# A symlink at the watch dir or etc/ could steer the topic (or any file) to a
+# place of the account's choosing — refuse instead of following it.
+refuse_symlinks() {
+	local rel
+	for rel in "" /etc /bin; do
+		if as_account test -L "$W$rel"; then
+			echo "ERROR (5): $SHOW$rel is a symlink — refusing, nothing written" >&2; exit 5
+		fi
+	done
+}
 ensure_layout() {
+	refuse_symlinks
 	as_account mkdir -p "$W/bin" "$W/etc" "$W/state" "$W/log" "$W/backup"
 	as_account chmod 700 "$W" "$W/bin" "$W/etc" "$W/state" "$W/log" "$W/backup"
 }
@@ -214,11 +225,18 @@ fi
 # ---- crontab helpers -------------------------------------------------------
 HAD_CRONTAB=0
 ORIG_HAD_CRONTAB=0  # captured right after reading "before"; read_crontab overwrites HAD_CRONTAB
-read_crontab() { # $1 = out file; sets HAD_CRONTAB
+# read_crontab <out file> [critical]; sets HAD_CRONTAB. Without "critical" a
+# read failure happens before any write (exit 9, nothing written); with it,
+# the crontab has already been written and its state is unknown (exit 10).
+read_crontab() {
 	if crontab -u "$ACCT" -l > "$1" 2> "$TMP/cl.err"; then
 		HAD_CRONTAB=1
 	elif grep -qi 'no crontab' "$TMP/cl.err"; then
 		: > "$1"; HAD_CRONTAB=0
+	elif [ "${2:-}" = critical ]; then
+		echo "CRITICAL (10): cannot re-read the crontab of $ACCT after writing it — state unknown." >&2
+		echo "              Check it by hand. Backup: $CRONTAB_BAK_SHOW" >&2
+		exit 10
 	else
 		echo "ERROR (9): cannot read the crontab of $ACCT — nothing written" >&2; exit 9
 	fi
@@ -246,12 +264,20 @@ show_crontab_diff() { diff -U0 "$1" "$2" | grep -vE '^(---|\+\+\+) ' || true; }
 
 restore_crontab() {
 	echo "--- restoring the original crontab ---" >&2
+	# Someone else may have edited the crontab since our verification read;
+	# restoring now would silently discard their change.
+	read_crontab "$TMP/prerestore" critical
+	if ! cmp -s "$TMP/after" "$TMP/prerestore"; then
+		echo "CRITICAL (10): the crontab changed again after our write — NOT restoring over it." >&2
+		echo "              Check it by hand. Backup: $CRONTAB_BAK_SHOW" >&2
+		exit 10
+	fi
 	if [ "$ORIG_HAD_CRONTAB" = 1 ]; then
 		crontab -u "$ACCT" "$TMP/before" || true
 	else
 		crontab -u "$ACCT" -r 2>/dev/null || true
 	fi
-	read_crontab "$TMP/restored"
+	read_crontab "$TMP/restored" critical
 	if cmp -s "$TMP/before" "$TMP/restored"; then
 		echo "restored: crontab of $ACCT is byte-identical to the backup" >&2
 	else
@@ -262,8 +288,16 @@ restore_crontab() {
 
 # write_and_verify <new file> <expect: present|absent>
 write_and_verify() {
+	# Co-tenants share this crontab: if it changed since the "before" snapshot
+	# the new file was built from, writing would discard their edit.
+	read_crontab "$TMP/recheck"
+	if ! cmp -s "$TMP/before" "$TMP/recheck"; then
+		echo "ERROR (9): the crontab of $ACCT changed while this installer ran — nothing written." >&2
+		echo "           Re-run the installer." >&2
+		exit 9
+	fi
 	crontab -u "$ACCT" "$1" || true
-	read_crontab "$TMP/after"
+	read_crontab "$TMP/after" critical
 	local why=""
 	outside_block "$TMP/before" > "$TMP/out.before"
 	outside_block "$TMP/after" > "$TMP/out.after" || true
@@ -391,32 +425,38 @@ plan_file bin/external-watch.sh "$TMP/external-watch.sh"
 plan_file bin/notify.sh "$TMP/notify.sh"
 plan_file etc/watch.env "$TMP/watch.env"
 
-echo
-echo "--- crontab of $ACCT ---"
-read_crontab "$TMP/before"; ORIG_HAD_CRONTAB="$HAD_CRONTAB"
-check_markers "$TMP/before"
-CRON_UP_TO_DATE=0
-if [ "$NB" = 1 ]; then
-	the_block "$TMP/before" > "$TMP/block.before"
-	if cmp -s "$TMP/block" "$TMP/block.before"; then CRON_UP_TO_DATE=1; fi
-	LC_ALL=C awk -v b="$BEGIN_MARK" -v e="$END_MARK" -v blk="$TMP/block" '
-		inb==0 && $0==b { while ((getline l < blk) > 0) print l; inb=1; next }
-		inb==1 { if ($0==e) inb=0; next }
-		{ print }' "$TMP/before" > "$TMP/new"
-else
-	cat "$TMP/before" > "$TMP/new"
-	if [ -s "$TMP/new" ] && [ "$(tail -c 1 "$TMP/new" | od -An -c | tr -d ' ')" != '\n' ]; then
-		printf '\n' >> "$TMP/new"
+# plan_crontab: snapshot the crontab ("before") and build the new one. Called
+# as late as possible (after the self-test) so the window in which a co-tenant
+# edit could race us is minimal; write_and_verify re-checks it anyway.
+plan_crontab() {
+	read_crontab "$TMP/before"; ORIG_HAD_CRONTAB="$HAD_CRONTAB"
+	check_markers "$TMP/before"
+	CRON_UP_TO_DATE=0
+	if [ "$NB" = 1 ]; then
+		the_block "$TMP/before" > "$TMP/block.before"
+		if cmp -s "$TMP/block" "$TMP/block.before"; then CRON_UP_TO_DATE=1; fi
+		LC_ALL=C awk -v b="$BEGIN_MARK" -v e="$END_MARK" -v blk="$TMP/block" '
+			inb==0 && $0==b { while ((getline l < blk) > 0) print l; inb=1; next }
+			inb==1 { if ($0==e) inb=0; next }
+			{ print }' "$TMP/before" > "$TMP/new"
+	else
+		cat "$TMP/before" > "$TMP/new"
+		if [ -s "$TMP/new" ] && [ "$(tail -c 1 "$TMP/new" | od -An -c | tr -d ' ')" != '\n' ]; then
+			printf '\n' >> "$TMP/new"
+		fi
+		cat "$TMP/block" >> "$TMP/new"
 	fi
-	cat "$TMP/block" >> "$TMP/new"
-fi
-if [ "$CRON_UP_TO_DATE" = 1 ]; then
-	echo "crontab block: already up to date"
-else
-	show_crontab_diff "$TMP/before" "$TMP/new"
-fi
+	if [ "$CRON_UP_TO_DATE" = 1 ]; then
+		echo "crontab block: already up to date"
+	else
+		show_crontab_diff "$TMP/before" "$TMP/new"
+	fi
+}
 
 if [ "$DRY_RUN" = 1 ]; then
+	echo
+	echo "--- crontab of $ACCT ---"
+	plan_crontab
 	echo
 	echo "DRY-RUN: nothing written."
 	exit 0
@@ -471,7 +511,8 @@ fi
 echo "  log: $(as_account tail -n 1 "$W/log/watch.log" 2>/dev/null || echo '(no log line)')"
 
 echo
-echo "--- crontab ---"
+echo "--- crontab of $ACCT ---"
+plan_crontab
 if [ "$CRON_UP_TO_DATE" = 1 ]; then
 	echo "already up to date — crontab not rewritten"
 else
@@ -545,13 +586,18 @@ if [ "$MODE" = install ]; then
 	done
 fi
 
-# mask: replace every host-specific value with a placeholder. Values reach
-# awk through ENVIRON, not argv. Applied to every byte coming back from a host.
+# mask: replace every host-specific value with a placeholder. Literals (key
+# paths first, since they may contain a user name, then hosts, then ssh users)
+# reach awk through ENVIRON, not argv. Then any IPv4 dotted quad and anything
+# shaped like an IPv6 address is masked generically, so a name ssh resolved
+# to an address we never saw is still hidden. Applied to every byte coming
+# back from a host.
 mask() {
-	M1="$WEB_HOST" M2="$VALIDATOR_HOST" M3="$WEB_HOST_KEY" M4="$VALIDATOR_SSH_KEY" \
+	M1="$WEB_HOST_KEY" M2="$VALIDATOR_SSH_KEY" M3="$WEB_HOST" M4="$VALIDATOR_HOST" \
+	M5="$WEB_HOST_USER" M6="$VALIDATOR_SSH_USER" \
 	LC_ALL=C awk 'BEGIN {
-		n = split("M1 M2 M3 M4", k, " ")
-		split("<web host>|<validator host>|<ssh key>|<ssh key>", r, "|")
+		n = split("M1 M2 M3 M4 M5 M6", k, " ")
+		split("<ssh key>|<ssh key>|<web host>|<validator host>|<ssh user>|<ssh user>", r, "|")
 	}
 	{
 		for (i = 1; i <= n; i++) {
@@ -560,12 +606,22 @@ mask() {
 			while ((p = index(s, v)) > 0) { out = out substr(s, 1, p - 1) r[i]; s = substr(s, p + length(v)) }
 			$0 = out s
 		}
-		print
+		gsub(/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/, "<ip>")
+		# IPv6: a hex/colon run with >=2 colons that has "::", a hex letter,
+		# or >=5 colons. Plain times like 04:53:35 are left alone.
+		out = ""; s = $0
+		while (match(s, /[0-9A-Fa-f:]+/)) {
+			tok = substr(s, RSTART, RLENGTH); t = tok; c = gsub(/:/, ":", t)
+			if (c >= 2 && (index(tok, "::") || tok ~ /[A-Fa-f]/ || c >= 5)) tok = "<ip>"
+			out = out substr(s, 1, RSTART - 1) tok; s = substr(s, RSTART + RLENGTH)
+		}
+		print out s
 	}'
 }
 
 shq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
-SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=10)
+SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=10 -o LogLevel=ERROR
+	-o IdentitiesOnly=yes -o ForwardAgent=no -o ClearAllForwardings=yes)
 
 # web_run <mode>: run the remote half on the web host; stdin is passed through.
 web_run() {
@@ -595,16 +651,18 @@ echo
 
 if [ "$SKIP_SSH" != 1 ]; then
 	set +e
-	ssh -i "$WEB_HOST_KEY" "${SSH_OPTS[@]}" "${WEB_HOST_USER}@${WEB_HOST}" 'exit 0' 2>&1 < /dev/null | mask
-	rc="${PIPESTATUS[0]}"
+	# Pre-check stderr is discarded, not masked: ssh may print resolved
+	# addresses or user names no literal mask knows about.
+	ssh -i "$WEB_HOST_KEY" "${SSH_OPTS[@]}" "${WEB_HOST_USER}@${WEB_HOST}" 'exit 0' > /dev/null 2>&1 < /dev/null
+	rc=$?
 	set -e
-	if [ "$rc" -ne 0 ]; then echo "ERROR (3): ssh pre-check failed: <web host>" >&2; exit 3; fi
+	if [ "$rc" -ne 0 ]; then echo "ERROR (3): ssh pre-check failed: <web host> (ssh rc=$rc)" >&2; exit 3; fi
 	if [ "$MODE" = install ]; then
 		set +e
-		ssh -i "$VALIDATOR_SSH_KEY" "${SSH_OPTS[@]}" "${VALIDATOR_SSH_USER}@${VALIDATOR_HOST}" 'exit 0' 2>&1 < /dev/null | mask
-		rc="${PIPESTATUS[0]}"
+		ssh -i "$VALIDATOR_SSH_KEY" "${SSH_OPTS[@]}" "${VALIDATOR_SSH_USER}@${VALIDATOR_HOST}" 'exit 0' > /dev/null 2>&1 < /dev/null
+		rc=$?
 		set -e
-		if [ "$rc" -ne 0 ]; then echo "ERROR (3): ssh pre-check failed: <validator host>" >&2; exit 3; fi
+		if [ "$rc" -ne 0 ]; then echo "ERROR (3): ssh pre-check failed: <validator host> (ssh rc=$rc)" >&2; exit 3; fi
 	fi
 	echo "==> ssh pre-check OK"
 fi

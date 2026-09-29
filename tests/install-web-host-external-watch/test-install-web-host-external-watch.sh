@@ -65,11 +65,20 @@ cat > "$CRONBIN/crontab" <<'EOF'
 #!/usr/bin/env bash
 # Fake crontab: -u U -l | -u U -r | -u U <file>. FAKE_CRON_MANGLE_ONCE=1 makes
 # the FIRST write alter a co-tenant line (a broken cron write), later writes
-# (the restore) behave. =append: the first write gains a stray line instead.
+# (the restore) behave. FAKE_CRON_EDIT_ON_LIST=N: a co-tenant appends a line
+# right after the Nth `-l`. FAKE_CRON_LIST_FAIL_FROM=N: the Nth and later `-l`
+# fail. =append: the first write gains a stray line instead.
 [ "$1" = -u ] || { echo "fake crontab: -u required" >&2; exit 64; }
 u="$2"; shift 2
 case "$1" in
-	-l) if [ -e "$FAKE_CRON_STORE" ]; then cat "$FAKE_CRON_STORE"; else echo "no crontab for $u" >&2; exit 1; fi ;;
+	-l) echo l >> "$FAKE_CRON_WRITES.lists"; n="$(wc -l < "$FAKE_CRON_WRITES.lists" | tr -d ' ')"
+	    if [ -n "${FAKE_CRON_LIST_FAIL_FROM:-}" ] && [ "$n" -ge "$FAKE_CRON_LIST_FAIL_FROM" ]; then
+	        echo "crontab: cannot open spool (simulated)" >&2; exit 1
+	    fi
+	    if [ -e "$FAKE_CRON_STORE" ]; then cat "$FAKE_CRON_STORE"; else echo "no crontab for $u" >&2; rc=1; fi
+	    # A co-tenant edits the crontab right after our Nth read.
+	    [ "${FAKE_CRON_EDIT_ON_LIST:-0}" = "$n" ] && echo "# co-tenant edit $n" >> "$FAKE_CRON_STORE"
+	    exit "${rc:-0}" ;;
 	-r) rm -f "$FAKE_CRON_STORE" ;;
 	*)  echo w >> "$FAKE_CRON_WRITES"
 	    first=0; [ "$(wc -l < "$FAKE_CRON_WRITES" | tr -d ' ')" = 1 ] && first=1
@@ -92,8 +101,12 @@ printf '%s' "$*" | tr '\n' ' ' >> "$SSH_LOG"; printf '\n' >> "$SSH_LOG"
 last="${!#}"
 n="$(wc -l < "$SSH_LOG" | tr -d ' ')"
 if [ "${STUB_SSH_FAIL:-0}" = 1 ]; then
-	for a in "$@"; do case "$a" in *@*) echo "ssh: connect to host ${a#*@} port 22: Connection refused" >&2 ;; esac; done
+	for a in "$@"; do case "$a" in *@*) echo "ssh: connect to host 198.51.100.7 port 22: Connection refused (${a})" >&2 ;; esac; done
 	exit 255
+fi
+if [ "${STUB_SSH_NOISE:-0}" = 1 ]; then
+	echo "Warning: Permanently added '198.51.100.7' (ED25519) to the list of known hosts." >&2
+	echo "debug: opuser@203.0.113.57 root@198.51.100.23 via [2001:db8::7]" >&2
 fi
 case "$last" in
 	'exit 0') exit 0 ;;
@@ -113,7 +126,7 @@ fresh_fixture() {
 	printf '#!/bin/bash\n# wrapper fixture\n__fy_root='"'"'%s'"'"'\n' "$T/fx/webroot/api" > "$H/bin/receive-metal-push"
 	printf '{"observedAt":"%s"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$T/fx/webroot/api/validator.json"
 	printf '%s\n' "$TOPIC" > "$T/fx/validator-topic"
-	: > "$WRITES"
+	: > "$WRITES"; rm -f "$WRITES.lists"
 }
 cotenant_crontab() { # two co-tenant jobs, comments, blank lines, trailing spaces
 	printf '# co-tenant project A\nMAILTO=""\n*/10 * * * * /srv/cotenant-a/run.sh  \n\n# co-tenant B\n0 3 * * * /srv/cotenant-b/nightly.sh >/dev/null 2>&1\n' > "$STORE"
@@ -149,6 +162,8 @@ check "--print-remote output passes bash -n" 'bash -n "$REMOTE"'
 check "--print-remote embeds no host value" '! grep -qF "$VH" "$REMOTE" && ! grep -qF 198.51.100.23 "$REMOTE"'
 check "remote carries the exact markers" 'grep -qxF "BEGIN_MARK='"'"'$BEGIN_MARK'"'"'" "$REMOTE" && grep -qxF "END_MARK='"'"'$END_MARK'"'"'" "$REMOTE"'
 check "remote carries the exact cron line" 'grep -qxF "CRON_LINE='"'"'$CRON_LINE'"'"'" "$REMOTE"'
+check "SSH_OPTS is hardened (LogLevel, IdentitiesOnly, no agent/forwarding)" \
+	'grep -A1 "^SSH_OPTS=(" "$INSTALLER" | tr "\n" " " | grep -qE "BatchMode=yes.*LogLevel=ERROR.*IdentitiesOnly=yes.*ForwardAgent=no.*ClearAllForwardings=yes"'
 check "installer never enables xtrace" '! grep -nE "^[^#]*(set -[a-wyz]*x|set -o xtrace|bash -x)" "$INSTALLER"'
 
 # ==============================================================================
@@ -175,7 +190,8 @@ for f in bin/external-watch.sh bin/notify.sh; do [ "$(meta "$W/$f")" = 700 ] || 
 for f in etc/watch.env etc/ntfy-topic; do [ "$(meta "$W/$f")" = 600 ] || MODES_OK=0; done
 check "modes: dirs 700, scripts 700, etc/* 600" '[ "$MODES_OK" = 1 ]'
 check "self-test ran and its log line was printed" 'printf "%s" "$OUT" | grep -qE "log: .*fresh=PASS"'
-check "self-test did not arm state (WATCH_LIVE unset)" '[ ! -e "$W/state/state.json" ]'
+check "self-test did not put any check into alerting (WATCH_LIVE unset)" \
+	'[ ! -e "$W/state/state.json" ] || ! grep -q alerting "$W/state/state.json"'
 check "output: topic confirmed without its value" 'printf "%s" "$OUT" | grep -q "topic: new — non-empty, mode 600"'
 
 # ---- re-run is a no-op --------------------------------------------------------
@@ -224,6 +240,46 @@ EXTRA_ENV="FAKE_CRON_MANGLE_ONCE=append" run
 check "no crontab before + bad write: exit 7 and the crontab removed again" \
 	'[ "$RC" -eq 7 ] && [ ! -e "$STORE" ]' "rc=$RC"
 
+# ---- concurrent co-tenant edit (Fix round 1 #1) ----------------------------------
+# -l order on a fresh install: 1 = snapshot (after the self-test), 2 = re-check
+# right before the write, 3 = verification read.
+fresh_fixture; cotenant_crontab
+EXTRA_ENV="FAKE_CRON_EDIT_ON_LIST=1" run
+check "co-tenant edit before our write: exit 9" '[ "$RC" -eq 9 ]' "rc=$RC"
+check "co-tenant edit before our write: nothing written, their edit kept" \
+	'[ "$(nwrites)" = 0 ] && grep -qxF "# co-tenant edit 1" "$STORE" && [ "$(nbegin "$STORE")" = 0 ]'
+check "co-tenant edit before our write: operator told to re-run" 'printf "%s" "$OUT" | grep -q "Re-run the installer"'
+
+fresh_fixture; cotenant_crontab
+EXTRA_ENV="FAKE_CRON_MANGLE_ONCE=1 FAKE_CRON_EDIT_ON_LIST=3" run
+check "co-tenant edit after a bad write: CRITICAL exit 10, no blind restore" \
+	'[ "$RC" -eq 10 ] && [ "$(nwrites)" = 1 ] && grep -qxF "# co-tenant edit 3" "$STORE"' "rc=$RC"
+check "co-tenant edit after a bad write: backup path given" 'printf "%s" "$OUT" | grep -q "Backup: ~$ME/metal-fy-watch/backup/crontab.bak-"'
+
+# ---- crontab unreadable after our write (Fix round 1 #5) --------------------------
+fresh_fixture; cotenant_crontab
+EXTRA_ENV="FAKE_CRON_LIST_FAIL_FROM=3" run
+check "crontab unreadable after write: CRITICAL exit 10 with backup path" \
+	'[ "$RC" -eq 10 ] && printf "%s" "$OUT" | grep -q "CRITICAL (10).*re-read" && printf "%s" "$OUT" | grep -q "Backup: ~$ME/metal-fy-watch/backup/crontab.bak-"' "rc=$RC"
+fresh_fixture; cotenant_crontab
+EXTRA_ENV="FAKE_CRON_MANGLE_ONCE=1 FAKE_CRON_LIST_FAIL_FROM=4" run
+check "crontab unreadable before restore: CRITICAL exit 10" '[ "$RC" -eq 10 ]' "rc=$RC"
+fresh_fixture; cotenant_crontab
+EXTRA_ENV="FAKE_CRON_MANGLE_ONCE=1 FAKE_CRON_LIST_FAIL_FROM=5" run
+check "crontab unreadable after restore: CRITICAL exit 10" '[ "$RC" -eq 10 ]' "rc=$RC"
+
+# ---- planted symlinks (Fix round 1 #4) -------------------------------------------
+fresh_fixture; cotenant_crontab; mkdir -p "$T/fx/elsewhere"
+ln -s "$T/fx/elsewhere" "$H/metal-fy-watch"
+run
+check "watch dir is a symlink: exit 5, nothing written through it" \
+	'[ "$RC" -eq 5 ] && [ -z "$(ls -A "$T/fx/elsewhere")" ] && [ "$(nwrites)" = 0 ]' "rc=$RC"
+fresh_fixture; mkdir -p "$T/fx/elsewhere" "$H/metal-fy-watch"
+ln -s "$T/fx/elsewhere" "$H/metal-fy-watch/etc"
+run
+check "etc/ is a symlink: exit 5, topic not written through it" \
+	'[ "$RC" -eq 5 ] && [ -z "$(ls -A "$T/fx/elsewhere")" ]' "rc=$RC"
+
 # ---- malformed markers: nothing written -----------------------------------------
 fresh_fixture
 printf '%s\n%s\n1 1 * * * /srv/cotenant-a/x\n' "$BEGIN_MARK" "$BEGIN_MARK" > "$STORE"; cp "$STORE" "$T/orig"
@@ -265,6 +321,7 @@ EXTRA_ENV="SKIP_SSH_WATCH_SRC=$T/bad-watch.sh" run
 check "self-test rc!=0: installer exits 8" '[ "$RC" -eq 8 ]' "rc=$RC"
 check "self-test rc!=0: surfaced clearly" 'printf "%s" "$OUT" | grep -q "watch self-test failed: rc=1"'
 check "self-test rc!=0: crontab not armed" '[ "$(nwrites)" = 0 ] && cmp -s "$STORE" "$T/orig"'
+check "crontab is read only after the self-test (minimal race window)" '[ ! -e "$WRITES.lists" ]'
 
 # ---- uninstall ------------------------------------------------------------------
 fresh_fixture; cotenant_crontab; cp "$STORE" "$T/orig"
@@ -322,9 +379,16 @@ check "real mode: validator host never in web-host argv" '! grep -F 198.51.100.2
 check "real mode: every ssh call is BatchMode with a key" '[ "$(grep -c . "$SSH_LOG")" -ge 4 ] && ! grep -v -- "-o BatchMode=yes" "$SSH_LOG" | grep -q . && ! grep -v -- "-i $T/key" "$SSH_LOG" | grep -q .'
 check "real mode: topic travelled on the web host session stdin" 'grep -lxF "$TOPIC" "$SSH_STDIN_DIR"/* >/dev/null 2>&1'
 check "real mode: validator host travelled on stdin, not argv" 'grep -lxF "$VH" "$SSH_STDIN_DIR"/* >/dev/null 2>&1'
+check "real mode: every ssh call carries the hardening options" \
+	'! grep -vE -- "-o LogLevel=ERROR.*-o IdentitiesOnly=yes -o ForwardAgent=no -o ClearAllForwardings=yes" "$SSH_LOG" | grep -q .'
+EXTRA_ENV="STUB_SSH_NOISE=1" real
+check "noisy ssh: exit 0" '[ "$RC" -eq 0 ]' "rc=$RC"
+check "noisy ssh: resolved IP, user@host and IPv6 never reach the output" \
+	'! printf "%s" "$OUT" | grep -qE "198\.51\.100\.7|203\.0\.113\.57|198\.51\.100\.23|opuser|root@|2001:db8" && printf "%s" "$OUT" | grep -qF "<ssh user>@" && printf "%s" "$OUT" | grep -qF "[<ip>]"' "$OUT"
 EXTRA_ENV="STUB_SSH_FAIL=1" real
 check "real mode: pre-check failure exits 3" '[ "$RC" -eq 3 ]' "rc=$RC"
-check "real mode: ssh's own error text is masked" 'printf "%s" "$OUT" | grep -qF "<web host>" && ! printf "%s" "$OUT" | grep -qF 198.51.100.23'
+check "real mode: pre-check prints a generic error, never ssh's own text" \
+	'printf "%s" "$OUT" | grep -qF "<web host> (ssh rc=255)" && ! printf "%s" "$OUT" | grep -qE "Connection refused|198\.51\.100\.(7|23)|opuser"'
 EXTRA_ENV="WEB_HOST_KEY=" real
 check "real mode: WEB_HOST_KEY required, no ssh attempted" '[ "$RC" -eq 2 ] && [ ! -s "$SSH_LOG" ]' "rc=$RC"
 real --uninstall --dry-run
