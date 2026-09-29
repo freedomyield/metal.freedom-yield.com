@@ -368,6 +368,34 @@ else
   chmod 700 "$C/home/state"; EXTRA_PATH=""; LIVE=1
   run_watch "$((NOW + 1500))"
   assert_eq "  writable again: back to normal exit" "0" "$RC"
+
+  # I-1: a check already failing on disk must not add its own push on top of the
+  # save alert. Run 1 (writable) records fails=1; runs 2 and 3 cannot save.
+  new_case; P2P_PORT="$CLOSED_PORT"; write_config; make_json 10
+  run_watch                                   # p2p fails=1 saved
+  chmod 500 "$C/home/state"; EXTRA_PATH="$NOCHMOD"
+  : > "$C/notify.log"
+  run_watch "$((NOW + 300))"
+  assert_eq "  p2p failing + unwritable: exit 7, exactly one push" "7|1" "$RC|$(pushes)"
+  assert_eq "  it is the save alert" "urgent	外部見張り: 状態を保存できない (ディスク等)" "$(cut -f1,2 "$C/notify.log")"
+  assert_contains "  body lists p2p" "失敗中の確認: p2p" "$(cut -f3 "$C/notify.log")"
+  assert_not_contains "  no per-check alert" "validator に外から届かない" "$(cat "$C/notify.log")"
+  assert_not_contains "  body names no port/host" "$CLOSED_PORT" "$(cat "$C/notify.log")"
+  : > "$C/notify.log"
+  run_watch "$((NOW + 600))"
+  assert_eq "  consecutive run: still exactly one push" "7|1" "$RC|$(pushes)"
+  assert_contains "  and it lists p2p again" "失敗中の確認: p2p" "$(cut -f3 "$C/notify.log")"
+  chmod 700 "$C/home/state"; EXTRA_PATH=""
+
+  # All checks passing + unwritable: one push, body says none failing.
+  new_case; make_json 10
+  run_watch
+  chmod 500 "$C/home/state"; EXTRA_PATH="$NOCHMOD"
+  : > "$C/notify.log"
+  run_watch "$((NOW + 300))"
+  assert_eq "  all pass + unwritable: exit 7, one push" "7|1" "$RC|$(pushes)"
+  assert_contains "  body says none failing" "失敗中の確認: なし" "$(cut -f3 "$C/notify.log")"
+  chmod 700 "$C/home/state"; EXTRA_PATH=""
 fi
 
 # ============================ 7. DRY ============================
