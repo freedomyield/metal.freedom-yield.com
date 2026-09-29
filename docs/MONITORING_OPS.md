@@ -717,9 +717,17 @@ Everything lives under `$HOME/metal-fy-watch/` of the site account: directories 
 | `etc/watch.env` | strict `KEY=VALUE` config (parsed, never sourced) |
 | `etc/ntfy-topic` | the watch's own ntfy topic, generated on the web host by the installer (bearer secret, `docs/CONSTITUTION.md` §4.1 S5; never in the repo, never printed) |
 | `state/` | `state.json`, the RPC cache, the lock |
-| `log/watch.log` | one line per run; trimmed to the last 5000 lines when it exceeds 6000 |
-| `log/cron.err` | stderr of the cron job (including `DRY:` lines) |
-| `backup/` | crontab backups taken by the installer |
+| `log/watch.log` | one line per run; capped at 1 MiB (see below) |
+| `log/cron.err` | stderr of the cron job (including `DRY:` lines); capped at 1 MiB (see below) |
+| `backup/` | crontab backups taken by the installer; newest 10 files kept |
+
+**Size caps.** Every run, once it holds the lock, the script bounds every file it writes on the shared host, so a long-lived watch can never fill the site account's quota:
+
+- `log/watch.log` and `log/cron.err`: when a file exceeds 1 MiB (1048576 bytes) only its newest half is kept, cut at a line boundary (no partial first line). `cron.err` is rewritten **in place** (same inode): the cron shell holds it open for append during the run, and replacing the file would orphan that descriptor and lose the run's stderr.
+- `backup/`: the newest 10 regular files by modification time are kept; older ones are deleted. Symlinks are never followed, directories are never touched, nothing outside `backup/` is ever deleted.
+- `state/state.json.corrupt-*`: the newest 10 are kept. `state.json`, `lock`, `rpc-cache.json` and every other file in `state/` are never touched.
+- A housekeeping failure never changes alerting or the exit code; it writes one `note: housekeeping incomplete` line to `watch.log`.
+- The caps have test-only environment overrides (`WATCH_LOG_MAX_BYTES`, `WATCH_CRONERR_MAX_BYTES`, `WATCH_KEEP_BACKUPS`, `WATCH_KEEP_CORRUPT`); production uses the defaults. A value that is not a positive integer falls back to the default.
 
 Log line format:
 
@@ -727,7 +735,7 @@ Log line format:
 <UTC ISO time> fresh=<PASS|FAIL|UNKNOWN>(<age>s) p2p=<...> chain=<...>[(cached)] pushes=<n>
 ```
 
-Healthy looks like `fresh=PASS(<age under 900>s) p2p=PASS chain=PASS pushes=0`. `chain=PASS(cached)` means the run re-read a sample already counted. Free-text lines start with `note:` (chain RPC unavailable, validator absent, state file corrupt and re-initialised, state save failed).
+Healthy looks like `fresh=PASS(<age under 900>s) p2p=PASS chain=PASS pushes=0`. `chain=PASS(cached)` means the run re-read a sample already counted. Free-text lines start with `note:` (chain RPC unavailable, validator absent, state file corrupt and re-initialised, state save failed, housekeeping incomplete).
 
 ### 14.5 Operator runbook
 
