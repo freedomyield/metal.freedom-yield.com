@@ -392,6 +392,9 @@ trim_tail() {
     else
       tail -n +2 "$raw" > "$kept"
     fi
+    # A last line longer than half the cap (or unterminated) would leave
+    # nothing: keep the newest half verbatim rather than lose the newest line.
+    [ -s "$kept" ] || tail -c "$half" "$f" > "$kept" 2>/dev/null
     cat "$kept" > "$f" && rc=0
   fi
   rm -f "$raw" "$kept"
@@ -410,7 +413,7 @@ prune_dir() {
     rm -f "$list" "$ordered"; return 1
   fi
   while IFS= read -r -d '' f; do
-    case "$f" in *$'\n'*) continue ;; esac   # never act on odd names
+    case "$f" in *$'\n'*|*$'\t'*) continue ;; esac   # never act on odd names (the tab is our field separator)
     m="$(file_mtime "$f")"; [[ "$m" =~ ^[0-9]+$ ]] || continue
     printf '%s\t%s\n' "$m" "$f"
   done < "$list" | sort -t $'\t' -k1,1nr -k2,2r > "$ordered"
@@ -429,6 +432,9 @@ housekeeping() {
   max_err="$(cap_value "${WATCH_CRONERR_MAX_BYTES:-}" 1048576)"
   keep_bak="$(cap_value "${WATCH_KEEP_BACKUPS:-}" 10)"
   keep_cor="$(cap_value "${WATCH_KEEP_CORRUPT:-}" 10)"
+  # A run killed mid-trim leaves its temp files behind; sweep exactly that
+  # name shape (regular files only, so symlinks are never followed) first.
+  find "$LOG_DIR" -maxdepth 1 -type f -name '.trim.??????' -exec rm -f -- {} + 2>/dev/null || bad=1
   trim_tail "$LOG_FILE" "$max_log" 2>/dev/null || bad=1
   trim_tail "$LOG_DIR/cron.err" "$max_err" 2>/dev/null || bad=1
   prune_dir "$WATCH_HOME/backup" '*' "$keep_bak" 2>/dev/null || bad=1

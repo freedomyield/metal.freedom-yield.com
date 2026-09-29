@@ -624,6 +624,28 @@ else
   echo "  SKIP  unreadable backup dir (running as root; covered by the find-stub case)"
 fi
 
+echo "== housekeeping fix round 1 =="
+new_case; make_json 10; mkdir -p "$C/home/log"; echo keepme > "$C/home/log/other.txt"; echo a > "$C/home/log/.trim.AbC123"; echo b > "$C/home/log/.trim.xYz789"
+echo "old" > "$C/home/log/cron.err"; echo outside > "$C/outside_t"; ln -s "$C/outside_t" "$C/home/log/.trim.LNK000"
+run_watch
+absent "stale .trim temp 1 swept" "$C/home/log/.trim.AbC123"; absent "  stale .trim temp 2 swept" "$C/home/log/.trim.xYz789"
+assert_eq "  unrelated file untouched" "keepme" "$(cat "$C/home/log/other.txt")"
+assert_eq "  cron.err untouched" "old" "$(cat "$C/home/log/cron.err")"
+assert_eq "  symlink target survives" "outside" "$(cat "$C/outside_t")"
+[ -L "$C/home/log/.trim.LNK000" ] && ok "  symlink named like a temp is not followed or removed" || bad "  symlink temp" "removed"
+new_case; make_json 10; mkdir -p "$C/home/backup"; mk_files "$C/home/backup" 12
+TABNAME="$C/home/backup/$(printf 'aa-tab\t')"; echo x > "$TABNAME"; touch -t 200001010000 "$TABNAME"
+echo innocent > "$C/home/backup/aa-tab"; touch -t 203001010000 "$C/home/backup/aa-tab"   # what a mangled (tab-stripped) name would hit
+run_watch
+[ -e "$TABNAME" ] && ok "tab-suffixed name skipped (not pruned)" || bad "tab name skipped" "gone"
+assert_eq "  tab-stripped twin (newest file) not deleted by mistake" "innocent" "$(cat "$C/home/backup/aa-tab")"
+assert_eq "  regular files still pruned (13 -> 10)" "9" "$(count_files "$C/home/backup" 'hk-*')"
+new_case; make_json 10; mkdir -p "$C/home/log"; { printf 'short\n'; head -c 1500 /dev/zero | tr '\0' 'z'; } > "$C/home/log/cron.err"
+HK_ENV=(WATCH_CRONERR_MAX_BYTES=1000); run_watch
+[ -s "$C/home/log/cron.err" ] && ok "line longer than cap/2: file not emptied" || bad "long last line" "empty"
+[ "$(size_of "$C/home/log/cron.err")" -le 1000 ] && ok "  size <= cap" || bad "  size <= cap" "$(size_of "$C/home/log/cron.err")"
+assert_eq "  ends with that line's tail" "zzzzzzzzzz" "$(tail -c 10 "$C/home/log/cron.err")"
+
 echo
 echo "RESULT: $PASS passed, $FAIL failed"
 if [ "$FAIL" -ne 0 ]; then printf ' - %s\n' "${FAILURES[@]}"; exit 1; fi
