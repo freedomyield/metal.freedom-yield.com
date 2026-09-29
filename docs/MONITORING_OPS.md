@@ -707,7 +707,7 @@ The RPC response sits behind a 900 s TTL cache (OPERATING_MODEL W9, polite exter
 | 0 | Run completed (including runs that were skipped because another instance held the lock) |
 | 1 | Configuration error or missing dependency |
 | 6 | A push failed permanently. The failure counters still advance; only the status change to (or from) `alerting` is withheld, so the next run retries the push |
-| 7 | The state could not be saved (disk full, quota, permissions). One `urgent` push `外部見張り: 状態を保存できない (ディスク等)` was sent; it is **not** debounced and repeats on every such run, because without saved state no check can ever reach 2 consecutive failures. If that push also fails, the exit is 6 |
+| 7 | The state could not be saved (disk full, quota, permissions). That run sends **only** one `urgent` push `外部見張り: 状態を保存できない (ディスク等)`, whose body lists the names of the checks failing in this run (`失敗中の確認: p2p, fresh`, or `なし`; names only, no host values); the per-check alert and recovery pushes are held back for that run, so a failing check cannot double the push rate. The save push is **not** debounced and repeats on every such run, because without saved state no check can ever reach 2 consecutive failures. If that push also fails, the exit is 6. Residual case: the hold-back is decided by a write probe at the start of the run, so if the probe passes but the real save then fails, the per-check push and the save push can both go out in that one run |
 
 Everything lives under `$HOME/metal-fy-watch/` of the site account: directories are mode 700, the scripts in `bin/` are mode 700, and the files in `etc/` are mode 600. (Publishing this relative layout is recorded under "Reclassifications" in `docs/CONSTITUTION.md`, 2026-09-29.)
 

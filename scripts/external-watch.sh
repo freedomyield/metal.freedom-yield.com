@@ -159,6 +159,17 @@ commit_state() {
   return 1
 }
 
+# state_writable: same first steps as commit_state, without committing. When it
+# fails, this run cannot record anything, so the per-check pushes are held back
+# (see check_push) and the state-save alert is the only push.
+state_writable() {
+  local tmp
+  tmp="$(mktemp "$STATE_DIR/state.XXXXXX" 2>/dev/null)" || return 1
+  if printf '%s\n' "$STATE" > "$tmp" 2>/dev/null; then rm -f "$tmp"; return 0; fi
+  rm -f "$tmp"
+  return 1
+}
+
 st_get() { jq -r --arg c "$1" --arg f "$2" '.[$c][$f] // empty' <<<"$STATE"; }
 st_mark() { # check observation-epoch
   STATE="$(jq -c --arg c "$1" --argjson o "$2" '.[$c].last_counted = $o' <<<"$STATE")"
@@ -297,6 +308,16 @@ alert_text() { # check -> prio|title|label
   esac
 }
 
+# check_push: a per-check alert/recovery push. Held back (returns non-zero, so
+# the status change is not made) when this run cannot save state: the alert
+# would repeat on every run and could not be recorded, so the single
+# state-save push is the only message.
+SAVE_BLOCKED=0
+check_push() {
+  [ "$SAVE_BLOCKED" = "1" ] && return 1
+  notify_or_keep "$@"
+}
+
 apply_check() { # check result [observation-epoch]
   local check="$1" res="$2" obs="${3:-}" status fails first spec prio title label body dur newobs=1
   status="$(st_get "$check" status)"
@@ -315,7 +336,7 @@ apply_check() { # check result [observation-epoch]
         spec="$(alert_text "$check")"
         prio="${spec%%|*}"; spec="${spec#*|}"; title="${spec%%|*}"; label="${spec#*|}"
         body="$(printf 'チェック: %s\n開始: %s (UTC)\nvalidator host の外 (web host) から検知' "$label" "$(iso "$first")")"
-        if notify_or_keep "$prio" "$title" "$body" && [ "$LIVE" = "1" ]; then status=alerting; fi
+        if check_push "$prio" "$title" "$body" && [ "$LIVE" = "1" ]; then status=alerting; fi
       fi
       st_set "$check" "$status" "$fails" "$first"
       [ -n "$obs" ] && st_mark "$check" "$obs"
@@ -325,7 +346,7 @@ apply_check() { # check result [observation-epoch]
         spec="$(alert_text "$check")"; label="${spec##*|}"
         dur="$(fmt_duration $((NOW - ${first:-$NOW})))"
         body="$(printf 'チェック: %s\n開始: %s (UTC)\n停止期間: %s\nvalidator host の外 (web host) から検知' "$label" "$(iso "${first:-$NOW}")" "$dur")"
-        if notify_or_keep default "外部見張り: 復旧 ($check)" "$body" && [ "$LIVE" = "1" ]; then
+        if check_push default "外部見張り: 復旧 ($check)" "$body" && [ "$LIVE" = "1" ]; then
           st_set "$check" ok 0 null
         fi
       else
@@ -341,6 +362,7 @@ apply_check() { # check result [observation-epoch]
 
 # --- run ------------------------------------------------------------------
 load_state
+state_writable || SAVE_BLOCKED=1
 check_fresh
 check_p2p
 check_chain
@@ -348,7 +370,7 @@ apply_check fresh "$FRESH_RES"
 apply_check p2p "$P2P_RES"
 apply_check chain "$CHAIN_RES" "$CHAIN_OBS"
 STATE_SAVE_FAILED=0
-if ! commit_state 2>/dev/null; then
+if [ "$SAVE_BLOCKED" = "1" ] || ! commit_state 2>/dev/null; then
   # Without saved state every run re-reads the old counters, so no check can
   # ever reach 2 consecutive failures: alerting is silently dead. Say so on
   # every such run (deliberately not debounced or deduplicated: there is no
@@ -356,8 +378,14 @@ if ! commit_state 2>/dev/null; then
   STATE_SAVE_FAILED=1
   echo "[external-watch] state save failed" >&2
   log_note "state save failed" 2>/dev/null
+  # Per-check pushes were held back for this run (check_push), so name the
+  # checks failing right now here. Names only: no host, port, path or value.
+  FAILING=""
+  [ "$FRESH_RES" = FAIL ] && FAILING="fresh"
+  [ "$P2P_RES" = FAIL ] && FAILING="${FAILING:+$FAILING, }p2p"
+  [ "$CHAIN_RES" = FAIL ] && FAILING="${FAILING:+$FAILING, }chain"
   notify_or_keep urgent "外部見張り: 状態を保存できない (ディスク等)" \
-    "$(printf '見張りの状態を保存できず、警報を出せない状態です。\nweb host の空き容量・権限を確認してください。\nvalidator host の外 (web host) から検知')"
+    "$(printf '見張りの状態を保存できず、警報を出せない状態です。\n失敗中の確認: %s\nweb host の空き容量・権限を確認してください。\nvalidator host の外 (web host) から検知' "${FAILING:-なし}")"
 fi
 
 printf '%s fresh=%s(%ss) p2p=%s chain=%s pushes=%d\n' "$(iso "$NOW")" \
