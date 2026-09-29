@@ -222,5 +222,5 @@ Sections 1–7 above and the earlier addenda are left as written. `scripts/exter
 | `外部見張り: ネットワーク上で未接続 (connected=false)` | urgent | `chain` failed on 2 distinct RPC samples | `chain.status=alerting` |
 | `外部見張り: validator.json の更新が止まっている` | high | `fresh` failed on 2 consecutive runs (not in the renewal window) | `fresh.status=alerting` |
 | `外部見張り: 復旧 (<check>)` | default | first passing run of `<check>` after a delivered alert; body includes the outage duration | check reset to `ok` |
-| `外部見張り: 状態を保存できない (ディスク等)` | urgent | the run's state could not be saved (disk full, quota, permissions); sent on **every** such run, not debounced, exit 7 (6 if this push fails) | nothing (there is no saved state) |
+| `外部見張り: 状態を保存できない (ディスク等)` | urgent | the run's state could not be saved (disk full, quota, permissions); sent on **every** such run, not debounced, and it is the **only** push of that run (per-check alert/recovery pushes are held back); the body lists the names of currently failing checks, or none; exit 7 (6 if this push fails) | nothing (there is no saved state) |
 
