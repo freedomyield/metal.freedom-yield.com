@@ -17,6 +17,7 @@
 #       multicast are ALLOWED — analogous to the IPv4 exclusions above).
 #   A3. Japanese phone-number literal (mobile 070/080/090, ± separators).
 #   A4. personal email literal (any domain NOT in the allowlist below).
+#   A5. ntfy topic literal (fy-metal-<32 hex>) — the push channel's only secret.
 #   B.  forbidden ASCII word-literals (operator handle, surname, company slug,
 #       validator SSH key name) matched by sha256(lowercased token).
 #   C.  forbidden non-ASCII (CJK) literals (operator real name, company name in
@@ -505,6 +506,15 @@ SCAN_RAW="$(
 			next if $dom =~ /(?:^|\.)(?:metal\.freedom-yield\.com|freedom-yield\.com|anthropic\.com|(?:users\.)?noreply\.github\.com|example\.(?:com|org|net))$/;
 			next if $dom =~ /\.(?:invalid|test|example|localhost|local)$/;   # RFC 6761/6762 reserved (placeholder), never real
 			push @hits, "personal-email literal (redacted)";
+		}
+		# A5. ntfy topic literal (fy-metal-<32 hex>). The topic is the only
+		# credential of a push channel (anyone who knows it can read/publish),
+		# and it lives only in mode-600 env files on the operator side. Constitution
+		# 4.1: never in a public file. Case-insensitive; boundaries keep a longer
+		# hex run (e.g. a hash) from matching a 32-char slice of itself only when
+		# it is glued to more hex, but a topic embedded in a URL still matches.
+		while (/(?<![0-9A-Za-z])fy-metal-[0-9a-f]{32}(?![0-9A-Za-z])/gi) {
+			push @hits, "ntfy-topic literal (redacted)";
 		}
 		# B. forbidden ASCII word-literals by hash
 		while (/([A-Za-z0-9_]{3,})/g) {
