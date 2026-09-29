@@ -17,7 +17,13 @@
 # check failed on 2 consecutive runs; a recovery push fires on the first
 # passing run after an alert. State advances only if the push succeeded.
 # Nothing is sent unless WATCH_LIVE=1 (otherwise "DRY: would notify ..." on
-# stderr, and state is NOT persisted so a dry run cannot mute a real alert).
+# stderr). A DRY run persists fails/first_fail_at (so the alert path is
+# reachable) but never moves status to alerting and never clears an existing
+# alerting status, so it can neither mute nor fake a real alert.
+#
+# Chain observations come from a 900 s cached RPC sample: a cached sample is
+# counted once (fetchedAt is remembered in state as last_counted), so 2
+# consecutive chain failures always mean 2 distinct observations.
 #
 # Config: ${WATCH_CONFIG:-$HOME/metal-fy-watch/etc/watch.env}, strict
 # KEY=VALUE lines, never sourced. See parse_config below for the keys.
@@ -94,6 +100,15 @@ parse_config() {
 
 parse_config
 
+# Preflight: every dependency is required; a missing one must never degrade
+# into a silent no-op or a false alert.
+for dep in jq curl timeout flock; do
+  command -v "$dep" >/dev/null 2>&1 || {
+    echo "external-watch: missing dependency: $dep" >&2
+    exit 1
+  }
+done
+
 # --- runtime dirs + lock --------------------------------------------------
 STATE_DIR="$WATCH_HOME/state"
 LOG_DIR="$WATCH_HOME/log"
@@ -104,14 +119,8 @@ STATE_FILE="$STATE_DIR/state.json"
 CACHE_FILE="$STATE_DIR/rpc-cache.json"
 LOG_FILE="$LOG_DIR/watch.log"
 
-if command -v flock >/dev/null 2>&1; then
-  exec 9>"$STATE_DIR/lock"
-  flock -n 9 || exit 0
-else
-  # Fallback for hosts without flock (the web host has it; dev Macs may not).
-  mkdir "$STATE_DIR/lock.d" 2>/dev/null || exit 0
-  trap 'rmdir "$STATE_DIR/lock.d" 2>/dev/null' EXIT
-fi
+exec 9>"$STATE_DIR/lock"
+flock -n 9 || exit 0
 
 NOW="${WATCH_NOW_EPOCH:-$(date +%s)}"
 LIVE="${WATCH_LIVE:-0}"
@@ -121,7 +130,7 @@ log_note() { printf '%s note: %s\n' "$(iso "$NOW")" "$1" >> "$LOG_FILE"; }
 
 # --- state ----------------------------------------------------------------
 STATE_INIT='{"fresh":{"status":"ok","fails":0,"first_fail_at":null},"p2p":{"status":"ok","fails":0,"first_fail_at":null},"chain":{"status":"ok","fails":0,"first_fail_at":null}}'
-STATE_VALID_FILTER='[.fresh,.p2p,.chain] | all(.[]; (.status=="ok" or .status=="alerting") and (.fails|type=="number") and (.first_fail_at==null or (.first_fail_at|type=="number")))'
+STATE_VALID_FILTER='[.fresh,.p2p,.chain] | all(.[]; (.status=="ok" or .status=="alerting") and (.fails|type=="number") and (.first_fail_at==null or (.first_fail_at|type=="number")) and ((.last_counted // null)==null or (.last_counted|type=="number")))'
 
 load_state() {
   if [ ! -e "$STATE_FILE" ]; then STATE="$STATE_INIT"; return; fi
@@ -135,16 +144,18 @@ load_state() {
 }
 
 commit_state() {
-  [ "$LIVE" = "1" ] || return 0
   local tmp
   tmp="$(mktemp "$STATE_DIR/state.XXXXXX")" || return 1
   printf '%s\n' "$STATE" > "$tmp" && chmod 600 "$tmp" && mv "$tmp" "$STATE_FILE"
 }
 
 st_get() { jq -r --arg c "$1" --arg f "$2" '.[$c][$f] // empty' <<<"$STATE"; }
+st_mark() { # check observation-epoch
+  STATE="$(jq -c --arg c "$1" --argjson o "$2" '.[$c].last_counted = $o' <<<"$STATE")"
+}
 st_set() { # check status fails first_fail_at(number|null)
   STATE="$(jq -c --arg c "$1" --arg s "$2" --argjson n "$3" --argjson t "$4" \
-    '.[$c] = {status:$s, fails:$n, first_fail_at:$t}' <<<"$STATE")"
+    '.[$c] += {status:$s, fails:$n, first_fail_at:$t}' <<<"$STATE")"
 }
 
 # --- notify ---------------------------------------------------------------
@@ -190,7 +201,7 @@ fmt_duration() {
 # --- checks ---------------------------------------------------------------
 FRESH_RES=UNKNOWN FRESH_AGE=na
 P2P_RES=UNKNOWN
-CHAIN_RES=UNKNOWN
+CHAIN_RES=UNKNOWN CHAIN_OBS="" CHAIN_NOTE=""
 
 check_fresh() {
   local obs end
@@ -223,14 +234,17 @@ check_p2p() {
 # keys (.result...) belong to the external RPC, not to this artifact's own schema.
 cache_body() { jq -c 'del(.fetchedAt)' "$CACHE_FILE" 2>/dev/null; }
 
-rpc_response() { # prints a valid cached-or-fresh response, or returns 1
+# rpc_response: sets RPC_RESP (valid cached-or-fresh response) and RPC_OBS
+# (epoch at which that sample was really taken), or returns 1.
+RPC_RESP="" RPC_OBS=""
+rpc_response() {
   local fetched resp
   if [ -r "$CACHE_FILE" ]; then
     fetched="$(jq -r '.fetchedAt // empty' "$CACHE_FILE" 2>/dev/null)"
     if [[ "$fetched" =~ ^[0-9]+$ ]] && [ "$((NOW - fetched))" -ge 0 ] \
        && [ "$((NOW - fetched))" -lt "$RPC_CACHE_TTL" ]; then
       resp="$(cache_body)"
-      if [ -n "$resp" ]; then printf '%s' "$resp"; return 0; fi
+      if [ -n "$resp" ]; then RPC_RESP="$resp"; RPC_OBS="$fetched"; return 0; fi
     fi
   fi
   resp="$(curl -sS -X POST -H 'content-type:application/json' --max-time 10 \
@@ -241,14 +255,15 @@ rpc_response() { # prints a valid cached-or-fresh response, or returns 1
   tmp="$(mktemp "$STATE_DIR/rpc-cache.XXXXXX")" \
     && jq -c --argjson t "$NOW" '. + {fetchedAt:$t}' <<<"$resp" > "$tmp" \
     && mv "$tmp" "$CACHE_FILE"
-  printf '%s' "$resp"
+  RPC_RESP="$resp"; RPC_OBS="$NOW"
 }
 
 check_chain() {
   local resp conn
-  if ! resp="$(rpc_response)"; then
+  if ! rpc_response; then
     CHAIN_RES=UNKNOWN; log_note "chain rpc unavailable or invalid"; return
   fi
+  resp="$RPC_RESP"; CHAIN_OBS="$RPC_OBS"
   conn="$(jq -r --arg id "$NODE_ID" \
     '[.result.validators[] | select(.nodeID==$id)] | if length==0 then "absent" else (.[0].connected | tostring) end' \
     <<<"$resp" 2>/dev/null)"
@@ -269,34 +284,43 @@ alert_text() { # check -> prio|title|label
   esac
 }
 
-apply_check() { # check result
-  local check="$1" res="$2" status fails first spec prio title label body dur
+apply_check() { # check result [observation-epoch]
+  local check="$1" res="$2" obs="${3:-}" status fails first spec prio title label body dur newobs=1
   status="$(st_get "$check" status)"
   fails="$(st_get "$check" fails)"
   first="$(st_get "$check" first_fail_at)"
+  # A cached sample already counted must not count again (2-consecutive rule).
+  if [ -n "$obs" ] && [ "$(st_get "$check" last_counted)" = "$obs" ]; then
+    newobs=0
+    [ "$check" = chain ] && CHAIN_NOTE="(cached)"
+  fi
   case "$res" in
     FAIL)
-      fails=$((fails + 1))
+      [ "$newobs" = 1 ] && fails=$((fails + 1))
       [ -n "$first" ] || first="$NOW"
       if [ "$fails" -ge 2 ] && [ "$status" = "ok" ]; then
         spec="$(alert_text "$check")"
         prio="${spec%%|*}"; spec="${spec#*|}"; title="${spec%%|*}"; label="${spec#*|}"
         body="$(printf 'チェック: %s\n開始: %s (UTC)\nvalidator host の外 (web host) から検知' "$label" "$(iso "$first")")"
-        if notify_or_keep "$prio" "$title" "$body"; then status=alerting; fi
+        if notify_or_keep "$prio" "$title" "$body" && [ "$LIVE" = "1" ]; then status=alerting; fi
       fi
       st_set "$check" "$status" "$fails" "$first"
+      [ -n "$obs" ] && st_mark "$check" "$obs"
       ;;
     PASS)
       if [ "$status" = "alerting" ]; then
         spec="$(alert_text "$check")"; label="${spec##*|}"
         dur="$(fmt_duration $((NOW - ${first:-$NOW})))"
         body="$(printf 'チェック: %s\n開始: %s (UTC)\n停止期間: %s\nvalidator host の外 (web host) から検知' "$label" "$(iso "${first:-$NOW}")" "$dur")"
-        if notify_or_keep default "外部見張り: 復旧 ($check)" "$body"; then
+        if notify_or_keep default "外部見張り: 復旧 ($check)" "$body" && [ "$LIVE" = "1" ]; then
           st_set "$check" ok 0 null
         fi
       else
         st_set "$check" ok 0 null
       fi
+      # No PASS marker needed: a PASS is not counted (reset is idempotent and a
+      # recovery push retry on a cached sample is desired), so dedup has no
+      # observable effect on the PASS side.
       ;;
     *) : ;;  # UNKNOWN: no change
   esac
@@ -309,11 +333,11 @@ check_p2p
 check_chain
 apply_check fresh "$FRESH_RES"
 apply_check p2p "$P2P_RES"
-apply_check chain "$CHAIN_RES"
+apply_check chain "$CHAIN_RES" "$CHAIN_OBS"
 commit_state
 
 printf '%s fresh=%s(%ss) p2p=%s chain=%s pushes=%d\n' "$(iso "$NOW")" \
-  "$FRESH_RES" "$FRESH_AGE" "$P2P_RES" "$CHAIN_RES" "$PUSHES" >> "$LOG_FILE"
+  "$FRESH_RES" "$FRESH_AGE" "$P2P_RES" "$CHAIN_RES$CHAIN_NOTE" "$PUSHES" >> "$LOG_FILE"
 if [ "$(wc -l < "$LOG_FILE")" -gt 6000 ]; then
   tail -n 5000 "$LOG_FILE" > "$LOG_FILE.tmp" && mv "$LOG_FILE.tmp" "$LOG_FILE"
 fi
