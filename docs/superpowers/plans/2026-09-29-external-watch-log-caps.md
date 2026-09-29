@@ -4,8 +4,7 @@ Date: 2026-09-29. Operator-approved values: 1 MB caps, keep newest 10.
 
 ## Why
 
-The watch runs every 5 minutes on a shared web host whose disk was measured at
-84% used. `log/watch.log` is capped by line count only; `log/cron.err`,
+The watch runs every 5 minutes on a shared web host with little free disk. `log/watch.log` is capped by line count only; `log/cron.err`,
 `backup/*` and `state/state.json.corrupt-*` have no cap at all. A watch that
 errors every run would grow `cron.err` without bound.
 
@@ -52,3 +51,35 @@ a symlink in backup/ pointing outside is not followed and its target survives;
 invalid override → default used; housekeeping failure (e.g. unreadable backup
 dir) → alerting outcome and exit code unchanged. G9: break each rule and show a
 test fails.
+
+## As built (fix rounds after the Task 1 review and the final audit)
+
+The spec above is the original plan; these rounds changed the behaviour.
+`docs/MONITORING_OPS.md` §14.4 is the current description.
+
+Fix round 1 (review minors):
+- Leaked `log/.trim.XXXXXX` temps of a killed run are swept (exact 6-character
+  suffix, regular files only).
+- Names containing a tab or newline are skipped by the prune (the tab is the
+  sort field separator).
+- C1/C2 "newest half" means the newest cap/2 bytes cut at a line boundary; when
+  the newest line alone is longer than cap/2, its last cap/2 bytes are kept
+  verbatim (a partial first line rather than an empty file).
+
+Fix round 2 (final audit: security, correctness, constitution):
+- C1/C2: a file with more than one hard link, or in a symlinked `log/`, is not
+  trimmed (the in-place write would truncate the other file); a hard link is
+  reported with the housekeeping note. The trim re-verifies (no symlink, same
+  device/inode, link count 1) immediately before its single write.
+- C2: `cron.err` is also trimmed at the very start of every run, before the
+  config is parsed, so config errors, a missing dependency or a `set -u` abort
+  keep it bounded (at most one run's output over the cap).
+- C3: only `*.bak-*` names (all the installer writes to `backup/`) are pruned,
+  and the deletions run from inside the directory after verifying it is
+  physically `<parent>/backup` (a symlink swapped in after the listing makes
+  the prune refuse). The keep-10 count is shared by crontab and bin/etc backups.
+- Leaked `state/state.XXXXXX` and `state/rpc-cache.XXXXXX` temps are swept too.
+- The installer's `--uninstall` keeps only the newest 3
+  `~/metal-fy-watch-crontab.bak-<ts>` files (exactly that name, regular files).
+- Residual: a process running as the site account can still race a check and
+  its action; no privilege boundary is crossed (MONITORING_OPS §14.4).
