@@ -162,6 +162,11 @@ run_text "ntfy topic in URL -> block"               1 --text "curl https://ntfy.
 run_text "ntfy topic uppercase -> block"            1 --text "topic ${FAKE_TOPIC_UP}"
 run_text "ntfy topic in --diff mode -> block"       1 --diff "$(printf '+++ b/x\n+topic=%s\n' "$FAKE_TOPIC")"
 run_text "topic prefix with short hex -> allow"     0 --text "example ${FAKE_TOPIC_SHORT}"
+# Boundaries (intended: a 32-hex run glued to more alphanumerics is not a topic).
+run_text "topic glued to a leading letter -> allow"  0 --text "x${FAKE_TOPIC}"
+run_text "topic followed by a 33rd hex -> allow"     0 --text "${FAKE_TOPIC}a"
+run_text "fy-metal- + 32 non-hex -> allow"           0 --text "$(printf 'fy-metal-%s%s' ghijklmnopqrstuv ghijklmnopqrstuv)"
+run_text "topic in quotes -> block"                  1 --text "t=\"${FAKE_TOPIC}\""
 run_text "topic placeholder -> allow"               0 --text "NTFY_TOPIC=fy-metal-<random-hex>"
 
 echo "== forbidden word (hash) =="
