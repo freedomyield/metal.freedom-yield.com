@@ -211,3 +211,15 @@ Sections 1–7 above and the 2026-09-07 addendum are left as written. The public
 | `公開サイト復旧` | default | first healthy run after a delivered outage push | `.web=ok`, `web_incident` cleared, one blip-log line |
 
 The pre-2026-09-24 title `公開サイトが応答しない` (without the suffix) is no longer sent. A failure that clears before the next run sends nothing; it is recorded in `/var/log/anomalies-web-blips.log` with `pushed=false`. Bodies carry the class label, `継続: 約 N 分 (5 分刻みの観測)`, the key timings of `P_cf` and `P_direct` (each with `remote_ip=…` stripped — added 2026-09-24 review, so the origin address never reaches ntfy.sh, in any class), the `cf-ray` colo, and the path of the diagnostics log.
+
+## Addendum (2026-09-29) — `external-watch.sh` (off-host watch on the web host)
+
+Sections 1–7 above and the earlier addenda are left as written. `scripts/external-watch.sh` is a new caller of `notify.sh`. It runs on the web host, not the validator host, and calls its own bundled copy of `notify.sh` (installed next to it by `scripts/install-web-host-external-watch.sh`) through `notify_or_keep`, the same delivered-or-keep discipline as caller #1's `notify_or_keep`. Nothing is sent unless `WATCH_LIVE=1` (otherwise `DRY: would notify …` on stderr); a permanent push failure exits 6 and leaves state un-advanced. Design and runbook: `docs/MONITORING_OPS.md` §14.
+
+| Title | Priority | When | State advanced only on delivery |
+|---|---|---|---|
+| `外部見張り: validator に外から届かない` | urgent | `p2p` failed on 2 consecutive runs | `p2p.status=alerting` |
+| `外部見張り: ネットワーク上で未接続 (connected=false)` | urgent | `chain` failed on 2 distinct RPC samples | `chain.status=alerting` |
+| `外部見張り: validator.json の更新が止まっている` | high | `fresh` failed on 2 consecutive runs (not in the renewal window) | `fresh.status=alerting` |
+| `外部見張り: 復旧 (<check>)` | default | first passing run of `<check>` after a delivered alert; body includes the outage duration | check reset to `ok` |
+
