@@ -39,7 +39,7 @@ Anomaly thresholds:
 
 When any anomaly fires, an out-of-band push is delivered in addition to the digest.
 
-Implementing scripts live in `scripts/` in this repository; alert routing parameters live on the validator host outside the repository, per Constitution §4.1 S5.
+Implementing scripts live in `scripts/` in this repository; alert routing parameters live outside the repository, per Constitution §4.1 S5: the validator host keeps its own ntfy topic, and the off-host external watch on the web host (`docs/MONITORING_OPS.md` §14) has a separate, dedicated topic of its own.
 
 ### W2 — Weekly review (operator + AI)
 
