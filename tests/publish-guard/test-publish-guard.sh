@@ -59,6 +59,11 @@ FAKE_EMAIL="$(printf 'user@%s' badactor.io)"
 # Bash-tool PreToolUse hook when *this file* is committed/edited by an
 # agent session with that hook wired in -- see round-2 review notes).
 NOVERIFY_FLAG="$(printf -- '--no-ver%s' ify)"
+# ntfy topic (fake, random-looking hex), assembled at runtime so this tracked
+# file never contains a topic-shaped literal itself.
+FAKE_TOPIC="$(printf 'fy-metal-%s%s' 0123456789abcdef 0123456789abcdef)"
+FAKE_TOPIC_UP="$(printf 'FY-METAL-%s%s' 0123456789ABCDEF 0123456789ABCDEF)"
+FAKE_TOPIC_SHORT="$(printf 'fy-metal-%s' 0123456789abcdef)"
 DASH_N="$(printf -- '-%s' n)"
 
 PASS=0
@@ -150,6 +155,14 @@ run_text "anthropic trailer email -> allow"        0 --text "Co-Authored-By: X <
 run_text "example.com email -> allow"              0 --text "demo user@example.com"
 run_text "reserved-TLD .invalid email -> allow"    0 --text "ph x@host.invalid"
 run_text "reserved-TLD .local email -> allow"      0 --text "mdns box@printer.local"
+
+echo "== ntfy topic =="
+run_text "ntfy topic literal -> block"              1 --text "NTFY_TOPIC=${FAKE_TOPIC}"
+run_text "ntfy topic in URL -> block"               1 --text "curl https://ntfy.example.org/${FAKE_TOPIC}"
+run_text "ntfy topic uppercase -> block"            1 --text "topic ${FAKE_TOPIC_UP}"
+run_text "ntfy topic in --diff mode -> block"       1 --diff "$(printf '+++ b/x\n+topic=%s\n' "$FAKE_TOPIC")"
+run_text "topic prefix with short hex -> allow"     0 --text "example ${FAKE_TOPIC_SHORT}"
+run_text "topic placeholder -> allow"               0 --text "NTFY_TOPIC=fy-metal-<random-hex>"
 
 echo "== forbidden word (hash) =="
 run_text "forbidden word -> block"                 1 --text "signed by ${TEST_WORD} today"
