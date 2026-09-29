@@ -36,6 +36,7 @@
 #
 # Test/ops overrides (env): WATCH_HOME WATCH_CONFIG WATCH_LIVE WATCH_NOTIFY
 # WATCH_NOW_EPOCH P2P_REPROBE_SLEEP WATCH_NOTIFY_RETRY_SLEEP
+# WATCH_LOG_MAX_BYTES WATCH_CRONERR_MAX_BYTES WATCH_KEEP_BACKUPS WATCH_KEEP_CORRUPT
 
 set -uo pipefail
 
@@ -360,6 +361,82 @@ apply_check() { # check result [observation-epoch]
   esac
 }
 
+# --- housekeeping (size caps) --------------------------------------------
+# Every file this script writes on the shared host has an upper bound. The
+# overrides exist for tests; production runs on the defaults. A value that is
+# not a positive integer falls back to the default.
+cap_value() { # env-value default
+  if [[ "$1" =~ ^[1-9][0-9]{0,14}$ ]]; then printf '%s' "$1"; else printf '%s' "$2"; fi
+}
+file_size() { wc -c < "$1" 2>/dev/null | tr -d ' '; }
+file_mtime() { stat -c '%Y' "$1" 2>/dev/null || stat -f '%m' "$1" 2>/dev/null; }
+
+# trim_tail file max: when the file exceeds max bytes keep only its newest
+# half, cut at a line boundary (no partial first line). The file is rewritten
+# IN PLACE (cat tmp > file, never mv): cron.err is held open with O_APPEND by
+# the cron shell for the whole run, and replacing the inode would orphan that
+# descriptor and lose this run's stderr.
+trim_tail() {
+  local f="$1" max="$2" size half raw kept rc=1
+  [ -f "$f" ] && [ ! -L "$f" ] || return 0
+  size="$(file_size "$f")"
+  [[ "$size" =~ ^[0-9]+$ ]] || return 1
+  [ "$size" -gt "$max" ] || return 0
+  half=$((max / 2))
+  raw="$(mktemp "$LOG_DIR/.trim.XXXXXX")" || return 1
+  kept="$(mktemp "$LOG_DIR/.trim.XXXXXX")" || { rm -f "$raw"; return 1; }
+  # One byte more than half: if it is a newline, the rest starts on a line.
+  if tail -c $((half + 1)) "$f" > "$raw" 2>/dev/null; then
+    if [ "$(head -c 1 "$raw" | od -An -tx1 | tr -d ' \n')" = "0a" ]; then
+      tail -c +2 "$raw" > "$kept"
+    else
+      tail -n +2 "$raw" > "$kept"
+    fi
+    cat "$kept" > "$f" && rc=0
+  fi
+  rm -f "$raw" "$kept"
+  return "$rc"
+}
+
+# prune_dir dir pattern keep: delete all but the newest KEEP regular files
+# (not symlinks, not directories) directly inside dir whose name matches
+# pattern. Nothing outside dir is ever touched.
+prune_dir() {
+  local dir="$1" pat="$2" keep="$3" list ordered f m rc=0
+  [ -d "$dir" ] && [ ! -L "$dir" ] || return 0
+  list="$(mktemp "$LOG_DIR/.trim.XXXXXX")" || return 1
+  ordered="$(mktemp "$LOG_DIR/.trim.XXXXXX")" || { rm -f "$list"; return 1; }
+  if ! find "$dir" -maxdepth 1 -type f -name "$pat" -print0 > "$list" 2>/dev/null; then
+    rm -f "$list" "$ordered"; return 1
+  fi
+  while IFS= read -r -d '' f; do
+    case "$f" in *$'\n'*) continue ;; esac   # never act on odd names
+    m="$(file_mtime "$f")"; [[ "$m" =~ ^[0-9]+$ ]] || continue
+    printf '%s\t%s\n' "$m" "$f"
+  done < "$list" | sort -t $'\t' -k1,1nr -k2,2r > "$ordered"
+  while IFS=$'\t' read -r _ f; do
+    rm -f -- "$f" || rc=1
+  done < <(tail -n +$((keep + 1)) "$ordered")
+  rm -f "$list" "$ordered"
+  return "$rc"
+}
+
+# Housekeeping must never change alerting or the exit code: every failure is
+# folded into one host-free note line.
+housekeeping() {
+  local max_log max_err keep_bak keep_cor bad=0
+  max_log="$(cap_value "${WATCH_LOG_MAX_BYTES:-}" 1048576)"
+  max_err="$(cap_value "${WATCH_CRONERR_MAX_BYTES:-}" 1048576)"
+  keep_bak="$(cap_value "${WATCH_KEEP_BACKUPS:-}" 10)"
+  keep_cor="$(cap_value "${WATCH_KEEP_CORRUPT:-}" 10)"
+  trim_tail "$LOG_FILE" "$max_log" 2>/dev/null || bad=1
+  trim_tail "$LOG_DIR/cron.err" "$max_err" 2>/dev/null || bad=1
+  prune_dir "$WATCH_HOME/backup" '*' "$keep_bak" 2>/dev/null || bad=1
+  prune_dir "$STATE_DIR" 'state.json.corrupt-*' "$keep_cor" 2>/dev/null || bad=1
+  [ "$bad" = 0 ] || log_note "housekeeping incomplete" 2>/dev/null
+  return 0
+}
+
 # --- run ------------------------------------------------------------------
 load_state
 state_writable || SAVE_BLOCKED=1
@@ -390,9 +467,7 @@ fi
 
 printf '%s fresh=%s(%ss) p2p=%s chain=%s pushes=%d\n' "$(iso "$NOW")" \
   "$FRESH_RES" "$FRESH_AGE" "$P2P_RES" "$CHAIN_RES$CHAIN_NOTE" "$PUSHES" >> "$LOG_FILE"
-if [ "$(wc -l < "$LOG_FILE")" -gt 6000 ]; then
-  tail -n 5000 "$LOG_FILE" > "$LOG_FILE.tmp" && mv "$LOG_FILE.tmp" "$LOG_FILE"
-fi
+housekeeping || true
 
 [ "$PUSH_FAILED" = "1" ] && exit 6
 [ "$STATE_SAVE_FAILED" = "1" ] && exit 7

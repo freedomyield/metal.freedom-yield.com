@@ -8,6 +8,7 @@
 # together with the stub notifier, so nothing is ever sent for real.
 # No GNU date dependency: the script uses jq for all time conversion.
 
+# shellcheck disable=SC2012,SC2015,SC2329  # ls -i for inodes; A&&ok||bad reporters; hooks called indirectly
 set -uo pipefail
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -106,7 +107,7 @@ new_case() { # sets C, HOMEDIR; p2p defaults to the open port
   P2P_PORT="$OPEN_PORT"
   write_config
   : > "$C/notify.log"; : > "$C/sleep.log"; : > "$C/curl.log"; : > "$C/timeout.argv"; rm -f "$C/curl.count" "$C/timeout.count"
-  JSON_AGE=""; JSON_END=""; RPC_BODY="$BODY_CONNECTED"; RPC_RC=0; NOTIFY_RC=0; LIVE=1; FAIL_FIRST=0; EXTRA_PATH=""
+  JSON_AGE=""; JSON_END=""; RPC_BODY="$BODY_CONNECTED"; RPC_RC=0; NOTIFY_RC=0; LIVE=1; FAIL_FIRST=0; EXTRA_PATH=""; HK_ENV=()
 }
 write_config() {
   cat > "$C/etc/watch.env" <<CFG
@@ -141,7 +142,7 @@ run_watch() { # [NOW override]; sets RC, ERR
     STUB_CURL_LOG="$C/curl.log" STUB_CURL_COUNTER="$C/curl.count" STUB_CURL_BODY="$RPC_BODY" STUB_CURL_RC="$RPC_RC" \
     STUB_NOTIFY_LOG="$C/notify.log" STUB_NOTIFY_RC="$NOTIFY_RC" STUB_SLEEP_LOG="$C/sleep.log" \
     STUB_TIMEOUT_FAIL_FIRST="$FAIL_FIRST" STUB_TIMEOUT_COUNTER="$C/timeout.count" STUB_TIMEOUT_ARGV_LOG="$C/timeout.argv" \
-    bash "$SCRIPT" 2>&1 >/dev/null)"
+    ${HK_ENV[@]+"${HK_ENV[@]}"} bash "$SCRIPT" 2>&1 >/dev/null)"
   RC=$?
 }
 pushes() { grep -c . "$C/notify.log"; }
@@ -500,13 +501,128 @@ assert_eq "corrupt state: rc 0" "0" "$RC"
 assert_eq "  moved aside" "1" "$(count_files "$C/home/state" "state.json.corrupt-$NOW")"
 assert_eq "  re-initialised" "ok" "$(st chain status)"
 assert_contains "  logged" "state corrupt" "$(cat "$C/home/log/watch.log")"
-new_case; make_json 10; mkdir -p "$C/home/log"; for i in $(seq 1 6000); do echo "old line $i"; done > "$C/home/log/watch.log"
-run_watch
-assert_eq "log trimmed to 5000 lines when > 6000" "5000" "$(wc -l < "$C/home/log/watch.log" | tr -d ' ')"
+# ---- size caps (C1-C7): small override values keep the fixtures tiny ----
+inode_of() { ls -i "$1" | awk '{print $1}'; }
+size_of() { wc -c < "$1" | tr -d ' '; }
+mk_files() { # dir count  -> hk-01..hk-NN, higher NN = newer mtime, name order == age order
+  local d="$1" n="$2" i
+  for i in $(seq 1 "$n"); do
+    printf 'x%s\n' "$i" > "$d/hk-$(printf %02d "$i")"
+    touch -t "$(printf '20260101%02d00' "$i")" "$d/hk-$(printf %02d "$i")"
+  done
+}
+echo "== log caps: watch.log =="
+new_case; make_json 10; mkdir -p "$C/home/log"; for i in $(seq 1 300); do echo "old line $i"; done > "$C/home/log/watch.log"
+HK_ENV=(WATCH_LOG_MAX_BYTES=2000); run_watch
+assert_eq "watch.log over cap: rc 0" "0" "$RC"
+[ "$(size_of "$C/home/log/watch.log")" -le 2000 ] && ok "  size <= cap" || bad "  size <= cap" "$(size_of "$C/home/log/watch.log")"
+[ "$(size_of "$C/home/log/watch.log")" -gt 500 ] && ok "  keeps a real tail (not emptied)" || bad "  keeps a real tail" "$(size_of "$C/home/log/watch.log")"
 assert_contains "  newest line kept" "fresh=PASS" "$(last_log)"
-new_case; make_json 10; mkdir -p "$C/home/log"; for i in $(seq 1 5999); do echo "old line $i"; done > "$C/home/log/watch.log"
+FIRST="$(head -n 1 "$C/home/log/watch.log")"
+case "$FIRST" in "old line "[0-9]*) ok "  first line complete" ;; *) bad "  first line complete" "'$FIRST'" ;; esac
+assert_eq "  old line 300 (last before this run) kept" "old line 300" "$(grep -x 'old line 300' "$C/home/log/watch.log")"
+new_case; make_json 10; mkdir -p "$C/home/log"; for i in $(seq 1 30); do echo "old line $i"; done > "$C/home/log/watch.log"
+HK_ENV=(WATCH_LOG_MAX_BYTES=2000); run_watch
+assert_eq "watch.log under cap: untouched (31 lines)" "31" "$(wc -l < "$C/home/log/watch.log" | tr -d ' ')"
+new_case; make_json 10; mkdir -p "$C/home/log"; for i in $(seq 1 30); do echo "old line $i"; done > "$C/home/log/watch.log"
 run_watch
-assert_eq "log not trimmed at exactly 6000" "6000" "$(wc -l < "$C/home/log/watch.log" | tr -d ' ')"
+assert_eq "default cap is large: small log untouched" "31" "$(wc -l < "$C/home/log/watch.log" | tr -d ' ')"
+
+echo "== log caps: cron.err trimmed in place =="
+new_case; make_json 10; mkdir -p "$C/home/log"; for i in $(seq 1 300); do echo "err line $i"; done > "$C/home/log/cron.err"
+INO_BEFORE="$(inode_of "$C/home/log/cron.err")"
+exec 8>>"$C/home/log/cron.err"
+HK_ENV=(WATCH_CRONERR_MAX_BYTES=2000); run_watch
+echo "LATE WRITE" >&8; exec 8>&-
+assert_eq "cron.err over cap: rc 0" "0" "$RC"
+assert_eq "  same inode (in place)" "$INO_BEFORE" "$(inode_of "$C/home/log/cron.err")"
+[ "$(size_of "$C/home/log/cron.err")" -le 2100 ] && ok "  size near cap (cap + late write)" || bad "  size near cap" "$(size_of "$C/home/log/cron.err")"
+assert_eq "  descriptor opened before the trim still lands its write" "LATE WRITE" "$(tail -n 1 "$C/home/log/cron.err")"
+FIRST="$(head -n 1 "$C/home/log/cron.err")"
+case "$FIRST" in "err line "[0-9]*) ok "  first line complete" ;; *) bad "  first line complete" "'$FIRST'" ;; esac
+assert_eq "  no temp left in log/" "0" "$(count_files "$C/home/log" '.trim.*')"
+
+echo "== backup/ retention =="
+new_case; make_json 10; mkdir -p "$C/home/backup/keepdir"; mk_files "$C/home/backup" 12
+run_watch
+assert_eq "12 backups -> newest 10 kept" "10" "$(count_files "$C/home/backup" 'hk-*')"
+absent "  oldest gone" "$C/home/backup/hk-01"; absent "  2nd oldest gone" "$C/home/backup/hk-02"
+[ -e "$C/home/backup/hk-03" ] && [ -e "$C/home/backup/hk-12" ] && ok "  newest 10 survive" || bad "  newest 10 survive" "hk-03/hk-12 missing"
+[ -d "$C/home/backup/keepdir" ] && ok "  directory untouched" || bad "  directory untouched" "gone"
+# order is by mtime, not by name: name order reversed against age
+new_case; make_json 10; mkdir -p "$C/home/backup"
+for i in $(seq 1 12); do n="$(printf %02d $((13 - i)))"; echo x > "$C/home/backup/rv-$n"; touch -t "$(printf '20260101%02d00' "$i")" "$C/home/backup/rv-$n"; done
+run_watch
+absent "mtime order: rv-12 (oldest mtime) gone" "$C/home/backup/rv-12"; absent "  rv-11 gone" "$C/home/backup/rv-11"
+[ -e "$C/home/backup/rv-01" ] && ok "  rv-01 (newest mtime) kept" || bad "  rv-01 kept" "gone"
+new_case; make_json 10; mkdir -p "$C/home/backup"; mk_files "$C/home/backup" 5
+HK_ENV=(WATCH_KEEP_BACKUPS=2); run_watch
+assert_eq "override WATCH_KEEP_BACKUPS=2 honoured" "2" "$(count_files "$C/home/backup" 'hk-*')"
+
+echo "== backup/ symlinks are never followed =="
+new_case; make_json 10; mkdir -p "$C/home/backup" "$C/outside/d"; echo precious > "$C/outside/file"; echo precious > "$C/outside/d/inner"
+touch -t 200001010000 "$C/outside/file"
+ln -s "$C/outside/file" "$C/home/backup/aa-link-file"; ln -s "$C/outside/d" "$C/home/backup/aa-link-dir"
+touch -h -t 200001010000 "$C/home/backup/aa-link-file" "$C/home/backup/aa-link-dir" 2>/dev/null
+mk_files "$C/home/backup" 12
+run_watch
+assert_eq "  12 regular files -> 10 kept, links not counted" "10" "$(count_files "$C/home/backup" 'hk-*')"
+[ "$(cat "$C/outside/file")" = precious ] && [ "$(cat "$C/outside/d/inner")" = precious ] && ok "  link targets survive" || bad "  link targets survive" "deleted"
+[ -L "$C/home/backup/aa-link-file" ] && [ -L "$C/home/backup/aa-link-dir" ] && ok "  links themselves untouched" || bad "  links themselves untouched" "removed"
+new_case; make_json 10; mkdir -p "$C/home" "$C/outside2"; mk_files "$C/outside2" 12; ln -s "$C/outside2" "$C/home/backup"
+run_watch
+assert_eq "backup/ itself a symlink: nothing outside deleted" "12" "$(count_files "$C/outside2" 'hk-*')"
+assert_eq "  rc 0" "0" "$RC"
+
+echo "== state/ corrupt-file retention =="
+new_case; make_json 10; mkdir -p "$C/home/state"
+for i in $(seq 1 12); do echo '{}' > "$C/home/state/state.json.corrupt-$(printf 179000%04d "$i")"; touch -t "$(printf '20260101%02d00' "$i")" "$C/home/state/state.json.corrupt-$(printf 179000%04d "$i")"; done
+echo '{}' > "$C/home/state/rpc-cache.json"; echo keep > "$C/home/state/other.keep"; echo keep > "$C/home/state/state.json.old"
+touch -t 200001010000 "$C/home/state/other.keep" "$C/home/state/state.json.old" "$C/home/state/rpc-cache.json"
+run_watch
+assert_eq "12 corrupt -> newest 10 kept" "10" "$(count_files "$C/home/state" 'state.json.corrupt-*')"
+absent "  oldest corrupt gone" "$C/home/state/state.json.corrupt-1790000001"
+[ -e "$C/home/state/state.json.corrupt-1790000012" ] && ok "  newest corrupt kept" || bad "  newest corrupt kept" "gone"
+[ -e "$C/home/state/state.json" ] && [ -e "$C/home/state/lock" ] && [ -e "$C/home/state/rpc-cache.json" ] && ok "  state.json / lock / rpc-cache.json untouched" || bad "  state files" "missing"
+[ -e "$C/home/state/other.keep" ] && [ -e "$C/home/state/state.json.old" ] && ok "  other state/ files untouched" || bad "  other state/ files" "missing"
+new_case; make_json 10; mkdir -p "$C/home/state"; for i in $(seq 1 12); do echo '{}' > "$C/home/state/state.json.corrupt-$i"; touch -t "$(printf '20260101%02d00' "$i")" "$C/home/state/state.json.corrupt-$i"; done
+HK_ENV=(WATCH_KEEP_CORRUPT=3); run_watch
+assert_eq "override WATCH_KEEP_CORRUPT=3 honoured" "3" "$(count_files "$C/home/state" 'state.json.corrupt-*')"
+
+echo "== invalid overrides fall back to defaults =="
+for badv in abc 0 -5 1e3 "" " 7" 99999999999999999999; do
+  new_case; make_json 10; mkdir -p "$C/home/log" "$C/home/backup"; for i in $(seq 1 300); do echo "old line $i"; done > "$C/home/log/watch.log"; mk_files "$C/home/backup" 12
+  HK_ENV=("WATCH_LOG_MAX_BYTES=$badv" "WATCH_KEEP_BACKUPS=$badv"); run_watch
+  assert_eq "override '$badv': rc 0" "0" "$RC"
+  assert_eq "  log cap default (not trimmed)" "301" "$(wc -l < "$C/home/log/watch.log" | tr -d ' ')"
+  assert_eq "  keep default 10" "10" "$(count_files "$C/home/backup" 'hk-*')"
+done
+
+echo "== housekeeping failure never changes alerting or exit code =="
+hk_scenario() { # label extra-setup-fn -> prints "rc pushes status"
+  new_case; make_json 10; P2P_PORT="$CLOSED_PORT"; write_config; mkdir -p "$C/home/backup"; mk_files "$C/home/backup" 12
+  "$1"
+  run_watch; run_watch
+  echo "$RC $(pushes) $(st p2p status)"
+}
+hk_none() { :; }
+hk_break_find() { mkdir -p "$C/fbin"; printf '#!/bin/sh\nexit 1\n' > "$C/fbin/find"; chmod +x "$C/fbin/find"; EXTRA_PATH="$C/fbin"; }
+CTRL="$(hk_scenario hk_none)"
+BROKE="$(hk_scenario hk_break_find)"
+assert_eq "control: p2p alert pushed, rc 0" "0 1 alerting" "$CTRL"
+assert_eq "housekeeping failing (find broken): identical rc/pushes/status" "$CTRL" "$BROKE"
+new_case; make_json 10; P2P_PORT="$CLOSED_PORT"; write_config; hk_break_find; run_watch; run_watch
+assert_eq "  exactly one note per failing run (2 runs -> 2)" "2" "$(grep -c 'note: housekeeping incomplete' "$C/home/log/watch.log")"
+assert_not_contains "  note names no host/path" "$C" "$(grep 'housekeeping incomplete' "$C/home/log/watch.log")"
+if [ "$(id -u)" != 0 ]; then
+  new_case; make_json 10; mkdir -p "$C/home/backup"; mk_files "$C/home/backup" 12; chmod 000 "$C/home/backup"
+  run_watch; chmod 700 "$C/home/backup"
+  assert_eq "unreadable backup dir: rc 0" "0" "$RC"
+  assert_contains "  note logged" "housekeeping incomplete" "$(cat "$C/home/log/watch.log")"
+  assert_eq "  backups untouched" "12" "$(count_files "$C/home/backup" 'hk-*')"
+else
+  echo "  SKIP  unreadable backup dir (running as root; covered by the find-stub case)"
+fi
 
 echo
 echo "RESULT: $PASS passed, $FAIL failed"
