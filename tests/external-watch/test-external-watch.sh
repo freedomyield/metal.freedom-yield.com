@@ -61,6 +61,12 @@ if [ "\${STUB_TIMEOUT_FAIL_FIRST:-0}" = 1 ]; then
 fi
 exec "$REAL_TIMEOUT" "\$@"
 STUB
+# No real flock (e.g. macOS dev box): a no-op stub lets every non-lock case run;
+# only the real lock-contention case needs the real thing and SKIPs loudly.
+HAVE_REAL_FLOCK=0
+if command -v flock >/dev/null 2>&1; then HAVE_REAL_FLOCK=1; else
+  printf '#!/bin/sh\nexit 0\n' > "$BIN/flock"
+fi
 chmod +x "$BIN"/*
 
 # --- loopback listener / closed port -----------------------------------------
@@ -231,14 +237,28 @@ assert_eq "cache expired at 900 s (2 curl calls)" "2" "$(curl_calls)"
 echo "== 2-consecutive rule =="
 new_case; make_json 10; RPC_BODY="$BODY_DISCONNECTED"
 run_watch; assert_eq "run 1: no push" "0" "$(pushes)"
-run_watch "$((NOW + 300))"; assert_eq "run 2: exactly one push" "1" "$(pushes)"
+run_watch "$((NOW + 900))"; assert_eq "run 2 (new observation): exactly one push" "1" "$(pushes)"
 assert_contains "  urgent + chain title" "urgent" "$(cat "$C/notify.log")"
 assert_contains "  chain title text" "外部見張り: ネットワーク上で未接続 (connected=false)" "$(cat "$C/notify.log")"
 assert_eq "  status alerting" "alerting" "$(st chain status)"
-run_watch "$((NOW + 600))"; assert_eq "run 3: no second push" "1" "$(pushes)"
-assert_eq "  fails keeps counting" "3" "$(st chain fails)"
+run_watch "$((NOW + 1200))"; assert_eq "run 3 (cached): no second push" "1" "$(pushes)"
+assert_eq "  cached sample not counted again" "2" "$(st chain fails)"
 assert_eq "  state file mode 600" "600" "$( (stat -c %a "$C/home/state/state.json" 2>/dev/null || stat -f %Lp "$C/home/state/state.json"))"
 assert_eq "  no temp leftovers in state dir" "0" "$(count_files "$C/home/state" 'state.??????')"
+
+echo "== cached observation counts once =="
+new_case; make_json 10; RPC_BODY="$BODY_DISCONNECTED"
+run_watch; run_watch "$((NOW + 300))"; run_watch "$((NOW + 600))"
+assert_eq "one cached false sample over 3 runs: no push" "0" "$(pushes)"
+assert_eq "  counted once" "1" "$(st chain fails)"
+assert_contains "  log marks it cached" "chain=FAIL(cached)" "$(last_log)"
+run_watch "$((NOW + 900))"
+assert_eq "second distinct false observation: push" "1" "$(pushes)"
+new_case; make_json 10; RPC_BODY="$BODY_DISCONNECTED"
+run_watch; run_watch "$((NOW + 900))"; RPC_BODY="$BODY_CONNECTED"; run_watch "$((NOW + 1000))"
+assert_eq "cached FAIL then no recovery from stale cache" "alerting" "$(st chain status)"
+run_watch "$((NOW + 1800))"
+assert_eq "new PASS observation recovers" "ok" "$(st chain status)"
 
 new_case; P2P_PORT="$CLOSED_PORT"; write_config; make_json 10
 run_watch; run_watch "$((NOW + 300))"
@@ -249,7 +269,7 @@ assert_contains "fresh push is high with its title" "high	外部見張り: valid
 
 echo "== recovery =="
 new_case; RPC_BODY="$BODY_DISCONNECTED"
-make_json 10; run_watch; make_json 10; run_watch "$((NOW + 300))"
+make_json 10; run_watch; make_json 10; run_watch "$((NOW + 900))"
 RPC_BODY="$BODY_CONNECTED"
 make_json 10; run_watch "$((NOW + 1800))"
 assert_eq "recovery push sent (2 pushes total)" "2" "$(pushes)"
@@ -261,7 +281,7 @@ assert_eq "  state reset" "ok|0" "$(st chain status)|$(st chain fails)"
 make_json 10; run_watch "$((NOW + 2100))"
 assert_eq "  no repeat recovery" "2" "$(pushes)"
 new_case; RPC_BODY="$BODY_DISCONNECTED"
-make_json 10; run_watch; make_json 10; run_watch "$((NOW + 300))"
+make_json 10; run_watch; make_json 10; run_watch "$((NOW + 900))"
 RPC_BODY="$BODY_CONNECTED"; make_json 10; run_watch "$((NOW + 7500))"
 assert_contains "  duration 2時間5分" "2時間5分" "$(tail -n 1 "$C/notify.log")"
 assert_contains "  since (UTC ISO)" "$(jq -nr --argjson t "$NOW" '$t|todate')" "$(tail -n 1 "$C/notify.log")"
@@ -274,29 +294,32 @@ assert_eq "UNKNOWN between fails leaves counter (still 1)" "1" "$(st chain fails
 # ============================ 6. push failure ============================
 echo "== push failure =="
 new_case; make_json 10; RPC_BODY="$BODY_DISCONNECTED"; NOTIFY_RC=3
-run_watch; run_watch "$((NOW + 300))"
+run_watch; run_watch "$((NOW + 900))"
 assert_eq "permanent failure exits 6" "6" "$RC"
 assert_eq "  state not advanced (still ok)" "ok" "$(st chain status)"
 assert_eq "  4xx not retried (1 attempt)" "1" "$(pushes)"
-NOTIFY_RC=0; make_json 10; run_watch "$((NOW + 600))"
-assert_eq "  next run retries the push and succeeds" "0" "$RC"
+NOTIFY_RC=0; make_json 10; run_watch "$((NOW + 1200))"
+assert_eq "  next run (cached sample) retries the push and succeeds" "0" "$RC"
 assert_eq "  now alerting" "alerting" "$(st chain status)"
 new_case; make_json 10; RPC_BODY="$BODY_DISCONNECTED"; NOTIFY_RC=2
-run_watch; run_watch "$((NOW + 300))"
+run_watch; run_watch "$((NOW + 900))"
 assert_eq "transport failure retried once (2 attempts)" "2" "$(pushes)"
 assert_contains "  retry waited 5 s" "5" "$(cat "$C/sleep.log")"
 assert_eq "  exit 6" "6" "$RC"
 
 # ============================ 7. DRY ============================
 echo "== side-effect gate =="
-new_case; LIVE=0; make_json 10; RPC_BODY="$BODY_DISCONNECTED"
-mkdir -p "$C/home/state"
-echo '{"fresh":{"status":"ok","fails":0,"first_fail_at":null},"p2p":{"status":"ok","fails":0,"first_fail_at":null},"chain":{"status":"ok","fails":1,"first_fail_at":1}}' > "$C/home/state/state.json"
-cp "$C/home/state/state.json" "$C/state.before"
-run_watch
-assert_contains "DRY line printed" "DRY: would notify urgent 外部見張り: ネットワーク上で未接続" "$ERR"
+new_case; LIVE=0; make_json 901
+run_watch; assert_eq "DRY run 1: no line yet" "" "$(printf '%s' "$ERR" | grep DRY)"
+run_watch "$((NOW + 300))"
+assert_contains "DRY run 2 (unseeded) reaches the alert path" "DRY: would notify high 外部見張り: validator.json の更新が止まっている" "$ERR"
 assert_eq "  notifier never called" "0" "$(pushes)"
-assert_eq "  state file untouched in DRY" "$(cat "$C/state.before")" "$(cat "$C/home/state/state.json")"
+assert_eq "  fails persisted, status never alerting" "2|ok" "$(st fresh fails)|$(st fresh status)"
+new_case; LIVE=0; make_json 10; mkdir -p "$C/home/state"
+echo '{"fresh":{"status":"alerting","fails":3,"first_fail_at":1},"p2p":{"status":"ok","fails":0,"first_fail_at":null},"chain":{"status":"ok","fails":0,"first_fail_at":null}}' > "$C/home/state/state.json"
+run_watch
+assert_contains "DRY pass on alerting prints would-recover" "DRY: would notify default 外部見張り: 復旧 (fresh)" "$ERR"
+assert_eq "  DRY pass does not clear alerting" "alerting|3" "$(st fresh status)|$(st fresh fails)"
 
 # ============================ 8. no host leak ============================
 echo "== no host/topic leak =="
@@ -316,21 +339,35 @@ assert_not_contains "stderr has no host" "127.0.0.1" "$ERR"
 
 # ============================ 9. lock ============================
 echo "== lock =="
-new_case; make_json 10; mkdir -p "$C/home/state"
-if command -v flock >/dev/null 2>&1; then
+if [ "$HAVE_REAL_FLOCK" = 1 ]; then
+  new_case; make_json 10; mkdir -p "$C/home/state"
   python3 -c 'import fcntl,time,sys;f=open(sys.argv[1],"a");fcntl.flock(f,fcntl.LOCK_EX);time.sleep(6)' "$C/home/state/lock" &
+  HOLDER=$!; /bin/sleep 1
+  run_watch
+  assert_eq "lock held: exit 0" "0" "$RC"
+  absent "  silent: no run happened" "$C/home/log/watch.log"
+  kill "$HOLDER" 2>/dev/null; wait "$HOLDER" 2>/dev/null
+  run_watch
+  assert_eq "after release the run proceeds" "1" "$(grep -c . "$C/home/log/watch.log")"
 else
-  mkdir "$C/home/state/lock.d"
-  python3 -c 'import time;time.sleep(6)' &
+  echo "  SKIP  lock contention (no real flock on this host; verified on Linux CI)"
 fi
-HOLDER=$!; /bin/sleep 1
-run_watch
-assert_eq "lock held: exit 0" "0" "$RC"
-absent "  silent: no run happened" "$C/home/log/watch.log"
-kill "$HOLDER" 2>/dev/null; wait "$HOLDER" 2>/dev/null
-rmdir "$C/home/state/lock.d" 2>/dev/null
-run_watch
-assert_eq "after release the run proceeds" "1" "$(grep -c . "$C/home/log/watch.log")"
+
+# ============================ 9b. preflight ============================
+echo "== dependency preflight =="
+for missing in jq curl timeout flock; do
+  new_case; make_json 10
+  PF="$C/pfbin"; mkdir -p "$PF"
+  for t in dirname stat id jq curl timeout flock; do
+    [ "$t" = "$missing" ] && continue
+    src="$(PATH="$BIN:$PATH" command -v "$t")"; ln -s "$src" "$PF/$t"
+  done
+  ERR="$(env PATH="$PF" WATCH_LIVE=1 WATCH_HOME="$C/home" WATCH_CONFIG="$C/etc/watch.env" WATCH_NOTIFY="$BIN/notify" \
+    STUB_NOTIFY_LOG="$C/notify.log" "$(command -v bash)" "$SCRIPT" 2>&1 >/dev/null)"; RC=$?
+  assert_eq "missing $missing: exit 1" "1" "$RC"
+  assert_eq "  names only the tool" "external-watch: missing dependency: $missing" "$ERR"
+  absent "  nothing created before the check" "$C/home"
+done
 
 # ============================ 10. state / log housekeeping ============================
 echo "== corrupt state / log trim =="
