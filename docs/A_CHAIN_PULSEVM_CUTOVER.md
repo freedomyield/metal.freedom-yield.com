@@ -60,9 +60,15 @@ library therefore holds `pulsevm-mainnet.gate1_evidence_profile = null`, and
 `bin/safe-broadcast` refuses a PulseVM mainnet broadcast with **exit 3 ("OPEN
 operator decision")**. It also refuses an evidence testnet of a different
 execution family (`push_response` / `lib_equals_head` must match). The operator
-decides which network is the corresponding testnet; the answer goes into the
-profile file by a reviewed commit, and a testnet profile for it must exist with
-real values. Until then: no PulseVM mainnet anchor.
+decides which network is the corresponding testnet. On the day: (1) record the
+decision as a **§9 clarification in `docs/CONSTITUTION.md`, approved by the
+operator** (the v0.5 §5 precedent) — it changes how a PRIME DIRECTIVE clause is
+read, so a config edit alone is not enough; (2) put the answer into the profile
+file by a reviewed commit that **cites that clarification**, with a testnet
+profile for it holding real values; (3) update the drift test
+`tests/a-chain-profile/test-gate1-drift.sh` in the **same commit** (it pins the
+committed `pulsevm-*` `gate1_evidence_profile` to `null` and fails otherwise).
+Until then: no PulseVM mainnet anchor.
 
 **(b) chain_id policy.** The upstream code merged on 2026-09-14 gives the migrated
 chain a **new** chain_id (the MetalGo blockchain ID); the community path keeps the

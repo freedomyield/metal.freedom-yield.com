@@ -1117,6 +1117,12 @@ jq -r '.[]? | select((.draft // false) | not) | .tag_name // empty' "$TMP/s6.jso
 	| sort -u > "$TMP/cur_metalgo_tags" || true
 
 # ---- S7: Metallicus-owned pages (T8) — soft, never fails the run ----------
+# prev_official_field <url> <field> — recorded value, or nothing when the
+# last run did not record this URL (no history for it).
+prev_official_field() {
+	jq -r --arg u "$1" --arg f "$2" 'select(.url == $u) | .[$f] | tostring' "$TMP/prev_official.jsonl" 2>/dev/null | head -1
+}
+
 : > "$TMP/cur_official.jsonl"
 OFFICIAL_UNREAD_LIST=""
 for official_url in $OFFICIAL_URLS; do
@@ -1136,18 +1142,24 @@ for official_url in $OFFICIAL_URLS; do
 	else
 		OFFICIAL_UNREAD_LIST="${OFFICIAL_UNREAD_LIST}${OFFICIAL_UNREAD_LIST:+ }${official_url}(HTTP=${official_code})"
 		log "WARN S7 ${official_url} not readable (HTTP=${official_code}) — recorded as unread; T8 is not evaluated for it this run"
-		jq -nc --arg u "$official_url" '{url: $u, read: false, mentions: false, chain_ids: []}' \
+		# An unreadable page is UNKNOWN, never "no mention" (Constitution §6, no
+		# false urgency): carry the last recorded mentions/chain_ids forward so a
+		# read->unread->read sequence compares against the last real reading; with
+		# no prior record the state is null (nothing known yet).
+		unread_m="null"; unread_ids='[]'
+		if [ "$PREV_OFFICIAL_KNOWN" -eq 1 ]; then
+			pm="$(prev_official_field "$official_url" mentions)"
+			case "$pm" in true|false|null) unread_m="$pm" ;; esac
+			pi="$(jq -c --arg u "$official_url" 'select(.url == $u) | .chain_ids // []' "$TMP/prev_official.jsonl" 2>/dev/null | head -1)"
+			[ -n "$pi" ] && unread_ids="$pi"
+		fi
+		jq -nc --arg u "$official_url" --argjson m "$unread_m" --argjson ids "$unread_ids" \
+			'{url: $u, read: false, mentions: $m, chain_ids: $ids}' \
 			>> "$TMP/cur_official.jsonl" 2>/dev/null \
 			|| fail_and_exit 5 "could not compose the S7 record for ${official_url}"
 	fi
 done
 if [ -n "$OFFICIAL_UNREAD_LIST" ]; then CUR_OFFICIAL_UNREAD=$((PREV_OFFICIAL_UNREAD + 1)); else CUR_OFFICIAL_UNREAD=0; fi
-
-# prev_official_field <url> <field> — recorded value, or nothing when the
-# last run did not record this URL (no history for it).
-prev_official_field() {
-	jq -r --arg u "$1" --arg f "$2" 'select(.url == $u) | .[$f] | tostring' "$TMP/prev_official.jsonl" 2>/dev/null | head -1
-}
 
 # ---- evaluate triggers ---------------------------------------------------
 # PRIORITY SPLIT. Not every trigger deserves the same channel. Three of them
@@ -1332,17 +1344,21 @@ while IFS= read -r official_rec; do
 	[ "$o_read" = "true" ] && [ "$o_mentions" = "true" ] || continue
 	p_mentions=""
 	[ "$PREV_OFFICIAL_KNOWN" -eq 1 ] && p_mentions="$(prev_official_field "$o_url" mentions)"
-	if [ "$p_mentions" != "true" ]; then
+	# Fire only on a positive observation: the last recorded reading was a
+	# successful "no mention" (false). No record / unknown (null) = baseline,
+	# recorded silently by the state write below.
+	if [ "$p_mentions" = "false" ]; then
 		T8_MENTION_URLS="${T8_MENTION_URLS}${T8_MENTION_URLS:+ }${o_url}"
 		continue
 	fi
+	[ "$p_mentions" = "true" ] || continue
 	o_new_ids="$(comm -13 \
 		<(jq -r --arg u "$o_url" 'select(.url == $u) | .chain_ids[]' "$TMP/prev_official.jsonl" 2>/dev/null | sort -u) \
 		<(printf '%s' "$official_rec" | jq -r '.chain_ids[]' | sort -u) | head -3 | tr '\n' ' ')"
 	[ -n "${o_new_ids// /}" ] && T8_NEW_IDS="${T8_NEW_IDS}${T8_NEW_IDS:+; }${o_url}: ${o_new_ids%% }"
 done < "$TMP/cur_official.jsonl"
 if [ -n "$T8_MENTION_URLS" ]; then
-	add_fire "T8" "OBSERVED: Metallicus-owned page(s) now match '${OFFICIAL_MENTION_RE}': ${T8_MENTION_URLS} (no match, or no readable record, on the previous run). NOT ESTABLISHED: that a PulseVM mainnet chain_id or a cutover plan has been published — this run matched a word, it did not read the page. OBLIGATION: read the page; if it states a mainnet chain_id, endpoints or a cutover date, follow docs/A_CHAIN_PULSEVM_CUTOVER.md (profile values go in by a reviewed commit, never by an env override)"
+	add_fire "T8" "OBSERVED: Metallicus-owned page(s) now match '${OFFICIAL_MENTION_RE}': ${T8_MENTION_URLS} (the last successful reading of each showed no match). NOT ESTABLISHED: that a PulseVM mainnet chain_id or a cutover plan has been published — this run matched a word, it did not read the page. OBLIGATION: read the page; if it states a mainnet chain_id, endpoints or a cutover date, follow docs/A_CHAIN_PULSEVM_CUTOVER.md (profile values go in by a reviewed commit, never by an env override)"
 	FIRED_HIGH=1
 fi
 if [ -n "$T8_NEW_IDS" ]; then

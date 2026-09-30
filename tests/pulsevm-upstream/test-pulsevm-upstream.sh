@@ -1577,6 +1577,43 @@ OUT="$(run_checker 2>&1)"; RC=$?
 	|| bad "T8: expected the chain-id sub-condition, got $RC ($(alerts))"
 teardown
 
+# ---- case 21a (T8): no false urgency — unknown is never a positive ------------
+# (1) first run after deploy, page already mentions PulseVM -> baseline, silent.
+setup
+seed_state false false "$CHAIN_A" 3406 "v0.6.2"
+write_official "$OFFB" mention
+OUT="$(run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 0 ] && [ "$(n_alerts)" -eq 0 ] \
+	&& ok "T8 no-false-urgency: first run with an already-mentioning page records a baseline, silent" \
+	|| bad "T8 no-false-urgency: first-run mention paged, got $RC ($(alerts))"
+# (2) read(mention) -> unread -> read(mention): the outage must not re-page.
+: > "$NOTIFY_LOG"
+OUT="$(OFFB_CODE=503 run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 0 ] && [ "$(n_alerts)" -eq 0 ] \
+	&& ok "T8 no-false-urgency: a single unreadable run after a mention is silent" \
+	|| bad "T8 no-false-urgency: unread run paged, got $RC ($(alerts))"
+jq -e '.observations.official_pages | map(select(.url|endswith("/b"))) | .[0] | .read == false and .mentions == true' "$STATE" >/dev/null 2>&1 \
+	&& ok "T8 no-false-urgency: the unread record carries the last real reading forward" \
+	|| bad "T8 no-false-urgency: unread record lost the prior mention ($(jq -c '.observations.official_pages' "$STATE"))"
+: > "$NOTIFY_LOG"
+OUT="$(run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 0 ] && [ "$(n_alerts)" -eq 0 ] \
+	&& ok "T8 no-false-urgency: read -> unread -> read of the same mention never re-pages" \
+	|| bad "T8 no-false-urgency: recovery run re-paged, got $RC ($(alerts))"
+teardown
+# (3) the very first run cannot read the page; the next readable run is a
+# baseline (nothing was ever positively observed as absent) -> silent.
+setup
+seed_state false false "$CHAIN_A" 3406 "v0.6.2"
+write_official "$OFFB" mention
+OUT="$(OFFB_CODE=503 run_checker 2>&1)"; RC=$?
+: > "$NOTIFY_LOG"
+OUT="$(run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 0 ] && [ "$(n_alerts)" -eq 0 ] \
+	&& ok "T8 no-false-urgency: unread first run then a mentioning read is a baseline, silent" \
+	|| bad "T8 no-false-urgency: unknown->mention paged, got $RC ($(alerts))"
+teardown
+
 # ---- case 21b (T8): an unreadable page is soft, and pages once per outage -----
 setup
 seed_state false false "$CHAIN_A" 3406 "v0.6.2"
