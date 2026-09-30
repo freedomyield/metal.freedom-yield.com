@@ -27,6 +27,10 @@
 #   are in when scripts/install-rehearsal-preflight.sh check 10 is green — so
 #   the new gate-3 host check passes and must not change any outcome.
 #
+#   Exit 7 (audit-log write failure) is NOT reproduced: forcing it needs the
+#   fallback log — which lives in the invoking user's LOGIN home — to be
+#   unwritable, i.e. touching the operator's real audit log. Unchanged code.
+#
 #   Deliberately NOT here (they are intended, stricter changes, pinned in
 #   test-safe-broadcast-profiles.sh): an FYD_*_CHAIN_ID override that
 #   DIFFERS from the profile (old: gate 3 compared against the override;
@@ -71,6 +75,8 @@ sc() {
 	# exactly: header lines are replaced by one marker line.
 	local f
 	for f in out err; do
+		# the wrapper's own path ($0) appears in some messages
+		sed "s#${W}#<WRAPPER>#g" "$T/$f" > "$T/$f.w" && mv "$T/$f.w" "$T/$f"
 		if grep -qxF -f "$HELP" "$T/$f"; then
 			{ grep -vxF -f "$HELP" "$T/$f" | sed '/^$/d'; echo "[usage text printed]"; } > "$T/$f.f"
 			mv "$T/$f.f" "$T/$f"
@@ -97,6 +103,17 @@ sc "arg: unknown flag"           ''  '' -- --tx="$T/tx-c3.json" --chain=testnet-
 sc "arg: --endpoint= refused"    ''  '' -- --tx="$T/tx-c3.json" --chain=testnet-a --endpoint=https://example.invalid
 sc "arg: -u refused"             ''  '' -- -u
 
+# ---- pre-gate environment checks ----
+sc "env: proton CLI missing"     '' '' "PATH=$SBH_PATH_NOPROTON" -- --tx="$T/tx-c3.json" --chain=testnet-a --non-interactive
+LOGIN_HOME_EQ="$(eval echo "~$(id -un)" 2>/dev/null || true)"
+if [ -n "$LOGIN_HOME_EQ" ] && [ -d "$LOGIN_HOME_EQ" ]; then
+	# The §3.5 guard refuses before gate 3 — i.e. before anything reads the
+	# login home's proton-cli config. Nothing under the login home is read.
+	sc "keystore guard: HOME = login home → exit 8" '' '' "HOME=$LOGIN_HOME_EQ" -- --tx="$T/tx-c3.json" --chain=testnet-a --non-interactive
+else
+	echo "FAIL login home not resolvable — the keystore-guard scenario cannot run here"; exit 1
+fi
+
 # ---- gate 2 ----
 sc "gate 2: token missing"       @none  '' -- --tx="$T/tx-c3.json" --chain=testnet-a --non-interactive
 sc "gate 2: token stale (tight)" @stale '' -- --tx="$T/tx-c3.json" --chain=testnet-a --non-interactive
@@ -111,6 +128,8 @@ sc "gate 1: cycle-2 vs cycle-4"  "$MAIN_TOKEN" '' -- --tx="$T/tx-c4.json" "${M[@
 sc "gate 1: no extractable actions" "$MAIN_TOKEN" '' -- --tx="$T/tx-c3.json" "${M[@]}" --testnet-tx-id="$SBH_NOACT" --dry-run-log="$T/dry-c3.json"
 sc "gate 1: non-object .data"    "$MAIN_TOKEN" '' -- --tx="$T/tx-hex.json" "${M[@]}" --testnet-tx-id="$SBH_R16" --dry-run-log="$T/dry-c3.json"
 sc "gate 1: updateauth vs transfer evidence" "$MAIN_TOKEN" '' -- --tx="$T/tx-upd.json" "${M[@]}" --testnet-tx-id="$SBH_UPD_DIFF" --dry-run-log="$T/dry-c3.json"
+sc "gate 1: v2-shaped answer (trx_id, no id) on the v1 endpoint → refuse" "$MAIN_TOKEN" '' -- --tx="$T/tx-c4.json" "${M[@]}" --testnet-tx-id="$SBH_V2SHAPE" --dry-run-log="$T/dry-c4.json"
+sc "gate 1: curl missing"        "$MAIN_TOKEN" '' "PATH=$SBH_PATH_NOCURL" -- --tx="$T/tx-c4.json" "${M[@]}" --testnet-tx-id="$SBH_CYCLE4" --dry-run-log="$T/dry-c4.json"
 sc "gate 1: XPR_TESTNET_RPC = the profile's history base" "$MAIN_TOKEN" '' XPR_TESTNET_RPC=https://test.proton.eosusa.io -- --tx="$T/tx-c3.json" "${M[@]}" --testnet-tx-id="$SBH_R16" --dry-run-log="$T/dry-c3.json"
 
 # ---- gate 4 ----

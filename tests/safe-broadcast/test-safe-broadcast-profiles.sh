@@ -141,10 +141,10 @@ echo "── FYD_*_CHAIN_ID: confirm-only ──"
 sbh_reset; sbh_token "$MT"
 sbh_run - '' "$W" FYD_MAINNET_CHAIN_ID=ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff -- "${MAIN_ARGS[@]}"
 check "O1 mainnet override ≠ profile → refused before any gate (exit 4), nothing contacted" 4 \
-	"err:a-chain-profile:" "err:refusing before any gate" "nocall:curl" "nocall:proton" noaudit
+	"err:a-chain-profile:" "err:refusing before any gate" "nocall:curl" "nocall:proton chain:set" noaudit
 sbh_reset; sbh_token ''
 sbh_run - '' "$W" FYD_TESTNET_CHAIN_ID=ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff -- "${TEST_ARGS[@]}"
-check "O2 testnet override ≠ profile → refused (exit 4), nothing contacted" 4 "err:a-chain-profile:" "nocall:proton"
+check "O2 testnet override ≠ profile → refused (exit 4), nothing contacted" 4 "err:a-chain-profile:" "nocall:proton chain:set"
 sbh_reset; sbh_token "$MT"
 sbh_run - '' "$W" FYD_MAINNET_CHAIN_ID=384DA888112027F0321850A169F737C33E53B388AAD48B5ADACE4BAB97F437E0 -- "${MAIN_ARGS[@]}"
 check "O3 upper-cased copy of the real id is still refused (exact match only)" 4 "err:a-chain-profile:"
@@ -152,16 +152,16 @@ check "O3 upper-cased copy of the real id is still refused (exact match only)" 4
 echo "── profile selection ──"
 sbh_reset; sbh_token "$MT"
 sbh_run - '' "$W" FYD_A_CHAIN_PROFILE_MAINNET=pulsevm-mainnet -- "${MAIN_ARGS[@]}"
-check "S1 committed pulsevm-mainnet (chain_id null) → refused, nothing contacted" 4 "err:is null" "nocall:curl" "nocall:proton"
+check "S1 committed pulsevm-mainnet (chain_id null) → refused, nothing contacted" 4 "err:is null" "nocall:curl" "nocall:proton chain:set"
 sbh_reset; sbh_token ''
 sbh_run - '' "$W" FYD_A_CHAIN_PROFILE_TESTNET=pulsevm-testnet -- "${TEST_ARGS[@]}"
-check "S2 committed pulsevm-testnet → refused" 4 "err:is null" "nocall:proton"
+check "S2 committed pulsevm-testnet → refused" 4 "err:is null" "nocall:proton chain:set"
 sbh_reset; sbh_token "$MT"
 sbh_run - '' "$W" FYD_A_CHAIN_PROFILE_MAINNET=no-such-profile -- "${MAIN_ARGS[@]}"
-check "S3 unknown profile → refused" 4 "err:a-chain-profile:" "nocall:proton"
+check "S3 unknown profile → refused" 4 "err:a-chain-profile:" "nocall:proton chain:set"
 sbh_reset; sbh_token "$MT"
 sbh_run - '' "$W" FYD_A_CHAIN_PROFILE_MAINNET=xpr-testnet -- "${MAIN_ARGS[@]}"
-check "S4 a TESTNET profile selected for mainnet → refused" 4 "err:a-chain-profile:" "nocall:proton"
+check "S4 a TESTNET profile selected for mainnet → refused" 4 "err:a-chain-profile:" "nocall:proton chain:set"
 sbh_reset; sbh_token "$MT"
 sbh_run - 'BROADCAST mainnet-a
 ' "$W" FYD_A_CHAIN_PROFILE_MAINNET=xpr-mainnet -- --tx="$T/tx-c4.json" --chain=mainnet-a --testnet-tx-id="$SBH_CYCLE4" --dry-run-log="$T/dry-c4.json"
@@ -174,7 +174,7 @@ check "S6 default selection prints no profile line (output unchanged)" 0 "noerr:
 echo "── gate 1: XPR_TESTNET_RPC must be a profile history base ──"
 sbh_reset; sbh_token "$MT"
 sbh_run - '' "$W" XPR_TESTNET_RPC=https://xpr-clone.example.net -- "${MAIN_ARGS[@]}"
-check "R1 XPR_TESTNET_RPC off the profile → gate 1 refuses, no lookup made" 3 "err:is not one of the testnet profile (xpr-testnet) history bases" "nocall:curl" "nocall:proton"
+check "R1 XPR_TESTNET_RPC off the profile → gate 1 refuses, no lookup made" 3 "err:is not one of the testnet profile (xpr-testnet) history bases" "nocall:curl" "nocall:proton chain:set"
 sbh_reset; sbh_token "$MT"
 sbh_run - '' "$W" XPR_TESTNET_RPC=https://test.proton.eosusa.io/ -- "${MAIN_ARGS[@]}"
 check "R2 trailing-slash variant is not an exact match → refuse" 3 "err:XPR_TESTNET_RPC="
@@ -190,8 +190,10 @@ act2='{"act":{"account":"eosio.token","name":"transfer","data":{"memo":"fya1c2-t
 printf '{"trx_id":"%s","executed":true,"actions":[%s]}\n' "$EV2" "$act4" > "$T/hist/v1/$EV2.json"
 printf '{"trx_id":"%s","executed":true,"actions":[%s]}\n' "$SBH_ZERO" "$act4" > "$T/hist/v1/$EVB.json"
 printf '{"id":"%s","trx_id":"%s","actions":[%s]}\n' "$EVC" "$SBH_ZERO" "$act4" > "$T/hist/v1/$EVC.json"
-printf '{"trx_id":"%s","executed":false,"actions":[%s]}\n' "$EVD" "$act4" > "$T/hist/v1/$EVD.json"
-printf '{"trx_id":"%s","executed":true,"actions":[%s]}\n' "$EVE" "$act2" > "$T/hist/v1/$EVE.json"
+printf '{"id":"%s","trx_id":"%s","executed":false,"actions":[%s]}\n' "$EVD" "$EVD" "$act4" > "$T/hist/v1/$EVD.json"
+printf '{"id":"%s","trx_id":"%s","executed":true,"actions":[%s]}\n' "$EVE" "$EVE" "$act2" > "$T/hist/v1/$EVE.json"
+EVF="$(printf '9a9a0007%.0s' 1 2 3 4 5 6 7 8)"
+printf '{"id":"%s","trx_id":"%s","executed":true,"actions":[%s]}\n' "$EVF" "$EVF" "$act4" > "$T/hist/v1/$EVF.json"
 EVV2ONLY="$(printf '9a9a0006%.0s' 1 2 3 4 5 6 7 8)"
 printf '{"trx_id":"%s","executed":true,"actions":[%s]}\n' "$EVV2ONLY" "$act4" > "$T/hist/v2/$EVV2ONLY.json"
 g1() { # <name> <rc> <evidence-id> <checks...>
@@ -200,7 +202,8 @@ g1() { # <name> <rc> <evidence-id> <checks...>
 	sbh_run - '' "$W" -- --tx="$T/tx-c4.json" --chain=mainnet-a --non-interactive --testnet-tx-id="$id" --dry-run-log="$T/dry-c4.json"
 	check "$n" "$r" "$@"
 }
-g1 "V1 Hyperion v2 shape (trx_id + actions[].act) accepted → passes" 0 "$EV2" "out:$SBH_TXID"
+g1 "V1 default profile: v2-shaped answer (trx_id, no id) is NOT resolved (base rule .id == id)" 3 "$EV2" "err:could not resolve --testnet-tx-id" "nocall:proton chain:set"
+g1 "V1b default profile: answer with id AND matching trx_id + actions[].act → passes" 0 "$EVF" "out:$SBH_TXID"
 g1 "V2 v2 shape naming ANOTHER tx → refuse" 3 "$EVB" "err:could not resolve --testnet-tx-id"
 g1 "V3 id matches but trx_id names another tx → refuse" 3 "$EVC" "err:could not resolve --testnet-tx-id"
 g1 "V4 executed:false → refuse" 3 "$EVD" "err:could not resolve --testnet-tx-id"
@@ -219,20 +222,20 @@ STUB
 chmod +x "$T/oldjq/jq"
 sbh_reset; sbh_token "$MT"
 sbh_run - '' "$W" "PATH=$T/oldjq:$PATH" -- "${MAIN_ARGS[@]}"
-check "M1 jq older than 1.6 (lib rc 6) → exit 2, nothing contacted" 2 "err:a-chain-profile" "nocall:proton" "nocall:curl"
+check "M1 jq older than 1.6 (lib rc 6) → exit 2, nothing contacted" 2 "err:a-chain-profile" "nocall:proton chain:set" "nocall:curl"
 BADTREE="$T/badtree"
 printf '{"schema_version":1,"profiles":{}}\n' > "$T/bad-profiles.json"
 sbh_tree "$BADTREE" "$W" "$T/bad-profiles.json"
 sbh_reset; sbh_token "$MT"
 sbh_run - '' "$BADTREE/bin/safe-broadcast" -- "${MAIN_ARGS[@]}"
-check "M2 invalid profile file (lib rc 2) → exit 4, nothing contacted" 4 "err:a-chain-profile" "nocall:proton" "nocall:curl"
+check "M2 invalid profile file (lib rc 2) → exit 4, nothing contacted" 4 "err:a-chain-profile" "nocall:proton chain:set" "nocall:curl"
 
 # ---------------------------------------------------------------------------
 echo "── PulseVM (fixture profiles: id-only push, LIB = head) ──"
 PVM_MAIN_CID="$(printf 'a1b2c3d4%.0s' 1 2 3 4 5 6 7 8)"
 PVM_TEST_CID="$(printf 'd4c3b2a1%.0s' 1 2 3 4 5 6 7 8)"
 jq --arg m "$PVM_MAIN_CID" --arg t "$PVM_TEST_CID" '
-	.profiles["pulsevm-mainnet"] += {chain_id: $m, node_hosts: ["pvm-node.example.net"],
+	.profiles["pulsevm-mainnet"] += {chain_id: $m, node_hosts: ["pvm-node.example.net"], gate1_evidence_profile: "pulsevm-testnet",
 		history_bases: ["https://pvm-hist-a.example.net", "https://pvm-hist-b.example.net"],
 		explorer_base: "https://pvm-explorer.example.net/tx", proton_network: "proton"}
 	| .profiles["pulsevm-testnet"] += {chain_id: $t, node_hosts: ["pvm-test-node.example.net"],
@@ -289,8 +292,8 @@ check "P6 no history base reachable → refused BEFORE the broadcast (exit 4)" 4
 pvm_reset; confirmed_fixture true "$act4"
 sbh_run - '' "$PW" FYD_A_CHAIN_PROFILE_MAINNET=pulsevm-mainnet STUB_PUSH_MODE=idonly "STUB_CHAIN_ID=$PVM_MAIN_CID" \
 	-- --tx="$T/tx-c4.json" --chain=mainnet-a --non-interactive --testnet-tx-id="$SBH_CYCLE4" --dry-run-log="$T/dry-c4.json"
-check "P7 XPR testnet evidence for a PulseVM mainnet → gate 1 refuses (open operator decision)" 3 \
-	"err:OPEN operator decision" "nocall:curl" "nocall:proton"
+check "P7 XPR testnet evidence for a PulseVM mainnet → gate 1 refuses (not the approved evidence profile)" 3 \
+	"err:is not the one mainnet profile pulsevm-mainnet approves (pulsevm-testnet)" "nocall:curl" "nocall:proton chain:set"
 
 sbh_reset; sbh_token "$MT"; confirmed_fixture true "$act4"
 sbh_run - '' "$PW" "${PVM_ENV[@]}" -- "${PVM_ARGS[@]}"
@@ -322,6 +325,68 @@ sbh_run - 'BROADCAST mainnet-a
 ' "$PW" "${PVM_ENV[@]}" -- --tx="$T/tx-c4.json" --chain=mainnet-a --testnet-tx-id="$PVM_EVID" --dry-run-log="$T/dry-c4.json"
 check "P14 the prompt names the PulseVM profile, chain_id and push shape" 0 \
 	"err:chain profile: pulsevm-mainnet (explicitly selected), chain_id=$PVM_MAIN_CID, push_response=id-only"
+
+# ---- fix round 1 ----
+echo "── gate 1: approved evidence profile (gate1_evidence_profile) ──"
+jq '.profiles["pulsevm-mainnet"].gate1_evidence_profile = null' "$T/pvm-profiles.json" > "$T/pvm-noevid.json"
+NT="$T/pvmtree-noevid"
+sbh_tree "$NT" "$W" "$T/pvm-noevid.json"
+pvm_reset; confirmed_fixture true "$act4"
+sbh_run - '' "$NT/bin/safe-broadcast" "${PVM_ENV[@]}" -- "${PVM_ARGS[@]}"
+check "P22 PulseVM pair with a committed chain_id but NO approved evidence profile → gate 1 refuses" 3 \
+	"err:names no approved gate-1 evidence testnet" "err:OPEN operator decision" "nocall:curl" "nocall:proton chain:set" noaudit
+
+echo "── gate 1 on an id-only testnet profile: trx_id-only answer on the v1 endpoint ──"
+PVM_EVID_V1="$(printf '7e570002%.0s' 1 2 3 4 5 6 7 8)"
+printf '{"trx_id":"%s","executed":true,"actions":[%s]}\n' "$PVM_EVID_V1" "$act4" > "$T/hist/v1/$PVM_EVID_V1.json"
+pvm_reset; confirmed_fixture true "$act4"
+sbh_run - '' "$PW" "${PVM_ENV[@]}" -- --tx="$T/tx-c4.json" --chain=mainnet-a --non-interactive --testnet-tx-id="$PVM_EVID_V1" --dry-run-log="$T/dry-c4.json"
+check "P15 id-only testnet profile accepts a trx_id-only answer (no v2 GET needed)" 0 "out:$SBH_TXID" \
+	"nocall:v2/history/get_transaction?id=$PVM_EVID_V1"
+
+echo "── id-only: history must be HEALTHY before signing ──"
+hb() { # <host> <json> — health body for one history host
+	printf '%s\n' "$2" > "$T/health/$1.json"
+}
+health_case() { # <name> <rc> <body-for-both-hosts> <checks...>
+	local n="$1" r="$2" b="$3"; shift 3
+	pvm_reset; confirmed_fixture true "$act4"; rm -f "$T/health/"*
+	hb pvm-hist-a.example.net "$b"; hb pvm-hist-b.example.net "$b"
+	sbh_run - '' "$PW" "${PVM_ENV[@]}" -- "${PVM_ARGS[@]}"
+	check "$n" "$r" "$@"
+}
+ALPINE='{"health":[{"service":"RabbitMq","status":"OK"},{"service":"PulseVM-RPC","status":"Error","service_data":{"head_block_num":0}},{"service":"Elasticsearch","status":"OK","service_data":{"last_indexed_block":64}}]}'
+health_case "P16 Alpine-like health (RPC Error, head 0, indexed 64) → refuse before signing" 4 "$ALPINE" \
+	"err:is HEALTHY" "err:PulseVM-RPC=Error" "nocall:proton transaction:push" noaudit
+health_case "P16b all OK but head 0 / indexed 0 (chain never produced a block) → refuse" 4 \
+	'{"health":[{"service":"NodeosRPC","status":"OK","service_data":{"head_block_num":0}},{"service":"Elasticsearch","status":"OK","service_data":{"last_indexed_block":0}}]}' \
+	"err:head=0 indexed=0"
+health_case "P17 all OK but indexer 31 blocks behind → refuse" 4 \
+	'{"health":[{"service":"NodeosRPC","status":"OK","service_data":{"head_block_num":1031}},{"service":"Elasticsearch","status":"OK","service_data":{"last_indexed_block":1000}}]}' \
+	"err:head=1031 indexed=1000" "nocall:proton transaction:push"
+health_case "P18 all OK, indexer exactly 30 behind → healthy, broadcast confirmed" 0 \
+	'{"health":[{"service":"NodeosRPC","status":"OK","service_data":{"head_block_num":1030}},{"service":"Elasticsearch","status":"OK","service_data":{"last_indexed_block":1000}}]}' \
+	"out:$SBH_TXID"
+health_case "P19 all OK but no head/indexed numbers (unknown shape) → refuse" 4 \
+	'{"health":[{"service":"Elasticsearch","status":"OK"}]}' "err:head=null" "nocall:proton transaction:push"
+health_case "P20 one service 'Warning' → refuse" 4 \
+	'{"health":[{"service":"NodeosRPC","status":"Warning","service_data":{"head_block_num":1000}},{"service":"Elasticsearch","status":"OK","service_data":{"last_indexed_block":1000}}]}' \
+	"nocall:proton transaction:push"
+health_case "P21 empty health list → refuse" 4 '{"health":[]}' "nocall:proton transaction:push"
+health_case "P21b non-JSON health body → refuse" 4 'OK' "err:unparseable health body" "nocall:proton transaction:push"
+pvm_reset; confirmed_fixture true "$act4"; rm -f "$T/health/"*
+hb pvm-hist-a.example.net "$ALPINE"
+sbh_run - '' "$PW" "${PVM_ENV[@]}" -- "${PVM_ARGS[@]}"
+check "P21c first base unhealthy, second healthy → proceeds (any healthy base suffices)" 0 "out:$SBH_TXID" \
+	"call:curl GET https://pvm-hist-b.example.net/v2/health"
+rm -f "$T/health/"*
+
+echo "── gate 3 host check re-run immediately before the push (TOCTOU) ──"
+sbh_reset; sbh_token "$MT"
+sbh_run - '' "$W" STUB_CHAININFO_REPOINT=1 -- "${MAIN_ARGS[@]}"
+check "T1 config re-pointed to a clone after gate 3 → nothing pushed, exit 3, audit post=refused" 3 \
+	"err:the push endpoint changed after gate 3 passed" "err:xpr-clone.example.net" \
+	"nocall:proton transaction:push" "audit:phase=pre" "audit:rc=refused-gate3-recheck"
 
 echo "---"
 echo "test-safe-broadcast-profiles.sh: PASS=$PASS FAIL=$FAIL"

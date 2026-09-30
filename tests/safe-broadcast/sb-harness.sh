@@ -37,6 +37,11 @@
 #   STUB_CHAINSET_NOWRITE=1   chain:set does not update currentChain
 #   STUB_PUSH_MODE=processed|idfield|idonly|fail|noid
 #   STUB_HEALTH_FAIL=1        <base>/v2/health fails
+#   $SBH_T/health/<host>.json  body <base>/v2/health answers for that host
+#                             (default: healthy — all OK, head 1000, indexed 998)
+#   STUB_CHAININFO_REPOINT=1  after answering chain:info, add an `endpoints`
+#                             override to a clone host (simulates the config
+#                             being edited while the prompt is on screen)
 #   History fixtures: $SBH_T/hist/v1/<txid>.json (POST /v1/history/
 #   get_transaction), $SBH_T/hist/v2/<txid>.json (GET /v2/history/
 #   get_transaction?id=), $SBH_T/hist/delay/<txid> = number of lookups that
@@ -53,6 +58,7 @@ SBH_UPD_SAME="$(printf 'cccc5555%.0s' 1 2 3 4 5 6 7 8)"
 SBH_UPD_DIFF="$(printf 'dddd6666%.0s' 1 2 3 4 5 6 7 8)"
 SBH_NOACT="$(printf 'eeee7777%.0s' 1 2 3 4 5 6 7 8)"
 SBH_ZERO="0000000000000000000000000000000000000000000000000000000000000000"
+SBH_V2SHAPE="$(printf 'ffff8888%.0s' 1 2 3 4 5 6 7 8)"
 
 # The proton-cli config path, exactly as conf/env-paths derive it (the same
 # rule bin/safe-broadcast uses).
@@ -66,7 +72,7 @@ sbh_cfg_path() {
 sbh_init() {
 	SBH_T="$(mktemp -d -t sbh.XXXXXX)"
 	SBH_T="$(cd "$SBH_T" && pwd -P)"
-	mkdir -p "$SBH_T/stub" "$SBH_T/home" "$SBH_T/hist/v1" "$SBH_T/hist/v2" "$SBH_T/hist/delay"
+	mkdir -p "$SBH_T/stub" "$SBH_T/home" "$SBH_T/hist/v1" "$SBH_T/hist/v2" "$SBH_T/hist/delay" "$SBH_T/health"
 	export SBH_T
 	export SBH_CALLS="$SBH_T/calls.log"
 	export FYD_BROADCAST_TOKEN_FILE="$SBH_T/token"
@@ -118,6 +124,10 @@ case "$1" in
 			esac
 		fi
 		printf '{"chain_id":"%s","head_block_num":1}\n' "$cid"
+		if [ "${STUB_CHAININFO_REPOINT:-0}" = "1" ]; then
+			c="$(cfg)"; cc="$(jq -r '.currentChain' "$c")"
+			t="$(mktemp)"; jq --arg c "$cc" '.endpoints = [{"chain": $c, "endpoints": ["https://xpr-clone.example.net"]}]' "$c" > "$t" && mv "$t" "$c"
+		fi
 		exit 0 ;;
 	transaction:push)
 		echo "proton transaction:push" >> "$SBH_CALLS"
@@ -171,7 +181,9 @@ case "$url" in
 		exit 0 ;;
 	*/v2/health)
 		[ "${STUB_HEALTH_FAIL:-0}" = "1" ] && exit 7
-		echo '{"health":[{"service":"Elasticsearch","status":"OK"}]}'
+		h="${url#https://}"; h="${h%%/*}"
+		if [ -f "$SBH_T/health/$h.json" ]; then cat "$SBH_T/health/$h.json"; exit 0; fi
+		echo '{"version":"3.3","health":[{"service":"RabbitMq","status":"OK"},{"service":"NodeosRPC","status":"OK","service_data":{"head_block_num":1000,"last_irreversible_block":1000}},{"service":"Elasticsearch","status":"OK","service_data":{"last_indexed_block":998,"total_indexed_blocks":998}}]}'
 		exit 0 ;;
 esac
 echo '{}'
@@ -181,6 +193,28 @@ STUB
 	export PATH="$SBH_T/stub:$PATH"
 	if [ "$(command -v proton)" != "$SBH_T/stub/proton" ] || [ "$(command -v curl)" != "$SBH_T/stub/curl" ]; then
 		echo "FATAL: proton/curl stubs are not first on PATH — refusing to run anything" >&2
+		exit 1
+	fi
+
+	# PATH variants for "tool missing" scenarios. NOT the system dirs: macOS
+	# ships /usr/bin/curl, and a real curl must never be reachable from a
+	# test. A toolbox of symlinks to exactly the tools the wrapper uses, plus
+	# ONE of the two stubs; the other binary is absent everywhere on PATH.
+	mkdir -p "$SBH_T/toolbox" "$SBH_T/path-noproton" "$SBH_T/path-nocurl"
+	local _t _p
+	for _t in bash sh jq cat grep sed tr head tail awk cut sort uniq wc id uname mktemp date stat \
+		sha256sum shasum dirname basename rm mv cp touch env printf ls mkdir; do
+		_p="$(command -v "$_t" 2>/dev/null)" || continue
+		case "$_p" in /*) ln -s "$_p" "$SBH_T/toolbox/$_t" ;; esac
+	done
+	cp "$SBH_T/stub/curl" "$SBH_T/path-noproton/curl"
+	cp "$SBH_T/stub/proton" "$SBH_T/path-nocurl/proton"
+	SBH_PATH_NOPROTON="$SBH_T/path-noproton:$SBH_T/toolbox"
+	SBH_PATH_NOCURL="$SBH_T/path-nocurl:$SBH_T/toolbox"
+	export SBH_PATH_NOPROTON SBH_PATH_NOCURL
+	if PATH="$SBH_PATH_NOPROTON" command -v proton >/dev/null 2>&1 \
+		|| PATH="$SBH_PATH_NOCURL" command -v curl >/dev/null 2>&1; then
+		echo "FATAL: a tool-missing PATH still resolves proton/curl — refusing to run" >&2
 		exit 1
 	fi
 
@@ -213,6 +247,9 @@ STUB
 	printf '{"id":"%s","block_num":5,"actions":[{"act":{"account":"eosio","name":"updateauth","data":{}}}]}\n' "$SBH_UPD_SAME" > "$SBH_T/hist/v1/$SBH_UPD_SAME.json"
 	printf '{"id":"%s","block_num":6,"trx":{"trx":{"actions":[{"account":"eosio.token","name":"transfer","data":{"memo":"fya1c4-test"}}]}}}\n' "$SBH_UPD_DIFF" > "$SBH_T/hist/v1/$SBH_UPD_DIFF.json"
 	printf '{"id":"%s","block_num":7,"traces":[],"trx":{"trx":{"actions":[]}}}\n' "$SBH_NOACT" > "$SBH_T/hist/v1/$SBH_NOACT.json"
+	# A Hyperion-v2-SHAPED answer (trx_id + actions, no `id`) served on the v1
+	# endpoint for a cycle-4 tx: the XPR default must NOT treat it as resolved.
+	printf '{"trx_id":"%s","executed":true,"actions":[%s]}\n' "$SBH_V2SHAPE" "$tr_c4" > "$SBH_T/hist/v1/$SBH_V2SHAPE.json"
 }
 
 # sbh_tree <dir> <wrapper-source> [<profiles.json>] — minimal repo tree.
@@ -257,7 +294,10 @@ sbh_run() {
 
 # Normalize a file for comparison: temp root, timestamps, token age, invoker.
 sbh_norm() {
+	local lh
+	lh="$(eval echo "~$(id -un)" 2>/dev/null || true)"
 	sed -e "s#${SBH_T}#<T>#g" \
+	    -e "s#${lh:-/nonexistent-login-home}#<LOGIN>#g" \
 	    -e 's#[0-9]\{4\}-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z#<TS>#g' \
 	    -e 's#token expired ([0-9]*s#token expired (<N>s#g' \
 	    -e "s#invoker=[^	]*#invoker=<U>#g" "$1"

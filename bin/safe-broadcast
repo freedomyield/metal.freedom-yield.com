@@ -221,7 +221,10 @@
 #       selected profile's node_hosts.
 #   Any miss — unreadable/unparseable file, wrong currentChain, no endpoint,
 #   non-string/control-character endpoint, host off the allowlist — refuses
-#   with exit 3 before `proton chain:info` talks to anything. This closes the
+#   with exit 3 before `proton chain:info` talks to anything. The same file
+#   check runs AGAIN immediately before the push (the config is a plain file
+#   that could be re-pointed while the operator reads the prompt); a failure
+#   there pushes nothing, exits 3 and logs phase=post rc=refused-gate3-recheck. This closes the
 #   clone gap on the MAINNET path too (before, only the testnet rehearsal
 #   pre-flight checked hosts). The default xpr profiles' node_hosts are
 #   check 10's allowlists, so a keystore that passes check 10 passes here.
@@ -232,20 +235,25 @@
 #   https://test.proton.eosusa.io — the value that used to be hard-coded).
 #   XPR_TESTNET_RPC, if set, must now EXACTLY equal one of those bases, else
 #   gate 1 refuses (exit 3); before, any value was used unchecked. The answer
-#   counts as "resolved" only if it names the tx: the v1 history `id` and/or
-#   the Hyperion v2 `trx_id` — every one present must equal the requested id,
-#   at least one must be present — and it is not marked `executed: false`.
+#   counts as "resolved" only if it names the tx and is not marked
+#   `executed: false`. On a testnet profile with push_response "processed"
+#   (the XPR default) `.id` MUST equal the requested id — the rule gate 1
+#   always had — and a `trx_id`, if present, must equal it too; a v2-shaped
+#   answer carrying only `trx_id` does NOT resolve there. On an id-only
+#   (PulseVM) testnet profile, `id` and/or `trx_id` may name it — every one
+#   present must equal the id, at least one must be present.
 #   Actions are then read from `.traces[].act` (v1), `.actions[].act`
 #   (Hyperion v2 get_transaction) or `.trx.trx.actions[]`, with the same
 #   shape-binding checks as before. For a testnet profile whose push_response
 #   is id-only (PulseVM, where history lives only in Hyperion) a
 #   GET <base>/v2/history/get_transaction?id= is tried after the v1 POST; the
 #   default (processed) profiles make exactly the v1 POST they always made.
-#   Which testnet "corresponds" to a PulseVM mainnet is an OPEN operator
-#   decision (Constitution PRIME DIRECTIVE gate 1): until it is made, gate 1
-#   refuses when the mainnet and testnet profiles differ in push_response or
-#   lib_equals_head (i.e. XPR testnet evidence for a PulseVM mainnet
-#   broadcast, or the reverse).
+#   Which testnet "corresponds" to a mainnet (Constitution PRIME DIRECTIVE
+#   gate 1) is recorded per mainnet profile as gate1_evidence_profile:
+#   xpr-mainnet → xpr-testnet; the PulseVM profiles ship null = an OPEN
+#   operator decision. Gate 1 refuses (exit 3) when it is null, when the
+#   selected testnet profile is not that profile, and — independently — when
+#   the two profiles differ in push_response or lib_equals_head.
 #
 # ---- Push response: id-only (PulseVM profiles only) ----
 #   On a profile with push_response "processed" (XPR/Antelope) the push is
@@ -253,7 +261,9 @@
 #   {"transaction_id"} once the tx is admitted to the mempool — it can still
 #   fail at block build):
 #     * BEFORE the broadcast (after gate 3), at least one of the profile's
-#       history_bases must answer GET <base>/v2/health, else exit 4 — the
+#       history_bases must be HEALTHY on GET <base>/v2/health — every
+#       service "OK", head_block_num > 0 and last_indexed_block within
+#       SB_HISTORY_MAX_INDEX_LAG (30) blocks of it — else exit 4: the
 #       confirmation below would be impossible, so nothing is signed;
 #     * AFTER a push that returned a tx_id, the tx is looked up on the
 #       history bases (v1 POST, then v2 GET) until it resolves (as in gate 1)
@@ -468,32 +478,44 @@ esac
 
 # ---- history helpers (gate 1 evidence; id-only execution confirmation) ----
 
-# sb_history_names_tx <json> <tx_id> — rc 0 iff the history answer is an
-# object that NAMES this tx: every id field present (v1 `id`, Hyperion v2
-# `trx_id`) equals <tx_id>, at least one is present, and it is not marked
-# `executed: false`. Anything else — including unparseable input — is rc != 0.
+# sb_history_names_tx <json> <tx_id> <mode> — rc 0 iff the history answer is
+# an object that NAMES this tx and is not marked `executed: false`.
+#   mode v1-id  (profiles with push_response "processed" — the XPR default):
+#               `.id` MUST equal <tx_id>, exactly as gate 1 has always
+#               required; a `trx_id`, if also present, must equal it too.
+#               A v2-shaped answer (trx_id only) does NOT resolve here.
+#   mode any-id (id-only profiles — PulseVM, whose history is Hyperion-only):
+#               every id field present (`id`, `trx_id`) must equal <tx_id>
+#               and at least one must be present.
+# Anything else — unknown mode, unparseable input — is rc != 0.
 sb_history_names_tx() {
-	printf '%s' "$1" | jq -e --arg id "$2" '
+	case "${3:-}" in
+		v1-id|any-id) ;;
+		*) return 2 ;;
+	esac
+	printf '%s' "$1" | jq -e --arg id "$2" --arg mode "$3" '
 		if type != "object" then false
 		else ([.id, .trx_id] | map(select(. != null))) as $ids
-		     | (($ids | length) > 0) and ($ids | all(. == $id)) and (.executed != false)
+		     | (if $mode == "v1-id" then (.id == $id) else (($ids | length) > 0) end)
+		       and ($ids | all(. == $id)) and (.executed != false)
 		end' >/dev/null 2>&1
 }
 
-# sb_history_lookup <base> <tx_id> <try_v2:0|1> — print the answer that names
-# the tx (rc 0), or nothing (rc 1). The v1 POST is byte-for-byte the request
-# gate 1 has always made; the Hyperion v2 GET is only tried when <try_v2>=1.
+# sb_history_lookup <base> <tx_id> <try_v2:0|1> <mode> — print the answer that
+# names the tx (rc 0, see sb_history_names_tx for <mode>), or nothing (rc 1).
+# The v1 POST is byte-for-byte the request gate 1 has always made; the
+# Hyperion v2 GET is only tried when <try_v2>=1.
 sb_history_lookup() {
-	local base="$1" id="$2" try_v2="$3" j
+	local base="$1" id="$2" try_v2="$3" mode="$4" j
 	j="$(curl -sSf --max-time 15 \
 		-X POST -H 'content-type:application/json' \
 		-d "{\"id\":\"${id}\"}" \
 		"${base}/v1/history/get_transaction" 2>/dev/null || echo '{}')"
-	if sb_history_names_tx "$j" "$id"; then printf '%s' "$j"; return 0; fi
+	if sb_history_names_tx "$j" "$id" "$mode"; then printf '%s' "$j"; return 0; fi
 	if [ "$try_v2" = "1" ]; then
 		j="$(curl -sSf --max-time 15 \
 			"${base}/v2/history/get_transaction?id=${id}" 2>/dev/null || echo '{}')"
-		if sb_history_names_tx "$j" "$id"; then printf '%s' "$j"; return 0; fi
+		if sb_history_names_tx "$j" "$id" "$mode"; then printf '%s' "$j"; return 0; fi
 	fi
 	return 1
 }
@@ -514,6 +536,41 @@ HISTORY_ACTIONS_JQ='
 	    end )
 	| unique
 '
+
+# ---- id-only history health (checked BEFORE signing) ----
+# A Hyperion /v2/health that merely answers 2xx is not enough: a live
+# PulseVM testnet Hyperion was observed (2026-09-30) answering while it
+# reported its chain RPC as "Error", head_block_num 0 and last_indexed_block
+# 64 — it could never have confirmed a new tx. Healthy means ALL of:
+#   * a non-empty `health` array whose every entry has status "OK";
+#   * a numeric head_block_num (> 0) and last_indexed_block in the entries'
+#     service_data (Hyperion reports them there);
+#   * |head_block_num - last_indexed_block| <= SB_HISTORY_MAX_INDEX_LAG.
+# 30 blocks: PulseVM builds a block only when there are transactions (LIB ==
+# head), so a live indexer sits at or within a few blocks of head; 30
+# tolerates a burst without letting a stalled indexer through. A body
+# lacking either number (e.g. a hyperion-rs shape not seen yet) is NOT
+# healthy — fail closed, before anything is signed.
+SB_HISTORY_MAX_INDEX_LAG=30
+sb_history_healthy() {
+	printf '%s' "$1" | jq -e --argjson n "$SB_HISTORY_MAX_INDEX_LAG" '
+		if type != "object" or (.health | type) != "array" or (.health | length) == 0 then false
+		else ([.health[] | .service_data? | objects | .head_block_num? | numbers] | max) as $h
+		   | ([.health[] | .service_data? | objects | .last_indexed_block? | numbers] | max) as $l
+		   | (.health | all(type == "object" and .status == "OK"))
+		     and $h != null and $l != null and $h > 0
+		     and ($h - $l) <= $n and ($l - $h) <= $n
+		end' >/dev/null 2>&1
+}
+sb_history_health_summary() {
+	[ -n "$1" ] || { printf 'no answer'; return; }
+	printf '%s' "$1" | jq -r '
+		if type != "object" or (.health | type) != "array" then "unparseable health body"
+		else ([.health[] | "\(.service // "?")=\(.status // "?")"] | join(" "))
+		   + " head=\([.health[] | .service_data? | objects | .head_block_num? | numbers] | max)"
+		   + " indexed=\([.health[] | .service_data? | objects | .last_indexed_block? | numbers] | max)"
+		end' 2>/dev/null || printf 'unparseable health body'
+}
 
 # ---- gate 3 host check helpers ----
 
@@ -621,6 +678,19 @@ if [ "$IS_MAINNET" = "1" ]; then
 		echo "ERROR (gate 1): lib_equals_head unavailable for the mainnet/testnet profiles — refusing" >&2
 		exit 3
 	fi
+	# The committed answer to "which testnet corresponds to this mainnet":
+	# the mainnet profile's gate1_evidence_profile. null = undecided → refuse;
+	# the selected testnet profile must BE that profile (xpr-mainnet names
+	# xpr-testnet, so the default path is unchanged).
+	if ! GATE1_EVIDENCE_PROFILE="$(acp_gate1_evidence_profile mainnet)"; then
+		echo "ERROR (gate 1): mainnet profile $PROFILE_NAME names no approved gate-1 evidence testnet (gate1_evidence_profile is null or unreadable)." >&2
+		echo "                Which testnet corresponds to this mainnet is an OPEN operator decision — refusing until it is made and committed." >&2
+		exit 3
+	fi
+	if [ "$TESTNET_PROFILE_NAME" != "$GATE1_EVIDENCE_PROFILE" ]; then
+		echo "ERROR (gate 1): testnet evidence profile $TESTNET_PROFILE_NAME is not the one mainnet profile $PROFILE_NAME approves ($GATE1_EVIDENCE_PROFILE) — refusing" >&2
+		exit 3
+	fi
 	if [ "$TESTNET_PUSH_RESPONSE" != "$PUSH_RESPONSE" ] || [ "$TESTNET_LIB_HEAD" != "$MAINNET_LIB_HEAD" ]; then
 		echo "ERROR (gate 1): mainnet profile $PROFILE_NAME (push_response=$PUSH_RESPONSE, lib_equals_head=$MAINNET_LIB_HEAD) and testnet evidence profile $TESTNET_PROFILE_NAME (push_response=$TESTNET_PUSH_RESPONSE, lib_equals_head=$TESTNET_LIB_HEAD) run different execution models." >&2
 		echo "                Which testnet corresponds to this mainnet is an OPEN operator decision — refusing until it is made and committed." >&2
@@ -641,8 +711,14 @@ if [ "$IS_MAINNET" = "1" ]; then
 	fi
 	# Hyperion v2 GET only where history lives solely in Hyperion (id-only
 	# profiles); the default profiles make exactly the v1 POST they always made.
+	# The same split decides how strictly an answer must name the tx: the
+	# processed profiles keep the historical `.id == <tx_id>` rule.
 	TESTNET_TRY_V2=0
-	[ "$TESTNET_PUSH_RESPONSE" = "id-only" ] && TESTNET_TRY_V2=1
+	TESTNET_ID_MODE="v1-id"
+	if [ "$TESTNET_PUSH_RESPONSE" = "id-only" ]; then
+		TESTNET_TRY_V2=1
+		TESTNET_ID_MODE="any-id"
+	fi
 	# For messages: the bases tried (one on xpr-testnet — the same text as ever).
 	TESTNET_RPC="$(printf '%s' "$TESTNET_HISTORY_BASES" | tr '\n' ' ' | sed -e 's/ *$//' -e 's/ /, /g')"
 
@@ -651,14 +727,14 @@ if [ "$IS_MAINNET" = "1" ]; then
 		RESOLVE_JSON='{}'
 		while IFS= read -r _base; do
 			[ -n "$_base" ] || continue
-			if RESOLVE_JSON="$(sb_history_lookup "$_base" "$TESTNET_TX_ID" "$TESTNET_TRY_V2")"; then
+			if RESOLVE_JSON="$(sb_history_lookup "$_base" "$TESTNET_TX_ID" "$TESTNET_TRY_V2" "$TESTNET_ID_MODE")"; then
 				break
 			fi
 			RESOLVE_JSON='{}'
 		done <<-BASES
 		$TESTNET_HISTORY_BASES
 		BASES
-		if ! sb_history_names_tx "$RESOLVE_JSON" "$TESTNET_TX_ID"; then
+		if ! sb_history_names_tx "$RESOLVE_JSON" "$TESTNET_TX_ID" "$TESTNET_ID_MODE"; then
 			echo "ERROR (gate 1): could not resolve --testnet-tx-id ${TESTNET_TX_ID} against ${TESTNET_RPC}. Verify the shape actually ran on testnet first." >&2
 			exit 3
 		fi
@@ -962,18 +1038,21 @@ if [ "$PUSH_RESPONSE" = "id-only" ]; then
 		exit 4
 	fi
 	HISTORY_REACHABLE=0
+	HISTORY_HEALTH_NOTES=""
 	while IFS= read -r _base; do
 		[ -n "$_base" ] || continue
-		if curl -sSf --max-time 15 "${_base}/v2/health" >/dev/null 2>&1; then
+		_hb="$(curl -sSf --max-time 15 "${_base}/v2/health" 2>/dev/null)" || _hb=""
+		if sb_history_healthy "$_hb"; then
 			HISTORY_REACHABLE=1
 			break
 		fi
+		HISTORY_HEALTH_NOTES="${HISTORY_HEALTH_NOTES}
+                  ${_base}: $(sb_history_health_summary "$_hb")"
 	done <<-BASES
 	$HISTORY_BASES
 	BASES
 	if [ "$HISTORY_REACHABLE" != "1" ]; then
-		echo "ERROR (4): none of the history bases of id-only profile $PROFILE_NAME answered <base>/v2/health:" >&2
-		printf '%s\n' "$HISTORY_BASES" | sed 's/^/                  /' >&2
+		echo "ERROR (4): no history base of id-only profile $PROFILE_NAME is HEALTHY (every <base>/v2/health service OK, indexer within ${SB_HISTORY_MAX_INDEX_LAG} blocks of head):${HISTORY_HEALTH_NOTES}" >&2
 		echo "           The push answer would carry only a tx_id and its execution could not be confirmed — refusing BEFORE the broadcast." >&2
 		exit 4
 	fi
@@ -1036,6 +1115,17 @@ PROTON_ARGS=(transaction:push "$(cat "$TX_JSON_FILE")")
 # REMOVED" usage-header section above. This always pushes to whatever
 # endpoint proton-cli resolves from its own config, which is EXACTLY the
 # endpoint gate 3 (above) already verified the chain_id of.
+
+# Re-read proton-cli's config right before the push (file read only, no
+# network): gate 3's host check ran before chain:info and the prompt, and a
+# world-writable config could be re-pointed in between (TOCTOU). If it now
+# fails, nothing is pushed; the audit log gets the matching post line.
+if ! ( sb_check_push_endpoint ); then
+	printf '%s\tinvoker=%s\twrapper=safe-broadcast\tphase=post\tchain=%s\ttx_sha256=%s\trc=%s\ttx_id=%s\n' \
+		"$TS" "$INVOKER" "$CHAIN" "$TX_SHA256" "refused-gate3-recheck" "none" >> "$AUDIT_TARGET" 2>/dev/null || true
+	echo "ERROR (gate 3): the push endpoint changed after gate 3 passed — nothing was pushed" >&2
+	exit 3
+fi
 
 BROADCAST_RC=0
 proton "${PROTON_ARGS[@]}" > "$BROADCAST_OUT" 2> "$BROADCAST_ERR" || BROADCAST_RC=$?
@@ -1100,7 +1190,7 @@ if [ "$PUSH_RESPONSE" = "id-only" ]; then
 	while [ "$_round" -le "$CONFIRM_ATTEMPTS" ]; do
 		while IFS= read -r _base; do
 			[ -n "$_base" ] || continue
-			if _j="$(sb_history_lookup "$_base" "$TX_ID" 1)"; then
+			if _j="$(sb_history_lookup "$_base" "$TX_ID" 1 any-id)"; then
 				_set="$(printf '%s' "$_j" | jq -c "$HISTORY_ACTIONS_JQ"' | [.[] | {account, name}] | unique' 2>/dev/null || true)"
 				if [ -n "$OUTGOING_SET_FOR_CONFIRM" ] && [ "$OUTGOING_SET_FOR_CONFIRM" != "[]" ] \
 					&& [ "$_set" = "$OUTGOING_SET_FOR_CONFIRM" ]; then

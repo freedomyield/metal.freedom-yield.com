@@ -77,6 +77,27 @@ ERROR: --endpoint=<url> / -u <url> is refused (removed 2026-08-21, not merely un
        push go to a DIFFERENT endpoint than the one gate 3 just verified.
 --- audit
 --- calls
+=== env: proton CLI missing
+rc=4
+--- stdout
+--- stderr
+ERROR: proton CLI not found in PATH
+--- audit
+--- calls
+=== keystore guard: HOME = login home → exit 8
+rc=8
+--- stdout
+--- stderr
+WARNING (gate 2): operator token is not chain-bound (legacy/bare token). Accepted for TESTNET ONLY, for backward compatibility — this will be required for mainnet unconditionally. See the R16 usage-header section above for the new ritual.
+ERROR (keystore guard, Constitution §3.5): $HOME resolves to the login
+                default home (<LOGIN>).
+                §3.5 prohibits proton-cli against the default (shared)
+                keystore for this project — fail-closed, no bypass flag.
+                Re-invoke <WRAPPER> with an explicit project keystore prefix:
+                  HOME=~/.metal-fy-proton      <WRAPPER> ...   (mainnet)
+                  HOME=~/.metal-fy-proton-test <WRAPPER> ...   (testnet)
+--- audit
+--- calls
 === gate 2: token missing
 rc=3
 --- stdout
@@ -166,6 +187,21 @@ ERROR (gate 1): testnet evidence tx action shape does not match the outgoing mai
 --- audit
 --- calls
 curl POST https://test.proton.eosusa.io/v1/history/get_transaction {"id":"dddd6666dddd6666dddd6666dddd6666dddd6666dddd6666dddd6666dddd6666"} | argv: -sSf --max-time 15 -X POST -H content-type:application/json -d {"id":"dddd6666dddd6666dddd6666dddd6666dddd6666dddd6666dddd6666dddd6666"} https://test.proton.eosusa.io/v1/history/get_transaction
+=== gate 1: v2-shaped answer (trx_id, no id) on the v1 endpoint → refuse
+rc=3
+--- stdout
+--- stderr
+ERROR (gate 1): could not resolve --testnet-tx-id ffff8888ffff8888ffff8888ffff8888ffff8888ffff8888ffff8888ffff8888 against https://test.proton.eosusa.io. Verify the shape actually ran on testnet first.
+--- audit
+--- calls
+curl POST https://test.proton.eosusa.io/v1/history/get_transaction {"id":"ffff8888ffff8888ffff8888ffff8888ffff8888ffff8888ffff8888ffff8888"} | argv: -sSf --max-time 15 -X POST -H content-type:application/json -d {"id":"ffff8888ffff8888ffff8888ffff8888ffff8888ffff8888ffff8888ffff8888"} https://test.proton.eosusa.io/v1/history/get_transaction
+=== gate 1: curl missing
+rc=3
+--- stdout
+--- stderr
+ERROR (gate 1): curl required to resolve testnet tx-id
+--- audit
+--- calls
 === gate 1: XPR_TESTNET_RPC = the profile's history base
 rc=0
 --- stdout

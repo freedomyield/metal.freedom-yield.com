@@ -9,7 +9,8 @@
       "explorer_base": "https://explorer.xprnetwork.org/transaction",
       "proton_network": "proton",
       "push_response": "processed",
-      "lib_equals_head": false
+      "lib_equals_head": false,
+      "gate1_evidence_profile": "xpr-testnet"
     },
     "xpr-testnet": {
       "role": "testnet",
@@ -19,7 +20,8 @@
       "explorer_base": "https://testnet.protonscan.io/transaction",
       "proton_network": "proton-test",
       "push_response": "processed",
-      "lib_equals_head": false
+      "lib_equals_head": false,
+      "gate1_evidence_profile": null
     },
     "pulsevm-mainnet": {
       "role": "mainnet",
@@ -29,7 +31,8 @@
       "explorer_base": null,
       "proton_network": null,
       "push_response": "id-only",
-      "lib_equals_head": true
+      "lib_equals_head": true,
+      "gate1_evidence_profile": null
     },
     "pulsevm-testnet": {
       "role": "testnet",
@@ -39,7 +42,8 @@
       "explorer_base": null,
       "proton_network": null,
       "push_response": "id-only",
-      "lib_equals_head": true
+      "lib_equals_head": true,
+      "gate1_evidence_profile": null
     }
   }
 }
