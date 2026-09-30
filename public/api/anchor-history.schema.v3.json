@@ -1,0 +1,209 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://metal.freedom-yield.com/api/anchor-history.schema.v3.json",
+	"title": "Freedom Yield Metal — A-chain Anchor History v3 (chain-discriminated lines)",
+	"description": "Per-line contract for v3 lines of /api/anchor-history.jsonl. v3 = v2 plus REQUIRED chain_id, block_id and chain_profile, mirrored from a v3 anchor receipt (see /api/anchor-receipt.schema.v3.json). The ledger is append-only and may hold v1, v2 and v3 lines; consumers MUST validate each line against the schema its own schema_version names. Lines without chain_id (v2 lines written before 2026-09-30, and any v2 line whose receipt carried none) are on the legacy XPR Network chain of their network: mainnet 384da888112027f0321850a169f737c33e53b388aad48b5adace4bab97f437e0, testnet 71ee83bcf52142d61019d95f9cc5427ba6a0d7ff8accd9e2088ae2abeaf3d3dd. Companion generator: scripts/append-anchor-history.sh.",
+	"x-issued-at": "2026-09-30T00:00:00Z",
+	"x-stability": "additive-only-within-v3",
+	"x-supersedes": "https://metal.freedom-yield.com/api/anchor-history.schema.v2.json",
+	"x-line-encoding": "JSONL — UTF-8, one JSON object per line, lines terminated by LF (0x0A) including the final line, no trailing blank lines. Schema describes the per-line object shape; consumers MUST validate each line independently.",
+	"x-append-only-invariants": [
+		"tx_id is unique across all lines",
+		"(cycle_number, event_type) pair is unique for cyclestart/cycleend event_type",
+		"(key_seq, 'idrotate') pair is unique for idrotate event_type",
+		"cycle_number strictly non-decreasing across lines that carry it",
+		"block_num non-decreasing across consecutive lines of the same chain_id (a line without chain_id counts as the legacy XPR chain_id of its network). A line whose chain_id differs from the previous line's starts a new era: allowed only when that chain_id is the one the writer's selected, reviewed chain profile carries; an unknown chain_id, or a return to an earlier era's chain_id, is refused",
+		"prev_anchor_tx_id of line N equals tx_id of line N-1 (hash chain by tx reference; null only for genesis line)",
+		"existing lines are byte-for-byte immutable; only legal write is appending a new line",
+		"file terminates with LF on the final line"
+	],
+	"x-format-guide": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/ANCHOR_SOURCE.md",
+	"type": "object",
+	"required": [
+		"schema_version",
+		"event_type",
+		"dag_root_hash",
+		"memo_prefix",
+		"network",
+		"chain",
+		"method",
+		"tx_id",
+		"block_num",
+		"block_time",
+		"explorer_url",
+		"signing_actor",
+		"signing_permission",
+		"verification_status",
+		"prev_anchor_tx_id",
+		"chain_id",
+		"block_id",
+		"chain_profile"
+	],
+	"additionalProperties": true,
+	"allOf": [
+		{
+			"if": {
+				"properties": {
+					"event_type": {
+						"enum": [
+							"cyclestart",
+							"cycleend"
+						]
+					}
+				},
+				"required": [
+					"event_type"
+				]
+			},
+			"then": {
+				"required": [
+					"cycle_number"
+				]
+			}
+		},
+		{
+			"if": {
+				"properties": {
+					"event_type": {
+						"const": "idrotate"
+					}
+				},
+				"required": [
+					"event_type"
+				]
+			},
+			"then": {
+				"required": [
+					"key_seq"
+				]
+			}
+		}
+	],
+	"properties": {
+		"_comment": {
+			"type": "string"
+		},
+		"schema_version": {
+			"type": "integer",
+			"const": 3
+		},
+		"event_type": {
+			"type": "string",
+			"enum": [
+				"cyclestart",
+				"cycleend",
+				"idrotate",
+				"heartbeat"
+			]
+		},
+		"cycle_number": {
+			"type": "integer",
+			"minimum": 1,
+			"description": "Present for cyclestart/cycleend. Absent for idrotate."
+		},
+		"key_seq": {
+			"type": "integer",
+			"minimum": 1,
+			"description": "Present for idrotate. The identity key generation counter."
+		},
+		"dag_root_hash": {
+			"type": "string",
+			"pattern": "^[a-f0-9]{64}$"
+		},
+		"memo_prefix": {
+			"type": "string",
+			"pattern": "^fya[0-9]+c[0-9]+$"
+		},
+		"network": {
+			"type": "string",
+			"enum": [
+				"xpr-mainnet",
+				"xpr-testnet",
+				"mainnet-a",
+				"testnet-a"
+			]
+		},
+		"chain": {
+			"type": "string",
+			"const": "metal-a-chain"
+		},
+		"chain_backend": {
+			"type": "string",
+			"description": "Protocol-family label mirrored from anchor-receipt.anchor.chain_backend — not an execution engine. For metal-a-chain this is 'antelope'; the lines published for the cycle 3 and cycle 4 anchors carry 'pulsevm', a forward-looking label naming an announced future execution engine rather than the family observed serving the chain. This ledger is append-only, so those lines keep the value they were published with."
+		},
+		"method": {
+			"type": "string",
+			"const": "hc_single_4_action_pack"
+		},
+		"tx_id": {
+			"type": "string",
+			"pattern": "^[a-f0-9]{64}$"
+		},
+		"block_num": {
+			"type": "integer",
+			"minimum": 1
+		},
+		"block_time": {
+			"type": "string",
+			"format": "date-time"
+		},
+		"explorer_url": {
+			"type": "string",
+			"format": "uri"
+		},
+		"signing_actor": {
+			"type": "string",
+			"pattern": "^[a-z1-5.]{1,12}$"
+		},
+		"signing_permission": {
+			"type": "string",
+			"pattern": "^[a-z1-5.]{1,12}$"
+		},
+		"verification_status": {
+			"type": "string",
+			"const": "live"
+		},
+		"verified_at": {
+			"type": "string",
+			"format": "date-time"
+		},
+		"prev_anchor_tx_id": {
+			"oneOf": [
+				{
+					"type": "null"
+				},
+				{
+					"type": "string",
+					"pattern": "^[a-f0-9]{64}$"
+				}
+			],
+			"description": "tx_id of the previous line. Null for the genesis line. Enables hash-chain-by-tx traversal."
+		},
+		"archived_source_path": {
+			"type": "string",
+			"description": "R18 (2026-07-08, additive): repo-relative path to the per-anchor, content-addressed archive copy of the anchor-source.json pre-image that produced this line's dag_root_hash, e.g. 'api/archive/anchor-source-<dag_root_hash>.json'. Written by scripts/gen-anchor-source.sh at generation time. Absent on lines appended before this field existed — its absence does not imply the archive copy itself is missing, only that this pointer predates R18."
+		},
+		"archived_receipt_path": {
+			"type": "string",
+			"description": "R18 (2026-07-08, additive): repo-relative path to the per-anchor, content-addressed archive copy of the anchor-receipt.json for this line's tx_id, e.g. 'api/archive/anchor-receipt-<tx_id>.json'. Written by scripts/gen-anchor-receipt.sh at generation time. Absent on lines appended before this field existed."
+		},
+		"chain_id": {
+			"type": "string",
+			"pattern": "^[a-f0-9]{64}$",
+			"description": "chain_id of the A-Chain the transaction of this line is on, taken from the reviewed chain profile (config/a-chain-profiles.json) the generator ran under and reconciled with FYD_<ROLE>_CHAIN_ID. The history base that resolved the tx is bound to this chain_id by that profile's allowlist. Lines from before this field existed are on the legacy XPR Network chain (mainnet 384da888112027f0321850a169f737c33e53b388aad48b5adace4bab97f437e0). Mirrored from anchor-receipt.anchor.chain_id. REQUIRED in v3."
+		},
+		"block_id": {
+			"type": "string",
+			"pattern": "^[a-f0-9]{64}$",
+			"description": "id of the block holding the transaction, as served by the history base (Hyperion action block_id) or by /v1/chain/get_block on the same base. With chain_id it identifies the block unambiguously across a chain migration, where block_num alone may not. Mirrored from anchor-receipt.anchor.block_id; absent when the receipt carried none. REQUIRED in v3."
+		},
+		"chain_profile": {
+			"type": "string",
+			"pattern": "^[a-z0-9][a-z0-9-]*$",
+			"description": "name of the chain profile (config/a-chain-profiles.json) the generator ran under, e.g. 'xpr-mainnet'. Mirrored from anchor-receipt.anchor.chain_profile. REQUIRED in v3."
+		},
+		"generated_by_script_version": {
+			"type": "string"
+		}
+	}
+}

@@ -90,7 +90,11 @@
 					}
 				},
 				"sink": {"type": "string", "pattern": "^[a-z1-5.]{1,12}$"},
-				"quantity": {"type": "string"}
+				"quantity": {"type": "string"},
+				"chain_id": {"type": "string", "pattern": "^[a-f0-9]{64}$", "description": "2026-09-30 (additive): chain_id of the A-Chain the inscribing transaction is on, taken from the reviewed chain profile (config/a-chain-profiles.json) the generator ran under and reconciled with FYD_<ROLE>_CHAIN_ID. The history base that resolved the tx is bound to this chain_id by that profile's allowlist. Receipts from before this field existed are on the legacy XPR Network chain (mainnet 384da888112027f0321850a169f737c33e53b388aad48b5adace4bab97f437e0)."},
+				"block_id": {"type": "string", "pattern": "^[a-f0-9]{64}$", "description": "2026-09-30 (additive): id of the block holding the transaction, as served by the history base (Hyperion action block_id) or by /v1/chain/get_block on the same base. With chain_id it identifies the block unambiguously across a chain migration, where block_num alone may not."},
+				"chain_profile": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$", "description": "2026-09-30 (additive): name of the chain profile (config/a-chain-profiles.json) the generator ran under, e.g. 'xpr-mainnet'."},
+				"history_base": {"type": "string", "format": "uri", "pattern": "^https://", "description": "2026-09-30 (additive): the history base URL that resolved and verified the transaction; one of the profile's history_bases (or, testnet rehearsal only, an explicitly allowed unlisted base)."}
 			}
 		},
 		"anchor_source_url": {"type": "string", "format": "uri"},
