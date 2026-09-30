@@ -138,6 +138,19 @@ expect "V37 host_allowed refuses on invalid file" \
 	"$(run_tree '.profiles["xpr-mainnet"].role = "main"' 'acp_host_allowed mainnet proton.eosusa.io')" "2|"
 expect "V38 invalid OTHER profile also refuses" \
 	"$(run_tree '.profiles["pulsevm-testnet"].push_response = "x"' 'acp_chain_id mainnet')" "2|"
+# gate1_evidence_profile (Task 3 fix round 1): the committed answer to "which
+# testnet corresponds to this mainnet" for PRIME DIRECTIVE gate 1.
+V "V49 gate1_evidence_profile missing"       'del(.profiles["xpr-mainnet"].gate1_evidence_profile)'
+V "V50 gate1_evidence_profile names nothing" '.profiles["xpr-mainnet"].gate1_evidence_profile = "no-such-profile"'
+V "V51 gate1_evidence_profile names a mainnet profile" '.profiles["xpr-mainnet"].gate1_evidence_profile = "pulsevm-mainnet"'
+V "V52 gate1_evidence_profile set on a testnet profile" '.profiles["xpr-testnet"].gate1_evidence_profile = "pulsevm-testnet"'
+V "V53 gate1_evidence_profile not a string"  '.profiles["xpr-mainnet"].gate1_evidence_profile = 1'
+expect "V54 gate1_evidence_profile naming another testnet profile validates" \
+	"$(run_tree '.profiles["pulsevm-mainnet"].gate1_evidence_profile = "pulsevm-testnet"' 'acp_validate')" "0|"
+V "V56 gate1_evidence_profile of another execution family (push_response)" '.profiles["xpr-mainnet"].gate1_evidence_profile = "pulsevm-testnet"'
+V "V57 gate1_evidence_profile of another execution family (lib_equals_head only)" '.profiles["xpr-mainnet"].lib_equals_head = true'
+expect "V55 acp_gate1_evidence_profile refuses on invalid file" \
+	"$(run_tree '.profiles["xpr-mainnet"].role = "main"' 'acp_gate1_evidence_profile mainnet')" "2|"
 
 # ---- fix round 1: document count, duplicate keys, dot segments, validator
 # failure vs invalid input, library-directory resolution, jq 1.5 policy ----
@@ -257,6 +270,10 @@ expect "G11 push_response xpr"     "$(run 'acp_push_response mainnet; acp_push_r
 expect "G12 lib_equals_head xpr"   "$(run 'acp_lib_equals_head mainnet; acp_lib_equals_head testnet')" "0|false false"
 expect "G13 push_response pulsevm" "$(EXTRA_ENV='FYD_A_CHAIN_PROFILE_MAINNET=pulsevm-mainnet' run 'acp_push_response mainnet')" "0|id-only"
 expect "G14 lib_equals_head pulsevm" "$(EXTRA_ENV='FYD_A_CHAIN_PROFILE_TESTNET=pulsevm-testnet' run 'acp_lib_equals_head testnet')" "0|true"
+expect "G15 xpr-mainnet gate-1 evidence profile" "$(run 'acp_gate1_evidence_profile mainnet')" "0|xpr-testnet"
+expect "G16 gate-1 evidence profile is mainnet-only" "$(run 'acp_gate1_evidence_profile testnet')" "3|"
+expect "G17 pulsevm-mainnet evidence profile undecided (null) refuses" \
+	"$(EXTRA_ENV='FYD_A_CHAIN_PROFILE_MAINNET=pulsevm-mainnet' run 'acp_gate1_evidence_profile mainnet')" "4|"
 
 # ---------------- N: null / empty refuse ----------------
 for g in acp_chain_id acp_expected_chain_id acp_explorer_base acp_proton_network acp_node_hosts acp_history_bases; do

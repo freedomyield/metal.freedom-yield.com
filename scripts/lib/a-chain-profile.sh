@@ -42,6 +42,12 @@
 #                                        (PulseVM); execution MUST be confirmed by
 #                                        polling history_bases for the tx_id
 #         "lib_equals_head": true | false   (PulseVM: LIB == head, no reversible window)
+#         "gate1_evidence_profile": "<testnet profile name>" | null
+#                            mainnet profiles: the testnet profile whose history
+#                            is the APPROVED PRIME DIRECTIVE gate-1 evidence for
+#                            this mainnet (the operator's committed answer to
+#                            "which testnet corresponds"); null = undecided,
+#                            gate 1 refuses. Testnet profiles: always null.
 #     } } }
 #   Profiles shipped: xpr-mainnet, xpr-testnet (current XPR values),
 #   pulsevm-mainnet, pulsevm-testnet (chain_id/hosts/explorer/network null or
@@ -60,7 +66,10 @@
 #   * top-level keys exactly {schema_version, profiles}; schema_version == 1
 #   * the default profiles xpr-mainnet and xpr-testnet exist
 #   * profile names match ^[a-z0-9][a-z0-9-]*$
-#   * each profile has EXACTLY the eight keys above (missing or extra = invalid)
+#   * each profile has EXACTLY the nine keys above (missing or extra = invalid)
+#   * gate1_evidence_profile: null, or (mainnet-role profiles only) the name
+#     of an existing TESTNET-role profile with the same push_response and
+#     lib_equals_head (same execution family)
 #   * each value has the type/shape above; list entries unique; URL paths
 #     carry no "." or ".." segment
 #   * cross-role separation: no chain_id, node host or history base may appear
@@ -107,6 +116,9 @@
 #   acp_proton_network <role>          proton-cli chain name; null -> rc 4
 #   acp_push_response <role>           "processed" | "id-only"
 #   acp_lib_equals_head <role>         "true" | "false"
+#   acp_gate1_evidence_profile mainnet the approved gate-1 evidence testnet
+#                                      profile name; null -> rc 4; role
+#                                      other than mainnet -> rc 3
 #
 # RETURN CODES (callers MUST treat any non-zero as "refuse"; map it to their
 # own exit-code table, e.g. gate 3 in bin/safe-broadcast)
@@ -181,7 +193,7 @@ def ishost: isstr and test(hostre);
 def ishttps: isstr and test("^https://[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+(/[A-Za-z0-9._~-]+)*$")
   and (test("/\\.\\.?(/|$)") | not);
 def uniqlist: (length == (unique | length));
-def req: ["chain_id","explorer_base","history_bases","lib_equals_head","node_hosts","proton_network","push_response","role"];
+def req: ["chain_id","explorer_base","gate1_evidence_profile","history_bases","lib_equals_head","node_hosts","proton_network","push_response","role"];
 def check_profile($n):
   . as $p
   | if ($p | type) != "object" then "\($n): profile is not an object"
@@ -205,8 +217,27 @@ def check_profile($n):
       ( if ($p | has("push_response")) and ($p.push_response | (. == "processed" or . == "id-only") | not)
           then "\($n): push_response must be processed or id-only" else empty end ),
       ( if ($p | has("lib_equals_head")) and (($p.lib_equals_head | type) != "boolean")
-          then "\($n): lib_equals_head must be a boolean" else empty end )
+          then "\($n): lib_equals_head must be a boolean" else empty end ),
+      ( if ($p | has("gate1_evidence_profile")) and ($p.gate1_evidence_profile != null)
+            and (($p.gate1_evidence_profile | isstr and test("^[a-z0-9][a-z0-9-]*$")) | not)
+          then "\($n): gate1_evidence_profile must be null or a profile name" else empty end ),
+      ( if ($p.role? == "testnet") and ($p.gate1_evidence_profile? != null)
+          then "\($n): gate1_evidence_profile must be null on a testnet profile" else empty end )
     end;
+# gate1_evidence_profile, when set, must name an existing TESTNET profile of
+# the SAME execution family (equal push_response and lib_equals_head): a
+# testnet with a different execution model is not evidence that the
+# mainnet broadcast shape works, so such a file is refused outright.
+def evidence_refs:
+  .profiles as $all
+  | $all | to_entries[] | select(.value | type == "object")
+  | .key as $n | .value as $v | (.value.gate1_evidence_profile? // null) as $e
+  | select($e != null and ($e | type) == "string")
+  | if ($all[$e] | type) != "object" then "\($n): gate1_evidence_profile \($e) is not a profile"
+    elif $all[$e].role? != "testnet" then "\($n): gate1_evidence_profile \($e) is not a testnet profile"
+    elif ($all[$e].push_response? != $v.push_response?) or ($all[$e].lib_equals_head? != $v.lib_equals_head?)
+      then "\($n): gate1_evidence_profile \($e) runs a different execution model (push_response / lib_equals_head differ)"
+    else empty end;
 def crossrole($field):
   [ .profiles | to_entries[] | select(.value | type == "object")
     | .value as $v
@@ -227,7 +258,8 @@ else
       ( .profiles | keys[] | select(test("^[a-z0-9][a-z0-9-]*$") | not) | "bad profile name \(.)" ),
       ( ($defaults | split(" ")) - (.profiles | keys) | .[] | "default profile \(.) is missing" ),
       ( .profiles | to_entries[] | .key as $n | .value | check_profile($n) ),
-      crossrole("chain_id"), crossrole("node_hosts"), crossrole("history_bases")
+      crossrole("chain_id"), crossrole("node_hosts"), crossrole("history_bases"),
+      evidence_refs
     else empty end )
 end
 '
@@ -386,6 +418,16 @@ acp_explorer_base()   { acp__scalar "${1:-}" explorer_base; }
 acp_proton_network()  { acp__scalar "${1:-}" proton_network; }
 acp_push_response()   { acp__scalar "${1:-}" push_response; }
 acp_lib_equals_head() { acp__scalar "${1:-}" lib_equals_head; }
+# acp_gate1_evidence_profile mainnet — the testnet profile whose history is
+# the APPROVED gate-1 evidence source for the selected mainnet profile (the
+# operator's committed answer to "which testnet corresponds to this
+# mainnet"). null → rc 4 (not decided yet); a testnet role → rc 3.
+acp_gate1_evidence_profile() {
+	case "${1:-}" in
+		mainnet) acp__scalar mainnet gate1_evidence_profile ;;
+		*) acp__fail 3 "gate1_evidence_profile is a mainnet-role field; got role '${1:-}'" ;;
+	esac
+}
 acp_node_hosts()      { acp__list "${1:-}" node_hosts; }
 acp_history_bases()   { acp__list "${1:-}" history_bases; }
 acp_host_allowed()    { acp__member "${1:-}" node_hosts "${2:-}"; }

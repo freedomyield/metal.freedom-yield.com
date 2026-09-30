@@ -1,0 +1,641 @@
+=== arg: no args
+rc=2
+--- stdout
+[usage text printed]
+--- stderr
+ERROR: --tx=<json-file> required
+--- audit
+--- calls
+=== arg: --tx missing
+rc=2
+--- stdout
+[usage text printed]
+--- stderr
+ERROR: --tx=<json-file> required
+--- audit
+--- calls
+=== arg: --chain missing
+rc=2
+--- stdout
+--- stderr
+ERROR: --chain=<testnet-a|mainnet-a> required
+--- audit
+--- calls
+=== arg: --chain invalid
+rc=2
+--- stdout
+--- stderr
+ERROR: --chain must be testnet-a or mainnet-a, got: mainnet-c
+--- audit
+--- calls
+=== arg: --chain xpr-mainnet (not an accepted spelling)
+rc=2
+--- stdout
+--- stderr
+ERROR: --chain must be testnet-a or mainnet-a, got: xpr-mainnet
+--- audit
+--- calls
+=== arg: tx unreadable
+rc=2
+--- stdout
+--- stderr
+ERROR: tx file not readable: /nonexistent/path
+--- audit
+--- calls
+=== arg: tx without actions
+rc=2
+--- stdout
+--- stderr
+ERROR: tx file must contain non-empty .actions array
+--- audit
+--- calls
+=== arg: unknown flag
+rc=2
+--- stdout
+[usage text printed]
+--- stderr
+ERROR: unknown arg: --foo
+--- audit
+--- calls
+=== arg: --endpoint= refused
+rc=2
+--- stdout
+--- stderr
+ERROR: --endpoint=<url> / -u <url> is refused (removed 2026-08-21, not merely unrecognized)
+       reason: gate 3 verifies the chain_id proton-cli resolves from its own
+       config; overriding the broadcast destination separately would let the
+       push go to a DIFFERENT endpoint than the one gate 3 just verified.
+--- audit
+--- calls
+=== arg: -u refused
+rc=2
+--- stdout
+--- stderr
+ERROR: --endpoint=<url> / -u <url> is refused (removed 2026-08-21, not merely unrecognized)
+       reason: gate 3 verifies the chain_id proton-cli resolves from its own
+       config; overriding the broadcast destination separately would let the
+       push go to a DIFFERENT endpoint than the one gate 3 just verified.
+--- audit
+--- calls
+=== env: proton CLI missing
+rc=4
+--- stdout
+--- stderr
+ERROR: proton CLI not found in PATH
+--- audit
+--- calls
+=== keystore guard: HOME = login home → exit 8
+rc=8
+--- stdout
+--- stderr
+WARNING (gate 2): operator token is not chain-bound (legacy/bare token). Accepted for TESTNET ONLY, for backward compatibility — this will be required for mainnet unconditionally. See the R16 usage-header section above for the new ritual.
+ERROR (keystore guard, Constitution §3.5): $HOME resolves to the login
+                default home (<LOGIN>).
+                §3.5 prohibits proton-cli against the default (shared)
+                keystore for this project — fail-closed, no bypass flag.
+                Re-invoke <WRAPPER> with an explicit project keystore prefix:
+                  HOME=~/.metal-fy-proton      <WRAPPER> ...   (mainnet)
+                  HOME=~/.metal-fy-proton-test <WRAPPER> ...   (testnet)
+--- audit
+--- calls
+=== gate 2: token missing
+rc=3
+--- stdout
+--- stderr
+ERROR (gate 2): operator token missing: <T>/token
+                Operator must create a chain-bound token within TTL, e.g.:
+                  printf '{"chain":"testnet-a"}' > <T>/token
+                (see the R16 usage-header section above for the full ritual)
+--- audit
+--- calls
+=== gate 2: token stale (tight)
+rc=3
+--- stdout
+--- stderr
+ERROR (gate 2): operator token expired (<N>s > 60s max)
+--- audit
+--- calls
+=== gate 2: token stale (300s)
+rc=3
+--- stdout
+--- stderr
+ERROR (gate 2): operator token expired (<N>s > 300s max)
+--- audit
+--- calls
+=== gate 1: no testnet id
+rc=3
+--- stdout
+--- stderr
+ERROR (gate 1): mainnet requires --testnet-tx-id=<64hex> of a prior successful testnet broadcast of the identical shape
+--- audit
+--- calls
+=== gate 1: id not hex
+rc=3
+--- stdout
+--- stderr
+ERROR (gate 1): --testnet-tx-id must be 64-char hex, got: nothex
+--- audit
+--- calls
+=== gate 1: id 32 hex
+rc=3
+--- stdout
+--- stderr
+ERROR (gate 1): --testnet-tx-id must be 64-char hex, got: 00112233445566778899aabbccddeeff
+--- audit
+--- calls
+=== gate 1: unresolvable
+rc=3
+--- stdout
+--- stderr
+ERROR (gate 1): could not resolve --testnet-tx-id 0000000000000000000000000000000000000000000000000000000000000000 against https://test.proton.eosusa.io. Verify the shape actually ran on testnet first.
+--- audit
+--- calls
+curl POST https://test.proton.eosusa.io/v1/history/get_transaction {"id":"0000000000000000000000000000000000000000000000000000000000000000"} | argv: -sSf --max-time 15 -X POST -H content-type:application/json -d {"id":"0000000000000000000000000000000000000000000000000000000000000000"} https://test.proton.eosusa.io/v1/history/get_transaction
+=== gate 1: cycle-2 vs cycle-4
+rc=3
+--- stdout
+--- stderr
+ERROR (gate 1): testnet evidence memo-prefix set does not match the outgoing mainnet anchor tx — refusing
+                expected (outgoing mainnet --tx=) memo prefix set: ["fya1c4"]
+                actual (testnet evidence aaaa2222aaaa2222aaaa2222aaaa2222aaaa2222aaaa2222aaaa2222aaaa2222) memo prefix set:   ["fya1c2"]
+--- audit
+--- calls
+curl POST https://test.proton.eosusa.io/v1/history/get_transaction {"id":"aaaa2222aaaa2222aaaa2222aaaa2222aaaa2222aaaa2222aaaa2222aaaa2222"} | argv: -sSf --max-time 15 -X POST -H content-type:application/json -d {"id":"aaaa2222aaaa2222aaaa2222aaaa2222aaaa2222aaaa2222aaaa2222aaaa2222"} https://test.proton.eosusa.io/v1/history/get_transaction
+=== gate 1: no extractable actions
+rc=3
+--- stdout
+--- stderr
+ERROR (gate 1): could not extract any action from the resolved testnet evidence tx eeee7777eeee7777eeee7777eeee7777eeee7777eeee7777eeee7777eeee7777 (checked .traces[], .actions[], .trx.trx.actions[]) — refusing, fail-closed
+--- audit
+--- calls
+curl POST https://test.proton.eosusa.io/v1/history/get_transaction {"id":"eeee7777eeee7777eeee7777eeee7777eeee7777eeee7777eeee7777eeee7777"} | argv: -sSf --max-time 15 -X POST -H content-type:application/json -d {"id":"eeee7777eeee7777eeee7777eeee7777eeee7777eeee7777eeee7777eeee7777"} https://test.proton.eosusa.io/v1/history/get_transaction
+=== gate 1: non-object .data
+rc=3
+--- stdout
+--- stderr
+ERROR (gate 1): outgoing tx has a non-object .data field on at least one action — cannot verify shape, refusing
+--- audit
+--- calls
+curl POST https://test.proton.eosusa.io/v1/history/get_transaction {"id":"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"} | argv: -sSf --max-time 15 -X POST -H content-type:application/json -d {"id":"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"} https://test.proton.eosusa.io/v1/history/get_transaction
+=== gate 1: updateauth vs transfer evidence
+rc=3
+--- stdout
+--- stderr
+ERROR (gate 1): testnet evidence tx action shape does not match the outgoing mainnet tx — refusing
+                expected (outgoing mainnet --tx=) action set: [{"account":"eosio","name":"updateauth"}]
+                actual (testnet evidence dddd6666dddd6666dddd6666dddd6666dddd6666dddd6666dddd6666dddd6666) action set:   [{"account":"eosio.token","name":"transfer"}]
+--- audit
+--- calls
+curl POST https://test.proton.eosusa.io/v1/history/get_transaction {"id":"dddd6666dddd6666dddd6666dddd6666dddd6666dddd6666dddd6666dddd6666"} | argv: -sSf --max-time 15 -X POST -H content-type:application/json -d {"id":"dddd6666dddd6666dddd6666dddd6666dddd6666dddd6666dddd6666dddd6666"} https://test.proton.eosusa.io/v1/history/get_transaction
+=== gate 1: v2-shaped answer (trx_id, no id) on the v1 endpoint → refuse
+rc=3
+--- stdout
+--- stderr
+ERROR (gate 1): could not resolve --testnet-tx-id ffff8888ffff8888ffff8888ffff8888ffff8888ffff8888ffff8888ffff8888 against https://test.proton.eosusa.io. Verify the shape actually ran on testnet first.
+--- audit
+--- calls
+curl POST https://test.proton.eosusa.io/v1/history/get_transaction {"id":"ffff8888ffff8888ffff8888ffff8888ffff8888ffff8888ffff8888ffff8888"} | argv: -sSf --max-time 15 -X POST -H content-type:application/json -d {"id":"ffff8888ffff8888ffff8888ffff8888ffff8888ffff8888ffff8888ffff8888"} https://test.proton.eosusa.io/v1/history/get_transaction
+=== gate 1: curl missing
+rc=3
+--- stdout
+--- stderr
+ERROR (gate 1): curl required to resolve testnet tx-id
+--- audit
+--- calls
+=== gate 1: XPR_TESTNET_RPC = the profile's history base
+rc=0
+--- stdout
+f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000
+--- stderr
+--- audit
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=pre	chain=mainnet-a	tx_sha256=81b84c33c751e57b92649127ce9a9eacf15ea4e62f39baf5cab8ab9244d4a91f	testnet_txid=1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=post	chain=mainnet-a	tx_sha256=81b84c33c751e57b92649127ce9a9eacf15ea4e62f39baf5cab8ab9244d4a91f	rc=0	tx_id=f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000
+--- calls
+curl POST https://test.proton.eosusa.io/v1/history/get_transaction {"id":"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"} | argv: -sSf --max-time 15 -X POST -H content-type:application/json -d {"id":"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"} https://test.proton.eosusa.io/v1/history/get_transaction
+proton chain:set proton
+proton chain:info
+proton transaction:push
+=== gate 4: no dry-run log
+rc=3
+--- stdout
+--- stderr
+ERROR (gate 4): mainnet requires --dry-run-log=<file> pointing to a prior --dry-run output for this shape
+--- audit
+--- calls
+curl POST https://test.proton.eosusa.io/v1/history/get_transaction {"id":"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"} | argv: -sSf --max-time 15 -X POST -H content-type:application/json -d {"id":"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"} https://test.proton.eosusa.io/v1/history/get_transaction
+=== gate 4: dry-run log empty
+rc=3
+--- stdout
+--- stderr
+ERROR (gate 4): dry-run log missing or empty: <T>/tx-nonexistent
+--- audit
+--- calls
+curl POST https://test.proton.eosusa.io/v1/history/get_transaction {"id":"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"} | argv: -sSf --max-time 15 -X POST -H content-type:application/json -d {"id":"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"} https://test.proton.eosusa.io/v1/history/get_transaction
+=== gate 4: prefix mismatch
+rc=3
+--- stdout
+--- stderr
+ERROR (gate 4): dry-run log memo_prefix does not match the outgoing mainnet tx — refusing
+                expected (outgoing mainnet --tx=) memo prefix set: ["fya1c3"]
+                actual (dry-run log <T>/dry-c4.json) memo_prefix:       ["fya1c4"]
+--- audit
+--- calls
+curl POST https://test.proton.eosusa.io/v1/history/get_transaction {"id":"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"} | argv: -sSf --max-time 15 -X POST -H content-type:application/json -d {"id":"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"} https://test.proton.eosusa.io/v1/history/get_transaction
+=== gate 4: no prefix
+rc=3
+--- stdout
+--- stderr
+ERROR (gate 4): outgoing tx is anchor-shaped but dry-run log has no memo_prefix record: <T>/dry-noprefix.json
+--- audit
+--- calls
+curl POST https://test.proton.eosusa.io/v1/history/get_transaction {"id":"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"} | argv: -sSf --max-time 15 -X POST -H content-type:application/json -d {"id":"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"} https://test.proton.eosusa.io/v1/history/get_transaction
+=== gate 4: wrong target chain
+rc=3
+--- stdout
+--- stderr
+ERROR (gate 4): dry-run log target_chain ('testnet-a') does not match --chain= (mainnet-a) — refusing
+--- audit
+--- calls
+curl POST https://test.proton.eosusa.io/v1/history/get_transaction {"id":"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"} | argv: -sSf --max-time 15 -X POST -H content-type:application/json -d {"id":"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"} https://test.proton.eosusa.io/v1/history/get_transaction
+=== gate 4: not JSON (anchor)
+rc=3
+--- stdout
+--- stderr
+ERROR (gate 4): anchor-shaped outgoing tx requires a JSON-object dry-run log: <T>/dry-text.txt
+--- audit
+--- calls
+curl POST https://test.proton.eosusa.io/v1/history/get_transaction {"id":"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"} | argv: -sSf --max-time 15 -X POST -H content-type:application/json -d {"id":"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"} https://test.proton.eosusa.io/v1/history/get_transaction
+=== gate 2b: mainnet, testnet-bound token
+rc=3
+--- stdout
+--- stderr
+ERROR (gate 2): operator token was bound to chain 'testnet-a' but this broadcast targets 'mainnet-a' (proton) — refusing (R16 token-chain binding)
+--- audit
+--- calls
+curl POST https://test.proton.eosusa.io/v1/history/get_transaction {"id":"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"} | argv: -sSf --max-time 15 -X POST -H content-type:application/json -d {"id":"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"} https://test.proton.eosusa.io/v1/history/get_transaction
+=== gate 2b: mainnet, bare token
+rc=3
+--- stdout
+--- stderr
+ERROR (gate 2): operator token is not chain-bound (legacy/bare token) — MAINNET refuses unbound tokens, fail-closed (R16)
+                Create a bound token before broadcasting to mainnet, e.g.:
+                  printf '{"chain":"mainnet-a"}' > <T>/token
+                (see the R16 usage-header section above for the full ritual, incl. tx_sha256 binding)
+--- audit
+--- calls
+curl POST https://test.proton.eosusa.io/v1/history/get_transaction {"id":"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"} | argv: -sSf --max-time 15 -X POST -H content-type:application/json -d {"id":"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"} https://test.proton.eosusa.io/v1/history/get_transaction
+=== gate 2b: mainnet, unrecognized chain
+rc=3
+--- stdout
+--- stderr
+ERROR (gate 2): operator token was bound to chain 'moon' but this broadcast targets 'mainnet-a' (proton) — refusing (R16 token-chain binding)
+--- audit
+--- calls
+curl POST https://test.proton.eosusa.io/v1/history/get_transaction {"id":"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"} | argv: -sSf --max-time 15 -X POST -H content-type:application/json -d {"id":"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"} https://test.proton.eosusa.io/v1/history/get_transaction
+=== gate 2b: testnet, tx_sha256 mismatch
+rc=3
+--- stdout
+--- stderr
+ERROR (gate 2): operator token was bound to a different transaction (tx_sha256 mismatch) — refusing (R16 token-content binding)
+--- audit
+--- calls
+=== gate 2b: testnet, proton-test alias token
+rc=0
+--- stdout
+f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000
+--- stderr
+--- audit
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=pre	chain=testnet-a	tx_sha256=81b84c33c751e57b92649127ce9a9eacf15ea4e62f39baf5cab8ab9244d4a91f	testnet_txid=none
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=post	chain=testnet-a	tx_sha256=81b84c33c751e57b92649127ce9a9eacf15ea4e62f39baf5cab8ab9244d4a91f	rc=0	tx_id=f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000
+--- calls
+proton chain:set proton-test
+proton chain:info
+proton transaction:push
+=== gate 3: testnet chain_id mismatch
+rc=4
+--- stdout
+--- stderr
+WARNING (gate 2): operator token is not chain-bound (legacy/bare token). Accepted for TESTNET ONLY, for backward compatibility — this will be required for mainnet unconditionally. See the R16 usage-header section above for the new ritual.
+ERROR (gate 3): chain_id mismatch — proton is pointed at the WRONG chain; refusing to broadcast
+                target chain:   testnet-a (proton-test)
+                expected chain_id: 71ee83bcf52142d61019d95f9cc5427ba6a0d7ff8accd9e2088ae2abeaf3d3dd
+                actual chain_id:   ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+--- audit
+--- calls
+proton chain:set proton-test
+proton chain:info
+=== gate 3: mainnet answers testnet id
+rc=4
+--- stdout
+--- stderr
+ERROR (gate 3): chain_id mismatch — proton is pointed at the WRONG chain; refusing to broadcast
+                target chain:   mainnet-a (proton)
+                expected chain_id: 384da888112027f0321850a169f737c33e53b388aad48b5adace4bab97f437e0
+                actual chain_id:   71ee83bcf52142d61019d95f9cc5427ba6a0d7ff8accd9e2088ae2abeaf3d3dd
+--- audit
+--- calls
+curl POST https://test.proton.eosusa.io/v1/history/get_transaction {"id":"bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444"} | argv: -sSf --max-time 15 -X POST -H content-type:application/json -d {"id":"bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444"} https://test.proton.eosusa.io/v1/history/get_transaction
+proton chain:set proton
+proton chain:info
+=== gate 3: chain:set fails
+rc=4
+--- stdout
+--- stderr
+WARNING (gate 2): operator token is not chain-bound (legacy/bare token). Accepted for TESTNET ONLY, for backward compatibility — this will be required for mainnet unconditionally. See the R16 usage-header section above for the new ritual.
+ERROR (gate 3): proton chain:set proton-test failed
+--- audit
+--- calls
+proton chain:set proton-test
+=== gate 3: chain:info unparseable
+rc=4
+--- stdout
+--- stderr
+WARNING (gate 2): operator token is not chain-bound (legacy/bare token). Accepted for TESTNET ONLY, for backward compatibility — this will be required for mainnet unconditionally. See the R16 usage-header section above for the new ritual.
+ERROR (gate 3): could not parse chain_id from proton chain:info; refusing to broadcast
+                Output was:
+Error: connect ECONNREFUSED
+--- audit
+--- calls
+proton chain:set proton-test
+proton chain:info
+=== gate 3: override EQUAL to the profile (testnet)
+rc=0
+--- stdout
+f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000
+--- stderr
+WARNING (gate 2): operator token is not chain-bound (legacy/bare token). Accepted for TESTNET ONLY, for backward compatibility — this will be required for mainnet unconditionally. See the R16 usage-header section above for the new ritual.
+--- audit
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=pre	chain=testnet-a	tx_sha256=81b84c33c751e57b92649127ce9a9eacf15ea4e62f39baf5cab8ab9244d4a91f	testnet_txid=none
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=post	chain=testnet-a	tx_sha256=81b84c33c751e57b92649127ce9a9eacf15ea4e62f39baf5cab8ab9244d4a91f	rc=0	tx_id=f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000
+--- calls
+proton chain:set proton-test
+proton chain:info
+proton transaction:push
+=== gate 3: override EQUAL to the profile (mainnet)
+rc=0
+--- stdout
+f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000
+--- stderr
+--- audit
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=pre	chain=mainnet-a	tx_sha256=9f26f4a4ef003b66d9981c83fb8ab3c595565eb450e03de27c8aa07bd276e462	testnet_txid=bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=post	chain=mainnet-a	tx_sha256=9f26f4a4ef003b66d9981c83fb8ab3c595565eb450e03de27c8aa07bd276e462	rc=0	tx_id=f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000
+--- calls
+curl POST https://test.proton.eosusa.io/v1/history/get_transaction {"id":"bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444"} | argv: -sSf --max-time 15 -X POST -H content-type:application/json -d {"id":"bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444"} https://test.proton.eosusa.io/v1/history/get_transaction
+proton chain:set proton
+proton chain:info
+proton transaction:push
+=== gate 3: empty override = unset
+rc=0
+--- stdout
+f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000
+--- stderr
+WARNING (gate 2): operator token is not chain-bound (legacy/bare token). Accepted for TESTNET ONLY, for backward compatibility — this will be required for mainnet unconditionally. See the R16 usage-header section above for the new ritual.
+--- audit
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=pre	chain=testnet-a	tx_sha256=81b84c33c751e57b92649127ce9a9eacf15ea4e62f39baf5cab8ab9244d4a91f	testnet_txid=none
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=post	chain=testnet-a	tx_sha256=81b84c33c751e57b92649127ce9a9eacf15ea4e62f39baf5cab8ab9244d4a91f	rc=0	tx_id=f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000
+--- calls
+proton chain:set proton-test
+proton chain:info
+proton transaction:push
+=== confirm: testnet, wrong phrase
+rc=5
+--- stdout
+--- stderr
+WARNING (gate 2): operator token is not chain-bound (legacy/bare token). Accepted for TESTNET ONLY, for backward compatibility — this will be required for mainnet unconditionally. See the R16 usage-header section above for the new ritual.
+==================== BROADCAST CONFIRMATION ====================
+chain:        testnet-a (proton-test)
+token binding: chain=<unbound-legacy>  (R16)
+tx JSON file: <T>/tx-c3.json
+action count: 1
+actions:
+  eosio.token::transfer  authorization=metalfreedom@anchor  memo=fya1c3-test
+----------------------------------------------------------------
+Type 'BROADCAST testnet-a' to confirm (any other input aborts): ABORTED: confirmation phrase did not match
+--- audit
+--- calls
+proton chain:set proton-test
+proton chain:info
+=== confirm: testnet, EOF
+rc=5
+--- stdout
+--- stderr
+WARNING (gate 2): operator token is not chain-bound (legacy/bare token). Accepted for TESTNET ONLY, for backward compatibility — this will be required for mainnet unconditionally. See the R16 usage-header section above for the new ritual.
+==================== BROADCAST CONFIRMATION ====================
+chain:        testnet-a (proton-test)
+token binding: chain=<unbound-legacy>  (R16)
+tx JSON file: <T>/tx-c3.json
+action count: 1
+actions:
+  eosio.token::transfer  authorization=metalfreedom@anchor  memo=fya1c3-test
+----------------------------------------------------------------
+Type 'BROADCAST testnet-a' to confirm (any other input aborts): ABORTED: confirmation phrase did not match
+--- audit
+--- calls
+proton chain:set proton-test
+proton chain:info
+=== confirm: testnet, correct phrase → push
+rc=0
+--- stdout
+f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000
+--- stderr
+WARNING (gate 2): operator token is not chain-bound (legacy/bare token). Accepted for TESTNET ONLY, for backward compatibility — this will be required for mainnet unconditionally. See the R16 usage-header section above for the new ritual.
+==================== BROADCAST CONFIRMATION ====================
+chain:        testnet-a (proton-test)
+token binding: chain=<unbound-legacy>  (R16)
+tx JSON file: <T>/tx-c3.json
+action count: 1
+actions:
+  eosio.token::transfer  authorization=metalfreedom@anchor  memo=fya1c3-test
+----------------------------------------------------------------
+Type 'BROADCAST testnet-a' to confirm (any other input aborts): --- audit
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=pre	chain=testnet-a	tx_sha256=81b84c33c751e57b92649127ce9a9eacf15ea4e62f39baf5cab8ab9244d4a91f	testnet_txid=none
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=post	chain=testnet-a	tx_sha256=81b84c33c751e57b92649127ce9a9eacf15ea4e62f39baf5cab8ab9244d4a91f	rc=0	tx_id=f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000
+--- calls
+proton chain:set proton-test
+proton chain:info
+proton transaction:push
+=== confirm: mainnet, correct phrase → push
+rc=0
+--- stdout
+f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000
+--- stderr
+==================== BROADCAST CONFIRMATION ====================
+chain:        mainnet-a (proton)
+token binding: chain=mainnet-a  (R16)
+tx JSON file: <T>/tx-c4.json
+action count: 1
+actions:
+  eosio.token::transfer  authorization=metalfreedom@anchor  memo=fya1c4-test
+MAINNET gates verified: testnet-tx-id=bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444
+                        dry-run-log=<T>/dry-c4.json
+----------------------------------------------------------------
+Type 'BROADCAST mainnet-a' to confirm (any other input aborts): --- audit
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=pre	chain=mainnet-a	tx_sha256=9f26f4a4ef003b66d9981c83fb8ab3c595565eb450e03de27c8aa07bd276e462	testnet_txid=bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=post	chain=mainnet-a	tx_sha256=9f26f4a4ef003b66d9981c83fb8ab3c595565eb450e03de27c8aa07bd276e462	rc=0	tx_id=f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000
+--- calls
+curl POST https://test.proton.eosusa.io/v1/history/get_transaction {"id":"bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444"} | argv: -sSf --max-time 15 -X POST -H content-type:application/json -d {"id":"bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444"} https://test.proton.eosusa.io/v1/history/get_transaction
+proton chain:set proton
+proton chain:info
+proton transaction:push
+=== push: testnet processed → tx_id
+rc=0
+--- stdout
+f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000
+--- stderr
+WARNING (gate 2): operator token is not chain-bound (legacy/bare token). Accepted for TESTNET ONLY, for backward compatibility — this will be required for mainnet unconditionally. See the R16 usage-header section above for the new ritual.
+--- audit
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=pre	chain=testnet-a	tx_sha256=81b84c33c751e57b92649127ce9a9eacf15ea4e62f39baf5cab8ab9244d4a91f	testnet_txid=none
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=post	chain=testnet-a	tx_sha256=81b84c33c751e57b92649127ce9a9eacf15ea4e62f39baf5cab8ab9244d4a91f	rc=0	tx_id=f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000
+--- calls
+proton chain:set proton-test
+proton chain:info
+proton transaction:push
+=== push: testnet proton-test alias
+rc=0
+--- stdout
+f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000
+--- stderr
+WARNING (gate 2): operator token is not chain-bound (legacy/bare token). Accepted for TESTNET ONLY, for backward compatibility — this will be required for mainnet unconditionally. See the R16 usage-header section above for the new ritual.
+--- audit
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=pre	chain=proton-test	tx_sha256=81b84c33c751e57b92649127ce9a9eacf15ea4e62f39baf5cab8ab9244d4a91f	testnet_txid=none
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=post	chain=proton-test	tx_sha256=81b84c33c751e57b92649127ce9a9eacf15ea4e62f39baf5cab8ab9244d4a91f	rc=0	tx_id=f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000
+--- calls
+proton chain:set proton-test
+proton chain:info
+proton transaction:push
+=== push: testnet chain+sha bound
+rc=0
+--- stdout
+f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000
+--- stderr
+--- audit
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=pre	chain=testnet-a	tx_sha256=81b84c33c751e57b92649127ce9a9eacf15ea4e62f39baf5cab8ab9244d4a91f	testnet_txid=none
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=post	chain=testnet-a	tx_sha256=81b84c33c751e57b92649127ce9a9eacf15ea4e62f39baf5cab8ab9244d4a91f	rc=0	tx_id=f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000
+--- calls
+proton chain:set proton-test
+proton chain:info
+proton transaction:push
+=== push: mainnet cycle-4 all gates
+rc=0
+--- stdout
+f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000
+--- stderr
+--- audit
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=pre	chain=mainnet-a	tx_sha256=9f26f4a4ef003b66d9981c83fb8ab3c595565eb450e03de27c8aa07bd276e462	testnet_txid=bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=post	chain=mainnet-a	tx_sha256=9f26f4a4ef003b66d9981c83fb8ab3c595565eb450e03de27c8aa07bd276e462	rc=0	tx_id=f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000
+--- calls
+curl POST https://test.proton.eosusa.io/v1/history/get_transaction {"id":"bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444"} | argv: -sSf --max-time 15 -X POST -H content-type:application/json -d {"id":"bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444"} https://test.proton.eosusa.io/v1/history/get_transaction
+proton chain:set proton
+proton chain:info
+proton transaction:push
+=== push: mainnet alias proton
+rc=0
+--- stdout
+f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000
+--- stderr
+--- audit
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=pre	chain=proton	tx_sha256=9f26f4a4ef003b66d9981c83fb8ab3c595565eb450e03de27c8aa07bd276e462	testnet_txid=bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=post	chain=proton	tx_sha256=9f26f4a4ef003b66d9981c83fb8ab3c595565eb450e03de27c8aa07bd276e462	rc=0	tx_id=f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000
+--- calls
+curl POST https://test.proton.eosusa.io/v1/history/get_transaction {"id":"bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444"} | argv: -sSf --max-time 15 -X POST -H content-type:application/json -d {"id":"bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444"} https://test.proton.eosusa.io/v1/history/get_transaction
+proton chain:set proton
+proton chain:info
+proton transaction:push
+=== push: mainnet updateauth + text dry-run
+rc=0
+--- stdout
+f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000
+--- stderr
+--- audit
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=pre	chain=mainnet-a	tx_sha256=bdaf5d897a1b868966d7a2aee1ad997d2edd555f5bf5f5cd2210f11398d5728f	testnet_txid=cccc5555cccc5555cccc5555cccc5555cccc5555cccc5555cccc5555cccc5555
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=post	chain=mainnet-a	tx_sha256=bdaf5d897a1b868966d7a2aee1ad997d2edd555f5bf5f5cd2210f11398d5728f	rc=0	tx_id=f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000
+--- calls
+curl POST https://test.proton.eosusa.io/v1/history/get_transaction {"id":"cccc5555cccc5555cccc5555cccc5555cccc5555cccc5555cccc5555cccc5555"} | argv: -sSf --max-time 15 -X POST -H content-type:application/json -d {"id":"cccc5555cccc5555cccc5555cccc5555cccc5555cccc5555cccc5555cccc5555"} https://test.proton.eosusa.io/v1/history/get_transaction
+proton chain:set proton
+proton chain:info
+proton transaction:push
+=== push: answer carries only id
+rc=0
+--- stdout
+f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000
+--- stderr
+WARNING (gate 2): operator token is not chain-bound (legacy/bare token). Accepted for TESTNET ONLY, for backward compatibility — this will be required for mainnet unconditionally. See the R16 usage-header section above for the new ritual.
+--- audit
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=pre	chain=testnet-a	tx_sha256=81b84c33c751e57b92649127ce9a9eacf15ea4e62f39baf5cab8ab9244d4a91f	testnet_txid=none
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=post	chain=testnet-a	tx_sha256=81b84c33c751e57b92649127ce9a9eacf15ea4e62f39baf5cab8ab9244d4a91f	rc=0	tx_id=f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000
+--- calls
+proton chain:set proton-test
+proton chain:info
+proton transaction:push
+=== push: answer carries only transaction_id
+rc=0
+--- stdout
+f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000
+--- stderr
+WARNING (gate 2): operator token is not chain-bound (legacy/bare token). Accepted for TESTNET ONLY, for backward compatibility — this will be required for mainnet unconditionally. See the R16 usage-header section above for the new ritual.
+--- audit
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=pre	chain=testnet-a	tx_sha256=81b84c33c751e57b92649127ce9a9eacf15ea4e62f39baf5cab8ab9244d4a91f	testnet_txid=none
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=post	chain=testnet-a	tx_sha256=81b84c33c751e57b92649127ce9a9eacf15ea4e62f39baf5cab8ab9244d4a91f	rc=0	tx_id=f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000
+--- calls
+proton chain:set proton-test
+proton chain:info
+proton transaction:push
+=== push: chain rejects
+rc=6
+--- stdout
+--- stderr
+WARNING (gate 2): operator token is not chain-bound (legacy/bare token). Accepted for TESTNET ONLY, for backward compatibility — this will be required for mainnet unconditionally. See the R16 usage-header section above for the new ritual.
+ERROR (6): broadcast failed (rc=1, tx_id=empty)
+--- proton stderr (last 20 lines) ---
+Error: assertion failure with message: stub
+--- proton stdout (last 20 lines) ---
+--- audit
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=pre	chain=testnet-a	tx_sha256=81b84c33c751e57b92649127ce9a9eacf15ea4e62f39baf5cab8ab9244d4a91f	testnet_txid=none
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=post	chain=testnet-a	tx_sha256=81b84c33c751e57b92649127ce9a9eacf15ea4e62f39baf5cab8ab9244d4a91f	rc=1	tx_id=none
+--- calls
+proton chain:set proton-test
+proton chain:info
+proton transaction:push
+=== push: answer without any id
+rc=6
+--- stdout
+--- stderr
+WARNING (gate 2): operator token is not chain-bound (legacy/bare token). Accepted for TESTNET ONLY, for backward compatibility — this will be required for mainnet unconditionally. See the R16 usage-header section above for the new ritual.
+ERROR (6): broadcast failed (rc=0, tx_id=empty)
+--- proton stderr (last 20 lines) ---
+--- proton stdout (last 20 lines) ---
+{}
+--- audit
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=pre	chain=testnet-a	tx_sha256=81b84c33c751e57b92649127ce9a9eacf15ea4e62f39baf5cab8ab9244d4a91f	testnet_txid=none
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=post	chain=testnet-a	tx_sha256=81b84c33c751e57b92649127ce9a9eacf15ea4e62f39baf5cab8ab9244d4a91f	rc=0	tx_id=none
+--- calls
+proton chain:set proton-test
+proton chain:info
+proton transaction:push
+=== audit: log write fails (primary a directory, no login home) → exit 7
+rc=7
+--- stdout
+--- stderr
+WARNING (gate 2): operator token is not chain-bound (legacy/bare token). Accepted for TESTNET ONLY, for backward compatibility — this will be required for mainnet unconditionally. See the R16 usage-header section above for the new ritual.
+<WRAPPER>: line <N>: ~zzsbnouser9/.fyd-broadcast-audit.log: No such file or directory
+ERROR (7): audit log write failed to ~zzsbnouser9/.fyd-broadcast-audit.log
+--- audit
+--- calls
+proton chain:set proton-test
+proton chain:info
+=== push: mainnet chain rejects
+rc=6
+--- stdout
+--- stderr
+ERROR (6): broadcast failed (rc=1, tx_id=empty)
+--- proton stderr (last 20 lines) ---
+Error: assertion failure with message: stub
+--- proton stdout (last 20 lines) ---
+--- audit
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=pre	chain=mainnet-a	tx_sha256=9f26f4a4ef003b66d9981c83fb8ab3c595565eb450e03de27c8aa07bd276e462	testnet_txid=bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444
+<TS>	invoker=<U>	wrapper=safe-broadcast	phase=post	chain=mainnet-a	tx_sha256=9f26f4a4ef003b66d9981c83fb8ab3c595565eb450e03de27c8aa07bd276e462	rc=1	tx_id=none
+--- calls
+curl POST https://test.proton.eosusa.io/v1/history/get_transaction {"id":"bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444"} | argv: -sSf --max-time 15 -X POST -H content-type:application/json -d {"id":"bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444bbbb4444"} https://test.proton.eosusa.io/v1/history/get_transaction
+proton chain:set proton
+proton chain:info
+proton transaction:push

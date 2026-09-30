@@ -53,15 +53,32 @@ export FYD_BROADCAST_AUDIT_LOG="$TEST_AUDIT"
 # (b) answer the gate-3 chain:info probe with a well-formed chain_id. No test
 # case reaches the actual broadcast, so the stub never issues one — it does NOT
 # weaken any assertion, it only removes the environment's real-proton dependency.
-# The gate-3 scenario overrides FYD_TESTNET_CHAIN_ID to a bogus value, so the
-# stub's (real, default) chain_id deliberately mismatches → exit 4, as intended.
+# The gate-3 scenarios export STUB_CHAIN_ID (a bogus chain_id) so chain:info
+# answers a chain that is not the expected one → exit 4, as intended. (They
+# used to override FYD_TESTNET_CHAIN_ID instead; since 2026-09-30 that
+# variable is confirm-only and a differing value is refused BEFORE any gate,
+# which would no longer exercise gate 3 at all.)
+#
+# chain:set records the selected network in the fixture proton-cli.json
+# (below), the way the real proton-cli does: gate 3's host check (2026-09-30)
+# reads that file to learn which endpoint proton-cli will use, and requires
+# its currentChain to be the network just selected.
 STUB_DIR="$(mktemp -d -t safe-bcast-stub.XXXXXX)"
 cat > "$STUB_DIR/proton" <<'STUB'
 #!/usr/bin/env bash
 # Test stub for proton-cli (see tests/safe-broadcast/test-safe-broadcast.sh).
+cfg() {
+	case "$(uname -s)" in
+		Darwin) printf '%s' "$HOME/Library/Preferences/@proton/cli-nodejs/proton-cli.json" ;;
+		*)      printf '%s' "${XDG_CONFIG_HOME:-$HOME/.config}/@proton/cli-nodejs/proton-cli.json" ;;
+	esac
+}
 case "$1" in
-	chain:set)  exit 0 ;;
-	chain:info) echo '{"chain_id":"71ee83bcf52142d61019d95f9cc5427ba6a0d7ff8accd9e2088ae2abeaf3d3dd","head_block_num":1}' ; exit 0 ;;
+	chain:set)
+		c="$(cfg)"
+		if [ -f "$c" ]; then t="$(mktemp)"; jq --arg n "$2" '.currentChain = $n' "$c" > "$t" && mv "$t" "$c"; fi
+		exit 0 ;;
+	chain:info) echo "{\"chain_id\":\"${STUB_CHAIN_ID:-71ee83bcf52142d61019d95f9cc5427ba6a0d7ff8accd9e2088ae2abeaf3d3dd}\",\"head_block_num\":1}" ; exit 0 ;;
 	*)          exit 0 ;;
 esac
 STUB
@@ -209,6 +226,26 @@ export PATH="$STUB_DIR:$PATH"
 LOGIN_HOME="$(eval echo "~$(id -un)" 2>/dev/null || true)"
 TEST_HOME="$(mktemp -d -t safe-bcast-home.XXXXXX)"
 export HOME="$TEST_HOME"
+unset XDG_CONFIG_HOME FYD_A_CHAIN_PROFILE_MAINNET FYD_A_CHAIN_PROFILE_TESTNET \
+	FYD_MAINNET_CHAIN_ID FYD_TESTNET_CHAIN_ID XPR_TESTNET_RPC STUB_CHAIN_ID
+
+# The fixture keystore's proton-cli.json: what proton-cli persists on first
+# use — its built-in networks under `networks`, no `endpoints` override, and
+# NO private key. This is the state scripts/install-rehearsal-preflight.sh
+# check 10 accepts, so gate 3's host check (2026-09-30) passes on it and every
+# scenario below still reaches the gate it names.
+case "$(uname -s)" in
+	Darwin) TEST_PROTON_CFG="$TEST_HOME/Library/Preferences/@proton/cli-nodejs/proton-cli.json" ;;
+	*)      TEST_PROTON_CFG="$TEST_HOME/.config/@proton/cli-nodejs/proton-cli.json" ;;
+esac
+mkdir -p "$(dirname "$TEST_PROTON_CFG")"
+cat > "$TEST_PROTON_CFG" <<'JSON'
+{"privateKeys":[],"tryKeychain":false,"isLocked":false,
+ "networks":[
+  {"chain":"proton","endpoints":["https://rpc.api.mainnet.metalx.com","https://proton.cryptolions.io","https://proton.eosusa.io"]},
+  {"chain":"proton-test","endpoints":["https://rpc.api.testnet.metalx.com","https://proton-testnet.eoscafeblock.com","https://test.proton.eosusa.io"]}],
+ "currentChain":"proton-test"}
+JSON
 
 cleanup() {
 	rm -f "$TEST_TOKEN" "$TEST_AUDIT" "$TEST_TX_VALID" "$TEST_TX_EMPTY" "$TEST_DRY_LOG" \
@@ -749,17 +786,19 @@ run_case "keystore guard: HOME=project fixture dir → passes (reaches gate 3+co
 	--tx="$TEST_TX_VALID" --chain=testnet-a
 
 # ---- gate 3 (chain identity) failure path (exit 4) ----
-# Force a chain_id mismatch by overriding the expected testnet chain_id to a
-# value that cannot match the live chain. This exercises the identity check and
+# Force a chain_id mismatch: the proton stub's chain:info answers a bogus
+# chain_id (STUB_CHAIN_ID) while the expected testnet chain_id stays the
+# profile's real one. This exercises the identity comparison itself and
 # refuses BEFORE any broadcast (exit 4, before the pre-broadcast audit log).
-# Deterministic across environments: with proton present the real chain_id
-# differs from this bogus expectation; without proton (or offline) the wrapper
-# also exits 4 (proton-not-found / chain:set / parse failure all map to 4).
+# Reworked 2026-09-30: the previous FYD_TESTNET_CHAIN_ID override is now
+# confirm-only and refused before any gate, so it no longer reached gate 3;
+# the stderr assertion pins this to gate 3's own mismatch message.
 touch "$TEST_TOKEN"
-export FYD_TESTNET_CHAIN_ID="ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-run_case "gate 3: testnet, chain_id mismatch → refuse (exit 4)" 4 \
+export STUB_CHAIN_ID="ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+run_case_grep "gate 3: testnet, chain_id mismatch → refuse (exit 4)" 4 \
+	"ERROR (gate 3): chain_id mismatch" \
 	--tx="$TEST_TX_VALID" --chain=testnet-a --non-interactive
-unset FYD_TESTNET_CHAIN_ID
+unset STUB_CHAIN_ID
 
 # ---- R16: gate 2b (operator token CONTENT binding) ----
 # Freshness alone used to be sufficient (gate 2 above) — a token
@@ -826,13 +865,16 @@ run_case "gate 2b: testnet, tx_sha256 bound but mismatched → refuse (exit 3)" 
 	--tx="$TEST_TX_VALID" --chain=testnet-a --non-interactive
 
 # tx_sha256 binding: chain AND tx_sha256 both match → gate 2b passes,
-# reaches gate 3 (exit 4 via the same bogus FYD_TESTNET_CHAIN_ID override
-# used in the "gate 3: testnet, chain_id mismatch" case above).
-export FYD_TESTNET_CHAIN_ID="ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+# reaches gate 3 (exit 4 via the same bogus STUB_CHAIN_ID answer used in the
+# "gate 3: testnet, chain_id mismatch" case above). The stderr assertion
+# proves the refusal came from gate 3's chain_id comparison — i.e. the run
+# got PAST gate 2b — not from any earlier exit-4 path.
+export STUB_CHAIN_ID="ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
 printf '{"chain":"testnet-a","tx_sha256":"%s"}' "$TEST_TX_VALID_SHA256" > "$TEST_TOKEN"
-run_case "gate 2b: testnet, chain+tx_sha256 correctly bound → passes (reaches gate 3, exit 4)" 4 \
+run_case_grep "gate 2b: testnet, chain+tx_sha256 correctly bound → passes (reaches gate 3, exit 4)" 4 \
+	"ERROR (gate 3): chain_id mismatch" \
 	--tx="$TEST_TX_VALID" --chain=testnet-a --non-interactive
-unset FYD_TESTNET_CHAIN_ID
+unset STUB_CHAIN_ID
 
 # ---- audit log: no line written on gate refusal (pre-log happens only after gates pass) ----
 if [ ! -s "$TEST_AUDIT" ]; then

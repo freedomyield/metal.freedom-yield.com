@@ -447,6 +447,7 @@ fyc__table_rows() {
 5|7b|preview-cycle-anchor-broadcast.sh|8|Keystore separation guard failed (Constitution 3.5).|Re-invoke with the project mainnet keystore HOME prefix.
 5|7b|preview-cycle-anchor-broadcast.sh|9|Committed-bytes guard failed: --source does not match the committed anchor-source.|Preview the COMMITTED bytes, not a working-tree copy. If they should match, step 6 has not landed; complete it first.
 5|7b|preview-cycle-anchor-broadcast.sh|10|Published-copy guard failed: the live public anchor-source.json does not match.|The deploy has not propagated. Wait for it and re-check the published bytes; do not proceed on the local copy.
+5|7b|preview-cycle-anchor-broadcast.sh|11|The chain profile could not be read (profile file invalid, unknown profile selected, chain_id not published, or an FYD_MAINNET_CHAIN_ID override that differs).|The real broadcast would refuse for the same reason. Do not work around it: unset stray FYD_A_CHAIN_PROFILE_* / FYD_MAINNET_CHAIN_ID variables, or restore config/a-chain-profiles.json from git, then re-run the preview.
 5|7c|sign-anchor-event.sh|0|Success. The receipt fragment is on stdout.|Transfer the fragment to the host for step 8 (step 7.5). It is the only record of what was inscribed.
 5|7c|sign-anchor-event.sh|1|Usage error.|Fix the argument.
 5|7c|sign-anchor-event.sh|2|anchor-source.json is missing or invalid, its DAG root does not match, or cycle_number_observed is below 1.|Re-derive the anchor source (step 5) rather than editing it. A DAG mismatch means the file changed after it was composed.
