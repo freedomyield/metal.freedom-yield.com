@@ -1607,6 +1607,11 @@ OUT="$(run_checker 2>&1)"; RC=$?
 [ "$(jq -r '.observations.official_unread_runs' "$STATE")" = "0" ] \
 	&& ok "T8 soft: a fully readable run resets the counter" \
 	|| bad "T8 soft: counter not reset ($(jq -c '.observations.official_unread_runs' "$STATE"))"
+: > "$NOTIFY_LOG"
+OUT="$(PULSEVM_UPSTREAM_FAILURE_ALERT_AFTER=0 run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 0 ] && [ "$(n_alerts)" -eq 0 ] \
+	&& ok "T8 soft: threshold 0 silences the unread page — a fully readable run (counter 0) must not 'reach' it" \
+	|| bad "T8 soft: threshold 0 with every page readable paged anyway, got $RC ($(alerts))"
 teardown
 
 # ---- case 21c (config): a malformed official URL list falls back wholesale ----

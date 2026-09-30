@@ -1158,7 +1158,7 @@ unset PF_HYPERION_RPC
 D="$(fresh prof-pulsevm-unpublished)"
 FYD_A_CHAIN_PROFILE_TESTNET=pulsevm-testnet; export FYD_A_CHAIN_PROFILE_TESTNET
 expect_case "check 10 (profile): a testnet profile with no published values (pulsevm-testnet) -> exit 3, chain-profile-unavailable, never green" "$D" 3 \
-	"chain-profile-unavailable:" "VERDICT: PRE-FLIGHT GREEN"
+	"chain-profile-unavailable:a-chain-profile:" "VERDICT: PRE-FLIGHT GREEN"
 OUT_PROF="$(run_pf "$D")"
 if printf '%s' "$OUT_PROF" | grep -qF "xpr-chain-unverifiable(chain-profile-unavailable)"; then
 	pass "check 3 (profile): the rehearsal chain name cannot be judged without the profile -> named, not silently skipped"
@@ -1170,7 +1170,7 @@ unset FYD_A_CHAIN_PROFILE_TESTNET
 D="$(fresh prof-unknown)"
 FYD_A_CHAIN_PROFILE_MAINNET=no-such-profile; export FYD_A_CHAIN_PROFILE_MAINNET
 expect_case "check 10 (profile): an unknown mainnet profile selection -> exit 3, chain-profile-unavailable" "$D" 3 \
-	"chain-profile-unavailable:" "VERDICT: PRE-FLIGHT GREEN"
+	"chain-profile-unavailable:a-chain-profile:" "VERDICT: PRE-FLIGHT GREEN"
 unset FYD_A_CHAIN_PROFILE_MAINNET
 
 # ===========================================================================
