@@ -22,7 +22,7 @@
 #          --from-file=<path>       a local copy (used by tests / offline)
 #        Only lines whose network is a mainnet A-Chain network are archived.
 #
-# OUTPUT (default public/api/archive/legacy-a-chain/):
+# OUTPUT (default public/api/legacy-a-chain/):
 #   <tx_id>.json   envelope: the two response bodies stored VERBATIM as JSON
 #                  strings (history_body, block_body) plus their sha256s
 #   manifest.json  one entry per tx: tx_id, block_num, block_id, chain_id,
@@ -66,7 +66,7 @@ SCHEMA="legacy-a-chain-archive/v1"
 
 SITE="$DEFAULT_SITE"
 FROM_FILE=""
-OUT_DIR="${REPO_ROOT}/public/api/archive/legacy-a-chain"
+OUT_DIR="${REPO_ROOT}/public/api/legacy-a-chain"
 DRY_RUN=0
 SLEEP="${FYD_ARCHIVE_SLEEP:-1}"
 CURL="${FYD_CURL:-curl}"

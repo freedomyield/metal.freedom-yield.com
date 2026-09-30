@@ -22,7 +22,7 @@
 # Usage:
 #   verify-legacy-anchor-archive.sh [--archive-dir=<dir>] [--history=<jsonl>]
 #                                   [--receipts-dir=<dir>]
-#   defaults: public/api/archive/legacy-a-chain, public/api/anchor-history.jsonl
+#   defaults: public/api/legacy-a-chain, public/api/anchor-history.jsonl
 #   receipts: <dir>/anchor-receipt-<tx_id>.json (e.g. public/api/archive)
 #
 # Exit codes: 0 all verified / 1 verification failed / 2 usage or unreadable input
@@ -33,7 +33,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CHAIN_ID="384da888112027f0321850a169f737c33e53b388aad48b5adace4bab97f437e0"
 SCHEMA="legacy-a-chain-archive/v1"
 
-ARCHIVE_DIR="${REPO_ROOT}/public/api/archive/legacy-a-chain"
+ARCHIVE_DIR="${REPO_ROOT}/public/api/legacy-a-chain"
 HISTORY="${REPO_ROOT}/public/api/anchor-history.jsonl"
 RECEIPTS_DIR=""
 
