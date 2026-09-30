@@ -121,8 +121,9 @@
 # ---------------------------------------------------------------------------
 # The unit table below is reconciled by tests/cycle-transition/ against BOTH:
 #
-#   * docs/cycle-transition-steps.json — the 13 machine-checked execution
-#     units. Every one of its ids must appear here.
+#   * docs/cycle-transition-steps.json — the 15 machine-checked execution
+#     units (13 until 2026-09-30, when 7b.5 and 10 joined — see below). Every
+#     one of its ids must appear here.
 #   * docs/CYCLE_GATE.md — the canonical runbook. The set of step markers in
 #     its "Operator runbook" section must equal this table's ids, plus step 0
 #     (the operator's wallet action, which is stop 1 here and deliberately
@@ -131,10 +132,24 @@
 # The two sources do not agree with each other, and this table follows the
 # CANON rather than the index: docs/CYCLE_GATE.md carries STEP 4b (the C4
 # post-issuance cleanup, added 2026-08-14) and docs/cycle-transition-steps.json
-# — last updated 2026-08-06 — does not. So this table holds 14 units: the 13
+# — last updated 2026-08-06 — does not. So this table holds 16 units: the 15
 # indexed ones plus 4b. The test pins that difference to exactly {4b}, so
 # neither "4b silently disappears" nor "some other step quietly joins the
 # plan" can pass.
+#
+# THE TWO UNITS ADDED 2026-09-30 (A-Chain -> PulseVM migration readiness):
+#   7b.5  host, read-only, BEFORE stop 4(a) and unit 7c: the host checkout
+#         carries the chain profile (config/a-chain-profiles.json) and jq >=
+#         1.6, no stale FYD_*_CHAIN_ID / FYD_A_CHAIN_PROFILE_* is set, and
+#         scripts/check-anchor-history-reachable.sh --chain=mainnet-a proves
+#         that unit 8's receipt step — which runs AFTER the irreversible
+#         broadcast — will resolve the transaction. Non-zero stops the day
+#         before anything is signed.
+#   10    Mac, after unit 9: archive the new anchor's raw legacy-chain record
+#         (scripts/archive-legacy-anchors.sh + verify-legacy-anchor-archive.sh)
+#         and commit public/api/legacy-a-chain/ while the legacy chain is
+#         still served.
+# Every other unit's id, order and meaning is unchanged.
 #
 # WHAT THE DRIFT GATE DELIBERATELY DOES NOT COVER, stated here because the
 # gap is load-bearing rather than accidental. docs/CYCLE_GATE.md carries one
@@ -394,7 +409,7 @@ fyct__phase_rows() {
 2|identity|2|OPERATOR, AT A TTY — TYPE THE LINE BELOW YOURSELF, BEFORE UNIT 4. It loads the operator identity key into the ssh-agent; the passphrase is held in Dashlane (see docs/OPERATOR_IDENTITY_SETUP.md) and the AI never receives it. Expect one line back: "Identity added: …". A wrong passphrase breaks nothing and can be retried. WHY IT IS DONE HERE AND NOT INSIDE UNIT 4: gen-identity.sh signs by calling ssh-keygen -Y sign with the private-key PATH, so if the key is not already in the agent it prompts — and unit 4 is run by the AI, non-interactively, where a prompt is a dead stop, not a question. Loading it first is what makes unit 4 runnable at all. The agent does NOT survive across sessions, so a rehearsal that did this last week does not count: it is needed again today.|ssh-add ~/.ssh/freedom-yield-operator-identity
 3|compose|-|-|-
 4|rehearsal|3|OPERATOR, AT A TTY. Unlock the PROJECT TESTNET keystore (HOME=~/.metal-fy-proton-test) — the unlock command itself is handed over in chat, not printed here (see this script's header, "WHY THE KEYSTORE UNLOCK COMMANDS ARE NOT PRINTED"; exact wording in docs/CYCLE_GATE.md step 7a). Unit 7a cannot run against a locked keystore: it exits 2. This is also where testnet broadcast authorization is given — and note that the authorization is not this unlock but the operator personally STARTING unit 7a, which is why unit 7a is the one execution unit marked operator@TTY. Whatever you unlock here, you close at stop 4(b): the testnet keystore stays open from now until then.|-
-5|刻印 / inscribe|4|OPERATOR, THREE TIMES — AND (a) IS NOT DUE YET AT THIS LINE. (a) Between unit 7b and unit 7c, NOT before 7b: unlock the SEPARATE MAINNET keystore (HOME=~/.metal-fy-proton) and give the PRIME DIRECTIVE gate-2 per-invocation authorization, naming chain, actor, permission, action, memo and quantity explicitly. Gate 2 is a precondition of 7c, not a review of it — but 7b is a dry run that needs the mainnet keystore HOME only for the separation guard, never an UNLOCKED one, so unlocking here would leave the keystore open one unit longer than necessary. Unit 7b prints the exact unlock line and token ritual itself when it finishes, which is the moment to do this. (b) AFTER unit 7c, confirm the transaction on the explorer by eye, then re-lock BOTH keystores — TWO separate actions, not one: the MAINNET keystore opened at (a), and the TESTNET keystore opened at stop 3, which is still open. Closing only the mainnet one and calling the day done is the single likeliest omission of the transition, and the canon's completion checklist exists to catch it: both must read locked. Both prompts read "Enter 32 character password (leave empty to create new)", and an empty Enter at either creates a NEW password instead of locking with the existing one — which silently breaks the next cycle's unlock for that keystore.|-
+5|刻印 / inscribe|4|OPERATOR, THREE TIMES — AND (a) IS NOT DUE YET AT THIS LINE. (a) Between unit 7b and unit 7c — and only AFTER unit 7b.5 has printed REACHABLE, NOT before 7b: unlock the SEPARATE MAINNET keystore (HOME=~/.metal-fy-proton) and give the PRIME DIRECTIVE gate-2 per-invocation authorization, naming chain, actor, permission, action, memo and quantity explicitly. Gate 2 is a precondition of 7c, not a review of it — but 7b is a dry run that needs the mainnet keystore HOME only for the separation guard, never an UNLOCKED one, so unlocking here would leave the keystore open one unit longer than necessary. Unit 7b prints the exact unlock line and token ritual itself when it finishes, which is the moment to do this. (b) AFTER unit 7c, confirm the transaction on the explorer by eye, then re-lock BOTH keystores — TWO separate actions, not one: the MAINNET keystore opened at (a), and the TESTNET keystore opened at stop 3, which is still open. Closing only the mainnet one and calling the day done is the single likeliest omission of the transition, and the canon's completion checklist exists to catch it: both must read locked. Both prompts read "Enter 32 character password (leave empty to create new)", and an empty Enter at either creates a NEW password instead of locking with the existing one — which silently breaks the next cycle's unlock for that keystore.|-
 6|事後 / post|-|-|-
 FYCT_PHASE_EOF
 }
@@ -436,11 +451,13 @@ fyct__unit_rows() {
 6|3|Mac|AI@Mac|operator-local/commit-anchor-source.sh|fetch + verify + commit the host-composed anchor-source, push, wait for deploy
 7a|4|Mac|operator@TTY|run-testnet-rehearsal.sh|testnet rehearsal of this cycle's exact memo shape (gate-1 material)
 7b|5|Mac|AI@Mac|preview-cycle-anchor-broadcast.sh|mainnet dry run from the committed bytes (gate-4 material)
+7b.5|5|host|AI@host|check-anchor-history-reachable.sh|host preconditions + prove the receipt step will resolve history (read-only, before signing)
 7c|5|Mac|AI@Mac|sign-anchor-event.sh|sign the 4-action anchor pack
 7.5|5|Mac|AI@Mac|-|transfer the signing fragment from the Mac to the host
 8|6|host|AI@host|gen-anchor-receipt.sh append-anchor-history.sh|7-gate verify the transaction, then append it to the anchor ledger
 8.5|6|host|AI@host|push-to-web-host.sh|publish the two canonical flat files
 9|6|host|AI@host|resume-after-cycle-start.sh|record the cycle-gate approval state
+10|6|Mac|AI@Mac|archive-legacy-anchors.sh verify-legacy-anchor-archive.sh|archive the new anchor's raw legacy-chain record, verify, commit
 FYCT_UNIT_EOF
 }
 
@@ -701,8 +718,15 @@ fyct__unit_commands() {
 			fyct__cmd_pending "$m" "NEEDS 7a TX ID" "FY_CONFIG_DIR=${CFG} HOME=~/.metal-fy-proton bash scripts/preview-cycle-anchor-broadcast.sh --source=public/api/anchor-source.json --testnet-tx-id=<64hex from unit 7a>"
 		fi
 		;;
+	7b.5)
+		fyct__wrap "  " "READ-ONLY, ON THE HOST, AND IT DECIDES WHETHER STOP 4(a) HAPPENS AT ALL. Unit 8 resolves the broadcast transaction from history AFTER the irreversible broadcast, and since 2026-09-30 it takes its history bases and chain_id from the committed chain profile. This unit runs the SAME reader code on the SAME machine as unit 8, before anything is signed. No REACHABLE line, or any non-zero exit, and the day STOPS here: do not unlock the mainnet keystore, do not run 7c. Nothing has been broadcast yet, so waiting and re-running this unit costs nothing."
+		fyct__wrap "  " "FIRST THE HOST PRECONDITIONS. The line below prints the host checkout's short HEAD and the jq version, and must exit 0. Non-zero means one of: config/a-chain-profiles.json or the profile/history libraries are missing (the host checkout has not been advanced to a commit carrying them — wait for the deploy's host-advance step, or run scripts/advance-host-checkout.sh on the host, then re-run); or a stale FYD_MAINNET_CHAIN_ID / FYD_TESTNET_CHAIN_ID / FYD_A_CHAIN_PROFILE_* is set in the deploy user's environment (grep prints it — remove it at its source; the committed profile file is the only source of chain values, and an override may only confirm it). The jq version must be 1.6 or newer; the check below enforces that itself (exit 2), it is printed here so it is seen first."
+		fyct__host_cd "git rev-parse --short HEAD && test -r config/a-chain-profiles.json && test -r scripts/lib/a-chain-profile.sh && test -r scripts/lib/anchor-history-read.sh && jq --version && ! env | grep -e ^FYD_MAINNET_CHAIN_ID= -e ^FYD_TESTNET_CHAIN_ID= -e ^FYD_A_CHAIN_PROFILE_"
+		fyct__wrap "  " "THEN THE CHECK. Known-tx mode: the newest anchor in the host ledger must still resolve, with block number, time and chain, through the profile's history bases in the receipt's own order. Exit 0 prints one 'REACHABLE profile=xpr-mainnet ... mode=known-tx' line. Exit 2 = the chain profile cannot supply what the receipt needs; 3 = no history base resolved the known anchor; 4 = a listed history base answers for a DIFFERENT chain_id; 1 = usage or ledger problem. For every non-zero: stop, report, do not sign."
+		fyct__host_cd "bash scripts/check-anchor-history-reachable.sh --chain=mainnet-a"
+		;;
 	7c)
-		fyct__wrap "  " "Requires the stop-4(a) authorization above. Both gate args are mandatory and only unit 7b's output can supply them — copy them from there INTO THE LINE BELOW. THIS is the line to run: 7b renders the same command with FY_CONFIG_DIR written home-relative and with no --output=, and both of those are traps this line has already closed."
+		fyct__wrap "  " "Requires the stop-4(a) authorization above, which itself requires unit 7b.5's REACHABLE line. Both gate args are mandatory and only unit 7b's output can supply them — copy them from there INTO THE LINE BELOW. THIS is the line to run: 7b renders the same command with FY_CONFIG_DIR written home-relative and with no --output=, and both of those are traps this line has already closed."
 		fyct__wrap "  " "WHY FY_CONFIG_DIR IS ABSOLUTE HERE. Written home-relative, it is expanded against the keystore HOME set on the same line rather than the operator's own, so the config directory silently relocates INSIDE the keystore. docs/CYCLE_GATE.md spends about thirty lines on this trap; resolving the path at print time removes it, which is why this line looks different from 7b's."
 		fyct__wrap "  " "WHY --output= IS PINNED HERE. Its stdout is additionally saved to /tmp/fya-mainnet-sign-output.json, which is unit 7.5's input. Left to the default, that directory is whatever FY_SIGN_OUTPUT_DIR says (it exists so tests can redirect it), and a value still exported in this terminal would send the fragment elsewhere while unit 7.5 goes on scp'ing the literal /tmp path — shipping the PREVIOUS cycle's fragment, which the implementation itself warns is a live artifact on the operator's Mac and not disposable scratch. Unit 8's 7-gate would catch the mismatch, but only after the irreversible broadcast."
 		if [ "$TTX_KNOWN" = "1" ]; then
@@ -731,6 +755,19 @@ fyct__unit_commands() {
 	9)
 		fyct__wrap "  " "FY_LIVE=1 is required; without it the script refuses with exit 6 before Phase 1 and writes nothing. No broadcast and no explorer URL here — this only records cycle-gate approval state."
 		fyct__host_env "FY_LIVE=1" "scripts/resume-after-cycle-start.sh --apply"
+		;;
+	10)
+		fyct__wrap "  " "WHILE THE LEGACY CHAIN IS STILL SERVED, PRESERVE TODAY'S ANCHOR. Anchors are transfer memos — HISTORY, not chain state — and after the A-Chain moves to PulseVM the old chain's history may stop being served. scripts/archive-legacy-anchors.sh stores the raw history and block responses of every mainnet anchor in the PUBLISHED ledger under public/api/legacy-a-chain/ (read-only requests; anchors already archived are skipped with no request at all). It reads the legacy chain profile BY NAME, so it keeps pointing at the old chain after a cutover. It needs unit 8.5's publish, and it runs after unit 9 so its push and deploy come after the gate-state write."
+		fyct__wrap "  " "Done = the archiver exits 0 AND the verifier prints 'VERIFIED <n> anchor(s)' with n one higher than yesterday. Archiver exit 3 = a record could not be fetched this time (the others were kept) — re-run later, it resumes. Exit 4 or 5 = fail closed (an existing record disagrees with what the chain serves now, or the chain_id differs) — stop and report; never delete a file to make it pass. None of this touches the anchor itself: a failure here repeats or undoes nothing above."
+		fyct__cmd "$m" "curl -fsS 'https://metal.freedom-yield.com/api/anchor-history.jsonl' -o /tmp/fya-anchor-history.jsonl"
+		fyct__cmd "$m" "bash scripts/archive-legacy-anchors.sh --from-file=/tmp/fya-anchor-history.jsonl"
+		fyct__cmd "$m" "bash scripts/verify-legacy-anchor-archive.sh --history=/tmp/fya-anchor-history.jsonl"
+		fyct__wrap "  " "Expect the staged set to be exactly the new anchor's <tx_id>.json plus manifest.json."
+		fyct__cmd "$m" "git add public/api/legacy-a-chain/"
+		fyct__cmd "$m" "git diff --cached --name-status"
+		fyct__cmd "$m" "git commit -m 'data(legacy-a-chain): archive the cycle ${INSCRIBE} anchor while the legacy chain is served'"
+		fyct__cmd "$m" "git push"
+		fyct__cmd "$m" "gh run watch"
 		;;
 	*)
 		echo "cycle-transition: ERROR: no command block for unit '${id}' — the unit table and the command blocks have drifted." >&2
@@ -1571,11 +1608,12 @@ fyct_status_report() {
 
 	printf '============================================================================\n'
 	printf 'WHERE THIS READING IS NOT A COMPLETE ACCOUNT OF THE DAY\n'
-	fyct__status_wrap "  " "FIVE OF THE FOURTEEN EXECUTION UNITS ARE COVERED BY NO POST-CONDITION. The list below is the result of asking, for EVERY unit in the plan, \"if this were skipped, would all five still read COMPLETE?\" — not of noticing one. An earlier revision listed only 8.5, and review found a second (4b); the sweep that produced this list found three more."
+	fyct__status_wrap "  " "SEVEN OF THE SIXTEEN EXECUTION UNITS ARE COVERED BY NO POST-CONDITION. The list below is the result of asking, for EVERY unit in the plan, \"if this were skipped, would all five still read COMPLETE?\" — not of noticing one. An earlier revision listed only 8.5, and review found a second (4b); the sweep that produced this list found three more; the two units added 2026-09-30 (7b.5, 10) are the last two."
 	fyct__status_wrap "  " "1. UNIT 7a (phase 4) has no post-condition at all. The rehearsal's only product is a transaction id on stdout, which nothing publishes."
 	fyct__status_wrap "  " "2. UNIT 7b (the mainnet dry run) is observed by nothing. Its --dry-run-log is an OPTIONAL argument to unit 7c, so skipping it does not even make 7c fail — it removes the gate-4 evidence silently."
 	fyct__status_wrap "  " "3. UNITS 7.5, 8 AND 8.5 are observed by nothing. Phase 6's post-condition is the gate-state signature written by unit 9, and unit 9 reads only the chain, the published anchor-source and the identity manifest — never the receipt or the anchor ledger. So a day where the signing fragment was never transferred, no receipt was verified, no history row was appended and nothing was published still reads COMPLETE here, with the public anchor-receipt.json and anchor-history.jsonl left serving the PREVIOUS cycle."
 	fyct__status_wrap "  " "4. UNIT 4b's REGISTRY EDITS are observed by nothing. Phase 2 reads generated_at and the presence of the .sig; identity.json carries no cycle number and no registry state. 4b's commit is needed to publish the manifest at all, so a wholly skipped 4b does show up — but doing the commit WITHOUT the deploy/identity-pin-baseline.json and deploy/publication.json edits leaves every post-condition here green while tests/publication-registry/ goes red on main."
+	fyct__status_wrap "  " "4b. UNIT 7b.5 (the host preconditions and the history reachability check) and UNIT 10 (the legacy-chain archive) are observed by nothing. 7b.5 leaves no artifact at all — its only product is the REACHABLE line it prints — and a skipped 10 leaves public/api/legacy-a-chain/ one anchor short, which no post-condition reads."
 	fyct__status_wrap "  " "5. Phase 2 confirms that identity.json.sig published alongside the manifest. It does NOT verify the signature. Unit 9's Phase 1 is what performs the cryptographic check."
 	fyct__status_wrap "  " "6. Phase 3 compares the published bytes against the copy committed IN THE REPOSITORY THIS COMMAND IS RUNNING FROM — this machine's HEAD, not the host's and not the host's live file. Running it on a machine whose HEAD lags the one that committed unit 6 reports INCOMPLETE for a phase that is done. See this script's header for why comparing against a live host copy would be worse."
 	fyct__status_wrap "  " "7. Phase 5 verifies the response it was handed, not its provenance. Capture it at the moment you run this; a response from another machine or another hour is not distinguishable here."

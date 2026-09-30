@@ -88,14 +88,23 @@ phase 2  identity  Mac: gen-identity → commit → push → deploy 着地確認
 phase 3  compose   host: gen-anchor-source → Mac へ転送 → commit → push → deploy 着地確認
 ⏸ 停止3: testnet keystore unlock (broadcast 認可は script 起動そのもので自動成立)
 phase 4  rehearsal Mac: testnet 通し稽古 (コマンドを印字して停止)
-phase 5  刻印      Mac: preview(7b) (印字して停止。orchestrator は実行しない)
-   ⏸ 停止4a: mainnet keystore unlock + broadcast 認可(7b 完了後・7c 直前 —
+phase 5  刻印      Mac: preview(7b) (印字して停止。orchestrator は実行しない) → host: history 到達確認(7b.5, read-only)
+   ⏸ 停止4a: mainnet keystore unlock + broadcast 認可(7b.5 の REACHABLE 後・7c 直前 —
               phase5 の入口ではなく phase5 内部)
               → 署名+broadcast(7c) → fragment 転送(7.5)
    ⏸ 停止4b: explorer 目視確認 → re-lock(空 Enter で新パスワード生成に注意)
               (いずれも 7c 完了後。7.5 と並行/前後 — phase5 の外とまでは断定しない)
-phase 6  事後      host: receipt 7-gate → history append → 公開 push → resume --apply
+phase 6  事後      host: receipt 7-gate → history append → 公開 push → resume --apply → Mac: legacy archive(10)
 ```
+
+**2026-09-30 追記 (A-Chain → PulseVM 移行準備)**: 実行単位を 2 つ追加した —
+**7b.5** (phase 5 内、host、read-only: host 前提条件 + `check-anchor-history-reachable.sh`
+で「⑧の receipt が broadcast 後に tx を引ける」ことを署名前に証明。非 0 なら停止4a に
+進まない) と **10** (phase 6 末尾、Mac: 旧 chain が配信されているうちに
+`archive-legacy-anchors.sh` + `verify-legacy-anchor-archive.sh` で当日の anchor の生
+記録を `public/api/legacy-a-chain/` に保存し commit)。これで `scripts/cycle-transition.sh`
+の unit 表は 16 単位 (docs/cycle-transition-steps.json の 15 + 4b)。停止4a は 7b.5 の
+後に移る (7b と 7c の間であることは変わらない)。
 
 根拠 (`docs/CYCLE_GATE.md` の step 番号 + `scripts/cycle-transition.sh` の
 unit 本文で示す):
