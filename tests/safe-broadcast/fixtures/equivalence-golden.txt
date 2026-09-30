@@ -612,6 +612,17 @@ ERROR (6): broadcast failed (rc=0, tx_id=empty)
 proton chain:set proton-test
 proton chain:info
 proton transaction:push
+=== audit: log write fails (primary a directory, no login home) → exit 7
+rc=7
+--- stdout
+--- stderr
+WARNING (gate 2): operator token is not chain-bound (legacy/bare token). Accepted for TESTNET ONLY, for backward compatibility — this will be required for mainnet unconditionally. See the R16 usage-header section above for the new ritual.
+<WRAPPER>: line <N>: ~zzsbnouser9/.fyd-broadcast-audit.log: No such file or directory
+ERROR (7): audit log write failed to ~zzsbnouser9/.fyd-broadcast-audit.log
+--- audit
+--- calls
+proton chain:set proton-test
+proton chain:info
 === push: mainnet chain rejects
 rc=6
 --- stdout

@@ -14,10 +14,7 @@
 #   calls) of every scenario below, produced by running this suite with
 #   --write-golden against the wrapper at base commit 8a79fd5 — the last
 #   version with hard-coded chain constants, i.e. the code the 2026-10-07
-#   transition was rehearsed on:
-#       git show 8a79fd5:bin/safe-broadcast > <tree>/bin/safe-broadcast
-#       SB_EQ_WRAPPER=<tree>/bin/safe-broadcast \
-#         bash tests/safe-broadcast/test-safe-broadcast-equivalence.sh --write-golden
+#   transition was rehearsed on (full-tree command below).
 #   The current wrapper must reproduce it byte-for-byte. The call list makes
 #   this stronger than an exit-code match: the same endpoints are asked the
 #   same questions in the same order.
@@ -27,9 +24,18 @@
 #   are in when scripts/install-rehearsal-preflight.sh check 10 is green — so
 #   the new gate-3 host check passes and must not change any outcome.
 #
-#   Exit 7 (audit-log write failure) is NOT reproduced: forcing it needs the
-#   fallback log — which lives in the invoking user's LOGIN home — to be
-#   unwritable, i.e. touching the operator's real audit log. Unchanged code.
+#   Exit 7 (audit-log write failure) is reproduced without touching any real
+#   file: an `id` stub names a nonexistent user, so the fallback log path is
+#   a nonexistent relative directory, and the primary is pointed at a
+#   directory.
+#
+#   REGENERATING THE GOLDEN needs the FULL base tree, not just the wrapper
+#   file (it sources scripts/lib/require-keystore-home.sh, whose base copy
+#   must be used too):
+#       git archive 8a79fd5 | tar -x -C <tree>
+#       SB_EQ_WRAPPER=<tree>/bin/safe-broadcast \
+#         bash tests/safe-broadcast/test-safe-broadcast-equivalence.sh --write-golden
+#   Never regenerate it from the current code — that would pin nothing.
 #
 #   Deliberately NOT here (they are intended, stricter changes, pinned in
 #   test-safe-broadcast-profiles.sh): an FYD_*_CHAIN_ID override that
@@ -51,7 +57,11 @@ sbh_init
 trap 'rm -rf "$SBH_T"' EXIT
 
 W="${SB_EQ_WRAPPER:-$ROOT/bin/safe-broadcast}"
+case "$W" in /*) ;; *) W="$PWD/$W" ;; esac
 T="$SBH_T"
+# Run from the temp root: the exit-7 scenario's fallback audit path is the
+# RELATIVE "~zzsbnouser9/…", which must resolve inside this throwaway dir.
+cd "$T" || exit 1
 OUT="$T/actual.txt"
 : > "$OUT"
 
@@ -76,7 +86,8 @@ sc() {
 	local f
 	for f in out err; do
 		# the wrapper's own path ($0) appears in some messages
-		sed "s#${W}#<WRAPPER>#g" "$T/$f" > "$T/$f.w" && mv "$T/$f.w" "$T/$f"
+		# (and bash's own "<script>: line N:" diagnostics — N moves with any edit)
+		sed -e "s#${W}#<WRAPPER>#g" -e 's#^<WRAPPER>: line [0-9]*:#<WRAPPER>: line <N>:#' "$T/$f" > "$T/$f.w" && mv "$T/$f.w" "$T/$f"
 		if grep -qxF -f "$HELP" "$T/$f"; then
 			{ grep -vxF -f "$HELP" "$T/$f" | sed '/^$/d'; echo "[usage text printed]"; } > "$T/$f.f"
 			mv "$T/$f.f" "$T/$f"
@@ -175,6 +186,11 @@ sc "push: answer carries only id"      '' '' STUB_PUSH_MODE=idfield -- --tx="$T/
 sc "push: answer carries only transaction_id" '' '' STUB_PUSH_MODE=idonly -- --tx="$T/tx-c3.json" --chain=testnet-a --non-interactive
 sc "push: chain rejects"               '' '' STUB_PUSH_MODE=fail -- --tx="$T/tx-c3.json" --chain=testnet-a --non-interactive
 sc "push: answer without any id"       '' '' STUB_PUSH_MODE=noid -- --tx="$T/tx-c3.json" --chain=testnet-a --non-interactive
+# Exit 7: both audit targets unwritable — the primary is a DIRECTORY, and the
+# fallback lives under the login home, which the `id` stub makes a
+# nonexistent relative path. Refused BEFORE the push, nothing is written.
+sc "audit: log write fails (primary a directory, no login home) → exit 7" '' '' \
+	"PATH=$SBH_PATH_NOUSER" "FYD_BROADCAST_AUDIT_LOG=$T" -- --tx="$T/tx-c3.json" --chain=testnet-a --non-interactive
 sc "push: mainnet chain rejects"       "$MAIN_TOKEN" '' STUB_PUSH_MODE=fail -- --tx="$T/tx-c4.json" "${M[@]}" --testnet-tx-id="$SBH_CYCLE4" --dry-run-log="$T/dry-c4.json"
 
 if [ "$WRITE" = "1" ]; then

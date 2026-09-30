@@ -147,6 +147,8 @@ V "V52 gate1_evidence_profile set on a testnet profile" '.profiles["xpr-testnet"
 V "V53 gate1_evidence_profile not a string"  '.profiles["xpr-mainnet"].gate1_evidence_profile = 1'
 expect "V54 gate1_evidence_profile naming another testnet profile validates" \
 	"$(run_tree '.profiles["pulsevm-mainnet"].gate1_evidence_profile = "pulsevm-testnet"' 'acp_validate')" "0|"
+V "V56 gate1_evidence_profile of another execution family (push_response)" '.profiles["xpr-mainnet"].gate1_evidence_profile = "pulsevm-testnet"'
+V "V57 gate1_evidence_profile of another execution family (lib_equals_head only)" '.profiles["xpr-mainnet"].lib_equals_head = true'
 expect "V55 acp_gate1_evidence_profile refuses on invalid file" \
 	"$(run_tree '.profiles["xpr-mainnet"].role = "main"' 'acp_gate1_evidence_profile mainnet')" "2|"
 

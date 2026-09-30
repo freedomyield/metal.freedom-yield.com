@@ -68,7 +68,8 @@
 #   * profile names match ^[a-z0-9][a-z0-9-]*$
 #   * each profile has EXACTLY the nine keys above (missing or extra = invalid)
 #   * gate1_evidence_profile: null, or (mainnet-role profiles only) the name
-#     of an existing TESTNET-role profile
+#     of an existing TESTNET-role profile with the same push_response and
+#     lib_equals_head (same execution family)
 #   * each value has the type/shape above; list entries unique; URL paths
 #     carry no "." or ".." segment
 #   * cross-role separation: no chain_id, node host or history base may appear
@@ -223,14 +224,19 @@ def check_profile($n):
       ( if ($p.role? == "testnet") and ($p.gate1_evidence_profile? != null)
           then "\($n): gate1_evidence_profile must be null on a testnet profile" else empty end )
     end;
-# gate1_evidence_profile, when set, must name an existing TESTNET profile.
+# gate1_evidence_profile, when set, must name an existing TESTNET profile of
+# the SAME execution family (equal push_response and lib_equals_head): a
+# testnet with a different execution model is not evidence that the
+# mainnet broadcast shape works, so such a file is refused outright.
 def evidence_refs:
   .profiles as $all
   | $all | to_entries[] | select(.value | type == "object")
-  | .key as $n | (.value.gate1_evidence_profile? // null) as $e
+  | .key as $n | .value as $v | (.value.gate1_evidence_profile? // null) as $e
   | select($e != null and ($e | type) == "string")
   | if ($all[$e] | type) != "object" then "\($n): gate1_evidence_profile \($e) is not a profile"
     elif $all[$e].role? != "testnet" then "\($n): gate1_evidence_profile \($e) is not a testnet profile"
+    elif ($all[$e].push_response? != $v.push_response?) or ($all[$e].lib_equals_head? != $v.lib_equals_head?)
+      then "\($n): gate1_evidence_profile \($e) runs a different execution model (push_response / lib_equals_head differ)"
     else empty end;
 def crossrole($field):
   [ .profiles | to_entries[] | select(.value | type == "object")

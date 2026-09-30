@@ -38,6 +38,8 @@ bad() {
 }
 # check <name> <rc> [err:<substr>] [noerr:<substr>] [out:<exact>] [call:<substr>]
 #       [nocall:<substr>] [calls:<substr>=<n>] [audit:<substr>] [noaudit]
+#       [noproton]  — no line of the call log comes from the proton stub
+#                     (use it where curl URLs legitimately contain "proton")
 check() {
 	local name="$1" want_rc="$2" a why=""
 	shift 2
@@ -55,6 +57,7 @@ check() {
 			          [ "$n" = "${k##*=}" ] || why="calls matching '${k%=*}' = $n, want ${k##*=}" ;;
 			audit:*)  grep -qF -- "${a#audit:}" "$T/audit.log" || why="audit lacks: ${a#audit:}" ;;
 			noaudit)  [ -s "$T/audit.log" ] && why="audit log written" ;;
+			noproton) grep -q '^proton ' "$SBH_CALLS" && why="proton-cli stub was invoked: $(grep '^proton ' "$SBH_CALLS" | head -1)" ;;
 		esac
 	done
 	if [ -z "$why" ]; then ok "$name"; else bad "$name" "$why"; fi
@@ -141,10 +144,10 @@ echo "── FYD_*_CHAIN_ID: confirm-only ──"
 sbh_reset; sbh_token "$MT"
 sbh_run - '' "$W" FYD_MAINNET_CHAIN_ID=ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff -- "${MAIN_ARGS[@]}"
 check "O1 mainnet override ≠ profile → refused before any gate (exit 4), nothing contacted" 4 \
-	"err:a-chain-profile:" "err:refusing before any gate" "nocall:curl" "nocall:proton chain:set" noaudit
+	"err:a-chain-profile:" "err:refusing before any gate" "nocall:curl" "nocall:proton" noaudit
 sbh_reset; sbh_token ''
 sbh_run - '' "$W" FYD_TESTNET_CHAIN_ID=ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff -- "${TEST_ARGS[@]}"
-check "O2 testnet override ≠ profile → refused (exit 4), nothing contacted" 4 "err:a-chain-profile:" "nocall:proton chain:set"
+check "O2 testnet override ≠ profile → refused (exit 4), nothing contacted" 4 "err:a-chain-profile:" "nocall:proton"
 sbh_reset; sbh_token "$MT"
 sbh_run - '' "$W" FYD_MAINNET_CHAIN_ID=384DA888112027F0321850A169F737C33E53B388AAD48B5ADACE4BAB97F437E0 -- "${MAIN_ARGS[@]}"
 check "O3 upper-cased copy of the real id is still refused (exact match only)" 4 "err:a-chain-profile:"
@@ -152,16 +155,16 @@ check "O3 upper-cased copy of the real id is still refused (exact match only)" 4
 echo "── profile selection ──"
 sbh_reset; sbh_token "$MT"
 sbh_run - '' "$W" FYD_A_CHAIN_PROFILE_MAINNET=pulsevm-mainnet -- "${MAIN_ARGS[@]}"
-check "S1 committed pulsevm-mainnet (chain_id null) → refused, nothing contacted" 4 "err:is null" "nocall:curl" "nocall:proton chain:set"
+check "S1 committed pulsevm-mainnet (chain_id null) → refused, nothing contacted" 4 "err:is null" "nocall:curl" "nocall:proton"
 sbh_reset; sbh_token ''
 sbh_run - '' "$W" FYD_A_CHAIN_PROFILE_TESTNET=pulsevm-testnet -- "${TEST_ARGS[@]}"
-check "S2 committed pulsevm-testnet → refused" 4 "err:is null" "nocall:proton chain:set"
+check "S2 committed pulsevm-testnet → refused" 4 "err:is null" "nocall:proton"
 sbh_reset; sbh_token "$MT"
 sbh_run - '' "$W" FYD_A_CHAIN_PROFILE_MAINNET=no-such-profile -- "${MAIN_ARGS[@]}"
-check "S3 unknown profile → refused" 4 "err:a-chain-profile:" "nocall:proton chain:set"
+check "S3 unknown profile → refused" 4 "err:a-chain-profile:" "nocall:proton"
 sbh_reset; sbh_token "$MT"
 sbh_run - '' "$W" FYD_A_CHAIN_PROFILE_MAINNET=xpr-testnet -- "${MAIN_ARGS[@]}"
-check "S4 a TESTNET profile selected for mainnet → refused" 4 "err:a-chain-profile:" "nocall:proton chain:set"
+check "S4 a TESTNET profile selected for mainnet → refused" 4 "err:a-chain-profile:" "nocall:proton"
 sbh_reset; sbh_token "$MT"
 sbh_run - 'BROADCAST mainnet-a
 ' "$W" FYD_A_CHAIN_PROFILE_MAINNET=xpr-mainnet -- --tx="$T/tx-c4.json" --chain=mainnet-a --testnet-tx-id="$SBH_CYCLE4" --dry-run-log="$T/dry-c4.json"
@@ -174,7 +177,7 @@ check "S6 default selection prints no profile line (output unchanged)" 0 "noerr:
 echo "── gate 1: XPR_TESTNET_RPC must be a profile history base ──"
 sbh_reset; sbh_token "$MT"
 sbh_run - '' "$W" XPR_TESTNET_RPC=https://xpr-clone.example.net -- "${MAIN_ARGS[@]}"
-check "R1 XPR_TESTNET_RPC off the profile → gate 1 refuses, no lookup made" 3 "err:is not one of the testnet profile (xpr-testnet) history bases" "nocall:curl" "nocall:proton chain:set"
+check "R1 XPR_TESTNET_RPC off the profile → gate 1 refuses, no lookup made" 3 "err:is not one of the testnet profile (xpr-testnet) history bases" "nocall:curl" "nocall:proton"
 sbh_reset; sbh_token "$MT"
 sbh_run - '' "$W" XPR_TESTNET_RPC=https://test.proton.eosusa.io/ -- "${MAIN_ARGS[@]}"
 check "R2 trailing-slash variant is not an exact match → refuse" 3 "err:XPR_TESTNET_RPC="
@@ -202,7 +205,7 @@ g1() { # <name> <rc> <evidence-id> <checks...>
 	sbh_run - '' "$W" -- --tx="$T/tx-c4.json" --chain=mainnet-a --non-interactive --testnet-tx-id="$id" --dry-run-log="$T/dry-c4.json"
 	check "$n" "$r" "$@"
 }
-g1 "V1 default profile: v2-shaped answer (trx_id, no id) is NOT resolved (base rule .id == id)" 3 "$EV2" "err:could not resolve --testnet-tx-id" "nocall:proton chain:set"
+g1 "V1 default profile: v2-shaped answer (trx_id, no id) is NOT resolved (base rule .id == id)" 3 "$EV2" "err:could not resolve --testnet-tx-id" noproton
 g1 "V1b default profile: answer with id AND matching trx_id + actions[].act → passes" 0 "$EVF" "out:$SBH_TXID"
 g1 "V2 v2 shape naming ANOTHER tx → refuse" 3 "$EVB" "err:could not resolve --testnet-tx-id"
 g1 "V3 id matches but trx_id names another tx → refuse" 3 "$EVC" "err:could not resolve --testnet-tx-id"
@@ -222,13 +225,13 @@ STUB
 chmod +x "$T/oldjq/jq"
 sbh_reset; sbh_token "$MT"
 sbh_run - '' "$W" "PATH=$T/oldjq:$PATH" -- "${MAIN_ARGS[@]}"
-check "M1 jq older than 1.6 (lib rc 6) → exit 2, nothing contacted" 2 "err:a-chain-profile" "nocall:proton chain:set" "nocall:curl"
+check "M1 jq older than 1.6 (lib rc 6) → exit 2, nothing contacted" 2 "err:a-chain-profile" "nocall:proton" "nocall:curl"
 BADTREE="$T/badtree"
 printf '{"schema_version":1,"profiles":{}}\n' > "$T/bad-profiles.json"
 sbh_tree "$BADTREE" "$W" "$T/bad-profiles.json"
 sbh_reset; sbh_token "$MT"
 sbh_run - '' "$BADTREE/bin/safe-broadcast" -- "${MAIN_ARGS[@]}"
-check "M2 invalid profile file (lib rc 2) → exit 4, nothing contacted" 4 "err:a-chain-profile" "nocall:proton chain:set" "nocall:curl"
+check "M2 invalid profile file (lib rc 2) → exit 4, nothing contacted" 4 "err:a-chain-profile" "nocall:proton" "nocall:curl"
 
 # ---------------------------------------------------------------------------
 echo "── PulseVM (fixture profiles: id-only push, LIB = head) ──"
@@ -293,7 +296,7 @@ pvm_reset; confirmed_fixture true "$act4"
 sbh_run - '' "$PW" FYD_A_CHAIN_PROFILE_MAINNET=pulsevm-mainnet STUB_PUSH_MODE=idonly "STUB_CHAIN_ID=$PVM_MAIN_CID" \
 	-- --tx="$T/tx-c4.json" --chain=mainnet-a --non-interactive --testnet-tx-id="$SBH_CYCLE4" --dry-run-log="$T/dry-c4.json"
 check "P7 XPR testnet evidence for a PulseVM mainnet → gate 1 refuses (not the approved evidence profile)" 3 \
-	"err:is not the one mainnet profile pulsevm-mainnet approves (pulsevm-testnet)" "nocall:curl" "nocall:proton chain:set"
+	"err:is not the one mainnet profile pulsevm-mainnet approves (pulsevm-testnet)" "nocall:curl" "nocall:proton"
 
 sbh_reset; sbh_token "$MT"; confirmed_fixture true "$act4"
 sbh_run - '' "$PW" "${PVM_ENV[@]}" -- "${PVM_ARGS[@]}"
@@ -334,7 +337,7 @@ sbh_tree "$NT" "$W" "$T/pvm-noevid.json"
 pvm_reset; confirmed_fixture true "$act4"
 sbh_run - '' "$NT/bin/safe-broadcast" "${PVM_ENV[@]}" -- "${PVM_ARGS[@]}"
 check "P22 PulseVM pair with a committed chain_id but NO approved evidence profile → gate 1 refuses" 3 \
-	"err:names no approved gate-1 evidence testnet" "err:OPEN operator decision" "nocall:curl" "nocall:proton chain:set" noaudit
+	"err:names no approved gate-1 evidence testnet" "err:OPEN operator decision" "nocall:curl" "nocall:proton" noaudit
 
 echo "── gate 1 on an id-only testnet profile: trx_id-only answer on the v1 endpoint ──"
 PVM_EVID_V1="$(printf '7e570002%.0s' 1 2 3 4 5 6 7 8)"

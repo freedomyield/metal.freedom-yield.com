@@ -209,6 +209,14 @@ STUB
 	done
 	cp "$SBH_T/stub/curl" "$SBH_T/path-noproton/curl"
 	cp "$SBH_T/stub/proton" "$SBH_T/path-nocurl/proton"
+	# An `id` stub naming a user that does not exist: fyd_login_home then
+	# yields the literal, relative, nonexistent "~zzsbnouser9", so the
+	# audit-log FALLBACK path is unwritable without touching any real file.
+	mkdir -p "$SBH_T/path-nouser"
+	printf '#!/bin/sh\necho zzsbnouser9\n' > "$SBH_T/path-nouser/id"
+	chmod +x "$SBH_T/path-nouser/id"
+	SBH_PATH_NOUSER="$SBH_T/path-nouser:$SBH_T/stub:$SBH_T/toolbox"
+	export SBH_PATH_NOUSER
 	SBH_PATH_NOPROTON="$SBH_T/path-noproton:$SBH_T/toolbox"
 	SBH_PATH_NOCURL="$SBH_T/path-nocurl:$SBH_T/toolbox"
 	export SBH_PATH_NOPROTON SBH_PATH_NOCURL
