@@ -10,12 +10,14 @@
 #   Everything this watch reads moves on a scale of weeks. Releases land
 #   roughly weekly; the docs site is a community developer's Vercel
 #   deployment; A-Chain Alpine's head block did not advance at all across
-#   repeated samples on 2026-08-17. Two of the four sources are also
-#   rate-limited or owned by someone else — GitHub's unauthenticated API
-#   allows 60 requests/hour per IP and answers 403 once that is spent — so a
-#   sub-daily cadence would spend a third party's budget to learn nothing.
-#   Four GETs a day is the polite-external-access floor that still catches a
-#   change within one working day of it landing.
+#   repeated samples on 2026-08-17. Every source belongs to someone else, and
+#   two of them are GitHub's unauthenticated API, which allows 60
+#   requests/hour per IP and answers 403 once that is spent — so a sub-daily
+#   cadence would spend a third party's budget to learn nothing. One run a
+#   day (about a dozen GETs, one per source page) is the
+#   polite-external-access floor that still catches a change within one
+#   working day of it landing. The checker's header is the authority on the
+#   exact source list; this file deliberately does not restate a count.
 #
 # Why 02:00 UTC:
 #   = 11:00 JST, inside the operator's working hours, so the one thing this
@@ -24,11 +26,12 @@
 #   the same minute on a host that also serves the validator.
 #
 # Alert discipline (why this is safe to run daily):
-#   check-pulsevm-upstream.sh notifies only when one of its four triggers
-#   fires, plus once on the very first run (no prior state = fail open toward
-#   alerting), plus once per outage if a source stays unreachable for three
-#   consecutive runs. A new release tag is recorded, never pushed. Steady
-#   state is therefore zero notifications.
+#   check-pulsevm-upstream.sh notifies only when one of its triggers
+#   (T1-T8, listed in its header) fires, plus once on the very first run (no
+#   prior state = fail open toward alerting), plus once per outage if a
+#   source stays unreachable for three consecutive runs. A routine release
+#   tag move is recorded, never pushed. Steady state is therefore zero
+#   notifications.
 #
 # FY_LIVE=1 in the env header is mandatory: scripts/lib/side-effects.sh (the
 #   C3 rollout, 2026-08-06) makes every production side effect opt-in, and
@@ -79,24 +82,26 @@ if [ ! -f "${REPO_PATH}/scripts/check-pulsevm-upstream.sh" ]; then
 fi
 
 read -r -d '' EXPECTED <<CRON || true
-# Daily, watch the PulseVM upstream for the four changes that would oblige
-# this project to act: the "third-party node sync is not yet supported"
-# notice disappearing (we could run our own node), a mainnet section or a
-# new chain id appearing on the endpoints page (migration, or another Alpine
-# reset), a new documentation page (the site announces before anything else
-# changes), and A-Chain Alpine's head block actually advancing.
+# Daily, watch the PulseVM upstream for the changes that would oblige this
+# project to act (T1-T8; the checker's header is the authority): the
+# "third-party node sync is not yet supported" notice disappearing, a mainnet
+# section or a new chain id on the endpoints page, a new documentation page,
+# A-Chain Alpine's head block advancing, the documented npm names changing
+# hands, a suffix-less metalgo release at v1.14+ (mainnet Granite), a PulseVM
+# GitHub Release at v1.0.0+, and a Metallicus-owned page naming PulseVM or a
+# mainnet chain id (the cutover facts docs/A_CHAIN_PULSEVM_CUTOVER.md waits on).
 #
 # Why this matters here: PulseVM's docs describe it as the future basis of
 # A-Chain, which is where this project's cycle anchors live. If A-Chain moves
-# onto it, bin/safe-broadcast's gate 1 (/v1/history/get_transaction) and
-# gate 3 (proton chain:info) both lose their endpoints, and under the Prime
-# Directive a permanently-failing gate 1 means no mainnet anchor can be sent
-# at all. No date has been published, so this is a watch, not a countdown.
+# onto it, the anchor path needs the published PulseVM profile values and the
+# OPEN operator decisions in docs/A_CHAIN_PULSEVM_CUTOVER.md before a single
+# anchor can be sent — until then every gate refuses (fail closed). No date
+# has been published, so this is a watch, not a countdown.
 #
 # 02:00 UTC = 11:00 JST: inside operator working hours, and off the 01:00
 # slot metal-identity-pins already holds. Daily rather than sub-daily because
-# two of the four sources belong to third parties (a community Vercel
-# deployment and GitHub's 60/hour unauthenticated API).
+# every source belongs to a third party (a community Vercel deployment,
+# GitHub's 60/hour unauthenticated API, npm, Metallicus's own sites).
 #
 # Read-only HTTP GETs; no broadcast, no push, no recovery. Steady state is
 # silent. Exit codes: 0 no change, 3 trigger fired (pushes high), 4 a source
@@ -149,7 +154,7 @@ else
 	rm -f "$TMP"
 fi
 echo "installed: ${CRON_TARGET} (daily 02:00 UTC = 11:00 JST)"
-echo "alerts:    high-priority ntfy push only on a trigger (T1-T4) or the first-run baseline"
+echo "alerts:    ntfy push only on a trigger (T1-T8; high or default per the checker's header) or the first-run baseline"
 echo "log:       ${REPO_PATH}/logs/pulsevm-upstream.log + journalctl -t pulsevm-upstream"
 echo "state:     ${REPO_PATH}/logs/pulsevm-upstream-state.json (gitignored; the diff basis)"
 echo "note:      logs/ must be deploy-writable — scripts/install-host-log-dir.sh provisions it"

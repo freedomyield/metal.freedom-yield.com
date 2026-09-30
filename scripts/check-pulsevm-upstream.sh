@@ -3,9 +3,9 @@
 # changes that would actually oblige this project to act, and stay silent
 # otherwise.
 #
-# CHAIN: none — read-only HTTP GETs against public third-party URLs (seven per
-#        run with the default watch list; see S5). No broadcast, no push, no
-#        signing, no chain RPC of any kind.
+# CHAIN: none — read-only HTTP GETs against public third-party URLs (twelve
+#        per run with the default watch lists; see S5 and S7). No broadcast, no
+#        push, no signing, no chain RPC of any kind.
 # PRIME_DIRECTIVE: TESTNET-FIRST — this script has no broadcast pathway.
 #
 # ---------------------------------------------------------------------------
@@ -17,16 +17,29 @@
 # rebuilt on it. If that happens, two things in this repo break at once:
 #
 #   * bin/safe-broadcast's gate 1 takes its testnet evidence from
-#     /v1/history/get_transaction (:266) and gate 3 reads `proton chain:info`
-#     (:549). The rebooted A-Chain Alpine testnet offers neither route: its
+#     /v1/history/get_transaction (sb_history_lookup) and gate 3 reads
+#     `proton chain:info` (see that file's header, "Gate 3 host check"). The
+#     rebooted A-Chain Alpine testnet offers neither route: its
 #     own endpoints page states the Antelope-style /v1/chain REST "is not
 #     currently exposed" and directs history reads to the Hyperion /v2 API
 #     instead. A permanently-failing gate 1 is a permanent `exit 3`, which
 #     under the Prime Directive means mainnet anchoring stops being possible
 #     at all.
 #   * the public verification story survives, because
-#     scripts/gen-anchor-receipt.sh already prefers Hyperion /v2 (:160) and
-#     the chain_id is already externalised into FYD_*_CHAIN_ID (:147-150).
+#     scripts/gen-anchor-receipt.sh reads Hyperion /v2 first (through
+#     scripts/lib/anchor-history-read.sh) and, since 2026-09-30, takes its
+#     chain_id and history bases from the committed chain profile
+#     (config/a-chain-profiles.json; FYD_*_CHAIN_ID may only confirm it).
+#
+# 2026-09-30: the operator decided to PREPARE for the migration rather than
+# only watch for it (docs/STRATEGIC_TARGET_ALIGNMENT.md, dated update). The
+# repo now carries chain profiles (xpr-* default, pulsevm-* with unpublished
+# values that fail closed), a pre-signing history reachability check, and the
+# cutover runbook docs/A_CHAIN_PULSEVM_CUTOVER.md. What is still missing is
+# upstream FACTS — so T6-T8 below watch for exactly the three facts that
+# runbook needs before it can be executed: a mainnet metalgo release able to
+# run PulseVM v1 (T6), a PulseVM GitHub Release at v1.0.0 or later (T7), and
+# an official Metallicus statement of the mainnet chain_id / cutover (T8).
 #
 # The migration has no published date. As surveyed on 2026-08-17, Metallicus's
 # own properties (metallicus.com, metalblockchain.org,
@@ -36,7 +49,7 @@
 # changed" for that survey and which parts of it were re-measured directly.
 # So there is nothing to build against yet — only something to WATCH. This
 # script is that watch, and its entire design goal is to be silent until one
-# of five specific things becomes true.
+# of eight specific things becomes true.
 #
 # ---------------------------------------------------------------------------
 # THE ENDPOINTS PAGE AS MEASURED 2026-08-19 (S2, fetched and read directly)
@@ -75,7 +88,7 @@
 # deliberately not attempted here.)
 #
 # ---------------------------------------------------------------------------
-# WHAT IT READS (five sources — none of them a chain RPC; see below)
+# WHAT IT READS (seven sources — none of them a chain RPC; see below)
 # ---------------------------------------------------------------------------
 #   S1  api.github.com/repos/MetalBlockchain/pulsevm/releases/latest
 #         -> .tag_name                       (recorded; never notifies — see below)
@@ -95,6 +108,15 @@
 #         S5b  the registry search API for "pulsevm" -> the set of package
 #              names whose name or description mentions PulseVM, which is how
 #              a package published under a name we did not guess is noticed
+#   S6  api.github.com/repos/MetalBlockchain/metalgo/releases?per_page=30
+#         -> the published (non-draft) release tags that are a PLAIN semver
+#            (no "-tahoe" or other suffix) at v1.14.0 or later
+#   S7  Metallicus-owned web pages ($PULSEVM_OFFICIAL_URLS; default the four
+#         properties the 2026-08-17 survey read: metallicus.com,
+#         metalblockchain.org, docs.metalblockchain.org, xprnetwork.org)
+#         -> whether each page mentions PulseVM, and any 64-hex value on a
+#            line that also says "chain id". Redirects are followed. A page
+#            that cannot be read does NOT fail the run (see T8).
 #
 # ---------------------------------------------------------------------------
 # WHY npm IS WATCHED AT ALL (S5)
@@ -223,6 +245,35 @@
 #         T5 body ever asserts that a package IS official; every one of them
 #         says to check.
 #
+#   T6  [high]  S6 shows a plain-semver metalgo release at >= v1.14 that the
+#         last run had not recorded (every such tag on a run with no record of
+#         them). The 2026-09-30 upstream survey: PulseVM v1.0.0 needs rpcchainvm
+#         protocol 45 = metalgo v1.14.x (Granite), which exists only as
+#         "-tahoe" pre-releases for the Tahoe testnet; Metal mainnet runs
+#         v1.13.x. A suffix-less v1.14 is the first shape a MAINNET-capable
+#         release would take. The alert does not claim mainnet upgraded.
+#   T7  [high]  S1's latest release tag is a plain semver >= v1.0.0 and the
+#         last recorded tag was not (or there is no record). The v1.0.0 git
+#         TAG exists since 2026-09-24 without a GitHub Release; a Release is
+#         the upstream's own "this is the version" signal. Other tag moves stay
+#         unpaged (see "NOT notified" below).
+#   T8  S7, Metallicus-owned pages. Three sub-conditions:
+#           a page that could be read now mentions PulseVM and did not on
+#             the previous run (or has no record)  [high]
+#           a page that mentions PulseVM shows a 64-hex value on a "chain id"
+#             line that was not recorded for it before  [high]
+#           one or more pages have been unreadable for exactly
+#             $PULSEVM_UPSTREAM_FAILURE_ALERT_AFTER consecutive runs  [default]
+#             -> once per outage, like the source-outage page; a URL that
+#             moved must not silently blind this trigger forever
+#         WHY SOFT. The four default URLs are homepages of sites this project
+#         does not control, may redirect, and may render client-side. Making
+#         one of them a hard failure would let a cosmetic site change stop
+#         T1-T7 from being evaluated at all. So an unreadable page is
+#         recorded and counted, and only the count pages.
+#         A MATCH IS A WORD ON A PAGE, NOT A PLAN. The alert says so, and
+#         names reading the page as the obligation.
+#
 #   BASELINE  [high]  no usable prior state -> fires once, says exactly that,
 #         and records a baseline. High because until it runs, this monitor was
 #         not actually watching anything, and the operator should know that
@@ -342,6 +393,13 @@
 #     baseline run too. Its transitions (absent -> present, an owner newly
 #     matching, a name new to the search set) are pure diffs and are DEFERRED
 #     with T3/T4.
+#   * T6, T7 and T8 (2026-09-30) are facts about the CURRENT reading with a
+#     transition memory, so they follow T1: with no record for them (a
+#     baseline run, or a schema-2 state file written before they existed)
+#     each is evaluated from the current reading alone and fires if its
+#     condition holds. Their fields are deliberately NOT part of the "usable
+#     prior state" gate — an older state file keeps T1-T5's history instead
+#     of re-baselining and re-sending the known T1 page.
 #
 # The first run of a fresh install is therefore expected to page once and
 # then go quiet. That is the intended behaviour, not a defect.
@@ -356,7 +414,7 @@
 # ---------------------------------------------------------------------------
 # FETCH FAILURES (exit 4 / 5) — one page per outage, not one per day
 # ---------------------------------------------------------------------------
-# Every one of the five sources is someone else's property: a community
+# Every one of the seven sources is someone else's property: a community
 # developer's Vercel deployment, GitHub's unauthenticated API (60 requests/hour
 # per IP, which answers 403 — not 429 — when exhausted), Hyperion, and the npm
 # registry. Paging the operator every
@@ -399,8 +457,8 @@
 # ---------------------------------------------------------------------------
 # EXIT CODES
 # ---------------------------------------------------------------------------
-#   0  all five sources read, nothing fired (verbose: one heartbeat line)
-#   3  at least one trigger fired (T1 / T2 / T3 / T4 / T5 / BASELINE) — alerts
+#   0  all hard sources read, nothing fired (verbose: one heartbeat line)
+#   3  at least one trigger fired (T1 / T2 / T3 / T4 / T5 / T6 / T7 / T8 / BASELINE) — alerts
 #   4  a source did not return HTTP 200 after retrying
 #   5  a source returned 200 but its body could not be parsed (or jq is absent)
 #   6  scripts/lib/side-effects.sh is missing/unreadable
@@ -498,8 +556,9 @@
 #                               "never tell me about a third party's downtime"
 #                               is a reasonable thing to want — but it is NOT
 #                               a way to make it page sooner, and it does not
-#                               affect the T1-T4 triggers, which are never
-#                               gated by this value.
+#                               affect the T1-T7 triggers, which are never
+#                               gated by this value (T8's unreadable-page page
+#                               uses the same threshold, and 0 silences it too).
 #   PULSEVM_UPSTREAM_SYNC_NOTICE_RE  ERE for the T1 sentence (default
 #                               'third-party node sync is not yet supported',
 #                               matched case-insensitively). Any rewording
@@ -560,8 +619,19 @@
 #                               every package as unaffiliated and silently
 #                               disarm the only sub-condition that pages high.
 #
+#   PULSEVM_OFFICIAL_URLS  space-separated https:// URLs for S7 (default: the
+#                               four Metallicus properties above). A list with
+#                               anything that is not a plain https URL is
+#                               rejected WHOLESALE in favour of the default,
+#                               loudly — same rule as PULSEVM_NPM_PACKAGES.
+#   PULSEVM_OFFICIAL_MENTION_RE  ERE for "mentions PulseVM" on S7, matched
+#                               case-insensitively (default 'pulse[ -]?vm'). An
+#                               ERE grep cannot compile falls back to the
+#                               default, loudly.
+#
 #   PULSEVM_RELEASES_URL / PULSEVM_ENDPOINTS_URL / PULSEVM_HEALTH_URL /
-#   PULSEVM_LLMS_URL      source URLs (tests point these at a stub)
+#   PULSEVM_LLMS_URL / PULSEVM_METALGO_RELEASES_URL
+#                         source URLs (tests point these at a stub)
 #
 # Usage:
 #   bash scripts/check-pulsevm-upstream.sh [--verbose]
@@ -591,6 +661,11 @@ RELEASES_URL="${PULSEVM_RELEASES_URL:-https://api.github.com/repos/MetalBlockcha
 ENDPOINTS_URL="${PULSEVM_ENDPOINTS_URL:-https://pulsevm.dev/network/endpoints.md}"
 HEALTH_URL="${PULSEVM_HEALTH_URL:-https://a-chain-alpine-hyperion.metalblockchain.org/v2/health}"
 LLMS_URL="${PULSEVM_LLMS_URL:-https://pulsevm.dev/llms.txt}"
+METALGO_RELEASES_URL="${PULSEVM_METALGO_RELEASES_URL:-https://api.github.com/repos/MetalBlockchain/metalgo/releases?per_page=30}"
+OFFICIAL_URLS_DEFAULT='https://metallicus.com/ https://www.metalblockchain.org/ https://docs.metalblockchain.org/ https://xprnetwork.org/'
+OFFICIAL_URLS="${PULSEVM_OFFICIAL_URLS:-$OFFICIAL_URLS_DEFAULT}"
+OFFICIAL_MENTION_RE_DEFAULT='pulse[ -]?vm'
+OFFICIAL_MENTION_RE="${PULSEVM_OFFICIAL_MENTION_RE:-$OFFICIAL_MENTION_RE_DEFAULT}"
 
 NPM_REGISTRY="${PULSEVM_NPM_REGISTRY:-https://registry.npmjs.org}"
 NPM_SEARCH_URL="${PULSEVM_NPM_SEARCH_URL:-https://registry.npmjs.org/-/v1/search?text=pulsevm&size=50}"
@@ -655,6 +730,28 @@ printf 'x' | grep -qiE "$NPM_OFFICIAL_RE" >/dev/null 2>&1 || NPM_OFFICIAL_RE_RC=
 if [ "$NPM_OFFICIAL_RE_RC" -gt 1 ]; then
 	printf '%s WARN PULSEVM_NPM_OFFICIAL_RE=%s is not a usable ERE — using the default (%s)\n' "$NOW_ISO" "$NPM_OFFICIAL_RE" "$NPM_OFFICIAL_RE_DEFAULT" >&2
 	NPM_OFFICIAL_RE="$NPM_OFFICIAL_RE_DEFAULT"
+fi
+
+# S7's URL list: wholesale, for the reason npm_packages_valid gives. A plain
+# https URL only (no whitespace, quote or shell metacharacter), so a value can
+# never reach curl as an option or be split into something else.
+official_urls_valid() {
+	local list="$1" u
+	[ -n "${list// /}" ] || return 1
+	for u in $list; do
+		[[ "$u" =~ ^https://[A-Za-z0-9.-]+(/[A-Za-z0-9._~/-]*)?$ ]] || return 1
+	done
+	return 0
+}
+if ! official_urls_valid "$OFFICIAL_URLS"; then
+	printf '%s WARN PULSEVM_OFFICIAL_URLS=%s is not a space-separated list of plain https URLs — using the default list (%s)\n' "$NOW_ISO" "$OFFICIAL_URLS" "$OFFICIAL_URLS_DEFAULT" >&2
+	OFFICIAL_URLS="$OFFICIAL_URLS_DEFAULT"
+fi
+OFFICIAL_MENTION_RE_RC=0
+printf 'x' | grep -qiE "$OFFICIAL_MENTION_RE" >/dev/null 2>&1 || OFFICIAL_MENTION_RE_RC=$?
+if [ "$OFFICIAL_MENTION_RE_RC" -gt 1 ]; then
+	printf '%s WARN PULSEVM_OFFICIAL_MENTION_RE=%s is not a usable ERE — using the default (%s)\n' "$NOW_ISO" "$OFFICIAL_MENTION_RE" "$OFFICIAL_MENTION_RE_DEFAULT" >&2
+	OFFICIAL_MENTION_RE="$OFFICIAL_MENTION_RE_DEFAULT"
 fi
 
 # ---- logging -------------------------------------------------------------
@@ -734,6 +831,30 @@ if [ -r "$STATE" ] && jq -e '.schema_version == 2' "$STATE" >/dev/null 2>&1; the
 		jq -r '.observations.npm_discovered[]? // empty' "$STATE" 2>/dev/null | sort -u > "$TMP/prev_npm_found" || true
 		jq -c '.observations.npm_watch[]?' "$STATE" 2>/dev/null > "$TMP/prev_npm_watch.jsonl" || true
 	fi
+fi
+# T6 / T8 history (added 2026-09-30). NOT part of the PREV_OK gate on purpose:
+# a schema-2 file written before these fields existed is still a usable
+# baseline for T1-T5, and re-baselining it would re-send the known T1 page.
+# An absent or mistyped field means "no history for THAT trigger", which the
+# triggers treat the fail-open way (evaluated from the current reading).
+PREV_METALGO_KNOWN=0
+PREV_OFFICIAL_KNOWN=0
+PREV_OFFICIAL_UNREAD=0
+: > "$TMP/prev_metalgo_tags"
+: > "$TMP/prev_official.jsonl"
+if [ "$PREV_OK" -eq 1 ]; then
+	if jq -e '.observations.metalgo_mainnet_tags | type == "array" and all(type == "string")' "$STATE" >/dev/null 2>&1; then
+		PREV_METALGO_KNOWN=1
+		jq -r '.observations.metalgo_mainnet_tags[]' "$STATE" 2>/dev/null | sort -u > "$TMP/prev_metalgo_tags" || true
+	fi
+	if jq -e '.observations.official_pages | type == "array"
+	          and all(type == "object" and (.url | type) == "string" and (.read | type) == "boolean"
+	                  and (.mentions | type) == "boolean" and (.chain_ids | type) == "array")' "$STATE" >/dev/null 2>&1; then
+		PREV_OFFICIAL_KNOWN=1
+		jq -c '.observations.official_pages[]' "$STATE" 2>/dev/null > "$TMP/prev_official.jsonl" || true
+	fi
+	PREV_OFFICIAL_UNREAD="$(jq -r '.observations.official_unread_runs // 0' "$STATE" 2>/dev/null || echo 0)"
+	[[ "$PREV_OFFICIAL_UNREAD" =~ ^[0-9]+$ ]] || PREV_OFFICIAL_UNREAD=0
 fi
 [ -f "$TMP/prev_chain_ids" ]      || : > "$TMP/prev_chain_ids"
 [ -f "$TMP/prev_pages" ]          || : > "$TMP/prev_pages"
@@ -819,6 +940,24 @@ fetch() {
 	local attempt=1 code
 	while :; do
 		code="$("$CURL" -sS -o "$outfile" -w "%{http_code}" --max-time 20 "$url" 2>/dev/null || echo "000")"
+		[ "$code" = "200" ] && break
+		case "$code" in 4??) break ;; esac
+		[ "$attempt" -ge "$attempts" ] && break
+		sleep "$sleep_s"
+		attempt=$((attempt + 1))
+	done
+	printf '%s' "$code"
+}
+
+# fetch_soft <url> <outfile> — S7 only: follows redirects (a homepage that moved
+# to www. is not an outage) and NEVER exits. Same retry rules as fetch().
+fetch_soft() {
+	local url="$1" outfile="$2"
+	local attempts="${FYD_FETCH_ATTEMPTS:-3}"
+	local sleep_s="${FYD_RETRY_SLEEP:-3}"
+	local attempt=1 code
+	while :; do
+		code="$("$CURL" -sS -L --max-redirs 5 -o "$outfile" -w "%{http_code}" --max-time 20 "$url" 2>/dev/null || echo "000")"
 		[ "$code" = "200" ] && break
 		case "$code" in 4??) break ;; esac
 		[ "$attempt" -ge "$attempts" ] && break
@@ -965,6 +1104,50 @@ NPM_SEARCH_TOTAL="$(jq -r '.total // 0' "$TMP/s5search.json" 2>/dev/null || echo
 if [ "$NPM_SEARCH_TOTAL" -gt "$NPM_FOUND_N" ]; then
 	log "WARN S5b reports total=${NPM_SEARCH_TOTAL} but ${NPM_FOUND_N} usable name(s) came back — the discovery set is truncated; raise size= in PULSEVM_NPM_SEARCH_URL before trusting its diff"
 fi
+
+# ---- S6: metalgo releases (T6) -------------------------------------------
+fetch_or_fail "S6 metalgo releases" "$METALGO_RELEASES_URL" "$TMP/s6.json"
+jq -e 'type == "array"' "$TMP/s6.json" >/dev/null 2>&1 \
+	|| fail_and_exit 5 "S6 returned 200 but is not a release list (${METALGO_RELEASES_URL})"
+# Eligible = a non-draft release whose tag is a PLAIN semver (so every
+# "-tahoe", "-rc" … build is out) at v1.14.0 or later.
+jq -r '.[]? | select((.draft // false) | not) | .tag_name // empty' "$TMP/s6.json" 2>/dev/null \
+	| grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' \
+	| awk -F. '{ m = $1; sub(/^v/, "", m); if (m + 0 > 1 || (m + 0 == 1 && $2 + 0 >= 14)) print }' \
+	| sort -u > "$TMP/cur_metalgo_tags" || true
+
+# ---- S7: Metallicus-owned pages (T8) — soft, never fails the run ----------
+: > "$TMP/cur_official.jsonl"
+OFFICIAL_UNREAD_LIST=""
+for official_url in $OFFICIAL_URLS; do
+	official_body="$TMP/s7_$(printf '%s' "$official_url" | tr -c 'A-Za-z0-9' '_')"
+	official_code="$(fetch_soft "$official_url" "$official_body")"
+	if [ "$official_code" = "200" ] && [ -s "$official_body" ]; then
+		if grep -qiE "$OFFICIAL_MENTION_RE" "$official_body"; then official_mentions=true; else official_mentions=false; fi
+		# 64-hex values only from lines that also say "chain id": a page's
+		# asset hashes change on every site build and must not read as ids.
+		{ grep -iE 'chain[ _-]?id' "$official_body" | grep -oiE '\b[0-9a-f]{64}\b' | tr 'A-F' 'a-f' | sort -u; } \
+			> "${official_body}.ids" 2>/dev/null || true
+		official_ids="$(jq -R -s -c 'split("\n") | map(select(length > 0))' < "${official_body}.ids" 2>/dev/null)"
+		[ -n "$official_ids" ] || official_ids='[]'
+		jq -nc --arg u "$official_url" --argjson m "$official_mentions" --argjson ids "${official_ids:-[]}" \
+			'{url: $u, read: true, mentions: $m, chain_ids: $ids}' >> "$TMP/cur_official.jsonl" 2>/dev/null \
+			|| fail_and_exit 5 "could not compose the S7 record for ${official_url}"
+	else
+		OFFICIAL_UNREAD_LIST="${OFFICIAL_UNREAD_LIST}${OFFICIAL_UNREAD_LIST:+ }${official_url}(HTTP=${official_code})"
+		log "WARN S7 ${official_url} not readable (HTTP=${official_code}) — recorded as unread; T8 is not evaluated for it this run"
+		jq -nc --arg u "$official_url" '{url: $u, read: false, mentions: false, chain_ids: []}' \
+			>> "$TMP/cur_official.jsonl" 2>/dev/null \
+			|| fail_and_exit 5 "could not compose the S7 record for ${official_url}"
+	fi
+done
+if [ -n "$OFFICIAL_UNREAD_LIST" ]; then CUR_OFFICIAL_UNREAD=$((PREV_OFFICIAL_UNREAD + 1)); else CUR_OFFICIAL_UNREAD=0; fi
+
+# prev_official_field <url> <field> — recorded value, or nothing when the
+# last run did not record this URL (no history for it).
+prev_official_field() {
+	jq -r --arg u "$1" --arg f "$2" 'select(.url == $u) | .[$f] | tostring' "$TMP/prev_official.jsonl" 2>/dev/null | head -1
+}
 
 # ---- evaluate triggers ---------------------------------------------------
 # PRIORITY SPLIT. Not every trigger deserves the same channel. Three of them
@@ -1117,6 +1300,59 @@ if [ "$PREV_OK" -eq 1 ]; then
 	fi
 fi
 
+# T6 — a mainnet-capable metalgo (plain semver >= v1.14). Evaluated from the
+# current reading when there is no record of these tags (baseline, or a state
+# file older than this trigger): the condition is a fact, not a diff.
+if [ "$PREV_METALGO_KNOWN" -eq 1 ]; then
+	NEW_METALGO="$(comm -13 "$TMP/prev_metalgo_tags" "$TMP/cur_metalgo_tags" | head -5 | tr '\n' ' ')"
+else
+	NEW_METALGO="$(head -5 "$TMP/cur_metalgo_tags" | tr '\n' ' ')"
+fi
+if [ -n "${NEW_METALGO// /}" ]; then
+	add_fire "T6" "OBSERVED: MetalBlockchain/metalgo lists release tag(s) with no suffix at v1.14 or later: ${NEW_METALGO%% } (the Granite line PulseVM v1 needs was '-tahoe' pre-releases only on 2026-09-30). NOT ESTABLISHED: that Metal mainnet has upgraded, or that an A-Chain move onto PulseVM has a date — a release is code, not a network event. OBLIGATION: read the release notes (Granite, rpcchainvm protocol); if it is a mainnet release, plan the validator upgrade through the usual runbook; then re-read docs/A_CHAIN_PULSEVM_CUTOVER.md, whose first precondition this is"
+	FIRED_HIGH=1
+fi
+
+# T7 — PulseVM's own GitHub Release reached v1.0.0.
+semver_major_ge1() { [[ "$1" =~ ^v?([0-9]+)\.[0-9]+\.[0-9]+$ ]] && [ "${BASH_REMATCH[1]}" -ge 1 ]; }
+if semver_major_ge1 "$CUR_TAG" && { [ "$PREV_OK" -eq 0 ] || [ -z "$PREV_TAG" ] || ! semver_major_ge1 "$PREV_TAG"; }; then
+	add_fire "T7" "OBSERVED: the latest PulseVM GitHub release is ${CUR_TAG} (last recorded: ${PREV_TAG:-none}), a plain version at v1.0.0 or later. NOT ESTABLISHED: that any network runs it, or that the A-Chain cutover has a date. OBLIGATION: read the release notes for the /v1/chain REST surface, the push response shape and the chain_id policy, and compare them with the OPEN operator decisions in docs/A_CHAIN_PULSEVM_CUTOVER.md"
+	FIRED_HIGH=1
+fi
+
+# T8 — Metallicus-owned pages. Read from a file redirect (not a pipeline) so
+# add_fire in the loop body runs in THIS shell.
+T8_MENTION_URLS=""
+T8_NEW_IDS=""
+while IFS= read -r official_rec; do
+	[ -n "$official_rec" ] || continue
+	o_url="$(printf '%s' "$official_rec" | jq -r '.url')"
+	o_read="$(printf '%s' "$official_rec" | jq -r '.read | tostring')"
+	o_mentions="$(printf '%s' "$official_rec" | jq -r '.mentions | tostring')"
+	[ "$o_read" = "true" ] && [ "$o_mentions" = "true" ] || continue
+	p_mentions=""
+	[ "$PREV_OFFICIAL_KNOWN" -eq 1 ] && p_mentions="$(prev_official_field "$o_url" mentions)"
+	if [ "$p_mentions" != "true" ]; then
+		T8_MENTION_URLS="${T8_MENTION_URLS}${T8_MENTION_URLS:+ }${o_url}"
+		continue
+	fi
+	o_new_ids="$(comm -13 \
+		<(jq -r --arg u "$o_url" 'select(.url == $u) | .chain_ids[]' "$TMP/prev_official.jsonl" 2>/dev/null | sort -u) \
+		<(printf '%s' "$official_rec" | jq -r '.chain_ids[]' | sort -u) | head -3 | tr '\n' ' ')"
+	[ -n "${o_new_ids// /}" ] && T8_NEW_IDS="${T8_NEW_IDS}${T8_NEW_IDS:+; }${o_url}: ${o_new_ids%% }"
+done < "$TMP/cur_official.jsonl"
+if [ -n "$T8_MENTION_URLS" ]; then
+	add_fire "T8" "OBSERVED: Metallicus-owned page(s) now match '${OFFICIAL_MENTION_RE}': ${T8_MENTION_URLS} (no match, or no readable record, on the previous run). NOT ESTABLISHED: that a PulseVM mainnet chain_id or a cutover plan has been published — this run matched a word, it did not read the page. OBLIGATION: read the page; if it states a mainnet chain_id, endpoints or a cutover date, follow docs/A_CHAIN_PULSEVM_CUTOVER.md (profile values go in by a reviewed commit, never by an env override)"
+	FIRED_HIGH=1
+fi
+if [ -n "$T8_NEW_IDS" ]; then
+	add_fire "T8" "OBSERVED: new 64-hex value(s) on a 'chain id' line of a Metallicus-owned page that mentions PulseVM — ${T8_NEW_IDS}. NOT ESTABLISHED: that any of them is the PulseVM mainnet chain_id; a testnet reset or an unrelated identifier looks the same to this match. OBLIGATION: read the page; a mainnet chain_id enters config/a-chain-profiles.json only through a reviewed commit per docs/A_CHAIN_PULSEVM_CUTOVER.md"
+	FIRED_HIGH=1
+fi
+if [ "$CUR_OFFICIAL_UNREAD" -eq "$FAILURE_ALERT_AFTER" ] && [ "$CUR_OFFICIAL_UNREAD" -gt 0 ]; then
+	add_fire "T8" "OBSERVED: ${CUR_OFFICIAL_UNREAD} consecutive runs could not read Metallicus-owned page(s): ${OFFICIAL_UNREAD_LIST}. NOT ESTABLISHED: anything about those pages — a run that could not read a page compared nothing for it. OBLIGATION: check whether the URL moved or the site is down, and fix PULSEVM_OFFICIAL_URLS (or the default list) so T8 is not silently blind. Paged once per outage"
+fi
+
 # Release tag movement is recorded, never paged.
 if [ "$PREV_OK" -eq 1 ] && [ -n "$PREV_TAG" ] && [ "$PREV_TAG" != "$CUR_TAG" ]; then
 	log "INFO release tag ${PREV_TAG} -> ${CUR_TAG} (recorded, not a trigger)"
@@ -1132,8 +1368,11 @@ NPM_FOUND_JSON="$(jq -R -s 'split("\n") | map(select(length > 0))' < "$TMP/cur_n
 # -s over the JSONL the S5a loop appended, so the array is built from records
 # that were each composed by jq and are therefore already valid.
 NPM_WATCH_JSON="$(jq -s '.' < "$TMP/cur_npm_watch.jsonl" 2>/dev/null || true)"
+METALGO_TAGS_JSON="$(jq -R -s 'split("\n") | map(select(length > 0))' < "$TMP/cur_metalgo_tags" 2>/dev/null || true)"
+OFFICIAL_JSON="$(jq -s '.' < "$TMP/cur_official.jsonl" 2>/dev/null || true)"
 CUR_OBS=""
-if [ -n "$CHAIN_IDS_JSON" ] && [ -n "$PAGES_JSON" ] && [ -n "$NPM_FOUND_JSON" ] && [ -n "$NPM_WATCH_JSON" ]; then
+if [ -n "$CHAIN_IDS_JSON" ] && [ -n "$PAGES_JSON" ] && [ -n "$NPM_FOUND_JSON" ] && [ -n "$NPM_WATCH_JSON" ] \
+	&& [ -n "$METALGO_TAGS_JSON" ] && [ -n "$OFFICIAL_JSON" ]; then
 	CUR_OBS="$(jq -n \
 		--arg tag "$CUR_TAG" \
 		--argjson sync "$CUR_SYNC_NOTICE" \
@@ -1143,9 +1382,14 @@ if [ -n "$CHAIN_IDS_JSON" ] && [ -n "$PAGES_JSON" ] && [ -n "$NPM_FOUND_JSON" ] 
 		--argjson pages "$PAGES_JSON" \
 		--argjson npm_watch "$NPM_WATCH_JSON" \
 		--argjson npm_discovered "$NPM_FOUND_JSON" \
+		--argjson metalgo_tags "$METALGO_TAGS_JSON" \
+		--argjson official "$OFFICIAL_JSON" \
+		--argjson official_unread "$CUR_OFFICIAL_UNREAD" \
 		'{release_tag: $tag, sync_notice_present: $sync, mainnet_section_present: $mainnet,
 		  head_block: $head, chain_ids: $chain_ids, pages: $pages,
-		  npm_watch: $npm_watch, npm_discovered: $npm_discovered}' 2>/dev/null || true)"
+		  npm_watch: $npm_watch, npm_discovered: $npm_discovered,
+		  metalgo_mainnet_tags: $metalgo_tags, official_pages: $official,
+		  official_unread_runs: $official_unread}' 2>/dev/null || true)"
 fi
 if [ -z "$CUR_OBS" ]; then
 	# Composing our OWN record failed — that is a local defect, not an
@@ -1156,8 +1400,9 @@ fi
 state_write "$CUR_OBS" 0
 
 if [ -n "$FIRED" ]; then
-	# Priority comes from FIRED_HIGH, set only by the three act-now triggers
-	# (T1 / T2-mainnet-section / BASELINE) at the point each one fires. See the
+	# Priority comes from FIRED_HIGH, set only by the act-now triggers (T1 /
+	# T2-mainnet-section / T5-affiliated / T6 / T7 / T8-page / BASELINE) at the
+	# point each one fires. See the
 	# PRIORITY SPLIT comment above the trigger block for why a routine
 	# chain-id change must not arrive on the same channel as T1. A run that
 	# fires BOTH kinds escalates to high, which is correct: the high one is
@@ -1169,5 +1414,5 @@ if [ -n "$FIRED" ]; then
 	exit 3
 fi
 
-[ "$VERBOSE" -eq 1 ] && log "OK no upstream change: release=${CUR_TAG} head_block=${CUR_HEAD} sync_notice_present=${CUR_SYNC_NOTICE} mainnet_section=${CUR_MAINNET} pages=$(wc -l < "$TMP/cur_pages" | tr -d ' ') npm_watched=$(grep -c . < "$TMP/cur_npm_watch.jsonl" | tr -d ' ') npm_found=${NPM_FOUND_N}"
+[ "$VERBOSE" -eq 1 ] && log "OK no upstream change: release=${CUR_TAG} head_block=${CUR_HEAD} sync_notice_present=${CUR_SYNC_NOTICE} mainnet_section=${CUR_MAINNET} pages=$(wc -l < "$TMP/cur_pages" | tr -d ' ') npm_watched=$(grep -c . < "$TMP/cur_npm_watch.jsonl" | tr -d ' ') npm_found=${NPM_FOUND_N} metalgo_v114_plain=$(grep -c . < "$TMP/cur_metalgo_tags" | tr -d ' ') official_unread=${CUR_OFFICIAL_UNREAD}"
 exit 0

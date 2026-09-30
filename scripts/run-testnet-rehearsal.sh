@@ -90,9 +90,16 @@
 #       unreachable or the response is malformed. A locked keystore is
 #       detected here (key:list non-zero / timed out) and exits 2 with the
 #       unlock instruction, NOT the "key must be imported" diagnosis.
-#   4.  Verify unlock state (proton-cli account read must succeed
-#       without hang; timeout applied) + proton chain:set proton-test
-#       + chain:info respond.
+#   4.  proton chain:set <testnet profile network> + chain:info respond;
+#       then the PRE-BROADCAST HISTORY REACHABILITY CHECK
+#       (scripts/check-anchor-history-reachable.sh --chain=testnet-a
+#       --rpc=$TESTNET_RPC, liveness mode for the rehearsal actor): step 9's
+#       receipt verification runs AFTER the irreversible testnet broadcast,
+#       so a history outage — or an XPR_TESTNET_RPC that is not EXACTLY one
+#       of the testnet profile's history_bases, which the receipt refuses —
+#       must stop the run HERE, before anything is signed (plan P3). Then
+#       verify unlock state (proton-cli account read must succeed without
+#       hang; timeout applied).
 #   5.  Compose 4-action tx JSON via sign-anchor-event.sh --dry-run,
 #       save to a tmpfile.
 #   6.  Create broadcast token (/tmp/fyd-broadcast-token, TTL 5 min,
@@ -146,7 +153,7 @@ for arg in "$@"; do
 		--source=*)         ANCHOR_SOURCE_ARG="${arg#--source=}" ;;
 		--allow-fixture)    ALLOW_FIXTURE=1 ;;
 		--expect-cycle=*)   EXPECT_CYCLE="${arg#--expect-cycle=}" ;;
-		-h|--help)          sed -n '2,99p' "$0" | sed 's/^# \?//'; exit 0 ;;
+		-h|--help)          sed -n '2,112p' "$0" | sed 's/^# \?//'; exit 0 ;;
 		*)                  echo "ERROR: unknown arg: $arg" >&2; exit 1 ;;
 	esac
 done
@@ -165,13 +172,23 @@ else
 	ANCHOR_SOURCE_ORIGIN="default (canonical)"
 fi
 
-# get_account (chain API — permission/key lookup). Distinct provider/base
-# from TESTNET_RPC below (Hyperion/history API) — see
+# get_account (chain API — permission/key lookup) goes to TESTNET_CHAIN_RPC,
+# a distinct provider/base from TESTNET_RPC (Hyperion/history API) — see
 # docs/ANCHOR_ACCOUNT_KEY_ROTATION.md, which already established this
 # endpoint for the same get_account use case during the 2026-07-10 key
-# rotation.
-TESTNET_CHAIN_RPC="${XPR_TESTNET_CHAIN_RPC:-https://rpc.api.testnet.metalx.com}"
-TESTNET_RPC="${XPR_TESTNET_RPC:-https://test.proton.eosusa.io}"
+# rotation. Both defaults, the proton-cli network name and the explorer base
+# come from the TESTNET chain profile (config/a-chain-profiles.json via
+# scripts/lib/a-chain-profile.sh; FYD_A_CHAIN_PROFILE_TESTNET, default
+# xpr-testnet = the values these were literals of until 2026-09-30). They are
+# resolved at step 3/10, after the tool checks, so a missing tool is still
+# diagnosed as itself.
+#   XPR_TESTNET_CHAIN_RPC  default https://<first node_host of the profile>
+#   XPR_TESTNET_RPC        default <first history_base of the profile>; a
+#                          custom value MUST EXACTLY equal one of the
+#                          profile's history_bases — the step 4/10
+#                          reachability check and the step 9/10 receipt both
+#                          refuse anything else (the check refuses BEFORE
+#                          the broadcast, which is the point).
 DRY_RUN_LOG="${LOGIN_HOME}/.fya-testnet-dryrun-log.json"
 TOKEN_FILE="/tmp/fyd-broadcast-token"
 
@@ -279,6 +296,25 @@ fi
 PUBKEY_HELPER="${REPO_ROOT}/scripts/lib/eosio-pubkey-raw-hex.js"
 [ -r "$PUBKEY_HELPER" ] || fail "missing helper: $PUBKEY_HELPER"
 
+# ---- testnet chain profile (see the TESTNET_CHAIN_RPC comment above) ----
+[ -r "${REPO_ROOT}/scripts/lib/a-chain-profile.sh" ] \
+	|| fail "missing library: scripts/lib/a-chain-profile.sh (the checkout is incomplete — advance it)"
+# shellcheck source=scripts/lib/a-chain-profile.sh
+. "${REPO_ROOT}/scripts/lib/a-chain-profile.sh" || fail "cannot load scripts/lib/a-chain-profile.sh"
+TESTNET_PROFILE="$(acp_profile_name testnet)" \
+	|| fail "no usable testnet chain profile (see the a-chain-profile message above). Unset a stray FYD_A_CHAIN_PROFILE_TESTNET, or restore config/a-chain-profiles.json from git."
+PROTON_NET="$(acp_proton_network testnet)" \
+	|| fail "testnet chain profile ${TESTNET_PROFILE} has no proton_network (values not published yet) — refusing to rehearse."
+TESTNET_EXPLORER="$(acp_explorer_base testnet)" \
+	|| fail "testnet chain profile ${TESTNET_PROFILE} has no explorer_base — refusing to rehearse."
+PROFILE_NODE_HOST="$(acp_node_hosts testnet | head -n 1)" \
+	|| fail "testnet chain profile ${TESTNET_PROFILE} has no node_hosts — refusing to rehearse."
+PROFILE_HISTORY_BASE="$(acp_history_bases testnet | head -n 1)" \
+	|| fail "testnet chain profile ${TESTNET_PROFILE} has no history_bases — refusing to rehearse."
+TESTNET_CHAIN_RPC="${XPR_TESTNET_CHAIN_RPC:-https://${PROFILE_NODE_HOST}}"
+TESTNET_RPC="${XPR_TESTNET_RPC:-${PROFILE_HISTORY_BASE}}"
+echo "  chain profile (testnet): ${TESTNET_PROFILE}  network=${PROTON_NET}  history=${TESTNET_RPC}"
+
 CHAIN_RC=0
 CHAIN_CURL_ERR="$(mktemp -t fya-testnet-curl-err.XXXXXX)"
 CHAIN_ACCOUNT_JSON="$(curl -sS --max-time 15 -X POST -H 'content-type: application/json' \
@@ -362,8 +398,8 @@ if [ "$MATCH_FOUND" -ne 1 ]; then
 fi
 
 # ---- step 4: keystore unlock check + chain preflight ----
-step "4/10 keystore unlock + proton chain preflight"
-proton chain:set proton-test >/dev/null 2>&1 || fail "proton chain:set proton-test failed"
+step "4/10 proton chain preflight + history reachability + keystore unlock"
+proton chain:set "$PROTON_NET" >/dev/null 2>&1 || fail "proton chain:set ${PROTON_NET} failed"
 # proton chain:info returns a pretty-printed JSON object (~22 lines).
 # The prior `head -20` truncated the trailing `}` and produced a "Unfinished
 # JSON term at EOF" parse error at step 3 during S9/S11 rehearsals. Capture
@@ -375,6 +411,21 @@ if ! printf '%s' "$CHAIN_INFO" | grep -q chain_id; then
 fi
 HEAD_BLOCK_NUM="$(printf '%s' "$CHAIN_INFO" | jq -r '.head_block_num // "unparsed"' 2>/dev/null || echo unparsed)"
 echo "  chain:info OK — head_block_num=$HEAD_BLOCK_NUM"
+
+# Pre-broadcast history reachability (plan P3). Step 9/10 resolves the
+# broadcast tx from history AFTER the broadcast; if history is down, or
+# TESTNET_RPC is not exactly one of the profile's history_bases, that step
+# fails with the testnet tx already on-chain. The same reader code is run
+# here first (scripts/lib/anchor-history-read.sh via the check), in liveness
+# mode for the rehearsal actor (--ledger=/dev/null: there is no testnet
+# ledger; the published one is mainnet's). Read-only. Any non-zero = stop.
+HISTORY_CHECK_RC=0
+bash "${REPO_ROOT}/scripts/check-anchor-history-reachable.sh" \
+	--chain=testnet-a --rpc="$TESTNET_RPC" --ledger=/dev/null --actor="$XPR_ACCOUNT" \
+	|| HISTORY_CHECK_RC=$?
+if [ "$HISTORY_CHECK_RC" -ne 0 ]; then
+	fail "pre-broadcast history reachability check failed (check-anchor-history-reachable.sh exit ${HISTORY_CHECK_RC}; its message is above). Nothing was composed, signed or broadcast. Step 9/10 would fail AFTER the broadcast for the same reason. If XPR_TESTNET_RPC is set, it must EXACTLY equal one of: $(acp_history_bases testnet | tr '\n' ' ')"
+fi
 
 # Unlock probe: try to read the same account we'll sign with.
 # Fast timeout because a locked keystore hangs on any signing-adjacent op.
@@ -505,7 +556,7 @@ TESTNET REHEARSAL COMPLETE — copy the line below back to the AI session:
     TESTNET REHEARSAL COMPLETE testnet_tx_id=${TX_ID}
 
 Details for the record:
-  chain:               testnet-a (proton-test)
+  chain:               testnet-a (${PROTON_NET}, profile ${TESTNET_PROFILE})
   actor:               $(jq -r .authorization.actor "$DRY_RUN_LOG")
   sink:                $(jq -r .sink "$DRY_RUN_LOG")
   memo prefix:         $(jq -r .memo_prefix "$DRY_RUN_LOG")
@@ -517,7 +568,7 @@ Details for the record:
     [4/dag] $(jq -r .composed_memos.dag_root_summary "$DRY_RUN_LOG")
   dry-run log:         $DRY_RUN_LOG  (testnet-side only — not mainnet gate-4 material)
   receipt:             $RECEIPT_OUT
-  explorer URL:        https://testnet.protonscan.io/transaction/${TX_ID}
+  explorer URL:        ${TESTNET_EXPLORER}/${TX_ID}
 
 Next: paste the sentinel line to the AI session. AI will use it as the
 --testnet-tx-id argument for the next mainnet cycle-transition anchor

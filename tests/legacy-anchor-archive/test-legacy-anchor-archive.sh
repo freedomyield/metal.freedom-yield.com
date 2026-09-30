@@ -301,6 +301,30 @@ cp "$TMP/tx1.saved2" "$OUT/$TX1.json"; cp "$TMP/manifest.saved" "$OUT/manifest.j
 check "verifier passes again after restoring" 0 "$(verify)"
 check "verifier: missing history file is a usage error" 2 "$("$VERIFIER" --archive-dir="$OUT" --history="$TMP/none.jsonl" >/dev/null 2>&1; echo $?)"
 
+# --- chain profile (Task 5, 2026-09-30) -----------------------------------------
+# The archive preserves the LEGACY chain. Its hosts and chain_id come from the
+# committed profile file BY NAME (xpr-mainnet), so selecting a PulseVM profile
+# for the mainnet role after a cutover must not move it anywhere.
+CFG="${REPO_ROOT}/config/a-chain-profiles.json"
+LEG_HIST="$(jq -r '.profiles["xpr-mainnet"].history_bases[0]' "$CFG")"
+LEG_CID="$(jq -r '.profiles["xpr-mainnet"].chain_id' "$CFG")"
+check "profile: the fixture chain_id is the legacy profile's chain_id" "$LEG_CID" "$CHAIN"
+rc="$(run_archive --from-file="$FX/history.jsonl" --out-dir="$TMP/out-dry-prof" --dry-run)"
+check "profile: dry-run history GET goes to the legacy profile's first history base" 2 \
+	"$(grep -c "GET ${LEG_HIST}/v2/history/get_transaction?id=" "$TMP/out.txt")"
+check "profile: node hosts start with the history host (same operator for both bodies)" \
+	"DRY-RUN: GET ${LEG_HIST}/v1/chain/get_info   (chain_id check, first reachable host)" \
+	"$(grep 'get_info' "$TMP/out.txt" | head -n1)"
+rc="$(FYD_A_CHAIN_PROFILE_MAINNET=pulsevm-mainnet run_archive --from-file="$FX/history.jsonl" --out-dir="$TMP/out-pvm-selected")"
+check "profile: PulseVM selected for the mainnet role still archives the legacy chain (exit 0)" 0 "$rc"
+check "profile: ... and every request went to a legacy profile host" 0 \
+	"$(grep -vcE "https://($(jq -r '.profiles["xpr-mainnet"] | [.node_hosts[], (.history_bases[] | sub("^https://"; ""))] | map(gsub("\\."; "\\.")) | join("|")' "$CFG"))/" "$LOG")"
+check "profile: verifier with PulseVM selected still checks against the legacy chain_id" 0 \
+	"$(FYD_A_CHAIN_PROFILE_MAINNET=pulsevm-mainnet "$VERIFIER" --archive-dir="$TMP/out-pvm-selected" --history="$FX/history.jsonl" >/dev/null 2>&1; echo $?)"
+check "profile: no chain literal left in the archiver or the verifier" 0 \
+	"$(jq -r '.profiles[] | (.chain_id // empty), .node_hosts[], (.history_bases[] | sub("^https://"; ""))' "$CFG" | sort -u \
+		| while IFS= read -r v; do grep -hF -- "$v" "$ARCHIVER" "$VERIFIER"; done | grep -c .)"
+
 echo "----"
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" -eq 0 ]

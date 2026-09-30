@@ -56,6 +56,8 @@ unset S1_CODE S2_CODE S3_CODE S4_CODE \
       S1_CODE_SEQ S2_CODE_SEQ S3_CODE_SEQ S4_CODE_SEQ \
       NPM_TS_CODE NPM_TSC_CODE NPM_TS_CODE_SEQ NPM_TSC_CODE_SEQ \
       NPMSEARCH_CODE NPMSEARCH_CODE_SEQ \
+      S6_CODE S6_CODE_SEQ OFFA_CODE OFFB_CODE \
+      PULSEVM_OFFICIAL_URLS PULSEVM_OFFICIAL_MENTION_RE \
       PULSEVM_NPM_PACKAGES PULSEVM_NPM_OFFICIAL_RE \
       FY_LIVE_OVERRIDE FYD_FETCH_ATTEMPTS \
       PULSEVM_UPSTREAM_HEAD_BLOCK_DELTA PULSEVM_UPSTREAM_FAILURE_ALERT_AFTER 2>/dev/null
@@ -81,7 +83,7 @@ CHAIN_A="193526980f523c07a567dda80f5f543e2356518ce1475cf3e03d98ca740b3f67"
 CHAIN_B="aaaaaaaabbbbbbbbccccccccddddddddeeeeeeeeffffffff00000000111111ff"
 
 BASE=""; STUB=""; LOG=""; STATE=""; NOTIFY_STUB=""; NOTIFY_LOG=""
-S1=""; S2=""; S3=""; S4=""; NPM_TS=""; NPM_TSC=""; NPM_SEARCH=""
+S1=""; S2=""; S3=""; S4=""; NPM_TS=""; NPM_TSC=""; NPM_SEARCH=""; S6=""; OFFA=""; OFFB=""
 SEED_NPM_WATCH=""; SEED_NPM_FOUND=""
 
 # Fixture identities are FICTIONAL on purpose. The real `pulse-ts` maintainer
@@ -108,6 +110,7 @@ setup() {
 	NPM_TS="$BASE/npm-pulse-ts.json"
 	NPM_TSC="$BASE/npm-pulse-tsc.json"
 	NPM_SEARCH="$BASE/npm-search.json"
+	S6="$BASE/s6.json"; OFFA="$BASE/official-a.html"; OFFB="$BASE/official-b.html"
 	SEED_NPM_WATCH=""
 	SEED_NPM_FOUND=""
 
@@ -139,6 +142,10 @@ done
 statedir="${STUB_STATE_DIR:-.}"
 printf '%s\n' "$url" >> "$statedir/urls.log"
 case "$url" in
+	# S6 BEFORE S1: both URLs contain "releases".
+	*metalgo*)    key=s6; body="${S6_BODY:-/dev/null}"; code="${S6_CODE:-200}"; seq="${S6_CODE_SEQ:-}" ;;
+	*/official/a) key=offa; body="${OFFA_BODY:-/dev/null}"; code="${OFFA_CODE:-200}"; seq="" ;;
+	*/official/b) key=offb; body="${OFFB_BODY:-/dev/null}"; code="${OFFB_CODE:-200}"; seq="" ;;
 	*releases*)   key=s1; body="${S1_BODY:-/dev/null}"; code="${S1_CODE:-200}"; seq="${S1_CODE_SEQ:-}" ;;
 	*endpoints*)  key=s2; body="${S2_BODY:-/dev/null}"; code="${S2_CODE:-200}"; seq="${S2_CODE_SEQ:-}" ;;
 	*health*)     key=s3; body="${S3_BODY:-/dev/null}"; code="${S3_CODE:-200}"; seq="${S3_CODE_SEQ:-}" ;;
@@ -185,6 +192,11 @@ STUBEOF
 	write_s4 "$S4"
 	write_npm "$NPM_TS" "pulse-ts" "2.1.1" "$STRANGER_USER" "$STRANGER_MAIL"
 	write_npm_search "$NPM_SEARCH" "${OFFICIAL_PKG}|${OFFICIAL_USER}|${OFFICIAL_MAIL}"
+	# S6/S7 as measured 2026-09-30: mainnet metalgo on v1.13.x, the Granite
+	# line only as -tahoe pre-releases; no Metallicus page mentions PulseVM.
+	write_s6 "$S6" "v1.13.5" "v1.14.2-tahoe"
+	write_official "$OFFA" plain
+	write_official "$OFFB" plain
 }
 teardown() { rm -rf "$BASE"; BASE=""; }
 
@@ -218,6 +230,33 @@ write_npm_search() {
 			                 links: {npm: ("https://example.test/" + $n)}}}]')"
 	done
 	printf '%s' "$objs" | jq '{total: length, objects: .}' > "$f"
+}
+
+# write_s6 <file> <tag>... — the shape api.github.com/repos/<o>/<r>/releases serves
+write_s6() {
+	local f="$1" t out='[]'
+	shift
+	for t in "$@"; do
+		out="$(printf '%s' "$out" | jq -c --arg t "$t" '. + [{tag_name: $t, draft: false, prerelease: ($t | test("-")), name: $t}]')"
+	done
+	printf '%s' "$out" > "$f"
+}
+
+# write_official <file> <plain|mention|mention-id <64hex>> — a Metallicus-like
+# homepage. The asset hash on the <link> line is 64 hex on purpose: it must
+# never be read as a chain id (it is not on a "chain id" line).
+write_official() {
+	local f="$1" kind="$2" id="${3:-}"
+	{
+		printf '<html><head><link rel="stylesheet" href="/assets/%s.css"></head><body>\n' \
+			"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+		printf '<h1>Compliant blockchain for financial institutions</h1>\n'
+		case "$kind" in
+			mention)    printf '<p>A-Chain is moving to PulseVM.</p>\n' ;;
+			mention-id) printf '<p>A-Chain is moving to PulseVM.</p>\n<p>Mainnet chain ID: %s</p>\n' "$id" ;;
+		esac
+		printf '</body></html>\n'
+	} > "$f"
 }
 
 # write_s1 <file> <tag>
@@ -324,6 +363,10 @@ run_checker() {
 	PULSEVM_NPM_REGISTRY="https://example.test/npm" \
 	PULSEVM_NPM_SEARCH_URL="https://example.test/npm-search?text=pulsevm&size=50" \
 	PULSEVM_NPM_PACKAGES="${PULSEVM_NPM_PACKAGES-pulse-ts pulse-tsc}" \
+	PULSEVM_METALGO_RELEASES_URL="https://example.test/repos/metalgo/releases?per_page=30" \
+	PULSEVM_OFFICIAL_URLS="${PULSEVM_OFFICIAL_URLS-https://example.test/official/a https://example.test/official/b}" \
+	S6_BODY="$S6" S6_CODE="${S6_CODE:-200}" S6_CODE_SEQ="${S6_CODE_SEQ:-}" \
+	OFFA_BODY="$OFFA" OFFA_CODE="${OFFA_CODE:-200}" OFFB_BODY="$OFFB" OFFB_CODE="${OFFB_CODE:-200}" \
 	S1_BODY="$S1" S2_BODY="$S2" S3_BODY="$S3" S4_BODY="$S4" \
 	S1_CODE="${S1_CODE:-200}" S2_CODE="${S2_CODE:-200}" S3_CODE="${S3_CODE:-200}" S4_CODE="${S4_CODE:-200}" \
 	S1_CODE_SEQ="${S1_CODE_SEQ:-}" S2_CODE_SEQ="${S2_CODE_SEQ:-}" S3_CODE_SEQ="${S3_CODE_SEQ:-}" S4_CODE_SEQ="${S4_CODE_SEQ:-}" \
@@ -1418,9 +1461,167 @@ run_checker >/dev/null 2>&1
 [ -z "$(urls | grep -v 'example\.test' || true)" ] \
 	&& ok "hermetic: every request went to example.test — the suite never touches a real registry or docs site" \
 	|| bad "hermetic: a request escaped to a real host ($(urls | grep -v 'example\.test' | head -3))"
-[ "$(urls | grep -c 'example.test')" -eq 7 ] \
-	&& ok "hermetic: a default run makes exactly 7 requests (S1-S4, two watched names, one search)" \
-	|| bad "hermetic: expected 7 requests on a clean run, got $(urls | grep -c 'example.test')"
+[ "$(urls | grep -c 'example.test')" -eq 10 ] \
+	&& ok "hermetic: a default run makes exactly 10 requests (S1-S4, two watched names, one search, S6, two official pages)" \
+	|| bad "hermetic: expected 10 requests on a clean run, got $(urls | grep -c 'example.test')"
+teardown
+
+# ---- case 19 (T6): a plain-semver metalgo v1.14 appears ---------------------
+setup
+seed_state false false "$CHAIN_A" 3406 "v0.6.2"
+OUT="$(run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 0 ] && [ "$(n_alerts)" -eq 0 ] \
+	&& ok "T6 near-miss: v1.13.5 + v1.14.2-tahoe only (the 2026-09-30 state) -> silent" \
+	|| bad "T6 near-miss: expected silent exit 0, got $RC / $(n_alerts) alert(s) ($(alerts))"
+jq -e '.observations.metalgo_mainnet_tags == []' "$STATE" >/dev/null 2>&1 \
+	&& ok "T6: an empty eligible set is recorded (history for the next run)" \
+	|| bad "T6: metalgo_mainnet_tags not recorded as [] ($(jq -c '.observations.metalgo_mainnet_tags' "$STATE" 2>&1))"
+: > "$NOTIFY_LOG"
+write_s6 "$S6" "v1.13.5" "v1.14.2-tahoe" "v1.14.3"
+OUT="$(run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 3 ] && echo "$OUT" | grep -q 'TRIGGER T6' \
+	&& ok "T6: v1.14.3 without a suffix -> exit 3, TRIGGER T6" \
+	|| bad "T6: expected exit 3 + T6, got $RC (out: $OUT)"
+alerts | grep -q '^high|' && alerts | grep -q 'v1.14.3' && ! alerts | grep -q 'v1.14.2-tahoe' \
+	&& ok "T6: high priority, names the new plain tag and not the -tahoe one" \
+	|| bad "T6: wrong priority or tag list ($(alerts))"
+alerts | grep -q 'NOT ESTABLISHED: that Metal mainnet has upgraded' \
+	&& ok "T6: the alert denies the conclusion a release does not establish" \
+	|| bad "T6: missing NOT ESTABLISHED ($(alerts))"
+assert_alert_shape "T6"
+assert_no_overclaim "T6"
+: > "$NOTIFY_LOG"
+OUT="$(run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 0 ] && [ "$(n_alerts)" -eq 0 ] \
+	&& ok "T6 hysteresis: the same tag on the next run does not re-page" \
+	|| bad "T6 hysteresis: expected silent exit 0, got $RC ($(alerts))"
+teardown
+
+# ---- case 19b (T6): a v1.14 tag in an OLD state file (no field) fires ---------
+setup
+seed_state false false "$CHAIN_A" 3406 "v0.6.2"
+write_s6 "$S6" "v1.14.0" "v1.13.5"
+OUT="$(run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 3 ] && echo "$OUT" | grep -q 'TRIGGER T6' && ! echo "$OUT" | grep -q 'BASELINE' \
+	&& ok "T6: no metalgo history + an eligible tag -> fires (fail open), without re-baselining T1-T5" \
+	|| bad "T6: expected T6 without BASELINE, got $RC (out: $OUT)"
+write_s6 "$S6" "v2.0.0-rc1" "v1.13.9"
+: > "$NOTIFY_LOG"; seed_state false false "$CHAIN_A" 3406 "v0.6.2"
+OUT="$(run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 0 ] \
+	&& ok "T6 near-miss: a suffixed v2 pre-release and a v1.13 plain tag do not fire" \
+	|| bad "T6 near-miss: expected 0, got $RC (out: $OUT)"
+teardown
+
+# ---- case 20 (T7): the PulseVM GitHub Release reaches v1.0.0 ------------------
+setup
+seed_state false false "$CHAIN_A" 3406 "v0.7.1"
+write_s1 "$S1" "v1.0.0"
+OUT="$(run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 3 ] && echo "$OUT" | grep -q 'TRIGGER T7' \
+	&& ok "T7: v0.7.1 -> v1.0.0 -> exit 3, TRIGGER T7" \
+	|| bad "T7: expected exit 3 + T7, got $RC (out: $OUT)"
+alerts | grep -q '^high|' && alerts | grep -q 'last recorded: v0.7.1' \
+	&& ok "T7: high priority, names both tags" \
+	|| bad "T7: wrong priority or body ($(alerts))"
+assert_alert_shape "T7"
+assert_no_overclaim "T7"
+: > "$NOTIFY_LOG"
+write_s1 "$S1" "v1.0.1"
+OUT="$(run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 0 ] && [ "$(n_alerts)" -eq 0 ] \
+	&& ok "T7 hysteresis: v1.0.0 -> v1.0.1 is a routine tag move (logged, not paged)" \
+	|| bad "T7 hysteresis: expected silent exit 0, got $RC ($(alerts))"
+teardown
+setup
+seed_state false false "$CHAIN_A" 3406 "v0.7.1"
+write_s1 "$S1" "v1.0.0-rc2"
+OUT="$(run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 0 ] \
+	&& ok "T7 near-miss: a suffixed v1.0.0-rc2 is not a v1 release" \
+	|| bad "T7 near-miss: expected 0, got $RC (out: $OUT)"
+teardown
+
+# ---- case 21 (T8): a Metallicus page starts mentioning PulseVM ----------------
+setup
+seed_state false false "$CHAIN_A" 3406 "v0.6.2"
+OUT="$(run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 0 ] && jq -e '.observations.official_pages | length == 2 and all(.read and (.mentions | not))' "$STATE" >/dev/null 2>&1 \
+	&& ok "T8 near-miss: two readable pages without a mention -> silent, both recorded" \
+	|| bad "T8 near-miss: expected silent + 2 records, got $RC ($(jq -c '.observations.official_pages' "$STATE" 2>&1))"
+jq -e '.observations.official_pages | all(.chain_ids == [])' "$STATE" >/dev/null 2>&1 \
+	&& ok "T8: a 64-hex asset hash that is not on a 'chain id' line is not recorded as a chain id" \
+	|| bad "T8: asset hash leaked into chain_ids ($(jq -c '.observations.official_pages' "$STATE"))"
+: > "$NOTIFY_LOG"
+write_official "$OFFB" mention
+OUT="$(run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 3 ] && echo "$OUT" | grep -q 'TRIGGER T8' && alerts | grep -q '^high|' \
+	&& alerts | grep -q 'example.test/official/b' && ! alerts | grep -q 'example.test/official/a' \
+	&& ok "T8: page b mentions PulseVM -> exit 3, high, names b only" \
+	|| bad "T8: expected T8 high naming b, got $RC ($(alerts))"
+alerts | grep -q 'NOT ESTABLISHED: that a PulseVM mainnet chain_id or a cutover plan has been published' \
+	&& ok "T8: the alert denies that a word on a page is a plan" \
+	|| bad "T8: missing NOT ESTABLISHED ($(alerts))"
+assert_alert_shape "T8"
+assert_no_overclaim "T8"
+: > "$NOTIFY_LOG"
+OUT="$(run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 0 ] && [ "$(n_alerts)" -eq 0 ] \
+	&& ok "T8 hysteresis: the same mention on the next run does not re-page" \
+	|| bad "T8 hysteresis: expected silent, got $RC ($(alerts))"
+: > "$NOTIFY_LOG"
+write_official "$OFFB" mention-id "$CHAIN_B"
+OUT="$(run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 3 ] && alerts | grep -q "$CHAIN_B" && alerts | grep -q "on a 'chain id' line" \
+	&& ok "T8: a new id on a 'chain id' line of a mentioning page -> fires, names the id" \
+	|| bad "T8: expected the chain-id sub-condition, got $RC ($(alerts))"
+teardown
+
+# ---- case 21b (T8): an unreadable page is soft, and pages once per outage -----
+setup
+seed_state false false "$CHAIN_A" 3406 "v0.6.2"
+OUT="$(OFFA_CODE=404 run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 0 ] && [ "$(n_alerts)" -eq 0 ] \
+	&& ok "T8 soft: one unreadable official page does NOT fail the run (T1-T7 still evaluated, exit 0)" \
+	|| bad "T8 soft: expected exit 0 and no alert, got $RC ($(alerts)) (out: $OUT)"
+echo "$OUT" | grep -q 'WARN S7 https://example.test/official/a not readable' \
+	&& ok "T8 soft: the unreadable page is logged, not hidden" \
+	|| bad "T8 soft: no WARN line for the unreadable page (out: $OUT)"
+[ "$(jq -r '.observations.official_unread_runs' "$STATE")" = "1" ] \
+	&& ok "T8 soft: the unread counter is persisted (1)" \
+	|| bad "T8 soft: counter not 1 ($(jq -c '.observations' "$STATE"))"
+OUT="$(OFFA_CODE=404 run_checker 2>&1)"; RC=$?
+: > "$NOTIFY_LOG"
+OUT="$(OFFA_CODE=404 run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 3 ] && alerts | grep -q '^default|' && alerts | grep -q '3 consecutive runs could not read' \
+	&& ok "T8 soft: the THIRD consecutive unreadable run pages once, at default" \
+	|| bad "T8 soft: expected one default page at run 3, got $RC ($(alerts))"
+assert_alert_shape "T8 unread"
+assert_no_overclaim "T8 unread"
+: > "$NOTIFY_LOG"
+OUT="$(OFFA_CODE=404 run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 0 ] && [ "$(n_alerts)" -eq 0 ] \
+	&& ok "T8 soft: a fourth unreadable run stays quiet" \
+	|| bad "T8 soft: expected quiet fourth run, got $RC ($(alerts))"
+OUT="$(run_checker 2>&1)"; RC=$?
+[ "$(jq -r '.observations.official_unread_runs' "$STATE")" = "0" ] \
+	&& ok "T8 soft: a fully readable run resets the counter" \
+	|| bad "T8 soft: counter not reset ($(jq -c '.observations.official_unread_runs' "$STATE"))"
+: > "$NOTIFY_LOG"
+OUT="$(PULSEVM_UPSTREAM_FAILURE_ALERT_AFTER=0 run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 0 ] && [ "$(n_alerts)" -eq 0 ] \
+	&& ok "T8 soft: threshold 0 silences the unread page — a fully readable run (counter 0) must not 'reach' it" \
+	|| bad "T8 soft: threshold 0 with every page readable paged anyway, got $RC ($(alerts))"
+teardown
+
+# ---- case 21c (config): a malformed official URL list falls back wholesale ----
+setup
+seed_state false false "$CHAIN_A" 3406 "v0.6.2"
+OUT="$(PULSEVM_OFFICIAL_URLS='https://example.test/official/a http://plain.example.test/' run_checker 2>&1)"; RC=$?
+echo "$OUT" | grep -q 'PULSEVM_OFFICIAL_URLS=.* is not a space-separated list of plain https URLs' \
+	&& grep -q 'metallicus' "$BASE/urls.log" \
+	&& ok "config: a list with one non-https URL is rejected wholesale, loudly, for the default list" \
+	|| bad "config: expected a loud wholesale fallback (out: $OUT) (urls: $(tr '\n' ' ' < "$BASE/urls.log"))"
 teardown
 
 # ---- case 12 (shape): the checker never names an /ext/bc/ URL ---------------
