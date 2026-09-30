@@ -652,7 +652,7 @@ t16() {
 	# every tracked file under it whose basename matches the pattern (the
 	# api/legacy-a-chain/ archive: one file per tx, unbounded). A tracked file
 	# under it that does NOT match the pattern is still reported as missing.
-	declared="$(jq -r '.publications[] | select(.git_tracked == true) | select((.path | endswith("/")) | not) | .path' "$REGISTRY" | sort)"
+	declared="$(jq -r '.publications[] | select(.git_tracked == true) | select(((.path | endswith("/")) and ((.member_pattern // "") != "")) | not) | .path' "$REGISTRY" | sort)"
 	tracked="$(cd "$REPO_ROOT" && git ls-files public/api/ public/.well-known/ | sed 's|^public/||' | sort)"
 	tracked="$(jq -Rr --slurpfile reg "$REGISTRY" '
 		. as $p

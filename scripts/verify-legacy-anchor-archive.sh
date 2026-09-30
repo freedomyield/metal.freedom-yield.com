@@ -76,7 +76,9 @@ LEDGER="$(mktemp "${TMPDIR:-/tmp}/verify-legacy.XXXXXX")"
 trap 'rm -f "$LEDGER"' EXIT
 jq -rR --slurp '
 	split("\n") | map(select(length > 0)) | map(fromjson)
-	| map(select((.network // "") | test("^(mainnet-a|xpr-mainnet|proton)$")))
+	| map(select((.network // "") | test("^(mainnet-a|xpr-mainnet)$")))
+	| if (group_by(.tx_id) | map(select((map(.block_num) | unique | length) > 1)) | length) > 0
+	  then error("a tx_id appears with two different block_num values") else . end
 	| unique_by(.tx_id) | sort_by(.block_num) | .[] | @json' "$HISTORY" > "$LEDGER" \
 	|| { echo "ERROR: anchor history is not valid JSONL" >&2; exit 2; }
 [ -s "$LEDGER" ] || { echo "ERROR: no mainnet anchors in $HISTORY" >&2; exit 2; }

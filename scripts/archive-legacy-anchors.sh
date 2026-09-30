@@ -87,8 +87,10 @@ for bin in jq "$CURL"; do
 done
 if command -v sha256sum >/dev/null 2>&1; then
 	sha256_file() { sha256sum "$1" | awk '{print $1}'; }
+	sha256_pipe() { sha256sum | awk '{print $1}'; }
 elif command -v shasum >/dev/null 2>&1; then
 	sha256_file() { shasum -a 256 "$1" | awk '{print $1}'; }
+	sha256_pipe() { shasum -a 256 | awk '{print $1}'; }
 else
 	echo "ERROR: sha256sum or shasum required" >&2; exit 1
 fi
@@ -111,18 +113,32 @@ else
 		|| { echo "ERROR (2): cannot read ${SITE%/}/api/anchor-history.jsonl" >&2; exit 2; }
 fi
 
-# tx_id<TAB>block_num for mainnet lines, first occurrence wins, malformed => exit 2
+# tx_id<TAB>block_num for mainnet lines. NOTHING is dropped silently: every
+# line whose network is a mainnet A-Chain network (per anchor-history.schema.v2
+# the enum is xpr-mainnet|xpr-testnet|mainnet-a|testnet-a) must carry a valid
+# tx_id and a positive integer block_num, and a tx_id that appears twice must
+# carry the same block_num. Otherwise exit 2. Non-mainnet lines are counted.
 LIST="$TMP/list.tsv"
 if ! jq -rR --slurp '
 	split("\n") | map(select(length > 0)) | map(fromjson)
-	| map(select((.network // "") | test("^(mainnet-a|xpr-mainnet|proton)$")))
-	| map(select((.tx_id | type == "string") and (.tx_id | test("^[a-f0-9]{64}$"))
-	              and (.block_num | type == "number")))
-	| unique_by(.tx_id) | sort_by(.block_num) | .[] | "\(.tx_id)\t\(.block_num)"' \
+	| map(select((.network // "") | test("^(mainnet-a|xpr-mainnet)$"))) as $m
+	| ($m | map(select((.tx_id | type == "string") and (.tx_id | test("^[a-f0-9]{64}$"))
+	                   and (.block_num | type == "number") and (.block_num > 0)
+	                   and (.block_num == (.block_num | floor))))) as $v
+	| if ($m | length) != ($v | length)
+	  then error("\(($m | length) - ($v | length)) mainnet line(s) have a malformed tx_id or a non-positive-integer block_num")
+	  else . end
+	| if ($v | group_by(.tx_id) | map(select((map(.block_num) | unique | length) > 1)) | length) > 0
+	  then error("a tx_id appears with two different block_num values")
+	  else . end
+	| $v | unique_by(.tx_id) | sort_by(.block_num) | .[] | "\(.tx_id)\t\(.block_num)"' \
 	"$HISTORY_COPY" > "$LIST" 2>"$TMP/jq.err"; then
-	echo "ERROR (2): anchor history is not valid JSONL: $(head -c 200 "$TMP/jq.err")" >&2
+	echo "ERROR (2): anchor history rejected: $(head -c 300 "$TMP/jq.err")" >&2
 	exit 2
 fi
+SKIPPED_OTHER="$(jq -rR --slurp 'split("\n") | map(select(length > 0)) | map(fromjson)
+	| map(select(((.network // "") | test("^(mainnet-a|xpr-mainnet)$")) | not)) | length' "$HISTORY_COPY")"
+echo "ledger: non-mainnet lines skipped: $SKIPPED_OTHER"
 TOTAL="$(wc -l < "$LIST" | tr -d ' ')"
 if [ "$TOTAL" -eq 0 ]; then
 	echo "ERROR (2): no mainnet anchor tx_ids found in the anchor history" >&2
@@ -195,11 +211,26 @@ else
 fi
 ORIG_ENTRIES="$(cat "$ENTRIES")"
 
+# Written after EVERY tx (tmp + mv) so an interrupted run never leaves a file
+# without its entry. Rewritten only when the entries actually changed.
+flush_manifest() {
+	local sorted
+	sorted="$(jq -c 'sort_by(.block_num, .tx_id)' "$ENTRIES")"
+	if [ "$sorted" != "$ORIG_ENTRIES" ]; then
+		jq -n --arg schema "$SCHEMA" --arg cid "$CHAIN_ID" --argjson e "$sorted" \
+			'{schema:$schema, chain_id:$cid, entries:$e}' > "$MANIFEST.new"
+		mv "$MANIFEST.new" "$MANIFEST"
+		ORIG_ENTRIES="$sorted"
+	fi
+}
+
 FAILED=0
 ARCHIVED=0
 SKIPPED=0
+ADOPTED=0
 
 while IFS="$(printf '\t')" read -r TX BN; do
+	case "$BN" in ''|*[!0-9]*|0*) echo "ERROR (2): block_num '$BN' is not a positive integer" >&2; exit 2 ;; esac
 	FILE="${OUT_DIR}/${TX}.json"
 	REC="$(jq -c --arg t "$TX" '.[] | select(.tx_id == $t)' "$ENTRIES" | head -n1)"
 
@@ -212,6 +243,44 @@ while IFS="$(printf '\t')" read -r TX BN; do
 			exit 4
 		fi
 		SKIPPED=$((SKIPPED + 1))
+		continue
+	fi
+
+	# -- manifest entry but file gone: never re-fetch over a recorded hash ----
+	if [ ! -e "$FILE" ] && [ -n "$REC" ]; then
+		echo "ERROR (4): manifest records $TX but $FILE is missing — restore it from git, not re-fetch" >&2
+		exit 4
+	fi
+
+	# -- file present, no entry (interrupted run): adopt without any network
+	# call if it verifies against itself and the ledger. Re-fetching would
+	# change volatile Hyperion fields (query_time_ms, lib, ...) and look like
+	# tampering; a file that does NOT self-verify is fail-closed.
+	if [ -e "$FILE" ]; then
+		fh="$(jq -j '.history_body' "$FILE" 2>/dev/null | sha256_pipe || true)"
+		fb="$(jq -j '.block_body' "$FILE" 2>/dev/null | sha256_pipe || true)"
+		if ! jq -e --arg s "$SCHEMA" --arg t "$TX" --arg c "$CHAIN_ID" --argjson bn "$BN" \
+				--arg fh "$fh" --arg fb "$fb" '
+			. as $f | .schema == $s and .tx_id == $t and .chain_id == $c and .block_num == $bn
+			and (.block_id | test("^[a-f0-9]{64}$"))
+			and .history_sha256 == $fh and .block_sha256 == $fb
+			and ((.history_body | fromjson) as $h
+				| ($h.actions | length > 0)
+				and ([$h.actions[] | .trx_id] | all(. == $t))
+				and ([$h.actions[] | .block_num] | all(. == $bn))
+				and ([$h.actions[] | .block_id // $f.block_id] | all(. == $f.block_id)))
+			and ((.block_body | fromjson) as $b | $b.block_num == $bn and $b.id == $f.block_id)' \
+			"$FILE" >/dev/null 2>&1; then
+			echo "ERROR (4): $FILE exists without a manifest entry and does not verify against itself or the ledger — not overwriting" >&2
+			exit 4
+		fi
+		NEW="$(jq -c --arg fs "$(sha256_file "$FILE")" '{tx_id, file:"\(.tx_id).json", block_num, block_id, chain_id, fetched_at,
+			source_host:.source.history_host, node_host:.source.node_host, sha256:$fs, history_sha256, block_sha256}' "$FILE")"
+		jq -c --argjson n "$NEW" 'map(select(.tx_id != $n.tx_id)) + [$n]' "$ENTRIES" > "$ENTRIES.new"
+		mv "$ENTRIES.new" "$ENTRIES"
+		flush_manifest
+		ADOPTED=$((ADOPTED + 1))
+		echo "ADOPT $TX block $BN (file self-verified, no network)"
 		continue
 	fi
 
@@ -256,27 +325,18 @@ while IFS="$(printf '\t')" read -r TX BN; do
 
 	H_SHA="$(sha256_file "$HB")"; B_SHA="$(sha256_file "$BB")"
 
-	# -- existing file without manifest entry: bodies must match ------------
-	if [ -e "$FILE" ]; then
-		if [ "$(jq -r '.history_sha256 + " " + .block_sha256' "$FILE" 2>/dev/null || true)" != "$H_SHA $B_SHA" ]; then
-			echo "ERROR (4): $FILE exists with different recorded bodies than the chain served now — not overwriting" >&2
-			exit 4
-		fi
-		FETCHED_AT="$(jq -r '.fetched_at' "$FILE")"
-	else
-		FETCHED_AT="$(now_utc)"
-		ENV="$TMP/$TX.envelope"
-		jq -n --arg schema "$SCHEMA" --arg tx "$TX" --arg cid "$CHAIN_ID" --arg at "$FETCHED_AT" \
-			--arg hh "$HIST_HOST" --arg nh "$NODE_HOST" --argjson bn "$BN" --arg bid "$BLOCK_ID" \
-			--rawfile hbody "$HB" --rawfile bbody "$BB" --arg hs "$H_SHA" --arg bs "$B_SHA" \
-			'{schema:$schema, tx_id:$tx, chain_id:$cid, block_num:$bn, block_id:$bid, fetched_at:$at,
-			  source:{history_host:$hh, node_host:$nh},
-			  requests:{history:"GET /v2/history/get_transaction?id=\($tx)",
-			            block:"POST /v1/chain/get_block {\"block_num_or_id\":\($bn)}"},
-			  history_sha256:$hs, block_sha256:$bs,
-			  history_body:$hbody, block_body:$bbody}' > "$ENV"
-		mv "$ENV" "$FILE"
-	fi
+	FETCHED_AT="$(now_utc)"
+	ENV="$TMP/$TX.envelope"
+	jq -n --arg schema "$SCHEMA" --arg tx "$TX" --arg cid "$CHAIN_ID" --arg at "$FETCHED_AT" \
+		--arg hh "$HIST_HOST" --arg nh "$NODE_HOST" --argjson bn "$BN" --arg bid "$BLOCK_ID" \
+		--rawfile hbody "$HB" --rawfile bbody "$BB" --arg hs "$H_SHA" --arg bs "$B_SHA" \
+		'{schema:$schema, tx_id:$tx, chain_id:$cid, block_num:$bn, block_id:$bid, fetched_at:$at,
+		  source:{history_host:$hh, node_host:$nh},
+		  requests:{history:"GET /v2/history/get_transaction?id=\($tx)",
+		            block:"POST /v1/chain/get_block {\"block_num_or_id\":\($bn)}"},
+		  history_sha256:$hs, block_sha256:$bs,
+		  history_body:$hbody, block_body:$bbody}' > "$ENV"
+	mv "$ENV" "$FILE"
 	F_SHA="$(sha256_file "$FILE")"
 	NEW="$(jq -cn --arg tx "$TX" --argjson bn "$BN" --arg bid "$BLOCK_ID" --arg cid "$CHAIN_ID" \
 		--arg at "$FETCHED_AT" --arg hh "$HIST_HOST" --arg nh "$NODE_HOST" \
@@ -285,18 +345,11 @@ while IFS="$(printf '\t')" read -r TX BN; do
 		  source_host:$hh, node_host:$nh, sha256:$fs, history_sha256:$hs, block_sha256:$bs}')"
 	jq -c --argjson n "$NEW" 'map(select(.tx_id != $n.tx_id)) + [$n]' "$ENTRIES" > "$ENTRIES.new"
 	mv "$ENTRIES.new" "$ENTRIES"
+	flush_manifest
 	ARCHIVED=$((ARCHIVED + 1))
 	echo "OK   $TX block $BN"
 done < "$LIST"
 
-# ---- manifest: rewritten only if entries changed --------------------------
-SORTED="$(jq -c 'sort_by(.block_num, .tx_id)' "$ENTRIES")"
-if [ "$SORTED" != "$ORIG_ENTRIES" ]; then
-	jq -n --arg schema "$SCHEMA" --arg cid "$CHAIN_ID" --argjson e "$SORTED" \
-		'{schema:$schema, chain_id:$cid, entries:$e}' > "$MANIFEST.new"
-	mv "$MANIFEST.new" "$MANIFEST"
-fi
-
-echo "archived=$ARCHIVED already_present=$SKIPPED failed=$FAILED total=$TOTAL out=$OUT_DIR"
+echo "archived=$ARCHIVED adopted=$ADOPTED already_present=$SKIPPED failed=$FAILED total=$TOTAL out=$OUT_DIR"
 [ "$FAILED" -eq 0 ] || exit 3
 exit 0

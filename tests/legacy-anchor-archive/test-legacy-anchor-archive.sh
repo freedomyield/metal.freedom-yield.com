@@ -76,12 +76,16 @@ while [ $# -gt 0 ]; do
 	shift
 done
 echo "$method $url $data" >> "$FX_LOG"
-serve() { [ -f "$1" ] || exit 22; cp "$1" "$out"; exit 0; }
+serve() {
+	[ -f "$1" ] || exit 22
+	if [ -n "${FX_VOLATILE:-}" ]; then sed "s/\"query_time_ms\": 1.5/\"query_time_ms\": $RANDOM$RANDOM/" "$1" > "$out"; else cp "$1" "$out"; fi
+	exit 0
+}
 case "$url" in
 	*/api/anchor-history.jsonl)          serve "$FX/history.jsonl" ;;
 	*/v1/chain/get_info)                 serve "${FX_INFO:-$FX/get_info.json}" ;;
 	*/v2/history/get_transaction\?id=*)  serve "$FX/hist-${url##*id=}.json" ;;
-	*/v1/chain/get_block)                bn="$(printf '%s' "$data" | sed 's/[^0-9]//g')"; serve "$FX/block-$bn.json" ;;
+	*/v1/chain/get_block)                [ -n "${FX_DIE_ON_BLOCK:-}" ] && printf '%s' "$data" | grep -q "$FX_DIE_ON_BLOCK" && kill -9 "$PPID"; bn="$(printf '%s' "$data" | sed 's/[^0-9]//g')"; serve "$FX/block-$bn.json" ;;
 esac
 echo "STUB: unmatched $url" >&2; exit 22
 STUB
@@ -127,18 +131,64 @@ rc="$(run_archive --from-file="$FX/history.jsonl" --out-dir="$OUT")"
 check "tampered file: exit 4" 4 "$rc"
 check "tampered file: left untouched" '{"tampered":true}' "$(cat "$OUT/$TX1.json")"
 cp "$TMP/tx1.saved" "$OUT/$TX1.json"
-# file present, manifest entry absent, chain now serves different bytes
+# file present, manifest entry absent (interrupted run), chain now serves
+# different volatile bytes: adopt WITHOUT any network call, no false exit 4
 jq --arg t "$TX1" '.entries |= map(select(.tx_id != $t))' "$OUT/manifest.json" > "$TMP/m.json" && cp "$TMP/m.json" "$OUT/manifest.json"
-cp "$FX/hist-$TX1.json" "$TMP/hist1.orig"
-sed 's/"lib": 999/"lib": 1000/' "$TMP/hist1.orig" > "$FX/hist-$TX1.json"
+rc="$(FX_VOLATILE=1 run_archive --from-file="$FX/history.jsonl" --out-dir="$OUT")"
+check "file without entry, volatile chain bytes: adopted, exit 0" 0 "$rc"
+check "adoption makes no HTTP call" 0 "$(calls)"
+check "adopted entry restored" 2 "$(jq '.entries|length' "$OUT/manifest.json")"
+check "adopted file bytes unchanged" "$(H < "$TMP/tx1.saved")" "$(H < "$OUT/$TX1.json")"
+# a file that does not verify against itself is never adopted nor overwritten
+jq --arg t "$TX1" '.entries |= map(select(.tx_id != $t))' "$OUT/manifest.json" > "$TMP/m.json" && cp "$TMP/m.json" "$OUT/manifest.json"
+jq '.history_body |= sub("\"lib\": 999"; "\"lib\": 5")' "$TMP/tx1.saved" > "$OUT/$TX1.json"
+cp "$OUT/$TX1.json" "$TMP/tx1.badself"
 rc="$(run_archive --from-file="$FX/history.jsonl" --out-dir="$OUT")"
-check "differing chain bytes vs recorded bodies: exit 4" 4 "$rc"
-check "differing chain bytes: file untouched" "$(H < "$TMP/tx1.saved")" "$(H < "$OUT/$TX1.json")"
-cp "$TMP/hist1.orig" "$FX/hist-$TX1.json"
+check "file without entry that fails self-check: exit 4" 4 "$rc"
+check "non-verifying file left untouched" "$(H < "$TMP/tx1.badself")" "$(H < "$OUT/$TX1.json")"
+check "no network on the fail-closed path" 0 "$(calls)"
+# file self-verifies but disagrees with the ledger block_num
+cp "$TMP/tx1.saved" "$OUT/$TX1.json"
+sed 's/"block_num":100,/"block_num":99,/' "$FX/history.jsonl" > "$TMP/history-wrongblock.jsonl"
+rc="$(run_archive --from-file="$TMP/history-wrongblock.jsonl" --out-dir="$OUT")"
+check "self-verifying file vs different ledger block_num: exit 4" 4 "$rc"
+# manifest entry but file missing: never re-fetch over a recorded hash
+cp "$OUT/manifest.json" "$TMP/manifest.pre"
+jq --arg t "$TX1" '.entries += [{tx_id:$t, file:"x", block_num:100, sha256:"00"}]' "$OUT/manifest.json" > "$TMP/m.json" && cp "$TMP/m.json" "$OUT/manifest.json"
+mv "$OUT/$TX1.json" "$TMP/tx1.parked"
 rc="$(run_archive --from-file="$FX/history.jsonl" --out-dir="$OUT")"
-check "same bytes + missing manifest entry: re-adopted, exit 0" 0 "$rc"
-check "re-adopted entry restored" 2 "$(jq '.entries|length' "$OUT/manifest.json")"
-check "re-adopted file bytes unchanged" "$(H < "$TMP/tx1.saved")" "$(H < "$OUT/$TX1.json")"
+check "manifest entry without file: exit 4, no fetch" "4 0" "$rc $(calls)"
+mv "$TMP/tx1.parked" "$OUT/$TX1.json"
+cp "$TMP/manifest.pre" "$OUT/manifest.json"
+rc="$(run_archive --from-file="$FX/history.jsonl" --out-dir="$OUT")"
+check "manifest healed by adoption: exit 0, no network" "0 0" "$rc $(calls)"
+
+# 4b. interrupted run: killed while fetching the 2nd block; the 1st tx must
+# already be in the manifest, and the re-run (volatile bytes) must succeed
+OUTI="$TMP/out-interrupted"
+: > "$LOG"; { FX_VOLATILE=1 FX_DIE_ON_BLOCK=250 "$ARCHIVER" --from-file="$FX/history.jsonl" --out-dir="$OUTI" >/dev/null 2>&1; } 2>/dev/null
+check "interrupted run: first tx already recorded in the manifest" 1 "$(jq '.entries|length' "$OUTI/manifest.json" 2>/dev/null || echo 0)"
+rc="$(FX_VOLATILE=1 run_archive --from-file="$FX/history.jsonl" --out-dir="$OUTI")"
+check "re-run after interruption (volatile bytes): exit 0" 0 "$rc"
+check "re-run fetched only the missing tx (no history call for tx1)" 0 "$(grep -c "id=$TX1" "$LOG")"
+check "manifest complete after re-run" 2 "$(jq '.entries|length' "$OUTI/manifest.json")"
+check "verifier accepts the resumed archive" 0 "$("$VERIFIER" --archive-dir="$OUTI" --history="$FX/history.jsonl" >/dev/null 2>&1; echo $?)"
+
+# 4c. ledger strictness: nothing is dropped silently
+ledger_case() { # <label> <expected rc> <extra ledger line>
+	{ cat "$FX/history.jsonl"; printf '%s\n' "$3"; } > "$TMP/led.jsonl"
+	rc="$(run_archive --from-file="$TMP/led.jsonl" --out-dir="$TMP/out-led" --dry-run)"
+	check "$1" "$2" "$rc"
+}
+ledger_case "mainnet line with malformed tx_id: exit 2" 2 '{"network":"xpr-mainnet","tx_id":"zz","block_num":5}'
+ledger_case "mainnet line with missing tx_id: exit 2" 2 '{"network":"mainnet-a","block_num":5}'
+ledger_case "mainnet line with block_num 0: exit 2" 2 "{\"network\":\"xpr-mainnet\",\"tx_id\":\"$(printf 'a' | H)\",\"block_num\":0}"
+ledger_case "mainnet line with fractional block_num: exit 2" 2 "{\"network\":\"xpr-mainnet\",\"tx_id\":\"$(printf 'a' | H)\",\"block_num\":5.5}"
+ledger_case "mainnet line with string block_num: exit 2" 2 "{\"network\":\"xpr-mainnet\",\"tx_id\":\"$(printf 'a' | H)\",\"block_num\":\"5\"}"
+ledger_case "duplicate tx_id with a different block_num: exit 2" 2 "{\"network\":\"xpr-mainnet\",\"tx_id\":\"$TX1\",\"block_num\":101}"
+ledger_case "duplicate tx_id with the same block_num is accepted" 0 "{\"network\":\"xpr-mainnet\",\"tx_id\":\"$TX1\",\"block_num\":100}"
+ledger_case "non-mainnet line (incl. legacy alias 'proton') is skipped, exit 0" 0 '{"network":"proton","tx_id":"zz","block_num":"x"}'
+check "skipped non-mainnet lines are counted in the output" "ledger: non-mainnet lines skipped: 2" "$(grep '^ledger:' "$TMP/out.txt")"
 
 # 5. chain_id mismatch: exit 5, nothing written
 printf '{"chain_id":"%s"}' "$(printf 'other' | H)" > "$TMP/info-bad.json"
@@ -163,7 +213,6 @@ check "block mismatch: no file for that tx" "no" "$([ -f "$TMP/out-mismatch/$TX1
 cp "$TMP/block100.orig" "$FX/block-100.json"
 
 # 7b. ledger block_num that the history response contradicts is refused
-sed "s/\"block_num\":100,/\"block_num\":99,/" "$FX/history.jsonl" > "$TMP/history-wrongblock.jsonl"
 cp "$FX/block-100.json" "$FX/block-99.json"
 sed -i.bak 's/"block_num":100/"block_num":99/' "$FX/block-99.json" && rm "$FX/block-99.json.bak"
 rc="$(run_archive --from-file="$TMP/history-wrongblock.jsonl" --out-dir="$TMP/out-wrongblock")"
