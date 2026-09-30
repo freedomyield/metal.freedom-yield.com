@@ -9,12 +9,29 @@
 # hc_single_4_action_pack, memo_prefix fya<S>c<N>). Emits v2 jsonl lines
 # per anchor-history.schema.v2.json.
 #
+# 2026-09-30: also consumes v3 receipts (anchor-receipt.schema.v3.json) and
+# then emits a v3 line (anchor-history.schema.v3.json). The line's
+# schema_version mirrors the receipt's, so a v2 receipt still yields a v2
+# line. chain_id / block_id / chain_profile are copied from the receipt's
+# anchor object when present (additive in v2, required in v3).
+#
 # Invariants enforced:
 #   1. tx_id unique across all lines
 #   2. For cyclestart/cycleend: (cycle_number, event_type) pair unique
 #   3. For idrotate: (key_seq, "idrotate") pair unique
 #   4. cycle_number strictly non-decreasing across lines that carry it
-#   5. block_num strictly non-decreasing across all lines
+#   5. block_num non-decreasing WITHIN a chain_id (2026-09-30, PulseVM
+#      migration readiness). Each line's chain_id is its own `chain_id`
+#      field, or — for lines without one (every line written before
+#      2026-09-30) — the legacy XPR chain_id of its network (testnet-a /
+#      xpr-testnet -> the xpr-testnet profile's; anything else -> the
+#      xpr-mainnet profile's). A new line whose chain_id differs from the
+#      last line's starts a new ERA, which is allowed only when that
+#      chain_id is known: the legacy chain_id of its role, or the chain_id
+#      of the currently selected, reviewed profile
+#      (config/a-chain-profiles.json). An unknown chain_id is refused, and
+#      so is a return to the chain_id of an EARLIER era (eras are
+#      sequential). Within an era the old rule holds unchanged.
 #   6. prev_anchor_tx_id of new line == tx_id of last line (or null if
 #      genesis line)
 #   7. existing lines are byte-for-byte immutable (only legal write is
@@ -24,13 +41,17 @@
 # Exit codes:
 #   0  appended successfully
 #   1  usage / arg error
-#   2  receipt file unreadable / invalid
+#   2  receipt file unreadable / invalid (schema_version not 2 or 3, a
+#      v3 receipt without chain_id / block_id / chain_profile, or a v2
+#      receipt whose chain_id is not the legacy chain of its network)
 #   3  receipt verification_status != "live"
-#   4  invariant violation (with detail on stderr)
+#   4  invariant violation (with detail on stderr), including an unknown
+#      or re-entered chain_id (invariant 5) or a chain profile that cannot
+#      name the legacy chain_id
 #   5  atomic write failed
 #   6  R13: the newly composed line failed schema validation against
-#      public/api/anchor-history.schema.v2.json (or the schema file
-#      itself is unreadable)
+#      public/api/anchor-history.schema.v2.json / .v3.json (or the schema
+#      file itself is unreadable)
 #   7  R13: no JSON schema validator available (ajv absent AND python3's
 #      jsonschema module absent) — fail-closed rather than silently skip
 #      validation. Provision one: `npm i -g ajv-cli ajv-formats` or
@@ -106,7 +127,8 @@
 # Exit codes: 1 usage, 2 receipt unreadable/wrong schema, 3 not verification_
 # status=live, 4 append-only invariant violated, 5 tmp write / rename failed,
 # 6 schema validation failed, 7 no JSON-schema validator available,
-# 8 scripts/lib/side-effects.sh missing (structural).
+# 8 a structural library missing: scripts/lib/side-effects.sh or
+# scripts/lib/a-chain-profile.sh.
 
 set -euo pipefail
 
@@ -119,6 +141,13 @@ if [ ! -r "$FYD_LIB" ]; then
 fi
 # shellcheck source=scripts/lib/side-effects.sh
 . "$FYD_LIB"
+ACP_LIB="${REPO_ROOT}/scripts/lib/a-chain-profile.sh"
+if [ ! -r "$ACP_LIB" ]; then
+	echo "append-anchor-history: FATAL: chain-profile library not readable at $ACP_LIB" >&2
+	exit 8
+fi
+# shellcheck source=scripts/lib/a-chain-profile.sh
+. "$ACP_LIB" || { echo "append-anchor-history: FATAL: cannot load $ACP_LIB" >&2; exit 8; }
 
 RECEIPT=""
 # History file target. Env override (FYD_HISTORY_FILE) takes precedence
@@ -130,7 +159,9 @@ EVENT_TYPE=""
 KEY_SEQ=""
 # R13: LOCAL schema file used to self-validate each newly composed line
 # before it is appended (see schema_validate_or_die below).
-SCHEMA_FILE="${SCHEMA_FILE:-${REPO_ROOT}/public/api/anchor-history.schema.v2.json}"
+# Empty = public/api/anchor-history.schema.v<N>.json, N = the receipt's
+# schema_version (resolved after the receipt is read).
+SCHEMA_FILE="${SCHEMA_FILE:-}"
 
 for arg in "$@"; do
 	case "$arg" in
@@ -157,10 +188,19 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 # ---- receipt parse + verify ----
-if ! jq -e '.schema_version == 2' "$RECEIPT" >/dev/null 2>&1; then
-	echo "ERROR (2): receipt schema_version must be 2 (got $(jq -r .schema_version "$RECEIPT"))" >&2
+if ! jq -e '.schema_version == 2 or .schema_version == 3' "$RECEIPT" >/dev/null 2>&1; then
+	echo "ERROR (2): receipt schema_version must be 2 or 3 (got $(jq -r .schema_version "$RECEIPT"))" >&2
 	exit 2
 fi
+LINE_SCHEMA_VERSION="$(jq -r '.schema_version' "$RECEIPT")"
+if [ "$LINE_SCHEMA_VERSION" = "3" ] && ! jq -e '
+		(.anchor.chain_id | type == "string" and test("^[a-f0-9]{64}$"))
+		and (.anchor.block_id | type == "string" and test("^[a-f0-9]{64}$"))
+		and (.anchor.chain_profile | type == "string" and length > 0)' "$RECEIPT" >/dev/null 2>&1; then
+	echo "ERROR (2): v3 receipt must carry anchor.chain_id, anchor.block_id (64 hex) and anchor.chain_profile" >&2
+	exit 2
+fi
+[ -n "$SCHEMA_FILE" ] || SCHEMA_FILE="${REPO_ROOT}/public/api/anchor-history.schema.v${LINE_SCHEMA_VERSION}.json"
 if ! jq -e '.verification_status == "live"' "$RECEIPT" >/dev/null 2>&1; then
 	STATUS="$(jq -r '.verification_status // "unknown"' "$RECEIPT")"
 	echo "ERROR (3): receipt verification_status must be 'live', got: $STATUS" >&2
@@ -186,6 +226,8 @@ ACTOR="$(jq -r '.signing_actor // .anchor.authorization.actor' "$RECEIPT")"
 PERMISSION="$(jq -r '.signing_permission // .anchor.authorization.permission' "$RECEIPT")"
 VERIFIED_AT="$(jq -r '.verified_at' "$RECEIPT")"
 PREV_TX_ID_JSON="$(jq -c '.prev_anchor_tx_id // null' "$RECEIPT")"
+# 2026-09-30: the receipt's chain_id (empty when a v2 receipt carries none).
+RCPT_CHAIN_ID="$(jq -r '.anchor.chain_id // empty' "$RECEIPT")"
 
 # EVENT_TYPE default: derive from trigger_event on receipt if not provided.
 if [ -z "$EVENT_TYPE" ]; then
@@ -207,6 +249,50 @@ if [ "$EVENT_TYPE" = "cyclestart" ] || [ "$EVENT_TYPE" = "cycleend" ]; then
 		echo "ERROR (4): receipt missing cycle_number for event_type=$EVENT_TYPE" >&2
 		exit 4
 	fi
+fi
+
+# ---- invariant 5 inputs: which chain is this line on? --------------------
+# Legacy chain_ids come from the DEFAULT (xpr-*) profiles by name, whatever
+# profile is selected now: a line without chain_id was written on the XPR
+# Network. The only other chain_id a new era may carry is the selected
+# profile's. Any failure to establish either is fail-closed (exit 4).
+LEGACY_MAINNET_CID="$(FYD_A_CHAIN_PROFILE_MAINNET="$ACP_DEFAULT_MAINNET" acp_chain_id mainnet)" \
+	|| { echo "ERROR (4): invariant 5 — cannot read the legacy mainnet chain_id from profile $ACP_DEFAULT_MAINNET" >&2; exit 4; }
+LEGACY_TESTNET_CID="$(FYD_A_CHAIN_PROFILE_TESTNET="$ACP_DEFAULT_TESTNET" acp_chain_id testnet)" \
+	|| { echo "ERROR (4): invariant 5 — cannot read the legacy testnet chain_id from profile $ACP_DEFAULT_TESTNET" >&2; exit 4; }
+case "$NETWORK" in
+	testnet-a|xpr-testnet) NEW_ROLE=testnet; LEGACY_CID="$LEGACY_TESTNET_CID" ;;
+	*)                     NEW_ROLE=mainnet; LEGACY_CID="$LEGACY_MAINNET_CID" ;;
+esac
+NEW_CID="${RCPT_CHAIN_ID:-$LEGACY_CID}"
+# A v2 line can only be on the legacy chain: anchor-history.schema.v2.json
+# states block_num non-decreasing across ALL lines, which holds only while
+# every v2 line shares one chain. gen-anchor-receipt.sh never writes a v2
+# receipt for another chain (v2 is refused for non-default profiles); this
+# refuses a hand-made one, so a post-migration line is always v3.
+if [ "$LINE_SCHEMA_VERSION" = "2" ] && [ "$NEW_CID" != "$LEGACY_CID" ]; then
+	echo "ERROR (2): a v2 receipt may only record the legacy $NEW_ROLE chain ($LEGACY_CID); chain_id $NEW_CID needs a v3 receipt (gen-anchor-receipt.sh --receipt-schema=v3)" >&2
+	exit 2
+fi
+# The selected profile may have no chain_id yet (pulsevm-* before
+# publication, library rc 4): then only the legacy chain_id is known. Any
+# OTHER refusal — invalid profile file (2), unknown/wrong-role selection (3),
+# FYD_<ROLE>_CHAIN_ID disagreeing with the profile (5), jq too old (6) — is
+# fail-closed here exactly as in gen-anchor-receipt.sh, even for a line on
+# the legacy chain: a misconfigured selection must not be silently ignored.
+if SELECTED_CID="$(acp_expected_chain_id "$NEW_ROLE")"; then
+	:
+else
+	sel_rc=$?
+	if [ "$sel_rc" -ne 4 ]; then
+		echo "ERROR (4): invariant 5 — the selected $NEW_ROLE chain profile is refused (a-chain-profile rc $sel_rc, see message above); fix FYD_A_CHAIN_PROFILE_MAINNET|TESTNET, FYD_MAINNET|TESTNET_CHAIN_ID or config/a-chain-profiles.json" >&2
+		exit 4
+	fi
+	SELECTED_CID=""
+fi
+if [ "$NEW_CID" != "$LEGACY_CID" ] && { [ -z "$SELECTED_CID" ] || [ "$NEW_CID" != "$SELECTED_CID" ]; }; then
+	echo "ERROR (4): invariant 5 — receipt chain_id $NEW_CID is unknown: it is neither the legacy $NEW_ROLE chain_id nor the chain_id of the selected profile $(acp_profile_name "$NEW_ROLE" 2>/dev/null || echo '?')${SELECTED_CID:+ ($SELECTED_CID)}" >&2
+	exit 4
 fi
 
 # ---- invariant checks against existing history ----
@@ -267,10 +353,26 @@ if [ -f "$HISTORY" ] && [ -s "$HISTORY" ]; then
 		fi
 	fi
 
-	# Invariant 5: block_num non-decreasing.
-	if [ "$BLOCK_NUM" -lt "$LAST_BLOCK_NUM" ]; then
-		echo "ERROR (4): invariant 5 — new block_num $BLOCK_NUM < last $LAST_BLOCK_NUM" >&2
+	# Invariant 5: block_num non-decreasing within a chain_id; a chain_id
+	# change starts a new era (see header). Effective chain_id per line:
+	# its own chain_id, else the legacy chain_id of its network.
+	if ! LINE_CIDS="$(jq -r --arg lm "$LEGACY_MAINNET_CID" --arg lt "$LEGACY_TESTNET_CID" '
+			.chain_id // (if (.network == "testnet-a" or .network == "xpr-testnet") then $lt else $lm end)' "$HISTORY" 2>/dev/null)" \
+		|| [ -z "$LINE_CIDS" ]; then
+		echo "ERROR (4): invariant 5 — cannot parse every line of $HISTORY to establish its chain_id" >&2
 		exit 4
+	fi
+	LAST_CID="$(printf '%s\n' "$LINE_CIDS" | tail -n 1)"
+	if [ "$NEW_CID" = "$LAST_CID" ]; then
+		if [ "$BLOCK_NUM" -lt "$LAST_BLOCK_NUM" ]; then
+			echo "ERROR (4): invariant 5 — new block_num $BLOCK_NUM < last $LAST_BLOCK_NUM (chain_id $NEW_CID)" >&2
+			exit 4
+		fi
+	elif printf '%s\n' "$LINE_CIDS" | grep -qxF -- "$NEW_CID"; then
+		echo "ERROR (4): invariant 5 — chain_id $NEW_CID belongs to an EARLIER era of this ledger (last line is on $LAST_CID); eras are sequential, returning to an old chain is refused" >&2
+		exit 4
+	else
+		echo "NOTE: invariant 5 — new era: chain_id $LAST_CID -> $NEW_CID (known: $([ "$NEW_CID" = "$LEGACY_CID" ] && echo "legacy $NEW_ROLE" || echo "selected profile")); block_num restarts its comparison here" >&2
 	fi
 
 	# Invariant 6: prev_anchor_tx_id must equal last line's tx_id.
@@ -335,6 +437,11 @@ fi
 ARCHIVED_SOURCE_PATH="api/archive/anchor-source-${DAG_ROOT}.json"
 ARCHIVED_RECEIPT_PATH="api/archive/anchor-receipt-${TX_ID}.json"
 
+# Chain discrimination fields, copied verbatim from the receipt's anchor
+# object — only those it carries (a pre-2026-09-30 v2 receipt carries none,
+# and the line then carries none: this script never invents a chain_id).
+CHAIN_EXTRA_JSON="$(jq -c '.anchor | {chain_id, block_id, chain_profile} | with_entries(select(.value != null))' "$RECEIPT")"
+
 if [ "$EVENT_TYPE" = "idrotate" ]; then
 	# idrotate: omit cycle_number, include key_seq.
 	NEW_LINE_JSON="$(jq -nc \
@@ -355,8 +462,10 @@ if [ "$EVENT_TYPE" = "idrotate" ]; then
 		--arg archived_source_path "$ARCHIVED_SOURCE_PATH" \
 		--arg archived_receipt_path "$ARCHIVED_RECEIPT_PATH" \
 		--arg script_ver "append-anchor-history.sh v${SCRIPT_VERSION}" \
+		--argjson line_sv "$LINE_SCHEMA_VERSION" \
+		--argjson chain_extra "$CHAIN_EXTRA_JSON" \
 		'{
-			schema_version: 2, event_type: "idrotate", key_seq: $key_seq,
+			schema_version: $line_sv, event_type: "idrotate", key_seq: $key_seq,
 			dag_root_hash: $dag_root_hash, memo_prefix: $memo_prefix,
 			network: $network, chain: "metal-a-chain", chain_backend: $chain_backend,
 			method: $method, tx_id: $tx_id, block_num: $block_num, block_time: $block_time,
@@ -366,7 +475,7 @@ if [ "$EVENT_TYPE" = "idrotate" ]; then
 			archived_source_path: $archived_source_path,
 			archived_receipt_path: $archived_receipt_path,
 			generated_by_script_version: $script_ver
-		}')"
+		} + $chain_extra')"
 else
 	NEW_LINE_JSON="$(jq -nc \
 		--arg event_type "$EVENT_TYPE" \
@@ -387,8 +496,10 @@ else
 		--arg archived_source_path "$ARCHIVED_SOURCE_PATH" \
 		--arg archived_receipt_path "$ARCHIVED_RECEIPT_PATH" \
 		--arg script_ver "append-anchor-history.sh v${SCRIPT_VERSION}" \
+		--argjson line_sv "$LINE_SCHEMA_VERSION" \
+		--argjson chain_extra "$CHAIN_EXTRA_JSON" \
 		'{
-			schema_version: 2, event_type: $event_type, cycle_number: $cycle_number,
+			schema_version: $line_sv, event_type: $event_type, cycle_number: $cycle_number,
 			dag_root_hash: $dag_root_hash, memo_prefix: $memo_prefix,
 			network: $network, chain: "metal-a-chain", chain_backend: $chain_backend,
 			method: $method, tx_id: $tx_id, block_num: $block_num, block_time: $block_time,
@@ -398,7 +509,7 @@ else
 			archived_source_path: $archived_source_path,
 			archived_receipt_path: $archived_receipt_path,
 			generated_by_script_version: $script_ver
-		}')"
+		} + $chain_extra')"
 fi
 
 # ---- R13: mandatory schema validation (fail closed) ------------------------

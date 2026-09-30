@@ -9,6 +9,11 @@
 # Runs a fail-closed freshness preflight, then the four-step anchor
 # pipeline sequentially:
 #   0. scripts/check-scripts-freshness.sh → fail-closed HEAD==origin/main gate
+#   0b. scripts/check-anchor-history-reachable.sh → fail-closed proof that
+#      step 3 will be able to resolve the tx and name its chain (P3,
+#      2026-09-30): runs BEFORE step 2 signs, because step 3 runs after an
+#      irreversible broadcast and must not be the first to find a history
+#      outage or a chain profile that cannot supply chain_id/history bases
 #   1. scripts/gen-anchor-source.sh   → refresh anchor-source.json
 #   2. scripts/sign-anchor-event.sh   → compose + broadcast 4-action pack
 #   3. scripts/gen-anchor-receipt.sh  → fetch tx + 7-PASS verify + write receipt
@@ -64,6 +69,9 @@
 #        run advance-host-checkout.sh, or FYD_ALLOW_STALE_PIPELINE=1 to
 #        bypass (emergency only; always alerts)
 #   3    scripts/lib/side-effects.sh missing (structural)
+#   4    history reachability preflight failed (step 0b) — nothing was
+#        generated, signed or broadcast; fix the history base / chain
+#        profile, then re-run
 #   10+  step-N failed, script exit = 10 + step number (11..14)
 #
 # Usage:
@@ -129,7 +137,7 @@ for arg in "$@"; do
 		--key-seq=*)              KEY_SEQ="${arg#*=}" ;;
 		--non-interactive)        NON_INTERACTIVE="--non-interactive" ;;
 		--skip-source-refresh)    SKIP_SOURCE_REFRESH=1 ;;
-		-h|--help)                sed -n '2,61p' "$0" | sed 's/^# \?//'; exit 0 ;;
+		-h|--help)                sed -n '2,66p' "$0" | sed 's/^# \?//'; exit 0 ;;
 		*)                        echo "ERROR: unknown arg: $arg" >&2; exit 1 ;;
 	esac
 done
@@ -169,6 +177,16 @@ elif ! bash "${REPO_ROOT}/scripts/check-scripts-freshness.sh" >&2; then
 	exit 2
 else
 	LOG "preflight OK: checkout is fresh (HEAD == origin/main)"
+fi
+
+# -------- preflight 0b: history reachability BEFORE signing (P3) --------
+# No bypass on purpose: if this fails, step 3 would fail AFTER the broadcast
+# for the same reason. Its stdout (one REACHABLE line) goes to stderr so this
+# script's stdout keeps carrying only the tx_id.
+LOG "preflight: history reachability for the receipt step (before signing)"
+if ! bash "${REPO_ROOT}/scripts/check-anchor-history-reachable.sh" --chain="$CHAIN" >&2; then
+	LOG "ERROR (4): the receipt step could not resolve the anchor after a broadcast — refusing to sign"
+	exit 4
 fi
 
 # -------- step 1: refresh anchor-source.json --------

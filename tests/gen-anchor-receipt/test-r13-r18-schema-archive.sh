@@ -155,11 +155,15 @@ for absent_tool in ajv npx python3; do
 	fi
 done
 
+# --rpc: the xpr-testnet profile's history base. Since 2026-09-30 an --rpc
+# outside the profile's history_bases is refused before any request (it was
+# https://fixture.invalid before); the stub curl above intercepts every call,
+# so the real host is never contacted.
 run_gen_anchor_receipt() {
 	local farm="$1" out="$2"
 	PATH="${farm}:${PATH}" bash "$SCRIPT" \
 		--input="$INPUT_JSON" --anchor-source="$ANCHOR_SOURCE_FIXTURE" \
-		--out="$out" --rpc=https://fixture.invalid --trigger=cyclestart
+		--out="$out" --rpc=https://test.proton.eosusa.io --trigger=cyclestart
 }
 
 # ---- case 1: happy path (validator says "valid") ---------------------------
@@ -221,7 +225,7 @@ fi
 # what the generator writes" is a test rather than a coincidence.
 EXPECTED_BACKEND="antelope"
 API_DIR="${REPO_ROOT}/public/api"
-for ex in anchor-receipt.example.json anchor-receipt.v2.example.json anchor-receipt.phase-beta.example.json; do
+for ex in anchor-receipt.example.json anchor-receipt.v2.example.json anchor-receipt.v3.example.json anchor-receipt.phase-beta.example.json; do
 	check_eq "published example: ${ex} chain_backend" \
 		"$EXPECTED_BACKEND" \
 		"$(jq -r '.anchor.chain_backend // "MISSING"' "${API_DIR}/${ex}" 2>/dev/null)"
@@ -231,6 +235,9 @@ done
 check_eq "published example: anchor-history.example.jsonl chain_backend (every line)" \
 	"$EXPECTED_BACKEND" \
 	"$(jq -r '.chain_backend // "MISSING"' "${API_DIR}/anchor-history.example.jsonl" 2>/dev/null | sort -u | tr '\n' ' ' | sed 's/ *$//')"
+check_eq "published example: anchor-history.v3.example.jsonl chain_backend (every line)" \
+	"$EXPECTED_BACKEND" \
+	"$(jq -r '.chain_backend // "MISSING"' "${API_DIR}/anchor-history.v3.example.jsonl" 2>/dev/null | sort -u | tr '\n' ' ' | sed 's/ *$//')"
 
 # ---- case 2: validator says "invalid" -> exit 6, nothing written ----------
 OUT2="$TMP/out/anchor-receipt-run2.json"
@@ -250,7 +257,7 @@ grep -q "failed schema validation" "$TMP/out/run2.stderr" \
 OUT3="$TMP/out/anchor-receipt-run3.json"
 PATH="$FARM_NO_VALIDATOR" bash "$SCRIPT" \
 	--input="$INPUT_JSON" --anchor-source="$ANCHOR_SOURCE_FIXTURE" \
-	--out="$OUT3" --rpc=https://fixture.invalid --trigger=cyclestart \
+	--out="$OUT3" --rpc=https://test.proton.eosusa.io --trigger=cyclestart \
 	>/dev/null 2>"$TMP/out/run3.stderr"
 RC3=$?
 check_eq "R13: no validator available -> exit 7 (fail-closed, not silent skip)" "7" "$RC3"
