@@ -37,8 +37,16 @@
 #     before any block is trusted; a different chain_id is exit 5
 #   - polite: one request at a time, FYD_ARCHIVE_SLEEP seconds between calls
 #
-# HOSTS: script constants below (public XPR mainnet infrastructure). Task 5 of
-#        the PulseVM readiness plan switches them to the chain profile.
+# HOSTS + CHAIN_ID: read from config/a-chain-profiles.json through
+#        scripts/lib/a-chain-profile.sh, from the LEGACY profile xpr-mainnet BY
+#        NAME — never from the profile currently selected for the mainnet role.
+#        After a cutover FYD_A_CHAIN_PROFILE_MAINNET names the PulseVM profile,
+#        and this script must keep reading the OLD chain: the records it
+#        preserves only exist there. History bases are tried in profile order;
+#        node hosts are tried history hosts first (so both bodies of a record
+#        come from one operator when possible), then the remaining node_hosts
+#        in profile order. A profile that cannot supply chain_id, history_bases
+#        or node_hosts is exit 1 before any request.
 #
 # Usage:
 #   archive-legacy-anchors.sh [--from-site=<url> | --from-file=<path>]
@@ -57,10 +65,29 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-# --- constants (Task 5 replaces these with the xpr-mainnet profile) ---------
-CHAIN_ID="384da888112027f0321850a169f737c33e53b388aad48b5adace4bab97f437e0"
-HISTORY_HOSTS="proton.eosusa.io"
-NODE_HOSTS="proton.eosusa.io rpc.api.mainnet.metalx.com proton.cryptolions.io"
+# --- the legacy chain, from the committed profile (see HOSTS above) ---------
+[ -r "${REPO_ROOT}/scripts/lib/a-chain-profile.sh" ] \
+	|| { echo "ERROR: scripts/lib/a-chain-profile.sh not readable" >&2; exit 1; }
+# shellcheck source=scripts/lib/a-chain-profile.sh
+. "${REPO_ROOT}/scripts/lib/a-chain-profile.sh" || { echo "ERROR: cannot load a-chain-profile.sh" >&2; exit 1; }
+# legacy_get <getter> — the legacy mainnet profile's value, whatever is selected.
+legacy_get() { FYD_A_CHAIN_PROFILE_MAINNET="$ACP_DEFAULT_MAINNET" "$1" mainnet; }
+CHAIN_ID="$(legacy_get acp_chain_id)" \
+	|| { echo "ERROR: legacy profile ${ACP_DEFAULT_MAINNET} has no usable chain_id" >&2; exit 1; }
+HISTORY_BASES="$(legacy_get acp_history_bases | tr '\n' ' ')" \
+	|| { echo "ERROR: legacy profile ${ACP_DEFAULT_MAINNET} has no history_bases" >&2; exit 1; }
+PROFILE_NODE_HOSTS="$(legacy_get acp_node_hosts | tr '\n' ' ')" \
+	|| { echo "ERROR: legacy profile ${ACP_DEFAULT_MAINNET} has no node_hosts" >&2; exit 1; }
+# base_host <https://host[/path]> — the bare host of a profile history base.
+base_host() { local v="${1#https://}"; printf '%s' "${v%%/*}"; }
+NODE_HOSTS=""
+for b in $HISTORY_BASES; do
+	h="$(base_host "$b")"
+	case " $PROFILE_NODE_HOSTS " in *" $h "*) NODE_HOSTS="${NODE_HOSTS}${NODE_HOSTS:+ }$h" ;; esac
+done
+for h in $PROFILE_NODE_HOSTS; do
+	case " $NODE_HOSTS " in *" $h "*) ;; *) NODE_HOSTS="${NODE_HOSTS}${NODE_HOSTS:+ }$h" ;; esac
+done
 DEFAULT_SITE="https://metal.freedom-yield.com"
 SCHEMA="legacy-a-chain-archive/v1"
 
@@ -77,7 +104,7 @@ for arg in "$@"; do
 		--from-file=*) FROM_FILE="${arg#*=}" ;;
 		--out-dir=*)   OUT_DIR="${arg#*=}" ;;
 		--dry-run)     DRY_RUN=1 ;;
-		-h|--help)     sed -n '2,50p' "$0" | sed 's/^# \?//'; exit 0 ;;
+		-h|--help)     sed -n '2,62p' "$0" | sed 's/^# \?//'; exit 0 ;;
 		*)             echo "ERROR: unknown arg: $arg" >&2; exit 1 ;;
 	esac
 done
@@ -155,8 +182,8 @@ if [ "$DRY_RUN" -eq 1 ]; then
 		break
 	done
 	while IFS="$(printf '\t')" read -r tx bn; do
-		for h in $HISTORY_HOSTS; do
-			echo "DRY-RUN: GET https://${h}/v2/history/get_transaction?id=${tx}"
+		for b in $HISTORY_BASES; do
+			echo "DRY-RUN: GET ${b}/v2/history/get_transaction?id=${tx}"
 			break
 		done
 		for h in $NODE_HOSTS; do
@@ -287,8 +314,8 @@ while IFS="$(printf '\t')" read -r TX BN; do
 	# -- fetch history ------------------------------------------------------
 	HB="$TMP/$TX.history"; BB="$TMP/$TX.block"
 	HIST_HOST=""
-	for h in $HISTORY_HOSTS; do
-		if http_get "https://${h}/v2/history/get_transaction?id=${TX}" "$HB"; then HIST_HOST="$h"; polite; break; fi
+	for b in $HISTORY_BASES; do
+		if http_get "${b}/v2/history/get_transaction?id=${TX}" "$HB"; then HIST_HOST="$(base_host "$b")"; polite; break; fi
 		polite
 	done
 	if [ -z "$HIST_HOST" ]; then

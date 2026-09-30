@@ -30,7 +30,15 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CHAIN_ID="384da888112027f0321850a169f737c33e53b388aad48b5adace4bab97f437e0"
+# The legacy chain's id comes from the committed profile file, read BY NAME
+# (xpr-mainnet) so that selecting a PulseVM profile for the mainnet role after
+# a cutover cannot change what an archived legacy record is checked against.
+[ -r "${REPO_ROOT}/scripts/lib/a-chain-profile.sh" ] \
+	|| { echo "ERROR: scripts/lib/a-chain-profile.sh not readable" >&2; exit 2; }
+# shellcheck source=scripts/lib/a-chain-profile.sh
+. "${REPO_ROOT}/scripts/lib/a-chain-profile.sh" || { echo "ERROR: cannot load a-chain-profile.sh" >&2; exit 2; }
+CHAIN_ID="$(FYD_A_CHAIN_PROFILE_MAINNET="$ACP_DEFAULT_MAINNET" acp_chain_id mainnet)" \
+	|| { echo "ERROR: legacy profile ${ACP_DEFAULT_MAINNET} has no usable chain_id" >&2; exit 2; }
 SCHEMA="legacy-a-chain-archive/v1"
 
 ARCHIVE_DIR="${REPO_ROOT}/public/api/legacy-a-chain"

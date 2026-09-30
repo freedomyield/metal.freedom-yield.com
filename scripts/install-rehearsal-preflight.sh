@@ -129,12 +129,19 @@
 #                           with run-testnet-rehearsal.sh, on purpose)
 #   XPR_TESTNET_RPC         NOT a fetch transport for this script (no local-
 #                           path acceptance, nothing is ever fetched from it
-#                           here) — check 10 only reads and validates its
-#                           HOST, because run-testnet-rehearsal.sh:174 passes
-#                           it to gen-anchor-receipt.sh for the rehearsal's
-#                           7-gate receipt verification. Shared spelling with
-#                           that script, on purpose; that script is unread by
-#                           this variable's presence — it is not modified.
+#                           here) — check 10 only validates it: it must
+#                           EXACTLY equal one of the testnet chain profile's
+#                           history_bases, because run-testnet-rehearsal.sh
+#                           passes it to its pre-broadcast reachability check
+#                           and to gen-anchor-receipt.sh, and both refuse any
+#                           other value. Shared spelling with that script, on
+#                           purpose.
+#   FYD_A_CHAIN_PROFILE_TESTNET / FYD_A_CHAIN_PROFILE_MAINNET
+#                           chain profile selection (scripts/lib/
+#                           a-chain-profile.sh; defaults xpr-testnet /
+#                           xpr-mainnet). Selects a COMMITTED profile, never
+#                           widens one; a profile that cannot supply values
+#                           fails checks 3 and 10 (exit 3).
 #   FYP_LEDGER_URL          published cycle-history.jsonl  (URL or path)
 #   FYP_ANCHOR_SOURCE_URL   published anchor-source.json   (URL or path)
 #   FYP_ANCHOR_HISTORY_URL  published anchor-history.jsonl (URL or path)
@@ -270,7 +277,8 @@ IDENTITY_KEY="${FYP_IDENTITY_KEY:-${LOGIN_HOME}/.ssh/freedom-yield-operator-iden
 KEYSTORE_TESTNET="${FYP_KEYSTORE_TESTNET:-${LOGIN_HOME}/.metal-fy-proton-test}"
 KEYSTORE_MAINNET="${FYP_KEYSTORE_MAINNET:-${LOGIN_HOME}/.metal-fy-proton}"
 
-TESTNET_CHAIN_RPC="${XPR_TESTNET_CHAIN_RPC:-https://rpc.api.testnet.metalx.com}"
+# TESTNET_CHAIN_RPC's default is resolved from the chain profile below, once
+# $WORK exists (see "Chain values from the committed profile").
 LEDGER_URL="${FYP_LEDGER_URL:-https://metal.freedom-yield.com/api/cycle-history.jsonl}"
 PUB_ANCHOR_URL="${FYP_ANCHOR_SOURCE_URL:-https://metal.freedom-yield.com/api/anchor-source.json}"
 PUB_ANCHOR_HISTORY_URL="${FYP_ANCHOR_HISTORY_URL:-https://metal.freedom-yield.com/api/anchor-history.jsonl}"
@@ -441,6 +449,60 @@ WORK="$(mktemp -d -t fya-rehearsal-preflight.XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT
 
 # ---------------------------------------------------------------------------
+# Chain values from the committed profile (config/a-chain-profiles.json)
+# ---------------------------------------------------------------------------
+# Until 2026-09-30 the host allowlists, the proton-cli network names and the
+# two RPC defaults below were literals in this file, duplicated from
+# the broadcast wrapper and the receipt path. They now come from the ONE reader
+# of the committed profile file, scripts/lib/a-chain-profile.sh, for the
+# profiles SELECTED for each role (FYD_A_CHAIN_PROFILE_TESTNET/_MAINNET,
+# defaults xpr-testnet / xpr-mainnet — the same values as the literals they
+# replace, pinned by tests/a-chain-profile/test-no-drift-rehearsal-preflight.sh).
+# Still no env var widens an allowlist: selecting a profile selects a
+# REVIEWED, COMMITTED list, and the library refuses unknown names.
+#
+# A profile that cannot be read (file missing/invalid, jq < 1.6, unknown or
+# wrong-role selection, a PulseVM profile whose values are not published yet)
+# is NOT a reason to stop before the other checks run: every value is left
+# empty, and checks 3 and 10 then FAIL (exit 3) naming the reason — an
+# allowlist that could not be established is a violated allowlist.
+FYP_PROFILE_OK=1
+TESTNET_NET=""
+MAINNET_NET=""
+TESTNET_HOST_ALLOWLIST=""
+MAINNET_HOST_ALLOWLIST=""
+TESTNET_HISTORY_BASES=""
+: > "${WORK}/acp.err"
+# fyp_acp_set <var> <getter> <role> — the value (a list joined by single
+# spaces), or leave <var> empty and mark the profile unusable.
+fyp_acp_set() {
+	local v
+	if v="$("$2" "$3" 2>>"${WORK}/acp.err")" && [ -n "$v" ]; then
+		printf -v "$1" '%s' "$(printf '%s' "$v" | tr '\n' ' ' | sed 's/ *$//')"
+	else
+		FYP_PROFILE_OK=0
+	fi
+}
+if [ -r "${REPO_ROOT}/scripts/lib/a-chain-profile.sh" ] \
+	&& . "${REPO_ROOT}/scripts/lib/a-chain-profile.sh" 2>>"${WORK}/acp.err"; then
+	fyp_acp_set TESTNET_NET            acp_proton_network testnet
+	fyp_acp_set MAINNET_NET            acp_proton_network mainnet
+	fyp_acp_set TESTNET_HOST_ALLOWLIST acp_node_hosts     testnet
+	fyp_acp_set MAINNET_HOST_ALLOWLIST acp_node_hosts     mainnet
+	fyp_acp_set TESTNET_HISTORY_BASES  acp_history_bases  testnet
+else
+	FYP_PROFILE_OK=0
+	echo "a-chain-profile: scripts/lib/a-chain-profile.sh not readable or not loadable" >> "${WORK}/acp.err"
+fi
+FYP_PROFILE_REASON="$(head -n 1 "${WORK}/acp.err" | tr -s ' ' | tr ' ' '_')"
+[ -n "$FYP_PROFILE_REASON" ] || FYP_PROFILE_REASON="empty-value"
+
+# The first listed node host / history base is the default transport, exactly
+# the values these two defaults held as literals before the profile existed.
+TESTNET_CHAIN_RPC="${XPR_TESTNET_CHAIN_RPC:-https://${TESTNET_HOST_ALLOWLIST%% *}}"
+TESTNET_HYPERION_RPC="${XPR_TESTNET_RPC:-${TESTNET_HISTORY_BASES%% *}}"
+
+# ---------------------------------------------------------------------------
 # Provenance of every observation (see the header's "NO FLAG BYPASSES A CHECK")
 # ---------------------------------------------------------------------------
 # A green transcript has to say what it read. Before this existed, a run
@@ -573,7 +635,11 @@ if [ -z "$RH_PROBLEMS" ]; then
 	# BLOCK-1, enforced by sign-anchor-event.sh:286: eosio.token rejects a
 	# self-transfer, so an equal sink fails only once the tx is composed.
 	[ "$RH_SINK" != "$RH_ACCOUNT" ] || RH_PROBLEMS="${RH_PROBLEMS} sink-equals-account(BLOCK-1)"
-	[ "$RH_CHAIN" = "proton-test" ] || RH_PROBLEMS="${RH_PROBLEMS} xpr-chain-is-not-proton-test"
+	if [ -z "$TESTNET_NET" ]; then
+		RH_PROBLEMS="${RH_PROBLEMS} xpr-chain-unverifiable(chain-profile-unavailable)"
+	elif [ "$RH_CHAIN" != "$TESTNET_NET" ]; then
+		RH_PROBLEMS="${RH_PROBLEMS} xpr-chain-is-not-${TESTNET_NET}"
+	fi
 fi
 if [ -z "$RH_PROBLEMS" ]; then
 	chk_pass 3 "rehearsal config complete" "actor=${RH_ACCOUNT} chain=${RH_CHAIN}"
@@ -1072,12 +1138,13 @@ fi
 # project default or came from an override — see MAINNET_HOME_PINNED below.
 echo "── check 10 — chain endpoint allowlist (clone-network defense) ──"
 
-# Fixed, not an env override: an allowlist that widens by exporting a
-# variable is not an allowlist. Values as read 2026-08-21 from this
-# machine's actual proton-cli.json / @proton/cli's constants.js — proton-
-# cli's own shipped default set.
-TESTNET_HOST_ALLOWLIST="rpc.api.testnet.metalx.com proton-testnet.eoscafeblock.com test.proton.eosusa.io"
-MAINNET_HOST_ALLOWLIST="rpc.api.mainnet.metalx.com proton.cryptolions.io proton.eosusa.io"
+# TESTNET_HOST_ALLOWLIST / MAINNET_HOST_ALLOWLIST come from the selected
+# chain profiles' node_hosts (resolved at the top of this script). Not an env
+# override: an allowlist that widens by exporting a variable is not an
+# allowlist, and the profile file is a reviewed commit. The xpr-* values are
+# the ones read 2026-08-21 from this machine's actual proton-cli.json /
+# @proton/cli's constants.js — proton-cli's own shipped default set — and
+# the same set the broadcast wrapper's gate-3 host check uses.
 
 # fyp_host_of <value> — the host, or EMPTY if the value is rejected outright
 # (no https:// scheme, or userinfo (`user@`/`user:pass@`) survives stripping).
@@ -1265,19 +1332,26 @@ fyp_scan_proton_cli() {
 		ep_chains="$(jq -r '[.endpoints[]?.chain // "unknown"] | unique | join(",")' "$out" 2>/dev/null)"
 		[ -n "$ep_chains" ] || ep_chains="unknown"
 		problems="${problems} ${label}-endpoints-override-key-present:${ep_chains}"
-		problems="${problems}$(fyp_scan_chain_key "$out" endpoints proton-test "$TESTNET_HOST_ALLOWLIST" "$label" testnet 0)"
-		problems="${problems}$(fyp_scan_chain_key "$out" endpoints proton "$MAINNET_HOST_ALLOWLIST" "$label" mainnet 0)"
+		problems="${problems}$(fyp_scan_chain_key "$out" endpoints "$TESTNET_NET" "$TESTNET_HOST_ALLOWLIST" "$label" testnet 0)"
+		problems="${problems}$(fyp_scan_chain_key "$out" endpoints "$MAINNET_NET" "$MAINNET_HOST_ALLOWLIST" "$label" mainnet 0)"
 	fi
 
 	# SECONDARY / insurance — not consulted by the installed proton-cli's
 	# runtime resolver, kept as a second layer regardless.
-	problems="${problems}$(fyp_scan_chain_key "$out" networks proton-test "$TESTNET_HOST_ALLOWLIST" "$label" testnet "$require_test")"
-	problems="${problems}$(fyp_scan_chain_key "$out" networks proton "$MAINNET_HOST_ALLOWLIST" "$label" mainnet "$require_main")"
+	problems="${problems}$(fyp_scan_chain_key "$out" networks "$TESTNET_NET" "$TESTNET_HOST_ALLOWLIST" "$label" testnet "$require_test")"
+	problems="${problems}$(fyp_scan_chain_key "$out" networks "$MAINNET_NET" "$MAINNET_HOST_ALLOWLIST" "$label" mainnet "$require_main")"
 
 	printf '%s' "$problems"
 }
 
 EP_PROBLEMS=""
+
+# --- the chain profile itself (see the top of this script) ----------------
+# Without the profile there is no allowlist to judge against, and "could not
+# judge" is a failure here, never a pass.
+if [ "$FYP_PROFILE_OK" -ne 1 ]; then
+	EP_PROBLEMS="${EP_PROBLEMS} chain-profile-unavailable:${FYP_PROFILE_REASON}"
+fi
 
 # --- exposure path (1): XPR_TESTNET_CHAIN_RPC (check 9's transport) -------
 RPC_HOST="$(fyp_host_of "$TESTNET_CHAIN_RPC")"
@@ -1286,11 +1360,17 @@ if [ -z "$RPC_HOST" ] || ! fyp_host_allowed "$RPC_HOST" "$TESTNET_HOST_ALLOWLIST
 fi
 
 # --- exposure path (2): XPR_TESTNET_RPC (I2 — run-testnet-rehearsal.sh's
-# receipt-verification RPC, read here for cross-check only; that script is
-# not modified) -------------------------------------------------------------
-TESTNET_HYPERION_RPC="${XPR_TESTNET_RPC:-https://test.proton.eosusa.io}"
+# receipt-verification RPC, read here for cross-check only) ----------------
+# EXACT match against the testnet profile's history_bases (2026-09-30), not a
+# host match against node_hosts any more: gen-anchor-receipt.sh --rpc= and
+# scripts/check-anchor-history-reachable.sh both refuse anything that is not
+# exactly one listed base, so a host-only check here would pass a value
+# (e.g. a node host with no Hyperion behind it, or a trailing '/') that the
+# rehearsal's own reachability step and receipt step then refuse. The host is
+# still extracted, for the problem token only.
 HYPERION_HOST="$(fyp_host_of "$TESTNET_HYPERION_RPC")"
-if [ -z "$HYPERION_HOST" ] || ! fyp_host_allowed "$HYPERION_HOST" "$TESTNET_HOST_ALLOWLIST"; then
+if [ -z "$HYPERION_HOST" ] || [ "$FYP_PROFILE_OK" -ne 1 ] \
+	|| ! acp_history_base_allowed testnet "$TESTNET_HYPERION_RPC" 2>/dev/null; then
 	EP_PROBLEMS="${EP_PROBLEMS} XPR_TESTNET_RPC-rejected:${HYPERION_HOST:-RAW(${TESTNET_HYPERION_RPC})}"
 fi
 
@@ -1318,8 +1398,8 @@ MAINNET_HOME_RESULT="$(fyp_scan_proton_cli "$KEYSTORE_MAINNET" mainnet-HOME 0 1)
 # rehearsal's pre-flight (it is still reported, per the provenance rule).
 TESTNET_CURRENT_CHAIN=""
 [ -r "$TESTNET_CFG_PATH" ] && TESTNET_CURRENT_CHAIN="$(jq -r '.currentChain // empty' "$TESTNET_CFG_PATH" 2>/dev/null)"
-if [ "$TESTNET_CURRENT_CHAIN" != "proton-test" ]; then
-	EP_PROBLEMS="${EP_PROBLEMS} testnet-HOME-currentChain-is-not-proton-test:${TESTNET_CURRENT_CHAIN:-<unobservable>}"
+if [ -z "$TESTNET_NET" ] || [ "$TESTNET_CURRENT_CHAIN" != "$TESTNET_NET" ]; then
+	EP_PROBLEMS="${EP_PROBLEMS} testnet-HOME-currentChain-is-not-${TESTNET_NET:-<profile-unavailable>}:${TESTNET_CURRENT_CHAIN:-<unobservable>}"
 fi
 MAINNET_CURRENT_CHAIN=""
 [ -r "$MAINNET_CFG_PATH" ] && MAINNET_CURRENT_CHAIN="$(jq -r '.currentChain // empty' "$MAINNET_CFG_PATH" 2>/dev/null)"
@@ -1336,7 +1416,8 @@ if [ -z "$EP_PROBLEMS" ]; then
 		"testnet-HOME: ${TESTNET_CFG_PATH}  (currentChain=${TESTNET_CURRENT_CHAIN})"
 	note "mainnet-HOME: ${MAINNET_CFG_PATH}  (currentChain=${MAINNET_CURRENT_CHAIN}, not judged)"
 	note "mainnet HOME pinned: ${MAINNET_HOME_PINNED}"
-	note "hosts checked — chain RPC:${RPC_HOST}; receipt RPC:${HYPERION_HOST}; testnet-HOME[endpoints?,networks: proton-test,proton]; mainnet-HOME[endpoints?,networks: proton, proton-test if present]"
+	note "hosts checked — chain RPC:${RPC_HOST}; receipt RPC:${TESTNET_HYPERION_RPC} (exact history base); testnet-HOME[endpoints?,networks: ${TESTNET_NET},${MAINNET_NET}]; mainnet-HOME[endpoints?,networks: ${MAINNET_NET}, ${TESTNET_NET} if present]"
+	note "chain profiles: testnet=$(acp_profile_name testnet 2>/dev/null) mainnet=$(acp_profile_name mainnet 2>/dev/null) (config/a-chain-profiles.json)"
 else
 	chk_fail 10 3 "chain endpoint allowlist violation — a config or env value points off the fixed allowlist" \
 		"problems:${EP_PROBLEMS}" \
@@ -1364,8 +1445,15 @@ else
 		"  HOME=~/.metal-fy-proton-test proton chain:set proton-test" \
 		"(mainnet-keystore equivalent, HOME=~/.metal-fy-proton, if that leg names a chain)." \
 		"Do NOT hand-edit the config file to fix this." \
-		"testnet allowlist: ${TESTNET_HOST_ALLOWLIST}" \
-		"mainnet allowlist: ${MAINNET_HOST_ALLOWLIST}"
+		"If the problem is 'XPR_TESTNET_RPC-rejected:…': the value must EXACTLY equal one" \
+		"of the testnet profile's history_bases (no trailing '/', same case) — the" \
+		"rehearsal's reachability step and gen-anchor-receipt.sh refuse anything else." \
+		"If the problem is 'chain-profile-unavailable:…': config/a-chain-profiles.json or" \
+		"scripts/lib/a-chain-profile.sh could not supply the values (or a stray" \
+		"FYD_A_CHAIN_PROFILE_* selects a profile without them) — restore from git / unset." \
+		"testnet allowlist: ${TESTNET_HOST_ALLOWLIST:-<unavailable>}" \
+		"mainnet allowlist: ${MAINNET_HOST_ALLOWLIST:-<unavailable>}" \
+		"testnet history bases: ${TESTNET_HISTORY_BASES:-<unavailable>}"
 fi
 
 # ===========================================================================

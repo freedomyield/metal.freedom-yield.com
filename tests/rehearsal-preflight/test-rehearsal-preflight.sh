@@ -1134,6 +1134,46 @@ expect_case "check 10 (I10): a populated 'endpoints' stanza for a chain OTHER th
 	"testnet-HOME-endpoints-override-key-present:proton"
 
 # ===========================================================================
+# Part 9f — chain profile (PulseVM readiness Task 5, 2026-09-30)
+# ===========================================================================
+# The allowlists, network names and RPC defaults now come from
+# config/a-chain-profiles.json. The green baseline above already proves the
+# default xpr-* profiles reproduce the old literals end to end; these cases
+# prove the two NEW behaviours: XPR_TESTNET_RPC is judged as an EXACT history
+# base (what the receipt and the reachability check accept), and a profile
+# that cannot supply values fails closed instead of skipping the check.
+PF_TESTNET_NODE_NOT_HISTORY="https://rpc.api.testnet.metalx.com"
+D="$(fresh prof-hyperion-node-host)"
+PF_HYPERION_RPC="$PF_TESTNET_NODE_NOT_HISTORY"; export PF_HYPERION_RPC
+expect_case "check 10 (profile): XPR_TESTNET_RPC on an allowlisted NODE host that is not a history base -> exit 3 (the receipt would refuse it)" "$D" 3 \
+	"XPR_TESTNET_RPC-rejected:rpc.api.testnet.metalx.com"
+unset PF_HYPERION_RPC
+
+D="$(fresh prof-hyperion-trailing-slash)"
+PF_HYPERION_RPC="https://test.proton.eosusa.io/"; export PF_HYPERION_RPC
+expect_case "check 10 (profile): XPR_TESTNET_RPC with a trailing '/' is not an exact history base -> exit 3" "$D" 3 \
+	"XPR_TESTNET_RPC-rejected:test.proton.eosusa.io"
+unset PF_HYPERION_RPC
+
+D="$(fresh prof-pulsevm-unpublished)"
+FYD_A_CHAIN_PROFILE_TESTNET=pulsevm-testnet; export FYD_A_CHAIN_PROFILE_TESTNET
+expect_case "check 10 (profile): a testnet profile with no published values (pulsevm-testnet) -> exit 3, chain-profile-unavailable, never green" "$D" 3 \
+	"chain-profile-unavailable:" "VERDICT: PRE-FLIGHT GREEN"
+OUT_PROF="$(run_pf "$D")"
+if printf '%s' "$OUT_PROF" | grep -qF "xpr-chain-unverifiable(chain-profile-unavailable)"; then
+	pass "check 3 (profile): the rehearsal chain name cannot be judged without the profile -> named, not silently skipped"
+else
+	bad "check 3 (profile): the rehearsal chain name cannot be judged without the profile -> named, not silently skipped"
+fi
+unset FYD_A_CHAIN_PROFILE_TESTNET
+
+D="$(fresh prof-unknown)"
+FYD_A_CHAIN_PROFILE_MAINNET=no-such-profile; export FYD_A_CHAIN_PROFILE_MAINNET
+expect_case "check 10 (profile): an unknown mainnet profile selection -> exit 3, chain-profile-unavailable" "$D" 3 \
+	"chain-profile-unavailable:" "VERDICT: PRE-FLIGHT GREEN"
+unset FYD_A_CHAIN_PROFILE_MAINNET
+
+# ===========================================================================
 # Part 10 — reporting discipline
 # ===========================================================================
 # Two independent breakages: every one must be listed, and the exit code must
