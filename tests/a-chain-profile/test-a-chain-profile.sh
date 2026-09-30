@@ -128,7 +128,7 @@ expect "V31 same-role shared chain_id allowed" \
 expect "V32 top level not object"            "$(run_tree '[1]' 'acp_validate')" "2|"
 expect "V33 not JSON"                        "$(run_raw '{ not json' 'acp_chain_id mainnet')" "2|"
 expect "V34 file missing"                    "$(run_raw NOFILE 'acp_chain_id mainnet')" "2|"
-expect "V35 jq missing"                      "$(run 'PATH=/nonexistent acp_chain_id mainnet')" "2|"
+expect "V35 jq missing"                      "$(run 'PATH=/nonexistent acp_chain_id mainnet')" "6|"
 # every getter refuses on an invalid file, not only acp_validate
 for g in acp_profile_name acp_chain_id acp_expected_chain_id acp_node_hosts acp_history_bases \
          acp_explorer_base acp_proton_network acp_push_response acp_lib_equals_head; do
@@ -185,14 +185,46 @@ ln -s "$t/real/scripts/lib/sub" "$t/s"
 expect "R04 symlink/.. source path resolves physically" \
 	"$(bash -c ". '$t/s/../a-chain-profile.sh' && acp_chain_id mainnet" 2>"$WORK/err"; echo "|$?")" "$MAIN_CID
 |0"
-# jq 1.5 policy (as scripts/check-pulsevm-upstream.sh): none of these jq
-# >= 1.6 builtins/flags in the library's code (comment lines excluded):
-# IN INDEX walk halt halt_error @base32d utf8bytelength $ENV --rawfile
-# --args --jsonargs (1.6); pick have_decnum have_literal_numbers debug/1
-# --raw-output0 (1.7); trim abs toarray (1.7.1)
-# shellcheck disable=SC2016  # literal $ENV / $__loc__ tokens in a regex
-J_HITS="$(grep -v '^[[:space:]]*#' "$LIB" | grep -nE '(^|[^A-Za-z_])(IN|INDEX|walk|halt|halt_error|pick|trim|abs|toarray|utf8bytelength|have_decnum|have_literal_numbers|debug|@base32d)\(|\$ENV|--rawfile|--args|--jsonargs|--raw-output0|halt_error|(^|[^A-Za-z_])halt([^_A-Za-z]|$)' || true)"
-expect "J01 no post-1.5 jq builtin/flag in the library" "$J_HITS" ""
+# jq >= 1.6 is required and enforced (JV* below); the code must still stay
+# within the jq 1.6 language because a host may have exactly 1.6: none of
+# these jq >= 1.7 builtins/flags in the library's code (comment lines
+# excluded): pick have_decnum have_literal_numbers debug/1 --raw-output0
+# (1.7); trim abs toarray add/1 (1.7.1). The docker matrix
+# (tests/a-chain-profile/docker-jq-matrix.sh) runs this suite on a real 1.6.
+J_HITS="$(grep -v '^[[:space:]]*#' "$LIB" | grep -nE '(^|[^A-Za-z_])(pick|trim|abs|toarray|have_decnum|have_literal_numbers|debug|add)\(|--raw-output0' || true)"
+expect "J01 no jq >= 1.7 builtin/flag in the library" "$J_HITS" ""
+
+# ---- JV: the jq version gate. A stub jq answers --version with a chosen
+# string and passes every other call through to the real jq, so the gate
+# alone decides. ----
+mkdir -p "$WORK/jqver"
+cat > "$WORK/jqver/jq" <<STUB
+#!/usr/bin/env bash
+if [ "\$1" = "--version" ]; then cat "$WORK/jqver/version"; exit 0; fi
+exec "$REAL_JQ" "\$@"
+STUB
+chmod +x "$WORK/jqver/jq"
+jv() { # jv <version-string> <cmd>
+	printf '%s' "$1" > "$WORK/jqver/version"
+	run "PATH='$WORK/jqver':\$PATH; $2"
+}
+for v in "jq-1.5-1-a5b5cbe" "jq-1.5" "jq-1.4" "jq-0.9" "jq version 1.3" "" "jq-1" "jq-1.x" "1.7.1" "2.0" "jq-1a.6"; do
+	expect "JV01 refuses jq '$v'" "$(jv "$v" 'acp_chain_id mainnet')" "6|"
+done
+for v in "jq-1.6" "jq-1.7.1" "jq-1.7.1-apple" "jq-1.8.2" "jq-1.10" "jq-2.0"; do
+	expect "JV02 accepts jq '$v'" "$(jv "$v" 'acp_chain_id mainnet')" "0|$MAIN_CID"
+done
+for g in acp_validate acp_profile_name acp_chain_id acp_expected_chain_id acp_node_hosts acp_history_bases \
+         acp_explorer_base acp_proton_network acp_push_response acp_lib_equals_head; do
+	expect "JV03 $g refuses under jq 1.5, stdout empty" "$(jv "jq-1.5-1-a5b5cbe" "$g mainnet")" "6|"
+done
+expect "JV04 host_allowed refuses under jq 1.5"  "$(jv "jq-1.5" 'acp_host_allowed mainnet proton.eosusa.io')" "6|"
+expect "JV05 history_base_allowed refuses under jq 1.5" "$(jv "jq-1.5" 'acp_history_base_allowed testnet https://test.proton.eosusa.io')" "6|"
+jv "jq-1.5-1-a5b5cbe" 'acp_chain_id mainnet' >/dev/null
+expect "JV06 message names the version"      "$(grep -c 'jq-1.5-1-a5b5cbe .*older than 1.6' "$WORK/err")" "1"
+printf 'jq-1.5' > "$WORK/jqver/version"
+expect "JV07 version cache is per jq path (a later, older jq is still refused)" \
+	"$(run "acp_validate && PATH='$WORK/jqver':\$PATH acp_validate")" "6|"
 
 # ---------------- S: selection ----------------
 expect "S01 default mainnet profile"   "$(run 'acp_profile_name mainnet')" "0|xpr-mainnet"

@@ -112,12 +112,13 @@
 # own exit-code table, e.g. gate 3 in bin/safe-broadcast)
 #   0  ok (value on stdout, one line or one item per line)
 #   1  negative answer of a predicate (acp_*_allowed: not in the list)
-#   2  profile file missing / unreadable / invalid, jq missing, the library
+#   2  profile file missing / unreadable / invalid, the library
 #      directory could not be resolved, or the validator itself failed
 #      (message says "validator failure (jq ...)" — distinct from "invalid")
 #   3  bad role / chain argument, or selected profile unknown / wrong role
 #   4  value not available in the selected profile (null or empty list)
 #   5  FYD_<ROLE>_CHAIN_ID override disagrees with the profile
+#   6  jq missing, older than 1.6, or its version unparseable
 #   On rc != 0 stdout is empty and stderr carries "a-chain-profile: <reason>".
 #
 # CALLER IDIOM (never let a failed getter degrade to an empty string):
@@ -125,9 +126,15 @@
 #   if ! acp_host_allowed mainnet "$host"; then ...refuse...; fi
 #
 # Bash 3.2 compatible (macOS /bin/bash): no associative arrays, no mapfile.
-# jq 1.5 compatible by policy (as scripts/check-pulsevm-upstream.sh): no IN,
-# INDEX, walk, $ENV, halt, --rawfile, --args or later builtins. Enforced by
-# a token denylist in tests/a-chain-profile/test-a-chain-profile.sh (J01).
+# REQUIRES jq >= 1.6 (every host that runs this has 1.6 or later). This is
+# ENFORCED, not assumed: acp__require_jq parses `jq --version` (jq-1.5-1-a5b5cbe,
+# jq-1.6, jq-1.7.1, jq-1.7.1-apple, jq-1.8.2 ...) before any other jq call, and
+# refuses with rc 6 on a missing jq, a version below 1.6 or an unparseable
+# version string — the library never silently runs on a jq it was not
+# written for (measured: under jq 1.5 the validator misbehaves). Code stays
+# within the jq 1.6 language (no pick, trim, abs, toarray, have_decnum,
+# debug/1, --raw-output0 ...), pinned by test J01, because a host may have
+# exactly 1.6. The version check result is cached per resolved jq path.
 #
 # Sourcing: `. lib || exit` — the source itself returns 2 if the library
 # directory cannot be resolved (ACP_FILE is then empty and every getter
@@ -226,9 +233,33 @@ end
 '
 
 # acp_validate_file <path> — rc 0 valid, rc 2 invalid (reasons on stderr).
+# acp__require_jq — rc 0 iff the jq on PATH reports version >= 1.6.
+ACP__JQ_OK_PATH=""
+acp__require_jq() {
+	local jqpath ver major minor
+	jqpath="$(command -v jq 2>/dev/null)" || jqpath=""
+	[ -n "$jqpath" ] || { acp__fail 6 "jq is required (>= 1.6) and was not found on PATH"; return; }
+	[ "$jqpath" = "$ACP__JQ_OK_PATH" ] && return 0
+	ver="$(jq --version 2>/dev/null | head -1)"
+	case "$ver" in
+		jq-[0-9]*.[0-9]*) ;;
+		*) acp__fail 6 "cannot parse jq version '${ver}' from ${jqpath}; jq >= 1.6 required, refusing"; return ;;
+	esac
+	major="${ver#jq-}"; major="${major%%.*}"
+	minor="${ver#jq-*.}"; minor="${minor%%[!0-9]*}"
+	case "$major" in ''|*[!0-9]*) acp__fail 6 "cannot parse jq version '${ver}'; jq >= 1.6 required, refusing"; return ;; esac
+	case "$minor" in ''|*[!0-9]*) acp__fail 6 "cannot parse jq version '${ver}'; jq >= 1.6 required, refusing"; return ;; esac
+	if [ "$major" -lt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -lt 6 ]; }; then
+		acp__fail 6 "jq ${ver} at ${jqpath} is older than 1.6; refusing (this library requires jq >= 1.6)"
+		return
+	fi
+	ACP__JQ_OK_PATH="$jqpath"
+	return 0
+}
+
 acp_validate_file() {
 	local file="${1:-}" errs ndocs nstream nparsed
-	command -v jq >/dev/null 2>&1 || { acp__fail 2 "jq is required"; return; }
+	acp__require_jq || return
 	[ -n "$file" ] && [ -f "$file" ] && [ -r "$file" ] \
 		|| { acp__fail 2 "profile file not readable: ${file:-<empty>}"; return; }
 	# 1. Parse only (a program that cannot fail to compile): a failure here
@@ -294,7 +325,7 @@ acp_profile_name() {
 		testnet) envvar="FYD_A_CHAIN_PROFILE_TESTNET"; name="${FYD_A_CHAIN_PROFILE_TESTNET:-$ACP_DEFAULT_TESTNET}" ;;
 		*) acp__fail 3 "role must be mainnet or testnet, got: '${role}'"; return ;;
 	esac
-	acp_validate || return 2
+	acp_validate || return
 	case "$name" in
 		*[!a-z0-9-]*|-*) acp__fail 3 "${envvar}='${name}' is not a valid profile name"; return ;;
 	esac
