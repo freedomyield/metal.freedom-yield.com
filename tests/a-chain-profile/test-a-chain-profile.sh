@@ -139,6 +139,61 @@ expect "V37 host_allowed refuses on invalid file" \
 expect "V38 invalid OTHER profile also refuses" \
 	"$(run_tree '.profiles["pulsevm-testnet"].push_response = "x"' 'acp_chain_id mainnet')" "2|"
 
+# ---- fix round 1: document count, duplicate keys, dot segments, validator
+# failure vs invalid input, library-directory resolution, jq 1.5 policy ----
+CFG_TEXT="$(cat "$CFG")"
+expect "V39 empty (0-byte) file"             "$(run_raw '' 'acp_validate')" "2|"
+expect "V39b whitespace-only file"           "$(run_raw '
+  ' 'acp_validate')" "2|"
+expect "V40 two concatenated documents"      "$(run_raw "${CFG_TEXT}${CFG_TEXT}" 'acp_validate')" "2|"
+expect "V39c ...refused by the document count" "$(run_raw '' 'acp_validate' >/dev/null; grep -c 'holds no JSON document' "$WORK/err")" "1"
+expect "V40c ...refused by the document count" "$(run_raw "${CFG_TEXT}${CFG_TEXT}" 'acp_validate' >/dev/null; grep -c 'holds 2 JSON documents' "$WORK/err")" "1"
+expect "V40b getter refuses on two documents" "$(run_raw "${CFG_TEXT}${CFG_TEXT}" 'acp_chain_id mainnet')" "2|"
+DUP_CID="$(printf '%s' "$CFG_TEXT" | perl -0pe "s/(\"xpr-mainnet\": \\{\n\s+\"role\": \"mainnet\",)/\$1 \"chain_id\": \"$TEST_CID\",/")"
+expect "V41 duplicate scalar key (hidden chain_id)" "$(run_raw "$DUP_CID" 'acp_validate')" "2|"
+expect "V41c ...refused as a duplicate key" "$(run_raw "$DUP_CID" 'acp_validate' >/dev/null; grep -c 'duplicate object keys' "$WORK/err")" "1"
+expect "V41b fixture really is a duplicate"  "$(printf '%s' "$DUP_CID" | grep -c "$TEST_CID")" "2"
+expect "V42 duplicate object-valued key"     "$(run_raw "$(printf '%s' "$CFG_TEXT" | perl -0pe 's/^\{/{"profiles": {"x": {"a": 1}},/')" 'acp_validate')" "2|"
+expect "V43 duplicate identical key"         "$(run_raw "$(printf '%s' "$CFG_TEXT" | perl -0pe 's/^\{/{"schema_version": 1,/')" 'acp_validate')" "2|"
+V "V44 history base with .. segment"         '.profiles["xpr-mainnet"].history_bases = ["https://proton.eosusa.io/a/../b"]'
+V "V45 explorer_base with . segment"         '.profiles["xpr-mainnet"].explorer_base = "https://explorer.xprnetwork.org/./transaction"'
+V "V45b history base ending in .."           '.profiles["xpr-mainnet"].history_bases = ["https://proton.eosusa.io/.."]'
+expect "V46 dotted (non-dot-segment) path allowed" \
+	"$(run_tree '.profiles["xpr-mainnet"].history_bases = ["https://proton.eosusa.io/v2.api/..x"]' 'acp_validate')" "0|"
+run_raw '{ not json' 'acp_validate' >/dev/null
+expect "V47 bad input says invalid JSON"     "$(grep -c 'is not valid JSON' "$WORK/err")" "1"
+# a jq that fails only on the schema program (as an older jq lacking a
+# builtin would): refused, and reported as the validator's failure
+mkdir -p "$WORK/jqstub"
+REAL_JQ="$(command -v jq)"
+cat > "$WORK/jqstub/jq" <<STUB
+#!/usr/bin/env bash
+for a in "\$@"; do [ "\$a" = "defaults" ] && { echo "jq: error: IN/1 is not defined" >&2; exit 3; }; done
+exec "$REAL_JQ" "\$@"
+STUB
+chmod +x "$WORK/jqstub/jq"
+expect "V48 validator failure refuses"       "$(run "PATH='$WORK/jqstub':\$PATH acp_chain_id mainnet")" "2|"
+expect "V48b ...and says validator failure"  "$(grep -c 'validator failure (jq compile/runtime error' "$WORK/err")" "1"
+expect "R01 empty lib dir does not resolve"  "$(run 'acp__resolve_file ""')" "2|"
+expect "R02 missing lib dir does not resolve" "$(run "acp__resolve_file '$WORK/no/such/dir'")" "2|"
+expect "R03 empty ACP_FILE refuses"          "$(run 'ACP_FILE=""; acp_chain_id mainnet')" "2|"
+# sourced through symlink/.. : physical resolution must find the real tree
+N=$((N + 1)); t="$WORK/tree$N"
+mkdir -p "$t/real/scripts/lib/sub" "$t/real/config"
+cp "$LIB" "$t/real/scripts/lib/"; cp "$CFG" "$t/real/config/"
+ln -s "$t/real/scripts/lib/sub" "$t/s"
+expect "R04 symlink/.. source path resolves physically" \
+	"$(bash -c ". '$t/s/../a-chain-profile.sh' && acp_chain_id mainnet" 2>"$WORK/err"; echo "|$?")" "$MAIN_CID
+|0"
+# jq 1.5 policy (as scripts/check-pulsevm-upstream.sh): none of these jq
+# >= 1.6 builtins/flags in the library's code (comment lines excluded):
+# IN INDEX walk halt halt_error @base32d utf8bytelength $ENV --rawfile
+# --args --jsonargs (1.6); pick have_decnum have_literal_numbers debug/1
+# --raw-output0 (1.7); trim abs toarray (1.7.1)
+# shellcheck disable=SC2016  # literal $ENV / $__loc__ tokens in a regex
+J_HITS="$(grep -v '^[[:space:]]*#' "$LIB" | grep -nE '(^|[^A-Za-z_])(IN|INDEX|walk|halt|halt_error|pick|trim|abs|toarray|utf8bytelength|have_decnum|have_literal_numbers|debug|@base32d)\(|\$ENV|--rawfile|--args|--jsonargs|--raw-output0|halt_error|(^|[^A-Za-z_])halt([^_A-Za-z]|$)' || true)"
+expect "J01 no post-1.5 jq builtin/flag in the library" "$J_HITS" ""
+
 # ---------------- S: selection ----------------
 expect "S01 default mainnet profile"   "$(run 'acp_profile_name mainnet')" "0|xpr-mainnet"
 expect "S02 default testnet profile"   "$(run 'acp_profile_name testnet')" "0|xpr-testnet"

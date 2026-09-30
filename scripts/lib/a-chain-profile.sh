@@ -53,12 +53,16 @@
 #   copy the library and a fixture file into a temporary tree instead.
 #
 # VALIDATION (acp_validate — run by EVERY getter before it answers)
-#   * file readable, valid JSON, jq present
+#   * file readable, jq present, valid JSON, EXACTLY ONE document (an empty
+#     file or a concatenation of documents is refused)
+#   * no duplicate object key anywhere (jq is last-wins; a duplicate could
+#     show a reviewer one value and hand gate 3 another)
 #   * top-level keys exactly {schema_version, profiles}; schema_version == 1
 #   * the default profiles xpr-mainnet and xpr-testnet exist
 #   * profile names match ^[a-z0-9][a-z0-9-]*$
 #   * each profile has EXACTLY the eight keys above (missing or extra = invalid)
-#   * each value has the type/shape above; list entries unique
+#   * each value has the type/shape above; list entries unique; URL paths
+#     carry no "." or ".." segment
 #   * cross-role separation: no chain_id, node host or history base may appear
 #     in both a mainnet-role and a testnet-role profile (otherwise a "testnet"
 #     broadcast could pass gate 3 against mainnet). Same-role sharing is
@@ -108,7 +112,9 @@
 # own exit-code table, e.g. gate 3 in bin/safe-broadcast)
 #   0  ok (value on stdout, one line or one item per line)
 #   1  negative answer of a predicate (acp_*_allowed: not in the list)
-#   2  profile file missing / unreadable / invalid, or jq missing
+#   2  profile file missing / unreadable / invalid, jq missing, the library
+#      directory could not be resolved, or the validator itself failed
+#      (message says "validator failure (jq ...)" — distinct from "invalid")
 #   3  bad role / chain argument, or selected profile unknown / wrong role
 #   4  value not available in the selected profile (null or empty list)
 #   5  FYD_<ROLE>_CHAIN_ID override disagrees with the profile
@@ -119,9 +125,36 @@
 #   if ! acp_host_allowed mainnet "$host"; then ...refuse...; fi
 #
 # Bash 3.2 compatible (macOS /bin/bash): no associative arrays, no mapfile.
+# jq 1.5 compatible by policy (as scripts/check-pulsevm-upstream.sh): no IN,
+# INDEX, walk, $ENV, halt, --rawfile, --args or later builtins. Enforced by
+# a token denylist in tests/a-chain-profile/test-a-chain-profile.sh (J01).
+#
+# Sourcing: `. lib || exit` — the source itself returns 2 if the library
+# directory cannot be resolved (ACP_FILE is then empty and every getter
+# refuses anyway).
 
-ACP_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ACP_FILE="$(cd "${ACP_LIB_DIR}/../.." && pwd)/config/a-chain-profiles.json"
+# acp__resolve_file <lib-dir> — the profile file path for a library living in
+# <lib-dir>, or rc 2 with nothing on stdout. Physical resolution (cd -P) so a
+# symlinked or ".."-containing path cannot land the lookup in another tree;
+# CDPATH cleared so a relative dirname cannot be redirected (and cd prints
+# nothing). An empty <lib-dir> must NOT degrade to "/config/…".
+acp__resolve_file() {
+	local libdir="${1:-}" root
+	[ -n "$libdir" ] || return 2
+	root="$(CDPATH='' cd -P -- "${libdir}/../.." 2>/dev/null && pwd -P)" || return 2
+	[ -n "$root" ] || return 2
+	printf '%s/config/a-chain-profiles.json\n' "$root"
+}
+
+ACP_LIB_DIR="$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
+if ! ACP_FILE="$(acp__resolve_file "$ACP_LIB_DIR")"; then
+	# Leave ACP_FILE empty: every getter then refuses with rc 2. Also make
+	# the source itself fail so a caller written as `. lib || exit` stops.
+	ACP_FILE=""
+	printf 'a-chain-profile: cannot resolve the library directory; every getter will refuse\n' >&2
+	# shellcheck disable=SC2317  # the exit is reached only when executed, not sourced
+	return 2 2>/dev/null || exit 2
+fi
 ACP_DEFAULT_MAINNET="xpr-mainnet"
 ACP_DEFAULT_TESTNET="xpr-testnet"
 
@@ -138,7 +171,8 @@ ACP__VALIDATE_JQ='
 def hostre: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$";
 def isstr: type == "string";
 def ishost: isstr and test(hostre);
-def ishttps: isstr and test("^https://[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+(/[A-Za-z0-9._~-]+)*$");
+def ishttps: isstr and test("^https://[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+(/[A-Za-z0-9._~-]+)*$")
+  and (test("/\\.\\.?(/|$)") | not);
 def uniqlist: (length == (unique | length));
 def req: ["chain_id","explorer_base","history_bases","lib_equals_head","node_hosts","proton_network","push_response","role"];
 def check_profile($n):
@@ -147,7 +181,7 @@ def check_profile($n):
     else
       ( (req - ($p | keys)) | .[] | "\($n): missing key \(.)" ),
       ( (($p | keys) - req) | .[] | "\($n): unexpected key \(.)" ),
-      ( if ($p | has("role")) and ($p.role | IN("mainnet","testnet") | not)
+      ( if ($p | has("role")) and ($p.role | (. == "mainnet" or . == "testnet") | not)
           then "\($n): role must be mainnet or testnet" else empty end ),
       ( if ($p | has("chain_id")) and ($p.chain_id != null)
             and (($p.chain_id | isstr and test("^[0-9a-f]{64}$")) | not)
@@ -161,7 +195,7 @@ def check_profile($n):
       ( if ($p | has("proton_network")) and ($p.proton_network != null)
             and (($p.proton_network | isstr and test("^[a-z0-9][a-z0-9-]*$")) | not)
           then "\($n): proton_network must be null or ^[a-z0-9][a-z0-9-]*$" else empty end ),
-      ( if ($p | has("push_response")) and ($p.push_response | IN("processed","id-only") | not)
+      ( if ($p | has("push_response")) and ($p.push_response | (. == "processed" or . == "id-only") | not)
           then "\($n): push_response must be processed or id-only" else empty end ),
       ( if ($p | has("lib_equals_head")) and (($p.lib_equals_head | type) != "boolean")
           then "\($n): lib_equals_head must be a boolean" else empty end )
@@ -193,13 +227,43 @@ end
 
 # acp_validate_file <path> — rc 0 valid, rc 2 invalid (reasons on stderr).
 acp_validate_file() {
-	local file="${1:-}" errs
+	local file="${1:-}" errs ndocs nstream nparsed
 	command -v jq >/dev/null 2>&1 || { acp__fail 2 "jq is required"; return; }
 	[ -n "$file" ] && [ -f "$file" ] && [ -r "$file" ] \
 		|| { acp__fail 2 "profile file not readable: ${file:-<empty>}"; return; }
+	# 1. Parse only (a program that cannot fail to compile): a failure here
+	#    is the FILE's fault. Slurp so empty and multi-document input are
+	#    visible: jq would otherwise answer 0 lines for an empty file and
+	#    run the program once per document for a concatenation.
+	if ! ndocs="$(jq -s 'length' "$file" 2>/dev/null)"; then
+		acp__fail 2 "profile file is not valid JSON: $file"
+		return
+	fi
+	case "$ndocs" in
+		1) ;;
+		0) acp__fail 2 "profile file holds no JSON document (empty): $file"; return ;;
+		*) acp__fail 2 "profile file holds ${ndocs} JSON documents, expected exactly 1: $file"; return ;;
+	esac
+	# 2. Duplicate object keys. jq keeps the LAST of duplicate keys, so a
+	#    file could show a reviewer one chain_id and hand gate 3 another.
+	#    The token stream (--stream, jq 1.5) still carries every duplicate;
+	#    the parsed value does not. Each dropped duplicate removes at least
+	#    one leaf, so the two leaf counts are equal iff there is no
+	#    duplicate key anywhere in the document.
+	nstream="$(jq -n --stream 'reduce (inputs | select(length == 2)) as $e (0; . + 1)' "$file" 2>/dev/null)" \
+		|| { acp__fail 2 "validator failure (jq error) while scanning keys of $file"; return; }
+	nparsed="$(jq '[paths(((type == "object" or type == "array") and length > 0) | not)] | length' "$file" 2>/dev/null)" \
+		|| { acp__fail 2 "validator failure (jq error) while counting leaves of $file"; return; }
+	if [ "$nstream" != "$nparsed" ]; then
+		acp__fail 2 "profile file has duplicate object keys (last-wins would hide a value): $file"
+		return
+	fi
+	# 3. Schema. The input is known-good JSON here, so a failure is the
+	#    validator program's own (jq compile/runtime error, e.g. an older jq
+	#    lacking a builtin) — reported as such, still refusing.
 	if ! errs="$(jq -r --arg defaults "${ACP_DEFAULT_MAINNET} ${ACP_DEFAULT_TESTNET}" \
 		"$ACP__VALIDATE_JQ" "$file" 2>&1)"; then
-		acp__fail 2 "profile file is not valid JSON: $file"
+		acp__fail 2 "validator failure (jq compile/runtime error, jq $(jq --version 2>/dev/null)) on $file: $(printf '%s' "$errs" | head -1)"
 		return
 	fi
 	if [ -n "$errs" ]; then
