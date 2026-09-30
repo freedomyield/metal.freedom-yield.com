@@ -275,8 +275,21 @@ if [ "$LINE_SCHEMA_VERSION" = "2" ] && [ "$NEW_CID" != "$LEGACY_CID" ]; then
 	exit 2
 fi
 # The selected profile may have no chain_id yet (pulsevm-* before
-# publication): then only the legacy chain_id is known.
-SELECTED_CID="$(acp_expected_chain_id "$NEW_ROLE" 2>/dev/null || true)"
+# publication, library rc 4): then only the legacy chain_id is known. Any
+# OTHER refusal — invalid profile file (2), unknown/wrong-role selection (3),
+# FYD_<ROLE>_CHAIN_ID disagreeing with the profile (5), jq too old (6) — is
+# fail-closed here exactly as in gen-anchor-receipt.sh, even for a line on
+# the legacy chain: a misconfigured selection must not be silently ignored.
+if SELECTED_CID="$(acp_expected_chain_id "$NEW_ROLE")"; then
+	:
+else
+	sel_rc=$?
+	if [ "$sel_rc" -ne 4 ]; then
+		echo "ERROR (4): invariant 5 — the selected $NEW_ROLE chain profile is refused (a-chain-profile rc $sel_rc, see message above); fix FYD_A_CHAIN_PROFILE_MAINNET|TESTNET, FYD_MAINNET|TESTNET_CHAIN_ID or config/a-chain-profiles.json" >&2
+		exit 4
+	fi
+	SELECTED_CID=""
+fi
 if [ "$NEW_CID" != "$LEGACY_CID" ] && { [ -z "$SELECTED_CID" ] || [ "$NEW_CID" != "$SELECTED_CID" ]; }; then
 	echo "ERROR (4): invariant 5 — receipt chain_id $NEW_CID is unknown: it is neither the legacy $NEW_ROLE chain_id nor the chain_id of the selected profile $(acp_profile_name "$NEW_ROLE" 2>/dev/null || echo '?')${SELECTED_CID:+ ($SELECTED_CID)}" >&2
 	exit 4

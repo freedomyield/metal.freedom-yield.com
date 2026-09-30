@@ -160,6 +160,22 @@ cp "$H" "$WORK/h9.jsonl"
 append "$WORK/h9.jsonl" "$(receipt 3 10 "$(txn 2)" 2 "$PV_M" pulsevm-mainnet "$BID")" FYD_A_CHAIN_PROFILE_MAINNET=pulsevm-mainnet; RC=$?
 [ "$RC" -eq 2 ] && [ "$(wc -l < "$WORK/h9.jsonl" | tr -d ' ')" = "2" ] && ok "E9 v2 receipt on the new chain refused (2), ledger untouched" || bad "E9 rc=$RC"
 
+# ---- E10 a refused profile selection fails closed even for a legacy-chain line ----
+# Only rc 4 (selected profile has no chain_id yet) is tolerated; override
+# mismatch (5) and unknown selection (3) refuse, as in gen-anchor-receipt.sh.
+for c in "FYD_MAINNET_CHAIN_ID=$PV_M|chain_id override mismatch" "FYD_A_CHAIN_PROFILE_MAINNET=nope|unknown profile selected"; do
+	cp "$H" "$WORK/h10.jsonl"
+	append "$WORK/h10.jsonl" "$(receipt 3 3000 "$(txn 2)" 2 "$LEG_M" xpr-mainnet "$BID")" "${c%%|*}"; RC=$?
+	[ "$RC" -eq 4 ] && [ "$(wc -l < "$WORK/h10.jsonl" | tr -d ' ')" = "2" ] && ok "E10 ${c#*|} -> 4, ledger untouched" || bad "E10 ${c#*|} rc=$RC"
+done
+cp "$H" "$WORK/h10.jsonl"
+append "$WORK/h10.jsonl" "$(receipt 3 3000 "$(txn 2)" 2 "$LEG_M" xpr-mainnet "$BID")" FYD_MAINNET_CHAIN_ID="$LEG_M"; RC=$?
+cp "$H" "$WORK/h10b.jsonl"
+# selected profile WITH null chain_id (rc 4) is tolerated for a legacy line:
+jq '.profiles["null-mainnet"] = (.profiles["pulsevm-mainnet"] | .chain_id = null | .history_bases = [])' "$TREE/config/a-chain-profiles.json" > "$WORK/cfg.tmp" && cp "$WORK/cfg.tmp" "$TREE/config/a-chain-profiles.json"
+append "$WORK/h10b.jsonl" "$(receipt 3 3000 "$(txn 2)" 2 "$LEG_M" xpr-mainnet "$BID")" FYD_A_CHAIN_PROFILE_MAINNET=null-mainnet; RC2=$?
+[ "$RC" -eq 0 ] && [ "$RC2" -eq 0 ] && ok "E10 equal override, and a null-chain_id selection (rc 4), are tolerated for a legacy line" || bad "E10 tolerated cases rc=$RC/$RC2 $(cat "$WORK/err")"
+
 echo "---"
 echo "test-chain-era-invariant.sh summary: PASS=$PASS  FAIL=$FAIL"
 [ "$FAIL" -eq 0 ] && { echo "RESULT: PASS"; exit 0; }
