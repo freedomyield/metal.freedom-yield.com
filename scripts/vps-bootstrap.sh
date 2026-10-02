@@ -297,11 +297,90 @@ CRON_SCRIPT
   ls -la /etc/cron.daily/check-validator-period
 }
 
+# The metalgo compose stack, exactly as step_metalgo starts it. Run from
+# $DEPLOY_DIR so compose reads $DEPLOY_DIR/.env and derives the same project.
+metalgo_compose() {
+  docker compose -f docker-compose.metalgo.yml -f docker-compose.metalgo.prod.yml "$@"
+}
+
+# Print the host path that compose mounts at the metalgo container's /data —
+# the directory that must hold staking/staker.{crt,key} and signer.key.
+#
+# Why not a fixed path: the volume name is <compose project>_metalgo_data, and
+# the project comes from `name:` in docker-compose.metalgo.yml, an operator
+# override (COMPOSE_PROJECT_NAME / -p), or METALGO_DATA_PATH replaces the
+# volume with a bind mount. A hardcoded volume path (formerly
+# /var/lib/docker/volumes/metalgo_data/_data, which compose never used) makes
+# keys look missing, or lets them be placed where metalgo never reads them —
+# metalgo then generates NEW keys and comes up with a different NodeID.
+#
+# Resolution: ask compose for its own metalgo container (creating it, never
+# starting it, if absent) and read that container's /data mount source.
+# Fails closed (non-zero, nothing created) when:
+#   - a metalgo container from ANOTHER compose project exists on this host
+#     (e.g. a stack created under an older project name): `up -d` from this
+#     repo would start a second metalgo beside it on a fresh, empty volume;
+#   - compose reports more than one metalgo container for this project;
+#   - the /data mount source cannot be read.
+resolve_metalgo_data_dir() {
+  local all own own_short id foreign="" n src
+  all=$(docker ps -a --no-trunc -q --filter label=com.docker.compose.service=metalgo) || {
+    echo "ERROR: docker ps failed; cannot resolve the metalgo data dir" >&2; return 1; }
+  own=$(metalgo_compose ps -a -q metalgo) || {
+    echo "ERROR: docker compose ps failed (is .env complete?); cannot resolve the metalgo data dir" >&2; return 1; }
+  own_short=$(printf '%s\n' "$own" | cut -c1-12)
+  for id in $all; do
+    printf '%s\n' "$own_short" | grep -qxF "$(printf '%s' "$id" | cut -c1-12)" || foreign="$foreign $id"
+  done
+  if [ -n "$foreign" ]; then
+    echo "ERROR: a metalgo container from another compose project exists on this host:" >&2
+    for id in $foreign; do
+      docker inspect --format '         {{.Name}} project={{index .Config.Labels "com.docker.compose.project"}}' "$id" >&2 || true
+    done
+    echo "       Starting metalgo from this repo would create a second stack on a new, empty" >&2
+    echo "       /data (new staker keys, different NodeID). Refusing. Reconcile by hand first" >&2
+    echo "       (docs/DISASTER_RECOVERY.md, warning on compose project naming)." >&2
+    return 1
+  fi
+  if [ -z "$own" ]; then
+    metalgo_compose create metalgo >&2 || {
+      echo "ERROR: docker compose create metalgo failed; cannot resolve the metalgo data dir" >&2; return 1; }
+    own=$(metalgo_compose ps -a -q metalgo) || {
+      echo "ERROR: docker compose ps failed after create" >&2; return 1; }
+  fi
+  n=$(printf '%s\n' "$own" | grep -c . || true)
+  if [ "$n" -ne 1 ]; then
+    echo "ERROR: expected exactly 1 metalgo container for this compose project, found $n. Refusing." >&2
+    return 1
+  fi
+  src=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}' "$own") || {
+    echo "ERROR: docker inspect failed for the metalgo container" >&2; return 1; }
+  if [ -z "$src" ]; then
+    echo "ERROR: the metalgo container has no /data mount; cannot resolve the staking dir. Refusing." >&2
+    return 1
+  fi
+  printf '%s\n' "$src"
+}
+
 step_metalgo() {
   log "Step 7/8: bring up metalgo (mainnet) — staker keys must be in place first"
-  STAKING_DIR=/var/lib/docker/volumes/metalgo_data/_data/staking
+  cd "$DEPLOY_DIR"
+  if [ ! -f .env ]; then
+    # Compose cannot even be evaluated without .env (METAL_NETWORK /
+    # METAL_PUBLIC_IP are required), so no data dir can be resolved yet.
+    # This is the expected state on the first run of a fresh host.
+    echo "NOTE: $DEPLOY_DIR/.env not present — metalgo not started and its data dir not resolved."
+    echo "      Create .env (docs/DISASTER_RECOVERY.md), restore the staker keys, then re-run."
+    return 0
+  fi
+  local data_dir
+  if ! data_dir=$(resolve_metalgo_data_dir); then
+    echo "FATAL: could not resolve where compose mounts metalgo's /data; metalgo NOT started." >&2
+    return 1
+  fi
+  STAKING_DIR="$data_dir/staking"
   if [ ! -f "$STAKING_DIR/staker.crt" ]; then
-    echo "WARNING: $STAKING_DIR/staker.crt not found."
+    echo "WARNING: $STAKING_DIR/staker.crt not found (resolved from the compose /data mount)."
     echo "         Restore from encrypted backup before continuing:"
     echo "           1. scp staker-backup.tar.gz.enc to this VPS"
     echo "           2. openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 \\"
@@ -312,8 +391,7 @@ step_metalgo() {
     echo "         Then re-run this script (Step 7 will then start metalgo)."
     return 0
   fi
-  cd "$DEPLOY_DIR"
-  docker compose -f docker-compose.metalgo.yml -f docker-compose.metalgo.prod.yml up -d
+  metalgo_compose up -d
   sleep 10
   echo "NodeID check:"
   curl -sS -X POST -H 'content-type:application/json' \
@@ -353,4 +431,8 @@ main() {
   echo "  - tail /var/log/validator-period.log"
 }
 
-main "$@"
+# VPS_BOOTSTRAP_SOURCED=1 lets tests source the step functions without
+# provisioning anything. Not a BASH_SOURCE check: `curl ... | bash` must still run.
+if [ "${VPS_BOOTSTRAP_SOURCED:-0}" != 1 ]; then
+  main "$@"
+fi
