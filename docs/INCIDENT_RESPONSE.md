@@ -69,6 +69,8 @@ sudo ufw status verbose
 
 **症状**: `docker compose ps` で metalgo が unhealthy / restarting / exited、または `info.getNodeID` API が応答なし。
 
+> ⚠️ 現行本番 host では compose up は実行しない (別 NodeID になる。[DISASTER_RECOVERY.md 冒頭の警告](DISASTER_RECOVERY.md) 参照)。 コンテナは `docker ps -a --filter label=com.docker.compose.service=metalgo` で特定する。
+
 **調査手順**:
 
 ```bash
@@ -168,6 +170,8 @@ sudo find / -newer /etc/passwd -not -path '/proc/*' -not -path '/sys/*' 2>/dev/n
 ### 3.6 Bootstrap fail / 再同期が必要
 
 **症状**: 起動後何時間経っても bootstrap が完了しない、または `accepted state summary "Skipped"` 等のログが繰り返し出る。
+
+> ⚠️ 現行本番 host では compose up は実行しない (別 NodeID になる。[DISASTER_RECOVERY.md 冒頭の警告](DISASTER_RECOVERY.md) 参照)。
 
 **対応**:
 

@@ -602,7 +602,7 @@ kb_to_mb() { awk -v k="$1" 'BEGIN{printf "%.0f", k/1024}'; }
 # === transition: metalgo (notify-gated) =================================
 ORIG_METALGO=$(orig_get '.metalgo')
 if [ "$OBS_METALGO" != "running" ] && [ "$ORIG_METALGO" = "running" ]; then
-  body=$(printf 'コンテナ状態: %s\n対処:\n1) ssh -i ~/.ssh/<your_validator_host_key> root@VPS\n2) docker logs --tail 50 metalgo-mainnet\n3) docker compose -f docker-compose.metalgo.yml -f docker-compose.metalgo.prod.yml up -d\n影響: validator が consensus から脱落しうる、uptime 評価値が低下' "$OBS_METALGO")
+  body=$(printf 'コンテナ状態: %s\n対処:\n1) ssh -i ~/.ssh/<your_validator_host_key> root@VPS\n2) docker ps -a --filter label=com.docker.compose.service=metalgo\n3) docker logs --tail 50 <2) の ID>\n4) docker start <2) の ID>\ncompose up は実行しない (別 NodeID になる。docs/DISASTER_RECOVERY.md 冒頭の警告)\n影響: validator が consensus から脱落しうる、uptime 評価値が低下' "$OBS_METALGO")
   notify_or_keep urgent "metalgo 停止" "$body" && candidate_set '.metalgo' "\"$OBS_METALGO\""
 elif [ "$OBS_METALGO" = "running" ] && [ "$ORIG_METALGO" != "running" ]; then
   notify_or_keep default "metalgo 復旧" "コンテナが running に戻りました" \
@@ -625,7 +625,7 @@ ORIG_DISK=$(orig_get '.disk')
 if [ "$DISK_INT" -gt 85 ] && [ "$ORIG_DISK" = "ok" ]; then
   DISK_TOTAL_GB=$(kb_to_gb "$OBS_DISK_TOTAL_KB")
   DISK_FREE_GB=$(kb_to_gb $(( OBS_DISK_TOTAL_KB - OBS_DISK_USED_KB )))
-  body=$(printf '使用率: %s%% (空き %s GB / 全 %s GB)\n対処:\n1) docker exec metalgo-mainnet du -sh /data\n2) journalctl --vacuum-time=7d\n3) docker system prune\n影響: metalgo データ増加で chain 動作不能リスク' "$OBS_DISK_PCT" "$DISK_FREE_GB" "$DISK_TOTAL_GB")
+  body=$(printf '使用率: %s%% (空き %s GB / 全 %s GB)\n対処:\n1) docker exec $(docker ps -q --filter label=com.docker.compose.service=metalgo) du -sh /data\n2) journalctl --vacuum-time=7d\n3) docker system prune\n影響: metalgo データ増加で chain 動作不能リスク' "$OBS_DISK_PCT" "$DISK_FREE_GB" "$DISK_TOTAL_GB")
   notify_or_keep high "ディスク 85% 超過" "$body" && candidate_set '.disk' '"warn"'
 elif [ "$DISK_INT" -le 80 ] && [ "$ORIG_DISK" = "warn" ]; then
   notify_or_keep default "ディスク正常化" "ルート使用率 ${OBS_DISK_PCT}%" \
@@ -648,7 +648,7 @@ fi
 # === transition: peers (hysteresis: warn<10, ok>=50) ====================
 ORIG_PEERS=$(orig_get '.peers')
 if [ "${OBS_PEERS:-0}" -lt 10 ] && [ "$ORIG_PEERS" = "ok" ]; then
-  body=$(printf '%s 接続(通常 100+)\n対処:\n1) ufw status で 9651/TCP open 確認\n2) docker logs --tail 50 metalgo-mainnet\n3) validator host ネットワーク疎通確認\n影響: validator が consensus 投票できない、uptime 評価値低下' "$OBS_PEERS")
+  body=$(printf '%s 接続(通常 100+)\n対処:\n1) ufw status で 9651/TCP open 確認\n2) docker logs --tail 50 $(docker ps -aq --filter label=com.docker.compose.service=metalgo)\n3) validator host ネットワーク疎通確認\n影響: validator が consensus 投票できない、uptime 評価値低下' "$OBS_PEERS")
   notify_or_keep high "ピア接続数低下" "$body" && candidate_set '.peers' '"warn"'
 elif [ "${OBS_PEERS:-0}" -ge 50 ] && [ "$ORIG_PEERS" = "warn" ]; then
   notify_or_keep default "ピア接続数復旧" "${OBS_PEERS} 接続" \
