@@ -37,6 +37,10 @@
 # Test/ops overrides (env): WATCH_HOME WATCH_CONFIG WATCH_LIVE WATCH_NOTIFY
 # WATCH_NOW_EPOCH P2P_REPROBE_SLEEP WATCH_NOTIFY_RETRY_SLEEP
 # WATCH_LOG_MAX_BYTES WATCH_CRONERR_MAX_BYTES WATCH_KEEP_BACKUPS WATCH_KEEP_CORRUPT
+# WATCH_KEEP_DRAFTS WATCH_MTR WATCH_MTR_TIMEOUT
+#
+# `external-watch.sh --classify-mtr < report` prints the path class of an mtr
+# report (see classify_mtr) and exits; no config is read.
 
 set -uo pipefail
 
@@ -44,6 +48,40 @@ WATCH_HOME="${WATCH_HOME:-$HOME/metal-fy-watch}"
 WATCH_CONFIG="${WATCH_CONFIG:-$WATCH_HOME/etc/watch.env}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 NOTIFY="${WATCH_NOTIFY:-$SCRIPT_DIR/notify.sh}"
+
+# --- path classification (pure: mtr report text on stdin -> one line) -------
+# classify_mtr reads an `mtr -r -n` report and prints exactly one line:
+#   reaches-host                                   the last hop (the target) answers:
+#                                                  the path is fine, the problem is
+#                                                  on the host or the port
+#   provider-edge last_answering_hop=N first_silent_hop=M
+#                                                  some hops answer, then every hop
+#                                                  from M to the end is silent
+#   no-route-at-all                                no hop answers
+#   unknown                                        no hop lines (mtr missing, cut
+#                                                  off, or unparseable output)
+# A hop "answers" when it has an address (not ???) and loss below 100 %.
+# 2026-09-24..28 shape: hops inside the provider answered, 100 % loss from the
+# first hop outside it to the end -> provider-edge.
+# Kept pure (no I/O besides stdin/stdout) so tests feed fixtures through
+# `external-watch.sh --classify-mtr < fixture`.
+classify_mtr() {
+  awk '
+    $1 ~ /^[0-9]+\.[|`]/ && NF >= 3 {
+      n = $1; sub(/\..*/, "", n)
+      loss = $3; sub(/%$/, "", loss)
+      h++; idx[h] = n
+      ans[h] = ($2 != "???" && loss ~ /^[0-9.]+$/ && loss + 0 < 100) ? 1 : 0
+      if (ans[h]) last = h
+    }
+    END {
+      if (h == 0) { print "unknown"; exit }
+      if (ans[h]) { print "reaches-host"; exit }
+      if (last == 0) { print "no-route-at-all"; exit }
+      printf "provider-edge last_answering_hop=%s first_silent_hop=%s\n", idx[last], idx[last + 1]
+    }'
+}
+if [ "${1:-}" = "--classify-mtr" ]; then classify_mtr; exit 0; fi
 
 # --- size caps: shared helpers ---------------------------------------------
 # Every file this script writes on the shared host has an upper bound. The
@@ -370,6 +408,120 @@ check_chain() {
   esac
 }
 
+# --- p2p diagnosis: mtr + provider ticket draft ----------------------------
+# Runs only on the transition into a p2p alert (from apply_check, right
+# before the alert push), never on the 5-minute runs while still failing.
+# The 2026-09-24 outage lasted ~100 h because nobody escalated; the draft is
+# ready to paste into the provider's "Public Network issue" ticket.
+#
+# Same command shape as web_mtr_capture in scripts/lib/web-probe.sh (that lib
+# is not shipped to the web host by the installer, so the few lines are
+# mirrored here). mtr needs the target in its argv for the ~5-25 s it runs;
+# the draft file necessarily holds the raw report (addresses), so it is
+# mode 600 in the 700 log/ dir and never pushed. The push carries only the
+# class, hop indices and the draft's file name.
+#
+# Sets DIAG_LINE (Japanese, host-free) for the alert body. Never fails.
+DIAG_LINE=""
+mtr_capture() { # outfile
+  local out="$1" mtr="${WATCH_MTR:-mtr}" rc=0
+  {
+    if ! command -v "$mtr" >/dev/null 2>&1; then
+      echo "mtr unavailable (not installed)"
+    else
+      # -k 5: an mtr that ignores SIGTERM is SIGKILLed 5 s later, so it can
+      # never hold the run's flock (GNU coreutils and busybox both take -k).
+      timeout -k 5 "${WATCH_MTR_TIMEOUT:-25}" "$mtr" -r -n -c 5 -w "$VALIDATOR_HOST" 2>&1 || rc=$?
+      [ "$rc" -eq 0 ] || echo "(mtr exited rc=${rc}; 124 = cut off by timeout ${WATCH_MTR_TIMEOUT:-25}s, 137 = killed after ignoring it)"
+    fi
+  } > "$out" 2>/dev/null || true
+  return 0
+}
+
+p2p_diagnose() { # first_fail_epoch
+  local first="$1" raw class ts name tmp max mtrnote=""
+  DIAG_LINE=""
+  if [ "$LIVE" != "1" ]; then
+    echo "DRY: would capture mtr and write a ticket draft" >&2
+    DIAG_LINE="経路 (mtr): DRY のため未取得"
+    return 0
+  fi
+  raw="$(mktemp "$LOG_DIR/.trim.XXXXXX")" || { DIAG_LINE="経路 (mtr): 取得失敗 (一時ファイル)"; return 0; }
+  mtr_capture "$raw"
+  class="$(classify_mtr < "$raw")"
+  grep -q '^mtr unavailable' "$raw" 2>/dev/null && mtrnote=" (mtr unavailable)"
+  local hop_n hop_m
+  hop_n="$(sed -n 's/.*last_answering_hop=\([0-9]*\).*/\1/p' <<<"$class")"
+  hop_m="$(sed -n 's/.*first_silent_hop=\([0-9]*\).*/\1/p' <<<"$class")"
+  case "$class" in
+    provider-edge*)
+      DIAG_LINE="$(printf '経路 (mtr): provider-edge — 応答する最後の hop %s / 無応答の最初の hop %s (以降すべて無応答)' "$hop_n" "$hop_m")" ;;
+    reaches-host) DIAG_LINE="経路 (mtr): reaches-host — 経路は届いている (host/port 側の問題)" ;;
+    no-route-at-all) DIAG_LINE="経路 (mtr): no-route-at-all — どの hop も応答なし" ;;
+    *) DIAG_LINE="経路 (mtr): unknown${mtrnote}" ;;
+  esac
+  ts="$(jq -nr --argjson t "$NOW" '$t | strftime("%Y%m%dT%H%M%SZ")')"
+  name="ticket-draft-$ts.txt"
+  max="$(cap_value "${WATCH_LOG_MAX_BYTES:-}" "$DEFAULT_MAX_BYTES")"
+  tmp="$(mktemp "$LOG_DIR/.trim.XXXXXX")" || { rm -f "$raw"; DIAG_LINE="$DIAG_LINE"$'\n'"下書き: 作成失敗"; return 0; }
+  # The cap closes the pipe early on an oversized report, so the writer side
+  # may die of SIGPIPE; under pipefail that would read as a failed write.
+  # Only head's status (the actual write to the file) decides.
+  local hrc
+  {
+       # The trace runs from a third-party vantage point (the web host) toward
+       # the validator host and the classifier knows no ASNs, so the draft
+       # states only what the report shows; it never asserts whose network
+       # the silent section is in, nor anything about the server it did not
+       # measure (the operator confirms that before sending).
+       case "$class" in
+         reaches-host)
+           printf '*** PROBABLY NOT A NETWORK TICKET (operator: read before sending) ***\n'
+           printf 'The server answers ICMP from our external vantage point, so the network path\n'
+           printf 'looks fine and the issue is likely at the host or port level (metalgo, firewall).\n'
+           printf 'Check the host first; send this only if that rules the host out.\n\n' ;;
+         provider-edge*) ;;
+         *)
+           printf '*** operator: the trace does not locate the break; check the web host'"'"'s own\n'
+           printf 'network and the provider console before sending ***\n\n' ;;
+       esac
+       printf 'Subject: Public Network issue - server unreachable from our external monitor\n\n'
+       printf 'Hello,\n\n'
+       printf 'Our external monitor, which probes the server from another network every\n'
+       printf '5 minutes, has been unable to connect to it since %s (UTC, first failed check).\n' "$(iso "$first")"
+       printf '[operator: confirm no changes were made to the server]\n\n'
+       printf 'Path classification: %s%s\n' "$class" "$mtrnote"
+       case "$class" in
+         provider-edge*)
+           printf 'From an external vantage point, hops answer up to hop %s and are silent from\n' "$hop_n"
+           printf 'hop %s onward, through to the server.\n\n' "$hop_m" ;;
+         reaches-host)
+           printf 'From an external vantage point, the server itself answers ICMP.\n\n' ;;
+         no-route-at-all)
+           printf 'From an external vantage point, no hop answered.\n\n' ;;
+         *)
+           printf 'The trace from our external vantage point produced no usable hop lines.\n\n' ;;
+       esac
+       printf 'mtr report from our external monitor (%s UTC):\n\n' "$(iso "$NOW")"
+       cat "$raw"
+       case "$class" in
+         provider-edge*) printf '\nCould you please check the upstream path toward this server?\n' ;;
+         *) printf '\nCould you please check whether this server is reachable from your side?\n' ;;
+       esac
+       printf 'Thank you.\n'
+     } 2>/dev/null | head -c "$max" > "$tmp"
+  hrc="${PIPESTATUS[1]}"
+  if [ "$hrc" -eq 0 ] && chmod 600 "$tmp" && mv "$tmp" "$LOG_DIR/$name"; then
+    DIAG_LINE="$DIAG_LINE"$'\n'"下書き: ${WATCH_HOME##*/}/log/$name (Public Network issue チケット用)"
+  else
+    rm -f "$tmp"
+    DIAG_LINE="$DIAG_LINE"$'\n'"下書き: 作成失敗"
+  fi
+  rm -f "$raw"
+  log_note "p2p diagnosis: $class$mtrnote, draft $name"
+  return 0
+}
+
 # --- transitions ----------------------------------------------------------
 alert_text() { # check -> prio|title|label
   case "$1" in
@@ -407,6 +559,12 @@ apply_check() { # check result [observation-epoch]
         spec="$(alert_text "$check")"
         prio="${spec%%|*}"; spec="${spec#*|}"; title="${spec%%|*}"; label="${spec#*|}"
         body="$(printf 'チェック: %s\n開始: %s (UTC)\nvalidator host の外 (web host) から検知' "$label" "$(iso "$first")")"
+        # p2p: diagnose the path once, on the transition (a held-back push
+        # would be retried next run anyway, so skip the work when blocked).
+        if [ "$check" = p2p ] && [ "$SAVE_BLOCKED" != "1" ]; then
+          p2p_diagnose "$first"
+          body="$body"$'\n'"$DIAG_LINE"
+        fi
         if check_push "$prio" "$title" "$body" && [ "$LIVE" = "1" ]; then status=alerting; fi
       fi
       st_set "$check" "$status" "$fails" "$first"
@@ -473,11 +631,12 @@ prune_dir() {
 # Housekeeping must never change alerting or the exit code: every failure is
 # folded into one host-free note line.
 housekeeping() {
-  local max_log max_err keep_bak keep_cor bad=0
+  local max_log max_err keep_bak keep_cor keep_drf bad=0
   max_log="$(cap_value "${WATCH_LOG_MAX_BYTES:-}" "$DEFAULT_MAX_BYTES")"
   max_err="$(cap_value "${WATCH_CRONERR_MAX_BYTES:-}" "$DEFAULT_MAX_BYTES")"
   keep_bak="$(cap_value "${WATCH_KEEP_BACKUPS:-}" "$DEFAULT_KEEP")"
   keep_cor="$(cap_value "${WATCH_KEEP_CORRUPT:-}" "$DEFAULT_KEEP")"
+  keep_drf="$(cap_value "${WATCH_KEEP_DRAFTS:-}" "$DEFAULT_KEEP")"
   # A run killed mid-write leaves its temp files behind; sweep exactly the
   # name shapes this script creates (mktemp's 6-character suffix), regular
   # files only, so symlinks are never followed. -delete unlinks relative to
@@ -494,6 +653,9 @@ housekeeping() {
   # Only the names the installer writes there (<file>.bak-<timestamp>).
   prune_dir "$WATCH_HOME/backup" '*.bak-*' "$keep_bak" 2>/dev/null || bad=1
   prune_dir "$STATE_DIR" 'state.json.corrupt-*' "$keep_cor" 2>/dev/null || bad=1
+  # p2p ticket drafts (log/ticket-draft-<UTC>.txt): newest 10; each is capped
+  # at the watch.log size cap when written.
+  prune_dir "$LOG_DIR" 'ticket-draft-*.txt' "$keep_drf" 2>/dev/null || bad=1
   [ "$bad" = 0 ] || log_note "housekeeping incomplete" 2>/dev/null
   return 0
 }

@@ -54,6 +54,13 @@ cat > "$BIN/notify" <<'STUB'
 printf '%s\t%s\t%s\n' "$1" "$2" "$3" | tr '\n' '\001' >> "$STUB_NOTIFY_LOG"; printf '\n' >> "$STUB_NOTIFY_LOG"
 exit "${STUB_NOTIFY_RC:-0}"
 STUB
+# mtr: logs its argv (one line per call) and prints the case's fixture.
+cat > "$BIN/mtr" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$STUB_MTR_LOG"
+[ -n "${STUB_MTR_FIXTURE:-}" ] && cat "$STUB_MTR_FIXTURE"
+exit 0
+STUB
 cat > "$BIN/sleep" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$1" >> "$STUB_SLEEP_LOG"
@@ -106,8 +113,8 @@ new_case() { # sets C, HOMEDIR; p2p defaults to the open port
   printf 'fy-test-topic\n' > "$C/topic"; chmod 600 "$C/topic"
   P2P_PORT="$OPEN_PORT"
   write_config
-  : > "$C/notify.log"; : > "$C/sleep.log"; : > "$C/curl.log"; : > "$C/timeout.argv"; rm -f "$C/curl.count" "$C/timeout.count"
-  JSON_AGE=""; JSON_END=""; RPC_BODY="$BODY_CONNECTED"; RPC_RC=0; NOTIFY_RC=0; LIVE=1; FAIL_FIRST=0; EXTRA_PATH=""; HK_ENV=()
+  : > "$C/notify.log"; : > "$C/sleep.log"; : > "$C/curl.log"; : > "$C/timeout.argv"; : > "$C/mtr.log"; rm -f "$C/curl.count" "$C/timeout.count"
+  JSON_AGE=""; JSON_END=""; RPC_BODY="$BODY_CONNECTED"; RPC_RC=0; NOTIFY_RC=0; LIVE=1; FAIL_FIRST=0; EXTRA_PATH=""; HK_ENV=(); MTR_CMD="$BIN/mtr"; MTR_FIXTURE=""
 }
 write_config() {
   cat > "$C/etc/watch.env" <<CFG
@@ -142,6 +149,7 @@ run_watch() { # [NOW override]; sets RC, ERR
     STUB_CURL_LOG="$C/curl.log" STUB_CURL_COUNTER="$C/curl.count" STUB_CURL_BODY="$RPC_BODY" STUB_CURL_RC="$RPC_RC" \
     STUB_NOTIFY_LOG="$C/notify.log" STUB_NOTIFY_RC="$NOTIFY_RC" STUB_SLEEP_LOG="$C/sleep.log" \
     STUB_TIMEOUT_FAIL_FIRST="$FAIL_FIRST" STUB_TIMEOUT_COUNTER="$C/timeout.count" STUB_TIMEOUT_ARGV_LOG="$C/timeout.argv" \
+    WATCH_MTR="$MTR_CMD" STUB_MTR_LOG="$C/mtr.log" STUB_MTR_FIXTURE="$MTR_FIXTURE" \
     ${HK_ENV[@]+"${HK_ENV[@]}"} bash "$SCRIPT" 2>&1 >/dev/null)"
   RC=$?
 }
@@ -779,6 +787,156 @@ assert_eq "default watch.log cap: exactly 1048576 after this run's line, untouch
 new_case; make_json 10; mkdir -p "$C/home/log"; yes 'default cap filler line' | head -c $((1048577 - L)) > "$C/home/log/watch.log"
 run_watch
 [ "$(size_of "$C/home/log/watch.log")" -le 524288 ] && ok "  one byte more: trimmed to <= 524288" || bad "  default watch.log cap" "$(size_of "$C/home/log/watch.log")"
+
+# ============================ 12. p2p path diagnosis (mtr + ticket draft) ============================
+# 2026-09-24..28: ~100 h unreachable, the break was at the provider's edge and
+# nobody escalated. On the transition into the p2p alert the watch classifies
+# the path from an mtr report and writes a provider ticket draft.
+FIX="$REPO/tests/external-watch/fixtures"
+echo "== classify_mtr (pure, fixtures) =="
+classify() { bash "$SCRIPT" --classify-mtr < "$1"; }
+assert_eq "provider-edge: break after the last answering hop" \
+  "provider-edge last_answering_hop=3 first_silent_hop=4" "$(classify "$FIX/mtr-provider-edge.txt")"
+assert_eq "provider-edge: a silent hop in the middle does not move the break; 100% with an address is silent" \
+  "provider-edge last_answering_hop=3 first_silent_hop=4" "$(classify "$FIX/mtr-provider-edge-gap.txt")"
+assert_eq "no-route-at-all: nothing answers" "no-route-at-all" "$(classify "$FIX/mtr-no-route.txt")"
+assert_eq "reaches-host: the target answers" "reaches-host" "$(classify "$FIX/mtr-reaches-host.txt")"
+assert_eq "unknown: no hop lines" "unknown" "$(classify "$FIX/mtr-garbage.txt")"
+assert_eq "unknown: empty input" "unknown" "$(classify /dev/null)"
+assert_eq "unknown: 'mtr unavailable' line" "unknown" "$(printf 'mtr unavailable (not installed)\n' | bash "$SCRIPT" --classify-mtr)"
+assert_eq "--classify-mtr reads no config" "0" "$(WATCH_CONFIG=/nonexistent bash "$SCRIPT" --classify-mtr < /dev/null >/dev/null 2>&1; echo $?)"
+
+echo "== p2p alert: mtr + ticket draft on the transition only =="
+draft_name() { printf 'ticket-draft-%s.txt' "$(jq -nr --argjson t "$1" '$t | strftime("%Y%m%dT%H%M%SZ")')"; }
+new_case; P2P_PORT="$CLOSED_PORT"; write_config; make_json 10; MTR_FIXTURE="$FIX/mtr-provider-edge.txt"
+run_watch
+assert_eq "run 1 (no alert yet): mtr not run" "0" "$(grep -c . "$C/mtr.log")"
+run_watch "$((NOW + 300))"
+D="$C/home/log/$(draft_name "$((NOW + 300))")"
+BODY="$(tail -n 1 "$C/notify.log" | tr '\001' '\n')"
+assert_eq "alert run: exactly one push, mtr run once" "1|1" "$(pushes)|$(grep -c . "$C/mtr.log")"
+assert_eq "  mtr shape: report, numeric, 5 cycles, wide, toward the host" "-r -n -c 5 -w 127.0.0.1" "$(cat "$C/mtr.log")"
+assert_contains "  push carries the class with hop indices" \
+  "経路 (mtr): provider-edge — 応答する最後の hop 3 / 無応答の最初の hop 4 (以降すべて無応答)" "$BODY"
+assert_contains "  push names the draft file" "下書き: home/log/$(draft_name "$((NOW + 300))") (Public Network issue チケット用)" "$BODY"
+assert_contains "  existing alert lines kept" "チェック: p2p (TCP 到達)" "$BODY"
+for ip in 192.0.2.1 198.51.100.17 198.51.100.33 127.0.0.1; do
+  assert_not_contains "  push has no hop/host address $ip" "$ip" "$(cat "$C/notify.log")"
+done
+assert_not_contains "  push has no path" "$C" "$(cat "$C/notify.log")"
+assert_not_contains "  watch.log has no hop address" "198.51.100" "$(cat "$C/home/log/watch.log")"
+assert_contains "  watch.log notes the diagnosis" "note: p2p diagnosis: provider-edge" "$(cat "$C/home/log/watch.log")"
+if [ -f "$D" ]; then ok "  draft written"; else bad "  draft written" "missing $D"; fi
+DRAFT="$(cat "$D" 2>/dev/null)"
+assert_contains "  draft: ticket subject" "Subject: Public Network issue" "$DRAFT"
+assert_contains "  draft: start = first FAIL observed (run 1), not the alert run" \
+  "unable to connect to it since $(jq -nr --argjson t "$NOW" '$t|todate') (UTC" "$DRAFT"
+assert_contains "  draft: classification line" "Path classification: provider-edge last_answering_hop=3 first_silent_hop=4" "$DRAFT"
+assert_contains "  draft: raw mtr report verbatim" "$(sed -n 5p "$FIX/mtr-provider-edge.txt")" "$DRAFT"
+assert_contains "  draft: observation only, from the external vantage point" \
+  "From an external vantage point, hops answer up to hop 3 and are silent from
+hop 4 onward" "$DRAFT"
+assert_contains "  draft: asks for the upstream path" "Could you please check the upstream path toward this server?" "$DRAFT"
+for claim in "has not been changed" "uplink" "up to your network" "outside it"; do
+  assert_not_contains "  draft asserts nothing unmeasured: '$claim'" "$claim" "$DRAFT"
+done
+assert_contains "  draft: server-unchanged is an operator placeholder" "[operator: confirm no changes were made to the server]" "$DRAFT"
+assert_not_contains "  provider-edge draft has no 'not a network ticket' label" "NOT A NETWORK TICKET" "$DRAFT"
+assert_eq "  draft is English only (no non-ASCII bytes)" "0" "$(LC_ALL=C grep -c '[^ -~]' "$D")"
+assert_eq "  draft mode 600" "600" "$( (stat -c %a "$D" 2>/dev/null || stat -f %Lp "$D"))"
+run_watch "$((NOW + 600))"; run_watch "$((NOW + 900))"
+assert_eq "still failing (2 more runs): no new push, no new mtr, no new draft" "1|1|1" \
+  "$(pushes)|$(grep -c . "$C/mtr.log")|$(count_files "$C/home/log" 'ticket-draft-*.txt')"
+P2P_PORT="$OPEN_PORT"; write_config; run_watch "$((NOW + 1200))"
+P2P_PORT="$CLOSED_PORT"; write_config; run_watch "$((NOW + 1500))"; run_watch "$((NOW + 1800))"
+assert_eq "recover then fail again: a second transition diagnoses again" "2|2" \
+  "$(grep -c . "$C/mtr.log")|$(count_files "$C/home/log" 'ticket-draft-*.txt')"
+
+for pair in "no-route:no-route-at-all — どの hop も応答なし" "reaches-host:reaches-host — 経路は届いている (host/port 側の問題)" "garbage:unknown"; do
+  new_case; P2P_PORT="$CLOSED_PORT"; write_config; make_json 10; MTR_FIXTURE="$FIX/mtr-${pair%%:*}.txt"
+  run_watch; run_watch "$((NOW + 300))"
+  assert_contains "push class line for ${pair%%:*}" "経路 (mtr): ${pair#*:}" "$(tr '\001' '\n' < "$C/notify.log")"
+  DRAFT="$(cat "$C/home/log/$(draft_name "$((NOW + 300))")" 2>/dev/null)"
+  for claim in "upstream" "uplink" "hops answer up to" "has not been changed"; do
+    assert_not_contains "  ${pair%%:*} draft: no '$claim' claim" "$claim" "$DRAFT"
+  done
+  assert_contains "  ${pair%%:*} draft: neutral request" "check whether this server is reachable from your side?" "$DRAFT"
+  assert_contains "  ${pair%%:*} draft: operator placeholder" "[operator: confirm no changes were made to the server]" "$DRAFT"
+  if [ "${pair%%:*}" = reaches-host ]; then
+    assert_contains "  reaches-host draft: labelled probably not a network ticket" "PROBABLY NOT A NETWORK TICKET" "$DRAFT"
+    assert_contains "  reaches-host draft: says the target answers ICMP" "The server answers ICMP from our external vantage point" "$DRAFT"
+  else
+    assert_not_contains "  ${pair%%:*} draft: no 'not a network ticket' label" "NOT A NETWORK TICKET" "$DRAFT"
+    assert_contains "  ${pair%%:*} draft: tells the operator the break is not located" "the trace does not locate the break" "$DRAFT"
+  fi
+done
+
+new_case; P2P_PORT="$CLOSED_PORT"; write_config; make_json 10; MTR_CMD="fy-no-such-mtr"
+run_watch; run_watch "$((NOW + 300))"
+assert_eq "mtr missing: the alert still goes out" "1|0" "$(pushes)|$RC"
+assert_contains "  push says mtr unavailable" "経路 (mtr): unknown (mtr unavailable)" "$(tr '\001' '\n' < "$C/notify.log")"
+assert_contains "  draft says mtr unavailable" "mtr unavailable (not installed)" "$(cat "$C/home/log/$(draft_name "$((NOW + 300))")" 2>/dev/null)"
+
+echo "== mtr ignoring SIGTERM cannot hold the run (timeout -k) =="
+# The stub ignores TERM (inherited by its child sleep); only a KILL ends it.
+# The outer real timeout bounds the test itself if -k is ever dropped.
+cat > "$BIN/mtr-hang" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$STUB_MTR_LOG"
+trap '' TERM
+/bin/sleep 60
+STUB
+chmod +x "$BIN/mtr-hang"
+new_case; P2P_PORT="$CLOSED_PORT"; write_config; make_json 10; MTR_CMD="$BIN/mtr-hang"
+run_watch
+T0="$(date +%s)"
+ERR="$(WATCH_MTR_TIMEOUT=1 "$REAL_TIMEOUT" 30 env WATCH_LIVE=1 PATH="$BIN:$PATH" WATCH_HOME="$C/home" WATCH_CONFIG="$C/etc/watch.env" \
+  WATCH_NOTIFY="$BIN/notify" WATCH_NOW_EPOCH="$((NOW + 300))" P2P_REPROBE_SLEEP=7 WATCH_NOTIFY_RETRY_SLEEP=5 \
+  STUB_CURL_LOG="$C/curl.log" STUB_CURL_COUNTER="$C/curl.count" STUB_CURL_BODY="$RPC_BODY" STUB_CURL_RC=0 \
+  STUB_NOTIFY_LOG="$C/notify.log" STUB_NOTIFY_RC=0 STUB_SLEEP_LOG="$C/sleep.log" STUB_TIMEOUT_ARGV_LOG="$C/timeout.argv" \
+  WATCH_MTR="$MTR_CMD" STUB_MTR_LOG="$C/mtr.log" bash "$SCRIPT" 2>&1 >/dev/null)"; RC=$?
+T1="$(date +%s)"
+assert_eq "TERM-ignoring mtr: run finishes on its own and the alert goes out" "0|1" "$RC|$(pushes)"
+if [ "$((T1 - T0))" -lt 20 ]; then ok "  bounded by timeout + kill-after ($((T1 - T0)) s)"; else bad "  bounded by timeout + kill-after" "took $((T1 - T0)) s"; fi
+assert_contains "  mtr wrapped with -k 5" "-k 5 1 $BIN/mtr-hang -r -n -c 5 -w 127.0.0.1" "$(cat "$C/timeout.argv")"
+assert_contains "  draft records the kill" "(mtr exited rc=137" "$(cat "$C/home/log/$(draft_name "$((NOW + 300))")" 2>/dev/null)"
+
+new_case; RPC_BODY="$BODY_DISCONNECTED"; make_json 901; MTR_FIXTURE="$FIX/mtr-provider-edge.txt"
+run_watch; run_watch "$((NOW + 900))"
+assert_eq "chain + fresh alerts: no mtr, no draft" "2|0|0" \
+  "$(pushes)|$(grep -c . "$C/mtr.log")|$(count_files "$C/home/log" 'ticket-draft-*.txt')"
+
+new_case; LIVE=0; P2P_PORT="$CLOSED_PORT"; write_config; make_json 10; MTR_FIXTURE="$FIX/mtr-provider-edge.txt"
+run_watch; run_watch "$((NOW + 300))"
+assert_contains "DRY: says it would capture" "DRY: would capture mtr and write a ticket draft" "$ERR"
+assert_eq "  DRY: mtr never run, no draft" "0|0" "$(grep -c . "$C/mtr.log")|$(count_files "$C/home/log" 'ticket-draft-*.txt')"
+
+new_case; P2P_PORT="$CLOSED_PORT"; write_config; make_json 10; MTR_FIXTURE="$FIX/mtr-provider-edge.txt"; NOTIFY_RC=3
+run_watch; run_watch "$((NOW + 300))"; NOTIFY_RC=0; run_watch "$((NOW + 600))"
+assert_eq "push failed then retried: alert delivered, status alerting" "alerting" "$(st p2p status)"
+run_watch "$((NOW + 900))"
+assert_eq "  after delivery no further diagnosis (1 failed try + 1 retry)" "2" "$(grep -c . "$C/mtr.log")"
+
+echo "== ticket drafts are bounded =="
+new_case; P2P_PORT="$CLOSED_PORT"; write_config; make_json 10; MTR_FIXTURE="$FIX/mtr-provider-edge.txt"
+mkdir -p "$C/home/log"
+for i in $(seq -w 1 12); do echo old > "$C/home/log/ticket-draft-200001${i}T000000Z.txt"; touch -t "2000${i}010000" "$C/home/log/ticket-draft-200001${i}T000000Z.txt"; done
+echo keep > "$C/home/log/other-note.txt"; touch -t 200001010000 "$C/home/log/other-note.txt"
+run_watch; run_watch "$((NOW + 300))"
+assert_eq "12 old + 1 new: newest 10 kept" "10" "$(count_files "$C/home/log" 'ticket-draft-*.txt')"
+if [ -f "$C/home/log/$(draft_name "$((NOW + 300))")" ]; then ok "  the new draft is among them"; else bad "  new draft kept" "pruned"; fi
+absent "  the oldest is gone" "$C/home/log/ticket-draft-20000101T000000Z.txt"
+if [ -f "$C/home/log/other-note.txt" ]; then ok "  other names in log/ untouched"; else bad "  other names untouched" "deleted"; fi
+new_case; P2P_PORT="$CLOSED_PORT"; write_config; make_json 10
+# Report larger than a pipe buffer (64 KiB): the writer is still blocked when
+# the cap closes the pipe, so it always takes SIGPIPE. The draft must still be
+# written (truncated), not reported as failed (pipefail regression, 2026-10-02).
+for i in $(seq 1 3000); do echo "  $i.|-- ???                       100.0     5    0.0   0.0   0.0   0.0   0.0"; done > "$C/bigmtr"; MTR_FIXTURE="$C/bigmtr"
+HK_ENV=(WATCH_LOG_MAX_BYTES=4000); run_watch; run_watch "$((NOW + 300))"
+DSIZE="$(size_of "$C/home/log/$(draft_name "$((NOW + 300))")" 2>/dev/null)"
+if [ -n "$DSIZE" ] && [ "$DSIZE" -gt 0 ] && [ "$DSIZE" -le 4000 ]; then ok "oversized report: draft written and capped at the log cap (4000)"
+else bad "oversized report: draft written and capped" "size='$DSIZE'"; fi
+assert_not_contains "  push does not report a failed draft" "下書き: 作成失敗" "$(tr '\001' '\n' < "$C/notify.log")"
 
 echo
 echo "RESULT: $PASS passed, $FAIL failed"
