@@ -65,6 +65,8 @@ for title in "metalgo 停止" "ディスク 85% 超過" "ピア接続数低下";
 done
 
 down="$(render_body "metalgo 停止")"
+disk="$(render_body "ディスク 85% 超過")"
+peers="$(render_body "ピア接続数低下")"
 if printf '%s\n' "$down" | grep -E 'compose' | grep -qE 'up[[:space:]]+-d'; then
 	bad "metalgo 停止: no compose up -d step" "$(printf '%s\n' "$down" | grep -E 'compose.*up')"
 else
@@ -72,6 +74,9 @@ else
 fi
 lacks "metalgo 停止: no compose file advice" "$down" "docker-compose.metalgo"
 has   "metalgo 停止: restarts the existing container" "$down" "docker start <2) の ID>"
+has   "metalgo 停止: refuses to start when the label matches 2+ containers" "$down" "2 件以上なら start せず止めて確認"
+has   "disk: confirm the ID before exec" "$disk" "で ID 確認 → docker exec <ID>"
+has   "peers: confirm the ID before logs" "$peers" "で ID 確認 → docker logs --tail 50 <ID>"
 has   "metalgo 停止: NodeID warning line" "$down" \
 	"compose up は実行しない (別 NodeID になる。docs/DISASTER_RECOVERY.md 冒頭の警告)"
 has   "metalgo 停止: impact line kept" "$down" "影響: validator が consensus から脱落しうる"
