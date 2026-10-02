@@ -26,7 +26,7 @@ VPS が「明日突然消失」した時に、同じ NodeID を持つ validator 
 - 同じ形のコマンドを案内している箇所がある: `scripts/check-anomalies.sh` の metalgo 停止通知の対処欄、`docs/INCIDENT_RESPONSE.md`、`docs/VALIDATOR_HOST_SETUP.md`。現行本番 host ではこれらの metalgo 用 compose コマンドも同じ扱い。
 - `scripts/vps-bootstrap.sh` の step_metalgo は、別 project の metalgo コンテナを見つけると何も作らず止まる (fail closed)。
 - 名前を固定で仮定しない。本書の手順は metalgo コンテナを compose label `com.docker.compose.service=metalgo` で特定する。
-- この label 特定は compose の service 名が `metalgo` であることを前提にしている。**現行本番 host のコンテナの service label が `metalgo` かは未実測** (TODO: operator 承認の read-only 確認で `docker inspect` の `com.docker.compose.service` label を読む)。違っていれば、label による特定と `scripts/vps-bootstrap.sh` の他 project 検出 (`resolve_metalgo_data_dir`、`:327`) はそのコンテナを見落とす。
+- この label 特定は compose の service 名が `metalgo` であることを前提にしている。現行本番 host でも、この label が付いた metalgo コンテナがちょうど 1 つであることを 2026-10-02 に read-only で実測した (operator 承認)。将来この label が違っていれば、label による特定と `scripts/vps-bootstrap.sh` の他 project 検出 (`resolve_metalgo_data_dir`、`:327`) はそのコンテナを見落とす。
 - **本番 host の命名を repo に揃えるか (またはその逆か) は未決の operator 判断。** 本書では揃えない。新 host への移設は repo の命名で新規に作るので、この問題は旧 host 側にだけ残る。
 
 ---
