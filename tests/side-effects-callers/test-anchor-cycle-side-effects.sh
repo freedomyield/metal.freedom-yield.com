@@ -203,6 +203,12 @@ mk_repo() {
 	# addition silently repeats this failure. See the mirrored-growth
 	# regression guard near the end of this file.
 	cp -R "${SCRIPTS}/lib/." "${S}/scripts/lib/"
+	# scripts/lib/a-chain-profile.sh resolves config/a-chain-profiles.json
+	# relative to itself (../../config); the real checkout ships config/
+	# together with scripts/lib/, so the sandbox carries it too (2026-09-30,
+	# append-anchor-history.sh reads the legacy chain_ids from it).
+	mkdir -p "${S}/config"
+	cp "${REPO_ROOT}/config/a-chain-profiles.json" "${S}/config/a-chain-profiles.json"
 	cp "${SCRIPTS}/notify.sh" "${S}/scripts/notify.sh"
 	cp "${SCRIPTS}/push-to-web-host.sh" "${S}/scripts/push-to-web-host.sh"
 	# publish-scan.sh (mirrored above) requires this SIBLING of lib/ at
@@ -553,6 +559,12 @@ run_pipeline() {   # <FY_LIVE value>
 		bash "${S}/scripts/run-anchor-pipeline.sh" --chain=testnet-a
 }
 mk_repo pipeline-dry run-anchor-pipeline.sh
+# The history-reachability preflight (2026-09-30) runs before step 1. Its real
+# implementation reads a history service over HTTP, which this side-effects
+# suite must never do, and it is covered by
+# tests/anchor-history-read/test-check-anchor-history-reachable.sh — so the
+# sandbox gets a passing stub, keeping this case about the bypass alert.
+printf '#!/usr/bin/env bash\nexit 0\n' >"${S}/scripts/check-anchor-history-reachable.sh"
 reset_tripwire
 run_pipeline "" >"${TMP}/1i.out" 2>"${TMP}/1i.err"
 RC=$?
@@ -642,6 +654,8 @@ env FY_LIVE=1 NTFY_TOPIC_FILE="${S}/topic" NOTIFY_RETRY_SLEEP=0 \
 	|| bad "2f notify-anchor-transition: FY_LIVE=1 does reach ntfy.sh"
 
 mk_repo pipeline-live run-anchor-pipeline.sh
+# Same passing reachability stub as 1i (no HTTP from this suite).
+printf '#!/usr/bin/env bash\nexit 0\n' >"${S}/scripts/check-anchor-history-reachable.sh"
 reset_tripwire
 run_pipeline 1 >"${TMP}/2i.out" 2>"${TMP}/2i.err"
 RC=$?

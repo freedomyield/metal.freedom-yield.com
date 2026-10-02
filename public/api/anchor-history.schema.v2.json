@@ -97,6 +97,9 @@
 			"type": "string",
 			"description": "R18 (2026-07-08, additive): repo-relative path to the per-anchor, content-addressed archive copy of the anchor-receipt.json for this line's tx_id, e.g. 'api/archive/anchor-receipt-<tx_id>.json'. Written by scripts/gen-anchor-receipt.sh at generation time. Absent on lines appended before this field existed."
 		},
+		"chain_id": {"type": "string", "pattern": "^[a-f0-9]{64}$", "description": "2026-09-30 (additive): chain_id of the A-Chain the transaction of this line is on, taken from the reviewed chain profile (config/a-chain-profiles.json) the generator ran under and reconciled with FYD_<ROLE>_CHAIN_ID. The history base that resolved the tx is bound to this chain_id by that profile's allowlist. Lines from before this field existed are on the legacy XPR Network chain (mainnet 384da888112027f0321850a169f737c33e53b388aad48b5adace4bab97f437e0). Mirrored from anchor-receipt.anchor.chain_id."},
+		"block_id": {"type": "string", "pattern": "^[a-f0-9]{64}$", "description": "2026-09-30 (additive): id of the block holding the transaction, as served by the history base (Hyperion action block_id) or by /v1/chain/get_block on the same base. With chain_id it identifies the block unambiguously across a chain migration, where block_num alone may not. Mirrored from anchor-receipt.anchor.block_id; absent when the receipt carried none."},
+		"chain_profile": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$", "description": "2026-09-30 (additive): name of the chain profile (config/a-chain-profiles.json) the generator ran under, e.g. 'xpr-mainnet'. Mirrored from anchor-receipt.anchor.chain_profile."},
 		"generated_by_script_version": {"type": "string"}
 	}
 }

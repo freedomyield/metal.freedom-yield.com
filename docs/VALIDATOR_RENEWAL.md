@@ -299,7 +299,8 @@ or non-executable → skip Job B (fail-closed)` という別の stderr 行は出
         --testnet-tx-id=<控えた tx id>
     ```
     このスクリプトは source が `git show HEAD:public/api/anchor-source.json` と byte 一致することを検証し(不一致なら exit 9 で拒否)、続けて公開 `anchor-source.json`(cache-bust 付きで fetch)がまだ同じ bytes を配信していなければ **exit 10** で拒否する(push+deploy 待ちしてから再実行。`--skip-published-check` はオフライン/劣化時専用の bypass)。その後 `$DRYLOG`(default `/tmp/fya-mainnet-dryrun.json`)を書き、gate1/gate3 の read-only pre-check を表示し、⑦-c のコマンドを両 gate 引数入りで出力する。compose も broadcast もしない。**validator host の `sudo -u deploy` では実行しない** — §3.5 keystore guard が login HOME を **exit 8** で拒否し、かつ host 側で recompose すると `dag_root_computed` が commit 済 bytes と変わる(artifacts branch は 5 分 cron が書き換える live feed を hash しているため)。pre-check 抜きで log だけ欲しい場合の同等形は `FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton bash scripts/sign-anchor-event.sh --chain=mainnet-a --anchor-source=public/api/anchor-source.json --dry-run > /tmp/fya-mainnet-dryrun.json` — こちらも `FY_CONFIG_DIR` は必須で、無いと exit 3 になり redirect が **0 byte** の log を残す(gate 4 まで気づけない)
-  - **⑦-c 署名 + broadcast**: `HOME=~/.metal-fy-proton proton key:unlock` で mainnet keystore(testnet とは別)を unlock し、`FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton bash scripts/sign-anchor-event.sh --chain=mainnet-a --anchor-source=public/api/anchor-source.json --testnet-tx-id=<控えた tx id> --dry-run-log=/tmp/fya-mainnet-dryrun.json`(= operator の 4 番目の active action、`bin/safe-broadcast` 4-gate 経由。`--testnet-tx-id` / `--dry-run-log` は gate 1 / gate 4 の必須入力 — 欠くと safe-broadcast が REFUSE する)。**順序に注意**: どの env-prefix 行でも `FY_CONFIG_DIR=...` を `HOME=...` より前に書く。機序(2026-07-31 実測): **zsh**(operator の login shell)は prefix 代入を左→右で適用し、各代入が次の代入の展開に見えるため、`HOME=~/.metal-fy-proton` が先だと `FY_CONFIG_DIR=$HOME/...` の `$HOME` が keystore を指してしまう。bash は simple command の prefix 代入をコマンド実行前の環境に対して展開するので両順序とも動く(ただし pipeline 内では subshell 化して zsh と同じ挙動になる)。どの shell でも正しい順序で書く。**別の罠(2026-08-04 実測)**: `FY_CONFIG_DIR` の tilde は **quote しない**こと — `FY_CONFIG_DIR="~/.fy-mainnet-broadcast/config"` のように quote すると tilde が展開されず literal `~/...` path になり **exit 3**(config dir not readable)で失敗する。上記の順序を守り quote さえしなければ `~` と `$HOME` は同じ挙動になる(2026-08-04 実測、zsh/bash × 順序 正/誤 の全 4 パターン確認済)— 両者に別の分岐は無い。それでも堅牢性のため**絶対 path**(`/Users/<user>/...` 形)で書くことを推奨する — quote の罠も順序ルールも両方回避できる。`sign-anchor-event.sh` は `--output=<path>` も受け付ける — 未指定時は標準出力に加えて既定 path `/tmp/fya-mainnet-sign-output.json`(mainnet 実行の場合。testnet 実行なら `/tmp/fya-testnet-sign-output.json`)にも保存される。この fragment は **Mac 上で生成される**ため、手順⑦.5 で host へ転送してから手順⑧の `--input=` 値として使う。broadcast 後は mainnet keystore を re-lock する: `HOME=~/.metal-fy-proton proton key:lock`。プロンプトは `Enter 32 character password (leave empty to create new)` と表示されるが、**空 Enter は新規 password の作成になるため厳禁** — unlock 時と同じ 32 文字を入力する
+  - **⑦-b.5 validator host: history 到達確認(read-only、停止4(a) と ⑦-c の前)**(2026-09-30 追加、A-Chain → PulseVM 移行準備): 手順⑧の `gen-anchor-receipt.sh` は**不可逆な broadcast の後で** tx を history から引き直し、その history base と chain_id を commit 済の chain profile(`config/a-chain-profiles.json`)から読む。だから mainnet keystore を unlock する**前に**、⑧と同じ host・同じ reader code で「引ける」ことを確かめる。host の `sudo -u deploy` / host repo で ⑧と同じ形で 2 行: (1) 前提条件 `git rev-parse --short HEAD && test -r config/a-chain-profiles.json && test -r scripts/lib/a-chain-profile.sh && test -r scripts/lib/anchor-history-read.sh && jq --version && ! env | grep -e ^FYD_MAINNET_CHAIN_ID= -e ^FYD_TESTNET_CHAIN_ID= -e ^FYD_A_CHAIN_PROFILE_` が exit 0(= host checkout が profile と library を含む commit まで前進済、jq は 1.6 以上、deploy 環境に古い chain override が無い)、(2) `bash scripts/check-anchor-history-reachable.sh --chain=mainnet-a` が `REACHABLE profile=xpr-mainnet … mode=known-tx` を 1 行出して exit 0。**どちらかが非 0 ならその日はここで止める** — 何も署名していないので unlock しない・⑦-c に進まない、待って⑦-b.5 だけ再実行する(exit 2 = profile が receipt に必要な値を出せない、3 = どの history base も既知の anchor を解決できない、4 = 許可された base が別 chain_id を返す、1 = usage/ledger)。前提条件が落ちたら host checkout を前進させる(deploy の host-advance、または host で `scripts/advance-host-checkout.sh`)か、古い変数を元から消す — **override を足して通すことはしない**(override は profile 値の確認にしか使えない)。jq 1.6 未満は check 自身が exit 2 で拒否する
+  - **⑦-c 署名 + broadcast**(⑦-b.5 が `REACHABLE` を出した後のみ): `HOME=~/.metal-fy-proton proton key:unlock` で mainnet keystore(testnet とは別)を unlock し、`FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton bash scripts/sign-anchor-event.sh --chain=mainnet-a --anchor-source=public/api/anchor-source.json --testnet-tx-id=<控えた tx id> --dry-run-log=/tmp/fya-mainnet-dryrun.json`(= operator の 4 番目の active action、`bin/safe-broadcast` 4-gate 経由。`--testnet-tx-id` / `--dry-run-log` は gate 1 / gate 4 の必須入力 — 欠くと safe-broadcast が REFUSE する)。**順序に注意**: どの env-prefix 行でも `FY_CONFIG_DIR=...` を `HOME=...` より前に書く。機序(2026-07-31 実測): **zsh**(operator の login shell)は prefix 代入を左→右で適用し、各代入が次の代入の展開に見えるため、`HOME=~/.metal-fy-proton` が先だと `FY_CONFIG_DIR=$HOME/...` の `$HOME` が keystore を指してしまう。bash は simple command の prefix 代入をコマンド実行前の環境に対して展開するので両順序とも動く(ただし pipeline 内では subshell 化して zsh と同じ挙動になる)。どの shell でも正しい順序で書く。**別の罠(2026-08-04 実測)**: `FY_CONFIG_DIR` の tilde は **quote しない**こと — `FY_CONFIG_DIR="~/.fy-mainnet-broadcast/config"` のように quote すると tilde が展開されず literal `~/...` path になり **exit 3**(config dir not readable)で失敗する。上記の順序を守り quote さえしなければ `~` と `$HOME` は同じ挙動になる(2026-08-04 実測、zsh/bash × 順序 正/誤 の全 4 パターン確認済)— 両者に別の分岐は無い。それでも堅牢性のため**絶対 path**(`/Users/<user>/...` 形)で書くことを推奨する — quote の罠も順序ルールも両方回避できる。`sign-anchor-event.sh` は `--output=<path>` も受け付ける — 未指定時は標準出力に加えて既定 path `/tmp/fya-mainnet-sign-output.json`(mainnet 実行の場合。testnet 実行なら `/tmp/fya-testnet-sign-output.json`)にも保存される。この fragment は **Mac 上で生成される**ため、手順⑦.5 で host へ転送してから手順⑧の `--input=` 値として使う。broadcast 後は mainnet keystore を re-lock する: `HOME=~/.metal-fy-proton proton key:lock`。プロンプトは `Enter 32 character password (leave empty to create new)` と表示されるが、**空 Enter は新規 password の作成になるため厳禁** — unlock 時と同じ 32 文字を入力する
 ⑦.5 Mac → host: 手順⑦-c の `sign-anchor-event.sh` 出力(既定 `--output=` 保存先 `/tmp/fya-mainnet-sign-output.json`)を host へ転送する。手順⑦-c の散文に埋没していた転送作業を独立 step として明示化(2026-08-06)。host 側で走る手順⑧の `gen-anchor-receipt.sh --input=` が読むのはこの転送先:
   ```sh
   scp -i ~/.ssh/<your_validator_host_key> \
@@ -320,12 +321,13 @@ or non-executable → skip Job B (fail-closed)` という別の stderr 行は出
 
   R18 per-anchor archive の 2 本(`archive/anchor-source-<dag_root>.json` / `archive/anchor-receipt-<tx_id>.json`)は、この手動 push の対象では**ない**: 2026-08-06(`77fd09d`)以降、`append-anchor-history.sh` が append 成功直後に自動で push する(best-effort — 失敗しても append 自体は失敗させない)。失敗時は stderr + `notify.sh high` alert に "R18 publish FAILED" / "R18 publish skipped" が出るので、その場合だけ表示された retry コマンドを手動実行する。`FYD_PUBLISH_ARCHIVES=0` で自動 push 自体を無効化できるが、通常の cycle 切替では使わない。
 ⑨ validator host: `FY_LIVE=1 bash scripts/resume-after-cycle-start.sh --apply`(**`FY_LIVE=1` 必須** — 無いと Phase 1 の前に exit 6 で拒否し、read も poll も write も一切しない。C3 rollout 2026-08-06)(= v2 3 phase: Phase 1 verify 6 check → Phase 2 atomic state write → Phase 3 report。**broadcast なし、explorer URL は出力しない**)
+⑩ Mac local: legacy anchor archive(2026-09-30 追加。⑧.5 の公開と⑨の後): anchor は `eosio.token` transfer の memo = **chain state ではなく history** で、A-Chain が PulseVM に移ると旧 chain の history は配信されなくなりうる(`docs/A_CHAIN_PULSEVM_CUTOVER.md`)。旧 chain が配信されているうちに、今日の anchor の生の history / block 応答を公開・git 管理の `public/api/legacy-a-chain/` に保存する: `curl -fsS 'https://metal.freedom-yield.com/api/anchor-history.jsonl' -o /tmp/fya-anchor-history.jsonl` → `bash scripts/archive-legacy-anchors.sh --from-file=/tmp/fya-anchor-history.jsonl` → `bash scripts/verify-legacy-anchor-archive.sh --history=/tmp/fya-anchor-history.jsonl` → `git add public/api/legacy-a-chain/`(staged は新 `<tx_id>.json` と `manifest.json` の 2 つだけ)→ commit → push → `gh run watch`。read-only の要求だけで、archive 済の anchor は要求なしで skip する。legacy profile を**名前で**(`xpr-mainnet`)読むので cutover 後も旧 chain を指し続ける。完了 = archiver が exit 0 **かつ** verifier が `VERIFIED <n> anchor(s)`(n は前回 +1)。archiver exit 3 = 今回取れなかった record がある(他は保存済)→ 後で再実行すれば続きから、exit 4/5 = fail closed(記録済ファイルと今の chain 応答が食い違う、または chain_id が違う)→ 止めて報告、ファイルを消して通すことは絶対にしない。anchor 自体には一切触れない
 
 手順⑦の tx id を読取り、explorer URL を operator に報告(resume-after-cycle-start.sh の出力ではなく、手順⑦の broadcast 結果)。
 
 ### 緊急 fallback (= AI 不在時の operator 手動経路)
 
-AI が応答不能な場合、 operator は本書「AI が裏で自走する技術 task」の当日順序 ⓪〜⑨(⑦.5 / ⑧.5 を含む)を以下の手順で手動実行する(anchor pipeline の手順を省くと anchor 刻印が欠落する、または刻印済みでも公開 feed が古いままになるので、⑦.5 / ⑧.5 を含め全 step を踏む):
+AI が応答不能な場合、 operator は本書「AI が裏で自走する技術 task」の当日順序 ⓪〜⑩(⑦-b.5 / ⑦.5 / ⑧.5 を含む)を以下の手順で手動実行する(anchor pipeline の手順を省くと anchor 刻印が欠落する、または刻印済みでも公開 feed が古いままになるので、⑦-b.5 / ⑦.5 / ⑧.5 を含め全 step を踏む):
 
 ```sh
 # ⓪ Metal Wallet web で AddValidator を submit → explorer で Committed 確認 →
@@ -420,6 +422,19 @@ FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton \
 #         --anchor-source=public/api/anchor-source.json \
 #         --dry-run > /tmp/fya-mainnet-dryrun.json
 
+# ⑦-b.5 validator host: history 到達確認(read-only、2026-09-30 追加)。⑦-c の不可逆 broadcast の
+#     後で走る⑧が tx を引けることを、unlock する前に確かめる。どちらかが非 0 ならここで止める
+#     (unlock しない・⑦-c に進まない。override を足して通さない)。
+ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
+    'sudo -u deploy bash -c "cd /home/deploy/metal.freedom-yield.com && \
+       git rev-parse --short HEAD && test -r config/a-chain-profiles.json && \
+       test -r scripts/lib/a-chain-profile.sh && test -r scripts/lib/anchor-history-read.sh && \
+       jq --version && ! env | grep -e ^FYD_MAINNET_CHAIN_ID= -e ^FYD_TESTNET_CHAIN_ID= -e ^FYD_A_CHAIN_PROFILE_"'
+ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
+    'sudo -u deploy bash -c "cd /home/deploy/metal.freedom-yield.com && \
+       bash scripts/check-anchor-history-reachable.sh --chain=mainnet-a"'
+# REACHABLE ... mode=known-tx の 1 行 + exit 0 を確認してから次へ。
+
 # ⑦-c Mac で mainnet keystore を unlock して署名+broadcast。
 #     --testnet-tx-id / --dry-run-log は bin/safe-broadcast の gate 1 / gate 4 必須入力(欠くと REFUSE)。
 #     順序注意: FY_CONFIG_DIR=... は HOME=... より前に書く。機序(2026-07-31 実測): zsh(operator の
@@ -496,6 +511,13 @@ ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HO
     'sudo -u deploy env FY_LIVE=1 bash /home/deploy/metal.freedom-yield.com/scripts/resume-after-cycle-start.sh --apply'
 
 # Phase 3 の report が出力される(state 更新のみ、broadcast も explorer URL も出さない)。
+
+# ⑩ Mac local: legacy anchor archive(2026-09-30 追加。旧 chain が配信されているうちに)。
+curl -fsS 'https://metal.freedom-yield.com/api/anchor-history.jsonl' -o /tmp/fya-anchor-history.jsonl
+bash scripts/archive-legacy-anchors.sh --from-file=/tmp/fya-anchor-history.jsonl
+bash scripts/verify-legacy-anchor-archive.sh --history=/tmp/fya-anchor-history.jsonl
+git add public/api/legacy-a-chain/ && git diff --cached --name-status
+# staged が新 <tx_id>.json + manifest.json の 2 つだけであることを確認してから commit → push → gh run watch。
 ```
 
 Phase 1 の identity.json polling は最大 10 分待ち、 deploy 完了 timing が不明でも安全に走る。同様に resume-after-cycle-start.sh の Phase 1 も anchor-source.json の polling を最大 `FY_POLL_MAX_SEC`(default 600 秒)待つ。

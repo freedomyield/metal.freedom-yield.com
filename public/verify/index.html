@@ -187,6 +187,31 @@ ssh-keygen -Y verify -f "$TMP/allowed" \
 
 		<article class="data-endpoint">
 			<header class="data-endpoint-head">
+				<h3>Legacy A-Chain anchor archive (XPR Network)</h3>
+				<span class="data-tag">live</span>
+			</header>
+			<p>The anchors above are transfer memos, i.e. transaction history rather than chain state. The Metal A-Chain is expected to move from the XPR Network onto PulseVM, and history from before such a move is not guaranteed to stay online. So every mainnet anchor on the legacy chain is also preserved here as the chain's own responses, stored verbatim: the Hyperion <code>/v2/history/get_transaction</code> body and the <code>/v1/chain/get_block</code> body for its block, each with its SHA-256. The archive is added to after every cycle's anchor while the legacy chain is served, and it is checkable offline.</p>
+			<dl class="data-meta">
+				<dt>Manifest</dt><dd><a href="/api/legacy-a-chain/manifest.json"><code>/api/legacy-a-chain/manifest.json</code></a> — one entry per anchor: <code>tx_id</code>, <code>block_num</code>, <code>block_id</code>, <code>chain_id</code>, the record's SHA-256 and the SHA-256 of each stored body</dd>
+				<dt>Records</dt><dd><code>/api/legacy-a-chain/&lt;tx_id&gt;.json</code> — fields <code>history_body</code> and <code>block_body</code> hold the responses as strings, byte-for-byte</dd>
+				<dt>Chain</dt><dd>XPR Network mainnet, <code>chain_id</code> <code>384da888112027f0321850a169f737c33e53b388aad48b5adace4bab97f437e0</code></dd>
+			</dl>
+			<p>To verify one anchor without the legacy chain:</p>
+			<ol>
+				<li>Fetch the manifest and the record <code>&lt;tx_id&gt;.json</code>; the SHA-256 of the record file must equal the manifest entry's <code>sha256</code>.</li>
+				<li>Hash the <code>history_body</code> and <code>block_body</code> strings exactly as stored; the digests must equal <code>history_sha256</code> and <code>block_sha256</code> in both the record and the manifest.</li>
+				<li>Parse <code>history_body</code>: exactly four <code>eosio.token::transfer</code> actions, every <code>trx_id</code> equal to the <code>tx_id</code>, every <code>block_num</code> equal to the ledger line's; parse <code>block_body</code>: its <code>id</code> equals the recorded <code>block_id</code>.</li>
+				<li>The four memos are <code>&lt;prefix&gt;-id:</code>, <code>-ob:</code>, <code>-ar:</code> and <code>&lt;prefix&gt;:&lt;dag_root&gt;</code>; the DAG root must equal SHA-256 of the three branch roots concatenated as hex (id, ob, ar), and must equal <code>dag_root_hash</code> of the matching line in <code>/api/anchor-history.jsonl</code>. The authorizing account and permission must equal that line's <code>signing_actor</code> and <code>signing_permission</code>.</li>
+				<li>While the legacy chain is still served, the same <code>tx_id</code> can also be re-fetched live from any XPR Network Hyperion endpoint and compared (volatile fields such as <code>query_time_ms</code> differ; the actions do not).</li>
+			</ol>
+			<dl class="data-meta">
+				<dt>Scripted check</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/scripts/verify-legacy-anchor-archive.sh" rel="noopener noreferrer" target="_blank"><code>scripts/verify-legacy-anchor-archive.sh</code></a> runs steps 1–4 for every mainnet anchor: <code>--archive-dir=</code> the downloaded archive, <code>--history=</code> a downloaded copy of <code>/api/anchor-history.jsonl</code>. No network access.</dd>
+				<dt>Migration notes</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/A_CHAIN_PULSEVM_CUTOVER.md" rel="noopener noreferrer" target="_blank"><code>docs/A_CHAIN_PULSEVM_CUTOVER.md</code></a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
 				<h3>Evidence manifest</h3>
 				<span class="data-tag">live</span>
 			</header>

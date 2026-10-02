@@ -93,6 +93,9 @@
 # convention as scripts/check-anchor-publish-health.sh) is the published-copy
 # guard's fetch target; FYD_CURL (default curl) lets tests stub that fetch —
 # also the same convention as check-anchor-publish-health.sh.
+# FYD_A_CHAIN_PROFILE_MAINNET / FYD_A_CHAIN_PROFILE_TESTNET / FYD_MAINNET_CHAIN_ID
+# / XPR_TESTNET_RPC are read exactly as bin/safe-broadcast reads them (chain
+# profile), so the [4/5] pre-checks show what the real gates will compare.
 #
 # Exit codes:
 #   0  preview complete (nothing broadcast)
@@ -108,6 +111,10 @@
 #      fetched fine but its dag_root_computed does not match --source (a
 #      push/deploy has not finished propagating yet). --skip-published-check
 #      bypasses this guard for offline/degraded use only.
+#   11 chain profile unusable (config/a-chain-profiles.json /
+#      scripts/lib/a-chain-profile.sh refused: file invalid, profile unknown,
+#      chain_id null, FYD_MAINNET_CHAIN_ID override differing, jq < 1.6) —
+#      bin/safe-broadcast would refuse the broadcast for the same reason
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -148,8 +155,34 @@ fi
 
 REPO="${REPO:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 DRYLOG="${DRYLOG:-/tmp/fya-mainnet-dryrun.json}"
-EXPECTED_CHAIN_ID="384da888112027f0321850a169f737c33e53b388aad48b5adace4bab97f437e0"
-TESTNET_HIST="https://test.proton.eosusa.io/v1/history/get_transaction"
+# Chain values come from the SAME source bin/safe-broadcast's gates read
+# (config/a-chain-profiles.json via scripts/lib/a-chain-profile.sh, selected
+# by FYD_A_CHAIN_PROFILE_MAINNET / _TESTNET, defaults xpr-*), so this advisory
+# preview cannot drift from the real gate. If the profile cannot be read the
+# real broadcast would refuse too — stop here (exit 11) rather than preview
+# against guessed values.
+# shellcheck source=scripts/lib/a-chain-profile.sh
+. "${SCRIPT_DIR}/lib/a-chain-profile.sh" || { echo "ERROR: chain profile library unusable — the broadcast would refuse too" >&2; exit 11; }
+if ! EXPECTED_CHAIN_ID="$(acp_expected_chain_id mainnet)"; then
+	echo "ERROR: mainnet chain profile gives no expected chain_id (reason above) — bin/safe-broadcast would refuse too" >&2
+	exit 11
+fi
+if ! TESTNET_HIST_BASE="$(acp_history_bases testnet | head -1)" || [ -z "$TESTNET_HIST_BASE" ]; then
+	echo "ERROR: testnet chain profile gives no history base (reason above) — bin/safe-broadcast gate 1 would refuse too" >&2
+	exit 11
+fi
+# gate 1 honours XPR_TESTNET_RPC only when it is one of the profile's bases
+# (otherwise it REFUSES — shown in [4/5] below).
+XPR_TESTNET_RPC_REFUSED=0
+if [ -n "${XPR_TESTNET_RPC:-}" ]; then
+	if acp_history_base_allowed testnet "$XPR_TESTNET_RPC"; then
+		TESTNET_HIST_BASE="$XPR_TESTNET_RPC"
+	else
+		XPR_TESTNET_RPC_REFUSED=1
+	fi
+fi
+TESTNET_HIST="${TESTNET_HIST_BASE}/v1/history/get_transaction"
+MAINNET_PROFILE_NAME="$(acp_profile_name mainnet)" || MAINNET_PROFILE_NAME="?"
 # The single tracked path whose committed bytes are the signing contract.
 CANONICAL_TRACKED_PATH="public/api/anchor-source.json"
 
@@ -342,11 +375,15 @@ jq -r '.tx.actions[] |
 
 echo
 echo "── [4/5] read-only gate pre-checks (safe-broadcast enforces these for real) ──"
-G1=$(curl -s --max-time 15 "$TESTNET_HIST" -d "{\"id\":\"$TESTNET_TX_ID\"}" 2>/dev/null | jq -r '.block_num // "MISS"' 2>/dev/null || echo ERR)
+G1=$(curl -s --max-time 15 "$TESTNET_HIST" -d "{\"id\":\"$TESTNET_TX_ID\"}" 2>/dev/null | jq -r '.block_num // .actions[0].block_num // "MISS"' 2>/dev/null || echo ERR)
 echo "  gate1 testnet-tx ${TESTNET_TX_ID:0:8}…  block_num: $G1  $([ "$G1" != MISS ] && [ "$G1" != ERR ] && echo '✓' || echo '(verify)')"
+if [ "$XPR_TESTNET_RPC_REFUSED" = "1" ]; then
+  echo "  ✗ gate1 WILL REFUSE: XPR_TESTNET_RPC='${XPR_TESTNET_RPC}' is not one of the testnet profile's history bases — unset it"
+fi
 if command -v proton >/dev/null 2>&1; then
   CID=$(proton chain:info 2>/dev/null | jq -r '.chain_id // empty' 2>/dev/null || true)
-  echo "  gate3 proton chain_id:  ${CID:-?}  $([ "${CID:-}" = "$EXPECTED_CHAIN_ID" ] && echo '✓ mainnet 384da888…' || echo '(verify at broadcast)')"
+  echo "  gate3 proton chain_id:  ${CID:-?}  $([ "${CID:-}" = "$EXPECTED_CHAIN_ID" ] && echo "✓ mainnet ${EXPECTED_CHAIN_ID:0:8}…" || echo '(verify at broadcast)')"
+  [ -z "${FYD_A_CHAIN_PROFILE_MAINNET:-}" ] || echo "  chain profile (mainnet): $MAINNET_PROFILE_NAME — gate 3 also checks proton-cli's endpoint host against its node_hosts"
 else
   echo "  gate3 proton: not on PATH in this shell (safe-broadcast checks chain_id at broadcast time)"
 fi

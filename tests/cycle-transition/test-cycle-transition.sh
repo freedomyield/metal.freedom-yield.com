@@ -7,7 +7,7 @@
 # mutation で実証する").
 #
 # Covered:
-#   A. the plan prints all 13 execution units from
+#   A. the plan prints all 15 execution units from
 #      docs/cycle-transition-steps.json, plus step 4b from docs/CYCLE_GATE.md
 #      — MUTATED per unit: dropping any one row turns the check red
 #   B. the drift gate (spec §8): docs/CYCLE_GATE.md's runbook step markers and
@@ -125,10 +125,11 @@ plan_unit_ids() {
 # ===========================================================================
 JSON_IDS="$(jq -r '.steps[].id' "$STEPS_JSON" | sort)"
 JSON_COUNT="$(printf '%s\n' "$JSON_IDS" | grep -c .)"
-if [ "$JSON_COUNT" -eq 13 ]; then
-	ok "docs/cycle-transition-steps.json still declares 13 execution units"
+# 15 since 2026-09-30 (7b.5 and 10 added for the A-Chain -> PulseVM readiness).
+if [ "$JSON_COUNT" -eq 15 ]; then
+	ok "docs/cycle-transition-steps.json still declares 15 execution units"
 else
-	bad "docs/cycle-transition-steps.json declares ${JSON_COUNT} units, expected 13 — the plan's baseline moved"
+	bad "docs/cycle-transition-steps.json declares ${JSON_COUNT} units, expected 15 — the plan's baseline moved"
 fi
 
 PLAN_IDS="$(plan_unit_ids "$PLAN" | sort)"
@@ -226,7 +227,9 @@ cat > "$MUT_DRIVER" <<'MUTEOF'
 . "$1"
 FYCT_ROWS_FILE="$2"
 FYCT_DROP="$3"
-fyct__unit_rows() { grep -v "^${FYCT_DROP}|" "$FYCT_ROWS_FILE"; }
+# Exact match on the id FIELD, not a regex: ids contain '.', and "^7b.5|"
+# as a regex also matches the row "7b|5|..." (the '.' eats the '|').
+fyct__unit_rows() { awk -F'|' -v d="$FYCT_DROP" '$1 != d' "$FYCT_ROWS_FILE"; }
 LEDGER="/fixture/ledger.jsonl"
 N=4
 INSCRIBE=5
@@ -264,8 +267,8 @@ while IFS= read -r drop_id; do
 	MUT_TESTED=$((MUT_TESTED + 1))
 done < <(cut -d'|' -f1 "$ROWS")
 
-if [ "$MUT_TESTED" -lt 14 ]; then
-	bad "mutation loop only exercised ${MUT_TESTED} units, expected 14"
+if [ "$MUT_TESTED" -lt 16 ]; then
+	bad "mutation loop only exercised ${MUT_TESTED} units, expected 16"
 elif [ "$MUT_OK" -eq 1 ]; then
 	ok "mutation: dropping any one of the ${MUT_TESTED} unit rows removes it from the output (coverage check is not a tautology)"
 fi
@@ -284,7 +287,7 @@ if [ ! -s "$RUNBOOK" ]; then
 fi
 
 DOC_TOP="$(grep -oE '^([0-9]+(\.[0-9]+)?[a-z]?)\. \*\*' "$RUNBOOK" | sed 's/\. \*\*$//')"
-DOC_SUB="$(grep -oE '^[[:space:]]*\*\*7[abc] — ' "$RUNBOOK" | grep -oE '7[abc]')"
+DOC_SUB="$(grep -oE '^[[:space:]]*\*\*7([abc]|b\.5) — ' "$RUNBOOK" | grep -oE '7([abc]|b\.5)')"
 # Step 7 is a container for 7a/7b/7c; step 0 is the operator's wallet action,
 # which docs/CYCLE_GATE.md itself says is "no script, no gate" — it is stop 1
 # in the plan, deliberately not an execution unit.
@@ -1046,16 +1049,16 @@ fi
 # 7b, 7.5 and 8. A regression that quietly drops any of them is the same
 # failure as never having listed it.
 UNCOVERED_MISSING=""
-for u in '7a' '7b' '7.5, 8 AND 8.5' '4b'; do
+for u in '7a' '7b' '7.5, 8 AND 8.5' '4b' 'UNIT 7b.5' 'UNIT 10'; do
 	grep -qF "$u" "$ST_ALL" || UNCOVERED_MISSING="${UNCOVERED_MISSING:+$UNCOVERED_MISSING }${u}"
 done
 if [ -z "$UNCOVERED_MISSING" ]; then
-	ok "the limits block names every unit the coverage sweep found uncovered (7a, 7b, 7.5/8/8.5, 4b)"
+	ok "the limits block names every unit the coverage sweep found uncovered (7a, 7b, 7b.5, 7.5/8/8.5, 4b, 10)"
 else
 	bad "the limits block no longer discloses: ${UNCOVERED_MISSING}"
 fi
-if grep -q 'FIVE OF THE FOURTEEN EXECUTION UNITS ARE COVERED BY NO POST-CONDITION' "$ST_ALL"; then
-	ok "the limits block states the coverage arithmetic (5 of 14 units), not just examples"
+if grep -q 'SEVEN OF THE SIXTEEN EXECUTION UNITS ARE COVERED BY NO POST-CONDITION' "$ST_ALL"; then
+	ok "the limits block states the coverage arithmetic (7 of 16 units), not just examples"
 else
 	bad "the limits block does not state how many units are uncovered"
 fi
@@ -1155,7 +1158,7 @@ else
 fi
 # ...and the unit list still appears, from the unit table, when the phase is
 # genuinely INCOMPLETE. Without this the fix above could be "print nothing".
-if grep -qE '^to advance phase 6 +: units 8 8\.5 9$' "${TMP}/status-69.txt"; then
+if grep -qE '^to advance phase 6 +: units 8 8\.5 9 10$' "${TMP}/status-69.txt"; then
 	ok "an INCOMPLETE phase still gets its unit list, taken from the table --print-only prints"
 else
 	bad "an INCOMPLETE phase lost its unit list: $(grep -E '^to advance' "${TMP}/status-69.txt" | head -1)"
@@ -1533,10 +1536,10 @@ fi
 # authorization — read exactly like the six other `Mac` lines the AI runs.
 ACTORS="$(grep -oE '^# \[unit [^]]+\] (host|Mac) — [^ ]+' "$PLAN" | awk '{print $NF}')"
 ACTOR_N="$(printf '%s\n' "$ACTORS" | grep -c . || true)"
-if [ "$ACTOR_N" -eq 14 ]; then
-	ok "all 14 unit headers name an actor as well as a machine"
+if [ "$ACTOR_N" -eq 16 ]; then
+	ok "all 16 unit headers name an actor as well as a machine"
 else
-	bad "expected 14 unit headers carrying an actor, found ${ACTOR_N}"
+	bad "expected 16 unit headers carrying an actor, found ${ACTOR_N}"
 fi
 BAD_ACTOR="$(printf '%s\n' "$ACTORS" | grep -vxE 'AI@host|AI@Mac|operator@TTY' || true)"
 if [ -z "$BAD_ACTOR" ]; then
@@ -1974,6 +1977,61 @@ if printf '%s' "$CLOSING" | grep -qF 'TWO RE-LOCKS'; then
 	ok "the closing summary names both unprinted re-locks, not one"
 else
 	bad "the closing summary still describes a single unprinted re-lock"
+fi
+
+# ===========================================================================
+# PulseVM migration readiness (2026-09-30): units 7b.5 and 10
+# ===========================================================================
+# 7b.5 exists to stop the day BEFORE signing when unit 8's post-broadcast
+# receipt could not resolve the tx. Its whole value is its POSITION: after 7b
+# (so the operator does not unlock for nothing), before 7c, and on the host
+# (the same vantage and the same checkout as unit 8).
+ORDER="$(plan_unit_ids "$PLAN_COV" | tr '\n' ' ')"
+case "$ORDER" in
+	*" 7b 7b.5 7c "*) ok "unit 7b.5 sits between 7b and 7c in the printed order ($ORDER)" ;;
+	*) bad "unit 7b.5 is not between 7b and 7c: $ORDER" ;;
+esac
+case "$ORDER" in
+	*" 9 10 ") ok "unit 10 (legacy archive) is the last unit, after 9" ;;
+	*) bad "unit 10 is not the last unit after 9: $ORDER" ;;
+esac
+U75B="$(unit_block "$PLAN_COV" '7b.5')"
+if printf '%s\n' "$U75B" | grep -F 'bash scripts/check-anchor-history-reachable.sh --chain=mainnet-a"' | grep -q "sudo -u deploy bash -c .*  # host$"; then
+	ok "unit 7b.5 runs the reachability check for mainnet-a ON THE HOST"
+else
+	bad "unit 7b.5 does not run check-anchor-history-reachable.sh --chain=mainnet-a on the host: $U75B"
+fi
+PRE_LINE="$(printf '%s\n' "$U75B" | grep 'test -r config/a-chain-profiles.json' || true)"
+if [ -n "$PRE_LINE" ] \
+	&& printf '%s' "$PRE_LINE" | grep -q 'jq --version' \
+	&& printf '%s' "$PRE_LINE" | grep -q 'test -r scripts/lib/anchor-history-read.sh' \
+	&& printf '%s' "$PRE_LINE" | grep -q '! env | grep -e ^FYD_MAINNET_CHAIN_ID= -e ^FYD_TESTNET_CHAIN_ID= -e ^FYD_A_CHAIN_PROFILE_' \
+	&& printf '%s' "$PRE_LINE" | grep -q '# host$'; then
+	ok "unit 7b.5 carries the host preconditions (profile + libraries present, jq printed, no stale chain override)"
+else
+	bad "unit 7b.5's host precondition line is missing or incomplete: ${PRE_LINE:-<none>}"
+fi
+L_PRE="$(printf '%s\n' "$U75B" | grep -n 'test -r config/a-chain-profiles.json' | head -1 | cut -d: -f1)"
+L_CHK="$(printf '%s\n' "$U75B" | grep -n 'check-anchor-history-reachable.sh' | head -1 | cut -d: -f1)"
+if [ -n "$L_PRE" ] && [ -n "$L_CHK" ] && [ "$L_PRE" -lt "$L_CHK" ]; then
+	ok "unit 7b.5 prints the preconditions before the check"
+else
+	bad "unit 7b.5 precondition/check order wrong (pre:${L_PRE:-none} check:${L_CHK:-none})"
+fi
+if grep -q 'only AFTER unit 7b.5 has printed REACHABLE' "$PLAN_COV"; then
+	ok "stop 4(a) is gated on unit 7b.5's REACHABLE line"
+else
+	bad "stop 4(a) text does not require unit 7b.5's REACHABLE line"
+fi
+U10B="$(unit_block "$PLAN_COV" '10')"
+L_ARC="$(printf '%s\n' "$U10B" | grep -n 'archive-legacy-anchors.sh --from-file=' | head -1 | cut -d: -f1)"
+L_VER="$(printf '%s\n' "$U10B" | grep -n 'verify-legacy-anchor-archive.sh --history=' | head -1 | cut -d: -f1)"
+L_ADD="$(printf '%s\n' "$U10B" | grep -n 'git add public/api/legacy-a-chain/' | head -1 | cut -d: -f1)"
+if [ -n "$L_ARC" ] && [ -n "$L_VER" ] && [ -n "$L_ADD" ] && [ "$L_ARC" -lt "$L_VER" ] && [ "$L_VER" -lt "$L_ADD" ] \
+	&& printf '%s\n' "$U10B" | grep -q 'archive the cycle 5 anchor'; then
+	ok "unit 10 archives, then verifies, then stages public/api/legacy-a-chain/ (commit names cycle 5)"
+else
+	bad "unit 10 order/commands wrong (archive:${L_ARC:-none} verify:${L_VER:-none} add:${L_ADD:-none})"
 fi
 
 finish

@@ -12,25 +12,53 @@
 # public/api/anchor-receipt.schema.v2.json. Replaces the single-action
 # fyid1:<hash> verify pipeline.
 #
+# 2026-09-30 (PulseVM migration readiness, Task 4): chain-aware.
+#   * The history base comes from the selected A-Chain profile
+#     (config/a-chain-profiles.json via scripts/lib/a-chain-profile.sh), not
+#     from a literal. --rpc must be one of that profile's history_bases;
+#     --allow-unlisted-rpc accepts another base for the TESTNET role only
+#     (rehearsal escape hatch, loud WARN) and is refused for mainnet.
+#   * The tx is resolved by scripts/lib/anchor-history-read.sh — the same
+#     code scripts/check-anchor-history-reachable.sh runs BEFORE signing, so
+#     a history outage is caught before the irreversible broadcast (P3).
+#     The v1 fallback now parses `traces` (it used to expect `.actions`,
+#     which /v1/history/get_transaction never returns).
+#   * The receipt records anchor.chain_id (the profile's, reconciled with
+#     FYD_<ROLE>_CHAIN_ID), anchor.chain_profile, anchor.history_base and
+#     anchor.block_id (from history, else /v1/chain/get_block).
+#   * Receipt schema: v2 by default when the selected profile is the role's
+#     default (xpr-mainnet / xpr-testnet) — the new fields are ADDITIVE v2
+#     fields (anchor-receipt.schema.v2.json is additive-only-within-v2), and
+#     block_id is best-effort (omitted with a WARN when history serves none),
+#     so the legacy-chain path adds no new failure after a broadcast.
+#     --receipt-schema=v3 produces a v3 receipt (schema_version 3, block_id
+#     REQUIRED) on any profile, including the legacy chain. A non-default
+#     profile (pulsevm-*) REQUIRES v3: v2 is refused, so no v2-only consumer
+#     can mistake a post-migration receipt for a legacy one.
+#
 # 7 verify gates (all must PASS or exit 4):
-#   1. tx reachable via tx_id at RPC
+#   1. tx reachable via tx_id at a history base of the selected profile
 #   2. tx has exactly 4 actions
 #   3. all 4 actions are eosio.token::transfer
 #   4. all 4 authorizations match expected actor@permission
 #   5. memo set matches expected {prefix}-{id|ob|ar|(summary)}:<hex>
 #   6. dag_root_summary root_hex == sha256(id_root || ob_root || ar_root)
-#   7. block_num + block_time present on tx
+#   7. block_num + block_time present on tx (v3: block_id too)
 #
 # Exit codes:
 #   0  success — 7-PASS verified, receipt written to --out
-#   1  usage / arg error
+#   1  usage / arg error, including: the chain profile is unavailable or
+#      refuses the network (e.g. a pulsevm profile whose chain_id is not yet
+#      published), --rpc not in the profile's history_bases, or
+#      --receipt-schema=v2 with a non-default profile. Nothing was fetched.
 #   2  input parse error
-#   3  RPC unreachable / tx_id not found
+#   3  RPC unreachable / tx_id not found at any history base
+#      (v3: also block_id not obtainable)
 #   4  one of the 7 verify gates failed
 #   5  atomic write failed (canonical --out file OR the R18 archive copy)
 #   6  R13: receipt failed schema validation against
-#      public/api/anchor-receipt.schema.v2.json (or the schema file itself
-#      is unreadable)
+#      public/api/anchor-receipt.schema.v2.json / .v3.json (or the schema
+#      file itself is unreadable)
 #   7  R13: no JSON schema validator available (ajv absent AND python3's
 #      jsonschema module absent) — fail-closed rather than silently skip
 #      validation. Provision one: `npm i -g ajv-cli ajv-formats` or
@@ -39,7 +67,9 @@
 # Usage:
 #   gen-anchor-receipt.sh --input=<sign-anchor-event.json>
 #                         --anchor-source=<anchor-source.json>
-#                         [--out=<path>] [--rpc=<hyperion-url>]
+#                         [--out=<path>] [--rpc=<history base url>]
+#                         [--allow-unlisted-rpc]   (testnet only)
+#                         [--receipt-schema=<v2|v3>]
 #                         [--explorer-base=<url>]
 #                         [--trigger=<cyclestart|cycleend|idrotate|heartbeat|manual>]
 #                         [--schema-url=<url>]
@@ -54,15 +84,19 @@ INPUT_FILE=""
 ANCHOR_SOURCE=""
 OUT_FILE="${REPO_ROOT}/public/api/anchor-receipt.json"
 RPC_OVERRIDE=""
-EXPLORER_BASE="${EXPLORER_BASE:-https://explorer.xprnetwork.org/transaction}"
+# Empty = the selected chain profile's explorer_base (resolved below).
+EXPLORER_BASE="${EXPLORER_BASE:-}"
 TRIGGER="manual"
-SCHEMA_URL="https://metal.freedom-yield.com/api/anchor-receipt.schema.v2.json"
+SCHEMA_URL=""   # empty = the published URL of the selected receipt schema
 # R13: LOCAL schema file used to self-validate the composed receipt before
 # it is written (see schema_validate_or_die below). Distinct from
 # $SCHEMA_URL, which is only the "$schema" field value embedded in the
 # receipt for downstream consumers.
-SCHEMA_FILE="${SCHEMA_FILE:-${REPO_ROOT}/public/api/anchor-receipt.schema.v2.json}"
+# Empty = public/api/anchor-receipt.schema.<v2|v3>.json for the selected version.
+SCHEMA_FILE="${SCHEMA_FILE:-}"
 PREV_ANCHOR_TX_ID_ARG=""
+ALLOW_UNLISTED_RPC=0
+RECEIPT_SCHEMA=""
 
 for arg in "$@"; do
 	case "$arg" in
@@ -70,11 +104,13 @@ for arg in "$@"; do
 		--anchor-source=*)       ANCHOR_SOURCE="${arg#*=}" ;;
 		--out=*)                 OUT_FILE="${arg#*=}" ;;
 		--rpc=*)                 RPC_OVERRIDE="${arg#*=}" ;;
+		--allow-unlisted-rpc)    ALLOW_UNLISTED_RPC=1 ;;
+		--receipt-schema=*)      RECEIPT_SCHEMA="${arg#*=}" ;;
 		--explorer-base=*)       EXPLORER_BASE="${arg#*=}" ;;
 		--trigger=*)             TRIGGER="${arg#*=}" ;;
 		--schema-url=*)          SCHEMA_URL="${arg#*=}" ;;
 		--prev-anchor-tx-id=*)   PREV_ANCHOR_TX_ID_ARG="${arg#*=}" ;;
-		-h|--help)               sed -n '2,42p' "$0" | sed 's/^# \?//'; exit 0 ;;
+		-h|--help)               sed -n '2,76p' "$0" | sed 's/^# \?//'; exit 0 ;;
 		*)                       echo "ERROR: unknown arg: $arg" >&2; exit 1 ;;
 	esac
 done
@@ -146,56 +182,71 @@ ID_ROOT="$(echo "$INPUT_JSON" | jq -r '.actions[] | select(.branch == "identity"
 OB_ROOT="$(echo "$INPUT_JSON" | jq -r '.actions[] | select(.branch == "observations") | .root_hex')"
 AR_ROOT="$(echo "$INPUT_JSON" | jq -r '.actions[] | select(.branch == "artifacts") | .root_hex')"
 
-if [ -n "$RPC_OVERRIDE" ]; then
-	RPC="$RPC_OVERRIDE"
-else
-	case "$NETWORK" in
-		mainnet-a|xpr-mainnet|proton) RPC="https://proton.eosusa.io" ;;
-		testnet-a|xpr-testnet|proton-test) RPC="https://test.proton.eosusa.io" ;;
-		*) echo "ERROR: unknown network for RPC selection: $NETWORK" >&2; exit 1 ;;
-	esac
+# ---- chain profile: role, chain_id, history bases, receipt schema --------
+# Everything chain-specific comes from the selected profile. Every failure
+# here is exit 1 and happens BEFORE any network request.
+for lib in a-chain-profile.sh anchor-history-read.sh; do
+	if [ ! -r "${REPO_ROOT}/scripts/lib/${lib}" ]; then
+		echo "ERROR: required library not readable: scripts/lib/${lib} (is the checkout complete? config/ and scripts/lib/ arrive together)" >&2
+		exit 1
+	fi
+done
+# shellcheck source=scripts/lib/a-chain-profile.sh
+. "${REPO_ROOT}/scripts/lib/a-chain-profile.sh" || { echo "ERROR: cannot load scripts/lib/a-chain-profile.sh" >&2; exit 1; }
+# shellcheck source=scripts/lib/anchor-history-read.sh
+. "${REPO_ROOT}/scripts/lib/anchor-history-read.sh"
+
+ROLE="$(acp_role_of_chain "$NETWORK")" \
+	|| { echo "ERROR: unknown network for RPC selection: $NETWORK" >&2; exit 1; }
+CHAIN_PROFILE="$(acp_profile_name "$ROLE")" \
+	|| { echo "ERROR: no usable A-Chain profile for role $ROLE (see a-chain-profile message above)" >&2; exit 1; }
+CHAIN_ID="$(acp_expected_chain_id "$ROLE")" \
+	|| { echo "ERROR: profile $CHAIN_PROFILE has no usable chain_id for role $ROLE — refusing to write a receipt that cannot name its chain" >&2; exit 1; }
+if [ "$ROLE" = "mainnet" ]; then DEFAULT_PROFILE="$ACP_DEFAULT_MAINNET"; else DEFAULT_PROFILE="$ACP_DEFAULT_TESTNET"; fi
+
+case "$RECEIPT_SCHEMA" in
+	"")
+		if [ "$CHAIN_PROFILE" = "$DEFAULT_PROFILE" ]; then RECEIPT_SCHEMA=v2; else RECEIPT_SCHEMA=v3; fi ;;
+	v2)
+		if [ "$CHAIN_PROFILE" != "$DEFAULT_PROFILE" ]; then
+			echo "ERROR: --receipt-schema=v2 refused for non-default profile $CHAIN_PROFILE — a post-migration receipt must be v3 so v2-only consumers cannot mistake it for a legacy-chain receipt" >&2
+			exit 1
+		fi ;;
+	v3) ;;
+	*) echo "ERROR: --receipt-schema must be v2 or v3, got: $RECEIPT_SCHEMA" >&2; exit 1 ;;
+esac
+RECEIPT_SCHEMA_VERSION="${RECEIPT_SCHEMA#v}"
+[ -n "$SCHEMA_URL" ]  || SCHEMA_URL="https://metal.freedom-yield.com/api/anchor-receipt.schema.${RECEIPT_SCHEMA}.json"
+[ -n "$SCHEMA_FILE" ] || SCHEMA_FILE="${REPO_ROOT}/public/api/anchor-receipt.schema.${RECEIPT_SCHEMA}.json"
+
+if [ -z "$EXPLORER_BASE" ]; then
+	EXPLORER_BASE="$(acp_explorer_base "$ROLE")" \
+		|| { echo "ERROR: profile $CHAIN_PROFILE has no explorer_base; pass --explorer-base=<url>" >&2; exit 1; }
 fi
+
+BASES="$(ahr_select_bases "$ROLE" "$RPC_OVERRIDE" "$ALLOW_UNLISTED_RPC")" \
+	|| { echo "ERROR: no permitted history base for profile $CHAIN_PROFILE (see message above)" >&2; exit 1; }
 
 # ---- gate 1: fetch tx by tx_id ----
-# Prefer Hyperion v2 (`/v2/history/get_actions?account=<actor>` + jq filter
-# by trx_id — the account-scoped query is the reliably-indexed path on
-# proton.eosusa.io / test.proton.eosusa.io). Fall back to EOSIO history
-# plugin v1 (`/v1/history/get_transaction`) for endpoints that don't run
-# Hyperion. Both paths produce the same normalized shape via jq below.
-TX_JSON_RAW=""
+# scripts/lib/anchor-history-read.sh ahr_resolve_tx: Hyperion v2
+# get_actions (account-scoped) → Hyperion v2 get_transaction → v1
+# get_transaction (traces). The first base that resolves the tx wins.
 TX_JSON=""
-
-# --- try Hyperion v2 first ---
-HYPERION_JSON="$(curl -sSf --max-time 15 \
-	"${RPC}/v2/history/get_actions?account=${ACTOR}&limit=50&sort=desc" 2>/dev/null || echo '{}')"
-if echo "$HYPERION_JSON" | jq -e --arg tx "$TX_ID" '[.actions[]? | select(.trx_id == $tx)] | length > 0' >/dev/null 2>&1; then
-	# Normalize Hyperion shape → v1-shape actions[]
-	TX_JSON="$(echo "$HYPERION_JSON" | jq --arg tx "$TX_ID" '
-		{
-			id: $tx,
-			block_num: ([.actions[] | select(.trx_id == $tx)] | first | .block_num),
-			block_time: ([.actions[] | select(.trx_id == $tx)] | first | .timestamp),
-			actions: [.actions[] | select(.trx_id == $tx) | {act: {account: .act.account, name: .act.name, authorization: .act.authorization, data: {memo: .act.data.memo}}}]
-		}')"
-	FETCHED_ACTIONS_LEN="$(echo "$TX_JSON" | jq '.actions | length')"
-fi
-
-# --- fall back to v1 EOSIO history plugin ---
-if [ -z "$TX_JSON" ] || [ "${FETCHED_ACTIONS_LEN:-0}" -eq 0 ]; then
-	V1_JSON="$(curl -sSf --max-time 15 \
-		-X POST -H 'content-type:application/json' \
-		-d "{\"id\":\"${TX_ID}\"}" \
-		"${RPC}/v1/history/get_transaction" 2>/dev/null || echo '{}')"
-	if echo "$V1_JSON" | jq -e '.id == "'"${TX_ID}"'" and (.actions | length > 0)' >/dev/null 2>&1; then
-		TX_JSON="$V1_JSON"
-		FETCHED_ACTIONS_LEN="$(echo "$TX_JSON" | jq '.actions | length')"
+RPC=""
+for base in $BASES; do
+	if TX_JSON="$(ahr_resolve_tx "$base" "$TX_ID" "$ACTOR")"; then
+		RPC="$base"
+		break
 	fi
-fi
+	TX_JSON=""
+done
 
 if [ -z "$TX_JSON" ] || ! echo "$TX_JSON" | jq -e '.actions | length > 0' >/dev/null 2>&1; then
-	echo "ERROR (3): gate 1 — tx_id $TX_ID not resolvable at $RPC (tried Hyperion v2 + v1)" >&2
+	echo "ERROR (3): gate 1 — tx_id $TX_ID not resolvable at $(printf '%s' "$BASES" | tr '\n' ' ')(profile $CHAIN_PROFILE; tried Hyperion v2 get_actions + get_transaction + v1)" >&2
 	exit 3
 fi
+FETCHED_ACTIONS_LEN="$(echo "$TX_JSON" | jq '.actions | length')"
+echo "OK: gate 1 — resolved at $RPC via $(echo "$TX_JSON" | jq -r .via)" >&2
 
 if [ "$FETCHED_ACTIONS_LEN" -ne 4 ]; then
 	echo "ERROR (4): gate 2 — expected 4 actions, got: $FETCHED_ACTIONS_LEN" >&2
@@ -247,7 +298,25 @@ case "$BLOCK_TIME" in
 	*) BLOCK_TIME="${BLOCK_TIME}Z" ;;
 esac
 
-# ---- compose v2 receipt ----
+# ---- block_id: from history, else /v1/chain/get_block on the same base ----
+# v2 (legacy default): best-effort — a missing block_id is a WARN and the
+#   field is omitted, so the XPR path gains no new post-broadcast failure.
+# v3: required — exit 3 (like an unresolvable tx: re-run later, do NOT
+#   re-broadcast). check-anchor-history-reachable.sh proves before signing
+#   that the base serves it.
+BLOCK_ID="$(echo "$TX_JSON" | jq -r '.block_id // empty')"
+if [ -z "$BLOCK_ID" ]; then
+	BLOCK_ID="$(ahr_block_id "$RPC" "$BLOCK_NUM" || true)"
+fi
+if [ -z "$BLOCK_ID" ]; then
+	if [ "$RECEIPT_SCHEMA" = "v3" ]; then
+		echo "ERROR (3): gate 7 — block_id for block $BLOCK_NUM not served by $RPC (history nor get_block); a v3 receipt requires it. The broadcast itself is NOT in question — re-run later, do NOT re-broadcast." >&2
+		exit 3
+	fi
+	echo "WARN: block_id for block $BLOCK_NUM not served by $RPC — omitted from this v2 receipt" >&2
+fi
+
+# ---- compose receipt (v2 by default; v3 on request / non-default profile) ----
 ANCHOR_SOURCE_URL="https://metal.freedom-yield.com/api/anchor-source.json"
 ANCHOR_SOURCE_SHA256="$(sha256_pipe < "$ANCHOR_SOURCE")"
 NOW="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
@@ -276,20 +345,26 @@ RECEIPT_JSON="$(jq -n \
 	--argjson prev_anchor_tx_id "$PREV_ANCHOR_TX_ID_JSON" \
 	--arg trigger "$TRIGGER" \
 	--arg now "$NOW" \
+	--argjson schema_version "$RECEIPT_SCHEMA_VERSION" \
+	--arg chain_id "$CHAIN_ID" \
+	--arg chain_profile "$CHAIN_PROFILE" \
+	--arg history_base "$RPC" \
+	--arg block_id "$BLOCK_ID" \
 	--arg script_ver "gen-anchor-receipt.sh v${SCRIPT_VERSION}" \
 	'{
 		"$schema": $schema_url,
-		schema_version: 2,
+		schema_version: $schema_version,
 		schema_version_of_source: $schema_version_of_source,
 		cycle_number: $cycle_number,
 		dag_root_hash: $dag_root_hash,
 		memo_prefix: $memo_prefix,
-		anchor: {
+		anchor: ({
 			chain: "metal-a-chain",
 			# chain_backend names the PROTOCOL FAMILY this script observes, not an
 			# execution engine. Evidenced by the dependencies of this very script:
 			# the tx is resolved through Antelope/EOSIO history interfaces (Hyperion
-			# /v2/history/get_actions, then /v1/history/get_transaction) and gates
+			# /v2/history/get_actions or get_transaction, then
+			# /v1/history/get_transaction — scripts/lib/anchor-history-read.sh) and gates
 			# 3-4 above assert the Antelope action model (eosio.token::transfer with
 			# actor@permission authorization). Everything published here is something
 			# the script actually checked.
@@ -308,7 +383,7 @@ RECEIPT_JSON="$(jq -n \
 			#   scripts/append-anchor-history.sh   (fallback default)
 			#   tests/gen-anchor-receipt/test-r13-r18-schema-archive.sh   (pinned value)
 			#   tests/append-anchor-history/test-append-anchor-history.sh (pinned value)
-			#   public/api/anchor-{receipt,history}.schema.v{1,2}.json    (description)
+			#   public/api/anchor-{receipt,history}.schema.v{1,2,3}.json  (description)
 			#   public/api/anchor-receipt*.example.json, anchor-history.example.jsonl
 			chain_backend: "antelope",
 			network: $network,
@@ -326,7 +401,14 @@ RECEIPT_JSON="$(jq -n \
 			authorization: {actor: $actor, permission: $perm},
 			sink: $sink,
 			quantity: $qty
-		},
+		} + {
+			# 2026-09-30 chain discrimination (additive in v2, required in v3):
+			# which chain this tx is on, which reviewed profile said so, which
+			# history base verified it, and the block that holds it.
+			chain_id: $chain_id,
+			chain_profile: $chain_profile,
+			history_base: $history_base
+		} + (if $block_id == "" then {} else {block_id: $block_id} end)),
 		anchor_source_url: $anchor_source_url,
 		anchor_source_sha256: $anchor_source_sha256,
 		prev_anchor_tx_id: $prev_anchor_tx_id,

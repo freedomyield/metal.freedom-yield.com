@@ -1,7 +1,7 @@
 {
-  "$comment": "Hand-maintained ground truth for the 13 execution units a cycle transition actually runs (model α, AI full orchestration). Read against real scripts on 2026-08-06 (background: docs/CYCLE_GATE.md model α runbook + docs/VALIDATOR_RENEWAL.md 新SOP were missing steps 7.5 (scp the Mac-signed fragment to the host) and 8.5 (push the two canonical anchor feeds) — buried in the prose of neighboring steps instead of being their own line item). Step 0 (operator's Metal Wallet web AddValidator submit) is deliberately NOT listed here: docs/CYCLE_GATE.md itself says 'Step 0 is the operator's own wallet action (no script, no gate)', so it is not a script-driven execution unit — it still has its own doc entry (0. / ⓪), just outside this machine-checked list of 13.",
+  "$comment": "Hand-maintained ground truth for the 13 execution units a cycle transition actually runs (model α, AI full orchestration). Read against real scripts on 2026-08-06 (background: docs/CYCLE_GATE.md model α runbook + docs/VALIDATOR_RENEWAL.md 新SOP were missing steps 7.5 (scp the Mac-signed fragment to the host) and 8.5 (push the two canonical anchor feeds) — buried in the prose of neighboring steps instead of being their own line item). Step 0 (operator's Metal Wallet web AddValidator submit) is deliberately NOT listed here: docs/CYCLE_GATE.md itself says 'Step 0 is the operator's own wallet action (no script, no gate)', so it is not a script-driven execution unit — it still has its own doc entry (0. / ⓪), just outside this machine-checked list of 13. 2026-09-30 (A-Chain -> PulseVM migration readiness): two units added, 7b.5 (host preconditions + pre-signing history reachability check, before 7c) and 10 (legacy-chain anchor archive, after 9) — the list is now 15.",
   "schema_version": 1,
-  "updated": "2026-08-06",
+  "updated": "2026-09-30",
   "source_of_truth": "docs/CYCLE_GATE.md 'Operator runbook (= cycle transitions, model α)' section + docs/VALIDATOR_RENEWAL.md '新 SOP' 当日順序 section. Both must carry every step below (as a literal substring match of that step's *_pattern) or tests/cycle-transition-steps/test-cycle-transition-steps.sh fails. Add a step here AND to both docs in the same commit.",
   "steps": [
     {
@@ -61,6 +61,13 @@
       "validator_renewal_pattern": "⑦-b gate 4 材料(mainnet dry run)"
     },
     {
+      "id": "7b.5",
+      "summary": "Host (read-only, before stop 4(a) and 7c): host preconditions — checkout advanced so config/a-chain-profiles.json and the profile/history libraries are present, jq >= 1.6, no stale FYD_*_CHAIN_ID / FYD_A_CHAIN_PROFILE_* in the deploy environment — then check-anchor-history-reachable.sh --chain=mainnet-a proves step 8's receipt will resolve the tx. Non-zero stops the transition before signing. Added 2026-09-30.",
+      "scripts": ["check-anchor-history-reachable.sh"],
+      "cycle_gate_pattern": "**7b.5 — history reachability (host, read-only, before 7c).**",
+      "validator_renewal_pattern": "⑦-b.5 validator host: history 到達確認"
+    },
+    {
       "id": "7c",
       "summary": "Mac: unlock mainnet keystore, sign + broadcast the 4-action anchor pack via bin/safe-broadcast.",
       "scripts": ["sign-anchor-event.sh"],
@@ -94,6 +101,13 @@
       "scripts": ["resume-after-cycle-start.sh"],
       "cycle_gate_pattern": "9. **host —**",
       "validator_renewal_pattern": "⑨ validator host: `FY_LIVE=1 bash scripts/resume-after-cycle-start.sh"
+    },
+    {
+      "id": "10",
+      "summary": "Mac (after 9): archive-legacy-anchors.sh + verify-legacy-anchor-archive.sh against the published ledger, then commit + push public/api/legacy-a-chain/ while the legacy XPR chain is still served. Added 2026-09-30.",
+      "scripts": ["archive-legacy-anchors.sh", "verify-legacy-anchor-archive.sh"],
+      "cycle_gate_pattern": "10. **Mac — archive the new anchor's legacy-chain record.**",
+      "validator_renewal_pattern": "⑩ Mac local: legacy anchor archive"
     }
   ]
 }

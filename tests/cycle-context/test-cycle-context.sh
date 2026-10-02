@@ -484,8 +484,11 @@ else
 fi
 
 echo
-echo "=== T8: the ten scripts the brief names are all in the table ==="
-BRIEF_SCRIPTS="append-anchor-history.sh check-identity-pins.sh gen-cycle-history.sh gen-anchor-receipt.sh gen-anchor-source.sh gen-renewal-ics.sh preview-cycle-anchor-broadcast.sh run-testnet-rehearsal.sh uptime-history.sh sign-anchor-event.sh"
+echo "=== T8: the scripts the brief names are all in the table ==="
+# check-anchor-history-reachable.sh joined 2026-09-30 (unit 7b.5, the
+# pre-signing history reachability check): its exit codes decide whether the
+# day proceeds to 7c, so they get recovery rows like every other day-of step.
+BRIEF_SCRIPTS="append-anchor-history.sh check-identity-pins.sh gen-cycle-history.sh gen-anchor-receipt.sh gen-anchor-source.sh gen-renewal-ics.sh preview-cycle-anchor-broadcast.sh run-testnet-rehearsal.sh uptime-history.sh sign-anchor-event.sh check-anchor-history-reachable.sh"
 for s in $BRIEF_SCRIPTS; do
 	if printf '%s\n' "$ROWS" | awk -F'|' -v s="$s" '$3==s{f=1} END{exit !f}'; then
 		pass "T8: $s has table rows"
@@ -555,7 +558,7 @@ SPEC_DOC="${REPO_ROOT}/docs/superpowers/specs/2026-08-06-single-source-of-truth-
 # below previously said 6|7.5, reasoning that phase 6 "consumes" the
 # fragment; that reasoning no longer holds now that the flow block itself
 # places 7.5 inside phase 5. Every other pair is a direct reading.
-PHASE_STEP_PAIRS="1|1 1|2 1|3 2|4 3|5 3|6 4|7a 5|7b 5|7c 5|7.5 6|8 6|8.5 6|9"
+PHASE_STEP_PAIRS="1|1 1|2 1|3 2|4 3|5 3|6 4|7a 5|7b 5|7b.5 5|7c 5|7.5 6|8 6|8.5 6|9 6|10"
 
 if [ ! -r "$SPEC_DOC" ]; then
 	fail "T9b: design doc not readable at ${SPEC_DOC#"${REPO_ROOT}"/} — the phase grouping has no authority to check against"
@@ -598,6 +601,8 @@ else
 	check_spec_phase "preview"           5
 	check_spec_phase "receipt"           6
 	check_spec_phase "history append"    6
+	check_spec_phase "history 到達確認(7b.5" 5
+	check_spec_phase "legacy archive(10)" 6
 
 	# Step 7.5 carries no script, so check_spec_phase() above never
 	# exercises it — that helper only reads the literal "^phase N " line,
@@ -666,7 +671,7 @@ PAIR_EOF
 	runbook_steps="$(jq -r '.steps[].id' "$STEPS_JSON" | LC_ALL=C sort -u | tr '\n' ' ' | sed 's/ *$//')"
 	pair_steps="$(printf '%s' "$PHASE_STEP_PAIRS" | tr ' ' '\n' | cut -d'|' -f2 | LC_ALL=C sort -u | tr '\n' ' ' | sed 's/ *$//')"
 	if [ "$runbook_steps" = "$pair_steps" ]; then
-		pass "T9b: the phase grouping covers exactly the runbook's 13 steps"
+		pass "T9b: the phase grouping covers exactly the runbook's steps"
 	else
 		fail "T9b: phase grouping covers steps [$pair_steps] but the runbook has [$runbook_steps] — assign the new step a phase deliberately"
 	fi

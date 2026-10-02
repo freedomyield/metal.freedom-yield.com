@@ -187,6 +187,31 @@ ssh-keygen -Y verify -f "$TMP/allowed" \
 
 		<article class="data-endpoint">
 			<header class="data-endpoint-head">
+				<h3>旧 A-Chain anchor アーカイブ (XPR Network)</h3>
+				<span class="data-tag">live</span>
+			</header>
+			<p>上の anchor は transfer の memo、 つまり chain state ではなく取引履歴 (history) です。 Metal A-Chain は XPR Network から PulseVM へ移行する見込みで、 移行前の履歴が配信され続ける保証はありません。 そのため旧 chain 上の mainnet anchor はすべて、 chain 自身の応答をそのまま保存した形でもここに残しています: Hyperion <code>/v2/history/get_transaction</code> の応答本文と、 その block の <code>/v1/chain/get_block</code> 応答本文、 それぞれの SHA-256 付き。 旧 chain が配信されている間は cycle ごとの anchor の後に追記され、 オフラインで検証できます。</p>
+			<dl class="data-meta">
+				<dt>マニフェスト</dt><dd><a href="/api/legacy-a-chain/manifest.json"><code>/api/legacy-a-chain/manifest.json</code></a> — anchor 1 件につき 1 entry: <code>tx_id</code>、 <code>block_num</code>、 <code>block_id</code>、 <code>chain_id</code>、 記録ファイルの SHA-256、 保存した各応答本文の SHA-256</dd>
+				<dt>記録</dt><dd><code>/api/legacy-a-chain/&lt;tx_id&gt;.json</code> — <code>history_body</code> / <code>block_body</code> に応答を文字列のまま byte-for-byte で保持</dd>
+				<dt>chain</dt><dd>XPR Network mainnet、 <code>chain_id</code> <code>384da888112027f0321850a169f737c33e53b388aad48b5adace4bab97f437e0</code></dd>
+			</dl>
+			<p>旧 chain を使わずに anchor 1 件を検証する手順:</p>
+			<ol>
+				<li>マニフェストと記録 <code>&lt;tx_id&gt;.json</code> を取得し、 記録ファイルの SHA-256 がマニフェスト entry の <code>sha256</code> と一致することを確認する。</li>
+				<li><code>history_body</code> と <code>block_body</code> の文字列を保存されたとおりに hash し、 記録とマニフェストの両方の <code>history_sha256</code> / <code>block_sha256</code> と一致することを確認する。</li>
+				<li><code>history_body</code> を parse: <code>eosio.token::transfer</code> がちょうど 4 action、 すべての <code>trx_id</code> が <code>tx_id</code> と一致、 すべての <code>block_num</code> が台帳行と一致。 <code>block_body</code> を parse: その <code>id</code> が記録の <code>block_id</code> と一致。</li>
+				<li>4 つの memo は <code>&lt;prefix&gt;-id:</code> / <code>-ob:</code> / <code>-ar:</code> / <code>&lt;prefix&gt;:&lt;dag_root&gt;</code>。 DAG root は 3 つの branch root を hex のまま連結 (id、 ob、 ar) した SHA-256 と一致し、 かつ <code>/api/anchor-history.jsonl</code> の該当行の <code>dag_root_hash</code> と一致すること。 署名した account と permission は、 その行の <code>signing_actor</code> / <code>signing_permission</code> と一致すること。</li>
+				<li>旧 chain が配信されている間は、 同じ <code>tx_id</code> を XPR Network の任意の Hyperion endpoint から取り直して比較することもできる (<code>query_time_ms</code> などの揮発 field は変わるが、 action は変わらない)。</li>
+			</ol>
+			<dl class="data-meta">
+				<dt>スクリプトでの検証</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/scripts/verify-legacy-anchor-archive.sh" rel="noopener noreferrer" target="_blank"><code>scripts/verify-legacy-anchor-archive.sh</code></a> が全 mainnet anchor について手順 1–4 を実行する: <code>--archive-dir=</code> にダウンロードしたアーカイブ、 <code>--history=</code> に <code>/api/anchor-history.jsonl</code> のコピー。 ネットワークには接続しない。</dd>
+				<dt>移行メモ</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/A_CHAIN_PULSEVM_CUTOVER.md" rel="noopener noreferrer" target="_blank"><code>docs/A_CHAIN_PULSEVM_CUTOVER.md</code></a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
 				<h3>エビデンスマニフェスト</h3>
 				<span class="data-tag">live</span>
 			</header>

@@ -960,8 +960,41 @@ topology (validator host + operator Mac)**, in this fixed day-of order
      exits 3 (config missing) and the redirect leaves a **0-byte** log that
      is only rejected later, at gate 4.
 
+   **7b.5 — history reachability (host, read-only, before 7c).** Added
+   2026-09-30 (A-Chain → PulseVM migration readiness). Step 8 resolves the
+   broadcast tx from history **after** the irreversible broadcast, and it now
+   reads its history bases and chain_id from the committed chain profile
+   (`config/a-chain-profiles.json`, via `scripts/lib/a-chain-profile.sh`).
+   So **before stop 4(a) — before the mainnet keystore is unlocked** — prove
+   on the host, with the same reader code on the same machine as step 8,
+   that it will be able to. Both lines run as `sudo -u deploy` in the host
+   repo, exactly like step 8:
+   ```sh
+   # host preconditions (must exit 0): checkout advanced so the profile and
+   # the libraries are present; jq printed (>= 1.6); no stale chain override
+   git rev-parse --short HEAD && test -r config/a-chain-profiles.json \
+     && test -r scripts/lib/a-chain-profile.sh \
+     && test -r scripts/lib/anchor-history-read.sh && jq --version \
+     && ! env | grep -e ^FYD_MAINNET_CHAIN_ID= -e ^FYD_TESTNET_CHAIN_ID= -e ^FYD_A_CHAIN_PROFILE_
+   bash scripts/check-anchor-history-reachable.sh --chain=mainnet-a
+   ```
+   Exit 0 prints one `REACHABLE profile=xpr-mainnet … mode=known-tx` line:
+   the newest anchor in the host ledger still resolves, with block number,
+   time and chain, through the profile's history bases in the receipt's own
+   order. **Any non-zero stops the day here** — 2 = the profile cannot
+   supply what the receipt needs, 3 = no history base resolved the known
+   anchor, 4 = a listed base answers for a different chain_id, 1 = usage or
+   ledger problem. Nothing has been signed: do not unlock, do not run 7c;
+   wait and re-run 7b.5. If the precondition line fails, advance the host
+   checkout (the deploy's host-advance step, or
+   `scripts/advance-host-checkout.sh` on the host) or remove the stale
+   variable at its source — never add an override to make it pass (an
+   override may only confirm the profile value). The jq floor is enforced
+   by the check itself (exit 2 below 1.6).
+   `scripts/cycle-transition.sh --print-only` prints this unit resolved.
+
    **7c — sign + broadcast.** Unlock the **separate** mainnet keystore, then
-   sign. `bin/safe-broadcast` gate 1 and gate 4 both REFUSE without
+   sign (only after 7b.5 printed `REACHABLE`). `bin/safe-broadcast` gate 1 and gate 4 both REFUSE without
    `--testnet-tx-id` / `--dry-run-log`.
 
    **この code block は 2 人で分担する**: **1 行目
@@ -1126,9 +1159,13 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    needs no opt-in.
    **Gate 1 can fail transiently right after the broadcast.** Hyperion
    indexes a tx some tens of seconds behind the chain, and
-   `gen-anchor-receipt.sh` queries it exactly once (`:159-197`, v2 then v1,
-   no wait, no retry) — so it exits 3 with `gate 1 — tx_id … not resolvable`
-   even though the tx is on-chain. Observed on the 2026-09-01 testnet
+   `gen-anchor-receipt.sh` queries each history base of the selected chain
+   profile once, in profile order (Hyperion `get_actions` → Hyperion
+   `get_transaction` → `/v1/history/get_transaction`, via
+   `scripts/lib/anchor-history-read.sh`; no wait, no retry) — so it exits 3
+   with `gate 1 — tx_id … not resolvable` even though the tx is on-chain.
+   (Step 7b.5 proved the bases answer; it cannot prove the NEW tx is already
+   indexed — that is this transient.) Observed on the 2026-09-01 testnet
    rehearsal: both v2 and v1 resolved the same tx about a minute later.
    **If step 7c exited 0 — `sign-anchor-event.sh` wrote its JSON receipt
    fragment with a 64-hex `tx_id` to stdout — the tx exists: wait about a
@@ -1195,6 +1232,32 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    **No broadcast, no explorer URL** here — the anchor tx confirmation
    belongs to step 7; this script only records cycle-gate approval state.
 
+10. **Mac — archive the new anchor's legacy-chain record.** Added
+   2026-09-30. Anchors are `eosio.token` transfer memos — history, not chain
+   state — and after the A-Chain moves to PulseVM the old chain's history
+   may stop being served (`docs/A_CHAIN_PULSEVM_CUTOVER.md`). While it is
+   still served, store today's anchor's raw history and block responses in
+   the published, git-tracked archive `public/api/legacy-a-chain/`:
+   ```sh
+   curl -fsS 'https://metal.freedom-yield.com/api/anchor-history.jsonl' -o /tmp/fya-anchor-history.jsonl
+   bash scripts/archive-legacy-anchors.sh --from-file=/tmp/fya-anchor-history.jsonl
+   bash scripts/verify-legacy-anchor-archive.sh --history=/tmp/fya-anchor-history.jsonl
+   git add public/api/legacy-a-chain/ && git diff --cached --name-status
+   git commit -m 'data(legacy-a-chain): archive the cycle <N+1> anchor while the legacy chain is served'
+   git push && gh run watch
+   ```
+   It reads the **published** ledger (so it needs step 8.5) and runs after
+   step 9 so its deploy comes after the gate-state write. Read-only requests
+   only; anchors already archived are skipped with no request. It reads the
+   legacy profile **by name** (`xpr-mainnet`), so it keeps pointing at the
+   old chain after a cutover. Done = archiver exit 0 **and** the verifier's
+   `VERIFIED <n> anchor(s)` with n one higher than before; the staged set is
+   exactly the new `<tx_id>.json` + `manifest.json`. Archiver exit 3 = a
+   record could not be fetched this time (others kept) — re-run later, it
+   resumes; exit 4/5 = fail closed (a recorded file disagrees with what the
+   chain serves now, or the chain_id differs) — stop and report, never
+   delete a file to make it pass. None of this touches the anchor itself.
+
 AI reads back step 7's tx id and reports the explorer URL to the operator
 for visual confirmation (PRIME DIRECTIVE gate 2's per-invocation
 authorization happens before that step runs, not after). Step 0 is the
@@ -1205,7 +1268,7 @@ needed for them.
 ### 完了判定 checklist (この 5 点が揃ったら当日終了)
 
 **`scripts/cycle-transition.sh --status` が全 green でも「終わった」ことには
-ならない。** 14 実行単位のうち 5 つ (7a / 7b / {7.5, 8, 8.5}) はどの事後条件にも
+ならない。** 16 実行単位のうち 7 つ (7a / 7b / 7b.5 / {7.5, 8, 8.5} / 10) はどの事後条件にも
 入っておらず、7.5 / 8 / 8.5 を丸ごと飛ばしても `--status` は緑を返しうる
 (その場合 on-chain には刻まれているのに公開 `anchor-receipt.json` /
 `anchor-history.jsonl` は前 cycle を配り続ける)。また 4b の registry 編集を

@@ -648,8 +648,20 @@ t14
 # ---------------------------------------------------------------------------
 t16() {
 	local declared tracked missing extra bad=0 n
-	declared="$(jq -r '.publications[] | select(.git_tracked == true) | .path' "$REGISTRY" | sort)"
+	# A git_tracked DIRECTORY row (path ends in "/") with a member_pattern covers
+	# every tracked file under it whose basename matches the pattern (the
+	# api/legacy-a-chain/ archive: one file per tx, unbounded). A tracked file
+	# under it that does NOT match the pattern is still reported as missing.
+	declared="$(jq -r '.publications[] | select(.git_tracked == true) | select(((.path | endswith("/")) and ((.member_pattern // "") != "")) | not) | .path' "$REGISTRY" | sort)"
 	tracked="$(cd "$REPO_ROOT" && git ls-files public/api/ public/.well-known/ | sed 's|^public/||' | sort)"
+	tracked="$(jq -Rr --slurpfile reg "$REGISTRY" '
+		. as $p
+		| ([$reg[0].publications[]
+			| select(.git_tracked == true and (.path | endswith("/")) and ((.member_pattern // "") != ""))
+			| . as $row
+			| select($p | startswith($row.path))
+			| ($p[($row.path | length):]) | select(test($row.member_pattern))] | length) as $covered
+		| select($covered == 0) | $p' <<< "$tracked" | sort)"
 	missing="$(comm -13 <(printf '%s\n' "$declared") <(printf '%s\n' "$tracked"))"
 	extra="$(comm -23 <(printf '%s\n' "$declared") <(printf '%s\n' "$tracked"))"
 	if [ -n "$missing" ]; then

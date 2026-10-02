@@ -108,6 +108,33 @@ No date is published, no route to running a third-party node is described anywhe
 
 The structural exposure is recorded (`bin/safe-broadcast` gate 1 reads `/v1/history/get_transaction` and gate 3 reads `proton chain:info`; PulseVM offers neither, and a permanently-failing gate 1 is a permanent `exit 3` under the Prime Directive) and the trigger to act is mechanical rather than a calendar reminder: `scripts/check-pulsevm-upstream.sh` watches daily and fires on T1 (the sync-notice sentence no longer matching), T2 (a mainnet section or a chain id not seen before), T3 (a new page in `llms.txt`), T4 (Alpine's head block advancing past a threshold) or T5 (the npm surface the docs tell people to install moving).
 
+### 2026-09-30 update — prepare now (operator decision; supersedes "no pre-emptive rewiring")
+
+**Superseded.** The paragraph above concluded that "no pre-emptive rewiring of the anchor pipeline is justified yet" and that the trigger to act would be the daily watch. On **2026-09-30 the operator decided the opposite for the anchor path**: the A-Chain's move onto PulseVM is treated as near-certain, so the repository is prepared for it now, the legacy anchors are archived and published now, and the watch's job narrows to reporting the few upstream facts the cutover still needs. What did NOT change: **"Own network ≠ anchor venue"** above stands exactly as written, and every new path is fail-closed until an operator has decided the open questions below.
+
+**Upstream facts as surveyed on 2026-09-30** (read-only; code, docs and live read-only probes — a dated survey like the table above, not a standing claim):
+
+| item | state on 2026-09-30 |
+|---|---|
+| `MetalBlockchain/pulsevm` | main = tag `v1.0.0` (2026-09-24); the latest GitHub **Release** is still v0.7.1 (2026-08-20) |
+| official migration code (merged 2026-09-14, in v1.0.0) | halt-and-import from an irreversible XPR block; **the new chain's chain_id is the MetalGo blockchain ID** (so it cannot equal the XPR chain_id `384da888…`); block heights **continue** from the cut (H+1); blocks before the cut are **not** served by the new chain |
+| community "1:1" demo | presents the source chain_id — explicitly "not an official Metallicus product and not an announced migration plan" |
+| push response on PulseVM | only `{"transaction_id"}` = admitted to the pool, not executed; execution must be confirmed from history |
+| finality | LIB = head (Snowman); no reversible window |
+| history | no `/v1/history/*` on the node; Hyperion is a separate service |
+| write freeze | the upstream plan keeps admission closed through the cutover window (≥ the maximum transaction lifetime, ~1 h) |
+| metalgo | the Granite line PulseVM v1 needs (rpcchainvm protocol 45) exists only as `-tahoe` pre-releases for the Tahoe testnet; Metal mainnet runs v1.13.x |
+| official cutover plan, date, mainnet chain_id | **none published** |
+
+**What was built on 2026-09-30** (all default-off: with the default XPR profiles every command, output and gate decision on the 2026-10-07 path is unchanged, pinned by equivalence tests):
+
+- `config/a-chain-profiles.json` + `scripts/lib/a-chain-profile.sh` — the single committed source of every chain value; PulseVM profiles carry null values and refuse until official values are committed.
+- `bin/safe-broadcast` on profiles — gate 3 also checks proton-cli's push endpoint against the profile's hosts; an id-only push is confirmed from history (exit 9 = "a broadcast MAY have happened — verify before retrying"); gate 1 refuses a PulseVM mainnet until the operator names its evidence testnet.
+- Receipts and ledger — chain fields in receipts (v2 additive; v3 required for any non-default profile), ledger invariant 5 per chain_id.
+- A pre-signing history reachability check — in the anchor pipeline, the testnet rehearsal, and as cycle-transition unit 7b.5 (stops the day before 7c).
+- The legacy archive `public/api/legacy-a-chain/` — every legacy anchor's raw history and block records, published and verifiable offline; extended after every anchor (unit 10) while the legacy chain is served.
+- The watch's T6-T8 (metalgo mainnet Granite release, PulseVM v1 Release, an official Metallicus statement) and the cutover runbook [`docs/A_CHAIN_PULSEVM_CUTOVER.md`](A_CHAIN_PULSEVM_CUTOVER.md), which records the OPEN operator decisions — which network satisfies PRIME DIRECTIVE gate 1 on PulseVM, the chain_id policy, the Constitution §3.5 signing-tool question, and what happens if this validator is ever appointed to the A-Chain's own validator set (the separation rule above).
+
 ## Explicit unreachable set (under current policy)
 
 The following targets are constitutionally unreachable while [`feedback_no_operator_name`](../../../.claude/projects/-Users-admin-htdocs-01-PROJECTS-metal-freedom-yield-com/memory/feedback_no_operator_name.md) and [`feedback_no_personal_finance`](../../../.claude/projects/-Users-admin-htdocs-01-PROJECTS-metal-freedom-yield-com/memory/feedback_no_personal_finance.md) hold:

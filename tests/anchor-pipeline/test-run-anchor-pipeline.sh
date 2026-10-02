@@ -12,7 +12,7 @@
 #        The bypass alert is likewise a recording stub (FYD_NOTIFY) — no
 #        real notifier is ever invoked.
 #
-# Shape: 13 scenario blocks (case 1..13) carrying runtime assertions — the
+# Shape: 14 scenario blocks (case 1..14) carrying runtime assertions — the
 # summary line's PASS count tallies assertions, not scenarios.
 #
 # What this covers that the unit suites do not:
@@ -75,7 +75,7 @@ build_harness() {
 	cp "${REPO_ROOT}/scripts/lib/side-effects.sh" "$HARNESS/scripts/lib/side-effects.sh"
 
 	local name
-	for name in check-scripts-freshness gen-anchor-source sign-anchor-event gen-anchor-receipt append-anchor-history; do
+	for name in check-scripts-freshness check-anchor-history-reachable gen-anchor-source sign-anchor-event gen-anchor-receipt append-anchor-history; do
 		cat > "$HARNESS/scripts/${name}.sh" <<STUB
 #!/usr/bin/env bash
 ROOT="\$(cd "\$(dirname "\$0")/.." && pwd)"
@@ -90,6 +90,11 @@ STUB
 		fi
 		if [ "$name" = "gen-anchor-source" ]; then
 			echo 'echo "{}" > "$ROOT/public/api/anchor-source.json"' >> "$HARNESS/scripts/${name}.sh"
+		fi
+		if [ "$name" = "check-anchor-history-reachable" ]; then
+			# The real check prints one REACHABLE line on stdout; the
+			# orchestrator must keep it off its own stdout (tx_id only).
+			echo 'echo "REACHABLE profile=stub"' >> "$HARNESS/scripts/${name}.sh"
 		fi
 		if [ "$name" = "check-scripts-freshness" ]; then
 			echo '[ -e "$ROOT/fetchfail-check-scripts-freshness" ] && exit 3' >> "$HARNESS/scripts/${name}.sh"
@@ -136,9 +141,9 @@ RC=$?
 [ "$OUT" = "feedc0de77" ] \
 	&& ok "happy path: tx_id propagated to stdout" \
 	|| bad "happy path: tx_id propagated to stdout (actual='$OUT')"
-[ "$(order_log)" = "check-scripts-freshness gen-anchor-source sign-anchor-event gen-anchor-receipt append-anchor-history" ] \
-	&& ok "happy path: 4 steps invoked in pipeline order" \
-	|| bad "happy path: 4 steps invoked in pipeline order (actual='$(order_log)')"
+[ "$(order_log)" = "check-scripts-freshness check-anchor-history-reachable gen-anchor-source sign-anchor-event gen-anchor-receipt append-anchor-history" ] \
+	&& ok "happy path: 4 steps invoked in pipeline order (after both preflights)" \
+	|| bad "happy path: 4 steps invoked in pipeline order (after both preflights) (actual='$(order_log)')"
 destroy_harness
 
 # ---- case 2: arg forwarding to each step ------------------------------------
@@ -218,7 +223,7 @@ RC=$?
 [ "$RC" -eq 11 ] \
 	&& ok "step-1 fail: exit 11" \
 	|| bad "step-1 fail: exit 11 (actual=$RC)"
-[ "$(order_log)" = "check-scripts-freshness gen-anchor-source" ] \
+[ "$(order_log)" = "check-scripts-freshness check-anchor-history-reachable gen-anchor-source" ] \
 	&& ok "step-1 fail: later steps not invoked" \
 	|| bad "step-1 fail: later steps not invoked (order='$(order_log)')"
 destroy_harness
@@ -231,7 +236,7 @@ RC=$?
 [ "$RC" -eq 12 ] \
 	&& ok "step-2 fail: exit 12" \
 	|| bad "step-2 fail: exit 12 (actual=$RC)"
-[ "$(order_log)" = "check-scripts-freshness gen-anchor-source sign-anchor-event" ] \
+[ "$(order_log)" = "check-scripts-freshness check-anchor-history-reachable gen-anchor-source sign-anchor-event" ] \
 	&& ok "step-2 fail: receipt/append not invoked" \
 	|| bad "step-2 fail: receipt/append not invoked (order='$(order_log)')"
 destroy_harness
@@ -244,7 +249,7 @@ RC=$?
 [ "$RC" -eq 13 ] \
 	&& ok "step-3 fail: exit 13" \
 	|| bad "step-3 fail: exit 13 (actual=$RC)"
-[ "$(order_log)" = "check-scripts-freshness gen-anchor-source sign-anchor-event gen-anchor-receipt" ] \
+[ "$(order_log)" = "check-scripts-freshness check-anchor-history-reachable gen-anchor-source sign-anchor-event gen-anchor-receipt" ] \
 	&& ok "step-3 fail: append not invoked" \
 	|| bad "step-3 fail: append not invoked (order='$(order_log)')"
 destroy_harness
@@ -351,6 +356,9 @@ RC=$?
 was_called check-scripts-freshness \
 	&& bad "bypass: freshness checker must NOT be invoked when bypassed" \
 	|| ok "bypass: freshness checker not invoked when bypassed"
+was_called check-anchor-history-reachable \
+	&& ok "bypass: the freshness bypass does NOT bypass the history reachability preflight" \
+	|| bad "bypass: the freshness bypass must NOT bypass the history reachability preflight"
 ALERTS="$(notify_log)"
 echo "$ALERTS" | grep -q '^high|' \
 	&& ok "bypass: alert fired at priority=high" \
@@ -358,6 +366,25 @@ echo "$ALERTS" | grep -q '^high|' \
 echo "$ALERTS" | grep -qi 'bypass' \
 	&& ok "bypass: alert message mentions the bypass" \
 	|| bad "bypass: alert message mentions the bypass (log: $ALERTS)"
+destroy_harness
+
+# ---- case 14: history reachability preflight fails → exit 4, nothing signed ---
+# 2026-09-30 (P3): step 3 (receipt) runs after an irreversible broadcast, so
+# the history read it depends on is proven BEFORE step 2 signs. A failing
+# check must stop the run before anchor generation and signing.
+build_harness
+touch "$HARNESS/fail-check-anchor-history-reachable"
+bash "$HARNESS/scripts/run-anchor-pipeline.sh" --chain=mainnet-a >/dev/null 2>&1
+RC=$?
+[ "$RC" -eq 4 ] \
+	&& ok "reachability fail: exit 4" \
+	|| bad "reachability fail: exit 4 (actual=$RC)"
+[ "$(order_log)" = "check-scripts-freshness check-anchor-history-reachable" ] \
+	&& ok "reachability fail: nothing generated or signed" \
+	|| bad "reachability fail: nothing generated or signed (order='$(order_log)')"
+args_of check-anchor-history-reachable | grep -qx -- '--chain=mainnet-a' \
+	&& ok "reachability: --chain forwarded to the check" \
+	|| bad "reachability: --chain forwarded to the check (args: $(args_of check-anchor-history-reachable))"
 destroy_harness
 
 # ---- summary -----------------------------------------------------------------
