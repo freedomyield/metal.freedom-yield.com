@@ -12,7 +12,9 @@ metalgo は `--data-dir` の下に staking dir を持ち、以下 3 ファイル
 | `staker.key` | 上記の **秘密鍵 (PEM)** | **絶対に外に出さない** |
 | `signer.key` | BLS の **秘密鍵** | **絶対に外に出さない** |
 
-本リポでは Docker named volume `metalgo_data` に格納される。host bind-mount にはしていない(漏洩面を増やさない方針)。
+本リポの compose では `/data` は Docker named volume (`METALGO_DATA_PATH` を設定すれば bind mount) に格納される。実体の名前は compose project 名で変わり、現行本番 host の metalgo は repo の compose とは別の名前で動いている ([DISASTER_RECOVERY.md 冒頭の警告](DISASTER_RECOVERY.md))。**volume 名・コンテナ名は固定で仮定しない。** 下の手順は compose label でコンテナを特定し、その `/data` の mount 元を使う。
+
+> ⚠️ 固定の volume 名で `docker run -v <名前>:/data` すると、その名前の volume が無い host では **空の volume が黙って作られ**、一覧は空・backup は空の tar になる。
 
 ## NodeID とは
 
@@ -23,8 +25,15 @@ metalgo は `--data-dir` の下に staking dir を持ち、以下 3 ファイル
 普段はアクセス不要。backup / rotation などの必要時のみ。
 
 ```sh
-# 名前付きボリューム内のファイル一覧を確認
-docker run --rm -v metalgo_data:/data alpine ls -la /data/staking
+# 対象コンテナを特定する (期待: 1 行だけ。2 行以上なら止まって確認)
+docker ps -a --filter label=com.docker.compose.service=metalgo --format '{{.ID}} {{.Names}} {{.Status}}'
+CID=<上の ID>
+# その /data の mount 元 (空なら止まる)
+DATA=$(docker inspect "$CID" \
+  --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}')
+echo "$DATA"
+# staking dir のファイル一覧
+sudo ls -la "$DATA/staking"
 ```
 
 ## Backup 手順
@@ -33,9 +42,11 @@ docker run --rm -v metalgo_data:/data alpine ls -la /data/staking
 2. backup を取る:
 
    ```sh
-   docker run --rm -v metalgo_data:/data \
-       -v "$(pwd)/secure-backup":/backup \
-       alpine tar czf /backup/staking-$(date +%Y%m%d-%H%M%S).tar.gz -C /data staking
+   # DATA は「ファイルにアクセスする方法」の手順で求めたもの
+   mkdir -p "$(pwd)/secure-backup"
+   sudo tar czf "$(pwd)/secure-backup/staking-$(date +%Y%m%d-%H%M%S).tar.gz" -C "$DATA" staking
+   # 中身に staker.crt / staker.key / signer.key が入っていることを確認
+   sudo tar tzf "$(pwd)"/secure-backup/staking-*.tar.gz
    ```
 
 3. tar を**すぐ暗号化** (`gpg -c` / `age` / KMS にアップロード) して、平文 tar は削除
@@ -56,7 +67,7 @@ testnet は経済価値ゼロなので即時 rotation 可能(named volume を消
 
 `staker.key` または `signer.key` が**外部に出た疑い**がある場合:
 
-1. **すぐ metalgo を停止**: `make node-down`
+1. **すぐ metalgo を停止**: compose label でコンテナを特定して `docker stop <ID>` し、止まったことを確認する。手順は [INCIDENT_RESPONSE.md §3.4](INCIDENT_RESPONSE.md#34-staking-key-漏洩疑い-sev-1) の step 1。`make node-down` や compose の down は使わない (testnet 用 compose / 別 project を指すので、現行本番 host の metalgo は止まらない)
 2. 当該 key を含む全 backup を特定し、暗号化破棄
 3. 公衆 explorer で当該 NodeID の `endTime` を確認:
    - stake が active なら **その期間は経済的損失リスクあり**(攻撃者が一時的に validator を動かして報酬を盗む / 不正委任を受ける)
