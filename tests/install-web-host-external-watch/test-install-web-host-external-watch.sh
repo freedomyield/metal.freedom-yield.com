@@ -530,6 +530,36 @@ check "changed VALIDATOR_HOST: exit 0, only the key name shown" \
 check "  neither the old nor the new value printed" '! printf "%s" "$OUT" | grep -qF "$HN_OLD" && ! printf "%s" "$OUT" | grep -qF "$HN_NEW"'
 check "  new value written" 'grep -qxF "VALIDATOR_HOST=$HN_NEW" "$H/metal-fy-watch/etc/watch.env"'
 
+# ---- WATCH_PUBLIC_STATUS: public status file for the phone page ------------------
+fresh_fixture; cotenant_crontab
+PUB="$T/fx/webroot/api/watch-status.json"
+WENV="$H/metal-fy-watch/etc/watch.env"
+run
+check "status: first install without the env: key absent (disabled), says so" \
+	'[ "$RC" -eq 0 ] && ! grep -q "^WATCH_PUBLIC_STATUS=" "$WENV" && printf "%s" "$OUT" | grep -q "public status: disabled"' "rc=$RC"
+check "  and the self-test published nothing" '[ ! -e "$PUB" ]'
+EXTRA_ENV="WATCH_PUBLIC_STATUS=auto" run --dry-run
+check "status: auto --dry-run shows enabled + the changed key name, writes nothing" \
+	'[ "$RC" -eq 0 ] && printf "%s" "$OUT" | grep -q "public status: enabled — watch-status.json in the api dir of validator.json (auto)" && printf "%s" "$OUT" | grep -q "etc/watch.env: update (changed keys: WATCH_PUBLIC_STATUS )" && ! grep -q "^WATCH_PUBLIC_STATUS=" "$WENV" && [ ! -e "$PUB" ]' "rc=$RC"
+EXTRA_ENV="WATCH_PUBLIC_STATUS=auto" run
+check "status: auto writes the api dir of validator.json" '[ "$RC" -eq 0 ] && grep -qxF "WATCH_PUBLIC_STATUS=$PUB" "$WENV"' "rc=$RC"
+check "  the self-test run published it (schema 1, mode 644)" '[ "$(jq -r .schema "$PUB" 2>/dev/null)" = 1 ] && [ "$(meta "$PUB")" = 644 ]'
+check "  the path is not printed" '! printf "%s" "$OUT" | grep -qF "$PUB"'
+run
+check "status: re-install without the env keeps it" '[ "$RC" -eq 0 ] && grep -qxF "WATCH_PUBLIC_STATUS=$PUB" "$WENV" && printf "%s" "$OUT" | grep -q "kept from the installed watch.env"' "rc=$RC"
+mkdir -p "$T/fx/other"
+EXTRA_ENV="WATCH_PUBLIC_STATUS=$T/fx/other/s.json" run
+check "status: explicit absolute path is written" '[ "$RC" -eq 0 ] && grep -qxF "WATCH_PUBLIC_STATUS=$T/fx/other/s.json" "$WENV"' "rc=$RC"
+EXTRA_ENV="WATCH_PUBLIC_STATUS=off" run
+check "status: off removes the key" '[ "$RC" -eq 0 ] && ! grep -q "^WATCH_PUBLIC_STATUS=" "$WENV"' "rc=$RC"
+cp "$WENV" "$T/wenv.before"
+for badv in relative.json /x/../y.json /x/y.txt '/x/a;b.json'; do
+	EXTRA_ENV="WATCH_PUBLIC_STATUS=$badv" run
+	check "status: malformed value '$badv' refused locally (exit 2), watch.env untouched" '[ "$RC" -eq 2 ] && cmp -s "$WENV" "$T/wenv.before"' "rc=$RC"
+done
+EXTRA_ENV="WATCH_PUBLIC_STATUS=$T/fx/nodir/watch-status.json" run
+check "status: directory missing on the host: exit 6, watch.env untouched" '[ "$RC" -eq 6 ] && cmp -s "$WENV" "$T/wenv.before"' "rc=$RC"
+
 # ---- layout verification fails loudly (I27) -------------------------------------
 # chmod leaves installed files world-readable (644) as a broken filesystem
 # might; the verifier must refuse with exit 11 before arming the crontab.

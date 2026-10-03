@@ -27,7 +27,7 @@
       },
       {
         "surface": "/etc/cron.d on the validator host — the cron files that actually invoke the producers.",
-        "measured": "Seven cron basenames have a creating installer in this repo (metal-host-advance, metal-anchor-watch, metal-anchor-publish-health, metal-identity-pins, metal-host-drift, metal-watch-validators, metal-pulsevm-watch — grep of scripts/install-*.sh for cron.d/, re-measured 2026-08-17 when metal-pulsevm-watch landed; the same grep returned six on 2026-08-07). NONE of them produces a publication listed here. Of the 20 push-owned publications (publisher push / push-subdir / push-out-of-band), 17 name a cron and ALL 17 carry owner.cron_installer_in_repo=false, i.e. zero of them have a repo-verifiable command body. The other 3 — api/anchor-receipt.json, api/anchor-history.jsonl, api/archive/ — are on NO cron at all and carry cron_installer_in_repo=null; they are produced by hand through scripts/run-anchor-pipeline.sh after an on-chain broadcast. Do not read this as 'push implies cron'.",
+        "measured": "Seven cron basenames have a creating installer in this repo (metal-host-advance, metal-anchor-watch, metal-anchor-publish-health, metal-identity-pins, metal-host-drift, metal-watch-validators, metal-pulsevm-watch — grep of scripts/install-*.sh for cron.d/, re-measured 2026-08-17 when metal-pulsevm-watch landed; the same grep returned six on 2026-08-07). NONE of them produces a publication listed here. Of the 21 push-owned publications (publisher push / push-subdir / push-out-of-band), 17 name a cron and ALL 17 carry owner.cron_installer_in_repo=false, i.e. zero of them have a repo-verifiable command body. The other 3 — api/anchor-receipt.json, api/anchor-history.jsonl, api/archive/ — are on NO cron at all and carry cron_installer_in_repo=null; they are produced by hand through scripts/run-anchor-pipeline.sh after an on-chain broadcast. The 21st, api/watch-status.json (added 2026-10-03), runs on the web host, not the validator host: it is written by scripts/external-watch.sh from a user-crontab block whose installer IS in this repo (scripts/install-web-host-external-watch.sh), so it carries cron_file=null and cron_installer_in_repo=true. Do not read this as 'push implies cron'.",
         "why_excluded": "A registry cannot govern text it cannot read. The spec (§9) records that 15 project cron files run in production and 7 have no repo installer; that count was measured on the host, not by this file, and is not re-measured here. What IS measured here is the repo side: the schedule, the arguments, and the environment that decide when and where a producer writes are outside this file for every push-owned publication. Do not read owner.producer as 'the registry controls this artifact' — it means only 'this script contains the write'."
       },
       {
@@ -371,6 +371,25 @@
       "note": "Same measured-then-fixed history as api/anchor-receipt.json: excluded from --delete, on the push allowlist, and added to .gitignore's runtime-generated-site-data section 2026-08-14 (was neither tracked nor ignored before that)."
     },
     {
+      "path": "api/watch-status.json",
+      "kind": "stream",
+      "publisher": "push-out-of-band",
+      "owner": {
+        "producer": "scripts/external-watch.sh",
+        "producer_evidence": "scripts/external-watch.sh publish_status: writes WATCH_PUBLIC_STATUS from etc/watch.env (the installer sets it to <api dir of validator.json>/watch-status.json)",
+        "runs_on": "web-host",
+        "cron_file": null,
+        "cron_installer_in_repo": true,
+        "invocation_note": "Every 5 minutes from the site account's crontab block '# BEGIN metal-fy-external-watch', installed by scripts/install-web-host-external-watch.sh (WATCH_PUBLIC_STATUS=auto). Not an /etc/cron.d file, hence cron_file null."
+      },
+      "push_name": null,
+      "rsync_delete_exclude": true,
+      "gitignored": true,
+      "git_tracked": false,
+      "pinned_by": [],
+      "note": "Written in place on the web host by the off-host external watch (docs/MONITORING_OPS.md section 14), never pushed from the validator host, so the status page keeps working while the validator host is unreachable. Excluded from --delete so a deploy cannot erase it; NOT on scripts/push-to-web-host.sh's allowlist on purpose: the validator host must never be able to overwrite the watch's view of it."
+    },
+    {
       "path": "api/archive/",
       "entry_type": "directory",
       "kind": "record",
@@ -548,6 +567,10 @@
         { "path": "api/cycle-history.jsonl" },
         { "path": "api/anchor-receipt.json" },
         { "path": "api/anchor-history.jsonl" },
+        { "path": "api/watch-status.json", "comment_before": [
+          "# Written on the web host itself by the off-host external watch",
+          "# (scripts/external-watch.sh, WATCH_PUBLIC_STATUS), not pushed: the deploy",
+          "# must neither deliver nor delete it." ] },
         {
           "path": "api/archive/",
           "comment_before": [
@@ -603,6 +626,9 @@
           "# R18 anchor receipt / history — on-chain anchor 確定後にのみ生成・push される",
           "# (validator host, scripts/run-anchor-pipeline.sh 経由。cron 常駐ではない)" ] },
         { "path": "api/anchor-history.jsonl" },
+        { "path": "api/watch-status.json", "comment_before": [
+          "# 外部見張り (scripts/external-watch.sh) が web host 上で直接書く status page 用",
+          "# の feed。push でも git でもない単一 owner、追跡しない。" ] },
         { "path": "api/archive/", "comment_before": [
           "# R18 per-anchor archive (gen-anchor-source.sh / gen-anchor-receipt.sh が",
           "# content-addressed で書く anchor-source-<dag>.json / anchor-receipt-<tx>.json)。",

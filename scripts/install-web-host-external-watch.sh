@@ -100,6 +100,14 @@
 #                        never contacted)
 #   FY_WEB_API_DIR       web host api/ dir holding validator.json; skips
 #                        auto-detection from the push wrapper
+#   WATCH_PUBLIC_STATUS  public status file for the phone status page
+#                        (/api/watch-status.json, docs/MONITORING_OPS.md §14.7):
+#                          auto  = watch-status.json in the same api/ dir as
+#                                  validator.json (the site's served api/)
+#                          off   = disable (removes the key)
+#                          /abs/path.json = explicit target
+#                          unset = keep what the installed watch.env has
+#                                  (disabled on a first install)
 #
 # Test mode: SKIP_SSH=1 runs both remote halves locally with `bash -c` (no
 # host contacted). Only then are these honoured: SKIP_SSH_HOME (fake account
@@ -167,6 +175,8 @@ API_DIR_OVERRIDE="${4:-}"
 # environment can redirect them; a real run always passes them empty.
 HOME_OVERRIDE="${5:-}"
 SELFTEST_PATH="${6:-}"
+# $7: WATCH_PUBLIC_STATUS request ("" keep | auto | off | /abs/path.json).
+PUBSTAT_REQ="${7:-}"
 [ -n "$SELFTEST_PATH" ] || SELFTEST_PATH=/usr/bin:/bin
 
 BEGIN_MARK='# BEGIN metal-fy-external-watch'
@@ -494,12 +504,39 @@ else
 	echo "WARNING: validator.json not readable by $ACCT yet — the fresh check will FAIL until it is" >&2
 fi
 
+echo "--- public status file (WATCH_PUBLIC_STATUS) ---"
+PUBSTAT_RE='^/[A-Za-z0-9._/-]+[.]json$'
+pubstat_ok() { printf '%s' "$1" | grep -qE "$PUBSTAT_RE" && ! printf '%s' "$1" | grep -qE '(^|/)[.][.]?(/|$)|//'; }
+PUBSTAT=""
+case "$PUBSTAT_REQ" in
+	off)  echo "public status: disabled (WATCH_PUBLIC_STATUS=off)" ;;
+	auto) PUBSTAT="$API_DIR/watch-status.json"
+	      echo "public status: enabled — watch-status.json in the api dir of validator.json (auto)" ;;
+	"")
+		OLD="$(as_account sed -n 's/^WATCH_PUBLIC_STATUS=//p' "$W/etc/watch.env" 2>/dev/null | tail -n 1 || true)"
+		if [ -n "$OLD" ] && pubstat_ok "$OLD"; then
+			PUBSTAT="$OLD"; echo "public status: enabled — kept from the installed watch.env"
+		else
+			echo "public status: disabled (not configured; WATCH_PUBLIC_STATUS=auto enables it)"
+		fi ;;
+	*)    PUBSTAT="$PUBSTAT_REQ"; echo "public status: enabled — explicit path" ;;
+esac
+if [ -n "$PUBSTAT" ]; then
+	if ! pubstat_ok "$PUBSTAT"; then
+		echo "ERROR (6): WATCH_PUBLIC_STATUS must be an absolute *.json path of [A-Za-z0-9._/-] without . or .. segments" >&2; exit 6
+	fi
+	if ! as_account test -d "${PUBSTAT%/*}" || ! as_account test -w "${PUBSTAT%/*}"; then
+		echo "ERROR (6): the public status file's directory does not exist or is not writable by $ACCT" >&2; exit 6
+	fi
+fi
+
 {
 	echo "# metal-fy-watch config — written by scripts/install-web-host-external-watch.sh"
 	echo "# Strict KEY=VALUE, never sourced. Host-specific: never commit. Mode 600."
 	echo "VALIDATOR_HOST=$VHOST"
 	echo "VALIDATOR_JSON=$VJSON"
 	echo "NTFY_TOPIC_FILE=$W/etc/ntfy-topic"
+	[ -z "$PUBSTAT" ] || echo "WATCH_PUBLIC_STATUS=$PUBSTAT"
 } > "$TMP/watch.env"
 
 echo
@@ -649,6 +686,7 @@ WEB_HOST_KEY="${WEB_HOST_KEY:-}"
 WATCH_ACCOUNT="${WATCH_ACCOUNT:-deploy}"
 VALIDATOR_HOST="${VALIDATOR_HOST:-}"
 FY_WEB_API_DIR="${FY_WEB_API_DIR:-}"
+WATCH_PUBLIC_STATUS="${WATCH_PUBLIC_STATUS:-}"
 WATCH_SRC="${REPO_ROOT}/scripts/external-watch.sh"
 NOTIFY_SRC="${REPO_ROOT}/scripts/notify.sh"
 T_HOME="" T_PATH=""
@@ -667,6 +705,13 @@ fi
 if [ -n "$FY_WEB_API_DIR" ] && ! printf '%s' "$FY_WEB_API_DIR" | grep -qE '^/[A-Za-z0-9._/-]+$'; then
 	die2 "FY_WEB_API_DIR must be an absolute path of [A-Za-z0-9._/-]"
 fi
+case "$WATCH_PUBLIC_STATUS" in
+	""|auto|off) ;;
+	*) if ! printf '%s' "$WATCH_PUBLIC_STATUS" | grep -qE '^/[A-Za-z0-9._/-]+[.]json$' \
+		|| printf '%s' "$WATCH_PUBLIC_STATUS" | grep -qE '(^|/)[.][.]?(/|$)|//'; then
+		die2 "WATCH_PUBLIC_STATUS must be auto, off, or an absolute *.json path of [A-Za-z0-9._/-]"
+	fi ;;
+esac
 if [ "$SKIP_SSH" != 1 ]; then
 	[ -n "$WEB_HOST" ] || die2 "WEB_HOST required"
 	[ -n "$WEB_HOST_KEY" ] || die2 "WEB_HOST_KEY required (no default)"
@@ -732,7 +777,7 @@ SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=10 -o LogLevel=ERROR
 # web_run <mode>: run the remote half on the web host; stdin is passed through.
 web_run() {
 	local args
-	args="$(shq "$1") $(shq "$DRY_RUN") $(shq "$WATCH_ACCOUNT") $(shq "$FY_WEB_API_DIR") $(shq "$T_HOME") $(shq "$T_PATH")"
+	args="$(shq "$1") $(shq "$DRY_RUN") $(shq "$WATCH_ACCOUNT") $(shq "$FY_WEB_API_DIR") $(shq "$T_HOME") $(shq "$T_PATH") $(shq "$WATCH_PUBLIC_STATUS")"
 	if [ "$SKIP_SSH" = 1 ]; then
 		eval "set -- $args"
 		bash -c "$REMOTE_SCRIPT" _ "$@"
