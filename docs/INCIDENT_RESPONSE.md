@@ -69,7 +69,7 @@ sudo ufw status verbose
 
 **症状**: `docker ps -a --filter label=com.docker.compose.service=metalgo` で metalgo が unhealthy / restarting / exited、または `info.getNodeID` API が応答なし。
 
-> ⚠️ 現行本番 host では compose up は実行しない (別 NodeID になる。[DISASTER_RECOVERY.md 冒頭の警告](DISASTER_RECOVERY.md) 参照)。 コンテナは `docker ps -a --filter label=com.docker.compose.service=metalgo` で特定する。
+> ⚠️ 現行本番 host では、`.env` で名前を揃えて `scripts/check-compose-naming.sh` が `RESULT: MATCH` を返すまで compose up は実行しない (揃っていないと別 NodeID になる。[DISASTER_RECOVERY.md 冒頭の警告](DISASTER_RECOVERY.md) 参照)。 コンテナは `docker ps -a --filter label=com.docker.compose.service=metalgo` で特定する。
 
 **調査手順**:
 
@@ -188,6 +188,7 @@ sudo find / -newer /etc/passwd -not -path '/proc/*' -not -path '/sys/*' 2>/dev/n
 **症状**: 起動後何時間経っても bootstrap が完了しない、または `accepted state summary "Skipped"` 等のログが繰り返し出る。
 
 > ⚠️ ここでは compose の down / up を使わない。現行本番 host の metalgo は repo の compose とは別の project 名・volume 名で動いているので、repo の compose ファイルでの `down -v` は本番の volume を消さず、`up` は空の volume で **別 NodeID** を作る ([DISASTER_RECOVERY.md 冒頭の警告](DISASTER_RECOVERY.md) 参照)。volume 名も固定で仮定しない。コンテナは compose label で特定し、データは今の `/data` の mount 元の中で、staking 以外だけを消す。
+> ⚠️ 現行本番 host では、`.env` で名前を揃えて `scripts/check-compose-naming.sh` が `RESULT: MATCH` を返すまで compose up は実行しない (揃っていないと別 NodeID になる。[DISASTER_RECOVERY.md 冒頭の警告](DISASTER_RECOVERY.md) 参照)。
 
 **対応**:
 

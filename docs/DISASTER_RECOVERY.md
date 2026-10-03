@@ -20,14 +20,15 @@ VPS が「明日突然消失」した時に、同じ NodeID を持つ validator 
 
 ### ⚠️ 警告: 現行本番 host の metalgo は、repo の compose とは別の名前で動いている
 
-2026-10-02 に本番 host を read-only で実測した結果、現行本番 host (repo の初回 commit より前に作成) の metalgo は、**repo より前からある別の compose project 名・コンテナ名・named volume 名**で動いている。repo の compose ファイルからは別の名前になる (project = `docker-compose.metalgo.yml:17` の `name: metalgo-stack`、コンテナ = `docker-compose.metalgo.prod.yml` の `container_name: metalgo-${METAL_NETWORK:-mainnet}` → mainnet では `metalgo-mainnet`、volume = `metalgo-stack_metalgo_data`)。本番側の実名は本書に書かない (Constitution §4.1 S9 / §4.2 C5。operator-local notes 参照)。
+2026-10-02 に本番 host を read-only で実測した結果、現行本番 host (repo の初回 commit より前に作成) の metalgo は、**repo より前からある別の compose project 名・コンテナ名・named volume 名**で動いている。repo の compose ファイルの既定では別の名前になる (project = `docker-compose.metalgo.yml` の `name:` の既定 `metalgo-stack`、コンテナ = `docker-compose.metalgo.prod.yml` の `container_name:` の既定 `metalgo-${METAL_NETWORK:-mainnet}` → mainnet では `metalgo-mainnet`、volume = `metalgo-stack_metalgo_data`)。本番側の実名は本書に書かない (Constitution §4.1 S9 / §4.2 C5。operator-local notes 参照)。
 
-- **現行本番 host で、今の repo のファイルのまま metalgo の `docker compose ... up -d` を実行してはいけない。** compose は別 project として **新しい空の volume** を作り、その metalgo は staker keys を見つけられず **新しい鍵を生成 = 別の NodeID** で起動しようとする。旧コンテナの横に 2 つ目の stack ができる (旧コンテナが動いていれば port 衝突で起動に失敗するが、volume とコンテナは残る。旧コンテナが止まっている時なら別 NodeID のまま起動する)。
+- **現行本番 host で、名前を揃えないまま metalgo の `docker compose ... up -d` を実行してはいけない。** compose は別 project として **新しい空の volume** を作り、その metalgo は staker keys を見つけられず **新しい鍵を生成 = 別の NodeID** で起動しようとする。旧コンテナの横に 2 つ目の stack ができる (旧コンテナが動いていれば port 衝突で起動に失敗するが、volume とコンテナは残る。旧コンテナが止まっている時なら別 NodeID のまま起動する)。
+- **揃え方 (2026-10-03 operator 決定: 鍵とデータは動かさず、repo の compose を現行の名前に解決させる):** host の `.env` (untracked) に `METALGO_COMPOSE_PROJECT=<current-project>` と `METALGO_CONTAINER_NAME=<current-container>` を現行の名前で設定し、**compose で metalgo を作り直す前に必ず `scripts/check-compose-naming.sh` を実行して `RESULT: MATCH` (exit 0) を確認する。** このスクリプトは read-only (`docker compose ... config` / `docker ps` / `docker inspect` だけ) で、compose が解決する project 名・コンテナ名・`/data` の volume 名 (`<project>_metalgo_data`、bind の場合は host path) を、label で特定した稼働中 metalgo コンテナと比べる。1 つでも MISMATCH (exit 1)、または判定不能 (exit 2: metalgo コンテナが 0 個 / 2 個以上、`.env` 不備など) なら compose up しない。両変数とも未設定なら従来の名前 (`metalgo-stack` / `metalgo-<network>`) のまま。 **`COMPOSE_PROJECT_NAME` は使わない。** この `.env` は Caddy の stack (`docker-compose.yml`、`name: site`) と共有で、`COMPOSE_PROJECT_NAME` はどの compose ファイルの `name:` よりも優先されるため、Caddy の project 名と volume (`site_caddy_data` = TLS 証明書) まで改名してしまう。check-compose-naming.sh はこれが設定されていると `isolation` を MISMATCH にする。
 - `docs/VALIDATOR_HOST_SETUP.md` の metalgo 用 compose コマンドは新 host 専用 (該当箇所に 1 行の警告あり)。`docs/INCIDENT_RESPONSE.md` (§3.2 / §3.4 / §3.6) と `docs/KEY_ROTATION.md` の現行本番 host 向け手順は、compose を使わず label で特定したコンテナ ID に `docker stop` / `docker start` / `docker logs` を当て、データは `/data` の mount 元を使う形に改めた (2026-10-03)。`scripts/check-anomalies.sh` の通知の対処欄は label で特定し、既存コンテナを `docker start` する形に改めた (2026-10-02、`tests/anomalies/test-metalgo-advice-body.sh` で固定)。
-- `scripts/vps-bootstrap.sh` の step_metalgo は、別 project の metalgo コンテナを見つけると何も作らず止まる (fail closed)。
+- `scripts/vps-bootstrap.sh` の step_metalgo は、別 project の metalgo コンテナを見つけると何も作らず止まる (fail closed)。`.env` で名前を揃えた後は、そのコンテナを自 project のものとして扱う (それでも先に `scripts/check-compose-naming.sh` で MATCH を確認する)。
 - 名前を固定で仮定しない。本書の手順は metalgo コンテナを compose label `com.docker.compose.service=metalgo` で特定する。
 - この label 特定は compose の service 名が `metalgo` であることを前提にしている。現行本番 host でも、この label が付いた metalgo コンテナがちょうど 1 つであることを 2026-10-02 に read-only で実測した (operator 承認)。将来この label が違っていれば、label による特定と `scripts/vps-bootstrap.sh` の他 project 検出 (`resolve_metalgo_data_dir`、`:327`) はそのコンテナを見落とす。
-- **本番 host の命名を repo に揃えるか (またはその逆か) は未決の operator 判断。** 本書では揃えない。新 host への移設は repo の命名で新規に作るので、この問題は旧 host 側にだけ残る。
+- 新 host への移設は repo の既定の命名で新規に作る (`.env` に上の 2 変数を書かない) ので、この揃え方が要るのは旧 host 側だけ。旧 host の当日手順の草案は operator-local (`docs/tasks/`、gitignore 対象)。
 
 ---
 
@@ -111,8 +112,9 @@ EOF
 
 # 6. 鍵の置き場を確定 → 復号 + 配置 → 公開前の NodeID 確認
 # 鍵の置き場 = metalgo コンテナの /data の mount 元。compose 自身から引く(起動はしない)
-#   compose の project 名は docker-compose.metalgo.yml:17 の `name: metalgo-stack` なので、
-#   /data の named volume(docker-compose.metalgo.prod.yml:49)の実体は
+#   compose の project 名は docker-compose.metalgo.yml の `name:`(既定 metalgo-stack、
+#   .env の METALGO_COMPOSE_PROJECT で上書き。新 host では設定しない)なので、
+#   /data の named volume の実体は既定で
 #   metalgo-stack_metalgo_data(metalgo_data ではない)。METALGO_DATA_PATH を使う場合はその path
 #   (コンテナ名は固定で仮定しない。compose label で特定する。冒頭の警告参照)
 docker compose -f docker-compose.metalgo.yml -f docker-compose.metalgo.prod.yml create metalgo
@@ -280,8 +282,9 @@ trap 'rm -rf /tmp/staking' EXIT
 # 途中で失敗して手で中断する時も、session を離れる前に rm -rf /tmp/staking を実行する
 # (Mac 側の scp が途中で失敗した時も、VPS にログインして同じく消す)
 # 鍵の置き場 = metalgo コンテナの /data の mount 元。compose 自身から引く(起動はしない)
-#   compose の project 名は docker-compose.metalgo.yml:17 の `name: metalgo-stack` なので、
-#   /data の named volume(docker-compose.metalgo.prod.yml:49)の実体は
+#   compose の project 名は docker-compose.metalgo.yml の `name:`(既定 metalgo-stack、
+#   .env の METALGO_COMPOSE_PROJECT で上書き。新 host では設定しない)なので、
+#   /data の named volume の実体は既定で
 #   metalgo-stack_metalgo_data(metalgo_data ではない)。METALGO_DATA_PATH を使う場合はその path
 #   (コンテナ名は固定で仮定しない。compose label で特定する。冒頭の警告参照)
 docker compose -f docker-compose.metalgo.yml -f docker-compose.metalgo.prod.yml create metalgo
