@@ -5,12 +5,15 @@
 #   - with no naming env, the names are unchanged from before 2026-10-03
 #     (project metalgo-stack, container metalgo-<network>, volume
 #     metalgo-stack_metalgo_data; base-only container metalgo-testnet)
-#   - COMPOSE_PROJECT_NAME / METALGO_CONTAINER_NAME (in the environment, or in a
+#   - METALGO_COMPOSE_PROJECT / METALGO_CONTAINER_NAME (in the environment, or in a
 #     .env beside the compose files as on the host) change the project,
 #     the container AND the /data named volume together
 #   - check-compose-naming.sh parses real compose output: with docker ps /
 #     inspect stubbed to a synthetic container, aligned env -> MATCH, default
-#     env -> MISMATCH on all three items.
+#     env -> MISMATCH on all three items, COMPOSE_PROJECT_NAME -> isolation MISMATCH
+#   - why COMPOSE_PROJECT_NAME is not the knob: the host .env is shared with
+#     the Caddy stack, and COMPOSE_PROJECT_NAME renames that stack too, while
+#     METALGO_COMPOSE_PROJECT leaves it alone.
 #
 # `docker compose config` only renders files — it never contacts containers or
 # volumes. It runs in a throwaway copy so a host .env in the checkout cannot
@@ -62,16 +65,16 @@ assert_eq "T1 base-only (local dev) unchanged" "metalgo-stack|metalgo-testnet|me
 
 echo "T2: environment overrides move project, container and volume together"
 assert_eq "T2 both overridden" "t-proj|t-ctr|t-proj_metalgo_data|metalgo_data" \
-  "$(names COMPOSE_PROJECT_NAME=t-proj METALGO_CONTAINER_NAME=t-ctr)"
+  "$(names METALGO_COMPOSE_PROJECT=t-proj METALGO_CONTAINER_NAME=t-ctr)"
 assert_eq "T2 project only -> container keeps default" "t-proj|metalgo-mainnet|t-proj_metalgo_data|metalgo_data" \
-  "$(names COMPOSE_PROJECT_NAME=t-proj)"
+  "$(names METALGO_COMPOSE_PROJECT=t-proj)"
 assert_eq "T2 container only -> project/volume keep default" "metalgo-stack|t-ctr|metalgo-stack_metalgo_data|metalgo_data" \
   "$(names METALGO_CONTAINER_NAME=t-ctr)"
 assert_eq "T2 empty values fall back to defaults" "metalgo-stack|metalgo-mainnet|metalgo-stack_metalgo_data|metalgo_data" \
-  "$(names METALGO_CONTAINER_NAME= COMPOSE_PROJECT_NAME=)"
+  "$(names METALGO_CONTAINER_NAME= METALGO_COMPOSE_PROJECT=)"
 
 echo "T3: a .env beside the compose files (the host layout) is honoured"
-printf 'COMPOSE_PROJECT_NAME=t-envproj\nMETALGO_CONTAINER_NAME=t-envctr\n' >"$W/.env"
+printf 'METALGO_COMPOSE_PROJECT=t-envproj\nMETALGO_CONTAINER_NAME=t-envctr\n' >"$W/.env"
 assert_eq "T3 .env overrides" "t-envproj|t-envctr|t-envproj_metalgo_data|metalgo_data" "$(names)"
 rm -f "$W/.env"
 
@@ -98,14 +101,31 @@ vrun() {
   env -i PATH="$TMP/bin:$PATH" HOME="$HOME" ${DOCKER_CONFIG:+DOCKER_CONFIG="$DOCKER_CONFIG"} \
     METAL_NETWORK=mainnet METAL_PUBLIC_IP=192.0.2.1 "$@" bash "$W/scripts/check-compose-naming.sh" 2>&1
 }
-out=$(vrun COMPOSE_PROJECT_NAME=t-proj METALGO_CONTAINER_NAME=t-ctr); rc=$?
+out=$(vrun METALGO_COMPOSE_PROJECT=t-proj METALGO_CONTAINER_NAME=t-ctr); rc=$?
 assert_eq "T5a aligned env -> exit 0" 0 "$rc"
 assert_contains "T5a data MATCH on the resolved volume" "MATCH     data      volume:t-proj_metalgo_data" "$out"
 out=$(vrun); rc=$?
 assert_eq "T5b default env -> exit 1" 1 "$rc"
 assert_eq "T5b three MISMATCH lines" 3 "$(printf '%s\n' "$out" | grep -c '^MISMATCH ')"
+out=$(vrun METALGO_COMPOSE_PROJECT=t-proj METALGO_CONTAINER_NAME=t-ctr COMPOSE_PROJECT_NAME=t-proj); rc=$?
+assert_eq "T5c COMPOSE_PROJECT_NAME set -> exit 1 even though names align" 1 "$rc"
+assert_contains "T5c isolation MISMATCH" "MISMATCH  isolation" "$out"
 bad_calls=$(grep -vE '^(compose .* config( |$)|ps |inspect )' "$TMP/log" || true)
 assert_eq "T5 docker saw only config/ps/inspect" "" "$bad_calls"
+
+echo "T6: the Caddy stack (same host .env) is untouched by the metalgo knobs"
+cp "$REPO/docker-compose.yml" "$REPO/docker-compose.prod.yml" "$W/"
+site() {
+  (cd "$W" && env -i PATH="$PATH" HOME="$HOME" ${DOCKER_CONFIG:+DOCKER_CONFIG="$DOCKER_CONFIG"} \
+     DOMAIN=example.com ACME_EMAIL=ops@example.com OPS_BASIC_AUTH_HASH=x "$@" \
+     docker compose -f docker-compose.yml -f docker-compose.prod.yml config --format json) \
+  | jq -r '[.name, .volumes.caddy_data.name] | join("|")'
+}
+site_default=$(site)
+assert_eq "T6a METALGO_* leave the site project/volume alone" "$site_default" \
+  "$(site METALGO_COMPOSE_PROJECT=t-proj METALGO_CONTAINER_NAME=t-ctr)"
+assert_eq "T6b (rationale) COMPOSE_PROJECT_NAME would rename the site stack" "t-proj|t-proj_caddy_data" \
+  "$(site COMPOSE_PROJECT_NAME=t-proj)"
 
 echo
 echo "PASS=$PASS FAIL=$FAIL"

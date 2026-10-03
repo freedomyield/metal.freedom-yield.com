@@ -340,6 +340,9 @@ resolve_metalgo_data_dir() {
     echo "       Starting metalgo from this repo would create a second stack on a new, empty" >&2
     echo "       /data (new staker keys, different NodeID). Refusing. Reconcile by hand first" >&2
     echo "       (docs/DISASTER_RECOVERY.md, warning on compose project naming)." >&2
+    echo "       If that container is this validator's current metalgo, set" >&2
+    echo "       METALGO_COMPOSE_PROJECT / METALGO_CONTAINER_NAME in .env to its names and" >&2
+    echo "       confirm with scripts/check-compose-naming.sh (RESULT: MATCH) first." >&2
     return 1
   fi
   if [ -z "$own" ]; then

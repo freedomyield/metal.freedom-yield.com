@@ -16,8 +16,9 @@
 #                            未設定なら named volume
 #   METAL_MEM_LIMIT       = (任意) "16g" 等。未設定なら 16g
 #   METAL_CPUS            = (任意) "8.0" 等。未設定なら 8.0
-#   COMPOSE_PROJECT_NAME  = (任意) compose project 名。未設定なら base の metalgo-stack。
-#                            named volume 名 (<project>_metalgo_data) もこれで決まる
+#   METALGO_COMPOSE_PROJECT=(任意) metalgo の compose project 名。未設定なら metalgo-stack。
+#                            named volume 名 (<project>_metalgo_data) もこれで決まる。
+#                            COMPOSE_PROJECT_NAME は使わない (.env 共有の Caddy stack まで改名される)
 #   METALGO_CONTAINER_NAME= (任意) コンテナ名。未設定なら metalgo-${METAL_NETWORK}
 #   ※ 既存 host では上の 2 つを現行の名前に合わせ、compose up の前に
 #     scripts/check-compose-naming.sh で MATCH を確認する(不一致のまま up すると

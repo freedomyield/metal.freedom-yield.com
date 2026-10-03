@@ -17,12 +17,14 @@
 # project 名は env で上書きできる (未設定なら metalgo-stack = 従来どおり)。
 # named volume `metalgo_data` の実体名は `<project 名>_metalgo_data` になるので、
 # project 名を変えると /data の volume も変わる (= 別の staker keys / 別の NodeID)。
-# 既存 host で compose を使う前に、host の .env の COMPOSE_PROJECT_NAME を現行の
+# 既存 host で compose を使う前に、host の .env の METALGO_COMPOSE_PROJECT を現行の
 # project 名に合わせ、scripts/check-compose-naming.sh で MATCH を確認すること
 # (docs/DISASTER_RECOVERY.md 冒頭の警告参照)。
-# 補足: compose は COMPOSE_PROJECT_NAME を (env / .env のどちらでも) `name:` より
-# 優先して使うので、ここの interpolation は既定値を見えるようにするための明示。
-name: ${COMPOSE_PROJECT_NAME:-metalgo-stack}
+# COMPOSE_PROJECT_NAME は使わない: host の .env は Caddy の stack (docker-compose.yml、
+# name: site) と共有で、COMPOSE_PROJECT_NAME は (env / .env のどちらでも) `name:` より
+# 優先されるため、Caddy の project と volume (site_caddy_data 等) まで改名してしまう。
+# check-compose-naming.sh は COMPOSE_PROJECT_NAME が設定されていると MISMATCH にする。
+name: ${METALGO_COMPOSE_PROJECT:-metalgo-stack}
 
 services:
   metalgo:

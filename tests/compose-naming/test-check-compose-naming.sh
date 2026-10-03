@@ -75,7 +75,7 @@ insp() {
 OUT=""; RC=0
 run() {
   : >"$TMP/log"
-  OUT=$(PATH="$TMP/bin:$PATH" STUB_LOG="$TMP/log" STUB_CFG="$TMP/fx/cfg" STUB_IDS="$TMP/fx/ids" \
+  OUT=$(env -u COMPOSE_PROJECT_NAME PATH="$TMP/bin:$PATH" ${CPN:+COMPOSE_PROJECT_NAME="$CPN"} STUB_LOG="$TMP/log" STUB_CFG="$TMP/fx/cfg" STUB_IDS="$TMP/fx/ids" \
         STUB_INSPECT="$TMP/fx/insp" STUB_CFG_RC="${CFG_RC:-0}" \
         bash "$FAKE_REPO/scripts/check-compose-naming.sh" 2>&1)
   RC=$?
@@ -100,7 +100,7 @@ cfg t-proj t-ctr volume metalgo_data t-proj_metalgo_data >"$TMP/fx/cfg"
 echo cid-1 >"$TMP/fx/ids"; insp t-ctr t-proj volume t-proj_metalgo_data >"$TMP/fx/insp"
 run
 assert_eq "T1 exit 0" 0 "$RC"
-assert_eq "T1 three MATCH lines" 3 "$(printf '%s\n' "$OUT" | grep -c '^MATCH ')"
+assert_eq "T1 four MATCH lines" 4 "$(printf '%s\n' "$OUT" | grep -c '^MATCH ')"
 assert_contains "T1 RESULT MATCH" "RESULT: MATCH" "$OUT"
 assert_not_contains "T1 no MISMATCH" "MISMATCH" "$OUT"
 assert_contains "T1 ps by service label, all states" "ps -a --no-trunc -q --filter label=com.docker.compose.service=metalgo" "$(cat "$TMP/log")"
@@ -178,6 +178,24 @@ echo "T10: container without compose project label -> fail closed"
 insp t-ctr t-proj volume t-proj_metalgo_data | jq '.[0].Config.Labels |= del(.["com.docker.compose.project"])' >"$TMP/fx/insp"
 run
 assert_eq "T10 exit 2" 2 "$RC"
+
+echo "T12: COMPOSE_PROJECT_NAME set -> isolation MISMATCH even when names align"
+cfg t-proj t-ctr volume metalgo_data t-proj_metalgo_data >"$TMP/fx/cfg"
+echo cid-1 >"$TMP/fx/ids"; insp t-ctr t-proj volume t-proj_metalgo_data >"$TMP/fx/insp"
+CPN=t-proj run
+assert_eq "T12a in environment -> exit 1" 1 "$RC"
+assert_contains "T12a isolation MISMATCH names the source" "MISMATCH  isolation COMPOSE_PROJECT_NAME is set (environment)" "$OUT"
+printf 'METAL_NETWORK=mainnet\nCOMPOSE_PROJECT_NAME=t-proj\n' >"$FAKE_REPO/.env"
+run
+assert_eq "T12b in ./.env -> exit 1" 1 "$RC"
+assert_contains "T12b isolation MISMATCH (.env)" "COMPOSE_PROJECT_NAME is set (.env)" "$OUT"
+printf 'export COMPOSE_PROJECT_NAME = t-proj\n' >"$FAKE_REPO/.env"
+run
+assert_eq "T12c 'export X = y' form in ./.env -> exit 1" 1 "$RC"
+printf '# COMPOSE_PROJECT_NAME=t-proj\nMETALGO_COMPOSE_PROJECT=t-proj\n' >"$FAKE_REPO/.env"
+run
+assert_eq "T12d commented-out line is not a hit -> exit 0" 0 "$RC"
+rm -f "$FAKE_REPO/.env"
 
 echo "T11: static — the script text names no mutating docker subcommand outside its refusal list"
 body=$(grep -v '^\s*#' "$SCRIPT" | grep -v 'REFUSED\|up|create|run|start')

@@ -10,7 +10,7 @@
 # under a different compose project / container / named volume than the
 # repo's defaults. A `docker compose ... up` whose names do not match creates
 # a NEW empty /data volume -> new staker keys -> a different NodeID. The fix is
-# to set COMPOSE_PROJECT_NAME / METALGO_CONTAINER_NAME in the host .env to the
+# to set METALGO_COMPOSE_PROJECT / METALGO_CONTAINER_NAME in the host .env to the
 # current names (docs/DISASTER_RECOVERY.md, warning on compose naming). This
 # script proves the alignment BEFORE any compose up.
 #
@@ -20,6 +20,11 @@
 #   data       the /data mount: volume -> resolved volume name (volumes.<key>.name),
 #              bind -> host path                  vs  the container's /data Mount
 #                                                     (volume -> .Name, bind -> .Source)
+#   isolation  COMPOSE_PROJECT_NAME must be UNSET (environment and ./.env). The host
+#              .env is shared with the Caddy stack (docker-compose.yml, name: site);
+#              COMPOSE_PROJECT_NAME beats `name:` in every compose file, so it would
+#              rename the Caddy project and its volumes too. Use
+#              METALGO_COMPOSE_PROJECT instead.
 #
 # The running container is found ONLY by label com.docker.compose.service=metalgo
 # (all states, `docker ps -a`). 0 or 2+ such containers -> fail closed.
@@ -33,7 +38,7 @@
 #   bash scripts/check-compose-naming.sh
 #
 # Exit codes:
-#   0  all three items MATCH
+#   0  all four items MATCH
 #   1  at least one MISMATCH
 #   2  could not decide (docker/jq missing, compose config failed, 0 or 2+
 #      metalgo containers, unparsable output) — fail closed, never a pass
@@ -127,6 +132,17 @@ item() {
 item project   "$want_project"   "$have_project"
 item container "$want_container" "$have_container"
 item data      "$want_data"      "$have_data"
+cpn_src=""
+[ -n "${COMPOSE_PROJECT_NAME:-}" ] && cpn_src="environment"
+if [ -f .env ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?COMPOSE_PROJECT_NAME[[:space:]]*=' .env; then
+  cpn_src="${cpn_src:+$cpn_src+}.env"
+fi
+if [ -z "$cpn_src" ]; then
+  printf 'MATCH     %-9s %s\n' isolation "COMPOSE_PROJECT_NAME unset"
+else
+  printf 'MISMATCH  %-9s COMPOSE_PROJECT_NAME is set (%s): it also renames the Caddy stack; use METALGO_COMPOSE_PROJECT\n' isolation "$cpn_src"
+  fails=$((fails + 1))
+fi
 echo "INFO      state     $have_state (informational; not part of the verdict)"
 
 if [ "$fails" -eq 0 ]; then
@@ -134,5 +150,5 @@ if [ "$fails" -eq 0 ]; then
   exit 0
 fi
 echo "RESULT: MISMATCH ($fails item(s)) — do NOT (re)create metalgo via compose on this host."
-echo "        Set COMPOSE_PROJECT_NAME / METALGO_CONTAINER_NAME in the host .env and re-run."
+echo "        Set METALGO_COMPOSE_PROJECT / METALGO_CONTAINER_NAME in the host .env and re-run."
 exit 1
