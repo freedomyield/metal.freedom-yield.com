@@ -4,9 +4,14 @@
 //   - validator.json: network-first with cache fallback (so a fresh fetch
 //     wins when online, last-known value renders when offline)
 //   - Versioned cache name; old caches deleted on activate.
+//   - NETWORK-ONLY (never cached, never answered from cache): the operator
+//     status page /status/*, every /api/* JSON it reads, and any request made
+//     with cache: "no-store". A cached status page or cached JSON could show
+//     a stale "正常" while the validator is down; offline it must fail so the
+//     page says "通信できません" (or the browser shows its offline error).
 "use strict";
 
-const CACHE_VERSION = "v157-inquiry-uptime-link-fix";
+const CACHE_VERSION = "v158-status-page-network-only";
 const SHELL_CACHE = "shell-" + CACHE_VERSION;
 const DATA_CACHE = "data-" + CACHE_VERSION;
 
@@ -43,12 +48,24 @@ self.addEventListener("activate", (event) => {
 	self.clients.claim();
 });
 
+const NETWORK_ONLY_API = ["/api/watch-status.json", "/api/known-outages.json"];
+
+function isNetworkOnly(req, url) {
+	if (url.pathname === "/status" || url.pathname.indexOf("/status/") === 0) return true;
+	if (NETWORK_ONLY_API.indexOf(url.pathname) !== -1) return true;
+	if (req.cache === "no-store") return true;
+	return false;
+}
+
 self.addEventListener("fetch", (event) => {
 	const req = event.request;
 	if (req.method !== "GET") return;
 
 	const url = new URL(req.url);
 	if (url.origin !== self.location.origin) return;
+
+	// Network-only: return without respondWith → the browser fetches normally.
+	if (isNetworkOnly(req, url)) return;
 
 	// validator.json — network-first
 	if (url.pathname === "/api/validator.json") {
