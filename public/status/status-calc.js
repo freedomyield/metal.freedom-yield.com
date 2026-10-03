@@ -27,7 +27,10 @@
 		gapMs: 7 * MIN,             // a check-to-check interval above this is a gap
 		uptimeSlackPts: 0.5,        // (d) actual < expected - this → unexpected drop
 		rewardThresholdPct: 80,     // reward requirement
-		lowBudgetHours: 24          // remaining budget below this is shown red
+		lowBudgetHours: 24,         // remaining budget below this is shown red
+		futureSkewMs: 2 * MIN,      // a timestamp this far ahead of now → clock is wrong
+		renderStaleMs: 3 * MIN,     // screen not re-rendered for this long → 更新できていません
+		fetchTimeoutMs: 15 * 1000   // each fetch is aborted after this
 	};
 
 	var CHECK_LABELS = {
@@ -100,27 +103,45 @@
 		return Math.max(0, (budget - used) / HOUR);
 	}
 
+	// Check values are tri-state: true (PASS), false (FAIL), null (UNKNOWN =
+	// not confirmed). Anything else (missing, string, …) counts as failed.
 	function checkFailed(c) {
-		return !c || c.fresh !== true || c.p2p !== true || c.chain !== true;
+		if (!c) return true;
+		for (var i = 0; i < CHECK_KEYS.length; i++) {
+			var x = c[CHECK_KEYS[i]];
+			if (x !== true && x !== null) return true;
+		}
+		return false;
 	}
 
-	// 24-hour summary of the watch history: failed checks and gaps. A gap is
+	function checkUnknown(c) {
+		if (!c) return false;
+		for (var i = 0; i < CHECK_KEYS.length; i++) {
+			if (c[CHECK_KEYS[i]] === null) return true;
+		}
+		return false;
+	}
+
+	// 24-hour summary of the watch history: failed checks, unconfirmed checks
+	// (some value null, none failed) and gaps. A gap is
 	// a consecutive-check interval > 7 min; the interval from the newest check
 	// to now counts too (a silent watcher is a gap, not a pass).
 	function historySummary(checks, nowMs) {
 		var list = Array.isArray(checks) ? checks : [];
 		var failures = 0;
+		var unknowns = 0;
 		var gaps = 0;
 		var prev = null;
 		for (var i = 0; i < list.length; i++) {
 			if (checkFailed(list[i])) failures++;
+			else if (checkUnknown(list[i])) unknowns++;
 			var t = toMs(list[i] && list[i].t);
 			if (t === null) continue;
 			if (prev !== null && t - prev > LIMITS.gapMs) gaps++;
 			prev = t;
 		}
 		if (prev !== null && nowMs - prev > LIMITS.gapMs) gaps++;
-		return { failures: failures, gaps: gaps, total: list.length };
+		return { failures: failures, unknowns: unknowns, gaps: gaps, total: list.length };
 	}
 
 	function alertNames(last) {
@@ -133,9 +154,29 @@
 		}
 		for (var k = 0; k < CHECK_KEYS.length; k++) {
 			var key = CHECK_KEYS[k];
-			if (last && last[key] !== true && !seen[key]) { seen[key] = true; names.push(key); }
+			// null = 未確認 (handled by unknownNames), not an alert
+			if (last && last[key] !== true && last[key] !== null && !seen[key]) { seen[key] = true; names.push(key); }
 		}
 		return names;
+	}
+
+	function unknownNames(last) {
+		var names = [];
+		for (var k = 0; k < CHECK_KEYS.length; k++) {
+			if (last && last[CHECK_KEYS[k]] === null) names.push(CHECK_KEYS[k]);
+		}
+		return names;
+	}
+
+	// true when ms lies further in the future than the allowed clock skew.
+	function inFuture(ms, now) {
+		return ms !== null && ms - now > LIMITS.futureSkewMs;
+	}
+
+	// Watchdog: the screen must have been re-rendered successfully within
+	// renderStaleMs, otherwise whatever it shows can no longer be vouched for.
+	function renderStale(lastRenderMs, now) {
+		return typeof lastRenderMs !== "number" || !isFinite(lastRenderMs) || now - lastRenderMs > LIMITS.renderStaleMs;
 	}
 
 	function labelOf(name) {
@@ -144,8 +185,11 @@
 
 	// Verdict, evaluated strictly in this order:
 	//   (0) nothing could be fetched at all            → 通信できません
+	//   (t) last.t / generated_at / observedAt more
+	//       than 2 min in the future                   → 時刻が不正
 	//   (a) watch-status missing/unreadable/>15 min    → 見張りの情報が古い
 	//   (b) last.alerting non-empty or any check false → 異常あり
+	//   (u) any check null (UNKNOWN)                   → 一部未確認
 	//   (c) validator.json missing or observedAt >20 m → validator の情報が古い
 	//   (d) uptime unknown, or actual < expected - 0.5 → 取得できない / 想定外の低下
 	//   else                                           → 正常
@@ -164,6 +208,13 @@
 
 		var last = watch && watch.last;
 		var lastT = last ? toMs(last.t) : null;
+		var genT = watch ? toMs(watch.generated_at) : null;
+		var obs = validator ? toMs(validator.observedAt) : null;
+		if (inFuture(lastT, now) || inFuture(genT, now) || inFuture(obs, now)) {
+			return { ok: false, code: "clock", title: "⚠️ 時刻が不正 (端末か見張りの時計)",
+				detail: "データの時刻が端末の時刻より 2 分以上先です。どちらかの時計がずれているため、新しさを判断できません。",
+				next: "端末の時刻設定 (自動) を確認。正しければ web host / validator host の時計 (NTP) を確認" };
+		}
 		if (!watch || watch.schema !== 1 || !last || lastT === null || now - lastT > LIMITS.watchStaleMs) {
 			return { ok: false, code: "stale_watch", title: "⚠️ 見張りの情報が古い",
 				detail: lastT === null ? "見張りの結果が読めません。"
@@ -181,7 +232,13 @@
 					: "docs/DISASTER_RECOVERY.md を開き、該当する手順を確認" };
 		}
 
-		var obs = validator ? toMs(validator.observedAt) : null;
+		var unk = unknownNames(last);
+		if (unk.length > 0) {
+			return { ok: false, code: "unknown", title: "⚠️ 一部未確認",
+				detail: unk.map(labelOf).join("・") + " を確認できていません。",
+				next: "見張りが結果を出せていない確認があります (公開 RPC の不調、更新期間、validator が集合に居ない など)。docs/MONITORING_OPS.md を確認" };
+		}
+
 		if (obs === null || now - obs > LIMITS.validatorStaleMs) {
 			return { ok: false, code: "stale_validator", title: "⚠️ validator の情報が古い",
 				detail: obs === null ? "validator.json が読めません。"
@@ -249,6 +306,7 @@
 		expectedUptime: expectedUptime,
 		remainingHours: remainingHours,
 		historySummary: historySummary,
+		renderStale: renderStale,
 		verdict: verdict,
 		uptimeView: uptimeView,
 		jstHHMM: jstHHMM,

@@ -22,6 +22,12 @@
 #       or a cache:"no-store" request from cache (no respondWith)
 #   C9  page hygiene: no inline style/script, noindex, h1→h2→h3, dedicated
 #       manifest scoped to /status/, not linked from any other page
+#   C10 clock: last.t / generated_at / observedAt > 2 min in the future →
+#       時刻が不正 (never 正常); ≤ 2 min ahead is tolerated
+#   C11 UNKNOWN (null) is never OK: last.* null → 一部未確認, after alerting,
+#       before stale validator; history counts unknowns separately
+#   C12 watchdog: no successful render for > 3 min → stale; fetch abort /
+#       finally / watchdog are wired in status.js
 #
 # Mutation check: STATUS_CALC_MUTANT=<path> runs C1–C6 against another copy
 # of status-calc.js (used to prove each claim fails when broken).
@@ -127,6 +133,44 @@ const h6 = [{ t: iso(NOW - 13 * MIN), fresh: true, p2p: true, chain: true },
 ok(C.historySummary(h6, NOW).gaps === 0, "C3 7-min interval exactly is not a gap");
 ok(C.historySummary(goodWatch(NOW - 10 * MIN).checks, NOW).gaps === 1, "C3 last check → now >7 min counts as a gap");
 
+// ---- C10 clock skew ------------------------------------------------------------
+const fut = (ms) => { const w = goodWatch(NOW); w.last.t = iso(NOW + ms); return w; };
+ok(v({ watch: fut(3 * HOUR) }).code === "clock", "C10 last.t 3 h ahead → 時刻が不正 (was ✅ before the fix)");
+ok(v({ watch: fut(3 * HOUR) }).title === "⚠️ 時刻が不正 (端末か見張りの時計)", "C10 title");
+ok(v({ watch: fut(2 * MIN + 1000) }).code === "clock", "C10 last.t 2 min 1 s ahead → 時刻が不正");
+ok(v({ watch: fut(2 * MIN) }).code === "ok", "C10 last.t exactly 2 min ahead is tolerated");
+const gw = goodWatch(NOW); gw.generated_at = iso(NOW + 10 * MIN);
+ok(v({ watch: gw }).code === "clock", "C10 generated_at 10 min ahead → 時刻が不正");
+ok(v({ validator: Object.assign(goodValidator(NOW), { observedAt: iso(NOW + 3 * HOUR) }) }).code === "clock",
+	"C10 validator observedAt 3 h ahead → 時刻が不正");
+ok(v({ watch: fut(3 * HOUR), validator: Object.assign(goodValidator(NOW), { observedAt: iso(NOW + 3 * HOUR) }) }).ok === false,
+	"C10 both ahead → never OK");
+
+// ---- C11 UNKNOWN (null) ----------------------------------------------------------
+const uw = goodWatch(NOW); uw.last.chain = null;
+const uv = v({ watch: uw });
+ok(uv.code === "unknown" && uv.title === "⚠️ 一部未確認" && uv.ok === false, "C11 last.chain null → 一部未確認 (not ✅)");
+ok(/ネットワークに接続/.test(uv.detail), "C11 detail names the unconfirmed check");
+const uf = goodWatch(NOW); uf.last.fresh = null; uf.last.p2p = null;
+ok(v({ watch: uf }).code === "unknown", "C11 fresh+p2p null → 一部未確認");
+const ua = goodWatch(NOW); ua.last.chain = null; ua.last.p2p = false;
+ok(v({ watch: ua }).code === "alert", "C11 a false check beats null (異常あり first)");
+const ual = goodWatch(NOW); ual.last.chain = null; ual.last.alerting = ["fresh"];
+ok(v({ watch: ual }).code === "alert", "C11 alerting beats null");
+ok(v({ watch: uw, validator: null }).code === "unknown", "C11 null beats stale validator");
+const um = goodWatch(NOW); delete um.last.chain;
+ok(v({ watch: um }).code === "alert", "C11 a missing check is still an alert (not unknown, not OK)");
+const hu = goodWatch(NOW); hu.checks[2].chain = null; hu.checks[5].fresh = null; hu.checks[5].p2p = false;
+const hus = C.historySummary(hu.checks, NOW);
+ok(hus.unknowns === 1 && hus.failures === 1, "C11 history: null-only check → 未確認, null+false → 失敗");
+ok(C.historySummary(goodWatch(NOW).checks, NOW).unknowns === 0, "C11 history: clean → 0 未確認");
+
+// ---- C12 watchdog ------------------------------------------------------------------
+ok(C.renderStale(NOW - 3 * MIN - 1000, NOW) === true, "C12 last render 3 min 1 s ago → stale");
+ok(C.renderStale(NOW - 2 * MIN, NOW) === false, "C12 last render 2 min ago → fine");
+ok(C.renderStale(null, NOW) === true, "C12 never rendered → stale");
+ok(C.LIMITS.fetchTimeoutMs > 0 && C.LIMITS.fetchTimeoutMs <= 15000, "C12 fetch timeout set (≤ 15 s)");
+
 // ---- C4 expected uptime ------------------------------------------------------
 const e = C.expectedUptime(S * 1000, NOW, OUT);
 ok(e !== null && e.toFixed(2) === "85.78", "C4 2026-10-03 point → 85.78 (got " + (e && e.toFixed(4)) + ")");
@@ -160,7 +204,7 @@ ok(Math.abs(low.expectedAtEnd - C.expectedUptime(S * 1000, E * 1000, OUT)) < 1e-
 if (!process.env.STATUS_CALC_MUTANT) {
 	// ---- C7 committed known outages -------------------------------------------
 	const ko = JSON.parse(fs.readFileSync(path.join(REPO, "public/api/known-outages.json"), "utf8"));
-	ok(Array.isArray(ko) && ko.some((o) => o.start === "2026-09-24T10:56:46Z" && o.end === "2026-09-28T14:51:16Z"),
+	ok(Array.isArray(ko) && ko.every((o) => /\(likely\)/.test(o.note || "")) && ko.some((o) => o.start === "2026-09-24T10:56:46Z" && o.end === "2026-09-28T14:51:16Z"),
 		"C7 known-outages.json has the 2026-09-24..28 window");
 
 	// ---- C8 service worker -------------------------------------------------------
@@ -202,6 +246,15 @@ if (!process.env.STATUS_CALC_MUTANT) {
 	const js = fs.readFileSync(path.join(dir, "status.js"), "utf8") + fs.readFileSync(path.join(dir, "status-calc.js"), "utf8");
 	ok(!/innerHTML|\.style\.|setAttribute\(\s*["']style/.test(js), "C9 no innerHTML / inline style from JS");
 	ok((js.match(/fetch\(/g) || []).length === 1 && /cache: "no-store"/.test(js), "C9 single fetch path, cache no-store");
+	const sjs = fs.readFileSync(path.join(dir, "status.js"), "utf8");
+	ok(/new AbortController\(\)/.test(sjs) && /signal: ctl \? ctl\.signal/.test(sjs) && /ctl\.abort\(\)/.test(sjs)
+		&& /Promise\.race\(\[req, timeout\]\)/.test(sjs) && /C\.LIMITS\.fetchTimeoutMs/.test(sjs),
+		"C12 every fetch carries an abort signal and is raced against the timeout");
+	ok(/\.then\(done, done\)/.test(sjs) && /function done\(\) \{\s*busy = false;/.test(sjs), "C12 busy cleared on both outcomes (finally)");
+	ok(/setInterval\(watchdog, WATCHDOG_MS\)/.test(sjs) && /C\.renderStale\(lastRenderOk, now\)/.test(sjs)
+		&& /更新できていません/.test(sjs) && /lastRenderOk = now;/.test(sjs), "C12 watchdog wired: interval + render timestamp + verdict");
+	ok(/last\[k\] === null\)\s*\{\s*el\.textContent = "未確認"/.test(sjs) && /未確認 " \+ h\.unknowns/.test(sjs),
+		"C11 page renders null as 未確認 and counts 未確認 in 24 h");
 	const mf = JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8"));
 	ok(mf.start_url === "/status/" && mf.scope === "/status/" && mf.name === "Metal 状態", "C9 dedicated manifest scoped to /status/");
 	ok(mf.icons.every((i) => fs.existsSync(path.join(REPO, "public", i.src))), "C9 manifest icons exist");

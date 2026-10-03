@@ -605,8 +605,10 @@ apply_check() { # check result [observation-epoch]
 #   {"schema":1,"generated_at":ISO,"interval_sec":300,
 #    "last":{"t":ISO,"fresh":b,"p2p":b,"chain":b,"alerting":[names]},
 #    "checks":[{"t":ISO,"fresh":b,"p2p":b,"chain":b}, ...]}  last 24 h, oldest first
-# A check is false only when the watch logged FAIL; UNKNOWN (renewal window,
-# RPC unavailable) is not a failure for the watch either, so it reads true.
+# b is tri-state: PASS -> true, FAIL -> false, UNKNOWN -> null. UNKNOWN
+# (renewal window, RPC unavailable, validator absent from the set) is not a
+# failure for the watch, but it is not a confirmation either: the page shows
+# null as 未確認, never as OK.
 # "alerting" = checks whose state status is "alerting" after this run.
 # Built ONLY from the log line's fixed tokens (time + PASS/FAIL/UNKNOWN) and
 # the check names: no host, address, topic, mtr text, ticket or log path can
@@ -625,7 +627,8 @@ status_json() {
       | capture("^(?<t>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z) fresh=(?<f>PASS|FAIL|UNKNOWN)\\([^)]*\\) p2p=(?<p>PASS|FAIL|UNKNOWN) chain=(?<c>PASS|FAIL|UNKNOWN)(\\(cached\\))? pushes=[0-9]+$")?
       | (.t | fromdateiso8601) as $e
       | select($e > $now - $win and $e <= $now)
-      | {t: .t, fresh: (.f != "FAIL"), p2p: (.p != "FAIL"), chain: (.c != "FAIL")} ]
+      | {t: .t, fresh: ({PASS: true, FAIL: false}[.f]), p2p: ({PASS: true, FAIL: false}[.p]),
+         chain: ({PASS: true, FAIL: false}[.c])} ]
     | sort_by(.t) | .[-$max:]
     | if length == 0 then error("no checks in window") else . end
     | {schema: 1, generated_at: ($now | todate), interval_sec: $iv,

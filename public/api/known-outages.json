@@ -2,6 +2,6 @@
 	{
 		"start": "2026-09-24T10:56:46Z",
 		"end": "2026-09-28T14:51:16Z",
-		"note": "provider upstream path; provider reported no internal outage"
+		"note": "provider upstream path (likely); provider reported no known internal outage"
 	}
 ]

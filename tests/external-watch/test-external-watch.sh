@@ -161,7 +161,7 @@ curl_calls() { grep -c . "$C/curl.log"; }
 # ============================ 13. public status file (watch-status.json) ============================
 # Contract consumed by public/status/: {"schema":1,"generated_at","interval_sec":300,
 # "last":{t,fresh,p2p,chain,alerting[]},"checks":[{t,fresh,p2p,chain}...]} last 24 h,
-# oldest first. Defined here, called at the end of the suite;
+# oldest first; each check value is true (PASS) / false (FAIL) / null (UNKNOWN). Defined here, called at the end of the suite;
 # WATCH_TEST_ONLY_STATUS=1 runs only this section (fast mutation loop).
 file_mode_of() { stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null; }
 isoat() { jq -nr --argjson t "$1" '$t | todate'; }
@@ -200,14 +200,14 @@ new_case; enable_status; seed_log; make_json 10; run_watch
 assert_eq "status: run rc unaffected" "0" "$RC"
 assert_eq "status: top-level keys exactly the contract" '["checks","generated_at","interval_sec","last","schema"]' "$(sj 'keys')"
 assert_eq "  schema / interval / generated_at" "1|300|$(isoat "$NOW")" "$(sj '.schema')|$(sj '.interval_sec')|$(jq -r .generated_at "$SPATH" 2>/dev/null)"
-assert_eq "  every check has exactly t,fresh,p2p,chain (booleans)" "true" \
-  "$(sj '[.checks[] | (keys == ["chain","fresh","p2p","t"]) and ([.fresh,.p2p,.chain] | all(type == "boolean"))] | all')"
+assert_eq "  every check has exactly t,fresh,p2p,chain (boolean or null)" "true" \
+  "$(sj '[.checks[] | (keys == ["chain","fresh","p2p","t"]) and ([.fresh,.p2p,.chain] | all(type == "boolean" or type == "null"))] | all')"
 assert_eq "  last keys exactly t,fresh,p2p,chain,alerting" '["alerting","chain","fresh","p2p","t"]' "$(sj '.last | keys')"
 assert_eq "  24 h window, oldest first; 24h-old, future, note, malformed lines excluded; gap not filled" \
   "$(isoat $((NOW - 86399)))|$(isoat $((NOW - 20000)))|$(isoat $((NOW - 19700)))|$(isoat $((NOW - 12500)))|$(isoat "$NOW")" \
   "$(jq -r '[.checks[].t] | join("|")' "$SPATH" 2>/dev/null)"
-assert_eq "  FAIL -> false; PASS, UNKNOWN, cached -> true" \
-  '[[true,true,true],[false,true,true],[true,false,false],[true,true,true],[true,true,true]]' \
+assert_eq "  FAIL -> false; PASS, cached PASS -> true; UNKNOWN -> null (never true)" \
+  '[[true,true,true],[false,true,true],[true,false,false],[null,true,null],[true,true,true]]' \
   "$(sj '[.checks[] | [.fresh,.p2p,.chain]]')"
 assert_eq "  last = this run, nothing alerting" "$(isoat "$NOW")|[]" "$(jq -r '.last.t' "$SPATH" 2>/dev/null)|$(sj '.last.alerting')"
 assert_eq "  mode 644" "644" "$(file_mode_of "$SPATH")"
@@ -216,6 +216,11 @@ SJ="$(cat "$SPATH" 2>/dev/null)"
 for leak in 127.0.0.1 10.9.8.7 "$P2P_PORT" fy-test-topic ticket draft mtr provider-edge note "$C" validator.json "$FAKE_NODE" rpc.invalid log/; do
   assert_not_contains "  no host/path/topic string: $leak" "$leak" "$SJ"
 done
+
+echo "== public status file: UNKNOWN this run -> null in last =="
+new_case; enable_status; make_json 10; RPC_RC=7; run_watch
+assert_eq "chain rpc unavailable: last.chain null (not true), fresh/p2p true, rc 0" "null|true|true|0" \
+  "$(sj '.last.chain')|$(sj '.last.fresh')|$(sj '.last.p2p')|$RC"
 
 echo "== public status file: alerting mirrors the state =="
 new_case; enable_status; status_config closed; make_json 10; MTR_FIXTURE="$FIX/mtr-provider-edge.txt"

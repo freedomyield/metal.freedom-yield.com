@@ -14,17 +14,29 @@
 		validator: "/api/validator.json",
 		outages: "/api/known-outages.json"
 	};
+	var WATCHDOG_MS = 15 * 1000;
 	var busy = false;
+	var lastRenderOk = null; // Date.now() of the last successful render
 
 	function $(id) { return document.getElementById(id); }
 
 	function setText(id, text) { $(id).textContent = text; }
 
 	// Resolves to { ok, data, network } — network=true means the request
-	// never reached the server (offline), as opposed to a 404 / bad JSON.
+	// never reached the server (offline, or aborted after fetchTimeoutMs), as
+	// opposed to a 404 / bad JSON. Always settles: a stalled connection is
+	// aborted (the signal covers the body read too), so busy never sticks.
 	function getJson(url) {
 		var sep = url.indexOf("?") === -1 ? "?" : "&";
-		return fetch(url + sep + "_=" + Date.now(), { cache: "no-store", credentials: "omit" })
+		var ctl = typeof AbortController === "function" ? new AbortController() : null;
+		var timer = null;
+		var timeout = new Promise(function (resolve) {
+			timer = setTimeout(function () {
+				if (ctl) ctl.abort();
+				resolve({ ok: false, data: null, network: true });
+			}, C.LIMITS.fetchTimeoutMs);
+		});
+		var req = fetch(url + sep + "_=" + Date.now(), { cache: "no-store", credentials: "omit", signal: ctl ? ctl.signal : undefined })
 			.then(function (res) {
 				if (!res.ok) return { ok: false, data: null, network: false };
 				return res.json()
@@ -32,6 +44,7 @@
 					.catch(function () { return { ok: false, data: null, network: false }; });
 			})
 			.catch(function () { return { ok: false, data: null, network: true }; });
+		return Promise.race([req, timeout]).then(function (r) { clearTimeout(timer); return r; });
 	}
 
 	function minutesAgo(now, ms) {
@@ -70,10 +83,14 @@
 			: "最終確認: " + minutesAgo(now, lastT) + " 分前 (" + C.jstHHMM(lastT) + " JST)");
 
 		// The three checks: only shown as ✅ when the watch data is current.
-		var watchUsable = v.code !== "offline" && v.code !== "stale_watch";
+		// null = the watch could not confirm it → 未確認 (never ✅ / ❌).
+		var watchUsable = v.code !== "offline" && v.code !== "stale_watch" && v.code !== "clock";
 		C.CHECK_KEYS.forEach(function (k) {
 			var el = $("c-" + k);
-			if (!last || typeof last[k] !== "boolean") {
+			if (last && last[k] === null) {
+				el.textContent = "未確認";
+				setState(el, "is-warn");
+			} else if (!last || typeof last[k] !== "boolean") {
 				el.textContent = "—";
 				setState(el, "is-unknown");
 			} else if (last[k] === true) {
@@ -88,8 +105,8 @@
 		if (watch && Array.isArray(watch.checks)) {
 			var h = C.historySummary(watch.checks, now);
 			var hEl = $("history");
-			hEl.textContent = "失敗 " + h.failures + " 回・見張りの抜け " + h.gaps + " 回 (確認 " + h.total + " 回)";
-			setState(hEl, h.failures === 0 && h.gaps === 0 ? "is-ok" : "is-bad");
+			hEl.textContent = "失敗 " + h.failures + " 回・未確認 " + h.unknowns + " 回・見張りの抜け " + h.gaps + " 回 (確認 " + h.total + " 回)";
+			setState(hEl, h.failures > 0 || h.gaps > 0 ? "is-bad" : h.unknowns > 0 ? "is-warn" : "is-ok");
 		} else {
 			setText("history", "履歴を読めません");
 			setState($("history"), "is-unknown");
@@ -125,6 +142,28 @@
 		notes.push("60 秒ごとに自動で更新します。このボタンはデータを読み直すだけで、validator には何も送りません。");
 		notes.push("画面の更新: " + C.jstHHMM(now) + " JST");
 		setText("foot", notes.join(" "));
+		lastRenderOk = now;
+	}
+
+	// Watchdog: if no render has succeeded for renderStaleMs, nothing on
+	// screen can be vouched for — drop the verdict and any ✅ to ⚠️.
+	function watchdog() {
+		var now = Date.now();
+		if (!C.renderStale(lastRenderOk, now)) return;
+		var vEl = $("verdict");
+		vEl.textContent = "⚠️ 更新できていません";
+		setState(vEl, "is-bad");
+		document.title = "⚠️ Metal 状態";
+		setText("verdict-detail", lastRenderOk === null ? "まだ一度も画面を更新できていません。"
+			: "最後に画面を更新できたのは " + C.jstHHMM(lastRenderOk) + " JST です。表示は古い可能性があります。");
+		C.CHECK_KEYS.forEach(function (k) {
+			var el = $("c-" + k);
+			if (el.classList.contains("is-ok")) { el.textContent = "✅?"; setState(el, "is-warn"); }
+		});
+		["history", "uptime", "budget"].forEach(function (id) {
+			var el = $(id);
+			if (el.classList.contains("is-ok")) setState(el, "is-warn");
+		});
 	}
 
 	function refresh() {
@@ -142,11 +181,13 @@
 				vEl.textContent = "⚠️ 通信できません";
 				setState(vEl, "is-bad");
 			})
-			.then(function () {
-				busy = false;
-				btn.disabled = false;
-				btn.textContent = "再読み込み";
-			});
+			.then(done, done);
+		// finally: busy is cleared whether the render succeeded or threw.
+		function done() {
+			busy = false;
+			btn.disabled = false;
+			btn.textContent = "再読み込み";
+		}
 	}
 
 	function start() {
@@ -162,6 +203,7 @@
 		setInterval(function () {
 			if (document.visibilityState !== "hidden") refresh();
 		}, REFRESH_MS);
+		setInterval(watchdog, WATCHDOG_MS);
 	}
 
 	if (document.readyState === "loading") {
