@@ -36,7 +36,7 @@
 				resolve({ ok: false, data: null, network: true });
 			}, C.LIMITS.fetchTimeoutMs);
 		});
-		var req = fetch(url + sep + "_=" + Date.now(), { cache: "no-store", credentials: "omit", signal: ctl ? ctl.signal : undefined })
+		var req = fetch(url + sep + "_=" + Date.now(), { cache: "no-store", credentials: "same-origin", signal: ctl ? ctl.signal : undefined })
 			.then(function (res) {
 				if (!res.ok) return { ok: false, data: null, network: false };
 				return res.json()

@@ -262,6 +262,9 @@ if (!process.env.STATUS_CALC_MUTANT) {
 	ok(!/innerHTML|\.style\.|setAttribute\(\s*["']style/.test(js), "C9 no innerHTML / inline style from JS");
 	ok((js.match(/fetch\(/g) || []).length === 1 && /cache: "no-store"/.test(js), "C9 single fetch path, cache no-store");
 	const sjs = fs.readFileSync(path.join(dir, "status.js"), "utf8");
+	// /status/ and /api/watch-status.json sit behind Cloudflare Access: the fetch must carry the
+	// session cookie, or the data request is redirected to the login page and the page shows stale.
+	ok(/credentials:\s*"same-origin"/.test(sjs) && !/credentials:\s*"omit"/.test(sjs), "C14 fetch sends same-origin credentials (Cloudflare Access session cookie)");
 	ok(/new AbortController\(\)/.test(sjs) && /signal: ctl \? ctl\.signal/.test(sjs) && /ctl\.abort\(\)/.test(sjs)
 		&& /Promise\.race\(\[req, timeout\]\)/.test(sjs) && /C\.LIMITS\.fetchTimeoutMs/.test(sjs),
 		"C12 every fetch carries an abort signal and is raced against the timeout");
