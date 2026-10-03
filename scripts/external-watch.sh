@@ -37,7 +37,14 @@
 # Test/ops overrides (env): WATCH_HOME WATCH_CONFIG WATCH_LIVE WATCH_NOTIFY
 # WATCH_NOW_EPOCH P2P_REPROBE_SLEEP WATCH_NOTIFY_RETRY_SLEEP
 # WATCH_LOG_MAX_BYTES WATCH_CRONERR_MAX_BYTES WATCH_KEEP_BACKUPS WATCH_KEEP_CORRUPT
-# WATCH_KEEP_DRAFTS WATCH_MTR WATCH_MTR_TIMEOUT
+# WATCH_KEEP_DRAFTS WATCH_MTR WATCH_MTR_TIMEOUT WATCH_STATUS_MAX_BYTES
+#
+# Public status file (optional): when watch.env sets WATCH_PUBLIC_STATUS to an
+# absolute *.json path (the site's api/watch-status.json), every run rewrites
+# it from watch.log (last 24 h) plus the current alert state, for the phone
+# status page. Host-free by construction (see status_json). Publishing runs
+# after every push of the run and in a subshell: it can never block, delay or
+# alter an alert, nor change the exit code; a failure is one log note.
 #
 # `external-watch.sh --classify-mtr < report` prints the path class of an mtr
 # report (see classify_mtr) and exits; no config is read.
@@ -170,6 +177,7 @@ file_uid() { stat -c '%u' "$1" 2>/dev/null || stat -f '%u' "$1" 2>/dev/null; }
 parse_config() {
   [ -r "$WATCH_CONFIG" ] || die_config "config file not readable"
   VALIDATOR_HOST="" VALIDATOR_P2P_PORT=9651 VALIDATOR_JSON="" NTFY_TOPIC_FILE=""
+  WATCH_PUBLIC_STATUS=""
   NODE_ID="NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v"
   RPC_URL="https://api.metalblockchain.org/ext/bc/P"
   local line key val n=0
@@ -188,6 +196,9 @@ parse_config() {
       NTFY_TOPIC_FILE) NTFY_TOPIC_FILE="$val" ;;
       NODE_ID) NODE_ID="$val" ;;
       RPC_URL) RPC_URL="$val" ;;
+      # Validated at publish time, not here: a bad value must disable only the
+      # status file (one log note per run), never the alerting (exit 1).
+      WATCH_PUBLIC_STATUS) WATCH_PUBLIC_STATUS="$val" ;;
       *) die_config "line $n: unknown key $key" ;;
     esac
   done < "$WATCH_CONFIG"
@@ -589,6 +600,69 @@ apply_check() { # check result [observation-epoch]
   esac
 }
 
+# --- public status file ---------------------------------------------------
+# /api/watch-status.json for the phone status page (contract: schema 1):
+#   {"schema":1,"generated_at":ISO,"interval_sec":300,
+#    "last":{"t":ISO,"fresh":b,"p2p":b,"chain":b,"alerting":[names]},
+#    "checks":[{"t":ISO,"fresh":b,"p2p":b,"chain":b}, ...]}  last 24 h, oldest first
+# A check is false only when the watch logged FAIL; UNKNOWN (renewal window,
+# RPC unavailable) is not a failure for the watch either, so it reads true.
+# "alerting" = checks whose state status is "alerting" after this run.
+# Built ONLY from the log line's fixed tokens (time + PASS/FAIL/UNKNOWN) and
+# the check names: no host, address, topic, mtr text, ticket or log path can
+# reach it. Note lines and anything not matching the exact format are skipped.
+STATUS_INTERVAL=300
+STATUS_WINDOW=86400
+STATUS_MAX_CHECKS=400   # 24 h at 5 min = 288; headroom for manual runs
+DEFAULT_STATUS_MAX_BYTES=262144
+status_json() {
+  local alerting
+  alerting="$(jq -c '[("fresh","p2p","chain") as $c | select(.[$c].status == "alerting") | $c]' <<<"$STATE")" \
+    || return 1
+  jq -R -n -c --argjson now "$NOW" --argjson win "$STATUS_WINDOW" --argjson iv "$STATUS_INTERVAL" \
+    --argjson max "$STATUS_MAX_CHECKS" --argjson alerting "$alerting" '
+    [ inputs
+      | capture("^(?<t>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z) fresh=(?<f>PASS|FAIL|UNKNOWN)\\([^)]*\\) p2p=(?<p>PASS|FAIL|UNKNOWN) chain=(?<c>PASS|FAIL|UNKNOWN)(\\(cached\\))? pushes=[0-9]+$")?
+      | (.t | fromdateiso8601) as $e
+      | select($e > $now - $win and $e <= $now)
+      | {t: .t, fresh: (.f != "FAIL"), p2p: (.p != "FAIL"), chain: (.c != "FAIL")} ]
+    | sort_by(.t) | .[-$max:]
+    | if length == 0 then error("no checks in window") else . end
+    | {schema: 1, generated_at: ($now | todate), interval_sec: $iv,
+       last: (.[-1] + {alerting: $alerting}), checks: .}' < "$LOG_FILE"
+}
+
+# publish_status: write WATCH_PUBLIC_STATUS atomically (temp in the same dir,
+# mode 644, rename). Same file-safety stance as trim_tail: the directory must
+# not be a symlink, and an existing target must be a regular, singly linked
+# file (re-checked right before the rename). Returns non-zero on any refusal
+# or failure; the caller turns that into one log note.
+publish_status() {
+  local out="$WATCH_PUBLIC_STATUS" d tmp max json
+  [[ "$out" =~ ^/[A-Za-z0-9._/-]+\.json$ ]] || return 1
+  case "$out" in */../*|*/./*|*//*) return 1 ;; esac
+  d="${out%/*}"; [ -n "$d" ] || return 1
+  target_ok() {
+    [ -d "$d" ] && [ ! -L "$d" ] || return 1
+    if [ -e "$out" ] || [ -L "$out" ]; then
+      [ -f "$out" ] && [ ! -L "$out" ] && [[ "$(file_id "$out")" =~ ^[0-9]+:[0-9]+:1$ ]] || return 1
+    fi
+  }
+  target_ok || return 1
+  max="$(cap_value "${WATCH_STATUS_MAX_BYTES:-}" "$DEFAULT_STATUS_MAX_BYTES")"
+  json="$(status_json)" || return 1
+  [ -n "$json" ] && [ "$(printf '%s\n' "$json" | wc -c | tr -d ' ')" -le "$max" ] || return 1
+  # A killed run's temp (exact mktemp shape, regular files only). Runs under
+  # the lock; nothing else writes this name.
+  find "$d" -maxdepth 1 -type f -name '.watch-status.??????' -delete 2>/dev/null
+  tmp="$(mktemp "$d/.watch-status.XXXXXX")" || return 1
+  if printf '%s\n' "$json" > "$tmp" && chmod 644 "$tmp" && target_ok && mv -f "$tmp" "$out"; then
+    return 0
+  fi
+  rm -f "$tmp"
+  return 1
+}
+
 # --- housekeeping (size caps) --------------------------------------------
 # cap_value / file_size / file_id / trim_tail and the defaults live at the top
 # of the script (the cron.err trim runs before the config is parsed).
@@ -690,6 +764,11 @@ fi
 
 printf '%s fresh=%s(%ss) p2p=%s chain=%s pushes=%d\n' "$(iso "$NOW")" \
   "$FRESH_RES" "$FRESH_AGE" "$P2P_RES" "$CHAIN_RES$CHAIN_NOTE" "$PUSHES" >> "$LOG_FILE"
+# After every push of this run, in a subshell: cannot delay or alter an alert,
+# cannot change the exit code; a failure is one host-free note.
+if [ -n "$WATCH_PUBLIC_STATUS" ]; then
+  ( publish_status ) >/dev/null 2>&1 || log_note "status publish failed" 2>/dev/null
+fi
 housekeeping || true
 
 [ "$PUSH_FAILED" = "1" ] && exit 6

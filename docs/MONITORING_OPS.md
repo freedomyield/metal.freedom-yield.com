@@ -724,7 +724,7 @@ Everything lives under `$HOME/metal-fy-watch/` of the site account: directories 
 | `etc/watch.env` | strict `KEY=VALUE` config (parsed, never sourced) |
 | `etc/ntfy-topic` | the watch's own ntfy topic, generated on the web host by the installer (bearer secret, `docs/CONSTITUTION.md` §4.1 S5; never in the repo, never printed) |
 | `state/` | `state.json`, the RPC cache, the lock |
-| `log/watch.log` | one line per run; capped at 1 MiB (see below) |
+| `log/watch.log` | one line per run; capped at 1 MiB (see below); also the source of the public status file (§14.7) |
 | `log/cron.err` | stderr of the cron job (including `DRY:` lines); capped at 1 MiB (see below) |
 | `log/ticket-draft-<UTC>.txt` | provider ticket draft written on a `p2p` alert (§14.3); newest 10 kept, each capped at 1 MiB |
 | `backup/` | backups taken by the installer: `crontab.bak-<ts>` and, when a re-install replaces them, `external-watch.sh.bak-<ts>`, `notify.sh.bak-<ts>`, `watch.env.bak-<ts>`; the newest 10 `*.bak-*` files are kept, counted **across all kinds** |
@@ -768,7 +768,7 @@ WEB_HOST=<web host> WEB_HOST_KEY=<path> VALIDATOR_HOST=<validator host> \
   bash scripts/install-web-host-external-watch.sh
 ```
 
-Optional variables: `WEB_HOST_USER` (login used for the installation), `WATCH_ACCOUNT` (the site account that owns the job; defaults to the site account), `FY_WEB_API_DIR` (override of the detected `validator.json` location). `--print-remote` prints the remote script text only. The installer **never contacts the validator host**: `VALIDATOR_HOST` is only written into `etc/watch.env` for the TCP probe. It must run on the Mac, because the topic hand-over needs `pbcopy`/`pbpaste`; without them it refuses.
+Optional variables: `WEB_HOST_USER` (login used for the installation), `WATCH_ACCOUNT` (the site account that owns the job; defaults to the site account), `FY_WEB_API_DIR` (override of the detected `validator.json` location), `WATCH_PUBLIC_STATUS` (the public status file, §14.7: `auto`, `off`, an absolute `*.json` path, or unset to keep the installed setting). `--print-remote` prints the remote script text only. The installer **never contacts the validator host**: `VALIDATOR_HOST` is only written into `etc/watch.env` for the TCP probe. It must run on the Mac, because the topic hand-over needs `pbcopy`/`pbpaste`; without them it refuses.
 
 The installer:
 
@@ -810,3 +810,13 @@ The installer backs up the crontab to `~/metal-fy-watch-crontab.bak-<ts>` in the
 
 - **GitHub backstop.** `.github/workflows/uptime.yml` fails when `validator.json` is more than 1 hour stale, except inside the renewal window (where it emits a notice). It is slow (scheduled GitHub runs in practice fire only every few hours) but independent of both hosts and of their provider.
 - **Known gap: no self-heartbeat.** The watchdog does not report its own death. If the web host itself dies, the validator host's existing public-site probe (§6.7) alerts. If both hosts are silent, only the GitHub backstop remains.
+
+### 14.7 Public status file (`/api/watch-status.json`)
+
+The phone status page (`/status/`) reads `/api/watch-status.json`. The external watch writes it **on the web host**, so the page keeps working while the validator host is unreachable; nothing is pushed from the validator host.
+
+- **Enable.** Re-run the installer with `WATCH_PUBLIC_STATUS=auto` (same `WEB_HOST` / `WEB_HOST_KEY` / `VALIDATOR_HOST` as the install; try `--dry-run` first, which shows `public status: enabled …` and `etc/watch.env: update (changed keys: WATCH_PUBLIC_STATUS )`). `auto` puts `watch-status.json` in the same `api/` directory as the pushed `validator.json`, i.e. the site's served `api/`. The installer refuses (exit 6) if that directory is missing or not writable by the watch account. Later re-installs without the variable keep the setting; `WATCH_PUBLIC_STATUS=off` removes it. The path is written to `etc/watch.env` and never printed.
+- **Content (schema 1).** `{"schema":1,"generated_at":<ISO UTC>,"interval_sec":300,"last":{"t","fresh","p2p","chain","alerting":[…]},"checks":[{"t","fresh","p2p","chain"},…]}`. `checks` are the `watch.log` run lines of the last 24 h, oldest first; a gap in the log is a gap in `checks` (nothing is filled in). A check is `false` only when the watch logged `FAIL`; `UNKNOWN` (renewal window, RPC unavailable) is not a failure for the watch either and reads `true`. `last` is the newest run (this run) plus `alerting`, the checks whose state is `alerting` (a DRY run never sets that, so it can show `false` with `alerting: []`). The file is built only from the log line's fixed tokens and the check names: no host, address, port, topic, mtr text, ticket or log path can reach it. `note:` lines and anything not in the exact run-line format are skipped.
+- **Write discipline.** Every run (after all pushes, in a subshell) writes a temp `.watch-status.XXXXXX` in the same directory, sets mode 644, and renames it over the target. It refuses a symlinked directory, a symlinked or hard-linked target, a path that is not an absolute `*.json` without `.`/`..` segments, and output larger than 256 KiB. A refusal or failure is one `note: status publish failed` line in `watch.log`; it never delays or changes an alert and never changes the exit code (§14.4). A bad value in `watch.env` disables only the file, never the watch.
+- **Deploy cannot clobber it.** `api/watch-status.json` is in `deploy/feed-excludes.txt` (both deploy rsyncs' `--delete` skip it), in `.gitignore` (the host checkout never tracks or reverts it), and **not** on `scripts/push-to-web-host.sh`'s allowlist on purpose (the validator host cannot overwrite the outside view of itself). See `docs/DEPLOY_OWNERSHIP_MATRIX.md`.
+- **Edge cache.** `/api/*` passes through the CDN with a short max-age, so the page may see a file up to a couple of minutes old; it shows the age from `last.t`.

@@ -158,6 +158,127 @@ last_log() { tail -n 1 "$C/home/log/watch.log" 2>/dev/null; }
 st() { jq -r ".$1.$2" "$C/home/state/state.json" 2>/dev/null; }
 curl_calls() { grep -c . "$C/curl.log"; }
 
+# ============================ 13. public status file (watch-status.json) ============================
+# Contract consumed by public/status/: {"schema":1,"generated_at","interval_sec":300,
+# "last":{t,fresh,p2p,chain,alerting[]},"checks":[{t,fresh,p2p,chain}...]} last 24 h,
+# oldest first. Defined here, called at the end of the suite;
+# WATCH_TEST_ONLY_STATUS=1 runs only this section (fast mutation loop).
+file_mode_of() { stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null; }
+isoat() { jq -nr --argjson t "$1" '$t | todate'; }
+enable_status() { # [path]  sets SPATH; a stand-in for the site's api/ dir, outside WATCH_HOME
+  mkdir -p "$C/pub/api"
+  SPATH="${1:-$C/pub/api/watch-status.json}"
+  printf 'WATCH_PUBLIC_STATUS=%s\n' "$SPATH" >> "$C/etc/watch.env"
+}
+sj() { jq -c "$1" "$SPATH" 2>/dev/null; }
+# Fixture log: in-window PASS/FAIL/UNKNOWN/cached lines, a ~2 h gap, a note
+# line carrying host-like text, malformed lines, one line exactly 24 h old
+# (excluded), one a second newer (included), one in the future (excluded).
+seed_log() {
+  mkdir -p "$C/home/log"
+  {
+    printf '%s fresh=PASS(10s) p2p=PASS chain=PASS pushes=0\n' "$(isoat $((NOW - 86400)))"
+    printf '%s fresh=PASS(10s) p2p=PASS chain=PASS pushes=0\n' "$(isoat $((NOW - 86399)))"
+    printf '%s fresh=FAIL(nas) p2p=PASS chain=PASS pushes=0\n' "$(isoat $((NOW - 20000)))"
+    printf '%s note: p2p diagnosis: provider-edge, draft ticket-draft-x.txt 127.0.0.1 10.9.8.7\n' "$(isoat $((NOW - 19990)))"
+    printf '%s fresh=PASS(20s) p2p=FAIL chain=FAIL(cached) pushes=1\n' "$(isoat $((NOW - 19700)))"
+    printf '%s fresh=UNKNOWN(5000s) p2p=PASS chain=UNKNOWN pushes=0\n' "$(isoat $((NOW - 12500)))"
+    printf 'garbage fresh=PASS p2p=PASS chain=PASS\n'
+    printf '%s fresh=PASS(10s) p2p=PASS chain=PASS pushes=0 extra\n' "$(isoat $((NOW - 600)))"
+    printf '%s fresh=PASS(10s) p2p=PASS chain=PASS pushes=0\n' "$(isoat $((NOW + 999)))"
+  } > "$C/home/log/watch.log"
+}
+status_config() { # closed|open  rewrite watch.env keeping the status key
+  if [ "$1" = closed ]; then P2P_PORT="$CLOSED_PORT"; else P2P_PORT="$OPEN_PORT"; fi
+  write_config; printf 'WATCH_PUBLIC_STATUS=%s\n' "$SPATH" >> "$C/etc/watch.env"
+}
+
+status_suite() {
+FIX="$REPO/tests/external-watch/fixtures"
+echo "== public status file: schema, window, mapping =="
+new_case; enable_status; seed_log; make_json 10; run_watch
+assert_eq "status: run rc unaffected" "0" "$RC"
+assert_eq "status: top-level keys exactly the contract" '["checks","generated_at","interval_sec","last","schema"]' "$(sj 'keys')"
+assert_eq "  schema / interval / generated_at" "1|300|$(isoat "$NOW")" "$(sj '.schema')|$(sj '.interval_sec')|$(jq -r .generated_at "$SPATH" 2>/dev/null)"
+assert_eq "  every check has exactly t,fresh,p2p,chain (booleans)" "true" \
+  "$(sj '[.checks[] | (keys == ["chain","fresh","p2p","t"]) and ([.fresh,.p2p,.chain] | all(type == "boolean"))] | all')"
+assert_eq "  last keys exactly t,fresh,p2p,chain,alerting" '["alerting","chain","fresh","p2p","t"]' "$(sj '.last | keys')"
+assert_eq "  24 h window, oldest first; 24h-old, future, note, malformed lines excluded; gap not filled" \
+  "$(isoat $((NOW - 86399)))|$(isoat $((NOW - 20000)))|$(isoat $((NOW - 19700)))|$(isoat $((NOW - 12500)))|$(isoat "$NOW")" \
+  "$(jq -r '[.checks[].t] | join("|")' "$SPATH" 2>/dev/null)"
+assert_eq "  FAIL -> false; PASS, UNKNOWN, cached -> true" \
+  '[[true,true,true],[false,true,true],[true,false,false],[true,true,true],[true,true,true]]' \
+  "$(sj '[.checks[] | [.fresh,.p2p,.chain]]')"
+assert_eq "  last = this run, nothing alerting" "$(isoat "$NOW")|[]" "$(jq -r '.last.t' "$SPATH" 2>/dev/null)|$(sj '.last.alerting')"
+assert_eq "  mode 644" "644" "$(file_mode_of "$SPATH")"
+assert_eq "  no publish note" "0" "$(grep -c 'status publish failed' "$C/home/log/watch.log")"
+SJ="$(cat "$SPATH" 2>/dev/null)"
+for leak in 127.0.0.1 10.9.8.7 "$P2P_PORT" fy-test-topic ticket draft mtr provider-edge note "$C" validator.json "$FAKE_NODE" rpc.invalid log/; do
+  assert_not_contains "  no host/path/topic string: $leak" "$leak" "$SJ"
+done
+
+echo "== public status file: alerting mirrors the state =="
+new_case; enable_status; status_config closed; make_json 10; MTR_FIXTURE="$FIX/mtr-provider-edge.txt"
+run_watch
+assert_eq "1st failing run: p2p false, not alerting yet" "false|[]" "$(sj '.last.p2p')|$(sj '.last.alerting')"
+run_watch "$((NOW + 300))"
+assert_eq "2nd failing run: state alerting -> alerting [p2p]" "alerting|[\"p2p\"]" "$(st p2p status)|$(sj '.last.alerting')"
+assert_eq "  two checks, oldest first" "$(isoat "$NOW")|$(isoat $((NOW + 300)))" "$(jq -r '[.checks[].t]|join("|")' "$SPATH" 2>/dev/null)"
+status_config open; run_watch "$((NOW + 600))"
+assert_eq "recovery: alerting [] and p2p true" "[]|true" "$(sj '.last.alerting')|$(sj '.last.p2p')"
+new_case; LIVE=0; enable_status; status_config closed; make_json 10; run_watch; run_watch "$((NOW + 300))"
+assert_eq "DRY never moves state to alerting -> alerting [] (state, not the fail count)" "ok|2|[]" "$(st p2p status)|$(st p2p fails)|$(sj '.last.alerting')"
+
+echo "== public status file: atomic write and file safety =="
+new_case; enable_status; make_json 10
+printf 'old\n' > "$SPATH"; chmod 644 "$SPATH"; INO0="$(ls -i "$SPATH" | awk '{print $1}')"
+: > "$C/pub/api/.watch-status.AbC123"
+run_watch
+INO1="$(ls -i "$SPATH" | awk '{print $1}')"
+if [ "$INO0" != "$INO1" ]; then ok "replaced by rename (new inode), not rewritten in place"; else bad "replaced by rename" "same inode $INO0"; fi
+assert_eq "  no temp left behind (a killed run's temp is swept)" "0" "$(count_files "$C/pub/api" '.watch-status.*')"
+assert_eq "  content is the new JSON" "1" "$(sj '.schema')"
+new_case; enable_status; make_json 10; printf 'precious\n' > "$C/victim"; ln -s "$C/victim" "$SPATH"; run_watch
+assert_eq "symlink target refused: victim untouched, link kept, rc 0" "precious|link|0" \
+  "$(cat "$C/victim")|$([ -L "$SPATH" ] && echo link)|$RC"
+assert_contains "  one publish note" "note: status publish failed" "$(cat "$C/home/log/watch.log")"
+new_case; enable_status; make_json 10; printf 'precious\n' > "$C/victim"; ln "$C/victim" "$SPATH"; run_watch
+assert_eq "hard-linked target refused: both names keep the old bytes" "precious|precious|1" \
+  "$(cat "$C/victim")|$(cat "$SPATH")|$(grep -c 'status publish failed' "$C/home/log/watch.log")"
+new_case; mkdir -p "$C/real"; ln -s "$C/real" "$C/linkdir"; enable_status "$C/linkdir/watch-status.json"; make_json 10; run_watch
+absent "symlinked directory refused" "$C/real/watch-status.json"
+new_case; enable_status; make_json 10; seed_log
+printf 'keep\n' > "$SPATH"; HK_ENV=(WATCH_STATUS_MAX_BYTES=200); run_watch
+assert_eq "over the size cap: refused, previous file kept, note" "keep|1" "$(cat "$SPATH")|$(grep -c 'status publish failed' "$C/home/log/watch.log")"
+new_case; enable_status; make_json 10; seed_log; run_watch
+assert_eq "default cap: the 24 h file is written" "1" "$(sj '.schema')"
+
+echo "== public status file: disabled when unset =="
+new_case; mkdir -p "$C/pub/api"; make_json 10; run_watch
+assert_eq "unset: rc 0, no file anywhere, no note" "0|0|0" \
+  "$RC|$(find "$C" -name 'watch-status.json' | wc -l | tr -d ' ')|$(grep -c 'status publish' "$C/home/log/watch.log")"
+new_case; printf 'WATCH_PUBLIC_STATUS=\n' >> "$C/etc/watch.env"; make_json 10; run_watch
+assert_eq "empty value: disabled, rc 0, no note" "0|0" "$RC|$(grep -c 'status publish' "$C/home/log/watch.log")"
+
+echo "== public status file: a publish failure never suppresses an alert =="
+for badpath in "@C@/nodir/api/watch-status.json" "relative/watch-status.json" "@C@/pub/api/../api/watch-status.json" "@C@/pub/api/status.txt"; do
+  new_case; mkdir -p "$C/pub/api"; SPATH="${badpath//@C@/$C}"; status_config closed
+  make_json 10; MTR_FIXTURE="$FIX/mtr-provider-edge.txt"
+  run_watch; run_watch "$((NOW + 300))"
+  assert_eq "bad target '${badpath#@C@}': alert delivered, alerting, rc 0" "1|alerting|0" "$(pushes)|$(st p2p status)|$RC"
+  assert_eq "  one note per run" "2" "$(grep -c 'note: status publish failed' "$C/home/log/watch.log")"
+done
+new_case; enable_status; status_config closed; make_json 10; MTR_FIXTURE="$FIX/mtr-provider-edge.txt"; NOTIFY_RC=3
+run_watch; run_watch "$((NOW + 300))"
+assert_eq "push failure: exit 6 kept, status still published, not alerting" "6|[]|false" "$RC|$(sj '.last.alerting')|$(sj '.last.p2p')"
+}
+if [ "${WATCH_TEST_ONLY_STATUS:-0}" = 1 ]; then
+  status_suite
+  echo; echo "RESULT: $PASS passed, $FAIL failed"
+  if [ "$FAIL" -ne 0 ]; then printf ' - %s\n' "${FAILURES[@]}"; exit 1; fi
+  exit 0
+fi
+
 # WATCH_TEST_ONLY_CAPS=1 runs only the size-cap sections (10 onwards): the
 # fast loop for mutation runs against the housekeeping code. CI and
 # run-all-tests.sh never set it, so the full suite always runs there.
@@ -937,6 +1058,8 @@ DSIZE="$(size_of "$C/home/log/$(draft_name "$((NOW + 300))")" 2>/dev/null)"
 if [ -n "$DSIZE" ] && [ "$DSIZE" -gt 0 ] && [ "$DSIZE" -le 4000 ]; then ok "oversized report: draft written and capped at the log cap (4000)"
 else bad "oversized report: draft written and capped" "size='$DSIZE'"; fi
 assert_not_contains "  push does not report a failed draft" "下書き: 作成失敗" "$(tr '\001' '\n' < "$C/notify.log")"
+
+status_suite
 
 echo
 echo "RESULT: $PASS passed, $FAIL failed"
