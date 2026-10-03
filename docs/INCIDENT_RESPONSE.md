@@ -67,18 +67,19 @@ sudo ufw status verbose
 
 ### 3.2 metalgo container down / unhealthy
 
-**症状**: `docker compose ps` で metalgo が unhealthy / restarting / exited、または `info.getNodeID` API が応答なし。
+**症状**: `docker ps -a --filter label=com.docker.compose.service=metalgo` で metalgo が unhealthy / restarting / exited、または `info.getNodeID` API が応答なし。
 
 > ⚠️ 現行本番 host では compose up は実行しない (別 NodeID になる。[DISASTER_RECOVERY.md 冒頭の警告](DISASTER_RECOVERY.md) 参照)。 コンテナは `docker ps -a --filter label=com.docker.compose.service=metalgo` で特定する。
 
 **調査手順**:
 
 ```bash
-# 1. コンテナ状態
-docker compose -f docker-compose.metalgo.yml -f docker-compose.metalgo.prod.yml ps
+# 1. コンテナ状態 (repo の compose での `ps` は現行本番 host では別 project を見るので使わない)
+docker ps -a --filter label=com.docker.compose.service=metalgo --format '{{.ID}} {{.Names}} {{.Status}}'
+# 期待: 1 行だけ。2 行以上なら start / restart せず、どれが本番か確認する
 
 # 2. 最近のログ(エラー原因の特定)
-docker compose -f docker-compose.metalgo.yml -f docker-compose.metalgo.prod.yml logs metalgo --tail 100
+docker logs --tail 100 <1 の ID>
 
 # 3. リソース使用率(OOM か CPU 詰まりか)
 docker stats --no-stream
@@ -138,9 +139,24 @@ curl -sS http://localhost:9650/ext/health
 
 **即座の対応**:
 
+> ⚠️ ここでは compose の down / up を使わない。現行本番 host の metalgo は repo の compose とは別の project 名で動いているので、repo の compose ファイルでの `down` は本番の metalgo を止めない (止めたつもりで動き続ける)。`up` は空の volume で **別 NodeID** を作る。[DISASTER_RECOVERY.md 冒頭の警告](DISASTER_RECOVERY.md) 参照。コンテナは compose label で特定し、`docker stop` で止める。
+
 ```bash
 # 1. metalgo を停止(攻撃者が validator を勝手に動かすのを止める)
-docker compose -f docker-compose.metalgo.yml -f docker-compose.metalgo.prod.yml down
+# 1a. 対象を特定する (コンテナ名は固定で仮定しない)
+docker ps -a --filter label=com.docker.compose.service=metalgo --format '{{.ID}} {{.Names}} {{.Status}}'
+# 期待: 1 行だけ。2 行以上なら止める前に、どれが本番か確認する
+#       (誤った compose up で残った空 volume のコンテナがありうる)
+# 1b. その ID を止める (rm はしない。コンテナと volume は調査・復旧用に残す)
+docker stop <1a の ID>
+# 1c. 自動で戻らないようにする (restart ポリシーが always だと docker 再起動で戻る)
+docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' <1a の ID>
+# always なら: docker update --restart=no <1a の ID>
+# 1d. 止まったことを確認する
+docker ps --filter label=com.docker.compose.service=metalgo --format '{{.ID}} {{.Names}} {{.Status}}'
+# 期待: 何も出ない (running の metalgo が 0 個)
+sudo ss -ltn | grep ':9651 ' || echo "9651 not listening"
+# 期待: "9651 not listening" (P2P port が閉じた = ピアから validator として見えない)
 
 # 2. host の他の侵入痕跡を確認
 last -n 50
@@ -171,27 +187,46 @@ sudo find / -newer /etc/passwd -not -path '/proc/*' -not -path '/sys/*' 2>/dev/n
 
 **症状**: 起動後何時間経っても bootstrap が完了しない、または `accepted state summary "Skipped"` 等のログが繰り返し出る。
 
-> ⚠️ 現行本番 host では compose up は実行しない (別 NodeID になる。[DISASTER_RECOVERY.md 冒頭の警告](DISASTER_RECOVERY.md) 参照)。
+> ⚠️ ここでは compose の down / up を使わない。現行本番 host の metalgo は repo の compose とは別の project 名・volume 名で動いているので、repo の compose ファイルでの `down -v` は本番の volume を消さず、`up` は空の volume で **別 NodeID** を作る ([DISASTER_RECOVERY.md 冒頭の警告](DISASTER_RECOVERY.md) 参照)。volume 名も固定で仮定しない。コンテナは compose label で特定し、データは今の `/data` の mount 元の中で、staking 以外だけを消す。
 
 **対応**:
 
 ```bash
+# 0. 対象を特定する (コンテナ名・volume 名は固定で仮定しない)
+docker ps -a --filter label=com.docker.compose.service=metalgo --format '{{.ID}} {{.Names}} {{.Status}}'
+# 期待: 1 行だけ。2 行以上なら先に進まず、どれが本番か確認する
+CID=<0 の ID>
+DATA=$(docker inspect "$CID" \
+  --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}')
+echo "$DATA"   # 空なら止まる
+NODEID_BEFORE=$(curl -sS -X POST -H 'content-type:application/json' \
+  --data '{"jsonrpc":"2.0","id":1,"method":"info.getNodeID"}' \
+  http://localhost:9650/ext/info | jq -r '.result.nodeID')
+echo "$NODEID_BEFORE"   # 応答しない時は explorer / 運用記録の NodeID を控える
+
 # 1. ログ詳細
-docker compose -f docker-compose.metalgo.yml -f docker-compose.metalgo.prod.yml logs metalgo --tail 200 | grep -E "WARN|ERROR|bootstrap"
+docker logs --tail 200 "$CID" 2>&1 | grep -E "WARN|ERROR|bootstrap"
 
-# 2. データボリュームを破棄して再 bootstrap (mainnet では staking key を救出してから!)
-# staking key を tar で別場所に backup
-docker run --rm -v metalgo_data:/data -v "$PWD/backup":/backup alpine \
-  tar czf /backup/staking-rescue-$(date +%Y%m%d).tar.gz -C /data staking
+# 2. 止めて、staking key を別の場所に backup する (mainnet では必ず先に)
+docker stop "$CID"
+mkdir -p "$PWD/backup"
+sudo tar czf "$PWD/backup/staking-rescue-$(date +%Y%m%d).tar.gz" -C "$DATA" staking
+sudo tar tzf "$PWD/backup/staking-rescue-$(date +%Y%m%d).tar.gz"
+# 期待: staking/staker.crt, staking/staker.key, staking/signer.key が含まれる
 
-# 3. data volume だけリセット(staking 以外)、staking dir は新 volume に戻す
-docker compose -f docker-compose.metalgo.yml -f docker-compose.metalgo.prod.yml down -v
-docker volume create metalgo_data
-docker run --rm -v metalgo_data:/data -v "$PWD/backup":/backup alpine \
-  tar xzf /backup/staking-rescue-*.tar.gz -C /data
+# 3. 同じ mount 元の中で、staking 以外だけを消す (volume もコンテナも作り直さない)
+sudo find "$DATA" -mindepth 1 -maxdepth 1 ! -name staking -print
+# ↑ 消す対象を目で確認してから ↓
+sudo find "$DATA" -mindepth 1 -maxdepth 1 ! -name staking -exec rm -rf {} +
+sudo ls -la "$DATA/staking"   # 3 ファイルが残っていること
 
-# 4. 再起動
-docker compose -f docker-compose.metalgo.yml -f docker-compose.metalgo.prod.yml up -d
+# 4. 同じコンテナを start し、NodeID が変わっていないことを確認する
+docker start "$CID"
+sleep 30
+curl -sS -X POST -H 'content-type:application/json' \
+  --data '{"jsonrpc":"2.0","id":1,"method":"info.getNodeID"}' \
+  http://localhost:9650/ext/info | jq -r '.result.nodeID'
+# 期待: NODEID_BEFORE と同じ。違えば即 docker stop "$CID" して、2 の backup から staking を戻す
 ```
 
 ⚠️ staking dir(`staker.crt` / `staker.key` / `signer.key`)を救出せずに volume を消すと **NodeID が変わる**。**mainnet では絶対に注意**。詳細は [KEY_ROTATION.md](KEY_ROTATION.md)。
