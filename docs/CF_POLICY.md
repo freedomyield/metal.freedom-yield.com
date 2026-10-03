@@ -114,6 +114,30 @@ Configured per project memory `reference_cf_email_routing` and
 - **DKIM** is auto-managed by Cloudflare Email Routing
   (`cf2024-1._domainkey.freedom-yield.com`).
 
+## Intentionally ON — Cloudflare Access on the operator status page
+
+Set up by the operator on 2026-10-03 in the Cloudflare Zero Trust dashboard
+(Free plan; the configuration lives in Cloudflare, not in this repo — this
+section is its record, so a dashboard change that is not reflected here is
+drift):
+
+- Access application (self-hosted, public DNS), two destinations on the
+  site's hostname: path `status` (the page) and path `api/watch-status.json`
+  (the watch file the page reads).
+- One policy, action **Allow**, include **Emails** = the operator's own
+  address only (never "Everyone" or an email-domain rule).
+- Login method: one-time PIN by email. Session duration: 1 month.
+- Everything else on the site, including `/api/validator.json` and
+  `/api/known-outages.json`, stays public.
+
+Consequences the code relies on: the page fetches with
+`credentials: "same-origin"` so the Access session cookie reaches
+`/api/watch-status.json`; when the session has expired the data request is
+redirected cross-origin and fails, and the page shows a warning, never ✅
+(`public/status/status-calc.js`). Verification after any change:
+an unauthenticated `curl -I` of both paths must answer 302 to the team's
+`cloudflareaccess.com` login, and the two public JSON files must answer 200.
+
 ## Why this document exists
 
 The Cloudflare Security Insights dashboard is built around generic best

@@ -811,7 +811,9 @@ The installer backs up the crontab to `~/metal-fy-watch-crontab.bak-<ts>` in the
 - **GitHub backstop.** `.github/workflows/uptime.yml` fails when `validator.json` is more than 1 hour stale, except inside the renewal window (where it emits a notice). It is slow (scheduled GitHub runs in practice fire only every few hours) but independent of both hosts and of their provider.
 - **Known gap: no self-heartbeat.** The watchdog does not report its own death. If the web host itself dies, the validator host's existing public-site probe (§6.7) alerts. If both hosts are silent, only the GitHub backstop remains.
 
-### 14.7 Public status file (`/api/watch-status.json`)
+### 14.7 Status file (`/api/watch-status.json`)
+
+Since 2026-10-03 both `/status/` and this file are behind Cloudflare Access (operator only; see `docs/CF_POLICY.md`). The schema below was approved as publishable (Constitution Reclassifications, 2026-10-03), which remains the ceiling if Access is ever removed.
 
 The phone status page (`/status/`) reads `/api/watch-status.json`. The external watch writes it **on the web host**, so the page keeps working while the validator host is unreachable; nothing is pushed from the validator host.
 
