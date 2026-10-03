@@ -543,7 +543,7 @@ check "status: auto --dry-run shows enabled + the changed key name, writes nothi
 	'[ "$RC" -eq 0 ] && printf "%s" "$OUT" | grep -q "public status: enabled — watch-status.json in the api dir of validator.json (auto)" && printf "%s" "$OUT" | grep -q "etc/watch.env: update (changed keys: WATCH_PUBLIC_STATUS )" && ! grep -q "^WATCH_PUBLIC_STATUS=" "$WENV" && [ ! -e "$PUB" ]' "rc=$RC"
 EXTRA_ENV="WATCH_PUBLIC_STATUS=auto" run
 check "status: auto writes the api dir of validator.json" '[ "$RC" -eq 0 ] && grep -qxF "WATCH_PUBLIC_STATUS=$PUB" "$WENV"' "rc=$RC"
-check "  the self-test run published it (schema 1, mode 644)" '[ "$(jq -r .schema "$PUB" 2>/dev/null)" = 1 ] && [ "$(meta "$PUB")" = 644 ]'
+check "  the self-test run published it (schema 2, mode 644)" '[ "$(jq -r .schema "$PUB" 2>/dev/null)" = 2 ] && [ "$(meta "$PUB")" = 644 ]'
 check "  the path is not printed" '! printf "%s" "$OUT" | grep -qF "$PUB"'
 run
 check "status: re-install without the env keeps it" '[ "$RC" -eq 0 ] && grep -qxF "WATCH_PUBLIC_STATUS=$PUB" "$WENV" && printf "%s" "$OUT" | grep -q "kept from the installed watch.env"' "rc=$RC"
