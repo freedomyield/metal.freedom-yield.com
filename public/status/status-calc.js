@@ -232,7 +232,7 @@
 				detail: "データの時刻が端末の時刻より 2 分以上先です。どちらかの時計がずれているため、新しさを判断できません。",
 				next: "端末の時刻設定 (自動) を確認。正しければ web host / validator host の時計 (NTP) を確認" };
 		}
-		if (!watch || watch.schema !== 2 || !last || lastT === null || now - lastT > LIMITS.watchStaleMs) {
+		if (!watch || watch.schema !== 2 || !last || lastT === null || now - lastT > LIMITS.watchStaleMs || countsSummary(watch, now) === null) {
 			return { ok: false, code: "stale_watch", title: "⚠️ 見張りの情報が古い",
 				detail: lastT === null ? "見張りの結果が読めません。"
 					: "最後の確認から " + Math.floor((now - lastT) / MIN) + " 分たっています。",

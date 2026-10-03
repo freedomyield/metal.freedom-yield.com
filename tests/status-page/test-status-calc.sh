@@ -177,6 +177,8 @@ ok(C.countsSummary(goodWatch(NOW), NOW).gaps === 0, "C13 fresh watch adds no gap
 { const w = goodWatch(NOW); w.counts_24h.fail = -1; ok(C.countsSummary(w, NOW) === null, "C13 negative count → null"); }
 { const w = goodWatch(NOW); w.counts_24h.gap = "0"; ok(C.countsSummary(w, NOW) === null, "C13 string count → null"); }
 { const w = goodWatch(NOW); w.counts_24h.runs = 1.5; ok(C.countsSummary(w, NOW) === null, "C13 non-integer count → null"); }
+{ const w = goodWatch(NOW); delete w.counts_24h; ok(v({ watch: w }).code === "stale_watch", "C13 verdict: missing counts → never ✅ (見張りの情報が読めない)"); }
+{ const w = goodWatch(NOW); w.counts_24h.fail = "5"; ok(v({ watch: w }).code === "stale_watch", "C13 verdict: garbled counts → never ✅"); }
 
 // ---- C12 watchdog ------------------------------------------------------------------
 ok(C.renderStale(NOW - 3 * MIN - 1000, NOW) === true, "C12 last render 3 min 1 s ago → stale");
