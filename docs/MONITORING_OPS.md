@@ -724,7 +724,7 @@ Everything lives under `$HOME/metal-fy-watch/` of the site account: directories 
 | `etc/watch.env` | strict `KEY=VALUE` config (parsed, never sourced) |
 | `etc/ntfy-topic` | the watch's own ntfy topic, generated on the web host by the installer (bearer secret, `docs/CONSTITUTION.md` §4.1 S5; never in the repo, never printed) |
 | `state/` | `state.json`, the RPC cache, the lock |
-| `log/watch.log` | one line per run; capped at 1 MiB (see below); also the source of the public status file (§14.7) |
+| `log/watch.log` | one line per run; capped at 1 MiB (see below); also the source of the status file (§14.7) |
 | `log/cron.err` | stderr of the cron job (including `DRY:` lines); capped at 1 MiB (see below) |
 | `log/ticket-draft-<UTC>.txt` | provider ticket draft written on a `p2p` alert (§14.3); newest 10 kept, each capped at 1 MiB |
 | `backup/` | backups taken by the installer: `crontab.bak-<ts>` and, when a re-install replaces them, `external-watch.sh.bak-<ts>`, `notify.sh.bak-<ts>`, `watch.env.bak-<ts>`; the newest 10 `*.bak-*` files are kept, counted **across all kinds** |
@@ -768,7 +768,7 @@ WEB_HOST=<web host> WEB_HOST_KEY=<path> VALIDATOR_HOST=<validator host> \
   bash scripts/install-web-host-external-watch.sh
 ```
 
-Optional variables: `WEB_HOST_USER` (login used for the installation), `WATCH_ACCOUNT` (the site account that owns the job; defaults to the site account), `FY_WEB_API_DIR` (override of the detected `validator.json` location), `WATCH_PUBLIC_STATUS` (the public status file, §14.7: `auto`, `off`, an absolute `*.json` path, or unset to keep the installed setting). `--print-remote` prints the remote script text only. The installer **never contacts the validator host**: `VALIDATOR_HOST` is only written into `etc/watch.env` for the TCP probe. It must run on the Mac, because the topic hand-over needs `pbcopy`/`pbpaste`; without them it refuses.
+Optional variables: `WEB_HOST_USER` (login used for the installation), `WATCH_ACCOUNT` (the site account that owns the job; defaults to the site account), `FY_WEB_API_DIR` (override of the detected `validator.json` location), `WATCH_PUBLIC_STATUS` (the status file, §14.7: `auto`, `off`, an absolute `*.json` path, or unset to keep the installed setting). `--print-remote` prints the remote script text only. The installer **never contacts the validator host**: `VALIDATOR_HOST` is only written into `etc/watch.env` for the TCP probe. It must run on the Mac, because the topic hand-over needs `pbcopy`/`pbpaste`; without them it refuses.
 
 The installer:
 

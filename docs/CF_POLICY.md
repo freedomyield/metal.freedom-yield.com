@@ -134,7 +134,7 @@ Consequences the code relies on: the page fetches with
 `credentials: "same-origin"` so the Access session cookie reaches
 `/api/watch-status.json`; when the session has expired the data request is
 redirected cross-origin and fails, and the page shows a warning, never ✅
-(`public/status/status-calc.js`). Verification after any change:
+(fetch in `public/status/status.js`, verdict in `public/status/status-calc.js`). Verification after any change:
 an unauthenticated `curl -I` of both paths must answer 302 to the team's
 `cloudflareaccess.com` login, and the two public JSON files must answer 200.
 

@@ -150,12 +150,13 @@ docker ps -a --filter label=com.docker.compose.service=metalgo --format '{{.ID}}
 # 1b. その ID を止める (rm はしない。コンテナと volume は調査・復旧用に残す)
 docker stop <1a の ID>
 # 1c. 自動で戻らないようにする (restart ポリシーが always だと docker 再起動で戻る)
-docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' <1a の ID>
-# always なら: docker update --restart=no <1a の ID>
+docker update --restart=no <1a の ID>   # ポリシーに関係なく常に実行する
+docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' <1a の ID>   # 期待: no
 # 1d. 止まったことを確認する
 docker ps --filter label=com.docker.compose.service=metalgo --format '{{.ID}} {{.Names}} {{.Status}}'
 # 期待: 何も出ない (running の metalgo が 0 個)
 sudo ss -ltn | grep ':9651 ' || echo "9651 not listening"
+# この間に届く「metalgo 停止」通知の対処欄 (docker start) には従わない。侵害の疑いが晴れるまで止めたままにする
 # 期待: "9651 not listening" (P2P port が閉じた = ピアから validator として見えない)
 
 # 2. host の他の侵入痕跡を確認
@@ -187,8 +188,7 @@ sudo find / -newer /etc/passwd -not -path '/proc/*' -not -path '/sys/*' 2>/dev/n
 
 **症状**: 起動後何時間経っても bootstrap が完了しない、または `accepted state summary "Skipped"` 等のログが繰り返し出る。
 
-> ⚠️ ここでは compose の down / up を使わない。現行本番 host の metalgo は repo の compose とは別の project 名・volume 名で動いているので、repo の compose ファイルでの `down -v` は本番の volume を消さず、`up` は空の volume で **別 NodeID** を作る ([DISASTER_RECOVERY.md 冒頭の警告](DISASTER_RECOVERY.md) 参照)。volume 名も固定で仮定しない。コンテナは compose label で特定し、データは今の `/data` の mount 元の中で、staking 以外だけを消す。
-> ⚠️ 現行本番 host では、`.env` で名前を揃えて `scripts/check-compose-naming.sh` が `RESULT: MATCH` を返すまで compose up は実行しない (揃っていないと別 NodeID になる。[DISASTER_RECOVERY.md 冒頭の警告](DISASTER_RECOVERY.md) 参照)。
+> ⚠️ ここでは compose の down / up を使わない (`.env` で名前を揃えた後でも同じ)。名前が揃っていなければ、repo の compose ファイルでの `down -v` は本番の volume を消さず、`up` は空の volume で **別 NodeID** を作る。揃っていれば、`down` は本番コンテナを、`down -v` は staker keys を含む volume ごと消す。この手順は compose を使わず、同じコンテナと同じ mount 元だけを扱う ([DISASTER_RECOVERY.md 冒頭の警告](DISASTER_RECOVERY.md) 参照)。
 
 **対応**:
 
@@ -217,7 +217,7 @@ sudo tar tzf "$PWD/backup/staking-rescue-$(date +%Y%m%d).tar.gz"
 
 # 3. 同じ mount 元の中で、staking 以外だけを消す (volume もコンテナも作り直さない)
 sudo find "$DATA" -mindepth 1 -maxdepth 1 ! -name staking -print
-# ↑ 消す対象を目で確認してから ↓
+# ↑ 消す対象を目で確認してから ↓ (staking 以外に configs/ など chain 設定のディレクトリがあれば、消さずに止めて確認する)
 sudo find "$DATA" -mindepth 1 -maxdepth 1 ! -name staking -exec rm -rf {} +
 sudo ls -la "$DATA/staking"   # 3 ファイルが残っていること
 

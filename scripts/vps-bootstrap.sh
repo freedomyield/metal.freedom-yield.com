@@ -394,6 +394,19 @@ step_metalgo() {
     echo "         Then re-run this script (Step 7 will then start metalgo)."
     return 0
   fi
+  # On a host that already has a metalgo container (e.g. the current production
+  # host, whose names predate this repo), compose must resolve to exactly that
+  # project, container and /data volume, or `up` recreates metalgo on an empty
+  # volume -> new staker keys -> a different NodeID. Refuse unless the
+  # read-only verifier says MATCH (docs/DISASTER_RECOVERY.md, top warning).
+  if [ -n "$(docker ps -aq --filter label=com.docker.compose.service=metalgo)" ]; then
+    if ! bash "${COMPOSE_NAMING_CHECK:-scripts/check-compose-naming.sh}"; then
+      echo "ERROR: compose names do not match the existing metalgo container;" >&2
+      echo "       refusing to run compose up (set METALGO_COMPOSE_PROJECT /" >&2
+      echo "       METALGO_CONTAINER_NAME in .env and re-run scripts/check-compose-naming.sh)." >&2
+      return 1
+    fi
+  fi
   metalgo_compose up -d
   sleep 10
   echo "NodeID check:"

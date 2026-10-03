@@ -29,6 +29,8 @@
 #   T5 two own containers -> rc != 0, not started.
 #   T6 no .env -> NOTE, rc 0, docker never called.
 #   T7 static: the old hardcoded volume path is gone from vps-bootstrap.sh.
+#   T8 a metalgo container exists and the compose naming verifier reports
+#      MISMATCH -> rc != 0, compose up never runs (production NodeID guard).
 #
 # Mutation: MUTATE_OLD_PATH=1 runs T1 against a copy of the script whose
 # staking dir is forced back to the old hardcoded path; T1 must then FAIL.
@@ -87,6 +89,8 @@ STUB
 printf '#!/usr/bin/env bash\necho "{}"\n' > "$BIN/curl"
 printf '#!/usr/bin/env bash\ncat >/dev/null; echo NodeID-stub\n' > "$BIN/jq"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$BIN/sleep"
+# naming-check stub: exits with $STUB_STATE/naming_rc (default 0 = MATCH), logs the call
+printf '#!/usr/bin/env bash\necho naming-check >> "$STUB_STATE/calls.log"\nexit "$(cat "$STUB_STATE/naming_rc" 2>/dev/null || echo 0)"\n' > "$BIN/naming-check"
 chmod +x "$BIN"/*
 
 ID_A=aaaaaaaaaaaa1111111111111111111111111111111111111111111111111111
@@ -106,7 +110,7 @@ add_keys() { mkdir -p "$1/staking" && : > "$1/staking/staker.crt"; }
 # run_step: source the script and call step_metalgo in a subshell
 run_step() {
 	(
-		export PATH="$BIN:$PATH" VPS_BOOTSTRAP_SOURCED=1 DEPLOY_DIR="$C/deploy"
+		export PATH="$BIN:$PATH" VPS_BOOTSTRAP_SOURCED=1 DEPLOY_DIR="$C/deploy" COMPOSE_NAMING_CHECK="$BIN/naming-check"
 		# shellcheck disable=SC1090
 		. "$SCRIPT"
 		step_metalgo
@@ -191,6 +195,27 @@ if [ "$(rc)" = 0 ] && ! started && ! [ -s "$STUB_STATE/calls.log" ] \
 	ok "T6 no .env -> NOTE, docker never called"
 else
 	bad "T6 no .env -> NOTE, docker never called" "rc=$(rc)"
+fi
+
+# ---- T8 --------------------------------------------------------------------
+# Existing metalgo container + naming verifier says MISMATCH -> never compose up.
+new_case t8
+echo "$ID_A" > "$STUB_STATE/all"
+echo "$ID_A" > "$STUB_STATE/own"
+echo "$C/vol/_data" > "$STUB_STATE/mount_$ID_A"
+add_keys "$C/vol/_data"
+echo 1 > "$STUB_STATE/naming_rc"
+run_step
+if [ "$(rc)" != 0 ] && ! started && grep -q naming-check "$STUB_STATE/calls.log"; then
+	ok "T8 existing container + naming MISMATCH -> refused, compose up never runs"
+else
+	bad "T8 existing container + naming MISMATCH -> refused, compose up never runs" "rc=$(rc) out=$(tr '\n' ' ' < "$C/out.txt")"
+fi
+# T1 must have consulted the verifier too (the gate is on the path to `up`).
+if grep -q naming-check "$TMP/t1/state/calls.log"; then
+	ok "T8b the naming verifier runs before compose up when a container exists"
+else
+	bad "T8b the naming verifier runs before compose up when a container exists"
 fi
 
 # ---- T7 --------------------------------------------------------------------
