@@ -71,6 +71,11 @@
 	@code path /styles.css /assets/*.css /assets/*.js
 	header @code Cache-Control "public, max-age=3600, must-revalidate"
 
+	# operator 状態ページの部品は毎回確認 (古い JS が残ると判定ロジックの修正が届かない。
+	# 2026-10-03 に credentials 修正が届かず「読めません」が続いた)。
+	@status_assets path /status/*.js /status/*.css /status/manifest.json
+	header @status_assets Cache-Control "no-cache, must-revalidate"
+
 	# HTML は no-cache(常に最新を確認、ETag で 304 で済む)
 	@html path /*.html / /*/
 	header @html Cache-Control "no-cache, must-revalidate"
