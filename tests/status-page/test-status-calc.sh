@@ -71,8 +71,9 @@ function goodWatch(now) {
 		checks.unshift({ t: iso(t), fresh: true, p2p: true, chain: true });
 	}
 	const lastT = Date.parse(checks[checks.length - 1].t);
-	return { schema: 1, generated_at: iso(now), interval_sec: 300,
-		last: { t: iso(lastT), fresh: true, p2p: true, chain: true, alerting: [] }, checks };
+	return { schema: 2, generated_at: iso(now), interval_sec: 300,
+		last: { t: iso(lastT), fresh: true, p2p: true, chain: true, alerting: [] },
+		counts_24h: { runs: checks.length, fail: 0, unknown: 0, gap: 0 }, checks };
 }
 function goodValidator(now, network) {
 	return { observedAt: iso(now - 2 * MIN), startTime: S, endTime: E,
@@ -95,7 +96,8 @@ ok(v({ watch: staleAlert, validator: null, outages: [] }).code === "stale_watch"
 	"C1 stale watch beats alerting + missing validator");
 ok(v({ watch: null }).code === "stale_watch", "C1 missing watch-status → stale (never OK)");
 ok(v({ watch: { schema: 1, last: { t: "garbage" } } }).code === "stale_watch", "C1 unreadable last.t → stale");
-ok(v({ watch: { schema: 2, last: goodWatch(NOW).last } }).code === "stale_watch", "C1 unknown schema → stale");
+{ const w1 = goodWatch(NOW); w1.schema = 1; ok(v({ watch: w1 }).code === "stale_watch", "C1 old schema 1 (timeline) → stale, not read"); }
+{ const w3 = goodWatch(NOW); w3.schema = 3; ok(v({ watch: w3 }).code === "stale_watch", "C1 unknown schema → stale"); }
 const alertW = goodWatch(NOW); alertW.last.chain = false;
 ok(v({ watch: alertW, validator: null }).code === "alert", "C1 alert beats stale validator");
 ok(v({ validator: null }).code === "stale_validator", "C1 missing validator.json → validator の情報が古い");
@@ -164,6 +166,17 @@ const hu = goodWatch(NOW); hu.checks[2].chain = null; hu.checks[5].fresh = null;
 const hus = C.historySummary(hu.checks, NOW);
 ok(hus.unknowns === 1 && hus.failures === 1, "C11 history: null-only check → 未確認, null+false → 失敗");
 ok(C.historySummary(goodWatch(NOW).checks, NOW).unknowns === 0, "C11 history: clean → 0 未確認");
+
+// ---- C13 counts_24h (schema 2: aggregates only) -------------------------------------
+{ const w = goodWatch(NOW); w.counts_24h = { runs: 280, fail: 2, unknown: 1, gap: 1 };
+  const s = C.countsSummary(w, NOW);
+  ok(s && s.failures === 2 && s.unknowns === 1 && s.gaps === 1 && s.total === 280, "C13 counts read as published"); }
+ok(C.countsSummary(goodWatch(NOW - 10 * MIN), NOW).gaps === 1, "C13 newest run → now > 7 min adds a gap");
+ok(C.countsSummary(goodWatch(NOW), NOW).gaps === 0, "C13 fresh watch adds no gap");
+{ const w = goodWatch(NOW); delete w.counts_24h; ok(C.countsSummary(w, NOW) === null, "C13 missing counts → null (not a clean 0)"); }
+{ const w = goodWatch(NOW); w.counts_24h.fail = -1; ok(C.countsSummary(w, NOW) === null, "C13 negative count → null"); }
+{ const w = goodWatch(NOW); w.counts_24h.gap = "0"; ok(C.countsSummary(w, NOW) === null, "C13 string count → null"); }
+{ const w = goodWatch(NOW); w.counts_24h.runs = 1.5; ok(C.countsSummary(w, NOW) === null, "C13 non-integer count → null"); }
 
 // ---- C12 watchdog ------------------------------------------------------------------
 ok(C.renderStale(NOW - 3 * MIN - 1000, NOW) === true, "C12 last render 3 min 1 s ago → stale");

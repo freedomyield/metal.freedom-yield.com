@@ -159,9 +159,9 @@ st() { jq -r ".$1.$2" "$C/home/state/state.json" 2>/dev/null; }
 curl_calls() { grep -c . "$C/curl.log"; }
 
 # ============================ 13. public status file (watch-status.json) ============================
-# Contract consumed by public/status/: {"schema":1,"generated_at","interval_sec":300,
-# "last":{t,fresh,p2p,chain,alerting[]},"checks":[{t,fresh,p2p,chain}...]} last 24 h,
-# oldest first; each check value is true (PASS) / false (FAIL) / null (UNKNOWN). Defined here, called at the end of the suite;
+# Contract consumed by public/status/: {"schema":2,"generated_at","interval_sec":300,
+# "last":{t,fresh,p2p,chain,alerting[]},"counts_24h":{runs,fail,unknown,gap}} — no per-run
+# timeline (operator approval 2026-10-03); each value is true (PASS) / false (FAIL) / null (UNKNOWN). Defined here, called at the end of the suite;
 # WATCH_TEST_ONLY_STATUS=1 runs only this section (fast mutation loop).
 file_mode_of() { stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null; }
 isoat() { jq -nr --argjson t "$1" '$t | todate'; }
@@ -182,6 +182,7 @@ seed_log() {
     printf '%s fresh=FAIL(nas) p2p=PASS chain=PASS pushes=0\n' "$(isoat $((NOW - 20000)))"
     printf '%s note: p2p diagnosis: provider-edge, draft ticket-draft-x.txt 127.0.0.1 10.9.8.7\n' "$(isoat $((NOW - 19990)))"
     printf '%s fresh=PASS(20s) p2p=FAIL chain=FAIL(cached) pushes=1\n' "$(isoat $((NOW - 19700)))"
+    printf '%s fresh=FAIL(nas) p2p=PASS chain=UNKNOWN pushes=0\n' "$(isoat $((NOW - 19400)))"
     printf '%s fresh=UNKNOWN(5000s) p2p=PASS chain=UNKNOWN pushes=0\n' "$(isoat $((NOW - 12500)))"
     printf 'garbage fresh=PASS p2p=PASS chain=PASS\n'
     printf '%s fresh=PASS(10s) p2p=PASS chain=PASS pushes=0 extra\n' "$(isoat $((NOW - 600)))"
@@ -198,17 +199,15 @@ FIX="$REPO/tests/external-watch/fixtures"
 echo "== public status file: schema, window, mapping =="
 new_case; enable_status; seed_log; make_json 10; run_watch
 assert_eq "status: run rc unaffected" "0" "$RC"
-assert_eq "status: top-level keys exactly the contract" '["checks","generated_at","interval_sec","last","schema"]' "$(sj 'keys')"
-assert_eq "  schema / interval / generated_at" "1|300|$(isoat "$NOW")" "$(sj '.schema')|$(sj '.interval_sec')|$(jq -r .generated_at "$SPATH" 2>/dev/null)"
-assert_eq "  every check has exactly t,fresh,p2p,chain (boolean or null)" "true" \
-  "$(sj '[.checks[] | (keys == ["chain","fresh","p2p","t"]) and ([.fresh,.p2p,.chain] | all(type == "boolean" or type == "null"))] | all')"
+assert_eq "status: top-level keys exactly the contract (no checks timeline)" '["counts_24h","generated_at","interval_sec","last","schema"]' "$(sj 'keys')"
+assert_eq "  schema / interval / generated_at" "2|300|$(isoat "$NOW")" "$(sj '.schema')|$(sj '.interval_sec')|$(jq -r .generated_at "$SPATH" 2>/dev/null)"
+assert_eq "  counts_24h keys exactly runs,fail,unknown,gap (integers)" '["fail","gap","runs","unknown"]|true' \
+  "$(sj '.counts_24h | keys')|$(sj '[.counts_24h[] | type == "number" and . == floor and . >= 0] | all')"
+assert_eq "  exactly two timestamps in the file: generated_at and last.t (no per-run times)" "2" \
+  "$(grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z' "$SPATH" | wc -l | tr -d ' ')"
 assert_eq "  last keys exactly t,fresh,p2p,chain,alerting" '["alerting","chain","fresh","p2p","t"]' "$(sj '.last | keys')"
-assert_eq "  24 h window, oldest first; 24h-old, future, note, malformed lines excluded; gap not filled" \
-  "$(isoat $((NOW - 86399)))|$(isoat $((NOW - 20000)))|$(isoat $((NOW - 19700)))|$(isoat $((NOW - 12500)))|$(isoat "$NOW")" \
-  "$(jq -r '[.checks[].t] | join("|")' "$SPATH" 2>/dev/null)"
-assert_eq "  FAIL -> false; PASS, cached PASS -> true; UNKNOWN -> null (never true)" \
-  '[[true,true,true],[false,true,true],[true,false,false],[null,true,null],[true,true,true]]' \
-  "$(sj '[.checks[] | [.fresh,.p2p,.chain]]')"
+assert_eq "  24 h counts: 6 runs (24h-old, future, note, malformed excluded); 3 fail (FAIL+UNKNOWN counts as fail); 1 unknown-only; 3 gaps > 7 min" \
+  '{"runs":6,"fail":3,"unknown":1,"gap":3}' "$(sj '.counts_24h')"
 assert_eq "  last = this run, nothing alerting" "$(isoat "$NOW")|[]" "$(jq -r '.last.t' "$SPATH" 2>/dev/null)|$(sj '.last.alerting')"
 assert_eq "  mode 644" "644" "$(file_mode_of "$SPATH")"
 assert_eq "  no publish note" "0" "$(grep -c 'status publish failed' "$C/home/log/watch.log")"
@@ -228,7 +227,7 @@ run_watch
 assert_eq "1st failing run: p2p false, not alerting yet" "false|[]" "$(sj '.last.p2p')|$(sj '.last.alerting')"
 run_watch "$((NOW + 300))"
 assert_eq "2nd failing run: state alerting -> alerting [p2p]" "alerting|[\"p2p\"]" "$(st p2p status)|$(sj '.last.alerting')"
-assert_eq "  two checks, oldest first" "$(isoat "$NOW")|$(isoat $((NOW + 300)))" "$(jq -r '[.checks[].t]|join("|")' "$SPATH" 2>/dev/null)"
+assert_eq "  two runs counted, both failed, no gap" '{"runs":2,"fail":2,"unknown":0,"gap":0}' "$(sj '.counts_24h')"
 status_config open; run_watch "$((NOW + 600))"
 assert_eq "recovery: alerting [] and p2p true" "[]|true" "$(sj '.last.alerting')|$(sj '.last.p2p')"
 new_case; LIVE=0; enable_status; status_config closed; make_json 10; run_watch; run_watch "$((NOW + 300))"
@@ -242,7 +241,7 @@ run_watch
 INO1="$(ls -i "$SPATH" | awk '{print $1}')"
 if [ "$INO0" != "$INO1" ]; then ok "replaced by rename (new inode), not rewritten in place"; else bad "replaced by rename" "same inode $INO0"; fi
 assert_eq "  no temp left behind (a killed run's temp is swept)" "0" "$(count_files "$C/pub/api" '.watch-status.*')"
-assert_eq "  content is the new JSON" "1" "$(sj '.schema')"
+assert_eq "  content is the new JSON" "2" "$(sj '.schema')"
 new_case; enable_status; make_json 10; printf 'precious\n' > "$C/victim"; ln -s "$C/victim" "$SPATH"; run_watch
 assert_eq "symlink target refused: victim untouched, link kept, rc 0" "precious|link|0" \
   "$(cat "$C/victim")|$([ -L "$SPATH" ] && echo link)|$RC"
@@ -253,10 +252,10 @@ assert_eq "hard-linked target refused: both names keep the old bytes" "precious|
 new_case; mkdir -p "$C/real"; ln -s "$C/real" "$C/linkdir"; enable_status "$C/linkdir/watch-status.json"; make_json 10; run_watch
 absent "symlinked directory refused" "$C/real/watch-status.json"
 new_case; enable_status; make_json 10; seed_log
-printf 'keep\n' > "$SPATH"; HK_ENV=(WATCH_STATUS_MAX_BYTES=200); run_watch
+printf 'keep\n' > "$SPATH"; HK_ENV=(WATCH_STATUS_MAX_BYTES=100); run_watch
 assert_eq "over the size cap: refused, previous file kept, note" "keep|1" "$(cat "$SPATH")|$(grep -c 'status publish failed' "$C/home/log/watch.log")"
 new_case; enable_status; make_json 10; seed_log; run_watch
-assert_eq "default cap: the 24 h file is written" "1" "$(sj '.schema')"
+assert_eq "default cap: the 24 h file is written" "2" "$(sj '.schema')"
 
 echo "== public status file: disabled when unset =="
 new_case; mkdir -p "$C/pub/api"; make_json 10; run_watch

@@ -102,8 +102,8 @@
 			}
 		});
 
-		if (watch && Array.isArray(watch.checks)) {
-			var h = C.historySummary(watch.checks, now);
+		var h = C.countsSummary(watch, now);
+		if (h) {
 			var hEl = $("history");
 			hEl.textContent = "失敗 " + h.failures + " 回・未確認 " + h.unknowns + " 回・見張りの抜け " + h.gaps + " 回 (確認 " + h.total + " 回)";
 			setState(hEl, h.failures > 0 || h.gaps > 0 ? "is-bad" : h.unknowns > 0 ? "is-warn" : "is-ok");

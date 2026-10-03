@@ -49,8 +49,8 @@ echo "${OUT}" | grep -qx -- '--exclude=/api/peers-history/' \
 # written, so nothing protected it from being cleaned up by --delete.)
 H="$(bash "${EMIT}" "public/" | wc -l | tr -d ' ')"
 X="$(bash "${EMIT}" "" | wc -l | tr -d ' ')"
-[ "${H}" = "${X}" ] && [ "${H}" = 20 ] \
-  && ok "both shapes emit 20 excludes" || no "count parity (h=${H} x=${X})"
+[ "${H}" = "${X}" ] && [ "${H}" = 21 ] \
+  && ok "both shapes emit 21 excludes" || no "count parity (h=${H} x=${X})"
 
 # Regression guard: the dead anchor-receipt.json.sig exclude must not
 # reappear without a producer to justify it.

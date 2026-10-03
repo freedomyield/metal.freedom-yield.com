@@ -601,10 +601,16 @@ apply_check() { # check result [observation-epoch]
 }
 
 # --- public status file ---------------------------------------------------
-# /api/watch-status.json for the phone status page (contract: schema 1):
-#   {"schema":1,"generated_at":ISO,"interval_sec":300,
+# /api/watch-status.json for the phone status page (contract: schema 2):
+#   {"schema":2,"generated_at":ISO,"interval_sec":300,
 #    "last":{"t":ISO,"fresh":b,"p2p":b,"chain":b,"alerting":[names]},
-#    "checks":[{"t":ISO,"fresh":b,"p2p":b,"chain":b}, ...]}  last 24 h, oldest first
+#    "counts_24h":{"runs":N,"fail":N,"unknown":N,"gap":N}}
+# Only the latest run and 24-hour aggregates are public (operator approval
+# 2026-10-03, Constitution Reclassifications): no per-run timeline, so the
+# operator's response hours cannot be read from it. The per-run log stays
+# private in the watch dir. fail = runs with any FAIL; unknown = runs with
+# any UNKNOWN and no FAIL; gap = intervals > 7 min between consecutive runs
+# inside the window (the page adds last -> now itself).
 # b is tri-state: PASS -> true, FAIL -> false, UNKNOWN -> null. UNKNOWN
 # (renewal window, RPC unavailable, validator absent from the set) is not a
 # failure for the watch, but it is not a confirmation either: the page shows
@@ -631,8 +637,16 @@ status_json() {
          chain: ({PASS: true, FAIL: false}[.c])} ]
     | sort_by(.t) | .[-$max:]
     | if length == 0 then error("no checks in window") else . end
-    | {schema: 1, generated_at: ($now | todate), interval_sec: $iv,
-       last: (.[-1] + {alerting: $alerting}), checks: .}' < "$LOG_FILE"
+    | . as $r
+    | {schema: 2, generated_at: ($now | todate), interval_sec: $iv,
+       last: ($r[-1] + {alerting: $alerting}),
+       counts_24h: {
+         runs: ($r | length),
+         fail: ([$r[] | select(.fresh == false or .p2p == false or .chain == false)] | length),
+         unknown: ([$r[] | select((.fresh == false or .p2p == false or .chain == false) | not)
+                         | select(.fresh == null or .p2p == null or .chain == null)] | length),
+         gap: ([range(1; $r | length) as $i
+                | select((($r[$i].t | fromdateiso8601) - ($r[$i-1].t | fromdateiso8601)) > 420)] | length)}}' < "$LOG_FILE"
 }
 
 # publish_status: write WATCH_PUBLIC_STATUS atomically (temp in the same dir,
