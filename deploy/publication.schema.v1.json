@@ -75,7 +75,7 @@
             "properties": {
               "producer": { "type": "string" },
               "producer_evidence": { "type": "string" },
-              "runs_on": { "enum": ["validator-host", "operator-mac", "github-actions", "repo"] },
+              "runs_on": { "enum": ["validator-host", "web-host", "operator-mac", "github-actions", "repo"] },
               "cron_file": { "type": ["string", "null"] },
               "cron_installer_in_repo": { "type": ["boolean", "null"] },
               "invocation_note": { "type": "string" }

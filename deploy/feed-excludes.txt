@@ -24,6 +24,10 @@ api/peers-history-index.json
 api/cycle-history.jsonl
 api/anchor-receipt.json
 api/anchor-history.jsonl
+# Written on the web host itself by the off-host external watch
+# (scripts/external-watch.sh, WATCH_PUBLIC_STATUS), not pushed: the deploy
+# must neither deliver nor delete it.
+api/watch-status.json
 # Subdirectory feeds — whole-directory entries (like calendar/) because the
 # member filenames are content-addressed / date-keyed and unbounded:
 #   api/archive/       R18 per-anchor archives (anchor-source-<dag>.json,
