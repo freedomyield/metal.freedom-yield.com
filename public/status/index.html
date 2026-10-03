@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Metal 状態</title>
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<link rel="canonical" href="https://metal.freedom-yield.com/status/">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#07080c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Metal 状態">
+<link rel="manifest" href="/status/manifest.json">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+<link rel="stylesheet" href="/status/status.css">
+<script defer src="/status/status-calc.js"></script>
+<script defer src="/status/status.js"></script>
+</head>
+<body>
+<main class="wrap">
+	<h1 class="verdict" id="verdict" aria-live="polite">読み込み中…</h1>
+	<p class="verdict-detail" id="verdict-detail"></p>
+	<p class="next" id="next" hidden><span class="next-label">次にすること:</span> <span id="next-text"></span></p>
+	<p class="last-check" id="last-check">最終確認: —</p>
+
+	<section class="card" aria-labelledby="h-checks">
+		<h2 id="h-checks">見張りの確認</h2>
+		<ul class="checks">
+			<li><span class="check-mark" id="c-p2p">—</span> 外から届く <span class="sub">(p2p)</span></li>
+			<li><span class="check-mark" id="c-chain">—</span> ネットワークに接続 <span class="sub">(chain)</span></li>
+			<li><span class="check-mark" id="c-fresh">—</span> データ更新 <span class="sub">(fresh)</span></li>
+		</ul>
+	</section>
+
+	<section class="card" aria-labelledby="h-history">
+		<h2 id="h-history">直近 24 時間</h2>
+		<p id="history">—</p>
+	</section>
+
+	<section class="card" aria-labelledby="h-uptime">
+		<h2 id="h-uptime">Uptime</h2>
+		<p class="big" id="uptime">—</p>
+		<h3>報酬基準 80% まで</h3>
+		<p id="budget">—</p>
+		<p id="cycle-end">サイクル末の見込み: —</p>
+	</section>
+
+	<p class="actions">
+		<button type="button" class="reload" id="reload">再読み込み</button>
+	</p>
+	<p class="foot" id="foot">60 秒ごとに自動で更新します。このボタンはデータを読み直すだけで、validator には何も送りません。</p>
+</main>
+</body>
+</html>
