@@ -154,7 +154,7 @@ EOF
 sudo mkdir -p /var/lib/metalgo
 sudo chown deploy:deploy /var/lib/metalgo
 
-# Bring up metalgo (NEW host: .env に METALGO_COMPOSE_PROJECT / METALGO_CONTAINER_NAME を書かない。
+# Bring up metalgo (NEW host: .env に METALGO_COMPOSE_PROJECT / METALGO_CONTAINER_NAME / METALGO_DATA_VOLUME を書かない。
 #   現行本番 host では .env で名前を揃え scripts/check-compose-naming.sh が MATCH を返すまで
 #   compose up は実行しない: 揃っていないと別 NodeID になる。docs/DISASTER_RECOVERY.md 冒頭の警告)
 docker compose -f docker-compose.metalgo.yml -f docker-compose.metalgo.prod.yml up -d

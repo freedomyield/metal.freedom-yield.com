@@ -20,7 +20,10 @@
 #                            named volume 名 (<project>_metalgo_data) もこれで決まる。
 #                            COMPOSE_PROJECT_NAME は使わない (.env 共有の Caddy stack まで改名される)
 #   METALGO_CONTAINER_NAME= (任意) コンテナ名。未設定なら metalgo-${METAL_NETWORK}
-#   ※ 既存 host では上の 2 つを現行の名前に合わせ、compose up の前に
+#   METALGO_DATA_VOLUME   = (任意・既存 volume を持つ host 専用) 現行の /data volume 名。
+#                            設定時は docker-compose.metalgo.adopt.yml を 3 本目の -f に足す
+#                            (volume を external にし、compose に作り直し・削除させない)
+#   ※ 既存 host では上の 3 つを現行の名前に合わせ、compose up の前に
 #     scripts/check-compose-naming.sh で MATCH を確認する(不一致のまま up すると
 #     新しい空の volume = 新しい staker keys = 別 NodeID で起動する)
 #

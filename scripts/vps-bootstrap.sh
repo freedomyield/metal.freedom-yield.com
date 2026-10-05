@@ -308,8 +308,24 @@ CRON_SCRIPT
 # compose takes the default (No) and keeps the volume (rehearsed 2026-10-05,
 # docker compose v5.5.1), so a keystroke can never destroy the keys here.
 # Never add -y / --yes to these calls.
+#
+# Adopt: when METALGO_DATA_VOLUME is set (environment or .env) this host keeps a
+# /data volume that predates this repo, and docker-compose.metalgo.adopt.yml joins
+# the -f list. It declares that volume `external: true`, so compose never creates,
+# recreates (no "Recreate (data will be lost)?" at all) or deletes it, `down -v`
+# included; if the volume is absent, create / up fail instead of starting on an
+# empty one (rehearsed 2026-10-05). The rule is the same as in
+# scripts/check-compose-naming.sh, which reports the file list it used.
+metalgo_adopt_requested() {
+  [ -n "${METALGO_DATA_VOLUME:-}" ] && return 0
+  [ -f .env ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?METALGO_DATA_VOLUME[[:space:]]*=[[:space:]]*[^[:space:]#]' .env
+}
 metalgo_compose() {
-  docker compose -f docker-compose.metalgo.yml -f docker-compose.metalgo.prod.yml "$@" </dev/null
+  local files=(-f docker-compose.metalgo.yml -f docker-compose.metalgo.prod.yml)
+  if metalgo_adopt_requested; then
+    files+=(-f docker-compose.metalgo.adopt.yml)
+  fi
+  docker compose "${files[@]}" "$@" </dev/null
 }
 
 # Print the host path that compose mounts at the metalgo container's /data —
@@ -350,7 +366,7 @@ resolve_metalgo_data_dir() {
     echo "       /data (new staker keys, different NodeID). Refusing. Reconcile by hand first" >&2
     echo "       (docs/DISASTER_RECOVERY.md, warning on compose project naming)." >&2
     echo "       If that container is this validator's current metalgo, set" >&2
-    echo "       METALGO_COMPOSE_PROJECT / METALGO_CONTAINER_NAME in .env to its names and" >&2
+    echo "       METALGO_COMPOSE_PROJECT / METALGO_CONTAINER_NAME / METALGO_DATA_VOLUME in .env to its names and" >&2
     echo "       confirm with scripts/check-compose-naming.sh (RESULT: MATCH) first." >&2
     return 1
   fi
@@ -413,7 +429,8 @@ step_metalgo() {
     if ! bash "${COMPOSE_NAMING_CHECK:-scripts/check-compose-naming.sh}"; then
       echo "ERROR: compose names do not match the existing metalgo container;" >&2
       echo "       refusing to run compose up (set METALGO_COMPOSE_PROJECT /" >&2
-      echo "       METALGO_CONTAINER_NAME in .env and re-run scripts/check-compose-naming.sh)." >&2
+      echo "       METALGO_CONTAINER_NAME / METALGO_DATA_VOLUME and METAL_* in .env and re-run" >&2
+      echo "       scripts/check-compose-naming.sh)." >&2
       return 1
     fi
   fi
