@@ -71,23 +71,23 @@ VPS が「明日突然消失」した時に、同じ NodeID を持つ validator 
 
 git に無いので repo からは戻らない。`/etc/freedom-yield/`(`web-host` / `ntfy-topic` / `calendar-token` / `wallet-addresses.json` / `watch-list.json` 等)と、deploy checkout の `.env`(`OPS_BASIC_AUTH_HASH` 等)。
 
-- **取り方**: Mac で `scripts/operator-local/backup-host-config.sh` を対話実行する。host では read-only の `tar -cf -` だけが走り、その stream を ssh 越しにそのまま `openssl enc`(staker keys と同じ AES-256-CBC + PBKDF2 600k)へ流すので、平文は host にも Mac にもファイルとして残らない。パスフレーズは 2 回入力(argv / 環境変数 / ファイルからは受け取らない)。
+- **取り方(AI が実行。operator の入力なし)**: Mac で `scripts/operator-local/backup-host-config.sh` を非対話で実行する。host では read-only の `tar -cf -` と `sha256sum` だけが走る。tar の stream は ssh 越しにそのまま `age -R`(宛先 = operator identity の **公開鍵** `~/.ssh/freedom-yield-operator-identity.pub`、ssh-ed25519。`BACKUP_RECIPIENT_PUBKEY` で変更可)へ流れるので、平文は host にも Mac にもファイルとして残らない。暗号化に要るのは公開鍵だけなので、パスフレーズは一切聞かない。宛先に秘密鍵や ssh-ed25519 以外の鍵を渡すと、host に触る前に拒否する。
   ```bash
   VALIDATOR_HOST=<validator host> VALIDATOR_SSH_KEY=~/.ssh/<your_validator_host_key> \
     bash scripts/operator-local/backup-host-config.sh
   ```
-  - 出力: `~/fy-host-config-backup-<UTC yyyymmdd>.tar.enc`(mode 600)。書いた直後にパイプへ復号して `tar -t` し、host が出した名前一覧と一致した時だけ `~/Dropbox/metal-validator-backup/` へコピーして sha256 を表示する。一致しなければ `*.VERIFY-FAILED` に改名して残し、コピーしない(exit 1)。
-  - 事前確認だけなら `--dry-run`(名前一覧のみ、パスフレーズを聞かない、何も書かない)。
+  - 出力: `~/fy-host-config-backup-<UTC yyyymmdd>.tar.age` と、その隣の `.tar.age.manifest`(host 側の各ファイルの sha256 と名前だけ。中身は入らない)。どちらも mode 600。
+  - 検証(AI は復号できない設計なので、復号せずに確かめる): (a) 暗号化した stream そのものの名前一覧を途中で取り出し、host の一覧と一致すること (b) age v1 の header に宛先 stanza がちょうど 1 つで、型が ssh-ed25519、tag が公開鍵から計算した値と一致すること (c) ファイルの大きさが平文の byte 数から計算した age の大きさと一致すること (d) manifest の各行が `<sha256>  <名前>` の形で、ファイルの集合が archive と一致すること。全部通った時だけ `~/Dropbox/metal-validator-backup/` へ 2 つともコピーし、sha256 を照合して表示する。1 つでも落ちれば `*.VERIFY-FAILED` に改名して残し、コピーしない(exit 1)。
+  - 事前確認だけなら `--dry-run`(名前一覧のみ、何も書かない)。
   - **いつ取るか**: `/etc/freedom-yield/` か `.env` を変えた時(installer の再実行、topic・token の差し替え、BasicAuth 変更)と、下の四半期ドリルの時。
-- **確認(復元ドリル)**: 中身を展開せずに、復号できて必要な名前が揃っているかだけを見る。
+- **戻し方(新 host へ。災害時だけ、operator が行う)**: 復号には operator identity の **秘密鍵** `~/.ssh/freedom-yield-operator-identity` が要り、`age` がその鍵のパスフレーズを端末で聞く。日常のバックアップ・ドリルでこの鍵を使う場面は無い。手順は `bash scripts/operator-local/backup-host-config.sh --restore-help` が表示する(AI でも実行できる。何も復号しない)。Mac でパイプへ復号し、そのまま新 host で展開する(Mac のディスクに平文を置かない)。
   ```bash
-  bash scripts/operator-local/backup-host-config.sh --verify ~/fy-host-config-backup-<yyyymmdd>.tar.enc
-  ```
-- **戻し方(新 host へ)**: Mac でパイプへ復号し、そのまま新 host で展開する(Mac のディスクに平文を置かない)。`openssl` は `-pass` を付けなければ端末でパスフレーズを聞く。
-  ```bash
-  openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -in ~/fy-host-config-backup-<yyyymmdd>.tar.enc \
+  age -d -i ~/.ssh/freedom-yield-operator-identity ~/fy-host-config-backup-<yyyymmdd>.tar.age \
     | ssh -i ~/.ssh/<your_validator_host_key> root@<新IP> \
         'umask 077 && mkdir /root/fy-config-restore && tar -C /root/fy-config-restore -xpf -'
+  # manifest と照合(hash と名前だけ):
+  ssh -i ~/.ssh/<your_validator_host_key> root@<新IP> 'cd /root/fy-config-restore && sha256sum -c -' \
+    < ~/fy-host-config-backup-<yyyymmdd>.tar.age.manifest
   # 新 host 側(root):
   #   /etc/freedom-yield/ が無いことを確認してから戻す(installer が先に作っていたら差分を見て判断)
   #   cp -a /root/fy-config-restore/freedom-yield /etc/
@@ -95,6 +95,7 @@ git に無いので repo からは戻らない。`/etc/freedom-yield/`(`web-host
   #   → .env の METAL_PUBLIC_IP は新 IP に書き換える(旧 host の値のまま)
   #   rm -rf /root/fy-config-restore
   ```
+- 2026-10-05 より前の `*.tar.enc`(openssl + パスフレーズ)は、`openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -in <file>` で同じ形で戻せる。
 
 ### SSH key
 
@@ -527,21 +528,24 @@ validator host の IP / ホスト名を持っている場所 (全部更新する
 
 ## 四半期 DR ドリル(Mac で。mainnet には一切つながらない)
 
-バックアップは戻せることを確かめるまでバックアップではない。3 か月ごとに Mac で次の 3 つを回す。
+バックアップは戻せることを確かめるまでバックアップではない。3 か月ごとに Mac で次の 3 つを回す。**全部 AI が実行し、operator の入力は要らない**(パスフレーズも聞かない)。
 
 ```bash
-# 1. 準備確認(パスフレーズなし・復号なし): 最新の ~/staker-backup-*.tar.gz.enc を解決し、
-#    docker と本番と同じ image (既定 metalblockchain/metalgo:v1.13.5) を確認、
-#    使い捨て鍵で --network-id=local の metalgo を起動して info API が答えるかを見る
-bash scripts/dr-drill.sh --dry-run
-# 2. 本番: staker keys を復号 → SHA-256 照合 → local network で起動 → NodeID 再現を確認
-bash scripts/dr-drill.sh
-# 3. host 設定のバックアップを取り直して、復元ドリル
+# 1. 準備確認(鍵に触れない): 最新の ~/staker-backup-*/staking を解決し、docker と
+#    本番と同じ image (既定 metalblockchain/metalgo:v1.13.5) を確認、使い捨て鍵で
+#    --network-id=local の metalgo を起動して info API が答えるかを見る
+bash scripts/dr-drill.sh --dry-run --from-plaintext
+# 2. 本番: 最新の ~/staker-backup-*/staking(FileVault で守られた Mac 上の平文。
+#    2026-10-03 に本番と同一を確認済)から 3 ファイルを一時 WORKDIR へ mode 600 で複製
+#    → SHA-256 照合 → local network で起動 → NodeID 再現を確認 → WORKDIR を削除
+bash scripts/dr-drill.sh --from-plaintext
+# 3. host 設定のバックアップを取り直す(公開鍵へ暗号化、復号せずに検証)
 VALIDATOR_HOST=<validator host> VALIDATOR_SSH_KEY=~/.ssh/<your_validator_host_key> \
   bash scripts/operator-local/backup-host-config.sh
-bash scripts/operator-local/backup-host-config.sh --verify ~/fy-host-config-backup-<yyyymmdd>.tar.enc
 ```
 
+- 暗号化した staker keys backup(`~/staker-backup-<yyyymmdd>.tar.gz.enc`)そのものを確かめる経路(`bash scripts/dr-drill.sh`、パスフレーズを聞く)も残してあるが、定例のドリルではない。
+- host 設定のバックアップを実際に復号して確かめるには operator identity の秘密鍵が要るので、定例のドリルでは行わない(災害時のみ。上の「戻し方」)。定例では復号しない検証(名前・宛先 tag・大きさ・sha256 manifest)で代える。
 - `dr-drill.sh` が起動する metalgo には必ず `--network-id=local` と空の bootstrap が付き、それが無ければ起動を拒否する(metalgo 自身の既定は mainnet)。本番 validator が動いていても安全。
 - 本番の metalgo の版を上げたら、`dr-drill.sh` の `METALGO_IMAGE` 既定も揃える(env で一時的に上書き可)。
 
@@ -557,7 +561,7 @@ bash scripts/operator-local/backup-host-config.sh --verify ~/fy-host-config-back
 3. 委任者には公開アナウンスで NodeID 変更通知(現在 delegator ゼロのため影響なし)
 4. 過去の uptime track record は失われる
 
-→ **これを防ぐため、staker keys は暗号化 backup を Mac(`~/staker-backup-<yyyymmdd>.tar.gz.enc`)と Dropbox(`metal-validator-backup/`)の 2 か所に置き、四半期 DR ドリルで復号と NodeID 再現を確かめる。**
+→ **これを防ぐため、staker keys は暗号化 backup を Mac(`~/staker-backup-<yyyymmdd>.tar.gz.enc`)と Dropbox(`metal-validator-backup/`)の 2 か所に置き、四半期 DR ドリルで Mac 上の平文コピー(`~/staker-backup-<yyyymmdd>/staking`)から NodeID 再現を確かめる。**
 
 ---
 

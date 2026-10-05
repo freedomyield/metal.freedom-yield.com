@@ -101,10 +101,12 @@ Severity model: **CRITICAL** = unknown key guarded by a default (`// ""`, `|| "�
 **Cron:** daily, regenerate so it stays current.
 
 ### `scripts/dr-drill.sh`
-**Purpose:** End-to-end disaster-recovery exercise on a Mac (or any second host). Decrypts the encrypted staker key backup, verifies SHA-256, boots a local-network `metalgo` with the restored keys, confirms `info.getNodeID` matches your production NodeID, cleans up. **Never** connects to mainnet — uses `--network-id=local`. Safe to run while production is up.
-`--dry-run` checks readiness without the passphrase: resolves the newest `~/staker-backup-*.tar.gz.enc`, checks docker + the pinned image, boots a local-network `metalgo` with throwaway ephemeral keys and confirms the info API answers.
-**Dependencies:** `docker`, `openssl`, `tar`, `shasum`, `jq`, `curl`.
+**Purpose:** End-to-end disaster-recovery exercise on a Mac (or any second host). Gets the three staker key files into a private temp dir, verifies SHA-256, boots a local-network `metalgo` with them, confirms `info.getNodeID` matches your production NodeID, cleans up. **Never** connects to mainnet — uses `--network-id=local`. Safe to run while production is up.
+`--from-plaintext [<dir>]` is the routine, non-interactive source (we run it from automation with no operator input): copies the key files from a disk-encrypted plaintext backup dir (default: newest `~/staker-backup-*/staking`) into the temp dir at mode 600 and deletes it afterwards. Without it, the script decrypts the encrypted backup and asks the passphrase (kept for checking the encrypted copy itself).
+`--dry-run` checks readiness without touching key material: resolves the source, checks docker + the pinned image, boots a local-network `metalgo` with throwaway ephemeral keys and confirms the info API answers.
+**Dependencies:** `docker`, `tar`, `shasum`, `jq`, `curl` (+ `openssl` for the encrypted source).
 **Env:** `ENCRYPTED_BACKUP`, `EXPECTED_NODEID`, `METALGO_IMAGE` (pin it to your production version), `EXPECTED_SHA_CRT` / `EXPECTED_SHA_KEY` / `EXPECTED_SHA_BLS`.
+**Related:** the host's untracked config is backed up by `scripts/operator-local/backup-host-config.sh` (operator-local, also non-interactive: `age`-encrypted to an ssh-ed25519 public key, verified without decrypting; restoring needs the matching private key, disaster only).
 **Frequency:** quarterly; untested backups aren't backups.
 
 ---

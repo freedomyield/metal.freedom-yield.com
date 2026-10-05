@@ -81,9 +81,12 @@ symptom-keyed failure decision trees.
 
 - `backup-host-config.sh` — encrypted off-host backup of the validator
   host's untracked config (`/etc/freedom-yield/` + the deploy checkout's
-  `.env`). Streams `tar -cf -` over ssh straight into `openssl enc`
-  (AES-256-CBC + PBKDF2 600k, same as the staker key backup) so no
-  plaintext touches disk, verifies by decrypting to a pipe, then copies to
-  Dropbox. Interactive passphrase only. `--dry-run` lists names;
-  `--verify <file>` is the restore drill. Never reads `metalgo` keys.
+  `.env`). AI-run, non-interactive: streams `tar -cf -` over ssh straight
+  into `age -R` to the operator identity ssh-ed25519 PUBLIC key, so no
+  plaintext touches disk and no passphrase is ever asked. Verifies without
+  decrypting (names of the encrypted stream, age header recipient tag,
+  exact size, host sha256 manifest of hashes + names), then copies the
+  `.tar.age` and its `.manifest` to Dropbox. `--dry-run` lists names;
+  `--restore-help` prints the operator's disaster-only decrypt (needs the
+  identity PRIVATE key). Never reads `metalgo` keys.
   Tests: `tests/backup-host-config/`.
