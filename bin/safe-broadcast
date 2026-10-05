@@ -350,7 +350,17 @@ AUDIT_LOG_FALLBACK="${_AUDIT_LOG_LOGIN_HOME:-/tmp}/.fyd-broadcast-audit.log"
 # the comment markers survived and every header line came out still
 # prefixed with `# ` — the exact bug measured 2026-08-17 in
 # scripts/install-rehearsal-preflight.sh and reproduced here on 2026-08-21.
-usage() { sed -n '2,$p' "$0" | sed -n '/^[^#]/q;p' | sed -E 's/^# ?//'; }
+#
+# ONE sed process, not `sed -n '2,$p' | sed -n '/^[^#]/q;p' | sed -E …`
+# (the form used until 2026-10-05). In that pipeline the middle sed quits at
+# the end of the header while the first is still streaming the rest of this
+# file into the pipe; where SIGPIPE is ignored (GitHub's ubuntu runner) the
+# first GNU sed then printed "sed: couldn't write N items to stdout: Broken
+# pipe" to stderr after a usage error — which broke the byte-for-byte
+# equivalence golden on CI (run 37250135519). Output and exit codes are
+# unchanged (cmp-verified on BSD and GNU sed); only the early-closing pipe
+# is gone.
+usage() { sed -n -E '2,${/^[^#]/q;s/^# ?//;p;}' "$0"; }
 
 # ---- arg parse ----
 for arg in "$@"; do
