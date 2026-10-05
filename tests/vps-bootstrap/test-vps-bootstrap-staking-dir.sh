@@ -31,9 +31,16 @@
 #   T7 static: the old hardcoded volume path is gone from vps-bootstrap.sh.
 #   T8 a metalgo container exists and the compose naming verifier reports
 #      MISMATCH -> rc != 0, compose up never runs (production NodeID guard).
+#   T9 compose create / up never see the operator's stdin. If the existing
+#      /data volume's compose config-hash label differs, compose asks
+#      "Recreate (data will be lost)?"; a "y" there deletes the staker keys.
+#      The stub reads stdin at create/up; with "y" piped into step_metalgo
+#      it must read nothing.
 #
 # Mutation: MUTATE_OLD_PATH=1 runs T1 against a copy of the script whose
 # staking dir is forced back to the old hardcoded path; T1 must then FAIL.
+# MUTATE_STDIN=1 runs T9 against a copy whose metalgo_compose passes the
+# caller's stdin through again; T9 must then FAIL.
 set -u
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -54,6 +61,12 @@ if [ "${MUTATE_OLD_PATH:-0}" = 1 ]; then
 		"$BOOTSTRAP" > "$SCRIPT"
 	grep -q 'STAKING_DIR=/var/lib/docker/volumes/metalgo_data/_data/staking' "$SCRIPT" \
 		|| { echo "FAIL  mutation did not apply"; exit 1; }
+fi
+if [ "${MUTATE_STDIN:-0}" = 1 ]; then
+	SCRIPT="$TMP/vps-bootstrap.mutant-stdin.sh"
+	sed 's|^\(  docker compose -f docker-compose.metalgo.yml -f docker-compose.metalgo.prod.yml "\$@"\) </dev/null$|\1|' \
+		"$BOOTSTRAP" > "$SCRIPT"
+	if grep -q 'metalgo.prod.yml "\$@" </dev/null' "$SCRIPT"; then echo "FAIL  mutation did not apply"; exit 1; fi
 fi
 
 # ---- stubs -----------------------------------------------------------------
@@ -77,10 +90,13 @@ compose)
 	case "$*" in
 	*" ps -a -q metalgo") cat "$STUB_STATE/own" ;;
 	*" create metalgo")
+		IFS= read -r line || true; printf '%s' "$line" >> "$STUB_STATE/stdin_seen"
 		id="$(cat "$STUB_STATE/create_id")"
 		echo "$id" >> "$STUB_STATE/own"
 		echo "$id" >> "$STUB_STATE/all" ;;
-	*" up -d") echo UP >> "$STUB_STATE/started" ;;
+	*" up -d")
+		IFS= read -r line || true; printf '%s' "$line" >> "$STUB_STATE/stdin_seen"
+		echo UP >> "$STUB_STATE/started" ;;
 	*) echo "stub: unexpected compose call: $*" >&2; exit 99 ;;
 	esac ;;
 *) echo "stub: unexpected docker call: $*" >&2; exit 99 ;;
@@ -114,7 +130,7 @@ run_step() {
 		# shellcheck disable=SC1090
 		. "$SCRIPT"
 		step_metalgo
-	) > "$C/out.txt" 2>&1
+	) < "${STEP_STDIN:-/dev/null}" > "$C/out.txt" 2>&1
 	echo $? > "$C/rc"
 }
 rc() { cat "$C/rc"; }
@@ -136,6 +152,34 @@ fi
 
 if [ "${MUTATE_OLD_PATH:-0}" = 1 ]; then
 	echo "RESULT: PASS=$PASS FAIL=$FAIL (mutation run: T1 only)"
+	[ "$FAIL" -eq 0 ]
+	exit $?
+fi
+
+# ---- T9 --------------------------------------------------------------------
+# An operator "y" on stdin must never reach compose create / up (it would
+# confirm "Recreate (data will be lost)?" on a config-hash-mismatched volume).
+t9() {
+	new_case "t9$1"
+	printf 'y\ny\ny\n' > "$C/yes.txt"
+	echo "$ID_A" > "$STUB_STATE/create_id"
+	echo "$C/vol/_data" > "$STUB_STATE/mount_$ID_A"
+	if [ "$1" = up ]; then
+		echo "$ID_A" > "$STUB_STATE/all"; echo "$ID_A" > "$STUB_STATE/own"; add_keys "$C/vol/_data"
+	fi
+	STEP_STDIN="$C/yes.txt" run_step
+	if [ "$(rc)" = 0 ] && called "$2" && ! [ -s "$STUB_STATE/stdin_seen" ]; then
+		ok "T9 $1: compose $2 never reads the caller's stdin (no 'y' to a volume-recreate prompt)"
+	else
+		bad "T9 $1: compose $2 never reads the caller's stdin (no 'y' to a volume-recreate prompt)" \
+			"rc=$(rc) stdin_seen='$(cat "$STUB_STATE/stdin_seen" 2>/dev/null)'"
+	fi
+}
+t9 create "create metalgo"
+t9 up "up -d"
+
+if [ "${MUTATE_STDIN:-0}" = 1 ]; then
+	echo "RESULT: PASS=$PASS FAIL=$FAIL (mutation run: T1 + T9)"
 	[ "$FAIL" -eq 0 ]
 	exit $?
 fi
