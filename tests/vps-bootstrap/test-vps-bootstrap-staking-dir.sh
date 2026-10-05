@@ -36,11 +36,18 @@
 #      "Recreate (data will be lost)?"; a "y" there deletes the staker keys.
 #      The stub reads stdin at create/up; with "y" piped into step_metalgo
 #      it must read nothing.
+#   T10 adopt: METALGO_DATA_VOLUME in .env (or the environment) -> every
+#      compose call (ps / create / up) carries -f docker-compose.metalgo.adopt.yml,
+#      stdin still /dev/null; absent / empty / commented -> no call does. Static:
+#      the "is adopt requested" rule is textually the same in vps-bootstrap.sh and
+#      check-compose-naming.sh (the verifier must judge the same file list).
 #
 # Mutation: MUTATE_OLD_PATH=1 runs T1 against a copy of the script whose
 # staking dir is forced back to the old hardcoded path; T1 must then FAIL.
 # MUTATE_STDIN=1 runs T9 against a copy whose metalgo_compose passes the
 # caller's stdin through again; T9 must then FAIL.
+# MUTATE_ADOPT=1 runs T10 against a copy whose metalgo_compose never adds the
+# adopt override; T10a/T10b must then FAIL.
 set -u
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -64,9 +71,14 @@ if [ "${MUTATE_OLD_PATH:-0}" = 1 ]; then
 fi
 if [ "${MUTATE_STDIN:-0}" = 1 ]; then
 	SCRIPT="$TMP/vps-bootstrap.mutant-stdin.sh"
-	sed 's|^\(  docker compose -f docker-compose.metalgo.yml -f docker-compose.metalgo.prod.yml "\$@"\) </dev/null$|\1|' \
+	sed 's|^\(  docker compose "\${files\[@\]}" "\$@"\) </dev/null$|\1|' \
 		"$BOOTSTRAP" > "$SCRIPT"
-	if grep -q 'metalgo.prod.yml "\$@" </dev/null' "$SCRIPT"; then echo "FAIL  mutation did not apply"; exit 1; fi
+	if grep -q '"\$@" </dev/null' "$SCRIPT"; then echo "FAIL  mutation did not apply"; exit 1; fi
+fi
+if [ "${MUTATE_ADOPT:-0}" = 1 ]; then
+	SCRIPT="$TMP/vps-bootstrap.mutant-adopt.sh"
+	sed 's|^    files+=(-f docker-compose.metalgo.adopt.yml)$|    :|' "$BOOTSTRAP" > "$SCRIPT"
+	if grep -q 'files+=(-f docker-compose.metalgo.adopt.yml)' "$SCRIPT"; then echo "FAIL  mutation did not apply"; exit 1; fi
 fi
 
 # ---- stubs -----------------------------------------------------------------
@@ -182,6 +194,44 @@ if [ "${MUTATE_STDIN:-0}" = 1 ]; then
 	echo "RESULT: PASS=$PASS FAIL=$FAIL (mutation run: T1 + T9)"
 	[ "$FAIL" -eq 0 ]
 	exit $?
+fi
+
+# ---- T10 -------------------------------------------------------------------
+# adopt override follows METALGO_DATA_VOLUME (.env or environment)
+t10() {  # t10 <label> <.env content> <expect: yes|no> [env value]
+	new_case "t10$1"
+	printf '%b' "$2" > "$C/deploy/.env"
+	printf 'y\n' > "$C/yes.txt"
+	echo "$ID_A" > "$STUB_STATE/all"; echo "$ID_A" > "$STUB_STATE/own"
+	echo "$C/vol/_data" > "$STUB_STATE/mount_$ID_A"; add_keys "$C/vol/_data"
+	METALGO_DATA_VOLUME="${4:-}" STEP_STDIN="$C/yes.txt" run_step
+	local n_compose n_adopt
+	n_compose=$(grep -c '^docker compose ' "$STUB_STATE/calls.log")
+	n_adopt=$(grep -c '^docker compose .*-f docker-compose.metalgo.adopt.yml ' "$STUB_STATE/calls.log")
+	local want=0; [ "$3" = yes ] && want="$n_compose"
+	if [ "$(rc)" = 0 ] && started && [ "$n_compose" -ge 2 ] && [ "$n_adopt" = "$want" ] && ! [ -s "$STUB_STATE/stdin_seen" ]; then
+		ok "T10 $1: adopt override on $n_adopt/$n_compose compose calls (expected $3), stdin unread"
+	else
+		bad "T10 $1: adopt override on $n_adopt/$n_compose compose calls (expected $3), stdin unread" \
+			"rc=$(rc) calls=$(tr '\n' ';' < "$STUB_STATE/calls.log")"
+	fi
+}
+t10a() { t10 a "METAL_NETWORK=mainnet\nMETALGO_DATA_VOLUME=t-old_data\n" yes; }
+t10b() { t10 b "METAL_NETWORK=mainnet\n" yes t-old_data; }
+t10a; t10b
+if [ "${MUTATE_ADOPT:-0}" = 1 ]; then
+	echo "RESULT: PASS=$PASS FAIL=$FAIL (mutation run: T1 + T9 + T10a/b)"
+	[ "$FAIL" -eq 0 ]
+	exit $?
+fi
+t10 c "METAL_NETWORK=mainnet\n" no
+t10 d "# METALGO_DATA_VOLUME=t-old_data\nMETALGO_DATA_VOLUME=\n" no
+rule='(export[[:space:]]+)?METALGO_DATA_VOLUME[[:space:]]*=[[:space:]]*[^[:space:]#]'
+if grep -qF "$rule" "$BOOTSTRAP" && grep -qF "$rule" "$REPO_ROOT/scripts/check-compose-naming.sh" \
+	&& grep -qF 'docker-compose.metalgo.adopt.yml' "$REPO_ROOT/scripts/check-compose-naming.sh"; then
+	ok "T10e the adopt rule is the same in vps-bootstrap.sh and check-compose-naming.sh"
+else
+	bad "T10e the adopt rule is the same in vps-bootstrap.sh and check-compose-naming.sh"
 fi
 
 # ---- T2 --------------------------------------------------------------------
