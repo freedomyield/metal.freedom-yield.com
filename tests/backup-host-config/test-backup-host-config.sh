@@ -155,7 +155,7 @@ if want happy; then
 	run_case "$PP\n$PP\n"
 	assert_eq "happy: exit 0" "0" "$RC"
 	[ -f "$BK" ] && ok "happy: backup file written" || bad "happy: backup file written" "missing $BK"
-	assert_eq "happy: backup mode 600" "600" "$(stat -f %Lp "$BK" 2>/dev/null || stat -c %a "$BK" 2>/dev/null)"
+	assert_eq "happy: backup mode 600" "600" "$(stat -c %a "$BK" 2>/dev/null || stat -f %Lp "$BK" 2>/dev/null)"
 	DB="$TMP/home/Dropbox/metal-validator-backup/$(basename "$BK")"
 	[ -f "$DB" ] && ok "happy: Dropbox copy written" || bad "happy: Dropbox copy written" "missing"
 	SHA="$(shasum -a 256 "$BK" 2>/dev/null | awk '{print $1}')"
