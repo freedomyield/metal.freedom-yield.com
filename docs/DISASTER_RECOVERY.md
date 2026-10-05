@@ -54,7 +54,35 @@ VPS が「明日突然消失」した時に、同じ NodeID を持つ validator 
 
 - GitHub(本リポ)に push 済
 - `docker-compose.*.yml` / `caddy/Caddyfile` / `public/*` / `scripts/*` は全て git 上
-- **TODO(未確認)**: validator host 上の git 管理外設定 `/etc/freedom-yield/`(`web-host` / `ntfy-topic` / `calendar-token` / `wallet-addresses.json` / `watch-list.json` 等)と `.env` の `OPS_BASIC_AUTH_HASH` が host 外にバックアップされているかは未確認
+
+### validator host の git 管理外設定(`/etc/freedom-yield/` + `<deploy_path>/.env`)
+
+git に無いので repo からは戻らない。`/etc/freedom-yield/`(`web-host` / `ntfy-topic` / `calendar-token` / `wallet-addresses.json` / `watch-list.json` 等)と、deploy checkout の `.env`(`OPS_BASIC_AUTH_HASH` 等)。
+
+- **取り方**: Mac で `scripts/operator-local/backup-host-config.sh` を対話実行する。host では read-only の `tar -cf -` だけが走り、その stream を ssh 越しにそのまま `openssl enc`(staker keys と同じ AES-256-CBC + PBKDF2 600k)へ流すので、平文は host にも Mac にもファイルとして残らない。パスフレーズは 2 回入力(argv / 環境変数 / ファイルからは受け取らない)。
+  ```bash
+  VALIDATOR_HOST=<validator host> VALIDATOR_SSH_KEY=~/.ssh/<your_validator_host_key> \
+    bash scripts/operator-local/backup-host-config.sh
+  ```
+  - 出力: `~/fy-host-config-backup-<UTC yyyymmdd>.tar.enc`(mode 600)。書いた直後にパイプへ復号して `tar -t` し、host が出した名前一覧と一致した時だけ `~/Dropbox/metal-validator-backup/` へコピーして sha256 を表示する。一致しなければ `*.VERIFY-FAILED` に改名して残し、コピーしない(exit 1)。
+  - 事前確認だけなら `--dry-run`(名前一覧のみ、パスフレーズを聞かない、何も書かない)。
+  - **いつ取るか**: `/etc/freedom-yield/` か `.env` を変えた時(installer の再実行、topic・token の差し替え、BasicAuth 変更)と、下の四半期ドリルの時。
+- **確認(復元ドリル)**: 中身を展開せずに、復号できて必要な名前が揃っているかだけを見る。
+  ```bash
+  bash scripts/operator-local/backup-host-config.sh --verify ~/fy-host-config-backup-<yyyymmdd>.tar.enc
+  ```
+- **戻し方(新 host へ)**: Mac でパイプへ復号し、そのまま新 host で展開する(Mac のディスクに平文を置かない)。`openssl` は `-pass` を付けなければ端末でパスフレーズを聞く。
+  ```bash
+  openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -in ~/fy-host-config-backup-<yyyymmdd>.tar.enc \
+    | ssh -i ~/.ssh/<your_validator_host_key> root@<新IP> \
+        'umask 077 && mkdir /root/fy-config-restore && tar -C /root/fy-config-restore -xpf -'
+  # 新 host 側(root):
+  #   /etc/freedom-yield/ が無いことを確認してから戻す(installer が先に作っていたら差分を見て判断)
+  #   cp -a /root/fy-config-restore/freedom-yield /etc/
+  #   install -m 600 /root/fy-config-restore/.env <deploy_path>/.env   # 短縮復旧手順 Step 5 の代わり
+  #   → .env の METAL_PUBLIC_IP は新 IP に書き換える(旧 host の値のまま)
+  #   rm -rf /root/fy-config-restore
+  ```
 
 ### SSH key
 
@@ -84,7 +112,8 @@ bash vps-bootstrap.sh
 #   を出して metalgo を起動しない(想定どおり。scripts/vps-bootstrap.sh:372)。鍵は Step 6 の手順で置く
 
 # 4. staker keys を encrypted backup から復旧(Mac 側で。冒頭の関門を通過していること)
-scp -i ~/.ssh/<your_validator_host_key> ~/staker-backup.tar.gz.enc root@<新IP>:/tmp/
+#    (最新の ~/staker-backup-<yyyymmdd>.tar.gz.enc。Dropbox の metal-validator-backup/ にも同じもの)
+scp -i ~/.ssh/<your_validator_host_key> ~/staker-backup-<yyyymmdd>.tar.gz.enc root@<新IP>:/tmp/staker-backup.tar.gz.enc
 
 # 5. VPS 側で .env 作成(metalgo 起動より前。metalgo と Caddy は同じ <deploy_path>/.env を読む)
 #    METAL_NETWORK / METAL_PUBLIC_IP は docker-compose.metalgo.prod.yml の command で
@@ -96,7 +125,7 @@ scp -i ~/.ssh/<your_validator_host_key> ~/staker-backup.tar.gz.enc root@<新IP>:
 #    METAL_CPUS は任意(旧 .env に値があれば揃える)。
 ssh -i ~/.ssh/<your_validator_host_key> root@<新IP>
 # 平文の鍵が /tmp に残らないよう、この session の終了時 (途中の失敗・切断を含む) に必ず消す
-trap 'rm -rf /tmp/restore.tar.gz /tmp/staker-backup' EXIT
+trap 'rm -rf /tmp/restore.tar.gz /tmp/staker-backup-*' EXIT
 # 途中で失敗して手で中断する時も、session を離れる前に同じ rm -rf を実行する
 # (session が切れて trap が走ったか不明なら、再ログインして同じ rm -rf を実行する)
 cd <deploy_path>
@@ -134,13 +163,14 @@ openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 \
   -in /tmp/staker-backup.tar.gz.enc -out /tmp/restore.tar.gz
 # (パスフレーズ入力)
 tar xzf /tmp/restore.tar.gz -C /tmp
-mv /tmp/staker-backup/staking/* "$STAKING/"
+# tarball の最上位 dir は日付付き (staker-backup-<yyyymmdd>/staking)
+mv /tmp/staker-backup-*/staking/* "$STAKING/"
 # コンテナは root で動く(image に USER 指定なし)→ root 所有・600
 chown root:root "$STAKING"/*
 chmod 600 "$STAKING"/*
 rm /tmp/restore.tar.gz
 rm /tmp/staker-backup.tar.gz.enc
-rm -rf /tmp/staker-backup
+rm -rf /tmp/staker-backup-*
 # 公開前の NodeID 確認: ネットワーク無し・staking 読み取り専用で metalgo を一時起動し、
 # 起動ログの nodeID を読む(mainnet にも他ノードにも一切つながらない)
 # image tag は .env で METAL_IMAGE_TAG を pin しているならその tag
@@ -455,7 +485,7 @@ u  = 現 cycle の uptime (%)
 
 - **Step 1**: 旧 VM と **別 region、できれば別 provider** を選ぶ。同 region だと同じ上流 transit を共有していて、同じ断に巻き込まれうる。
 - **Step 4 の前に**: 上の fencing 1〜2 が完了していること。
-- **validator host 側の operator-local 設定を戻す**: `/etc/freedom-yield/` (`web-host`、`ntfy-topic`、`calendar-token`、`wallet-addresses.json`、`watch-list.json` 等。git 管理外) と anchor 署名鍵 (`docs/OPERATOR_IDENTITY_SETUP.md` の転送手順)。
+- **validator host 側の operator-local 設定を戻す**: `/etc/freedom-yield/` (`web-host`、`ntfy-topic`、`calendar-token`、`wallet-addresses.json`、`watch-list.json` 等。git 管理外) と `.env` は本書「前提」節の `backup-host-config.sh` の暗号化バックアップから戻す (旧 host に届くうちは移設前にもう一度取る)。anchor 署名鍵は `docs/OPERATOR_IDENTITY_SETUP.md` の転送手順。
 
 validator host の IP / ホスト名を持っている場所 (全部更新する。値はどこにも commit しない):
 
@@ -483,6 +513,28 @@ validator host の IP / ホスト名を持っている場所 (全部更新する
 
 ---
 
+## 四半期 DR ドリル(Mac で。mainnet には一切つながらない)
+
+バックアップは戻せることを確かめるまでバックアップではない。3 か月ごとに Mac で次の 3 つを回す。
+
+```bash
+# 1. 準備確認(パスフレーズなし・復号なし): 最新の ~/staker-backup-*.tar.gz.enc を解決し、
+#    docker と本番と同じ image (既定 metalblockchain/metalgo:v1.13.5) を確認、
+#    使い捨て鍵で --network-id=local の metalgo を起動して info API が答えるかを見る
+bash scripts/dr-drill.sh --dry-run
+# 2. 本番: staker keys を復号 → SHA-256 照合 → local network で起動 → NodeID 再現を確認
+bash scripts/dr-drill.sh
+# 3. host 設定のバックアップを取り直して、復元ドリル
+VALIDATOR_HOST=<validator host> VALIDATOR_SSH_KEY=~/.ssh/<your_validator_host_key> \
+  bash scripts/operator-local/backup-host-config.sh
+bash scripts/operator-local/backup-host-config.sh --verify ~/fy-host-config-backup-<yyyymmdd>.tar.enc
+```
+
+- `dr-drill.sh` が起動する metalgo には必ず `--network-id=local` と空の bootstrap が付き、それが無ければ起動を拒否する(metalgo 自身の既定は mainnet)。本番 validator が動いていても安全。
+- 本番の metalgo の版を上げたら、`dr-drill.sh` の `METALGO_IMAGE` 既定も揃える(env で一時的に上書き可)。
+
+---
+
 ## 鍵を全て失った最悪シナリオ(NodeID 復活不可)
 
 `staker.crt` / `staker.key` が Mac + VPS 両方で失われた場合、**同 NodeID は二度と再現できない**。
@@ -493,7 +545,7 @@ validator host の IP / ホスト名を持っている場所 (全部更新する
 3. 委任者には公開アナウンスで NodeID 変更通知(現在 delegator ゼロのため影響なし)
 4. 過去の uptime track record は失われる
 
-→ **これを防ぐため、Mac の `<your-staker-backup-dir>/` は別マシン or USB へ暗号化 backup する**(TODO、未実施)
+→ **これを防ぐため、staker keys は暗号化 backup を Mac(`~/staker-backup-<yyyymmdd>.tar.gz.enc`)と Dropbox(`metal-validator-backup/`)の 2 か所に置き、四半期 DR ドリルで復号と NodeID 再現を確かめる。**
 
 ---
 
