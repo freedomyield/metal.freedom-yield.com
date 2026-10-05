@@ -299,8 +299,17 @@ CRON_SCRIPT
 
 # The metalgo compose stack, exactly as step_metalgo starts it. Run from
 # $DEPLOY_DIR so compose reads $DEPLOY_DIR/.env and derives the same project.
+#
+# stdin is ALWAYS /dev/null. When the existing /data volume carries a
+# com.docker.compose.config-hash label that differs from what this compose file
+# resolves to, `create` / `up` ask "Volume ... exists but doesn't match
+# configuration in compose file. Recreate (data will be lost)?". Answering y
+# deletes the volume = the staker keys = the NodeID. With no terminal on stdin
+# compose takes the default (No) and keeps the volume (rehearsed 2026-10-05,
+# docker compose v5.5.1), so a keystroke can never destroy the keys here.
+# Never add -y / --yes to these calls.
 metalgo_compose() {
-  docker compose -f docker-compose.metalgo.yml -f docker-compose.metalgo.prod.yml "$@"
+  docker compose -f docker-compose.metalgo.yml -f docker-compose.metalgo.prod.yml "$@" </dev/null
 }
 
 # Print the host path that compose mounts at the metalgo container's /data —
