@@ -16,6 +16,11 @@
 #   D3 the staking dir is found under the dated top directory of the tarball
 #   D4 the default image is the production pin, not :latest
 #   D5 wrong passphrase / NodeID mismatch / no backup -> non-zero
+#   P1 --from-plaintext defaults to the NEWEST ~/staker-backup-*/staking
+#   P2 the plaintext path never prompts and never reads stdin (stdin closed)
+#   P3 it mounts a COPY in its own WORKDIR (mode 600 files), never the source
+#   P4 WORKDIR is deleted after the run
+#   P5 the copied files are hash-checked: a wrong set -> non-zero, no boot
 #
 # DRILL_SCRIPT_UNDER_TEST=<path> / DRILL_TEST_ONLY=<case> as in the other suites.
 
@@ -59,11 +64,29 @@ SHA_CRT="$(shasum -a 256 "$SRC/staker.crt" | awk '{print $1}')"
 SHA_KEY="$(shasum -a 256 "$SRC/staker.key" | awk '{print $1}')"
 SHA_BLS="$(shasum -a 256 "$SRC/signer.key" | awk '{print $1}')"
 
+# --- synthetic plaintext staker dirs (the FileVault copy on the Mac) ---------
+PLAIN_NEW="$HOME_T/staker-backup-20260518/staking"; PLAIN_OLD="$HOME_T/staker-backup-20250101/staking"
+mkdir -p "$PLAIN_NEW" "$PLAIN_OLD"
+cp "$SRC/staker.crt" "$SRC/staker.key" "$SRC/signer.key" "$PLAIN_NEW/"
+for f in staker.crt staker.key signer.key; do printf 'old-%s\n' "$f" >"$PLAIN_OLD/$f"; done
+chmod 644 "$PLAIN_NEW"/* "$PLAIN_OLD"/*
+
 # --- stubs --------------------------------------------------------------------
 BIN="$TMP/bin"; mkdir -p "$BIN"; CALLS="$TMP/calls.log"
 cat >"$BIN/docker" <<'STUB'
 #!/usr/bin/env bash
 printf 'docker\t%s\n' "$*" >>"$STUB_CALLS"
+prev=""
+for a in "$@"; do
+	if [ "$prev" = -v ]; then
+		src="${a%%:*}"
+		printf 'mount\t%s\n' "$src" >>"$STUB_CALLS"
+		for f in staker.crt staker.key signer.key; do
+			printf 'mode\t%s\n' "$(stat -c %a "$src/$f" 2>/dev/null || stat -f %Lp "$src/$f" 2>/dev/null)" >>"$STUB_CALLS"
+		done
+	fi
+	prev="$a"
+done
 exit 0
 STUB
 cat >"$BIN/curl" <<'STUB'
@@ -85,6 +108,16 @@ run_drill() { # $1 stdin, rest = args; T_* env for overrides
 		EXPECTED_NODEID="$NODEID" EXPECTED_SHA_CRT="$SHA_CRT" EXPECTED_SHA_KEY="$SHA_KEY" EXPECTED_SHA_BLS="$SHA_BLS" \
 		DR_DRILL_BOOT_TIMEOUT=2 \
 		bash "$SCRIPT" "$@" 2>&1)"
+	RC=$?
+}
+# run_drill_closed <args...> — same, but stdin CLOSED: any prompt/read fails.
+run_drill_closed() {
+	: >"$CALLS"
+	OUT="$(env -i PATH="$BIN:/usr/bin:/bin:/usr/sbin:/sbin:$(dirname "$(command -v jq)")" \
+		HOME="$HOME_T" STUB_CALLS="$CALLS" STUB_NODEID="${T_NODEID:-$NODEID}" \
+		EXPECTED_NODEID="$NODEID" EXPECTED_SHA_CRT="$SHA_CRT" EXPECTED_SHA_KEY="$SHA_KEY" EXPECTED_SHA_BLS="$SHA_BLS" \
+		DR_DRILL_BOOT_TIMEOUT=2 \
+		bash "$SCRIPT" "$@" 2>&1 0<&-)"
 	RC=$?
 }
 docker_runs() { grep '^docker	run ' "$CALLS" || true; }
@@ -128,6 +161,46 @@ if want failures; then
 	mv "$TMP/aside1" "$HOME_T/staker-backup-20260518.tar.gz.enc"; mv "$TMP/aside2" "$HOME_T/staker-backup-20250101.tar.gz.enc"
 fi
 
+if want plaintext; then
+	echo "== P1-P4 --from-plaintext (routine, no operator input) =="
+	run_drill_closed --from-plaintext
+	assert_eq "plaintext: exit 0" "0" "$RC"
+	assert_contains "plaintext: PASSED" "DR drill PASSED" "$OUT"
+	assert_contains "plaintext: picks the newest staking dir" "source: $PLAIN_NEW " "$OUT"
+	assert_not_contains "plaintext: no passphrase prompt" "assphrase" "$OUT"
+	assert_not_contains "plaintext: no decryption" "Decrypt encrypted backup" "$OUT"
+	MNT="$(grep '^mount	' "$CALLS" | cut -f2)"
+	assert_eq "plaintext: exactly one keyed container" "1" "$(grep -c . <<<"$MNT")"
+	case "$MNT" in
+		"$HOME_T"*|"") bad "plaintext: mounts the WORKDIR copy, not the source" "mount=$MNT" ;;
+		*/staking) ok "plaintext: mounts the WORKDIR copy, not the source" ;;
+		*) bad "plaintext: mounts the WORKDIR copy, not the source" "mount=$MNT" ;;
+	esac
+	assert_eq "plaintext: copies are mode 600" "600 600 600" "$(grep '^mode	' "$CALLS" | cut -f2 | tr '\n' ' ' | sed 's/ $//')"
+	[ -n "$MNT" ] && [ ! -e "$MNT" ] && [ ! -e "$(dirname "$MNT")" ] \
+		&& ok "plaintext: WORKDIR deleted after the run" || bad "plaintext: WORKDIR deleted after the run" "${MNT:-no mount} still exists"
+	assert_contains "plaintext: --network-id=local" "--network-id=local" "$(docker_runs)"
+	assert_eq "plaintext: source untouched (mode 644 kept)" "644" \
+		"$(stat -c %a "$PLAIN_NEW/staker.key" 2>/dev/null || stat -f %Lp "$PLAIN_NEW/staker.key")"
+
+	echo "== P5 plaintext failure paths =="
+	run_drill_closed --from-plaintext "$PLAIN_OLD"
+	assert_eq "plaintext-wrongset: exit 1" "1" "$RC"
+	assert_contains "plaintext-wrongset: hash mismatch" "hash mismatch" "$OUT"
+	assert_eq "plaintext-wrongset: no container started" "" "$(docker_runs)"
+	T_NODEID="NodeID-SomeoneElse" run_drill_closed --from-plaintext
+	assert_eq "plaintext-nodeid: exit 1" "1" "$RC"
+	assert_contains "plaintext-nodeid: says so" "NodeID mismatch" "$OUT"
+	mkdir -p "$TMP/partial"; cp "$PLAIN_NEW/staker.crt" "$TMP/partial/"
+	run_drill_closed --from-plaintext "$TMP/partial"
+	assert_eq "plaintext-missing: exit 1" "1" "$RC"
+	assert_contains "plaintext-missing: names the file" "missing key file" "$OUT"
+	run_drill_closed --dry-run --from-plaintext
+	assert_eq "plaintext-dryrun: exit 0" "0" "$RC"
+	assert_contains "plaintext-dryrun: resolves the source" "source: $PLAIN_NEW " "$OUT"
+	assert_contains "plaintext-dryrun: ephemeral keys only" "--staking-ephemeral-cert-enabled=true" "$(docker_runs)"
+fi
+
 if [ -z "$ONLY" ] && [ -z "${DRILL_SCRIPT_UNDER_TEST:-}" ]; then
 	echo "== break-the-property =="
 	MUT="$TMP/mutants"; mkdir -p "$MUT"
@@ -151,6 +224,18 @@ if [ -z "$ONLY" ] && [ -z "${DRILL_SCRIPT_UNDER_TEST:-}" ]; then
 		'drill: exit 0'
 	mutate stale-staking-path drill 's/STAKING=\$\(find [^\n]*\n/STAKING="\$WORKDIR\/staker-backup\/staking"\n/' \
 		'drill: exit 0'
+	mutate plaintext-oldest plaintext 's/\[\[ "\$d" > "\$newest" \]\]/[[ "\$d" < "\$newest" ]]/' \
+		'plaintext: picks the newest staking dir'
+	mutate plaintext-prompts plaintext 's/(echo "\[1\/5\] Copy[^\n]*\n)/$1  read -rs -p "  Enter passphrase: " PP\n/' \
+		'plaintext: exit 0'
+	mutate mount-source plaintext 's/STAKING="\$WORKDIR\/staking"\n  mkdir -m 700 "\$STAKING"\n  for f in [^\n]*\n[^\n]*\n[^\n]*\n  done\n/STAKING="\$PLAIN_DIR"\n/' \
+		'plaintext: mounts the WORKDIR copy, not the source'
+	mutate loose-perms plaintext 's/\( umask 077; cp ([^\n]*) \)\n    chmod 600 "\$STAKING\/\$f"\n/cp $1\n/' \
+		'plaintext: copies are mode 600'
+	mutate workdir-kept plaintext 's/rm -rf "\$WORKDIR"/:/' \
+		'plaintext: WORKDIR deleted after the run'
+	mutate no-hash-check plaintext 's/\[ "\$ACT_(CRT|KEY|BLS)" = "\$EXPECTED_SHA_\1" \] \|\| fail/true || fail/g' \
+		'plaintext-wrongset: exit 1'
 	mutate image-latest drill 's/metalgo:v1\.13\.5\}/metalgo:latest}/' \
 		'drill: default image is the production pin'
 fi

@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # DR drill — end-to-end exercise of the disaster recovery path on the Mac:
-#   1. Decrypt the encrypted staker key backup with the operator's passphrase
+#   1. Get the three staker key files into a private temp WORKDIR (mode 600):
+#        --from-plaintext: copy them from the Mac's FileVault-protected
+#          plaintext staker backup (routine; no prompt, AI-run)
+#        default:          decrypt the encrypted staker key backup with the
+#          operator's passphrase (prompts; not the routine path)
 #   2. Verify SHA-256 of all three key files matches the recorded originals
-#   3. Boot a local-network metalgo container with the restored keys
+#   3. Boot a local-network metalgo container with those keys
 #   4. Confirm info.getNodeID returns the expected production NodeID
-#   5. Clean up (stop container, remove temp files)
+#   5. Clean up (stop container, delete WORKDIR)
 #
 # CHAIN: none — no transaction is built or sent.
 # NEVER connects to mainnet — every metalgo this script starts gets
@@ -15,11 +19,15 @@
 #
 # Run quarterly as risk-theater prevention: untested backups are not backups.
 #
-# Usage:  bash scripts/dr-drill.sh              # full drill (asks the passphrase)
-#         bash scripts/dr-drill.sh --dry-run    # readiness only: resolves the
-#             backup file, checks docker + image, boots metalgo on the local
-#             network with THROWAWAY ephemeral keys and checks info.getNodeID
-#             answers. No passphrase, no decryption, no key material touched.
+# Usage:  bash scripts/dr-drill.sh --from-plaintext   # ROUTINE (AI): newest
+#             ~/staker-backup-*/staking, no prompt, no operator input
+#         bash scripts/dr-drill.sh --from-plaintext <dir>   # explicit dir
+#         bash scripts/dr-drill.sh              # encrypted backup (asks the
+#             passphrase; kept for a drill of the encrypted copy itself)
+#         bash scripts/dr-drill.sh --dry-run [--from-plaintext [<dir>]]
+#             readiness only: resolves the source, checks docker + image,
+#             boots metalgo on the local network with THROWAWAY ephemeral
+#             keys and checks info.getNodeID answers. No key material touched.
 # Env:    ENCRYPTED_BACKUP  (default: newest ~/staker-backup-*.tar.gz.enc)
 #         EXPECTED_NODEID   (default: NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v)
 #         METALGO_IMAGE     (default: metalblockchain/metalgo:v1.13.5 — the
@@ -30,12 +38,19 @@
 set -euo pipefail
 
 MODE="drill"
-case "${1:-}" in
-  "") ;;
-  --dry-run) MODE="dry-run" ;;
-  -h|--help) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-  *) echo "ERROR: unknown argument: $1 (see --help)" >&2; exit 2 ;;
-esac
+SOURCE="encrypted"
+PLAIN_DIR=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run) MODE="dry-run" ;;
+    --from-plaintext)
+      SOURCE="plaintext"
+      if [ $# -ge 2 ] && [ "${2#--}" = "$2" ]; then PLAIN_DIR="$2"; shift; fi ;;
+    -h|--help) sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "ERROR: unknown argument: $1 (see --help)" >&2; exit 2 ;;
+  esac
+  shift
+done
 
 # newest_staker_backup — newest ~/staker-backup-*.tar.gz.enc by name (the
 # names carry yyyymmdd, so lexical order is date order). Empty if none.
@@ -48,7 +63,22 @@ newest_staker_backup() {
   printf '%s' "$newest"
 }
 
+# newest_plaintext_staking — newest ~/staker-backup-*/staking directory by
+# name (yyyymmdd in the name). Symlinks are skipped. Empty if none.
+newest_plaintext_staking() {
+  local d newest=""
+  for d in "$HOME"/staker-backup-*/staking; do
+    [ -d "$d" ] && [ ! -L "$d" ] && [ ! -L "${d%/staking}" ] || continue
+    if [ -z "$newest" ] || [[ "$d" > "$newest" ]]; then newest="$d"; fi
+  done
+  printf '%s' "$newest"
+}
+
 ENCRYPTED_BACKUP="${ENCRYPTED_BACKUP:-$(newest_staker_backup)}"
+if [ "$SOURCE" = "plaintext" ] && [ -z "$PLAIN_DIR" ]; then
+  PLAIN_DIR="$(newest_plaintext_staking)"
+fi
+KEY_FILES=(staker.crt staker.key signer.key)
 EXPECTED_NODEID="${EXPECTED_NODEID:-NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v}"
 METALGO_IMAGE="${METALGO_IMAGE:-metalblockchain/metalgo:v1.13.5}"
 BOOT_TIMEOUT="${DR_DRILL_BOOT_TIMEOUT:-60}"
@@ -132,17 +162,27 @@ echo
 
 # ── Step 0: prerequisites ──────────────────────────────────────────────
 echo "[0/5] Prerequisites"
-for t in docker openssl tar shasum jq curl; do
+for t in docker tar shasum jq curl; do
   command -v "$t" >/dev/null 2>&1 || fail "$t not found"
 done
-[ -n "$ENCRYPTED_BACKUP" ] || fail "no ~/staker-backup-*.tar.gz.enc found (set ENCRYPTED_BACKUP)"
-[ -f "$ENCRYPTED_BACKUP" ] || fail "encrypted backup not found at $ENCRYPTED_BACKUP"
-echo "  backup: $ENCRYPTED_BACKUP ($(wc -c <"$ENCRYPTED_BACKUP" | tr -d ' ') bytes)"
+if [ "$SOURCE" = "plaintext" ]; then
+  [ -n "$PLAIN_DIR" ] || fail "no ~/staker-backup-*/staking directory found (pass --from-plaintext <dir>)"
+  [ -d "$PLAIN_DIR" ] && [ ! -L "$PLAIN_DIR" ] || fail "plaintext key dir not found (or a symlink): $PLAIN_DIR"
+  for f in "${KEY_FILES[@]}"; do
+    [ -f "$PLAIN_DIR/$f" ] && [ ! -L "$PLAIN_DIR/$f" ] || fail "missing key file (or a symlink): $PLAIN_DIR/$f"
+  done
+  echo "  source: $PLAIN_DIR (plaintext, FileVault-protected; copied, never modified)"
+else
+  command -v openssl >/dev/null 2>&1 || fail "openssl not found"
+  [ -n "$ENCRYPTED_BACKUP" ] || fail "no ~/staker-backup-*.tar.gz.enc found (set ENCRYPTED_BACKUP)"
+  [ -f "$ENCRYPTED_BACKUP" ] || fail "encrypted backup not found at $ENCRYPTED_BACKUP"
+  echo "  backup: $ENCRYPTED_BACKUP ($(wc -c <"$ENCRYPTED_BACKUP" | tr -d ' ') bytes)"
+fi
 echo "  image:  $METALGO_IMAGE"
 docker info >/dev/null 2>&1 || fail "docker not running"
 docker image inspect "$METALGO_IMAGE" >/dev/null 2>&1 \
   || { echo "  pulling $METALGO_IMAGE..."; docker pull "$METALGO_IMAGE"; }
-pass "encrypted backup, docker, metalgo image all present"
+pass "key source, docker, metalgo image all present"
 
 if [ "$MODE" = "dry-run" ]; then
   echo
@@ -157,38 +197,53 @@ if [ "$MODE" = "dry-run" ]; then
   echo
   echo "=============================================="
   echo " ✓ DR drill READY (dry-run). Nothing was decrypted."
-  echo " Full drill: bash scripts/dr-drill.sh"
+  echo " Full drill: bash scripts/dr-drill.sh --from-plaintext"
   echo "=============================================="
   exit 0
 fi
 
-# ── Step 1: decrypt ────────────────────────────────────────────────────
-echo
-echo "[1/5] Decrypt encrypted backup"
-read -rs -p "  Enter passphrase: " PP
-echo
-export PP_FOR_OPENSSL="$PP"
-unset PP
+if [ "$SOURCE" = "plaintext" ]; then
+  # ── Step 1: copy the plaintext keys into WORKDIR (no prompt) ────────────
+  echo
+  echo "[1/5] Copy the 3 key files into the private WORKDIR (mode 600)"
+  STAKING="$WORKDIR/staking"
+  mkdir -m 700 "$STAKING"
+  for f in "${KEY_FILES[@]}"; do
+    ( umask 077; cp "$PLAIN_DIR/$f" "$STAKING/$f" )
+    chmod 600 "$STAKING/$f"
+  done
+  pass "copied to $STAKING"
+  echo
+  echo "[2/5] Verify SHA-256 of the copied key files"
+else
+  # ── Step 1: decrypt ──────────────────────────────────────────────────
+  echo
+  echo "[1/5] Decrypt encrypted backup"
+  read -rs -p "  Enter passphrase: " PP
+  echo
+  export PP_FOR_OPENSSL="$PP"
+  unset PP
 
-if ! openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 \
-       -in "$ENCRYPTED_BACKUP" \
-       -out "$WORKDIR/restored.tar.gz" \
-       -pass env:PP_FOR_OPENSSL 2>/dev/null; then
+  if ! openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 \
+         -in "$ENCRYPTED_BACKUP" \
+         -out "$WORKDIR/restored.tar.gz" \
+         -pass env:PP_FOR_OPENSSL 2>/dev/null; then
+    unset PP_FOR_OPENSSL
+    fail "decryption failed (wrong passphrase or corrupt file)"
+  fi
   unset PP_FOR_OPENSSL
-  fail "decryption failed (wrong passphrase or corrupt file)"
-fi
-unset PP_FOR_OPENSSL
-pass "decryption succeeded"
+  pass "decryption succeeded"
 
-# ── Step 2: extract + hash check ───────────────────────────────────────
-echo
-echo "[2/5] Verify SHA-256 of restored key files"
-tar xzf "$WORKDIR/restored.tar.gz" -C "$WORKDIR"
-# The tarball's top directory carries the backup date
-# (staker-backup-<yyyymmdd>/staking), so locate the single staking/ dir.
-STAKING=$(find "$WORKDIR" -mindepth 1 -maxdepth 2 -type d -name staking)
-[ -n "$STAKING" ] && [ "$(grep -c . <<<"$STAKING")" = 1 ] \
-  || fail "expected exactly one staking/ directory in the tarball, found: ${STAKING:-none}"
+  # ── Step 2: extract + hash check ─────────────────────────────────────
+  echo
+  echo "[2/5] Verify SHA-256 of restored key files"
+  tar xzf "$WORKDIR/restored.tar.gz" -C "$WORKDIR"
+  # The tarball's top directory carries the backup date
+  # (staker-backup-<yyyymmdd>/staking), so locate the single staking/ dir.
+  STAKING=$(find "$WORKDIR" -mindepth 1 -maxdepth 2 -type d -name staking)
+  [ -n "$STAKING" ] && [ "$(grep -c . <<<"$STAKING")" = 1 ] \
+    || fail "expected exactly one staking/ directory in the tarball, found: ${STAKING:-none}"
+fi
 
 ACT_CRT=$(shasum -a 256 "$STAKING/staker.crt" | awk '{print $1}')
 ACT_KEY=$(shasum -a 256 "$STAKING/staker.key" | awk '{print $1}')
@@ -234,7 +289,11 @@ echo
 echo "[5/5] Drill complete"
 echo "=============================================="
 echo " ✓ DR drill PASSED"
-echo " Encrypted backup at $ENCRYPTED_BACKUP"
+if [ "$SOURCE" = "plaintext" ]; then
+  echo " Plaintext keys at $PLAIN_DIR"
+else
+  echo " Encrypted backup at $ENCRYPTED_BACKUP"
+fi
 echo " correctly reproduces $EXPECTED_NODEID."
 echo " Schedule next drill ~3 months from now."
 echo "=============================================="
