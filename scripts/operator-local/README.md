@@ -85,8 +85,9 @@ symptom-keyed failure decision trees.
   into `age -R` to the operator identity ssh-ed25519 PUBLIC key, so no
   plaintext touches disk and no passphrase is ever asked. Verifies without
   decrypting (names of the encrypted stream, age header recipient tag,
-  exact size, host sha256 manifest of hashes + names), then copies the
-  `.tar.age` and its `.manifest` to Dropbox. `--dry-run` lists names;
+  exact size, host sha256 manifest of hashes + names), encrypts the
+  manifest to the same key (its plaintext never leaves the run's temp dir),
+  then copies only the `.tar.age` and `.tar.age.manifest.age` to Dropbox. `--dry-run` lists names;
   `--restore-help` prints the operator's disaster-only decrypt (needs the
   identity PRIVATE key). Never reads `metalgo` keys.
   Tests: `tests/backup-host-config/`.

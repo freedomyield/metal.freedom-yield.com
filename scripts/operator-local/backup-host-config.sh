@@ -40,11 +40,14 @@
 #         plaintext bytes (16-byte nonce + 16-byte tag per 64 KiB chunk)
 #      d. re-fetch the host's per-file sha256 (read-only `sha256sum` over ssh),
 #         check every line is `<64 hex>  <name>` (hashes and names only, never
-#         contents) and that its file set equals the archive's file set; store
-#         it next to the backup as <file>.manifest (mode 600)
+#         contents) and that its file set equals the archive's file set
+#      e. encrypt that manifest to the same recipient as <file>.manifest.age
+#         (mode 600; header + size checked as in b/c). The plaintext manifest
+#         exists only in the run's mktemp dir (mode 600), removed on every
+#         exit path: hashes of low-entropy files are guessable.
 #      On failure: backup and manifest renamed *.VERIFY-FAILED, exit 1.
-#   4. only after a passing verify: copy backup + manifest to the Dropbox
-#      backup directory, check both copies' sha256, print the sha256.
+#   4. only after a passing verify: copy the two .age files (backup + manifest)
+#      to the Dropbox backup directory, check both copies' sha256.
 #
 # Usage (AI, routine — no operator input):
 #   VALIDATOR_HOST=<host> VALIDATOR_SSH_KEY=~/.ssh/<key> \
@@ -85,7 +88,7 @@ REQUIRED_NAMES=("${CONFIG_NAME}/" ".env")
 # Known config entries: a missing one is reported as a WARN, not a refusal.
 KNOWN_NAMES=(web-host ntfy-topic calendar-token wallet-addresses.json watch-list.json)
 
-usage() { sed -n '2,76p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,78p' "$0" | sed 's/^# \{0,1\}//'; }
 die() { local rc="$1"; shift; echo "ERROR: $*" >&2; exit "$rc"; }
 
 MODE="backup"
@@ -115,7 +118,7 @@ age prompts for that key's passphrase on the terminal. Nothing in the
 routine backup / drill flow ever needs it.
 
 1. Pick the file (no decryption needed to check it):
-     ls -l ~/fy-host-config-backup-<yyyymmdd>.tar.age ~/fy-host-config-backup-<yyyymmdd>.tar.age.manifest
+     ls -l ~/fy-host-config-backup-<yyyymmdd>.tar.age ~/fy-host-config-backup-<yyyymmdd>.tar.age.manifest.age
      (same files in ~/Dropbox/metal-validator-backup/)
 
 2. Decrypt to a pipe straight into the NEW host (no plaintext on the Mac's disk):
@@ -123,10 +126,11 @@ routine backup / drill flow ever needs it.
        | ssh -i ~/.ssh/<your_validator_host_key> root@<new host> \\
            'umask 077 && mkdir /root/fy-config-restore && tar -C /root/fy-config-restore -xpf -'
 
-3. Check against the manifest (hashes + names only), then put the files in place:
-     ssh -i ~/.ssh/<your_validator_host_key> root@<new host> \\
-       'cd /root/fy-config-restore && sha256sum -c -' \\
-       < ~/fy-host-config-backup-<yyyymmdd>.tar.age.manifest
+3. Check against the manifest (also age-encrypted; decrypt it to a pipe too):
+     age -d -i $PRIV ~/fy-host-config-backup-<yyyymmdd>.tar.age.manifest.age \\
+       | ssh -i ~/.ssh/<your_validator_host_key> root@<new host> \\
+           'cd /root/fy-config-restore && sha256sum -c -'
+   then put the files in place:
      # new host (root):
      #   cp -a /root/fy-config-restore/freedom-yield /etc/
      #   install -m 600 /root/fy-config-restore/.env <deploy_path>/.env
@@ -263,7 +267,7 @@ OUT_DIR="${BACKUP_OUT_DIR:-$HOME}"
 DROPBOX_DIR="${BACKUP_DROPBOX_DIR:-$HOME/Dropbox/metal-validator-backup}"
 STAMP="$(date -u +%Y%m%d)"
 OUT="${OUT_DIR}/fy-host-config-backup-${STAMP}.tar.age"
-MANIFEST="${OUT}.manifest"
+MANIFEST="${OUT}.manifest.age"
 PARTIAL="${OUT}.partial"
 [ -d "$OUT_DIR" ] || die 2 "BACKUP_OUT_DIR not found: $OUT_DIR"
 for f in "$OUT" "$PARTIAL" "$MANIFEST"; do
@@ -272,9 +276,12 @@ done
 
 # Side channel of the stream: fifos (no data at rest), the name list and the
 # byte count. Never any file content.
-SIDE="$(mktemp -d)"
+SIDE="$(mktemp -d "${TMPDIR:-/tmp}/fy-hcb-run.XXXXXX")"
 trap 'rm -rf "$SIDE"' EXIT
 mkfifo "$SIDE/tee" "$SIDE/list"
+# The plaintext manifest (hashes of possibly low-entropy files) lives ONLY
+# here, mode 600, and is removed with SIDE on every exit path.
+MANIFEST_PLAIN="$SIDE/manifest"
 
 echo "[2] Streaming host config straight into age → $OUT" >&2
 : >"$PARTIAL"
@@ -323,14 +330,31 @@ if HASHES="$(host_run "$REMOTE_HASH_CMD")"; then
 			diff <(echo "$ARCHIVE_FILES") <(echo "$HASH_FILES") | sed 's/^/    /' >&2 || true
 			VERIFY_OK=0
 		else
-			LC_ALL=C sort -k2 <<<"$HASHES" >"$MANIFEST"
-			chmod 600 "$MANIFEST"
+			LC_ALL=C sort -k2 <<<"$HASHES" >"$MANIFEST_PLAIN"
+			chmod 600 "$MANIFEST_PLAIN"
 		fi
 	fi
 else
 	echo "  could not fetch the host sha256 list" >&2
 	VERIFY_OK=0
 fi
+
+# e. only after every check above: encrypt the manifest to the same
+#    recipient and check its header + size the same way.
+if [ "$VERIFY_OK" = "1" ]; then
+	: >"${MANIFEST}.partial"
+	chmod 600 "${MANIFEST}.partial"
+	if age -R "$RECIPIENT" -o "${MANIFEST}.partial" <"$MANIFEST_PLAIN" \
+		&& check_age_file "${MANIFEST}.partial" "$RECIPIENT_TAG" "$(wc -c <"$MANIFEST_PLAIN" | tr -d ' ')"; then
+		mv "${MANIFEST}.partial" "$MANIFEST"
+		chmod 600 "$MANIFEST"
+	else
+		echo "  encrypting the manifest failed" >&2
+		rm -f "${MANIFEST}.partial"
+		VERIFY_OK=0
+	fi
+fi
+rm -f "$MANIFEST_PLAIN"
 
 if [ "$VERIFY_OK" != "1" ]; then
 	mv "$OUT" "${OUT}.VERIFY-FAILED"

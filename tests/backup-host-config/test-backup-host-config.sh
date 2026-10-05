@@ -31,7 +31,10 @@
 #   C8  manifest = host sha256 hashes + names only; contents are refused, and
 #       its file set must equal the archive's
 #   C9  verify failure -> exit 1, files renamed *.VERIFY-FAILED, no Dropbox copy
-#   C10 Dropbox copy only after all checks; manifest is mode 600
+#   C10 Dropbox copy only after all checks, and only the two .age files
+#   C13 the manifest is age-encrypted to the same recipient (mode 600); its
+#       plaintext (hashes of maybe low-entropy files) is never left on disk,
+#       on success or failure paths
 #   C11 --dry-run never runs age and writes nothing
 #   C12 VALIDATOR_HOST unset -> refuse before any ssh
 #
@@ -164,7 +167,7 @@ reset_env() {
 	: >"$TMP/home/.ssh/id_test"; : >"$CALLS"; : >"$LOGS/poll-hits"
 }
 start_poller() {
-	( while :; do grep -rlF "$MARKER" "$TMP/home" >>"$LOGS/poll-hits" 2>/dev/null; sleep 0.01; done ) &
+	( while :; do grep -D skip -rlF "$MARKER" "$TMP/home" >>"$LOGS/poll-hits" 2>/dev/null; sleep 0.01; done ) &
 	POLL_PID=$!
 }
 stop_poller() { kill "$POLL_PID" 2>/dev/null; wait "$POLL_PID" 2>/dev/null; POLL_PID=""; }
@@ -192,7 +195,7 @@ dropbox_files() { find "$TMP/home/Dropbox/metal-validator-backup" -type f | sort
 calls_of() { grep -c "^$1	" "$CALLS" || true; }
 no_plaintext_anywhere() { # $1 label
 	assert_eq "$1: poller saw no plaintext during the run" "" "$(sort -u "$LOGS/poll-hits")"
-	assert_eq "$1: no plaintext left under HOME/TMPDIR" "" "$(grep -rlF "$MARKER" "$TMP/home" 2>/dev/null)"
+	assert_eq "$1: no plaintext left under HOME/TMPDIR" "" "$(grep -D skip -rlF "$MARKER" "$TMP/home" 2>/dev/null)"
 }
 no_prompt() { # $1 label
 	assert_not_contains "$1: no passphrase prompt" "assphrase:" "$OUT$ERR"
@@ -200,7 +203,20 @@ no_prompt() { # $1 label
 }
 TODAY="$(date -u +%Y%m%d)"
 BK="$TMP/home/fy-host-config-backup-${TODAY}.tar.age"
-MF="${BK}.manifest"
+MF="${BK}.manifest.age"
+ENV_HASH="$(shasum -a 256 "$TMP/host/deploy/.env" | awk '{print $1}')"
+# stub_decrypt <file> — inverse of the age stub (test-only format), prints
+# the plaintext to stdout.
+stub_decrypt() {
+	perl -e 'open(my $h, "<:raw", $ARGV[0]) or exit 1; local $/; my $d = <$h>;
+		$d =~ s/\A.*?\n--- [^\n]*\n//s or exit 1; $d = substr($d, 16);
+		while (length $d > 16) { my $c = substr($d, 0, 65536 + 16, ""); $c = substr($c, 0, -16);
+			$c =~ tr/\x80-\xff\x00-\x7f/\x00-\xff/; print $c }' "$1"
+}
+no_plain_manifest() { # $1 label — the .env hash must not be readable anywhere
+	assert_eq "$1: no plaintext manifest left on disk" "" "$(grep -D skip -rlF "$ENV_HASH" "$TMP/home" 2>/dev/null)"
+	assert_eq "$1: no *.manifest file left" "" "$(find "$TMP/home" -name '*.manifest' 2>/dev/null)"
+}
 # verify_fail_common <label> — the shape every verify failure must have (C9)
 verify_fail_common() {
 	assert_eq "$1: exit 1" "1" "$RC"
@@ -210,6 +226,7 @@ verify_fail_common() {
 	assert_eq "$1: nothing copied to Dropbox" "" "$(dropbox_files)"
 	assert_contains "$1: loud message" "VERIFY FAILED" "$ERR"
 	no_plaintext_anywhere "$1"
+	no_plain_manifest "$1"
 }
 
 # --- cases ----------------------------------------------------------------------
@@ -225,19 +242,23 @@ if want happy; then
 	SHA="$(shasum -a 256 "$BK" 2>/dev/null | awk '{print $1}')"
 	assert_eq "happy: Dropbox copy identical" "$SHA" "$(shasum -a 256 "$DB" 2>/dev/null | awk '{print $1}')"
 	assert_eq "happy: Dropbox manifest identical" "$(shasum -a 256 "$MF" 2>/dev/null | awk '{print $1}')" \
-		"$(shasum -a 256 "$DB.manifest" 2>/dev/null | awk '{print $1}')"
+		"$(shasum -a 256 "$DB.manifest.age" 2>/dev/null | awk '{print $1}')"
+	assert_eq "happy: Dropbox gets only the two .age files" "$(basename "$BK") $(basename "$MF")" \
+		"$(dropbox_files | xargs -n1 basename 2>/dev/null | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
+	assert_eq "happy: manifest is an age v1 file" "age-encryption.org/v1" "$(head -1 "$MF" 2>/dev/null)"
+	no_plain_manifest "happy"
 	assert_contains "happy: sha256 printed" "sha256:   $SHA" "$OUT"
 	no_plaintext_anywhere "happy"
 	no_prompt "happy"
-	assert_eq "happy: age argv is exactly -R <recipient> -o <partial>" "-R $PUB -o ${BK}.partial" \
-		"$(grep '^age	' "$CALLS" | cut -f2)"
+	assert_eq "happy: age argv is exactly -R <recipient> -o <partial> (backup, manifest)" \
+		"-R $PUB -o ${BK}.partial|-R $PUB -o ${MF}.partial" "$(grep '^age	' "$CALLS" | cut -f2 | tr '\n' '|' | sed 's/|$//')"
+	MPLAIN="$(stub_decrypt "$MF")"
 	assert_eq "happy: every ssh call ran one of the two read-only commands" "" \
 		"$(grep '^ssh' "$CALLS" | grep -vF -- "$EXPECTED_REMOTE" | grep -vF -- "$EXPECTED_HASH")"
-	assert_eq "happy: manifest has 7 lines" "7" "$(grep -c . "$MF" 2>/dev/null)"
-	assert_eq "happy: every manifest line is '<sha256>  <name>'" "" "$(grep -vE '^[0-9a-f]{64}  [^ ]+$' "$MF" 2>/dev/null)"
-	assert_not_contains "happy: manifest carries no file contents" "$MARKER" "$(cat "$MF" 2>/dev/null)"
-	assert_eq "happy: manifest hash of .env is the real one" \
-		"$(cd "$TMP/host/deploy" && shasum -a 256 .env)" "$(grep '  \.env$' "$MF" 2>/dev/null)"
+	assert_eq "happy: manifest has 7 lines" "7" "$(grep -c . <<<"$MPLAIN")"
+	assert_eq "happy: every manifest line is '<sha256>  <name>'" "" "$(grep -vE '^[0-9a-f]{64}  [^ ]+$' <<<"$MPLAIN")"
+	assert_not_contains "happy: manifest carries no file contents" "$MARKER" "$MPLAIN"
+	assert_eq "happy: manifest hash of .env is the real one" "$ENV_HASH  .env" "$(grep '  \.env$' <<<"$MPLAIN")"
 	cp_line="$(grep -n '^cp	' "$CALLS" | head -1 | cut -d: -f1)"
 	last_ssh="$(grep -n '^ssh	' "$CALLS" | tail -1 | cut -d: -f1)"
 	[ -n "$cp_line" ] && [ -n "$last_ssh" ] && [ "$last_ssh" -lt "$cp_line" ] \
@@ -247,6 +268,7 @@ if want happy; then
 	run_case --restore-help
 	assert_eq "restore-help: exit 0" "0" "$RC"
 	assert_contains "restore-help: shows the age decrypt with the private key" "age -d -i $TMP/keys/id_ed25519 " "$OUT"
+	assert_contains "restore-help: shows the manifest decrypt" ".tar.age.manifest.age" "$OUT"
 	assert_eq "restore-help: contacts nothing" "0" "$(calls_of ssh)"
 fi
 
@@ -261,6 +283,9 @@ if want realage; then
 		names="$("$REAL_AGE" -d -i "$KEYS/id_ed25519" "$BK" 2>/dev/null | tar -tf - | LC_ALL=C sort | tr '\n' ' ')"
 		assert_contains "realage: decrypts and lists .env" ".env " "$names"
 		assert_contains "realage: decrypts and lists the config entries" "freedom-yield/ntfy-topic " "$names"
+		assert_eq "realage: manifest decrypts, .env hash is the real one" "$ENV_HASH  .env" \
+			"$("$REAL_AGE" -d -i "$KEYS/id_ed25519" "$MF" 2>/dev/null | grep '  \.env$')"
+		no_plain_manifest "realage"
 		no_plaintext_anywhere "realage"
 	fi
 fi
@@ -320,7 +345,7 @@ if want hashleak; then
 	T_HASH_LEAK=1 run_case
 	verify_fail_common "hashleak"
 	assert_contains "hashleak: refused as not '<sha256>  <name>'" "line(s) that are not" "$ERR"
-	assert_eq "hashleak: content never stored anywhere" "" "$(grep -rlF "$MARKER" "$TMP/home" 2>/dev/null)"
+	assert_eq "hashleak: content never stored anywhere" "" "$(grep -D skip -rlF "$MARKER" "$TMP/home" 2>/dev/null)"
 fi
 
 if want streamfail; then
@@ -331,6 +356,7 @@ if want streamfail; then
 	[ -f "${BK}.INCOMPLETE" ] && ok "streamfail: partial kept as .INCOMPLETE" || bad "streamfail: partial kept as .INCOMPLETE" "$(out_files)"
 	assert_eq "streamfail: nothing copied to Dropbox" "" "$(dropbox_files)"
 	no_plaintext_anywhere "streamfail"
+	no_plain_manifest "streamfail"
 fi
 
 if want dryrun; then
@@ -381,8 +407,8 @@ if [ -z "$ONLY" ] && [ -z "${BACKUP_SCRIPT_UNDER_TEST:-}" ]; then
 	mutate prompts happy 's/(echo "\[2\] Streaming)/printf "Enter backup passphrase: " >&2; read -rs FYBK_PP || true\n$1/' \
 		'happy: no passphrase prompt'
 	# C3: age in passphrase mode.
-	mutate age-passphrase-mode happy 's/age -R "\$RECIPIENT" -o/age -p -o/' \
-		'happy: age argv is exactly -R <recipient> -o <partial>'
+	mutate age-passphrase-mode happy 's/age -R "\$RECIPIENT" -o "\$PARTIAL"/age -p -o "\$PARTIAL"/' \
+		'happy: age argv is exactly -R <recipient> -o <partial> (backup, manifest)'
 	# C4: accept whatever recipient file is given.
 	mutate recipient-gate-off recipient 's/if ! RECIPIENT_TAG="\$\(recipient_tag "\$RECIPIENT"\)"; then/if ! RECIPIENT_TAG="\$(recipient_tag "\$RECIPIENT")" \&\& false; then/' \
 		'private: ssh never ran'
@@ -410,16 +436,29 @@ if [ -z "$ONLY" ] && [ -z "${BACKUP_SCRIPT_UNDER_TEST:-}" ]; then
 		"hashleak: refused as not '<sha256>  <name>'"
 	# C9: ignore the verify verdict.
 	mutate ignore-verify wrongtag 's/if \[ "\$VERIFY_OK" != "1" \]; then/if false; then/' \
-		'wrongtag: exit 1'
+		'wrongtag: file kept, flagged .VERIFY-FAILED'
 	# C9: keep the failed file under its normal name.
 	mutate unflagged-fail wrongtag 's/mv "\$OUT" "\$\{OUT\}\.VERIFY-FAILED"/:/' \
 		'wrongtag: file kept, flagged .VERIFY-FAILED'
 	# C10: copy to Dropbox before verifying.
 	mutate dropbox-first wrongtag 's/(mv "\$PARTIAL" "\$OUT"\n)/$1cp "\$OUT" "\$DROPBOX_DIR\/"\n/' \
 		'wrongtag: nothing copied to Dropbox'
-	# C10: manifest written with a loose mode.
-	mutate manifest-loose-mode happy 's/^umask 077$/umask 022/m; s/\tchmod 600 "\$MANIFEST"\n//' \
+	# C10: the plaintext manifest is copied to Dropbox as well.
+	mutate dropbox-plain-manifest happy 's/^(rm -f "\$MANIFEST_PLAIN"\n)/cp "\$MANIFEST_PLAIN" "\$DROPBOX_DIR\/plain.manifest" || true\n$1/m' \
+		'happy: Dropbox gets only the two .age files'
+	# C13: manifest written with a loose mode.
+	mutate manifest-loose-mode happy 's/^umask 077$/umask 022/m; s/\t\tchmod 600 "\$MANIFEST"\n//; s/\t: >"\$\{MANIFEST\}\.partial"\n\tchmod 600 "\$\{MANIFEST\}\.partial"\n//' \
 		'happy: manifest mode 600'
+	# C13: plaintext manifest written next to the backup instead of the run dir.
+	mutate manifest-beside-backup happy 's/^MANIFEST_PLAIN="\$SIDE\/manifest"$/MANIFEST_PLAIN="\$OUT.plain"/m; s/^rm -f "\$MANIFEST_PLAIN"\n//m' \
+		'happy: no plaintext manifest left on disk'
+	# C13: neither the explicit removal nor the exit trap clears the run dir
+	# (two mechanisms; either alone suffices on this path).
+	mutate no-plain-cleanup wrongtag 's/^trap \x27rm -rf "\$SIDE"\x27 EXIT$/trap : EXIT/m; s/^rm -f "\$MANIFEST_PLAIN"\n//m' \
+		'wrongtag: no plaintext manifest left on disk'
+	# C13: manifest stored unencrypted under the .age name.
+	mutate manifest-not-encrypted happy 's/if age -R "\$RECIPIENT" -o "\$\{MANIFEST\}\.partial" <"\$MANIFEST_PLAIN" \\\n[^\n]*; then/if cp "\$MANIFEST_PLAIN" "\${MANIFEST}.partial"; then/' \
+		'happy: no plaintext manifest left on disk'
 	# C11: dry-run falls through to the backup.
 	mutate dryrun-encrypts dryrun 's/if \[ "\$MODE" = "dry-run" \]; then/if [ "\$MODE" = "never" ]; then/' \
 		'dryrun: age never ran'

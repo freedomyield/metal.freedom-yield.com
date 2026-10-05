@@ -76,8 +76,8 @@ git に無いので repo からは戻らない。`/etc/freedom-yield/`(`web-host
   VALIDATOR_HOST=<validator host> VALIDATOR_SSH_KEY=~/.ssh/<your_validator_host_key> \
     bash scripts/operator-local/backup-host-config.sh
   ```
-  - 出力: `~/fy-host-config-backup-<UTC yyyymmdd>.tar.age` と、その隣の `.tar.age.manifest`(host 側の各ファイルの sha256 と名前だけ。中身は入らない)。どちらも mode 600。
-  - 検証(AI は復号できない設計なので、復号せずに確かめる): (a) 暗号化した stream そのものの名前一覧を途中で取り出し、host の一覧と一致すること (b) age v1 の header に宛先 stanza がちょうど 1 つで、型が ssh-ed25519、tag が公開鍵から計算した値と一致すること (c) ファイルの大きさが平文の byte 数から計算した age の大きさと一致すること (d) manifest の各行が `<sha256>  <名前>` の形で、ファイルの集合が archive と一致すること。全部通った時だけ `~/Dropbox/metal-validator-backup/` へ 2 つともコピーし、sha256 を照合して表示する。1 つでも落ちれば `*.VERIFY-FAILED` に改名して残し、コピーしない(exit 1)。
+  - 出力: `~/fy-host-config-backup-<UTC yyyymmdd>.tar.age` と、その隣の `.tar.age.manifest.age`(host 側の各ファイルの sha256 と名前だけ。中身は入らない)。どちらも mode 600。manifest も同じ公開鍵へ age で暗号化する。値の種類が少ないファイル(1 語のチェーン名など)は hash から中身を当てられるので、平文の manifest は実行中の一時 dir(mode 600)にだけ置き、成功・失敗どちらの終わり方でも消す。
+  - 検証(AI は復号できない設計なので、復号せずに確かめる): (a) 暗号化した stream そのものの名前一覧を途中で取り出し、host の一覧と一致すること (b) age v1 の header に宛先 stanza がちょうど 1 つで、型が ssh-ed25519、tag が公開鍵から計算した値と一致すること (c) ファイルの大きさが平文の byte 数から計算した age の大きさと一致すること (d) manifest の各行が `<sha256>  <名前>` の形で、ファイルの集合が archive と一致すること (e) manifest を暗号化し、その header と大きさも (b)(c) と同じく確かめること。全部通った時だけ `~/Dropbox/metal-validator-backup/` へ `.age` の 2 つだけをコピーし、sha256 を照合して表示する。1 つでも落ちれば `*.VERIFY-FAILED` に改名して残し、コピーしない(exit 1)。
   - 事前確認だけなら `--dry-run`(名前一覧のみ、何も書かない)。
   - **いつ取るか**: `/etc/freedom-yield/` か `.env` を変えた時(installer の再実行、topic・token の差し替え、BasicAuth 変更)と、下の四半期ドリルの時。
 - **戻し方(新 host へ。災害時だけ、operator が行う)**: 復号には operator identity の **秘密鍵** `~/.ssh/freedom-yield-operator-identity` が要り、`age` がその鍵のパスフレーズを端末で聞く。日常のバックアップ・ドリルでこの鍵を使う場面は無い。手順は `bash scripts/operator-local/backup-host-config.sh --restore-help` が表示する(AI でも実行できる。何も復号しない)。Mac でパイプへ復号し、そのまま新 host で展開する(Mac のディスクに平文を置かない)。
@@ -85,9 +85,9 @@ git に無いので repo からは戻らない。`/etc/freedom-yield/`(`web-host
   age -d -i ~/.ssh/freedom-yield-operator-identity ~/fy-host-config-backup-<yyyymmdd>.tar.age \
     | ssh -i ~/.ssh/<your_validator_host_key> root@<新IP> \
         'umask 077 && mkdir /root/fy-config-restore && tar -C /root/fy-config-restore -xpf -'
-  # manifest と照合(hash と名前だけ):
-  ssh -i ~/.ssh/<your_validator_host_key> root@<新IP> 'cd /root/fy-config-restore && sha256sum -c -' \
-    < ~/fy-host-config-backup-<yyyymmdd>.tar.age.manifest
+  # manifest と照合(hash と名前だけ。manifest も暗号化されているのでパイプへ復号する):
+  age -d -i ~/.ssh/freedom-yield-operator-identity ~/fy-host-config-backup-<yyyymmdd>.tar.age.manifest.age \
+    | ssh -i ~/.ssh/<your_validator_host_key> root@<新IP> 'cd /root/fy-config-restore && sha256sum -c -'
   # 新 host 側(root):
   #   /etc/freedom-yield/ が無いことを確認してから戻す(installer が先に作っていたら差分を見て判断)
   #   cp -a /root/fy-config-restore/freedom-yield /etc/
