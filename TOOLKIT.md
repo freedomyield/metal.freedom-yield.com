@@ -102,8 +102,10 @@ Severity model: **CRITICAL** = unknown key guarded by a default (`// ""`, `|| "â
 
 ### `scripts/dr-drill.sh`
 **Purpose:** End-to-end disaster-recovery exercise on a Mac (or any second host). Decrypts the encrypted staker key backup, verifies SHA-256, boots a local-network `metalgo` with the restored keys, confirms `info.getNodeID` matches your production NodeID, cleans up. **Never** connects to mainnet â€” uses `--network-id=local`. Safe to run while production is up.
-**Dependencies:** `docker`, `openssl`, `tar`, `sha256sum`, `jq`.
-**Frequency:** periodically; untested backups aren't backups.
+`--dry-run` checks readiness without the passphrase: resolves the newest `~/staker-backup-*.tar.gz.enc`, checks docker + the pinned image, boots a local-network `metalgo` with throwaway ephemeral keys and confirms the info API answers.
+**Dependencies:** `docker`, `openssl`, `tar`, `shasum`, `jq`, `curl`.
+**Env:** `ENCRYPTED_BACKUP`, `EXPECTED_NODEID`, `METALGO_IMAGE` (pin it to your production version), `EXPECTED_SHA_CRT` / `EXPECTED_SHA_KEY` / `EXPECTED_SHA_BLS`.
+**Frequency:** quarterly; untested backups aren't backups.
 
 ---
 
