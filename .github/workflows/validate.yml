@@ -149,7 +149,7 @@ jobs:
   tests:
     name: repo test suites
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20  # 2026-10-05: suite grew past 10 min (stress loops); cancelled != green
     steps:
       - uses: actions/checkout@v7
       - name: Set up schema validator (sanctioned installer; tests/run-all-tests.sh preflight requires ajv or python3+jsonschema)
