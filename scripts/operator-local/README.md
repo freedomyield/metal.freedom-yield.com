@@ -78,3 +78,12 @@ At execution time, run from the compact one-page checklists instead:
 signed-manifest publish. It carries the section-keyed gate checks,
 command-by-command copy-paste blocks, live verification, rollback, and
 symptom-keyed failure decision trees.
+
+- `backup-host-config.sh` — encrypted off-host backup of the validator
+  host's untracked config (`/etc/freedom-yield/` + the deploy checkout's
+  `.env`). Streams `tar -cf -` over ssh straight into `openssl enc`
+  (AES-256-CBC + PBKDF2 600k, same as the staker key backup) so no
+  plaintext touches disk, verifies by decrypting to a pipe, then copies to
+  Dropbox. Interactive passphrase only. `--dry-run` lists names;
+  `--verify <file>` is the restore drill. Never reads `metalgo` keys.
+  Tests: `tests/backup-host-config/`.
