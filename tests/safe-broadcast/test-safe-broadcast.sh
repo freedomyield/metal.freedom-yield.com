@@ -522,6 +522,28 @@ else
 	FAIL=$((FAIL + 1))
 fi
 
+# ---- usage path writes nothing but its own message to stderr (2026-10-05) ----
+# usage() used to be a 3-stage sed pipeline whose middle stage quit early;
+# where SIGPIPE is ignored (GitHub's ubuntu runner) the upstream GNU sed then
+# sometimes printed "sed: couldn't write N items to stdout: Broken pipe" —
+# ~1% of runs, which made the equivalence golden red on CI (run 37250135519).
+# The race cannot be forced from outside, so run the usage-error path many
+# times with SIGPIPE ignored (inherited, so bash cannot restore it) and
+# require stderr to be EXACTLY the one ERROR line every time. Measured on
+# ubuntu:24.04 against the old pipeline: 5/500 runs leaked the line.
+SB_PIPE_LEAKS=0
+for _i in $(seq 400); do
+	_err="$( (trap '' PIPE; bash "$WRAPPER" --chain=testnet-a 2>&1 >/dev/null) )"
+	[ "$_err" = "ERROR: --tx=<json-file> required" ] || SB_PIPE_LEAKS=$((SB_PIPE_LEAKS + 1))
+done
+if [ "$SB_PIPE_LEAKS" -eq 0 ]; then
+	printf 'PASS  %-70s\n' "usage: stderr is only the ERROR line (400x, SIGPIPE ignored)"
+	PASS=$((PASS + 1))
+else
+	printf 'FAIL  %-70s (%s/400 runs had extra stderr)\n' "usage: stderr is only the ERROR line (400x, SIGPIPE ignored)" "$SB_PIPE_LEAKS" >&2
+	FAIL=$((FAIL + 1))
+fi
+
 # ---- gate 2 (token) failure paths (exit 3) ----
 rm -f "$TEST_TOKEN"
 run_case "gate 2: testnet, token missing" 3 --tx="$TEST_TX_VALID" --chain=testnet-a --non-interactive
