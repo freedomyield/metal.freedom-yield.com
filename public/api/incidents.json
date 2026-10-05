@@ -3,6 +3,21 @@
   "validatorSince": "2026-05-19",
   "incidents": [
     {
+      "id": "2026-09-25-01",
+      "type": "incident",
+      "detectionDate": "2026-09-25",
+      "confirmedPauseWindowStart": "2026-09-24T10:56:46Z",
+      "confirmedPauseWindowEnd": "2026-09-28T14:51:16Z",
+      "potentiallyAffectedStart": "2026-09-24",
+      "potentiallyAffectedStartStatus": "known",
+      "resolutionDate": "2026-10-03",
+      "title": "Validator unreachable from the network for about 100 hours while the host and node kept running",
+      "severity": "Critical",
+      "status": "resolved",
+      "summary": "From 2026-09-24T10:56:46Z to 2026-09-28T14:51:16Z, about 100 hours, the validator host could not be reached from outside its hosting provider's network, so the node had no connection to its Metal peers and the network observed it as offline for that whole period; the two timestamps are when the node's own health check turned failing and passing again. The host and metalgo kept running throughout: the node container was never restarted, the host was not rebooted, and its logs show no network-configuration change and no login during the window. Path traces taken during the window stopped at the edge of the provider's network; the provider reported no known internal outage and pointed to a likely problem on an external uplink, connectivity returned without any action on the host, and no more specific root cause is available. Network-observed uptime for cycle 5 fell to roughly 85-86% and remained above the 80% reward threshold, so the cycle's rewards were not put at risk; no effect on staked funds or delegations was identified in the records reviewed. The outage was detected only on 2026-09-25 at 00:10 UTC, about 13 hours after it began, because every alert ran on the host that had become unreachable. That detection gap was closed with an external watch running off the validator host (2026-09-29), path-diagnosis tooling with a prepared provider-ticket draft (2026-10-02), and an operator status page (2026-10-03).",
+      "postmortemUrl": null
+    },
+    {
       "id": "2026-08-17-01",
       "type": "incident",
       "detectionDate": "2026-08-17",

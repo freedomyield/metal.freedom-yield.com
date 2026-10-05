@@ -8,5 +8,15 @@
     "measurement": "tracked-class observed_sha256 measured against the repo working tree; stream-class observed_sha256 measured against the live published URL at record time (a moving value, informational only)"
   },
   "resolution_task": "C4",
-  "known_broken": {}
+  "known_broken": {
+    "incidents_json.sha256": {
+      "path": "public/api/incidents.json",
+      "class": "tracked",
+      "pinned_sha256": "c42d2ea9ec51e7a23e765d2094a2a72d37ddc2fb5e06afd969f630501baaa42e",
+      "observed_sha256": "74bac6dbe3e1920f9c9d8877d02c00629e792bea477d7f6f36dacc0980b6479a",
+      "reason": "TEMPORARY. Disclosure of incident 2026-09-25-01 changes incidents.json, but gen-identity.sh pins this file by curling the PUBLISHED copy, so the new sha256 can only be re-signed after this commit is deployed.",
+      "resolution": "Deleted in the same commit as the operator re-issue of identity.json (scripts/operator-local/gen-identity.sh), which pins the new bytes; the checker then reports this entry as OBSOLETE-BASELINE.",
+      "gate_effect": "suppresses-exit-3-until-reissue"
+    }
+  }
 }
