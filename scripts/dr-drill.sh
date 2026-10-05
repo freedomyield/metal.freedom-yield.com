@@ -42,7 +42,7 @@ esac
 newest_staker_backup() {
   local f newest=""
   for f in "$HOME"/staker-backup-*.tar.gz.enc; do
-    [ -f "$f" ] || continue
+    [ -f "$f" ] && [ ! -L "$f" ] || continue
     if [ -z "$newest" ] || [[ "$f" > "$newest" ]]; then newest="$f"; fi
   done
   printf '%s' "$newest"

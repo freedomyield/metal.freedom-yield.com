@@ -394,12 +394,13 @@ step_metalgo() {
   if [ ! -f "$STAKING_DIR/staker.crt" ]; then
     echo "WARNING: $STAKING_DIR/staker.crt not found (resolved from the compose /data mount)."
     echo "         Restore from encrypted backup before continuing:"
-    echo "           1. scp staker-backup.tar.gz.enc to this VPS"
+    echo "           1. scp ~/staker-backup-<yyyymmdd>.tar.gz.enc (newest on the operator Mac) to this VPS"
     echo "           2. openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 \\"
-    echo "                -in staker-backup.tar.gz.enc -out /tmp/restore.tar.gz"
+    echo "                -in staker-backup-<yyyymmdd>.tar.gz.enc -out /tmp/restore.tar.gz"
     echo "           3. mkdir -p $STAKING_DIR && tar xzf /tmp/restore.tar.gz -C /tmp"
-    echo "           4. mv /tmp/staker-backup/staking/* $STAKING_DIR/"
+    echo "           4. mv /tmp/staker-backup-<yyyymmdd>/staking/* $STAKING_DIR/   (the tar's top dir is dated)"
     echo "           5. chmod 600 $STAKING_DIR/* && chown root:root $STAKING_DIR/*"
+    echo "           6. rm -rf /tmp/restore.tar.gz /tmp/staker-backup-<yyyymmdd>"
     echo "         Then re-run this script (Step 7 will then start metalgo)."
     return 0
   fi

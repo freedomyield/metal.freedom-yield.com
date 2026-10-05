@@ -113,6 +113,10 @@ require_tty() {
 	fi
 }
 
+# Never inherit a passphrase variable from the caller's environment, and never
+# export it to children (ssh/tar); openssl gets it only via its own env prefix.
+unset FYBK_PP FYBK_OPENSSL_PASS
+
 # read_passphrase <confirm:0|1> — sets global FYBK_PP. Never echoes it.
 read_passphrase() {
 	local confirm="$1" p1="" p2=""
