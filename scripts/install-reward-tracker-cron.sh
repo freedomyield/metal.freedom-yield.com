@@ -65,8 +65,10 @@
 #   4  generated cron file failed the check-cron-file.sh pre-flight
 #
 # Operator-gated: this installer is committed so the host action is one
-# command; running it on the host is an operator-approved step (Constitution
-# §5 / Operating Model W7), not something CI or an AI session performs.
+# command; running it on the host is a validator-host change (Constitution
+# §5 v0.7 / Operating Model W7): the AI runs it only after the operator has
+# approved that run explicitly in chat (or the operator runs it). CI never
+# runs it.
 
 set -euo pipefail
 

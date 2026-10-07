@@ -182,8 +182,10 @@
 		<article class="continuity-scenario">
 			<h3>8. 単一運用者依存</h3>
 			<p>本 validator は単一の個人によって運用されている。職務分掌は無く、 on-call rotation チーム / 独立 change-approval
-			board / 組織的な意思決定冗長性は存在しない。 Constitution および Operating Model で「AI が提案、 operator が承認、
-			operator が実行、 AI が検証」という pattern を定義しているが、 最終承認と最終実行の権限は同一人物である。 日本の
+			board / 組織的な意思決定冗長性は存在しない。 Constitution および Operating Model で validator host の変更について「AI が提案、
+			operator が変更ごとに承認、 AI が実行して検証」という pattern を定義している (operator が自ら実行することもあり、
+			鍵の保管・keystore の解錠・wallet 操作は operator に残る)。 AI は operator の承認なしには動かないため、
+			最終承認の権限は依然として同一人物にあり、 AI assistant は独立した審査者ではない。 日本の
 			営業時間外の応答時間は best-effort であり、 guaranteed ではない。 renewal 時に operator が応答不可になった場合、
 			validator は current cycle 終了時に自然に validator set から離脱し、 委任された stake は no-slashing 仕様により
 			自動的に返却される (continuity ページ参照)。 つまり validator 自体は operator 不在による元本損失リスクを孕まないが、

@@ -439,7 +439,7 @@ jq .nodeId public/api/validator.json
 
 2026-09-24〜28 に実際に起きた形 (約 100 時間)。VM も metalgo コンテナも動き続けていたが、provider の外側 (上流 transit) で経路が切れ、外からは一切届かなかった。provider サポートも原因を説明できなかった。
 
-**実行者**: 旧 VM の Power off・server の削除・rescue system での変更・provider へのチケット起票は **operator が実行する**。AI はコマンドと下書きの準備、事後の検証だけを行う (Constitution §5、`docs/OPERATING_MODEL.md` W7)。
+**実行者**: 旧 VM の Power off・server の削除・rescue system での変更・provider へのチケット起票は **operator が実行する**。これらは provider の管理画面 (console) と provider への連絡で行う操作で、AI の SSH 経路の外にある (Power off・削除は破壊的操作でもあり、Constitution §3.3 の個別承認の対象)。AI はコマンドと下書きの準備、事後の検証を行う。validator host 上で SSH から打つ手順は Constitution §5 (v0.7) / `docs/OPERATING_MODEL.md` W7 に従い、operator が変更ごとに chat で承認してから AI が実行する。
 
 A シナリオとの決定的な違い: **旧 VM は生きている**。ここで同じ staker keys を新 VM に展開すると、経路が戻った瞬間に **同 NodeID の 2 ノードが同時に mainnet に出る**。だから本節は「移設手順」ではなく **fencing (旧 VM を確実に止める) が本体**。
 

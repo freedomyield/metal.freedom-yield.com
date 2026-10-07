@@ -31,8 +31,12 @@
 > remain separately operator-approved; a passing rehearsal does not
 > auto-trigger anything on mainnet.
 >
-> **Authority**: this runbook is an operator-executed sequence on XPR
-> testnet (`proton-test` / chain `testnet-a`) only.
+> **Authority**: this runbook is an operator-authorized sequence on XPR
+> testnet (`proton-test` / chain `testnet-a`) only. Since 2026-10-07 the
+> AI on the Mac starts the rehearsal on the operator's explicit chat
+> instruction for that one run (see "What an AI session can verify, and
+> what only the operator can" below); the keystore unlock / lock stays
+> with the operator.
 >
 > **Scope**: testnet operations only. No command in this document targets
 > mainnet.
