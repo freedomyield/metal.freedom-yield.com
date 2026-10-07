@@ -612,10 +612,10 @@ fi
 # === transition: caddy (notify-gated) ===================================
 ORIG_CADDY=$(orig_get '.caddy')
 if [ "$OBS_CADDY" != "running" ] && [ "$ORIG_CADDY" = "running" ]; then
-  body=$(printf 'コンテナ状態: %s (absent = 監視先の名前のコンテナが無い)\n対処 (validator host):\n1) docker ps -a --filter name=caddy --format "{{.ID}} {{.Names}} {{.Status}}"\n2) docker logs --tail 50 <1) の ID>\n3) docker start <1) の ID> (どれか不明なら start せず止めて確認)\n1) で別の caddy が Up なら監視先 (CADDY_CONTAINER) が古いだけ\ndocker compose up -d は実行しない (今いる dir の compose で別物が起動しうる)\n影響: 運用ダッシュボード (SSH 経由の 8443) が見られない。公開サイトは別サーバで影響なし、validator 本体も無事' "$OBS_CADDY")
+  body=$(printf 'コンテナ状態: %s (absent = 監視先の名前のコンテナが無い)\n対処 (validator host):\n1) docker ps -a --filter name=caddy --format "{{.ID}} {{.Names}} {{.Status}}"\n2) docker logs --tail 50 <1) の ID>\n3) docker start <1) の ID> (どれか不明なら start せず止めて確認)\n1) で別の caddy が Up なら監視先 (CADDY_CONTAINER) が古いだけ\ndocker compose up -d は実行しない (今いる dir の compose で別物が起動しうる)\n影響: 次の deploy の health check (127.0.0.1:8085) が失敗する。公開サイトは別サーバで影響なし、validator 本体も無事' "$OBS_CADDY")
   notify_or_keep high "Caddy 停止" "$body" && candidate_set '.caddy' "\"$OBS_CADDY\""
 elif [ "$OBS_CADDY" = "running" ] && [ "$ORIG_CADDY" != "running" ]; then
-  notify_or_keep default "Caddy 復旧" "運用ダッシュボード (8443) が再稼働" \
+  notify_or_keep default "Caddy 復旧" "validator host の Caddy (deploy の health check 先) が再稼働" \
     && candidate_set '.caddy' "\"$OBS_CADDY\""
 fi
 

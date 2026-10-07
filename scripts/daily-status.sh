@@ -6,7 +6,7 @@
 #   daily-status.sh night     → 🌙 夜の運用状態
 #   daily-status.sh (no arg)  → falls back to neutral title
 # Sends a single ntfy notification at "default" priority — quiet ping, full
-# context in the body so the operator can skip opening the ops dashboard.
+# context in the body so the operator need not open the /status/ page.
 #
 # Env:
 #   FY_LIVE=1  REQUIRED before the digest reaches ntfy. Anything else is a

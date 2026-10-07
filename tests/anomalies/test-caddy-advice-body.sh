@@ -11,7 +11,9 @@
 #   "Caddy 停止" body said the public site was down and told the operator to
 #   run `docker logs --tail 50 caddy-static` then a bare `docker compose up -d`.
 #   The public site is served by the separate web host; on the validator host
-#   Caddy only serves the operator ops dashboard (127.0.0.1:8443 over SSH).
+#   Caddy only answers the deploy health check on 127.0.0.1:8085 (the operator
+#   ops dashboard it used to serve on 127.0.0.1:8443 was abolished on
+#   2026-10-07, so the advice must not send the operator looking for it).
 #   A fixed container name can point at a retired container, and a bare
 #   compose up runs whatever compose project sits in the current directory —
 #   the same unsafe-advice class fixed for metalgo on 2026-10-02
@@ -73,15 +75,18 @@ check_script() {
 		| grep -vqF 'は実行しない'; then
 		echo "no compose up -d instruction"
 	fi
-	c_has   "impact: ops dashboard over SSH 8443" \
-		"影響: 運用ダッシュボード (SSH 経由の 8443) が見られない。公開サイトは別サーバで影響なし、validator 本体も無事"
+	c_has   "impact: deploy health check on 8085" \
+		"影響: 次の deploy の health check (127.0.0.1:8085) が失敗する。公開サイトは別サーバで影響なし、validator 本体も無事"
 	c_lacks "does not claim the public site is down" "公開サイト + ops dashboard ダウン"
+	c_lacks "does not name the abolished dashboard" "運用ダッシュボード"
+	c_lacks "does not name the abolished 8443"      "8443"
 	c_has   "absent state explained"             "absent = 監視先の名前のコンテナが無い"
 
 	recov="$(grep -F '"Caddy 復旧"' "$s")"
-	printf '%s' "$recov" | grep -qF '運用ダッシュボード (8443) が再稼働' \
-		|| echo "recovery names the ops dashboard"
+	printf '%s' "$recov" | grep -qF 'validator host の Caddy (deploy の health check 先) が再稼働' \
+		|| echo "recovery names the validator-host Caddy"
 	printf '%s' "$recov" | grep -qF 'サイト + ops' && echo "recovery does not claim the site"
+	printf '%s' "$recov" | grep -qE '運用ダッシュボード|8443' && echo "recovery does not name the abolished dashboard"
 }
 
 # --- real script: every property holds ------------------------------------
@@ -112,12 +117,16 @@ mutant "bare compose up as a step"     "no compose up -d instruction" \
 	's/3) docker start <1) の ID>/3) docker compose up -d/'
 mutant "list step dropped"             "lists caddy containers" \
 	's/1) docker ps -a --filter name=caddy[^\\]*\\n//'
-mutant "old public-site impact"        "impact: ops dashboard" \
-	's/影響: 運用ダッシュボード[^'"'"']*/影響: 公開サイト + ops dashboard ダウン、validator 本体は無事/'
+mutant "old public-site impact"        "impact: deploy health check" \
+	's/影響: 次の deploy の health check[^'"'"']*/影響: 公開サイト + ops dashboard ダウン、validator 本体は無事/'
+mutant "abolished-dashboard impact"    "does not name the abolished dashboard" \
+	's/影響: 次の deploy の health check (127.0.0.1:8085) が失敗する。/影響: 次の deploy の health check (127.0.0.1:8085) が失敗し、運用ダッシュボード (SSH 経由の 8443) も見られない。/'
 mutant "ambiguity guard dropped"       "stops when the ID is ambiguous" \
 	's/ (どれか不明なら start せず止めて確認)//'
-mutant "old recovery text"             "recovery names the ops dashboard" \
-	's/運用ダッシュボード (8443) が再稼働/サイト + ops dashboard が再稼働/'
+mutant "old recovery text"             "recovery names the validator-host Caddy" \
+	's/validator host の Caddy (deploy の health check 先) が再稼働/サイト + ops dashboard が再稼働/'
+mutant "abolished-dashboard recovery"  "recovery does not name the abolished dashboard" \
+	's/validator host の Caddy (deploy の health check 先) が再稼働/validator host の Caddy (deploy の health check 先) が再稼働、運用ダッシュボード (8443) も復旧/'
 
 printf '\n%d PASS, %d FAIL\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -7,9 +7,9 @@
 # PRIME_DIRECTIVE: TESTNET-FIRST — safe.
 #
 # WHY THIS EXISTS
-#   scripts/server-status.sh monitors the ops-dashboard Caddy by the name in
+#   scripts/server-status.sh monitors the validator host's Caddy by the name in
 #   CADDY_CONTAINER (host cron env, no repo default). Which Caddy container
-#   serves the dashboard can change; when the configured one is retired and
+#   that is can change; when the configured one is retired and
 #   removed, a bare `docker inspect` fails exactly like a dead docker daemon
 #   does. server-status.sh then exited 5 and kept the last-known-good JSON, so
 #   the whole status feed — metalgo included — went stale: one renamed web

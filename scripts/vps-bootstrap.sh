@@ -102,7 +102,7 @@ step_repo() {
 }
 
 step_server_status_cron() {
-  log "Step 6c/8: install 1-minute server-status.json refresh cron (ops dashboard)"
+  log "Step 6c/8: install 1-minute server-status.json refresh cron (host monitoring)"
   # 2026-08-06 (H2): SHELL/PATH headers (Rule 5) and the brace-wrapped
   # start/end markers + rc=$? capture (Rules 2/3) were missing here — the
   # linter (scripts/check-cron-file.sh) was never green against this
@@ -121,7 +121,7 @@ step_server_status_cron() {
   fi
   local metalgo_container="${mg_name:-metalgo-${mg_net:-mainnet}}"
   cat > /etc/cron.d/metal-server-status <<EOF
-# Refresh ops dashboard data every 1 minute.
+# Refresh server-status.json (read by check-anomalies / daily-status) every 1 minute.
 SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin
 METALGO_CONTAINER=${metalgo_container:-metalgo-mainnet}
