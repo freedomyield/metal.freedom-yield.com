@@ -176,11 +176,10 @@ MEM=$(jq -r '.host.memory.usedPercent' "$STATUS_JSON")
 DISK=$(jq -r '.host.disk.usedPercent' "$STATUS_JSON")
 PEERS=$(jq -r '.metalgo.peerCount // 0' "$STATUS_JSON")
 METALGO_S=$(jq -r '.metalgo.containerStatus' "$STATUS_JSON")
-CADDY_S=$(jq -r '.caddy.containerStatus' "$STATUS_JSON")
 
 # Overall verdict
 if [ "$P_BOOT" = "true" ] && [ "$X_BOOT" = "true" ] && [ "$C_BOOT" = "true" ] \
-   && [ "$METALGO_S" = "running" ] && [ "$CADDY_S" = "running" ]; then
+   && [ "$METALGO_S" = "running" ]; then
   OVERALL="✓ 正常稼働中"
 else
   OVERALL="⚠ 要確認"
@@ -308,7 +307,6 @@ ${BALANCE_BODY}
 CPU ${CPU}% / RAM ${MEM}% / Disk ${DISK}%
 Peers: ${PEERS}
 metalgo: ${METALGO_S}
-caddy: ${CADDY_S}
 
 [NodeID]
 ${NODE_SHORT}${REWARD_BLOCK}${EVIDENCE_BLOCK}

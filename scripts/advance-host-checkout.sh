@@ -586,11 +586,10 @@ OLD_HEAD="$(git -C "$REPO_DIR" rev-parse --short HEAD)"
 protect_anchor_source_pre_discard
 
 # Discard ONLY public/ working-tree dirt, never anything else. This is safe
-# specifically because this host is internal, not the public origin: Caddy
-# here binds 127.0.0.1:${BEHIND_PROXY_PORT:-8085} only (plain HTTP, loopback)
-# per docker-compose.behind-proxy.yml:20 — real traffic is served from
-# Xserver, so nothing user-facing ever reads this host's public/ working
-# tree. Deploy legs stamp cache-bust markers (?v=<sha>) into public/*.html
+# specifically because this host is internal, not the public origin: no web
+# server on it serves public/ (its loopback-only Caddy was removed on
+# 2026-10-07) — real traffic is served from Xserver, so nothing user-facing
+# ever reads this host's public/ working tree. Deploy legs stamp cache-bust markers (?v=<sha>) into public/*.html
 # here, which is exactly the dirt that blocks a clean FF pull; the next
 # deploy re-stamps it regardless of what we discard now. (Any real
 # anchor-source.json dirt was already pulled out of this path's way by

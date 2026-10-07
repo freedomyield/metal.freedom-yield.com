@@ -7,10 +7,11 @@
 #
 # 環境別の設定は override 経由で適用:
 #   - ローカル開発: docker-compose.override.yml(`docker compose up` で自動読込)
-#   - validator host: docker-compose.behind-proxy.yml
-#                     (-f で明示。deploy.yml が起動。127.0.0.1:8085 のみ。
-#                     host 上の Caddy はこの 1 つだけ。運用ダッシュボード 127.0.0.1:8443 は
-#                     2026-10-07 に廃止)
+#   - host nginx の背後 (127.0.0.1:8085): docker-compose.behind-proxy.yml
+#                     (web host の caddy-static と同じ形。web host に本リポの checkout は
+#                     無く、本リポの deploy はどの host でもこの stack を起動しない)
+#   - validator host ではこの stack を起動しない (Caddy は 2026-10-07 に operator の
+#     決定で撤去。Constitution v0.8 §5)。運用ダッシュボード 127.0.0.1:8443 も同日に廃止
 #   - docker-compose.prod.yml(80/443 を直接 bind する構成)は現在どの host でも使わない
 
 name: site
@@ -18,8 +19,8 @@ name: site
 services:
   caddy:
     # Custom image — caddy:2-alpine + mholt/caddy-ratelimit plugin built
-    # via xcaddy. See caddy/Dockerfile. deploy.yml passes --build so the
-    # image is rebuilt when caddy/Dockerfile or Caddyfile changes.
+    # via xcaddy. See caddy/Dockerfile. Pass --build to rebuild the image
+    # after caddy/Dockerfile changes.
     build:
       context: ./caddy
     image: caddy-static:local

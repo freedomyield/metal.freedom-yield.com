@@ -6,6 +6,9 @@
 # node-health-daily.sh (the ops dashboard that also served it over Caddy
 # :8443 was abolished on 2026-10-07). Public access is blocked by the
 # public vhost's deny rule.
+# Schema: observedAt, host, metalgo, security. The `caddy` object was dropped
+# on 2026-10-07 together with the validator-host Caddy; every reader is
+# updated in the same change and none requires it.
 set -euo pipefail
 
 # Resolve repository root from script location if REPO_BASE is not set.
@@ -65,11 +68,14 @@ C_HEIGHT_HEX=$(curl -sS -X POST -H 'content-type:application/json' \
   "$API/ext/bc/C/rpc" 2>/dev/null | jq -r '.result // "0x0"')
 C_HEIGHT=$((C_HEIGHT_HEX))
 
-# Container statuses (docker).
-# Container names are runtime configuration (compose project prefix differs by
-# host); inject via env so script and host-specific values stay decoupled.
+# Container status (docker).
+# The container name is runtime configuration (compose project prefix differs
+# by host); inject via env so script and host-specific values stay decoupled.
+# metalgo is the only container this feed watches: no Caddy runs on the
+# validator host since 2026-10-07 (operator decision, Constitution v0.8 §5),
+# so there is no CADDY_CONTAINER and no `caddy` field. A CADDY_CONTAINER still
+# present in an old cron env is ignored.
 : "${METALGO_CONTAINER:?METALGO_CONTAINER is required}"
-: "${CADDY_CONTAINER:?CADDY_CONTAINER is required}"
 
 # docker inspect emits a stray '\n' on stdout when the object is missing, which
 # survives inside $(... || echo "missing") and produces invalid JSON downstream.
@@ -91,21 +97,6 @@ if ! METALGO_STATUS=$(inspect_status "$METALGO_CONTAINER"); then
   echo "ERROR: docker inspect failed for METALGO_CONTAINER=$METALGO_CONTAINER; keeping last-known-good $OUT" >&2
   exit 5
 fi
-# Caddy here only answers the deploy health check (127.0.0.1:8085), and which
-# container that is can change. A CADDY_CONTAINER naming a removed container is published
-# as "absent" (check-anomalies.sh alerts on it) instead of aborting: aborting
-# would leave the WHOLE feed stale, metalgo included. Only a docker failure
-# still keeps last-known-good. See scripts/lib/container-status.sh.
-# shellcheck source=lib/container-status.sh
-. "$(cd "$(dirname "$0")" && pwd)/lib/container-status.sh"
-if ! CADDY_STATUS=$(fy_container_status "$CADDY_CONTAINER"); then
-  echo "ERROR: docker inspect failed for CADDY_CONTAINER=$CADDY_CONTAINER; keeping last-known-good $OUT" >&2
-  exit 5
-fi
-if [ "$CADDY_STATUS" = "absent" ]; then
-  echo "WARN: CADDY_CONTAINER=$CADDY_CONTAINER does not exist; publishing caddy.containerStatus=absent" >&2
-fi
-
 # fail2ban currently banned (sshd jail)
 # fail2ban-client typically requires root; deploy will get permission denied.
 # Tolerate failure so set -e doesn't abort the whole script.
@@ -133,7 +124,6 @@ if ! jq -n \
     --argjson peerCount   "$PEERS" \
     --argjson pHeight     "$P_HEIGHT" \
     --argjson cHeight     "$C_HEIGHT" \
-    --arg     caddyStat   "$CADDY_STATUS" \
     --argjson f2bBanned   "$F2B_BANNED" \
     '{
       observedAt: $observedAt,
@@ -150,7 +140,6 @@ if ! jq -n \
         pChainHeight:    $pHeight,
         cChainHeight:    $cHeight
       },
-      caddy:    { containerStatus: $caddyStat },
       security: { fail2banSshBanned: $f2bBanned }
     }' > "$TMP" 2> "$ERR"; then
   echo "ERROR: jq generation failed: $(cat "$ERR")" >&2
@@ -176,13 +165,12 @@ sem_check() {
 }
 sem_check '.observedAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")' 'observedAt is UTC ISO-8601'
 sem_check '.metalgo.containerStatus | type == "string" and length > 0' 'metalgo.containerStatus non-empty'
-sem_check '.caddy.containerStatus   | type == "string" and length > 0' 'caddy.containerStatus non-empty'
 sem_check '.metalgo.peerCount       | type == "number" and . >= 0 and (. | floor == .)' 'peerCount integer >= 0'
 sem_check '.host.cpu.usedPercent    | type == "number" and . >= 0 and . <= 100' 'cpu usedPercent in 0..100'
 sem_check '.host.memory.usedPercent | type == "number" and . >= 0 and . <= 100' 'memory usedPercent in 0..100'
 sem_check '.host.disk.usedPercent   | type == "number" and . >= 0 and . <= 100' 'disk usedPercent in 0..100'
 sem_check '.host.uptimeSec          | type == "number" and . >= 0' 'uptimeSec >= 0'
-sem_check 'has("observedAt") and has("host") and has("metalgo") and has("caddy") and has("security")' 'required top-level keys present'
+sem_check 'has("observedAt") and has("host") and has("metalgo") and has("security")' 'required top-level keys present'
 if [ "$sem_fail" -ne 0 ]; then
   echo "ERROR: $sem_fail semantic failure(s); keeping last-known-good $OUT" >&2
   rm -f "$TMP"

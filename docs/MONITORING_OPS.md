@@ -167,7 +167,6 @@ The state JSON must be parseable and must contain at least:
 ```jsonc
 {
   "metalgo": "running|stopped|<arbitrary string>",
-  "caddy": "running|stopped|<arbitrary string>",
   "disk": "ok|warn",
   "memory": "ok|warn",
   "peers": "ok|warn",
@@ -371,7 +370,7 @@ Init does **not** modify the contention counter, does **not** touch any in-progr
 ### 7.4 Required flags
 
 - `--confirm` — operator must pass this explicitly. Without it, the script prints what it would do and exits non-zero. Prevents accidental run from history.
-- `--baseline-status=running|stopped` — operator declares the baseline assumption for the metalgo/caddy fields (= default `running` when bootstrapping after a known-good cycle; `stopped` only when bootstrapping after a known-down recovery).
+- `--baseline-status=running|stopped` — operator declares the baseline assumption for the metalgo field (no caddy field since 2026-10-07: no Caddy on the validator host; a "caddy" key left in an older state file is ignored) (= default `running` when bootstrapping after a known-good cycle; `stopped` only when bootstrapping after a known-down recovery).
 - `--clear-quarantine` (optional) — wipe quarantine dirs as part of init. Default off.
 - `--clear-counter` (optional) — reset contention counter to 0. Default off.
 
@@ -548,7 +547,7 @@ ls /var/lib/freedom-yield/.missing-notified.marker 2>&1 | head -1
 
 - Dry-run prints `Plan (no changes will be made without --confirm)` and exits non-zero.
 - Apply prints `[init] lock acquired`, `[init] baseline state written`, `=== init complete ===` and exits 0.
-- `jq .` shows the baseline with `metalgo: "running"`, `caddy: "running"`, etc.
+- `jq .` shows the baseline with `metalgo: "running"`, `disk: "ok"`, etc. (no `caddy` key)
 - `ls .missing-notified.marker` returns "No such file or directory" (= marker was removed or never existed).
 
 **Abort if**:

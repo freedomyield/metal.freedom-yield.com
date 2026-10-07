@@ -115,8 +115,7 @@ VALJSON
 cat > "${TMP_REPO_BASE}/public/api/server-status.json" <<'STATJSON'
 {
   "host": { "cpu": { "usedPercent": 10 }, "memory": { "usedPercent": 20 }, "disk": { "usedPercent": 30 } },
-  "metalgo": { "peerCount": 100, "containerStatus": "running" },
-  "caddy": { "containerStatus": "running" }
+  "metalgo": { "peerCount": 100, "containerStatus": "running" }
 }
 STATJSON
 echo '{"cycles":[]}' > "${TMP_REPO_BASE}/public/api/uptime-cycles.json"

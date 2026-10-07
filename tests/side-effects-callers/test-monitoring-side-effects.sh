@@ -216,7 +216,6 @@ status_fixture() {   # <path> <metalgo container status>
 {
   "observedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "metalgo": { "containerStatus": "$2", "peerCount": 120, "pChainHeight": 1, "cChainHeight": 2 },
-  "caddy":   { "containerStatus": "running" },
   "host": {
     "load":   { "1m": 0.1, "5m": 0.2, "15m": 0.3 },
     "uptimeSec": 1000,

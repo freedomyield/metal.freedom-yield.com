@@ -31,7 +31,7 @@
 
 **症状**: 外部からアクセス不可、Uptime check が連続 fail。
 
-> **どの host か**: 公開サイトは **web host** (edge CDN 背後の公開 origin。host の nginx → loopback の `caddy-static` container) が配信する。**validator host** の Caddy (同じく `caddy-static`、project `site`) は loopback 8085 (deploy の health check) だけで、80/443 を持たず公開サイトには関与しない。以下の手順 1〜3 は手元 (Mac) から、4〜6 は web host、7 は両 host が対象。validator host 側の Caddy 停止 (次の deploy の health check が落ちる) は §3.1.1。
+> **どの host か**: 公開サイトは **web host** (edge CDN 背後の公開 origin。host の nginx → loopback の `caddy-static` container) が配信する。**validator host** には Caddy が無い (2026-10-07 に operator の決定で撤去。§3.1.1)。以下の手順 1〜3 は手元 (Mac) から、4〜6 は web host、7 は両 host が対象。
 
 **調査手順**:
 
@@ -64,33 +64,22 @@ sudo ufw status verbose
 
 - 配信 container が停止 → `docker start <手順 5 の ID>` (どれか不明なら start せず止めて確認)。web host に本リポの checkout は無いので、本リポの compose ファイルで起動しない
 - nginx 停止 → `sudo nginx -t` で設定を確認してから `sudo systemctl start nginx` (他 vhost も同居するので stop/restart は避ける)
-- [validator host] 本リポの `caddy/Caddyfile` の syntax error (deploy の health check が落ちる) → 直近の編集を revert して deploy で反映 (§3.1.1)
 - ディスクフル → **診断を先に、削除は本プロジェクトのものだけ** (web host も validator host も他プロジェクトと同居しうる。Constitution §5 の分離と §3.3 の都度承認):
   1. 診断 (どちらの host でも読むだけ): `df -h /` → `docker system df` → 本プロジェクトの path だけ `sudo du -sh <本プロジェクトの path>/*` (web host は配信 dir、validator host は `<deploy_path>`)
-  2. 本プロジェクトの不要物だけを名前・label で特定し、消す対象の ID 一覧を operator に示して承認を得てから消す (validator host の変更は §5 により 1 件ごとの承認)。例 (validator host の Caddy stack は compose project `site`): `docker ps -a --filter label=com.docker.compose.project=site --filter status=exited` で停止済み container を確認してから ID 指定で `docker rm <ID>`、`docker images --filter dangling=true` は出所を `docker image inspect` で確かめたものだけ ID 指定で `docker rmi <ID>`
+  2. 本プロジェクトの不要物だけを名前・label で特定し、消す対象の ID 一覧を operator に示して承認を得てから消す (validator host の変更は §5 により 1 件ごとの承認)。例 (本プロジェクトの compose project で絞る。validator host なら metalgo の project、旧 Caddy の残骸なら `site`): `docker ps -a --filter label=com.docker.compose.project=<project> --filter status=exited` で停止済み container を確認してから ID 指定で `docker rm <ID>`、`docker images --filter dangling=true` は出所を `docker image inspect` で確かめたものだけ ID 指定で `docker rmi <ID>`
   3. **metalgo の `/data` (named volume、または `METALGO_DATA_PATH` の bind) は消さない・prune の対象にしない** (validator host。container が止まっている間は volume が「未使用」に見えるため、volume を対象にする削除は一切しない)
   4. 本プロジェクトは host 全体に効く削除を**承認の有無にかかわらず行わない** (Constitution §5「every action MUST be scoped」): project で絞らない `docker system prune` / `docker image prune -a`、journal の vacuum、他プロジェクトの path への操作はいずれも対象外。本プロジェクトの分を片付けても足りない (host 自体の容量不足) なら、そこで止めて **host 全体の問題として operator に上げる** (他プロジェクトの扱いは各所有者が決める)。添えるのは手順 1 の診断出力だけ
 - VPS 自体停止 → VPS provider console から再起動 → 5 分待って再確認
 - DNS 消失 → edge CDN dashboardで A レコード復元
-- TLS 期限切れ → TLS は web host の nginx が終端する (validator host の Caddy は 443 を持たない)。web host で Let's Encrypt の更新を再走らせる。それでも駄目なら ACME challenge 経路 (HTTP-01 が edge proxy でブロックされていないか) を確認
+- TLS 期限切れ → TLS は web host の nginx が終端する (validator host に Caddy は無い)。web host で Let's Encrypt の更新を再走らせる。それでも駄目なら ACME challenge 経路 (HTTP-01 が edge proxy でブロックされていないか) を確認
 
-#### 3.1.1 validator host の Caddy 停止 (deploy の health check が落ちる)
+#### 3.1.1 validator host の Caddy (2026-10-07 撤去)
 
-公開サイトには影響しない。validator host の Caddy は 1 つだけ (container `caddy-static`、project `site`、deploy.yml と同じ 2 本 `docker-compose.yml` + `docker-compose.behind-proxy.yml`)。`docker-compose.prod.yml` は使わない。止まって困るのは次の deploy の health check (`127.0.0.1:8085`) だけ。
+validator host に Caddy は無い。以前の `caddy-static` (project `site`、loopback 8085) は運用ダッシュボード廃止後に何も配信しておらず、利用者は deploy の health check だけだったため、**2026-10-07 に operator の決定で撤去**した (Constitution v0.8 §5: CI は validator host で container を build / 起動 / reload しない)。監視 (server-status / check-anomalies / daily-status) も Caddy を見ない。
 
-> 運用ダッシュボード (`127.0.0.1:8443`、SSH トンネル + BasicAuth、2026-05-19 構築) は **2026-10-07 に operator の決定で廃止**した。理由: 稼働期間中一度も使われず、operator 用の `/status/` ページ (web host、Cloudflare Access、外部見張りの watch-status.json が元データ) と役割が重複していた。8443 の確認は不要。
-
-```bash
-# [validator host] ID で特定してから操作する (check-anomalies の「Caddy 停止」通知と同じ手順)
-docker ps -a --filter name=caddy --format '{{.ID}} {{.Names}} {{.Status}}'
-docker logs --tail 50 <上の ID>
-docker start <上の ID>     # どれか不明なら start せず止めて確認
-
-curl -fsS http://127.0.0.1:8085/health                              # 期待: ok
-```
-
-- 素の `docker compose up -d` は実行しない (今いる dir の compose で別物が起動しうる。metalgo 側は別 NodeID になる: [DISASTER_RECOVERY.md 冒頭の警告](DISASTER_RECOVERY.md))
-- 作り直しが必要なら `<deploy_path>` で上の 2 本を明示して実行する ([DISASTER_RECOVERY.md Step 6](DISASTER_RECOVERY.md) と同じ)。`caddy` サービスだけを対象にする: `docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml up -d caddy`
+- validator host で Caddy を起動しない。素の `docker compose up -d` も実行しない (今いる dir の compose で別物が起動しうる。metalgo 側は別 NodeID になる: [DISASTER_RECOVERY.md 冒頭の警告](DISASTER_RECOVERY.md))
+- validator host に `caddy-static` などサイトの container が現れたら、本リポのどの経路も起動しないものなので異常として扱う。`docker ps -a --filter label=com.docker.compose.project=site --format '{{.ID}} {{.Names}} {{.Status}}'` で確認し、止める・消す前に operator に上げる (Constitution §5 の都度承認)
+- 運用ダッシュボード (`127.0.0.1:8443`) も同日に廃止済み。operator 向けの状態確認は web host の `/status/` ページ
 
 ### 3.2 metalgo container down / unhealthy
 

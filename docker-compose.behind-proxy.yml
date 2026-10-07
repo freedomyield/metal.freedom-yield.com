@@ -8,11 +8,13 @@
 #   - TLS / Let's Encrypt は前段が処理(ACME_EMAIL は不要)
 #   - DOMAIN=:80(Caddy は Host にマッチさせず port 80 で listen)
 #
-# 起動(validator host。deploy.yml の Caddy ステップと同じ 2 本):
+# 形 (2 本で使う):
 #   docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml up -d --build
 #   (-f を明示することで docker-compose.override.yml は読まれない)
-#   validator host では 127.0.0.1:8085 の前段に nginx は居ない(deploy の health check
-#   だけが叩く)。公開サイトは web host が配信する。
+#   web host の caddy-static (host nginx -> 127.0.0.1:8085) と同じ形。web host に本リポの
+#   checkout は無く、本リポの deploy はこれを起動しない。
+#   validator host では使わない: validator host の Caddy は 2026-10-07 に operator の
+#   決定で撤去した (deploy の health check 以外に利用者がいなかった)。
 #
 # host nginx 側の reverse proxy 設定は docs/DEPLOY_SETUP.md 参照。
 
