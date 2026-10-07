@@ -1601,6 +1601,21 @@ if printf '%s' "$UNIT7A_TEXT" | grep -qi 'do NOT re-run it' && \
 else
 	bad "unit 7a does not forbid a silent re-run (or still says 'do it again')"
 fi
+# Audit 5be15b8 I3: now that the AI starts the testnet broadcast, the
+# operator's instruction must be given against the Constitution §3.4 (a)
+# values, which the rehearsal line itself does not show. Unit 7a must print
+# a broadcast-free preview of exactly that compose (testnet, --dry-run) and
+# it must come BEFORE the rehearsal command, or the instruction is given
+# blind.
+UNIT7A_RAW="$(awk -v want="# [unit 7a] " 'index($0,want)==1{f=1;next} index($0,"# [unit ")==1{f=0} f' "$PLAN")"
+PREVIEW_LN="$(printf '%s\n' "$UNIT7A_RAW" | grep -n 'sign-anchor-event.sh --chain=testnet-a' | grep -- '--dry-run' | head -1 | cut -d: -f1)"
+REHEARSAL_LN="$(printf '%s\n' "$UNIT7A_RAW" | grep -n 'run-testnet-rehearsal.sh --expect-cycle=' | head -1 | cut -d: -f1)"
+if [ -n "$PREVIEW_LN" ] && [ -n "$REHEARSAL_LN" ] && [ "$PREVIEW_LN" -lt "$REHEARSAL_LN" ] && \
+	printf '%s' "$UNIT7A_TEXT" | grep -qF '§3.4 (a)'; then
+	ok "unit 7a previews the §3.4 (a) values (testnet --dry-run compose) before the rehearsal command"
+else
+	bad "unit 7a does not preview the §3.4 (a) values before the rehearsal (preview line=${PREVIEW_LN:-none}, rehearsal line=${REHEARSAL_LN:-none})"
+fi
 
 # ---- MUTATION: the actor scan must be able to fail ------------------------
 ACTOR_MUT="${TMP}/plan-actor-mut.txt"

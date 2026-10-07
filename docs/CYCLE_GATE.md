@@ -394,8 +394,17 @@ testnet keystore の最後の利用が 7a なので。遅くとも 7c 末尾)。
 >
 > 1. operator が testnet keystore を unlock する (operator@TTY ②)。
 > 2. AI が実行するコマンド (`run-testnet-rehearsal.sh --expect-cycle=<N+1>`、
->    `<N+1>` は day-of value sheet の値) を chat に示す。
-> 3. operator がそれに対して実行を指示する (例:「解除した、実行して」)。
+>    `<N+1>` は day-of value sheet の値) と、**その run が broadcast する
+>    `{chain, actor, permission, action, memo, quantity}`** を chat に示す
+>    (Constitution §3.4 の 3 番目の bullet (a) は mainnet に限らず、「この
+>    broadcast」を名指す認可を求める)。値は rehearsal 自身の step 5/10 と同じ
+>    compose を **broadcast 無し**で先に走らせて取る (下の step 7a の
+>    「事前表示」。`sign-anchor-event.sh --dry-run` は proton を呼ばない):
+>    chain = `testnet-a`、actor@permission = `.authorization`、action =
+>    `eosio.token::transfer` × 4 (宛先 = `.sink`)、memo = `.composed_memos` の
+>    4 本、quantity = `.quantity`。
+> 3. operator がその値を見たうえで、それに対して実行を指示する (例:「解除した、
+>    実行して」)。指示はこの値の 1 回の broadcast を認可する。
 > 4. AI@Mac がそのコマンドを **1 回だけ**起動する。
 >
 > **認可 1 回 = 起動 1 回。** exit が非 0 で再実行が要るときは、`step 7/10` の
@@ -1005,9 +1014,22 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    `--expect-cycle=<N+1>` (mandatory per
    `docs/PHASE_ALPHA_TESTNET_DRY_RUN.md`; cycle-4 day example: `4`):
    **1 行目 (unlock) は operator@TTY、2 行目 (rehearsal 本体) は AI@Mac** —
-   ただし 2 行目は、AI がこのコマンドを chat に示し、operator がそれに対して
-   **実行を指示してから** 1 回だけ起動する (上の「実行者と実行場所」節の
-   引用ブロック。unlock だけでは起動しない):
+   ただし 2 行目は、AI がこのコマンドと下の「事前表示」の値を chat に示し、
+   operator がそれに対して**実行を指示してから** 1 回だけ起動する (上の
+   「実行者と実行場所」節の引用ブロック。unlock だけでは起動しない)。
+
+   **事前表示 (AI@Mac、broadcast なし・keystore 不要)** — rehearsal の
+   step 5/10 と同じ compose を先に走らせ、§3.4 (a) の値を chat に出す:
+
+   ```sh
+   FY_CONFIG_DIR=$HOME/freedom-yield-rehearsal-config HOME=~/.metal-fy-proton-test bash scripts/sign-anchor-event.sh --chain=testnet-a --anchor-source=public/api/anchor-source.json --dry-run --output=/tmp/fya-7a-preview.json | jq '{target_chain, authorization, sink, quantity, composed_memos}'
+   ```
+
+   出力の `target_chain` が `testnet-a`、`composed_memos` の prefix が
+   `fya<S>c<N+1>` であることを確かめてから示す。rehearsal 本体は同じ
+   `anchor-source.json` と同じ rehearsal config から同じ値を compose する
+   (間で step 6 の file を動かさない)。
+
 
    ```sh
    HOME=~/.metal-fy-proton-test proton key:unlock
