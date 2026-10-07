@@ -132,7 +132,7 @@ scp -i ~/.ssh/<your_validator_host_key> ~/staker-backup-<yyyymmdd>.tar.gz.enc ro
 #    METAL_NETWORK / METAL_PUBLIC_IP は docker-compose.metalgo.prod.yml の command で
 #    「:?」必須 → 無いと metalgo は起動しない。METAL_STAKING_BIND は
 #    docker-compose.metalgo.yml の ports で既定 127.0.0.1(= ピア不達、uptime ゼロ)。
-#    ACME_EMAIL / OPS_BASIC_AUTH_HASH は docker-compose.prod.yml で「:?」必須(Caddy)。
+#    OPS_BASIC_AUTH_HASH は docker-compose.ops-tunnel.yml で「:?」必須(Caddy の ops dashboard)。
 #    METALGO_DATA_PATH は旧 .env で使っていた場合のみ同じ値を入れる(Step 6 は実際の
 #    mount 先を compose から引くので、どちらでも動く)。METAL_IMAGE_TAG / METAL_MEM_LIMIT /
 #    METAL_CPUS は任意(旧 .env に値があれば揃える)。
@@ -210,7 +210,8 @@ curl -sS -X POST -H 'content-type:application/json' \
 #   docker compose -f docker-compose.metalgo.yml -f docker-compose.metalgo.prod.yml stop metalgo
 #   docker compose -f docker-compose.metalgo.yml -f docker-compose.metalgo.prod.yml down
 # "not ready" / 空なら 30 秒待って再確認。NodeID が一致するまで Caddy に進まない
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# Caddy は deploy.yml と同じ 3 本 (loopback 8085 + ops 8443 のみ。80/443 は使わない)
+docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml -f docker-compose.ops-tunnel.yml up -d --build
 docker ps --filter label=com.docker.compose.service=metalgo --format '{{.Names}} {{.Status}}'
 docker ps --filter name=caddy-static --format '{{.Names}} {{.Status}}'
 # 期待: どちらも 1 行で Up
@@ -381,12 +382,12 @@ watch -n 30 'curl -sS -X POST -H "content-type:application/json" \
 ### Step 6: Caddy + サイト復活 (10 分)
 
 ```sh
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# validator host の Caddy は 1 つだけ。公開サイトは web host が配信するので
+# ここでは 80/443 も Let's Encrypt も使わない (docker-compose.prod.yml は使わない)
+docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml -f docker-compose.ops-tunnel.yml up -d --build
 
-# Let's Encrypt 自動取得を待つ(初回 1 〜 2 分)
-sleep 60
-curl -sS https://metal.freedom-yield.com/ | head -1
-# 期待値: HTTP/2 200 + HTML 返却
+curl -fsS http://127.0.0.1:8085/health                                  # 期待: ok
+curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8443/        # 期待: 401 (BasicAuth)
 ```
 
 ### Step 7: GitHub Actions deploy の宛先更新 (5 分)
