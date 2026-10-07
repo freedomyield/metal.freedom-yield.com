@@ -68,8 +68,8 @@ sudo ufw status verbose
 - ディスクフル → **診断を先に、削除は本プロジェクトのものだけ** (web host も validator host も他プロジェクトと同居しうる。Constitution §5 の分離と §3.3 の都度承認):
   1. 診断 (どちらの host でも読むだけ): `df -h /` → `docker system df` → 本プロジェクトの path だけ `sudo du -sh <本プロジェクトの path>/*` (web host は配信 dir、validator host は `<deploy_path>`)
   2. 本プロジェクトの不要物だけを名前・label で特定し、消す対象の ID 一覧を operator に示して承認を得てから消す (validator host の変更は §5 により 1 件ごとの承認)。例 (validator host の Caddy stack は compose project `site`): `docker ps -a --filter label=com.docker.compose.project=site --filter status=exited` で停止済み container を確認してから ID 指定で `docker rm <ID>`、`docker images --filter dangling=true` は出所を `docker image inspect` で確かめたものだけ ID 指定で `docker rmi <ID>`
-  3. **metalgo の `/data` (named volume、または `METALGO_DATA_PATH` の bind) は消さない・prune の対象にしない** (validator host。container が止まっている間は volume prune が「未使用」と見なしうる)
-  4. host 全体に効く操作 (`docker system prune` / `docker image prune -a` / `docker volume prune` / `journalctl --vacuum-*` / 他プロジェクトの path の削除) は、他プロジェクトへの影響を確認したうえで、**変更 1 件ごとに operator の明示承認を得てから**行う
+  3. **metalgo の `/data` (named volume、または `METALGO_DATA_PATH` の bind) は消さない・prune の対象にしない** (validator host。container が止まっている間は volume が「未使用」に見えるため、volume を対象にする削除は一切しない)
+  4. 本プロジェクトは host 全体に効く削除を**承認の有無にかかわらず行わない** (Constitution §5「every action MUST be scoped」): project で絞らない `docker system prune` / `docker image prune -a`、journal の vacuum、他プロジェクトの path への操作はいずれも対象外。本プロジェクトの分を片付けても足りない (host 自体の容量不足) なら、そこで止めて **host 全体の問題として operator に上げる** (他プロジェクトの扱いは各所有者が決める)。添えるのは手順 1 の診断出力だけ
 - VPS 自体停止 → VPS provider console から再起動 → 5 分待って再確認
 - DNS 消失 → edge CDN dashboardで A レコード復元
 - TLS 期限切れ → TLS は web host の nginx が終端する (validator host の Caddy は 443 を持たない)。web host で Let's Encrypt の更新を再走らせる。それでも駄目なら ACME challenge 経路 (HTTP-01 が edge proxy でブロックされていないか) を確認
