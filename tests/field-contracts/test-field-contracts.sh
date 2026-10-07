@@ -291,11 +291,6 @@ mkdir -p "$MIRROR/public/assets"
 # .js only, and never the vendored bundles (huge, and not our contract).
 find "${REPO_ROOT}/public/assets" -maxdepth 1 -name '*.js' ! -name '*.min.js' \
 	-exec cp {} "$MIRROR/public/assets/" \;
-if [ -d "${REPO_ROOT}/public/ops" ]; then
-	mkdir -p "$MIRROR/public/ops"
-	find "${REPO_ROOT}/public/ops" -maxdepth 1 -name '*.js' \
-		-exec cp {} "$MIRROR/public/ops/" \;
-fi
 
 restore_mirror() {
 	cp "${REPO_ROOT}/scripts/gen-anchor-source.sh" "$MIRROR/scripts/gen-anchor-source.sh"
