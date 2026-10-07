@@ -265,6 +265,88 @@ step 4 / 5 の `FY_EXPECT_CYCLE=5`、step 6 と 7a の `--expect-cycle=6`、
 `cycle-transition.sh --expect-cycle=5`、`install-rehearsal-preflight.sh
 --expect-cycle=6`。step 3 の後に `cycle-history.jsonl` は 5 行。
 
+### cycle 間のメンテナンス枠 (maintenance window between cycles)
+
+**いつ**: cycle `<N>` の `endTime` を過ぎてから、step 0 の AddValidator を
+submit するまでの間だけ。この間 validator は validator set に居ないので、
+**停止しても uptime の評価対象にならない** (uptime は cycle の中でしか測られ
+ない)。host の再起動・metalgo コンテナの作り直しはこの枠でだけ行い、cycle
+中には行わない。終わったら step 0 へ進む (枠の確認項目がすべて揃う前に
+AddValidator を出さない — 登録した瞬間から uptime が測られる)。
+
+**誰が**: host 上の手順は **AI@host が実行する**。ただし着手前に operator の
+**一言の承認** (例:「進めて」) を chat で取る (Operating Model W7 の承認は
+operator に残る)。operator のキー操作はこの枠には無い。
+
+**何を** (この順で。どの手順も、期待と違う出力が出たらそこで止まって報告):
+
+- **着手前の確認 (read-only)** — 公開 `validator.json` で cycle `<N>` が
+  current set から外れていること (`endTime` が過ぎている)、staker keys の
+  暗号化 backup が揃っていること (`docs/DISASTER_RECOVERY.md`)、
+  `bash scripts/check-compose-naming.sh` が **10 行すべて MATCH**・
+  `RESULT: MATCH`・exit 0 (project / container / data / isolation / adopt /
+  image / command / memory / nanocpus / restart) であること、現在の NodeID を
+  `info.getNodeID` で控える。
+- **OS の更新と再起動** — apt の更新 (docker / docker compose plugin を含む)
+  → OS 再起動。再起動後、metalgo コンテナは restart policy で上がる。
+  外部見張り (`docs/MONITORING_OPS.md`) の p2p alert は再起動中の想定内で、
+  復帰後の recovery 通知で戻りを確認する。
+- **metalgo の作り直し** — 必ず **3 ファイル** (`docker-compose.metalgo.yml` /
+  `docker-compose.metalgo.prod.yml` / `docker-compose.metalgo.adopt.yml`) を
+  `-f` で渡す。adopt override が `/data` volume を external にするので、
+  compose は volume を作り直さず、`down -v` でも消さない。
+  1. 先に `--dry-run up -d metalgo </dev/null`。期待は `Container …`
+     の `Recreate / Recreated / Starting / Started` 4 行だけ。`Volume` の行、
+     `Recreate (data will be lost)?`、`external volume … not found` が出たら
+     止まる。
+  2. 同じコマンドから `--dry-run` を外して実行する。**stdin は常に
+     `</dev/null`、`-y` / `--yes` は絶対に付けない** (確認プロンプトに自動で
+     yes を返す経路を作らない)。
+- **事後確認** — `info.getNodeID` が控えた値と**一致** (不一致・空なら label で
+  特定したコンテナを即 `docker stop` して報告)、`info.isBootstrapped` が
+  **P / X / C すべて true**、peers 数が戻る、`check-compose-naming.sh` が
+  再び **10/10 MATCH**・exit 0、外部見張りの p2p が PASS に戻る。
+
+> **compose の版を上げた後の dry-run が `Recreate` を出すのは想定どおり。**
+> docker compose は container の設定から `com.docker.compose.config-hash` を
+> 計算しており、compose 本体の版が変わるとこの hash が変わる。そのため apt で
+> compose plugin を更新した後は、設定を何も変えていなくても次の dry-run が
+> `Container … Recreate` を出す。adopt override で `/data` が external に
+> なっているので、この Recreate は**コンテナだけ**の作り直しで、volume
+> (= staker keys) には触れない — 安全。止まるべきなのは上の 1. に挙げた
+> `Volume` 行 / `data will be lost` / `external volume … not found` だけ。
+
+### 当日の運用メモ (2026-10-07 の転換から)
+
+- **testnet の tx は Hyperion の索引に出るまで数分かかることがある。** 7a の
+  直後に 7b (`preview-cycle-anchor-broadcast.sh`) の gate-1 事前確認が
+  testnet tx の `block_num` を MISS と出すことがある (2026-10-07 実測)。
+  これは索引の遅れであって tx が無いのではない (7a は
+  `TESTNET REHEARSAL COMPLETE testnet_tx_id=…` を出している)。**待って 7b を
+  再実行する。7a をやり直して testnet に再 broadcast しない。** step 8 の
+  gate 1 の一時的な失敗 (mainnet 側) と同じ形。
+- **operator の手作業は、3 本の鍵の unlock とその lock だけ。** 呼び方は
+  「unlock / lock」に揃える:
+  ① identity 鍵 — unlock = `ssh-add` (step 4 の前操作)、
+  ② testnet keystore — unlock / lock (7a)、
+  ③ mainnet keystore — unlock / lock (7c)。
+  password / passphrase はすべて operator が自分の TTY で打ち、AI には渡さない。
+  これとは別に、現行の canon は 7a 本体の起動も operator@TTY としている
+  (下の「実行者と実行場所」節)。
+- **各鍵は最後に使った直後に lock する。** 開けたまま次の unit へ持ち越さない:
+  - identity 鍵 → **unit 4 の直後**。最後の利用者は `gen-identity.sh` なので、
+    それが exit 0 で終わったら **AI が `ssh-add -d` で agent から外す**
+    (passphrase を伴わないので AI@Mac)。
+  - testnet keystore → **7a の直後**。7b / 7c / 8 は testnet keystore を
+    使わない (7b・7c は mainnet の HOME、gate 1 の testnet tx 確認は履歴の
+    読み取り)。
+  - mainnet keystore → **7c の直後**。
+- **lock のプロンプトで空 Enter を押さない。** プロンプトは
+  `Enter 32 character password (leave empty to create new)` で、空 Enter は
+  既存 password での lock ではなく**新しい password の作成**になり、次回の
+  unlock が通らなくなる。lock には必ずその keystore の unlock と同じ
+  32 文字を入れる。
+
 ### 実行者と実行場所 (actor / location)
 
 各 step の見出しにある「Mac」「host」は**マシン**の指定であって実行者では
@@ -280,7 +362,8 @@ step 4 / 5 の `FY_EXPECT_CYCLE=5`、step 6 と 7a の `--expect-cycle=6`、
 **operator@TTY はこの runbook 全体で 6 箇所**: ① step 4 前の `ssh-add`、
 ② 7a の testnet keystore unlock、③ **7a の `run-testnet-rehearsal.sh` 本体**、
 ④ 7c の mainnet keystore unlock、⑤ 7c 末尾の mainnet keystore re-lock、
-⑥ **7c 末尾の testnet keystore re-lock** (② で開けたものを閉じる)。
+⑥ **testnet keystore の re-lock** (② で開けたものを閉じる。**7a の直後** —
+testnet keystore の最後の利用が 7a なので。遅くとも 7c 末尾)。
 **残りの code block はすべて AI が実行する。**
 
 > ⑥ は 2026-08-18 の三面突合 (K-7) で足した。それ以前この列挙は 5 箇所と
@@ -735,6 +818,12 @@ topology (validator host + operator Mac)**, in this fixed day-of order
      bash scripts/operator-local/gen-identity.sh
    ```
    then commit, push, `gh run watch` until deploy completes.
+
+   **後操作 (AI@Mac) — identity 鍵を agent から外す。** identity 鍵の最後の
+   利用は上の `gen-identity.sh` なので、それが exit 0 で終わり再実行の必要が
+   無くなったら、AI が `ssh-add -d ~/.ssh/freedom-yield-operator-identity` で
+   ssh-agent から外す (passphrase を伴わないので operator の手作業ではない)。
+   `ssh-add -l` にその鍵が出ないことを確認する。
    **push は 4b の編集を取り込んでから** — step 4b は "MANDATORY, same commit
    as step 4" なので、正しい順序は「step 4 で生成 → 4b の registry 編集 →
    `tests/publication-registry/` を回す → **まとめて 1 commit** → push →
@@ -907,6 +996,16 @@ topology (validator host + operator Mac)**, in this fixed day-of order
      (認可の実体が「operator 自身の起動」であること)。
    - **中止したくなったら**: 打たなければよい。この時点では mainnet 側は
      何も起きていない。
+   - **後操作 (operator@TTY) — testnet keystore を直後に re-lock する。**
+     testnet keystore の最後の利用はこの 7a なので、`TESTNET REHEARSAL
+     COMPLETE` を拾ったらすぐ閉じる (7b / 7c / 8 は testnet keystore を使わ
+     ない)。手順と注意 (同じ 32 文字・**空 Enter 禁止**) は 7c の「後操作 2」と
+     同じ。
+   - **直後の 7b が testnet tx の `block_num` を MISS と出しても、7a を
+     やり直さない。** testnet の Hyperion は tx を索引に出すまで数分かかる
+     ことがある (2026-10-07 実測)。`COMPLETE` 行が出ていれば tx は在る —
+     数分待って **7b だけ**を再実行する。7a の再実行は testnet への 2 度目の
+     broadcast になる。
 
    Its closing `TESTNET REHEARSAL COMPLETE testnet_tx_id=<64hex>` line is
    the `--testnet-tx-id` gate-1 input below. Its own dry-run log is
@@ -1111,8 +1210,11 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    **後操作 2 (operator@TTY) — testnet keystore も re-lock する。**
    `HOME=~/.metal-fy-proton-test proton key:lock`。
 
+   - **いつ**: **7a の直後が既定** (testnet keystore の最後の利用は 7a。
+     7a の「後操作」)。7a の直後に済ませていれば、ここでは locked であることを
+     確かめるだけ。済んでいなければここで必ず閉じる (遅くとも 7c 末尾)。
    - **打つ人**: **operator 自身** (password を打つため)。7a の ② で開けた
-     keystore がここまで開いたままなので、mainnet と同じ扱いで閉じる。
+     keystore がまだ開いていれば、mainnet と同じ扱いで閉じる。
    - **目視するもの**: ⑤ と同じプロンプト `Enter 32 character password (leave
      empty to create new)`。ただし入れるのは **testnet keystore の 32 文字**で、
      ⑤ で打った mainnet のものではない (keystore は HOME ごと別、
