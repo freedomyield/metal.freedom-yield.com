@@ -338,7 +338,16 @@ jobs:
           fi
           sleep 2
           curl -fsS -o /dev/null http://127.0.0.1:8085/health
-          OPS_CODE=$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8443/)
+          # Retry briefly: right after a recreate the container may still be
+          # binding 8443. curl's own failure (connection refused -> exit 7,
+          # code 000) must not abort under `set -e` before the message below.
+          OPS_CODE=000
+          for _try in 1 2 3 4 5; do
+            OPS_CODE=$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8443/ || true)
+            OPS_CODE=${OPS_CODE:-000}
+            [ "$OPS_CODE" = "401" ] && break
+            sleep 2
+          done
           if [ "$OPS_CODE" != "401" ]; then
             echo "ops dashboard on 127.0.0.1:8443 answered HTTP $OPS_CODE without credentials (expected 401)" >&2
             exit 1
