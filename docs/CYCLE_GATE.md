@@ -220,35 +220,134 @@ Exit codes:
 当日は暗算せず、この表を引く。誤った側を渡した場合の戻り値が step ごとに
 別番号 (exit 7 / exit 9 / exit 5) なので、暗算違いは症状からは読み取れない。
 
-**2026-09-04** — cycle 4 が閉じ、cycle 5 が刻まれる日:
+この表は日付に依存しない。値は「その日に**閉じる** cycle = `<N>`」と
+「その日に**刻む** cycle = `<N+1>`」の 2 つだけで決まる:
 
-| step | 変数 / フラグ | 意味 | 2026-09-04 の値 |
+| step | 変数 / フラグ | 意味 | 渡す値 |
 |---|---|---|---|
-| — | `<N>` | その日 **閉じる** cycle | **4** |
-| — | `<N+1>` | その日 **刻む** cycle | **5** |
-| 4 | `FY_EXPECT_CYCLE=` | 閉じた cycle (= 公開台帳の `CLOSED_COUNT`) | **4** |
-| 5 | `FY_EXPECT_CYCLE=` | 同上 | **4** |
-| 6 | `commit-anchor-source.sh --expect-cycle=` | 刻む cycle | **5** |
-| 7a | `run-testnet-rehearsal.sh --expect-cycle=` | 刻む cycle | **5** |
-| (runbook 外) | `cycle-transition.sh --expect-cycle=` | 閉じる cycle | **4** |
-| (runbook 外) | `install-rehearsal-preflight.sh --expect-cycle=` | 刻む cycle | **5** |
+| — | `<N>` | その日 **閉じる** cycle | `N` |
+| — | `<N+1>` | その日 **刻む** cycle | `N+1` |
+| 4 | `FY_EXPECT_CYCLE=` | 閉じた cycle (= 公開台帳の `CLOSED_COUNT`) | `N` |
+| 5 | `FY_EXPECT_CYCLE=` | 同上 | `N` |
+| 6 | `commit-anchor-source.sh --expect-cycle=` | 刻む cycle | `N+1` |
+| 7a | `run-testnet-rehearsal.sh --expect-cycle=` | 刻む cycle | `N+1` |
+| (runbook 外) | `cycle-transition.sh --expect-cycle=` | 閉じる cycle | `N` |
+| (runbook 外) | `install-rehearsal-preflight.sh --expect-cycle=` | 刻む cycle | `N+1` |
 
-導出の根拠 (2026-08-18 実測): committed `public/api/anchor-source.json` の
-`observations_branch.cycle_number_observed` = **4** = 現に刻まれている cycle。
-`gen-anchor-source.sh` はこれを `CLOSED_COUNT + 1` として composeするので、
-9/4 の朝の `CLOSED_COUNT` は **3**、step 3 が走った後に **4** になる。
-意味の権威は 2 系統: `scripts/cycle-transition.sh:175`
-(`--expect-cycle` = "The cycle that CLOSES today") と
-`scripts/install-rehearsal-preflight.sh` の header
-("THIS SCRIPT TAKES THE REHEARSAL'S MEANING (M)" = 刻む cycle =
-`cycle-transition.sh` の値より 1 大きい)。
+**当日の埋め方** (朝、step 0 より前に 1 回だけ。どれも read-only):
 
-> **2026-09-04 は step 2.5 (開示 incident の公開) が該当する。** step 2 の末尾に
-> あり、**step 3 より前に**通す必要がある — 飛ばすと cycle 4 の incident 件数が
-> 1 件過少のまま append-only 台帳に確定し、後から直せない。
->
-> **9/1 の稽古で渡す値はこの表ではない** — 9/1 の rehearsal フラグは **4**
-> (`docs/REHEARSAL_2026-09-01.md` §3)。9/1 と 9/4 で 1 ずれる。
+- `N` = **今日 `endTime` を迎える cycle の番号** = その朝の committed / 公開
+  `public/api/anchor-source.json` の `observations_branch.cycle_number_observed`
+  (= 現に刻まれている cycle)。
+- 照合: 公開 `cycle-history.jsonl` の行数 (`CLOSED_COUNT`) は朝の時点で
+  **`N-1`**、step 3 が走った後に **`N`** になる (`gen-anchor-source.sh` が
+  `cycle_number_observed` を `CLOSED_COUNT + 1` として compose するため)。
+  2 つが合わなければ表を埋めずに止まる。
+- 埋めた値で `bash scripts/cycle-transition.sh --print-only --expect-cycle=<N>
+  --ledger=<path>` を実行し、**その日の解決済みコマンドはこの出力を正とする**
+  (この表は値の意味の説明、per-day の実コマンドの出所は `--print-only`)。
+- 意味の権威は 2 系統: `scripts/cycle-transition.sh` の `--expect-cycle`
+  ("The cycle that CLOSES today") と `scripts/install-rehearsal-preflight.sh` の
+  header ("THIS SCRIPT TAKES THE REHEARSAL'S MEANING (M)" = 刻む cycle =
+  `cycle-transition.sh` の値より 1 大きい)。
+- `docs/pending-disclosures/` に公開待ちの開示 incident がある cycle では
+  **step 2.5 が該当する** (step 2 の末尾、**step 3 より前**)。飛ばすと閉じる
+  cycle の incident 件数が 1 件過少のまま append-only 台帳に確定し、後から
+  直せない。
+- **当日より前の稽古で渡す rehearsal フラグはこの表の値ではない** — 稽古の時点
+  ではまだ cycle `N` が刻まれた最新なので、稽古のフラグは `N` で、当日の 7a
+  (`N+1`) と 1 ずれる (前例: 2026-09-01 の稽古は 4、9/4 当日は 5 —
+  `docs/REHEARSAL_2026-09-01.md` §3)。
+
+**記入例 — 2026-10-07 (cycle 5 が閉じ、cycle 6 を刻んだ日):** 朝の
+`cycle_number_observed` = 5、公開 `cycle-history.jsonl` = 4 行 → `N=5`。
+step 4 / 5 の `FY_EXPECT_CYCLE=5`、step 6 と 7a の `--expect-cycle=6`、
+`cycle-transition.sh --expect-cycle=5`、`install-rehearsal-preflight.sh
+--expect-cycle=6`。step 3 の後に `cycle-history.jsonl` は 5 行。
+
+### cycle 間のメンテナンス枠 (maintenance window between cycles)
+
+**いつ**: cycle `<N>` の `endTime` を過ぎてから、step 0 の AddValidator を
+submit するまでの間だけ。この間 validator は validator set に居ないので、
+**停止しても uptime の評価対象にならない** (uptime は cycle の中でしか測られ
+ない)。host の再起動・metalgo コンテナの作り直しはこの枠でだけ行い、cycle
+中には行わない。終わったら step 0 へ進む (枠の確認項目がすべて揃う前に
+AddValidator を出さない — 登録した瞬間から uptime が測られる)。
+
+**誰が**: host 上の手順は **AI@host が実行する**。ただし着手前に operator の
+**一言の承認** (例:「進めて」) を chat で取る (Operating Model W7 の承認は
+operator に残る)。operator のキー操作はこの枠には無い。
+
+**何を** (この順で。どの手順も、期待と違う出力が出たらそこで止まって報告):
+
+- **着手前の確認 (read-only)** — 公開 `validator.json` で cycle `<N>` が
+  current set から外れていること (`endTime` が過ぎている)、staker keys の
+  暗号化 backup が揃っていること (`docs/DISASTER_RECOVERY.md`)、
+  `bash scripts/check-compose-naming.sh` が **10 行すべて MATCH**・
+  `RESULT: MATCH`・exit 0 (project / container / data / isolation / adopt /
+  image / command / memory / nanocpus / restart) であること、現在の NodeID を
+  `info.getNodeID` で控える。
+- **OS の更新と再起動** — apt の更新 (docker / docker compose plugin を含む)
+  → OS 再起動。再起動後、metalgo コンテナは restart policy で上がる。
+  外部見張り (`docs/MONITORING_OPS.md`) の p2p alert は再起動中の想定内で、
+  復帰後の recovery 通知で戻りを確認する。
+- **metalgo の作り直し** — 必ず **3 ファイル** (`docker-compose.metalgo.yml` /
+  `docker-compose.metalgo.prod.yml` / `docker-compose.metalgo.adopt.yml`) を
+  `-f` で渡す。adopt override が `/data` volume を external にするので、
+  compose は volume を作り直さず、`down -v` でも消さない。
+  1. 先に `--dry-run up -d metalgo </dev/null`。期待は `Container …`
+     の `Recreate / Recreated / Starting / Started` 4 行だけ。`Volume` の行、
+     `Recreate (data will be lost)?`、`external volume … not found` が出たら
+     止まる。
+  2. 同じコマンドから `--dry-run` を外して実行する。**stdin は常に
+     `</dev/null`、`-y` / `--yes` は絶対に付けない** (確認プロンプトに自動で
+     yes を返す経路を作らない)。
+- **事後確認** — `info.getNodeID` が控えた値と**一致** (不一致・空なら label で
+  特定したコンテナを即 `docker stop` して報告)、`info.isBootstrapped` が
+  **P / X / C すべて true**、peers 数が戻る、`check-compose-naming.sh` が
+  再び **10/10 MATCH**・exit 0、外部見張りの p2p が PASS に戻る。
+
+> **compose の版を上げた後の dry-run が `Recreate` を出すのは想定どおり。**
+> docker compose は container の設定から `com.docker.compose.config-hash` を
+> 計算しており、compose 本体の版が変わるとこの hash が変わる。そのため apt で
+> compose plugin を更新した後は、設定を何も変えていなくても次の dry-run が
+> `Container … Recreate` を出す。adopt override で `/data` が external に
+> なっているので、この Recreate は**コンテナだけ**の作り直しで、volume
+> (= staker keys) には触れない — 安全。止まるべきなのは上の 1. に挙げた
+> `Volume` 行 / `data will be lost` / `external volume … not found` だけ。
+
+### 当日の運用メモ (2026-10-07 の転換から)
+
+- **testnet の tx は Hyperion の索引に出るまで数分かかることがある。** 7a の
+  直後に 7b (`preview-cycle-anchor-broadcast.sh`) の gate-1 事前確認が
+  testnet tx の `block_num` を MISS と出すことがある (2026-10-07 実測)。
+  これは索引の遅れであって tx が無いのではない (7a は
+  `TESTNET REHEARSAL COMPLETE testnet_tx_id=…` を出している)。**待って 7b を
+  再実行する。7a をやり直して testnet に再 broadcast しない。** step 8 の
+  gate 1 の一時的な失敗 (mainnet 側) と同じ形。
+- **operator の手作業は、3 本の鍵の unlock とその lock だけ。** 呼び方は
+  「unlock / lock」に揃える:
+  ① identity 鍵 — unlock = `ssh-add` (step 4 の前操作)、
+  ② testnet keystore — unlock / lock (7a)、
+  ③ mainnet keystore — unlock / lock (7c)。
+  password / passphrase はすべて operator が自分の TTY で打ち、AI には渡さない。
+  **ただし現行の canon は、これに加えて 7a 本体の起動も operator@TTY と
+  している** (下の「実行者と実行場所」節)。この食い違いは同節の
+  **OPEN OPERATOR DECISION** で operator の判断待ちであり、決まるまでは
+  canon の規則が有効。
+- **各鍵は最後に使った直後に lock する。** 開けたまま次の unit へ持ち越さない:
+  - identity 鍵 → **unit 4 の直後**。最後の利用者は `gen-identity.sh` なので、
+    それが exit 0 で終わったら **AI が `ssh-add -d` で agent から外す**
+    (passphrase を伴わないので AI@Mac)。
+  - testnet keystore → **7a の直後**。7b / 7c / 8 は testnet keystore を
+    使わない (7b・7c は mainnet の HOME、gate 1 の testnet tx 確認は履歴の
+    読み取り)。
+  - mainnet keystore → **7c の直後**。
+- **lock のプロンプトで空 Enter を押さない。** プロンプトは
+  `Enter 32 character password (leave empty to create new)` で、空 Enter は
+  既存 password での lock ではなく**新しい password の作成**になり、次回の
+  unlock が通らなくなる。lock には必ずその keystore の unlock と同じ
+  32 文字を入れる。
 
 ### 実行者と実行場所 (actor / location)
 
@@ -265,7 +364,8 @@ Exit codes:
 **operator@TTY はこの runbook 全体で 6 箇所**: ① step 4 前の `ssh-add`、
 ② 7a の testnet keystore unlock、③ **7a の `run-testnet-rehearsal.sh` 本体**、
 ④ 7c の mainnet keystore unlock、⑤ 7c 末尾の mainnet keystore re-lock、
-⑥ **7c 末尾の testnet keystore re-lock** (② で開けたものを閉じる)。
+⑥ **testnet keystore の re-lock** (② で開けたものを閉じる。**7a の直後** —
+testnet keystore の最後の利用が 7a なので。遅くとも 7c 末尾)。
 **残りの code block はすべて AI が実行する。**
 
 > ⑥ は 2026-08-18 の三面突合 (K-7) で足した。それ以前この列挙は 5 箇所と
@@ -285,6 +385,47 @@ Exit codes:
 > (`docs/PHASE_ALPHA_TESTNET_DRY_RUN.md`「What an AI session can verify, and
 > what only the operator can」)、AI が起動した run は全 gate を通っても
 > 認可にならない。
+
+> [!warning] **OPEN OPERATOR DECISION — 7a を誰が起動するか (未決。決まるまで
+> 上の canon の規則が有効)**
+>
+> 2 つの規則が食い違っている。**この節は記録と提案であって、規則は変えて
+> いない。**
+>
+> - **読み A (canon、現行)** — 7a 本体は operator@TTY。「operator 自身が
+>   起動したこと」が testnet broadcast の per-invocation 認可の実体で、
+>   AI が起動した run は全 gate を通っても認可にならない (上の引用ブロック、
+>   `scripts/cycle-transition.sh` の unit 7a)。
+> - **読み B (2026-08-04 の operator 規則)** — operator の手作業は鍵の
+>   unlock / lock だけで、それ以外は AI が実行する。broadcast の
+>   per-invocation 認可は「operator が起動すること」ではなく、**その 1 回の
+>   実行に対する chat での明示的な認可**で与える。
+> - **2026-10-07 の実際** — operator が testnet keystore を unlock した後、
+>   chat で「解除した、実行して」と明示し、**AI が 7a を起動した**
+>   (結果は `TESTNET REHEARSAL COMPLETE`)。読み B で運用された。canon の
+>   文言 (読み A) とは一致しない。
+>
+> **提案する文言 (operator の承認待ち。承認されるまで canon には入れない):**
+>
+> > 7a の testnet broadcast の per-invocation 認可は、**chat での operator の
+> > 明示的な実行指示**で与える。手順: ① operator が testnet keystore を
+> > unlock する。② AI が実行するコマンド (`run-testnet-rehearsal.sh
+> > --expect-cycle=<N+1>`、`<N+1>` は day-of value sheet の値) を chat に
+> > 示す。③ operator がそれに対して実行を指示する (例:「解除した、実行して」)。
+> > ④ AI@Mac がそのコマンドを **1 回だけ**起動する。**認可 1 回 = 起動 1 回。**
+> > exit が非 0 で再実行が要るときは、`step 7/10` の行が出たかを報告した上で
+> > **改めて認可を取る**。unlock そのものは認可ではなく、unlock だけで AI が
+> > 7a を起動してはならない。mainnet (7c) の認可手順 (復唱 + 「認可する」) は
+> > この変更の対象外で、そのまま。
+>
+> **承認された場合に同じ commit で直すもの**: 上の operator@TTY の列挙
+> (③ を AI@Mac に移し、5 箇所になる)、この節の上の引用ブロック、step 7a の
+> 「この 2 行はどちらも operator@TTY」と「なぜ operator が打つのか」、
+> `scripts/cycle-transition.sh` の unit 7a の actor 列・stop 3 / unit 7a の
+> 説明文・「SIX」の数え上げ、およびそれを固定している
+> `tests/cycle-transition/test-cycle-transition.sh` (「exactly one execution
+> unit is operator@TTY」「SIX」の case と、その mutation)。どれも意図して
+> 同時に書き換える必要があり、片方だけ直すと drift gate か test が赤くなる。
 
 broadcast (mainnet) の per-invocation 認可は code block ではなく chat での
 応答 — step 7c の「per-invocation 認可の手順」節。
@@ -688,9 +829,9 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    **「exactly one line 増えた」は事前の基準値が無ければ検証できない** — この
    step を実行する**前に**公開版の行数を 1 度採って控えておく
    (`curl -s https://metal.freedom-yield.com/api/cycle-history.jsonl | wc -l`)。
-   この基準値は step 2 の完了確認としても使える。2026-09-04 の期待値は
-   実行前 **3 行 → 実行後 4 行** (day-of value sheet の `CLOSED_COUNT`
-   3 → 4 と同じこと)。
+   この基準値は step 2 の完了確認としても使える。期待値は
+   実行前 **`N-1` 行 → 実行後 `N` 行** (day-of value sheet の `CLOSED_COUNT`
+   と同じこと。記入例の 2026-10-07 なら 4 → 5)。
 4. **Mac —**
 
    **前操作 (operator@TTY) — identity 鍵を ssh-agent に載せる。**
@@ -720,6 +861,12 @@ topology (validator host + operator Mac)**, in this fixed day-of order
      bash scripts/operator-local/gen-identity.sh
    ```
    then commit, push, `gh run watch` until deploy completes.
+
+   **後操作 (AI@Mac) — identity 鍵を agent から外す。** identity 鍵の最後の
+   利用は上の `gen-identity.sh` なので、それが exit 0 で終わり再実行の必要が
+   無くなったら、AI が `ssh-add -d ~/.ssh/freedom-yield-operator-identity` で
+   ssh-agent から外す (passphrase を伴わないので operator の手作業ではない)。
+   `ssh-add -l` にその鍵が出ないことを確認する。
    **push は 4b の編集を取り込んでから** — step 4b は "MANDATORY, same commit
    as step 4" なので、正しい順序は「step 4 で生成 → 4b の registry 編集 →
    `tests/publication-registry/` を回す → **まとめて 1 commit** → push →
@@ -892,6 +1039,16 @@ topology (validator host + operator Mac)**, in this fixed day-of order
      (認可の実体が「operator 自身の起動」であること)。
    - **中止したくなったら**: 打たなければよい。この時点では mainnet 側は
      何も起きていない。
+   - **後操作 (operator@TTY) — testnet keystore を直後に re-lock する。**
+     testnet keystore の最後の利用はこの 7a なので、`TESTNET REHEARSAL
+     COMPLETE` を拾ったらすぐ閉じる (7b / 7c / 8 は testnet keystore を使わ
+     ない)。手順と注意 (同じ 32 文字・**空 Enter 禁止**) は 7c の「後操作 2」と
+     同じ。
+   - **直後の 7b が testnet tx の `block_num` を MISS と出しても、7a を
+     やり直さない。** testnet の Hyperion は tx を索引に出すまで数分かかる
+     ことがある (2026-10-07 実測)。`COMPLETE` 行が出ていれば tx は在る —
+     数分待って **7b だけ**を再実行する。7a の再実行は testnet への 2 度目の
+     broadcast になる。
 
    Its closing `TESTNET REHEARSAL COMPLETE testnet_tx_id=<64hex>` line is
    the `--testnet-tx-id` gate-1 input below. Its own dry-run log is
@@ -1058,7 +1215,7 @@ topology (validator host + operator Mac)**, in this fixed day-of order
      (`scripts/preview-cycle-anchor-broadcast.sh:340`)。
      加えて `MAINNET gates verified: testnet-tx-id=… / dry-run-log=…` の 2 行。
    - **operator が照合するもの** — ① memo prefix が**その日刻む cycle のもの**
-     であること (day-of value sheet の `<N+1>`。2026-09-04 なら cycle 5 側)、
+     であること (day-of value sheet の `<N+1>`。記入例の 2026-10-07 なら cycle 6 側)、
      ② `chain` が `mainnet-a` であること、③ `quantity` が想定どおりであること、
      ④ `tx_sha256` が空 (`<unbound-legacy>`) でないこと。
      **1 つでも読めない・違って見えたら照合は不成立** — 「たぶん合っている」で
@@ -1096,8 +1253,11 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    **後操作 2 (operator@TTY) — testnet keystore も re-lock する。**
    `HOME=~/.metal-fy-proton-test proton key:lock`。
 
+   - **いつ**: **7a の直後が既定** (testnet keystore の最後の利用は 7a。
+     7a の「後操作」)。7a の直後に済ませていれば、ここでは locked であることを
+     確かめるだけ。済んでいなければここで必ず閉じる (遅くとも 7c 末尾)。
    - **打つ人**: **operator 自身** (password を打つため)。7a の ② で開けた
-     keystore がここまで開いたままなので、mainnet と同じ扱いで閉じる。
+     keystore がまだ開いていれば、mainnet と同じ扱いで閉じる。
    - **目視するもの**: ⑤ と同じプロンプト `Enter 32 character password (leave
      empty to create new)`。ただし入れるのは **testnet keystore の 32 文字**で、
      ⑤ で打った mainnet のものではない (keystore は HOME ごと別、
@@ -1275,11 +1435,12 @@ needed for them.
 **部分的に**やり忘れた場合も `--status` は気づかない。だから目視で 5 点を取る:
 
 - **① `--status` が全 green** — `bash scripts/cycle-transition.sh --status
-  --expect-cycle=<N>` (2026-09-04 なら `4`)。必要条件であって十分条件では
+  --expect-cycle=<N>` (記入例の 2026-10-07 なら `5`)。必要条件であって十分条件では
   ないので、これ**だけ**では終了判定にしない。
 - **② 公開 `cycle-history.jsonl` が 1 行増えている** — step 3 の前に控えた
-  基準行数 +1 であること (2026-09-04 なら 3 → **4**)。かつ増えた行の
-  `incidents_in_cycle_ids` が step 2.5 の entry を含むこと。
+  基準行数 +1 であること (記入例の 2026-10-07 なら 4 → **5**)。かつ増えた行の
+  `incidents_in_cycle_ids` が step 2.5 の entry を含むこと (step 2.5 を
+  実行した cycle のみ)。
 - **③ explorer で anchor tx を目視** — step 7 の tx id を AI が読み返し、
   explorer URL 上で確認する。
 - **④ identity 署名が検証できる** — 公開 `identity.json` / `.sig` / pubkey の
