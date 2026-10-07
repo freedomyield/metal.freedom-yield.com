@@ -88,9 +88,19 @@ if ! METALGO_STATUS=$(inspect_status "$METALGO_CONTAINER"); then
   echo "ERROR: docker inspect failed for METALGO_CONTAINER=$METALGO_CONTAINER; keeping last-known-good $OUT" >&2
   exit 5
 fi
-if ! CADDY_STATUS=$(inspect_status "$CADDY_CONTAINER"); then
+# Caddy here serves only the operator ops dashboard, and which container does
+# that can change. A CADDY_CONTAINER naming a removed container is published
+# as "absent" (check-anomalies.sh alerts on it) instead of aborting: aborting
+# would leave the WHOLE feed stale, metalgo included. Only a docker failure
+# still keeps last-known-good. See scripts/lib/container-status.sh.
+# shellcheck source=lib/container-status.sh
+. "$(cd "$(dirname "$0")" && pwd)/lib/container-status.sh"
+if ! CADDY_STATUS=$(fy_container_status "$CADDY_CONTAINER"); then
   echo "ERROR: docker inspect failed for CADDY_CONTAINER=$CADDY_CONTAINER; keeping last-known-good $OUT" >&2
   exit 5
+fi
+if [ "$CADDY_STATUS" = "absent" ]; then
+  echo "WARN: CADDY_CONTAINER=$CADDY_CONTAINER does not exist; publishing caddy.containerStatus=absent" >&2
 fi
 
 # fail2ban currently banned (sshd jail)
