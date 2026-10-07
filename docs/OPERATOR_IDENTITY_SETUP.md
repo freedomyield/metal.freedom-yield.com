@@ -815,10 +815,14 @@ the broadcast is composed and signed on the operator Mac.)
 > for the cron-triggered unlock model; it is not repeated here.)
 
 > **Authorization gate**: every command in this section affects the
-> validator host. Per Constitution §5, validator-host changes are
-> operator-approved and operator-executed. The AI side (C2 acting as
-> drafter) produces this runbook; the operator executes. No step in
-> this section is a default-allowed AI action.
+> validator host. Per Constitution §5 (v0.7, 2026-10-07), each
+> validator-host change needs the operator's explicit approval of that
+> change in chat; only then may the AI execute it (or the operator
+> executes it personally), and the AI verifies the result. Key material
+> stays with the operator (passphrase entry, keystore unlock / lock,
+> W5). No step in this section is a default-allowed AI action. (This
+> section is RETIRED — see the banner above; the gate is kept accurate
+> in case any part is ever revived.)
 >
 > **Sequencing gate**: A6 + A7 + A8 (= mainnet permission install and
 > linkauth) MUST complete and verify on chain before B is executed.
