@@ -41,7 +41,8 @@ echo "[2] Firewall (ufw)"
 UFW_STATUS=$(ufw status 2>/dev/null | awk '/^Status:/ {print $2}')
 check "ufw status" "active" "$UFW_STATUS" FAIL
 
-EXPECTED_PORTS="22/tcp 443/tcp 443/udp 80/tcp 9651/tcp"
+# 80/443 removed from the validator host on 2026-10-07 (nothing listens there).
+EXPECTED_PORTS="22/tcp 9651/tcp"
 # ufw status prints "ALLOW" (no direction) for IPv4 / "ALLOW IN" only in verbose mode
 # Match the leading port column on rule lines and skip the (v6) duplicates.
 ACTUAL_PORTS=$(ufw status 2>/dev/null \

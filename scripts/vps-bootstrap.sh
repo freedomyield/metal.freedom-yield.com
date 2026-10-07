@@ -46,15 +46,17 @@ step_packages() {
 }
 
 step_firewall() {
-  log "Step 2/8: ufw firewall (deny incoming, allow 22/80/443/9651)"
+  log "Step 2/8: ufw firewall (deny incoming, allow 22/tcp + 9651/tcp only)"
+  # No 80/443: nothing listens there. The public site is served by the web
+  # host and this host's Caddy binds loopback 127.0.0.1:8085 only. The live
+  # validator host's 80/tcp, 443/tcp, 443/udp rules (v4+v6) were removed on
+  # 2026-10-07 (operator-approved); this template now matches it.
   ufw default deny incoming >/dev/null
   ufw default allow outgoing >/dev/null
   ufw allow 22/tcp >/dev/null
-  ufw allow 80/tcp >/dev/null
-  ufw allow 443/tcp >/dev/null
   ufw allow 9651/tcp >/dev/null
   ufw --force enable >/dev/null
-  ufw status verbose | grep -E '^(Status|22|80|443|9651)'
+  ufw status verbose | grep -E '^(Status|22|9651)'
 }
 
 step_ssh_hardening() {

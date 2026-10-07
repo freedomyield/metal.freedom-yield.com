@@ -7,7 +7,7 @@
 
 - validator host (推奨 production-grade VPS Ubuntu 22.04) もしくは同等の VPS を 1 台
 - ドメイン `metal.freedom-yield.com` の DNS A レコードを edge CDN で VPS public IP に向ける
-- 80/443/TCP, 443/UDP(HTTP/3), 22/TCP, 9651/TCP が inbound 許可
+- 22/TCP, 9651/TCP のみ inbound 許可(80/443 は開けない。公開サイトは web host、validator host の Caddy は loopback 8085 のみ。2026-10-07 に現行 host から削除済)
 
 **配信トポロジ (2 ホスト)**: GitHub Actions は repo-tracked static (`public/`) を **2 つの target** に配信する — (1) validator host の内部 Caddy、(2) 公開 Xserver origin (edge CDN 背後)。この 2 つの配信経路は非対称: validator host は `$DEPLOY_PATH` に本リポの git checkout を持ち、`public/` 以外の git 管理ファイル(`docs/`, `scripts/`, `tests/`, `caddy/Caddyfile`, `docker-compose*.yml` 等)は deploy のたびに `scripts/advance-host-checkout.sh` の `git pull --ff-only` が届ける(§4 参照)。公開 Xserver は git checkout を一切持たず、`rrsync -wo` で metal public dir に封じ込めた専用鍵(`scripts/install-xserver-static-deploy-key.sh` で設置)による `public/` のみの rsync が唯一の配信経路。動的 feed は validator host cron → 受信 wrapper 経由で Xserver に届く(deploy とは別経路)。両 `public/` rsync の除外集合は単一 SoT `deploy/feed-excludes.txt` から生成。詳細は [`docs/DEPLOY_OWNERSHIP_MATRIX.md`](DEPLOY_OWNERSHIP_MATRIX.md)。
 
@@ -41,11 +41,9 @@ usermod -aG docker <deploy_user>
 ### 2. VPS 側: ufw / firewall 設定
 
 ```sh
+# validator host: 22/tcp + 9651/tcp のみ。80/443 は開けない(何も listen しない。
+# 公開サイトは web host。2026-10-07 に現行 host から削除済)
 ufw allow 22/tcp
-ufw allow 80/tcp
-ufw allow 443/tcp
-ufw allow 443/udp
-# validator を同居させる場合は次も(別ホストなら不要)
 ufw allow 9651/tcp
 ufw default deny incoming
 ufw default allow outgoing

@@ -264,12 +264,11 @@ ssh -i ~/.ssh/<your_validator_host_key> root@<新IP>
 apt update && apt upgrade -y
 apt install -y docker.io docker-compose-v2 ufw fail2ban git jq curl
 
-# firewall (旧と同じポリシー)
+# firewall (旧と同じポリシー: 22/tcp + 9651/tcp のみ。80/443 は開けない — 公開サイトは web host、
+# この host の Caddy は loopback 8085 のみ。現行 host からは 2026-10-07 に削除済)
 ufw default deny incoming
 ufw default allow outgoing
 ufw allow 22/tcp
-ufw allow 80/tcp
-ufw allow 443/tcp
 ufw allow 9651/tcp
 ufw --force enable
 

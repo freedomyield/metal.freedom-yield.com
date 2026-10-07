@@ -139,7 +139,7 @@
 			<dt>Edge 層(CDN)</dt><dd>常時 L3 / L4 DDoS 自動緩和、 IP reputation filtering、 静的 asset の edge cache、 HTTPS 終端。 IP 単位の rate limiting も本層で active。 攻撃継続時の rule 強化手順は <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/SECURITY_LAYERS.md" target="_blank" rel="noopener noreferrer"><code>docs/SECURITY_LAYERS.md</code></a> の runbook 参照。</dd>
 			<dt>Application gateway</dt><dd>Caddy reverse proxy が IP / endpoint 単位の quota を in-memory で enforce。 quota 超過は <code>429 Too Many Requests</code>。 edge CDN forwarded IP を honour する設定。</dd>
 			<dt>Host network</dt><dd>web host 側 provider-managed firewall と TLS terminator が edge と application gateway の間に挟まる。 上流層で吸収しきれない攻撃には provider-side DDoS 緩和を escalation channel として利用可。</dd>
-			<dt>OS / SSH</dt><dd>標準 hardening。 validator 側で標準 web / SSH ポートのみを host firewall で開放、 両 host で SSH daemon に <code>fail2ban</code>、 SSH は公開鍵のみ(password 認証無効)。 運用者 dashboard は認証背後、 password 由来 credential は high-cost hash で保管。</dd>
+			<dt>OS / SSH</dt><dd>標準 hardening。 validator 側で SSH と validator の peer-to-peer ポートのみを host firewall で開放、 両 host で SSH daemon に <code>fail2ban</code>、 SSH は公開鍵のみ(password 認証無効)。 運用者 dashboard は認証背後、 password 由来 credential は high-cost hash で保管。</dd>
 		</dl>
 		<p class="note">具体的な rule 数値、 ポート allowlist、 blocklist source、 認証 credential の保管 path は SECRET / CONFIDENTIAL(下記)に分類され、 本ページには意図的に出さない。</p>
 	</section>
