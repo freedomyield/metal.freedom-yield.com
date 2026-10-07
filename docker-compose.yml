@@ -7,7 +7,10 @@
 #
 # 環境別の設定は override 経由で適用:
 #   - ローカル開発: docker-compose.override.yml(`docker compose up` で自動読込)
-#   - 本番VPS    : docker-compose.prod.yml(-f で明示) ※ 後続フェーズで追加
+#   - validator host: docker-compose.behind-proxy.yml + docker-compose.ops-tunnel.yml
+#                     (-f で明示。deploy.yml が起動。127.0.0.1:8085 と 127.0.0.1:8443 のみ。
+#                     host 上の Caddy はこの 1 つだけ)
+#   - docker-compose.prod.yml(80/443 を直接 bind する構成)は現在どの host でも使わない
 
 name: site
 

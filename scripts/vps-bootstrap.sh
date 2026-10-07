@@ -109,10 +109,23 @@ step_server_status_cron() {
   # template's own output. Schedule/user/command body/log target below are
   # UNCHANGED; only the audit-visibility wrapper was added. See
   # docs/CRON_CONVENTIONS.md rules 2/3/5.
+  # server-status.sh refuses to run (:?) without METALGO_CONTAINER and
+  # CADDY_CONTAINER. Caddy is the one deploy-managed container (container_name
+  # in docker-compose.yml). metalgo's name follows the same rule as
+  # docker-compose.metalgo.prod.yml: METALGO_CONTAINER_NAME from .env, else
+  # metalgo-<METAL_NETWORK> (default mainnet).
+  local env_file="$DEPLOY_DIR/.env" mg_name="" mg_net=""
+  if [ -f "$env_file" ]; then
+    mg_name=$(sed -n -E "s/^[[:space:]]*METALGO_CONTAINER_NAME=['\"]?([^'\"[:space:]#]+).*/\1/p" "$env_file" | tail -1)
+    mg_net=$(sed -n -E "s/^[[:space:]]*METAL_NETWORK=['\"]?([^'\"[:space:]#]+).*/\1/p" "$env_file" | tail -1)
+  fi
+  local metalgo_container="${mg_name:-metalgo-${mg_net:-mainnet}}"
   cat > /etc/cron.d/metal-server-status <<EOF
 # Refresh ops dashboard data every 1 minute.
 SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin
+METALGO_CONTAINER=${metalgo_container:-metalgo-mainnet}
+CADDY_CONTAINER=caddy-static
 * * * * * $DEPLOY_USER { echo "=== metal-server-status start \$(date -u +\%FT\%TZ) ==="; bash $DEPLOY_DIR/scripts/server-status.sh; rc=\$?; echo "=== metal-server-status end \$(date -u +\%FT\%TZ) rc=\$rc ==="; } >> /var/log/server-status.log 2>&1
 EOF
   chmod 644 /etc/cron.d/metal-server-status
@@ -443,13 +456,16 @@ step_metalgo() {
 }
 
 step_caddy() {
-  log "Step 8/8: bring up Caddy + site"
+  log "Step 8/8: bring up Caddy (internal site :8085 + ops dashboard 127.0.0.1:8443)"
   cd "$DEPLOY_DIR"
   if [ ! -f .env ]; then
-    echo "NOTE: .env not present. Create it with DOMAIN= and ACME_EMAIL= before starting Caddy."
+    echo "NOTE: .env not present. Create it with OPS_BASIC_AUTH_HASH= before starting Caddy."
     return 0
   fi
-  docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+  # Same file set as .github/workflows/deploy.yml's Caddy step: the validator
+  # host runs ONE Caddy, loopback only (no 80/443 — the public site is served
+  # by the web host). docker-compose.prod.yml (80/443 + ACME) is not used here.
+  docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml -f docker-compose.ops-tunnel.yml up -d --build
   sleep 5
   docker ps --filter name=caddy-static --format 'table {{.Names}}\t{{.Status}}'
 }

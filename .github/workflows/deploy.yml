@@ -315,12 +315,20 @@ jobs:
         # Caddyfiles and also heals a stale mount left by any earlier
         # deploy. Reload still covers the recreate-skipped path; the
         # health check guards both.
+        #
+        # This is the validator host's ONLY Caddy (2026-10-07). The
+        # ops-tunnel override adds the operator ops dashboard on
+        # 127.0.0.1:8443 (SSH tunnel + BasicAuth) with the real
+        # OPS_BASIC_AUTH_HASH from the host .env — compose refuses to start
+        # without it. No 80/443: the public site is served by the web host.
+        # The last curl proves the ops vhost is bound AND still demands
+        # credentials (401), never an open dashboard.
         run: |
           ssh -i ~/.ssh/id_deploy -p "$SSH_PORT" -o StrictHostKeyChecking=no \
             "$SSH_USER@$SSH_HOST" "DEPLOY_PATH='$DEPLOY_PATH' bash -s" <<'REMOTE'
           set -euo pipefail
           cd "$DEPLOY_PATH"
-          COMPOSE="docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml"
+          COMPOSE="docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml -f docker-compose.ops-tunnel.yml"
           $COMPOSE up -d --remove-orphans --build
           if $COMPOSE exec -T caddy cat /etc/caddy/Caddyfile | cmp -s - caddy/Caddyfile; then
             $COMPOSE exec -T caddy caddy reload --config /etc/caddy/Caddyfile
@@ -330,6 +338,11 @@ jobs:
           fi
           sleep 2
           curl -fsS -o /dev/null http://127.0.0.1:8085/health
+          OPS_CODE=$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8443/)
+          if [ "$OPS_CODE" != "401" ]; then
+            echo "ops dashboard on 127.0.0.1:8443 answered HTTP $OPS_CODE without credentials (expected 401)" >&2
+            exit 1
+          fi
           REMOTE
 
       - name: Set up Xserver deploy key

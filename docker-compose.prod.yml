@@ -1,5 +1,10 @@
 # サイト本番用オーバーライド(VPS で Caddy を 80/443 で公開)
 #
+# ⚠ 2026-10-07 時点で、この override はどの host でも使っていない。
+#   公開サイトは web host (edge CDN 背後) が配信し、validator host の Caddy は
+#   docker-compose.behind-proxy.yml + docker-compose.ops-tunnel.yml (loopback のみ)。
+#   validator host でこれを使うと 80/443 を公開し、届かない ACME を回し続ける。
+#
 # 起動:
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
