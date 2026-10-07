@@ -10,9 +10,9 @@
 		trusted_proxies static private_ranges
 	}
 
-	# rate_limit プラグイン(github.com/mholt/caddy-ratelimit)の execute order を
-	# basic_auth より先に固定。BasicAuth challenge を撃たれる前にブロックできる。
-	order rate_limit before basic_auth
+	# rate_limit の実行順はプラグイン(github.com/mholt/caddy-ratelimit)が自分で
+	# 登録する。以前の `order rate_limit before basic_auth` は basic_auth (運用
+	# ダッシュボード、2026-10-07 廃止) 用で、外しても adapt 結果の JSON は同一 (2026-10-07 確認)。
 }
 
 # サイト設定

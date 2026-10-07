@@ -64,8 +64,10 @@ in-memory (single Caddy instance, no need for distributed coordination)
 and trusts `X-Forwarded-For` because `trusted_proxies static
 private_ranges` is set globally.
 
-The peers page also has `X-Robots-Tag: noindex, nofollow` +
-`Cache-Control: private, no-store` so it can't be cached anywhere.
+(There is no BasicAuth-protected path any more: the former `/peers` page is
+gone, and the operator ops dashboard on the validator host was abolished on
+2026-10-07. The operator status page is protected at the edge instead — see
+`docs/CF_POLICY.md`.)
 
 ### 3. web host host nginx (TLS terminator)
 
@@ -82,9 +84,6 @@ DDoS mitigation that activates per-customer.
   watching sshd.
 - **web host (web)**: fail2ban active with sshd jail; ufw not used
   (web host-side firewalling handles it).
-- BasicAuth on `/peers` uses **bcrypt cost 14** — brute-forcing one
-  24-char base62 password is ~10⁴¹ ops, well outside any feasible
-  budget.
 
 ---
 
@@ -125,7 +124,7 @@ If `metal.freedom-yield.com` slows or returns 5xx:
 ## What's intentionally **not** done
 
 - **No WAF managed rule sets** (edge CDN paid plan only). Our
-  attack surface is tiny — pure static + 6 JSON files + BasicAuth.
+  attack surface is tiny — pure static + a handful of JSON files.
   The free protections cover the realistic threat model.
 - **No distributed rate limit** (e.g. Redis-backed). Single Caddy
   instance, in-memory is fine.
