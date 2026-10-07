@@ -23,7 +23,7 @@ All work in this repository MUST conform to:
 
 When the two documents conflict, the Constitution prevails.
 
-The pattern across all work: **AI proposes, operator approves, operator (or CI under the gate) executes, AI verifies output against the prior expectation.**
+The pattern across all work: **AI proposes, operator approves (per change), the AI (or CI under the gate, or the operator personally) executes, AI verifies output against the prior expectation.**
 
 ## Available documentation
 
@@ -40,4 +40,4 @@ The pattern across all work: **AI proposes, operator approves, operator (or CI u
 
 ## Working with infrastructure
 
-Per Constitution §5 and Operating Model W7, infrastructure changes are operator-approved and operator-executed. AI assistance produces commands, reviewable diffs, and verification steps; execution and final approval rest with the operator.
+Per Constitution §5 (v0.7) and Operating Model W7, every validator-host change is approved by the operator **per change, explicitly, in chat**; the AI then executes it on the host and verifies the output against the stated expectation (a mismatch halts and returns to the operator). Approval always rests with the operator; silence, a keystore unlock, or a general instruction is not approval. The operator's own manual work is limited to keystore unlock / lock, passwords / passphrases, and wallet-UI operations. CI touches the validator host only along W6's fixed path (host checkout fast-forward, `public/` rsync, site Caddy) and never `metalgo`. Broadcasts remain governed solely by the PRIME DIRECTIVE. (v0.7 is a loosening amendment: effective seven days after merge per Constitution §9.)

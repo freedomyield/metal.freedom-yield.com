@@ -1,6 +1,6 @@
 # Freedom Yield Validator — Operating Model
 
-> **Status:** v0.1 (draft)
+> **Status:** v0.2 (draft) — v0.2 (2026-10-07): roles, W6, W7, the cadence table and the responsibility matrix aligned with Constitution v0.7 §5 (validator-host changes: operator approves per change in chat, AI executes and verifies; CI's fixed validator-host path).
 > **Conforms to:** `docs/CONSTITUTION.md`. If this document conflicts with the Constitution, the Constitution prevails.
 
 This document describes **how** the validator is operated day to day. The Constitution describes **what is or is not permitted**; this Operating Model describes the workflows that operate within those bounds.
@@ -11,11 +11,11 @@ Like the Constitution, this document is itself public. SECRET items defined in C
 
 ## Roles and responsibility
 
-- **Operator** — the human accountable for the validator. Holds the staking keys, executes infrastructure changes, approves amendments, owns final judgment. The operator is the only party authorized to act on the validator host.
-- **AI assistant** — may research, draft commands, produce reviewable diffs, write verification scripts, and propose plans. MAY NOT execute infrastructure changes on the validator host, MAY NOT approve its own work, MAY NOT initiate external outreach.
-- **CI pipeline** — executes web-host deploys when authorized by a repository-level gate. Does not touch the validator host.
+- **Operator** — the human accountable for the validator. Holds the staking keys, approves every infrastructure change (per change, explicitly), approves amendments, owns final judgment. The operator's own manual work is limited to keystore unlock / lock, entering passwords and passphrases, and wallet-UI operations; the operator MAY also execute any change personally.
+- **AI assistant** — may research, draft commands, produce reviewable diffs, write verification scripts, and propose plans. MAY execute a validator-host change only after the operator has explicitly approved that specific change in chat (Constitution §5, v0.7; W7), and then MUST verify it against the expected output. MAY NOT approve its own work, MAY NOT treat silence, an unlock, or a general instruction as approval, MAY NOT initiate external outreach.
+- **CI pipeline** — executes deploys when authorized by a repository-level gate: the web-host deploy, plus the one fixed validator-host path of W6 (host checkout fast-forward, `public/` rsync, site-Caddy compose). Never acts on `metalgo`.
 
-The pattern across every workflow below: **AI proposes, operator approves, operator (or CI under the gate) executes, AI verifies output against the prior expectation.**
+The pattern across every workflow below: **AI proposes, operator approves (per change), the AI (or CI under the gate, or the operator personally) executes, AI verifies output against the prior expectation.**
 
 ---
 
@@ -97,7 +97,7 @@ Detailed runbook: `docs/KEY_ROTATION.md`.
 
 **Gating:** a repository-level variable enables the deploy job. When disabled, all deploy jobs skip cleanly.
 
-**Flow:** the CI pipeline rsyncs to the web host and recreates the web container. The validator host is not touched.
+**Flow:** the CI pipeline (`.github/workflows/deploy.yml`) acts on the validator host along one fixed path — fast-forwards the host's repository checkout to the pushed commit ("Advance host checkout to origin/main"), rsyncs the deploy-built `public/` tree into it ("Rsync public/ to VPS"), and brings up / reloads the project's site Caddy with the site compose files only ("Bring up / reload Caddy on VPS") — and then rsyncs `public/` to the web host (the public origin). It never acts on `metalgo`, its compose files, its data volume or keys, cron, packages, or firewall; any such change is W7.
 
 **Discipline requirements:**
 
@@ -115,11 +115,11 @@ Detailed runbook: `docs/DEPLOY_SETUP.md`.
 
 1. AI drafts the change as a reviewable diff or a sequence of commands. Each command lists its expected output.
 2. AI proposes a rollback plan.
-3. Operator reviews and approves.
-4. Operator executes — directly on the host or through an operator-controlled helper.
+3. Operator reviews and explicitly approves **that change** in chat. An approval covers only the change it names; silence, a keystore unlock, or a standing / general instruction is not approval. Destructive actions (Constitution §3.3) need their own explicit approval.
+4. AI executes it on the host, exactly as approved (the operator MAY execute it personally instead). Password / passphrase entry and keystore unlock / lock remain the operator's own manual work.
 5. AI verifies post-change output against the expected output produced in step 1. A mismatch halts and surfaces for operator decision.
 
-Validator-host changes are **not** part of the CI auto-deploy. They are operator-executed every time.
+Validator-host changes are **not** part of the CI auto-deploy (whose validator-host path is limited to W6). Each one is approved by the operator per change (Constitution §5, v0.7).
 
 ### W8 — Strategic review
 
@@ -178,7 +178,7 @@ Audit documents — the files under `docs/audits/`, and any file that records a 
 | W4 Incident response | On trigger | Operator (decisions); AI (drafts) | Alerting automated |
 | W5 Key rotation | Annual and on compromise | Operator | None |
 | W6 Web deploy | On `main` push | Operator (PR) → CI | Yes, gated |
-| W7 Validator-host change | On need | Operator | None |
+| W7 Validator-host change | On need | Operator (approval per change) → AI (execution + verification) | None |
 | W8 Strategic review | Per cycle | Operator + AI | Manual |
 | W9 Code discipline | Per change | Operator + AI | Some lints |
 | W10 External communication | On trigger | Operator | None |
@@ -190,7 +190,7 @@ Audit documents — the files under `docs/audits/`, and any file that records a 
 |---|:-:|:-:|:-:|
 | Approve a change | ✅ | ❌ | ❌ |
 | Generate, install, or destroy a key | ✅ | ❌ | ❌ |
-| Execute a validator-host command | ✅ | ❌ | ❌ |
+| Execute a validator-host command | ✅ | ✅ (only after per-change operator approval in chat) | ✅ (W6 fixed path only) |
 | Execute a web-host deploy | ✅ (via PR merge) | ❌ | ✅ (when gate enabled) |
 | Draft a command or diff | ✅ | ✅ | ❌ |
 | Verify output against expectation | ✅ | ✅ | ❌ |

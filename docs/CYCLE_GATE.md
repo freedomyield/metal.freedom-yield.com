@@ -274,9 +274,15 @@ submit するまでの間だけ。この間 validator は validator set に居�
 中には行わない。終わったら step 0 へ進む (枠の確認項目がすべて揃う前に
 AddValidator を出さない — 登録した瞬間から uptime が測られる)。
 
-**誰が**: host 上の手順は **AI@host が実行する**。ただし着手前に operator の
-**一言の承認** (例:「進めて」) を chat で取る (Operating Model W7 の承認は
-operator に残る)。operator のキー操作はこの枠には無い。
+**誰が**: host 上の手順は Constitution §5 (v0.7) / Operating Model W7 の型で
+**AI@host が実行する** — AI が下の「何を」の手順 (期待出力と止まる条件つき)
+を chat に示し、operator が**その手順に対して明示的に承認**してから着手し
+(例:「進めて」)、各手順の出力を期待と照合して報告する。承認はここに挙げた
+手順だけを覆い、別の変更には流用しない。operator のキー操作はこの枠には無い。
+**注意: v0.7 は loosening amendment で、発効は merge の 7 日後**
+(Constitution §9)。発効前にこの枠を使う日は v0.6 §5 (validator host の変更は
+operator が実行) が有効なので、operator が実行するか、どう扱うかを operator に
+確かめてから着手する。
 
 **何を** (この順で。どの手順も、期待と違う出力が出たらそこで止まって報告):
 
