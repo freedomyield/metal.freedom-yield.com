@@ -14,6 +14,11 @@
 #   - OPS_BASIC_AUTH_HASH: behind-proxy の dummy hash を host .env の本物で上書きする。
 #     .env に無ければ compose が起動を拒否する (fail closed — 認証の無い / 誰も知らない
 #     hash の dashboard を黙って立てない)。
+#     ⚠ host .env の bcrypt 値は単一引用符で囲む (OPS_BASIC_AUTH_HASH='$2a$14$...')
+#     か、各 `$` を `$$` と書く。無引用・二重引用だと compose が `$2a` などを変数
+#     として展開して消し、警告を出すだけで起動してしまう (壊れた hash になる)。
+#     `:?` は値が空でないので通り、デプロイの 401 確認も「誰も通れない」状態を
+#     正常と見なすため、どちらもこれを検出しない。
 #
 # アクセス: ssh -L 8443:localhost:8443 で validator host に入り、http://localhost:8443
 # 防御: ① loopback bind ② SSH 鍵認証 ③ Caddy BasicAuth
