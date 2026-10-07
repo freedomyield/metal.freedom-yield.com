@@ -46,17 +46,17 @@
     "incidents_json": {
       "url": "https://metal.freedom-yield.com/api/incidents.json",
       "kind": "static",
-      "sha256": "c42d2ea9ec51e7a23e765d2094a2a72d37ddc2fb5e06afd969f630501baaa42e",
+      "sha256": "74bac6dbe3e1920f9c9d8877d02c00629e792bea477d7f6f36dacc0980b6479a",
       "schema_url": "https://metal.freedom-yield.com/api/incidents.schema.v1.json",
       "schema_sha256": "422e46f67869f7335bb95e34871331126a902c59ea3c684c17d984ce7db3141b"
     },
     "anchor_source_archive_json": {
-      "url": "https://metal.freedom-yield.com/api/archive/anchor-source-063f753ebb79229064375b967db59421ba4f8e9e30c194a92d9c326e08f96dd1.json",
+      "url": "https://metal.freedom-yield.com/api/archive/anchor-source-bc947ee67ace9ba95aa4af79745fa004f9ef9accdfd7313cafe647c70d16c886.json",
       "kind": "record",
-      "sha256": "66987e95f457cb256c1e0ef69e54642f12a5fd0db664b92706b663108cbcf5ce"
+      "sha256": "4814664554674854e35dbf97103b3b984b950967f0a5cb45bba956b80b74774a"
     }
   },
-  "artifact_root": "f89608eeb60b30387a01ede879626c54b47225a69a56d941a064b50692baee19",
+  "artifact_root": "73764b639ce256d6c8ec2e2a865143d6928d491028e90b48ecd4fb7c87ea2e0e",
   "pin_policy": {
     "source": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/deploy/publication.json",
     "rule": "An artifact_manifest entry carries sha256 only when the publication registry declares its kind as 'static' (bytes change only when a commit changes them) or 'record' (the URL's name is derived from a digest of the content it addresses, so whatever that digest covers cannot change without the name changing too). A record's name binds only what its digest covers, and that need NOT be the whole file: for /api/archive/anchor-source-<64-hex>.json the name is the fold of the three DAG branches and does not cover computed_at, computed_by_script or computed_from_git_commit sitting beside them. The sha256 recorded here is what binds every byte, as of signing. A verifier whose fetch disagrees with that digest should re-derive the three branch roots before concluding anything: if they still fold to the value in the file name, the three branch objects are canonically identical to the ones that were anchored and the anchored DAG is unaffected — the difference lies somewhere outside them, and the fold does not say where. Entries with kind 'stream' are published with url + kind and NO sha256: their bytes change without a commit, so a digest fixed at signing time would be false within minutes. The absence of sha256 is a deliberate declaration, not an omission, and a verifier MUST NOT treat it as a broken manifest. The same rule is applied independently to schema_url / schema_sha256.",
@@ -67,5 +67,5 @@
     "anchor_receipt": "https://metal.freedom-yield.com/api/anchor-receipt.json",
     "anchor_history": "https://metal.freedom-yield.com/api/anchor-history.jsonl"
   },
-  "generated_at": "2026-09-04T05:21:15Z"
+  "generated_at": "2026-10-07T05:02:45Z"
 }
