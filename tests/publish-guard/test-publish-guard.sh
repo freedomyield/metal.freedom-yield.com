@@ -909,6 +909,62 @@ fi
 (cd "$H_MAIN" 2>/dev/null && git worktree remove --force ../linked-wt) >/dev/null 2>&1
 rm -rf "$H_ROOT"
 
+echo "== R4-H13+: SDD worktree NESTED in the main checkout (<repo>/.claude/worktrees/<name>) =="
+# 2026-10-07 audits: this project's SDD worktrees live physically inside the
+# main checkout, whose .gitignore has `.claude/*`. Ignore status used to be
+# asked of the main checkout first, which answered "ignored" for every file
+# in such a worktree -- tracked ones included -- so agent edits there were
+# never scanned (R4-H8 failed whenever the suite itself ran from a worktree).
+# This fixture reproduces the exact layout independently of where the suite
+# runs, so the property is pinned from the main checkout too.
+N_ROOT="$(mktemp -d -t pubguard-n.XXXXXX)"
+N_MAIN="$N_ROOT/main-checkout"
+N_WT="$N_MAIN/.claude/worktrees/x"
+(
+	mkdir -p "$N_MAIN" && cd "$N_MAIN" || exit 0
+	git init -q . 2>/dev/null
+	printf '%s\n' '.claude/*' 'scratch.md' 'docs/tasks/' > .gitignore
+	printf 'clean\n' > tracked.md
+	mkdir -p docs/tasks && printf 'clean\n' > docs/tasks/forced.md
+	git add .gitignore tracked.md && git add -f docs/tasks/forced.md
+	git -c user.email=t@example.com -c user.name=T commit -q -m seed 2>/dev/null
+	git worktree add -q .claude/worktrees/x -b guardtest-n 2>/dev/null
+) >/dev/null 2>&1
+if [ -f "$N_WT/tracked.md" ] && git -C "$N_MAIN" check-ignore -q "$N_WT/tracked.md" 2>/dev/null; then
+	# The precondition above IS the bug's premise: the main checkout calls a
+	# tracked worktree file ignored. Without it the cases below pin nothing.
+	run_json_cwd "R4-H13 Edit of a TRACKED file in a nested worktree, cwd = main -> block" 2 "$N_MAIN" \
+		"$(jq -nc --arg fp "$N_WT/tracked.md" --arg c "host $PUB_IP" '{tool_name:"Edit",tool_input:{file_path:$fp,new_string:$c}}')"
+	run_json_cwd "R4-H14 Write of a TRACKED file in a nested worktree, cwd = main -> block" 2 "$N_MAIN" \
+		"$(jq -nc --arg fp "$N_WT/tracked.md" --arg c "host $PUB_IP" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"
+	run_json_cwd "R4-H15 same, cwd = the nested worktree itself -> block" 2 "$N_WT" \
+		"$(jq -nc --arg fp "$N_WT/tracked.md" --arg c "host $PUB_IP" '{tool_name:"Edit",tool_input:{file_path:$fp,new_string:$c}}')"
+	run_json_cwd "R4-H16 new non-ignored file in a nested worktree -> block" 2 "$N_MAIN" \
+		"$(jq -nc --arg fp "$N_WT/new/dir/leak.md" --arg c "host $PUB_IP" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"
+	run_json_cwd "R4-H17 force-tracked file under an ignored dir in a nested worktree -> block" 2 "$N_MAIN" \
+		"$(jq -nc --arg fp "$N_WT/docs/tasks/forced.md" --arg c "host $PUB_IP" '{tool_name:"Edit",tool_input:{file_path:$fp,new_string:$c}}')"
+	# ...and genuinely ignored files keep their previous behaviour (skipped).
+	run_json_cwd "R4-H18 ignored scratch file in a nested worktree -> allow" 0 "$N_MAIN" \
+		"$(jq -nc --arg fp "$N_WT/scratch.md" --arg c "host $PUB_IP" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"
+	run_json_cwd "R4-H19 untracked file under ignored docs/tasks/ in a nested worktree -> allow" 0 "$N_MAIN" \
+		"$(jq -nc --arg fp "$N_WT/docs/tasks/new-task.md" --arg c "host $PUB_IP" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"
+	run_json_cwd "R4-H20 main checkout's own ignored .claude/ file (not a worktree) -> allow" 0 "$N_MAIN" \
+		"$(jq -nc --arg fp "$N_MAIN/.claude/notes.md" --arg c "host $PUB_IP" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"
+	run_json_cwd "R4-H21 not-yet-created worktree dir under .claude/worktrees -> allow" 0 "$N_MAIN" \
+		"$(jq -nc --arg fp "$N_MAIN/.claude/worktrees/y/tracked.md" --arg c "host $PUB_IP" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"
+	# A nested but UNRELATED repository under the ignored .claude/ keeps the
+	# old answer (ignored by the main checkout -> skipped): the fix only trusts
+	# a worktree of the SAME repository.
+	mkdir -p "$N_MAIN/.claude/other" && (cd "$N_MAIN/.claude/other" && git init -q .) >/dev/null 2>&1
+	run_json_cwd "R4-H22 unrelated nested repo under ignored .claude/ -> allow" 0 "$N_MAIN" \
+		"$(jq -nc --arg fp "$N_MAIN/.claude/other/notes.md" --arg c "host $PUB_IP" '{tool_name:"Write",tool_input:{file_path:$fp,content:$c}}')"
+else
+	printf 'FAIL  %-62s (fixture setup failed or premise absent)\n' "R4-H13+ nested worktree fixture" >&2
+	FAIL=$((FAIL+1))
+fi
+(cd "$N_MAIN" 2>/dev/null && git worktree remove --force .claude/worktrees/x) >/dev/null 2>&1
+rm -rf "$N_ROOT"
+
 echo "== local denylist (exact substring, incl. embedded) =="
 DENY_TMP="$(mktemp -t pubguard-deny.XXXXXX)"
 printf '%s\n' "# c" "SecretHostAlias" > "$DENY_TMP"
