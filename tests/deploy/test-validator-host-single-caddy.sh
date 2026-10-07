@@ -23,6 +23,8 @@
 #   T5 image/container stay caddy-static:local / caddy-static, project `site`
 #   T6 scripts/vps-bootstrap.sh brings Caddy up with the same file set and its
 #      server-status cron names the caddy-static container
+#   T7 deploy.yml's Caddy step probes 127.0.0.1:8443 and fails on any code other
+#      than 401 (an open or missing dashboard must stop the deploy)
 #
 # `docker compose config` only renders files; it touches no container. Runs in a
 # throwaway copy so no .env in the checkout can leak in. Hash values are synthetic.
@@ -55,6 +57,28 @@ echo "T1: deploy.yml's Caddy step composes base + behind-proxy + ops-tunnel"
 COMPOSE_LINE="$(grep -E '^[[:space:]]*COMPOSE="docker compose ' "$WORKFLOW" | head -1)"
 DEPLOY_FILES="$(printf '%s\n' "$COMPOSE_LINE" | grep -oE -- '-f [^ "]+' | awk '{print $2}' | tr '\n' ' ' | sed 's/ $//')"
 assert_eq "T1 deploy compose -f set" "$EXPECTED_FILES" "$DEPLOY_FILES"
+
+echo "T7: deploy.yml's Caddy step requires HTTP 401 (no credentials) from 127.0.0.1:8443"
+# Only the "Bring up / reload Caddy on VPS" step body, up to the next step.
+CADDY_STEP="$(awk '
+  /^[[:space:]]*- name: Bring up \/ reload Caddy on VPS[[:space:]]*$/ { on = 1; next }
+  on && /^[[:space:]]*- name: / { exit }
+  on { print }' "$WORKFLOW")"
+if printf '%s\n' "$CADDY_STEP" | grep -Eq "^[[:space:]]*OPS_CODE=\\\$\\(curl [^#]*-w '%\\{http_code\\}' http://127\\.0\\.0\\.1:8443/"; then
+  ok "T7a step probes http://127.0.0.1:8443/ for its HTTP code"
+else
+  bad "T7a step probes http://127.0.0.1:8443/ for its HTTP code" "OPS_CODE=\$(curl ... 8443/) not found"
+fi
+# The gate itself: a non-401 code must reach `exit 1` (mutation M3 deleted this).
+GATE="$(printf '%s\n' "$CADDY_STEP" | awk '
+  /^[[:space:]]*if \[ "\$OPS_CODE" != "401" \]; then[[:space:]]*$/ { on = 1; next }
+  on && /^[[:space:]]*fi[[:space:]]*$/ { exit }
+  on { print }')"
+if printf '%s\n' "$GATE" | grep -q 'expected 401' && printf '%s\n' "$GATE" | grep -Eq '^[[:space:]]*exit 1[[:space:]]*$'; then
+  ok "T7b any code other than 401 fails the step with the 'expected 401' message"
+else
+  bad "T7b any code other than 401 fails the step" "if [ \"\$OPS_CODE\" != \"401\" ] ... exit 1 block not found"
+fi
 
 echo "T6: vps-bootstrap uses the same file set and names caddy-static for server-status"
 BOOT_LINE="$(grep -E '^[[:space:]]*docker compose (-f [^ ]+ )+up -d' "$BOOTSTRAP" | grep 'docker-compose.yml' | head -1)"

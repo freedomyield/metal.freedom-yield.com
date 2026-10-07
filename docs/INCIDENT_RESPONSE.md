@@ -31,6 +31,8 @@
 
 **症状**: 外部からアクセス不可、Uptime check が連続 fail。
 
+> **どの host か**: 公開サイトは **web host** (edge CDN 背後の公開 origin。host の nginx → loopback の `caddy-static` container) が配信する。**validator host** の Caddy (同じく `caddy-static`、project `site`) は loopback 8085 (deploy の health check) と ops dashboard 8443 だけで、80/443 を持たず公開サイトには関与しない。以下の手順 1〜3 は手元 (Mac) から、4〜6 は web host、7 は両 host が対象。validator host 側の Caddy 停止 (ops dashboard が見えない) は §3.1.1。
+
 **調査手順**:
 
 ```bash
@@ -45,25 +47,45 @@ dig +short metal.freedom-yield.com A
 # 4. web host に SSH
 # ssh <deploy_user>@<web host from internal notes>
 
-# 5. Caddy コンテナ状態
-docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
-docker compose -f docker-compose.yml -f docker-compose.prod.yml logs caddy --tail 30
+# 5. [web host] nginx と配信 container の状態 (ID で特定する)
+systemctl status nginx
+sudo tail -n 30 /var/log/nginx/error.log
+docker ps -a --filter name=caddy-static --format '{{.ID}} {{.Names}} {{.Status}}'
+docker logs --tail 30 <5) の ID>
 
-# 6. ディスク容量
+# 6. [web host] ディスク容量
 df -h /
 
-# 7. ufw / Cloud Firewall ルールが壊れていないか
+# 7. [両 host] ufw / Cloud Firewall / パケットフィルタのルールが壊れていないか
 sudo ufw status verbose
 ```
 
-**対応分岐**:
+**対応分岐** (特記なしは web host):
 
-- Caddy crashed → `docker compose -f docker-compose.yml -f docker-compose.prod.yml restart caddy`
-- Caddyfile syntax error → 直近の編集をロールバック → `caddy reload --config /etc/caddy/Caddyfile`
+- 配信 container が停止 → `docker start <手順 5 の ID>` (どれか不明なら start せず止めて確認)。web host に本リポの checkout は無いので、本リポの compose ファイルで起動しない
+- nginx 停止 → `sudo nginx -t` で設定を確認してから `sudo systemctl start nginx` (他 vhost も同居するので stop/restart は避ける)
+- [validator host] 本リポの `caddy/Caddyfile` の syntax error (deploy の health check が落ちる) → 直近の編集を revert して deploy で反映 (§3.1.1)
 - ディスクフル → `docker system prune -a` / `journalctl --vacuum-size=100M`
 - VPS 自体停止 → VPS provider console から再起動 → 5 分待って再確認
 - DNS 消失 → edge CDN dashboardで A レコード復元
-- TLS 期限切れ → Caddy 再起動で Let's Encrypt 自動更新を再走らせる。それでも駄目なら ACME challenge 経路 (HTTP-01 が edge proxy でブロックされていないか) を確認
+- TLS 期限切れ → TLS は web host の nginx が終端する (validator host の Caddy は 443 を持たない)。web host で Let's Encrypt の更新を再走らせる。それでも駄目なら ACME challenge 経路 (HTTP-01 が edge proxy でブロックされていないか) を確認
+
+#### 3.1.1 validator host の Caddy 停止 (ops dashboard が見えない)
+
+公開サイトには影響しない。validator host の Caddy は 1 つだけ (container `caddy-static`、project `site`、deploy.yml と同じ 3 本 `docker-compose.yml` + `docker-compose.behind-proxy.yml` + `docker-compose.ops-tunnel.yml`)。`docker-compose.prod.yml` は使わない。
+
+```bash
+# [validator host] ID で特定してから操作する (check-anomalies の「Caddy 停止」通知と同じ手順)
+docker ps -a --filter name=caddy --format '{{.ID}} {{.Names}} {{.Status}}'
+docker logs --tail 50 <上の ID>
+docker start <上の ID>     # どれか不明なら start せず止めて確認
+
+curl -fsS http://127.0.0.1:8085/health                              # 期待: ok
+curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8443/   # 期待: 401 (BasicAuth)
+```
+
+- 素の `docker compose up -d` は実行しない (今いる dir の compose で別物が起動しうる。metalgo 側は別 NodeID になる: [DISASTER_RECOVERY.md 冒頭の警告](DISASTER_RECOVERY.md))
+- 作り直しが必要なら `<deploy_path>` で上の 3 本を明示して実行する ([DISASTER_RECOVERY.md Step 6](DISASTER_RECOVERY.md) と同じ)。`caddy` サービスだけを対象にする: `docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml -f docker-compose.ops-tunnel.yml up -d caddy`
 
 ### 3.2 metalgo container down / unhealthy
 
