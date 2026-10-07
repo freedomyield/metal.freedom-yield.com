@@ -14,7 +14,8 @@ delivery-ownership inversion): *if git tracks it, git delivers it; rsync
 ships only deploy-derived artifacts.* The two deploy targets apply that
 rule differently because only one of them is a git checkout:
 
-- **Validator host** (internal Caddy): every git-tracked file outside
+- **Validator host** (git checkout; no Caddy since 2026-10-07, so nothing
+  on it serves `public/`): every git-tracked file outside
   `public/` — `docs/`, `scripts/`, `tests/`, `caddy/Caddyfile`,
   `docker-compose*.yml`, etc. — is delivered by
   `scripts/advance-host-checkout.sh`'s FF-only `git pull`, invoked at

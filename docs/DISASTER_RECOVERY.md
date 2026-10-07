@@ -128,11 +128,11 @@ bash vps-bootstrap.sh
 #    (最新の ~/staker-backup-<yyyymmdd>.tar.gz.enc。Dropbox の metal-validator-backup/ にも同じもの)
 scp -i ~/.ssh/<your_validator_host_key> ~/staker-backup-<yyyymmdd>.tar.gz.enc root@<新IP>:/tmp/staker-backup.tar.gz.enc
 
-# 5. VPS 側で .env 作成(metalgo 起動より前。metalgo と Caddy は同じ <deploy_path>/.env を読む)
+# 5. VPS 側で .env 作成(metalgo 起動より前。metalgo は <deploy_path>/.env を読む)
 #    METAL_NETWORK / METAL_PUBLIC_IP は docker-compose.metalgo.prod.yml の command で
 #    「:?」必須 → 無いと metalgo は起動しない。METAL_STAKING_BIND は
 #    docker-compose.metalgo.yml の ports で既定 127.0.0.1(= ピア不達、uptime ゼロ)。
-#    Caddy に必須の変数は無い(運用ダッシュボードと OPS_BASIC_AUTH_HASH は 2026-10-07 に廃止)。
+#    validator host に Caddy は立てない (2026-10-07 に operator の決定で撤去)。Caddy 用の変数は不要。
 #    METALGO_DATA_PATH は旧 .env で使っていた場合のみ同じ値を入れる(Step 6 は実際の
 #    mount 先を compose から引くので、どちらでも動く)。METAL_IMAGE_TAG / METAL_MEM_LIMIT /
 #    METAL_CPUS は任意(旧 .env に値があれば揃える)。
@@ -194,7 +194,7 @@ docker rm -f nodeid-check
 # 期待: "nodeID": "NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v"
 # 違う値・空なら起動に進まない(鍵の置き場か中身が違う。鍵が無いと metalgo は新しい鍵を作る)
 
-# 7. metalgo と Caddy を起動
+# 7. metalgo を起動 (validator host に Caddy は立てない。2026-10-07 撤去)
 #    vps-bootstrap.sh の再実行でも起動はできる (step_metalgo は resolve_metalgo_data_dir
 #    (scripts/vps-bootstrap.sh:325) で Step 6 と同じ /data の mount 元を引き、鍵があれば
 #    :394 の metalgo_compose up -d で起動する)。本書では手順を目で追えるよう直接起動する
@@ -208,12 +208,9 @@ curl -sS -X POST -H 'content-type:application/json' \
 # 違う値なら即座に止めて片付ける (別 NodeID のまま mainnet に居続けさせない):
 #   docker compose -f docker-compose.metalgo.yml -f docker-compose.metalgo.prod.yml stop metalgo
 #   docker compose -f docker-compose.metalgo.yml -f docker-compose.metalgo.prod.yml down
-# "not ready" / 空なら 30 秒待って再確認。NodeID が一致するまで Caddy に進まない
-# Caddy は deploy.yml と同じ 2 本 (loopback 8085 のみ。80/443 は使わない)
-docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml up -d --build
+# "not ready" / 空なら 30 秒待って再確認。NodeID が一致するまで次に進まない
 docker ps --filter label=com.docker.compose.service=metalgo --format '{{.Names}} {{.Status}}'
-docker ps --filter name=caddy-static --format '{{.Names}} {{.Status}}'
-# 期待: どちらも 1 行で Up
+# 期待: 1 行で Up。サイトの compose (docker-compose.yml) はこの host では起動しない
 
 # 8. GitHub repo Secret の SSH_HOST を新 IP に更新
 #    → main に空 commit push で deploy 動作確認
@@ -226,7 +223,7 @@ bash scripts/node-info.sh
 合計時間目安:
 - Step 1-3: ~10 分(VPS 起動 + DNS + bootstrap script)
 - Step 4-5: ~3 分(scp + .env)
-- Step 6-7: ~5 分(鍵配置 + 公開前 NodeID 確認 + metalgo state sync + Caddy)
+- Step 6-7: ~5 分(鍵配置 + 公開前 NodeID 確認 + metalgo state sync)
 - Step 8-9: ~2 分(Secret 更新 + 確認)
 
 state sync が効くため metalgo は **数分** で current tip に到達 (full bootstrap の 60 分ではない)。
@@ -265,7 +262,7 @@ apt update && apt upgrade -y
 apt install -y docker.io docker-compose-v2 ufw fail2ban git jq curl
 
 # firewall (旧と同じポリシー: 22/tcp + 9651/tcp のみ。80/443 は開けない — 公開サイトは web host、
-# この host の Caddy は loopback 8085 のみ。現行 host からは 2026-10-07 に削除済)
+# この host に Caddy は無い。80/443 の旧ルールは現行 host から 2026-10-07 に削除済)
 ufw default deny incoming
 ufw default allow outgoing
 ufw allow 22/tcp
@@ -376,17 +373,13 @@ watch -n 30 'curl -sS -X POST -H "content-type:application/json" \
 # P/X/C 全部 true になるまで待機(通常 30 〜 60 分、state sync で更に速い)
 ```
 
-### Step 6: Caddy + サイト復活 (10 分)
+### Step 6: サイト — validator host では何もしない
 
-```sh
-# validator host の Caddy は 1 つだけ。公開サイトは web host が配信するので
-# ここでは 80/443 も Let's Encrypt も使わない (docker-compose.prod.yml は使わない)
-docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml up -d --build
-
-curl -fsS http://127.0.0.1:8085/health                                  # 期待: ok
-# 運用ダッシュボード (127.0.0.1:8443、SSH トンネル + BasicAuth) は 2026-10-07 に廃止
-# (operator 決定。一度も使われず、operator 用 /status/ ページと重複)。8443 は立てない
-```
+validator host に Caddy (サイトの compose) は立てない。公開サイトは web host が配信し、
+validator host の Caddy は 2026-10-07 に operator の決定で撤去した (deploy の health check
+以外に利用者がいなかった。Constitution v0.8 §5)。運用ダッシュボード (127.0.0.1:8443) も同日に
+廃止済み。`docker-compose.yml` / `docker-compose.behind-proxy.yml` / `docker-compose.prod.yml`
+をこの host で起動しない。
 
 ### Step 7: GitHub Actions deploy の宛先更新 (5 分)
 

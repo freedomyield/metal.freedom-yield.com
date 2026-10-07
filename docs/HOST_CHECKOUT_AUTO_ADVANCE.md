@@ -188,8 +188,8 @@ shipped, never a stale on-host copy, even on the very first run after
 this mechanism itself is deployed. Fail-closed: if the script exits
 non-zero (refused, fetch failed, not-a-git-checkout, or a
 non-absorbable pull conflict), the SSH command fails, the step fails, and
-the deploy job stops there — the `public/` rsync and the Caddy step never
-run against a host whose checkout the advance couldn't verify or bring
+the deploy job stops there — the `public/` rsync never runs against a
+host whose checkout the advance couldn't verify or bring
 current.
 
 The step then asserts `git merge-base --is-ancestor $GITHUB_SHA HEAD` on
@@ -236,9 +236,8 @@ at 05:15 UTC (see `scripts/install-metal-host-advance-cron.sh` and
 
 `git checkout -- public/` is scoped to `public/` only and is never applied
 to any other path. This is safe specifically because the validator host is
-**internal, not the public origin**: `docker-compose.behind-proxy.yml:20`
-binds Caddy to `127.0.0.1:${BEHIND_PROXY_PORT:-8085}:80` — loopback only,
-plain HTTP, not reachable from outside the host. Real users are served from
+**internal, not the public origin**: no web server on it serves `public/`
+at all (its loopback-only Caddy was removed on 2026-10-07). Real users are served from
 the Xserver public origin behind the edge CDN, which receives its own
 independent rsync from the same deploy workflow (see
 [`docs/DEPLOY_OWNERSHIP_MATRIX.md`](DEPLOY_OWNERSHIP_MATRIX.md)). So nothing

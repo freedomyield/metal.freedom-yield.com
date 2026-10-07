@@ -106,8 +106,9 @@ ufw default deny incoming
 ufw default allow outgoing
 ufw allow 22/tcp
 ufw allow 9651/tcp
-# No 80/443: nothing listens there (public site = web host; this host's Caddy
-# binds loopback 127.0.0.1:8085 only). Removed from the live host 2026-10-07.
+# No 80/443: nothing listens there (public site = web host; no Caddy or other
+# web server runs on this host since 2026-10-07). Removed from the live host
+# 2026-10-07.
 ufw enable
 ufw status verbose
 ```
