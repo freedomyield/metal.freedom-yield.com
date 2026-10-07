@@ -103,8 +103,9 @@ if printf '%s\n' "$CF_CODE" | grep -Eq '^[[:space:]]*[^[:space:]]*:8443[[:space:
 else
   ok "T4a Caddyfile has no :8443 site"
 fi
-if printf '%s\n' "$CF_CODE" | grep -Eq '^[[:space:]]*basic_auth[[:space:]]*\{|OPS_BASIC_AUTH_HASH'; then
-  bad "T4b Caddyfile has no basic_auth / OPS_BASIC_AUTH_HASH" "$(printf '%s\n' "$CF_CODE" | grep -m1 -E 'basic_auth|OPS_BASIC_AUTH_HASH')"
+BA_RE='^[[:space:]]*basic_auth[[:space:]]*\{|OPS_BASIC_AUTH_HASH'
+if printf '%s\n' "$CF_CODE" | grep -Eq "$BA_RE"; then
+  bad "T4b Caddyfile has no basic_auth / OPS_BASIC_AUTH_HASH" "$(printf '%s\n' "$CF_CODE" | grep -m1 -E "$BA_RE")"
 else
   ok "T4b Caddyfile has no basic_auth / OPS_BASIC_AUTH_HASH"
 fi
