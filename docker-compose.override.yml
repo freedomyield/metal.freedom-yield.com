@@ -12,9 +12,3 @@ services:
       - "${HTTP_PORT:-8080}:80"
     environment:
       - DOMAIN=:80
-      # Caddyfile の :8443 ops ブロックには basic_auth ディレクティブがあり、
-      # OPS_BASIC_AUTH_HASH が未定義だと parse error で Caddy が起動できない。
-      # dev モードでは :8443 を port-bind しないので実際の認証は使われないが、
-      # parse を通すため valid な bcrypt 形式のダミー値を渡す。$ は compose の
-      # 変数展開を抑止するため $$ にエスケープ。
-      - OPS_BASIC_AUTH_HASH=$$2a$$14$$DummyDevHashThatIsNeverUsedXXXXXXXXXXXXXXXXXX

@@ -456,16 +456,14 @@ step_metalgo() {
 }
 
 step_caddy() {
-  log "Step 8/8: bring up Caddy (internal site :8085 + ops dashboard 127.0.0.1:8443)"
+  log "Step 8/8: bring up Caddy (internal site 127.0.0.1:8085 only)"
   cd "$DEPLOY_DIR"
-  if [ ! -f .env ]; then
-    echo "NOTE: .env not present. Create it with OPS_BASIC_AUTH_HASH= before starting Caddy."
-    return 0
-  fi
   # Same file set as .github/workflows/deploy.yml's Caddy step: the validator
   # host runs ONE Caddy, loopback only (no 80/443 — the public site is served
   # by the web host). docker-compose.prod.yml (80/443 + ACME) is not used here.
-  docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml -f docker-compose.ops-tunnel.yml up -d --build
+  # The ops dashboard (127.0.0.1:8443 + OPS_BASIC_AUTH_HASH in .env) was
+  # abolished on 2026-10-07, so Caddy no longer needs anything from .env.
+  docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml up -d --build
   sleep 5
   docker ps --filter name=caddy-static --format 'table {{.Names}}\t{{.Status}}'
 }

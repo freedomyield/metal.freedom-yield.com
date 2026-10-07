@@ -316,19 +316,17 @@ jobs:
         # deploy. Reload still covers the recreate-skipped path; the
         # health check guards both.
         #
-        # This is the validator host's ONLY Caddy (2026-10-07). The
-        # ops-tunnel override adds the operator ops dashboard on
-        # 127.0.0.1:8443 (SSH tunnel + BasicAuth) with the real
-        # OPS_BASIC_AUTH_HASH from the host .env — compose refuses to start
-        # without it. No 80/443: the public site is served by the web host.
-        # The last curl proves the ops vhost is bound AND still demands
-        # credentials (401), never an open dashboard.
+        # This is the validator host's ONLY Caddy (2026-10-07), bound to
+        # loopback 127.0.0.1:8085 only. No 80/443: the public site is served
+        # by the web host. The operator ops dashboard (127.0.0.1:8443,
+        # ops-tunnel override) was abolished on 2026-10-07 by operator
+        # decision (never used; duplicated the operator /status/ page).
         run: |
           ssh -i ~/.ssh/id_deploy -p "$SSH_PORT" -o StrictHostKeyChecking=no \
             "$SSH_USER@$SSH_HOST" "DEPLOY_PATH='$DEPLOY_PATH' bash -s" <<'REMOTE'
           set -euo pipefail
           cd "$DEPLOY_PATH"
-          COMPOSE="docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml -f docker-compose.ops-tunnel.yml"
+          COMPOSE="docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml"
           $COMPOSE up -d --remove-orphans --build
           if $COMPOSE exec -T caddy cat /etc/caddy/Caddyfile | cmp -s - caddy/Caddyfile; then
             $COMPOSE exec -T caddy caddy reload --config /etc/caddy/Caddyfile
@@ -338,20 +336,6 @@ jobs:
           fi
           sleep 2
           curl -fsS -o /dev/null http://127.0.0.1:8085/health
-          # Retry briefly: right after a recreate the container may still be
-          # binding 8443. curl's own failure (connection refused -> exit 7,
-          # code 000) must not abort under `set -e` before the message below.
-          OPS_CODE=000
-          for _try in 1 2 3 4 5; do
-            OPS_CODE=$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8443/ || true)
-            OPS_CODE=${OPS_CODE:-000}
-            [ "$OPS_CODE" = "401" ] && break
-            sleep 2
-          done
-          if [ "$OPS_CODE" != "401" ]; then
-            echo "ops dashboard on 127.0.0.1:8443 answered HTTP $OPS_CODE without credentials (expected 401)" >&2
-            exit 1
-          fi
           REMOTE
 
       - name: Set up Xserver deploy key

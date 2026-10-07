@@ -2,7 +2,7 @@
 #
 # ⚠ 2026-10-07 時点で、この override はどの host でも使っていない。
 #   公開サイトは web host (edge CDN 背後) が配信し、validator host の Caddy は
-#   docker-compose.behind-proxy.yml + docker-compose.ops-tunnel.yml (loopback のみ)。
+#   docker-compose.behind-proxy.yml (loopback 8085 のみ)。
 #   validator host でこれを使うと 80/443 を公開し、届かない ACME を回し続ける。
 #
 # 起動:
@@ -23,9 +23,6 @@ services:
       - "80:80"
       - "443:443"
       - "443:443/udp"   # HTTP/3
-      # ops dashboard: 127.0.0.1 bind = SSH tunnel only, never public
-      - "127.0.0.1:8443:8443"
     environment:
       - DOMAIN=${DOMAIN:-metal.freedom-yield.com}
       - ACME_EMAIL=${ACME_EMAIL:?ACME_EMAIL is required for production (Let's Encrypt account)}
-      - OPS_BASIC_AUTH_HASH=${OPS_BASIC_AUTH_HASH:?OPS_BASIC_AUTH_HASH (bcrypt) required for ops dashboard}
