@@ -69,7 +69,7 @@ VPS が「明日突然消失」した時に、同じ NodeID を持つ validator 
 
 ### validator host の git 管理外設定(`/etc/freedom-yield/` + `<deploy_path>/.env`)
 
-git に無いので repo からは戻らない。`/etc/freedom-yield/`(`web-host` / `ntfy-topic` / `calendar-token` / `wallet-addresses.json` / `watch-list.json` 等)と、deploy checkout の `.env`(`OPS_BASIC_AUTH_HASH` 等)。
+git に無いので repo からは戻らない。`/etc/freedom-yield/`(`web-host` / `ntfy-topic` / `calendar-token` / `wallet-addresses.json` / `watch-list.json` 等)と、deploy checkout の `.env`(`METAL_NETWORK` / `METAL_PUBLIC_IP` 等)。
 
 - **取り方(AI が実行。operator の入力なし)**: Mac で `scripts/operator-local/backup-host-config.sh` を非対話で実行する。host では read-only の `tar -cf -` と `sha256sum` だけが走る。tar の stream は ssh 越しにそのまま `age -R`(宛先 = operator identity の **公開鍵** `~/.ssh/freedom-yield-operator-identity.pub`、ssh-ed25519。`BACKUP_RECIPIENT_PUBKEY` で変更可)へ流れるので、平文は host にも Mac にもファイルとして残らない。暗号化に要るのは公開鍵だけなので、パスフレーズは一切聞かない。宛先に秘密鍵や ssh-ed25519 以外の鍵を渡すと、host に触る前に拒否する。
   ```bash
@@ -79,7 +79,7 @@ git に無いので repo からは戻らない。`/etc/freedom-yield/`(`web-host
   - 出力: `~/fy-host-config-backup-<UTC yyyymmdd>.tar.age` と、その隣の `.tar.age.manifest.age`(host 側の各ファイルの sha256 と名前だけ。中身は入らない)。どちらも mode 600。manifest も同じ公開鍵へ age で暗号化する。値の種類が少ないファイル(1 語のチェーン名など)は hash から中身を当てられるので、平文の manifest は実行中の一時 dir(mode 600)にだけ置き、成功・失敗どちらの終わり方でも消す。
   - 検証(AI は復号できない設計なので、復号せずに確かめる): (a) 暗号化した stream そのものの名前一覧を途中で取り出し、host の一覧と一致すること (b) age v1 の header に宛先 stanza がちょうど 1 つで、型が ssh-ed25519、tag が公開鍵から計算した値と一致すること (c) ファイルの大きさが平文の byte 数から計算した age の大きさと一致すること (d) manifest の各行が `<sha256>  <名前>` の形で、ファイルの集合が archive と一致すること (e) manifest を暗号化し、その header と大きさも (b)(c) と同じく確かめること。全部通った時だけ `~/Dropbox/metal-validator-backup/` へ `.age` の 2 つだけをコピーし、sha256 を照合して表示する。1 つでも落ちれば `*.VERIFY-FAILED` に改名して残し、コピーしない(exit 1)。
   - 事前確認だけなら `--dry-run`(名前一覧のみ、何も書かない)。
-  - **いつ取るか**: `/etc/freedom-yield/` か `.env` を変えた時(installer の再実行、topic・token の差し替え、BasicAuth 変更)と、下の四半期ドリルの時。
+  - **いつ取るか**: `/etc/freedom-yield/` か `.env` を変えた時(installer の再実行、topic・token の差し替え)と、下の四半期ドリルの時。
 - **戻し方(新 host へ。災害時だけ、operator が行う)**: 復号には operator identity の **秘密鍵** `~/.ssh/freedom-yield-operator-identity` が要り、`age` がその鍵のパスフレーズを端末で聞く。日常のバックアップ・ドリルでこの鍵を使う場面は無い。手順は `bash scripts/operator-local/backup-host-config.sh --restore-help` が表示する(AI でも実行できる。何も復号しない)。Mac でパイプへ復号し、そのまま新 host で展開する(Mac のディスクに平文を置かない)。
   ```bash
   age -d -i ~/.ssh/freedom-yield-operator-identity ~/fy-host-config-backup-<yyyymmdd>.tar.age \
@@ -132,7 +132,7 @@ scp -i ~/.ssh/<your_validator_host_key> ~/staker-backup-<yyyymmdd>.tar.gz.enc ro
 #    METAL_NETWORK / METAL_PUBLIC_IP は docker-compose.metalgo.prod.yml の command で
 #    「:?」必須 → 無いと metalgo は起動しない。METAL_STAKING_BIND は
 #    docker-compose.metalgo.yml の ports で既定 127.0.0.1(= ピア不達、uptime ゼロ)。
-#    OPS_BASIC_AUTH_HASH は docker-compose.ops-tunnel.yml で「:?」必須(Caddy の ops dashboard)。
+#    Caddy に必須の変数は無い(運用ダッシュボードと OPS_BASIC_AUTH_HASH は 2026-10-07 に廃止)。
 #    METALGO_DATA_PATH は旧 .env で使っていた場合のみ同じ値を入れる(Step 6 は実際の
 #    mount 先を compose から引くので、どちらでも動く)。METAL_IMAGE_TAG / METAL_MEM_LIMIT /
 #    METAL_CPUS は任意(旧 .env に値があれば揃える)。
@@ -149,7 +149,6 @@ METAL_PUBLIC_IP=<新IP>
 METAL_STAKING_BIND=0.0.0.0
 DOMAIN=metal.freedom-yield.com
 ACME_EMAIL=info@metal.freedom-yield.com
-OPS_BASIC_AUTH_HASH='<bcrypt hash、operator-local 保管>'
 EOF
 
 # 6. 鍵の置き場を確定 → 復号 + 配置 → 公開前の NodeID 確認
@@ -210,8 +209,8 @@ curl -sS -X POST -H 'content-type:application/json' \
 #   docker compose -f docker-compose.metalgo.yml -f docker-compose.metalgo.prod.yml stop metalgo
 #   docker compose -f docker-compose.metalgo.yml -f docker-compose.metalgo.prod.yml down
 # "not ready" / 空なら 30 秒待って再確認。NodeID が一致するまで Caddy に進まない
-# Caddy は deploy.yml と同じ 3 本 (loopback 8085 + ops 8443 のみ。80/443 は使わない)
-docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml -f docker-compose.ops-tunnel.yml up -d --build
+# Caddy は deploy.yml と同じ 2 本 (loopback 8085 のみ。80/443 は使わない)
+docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml up -d --build
 docker ps --filter label=com.docker.compose.service=metalgo --format '{{.Names}} {{.Status}}'
 docker ps --filter name=caddy-static --format '{{.Names}} {{.Status}}'
 # 期待: どちらも 1 行で Up
@@ -307,7 +306,6 @@ METAL_PUBLIC_IP=<新IP>
 METAL_STAKING_BIND=0.0.0.0
 DOMAIN=metal.freedom-yield.com
 ACME_EMAIL=info@metal.freedom-yield.com
-OPS_BASIC_AUTH_HASH='<bcrypt hash、operator-local 保管>'
 EOF
 ```
 
@@ -384,10 +382,11 @@ watch -n 30 'curl -sS -X POST -H "content-type:application/json" \
 ```sh
 # validator host の Caddy は 1 つだけ。公開サイトは web host が配信するので
 # ここでは 80/443 も Let's Encrypt も使わない (docker-compose.prod.yml は使わない)
-docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml -f docker-compose.ops-tunnel.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml up -d --build
 
 curl -fsS http://127.0.0.1:8085/health                                  # 期待: ok
-curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8443/        # 期待: 401 (BasicAuth)
+# 運用ダッシュボード (127.0.0.1:8443、SSH トンネル + BasicAuth) は 2026-10-07 に廃止
+# (operator 決定。一度も使われず、operator 用 /status/ ページと重複)。8443 は立てない
 ```
 
 ### Step 7: GitHub Actions deploy の宛先更新 (5 分)

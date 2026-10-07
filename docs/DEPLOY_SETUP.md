@@ -181,7 +181,7 @@ cron backstop の節を参照。
 ## 関連
 
 - [.github/workflows/deploy.yml](../.github/workflows/deploy.yml) — 実際の workflow 定義
-- [docker-compose.behind-proxy.yml](../docker-compose.behind-proxy.yml) + [docker-compose.ops-tunnel.yml](../docker-compose.ops-tunnel.yml) — deploy.yml の「Bring up / reload Caddy on VPS」ステップが実際に読む override(`docker-compose.yml` と合わせて 3 本で起動)。validator host の Caddy はこの 1 つ (`caddy-static`) だけで、`127.0.0.1:8085`(deploy の health check)と `127.0.0.1:8443`(ops dashboard、SSH トンネル + BasicAuth。host `.env` の `OPS_BASIC_AUTH_HASH` が無いと起動拒否)のみを bind する。`docker-compose.prod.yml` は Caddy が直接 80/443 を bind する別トポロジ用の override で、この自動 deploy では使われない(手動運用手順は [docs/DISASTER_RECOVERY.md](DISASTER_RECOVERY.md) 等を参照)
+- [docker-compose.behind-proxy.yml](../docker-compose.behind-proxy.yml) — deploy.yml の「Bring up / reload Caddy on VPS」ステップが実際に読む override(`docker-compose.yml` と合わせて 2 本で起動)。validator host の Caddy はこの 1 つ (`caddy-static`) だけで、`127.0.0.1:8085`(deploy の health check)のみを bind する。運用ダッシュボード(`127.0.0.1:8443`、SSH トンネル + BasicAuth、`docker-compose.ops-tunnel.yml` と host `.env` の `OPS_BASIC_AUTH_HASH`)は 2026-10-07 に operator の決定で廃止した(一度も使われず、operator 用 `/status/` ページと重複)。`docker-compose.prod.yml` は Caddy が直接 80/443 を bind する別トポロジ用の override で、この自動 deploy では使われない(手動運用手順は [docs/DISASTER_RECOVERY.md](DISASTER_RECOVERY.md) 等を参照)
 - [docs/HOST_CHECKOUT_AUTO_ADVANCE.md](HOST_CHECKOUT_AUTO_ADVANCE.md) — validator host の git `HEAD` を `origin/main` に FF-only で追従させる self-heal の仕組み(git advance が担う「`public/` 以外の全ファイル配信」の実装)
 - [docs/DEPLOY_OWNERSHIP_MATRIX.md](DEPLOY_OWNERSHIP_MATRIX.md) — git 配信 vs rsync 配信の単一ルールと、`public/api/` 個別ファイルの所有権表
 - [docs/MAINNET_MIGRATION.md](MAINNET_MIGRATION.md) — Tahoe→mainnet 段階移行(本 deploy 設定もそこに連動)

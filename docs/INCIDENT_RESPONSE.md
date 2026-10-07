@@ -31,7 +31,7 @@
 
 **症状**: 外部からアクセス不可、Uptime check が連続 fail。
 
-> **どの host か**: 公開サイトは **web host** (edge CDN 背後の公開 origin。host の nginx → loopback の `caddy-static` container) が配信する。**validator host** の Caddy (同じく `caddy-static`、project `site`) は loopback 8085 (deploy の health check) と ops dashboard 8443 だけで、80/443 を持たず公開サイトには関与しない。以下の手順 1〜3 は手元 (Mac) から、4〜6 は web host、7 は両 host が対象。validator host 側の Caddy 停止 (ops dashboard が見えない) は §3.1.1。
+> **どの host か**: 公開サイトは **web host** (edge CDN 背後の公開 origin。host の nginx → loopback の `caddy-static` container) が配信する。**validator host** の Caddy (同じく `caddy-static`、project `site`) は loopback 8085 (deploy の health check) だけで、80/443 を持たず公開サイトには関与しない。以下の手順 1〜3 は手元 (Mac) から、4〜6 は web host、7 は両 host が対象。validator host 側の Caddy 停止 (次の deploy の health check が落ちる) は §3.1.1。
 
 **調査手順**:
 
@@ -74,9 +74,11 @@ sudo ufw status verbose
 - DNS 消失 → edge CDN dashboardで A レコード復元
 - TLS 期限切れ → TLS は web host の nginx が終端する (validator host の Caddy は 443 を持たない)。web host で Let's Encrypt の更新を再走らせる。それでも駄目なら ACME challenge 経路 (HTTP-01 が edge proxy でブロックされていないか) を確認
 
-#### 3.1.1 validator host の Caddy 停止 (ops dashboard が見えない)
+#### 3.1.1 validator host の Caddy 停止 (deploy の health check が落ちる)
 
-公開サイトには影響しない。validator host の Caddy は 1 つだけ (container `caddy-static`、project `site`、deploy.yml と同じ 3 本 `docker-compose.yml` + `docker-compose.behind-proxy.yml` + `docker-compose.ops-tunnel.yml`)。`docker-compose.prod.yml` は使わない。
+公開サイトには影響しない。validator host の Caddy は 1 つだけ (container `caddy-static`、project `site`、deploy.yml と同じ 2 本 `docker-compose.yml` + `docker-compose.behind-proxy.yml`)。`docker-compose.prod.yml` は使わない。止まって困るのは次の deploy の health check (`127.0.0.1:8085`) だけ。
+
+> 運用ダッシュボード (`127.0.0.1:8443`、SSH トンネル + BasicAuth、2026-05-19 構築) は **2026-10-07 に operator の決定で廃止**した。理由: 稼働期間中一度も使われず、operator 用の `/status/` ページ (web host、Cloudflare Access、外部見張りの watch-status.json が元データ) と役割が重複していた。8443 の確認は不要。
 
 ```bash
 # [validator host] ID で特定してから操作する (check-anomalies の「Caddy 停止」通知と同じ手順)
@@ -85,11 +87,10 @@ docker logs --tail 50 <上の ID>
 docker start <上の ID>     # どれか不明なら start せず止めて確認
 
 curl -fsS http://127.0.0.1:8085/health                              # 期待: ok
-curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8443/   # 期待: 401 (BasicAuth)
 ```
 
 - 素の `docker compose up -d` は実行しない (今いる dir の compose で別物が起動しうる。metalgo 側は別 NodeID になる: [DISASTER_RECOVERY.md 冒頭の警告](DISASTER_RECOVERY.md))
-- 作り直しが必要なら `<deploy_path>` で上の 3 本を明示して実行する ([DISASTER_RECOVERY.md Step 6](DISASTER_RECOVERY.md) と同じ)。`caddy` サービスだけを対象にする: `docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml -f docker-compose.ops-tunnel.yml up -d caddy`
+- 作り直しが必要なら `<deploy_path>` で上の 2 本を明示して実行する ([DISASTER_RECOVERY.md Step 6](DISASTER_RECOVERY.md) と同じ)。`caddy` サービスだけを対象にする: `docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml up -d caddy`
 
 ### 3.2 metalgo container down / unhealthy
 
