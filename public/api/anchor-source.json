@@ -1,23 +1,23 @@
 {
   "$schema": "https://metal.freedom-yield.com/api/anchor-source.schema.v1.json",
   "schema_version": 1,
-  "computed_at": "2026-09-04T05:24:17Z",
+  "computed_at": "2026-10-07T05:06:04Z",
   "computed_by_script": "gen-anchor-source.sh v1.0",
-  "computed_from_git_commit": "7558a8ef7840072964d929b32c655e98850822b4",
+  "computed_from_git_commit": "d5108f38d56ccfd737f2e78b705b8005a8d7bbc5",
   "identity_branch": {
     "operator_ed25519_pubkey_sha256_hex": "fbe80f02216fe82d06e5ef5cf20e75f14df7e85c42dd068c00436c9e7d863ffe",
     "operator_asserts_node_id": "NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v",
-    "prev_anchor_root": "063f753ebb79229064375b967db59421ba4f8e9e30c194a92d9c326e08f96dd1",
-    "prev_anchor_tx": "32529f4aadee1ef9906fd6be5253ceb9ea9a5b8b76b55c0cf41770ec36eefc4c",
+    "prev_anchor_root": "bc947ee67ace9ba95aa4af79745fa004f9ef9accdfd7313cafe647c70d16c886",
+    "prev_anchor_tx": "4117d87ddae4cf68f30f60298675fb568b0863a1b458db8b11c081ff0ebeec40",
     "key_seq": 1,
     "identity_history_root": "0021e4d21564c3ed5ccfbdd836d11e805b8b667d0b200f9cc55e3133a18c5856"
   },
   "observations_branch": {
-    "cycle_number_observed": 5,
-    "cycle_start_time_observed": "2026-09-04T05:13:50Z",
-    "cycle_end_time_observed": "2026-10-07T04:30:08Z",
-    "self_stake_observed_metal": 23750,
-    "self_stake_observed_nmetal": "23750000000000",
+    "cycle_number_observed": 6,
+    "cycle_start_time_observed": "2026-10-07T04:51:35Z",
+    "cycle_end_time_observed": "2026-11-06T04:00:25Z",
+    "self_stake_observed_metal": 26023,
+    "self_stake_observed_nmetal": "26023000000000",
     "fee_percent_observed_at_cycle_start": 3,
     "delegator_lifecycle_observation_window_started_at": "2026-07-01T06:02:00Z",
     "delegator_lifecycle_events_in_cycle_observed": [],
@@ -31,11 +31,11 @@
     "subnet_targets_declared_by_operator": []
   },
   "artifacts_branch": {
-    "public_api_manifest_root": "ac7b4afcc4a261f4378f4ecc73155e9af085a5e637d5eeaa3074be1c790350da",
+    "public_api_manifest_root": "1171211e3f0dbbc3f3fecb7f0b2022081b6faac77195f75ff658424cc8d14450",
     "public_api_files_hashed": [
       {
         "path": "evidence.json",
-        "sha256": "47f6cfbcd22411d52991e46f907d6a7575a528affcd35855a607ce4ff91393f1"
+        "sha256": "f3cf0edc2282865703f97e5ba42cfae44b8436e310c453cef4c3fb2df1f8f284"
       },
       {
         "path": "identity-history.jsonl",
@@ -43,31 +43,31 @@
       },
       {
         "path": "identity.json",
-        "sha256": "862992d8abcccddf0e3a8c914215afc464b538d6c6325a8849ed4c365ddc97d4"
+        "sha256": "5cdb4ef229b755c218bec86dc90d3f32ccb39f4c2bec9d4a4703aa164ef7f183"
       },
       {
         "path": "peer-geo.json",
-        "sha256": "1b89172ab904d8df30331e09757ba797450149a31b99c3f878839d4f0bcaec19"
+        "sha256": "5cd56383d0ef6a623b4e0b6972005c05303a3b6ddc12c4b369014d4c7bc36fad"
       },
       {
         "path": "peers.json",
-        "sha256": "07f039464a478b88c8b64228c495c6b2a0c2833eb9be3c6f4b30a683fc2a8cfc"
+        "sha256": "0dca8d0919a733aafb35f363817a407cdfaa8a21d1ffc0bf82efe131d572246b"
       },
       {
         "path": "uptime-cycles.json",
-        "sha256": "e47eb045e0c07882b3191571d871243a30d5162ac53fb25d1c1d8e0d117ffb3d"
+        "sha256": "bb9dd1de6aac6a92c7c6a750844b2826cbb41b95e2567b7b6723764539832eb1"
       },
       {
         "path": "uptime-recent.json",
-        "sha256": "9b05993cd6542abf7a4579e94bfae1b5816bd94cf3d1d20c01eb84e62a3bdbbd"
+        "sha256": "b304d69a4e9a7952ca9b3d4489e04d151d50852453b9f801a50eed0ab356fd41"
       },
       {
         "path": "validator.json",
-        "sha256": "cf543c92c176d53c72c60dfcbeb387ef5967a0e09ead673c25d1ed28994eb390"
+        "sha256": "ff456f546d738e9f12c5e23cb504276f6612a37d881c1992223786d2d847f639"
       }
     ],
-    "period_uptime_observed_pct": 100.0000,
+    "period_uptime_observed_pct": 93.7198,
     "period_incident_count_observed": 0
   },
-  "dag_root_computed": "bc947ee67ace9ba95aa4af79745fa004f9ef9accdfd7313cafe647c70d16c886"
+  "dag_root_computed": "abaaded0710537c3b843d2d2bde1732a837c4187796cec93f6f94afea26067e5"
 }
