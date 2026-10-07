@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # VPS bootstrap — provision a fresh Ubuntu 22.04 VPS to host the Metal
-# Blockchain validator + Caddy + this site.
+# Blockchain validator and this repository's host-side cron scripts.
+# No web server: the public site is served by the web host, and no Caddy runs
+# on the validator host (removed 2026-10-07, operator decision).
 #
 # Usage (on a brand-new validator host VPS, as root):
 #   curl -fsSLO https://raw.githubusercontent.com/<owner>/metal.freedom-yield.com/main/scripts/vps-bootstrap.sh
@@ -29,7 +31,7 @@ require_root() {
 }
 
 step_packages() {
-  log "Step 1/8: apt update + install required packages"
+  log "Step 1/7: apt update + install required packages"
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
   apt-get install -y -qq \
@@ -46,9 +48,9 @@ step_packages() {
 }
 
 step_firewall() {
-  log "Step 2/8: ufw firewall (deny incoming, allow 22/tcp + 9651/tcp only)"
+  log "Step 2/7: ufw firewall (deny incoming, allow 22/tcp + 9651/tcp only)"
   # No 80/443: nothing listens there. The public site is served by the web
-  # host and this host's Caddy binds loopback 127.0.0.1:8085 only. The live
+  # host and no Caddy runs on this host (removed 2026-10-07). The live
   # validator host's 80/tcp, 443/tcp, 443/udp rules (v4+v6) were removed on
   # 2026-10-07 (operator-approved); this template now matches it.
   ufw default deny incoming >/dev/null
@@ -60,7 +62,7 @@ step_firewall() {
 }
 
 step_ssh_hardening() {
-  log "Step 3/8: SSH hardening (PasswordAuthentication no, key-only)"
+  log "Step 3/7: SSH hardening (PasswordAuthentication no, key-only)"
   cat > /etc/ssh/sshd_config.d/99-disable-password.conf <<'EOF'
 # Disable password-based SSH (key-only) — defense in depth
 # Managed by scripts/vps-bootstrap.sh
@@ -73,7 +75,7 @@ EOF
 }
 
 step_deploy_user() {
-  log "Step 4/8: deploy user + SSH access for GitHub Actions"
+  log "Step 4/7: deploy user + SSH access for GitHub Actions"
   if ! id -u "$DEPLOY_USER" >/dev/null 2>&1; then
     useradd -m -s /bin/bash "$DEPLOY_USER"
     usermod -aG docker "$DEPLOY_USER"
@@ -94,7 +96,7 @@ step_deploy_user() {
 }
 
 step_repo() {
-  log "Step 5/8: clone or pull the repository"
+  log "Step 5/7: clone or pull the repository"
   if [ ! -d "$DEPLOY_DIR/.git" ]; then
     sudo -u "$DEPLOY_USER" git clone https://github.com/freedomyield/metal.freedom-yield.com.git "$DEPLOY_DIR"
   else
@@ -104,16 +106,17 @@ step_repo() {
 }
 
 step_server_status_cron() {
-  log "Step 6c/8: install 1-minute server-status.json refresh cron (host monitoring)"
+  log "Step 6c/7: install 1-minute server-status.json refresh cron (host monitoring)"
   # 2026-08-06 (H2): SHELL/PATH headers (Rule 5) and the brace-wrapped
   # start/end markers + rc=$? capture (Rules 2/3) were missing here — the
   # linter (scripts/check-cron-file.sh) was never green against this
   # template's own output. Schedule/user/command body/log target below are
   # UNCHANGED; only the audit-visibility wrapper was added. See
   # docs/CRON_CONVENTIONS.md rules 2/3/5.
-  # server-status.sh refuses to run (:?) without METALGO_CONTAINER and
-  # CADDY_CONTAINER. Caddy is the one deploy-managed container (container_name
-  # in docker-compose.yml). metalgo's name follows the same rule as
+  # server-status.sh refuses to run (:?) without METALGO_CONTAINER. There is
+  # no CADDY_CONTAINER: no Caddy runs on the validator host since 2026-10-07,
+  # and server-status.json no longer carries a caddy field. metalgo's name
+  # follows the same rule as
   # docker-compose.metalgo.prod.yml: METALGO_CONTAINER_NAME from .env, else
   # metalgo-<METAL_NETWORK> (default mainnet).
   local env_file="$DEPLOY_DIR/.env" mg_name="" mg_net=""
@@ -127,7 +130,6 @@ step_server_status_cron() {
 SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin
 METALGO_CONTAINER=${metalgo_container:-metalgo-mainnet}
-CADDY_CONTAINER=caddy-static
 * * * * * $DEPLOY_USER { echo "=== metal-server-status start \$(date -u +\%FT\%TZ) ==="; bash $DEPLOY_DIR/scripts/server-status.sh; rc=\$?; echo "=== metal-server-status end \$(date -u +\%FT\%TZ) rc=\$rc ==="; } >> /var/log/server-status.log 2>&1
 EOF
   chmod 644 /etc/cron.d/metal-server-status
@@ -150,7 +152,7 @@ EOF
 }
 
 step_node_info_cron() {
-  log "Step 6a/8: install 5-minute validator.json refresh cron"
+  log "Step 6a/7: install 5-minute validator.json refresh cron"
   # PWA countdown / explorer link / public stake values are read from
   # public/api/validator.json, which is refreshed by this cron from metalgo.
   # 2026-08-06 (H2): SHELL/PATH headers (Rule 5) and the brace-wrapped
@@ -184,7 +186,7 @@ EOF
 }
 
 step_daily_status_cron() {
-  log "Step 6e/8: install daily status digest cron (09:00 JST = 00:00 UTC)"
+  log "Step 6e/7: install daily status digest cron (09:00 JST = 00:00 UTC)"
   # 2026-08-06 (H2): SHELL/PATH headers (Rule 5) and the brace-wrapped
   # start/end markers + rc=$? capture (Rules 2/3) were missing here.
   # Schedule/user/command body/log target below are UNCHANGED; only the
@@ -220,7 +222,7 @@ EOF
 }
 
 step_anomaly_cron() {
-  log "Step 6d/8: install 5-minute anomaly detector cron (ntfy.sh push)"
+  log "Step 6d/7: install 5-minute anomaly detector cron (ntfy.sh push)"
   mkdir -p /var/lib/freedom-yield
   chown "$DEPLOY_USER:$DEPLOY_USER" /var/lib/freedom-yield
   if [ ! -f /etc/freedom-yield/ntfy-topic ]; then
@@ -268,7 +270,7 @@ EOF
 }
 
 step_period_check_cron() {
-  log "Step 6b/8: install daily validator-period check cron"
+  log "Step 6b/7: install daily validator-period check cron"
   cp "$DEPLOY_DIR/scripts/check-validator-period.sh" /usr/local/bin/check-validator-period.sh 2>/dev/null \
     || cat > /usr/local/bin/check-validator-period.sh <<'CRON_SCRIPT'
 #!/usr/bin/env bash
@@ -406,7 +408,7 @@ resolve_metalgo_data_dir() {
 }
 
 step_metalgo() {
-  log "Step 7/8: bring up metalgo (mainnet) — staker keys must be in place first"
+  log "Step 7/7: bring up metalgo (mainnet) — staker keys must be in place first"
   cd "$DEPLOY_DIR"
   if [ ! -f .env ]; then
     # Compose cannot even be evaluated without .env (METAL_NETWORK /
@@ -457,19 +459,6 @@ step_metalgo() {
     http://localhost:9650/ext/info | jq -r '.result.nodeID // "not ready yet"'
 }
 
-step_caddy() {
-  log "Step 8/8: bring up Caddy (internal site 127.0.0.1:8085 only)"
-  cd "$DEPLOY_DIR"
-  # Same file set as .github/workflows/deploy.yml's Caddy step: the validator
-  # host runs ONE Caddy, loopback only (no 80/443 — the public site is served
-  # by the web host). docker-compose.prod.yml (80/443 + ACME) is not used here.
-  # The ops dashboard (127.0.0.1:8443 + OPS_BASIC_AUTH_HASH in .env) was
-  # abolished on 2026-10-07, so Caddy no longer needs anything from .env.
-  docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml up -d --build
-  sleep 5
-  docker ps --filter name=caddy-static --format 'table {{.Names}}\t{{.Status}}'
-}
-
 main() {
   require_root
   step_packages
@@ -483,10 +472,8 @@ main() {
   step_daily_status_cron
   step_period_check_cron
   step_metalgo
-  step_caddy
   log "DONE. Verify with:"
   echo "  - bash scripts/node-info.sh (expect NodeID-yyPvtQHTA4...)"
-  echo "  - curl -I http://localhost (expect Caddy 200/302)"
   echo "  - tail /var/log/validator-period.log"
 }
 

@@ -11,15 +11,14 @@
 # pins already carried by:
 #   - tests/deploy/test-host-rsync-excludes.sh    (advance step shape, the
 #     public/ rsync step's exact source/dest + flags, step order)
-#   - tests/deploy/test-caddyfile-stale-mount-heal.sh (Caddy step's
-#     cmp/reload/force-recreate/health-check content)
-# Those two pin what each block currently looks like. This suite instead
+#   - tests/deploy/test-validator-host-no-caddy.sh (no Caddy / container
+#     step on the validator host since 2026-10-07)
+# Those pin what each block currently looks like. This suite instead
 # pins invariants that must hold regardless of how those blocks are worded —
 # so a future edit that satisfies the letter of the per-block tests but
 # reintroduces the old architecture (e.g. a second, differently-named
-# whole-repo rsync step; a duplicated self-heal call; a health check that
-# only guards one branch of the reload/force-recreate conditional) still
-# gets caught here.
+# whole-repo rsync step; a duplicated self-heal call) still gets caught
+# here.
 #
 # Env overrides (test-time only):
 #   FYD_WORKFLOW_FILE   path to the workflow file to check (default: this
@@ -90,7 +89,6 @@ fi
 #        $DEPLOY_PATH/public/ — never the bare $DEPLOY_PATH root. ---
 ADV_LINE="$(grep -n -F -- '- name: Advance host checkout to origin/main' "${WORKFLOW}" | head -1 | cut -d: -f1)"
 RSYNC_LINE="$(grep -n -F -- '- name: Rsync public/ to VPS' "${WORKFLOW}" | head -1 | cut -d: -f1)"
-CADDY_LINE="$(grep -n -F -- '- name: Bring up / reload Caddy on VPS' "${WORKFLOW}" | head -1 | cut -d: -f1)"
 XS_LINE="$(grep -n -F -- '- name: Set up Xserver deploy key' "${WORKFLOW}" | head -1 | cut -d: -f1)"
 
 if [ -n "${ADV_LINE}" ] && [ -n "${XS_LINE}" ] && [ "${ADV_LINE}" -lt "${XS_LINE}" ]; then
@@ -119,8 +117,8 @@ fi
 #        from GitHub independently of the runner, so a ref-advertisement
 #        lag could let the advance exit 0 with the host still short of the
 #        pushed commit. `merge-base --is-ancestor` inside the advance step
-#        is what turns "the compose step runs against the pushed commit's
-#        files" from a claim into an enforced invariant. ---
+#        is what turns "the host holds the pushed commit's files" from a
+#        claim into an enforced invariant. ---
 if [ -n "${ADV_LINE}" ]; then
   ADV_NEXT="$(awk -v start="${ADV_LINE}" 'NR>start && /^      - name:/{print NR; exit}' "${WORKFLOW}")"
   [ -n "${ADV_NEXT}" ] || ADV_NEXT=$((ADV_LINE + 1000))
@@ -134,18 +132,18 @@ else
   no "cannot check post-advance commit assertion: 'Advance host checkout to origin/main' step not found"
 fi
 
-# --- 4. step order: Advance < Rsync public/ < Bring up/reload Caddy. The
-#        advance step must run first (git delivers everything else before
-#        Caddy is (re)started against it); the public/ rsync must land
-#        before Caddy comes up so the served tree is never stale. ---
-if [ -n "${ADV_LINE}" ] && [ -n "${RSYNC_LINE}" ] && [ -n "${CADDY_LINE}" ]; then
-  if [ "${ADV_LINE}" -lt "${RSYNC_LINE}" ] && [ "${RSYNC_LINE}" -lt "${CADDY_LINE}" ]; then
-    ok "step order holds: Advance host checkout (${ADV_LINE}) < Rsync public/ to VPS (${RSYNC_LINE}) < Bring up / reload Caddy on VPS (${CADDY_LINE})"
+# --- 4. step order: Advance < Rsync public/. The advance step must run
+#        first (git delivers every tracked file before the rsync stamps
+#        public/). The Caddy step that used to follow was removed on
+#        2026-10-07 (no Caddy on the validator host). ---
+if [ -n "${ADV_LINE}" ] && [ -n "${RSYNC_LINE}" ]; then
+  if [ "${ADV_LINE}" -lt "${RSYNC_LINE}" ]; then
+    ok "step order holds: Advance host checkout (${ADV_LINE}) < Rsync public/ to VPS (${RSYNC_LINE})"
   else
-    no "step order violated: advance=${ADV_LINE} rsync=${RSYNC_LINE} caddy=${CADDY_LINE} (required: advance < rsync < caddy)"
+    no "step order violated: advance=${ADV_LINE} rsync=${RSYNC_LINE} (required: advance < rsync)"
   fi
 else
-  no "could not locate all three of 'Advance host checkout to origin/main', 'Rsync public/ to VPS', 'Bring up / reload Caddy on VPS' to check ordering"
+  no "could not locate both 'Advance host checkout to origin/main' and 'Rsync public/ to VPS' to check ordering"
 fi
 
 # --- 5. the daily self-heal cron backstop stays wired to this exact script.
@@ -155,37 +153,6 @@ if [ -f "${CRON_INSTALLER}" ] && grep -q 'advance-host-checkout.sh' "${CRON_INST
   ok "scripts/install-metal-host-advance-cron.sh exists and still references advance-host-checkout.sh"
 else
   no "scripts/install-metal-host-advance-cron.sh is missing, or no longer references advance-host-checkout.sh"
-fi
-
-# --- 6. (Task 3 review addition) within the "Bring up / reload Caddy on
-#        VPS" step, the trailing curl -fsS .../health check must appear
-#        AFTER the `fi` that closes the reload/force-recreate conditional —
-#        i.e. it must run regardless of which branch (in-place reload vs.
-#        force-recreate) executed, not just guard one of them. Compares
-#        line positions within the step's own extracted block only. ---
-if [ -n "${CADDY_LINE}" ]; then
-  CADDY_NEXT="$(awk -v start="${CADDY_LINE}" 'NR>start && /^      - name:/{print NR; exit}' "${WORKFLOW}")"
-  [ -n "${CADDY_NEXT}" ] || CADDY_NEXT=$((CADDY_LINE + 1000))
-  CADDY_BLOCK="$(sed -n "${CADDY_LINE},$((CADDY_NEXT - 1))p" "${WORKFLOW}")"
-
-  FORCE_RECREATE_LINE="$(printf '%s\n' "${CADDY_BLOCK}" | grep -n -F -- '--force-recreate caddy' | head -1 | cut -d: -f1)"
-  FI_LINE=""
-  if [ -n "${FORCE_RECREATE_LINE}" ]; then
-    FI_LINE="$(printf '%s\n' "${CADDY_BLOCK}" | awk -v start="${FORCE_RECREATE_LINE}" 'NR>start && /^[[:space:]]*fi[[:space:]]*$/{print NR; exit}')"
-  fi
-  HEALTH_LINE="$(printf '%s\n' "${CADDY_BLOCK}" | grep -n -E -- 'curl -fsS.*/health' | head -1 | cut -d: -f1)"
-
-  if [ -n "${FI_LINE}" ] && [ -n "${HEALTH_LINE}" ]; then
-    if [ "${FI_LINE}" -lt "${HEALTH_LINE}" ]; then
-      ok "curl -fsS .../health (step-block line ${HEALTH_LINE}) runs AFTER the fi closing the reload/force-recreate conditional (step-block line ${FI_LINE}) — guards both branches"
-    else
-      no "curl -fsS .../health (step-block line ${HEALTH_LINE}) does NOT run after the closing fi (step-block line ${FI_LINE}) — health check would no longer guard both the reload and force-recreate branches"
-    fi
-  else
-    no "could not locate both the fi closing the reload/force-recreate conditional and the curl -fsS .../health line within the Caddy step block (fi_line='${FI_LINE}' health_line='${HEALTH_LINE}')"
-  fi
-else
-  no "cannot check health-check-after-fi ordering: 'Bring up / reload Caddy on VPS' step not found"
 fi
 
 printf 'RESULTS: %s PASS / %s FAIL\n' "${PASS}" "${FAIL}"
