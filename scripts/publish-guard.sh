@@ -407,11 +407,59 @@ EOF
 			case "$FP" in /*) exit 0 ;; esac
 		fi
 
-		# check-ignore from the file's own worktree too: a path in a linked
-		# worktree is not resolvable from $REPO_ROOT, and without this a file
-		# genuinely gitignored there would newly be scanned.
-		if git -C "$REPO_ROOT" check-ignore -q "$FP" 2>/dev/null; then exit 0; fi
-		if [ -n "$FP_DIR_P" ] && git -C "$FP_DIR_P" check-ignore -q "$FP" 2>/dev/null; then exit 0; fi
+		# Ignore status is a property of the WORKTREE that contains the file,
+		# not of whichever checkout the hook happens to run from.
+		#
+		# This project's SDD worktrees live at <repo>/.claude/worktrees/<name>/,
+		# i.e. physically INSIDE the main checkout, and the main checkout's
+		# .gitignore has `.claude/*`. Asked from $REPO_ROOT (= the main
+		# checkout whenever CLAUDE_PROJECT_DIR is the main repo), check-ignore
+		# therefore answered "ignored" for EVERY file in such a worktree --
+		# including files tracked on the worktree's own branch -- and every
+		# Write/Edit an agent made there skipped this layer entirely (found by
+		# two audits on 2026-10-07; R4-H8 failed when the suite ran from a
+		# worktree, and R4-H13/H14 pin the layout itself).
+		#
+		# So: when the nearest existing ancestor of the file belongs to a
+		# worktree of THIS repository (same common dir), decide ignore status
+		# from that worktree alone. Tracked files are not ignored there
+		# (check-ignore consults the index), untracked ones follow that
+		# worktree's own .gitignore -- so scratch, .env, docs/tasks/ etc.
+		# keep being skipped exactly as before. Any other case (no owning
+		# worktree, or a nested DIFFERENT repository) keeps the previous
+		# two-step check unchanged, so nothing that was scanned before stops
+		# being scanned and no unrelated nested repo is newly scanned.
+		PG_OWN_TOP=""
+		if [ -n "$FP_DIR_P" ]; then
+			PG_OWN_TOP="$(git -C "$FP_DIR_P" rev-parse --show-toplevel 2>/dev/null || true)"
+			if [ -n "$PG_OWN_TOP" ]; then
+				PG_OURS="${PG_OURS:-$(pg_common_dir "$REPO_ROOT" || true)}"
+				PG_OWN_COMMON="$(pg_common_dir "$PG_OWN_TOP" || true)"
+				if [ -z "$PG_OURS" ] || [ -z "$PG_OWN_COMMON" ] \
+					|| ! { [ "$PG_OURS" = "$PG_OWN_COMMON" ] || [ "$PG_OURS" -ef "$PG_OWN_COMMON" ]; }; then
+					PG_OWN_TOP=""
+				fi
+			fi
+		fi
+		if [ -n "$PG_OWN_TOP" ]; then
+			# Physical spelling of the file: physical nearest existing
+			# ancestor + the (not yet existing) remainder of the path, so a
+			# logical /tmp vs /private/tmp spelling cannot make git call the
+			# path "outside repository" (which would read as not-ignored and
+			# so only ever over-scan, but keep it exact anyway).
+			case "$FP" in
+				"$FP_DIR"/*) PG_FP_REST="${FP#"$FP_DIR"}" ;;
+				*)           PG_FP_REST="/${FP##*/}" ;;
+			esac
+			[ "$FP_DIR_P" = "/" ] && PG_FP_REST="${PG_FP_REST#/}"
+			if git -C "$PG_OWN_TOP" check-ignore -q -- "$FP_DIR_P$PG_FP_REST" 2>/dev/null; then exit 0; fi
+		else
+			# check-ignore from the file's own directory too: a path in a
+			# linked worktree is not resolvable from $REPO_ROOT, and without
+			# this a file genuinely gitignored there would newly be scanned.
+			if git -C "$REPO_ROOT" check-ignore -q "$FP" 2>/dev/null; then exit 0; fi
+			if [ -n "$FP_DIR_P" ] && git -C "$FP_DIR_P" check-ignore -q "$FP" 2>/dev/null; then exit 0; fi
+		fi
 		if [ "$FP" = "$DENYLIST_FILE" ]; then exit 0; fi
 		if [ -n "$FP_DIR_P" ] && [ "$FP_DIR_P/${FP##*/}" = "$(pg_canon_file "$DENYLIST_FILE")" ]; then exit 0; fi
 	fi
