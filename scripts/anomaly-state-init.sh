@@ -81,7 +81,7 @@ Required:
                                      script refuses (exit 6) rather than pretending
                                      to succeed — see scripts/lib/side-effects.sh.
   --confirm                          Operator confirmation (refuse to proceed without it)
-  --baseline-status=running|stopped  Initial metalgo + caddy state for the new baseline
+  --baseline-status=running|stopped  Initial metalgo state for the new baseline
 
 Optional:
   --clear-quarantine                 Remove existing \${STATE_DIR}/quarantine/* dirs
@@ -181,7 +181,7 @@ STATE_FILE="$STATE_DIR/anomaly-state.json"
 MISSING_MARKER="$STATE_DIR/.missing-notified.marker"
 QUAR_DIR="$STATE_DIR/quarantine"
 
-# Build the baseline JSON. metalgo/caddy take the operator-declared value;
+# Build the baseline JSON. metalgo takes the operator-declared value;
 # all other gate fields default to "ok" / "yes" / null + alert flags false.
 TMP=$(mktemp -p "$STATE_DIR" .state.init.XXXXXX 2>/dev/null) || {
   echo "ERROR: mktemp failed in $STATE_DIR" >&2
@@ -190,7 +190,6 @@ TMP=$(mktemp -p "$STATE_DIR" .state.init.XXXXXX 2>/dev/null) || {
 cat > "$TMP" <<EOF
 {
   "metalgo": "$BASELINE_STATUS",
-  "caddy": "$BASELINE_STATUS",
   "disk": "ok",
   "memory": "ok",
   "peers": "ok",

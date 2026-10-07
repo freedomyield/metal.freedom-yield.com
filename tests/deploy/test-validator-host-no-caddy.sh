@@ -19,6 +19,10 @@
 #   B  scripts/vps-bootstrap.sh: no step_caddy (sourced, not grepped), no
 #      site-stack `docker compose -f docker-compose.yml … up`, no
 #      CADDY_CONTAINER in the server-status cron; METALGO_CONTAINER stays
+#   M  server-status.sh / check-anomalies.sh / daily-status.sh /
+#      anomaly-state-init.sh: no caddy field, no CADDY_CONTAINER, no Caddy
+#      stop/recovery alert, no caddy state seed (server-status.json schema is
+#      observedAt / host / metalgo / security)
 #   T4 the site Caddy definition (kept: it is the web host's shape) still has
 #      no :8443 site / basic_auth / OPS_BASIC_AUTH_HASH, and the ops-tunnel
 #      override stays deleted
@@ -113,6 +117,32 @@ printf '%s\n' "$M2" | grep -qF "defines step_caddy" && ok "mutant caught via sou
   || bad "sourced definition check has no teeth" "got: ${M2:-<none>}"
 sed -e '/^METALGO_CONTAINER=/d' "$BOOTSTRAP" >"$TMP/boot-m3.sh"
 expect_caught "METALGO_CONTAINER dropped along with CADDY_CONTAINER" "$(check_bootstrap "$TMP/boot-m3.sh")"
+
+# --- M: monitoring no longer watches a validator-host Caddy ------------------
+SS="$REPO/scripts/server-status.sh"
+CA="$REPO/scripts/check-anomalies.sh"
+DS="$REPO/scripts/daily-status.sh"
+SI="$REPO/scripts/anomaly-state-init.sh"
+code_of() { grep -v -E '^[[:space:]]*#' "$1"; }
+# check_monitoring <server-status> <check-anomalies> <daily-status> <state-init>
+check_monitoring() {
+  code_of "$1" | grep -i -E 'caddy' >/dev/null && echo "server-status.sh still reads / requires / publishes caddy"
+  code_of "$2" | grep -E '\.caddy|OBS_CADDY|Caddy 停止|Caddy 復旧' >/dev/null && echo "check-anomalies.sh still validates / alerts on caddy"
+  code_of "$3" | grep -E '\.caddy|CADDY_S' >/dev/null && echo "daily-status.sh still reads caddy"
+  code_of "$4" | grep -F '"caddy"' >/dev/null && echo "anomaly-state-init.sh still seeds caddy"
+  [ -e "$REPO/scripts/lib/container-status.sh" ] && echo "caddy-only helper scripts/lib/container-status.sh is back"
+  return 0
+}
+echo "M: monitoring has no validator-host Caddy"
+report "M server-status / check-anomalies / daily-status / state-init ignore Caddy" \
+  "$(check_monitoring "$SS" "$CA" "$DS" "$SI")"
+awk '{ print } /^: "\$\{METALGO_CONTAINER:\?/ { print ": \"${CADDY_CONTAINER:?CADDY_CONTAINER is required}\"" }' "$SS" >"$TMP/ss-m.sh"
+expect_caught "server-status requires CADDY_CONTAINER again" "$(check_monitoring "$TMP/ss-m.sh" "$CA" "$DS" "$SI")"
+awk '{ print } /and \(\.metalgo\.peerCount\|type=="number"\)/ { print "      and (.caddy|type==\"object\")" }' "$CA" >"$TMP/ca-m.sh"
+if cmp -s "$TMP/ca-m.sh" "$CA"; then bad "check-anomalies mutant changed the file" "awk matched nothing"
+else expect_caught "check-anomalies K-1 requires .caddy again" "$(check_monitoring "$SS" "$TMP/ca-m.sh" "$DS" "$SI")"; fi
+awk '{ print } /^METALGO_S=/ { print "CADDY_S=$(jq -r '"'"'.caddy.containerStatus'"'"' \"$STATUS_JSON\")" }' "$DS" >"$TMP/ds-m.sh"
+expect_caught "daily-status reads .caddy again" "$(check_monitoring "$SS" "$CA" "$TMP/ds-m.sh" "$SI")"
 
 # --- T4: the kept site definition stays dashboard-free --------------------------
 echo "T4: no dashboard vhost, credential or port in the site Caddy definition"

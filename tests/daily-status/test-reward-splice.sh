@@ -78,7 +78,6 @@ cat > "${S}/public/api/server-status.json" <<JSON
 {
   "observedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "metalgo": { "containerStatus": "running", "peerCount": 120 },
-  "caddy":   { "containerStatus": "running" },
   "host": {
     "cpu":    { "usedPercent": 15 },
     "memory": { "usedPercent": 30 },

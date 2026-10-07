@@ -161,7 +161,6 @@ cat > "$SBX_STATUS" <<EOF
 {
   "observedAt": "$NOW_ISO",
   "metalgo": { "containerStatus": "running", "peerCount": 120 },
-  "caddy":   { "containerStatus": "running" },
   "host": {
     "cpu":    { "usedPercent": 15 },
     "memory": { "usedPercent": 30, "totalKB": 16000000, "usedKB":  4800000 },
@@ -494,7 +493,6 @@ cat > "$SBX_STATUS" <<EOF
 {
   "observedAt": "$NOW_ISO",
   "metalgo": { "containerStatus": "running", "peerCount": 120 },
-  "caddy":   { "containerStatus": "running" },
   "host": {
     "cpu":    { "usedPercent": 15 },
     "memory": { "usedPercent": 30, "totalKB": 16000000, "usedKB":  4800000 },

@@ -5,7 +5,7 @@
 #
 # Detection rules:
 #   - metalgo container not "running"
-#   - caddy   container not "running"
+#     (no Caddy rule: no Caddy runs on the validator host since 2026-10-07)
 #   - disk usedPercent > 85
 #   - memory usedPercent > 95
 #   - peer count < 10
@@ -23,7 +23,7 @@
 # State file: /var/lib/freedom-yield/anomaly-state.json
 #   {
 #     "metalgo": "running",   ← last seen status
-#     "caddy":   "running",
+#     (a "caddy" key left in an older state file is ignored)
 #     "disk":    "ok",        ← "ok" or "warn"
 #     "memory":  "ok",
 #     "peers":   "ok",
@@ -76,7 +76,7 @@ fi
 . "$WEB_PROBE_LIB"
 
 # -------- cycle-gate (= partial gate、 cycle-aware-notify only) --------
-# Host monitoring (= metalgo / caddy / disk / memory / peers / web probe)
+# Host monitoring (= metalgo / disk / memory / peers / web probe)
 # always runs — those alerts are critical during cycle transitions too.
 # Only cycle-related alerts (= validator_present transition + period_alert
 # T-7 / T-1 / T-0 / T-10min) get suppressed when the gate is deferred.
@@ -137,8 +137,6 @@ validate_status_json() {
       and (.metalgo|type=="object")
       and (.metalgo.containerStatus|type=="string") and ((.metalgo.containerStatus|length)>0)
       and (.metalgo.peerCount|type=="number")
-      and (.caddy|type=="object")
-      and (.caddy.containerStatus|type=="string") and ((.caddy.containerStatus|length)>0)
       and (.host.cpu.usedPercent|type=="number")
       and (.host.memory.usedPercent|type=="number")
       and (.host.disk.usedPercent|type=="number")
@@ -412,7 +410,6 @@ fi
 # Schema check: all required top-level fields with expected types.
 if ! jq -e '
     (.metalgo|type=="string") and
-    (.caddy|type=="string") and
     (.disk|type=="string") and
     (.memory|type=="string") and
     (.peers|type=="string") and
@@ -587,7 +584,6 @@ notify_or_keep() {
 
 # === CURRENT_OBSERVATION extraction =====================================
 OBS_METALGO=$(jq -r '.metalgo.containerStatus // "unknown"' "$STATUS_JSON")
-OBS_CADDY=$(jq -r '.caddy.containerStatus // "unknown"' "$STATUS_JSON")
 OBS_DISK_PCT=$(jq -r '.host.disk.usedPercent // 0' "$STATUS_JSON")
 OBS_DISK_TOTAL_KB=$(jq -r '.host.disk.totalKB // 0' "$STATUS_JSON")
 OBS_DISK_USED_KB=$(jq -r '.host.disk.usedKB // 0' "$STATUS_JSON")
@@ -607,16 +603,6 @@ if [ "$OBS_METALGO" != "running" ] && [ "$ORIG_METALGO" = "running" ]; then
 elif [ "$OBS_METALGO" = "running" ] && [ "$ORIG_METALGO" != "running" ]; then
   notify_or_keep default "metalgo 復旧" "コンテナが running に戻りました" \
     && candidate_set '.metalgo' "\"$OBS_METALGO\""
-fi
-
-# === transition: caddy (notify-gated) ===================================
-ORIG_CADDY=$(orig_get '.caddy')
-if [ "$OBS_CADDY" != "running" ] && [ "$ORIG_CADDY" = "running" ]; then
-  body=$(printf 'コンテナ状態: %s (absent = 監視先の名前のコンテナが無い)\n対処 (validator host):\n1) docker ps -a --filter name=caddy --format "{{.ID}} {{.Names}} {{.Status}}"\n2) docker logs --tail 50 <1) の ID>\n3) docker start <1) の ID> (どれか不明なら start せず止めて確認)\n1) で別の caddy が Up なら監視先 (CADDY_CONTAINER) が古いだけ\ndocker compose up -d は実行しない (今いる dir の compose で別物が起動しうる)\n影響: 次の deploy の health check (127.0.0.1:8085) が失敗する。公開サイトは別サーバで影響なし、validator 本体も無事' "$OBS_CADDY")
-  notify_or_keep high "Caddy 停止" "$body" && candidate_set '.caddy' "\"$OBS_CADDY\""
-elif [ "$OBS_CADDY" = "running" ] && [ "$ORIG_CADDY" != "running" ]; then
-  notify_or_keep default "Caddy 復旧" "validator host の Caddy (deploy の health check 先) が再稼働" \
-    && candidate_set '.caddy' "\"$OBS_CADDY\""
 fi
 
 # === transition: disk (hysteresis: warn>85, ok<=80) =====================
