@@ -220,35 +220,50 @@ Exit codes:
 当日は暗算せず、この表を引く。誤った側を渡した場合の戻り値が step ごとに
 別番号 (exit 7 / exit 9 / exit 5) なので、暗算違いは症状からは読み取れない。
 
-**2026-09-04** — cycle 4 が閉じ、cycle 5 が刻まれる日:
+この表は日付に依存しない。値は「その日に**閉じる** cycle = `<N>`」と
+「その日に**刻む** cycle = `<N+1>`」の 2 つだけで決まる:
 
-| step | 変数 / フラグ | 意味 | 2026-09-04 の値 |
+| step | 変数 / フラグ | 意味 | 渡す値 |
 |---|---|---|---|
-| — | `<N>` | その日 **閉じる** cycle | **4** |
-| — | `<N+1>` | その日 **刻む** cycle | **5** |
-| 4 | `FY_EXPECT_CYCLE=` | 閉じた cycle (= 公開台帳の `CLOSED_COUNT`) | **4** |
-| 5 | `FY_EXPECT_CYCLE=` | 同上 | **4** |
-| 6 | `commit-anchor-source.sh --expect-cycle=` | 刻む cycle | **5** |
-| 7a | `run-testnet-rehearsal.sh --expect-cycle=` | 刻む cycle | **5** |
-| (runbook 外) | `cycle-transition.sh --expect-cycle=` | 閉じる cycle | **4** |
-| (runbook 外) | `install-rehearsal-preflight.sh --expect-cycle=` | 刻む cycle | **5** |
+| — | `<N>` | その日 **閉じる** cycle | `N` |
+| — | `<N+1>` | その日 **刻む** cycle | `N+1` |
+| 4 | `FY_EXPECT_CYCLE=` | 閉じた cycle (= 公開台帳の `CLOSED_COUNT`) | `N` |
+| 5 | `FY_EXPECT_CYCLE=` | 同上 | `N` |
+| 6 | `commit-anchor-source.sh --expect-cycle=` | 刻む cycle | `N+1` |
+| 7a | `run-testnet-rehearsal.sh --expect-cycle=` | 刻む cycle | `N+1` |
+| (runbook 外) | `cycle-transition.sh --expect-cycle=` | 閉じる cycle | `N` |
+| (runbook 外) | `install-rehearsal-preflight.sh --expect-cycle=` | 刻む cycle | `N+1` |
 
-導出の根拠 (2026-08-18 実測): committed `public/api/anchor-source.json` の
-`observations_branch.cycle_number_observed` = **4** = 現に刻まれている cycle。
-`gen-anchor-source.sh` はこれを `CLOSED_COUNT + 1` として composeするので、
-9/4 の朝の `CLOSED_COUNT` は **3**、step 3 が走った後に **4** になる。
-意味の権威は 2 系統: `scripts/cycle-transition.sh:175`
-(`--expect-cycle` = "The cycle that CLOSES today") と
-`scripts/install-rehearsal-preflight.sh` の header
-("THIS SCRIPT TAKES THE REHEARSAL'S MEANING (M)" = 刻む cycle =
-`cycle-transition.sh` の値より 1 大きい)。
+**当日の埋め方** (朝、step 0 より前に 1 回だけ。どれも read-only):
 
-> **2026-09-04 は step 2.5 (開示 incident の公開) が該当する。** step 2 の末尾に
-> あり、**step 3 より前に**通す必要がある — 飛ばすと cycle 4 の incident 件数が
-> 1 件過少のまま append-only 台帳に確定し、後から直せない。
->
-> **9/1 の稽古で渡す値はこの表ではない** — 9/1 の rehearsal フラグは **4**
-> (`docs/REHEARSAL_2026-09-01.md` §3)。9/1 と 9/4 で 1 ずれる。
+- `N` = **今日 `endTime` を迎える cycle の番号** = その朝の committed / 公開
+  `public/api/anchor-source.json` の `observations_branch.cycle_number_observed`
+  (= 現に刻まれている cycle)。
+- 照合: 公開 `cycle-history.jsonl` の行数 (`CLOSED_COUNT`) は朝の時点で
+  **`N-1`**、step 3 が走った後に **`N`** になる (`gen-anchor-source.sh` が
+  `cycle_number_observed` を `CLOSED_COUNT + 1` として compose するため)。
+  2 つが合わなければ表を埋めずに止まる。
+- 埋めた値で `bash scripts/cycle-transition.sh --print-only --expect-cycle=<N>
+  --ledger=<path>` を実行し、**その日の解決済みコマンドはこの出力を正とする**
+  (この表は値の意味の説明、per-day の実コマンドの出所は `--print-only`)。
+- 意味の権威は 2 系統: `scripts/cycle-transition.sh` の `--expect-cycle`
+  ("The cycle that CLOSES today") と `scripts/install-rehearsal-preflight.sh` の
+  header ("THIS SCRIPT TAKES THE REHEARSAL'S MEANING (M)" = 刻む cycle =
+  `cycle-transition.sh` の値より 1 大きい)。
+- `docs/pending-disclosures/` に公開待ちの開示 incident がある cycle では
+  **step 2.5 が該当する** (step 2 の末尾、**step 3 より前**)。飛ばすと閉じる
+  cycle の incident 件数が 1 件過少のまま append-only 台帳に確定し、後から
+  直せない。
+- **当日より前の稽古で渡す rehearsal フラグはこの表の値ではない** — 稽古の時点
+  ではまだ cycle `N` が刻まれた最新なので、稽古のフラグは `N` で、当日の 7a
+  (`N+1`) と 1 ずれる (前例: 2026-09-01 の稽古は 4、9/4 当日は 5 —
+  `docs/REHEARSAL_2026-09-01.md` §3)。
+
+**記入例 — 2026-10-07 (cycle 5 が閉じ、cycle 6 を刻んだ日):** 朝の
+`cycle_number_observed` = 5、公開 `cycle-history.jsonl` = 4 行 → `N=5`。
+step 4 / 5 の `FY_EXPECT_CYCLE=5`、step 6 と 7a の `--expect-cycle=6`、
+`cycle-transition.sh --expect-cycle=5`、`install-rehearsal-preflight.sh
+--expect-cycle=6`。step 3 の後に `cycle-history.jsonl` は 5 行。
 
 ### 実行者と実行場所 (actor / location)
 
@@ -688,9 +703,9 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    **「exactly one line 増えた」は事前の基準値が無ければ検証できない** — この
    step を実行する**前に**公開版の行数を 1 度採って控えておく
    (`curl -s https://metal.freedom-yield.com/api/cycle-history.jsonl | wc -l`)。
-   この基準値は step 2 の完了確認としても使える。2026-09-04 の期待値は
-   実行前 **3 行 → 実行後 4 行** (day-of value sheet の `CLOSED_COUNT`
-   3 → 4 と同じこと)。
+   この基準値は step 2 の完了確認としても使える。期待値は
+   実行前 **`N-1` 行 → 実行後 `N` 行** (day-of value sheet の `CLOSED_COUNT`
+   と同じこと。記入例の 2026-10-07 なら 4 → 5)。
 4. **Mac —**
 
    **前操作 (operator@TTY) — identity 鍵を ssh-agent に載せる。**
@@ -1058,7 +1073,7 @@ topology (validator host + operator Mac)**, in this fixed day-of order
      (`scripts/preview-cycle-anchor-broadcast.sh:340`)。
      加えて `MAINNET gates verified: testnet-tx-id=… / dry-run-log=…` の 2 行。
    - **operator が照合するもの** — ① memo prefix が**その日刻む cycle のもの**
-     であること (day-of value sheet の `<N+1>`。2026-09-04 なら cycle 5 側)、
+     であること (day-of value sheet の `<N+1>`。記入例の 2026-10-07 なら cycle 6 側)、
      ② `chain` が `mainnet-a` であること、③ `quantity` が想定どおりであること、
      ④ `tx_sha256` が空 (`<unbound-legacy>`) でないこと。
      **1 つでも読めない・違って見えたら照合は不成立** — 「たぶん合っている」で
@@ -1275,11 +1290,12 @@ needed for them.
 **部分的に**やり忘れた場合も `--status` は気づかない。だから目視で 5 点を取る:
 
 - **① `--status` が全 green** — `bash scripts/cycle-transition.sh --status
-  --expect-cycle=<N>` (2026-09-04 なら `4`)。必要条件であって十分条件では
+  --expect-cycle=<N>` (記入例の 2026-10-07 なら `5`)。必要条件であって十分条件では
   ないので、これ**だけ**では終了判定にしない。
 - **② 公開 `cycle-history.jsonl` が 1 行増えている** — step 3 の前に控えた
-  基準行数 +1 であること (2026-09-04 なら 3 → **4**)。かつ増えた行の
-  `incidents_in_cycle_ids` が step 2.5 の entry を含むこと。
+  基準行数 +1 であること (記入例の 2026-10-07 なら 4 → **5**)。かつ増えた行の
+  `incidents_in_cycle_ids` が step 2.5 の entry を含むこと (step 2.5 を
+  実行した cycle のみ)。
 - **③ explorer で anchor tx を目視** — step 7 の tx id を AI が読み返し、
   explorer URL 上で確認する。
 - **④ identity 署名が検証できる** — 公開 `identity.json` / `.sig` / pubkey の
