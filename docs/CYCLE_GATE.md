@@ -331,8 +331,10 @@ operator に残る)。operator のキー操作はこの枠には無い。
   ② testnet keystore — unlock / lock (7a)、
   ③ mainnet keystore — unlock / lock (7c)。
   password / passphrase はすべて operator が自分の TTY で打ち、AI には渡さない。
-  これとは別に、現行の canon は 7a 本体の起動も operator@TTY としている
-  (下の「実行者と実行場所」節)。
+  **ただし現行の canon は、これに加えて 7a 本体の起動も operator@TTY と
+  している** (下の「実行者と実行場所」節)。この食い違いは同節の
+  **OPEN OPERATOR DECISION** で operator の判断待ちであり、決まるまでは
+  canon の規則が有効。
 - **各鍵は最後に使った直後に lock する。** 開けたまま次の unit へ持ち越さない:
   - identity 鍵 → **unit 4 の直後**。最後の利用者は `gen-identity.sh` なので、
     それが exit 0 で終わったら **AI が `ssh-add -d` で agent から外す**
@@ -383,6 +385,47 @@ testnet keystore の最後の利用が 7a なので。遅くとも 7c 末尾)。
 > (`docs/PHASE_ALPHA_TESTNET_DRY_RUN.md`「What an AI session can verify, and
 > what only the operator can」)、AI が起動した run は全 gate を通っても
 > 認可にならない。
+
+> [!warning] **OPEN OPERATOR DECISION — 7a を誰が起動するか (未決。決まるまで
+> 上の canon の規則が有効)**
+>
+> 2 つの規則が食い違っている。**この節は記録と提案であって、規則は変えて
+> いない。**
+>
+> - **読み A (canon、現行)** — 7a 本体は operator@TTY。「operator 自身が
+>   起動したこと」が testnet broadcast の per-invocation 認可の実体で、
+>   AI が起動した run は全 gate を通っても認可にならない (上の引用ブロック、
+>   `scripts/cycle-transition.sh` の unit 7a)。
+> - **読み B (2026-08-04 の operator 規則)** — operator の手作業は鍵の
+>   unlock / lock だけで、それ以外は AI が実行する。broadcast の
+>   per-invocation 認可は「operator が起動すること」ではなく、**その 1 回の
+>   実行に対する chat での明示的な認可**で与える。
+> - **2026-10-07 の実際** — operator が testnet keystore を unlock した後、
+>   chat で「解除した、実行して」と明示し、**AI が 7a を起動した**
+>   (結果は `TESTNET REHEARSAL COMPLETE`)。読み B で運用された。canon の
+>   文言 (読み A) とは一致しない。
+>
+> **提案する文言 (operator の承認待ち。承認されるまで canon には入れない):**
+>
+> > 7a の testnet broadcast の per-invocation 認可は、**chat での operator の
+> > 明示的な実行指示**で与える。手順: ① operator が testnet keystore を
+> > unlock する。② AI が実行するコマンド (`run-testnet-rehearsal.sh
+> > --expect-cycle=<N+1>`、`<N+1>` は day-of value sheet の値) を chat に
+> > 示す。③ operator がそれに対して実行を指示する (例:「解除した、実行して」)。
+> > ④ AI@Mac がそのコマンドを **1 回だけ**起動する。**認可 1 回 = 起動 1 回。**
+> > exit が非 0 で再実行が要るときは、`step 7/10` の行が出たかを報告した上で
+> > **改めて認可を取る**。unlock そのものは認可ではなく、unlock だけで AI が
+> > 7a を起動してはならない。mainnet (7c) の認可手順 (復唱 + 「認可する」) は
+> > この変更の対象外で、そのまま。
+>
+> **承認された場合に同じ commit で直すもの**: 上の operator@TTY の列挙
+> (③ を AI@Mac に移し、5 箇所になる)、この節の上の引用ブロック、step 7a の
+> 「この 2 行はどちらも operator@TTY」と「なぜ operator が打つのか」、
+> `scripts/cycle-transition.sh` の unit 7a の actor 列・stop 3 / unit 7a の
+> 説明文・「SIX」の数え上げ、およびそれを固定している
+> `tests/cycle-transition/test-cycle-transition.sh` (「exactly one execution
+> unit is operator@TTY」「SIX」の case と、その mutation)。どれも意図して
+> 同時に書き換える必要があり、片方だけ直すと drift gate か test が赤くなる。
 
 broadcast (mainnet) の per-invocation 認可は code block ではなく chat での
 応答 — step 7c の「per-invocation 認可の手順」節。
