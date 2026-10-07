@@ -65,7 +65,11 @@ sudo ufw status verbose
 - 配信 container が停止 → `docker start <手順 5 の ID>` (どれか不明なら start せず止めて確認)。web host に本リポの checkout は無いので、本リポの compose ファイルで起動しない
 - nginx 停止 → `sudo nginx -t` で設定を確認してから `sudo systemctl start nginx` (他 vhost も同居するので stop/restart は避ける)
 - [validator host] 本リポの `caddy/Caddyfile` の syntax error (deploy の health check が落ちる) → 直近の編集を revert して deploy で反映 (§3.1.1)
-- ディスクフル → `docker system prune -a` / `journalctl --vacuum-size=100M`
+- ディスクフル → **診断を先に、削除は本プロジェクトのものだけ** (web host も validator host も他プロジェクトと同居しうる。Constitution §5 の分離と §3.3 の都度承認):
+  1. 診断 (どちらの host でも読むだけ): `df -h /` → `docker system df` → 本プロジェクトの path だけ `sudo du -sh <本プロジェクトの path>/*` (web host は配信 dir、validator host は `<deploy_path>`)
+  2. 本プロジェクトの不要物だけを名前・label で特定し、消す対象の ID 一覧を operator に示して承認を得てから消す (validator host の変更は §5 により 1 件ごとの承認)。例 (validator host の Caddy stack は compose project `site`): `docker ps -a --filter label=com.docker.compose.project=site --filter status=exited` で停止済み container を確認してから ID 指定で `docker rm <ID>`、`docker images --filter dangling=true` は出所を `docker image inspect` で確かめたものだけ ID 指定で `docker rmi <ID>`
+  3. **metalgo の `/data` (named volume、または `METALGO_DATA_PATH` の bind) は消さない・prune の対象にしない** (validator host。container が止まっている間は volume prune が「未使用」と見なしうる)
+  4. host 全体に効く操作 (`docker system prune` / `docker image prune -a` / `docker volume prune` / `journalctl --vacuum-*` / 他プロジェクトの path の削除) は、他プロジェクトへの影響を確認したうえで、**変更 1 件ごとに operator の明示承認を得てから**行う
 - VPS 自体停止 → VPS provider console から再起動 → 5 分待って再確認
 - DNS 消失 → edge CDN dashboardで A レコード復元
 - TLS 期限切れ → TLS は web host の nginx が終端する (validator host の Caddy は 443 を持たない)。web host で Let's Encrypt の更新を再走らせる。それでも駄目なら ACME challenge 経路 (HTTP-01 が edge proxy でブロックされていないか) を確認
