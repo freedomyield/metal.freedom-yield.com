@@ -102,6 +102,20 @@ the actual mainnet invocation.
 
 ### What an AI session can verify, and what only the operator can
 
+> **Superseded in part — operator decision of 2026-10-07.** The principle
+> stated in the next paragraph ("the operator's own invocation of this
+> script is the authorization pathway"; "no invocation by an AI session can
+> constitute the authorization") is replaced. Current rule: the AI on the
+> Mac MAY start this script, exactly once, after it has shown the exact
+> command in chat and the operator has explicitly instructed that run.
+> That chat instruction is the per-invocation authorization; the keystore
+> unlock is not; one instruction = one run, and a re-run needs a fresh
+> instruction. Canon: `docs/CYCLE_GATE.md`, "実行者と実行場所 (actor /
+> location)". The paragraph and the 2026-08-14 reconciliation below are
+> kept as the record of the rule at that time; the AI session's stop at
+> step 3/10 described there is still the correct outcome when no unlock
+> and no instruction have been given.
+
 Per Constitution §3.4, invoking a broadcast-capable command requires
 **per-broadcast operator authorization** — and this script's own design
 (see its header, "Broadcast authorization") makes the **operator's own
@@ -163,8 +177,10 @@ against `scripts/run-testnet-rehearsal.sh` (2026-08-14, current `main`):
 **Conclusion**: a clean run through step 3 (or a direct step-5 compose
 check) is evidence the pipeline is not structurally broken. It is **not**
 PRIME DIRECTIVE gate-1 evidence — only a real step 10 sentinel line
-(`TESTNET REHEARSAL COMPLETE testnet_tx_id=<64hex>`), produced by the
-operator running this script to completion, is. Do not represent a
+(`TESTNET REHEARSAL COMPLETE testnet_tx_id=<64hex>`), produced by an
+authorized run of this script to completion, is (since 2026-10-07: a run
+started by the AI on the operator's explicit chat instruction for that
+run — see the note at the top of the previous section). Do not represent a
 partial run as a passed rehearsal.
 
 ## Prerequisites

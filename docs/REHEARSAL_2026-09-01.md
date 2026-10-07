@@ -268,6 +268,10 @@ cd ~/htdocs/01_PROJECTS/metal.freedom-yield.com && HOME=~/.metal-fy-proton-test 
   (`docs/PHASE_ALPHA_TESTNET_DRY_RUN.md`「What an AI session can verify, and
   what only the operator can」)。AI が起動した run はたとえ全 gate を通っても
   認可にならない。
+  > **2026-10-07 追記**: 上は 9/1 当時の規則の記録。2026-10-07 の operator
+  > 決定以降、転換当日の 7a は operator の chat での明示的な実行指示 (1 回の
+  > 指示で 1 回) を受けて AI@Mac が起動する (`docs/CYCLE_GATE.md`
+  > 「実行者と実行場所」)。
 - **9/4 当日も改めて必要**: 今日の tx は今日 canonical な cycle の shape の
   稽古であって、9/4 の PRIME DIRECTIVE gate-1 evidence ではない —
   `bin/safe-broadcast` gate 1 は cross-cycle の evidence を拒否する

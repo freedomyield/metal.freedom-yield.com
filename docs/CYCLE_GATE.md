@@ -331,10 +331,9 @@ operator に残る)。operator のキー操作はこの枠には無い。
   ② testnet keystore — unlock / lock (7a)、
   ③ mainnet keystore — unlock / lock (7c)。
   password / passphrase はすべて operator が自分の TTY で打ち、AI には渡さない。
-  **ただし現行の canon は、これに加えて 7a 本体の起動も operator@TTY と
-  している** (下の「実行者と実行場所」節)。この食い違いは同節の
-  **OPEN OPERATOR DECISION** で operator の判断待ちであり、決まるまでは
-  canon の規則が有効。
+  7a 本体 (`run-testnet-rehearsal.sh`) は **AI@Mac** が起動する。その testnet
+  broadcast の認可は operator の **chat での明示的な実行指示** (1 回の指示で
+  1 回の起動) — 下の「実行者と実行場所」節 (2026-10-07 operator 決定)。
 - **各鍵は最後に使った直後に lock する。** 開けたまま次の unit へ持ち越さない:
   - identity 鍵 → **unit 4 の直後**。最後の利用者は `gen-identity.sh` なので、
     それが exit 0 で終わったら **AI が `ssh-add -d` で agent から外す**
@@ -361,14 +360,20 @@ operator に残る)。operator のキー操作はこの枠には無い。
 | **AI@Mac** | AI が実行する。operator は出力を読むだけ | Mac の repo working copy |
 | **AI@host** | AI が SSH 経由で実行する。operator は出力を読むだけ | validator host |
 
-**operator@TTY はこの runbook 全体で 6 箇所**: ① step 4 前の `ssh-add`、
-② 7a の testnet keystore unlock、③ **7a の `run-testnet-rehearsal.sh` 本体**、
-④ 7c の mainnet keystore unlock、⑤ 7c 末尾の mainnet keystore re-lock、
-⑥ **testnet keystore の re-lock** (② で開けたものを閉じる。**7a の直後** —
+**operator@TTY はこの runbook 全体で 5 箇所**: ① step 4 前の `ssh-add`、
+② 7a の testnet keystore unlock、③ 7c の mainnet keystore unlock、
+④ 7c 末尾の mainnet keystore re-lock、
+⑤ **testnet keystore の re-lock** (② で開けたものを閉じる。**7a の直後** —
 testnet keystore の最後の利用が 7a なので。遅くとも 7c 末尾)。
-**残りの code block はすべて AI が実行する。**
+**残りの code block はすべて AI が実行する** — 7a の
+`run-testnet-rehearsal.sh` 本体も含む (下の引用ブロック)。
 
-> ⑥ は 2026-08-18 の三面突合 (K-7) で足した。それ以前この列挙は 5 箇所と
+> 列挙の変遷: 2026-08-18 までは 5 箇所 (testnet re-lock 抜け)、2026-08-18 に
+> testnet re-lock を足して 6 箇所、2026-10-07 の operator 決定で 7a 本体を
+> AI@Mac に移して現在の 5 箇所。数は同じ 5 でも中身は別物である。
+>
+> testnet re-lock (現 ⑤、2026-08-18〜10-07 の版では ⑥) は 2026-08-18 の
+> 三面突合 (K-7) で足した。それ以前この列挙は 5 箇所と
 > 書いており、**testnet の re-lock だけが落ちていた** — 7c 末尾の散文
 > (mainnet re-lock bullet の末尾に「7a の testnet keystore も同様に」と
 > 1 節だけ埋まっていた) と完了 checklist ⑤ (`:1144-1145`) は最初から
@@ -377,55 +382,36 @@ testnet keystore の最後の利用が 7a なので。遅くとも 7c 末尾)。
 > 操作一覧が落としていた**という形なので、数を書き換えるだけでなく 7c 末尾を
 > 独立 bullet に分けた。
 
-> 7a の rehearsal 本体が operator@TTY なのは password を伴うからではない。
-> この script は `/tmp/fyd-broadcast-token` を**自分で**作り
-> (`scripts/run-testnet-rehearsal.sh:413-428`)、`bin/safe-broadcast` を
-> `--non-interactive` で呼ぶ (`:439-442`) ので、確認プロンプトが出ない。「**operator 自身がこの script を起動したこと**」が testnet
-> broadcast の per-invocation 認可の実体であり
-> (`docs/PHASE_ALPHA_TESTNET_DRY_RUN.md`「What an AI session can verify, and
-> what only the operator can」)、AI が起動した run は全 gate を通っても
-> 認可にならない。
+> **7a 本体は AI@Mac が起動し、その testnet broadcast の per-invocation 認可は
+> chat での operator の明示的な実行指示で与える。** この script は
+> `/tmp/fyd-broadcast-token` を**自分で**作り (`scripts/run-testnet-rehearsal.sh`
+> step 6/10)、`bin/safe-broadcast` を `--non-interactive` で呼ぶ (step 7/10)
+> ので、起動後に確認プロンプトは出ない。だから認可は**起動の前**に、chat で
+> 次の順に与える:
+>
+> 1. operator が testnet keystore を unlock する (operator@TTY ②)。
+> 2. AI が実行するコマンド (`run-testnet-rehearsal.sh --expect-cycle=<N+1>`、
+>    `<N+1>` は day-of value sheet の値) を chat に示す。
+> 3. operator がそれに対して実行を指示する (例:「解除した、実行して」)。
+> 4. AI@Mac がそのコマンドを **1 回だけ**起動する。
+>
+> **認可 1 回 = 起動 1 回。** exit が非 0 で再実行が要るときは、`step 7/10` の
+> 行が出たか (= testnet に tx が残っているかもしれないか) を報告した上で
+> **改めて認可を取る**。黙って再実行しない。**unlock そのものは認可ではなく**、
+> unlock だけで AI が 7a を起動してはならない。mainnet (7c) の認可手順
+> (復唱 + 「認可する」) はこの規則の対象外で、そのまま。
 
-> [!warning] **OPEN OPERATOR DECISION — 7a を誰が起動するか (未決。決まるまで
-> 上の canon の規則が有効)**
->
-> 2 つの規則が食い違っている。**この節は記録と提案であって、規則は変えて
-> いない。**
->
-> - **読み A (canon、現行)** — 7a 本体は operator@TTY。「operator 自身が
->   起動したこと」が testnet broadcast の per-invocation 認可の実体で、
->   AI が起動した run は全 gate を通っても認可にならない (上の引用ブロック、
->   `scripts/cycle-transition.sh` の unit 7a)。
-> - **読み B (2026-08-04 の operator 規則)** — operator の手作業は鍵の
->   unlock / lock だけで、それ以外は AI が実行する。broadcast の
->   per-invocation 認可は「operator が起動すること」ではなく、**その 1 回の
->   実行に対する chat での明示的な認可**で与える。
-> - **2026-10-07 の実際** — operator が testnet keystore を unlock した後、
->   chat で「解除した、実行して」と明示し、**AI が 7a を起動した**
->   (結果は `TESTNET REHEARSAL COMPLETE`)。読み B で運用された。canon の
->   文言 (読み A) とは一致しない。
->
-> **提案する文言 (operator の承認待ち。承認されるまで canon には入れない):**
->
-> > 7a の testnet broadcast の per-invocation 認可は、**chat での operator の
-> > 明示的な実行指示**で与える。手順: ① operator が testnet keystore を
-> > unlock する。② AI が実行するコマンド (`run-testnet-rehearsal.sh
-> > --expect-cycle=<N+1>`、`<N+1>` は day-of value sheet の値) を chat に
-> > 示す。③ operator がそれに対して実行を指示する (例:「解除した、実行して」)。
-> > ④ AI@Mac がそのコマンドを **1 回だけ**起動する。**認可 1 回 = 起動 1 回。**
-> > exit が非 0 で再実行が要るときは、`step 7/10` の行が出たかを報告した上で
-> > **改めて認可を取る**。unlock そのものは認可ではなく、unlock だけで AI が
-> > 7a を起動してはならない。mainnet (7c) の認可手順 (復唱 + 「認可する」) は
-> > この変更の対象外で、そのまま。
->
-> **承認された場合に同じ commit で直すもの**: 上の operator@TTY の列挙
-> (③ を AI@Mac に移し、5 箇所になる)、この節の上の引用ブロック、step 7a の
-> 「この 2 行はどちらも operator@TTY」と「なぜ operator が打つのか」、
-> `scripts/cycle-transition.sh` の unit 7a の actor 列・stop 3 / unit 7a の
-> 説明文・「SIX」の数え上げ、およびそれを固定している
-> `tests/cycle-transition/test-cycle-transition.sh` (「exactly one execution
-> unit is operator@TTY」「SIX」の case と、その mutation)。どれも意図して
-> 同時に書き換える必要があり、片方だけ直すと drift gate か test が赤くなる。
+> **決定記録 (2026-10-07, operator)** — 7a の起動者について、旧 canon
+> (読み A: 「operator 自身が起動したこと」が認可の実体で、7a 本体は
+> operator@TTY) と 2026-08-04 の operator 規則 (読み B: operator の手作業は
+> 鍵の unlock / lock だけで、broadcast の認可は chat での明示的な認可) が
+> 食い違っていた。2026-10-07 の転換当日は読み B で運用された (operator が
+> testnet keystore を unlock した後 chat で「解除した、実行して」と指示し、
+> AI が 7a を起動、結果は `TESTNET REHEARSAL COMPLETE`)。同日 operator が
+> **読み B を採用**し、上の引用ブロックが canon になった。同じ commit で
+> `scripts/cycle-transition.sh` (unit 7a の actor 列・stop 3・unit 7a の
+> 説明文・operator 操作の数え上げ) と
+> `tests/cycle-transition/test-cycle-transition.sh` を揃えた。
 
 broadcast (mainnet) の per-invocation 認可は code block ではなく chat での
 応答 — step 7c の「per-invocation 認可の手順」節。
@@ -449,10 +435,11 @@ broadcast (mainnet) の per-invocation 認可は code block ではなく chat �
 Under model α (= AI full orchestration; see
 `feedback_ai_full_orchestration_default` memo), the operator's active steps
 are: ask AI to start, do the Metal Wallet web flow, supply two keystore
-passwords + the identity-key passphrase when prompted, launch the testnet
-rehearsal in 7a (its per-invocation authorization IS the operator having
-started it — see the actor section above), and authorize the mainnet anchor
-broadcast per invocation. Everything else — including which
+passwords + the identity-key passphrase when prompted, instruct in chat
+the one run of the testnet rehearsal in 7a (the AI@Mac starts it; that
+explicit chat instruction is its per-invocation authorization, one
+instruction = one run — see the actor section above), and authorize the
+mainnet anchor broadcast per invocation. Everything else — including which
 machine each command runs on — is AI-orchestrated across a **2-host
 topology (validator host + operator Mac)**, in this fixed day-of order
 (cf. the cycle-3 → cycle-4 transition, `N=3`):
@@ -1014,7 +1001,10 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    this cycle's exact memo shape. The day-of invocation MUST carry
    `--expect-cycle=<N+1>` (mandatory per
    `docs/PHASE_ALPHA_TESTNET_DRY_RUN.md`; cycle-4 day example: `4`):
-   **この 2 行はどちらも operator@TTY** (打つのは operator、AI ではない):
+   **1 行目 (unlock) は operator@TTY、2 行目 (rehearsal 本体) は AI@Mac** —
+   ただし 2 行目は、AI がこのコマンドを chat に示し、operator がそれに対して
+   **実行を指示してから** 1 回だけ起動する (上の「実行者と実行場所」節の
+   引用ブロック。unlock だけでは起動しない):
 
    ```sh
    HOME=~/.metal-fy-proton-test proton key:unlock
@@ -1026,19 +1016,23 @@ topology (validator host + operator Mac)**, in this fixed day-of order
      `present: … (matches current on-chain key)` ③ `step 7/10` の
      `BROADCAST OK  tx_id=<64hex>` ④ `step 9/10` の `7-gate PASS`
      ⑤ 末尾の `TESTNET REHEARSAL COMPLETE testnet_tx_id=<64hex>`。
-   - **AI に渡すもの**: ⑤の 1 行を**そのまま chat に貼る**。これは script が
-     自動で引き継ぐものではなく、**人が目で拾って貼る手渡し**であり、貼り
+   - **控えるもの**: ⑤の 1 行。AI が自分の起動した run の出力から拾い、
+     **そのまま chat に示す** (operator も同じ行を目視する)。これは script が
+     自動で引き継ぐものではなく、**目で拾って渡す手渡し**であり、写し
      間違いを検出する機構は無い (7b/7c の `--testnet-tx-id=` の入力になる)。
    - **失敗したら**: exit **2** = keystore が locked → 上の unlock をやり直す。
      exit **8** = `HOME=` prefix の付け忘れ → 付けて再実行。exit **1** は
      原因が多岐 (`fail()` 全部) に潰れるので、**まず「`step 7/10` の行が
      画面に出ていたか?」を確認する** — 出ていなければ broadcast は未発生、
      出ていれば testnet 上に tx が残っている場合がある。この 1 問が
-     「やり直してよいか」の分岐そのもの。
-   - **なぜ operator が打つのか**: 上の「実行者と実行場所」節の引用ブロック
-     (認可の実体が「operator 自身の起動」であること)。
-   - **中止したくなったら**: 打たなければよい。この時点では mainnet 側は
-     何も起きていない。
+     「やり直してよいか」の分岐そのもの。**どの exit でも、やり直しは AI が
+     この 1 問の答えを報告した上で operator の改めての実行指示を取ってから**
+     (認可 1 回 = 起動 1 回)。
+   - **誰が起動し、何が認可か**: 起動は AI@Mac、認可は chat での operator の
+     明示的な実行指示 (上の「実行者と実行場所」節の引用ブロック、2026-10-07
+     operator 決定)。
+   - **中止したくなったら**: 実行を指示しなければよい。この時点では
+     mainnet 側は何も起きていない。
    - **後操作 (operator@TTY) — testnet keystore を直後に re-lock する。**
      testnet keystore の最後の利用はこの 7a なので、`TESTNET REHEARSAL
      COMPLETE` を拾ったらすぐ閉じる (7b / 7c / 8 は testnet keystore を使わ
@@ -1258,14 +1252,14 @@ topology (validator host + operator Mac)**, in this fixed day-of order
      確かめるだけ。済んでいなければここで必ず閉じる (遅くとも 7c 末尾)。
    - **打つ人**: **operator 自身** (password を打つため)。7a の ② で開けた
      keystore がまだ開いていれば、mainnet と同じ扱いで閉じる。
-   - **目視するもの**: ⑤ と同じプロンプト `Enter 32 character password (leave
+   - **目視するもの**: ④ (mainnet re-lock) と同じプロンプト `Enter 32 character password (leave
      empty to create new)`。ただし入れるのは **testnet keystore の 32 文字**で、
-     ⑤ で打った mainnet のものではない (keystore は HOME ごと別、
+     ④ で打った mainnet のものではない (keystore は HOME ごと別、
      Constitution §3.5)。**プロンプト文字列が同一なので、直前に打った mainnet
      の password をそのまま繰り返す取り違えがここで起きうる。**
    - **空 Enter は同じく禁止** — 新しい password を作ってしまい、次回の 7a が
      通らなくなる。
-   - **これは独立した 6 番目の operator 操作**であって mainnet re-lock の
+   - **これは独立した 5 番目の operator 操作** (「実行者と実行場所」節の ⑤)であって mainnet re-lock の
      付随事項ではない。完了 checklist ⑤ が「**片方だけ re-lock して終える
      取りこぼしがいちばん起きやすい**」と名指ししているのがこの 1 手。
      以前はこの要求が mainnet 側 bullet の末尾 1 節に埋もれており、

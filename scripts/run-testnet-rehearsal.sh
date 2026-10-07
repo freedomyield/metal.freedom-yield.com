@@ -41,8 +41,11 @@
 #   - Broadcast authorization: this script auto-creates the
 #     /tmp/fyd-broadcast-token file (5-minute TTL), bound to chain=testnet-a
 #     and the exact composed tx (tx_sha256) per R16, so bin/safe-broadcast
-#     admits the invocation. Operator invokes the script → operator
-#     token = correct authorization pathway.
+#     admits the invocation. The token is mechanics, not authorization:
+#     the per-invocation authorization is the operator's explicit chat
+#     instruction for this one run, given BEFORE it starts (the AI on the
+#     Mac starts it once per instruction; an unlock alone is not one).
+#     Operator decision 2026-10-07; canon = docs/CYCLE_GATE.md actor section.
 #
 # Usage:
 #   HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh \

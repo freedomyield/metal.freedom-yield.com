@@ -1531,9 +1531,11 @@ else
 fi
 
 # --- Actor is printed, closed, and consistent with the machine -------------
-# The finding: the plan labelled machines only, so unit 7a — where the
-# operator personally starting the script IS the testnet broadcast
-# authorization — read exactly like the six other `Mac` lines the AI runs.
+# The finding: the plan labelled machines only, so unit 7a — a testnet
+# broadcast — read exactly like the six other `Mac` lines. Since the operator
+# decision of 2026-10-07 the AI@Mac starts 7a, authorized only by the
+# operator's explicit chat instruction for that one run; the unit's text must
+# say so, because nothing in the script itself pauses to ask.
 ACTORS="$(grep -oE '^# \[unit [^]]+\] (host|Mac) — [^ ]+' "$PLAN" | awk '{print $NF}')"
 ACTOR_N="$(printf '%s\n' "$ACTORS" | grep -c . || true)"
 if [ "$ACTOR_N" -eq 16 ]; then
@@ -1571,31 +1573,43 @@ else
 	bad "actor / machine disagreement:${ACTOR_MISMATCH}"
 fi
 
-# Exactly one unit is the operator's, and it is 7a. Both halves matter: "at
-# least one" would pass if every unit were mislabelled operator@TTY, and
-# "7a is operator@TTY" would pass if 7b had quietly become one too.
+# No unit is the operator's, and 7a is AI@Mac (operator decision 2026-10-07:
+# the operator's manual work is the keystore unlock/lock and ssh-add, which
+# are STOP blocks, not units). Both halves matter: "7a is AI@Mac" would pass
+# if 7b had quietly become operator@TTY, and "no operator@TTY unit" would
+# pass if 7a had been dropped from the table.
 OP_UNITS="$(grep -oE '^# \[unit [^]]+\] (host|Mac) — operator@TTY' "$PLAN" | sed 's/^# \[unit //; s/\].*$//')"
-if [ "$OP_UNITS" = "7a" ]; then
-	ok "exactly one execution unit is operator@TTY, and it is unit 7a"
+if [ -z "$OP_UNITS" ] && grep -qE '^# \[unit 7a\] Mac — AI@Mac' "$PLAN"; then
+	ok "no execution unit is operator@TTY, and unit 7a is AI@Mac"
 else
-	bad "expected exactly unit 7a to be operator@TTY, got '$(printf '%s' "$OP_UNITS" | tr '\n' ' ')'"
+	bad "expected no operator@TTY unit and unit 7a as AI@Mac, got operator@TTY units '$(printf '%s' "$OP_UNITS" | tr '\n' ' ')'"
 fi
+UNIT7A_TEXT="$(awk -v want="# [unit 7a] " 'index($0,want)==1{f=1;next} index($0,"# [unit ")==1{f=0} f' "$PLAN" | flatten)"
 if unit_block "$PLAN" 7a >/dev/null && \
-	awk -v want="# [unit 7a] " 'index($0,want)==1{f=1;next} index($0,"# [unit ")==1{f=0} f' "$PLAN" \
-	| grep -qi 'THE OPERATOR HAVING STARTED IT IS THE PER-INVOCATION AUTHORIZATION'; then
-	ok "unit 7a states that the operator having started it IS the authorization"
+	printf '%s' "$UNIT7A_TEXT" | grep -qi "CHAT INSTRUCTION FOR THIS ONE RUN IS THE PER-INVOCATION AUTHORIZATION"; then
+	ok "unit 7a states that the operator's chat instruction for that one run IS the authorization"
 else
-	bad "unit 7a does not say why it must be the operator who starts it"
+	bad "unit 7a does not say what authorizes the AI to start it"
+fi
+# The retired "If in doubt about who ran it: do it again" told the reader to
+# re-broadcast on doubt. Under "one instruction = one run" a doubt must end in
+# a report and a fresh instruction, never a silent re-run.
+if printf '%s' "$UNIT7A_TEXT" | grep -qi 'do NOT re-run it' && \
+	printf '%s' "$UNIT7A_TEXT" | grep -qi 'fresh instruction' && \
+	! printf '%s' "$UNIT7A_TEXT" | grep -qi 'do it again'; then
+	ok "unit 7a forbids a silent re-run and requires a fresh instruction"
+else
+	bad "unit 7a does not forbid a silent re-run (or still says 'do it again')"
 fi
 
 # ---- MUTATION: the actor scan must be able to fail ------------------------
 ACTOR_MUT="${TMP}/plan-actor-mut.txt"
-sed 's/^# \[unit 7a\] Mac — operator@TTY/# [unit 7a] Mac — AI@Mac/' "$PLAN" > "$ACTOR_MUT"
+sed 's/^# \[unit 7a\] Mac — AI@Mac/# [unit 7a] Mac — operator@TTY/' "$PLAN" > "$ACTOR_MUT"
 MUT_OP="$(grep -oE '^# \[unit [^]]+\] (host|Mac) — operator@TTY' "$ACTOR_MUT" | sed 's/^# \[unit //; s/\].*$//')"
-if [ "$MUT_OP" != "7a" ]; then
-	ok "mutation: relabelling unit 7a as AI@Mac is detected by the operator@TTY check"
+if [ -n "$MUT_OP" ] || ! grep -qE '^# \[unit 7a\] Mac — AI@Mac' "$ACTOR_MUT"; then
+	ok "mutation: relabelling unit 7a back to operator@TTY is detected by the actor check"
 else
-	bad "MUTATION NOT CAUGHT: unit 7a still read as operator@TTY after being relabelled"
+	bad "MUTATION NOT CAUGHT: unit 7a still read as AI@Mac with no operator@TTY unit after being relabelled"
 fi
 
 # --- CHECKPOINT 2.5: printed, and still not a unit -------------------------
@@ -1947,10 +1961,10 @@ else
 	bad "stop 4 does not require re-locking the testnet keystore as well"
 fi
 # The plan's own count of the operator's keystrokes must match the canon's.
-if grep -qF 'Counting the operator' "$PLAN" && grep -qF 'the whole day: SIX' "$PLAN"; then
-	ok "the plan counts six operator@TTY actions, matching the canon"
+if grep -qF 'Counting the operator' "$PLAN" && grep -qF 'the whole day: FIVE' "$PLAN"; then
+	ok "the plan counts five operator@TTY actions, matching the canon"
 else
-	bad "the plan does not count the operator's six manual actions"
+	bad "the plan does not count the operator's five manual actions"
 fi
 # Checked against what the canon REQUIRES, not against its prose count. The
 # count sentence has itself been wrong (it said five while three other
