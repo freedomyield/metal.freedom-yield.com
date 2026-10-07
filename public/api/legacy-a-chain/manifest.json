@@ -40,6 +40,19 @@
       "sha256": "6315eedee140cdf6d2e34c740a24928bdf9232d447b82df476cc700fd7aadaa1",
       "history_sha256": "7c7337a83d25a42abb9091f9cc6b624e5914b0e3bdfa12d94775276e2e636fb0",
       "block_sha256": "f3be46545dd7ecf928a684acd6accfcd5afca6e8d84dd234d0c5c003a969c3f1"
+    },
+    {
+      "tx_id": "9d60a06d3c82a2c61e8c513a5a4fd497f8955050ca2504e035a7f9cd11971006",
+      "file": "9d60a06d3c82a2c61e8c513a5a4fd497f8955050ca2504e035a7f9cd11971006.json",
+      "block_num": 407319323,
+      "block_id": "1847331b05ffb4512267f188ad89c8fc8edaf2bd8ba0688d2aa10716aee96166",
+      "chain_id": "384da888112027f0321850a169f737c33e53b388aad48b5adace4bab97f437e0",
+      "fetched_at": "2026-10-07T05:13:44Z",
+      "source_host": "proton.eosusa.io",
+      "node_host": "proton.eosusa.io",
+      "sha256": "aa130a95ecdd4b8c5cfb0b21fd69ab6fe7419787f4104dd5d4b12a8373f12c25",
+      "history_sha256": "a564f08473f8d92e11b6a278ee70656ceba7a3b527832286858f0e31a751db24",
+      "block_sha256": "7325e28a0a2fecb78d8211446606211e2e082c876864ac9b4ed5f841e6547016"
     }
   ]
 }
