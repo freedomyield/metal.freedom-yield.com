@@ -198,8 +198,8 @@
 		renderTrackRecord(v);
 	}
 
-	// Our node's live peer count. server-status.json sits behind the ops
-	// vhost so the public site gets a 403 there — that endpoint never
+	// Our node's live peer count. server-status.json is operator-only
+	// monitoring data, so the public site gets a 403 there — that endpoint never
 	// resolves for a visitor's browser, so the "—" copy was permanently
 	// stuck. Read the same peer count instead from /api/peer-geo.json,
 	// the public feed peer-map.js already relies on for the map above

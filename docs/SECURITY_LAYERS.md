@@ -77,7 +77,8 @@ DDoS mitigation that activates per-customer.
 
 ### 4. OS / SSH (both hosts)
 
-- **validator host (validator)**: ufw active, allows only 22/80/443; fail2ban
+- **validator host (validator)**: ufw active, allows only 22/tcp and 9651/tcp
+  (80/443 removed 2026-10-07 — nothing listens there); fail2ban
   watching sshd.
 - **web host (web)**: fail2ban active with sshd jail; ufw not used
   (web host-side firewalling handles it).

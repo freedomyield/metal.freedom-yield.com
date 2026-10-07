@@ -161,7 +161,7 @@ echo "T6: the Caddy stack (same host .env) is untouched by the metalgo knobs"
 cp "$REPO/docker-compose.yml" "$REPO/docker-compose.prod.yml" "$W/"
 site() {
   (cd "$W" && env -i PATH="$PATH" HOME="$HOME" ${DOCKER_CONFIG:+DOCKER_CONFIG="$DOCKER_CONFIG"} \
-     DOMAIN=example.com ACME_EMAIL=ops@example.com OPS_BASIC_AUTH_HASH=x "$@" \
+     DOMAIN=example.com ACME_EMAIL=ops@example.com "$@" \
      docker compose -f docker-compose.yml -f docker-compose.prod.yml config --format json) \
   | jq -r '[.name, .volumes.caddy_data.name] | join("|")'
 }

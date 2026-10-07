@@ -7,7 +7,7 @@
 
 - validator host (推奨 production-grade VPS Ubuntu 22.04) もしくは同等の VPS を 1 台
 - ドメイン `metal.freedom-yield.com` の DNS A レコードを edge CDN で VPS public IP に向ける
-- 80/443/TCP, 443/UDP(HTTP/3), 22/TCP, 9651/TCP が inbound 許可
+- 22/TCP, 9651/TCP のみ inbound 許可(80/443 は開けない。公開サイトは web host、validator host の Caddy は loopback 8085 のみ。2026-10-07 に現行 host から削除済)
 
 **配信トポロジ (2 ホスト)**: GitHub Actions は repo-tracked static (`public/`) を **2 つの target** に配信する — (1) validator host の内部 Caddy、(2) 公開 Xserver origin (edge CDN 背後)。この 2 つの配信経路は非対称: validator host は `$DEPLOY_PATH` に本リポの git checkout を持ち、`public/` 以外の git 管理ファイル(`docs/`, `scripts/`, `tests/`, `caddy/Caddyfile`, `docker-compose*.yml` 等)は deploy のたびに `scripts/advance-host-checkout.sh` の `git pull --ff-only` が届ける(§4 参照)。公開 Xserver は git checkout を一切持たず、`rrsync -wo` で metal public dir に封じ込めた専用鍵(`scripts/install-xserver-static-deploy-key.sh` で設置)による `public/` のみの rsync が唯一の配信経路。動的 feed は validator host cron → 受信 wrapper 経由で Xserver に届く(deploy とは別経路)。両 `public/` rsync の除外集合は単一 SoT `deploy/feed-excludes.txt` から生成。詳細は [`docs/DEPLOY_OWNERSHIP_MATRIX.md`](DEPLOY_OWNERSHIP_MATRIX.md)。
 
@@ -41,11 +41,9 @@ usermod -aG docker <deploy_user>
 ### 2. VPS 側: ufw / firewall 設定
 
 ```sh
+# validator host: 22/tcp + 9651/tcp のみ。80/443 は開けない(何も listen しない。
+# 公開サイトは web host。2026-10-07 に現行 host から削除済)
 ufw allow 22/tcp
-ufw allow 80/tcp
-ufw allow 443/tcp
-ufw allow 443/udp
-# validator を同居させる場合は次も(別ホストなら不要)
 ufw allow 9651/tcp
 ufw default deny incoming
 ufw default allow outgoing
@@ -181,7 +179,7 @@ cron backstop の節を参照。
 ## 関連
 
 - [.github/workflows/deploy.yml](../.github/workflows/deploy.yml) — 実際の workflow 定義
-- [docker-compose.behind-proxy.yml](../docker-compose.behind-proxy.yml) + [docker-compose.ops-tunnel.yml](../docker-compose.ops-tunnel.yml) — deploy.yml の「Bring up / reload Caddy on VPS」ステップが実際に読む override(`docker-compose.yml` と合わせて 3 本で起動)。validator host の Caddy はこの 1 つ (`caddy-static`) だけで、`127.0.0.1:8085`(deploy の health check)と `127.0.0.1:8443`(ops dashboard、SSH トンネル + BasicAuth。host `.env` の `OPS_BASIC_AUTH_HASH` が無いと起動拒否)のみを bind する。`docker-compose.prod.yml` は Caddy が直接 80/443 を bind する別トポロジ用の override で、この自動 deploy では使われない(手動運用手順は [docs/DISASTER_RECOVERY.md](DISASTER_RECOVERY.md) 等を参照)
+- [docker-compose.behind-proxy.yml](../docker-compose.behind-proxy.yml) — deploy.yml の「Bring up / reload Caddy on VPS」ステップが実際に読む override(`docker-compose.yml` と合わせて 2 本で起動)。validator host の Caddy はこの 1 つ (`caddy-static`) だけで、`127.0.0.1:8085`(deploy の health check)のみを bind する。運用ダッシュボード(`127.0.0.1:8443`、SSH トンネル + BasicAuth、`docker-compose.ops-tunnel.yml` と host `.env` の `OPS_BASIC_AUTH_HASH`)は 2026-10-07 に operator の決定で廃止した(一度も使われず、operator 用 `/status/` ページと重複)。`docker-compose.prod.yml` は Caddy が直接 80/443 を bind する別トポロジ用の override で、この自動 deploy では使われない(手動運用手順は [docs/DISASTER_RECOVERY.md](DISASTER_RECOVERY.md) 等を参照)
 - [docs/HOST_CHECKOUT_AUTO_ADVANCE.md](HOST_CHECKOUT_AUTO_ADVANCE.md) — validator host の git `HEAD` を `origin/main` に FF-only で追従させる self-heal の仕組み(git advance が担う「`public/` 以外の全ファイル配信」の実装)
 - [docs/DEPLOY_OWNERSHIP_MATRIX.md](DEPLOY_OWNERSHIP_MATRIX.md) — git 配信 vs rsync 配信の単一ルールと、`public/api/` 個別ファイルの所有権表
 - [docs/MAINNET_MIGRATION.md](MAINNET_MIGRATION.md) — Tahoe→mainnet 段階移行(本 deploy 設定もそこに連動)

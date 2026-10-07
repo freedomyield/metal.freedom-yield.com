@@ -3,31 +3,33 @@
 #
 # The validator host runs exactly ONE Caddy: the deploy-managed `site` stack
 # (container caddy-static, custom image caddy-static:local with the rate_limit
-# plugin). It must serve BOTH
+# plugin), bound to loopback only:
 #   - 127.0.0.1:8085 -> :80   (deploy health check; the behind-proxy site)
-#   - 127.0.0.1:8443 -> :8443 (operator ops dashboard, SSH tunnel + BasicAuth)
-# and NOTHING else on the host: no 80/443, nothing on 0.0.0.0.
+# and NOTHING else on the host: no 8443, no 80/443, nothing on 0.0.0.0.
 #
-# Why (2026-10-07): a second Caddy (stock image, 80/443 + 8443, created by hand
-# from docker-compose.prod.yml in May) had kept the ops dashboard alive on a
-# config it read before the Caddyfile started using rate_limit. The first
-# reboot made it re-read the Caddyfile and it crash-looped. The ops vhost now
-# rides on the deploy-managed custom-image Caddy via docker-compose.ops-tunnel.yml.
+# Why (2026-10-07): earlier that day a second, hand-made Caddy (80/443 + 8443)
+# crash-looped after a reboot and the operator ops dashboard (127.0.0.1:8443,
+# SSH tunnel + BasicAuth) was briefly re-homed onto caddy-static through
+# docker-compose.ops-tunnel.yml. The operator then abolished the dashboard
+# (never used; it duplicated the operator /status/ page on the web host). This
+# suite pins the result so neither the dashboard port nor its credential
+# requirement can quietly come back.
 #
 # Checks, over the REAL `docker compose config` of exactly the file set the
 # deploy workflow uses (parsed out of deploy.yml, not restated here):
-#   T1 deploy.yml's Caddy step uses base + behind-proxy + ops-tunnel
-#   T2 merged ports are exactly {127.0.0.1:8085->80, 127.0.0.1:8443->8443}
-#   T3 the real OPS_BASIC_AUTH_HASH from the env replaces the behind-proxy dummy
-#   T4 without OPS_BASIC_AUTH_HASH the config refuses to render (fail closed)
+#   T1 deploy.yml's Caddy step uses base + behind-proxy only (2 files)
+#   T2 merged ports are exactly {127.0.0.1:8085->80}
+#   T3 the config renders with an EMPTY environment (no OPS_BASIC_AUTH_HASH or
+#      any other credential is required) and passes no OPS_BASIC_AUTH_HASH
+#   T4 the Caddyfile has no :8443 site and no basic_auth; no compose file
+#      in the repo publishes 8443; docker-compose.ops-tunnel.yml is gone
 #   T5 image/container stay caddy-static:local / caddy-static, project `site`
 #   T6 scripts/vps-bootstrap.sh brings Caddy up with the same file set and its
 #      server-status cron names the caddy-static container
-#   T7 deploy.yml's Caddy step probes 127.0.0.1:8443 and fails on any code other
-#      than 401 (an open or missing dashboard must stop the deploy)
+#   T7 deploy.yml's Caddy step does not probe 8443 any more
 #
 # `docker compose config` only renders files; it touches no container. Runs in a
-# throwaway copy so no .env in the checkout can leak in. Hash values are synthetic.
+# throwaway copy so no .env in the checkout can leak in.
 #
 # CHAIN: none. PRIME_DIRECTIVE: TESTNET-FIRST — safe.
 
@@ -36,6 +38,7 @@ set -uo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 WORKFLOW="$REPO/.github/workflows/deploy.yml"
 BOOTSTRAP="$REPO/scripts/vps-bootstrap.sh"
+CADDYFILE="$REPO/caddy/Caddyfile"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -51,33 +54,30 @@ finish() {
   exit 0
 }
 
-EXPECTED_FILES="docker-compose.yml docker-compose.behind-proxy.yml docker-compose.ops-tunnel.yml"
+EXPECTED_FILES="docker-compose.yml docker-compose.behind-proxy.yml"
 
-echo "T1: deploy.yml's Caddy step composes base + behind-proxy + ops-tunnel"
+echo "T1: deploy.yml's Caddy step composes base + behind-proxy only"
 COMPOSE_LINE="$(grep -E '^[[:space:]]*COMPOSE="docker compose ' "$WORKFLOW" | head -1)"
 DEPLOY_FILES="$(printf '%s\n' "$COMPOSE_LINE" | grep -oE -- '-f [^ "]+' | awk '{print $2}' | tr '\n' ' ' | sed 's/ $//')"
 assert_eq "T1 deploy compose -f set" "$EXPECTED_FILES" "$DEPLOY_FILES"
 
-echo "T7: deploy.yml's Caddy step requires HTTP 401 (no credentials) from 127.0.0.1:8443"
+echo "T7: deploy.yml's Caddy step no longer probes 8443"
 # Only the "Bring up / reload Caddy on VPS" step body, up to the next step.
 CADDY_STEP="$(awk '
   /^[[:space:]]*- name: Bring up \/ reload Caddy on VPS[[:space:]]*$/ { on = 1; next }
   on && /^[[:space:]]*- name: / { exit }
   on { print }' "$WORKFLOW")"
-if printf '%s\n' "$CADDY_STEP" | grep -Eq "^[[:space:]]*OPS_CODE=\\\$\\(curl [^#]*-w '%\\{http_code\\}' http://127\\.0\\.0\\.1:8443/"; then
-  ok "T7a step probes http://127.0.0.1:8443/ for its HTTP code"
+if [ -z "$CADDY_STEP" ]; then
+  bad "T7 Caddy step found in deploy.yml" "step body empty"
+elif printf '%s\n' "$CADDY_STEP" | grep -v '^[[:space:]]*#' | grep -q '8443'; then
+  bad "T7 Caddy step does not touch 8443" "$(printf '%s\n' "$CADDY_STEP" | grep -v '^[[:space:]]*#' | grep -m1 '8443')"
 else
-  bad "T7a step probes http://127.0.0.1:8443/ for its HTTP code" "OPS_CODE=\$(curl ... 8443/) not found"
+  ok "T7 Caddy step does not touch 8443"
 fi
-# The gate itself: a non-401 code must reach `exit 1` (mutation M3 deleted this).
-GATE="$(printf '%s\n' "$CADDY_STEP" | awk '
-  /^[[:space:]]*if \[ "\$OPS_CODE" != "401" \]; then[[:space:]]*$/ { on = 1; next }
-  on && /^[[:space:]]*fi[[:space:]]*$/ { exit }
-  on { print }')"
-if printf '%s\n' "$GATE" | grep -q 'expected 401' && printf '%s\n' "$GATE" | grep -Eq '^[[:space:]]*exit 1[[:space:]]*$'; then
-  ok "T7b any code other than 401 fails the step with the 'expected 401' message"
+if printf '%s\n' "$CADDY_STEP" | grep -Eq '^[[:space:]]*curl -fsS -o /dev/null http://127\.0\.0\.1:8085/health[[:space:]]*$'; then
+  ok "T7b Caddy step still health-checks 127.0.0.1:8085"
 else
-  bad "T7b any code other than 401 fails the step" "if [ \"\$OPS_CODE\" != \"401\" ] ... exit 1 block not found"
+  bad "T7b Caddy step still health-checks 127.0.0.1:8085" "curl ... 8085/health not found"
 fi
 
 echo "T6: vps-bootstrap uses the same file set and names caddy-static for server-status"
@@ -95,10 +95,35 @@ else
   bad "T6c bootstrap server-status cron sets METALGO_CONTAINER" "line not found"
 fi
 
+echo "T4: no dashboard vhost, credential or port anywhere in the Caddy config"
+# Non-comment lines only: the decision record in comments may name the old port.
+CF_CODE="$(grep -v '^[[:space:]]*#' "$CADDYFILE")"
+if printf '%s\n' "$CF_CODE" | grep -Eq '^[[:space:]]*[^[:space:]]*:8443[[:space:]]*\{'; then
+  bad "T4a Caddyfile has no :8443 site" "$(printf '%s\n' "$CF_CODE" | grep -m1 ':8443')"
+else
+  ok "T4a Caddyfile has no :8443 site"
+fi
+BA_RE='^[[:space:]]*basic_auth[[:space:]]*\{|OPS_BASIC_AUTH_HASH'
+if printf '%s\n' "$CF_CODE" | grep -Eq "$BA_RE"; then
+  bad "T4b Caddyfile has no basic_auth / OPS_BASIC_AUTH_HASH" "$(printf '%s\n' "$CF_CODE" | grep -m1 -E "$BA_RE")"
+else
+  ok "T4b Caddyfile has no basic_auth / OPS_BASIC_AUTH_HASH"
+fi
+LEAK=""
+for f in "$REPO"/docker-compose*.yml; do
+  if grep -v '^[[:space:]]*#' "$f" | grep -Eq '8443|OPS_BASIC_AUTH_HASH'; then LEAK="$LEAK $(basename "$f")"; fi
+done
+assert_eq "T4c no compose file publishes 8443 or passes OPS_BASIC_AUTH_HASH" "" "$LEAK"
+if [ -e "$REPO/docker-compose.ops-tunnel.yml" ]; then
+  bad "T4d docker-compose.ops-tunnel.yml is gone" "file exists"
+else
+  ok "T4d docker-compose.ops-tunnel.yml is gone"
+fi
+
 if ! command -v jq >/dev/null 2>&1 || ! command -v docker >/dev/null 2>&1 \
    || ! docker compose version >/dev/null 2>&1; then
   if [ -n "${CI:-}" ]; then bad "docker compose v2 + jq" "required in CI"; finish; fi
-  echo "SKIP: T2-T5 need docker compose v2 + jq (static checks above still ran)"
+  echo "SKIP: T2/T3/T5 need docker compose v2 + jq (static checks above still ran)"
   finish
 fi
 
@@ -115,26 +140,16 @@ render() {
      docker compose "${FARGS[@]}" config --format json)
 }
 
-SYNTH_HASH='$2a$14$SyntheticTestHashOnlyForComposeRenderXXXXXXXXXXXXXX'
-JSON="$(render OPS_BASIC_AUTH_HASH="$SYNTH_HASH")"; rc=$?
-assert_eq "T2 config renders with OPS_BASIC_AUTH_HASH set" 0 "$rc"
+echo "T3: renders with an empty environment (no credential required)"
+JSON="$(render 2>"$TMP/err")"; rc=$?
+assert_eq "T3a config renders with no env at all" 0 "$rc"
+[ "$rc" -eq 0 ] || { bad "T3a stderr" "$(head -c 200 "$TMP/err")"; finish; }
+assert_eq "T3b no OPS_BASIC_AUTH_HASH reaches the container" "absent" \
+  "$(printf '%s' "$JSON" | jq -r 'if (.services.caddy.environment // {} | has("OPS_BASIC_AUTH_HASH")) then "present" else "absent" end')"
 
-echo "T2: published ports are loopback 8085 + 8443 only"
+echo "T2: published ports are loopback 8085 only"
 PORTS="$(printf '%s' "$JSON" | jq -r '.services.caddy.ports // [] | map("\(.host_ip // "ALL"):\(.published)->\(.target)/\(.protocol // "tcp")") | sort | join(",")')"
-assert_eq "T2 exact port set" "127.0.0.1:8085->80/tcp,127.0.0.1:8443->8443/tcp" "$PORTS"
-
-echo "T3: the real hash from the env reaches the container"
-# `config` re-escapes every literal $ as $$ in its output; undo that to compare.
-GOT_HASH="$(printf '%s' "$JSON" | jq -r '.services.caddy.environment.OPS_BASIC_AUTH_HASH // "" | gsub("\\$\\$"; "$")')"
-assert_eq "T3 OPS_BASIC_AUTH_HASH is the env value, not the behind-proxy dummy" "$SYNTH_HASH" "$GOT_HASH"
-
-echo "T4: no hash -> refuse to render"
-render >/dev/null 2>"$TMP/err"; rc=$?
-if [ "$rc" -ne 0 ] && grep -q 'OPS_BASIC_AUTH_HASH' "$TMP/err"; then
-  ok "T4 missing OPS_BASIC_AUTH_HASH fails closed (rc=$rc)"
-else
-  bad "T4 missing OPS_BASIC_AUTH_HASH fails closed" "rc=$rc err=$(head -c 200 "$TMP/err")"
-fi
+assert_eq "T2 exact port set" "127.0.0.1:8085->80/tcp" "$PORTS"
 
 echo "T5: still the one custom-image Caddy"
 assert_eq "T5a project" "site" "$(printf '%s' "$JSON" | jq -r '.name')"

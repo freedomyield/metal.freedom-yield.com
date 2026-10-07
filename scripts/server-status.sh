@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Emit /srv/api/server-status.json with operator-only host metrics.
 # Designed to be invoked from cron every minute.
-# Output is served via the ops vhost (Caddy :8443) behind BasicAuth.
-# Public access is blocked by the public vhost's deny rule.
+# Operator-only monitoring data, read as a FILE on the validator host by
+# check-anomalies.sh, daily-status.sh, uptime-history.sh and
+# node-health-daily.sh (the ops dashboard that also served it over Caddy
+# :8443 was abolished on 2026-10-07). Public access is blocked by the
+# public vhost's deny rule.
 set -euo pipefail
 
 # Resolve repository root from script location if REPO_BASE is not set.
@@ -88,8 +91,8 @@ if ! METALGO_STATUS=$(inspect_status "$METALGO_CONTAINER"); then
   echo "ERROR: docker inspect failed for METALGO_CONTAINER=$METALGO_CONTAINER; keeping last-known-good $OUT" >&2
   exit 5
 fi
-# Caddy here serves only the operator ops dashboard, and which container does
-# that can change. A CADDY_CONTAINER naming a removed container is published
+# Caddy here only answers the deploy health check (127.0.0.1:8085), and which
+# container that is can change. A CADDY_CONTAINER naming a removed container is published
 # as "absent" (check-anomalies.sh alerts on it) instead of aborting: aborting
 # would leave the WHOLE feed stale, metalgo included. Only a docker failure
 # still keeps last-known-good. See scripts/lib/container-status.sh.

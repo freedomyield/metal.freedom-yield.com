@@ -46,15 +46,17 @@ step_packages() {
 }
 
 step_firewall() {
-  log "Step 2/8: ufw firewall (deny incoming, allow 22/80/443/9651)"
+  log "Step 2/8: ufw firewall (deny incoming, allow 22/tcp + 9651/tcp only)"
+  # No 80/443: nothing listens there. The public site is served by the web
+  # host and this host's Caddy binds loopback 127.0.0.1:8085 only. The live
+  # validator host's 80/tcp, 443/tcp, 443/udp rules (v4+v6) were removed on
+  # 2026-10-07 (operator-approved); this template now matches it.
   ufw default deny incoming >/dev/null
   ufw default allow outgoing >/dev/null
   ufw allow 22/tcp >/dev/null
-  ufw allow 80/tcp >/dev/null
-  ufw allow 443/tcp >/dev/null
   ufw allow 9651/tcp >/dev/null
   ufw --force enable >/dev/null
-  ufw status verbose | grep -E '^(Status|22|80|443|9651)'
+  ufw status verbose | grep -E '^(Status|22|9651)'
 }
 
 step_ssh_hardening() {
@@ -102,7 +104,7 @@ step_repo() {
 }
 
 step_server_status_cron() {
-  log "Step 6c/8: install 1-minute server-status.json refresh cron (ops dashboard)"
+  log "Step 6c/8: install 1-minute server-status.json refresh cron (host monitoring)"
   # 2026-08-06 (H2): SHELL/PATH headers (Rule 5) and the brace-wrapped
   # start/end markers + rc=$? capture (Rules 2/3) were missing here — the
   # linter (scripts/check-cron-file.sh) was never green against this
@@ -121,7 +123,7 @@ step_server_status_cron() {
   fi
   local metalgo_container="${mg_name:-metalgo-${mg_net:-mainnet}}"
   cat > /etc/cron.d/metal-server-status <<EOF
-# Refresh ops dashboard data every 1 minute.
+# Refresh server-status.json (read by check-anomalies / daily-status) every 1 minute.
 SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin
 METALGO_CONTAINER=${metalgo_container:-metalgo-mainnet}
@@ -456,16 +458,14 @@ step_metalgo() {
 }
 
 step_caddy() {
-  log "Step 8/8: bring up Caddy (internal site :8085 + ops dashboard 127.0.0.1:8443)"
+  log "Step 8/8: bring up Caddy (internal site 127.0.0.1:8085 only)"
   cd "$DEPLOY_DIR"
-  if [ ! -f .env ]; then
-    echo "NOTE: .env not present. Create it with OPS_BASIC_AUTH_HASH= before starting Caddy."
-    return 0
-  fi
   # Same file set as .github/workflows/deploy.yml's Caddy step: the validator
   # host runs ONE Caddy, loopback only (no 80/443 — the public site is served
   # by the web host). docker-compose.prod.yml (80/443 + ACME) is not used here.
-  docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml -f docker-compose.ops-tunnel.yml up -d --build
+  # The ops dashboard (127.0.0.1:8443 + OPS_BASIC_AUTH_HASH in .env) was
+  # abolished on 2026-10-07, so Caddy no longer needs anything from .env.
+  docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml up -d --build
   sleep 5
   docker ps --filter name=caddy-static --format 'table {{.Names}}\t{{.Status}}'
 }

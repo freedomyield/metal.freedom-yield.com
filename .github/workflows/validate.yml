@@ -68,9 +68,7 @@ jobs:
       - name: site prod
         run: docker compose -f docker-compose.yml -f docker-compose.prod.yml config --quiet
       - name: site validator host (deploy.yml file set)
-        env:
-          OPS_BASIC_AUTH_HASH: ci-dummy
-        run: docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml -f docker-compose.ops-tunnel.yml config --quiet
+        run: docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml config --quiet
       - name: metalgo local
         run: docker compose -f docker-compose.metalgo.yml config --quiet
       - name: metalgo prod

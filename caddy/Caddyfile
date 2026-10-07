@@ -44,8 +44,10 @@
 		}
 	}
 
-	# ops 専用パスは public サイトでは 403(SSH トンネル経由のみアクセス可)
-	# /ops, /ops/, /ops/anything, /api/server-status.json をすべて遮断
+	# operator 専用パスは 403。/api/server-status.json は validator host の cron
+	# (scripts/server-status.sh) が public/api/ に書き続ける operator 専用の監視データ
+	# (check-anomalies 等が file で読む)。/ops は 2026-10-07 に廃止した運用ダッシュボードの
+	# 旧 path で、古いコピーが残った配信先でも出さないため遮断を残す。
 	@ops_paths path /ops /ops/* /api/server-status.json
 	respond @ops_paths 403
 
@@ -122,47 +124,6 @@
 			rewrite * /404.html
 			file_server
 		}
-	}
-
-	log {
-		output stdout
-		format console
-	}
-}
-
-# ops dashboard — accessible ONLY via SSH tunnel:
-#   ssh -L 8443:localhost:8443 -i ~/.ssh/<your_validator_host_key> root@<vps>
-#   browser → http://localhost:8443
-#
-# Defense-in-depth:
-#   1. docker port mapping binds 127.0.0.1:8443 on the VPS (NOT 0.0.0.0)
-#   2. SSH key auth on the tunnel layer
-#   3. BasicAuth on Caddy
-# Plain HTTP is fine inside the SSH tunnel — encryption is already there.
-:8443 {
-	root * /srv
-
-	basic_auth {
-		operator {$OPS_BASIC_AUTH_HASH}
-	}
-
-	# Slightly more lenient cache for the operator-facing dashboard
-	@api path /api/*
-	header @api Cache-Control "no-store"
-
-	# Ops dashboard entry point
-	@ops_root path /
-	rewrite @ops_root /ops/index.html
-
-	file_server
-
-	header {
-		X-Frame-Options "DENY"
-		X-Content-Type-Options "nosniff"
-		Referrer-Policy "no-referrer"
-		# CSP: tighter than public — no external connects, only self
-		Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
-		-Server
 	}
 
 	log {
