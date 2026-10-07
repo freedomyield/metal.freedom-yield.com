@@ -279,10 +279,7 @@ AddValidator を出さない — 登録した瞬間から uptime が測られる
 を chat に示し、operator が**その手順に対して明示的に承認**してから着手し
 (例:「進めて」)、各手順の出力を期待と照合して報告する。承認はここに挙げた
 手順だけを覆い、別の変更には流用しない。operator のキー操作はこの枠には無い。
-**注意: v0.7 は loosening amendment で、発効は merge の 7 日後**
-(Constitution §9)。発効前にこの枠を使う日は v0.6 §5 (validator host の変更は
-operator が実行) が有効なので、operator が実行するか、どう扱うかを operator に
-確かめてから着手する。
+(v0.7 は 2026-10-07 に operator が clarification として承認し、即日発効。)
 
 **何を** (この順で。どの手順も、期待と違う出力が出たらそこで止まって報告):
 

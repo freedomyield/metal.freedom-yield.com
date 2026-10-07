@@ -1,6 +1,6 @@
 # Freedom Yield Validator — Operating Model
 
-> **Status:** v0.2 (draft) — v0.2 (2026-10-07): roles, W6, W7, the cadence table and the responsibility matrix aligned with Constitution v0.7 §5 (validator-host changes: operator approves per change in chat, AI executes and verifies; CI's fixed validator-host path).
+> **Status:** v0.2 (draft) — v0.2 (2026-10-07): roles, W6, W7, the cadence table and the responsibility matrix aligned with Constitution v0.7 §5 (validator-host changes: operator approves per change in chat, AI executes and verifies; CI's fixed validator-host path). Effective immediately: Constitution v0.7 is a clarification approved by the operator on 2026-10-07.
 > **Conforms to:** `docs/CONSTITUTION.md`. If this document conflicts with the Constitution, the Constitution prevails.
 
 This document describes **how** the validator is operated day to day. The Constitution describes **what is or is not permitted**; this Operating Model describes the workflows that operate within those bounds.
@@ -11,9 +11,9 @@ Like the Constitution, this document is itself public. SECRET items defined in C
 
 ## Roles and responsibility
 
-- **Operator** — the human accountable for the validator. Holds the staking keys, approves every infrastructure change (per change, explicitly), approves amendments, owns final judgment. The operator's own manual work is limited to keystore unlock / lock, entering passwords and passphrases, and wallet-UI operations; the operator MAY also execute any change personally.
+- **Operator** — the human accountable for the validator. Holds the staking keys, approves every infrastructure change (per change, explicitly), approves amendments, owns final judgment. The operator's own manual work is limited to keystore unlock / lock, entering passwords and passphrases, wallet-UI operations, and validator key generation / installation / destruction (W5); the operator MAY also execute any change personally.
 - **AI assistant** — may research, draft commands, produce reviewable diffs, write verification scripts, and propose plans. MAY execute a validator-host change only after the operator has explicitly approved that specific change in chat (Constitution §5, v0.7; W7), and then MUST verify it against the expected output. MAY NOT approve its own work, MAY NOT treat silence, an unlock, or a general instruction as approval, MAY NOT initiate external outreach.
-- **CI pipeline** — executes deploys when authorized by a repository-level gate: the web-host deploy, plus the one fixed validator-host path of W6 (host checkout fast-forward, `public/` rsync, site-Caddy compose). Never acts on `metalgo`.
+- **CI pipeline** — executes deploys when authorized by a repository-level gate: the web-host deploy, plus the one fixed validator-host path of W6 (deploy-path `mkdir`, host checkout fast-forward with its lossless self-heal, `public/` rsync, site-Caddy build / up / reload). Never starts, stops, recreates or configures the `metalgo` container.
 
 The pattern across every workflow below: **AI proposes, operator approves (per change), the AI (or CI under the gate, or the operator personally) executes, AI verifies output against the prior expectation.**
 
@@ -97,7 +97,7 @@ Detailed runbook: `docs/KEY_ROTATION.md`.
 
 **Gating:** a repository-level variable enables the deploy job. When disabled, all deploy jobs skip cleanly.
 
-**Flow:** the CI pipeline (`.github/workflows/deploy.yml`) acts on the validator host along one fixed path — fast-forwards the host's repository checkout to the pushed commit ("Advance host checkout to origin/main"), rsyncs the deploy-built `public/` tree into it ("Rsync public/ to VPS"), and brings up / reloads the project's site Caddy with the site compose files only ("Bring up / reload Caddy on VPS") — and then rsyncs `public/` to the web host (the public origin). It never acts on `metalgo`, its compose files, its data volume or keys, cron, packages, or firewall; any such change is W7.
+**Flow:** the CI pipeline (`.github/workflows/deploy.yml`) acts on the validator host along one fixed path (Constitution §5) — ensures the deploy path exists ("Ensure deploy path exists", `mkdir -p`), advances the host's repository checkout to the pushed commit with `scripts/advance-host-checkout.sh` ("Advance host checkout to origin/main": fast-forward only, after discarding `public/` deploy dirt and a lossless self-heal that reverts or removes only files byte-identical to the incoming commit), rsyncs the deploy-built `public/` tree into it ("Rsync public/ to VPS"), and builds / brings up / reloads the project's site Caddy with the site compose files only ("Bring up / reload Caddy on VPS") — and then rsyncs `public/` to the web host (the public origin). The fast-forward delivers every tracked file, including the `metalgo` compose files and scripts the host's cron runs (a script change takes effect at the cron's next tick; a compose-file change takes effect only through W7). CI never starts, stops, recreates or configures the `metalgo` container, never touches its data volume or keys, and never edits crontab, packages, or firewall; any such change is W7.
 
 **Discipline requirements:**
 
