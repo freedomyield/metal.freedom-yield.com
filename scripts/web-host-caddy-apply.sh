@@ -12,17 +12,19 @@
 # script is the supported path. It is run from the Mac by the AI after the
 # operator has approved THAT change in chat (Constitution §5 v0.9, Operating
 # Model W7, docs/DEPLOY_SETUP.md §9), and the approval is bound to the exact
-# content by --approved-sha256. v0.9 is a loosening amendment effective seven
-# days after merge (2026-10-15 for a 2026-10-08 merge); before that date the
-# AI runs none of the remote modes, and only the operator may run them.
+# content by --approved-sha256. v0.9 is a loosening amendment: merged
+# 2026-10-08 10:56 JST (merge commit 6da8456) -> effective 2026-10-15 10:56 JST
+# (merge + 7 days). Before that moment the AI runs none of the remote modes —
+# not even the read-only --check — and only the operator may run them.
 #
 # Modes:
 #   (none) | --plan   local only: no ssh, no docker. Prints the repo
 #                     Caddyfile's sha256, the commit it is in, and the
 #                     commands to run next.
 #   --check           read-only on the web host: scope guard (below), whether
-#                     the rate_limit module is in the running image, and a
-#                     unified diff running -> repo. Exit 0 in sync, 10 drift.
+#                     the rate_limit module is in the running image, health
+#                     as information only, and a unified diff running ->
+#                     repo. Exit 0 in sync, 10 drift.
 #   --apply --approved-sha256=<64 hex>
 #                     scope guard; the repo Caddyfile must be committed and
 #                     its sha256 must equal the approved value; validate it in
@@ -34,15 +36,19 @@
 #                     the container now sees the new bytes; `caddy reload`
 #                     (admin API pinned to 127.0.0.1:2019, never localhost)
 #                     inside the container; health (/health = ok and a CSP
-#                     header on /). The same health check must already pass
-#                     before anything is written (else refuse, exit 2). Any
+#                     header on /). For --apply only, the same health check
+#                     must already pass before anything is written (else
+#                     refuse, exit 2). Any
 #                     failure after the write restores the backup the same
 #                     way (only if its sha256 is unchanged since it was
 #                     taken) and reloads again. After success only the
 #                     newest 5 Caddyfile.bak-<UTC> next to the file are kept.
 #   --rollback --backup=Caddyfile.bak-<YYYYmmddTHHMMSSZ>
 #                     same guard + validate + in-place write + reload + health,
-#                     with a backup written next to the file by --apply.
+#                     with a backup written next to the file by --apply. Works
+#                     on a site whose health is already failing (that is when
+#                     it is needed); if it then still fails and the site was
+#                     failing before, it goes back to the file as found (exit 1).
 #   --print-remote    print the remote half for review and exit.
 #
 # Scope guard (every remote mode, before anything else). Refuses (exit 2,
@@ -57,8 +63,11 @@
 #   - its only port binding is 80/tcp -> 127.0.0.1:8085
 #   - the host file and the container's view of it are byte-identical
 # The only docker commands it issues are `docker inspect --type container …
-# caddy-static`, `docker exec caddy-static {cat,caddy list-modules,caddy
-# reload}` and `docker run --rm --network none … caddy validate`. It never runs
+# caddy-static`, `docker run --rm --network none … caddy validate` (a
+# throwaway container), and, through the single gate cexec(), exactly these
+# inside caddy-static: `cat /etc/caddy/Caddyfile`, `caddy list-modules`,
+# `caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile --address
+# 127.0.0.1:2019`. No other command runs inside it. It never runs
 # docker compose, never builds, starts, stops, recreates or removes a
 # container, never prunes, and never touches nginx, systemd, cron, packages or
 # the firewall (Constitution §5 multi-tenant scoping). A caddy/Dockerfile
@@ -134,11 +143,22 @@ ADMIN=127.0.0.1:2019
 refuse() { echo "REFUSED: $*" >&2; exit 2; }
 sha() { sha256sum "$1" | awk '{print $1}'; }
 
+HEALTH_BEFORE=unknown
 TMP="$(mktemp -d)" || refuse "mktemp failed"
 chmod 700 "$TMP"
 trap 'rm -rf "$TMP"' EXIT
 
-view() { docker exec "$C" cat "$IN"; }
+# cexec: the ONLY way this script runs a command inside caddy-static. The
+# allowed commands are listed exactly; anything else is refused (exit 2).
+# (caddy validate runs in a separate throwaway container, see validate().)
+cexec() {
+	case "$*" in
+		"cat $IN"|"caddy list-modules"|"caddy reload --config $IN --adapter caddyfile --address $ADMIN")
+			docker exec "$C" "$@" ;;
+		*) refuse "command inside $C not allowed: $*" ;;
+	esac
+}
+view() { cexec cat "$IN"; }
 
 guard() {
 	local facts running project image mounts ports n
@@ -169,16 +189,16 @@ image={{.Image}}
 	view > "$TMP/view" 2>/dev/null || refuse "cannot read $IN inside $C"
 	[ "$(sha "$TMP/view")" = "$(sha "$FILE")" ] \
 		|| refuse "host file and $C's view of it differ (bind pinned to an old inode?) — not handled here; see runbook"
-	if docker exec "$C" caddy list-modules 2>/dev/null | grep -qx 'http.handlers.rate_limit'; then
+	if cexec caddy list-modules 2>/dev/null | grep -qx 'http.handlers.rate_limit'; then
 		RL=present
 	else
 		RL=ABSENT
 	fi
 	echo "guard: ok (container $C, project ok, bind ok, port $WANT_PORT, image ${IMAGE#sha256:}, rate_limit module $RL)"
-	# Baseline: the site must pass the same health check BEFORE any write, so a
-	# later health failure means the change broke it (and "URGENT" is never
-	# reported for a site that was never healthy).
-	health || refuse "site health fails BEFORE any change (/health or CSP header on 127.0.0.1:8085) — not touching it"
+	# Health as found, before anything is written. Only --apply refuses on a
+	# failing baseline (so "URGENT" is never reported for a site that was never
+	# healthy); --rollback must work on a broken site, and --check only reports.
+	if health; then HEALTH_BEFORE=ok; else HEALTH_BEFORE=FAILING; echo "health: FAILING before any change (/health or CSP header on 127.0.0.1:8085)"; fi
 }
 
 validate() { # <file>
@@ -216,10 +236,10 @@ put() {
 	cat "$1" > "$FILE" || return 1
 	view > "$TMP/after" 2>/dev/null || return 1
 	[ "$(sha "$TMP/after")" = "$want" ] || { echo "container does not see the new bytes" >&2; return 1; }
-	docker exec "$C" caddy reload --config "$IN" --adapter caddyfile --address "$ADMIN" > "$TMP/reload.log" 2>&1 \
+	cexec caddy reload --config "$IN" --adapter caddyfile --address "$ADMIN" > "$TMP/reload.log" 2>&1 \
 		|| { tail -n 20 "$TMP/reload.log" >&2; return 1; }
 	echo "reload: ok"
-	health
+	health || return 3
 }
 
 restore() { # <backup path> <sha256 it had when it was taken>
@@ -228,8 +248,13 @@ restore() { # <backup path> <sha256 it had when it was taken>
 		echo "URGENT: backup $(basename "$1") changed since it was taken — NOT restoring from it; restore by hand (runbook §9.3)" >&2
 		exit 4
 	fi
-	if put "$1"; then
+	put "$1"; local rc=$?
+	if [ "$rc" = 0 ]; then
 		echo "ROLLED BACK: site is on the previous Caddyfile ($(basename "$1"))" >&2
+		exit 1
+	fi
+	if [ "$rc" = 3 ] && [ "$HEALTH_BEFORE" = FAILING ]; then
+		echo "ROLLED BACK to the Caddyfile as found ($(basename "$1")); health was already failing before this run and still fails" >&2
 		exit 1
 	fi
 	echo "URGENT: rollback FAILED — restore $(basename "$1") by hand (runbook §9.3)" >&2
@@ -261,6 +286,7 @@ apply)
 	cat > "$TMP/new"
 	[ "$(sha "$TMP/new")" = "$APPROVED" ] || refuse "received Caddyfile sha256 != approved sha256"
 	guard
+	[ "$HEALTH_BEFORE" = ok ] || refuse "site health fails BEFORE any change — --apply does not touch an unhealthy site (use --rollback to go back to a backup)"
 	if cmp -s "$FILE" "$TMP/new"; then echo "NO CHANGE: running Caddyfile already equals the approved one"; exit 0; fi
 	validate "$TMP/new" || refuse "caddy validate failed on the new Caddyfile — nothing changed"
 	B="$FILE.bak-$(date -u +%Y%m%dT%H%M%SZ)"
