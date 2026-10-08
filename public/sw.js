@@ -11,7 +11,7 @@
 //     page says "通信できません" (or the browser shows its offline error).
 "use strict";
 
-const CACHE_VERSION = "v158-status-page-network-only";
+const CACHE_VERSION = "v159-cadence-comment-after-period-only";
 const SHELL_CACHE = "shell-" + CACHE_VERSION;
 const DATA_CACHE = "data-" + CACHE_VERSION;
 

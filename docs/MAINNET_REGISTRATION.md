@@ -110,4 +110,4 @@
 
 - [INCIDENT_RESPONSE.md](INCIDENT_RESPONSE.md) — 登録後の障害対応
 - [KEY_ROTATION.md](KEY_ROTATION.md) — staker key 管理
-- [VALIDATOR_RENEWAL.md](VALIDATOR_RENEWAL.md) — cycle 終了前の再登録
+- [VALIDATOR_RENEWAL.md](VALIDATOR_RENEWAL.md) — cycle 終了後(旧 endTime 経過後)の再登録
