@@ -454,7 +454,8 @@ instruction = one run — see the actor section above), and authorize the
 mainnet anchor broadcast per invocation. Everything else — including which
 machine each command runs on — is AI-orchestrated across a **2-host
 topology (validator host + operator Mac)**, in this fixed day-of order
-(cf. the cycle-3 → cycle-4 transition, `N=3`):
+(`N` = the cycle that closes that day, `N+1` = the cycle inscribed that day;
+the values to pass on a given day are in the day-of value sheet above):
 
 0. **operator (Metal Wallet web) — submit the new AddValidator, then
    confirm it landed.** The one human-driven state change of the day, and
@@ -502,10 +503,12 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    成功は「`DRY:` が無いこと」ではなく**肯定的な signal** で確認する —
    `Closed cycle #<N>: …` がこの step の存在理由そのものを名指しする最強の行。
    ③ 付け忘れの被害は step 3 の行が「間違う」ことではなく「**出ない**」こと
-   (探すのは誤った行ではなく**欠けた行**)。④ **2026-09-04 は同じ日付で
-   `Appended daily entry` が 2 回出るのが正常** — 重複実行ではない。
+   (探すのは誤った行ではなく**欠けた行**)。④ **転換日は同じ日付で
+   `Appended daily entry` が 2 回出ることがあり、それは正常** — 重複実行では
+   ない (2026-09-04 に実測)。
    ⑤ **この step の末尾に 2.5 (開示 incident の公開) がある。step 3 へ進む前に
-   必ず読む** — 2026-09-04 は該当する。
+   必ず読む** — 該当するかは `find docs/pending-disclosures -name '*.json'` が
+   1 件以上返すかで決まる (2026-09-04 は該当した)。
 
    closes out cycle N's uptime record: the append-only master ledger entry,
    the in-flight `current-cycle-state.json`, the cycle-close summary row
@@ -571,19 +574,20 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    `FY_LIVE=1` is therefore a **missing** cycle-N row in
    `cycle-history.jsonl`, not a wrong one.
 
-   **2026-09-04 specifically needs care reading the `Appended daily entry`
-   signal above.** If cycle 4→5's `AddValidator` confirmation (step 1
-   above) lands mid-day, `uptime-history.sh` closing out cycle 4 in the
-   morning and a later run picking up cycle 5's new `period_end_unix` are
-   two DIFFERENT `EXISTING` combos on the SAME calendar date — the later
-   run legitimately prints a second `Appended daily entry for 2026-09-04 …`
+   **A transition day needs care reading the `Appended daily entry`
+   signal above** (first seen on 2026-09-04, cycle 4→5). If cycle
+   N→N+1's `AddValidator` confirmation (step 1 above) lands mid-day,
+   `uptime-history.sh` closing out cycle N in the morning and a later run
+   picking up cycle N+1's new `period_end_unix` are two DIFFERENT
+   `EXISTING` combos on the SAME calendar date — the later run
+   legitimately prints a second `Appended daily entry for <that date> …`
    line, not the skip line. **A second `Appended daily entry` for the same
    date that day is the expected success signal, not a duplicate-run
    symptom** — do not treat it as something to suppress or investigate on
    its own; if in doubt, compare each run's `period_end_unix` (in its
    `Appended …` line, or the corresponding `uptime-history.jsonl` row)
    against step 1's confirmed `endTime`.
-   **2.5 — 開示 incident の公開 (該当する cycle だけ。2026-09-04 は該当する)。**
+   **2.5 — 開示 incident の公開 (該当する cycle だけ。判定は下の手順 0 の `find`。2026-09-04 は該当した)。**
    その cycle に属する未公開の開示 incident があるなら、**step 3 より前に**
    `public/api/incidents.json` へ append し、公開まで届かせてから step 3 に進む。
    該当が無い cycle ではこのブロックは丸ごと飛ばしてよい。逆に、**step 3 の
@@ -612,9 +616,9 @@ topology (validator host + operator Mac)**, in this fixed day-of order
 
    0. **本文は `docs/pending-disclosures/<id>.json` に tracked で置いてある。**
       scratch から拾わない。`find docs/pending-disclosures -name '*.json'` が
-      その cycle に流す全量で、**2026-09-04 は
-      `docs/pending-disclosures/2026-08-17-01.json` の 1 件**
-      (`README.md` は常駐の説明文なので数えない)。**`*.json` が 1 件も
+      その cycle に流す全量 (`README.md` は常駐の説明文なので数えない。
+      過去例: 2026-09-04 は `docs/pending-disclosures/2026-08-17-01.json` の
+      1 件で、同日に公開済み)。**`*.json` が 1 件も
       返らなければ step 2.5 は非該当** (= 上の「該当が無い cycle」)。各ファイルは `incidents[]` に**そのまま入る entry
       オブジェクト**で、公開される bytes と同一 — 当日に整形し直す前提のもの
       ではない。中身は `tests/incidents/test-schema.sh` が毎回
@@ -622,7 +626,7 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    1. **AI@Mac** — その entry を `public/api/incidents.json` の `incidents[]`
       の**先頭**に挿入する (newest-first)。**手で貼らない**:
       ```sh
-      P=docs/pending-disclosures/2026-08-17-01.json
+      P=docs/pending-disclosures/<id>.json
       jq --slurpfile e "$P" '.incidents = ($e + .incidents)' \
         public/api/incidents.json > /tmp/incidents.new \
         && mv /tmp/incidents.new public/api/incidents.json
@@ -644,6 +648,11 @@ topology (validator host + operator Mac)**, in this fixed day-of order
       「公開後の後片付け」ではなく「公開そのものの一部」**と読むこと。
 
       **適用直前チェック (3 点)** — いずれも記憶で判断しない:
+
+      > ②③ の具体的な grep / curl は、2026-09-04 に公開した `2026-08-17-01`
+      > 向けに書いた**過去例**である (手順 6・7 の同 entry への言及も同じ)。
+      > 別の entry では同じ型 — 本文が主張する事実を repo と公開面で裏取りする
+      > — をその entry の主張に合わせて書き直してから使う。
 
       ① `resolutionDate` が実際の配信日と一致するか
       (ずれるなら**先に pending 側を**直してから進む)。
@@ -748,7 +757,7 @@ topology (validator host + operator Mac)**, in this fixed day-of order
       ことなので、step 3 に進まずその場で扱う。
    7. → ここで **step 3** へ。書かれたその cycle の行が
       `incidents_in_cycle_ids` に**新 entry を含んで**いることを確認する
-      (2026-09-04 なら新 entry + `2026-08-06-01` の 2 件)。1 件しか無ければ
+      (過去例: 2026-09-04 は新 entry + `2026-08-06-01` の 2 件)。1 件しか無ければ
       手順 5/6 が効いていない。
    8. 終了状態の確認: `find docs/pending-disclosures -name '*.json'` が
       **1 件も返さない** (手順 1 の `git rm` の結果)。`README.md` は常駐
@@ -851,7 +860,8 @@ topology (validator host + operator Mac)**, in this fixed day-of order
      以降の呼び出しで passphrase プロンプトが出ず、**AI が gen-identity を
      最後まで実行できる**。載せないと AI の非対話セッションがプロンプトで
      止まる。agent はセッションを跨がないので、**転換当日に改めて必要**
-     (9/1 の稽古で 1 度やっていても、9/4 にもう 1 度要る)。
+     (前日までの稽古で 1 度やっていても当日もう 1 度要る — 例: 9/1 の稽古と
+     9/4 当日)。
 
    **本体 (AI@Mac):**
 
@@ -872,8 +882,7 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    deploy 待ち」。この行を読んだ時点で commit + push まで走ると、4b が次の
    commit に落ちて main が赤くなる (4b 自身の警告と同じ状態)。
    `FY_EXPECT_CYCLE=<N>` is **mandatory** at a cycle transition (N = the
-   cycle that just closed, e.g. `FY_EXPECT_CYCLE=3` at the cycle-3 →
-   cycle-4 transition): it hard-stops (exit 7) if step 3's published ledger
+   cycle that just closed — the day-of value sheet's `N`): it hard-stops (exit 7) if step 3's published ledger
    has not caught up yet, turning "record the closed cycle before
    regenerating identity" into a machine-checked precondition instead of
    operator vigilance. Left unset, `gen-identity.sh` still runs (needed for
@@ -947,7 +956,7 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    > Do not add `FY_LIVE=1` either: this script writes no production state,
    > and the opt-in is not what makes the read correct.
    composes the fresh `anchor-source.json` (3-branch DAG) on the validator
-   host (cycle-4 day example: `FY_EXPECT_CYCLE=3`). It derives
+   host (`FY_EXPECT_CYCLE=<N>`, `N` from the day-of value sheet). It derives
    `cycle_number_observed` as `CLOSED_COUNT + 1` from the published
    `cycle-history.jsonl` line count, and carries its own ordering guard:
    if `FY_EXPECT_CYCLE` is set and does not match `CLOSED_COUNT` (= step 3
@@ -978,8 +987,8 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    # export VALIDATOR_HOST_KEY=~/.ssh/<your_validator_host_key>  # only if not using the default path
    # bash scripts/operator-local/commit-anchor-source.sh --expect-cycle=<N+1>
    ```
-   verifies + commits the host-composed `anchor-source.json` (cycle-4 day
-   example: `--expect-cycle=4`). The two exports are the SSH coordinates
+   verifies + commits the host-composed `anchor-source.json`
+   (`--expect-cycle=<N+1>`, from the day-of value sheet). The two exports are the SSH coordinates
    it fetches with — never literal in this repo, so both are yours to
    supply: `VALIDATOR_HOST` is **required** (unset → immediate refusal
    naming the variable), and `VALIDATOR_HOST_KEY` **defaults to the
@@ -1012,7 +1021,8 @@ topology (validator host + operator Mac)**, in this fixed day-of order
    **7a — gate-1 material (testnet-first).** A fresh testnet rehearsal of
    this cycle's exact memo shape. The day-of invocation MUST carry
    `--expect-cycle=<N+1>` (mandatory per
-   `docs/PHASE_ALPHA_TESTNET_DRY_RUN.md`; cycle-4 day example: `4`):
+   `docs/PHASE_ALPHA_TESTNET_DRY_RUN.md`; the value is in the day-of value
+   sheet):
    **1 行目 (unlock) は operator@TTY、2 行目 (rehearsal 本体) は AI@Mac** —
    ただし 2 行目は、AI がこのコマンドと下の「事前表示」の値を chat に示し、
    operator がそれに対して**実行を指示してから** 1 回だけ起動する (上の
@@ -1553,7 +1563,7 @@ Independent rollback levers, in increasing severity:
    opt-in is required — without it the script refuses with exit 6 and the
    gate stays disabled).
 2. **Kill switch — freeze all gated consumers. ⚠ USE PROHIBITED for routine
-   cycle transitions** (including cycle-4, 2026-08-04):
+   cycle transitions** (every cycle):
    `chmod -x /home/deploy/metal.freedom-yield.com/scripts/cycle-gate.sh`.
    This does **not** mean "gate disabled" — the opposite. Every consumer
    detects the non-executable gate and **fails closed**: the five
