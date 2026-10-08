@@ -1,8 +1,9 @@
 # Custom Caddy image with the rate-limit plugin baked in.
 # Built wherever the site container runs from this repo (local dev:
 # `make site-up`). This repo's deploy builds it nowhere: the web host has no
-# checkout of this repo, and the validator host runs no Caddy since
-# 2026-10-07. A change here reaches the web host's `caddy-static` only by a
+# git checkout of this repo (its deploy dir holds a non-git copy that deploy
+# refreshes only under public/, so this file there is NOT updated by deploy),
+# and the validator host runs no Caddy since 2026-10-07. A change here reaches the web host's `caddy-static` only by a
 # separately approved rebuild (docs/DEPLOY_SETUP.md §9.4); a Caddyfile-only
 # change goes through scripts/web-host-caddy-apply.sh (§9.2).
 #

@@ -12,7 +12,9 @@
 #   docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml up -d --build
 #   (-f を明示することで docker-compose.override.yml は読まれない)
 #   web host の caddy-static (host nginx -> 127.0.0.1:8085) と同じ形。web host に本リポの
-#   checkout は無く、本リポの deploy はこれを起動しない。
+#   git checkout は無い。deploy dir に本リポの git でないコピーが在り、caddy-static はそのコピーの
+#   この 2 本で起動されている。本リポの deploy はこれを起動せず、コピーの compose・Caddyfile も
+#   更新しない (deploy が更新するのは public/ だけ。Caddyfile の反映は docs/DEPLOY_SETUP.md §9)。
 #   validator host では使わない: validator host の Caddy は 2026-10-07 に operator の
 #   決定で撤去した (deploy の health check 以外に利用者がいなかった)。
 #
