@@ -62,6 +62,7 @@ sudo ufw status verbose
 
 **対応分岐** (特記なしは web host):
 
+- Caddyfile を反映した直後から崩れた → [DEPLOY_SETUP.md §9.3](DEPLOY_SETUP.md) の `--rollback` で直前の控えに戻す (反映も戻しも `scripts/web-host-caddy-apply.sh` だけで行う)
 - 配信 container が停止 → `docker start <手順 5 の ID>` (どれか不明なら start せず止めて確認)。web host に本リポの checkout は無いので、本リポの compose ファイルで起動しない
 - nginx 停止 → `sudo nginx -t` で設定を確認してから `sudo systemctl start nginx` (他 vhost も同居するので stop/restart は避ける)
 - ディスクフル → **診断を先に、削除は本プロジェクトのものだけ** (web host も validator host も他プロジェクトと同居しうる。Constitution §5 の分離と §3.3 の都度承認):

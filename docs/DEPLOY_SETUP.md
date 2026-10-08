@@ -164,6 +164,136 @@ cron backstop の節を参照。
 
 `workflow_dispatch` で随時手動実行も可。
 
+### 9. web host の `caddy-static` に Caddyfile の変更を反映する
+
+公開サイトは web host の host nginx → `127.0.0.1:8085` → container `caddy-static` が配信する。
+CI の deploy が web host に対して行うのは `public/` の rsync だけで(鍵が配信 dir に封じ込められている。§7 の 8)、
+**`caddy/Caddyfile` を変えても、それだけでは web host に届かない**。届ける経路はこの節の手順だけ。
+
+**統治**: web host は他プロジェクトと同居する multi-tenant host なので、Constitution §5 の
+「本プロジェクトの path・unit・名前に限定する。host 全体に効く変更は禁止」が掛かる。§5 の
+「変更ごとに chat で承認 → AI 実行 → AI 検証」(v0.7、Operating Model W7)は**文言上 validator host
+だけ**が対象で、web host 上の手作業の変更を明示的に統治する条文は無い (Operating Model の責任表は
+web host の deploy を CI だけに割り当てている)。そこでこの手順は、より厳しい側として **W7 と同じ形**で
+運用する: 変更(下の `--check` の diff と sha256)を operator が chat で**その変更として**承認 →
+AI が Mac から実行 → AI が期待値と照合。operator が自分で実行してもよい。この運用を条文にするか
+(W7 の対象を web host に広げる等)は operator の判断事項で、この節は条文を変えていない。
+
+**採らなかった案** (2026-10-08 検討):
+CI に web host 用の限定コマンドを足す案は、Caddyfile を書き換えて reload できる鍵 (= docker を
+動かせる鍵。共有 host では実質 root 相当) を CI の secret に置くことになり、漏れた時に他プロジェクト
+まで届く。Operating Model W6 (「web host では container を起動しない」) の変更も要る。
+running の Caddyfile と repo の差を常時見張る案は、web host で docker を読める権限を見張り側に
+新たに与える必要がある。差の確認は下の `--check` で必要な時に行う。
+
+#### 9.1 初回使用の前に: 未確認の事実 (UNVERIFIED)
+
+リポジトリからは次の 4 点を確認できない (SSH を伴う読み取りが要る)。**確認するまで `--apply` を使わない**。
+値は host の内部 path を含むので**リポジトリに書かない** (Constitution §4.2 C5)。実行時に環境変数で渡す。
+
+| 事実 | 渡し方 | 備考 |
+|---|---|---|
+| `caddy-static` の compose project 名 | `WEB_CADDY_PROJECT` | 本リポの `docker-compose.yml` なら `site` だが、web host のものは未確認 |
+| `/etc/caddy/Caddyfile` の bind 元 (host 上の path) | `WEB_CADDY_FILE` | bind mount でなければこの手順は使えない (script が拒否する) |
+| build context (Dockerfile と compose ファイルの在り処) | — | §9.4 の image 再 build にだけ要る |
+| ssh で入る account が docker を使えるか | `WEB_HOST_USER` (既定 root) | |
+
+確認に使う**読み取り専用**のコマンド (coordinator が web host 上で実行。どれも状態を変えない):
+
+```bash
+# 1. compose project・作業 dir・compose ファイル・稼働状態
+docker inspect --type container --format '{{json .Config.Labels}}' caddy-static
+docker inspect --type container --format '{{.State.Running}} {{.Config.Image}} {{.Image}}' caddy-static
+# 2. mount (Caddyfile の bind 元と種別)・port
+docker inspect --type container --format '{{json .Mounts}}' caddy-static
+docker inspect --type container --format '{{json .HostConfig.PortBindings}}' caddy-static
+# 3. validate に渡す DOMAIN (他の env は表示しない)
+docker inspect --type container --format '{{range .Config.Env}}{{println .}}{{end}}' caddy-static | grep '^DOMAIN='
+# 4. 稼働中の image に rate_limit が入っているか / caddy の版
+docker exec caddy-static caddy list-modules | grep -x http.handlers.rate_limit
+docker exec caddy-static caddy version
+# 5. reload に使う admin API (container 内 localhost:2019) が応答するか (GET のみ)
+docker exec caddy-static wget -q -O /dev/null http://localhost:2019/config/ && echo admin-api-ok
+# 6. host の bind 元と container の見ている内容が同じか・symlink でないか (2 の Source を使う)
+sha256sum <2 の Source>
+docker exec caddy-static cat /etc/caddy/Caddyfile | sha256sum
+stat -c '%F %i %U:%G %a' <2 の Source>
+stat -c '%F' "$(dirname <2 の Source>)"
+# 7. build context の有無 (1 の com.docker.compose.project.working_dir)
+ls -la <working_dir> <working_dir>/caddy
+docker image inspect --format '{{.Created}} {{json .RepoTags}}' <1 の .Image>
+# 8. ssh の account
+id
+```
+
+期待: 1 の `com.docker.compose.project` が `WEB_CADDY_PROJECT` に、2 の `/etc/caddy/Caddyfile` が
+`"Type":"bind"` でその `Source` が `WEB_CADDY_FILE` になる。port は `80/tcp` → `127.0.0.1:8085` だけ。
+4 で rate_limit が出なければ、稼働中の image は本リポの `caddy/Dockerfile` の物ではない (§9.4 が先)。
+6 の 2 つの sha256 が違えば、bind が古い inode に留まっている (下の注意) — 解消は §9.4 と同じく
+container の作り直しになるので、この手順の範囲外。
+
+その後 `--check` (読み取りのみ) を 1 回通し、`guard: ok` と diff を確認してから初めて `--apply` に進む。
+
+#### 9.2 手順
+
+```bash
+# 0. 手元 (Mac)。何にも接続しない。repo の Caddyfile の sha256 と次の手順を表示
+bash scripts/web-host-caddy-apply.sh
+
+# 1. 読み取りのみ: scope guard + 稼働中 → repo の diff (exit 0 = 一致 / 10 = 差あり)
+WEB_HOST=<web host> WEB_HOST_KEY=<鍵> WEB_CADDY_PROJECT=<9.1> WEB_CADDY_FILE=<9.1> \
+  bash scripts/web-host-caddy-apply.sh --check
+
+# 2. operator に diff と sha256 を示し、その変更として chat で承認を得る
+
+# 3. 反映 (承認された sha256 を渡す。repo の Caddyfile が commit 済みで、sha256 が一致しないと拒否)
+WEB_HOST=… WEB_HOST_KEY=… WEB_CADDY_PROJECT=… WEB_CADDY_FILE=… \
+  bash scripts/web-host-caddy-apply.sh --apply --approved-sha256=<0 の sha256>
+
+# 4. operator と同じ経路で確認 (edge CDN 経由)
+curl -fsS https://metal.freedom-yield.com/health
+curl -sSI https://metal.freedom-yield.com/ | grep -i '^content-security-policy'
+```
+
+`--apply` がすること (script 冒頭のコメントが正):
+
+1. scope guard — container 名は `caddy-static` 固定 (入力で変えられない)。compose project・Caddyfile の
+   bind 元・port (`127.0.0.1:8085` だけ)・host と container の内容一致・symlink でないこと、を全て満たさなければ
+   何も変えずに exit 2
+2. 稼働中の image で使い捨て container (`--rm --network none --read-only`) を起こし `caddy validate`。失敗なら exit 2 (何も変えない)
+3. host の Caddyfile を `Caddyfile.bak-<UTC>` に控える (同じ dir。削除はしない)
+4. host の Caddyfile を**その場で上書き**する。単一ファイルの bind mount は inode に固定されるので、
+   rename (mv や多くのエディタの保存) で置き換えると container は古い内容を見続ける。上書き後、container 内から
+   新しい内容が見えることを確かめる
+5. container 内で `caddy reload` (停止・再作成はしない)
+6. `127.0.0.1:8085/health` が `ok`、`/` に CSP ヘッダ。4〜6 のどれかが失敗すれば 3 の控えに同じ方法で戻して
+   reload し直し、exit 1
+
+使う docker コマンドは `docker inspect … caddy-static` / `docker exec caddy-static {cat, caddy list-modules, caddy reload}` /
+`docker run --rm --network none … caddy validate` だけ。docker compose・build・stop・rm・prune、nginx・systemd・cron・
+パッケージ・firewall には触れない。
+
+#### 9.3 戻す
+
+- **自動**: `--apply` は失敗時に自動で戻す (exit 1 = 前の Caddyfile で動いている)
+- **後から戻す**: `--apply` が表示した `BACKUP:` の名前を使う (戻す前の状態も新しい控えに残る)
+
+  ```bash
+  WEB_HOST=… WEB_HOST_KEY=… WEB_CADDY_PROJECT=… WEB_CADDY_FILE=… \
+    bash scripts/web-host-caddy-apply.sh --rollback --backup=Caddyfile.bak-<YYYYmmddTHHMMSSZ>
+  ```
+
+- **exit 4 (自動の戻しが失敗)**: 緊急。web host で `docker logs --tail 50 caddy-static` を見て、
+  `cat <控え> > <WEB_CADDY_FILE>` (その場で上書き。mv しない) → `docker exec caddy-static caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile`。
+  それでも配信が戻らなければ [INCIDENT_RESPONSE.md §3.1](INCIDENT_RESPONSE.md) へ。いずれも operator に上げてから行う
+
+#### 9.4 `caddy/Dockerfile` の変更 (image の再 build) — 自動化しない
+
+image を作り直すには container の再作成 (短い停止) が要り、web host 上の build context と compose 定義 (§9.1 の 7。未確認) に依存する。
+script はこれを扱わない。必要になったら、§9.1 の結果を元に「build → `caddy validate` (新 image で使い捨て container) →
+本プロジェクトの compose project だけを指定した `up -d --no-deps --force-recreate` → health → 戻し (前の image ID を控えて
+タグを戻す)」を具体的なコマンドと期待値つきで起こし、**その変更として**承認を得てから行う。
+
 ## トラブルシューティング
 
 | 症状 | 対処 |
