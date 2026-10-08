@@ -6,7 +6,7 @@
 
 > **適用版バナー (2026-06-29 16:40 JST update)**:
 > - **2026-07-04 cycle 3 開始 transition + 以降全 transition**: 本書末尾の **「新 SOP (= cycle-gate + resume 設計、 2026-06-29 deployed)」** section を使用。 手動 cron disable/enable は廃止、 operator 能動操作は wallet + 鍵の unlock / lock (operator@TTY 5 箇所) + chat での broadcast 認可 + visual verify のみ (同 section「operator の能動操作」、正は `docs/CYCLE_GATE.md`)。
-> - **本書 Step 1 〜 Step 3 (= 旧 11-step) + Phase α canonical memo**: deploy 前の **歴史記録 / 緊急 rollback 時の fallback**。 cycle-gate state file rm + cycle-gate.sh chmod -x で旧 behavior に戻せる (= 3 段階 rollback 手順は `docs/CYCLE_GATE.md` Rollback section)。
+> - **本書 Step 1 〜 Step 3 (= 旧 11-step) + Phase α canonical memo**: deploy 前の **歴史記録 / 緊急 rollback 時の fallback**。 承認 state を緩めるのは cycle-gate state file の退避 (rollback lever 1) だけで足りる。`cycle-gate.sh` の `chmod -x` (lever 2) は旧 behavior に戻す操作ではなく cycle 記録系を fail-closed で止める操作なので使わない (= 3 段階 rollback 手順は本書末尾「rollback」と `docs/CYCLE_GATE.md` Rollback section)。
 > - 切替の根拠: `docs/CYCLE_GATE.md` 全文。 cycle-gate は 2026-06-29 15:09 JST に T-7 deploy 完了済 + 第 7 ラウンド独立監査 PASS。
 
 ---
