@@ -1593,7 +1593,10 @@ metalgo RPC + web-host responses. The repo-wide suite runs via
 `tests/cycle-transition-steps/test-cycle-transition-steps.sh` guards the
 **runbook itself** against silent drift from the pipeline it describes: it
 checks every step in `docs/cycle-transition-steps.json` (the hand-maintained
-ground truth for the 13 execution units a transition actually runs) has a
+ground truth for the 15 indexed execution units a transition actually runs —
+13 until 2026-09-30, when 7b.5 and 10 joined; the orchestrator's plan adds
+step 4b for 16 units in all, see `scripts/cycle-transition.sh` "THE DRIFT
+GATE") has a
 literal mention in both this doc's model α runbook and
 `docs/VALIDATOR_RENEWAL.md`'s day-of list / emergency fallback — the
 2026-08-06 gap that motivated it (steps 7.5 and 8.5 existing in the real

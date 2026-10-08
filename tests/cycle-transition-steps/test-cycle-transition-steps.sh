@@ -2,8 +2,9 @@
 # tests/cycle-transition-steps/test-cycle-transition-steps.sh
 #
 # CI gate against runbook/reality drift: docs/cycle-transition-steps.json is
-# a hand-maintained, machine-readable ground truth for the 13 execution
-# units a cycle transition actually runs (see that file's own $comment for
+# a hand-maintained, machine-readable ground truth for the 15 execution
+# units a cycle transition actually runs (13 until 2026-09-30, when 7b.5 and
+# 10 joined; see that file's own $comment for
 # the 2026-08-06 background — steps 7.5 and 8.5 existed in the real
 # pipeline but were never written into docs/CYCLE_GATE.md or
 # docs/VALIDATOR_RENEWAL.md as their own line item, which is exactly the

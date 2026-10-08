@@ -132,7 +132,7 @@
 # The two sources do not agree with each other, and this table follows the
 # CANON rather than the index: docs/CYCLE_GATE.md carries STEP 4b (the C4
 # post-issuance cleanup, added 2026-08-14) and docs/cycle-transition-steps.json
-# — last updated 2026-08-06 — does not. So this table holds 16 units: the 15
+# does not (its last unit change, 2026-09-30, added 7b.5 and 10, not 4b). So this table holds 16 units: the 15
 # indexed ones plus 4b. The test pins that difference to exactly {4b}, so
 # neither "4b silently disappears" nor "some other step quietly joins the
 # plan" can pass.
