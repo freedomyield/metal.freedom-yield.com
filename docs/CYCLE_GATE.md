@@ -1447,6 +1447,45 @@ the values to pass on a given day are in the day-of value sheet above):
    chain serves now, or the chain_id differs) — stop and report, never
    delete a file to make it pass. None of this touches the anchor itself.
 
+11. **Mac — record the outcome in the working memo.** Added 2026-10-08
+   (operator decision), effective from the 2026-11-06 transition. **AI@Mac,
+   read-only check, no broadcast.** The day is not complete until the local
+   working memo `docs/tasks/validator-renew-cycle-<N+1>.md` (git-ignored,
+   never committed) records the outcome and its State header is updated —
+   **whoever drove the day**: the validator-renew agent, or the parent
+   session running this runbook directly. Background: on 2026-09-04 and
+   2026-10-07 the second half was run directly from this runbook and the
+   memo was left behind (the cycle-5 memo was never written, the cycle-6
+   memo stopped at Phase 1), although the on-chain and public records were
+   complete. If the memo does not exist yet (the day was not started by the
+   agent), create it. The memo must carry at least:
+   ```markdown
+   ## State
+   - Current phase: 完了 (cycle <N+1> 転換完了)
+   - Last update: <ISO 8601>
+
+   ## 結果
+   - registration tx: <AddValidator の P-Chain tx id (step 0)>
+   - self stake: <self stake (step 0)>
+   - endTime: <unix> (<JST>)
+   - anchor tx: <step 7c の 64hex tx id>
+   - verification: 完了判定 ①〜⑤ の結果 (各 PASS / 実測値)
+   - keys locked: testnet + mainnet keystore locked、identity 鍵は agent から削除済
+   ```
+   Then prove it:
+   ```sh
+   curl -fsS 'https://metal.freedom-yield.com/api/anchor-history.jsonl' -o /tmp/fya-anchor-history.jsonl
+   bash scripts/check-renewal-memo.sh <N+1> --history=/tmp/fya-anchor-history.jsonl
+   ```
+   Done = exit 0 (`RESULT: COMPLETE`). The checker takes the expected anchor
+   tx from the **published** ledger (the mainnet line whose `cycle_number`
+   is N+1), so a memo copied from the previous cycle does not pass. Exit 3 =
+   the memo is missing; 4 = incomplete (each missing item is listed: State
+   not `完了…`, an outcome key absent or a `<placeholder>`, or `anchor tx:`
+   not this cycle's id); 5 = the ledger has no single mainnet line for N+1
+   (has step 8.5 published?). Fix the memo and re-run; nothing here touches
+   the chain, the host or the repo.
+
 AI reads back step 7's tx id and reports the explorer URL to the operator
 for visual confirmation (PRIME DIRECTIVE gate 2's per-invocation
 authorization happens before that step runs, not after). Step 0 is the
@@ -1454,14 +1493,15 @@ operator's own wallet action (no script, no gate). Steps 1-3 and 8-9 pass
 the always-green `cycle-artifact-write` gate; no cycle-gate approval is
 needed for them.
 
-### 完了判定 checklist (この 5 点が揃ったら当日終了)
+### 完了判定 checklist (この 6 点が揃ったら当日終了)
 
 **`scripts/cycle-transition.sh --status` が全 green でも「終わった」ことには
-ならない。** 16 実行単位のうち 7 つ (7a / 7b / 7b.5 / {7.5, 8, 8.5} / 10) はどの事後条件にも
+ならない。** 17 実行単位のうち 8 つ (7a / 7b / 7b.5 / {7.5, 8, 8.5} / 10 / 11) はどの事後条件にも
 入っておらず、7.5 / 8 / 8.5 を丸ごと飛ばしても `--status` は緑を返しうる
 (その場合 on-chain には刻まれているのに公開 `anchor-receipt.json` /
 `anchor-history.jsonl` は前 cycle を配り続ける)。また 4b の registry 編集を
-**部分的に**やり忘れた場合も `--status` は気づかない。だから目視で 5 点を取る:
+**部分的に**やり忘れた場合も `--status` は気づかない。だから目視で 5 点を取り、
+最後に⑥を機械的に確かめる:
 
 - **① `--status` が全 green** — `bash scripts/cycle-transition.sh --status
   --expect-cycle=<N>` (記入例の 2026-10-07 なら `5`)。必要条件であって十分条件では
@@ -1481,6 +1521,16 @@ needed for them.
   削除を忘れても exit は 0 のままで、差が出るのは出力行だけ (2026-08-18 実測)。
 - **⑤ keystore が 2 つとも locked** — testnet (7a) と mainnet (7c) の両方。
   片方だけ re-lock して終える取りこぼしがいちばん起きやすい。
+- **⑥ 作業 memo が結果を記録している** (2026-10-08 operator 決定、2026-11-06 の
+  転換から適用) — step 11。`docs/tasks/validator-renew-cycle-<N+1>.md` (local、
+  commit しない) に registration tx / self stake / endTime / anchor tx /
+  ①〜⑤ の検証結果 / 鍵の lock を記録し、State を `完了 …` に更新したうえで
+  `bash scripts/check-renewal-memo.sh <N+1> --history=<公開 anchor-history.jsonl>`
+  が **exit 0**。**転換を validator-renew agent が進めたか、親 session が本
+  runbook で直接進めたかに関係なく必須。** on-chain と公開面が揃っていても、
+  memo が欠けている・Phase 途中で止まっている間は「終わった」ことにしない
+  (2026-09-04 は cycle 5 の memo が無く、2026-10-07 は cycle 6 の memo が
+  Phase 1 で止まっていた)。memo への記録は⑤の確認の後に行う (⑤の結果を書くため)。
 
 公開面の 3 ファイル (`anchor-receipt.json` / `anchor-history.jsonl` /
 `cycle-history.jsonl`) が**当 cycle の内容を配っていること**を curl で 1 度
@@ -1603,9 +1653,9 @@ metalgo RPC + web-host responses. The repo-wide suite runs via
 `tests/cycle-transition-steps/test-cycle-transition-steps.sh` guards the
 **runbook itself** against silent drift from the pipeline it describes: it
 checks every step in `docs/cycle-transition-steps.json` (the hand-maintained
-ground truth for the 15 indexed execution units a transition actually runs —
-13 until 2026-09-30, when 7b.5 and 10 joined; the orchestrator's plan adds
-step 4b for 16 units in all, see `scripts/cycle-transition.sh` "THE DRIFT
+ground truth for the 16 indexed execution units a transition actually runs —
+13 until 2026-09-30, when 7b.5 and 10 joined, and 15 until 2026-10-08, when
+11 joined; the orchestrator's plan adds step 4b for 17 units in all, see `scripts/cycle-transition.sh` "THE DRIFT
 GATE") has a
 literal mention in both this doc's model α runbook and
 `docs/VALIDATOR_RENEWAL.md`'s day-of list / emergency fallback — the
