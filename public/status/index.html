@@ -14,37 +14,89 @@
 <link rel="manifest" href="/status/manifest.json">
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
-<link rel="stylesheet" href="/status/status.css?v=a2d7b58">
-<script defer src="/status/status-calc.js?v=a2d7b58"></script>
-<script defer src="/status/status.js?v=a2d7b58"></script>
+<link rel="stylesheet" href="/status/status.css?v=s20261008">
+<script defer src="/status/status-calc.js?v=s20261008"></script>
+<script defer src="/status/status.js?v=s20261008"></script>
 </head>
 <body>
 <main class="wrap">
-	<h1 class="verdict" id="verdict" aria-live="polite">読み込み中…</h1>
-	<p class="verdict-detail" id="verdict-detail"></p>
+	<div class="verdict-box" id="verdict-box">
+		<h1 class="verdict" id="verdict" aria-live="polite">読み込み中…</h1>
+		<p class="verdict-detail" id="verdict-detail"></p>
+		<p class="last-check" id="last-check">確認時刻: —</p>
+	</div>
 	<p class="next" id="next" hidden><span class="next-label">次にすること:</span> <span id="next-text"></span></p>
-	<p class="last-check" id="last-check">最終確認: —</p>
 
 	<section class="card" aria-labelledby="h-checks">
 		<h2 id="h-checks">見張りの確認</h2>
 		<ul class="checks">
-			<li><span class="check-mark" id="c-p2p">—</span> 外から届く <span class="sub">(p2p)</span></li>
-			<li><span class="check-mark" id="c-chain">—</span> ネットワークに接続 <span class="sub">(chain)</span></li>
-			<li><span class="check-mark" id="c-fresh">—</span> データ更新 <span class="sub">(fresh)</span></li>
+			<li><span class="check-mark" id="c-p2p">—</span><span class="check-label">外から届く <span class="sub">p2p</span></span></li>
+			<li><span class="check-mark" id="c-chain">—</span><span class="check-label">ネットワークに接続 <span class="sub">chain</span></span></li>
+			<li><span class="check-mark" id="c-fresh">—</span><span class="check-label">データが新しい <span class="sub">fresh</span></span></li>
 		</ul>
+		<dl class="rows">
+			<div><dt>通知中の確認</dt><dd class="val" id="w-alerting">—</dd></div>
+			<div><dt>最後の確認 <span class="sub">last.t</span></dt><dd class="val" id="w-last">—</dd></div>
+			<div><dt>見張りの出力 <span class="sub">generated_at</span></dt><dd class="val" id="w-generated">—</dd></div>
+			<div><dt>確認の間隔</dt><dd class="val" id="w-interval">—</dd></div>
+		</dl>
 	</section>
 
 	<section class="card" aria-labelledby="h-history">
 		<h2 id="h-history">直近 24 時間</h2>
-		<p id="history">—</p>
+		<dl class="rows" id="history">
+			<div><dt>失敗</dt><dd class="val" id="h-fail">—</dd></div>
+			<div><dt>未確認</dt><dd class="val" id="h-unknown">—</dd></div>
+			<div><dt>見張りの抜け</dt><dd class="val" id="h-gap">—</dd></div>
+			<div><dt>確認</dt><dd class="val" id="h-total">—</dd></div>
+		</dl>
 	</section>
 
 	<section class="card" aria-labelledby="h-uptime">
 		<h2 id="h-uptime">Uptime</h2>
-		<p class="big" id="uptime">—</p>
-		<h3>報酬基準 80% まで</h3>
-		<p id="budget">—</p>
-		<p id="cycle-end">サイクル末の見込み: —</p>
+		<p class="big val" id="uptime">—</p>
+		<dl class="rows">
+			<div><dt>予定との差</dt><dd class="val" id="u-diff">—</dd></div>
+			<div><dt>予定</dt><dd class="val" id="u-expected">—</dd></div>
+			<div><dt>80% まで</dt><dd class="val" id="budget">—</dd></div>
+			<div><dt>サイクル末</dt><dd class="val" id="cycle-end">—</dd></div>
+		</dl>
+		<p class="note">80% まで = あと何時間止まっても報酬基準 (80%) を保てるか。サイクル末 = これ以上止まらなければの見込み。</p>
+
+		<h3>値の出どころ</h3>
+		<dl class="rows">
+			<div><dt>観測の方法 <span class="sub">uptime.source</span></dt><dd class="val" id="u-source">—</dd></div>
+			<div><dt>自ノードの申告 <span class="sub">参考</span></dt><dd class="val" id="u-self">—</dd></div>
+			<div><dt>値の古さ <span class="sub">cacheAgeSec</span></dt><dd class="val" id="u-cache">—</dd></div>
+		</dl>
+
+		<h3>既知の障害</h3>
+		<dl class="rows">
+			<div><dt>このサイクルで差し引き</dt><dd class="val" id="o-hours">—</dd></div>
+			<div><dt>登録件数</dt><dd class="val" id="o-count">—</dd></div>
+		</dl>
+	</section>
+
+	<section class="card" aria-labelledby="h-cycle">
+		<h2 id="h-cycle">サイクル</h2>
+		<dl class="rows">
+			<div><dt>開始</dt><dd class="val" id="cy-start">—</dd></div>
+			<div><dt>終了</dt><dd class="val" id="cy-end">—</dd></div>
+			<div><dt>残り</dt><dd class="val" id="cy-left">—</dd></div>
+		</dl>
+	</section>
+
+	<section class="card" aria-labelledby="h-validator">
+		<h2 id="h-validator">validator のデータ</h2>
+		<dl class="rows">
+			<div><dt>データの時刻 <span class="sub">observedAt</span></dt><dd class="val" id="v-observed">—</dd></div>
+			<div><dt>同期 <span class="sub">bootstrap</span></dt><dd class="val" id="v-bootstrap">—</dd></div>
+			<div><dt>ネットワーク</dt><dd class="val" id="v-network">—</dd></div>
+			<div><dt>自己 stake</dt><dd class="val" id="v-self">—</dd></div>
+			<div><dt>委任</dt><dd class="val" id="v-deleg">—</dd></div>
+			<div><dt>手数料</dt><dd class="val" id="v-fee">—</dd></div>
+			<div><dt>validator 総数</dt><dd class="val" id="v-total">—</dd></div>
+		</dl>
 	</section>
 
 	<p class="actions">

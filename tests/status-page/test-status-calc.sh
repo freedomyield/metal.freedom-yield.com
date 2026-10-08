@@ -271,7 +271,7 @@ if (!process.env.STATUS_CALC_MUTANT) {
 	ok(/\.then\(done, done\)/.test(sjs) && /function done\(\) \{\s*busy = false;/.test(sjs), "C12 busy cleared on both outcomes (finally)");
 	ok(/setInterval\(watchdog, WATCHDOG_MS\)/.test(sjs) && /C\.renderStale\(lastRenderOk, now\)/.test(sjs)
 		&& /更新できていません/.test(sjs) && /lastRenderOk = now;/.test(sjs), "C12 watchdog wired: interval + render timestamp + verdict");
-	ok(/last\[k\] === null\)\s*\{\s*el\.textContent = "未確認"/.test(sjs) && /未確認 " \+ h\.unknowns/.test(sjs),
+	ok(/last\[k\] === null\)\s*\{\s*el\.textContent = "未確認"/.test(sjs) && /setText\("h-unknown", h\.unknowns \+ " 回"\)/.test(sjs),
 		"C11 page renders null as 未確認 and counts 未確認 in 24 h");
 	const mf = JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8"));
 	ok(mf.start_url === "/status/" && mf.scope === "/status/" && mf.name === "Metal 状態", "C9 dedicated manifest scoped to /status/");
