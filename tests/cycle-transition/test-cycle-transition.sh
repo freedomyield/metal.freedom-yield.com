@@ -1093,7 +1093,7 @@ if grep -q 'WHERE THIS READING IS NOT A COMPLETE ACCOUNT OF THE DAY' "$ST_ALL"; 
 else
 	bad "the report omits its limits block"
 fi
-# The uncovered-unit list is the result of sweeping ALL 14 units, so the test
+# The uncovered-unit list is the result of sweeping ALL units, so the test
 # pins every unit the sweep found rather than the one that was noticed first.
 # An earlier revision disclosed only 8.5; review found 4b; the sweep then found
 # 7b, 7.5 and 8. A regression that quietly drops any of them is the same
