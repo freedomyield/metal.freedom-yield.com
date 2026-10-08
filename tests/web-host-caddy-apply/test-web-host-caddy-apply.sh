@@ -24,6 +24,10 @@
 #   - the host file is overwritten in place (inode kept; container sees it)
 #   - reload or health failure after the write -> automatic rollback (exit 1);
 #     rollback itself failing -> exit 4
+#   - health must pass BEFORE any write (a never-healthy site is refused with
+#     exit 2, never reported as URGENT)
+#   - a backup whose bytes changed since it was taken is never restored
+#   - only the newest 5 Caddyfile.bak-<UTC> are kept, only after success
 #   - every docker call targets caddy-static (or is the --rm --network none
 #     validate run); no compose / build / stop / rm / prune ever
 #   - the web host address never reaches the output
@@ -77,6 +81,9 @@ exec)
 			echo "Error: dial tcp [::1]:2019: connect: connection refused" >&2; exit 1 ;; esac
 		if [ -f "$F/reload-fail" ]; then
 			[ "$(cat "$F/reload-fail")" = always ] || rm -f "$F/reload-fail"
+			if [ -f "$F/corrupt-backup" ]; then
+				for b in "$F"/srv/caddy/Caddyfile.bak-*; do echo "TAMPERED" >> "$b"; done
+			fi
 			echo "Error: loading new config" >&2; exit 1
 		fi
 		cp "$F/view" "$F/live" ;;
@@ -281,6 +288,29 @@ rm "$F/view"; cp "$OLD_CF" "$F/view"
 run "$NEW_CF" --apply --approved-sha256="$NEWSHA"
 check "pinned view: not reported as applied (exit 1, rolled back)" '[ "$RC" = 1 ] && ! printf "%s" "$OUT" | grep -q "APPLIED:"'
 check "pinned view: host file = old, never reloaded onto new" 'cmp -s "$HOSTFILE" "$OLD_CF" && cmp -s "$F/live" "$OLD_CF"'
+fresh unhealthy-before
+# the site already fails health before anything is written
+printf 'BREAKS_HEALTH\n' >> "$F/live"
+run "$NEW_CF" --apply --approved-sha256="$NEWSHA"
+check "unhealthy before: exit 2 (refused), never URGENT" '[ "$RC" = 2 ] && ! printf "%s" "$OUT" | grep -q URGENT'
+check "unhealthy before: no write, no backup, no reload, no validate run" 'cmp -s "$HOSTFILE" "$OLD_CF" && [ "$(nbak)" = 0 ] && [ "$(nreloads)" = 0 ] && ! grep -q "^run " "$F/docker.log"'
+fresh tampered
+echo once > "$F/reload-fail"; touch "$F/corrupt-backup"
+run "$NEW_CF" --apply --approved-sha256="$NEWSHA"
+check "tampered backup: exit 4, says the backup changed" '[ "$RC" = 4 ] && printf "%s" "$OUT" | grep -q "changed since it was taken"'
+check "tampered backup: its bytes never written to the host file" '! grep -q TAMPERED "$HOSTFILE" && [ "$(nreloads)" = 1 ]'
+fresh prune
+for d in 01 02 03 04 05 06; do cp "$OLD_CF" "$F/srv/caddy/Caddyfile.bak-200001${d}T000000Z"; done
+echo keep > "$F/srv/caddy/Caddyfile.bak-manual"; echo keep > "$F/srv/caddy/notes.txt"
+run "$NEW_CF" --apply --approved-sha256="$NEWSHA"
+check "prune: exit 0, 5 dated backups kept" '[ "$RC" = 0 ] && [ "$(find "$F/srv/caddy" -name "Caddyfile.bak-*T*Z" | wc -l | tr -d " ")" = 5 ]'
+check "prune: the two oldest removed, the new one kept" '[ ! -e "$F/srv/caddy/Caddyfile.bak-20000101T000000Z" ] && [ ! -e "$F/srv/caddy/Caddyfile.bak-20000102T000000Z" ] && [ -e "$F/srv/caddy/Caddyfile.bak-20000103T000000Z" ] && [ "$(find "$F/srv/caddy" -name "Caddyfile.bak-20[1-9]*" | wc -l | tr -d " ")" = 1 ]'
+check "prune: other names untouched" '[ -f "$F/srv/caddy/Caddyfile.bak-manual" ] && [ -f "$F/srv/caddy/notes.txt" ]'
+fresh noprune-on-failure
+for d in 01 02 03 04 05 06; do cp "$OLD_CF" "$F/srv/caddy/Caddyfile.bak-200001${d}T000000Z"; done
+echo once > "$F/reload-fail"
+run "$NEW_CF" --apply --approved-sha256="$NEWSHA"
+check "failure: rolled back and no backup pruned (7 kept)" '[ "$RC" = 1 ] && [ "$(nbak)" = 7 ]'
 fresh rollbackfail
 echo always > "$F/reload-fail"
 run "$NEW_CF" --apply --approved-sha256="$NEWSHA"

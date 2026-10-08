@@ -271,15 +271,19 @@ curl -sSI https://metal.freedom-yield.com/ | grep -i '^content-security-policy'
 
 1. scope guard — container 名は `caddy-static` 固定 (入力で変えられない)。compose project・Caddyfile の
    bind 元・port (`127.0.0.1:8085` だけ)・host と container の内容一致・symlink でないこと、を全て満たさなければ
-   何も変えずに exit 2
+   何も変えずに exit 2。さらに**書き込む前に** 6 と同じ health を 1 回通す。通らなければ exit 2 (何も変えない)。
+   元から健全でないサイトを「戻しに失敗した (exit 4)」と誤って報告しないため。health は `127.0.0.1:8085` に
+   Host を付けずに当てるので、`DOMAIN` が `:80` 型であることが前提 (§9.1 で確認済み)
 2. 稼働中の image で使い捨て container (`--rm --network none --read-only`) を起こし `caddy validate`。失敗なら exit 2 (何も変えない)
-3. host の Caddyfile を `Caddyfile.bak-<UTC>` に控える (同じ dir。削除はしない)
+3. host の Caddyfile を `Caddyfile.bak-<UTC>` に控え (同じ dir)、控えの sha256 を記録する
 4. host の Caddyfile を**その場で上書き**する。単一ファイルの bind mount は inode に固定されるので、
    rename (mv や多くのエディタの保存) で置き換えると container は古い内容を見続ける。上書き後、container 内から
    新しい内容が見えることを確かめる
 5. container 内で `caddy reload --address 127.0.0.1:2019` (停止・再作成はしない。`localhost` は使わない: §9.1 の落とし穴)
 6. `127.0.0.1:8085/health` が `ok`、`/` に CSP ヘッダ。4〜6 のどれかが失敗すれば 3 の控えに同じ方法で戻して
-   reload し直し、exit 1
+   reload し直し、exit 1。戻す前に控えの sha256 が 3 で記録した値と同じか確かめ、違えば戻さずに exit 4
+7. 成功した時だけ、同じ dir の `Caddyfile.bak-<YYYYmmddTHHMMSSZ>` を新しい 5 個まで残し、古いものを消す
+   (その名前の形の通常ファイルだけ。他の名前・symlink・他の dir には触れない。失敗時は証拠として消さない)
 
 使う docker コマンドは `docker inspect … caddy-static` / `docker exec caddy-static {cat, caddy list-modules, caddy reload}` /
 `docker run --rm --network none … caddy validate` だけ。docker compose・build・stop・rm・prune、nginx・systemd・cron・
