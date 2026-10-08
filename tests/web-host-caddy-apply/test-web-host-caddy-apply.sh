@@ -320,13 +320,17 @@ check "rollback fail: host file restored to old bytes anyway" 'cmp -s "$HOSTFILE
 # ---- 9. real-mode ssh path: host masked, approval still bound --------------
 fresh realssh
 : > "$T/key"
-OUT="$(env PATH="$T/bin:$PATH" FAKE_DIR="$F" WEB_HOST=192.0.2.10 WEB_HOST_KEY="$T/key" \
+OUT="$(env -u WEB_HOST_USER PATH="$T/bin:$PATH" FAKE_DIR="$F" WEB_HOST=192.0.2.10 WEB_HOST_KEY="$T/key" \
 	WEB_CADDY_PROJECT=site WEB_CADDY_FILE="$HOSTFILE" "$SCRIPT" --check 2>&1)"; RC=$?
+check "ssh: WEB_HOST_USER unset -> exit 2, no ssh call (no root default)" '[ "$RC" = 2 ] && printf "%s" "$OUT" | grep -q "WEB_HOST_USER required" && [ ! -f "$F/ssh.calls" ]'
+OUT="$(env PATH="$T/bin:$PATH" FAKE_DIR="$F" WEB_HOST=192.0.2.10 WEB_HOST_KEY="$T/key" WEB_HOST_USER=webop \
+	WEB_CADDY_PROJECT=site WEB_CADDY_FILE="$HOSTFILE" "$SCRIPT" --check 2>&1)"; RC=$?
+check "ssh: logs in as the given WEB_HOST_USER" 'grep -qx "webop@192.0.2.10" "$F/ssh.argv.1" && ! grep -q "^root@" "$F"/ssh.argv.*'
 check "ssh check: runs remotely (exit 10 vs repo Caddyfile)" '[ "$RC" = 10 ] && [ "$(wc -l < "$F/ssh.calls" | tr -d " ")" = 2 ]'
 check "ssh check: web host address never printed" '! printf "%s" "$OUT" | grep -q "192.0.2.10"'
 check "ssh check: loopback binding still readable after masking" 'printf "%s" "$OUT" | grep -q "port 80/tcp=127.0.0.1:8085"'
 check "ssh: BatchMode + IdentitiesOnly" 'cat "$F"/ssh.argv.* | grep -q "BatchMode=yes" && cat "$F"/ssh.argv.* | grep -q "IdentitiesOnly=yes"'
-OUT="$(env PATH="$T/bin:$PATH" FAKE_DIR="$F" WEB_HOST=192.0.2.10 WEB_HOST_KEY="$T/key" WEB_CADDY_SRC="$NEW_CF" \
+OUT="$(env PATH="$T/bin:$PATH" FAKE_DIR="$F" WEB_HOST=192.0.2.10 WEB_HOST_KEY="$T/key" WEB_HOST_USER=webop WEB_CADDY_SRC="$NEW_CF" \
 	WEB_CADDY_PROJECT=site WEB_CADDY_FILE="$HOSTFILE" "$SCRIPT" --apply --approved-sha256="$NEWSHA" 2>&1)"; RC=$?
 check "WEB_CADDY_SRC outside tests: refused" '[ "$RC" = 2 ]'
 

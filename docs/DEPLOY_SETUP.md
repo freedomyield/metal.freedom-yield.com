@@ -201,7 +201,7 @@ web host の構成を変えたら (container の作り直し・deploy dir の移
 | `caddy-static` の compose project 名 | `site` (compose ファイルは `docker-compose.yml` + `docker-compose.behind-proxy.yml`) | `WEB_CADDY_PROJECT=site` |
 | `/etc/caddy/Caddyfile` の bind 元 | read-only の bind。元は `<deploy dir>/caddy/Caddyfile` (通常ファイル、deploy アカウント所有 644、親は symlink でない dir)。host と container の sha256 は一致 | `WEB_CADDY_FILE=<deploy dir>/caddy/Caddyfile` |
 | build context | `<deploy dir>` (本リポの git でないコピー。`caddy/Dockerfile` を含む)。image は `caddy-static:local` (caddy v2.11.4、`http.handlers.rate_limit` あり) | §9.4 でだけ使う |
-| ssh で入る account | root (docker を使える) | `WEB_HOST_USER=root` (既定) |
+| ssh で入る account | root (docker を使える) | `WEB_HOST_USER=root` (必須。既定値は無い: 入る account を毎回明示する) |
 
 その他の確認結果: port は `80/tcp` → `127.0.0.1:8085` だけ、`DOMAIN=:80`、`/srv` は `<deploy dir>/public` の read-only bind、
 volume は `site_caddy_config` / `site_caddy_data`。`<deploy dir>` は validator host の deploy path と同じ配置。
@@ -254,13 +254,13 @@ container の作り直しになるので、この手順の範囲外。
 bash scripts/web-host-caddy-apply.sh
 
 # 1. 読み取りのみ: scope guard + 稼働中 → repo の diff (exit 0 = 一致 / 10 = 差あり)
-WEB_HOST=<web host> WEB_HOST_KEY=<鍵> WEB_CADDY_PROJECT=site WEB_CADDY_FILE=<deploy dir>/caddy/Caddyfile \
+WEB_HOST=<web host> WEB_HOST_KEY=<鍵> WEB_HOST_USER=root WEB_CADDY_PROJECT=site WEB_CADDY_FILE=<deploy dir>/caddy/Caddyfile \
   bash scripts/web-host-caddy-apply.sh --check
 
 # 2. operator に diff と sha256 を示し、その変更として chat で承認を得る
 
 # 3. 反映 (承認された sha256 を渡す。repo の Caddyfile が commit 済みで、sha256 が一致しないと拒否)
-WEB_HOST=… WEB_HOST_KEY=… WEB_CADDY_PROJECT=… WEB_CADDY_FILE=… \
+WEB_HOST=… WEB_HOST_KEY=… WEB_HOST_USER=… WEB_CADDY_PROJECT=… WEB_CADDY_FILE=… \
   bash scripts/web-host-caddy-apply.sh --apply --approved-sha256=<0 の sha256>
 
 # 4. operator と同じ経路で確認 (edge CDN 経由)
@@ -296,7 +296,7 @@ curl -sSI https://metal.freedom-yield.com/ | grep -i '^content-security-policy'
 - **後から戻す**: `--apply` が表示した `BACKUP:` の名前を使う (戻す前の状態も新しい控えに残る)
 
   ```bash
-  WEB_HOST=… WEB_HOST_KEY=… WEB_CADDY_PROJECT=… WEB_CADDY_FILE=… \
+  WEB_HOST=… WEB_HOST_KEY=… WEB_HOST_USER=… WEB_CADDY_PROJECT=… WEB_CADDY_FILE=… \
     bash scripts/web-host-caddy-apply.sh --rollback --backup=Caddyfile.bak-<YYYYmmddTHHMMSSZ>
   ```
 

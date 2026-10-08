@@ -67,7 +67,8 @@
 # Env:
 #   WEB_HOST            web host address (required for remote modes)
 #   WEB_HOST_KEY        ssh private key path (required, no default)
-#   WEB_HOST_USER       ssh user (default root; needs docker access)
+#   WEB_HOST_USER       ssh user (required, no default; needs docker access —
+#                       the verified web-host fact is in docs/DEPLOY_SETUP.md §9.1)
 #   WEB_CADDY_PROJECT   expected compose project label of caddy-static
 #   WEB_CADDY_FILE      absolute host path bind-mounted at /etc/caddy/Caddyfile
 #   The last two are web-host facts, verified 2026-10-08 (project = site;
@@ -87,7 +88,7 @@
 #
 # Usage (from the Mac, repo root):
 #   bash scripts/web-host-caddy-apply.sh                       # plan
-#   WEB_HOST=… WEB_HOST_KEY=… WEB_CADDY_PROJECT=… WEB_CADDY_FILE=… \
+#   WEB_HOST=… WEB_HOST_KEY=… WEB_HOST_USER=… WEB_CADDY_PROJECT=… WEB_CADDY_FILE=… \
 #     bash scripts/web-host-caddy-apply.sh --check
 #   … --apply --approved-sha256=<sha from plan>
 #   … --rollback --backup=Caddyfile.bak-20261008T010203Z
@@ -357,11 +358,12 @@ fi
 
 WEB_HOST="${WEB_HOST:-}"
 WEB_HOST_KEY="${WEB_HOST_KEY:-}"
-WEB_HOST_USER="${WEB_HOST_USER:-root}"
+WEB_HOST_USER="${WEB_HOST_USER:-}"
 if [ "$SKIP_SSH" != 1 ]; then
 	[ -n "$WEB_HOST" ] || die2 "WEB_HOST required"
 	[ -n "$WEB_HOST_KEY" ] || die2 "WEB_HOST_KEY required (no default)"
 	[ -r "$WEB_HOST_KEY" ] || die2 "WEB_HOST_KEY not readable"
+	[ -n "$WEB_HOST_USER" ] || die2 "WEB_HOST_USER required (no default; web-host fact: docs/DEPLOY_SETUP.md §9.1)"
 	printf '%s' "$WEB_HOST_USER" | grep -qE '^[a-z_][a-z0-9_-]{0,31}$' || die2 "WEB_HOST_USER malformed"
 fi
 
