@@ -94,7 +94,7 @@ phase 5  刻印      Mac: preview(7b) (印字して停止。orchestrator は実�
               → 署名+broadcast(7c) → fragment 転送(7.5)
    ⏸ 停止4b: explorer 目視確認 → re-lock(空 Enter で新パスワード生成に注意)
               (いずれも 7c 完了後。7.5 と並行/前後 — phase5 の外とまでは断定しない)
-phase 6  事後      host: receipt 7-gate → history append → 公開 push → resume --apply → Mac: legacy archive(10)
+phase 6  事後      host: receipt 7-gate → history append → 公開 push → resume --apply → Mac: legacy archive(10) → 作業 memo 記録(11)
 ```
 
 **2026-09-30 追記 (A-Chain → PulseVM 移行準備)**: 実行単位を 2 つ追加した —
@@ -105,6 +105,12 @@ phase 6  事後      host: receipt 7-gate → history append → 公開 push →
 記録を `public/api/legacy-a-chain/` に保存し commit)。これで `scripts/cycle-transition.sh`
 の unit 表は 16 単位 (docs/cycle-transition-steps.json の 15 + 4b)。停止4a は 7b.5 の
 後に移る (7b と 7c の間であることは変わらない)。
+
+**2026-10-08 追記 (operator 決定)**: 実行単位 **11** を phase 6 の最後 (10 の後、Mac、
+read-only) に追加した — local の作業 memo `docs/tasks/validator-renew-cycle-<N+1>.md`
+が当日の結果を記録し State が `完了 …` になっていることを `scripts/check-renewal-memo.sh`
+で確かめる。転換を誰が進めたかに関係なく、これが exit 0 になるまで転換は完了ではない。
+unit 表は 17 単位 (docs/cycle-transition-steps.json の 16 + 4b)。
 
 根拠 (`docs/CYCLE_GATE.md` の step 番号 + `scripts/cycle-transition.sh` の
 unit 本文で示す):

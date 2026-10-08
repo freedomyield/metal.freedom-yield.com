@@ -1,7 +1,7 @@
 {
-  "$comment": "Hand-maintained ground truth for the 15 execution units a cycle transition actually runs (13 until 2026-09-30, see the end of this comment; scripts/cycle-transition.sh adds step 4b from docs/CYCLE_GATE.md for 16 units in its plan) (model α, AI full orchestration). Read against real scripts on 2026-08-06 (background: docs/CYCLE_GATE.md model α runbook + docs/VALIDATOR_RENEWAL.md 新SOP were missing steps 7.5 (scp the Mac-signed fragment to the host) and 8.5 (push the two canonical anchor feeds) — buried in the prose of neighboring steps instead of being their own line item). Step 0 (operator's Metal Wallet web AddValidator submit) is deliberately NOT listed here: docs/CYCLE_GATE.md itself says 'Step 0 is the operator's own wallet action (no script, no gate)', so it is not a script-driven execution unit — it still has its own doc entry (0. / ⓪), just outside this machine-checked list of 13. 2026-09-30 (A-Chain -> PulseVM migration readiness): two units added, 7b.5 (host preconditions + pre-signing history reachability check, before 7c) and 10 (legacy-chain anchor archive, after 9) — the list is now 15.",
+  "$comment": "Hand-maintained ground truth for the 16 execution units a cycle transition actually runs (13 until 2026-09-30 and 15 until 2026-10-08, see the end of this comment; scripts/cycle-transition.sh adds step 4b from docs/CYCLE_GATE.md for 17 units in its plan) (model α, AI full orchestration). Read against real scripts on 2026-08-06 (background: docs/CYCLE_GATE.md model α runbook + docs/VALIDATOR_RENEWAL.md 新SOP were missing steps 7.5 (scp the Mac-signed fragment to the host) and 8.5 (push the two canonical anchor feeds) — buried in the prose of neighboring steps instead of being their own line item). Step 0 (operator's Metal Wallet web AddValidator submit) is deliberately NOT listed here: docs/CYCLE_GATE.md itself says 'Step 0 is the operator's own wallet action (no script, no gate)', so it is not a script-driven execution unit — it still has its own doc entry (0. / ⓪), just outside this machine-checked list of 13. 2026-09-30 (A-Chain -> PulseVM migration readiness): two units added, 7b.5 (host preconditions + pre-signing history reachability check, before 7c) and 10 (legacy-chain anchor archive, after 9) — the list became 15. 2026-10-08 (operator decision): unit 11 added — the local working memo docs/tasks/validator-renew-cycle-<N+1>.md records the outcome and its State reads 完了, proved by scripts/check-renewal-memo.sh — the list is now 16.",
   "schema_version": 1,
-  "updated": "2026-09-30",
+  "updated": "2026-10-08",
   "source_of_truth": "docs/CYCLE_GATE.md 'Operator runbook (= cycle transitions, model α)' section + docs/VALIDATOR_RENEWAL.md '新 SOP' 当日順序 section. Both must carry every step below (as a literal substring match of that step's *_pattern) or tests/cycle-transition-steps/test-cycle-transition-steps.sh fails. Add a step here AND to both docs in the same commit.",
   "steps": [
     {
@@ -108,6 +108,13 @@
       "scripts": ["archive-legacy-anchors.sh", "verify-legacy-anchor-archive.sh"],
       "cycle_gate_pattern": "10. **Mac — archive the new anchor's legacy-chain record.**",
       "validator_renewal_pattern": "⑩ Mac local: legacy anchor archive"
+    },
+    {
+      "id": "11",
+      "summary": "Mac (last, after 10): record the day's outcome (registration tx, self stake, endTime, anchor tx, verification results, keys locked) in the local working memo docs/tasks/validator-renew-cycle-<N+1>.md, set its State to 完了, and prove it with check-renewal-memo.sh (read-only; the expected anchor tx comes from the published ledger). The transition is not complete until it exits 0, whoever drove the day. Added 2026-10-08 (operator decision).",
+      "scripts": ["check-renewal-memo.sh"],
+      "cycle_gate_pattern": "11. **Mac — record the outcome in the working memo.**",
+      "validator_renewal_pattern": "⑪ Mac local: 作業 memo に結果を記録"
     }
   ]
 }

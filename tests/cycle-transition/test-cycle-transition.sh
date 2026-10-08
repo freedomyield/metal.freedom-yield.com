@@ -7,7 +7,7 @@
 # mutation で実証する").
 #
 # Covered:
-#   A. the plan prints all 15 execution units from
+#   A. the plan prints all 16 execution units from
 #      docs/cycle-transition-steps.json, plus step 4b from docs/CYCLE_GATE.md
 #      — MUTATED per unit: dropping any one row turns the check red
 #   B. the drift gate (spec §8): docs/CYCLE_GATE.md's runbook step markers and
@@ -125,11 +125,12 @@ plan_unit_ids() {
 # ===========================================================================
 JSON_IDS="$(jq -r '.steps[].id' "$STEPS_JSON" | sort)"
 JSON_COUNT="$(printf '%s\n' "$JSON_IDS" | grep -c .)"
-# 15 since 2026-09-30 (7b.5 and 10 added for the A-Chain -> PulseVM readiness).
-if [ "$JSON_COUNT" -eq 15 ]; then
-	ok "docs/cycle-transition-steps.json still declares 15 execution units"
+# 15 since 2026-09-30 (7b.5 and 10 added for the A-Chain -> PulseVM readiness),
+# 16 since 2026-10-08 (11 added: the working memo records the outcome).
+if [ "$JSON_COUNT" -eq 16 ]; then
+	ok "docs/cycle-transition-steps.json still declares 16 execution units"
 else
-	bad "docs/cycle-transition-steps.json declares ${JSON_COUNT} units, expected 15 — the plan's baseline moved"
+	bad "docs/cycle-transition-steps.json declares ${JSON_COUNT} units, expected 16 — the plan's baseline moved"
 fi
 
 PLAN_IDS="$(plan_unit_ids "$PLAN" | sort)"
@@ -267,8 +268,8 @@ while IFS= read -r drop_id; do
 	MUT_TESTED=$((MUT_TESTED + 1))
 done < <(cut -d'|' -f1 "$ROWS")
 
-if [ "$MUT_TESTED" -lt 16 ]; then
-	bad "mutation loop only exercised ${MUT_TESTED} units, expected 16"
+if [ "$MUT_TESTED" -lt 17 ]; then
+	bad "mutation loop only exercised ${MUT_TESTED} units, expected 17"
 elif [ "$MUT_OK" -eq 1 ]; then
 	ok "mutation: dropping any one of the ${MUT_TESTED} unit rows removes it from the output (coverage check is not a tautology)"
 fi
@@ -1049,16 +1050,16 @@ fi
 # 7b, 7.5 and 8. A regression that quietly drops any of them is the same
 # failure as never having listed it.
 UNCOVERED_MISSING=""
-for u in '7a' '7b' '7.5, 8 AND 8.5' '4b' 'UNIT 7b.5' 'UNIT 10'; do
+for u in '7a' '7b' '7.5, 8 AND 8.5' '4b' 'UNIT 7b.5' 'UNIT 10' 'UNIT 11'; do
 	grep -qF "$u" "$ST_ALL" || UNCOVERED_MISSING="${UNCOVERED_MISSING:+$UNCOVERED_MISSING }${u}"
 done
 if [ -z "$UNCOVERED_MISSING" ]; then
-	ok "the limits block names every unit the coverage sweep found uncovered (7a, 7b, 7b.5, 7.5/8/8.5, 4b, 10)"
+	ok "the limits block names every unit the coverage sweep found uncovered (7a, 7b, 7b.5, 7.5/8/8.5, 4b, 10, 11)"
 else
 	bad "the limits block no longer discloses: ${UNCOVERED_MISSING}"
 fi
-if grep -q 'SEVEN OF THE SIXTEEN EXECUTION UNITS ARE COVERED BY NO POST-CONDITION' "$ST_ALL"; then
-	ok "the limits block states the coverage arithmetic (7 of 16 units), not just examples"
+if grep -q 'EIGHT OF THE SEVENTEEN EXECUTION UNITS ARE COVERED BY NO POST-CONDITION' "$ST_ALL"; then
+	ok "the limits block states the coverage arithmetic (8 of 17 units), not just examples"
 else
 	bad "the limits block does not state how many units are uncovered"
 fi
@@ -1158,7 +1159,7 @@ else
 fi
 # ...and the unit list still appears, from the unit table, when the phase is
 # genuinely INCOMPLETE. Without this the fix above could be "print nothing".
-if grep -qE '^to advance phase 6 +: units 8 8\.5 9 10$' "${TMP}/status-69.txt"; then
+if grep -qE '^to advance phase 6 +: units 8 8\.5 9 10 11$' "${TMP}/status-69.txt"; then
 	ok "an INCOMPLETE phase still gets its unit list, taken from the table --print-only prints"
 else
 	bad "an INCOMPLETE phase lost its unit list: $(grep -E '^to advance' "${TMP}/status-69.txt" | head -1)"
@@ -1538,10 +1539,10 @@ fi
 # say so, because nothing in the script itself pauses to ask.
 ACTORS="$(grep -oE '^# \[unit [^]]+\] (host|Mac) — [^ ]+' "$PLAN" | awk '{print $NF}')"
 ACTOR_N="$(printf '%s\n' "$ACTORS" | grep -c . || true)"
-if [ "$ACTOR_N" -eq 16 ]; then
-	ok "all 16 unit headers name an actor as well as a machine"
+if [ "$ACTOR_N" -eq 17 ]; then
+	ok "all 17 unit headers name an actor as well as a machine"
 else
-	bad "expected 16 unit headers carrying an actor, found ${ACTOR_N}"
+	bad "expected 17 unit headers carrying an actor, found ${ACTOR_N}"
 fi
 BAD_ACTOR="$(printf '%s\n' "$ACTORS" | grep -vxE 'AI@host|AI@Mac|operator@TTY' || true)"
 if [ -z "$BAD_ACTOR" ]; then
@@ -2021,8 +2022,8 @@ case "$ORDER" in
 	*) bad "unit 7b.5 is not between 7b and 7c: $ORDER" ;;
 esac
 case "$ORDER" in
-	*" 9 10 ") ok "unit 10 (legacy archive) is the last unit, after 9" ;;
-	*) bad "unit 10 is not the last unit after 9: $ORDER" ;;
+	*" 9 10 11 ") ok "unit 10 (legacy archive) follows 9, and unit 11 (working memo) is the last unit" ;;
+	*) bad "expected the plan to end '9 10 11': $ORDER" ;;
 esac
 U75B="$(unit_block "$PLAN_COV" '7b.5')"
 if printf '%s\n' "$U75B" | grep -F 'bash scripts/check-anchor-history-reachable.sh --chain=mainnet-a"' | grep -q "sudo -u deploy bash -c .*  # host$"; then
@@ -2061,6 +2062,54 @@ if [ -n "$L_ARC" ] && [ -n "$L_VER" ] && [ -n "$L_ADD" ] && [ "$L_ARC" -lt "$L_V
 	ok "unit 10 archives, then verifies, then stages public/api/legacy-a-chain/ (commit names cycle 5)"
 else
 	bad "unit 10 order/commands wrong (archive:${L_ARC:-none} verify:${L_VER:-none} add:${L_ADD:-none})"
+fi
+
+# ===========================================================================
+# Unit 11 (operator decision 2026-10-08): the working memo records the outcome
+# ===========================================================================
+# The transition is not complete until the local memo records the outcome and
+# its State is updated, whoever drove the day. The unit must be the last one,
+# the AI's on the Mac, read-only, bound to the cycle being INSCRIBED, and it
+# must say that it is the completion condition rather than a courtesy.
+U11B="$(unit_block "$PLAN_COV" '11')"
+if printf '%s\n' "$U11B" | grep -qE '^bash scripts/check-renewal-memo\.sh 5 --history=/tmp/fya-anchor-history\.jsonl +# Mac$'; then
+	ok "unit 11 runs check-renewal-memo.sh for the inscribed cycle (5) on the Mac, against the published ledger"
+else
+	bad "unit 11 does not run 'check-renewal-memo.sh 5 --history=…' on the Mac: $U11B"
+fi
+L_FETCH="$(printf '%s\n' "$U11B" | grep -n "curl -fsS 'https://metal.freedom-yield.com/api/anchor-history.jsonl'" | head -1 | cut -d: -f1)"
+L_CHECK="$(printf '%s\n' "$U11B" | grep -n 'check-renewal-memo.sh' | head -1 | cut -d: -f1)"
+if [ -n "$L_FETCH" ] && [ -n "$L_CHECK" ] && [ "$L_FETCH" -lt "$L_CHECK" ]; then
+	ok "unit 11 fetches the published ledger before checking the memo"
+else
+	bad "unit 11 fetch/check order wrong (fetch:${L_FETCH:-none} check:${L_CHECK:-none})"
+fi
+if grep -qE '^# \[unit 11\] Mac — AI@Mac — ' "$PLAN_COV"; then
+	ok "unit 11 is AI@Mac"
+else
+	bad "unit 11's header is not 'Mac — AI@Mac'"
+fi
+U11_TEXT="$(awk -v want="# [unit 11] " 'index($0,want)==1{f=1;next} index($0,"# [unit ")==1{f=0} f' "$PLAN_COV" | tr '\n' ' ')"
+if printf '%s' "$U11_TEXT" | grep -qF 'NOT COMPLETE UNTIL THIS EXITS 0' && \
+	printf '%s' "$U11_TEXT" | grep -qF 'WHOEVER DROVE IT' && \
+	printf '%s' "$U11_TEXT" | grep -qF 'docs/tasks/validator-renew-cycle-5.md'; then
+	ok "unit 11 states it is the completion condition, whoever drove the day, and names the cycle-5 memo"
+else
+	bad "unit 11 does not state the completion condition / the driver-independence / the memo path"
+fi
+# Any line of unit 11 that is not a comment must be the fetch or the check —
+# no git add, no commit, nothing that could publish the local memo.
+U11_OTHER="$(printf '%s\n' "$U11B" | grep -v -e '^$' -e 'check-renewal-memo.sh' -e "curl -fsS 'https://metal.freedom-yield.com/api/anchor-history.jsonl'" || true)"
+if [ -z "$U11_OTHER" ]; then
+	ok "unit 11 carries only the ledger fetch and the read-only check (nothing stages or publishes the memo)"
+else
+	bad "unit 11 carries unexpected commands: $U11_OTHER"
+fi
+# The completion checklist in the canon carries the memo criterion.
+if awk '/^### 完了判定 checklist/{f=1;next} /^## /{f=0} f' "$CYCLE_GATE_DOC" | grep -qF 'scripts/check-renewal-memo.sh'; then
+	ok "docs/CYCLE_GATE.md's completion checklist requires the working-memo check"
+else
+	bad "docs/CYCLE_GATE.md's completion checklist does not mention scripts/check-renewal-memo.sh"
 fi
 
 finish

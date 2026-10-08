@@ -558,7 +558,7 @@ SPEC_DOC="${REPO_ROOT}/docs/superpowers/specs/2026-08-06-single-source-of-truth-
 # below previously said 6|7.5, reasoning that phase 6 "consumes" the
 # fragment; that reasoning no longer holds now that the flow block itself
 # places 7.5 inside phase 5. Every other pair is a direct reading.
-PHASE_STEP_PAIRS="1|1 1|2 1|3 2|4 3|5 3|6 4|7a 5|7b 5|7b.5 5|7c 5|7.5 6|8 6|8.5 6|9 6|10"
+PHASE_STEP_PAIRS="1|1 1|2 1|3 2|4 3|5 3|6 4|7a 5|7b 5|7b.5 5|7c 5|7.5 6|8 6|8.5 6|9 6|10 6|11"
 
 if [ ! -r "$SPEC_DOC" ]; then
 	fail "T9b: design doc not readable at ${SPEC_DOC#"${REPO_ROOT}"/} — the phase grouping has no authority to check against"
@@ -603,6 +603,7 @@ else
 	check_spec_phase "history append"    6
 	check_spec_phase "history 到達確認(7b.5" 5
 	check_spec_phase "legacy archive(10)" 6
+	check_spec_phase "作業 memo 記録(11)" 6
 
 	# Step 7.5 carries no script, so check_spec_phase() above never
 	# exercises it — that helper only reads the literal "^phase N " line,

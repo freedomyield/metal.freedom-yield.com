@@ -121,8 +121,9 @@
 # ---------------------------------------------------------------------------
 # The unit table below is reconciled by tests/cycle-transition/ against BOTH:
 #
-#   * docs/cycle-transition-steps.json — the 15 machine-checked execution
-#     units (13 until 2026-09-30, when 7b.5 and 10 joined — see below). Every
+#   * docs/cycle-transition-steps.json — the 16 machine-checked execution
+#     units (13 until 2026-09-30, when 7b.5 and 10 joined; 15 until
+#     2026-10-08, when 11 joined — see below). Every
 #     one of its ids must appear here.
 #   * docs/CYCLE_GATE.md — the canonical runbook. The set of step markers in
 #     its "Operator runbook" section must equal this table's ids, plus step 0
@@ -132,8 +133,8 @@
 # The two sources do not agree with each other, and this table follows the
 # CANON rather than the index: docs/CYCLE_GATE.md carries STEP 4b (the C4
 # post-issuance cleanup, added 2026-08-14) and docs/cycle-transition-steps.json
-# does not (its last unit change, 2026-09-30, added 7b.5 and 10, not 4b). So this table holds 16 units: the 15
-# indexed ones plus 4b. The test pins that difference to exactly {4b}, so
+# does not (its last unit changes, 2026-09-30 and 2026-10-08, added 7b.5, 10
+# and 11, not 4b). So this table holds 17 units: the 16 indexed ones plus 4b. The test pins that difference to exactly {4b}, so
 # neither "4b silently disappears" nor "some other step quietly joins the
 # plan" can pass.
 #
@@ -149,6 +150,16 @@
 #         (scripts/archive-legacy-anchors.sh + verify-legacy-anchor-archive.sh)
 #         and commit public/api/legacy-a-chain/ while the legacy chain is
 #         still served.
+#
+# THE UNIT ADDED 2026-10-08 (operator decision, effective from the 2026-11-06
+# transition):
+#   11    Mac, last, after unit 10: the local working memo
+#         docs/tasks/validator-renew-cycle-<N+1>.md records the day's outcome
+#         and its State reads 完了, proved read-only by
+#         scripts/check-renewal-memo.sh against the published ledger. On
+#         2026-09-04 and 2026-10-07 the second half was driven directly from
+#         docs/CYCLE_GATE.md and the memo was left behind; the transition is
+#         now not complete until this unit exits 0, whoever drove the day.
 # Every other unit's id, order and meaning is unchanged.
 #
 # WHAT THE DRIFT GATE DELIBERATELY DOES NOT COVER, stated here because the
@@ -460,6 +471,7 @@ fyct__unit_rows() {
 8.5|6|host|AI@host|push-to-web-host.sh|publish the two canonical flat files
 9|6|host|AI@host|resume-after-cycle-start.sh|record the cycle-gate approval state
 10|6|Mac|AI@Mac|archive-legacy-anchors.sh verify-legacy-anchor-archive.sh|archive the new anchor's raw legacy-chain record, verify, commit
+11|6|Mac|AI@Mac|check-renewal-memo.sh|record the outcome in the working memo and prove it (read-only, last)
 FYCT_UNIT_EOF
 }
 
@@ -772,6 +784,12 @@ fyct__unit_commands() {
 		fyct__cmd "$m" "git commit -m 'data(legacy-a-chain): archive the cycle ${INSCRIBE} anchor while the legacy chain is served'"
 		fyct__cmd "$m" "git push"
 		fyct__cmd "$m" "gh run watch"
+		;;
+	11)
+		fyct__wrap "  " "THE DAY IS NOT COMPLETE UNTIL THIS EXITS 0 — WHOEVER DROVE IT (operator decision 2026-10-08, effective from the 2026-11-06 transition). The local working memo docs/tasks/validator-renew-cycle-${INSCRIBE}.md (never committed) must record the outcome — registration tx, self stake, endTime, anchor tx, the verification results of the canon's completion checklist, keys locked — under '## 結果', and its '## State' must read 'Current phase: 完了 …'. If the validator-renew agent did not start the day, the memo may not exist yet: create it. The template is docs/CYCLE_GATE.md step 11. On 2026-09-04 and 2026-10-07 the second half was run directly from the canon and the memo was left behind, although the chain and the public records were complete."
+		fyct__wrap "  " "Read-only, no broadcast: the checker reads the memo and the ledger and writes nothing. The expected anchor tx comes from the PUBLISHED ledger (the mainnet line for cycle ${INSCRIBE}), so a memo copied from the previous cycle does not pass. Exit 3 = memo missing; 4 = incomplete (each item listed); 5 = the ledger has no single mainnet line for cycle ${INSCRIBE} (check unit 8.5). Fix the memo and re-run."
+		fyct__cmd "$m" "curl -fsS 'https://metal.freedom-yield.com/api/anchor-history.jsonl' -o /tmp/fya-anchor-history.jsonl"
+		fyct__cmd "$m" "bash scripts/check-renewal-memo.sh ${INSCRIBE} --history=/tmp/fya-anchor-history.jsonl"
 		;;
 	*)
 		echo "cycle-transition: ERROR: no command block for unit '${id}' — the unit table and the command blocks have drifted." >&2
@@ -1612,12 +1630,12 @@ fyct_status_report() {
 
 	printf '============================================================================\n'
 	printf 'WHERE THIS READING IS NOT A COMPLETE ACCOUNT OF THE DAY\n'
-	fyct__status_wrap "  " "SEVEN OF THE SIXTEEN EXECUTION UNITS ARE COVERED BY NO POST-CONDITION. The list below is the result of asking, for EVERY unit in the plan, \"if this were skipped, would all five still read COMPLETE?\" — not of noticing one. An earlier revision listed only 8.5, and review found a second (4b); the sweep that produced this list found three more; the two units added 2026-09-30 (7b.5, 10) are the last two."
+	fyct__status_wrap "  " "EIGHT OF THE SEVENTEEN EXECUTION UNITS ARE COVERED BY NO POST-CONDITION. The list below is the result of asking, for EVERY unit in the plan, \"if this were skipped, would all five still read COMPLETE?\" — not of noticing one. An earlier revision listed only 8.5, and review found a second (4b); the sweep that produced this list found three more; the two units added 2026-09-30 (7b.5, 10) and the one added 2026-10-08 (11) are the last three."
 	fyct__status_wrap "  " "1. UNIT 7a (phase 4) has no post-condition at all. The rehearsal's only product is a transaction id on stdout, which nothing publishes."
 	fyct__status_wrap "  " "2. UNIT 7b (the mainnet dry run) is observed by nothing. Its --dry-run-log is an OPTIONAL argument to unit 7c, so skipping it does not even make 7c fail — it removes the gate-4 evidence silently."
 	fyct__status_wrap "  " "3. UNITS 7.5, 8 AND 8.5 are observed by nothing. Phase 6's post-condition is the gate-state signature written by unit 9, and unit 9 reads only the chain, the published anchor-source and the identity manifest — never the receipt or the anchor ledger. So a day where the signing fragment was never transferred, no receipt was verified, no history row was appended and nothing was published still reads COMPLETE here, with the public anchor-receipt.json and anchor-history.jsonl left serving the PREVIOUS cycle."
 	fyct__status_wrap "  " "4. UNIT 4b's REGISTRY EDITS are observed by nothing. Phase 2 reads generated_at and the presence of the .sig; identity.json carries no cycle number and no registry state. 4b's commit is needed to publish the manifest at all, so a wholly skipped 4b does show up — but doing the commit WITHOUT the deploy/identity-pin-baseline.json and deploy/publication.json edits leaves every post-condition here green while tests/publication-registry/ goes red on main."
-	fyct__status_wrap "  " "4b. UNIT 7b.5 (the host preconditions and the history reachability check) and UNIT 10 (the legacy-chain archive) are observed by nothing. 7b.5 leaves no artifact at all — its only product is the REACHABLE line it prints — and a skipped 10 leaves public/api/legacy-a-chain/ one anchor short, which no post-condition reads."
+	fyct__status_wrap "  " "4b. UNIT 7b.5 (the host preconditions and the history reachability check) and UNIT 10 (the legacy-chain archive) are observed by nothing. 7b.5 leaves no artifact at all — its only product is the REACHABLE line it prints — and a skipped 10 leaves public/api/legacy-a-chain/ one anchor short, which no post-condition reads. UNIT 11 (the working memo) is observed by nothing here either: the memo is local and never published, so this reading cannot see it. Run scripts/check-renewal-memo.sh itself; until it exits 0 the day is not complete, whatever this report says."
 	fyct__status_wrap "  " "5. Phase 2 confirms that identity.json.sig published alongside the manifest. It does NOT verify the signature. Unit 9's Phase 1 is what performs the cryptographic check."
 	fyct__status_wrap "  " "6. Phase 3 compares the published bytes against the copy committed IN THE REPOSITORY THIS COMMAND IS RUNNING FROM — this machine's HEAD, not the host's and not the host's live file. Running it on a machine whose HEAD lags the one that committed unit 6 reports INCOMPLETE for a phase that is done. See this script's header for why comparing against a live host copy would be worse."
 	fyct__status_wrap "  " "7. Phase 5 verifies the response it was handed, not its provenance. Capture it at the moment you run this; a response from another machine or another hour is not distinguishable here."

@@ -336,12 +336,13 @@ or non-executable → skip Job B (fail-closed)` という別の stderr 行は出
   R18 per-anchor archive の 2 本(`archive/anchor-source-<dag_root>.json` / `archive/anchor-receipt-<tx_id>.json`)は、この手動 push の対象では**ない**: 2026-08-06(`77fd09d`)以降、`append-anchor-history.sh` が append 成功直後に自動で push する(best-effort — 失敗しても append 自体は失敗させない)。失敗時は stderr + `notify.sh high` alert に "R18 publish FAILED" / "R18 publish skipped" が出るので、その場合だけ表示された retry コマンドを手動実行する。`FYD_PUBLISH_ARCHIVES=0` で自動 push 自体を無効化できるが、通常の cycle 切替では使わない。
 ⑨ validator host: `FY_LIVE=1 bash scripts/resume-after-cycle-start.sh --apply`(**`FY_LIVE=1` 必須** — 無いと Phase 1 の前に exit 6 で拒否し、read も poll も write も一切しない。C3 rollout 2026-08-06)(= v2 3 phase: Phase 1 verify 6 check → Phase 2 atomic state write → Phase 3 report。**broadcast なし、explorer URL は出力しない**)
 ⑩ Mac local: legacy anchor archive(2026-09-30 追加。⑧.5 の公開と⑨の後): anchor は `eosio.token` transfer の memo = **chain state ではなく history** で、A-Chain が PulseVM に移ると旧 chain の history は配信されなくなりうる(`docs/A_CHAIN_PULSEVM_CUTOVER.md`)。旧 chain が配信されているうちに、今日の anchor の生の history / block 応答を公開・git 管理の `public/api/legacy-a-chain/` に保存する: `curl -fsS 'https://metal.freedom-yield.com/api/anchor-history.jsonl' -o /tmp/fya-anchor-history.jsonl` → `bash scripts/archive-legacy-anchors.sh --from-file=/tmp/fya-anchor-history.jsonl` → `bash scripts/verify-legacy-anchor-archive.sh --history=/tmp/fya-anchor-history.jsonl` → `git add public/api/legacy-a-chain/`(staged は新 `<tx_id>.json` と `manifest.json` の 2 つだけ)→ commit → push → `gh run watch`。read-only の要求だけで、archive 済の anchor は要求なしで skip する。legacy profile を**名前で**(`xpr-mainnet`)読むので cutover 後も旧 chain を指し続ける。完了 = archiver が exit 0 **かつ** verifier が `VERIFIED <n> anchor(s)`(n は前回 +1)。archiver exit 3 = 今回取れなかった record がある(他は保存済)→ 後で再実行すれば続きから、exit 4/5 = fail closed(記録済ファイルと今の chain 応答が食い違う、または chain_id が違う)→ 止めて報告、ファイルを消して通すことは絶対にしない。anchor 自体には一切触れない
+⑪ Mac local: 作業 memo に結果を記録(2026-10-08 operator 決定、2026-11-06 の転換から適用。⑩の後、当日の最後): `docs/tasks/validator-renew-cycle-<N+1>.md`(local の作業 memo、commit しない)に registration tx / self stake / endTime / anchor tx / 検証結果(`docs/CYCLE_GATE.md` 完了判定 ①〜⑤)/ 鍵の lock を `## 結果` として記録し、`## State` の `Current phase:` を `完了 …` に更新する(雛形は `docs/CYCLE_GATE.md` step 11)。続けて AI@Mac が `bash scripts/check-renewal-memo.sh <N+1> --history=/tmp/fya-anchor-history.jsonl`(⑩で取った公開 ledger。read-only、broadcast なし)を実行し **exit 0** を確認する。**validator-renew agent が進めた日も、親 session が `docs/CYCLE_GATE.md` で直接進めた日も必須** — memo が無い・途中で止まっている間は、on-chain と公開面が揃っていても転換は完了ではない(2026-09-04 は cycle 5 の memo が無く、2026-10-07 は cycle 6 の memo が Phase 1 で止まっていた)。exit 3 = memo が無い、4 = 不足項目あり(stderr に列挙)、5 = 公開 ledger に N+1 の mainnet 行が 1 本に定まらない(⑧.5 の公開を確認)
 
 手順⑦の tx id を読取り、explorer URL を operator に報告(resume-after-cycle-start.sh の出力ではなく、手順⑦の broadcast 結果)。
 
 ### 緊急 fallback (= AI 不在時の operator 手動経路)
 
-AI が応答不能な場合、 operator は本書「AI が裏で自走する技術 task」の当日順序 ⓪〜⑩(⑦-b.5 / ⑦.5 / ⑧.5 を含む)を以下の手順で手動実行する(anchor pipeline の手順を省くと anchor 刻印が欠落する、または刻印済みでも公開 feed が古いままになるので、⑦-b.5 / ⑦.5 / ⑧.5 を含め全 step を踏む):
+AI が応答不能な場合、 operator は本書「AI が裏で自走する技術 task」の当日順序 ⓪〜⑪(⑦-b.5 / ⑦.5 / ⑧.5 を含む)を以下の手順で手動実行する(anchor pipeline の手順を省くと anchor 刻印が欠落する、または刻印済みでも公開 feed が古いままになるので、⑦-b.5 / ⑦.5 / ⑧.5 を含め全 step を踏む):
 
 ```sh
 # ⓪ Metal Wallet web で AddValidator を submit → explorer で Committed 確認 →
@@ -534,6 +535,10 @@ bash scripts/archive-legacy-anchors.sh --from-file=/tmp/fya-anchor-history.jsonl
 bash scripts/verify-legacy-anchor-archive.sh --history=/tmp/fya-anchor-history.jsonl
 git add public/api/legacy-a-chain/ && git diff --cached --name-status
 # staged が新 <tx_id>.json + manifest.json の 2 つだけであることを確認してから commit → push → gh run watch。
+
+# ⑪ Mac local: 作業 memo docs/tasks/validator-renew-cycle-<N+1>.md に結果を記録し State を「完了 …」に
+#    更新してから(雛形は docs/CYCLE_GATE.md step 11)、記録を確認する。exit 0 で当日終了。
+bash scripts/check-renewal-memo.sh <N+1> --history=/tmp/fya-anchor-history.jsonl
 ```
 
 Phase 1 の identity.json polling は最大 10 分待ち、 deploy 完了 timing が不明でも安全に走る。同様に resume-after-cycle-start.sh の Phase 1 も anchor-source.json の polling を最大 `FY_POLL_MAX_SEC`(default 600 秒)待つ。
