@@ -1,0 +1,103 @@
+{
+	"_comment": "Shared test vectors for the 予定 (expected) uptime. ONE definition, two implementations: public/status/status-calc.js (the /status/ page, node) and scripts/uptime-expected.py (the daily status push). tests/daily-status/test-uptime-expected.sh evaluates every vector against BOTH and requires both to equal 'want'. 'outages': null = known-outages.json missing. 'page': false = the page deliberately differs (it falls back to 'no outages' with a note; the push says 予定: 未確認), so only the push side is checked. Times: startTime/endTime unix seconds as node-info.sh writes them, observedAt ISO.",
+	"vectors": [
+		{
+			"name": "normal: cycle with no known outage inside it, small observed shortfall",
+			"validator": { "startTime": 1791345625, "endTime": 1793937625, "observedAt": "2026-10-08T00:00:00Z", "uptime": { "network": "99.9000" } },
+			"outages": [ { "start": "2026-09-24T10:56:46Z", "end": "2026-09-28T14:51:16Z", "note": "before this cycle" } ],
+			"want": { "status": "ok", "expected": "100.00", "diff": "-0.10", "drop": false },
+			"suffix": " (予定 100.00%・差 -0.10)"
+		},
+		{
+			"name": "with known outage: 2026-09-24..28 window inside the cycle (status-page C4 reference point)",
+			"validator": { "startTime": 1788498830, "endTime": 1791349999, "observedAt": "2026-10-03T11:40:00Z", "uptime": { "network": 85.78 } },
+			"outages": [ { "start": "2026-09-24T10:56:46Z", "end": "2026-09-28T14:51:16Z", "note": "x" } ],
+			"want": { "status": "ok", "expected": "85.78", "diff": "+0.00", "drop": false },
+			"suffix": " (予定 85.78%・差 +0.00)"
+		},
+		{
+			"name": "threshold: 0.49 pt below expected is NOT an unexpected drop",
+			"validator": { "startTime": 1788498830, "endTime": 1791349999, "observedAt": "2026-10-03T11:40:00Z", "uptime": { "network": 85.2868 } },
+			"outages": [ { "start": "2026-09-24T10:56:46Z", "end": "2026-09-28T14:51:16Z" } ],
+			"want": { "status": "ok", "expected": "85.78", "diff": "-0.49", "drop": false },
+			"suffix": " (予定 85.78%・差 -0.49)"
+		},
+		{
+			"name": "threshold: 0.51 pt below expected IS an unexpected drop",
+			"validator": { "startTime": 1788498830, "endTime": 1791349999, "observedAt": "2026-10-03T11:40:00Z", "uptime": { "network": 85.2668 } },
+			"outages": [ { "start": "2026-09-24T10:56:46Z", "end": "2026-09-28T14:51:16Z" } ],
+			"want": { "status": "ok", "expected": "85.78", "diff": "-0.51", "drop": true },
+			"suffix": " (予定 85.78%・差 -0.51)\n⚠ 想定外の低下 (予定より 0.5 pt 超低い)"
+		},
+		{
+			"name": "unexpected drop: observed far below expected with no new known outage",
+			"validator": { "startTime": 1791345625, "endTime": 1793937625, "observedAt": "2026-10-08T00:00:00Z", "uptime": { "network": "80.0000" } },
+			"outages": [ { "start": "2026-09-24T10:56:46Z", "end": "2026-09-28T14:51:16Z" } ],
+			"want": { "status": "ok", "expected": "100.00", "diff": "-20.00", "drop": true },
+			"suffix": " (予定 100.00%・差 -20.00)\n⚠ 想定外の低下 (予定より 0.5 pt 超低い)"
+		},
+		{
+			"name": "clip + merge: outage straddling the cycle start, and two overlapping entries counted once",
+			"validator": { "startTime": "1791345625", "endTime": 1793937625, "observedAt": "2026-10-11T04:00:25Z", "uptime": { "network": 97.0 } },
+			"outages": [
+				{ "start": "2026-10-07T00:00:00Z", "end": "2026-10-07T10:00:25Z" },
+				{ "start": "2026-10-09T00:00:00Z", "end": "2026-10-09T02:00:00Z" },
+				{ "start": "2026-10-09T01:00:00Z", "end": "2026-10-09T03:00:00Z" },
+				{ "start": null, "end": "2026-10-08T00:00:00Z" },
+				{ "start": "2026-10-10T00:00:00Z", "end": "2026-10-09T00:00:00Z" }
+			],
+			"want": { "status": "ok", "expected": "90.63", "diff": "+6.38", "drop": false },
+			"suffix": " (予定 90.63%・差 +6.38)"
+		},
+		{
+			"name": "observedAt after endTime: t is clamped to the cycle end",
+			"validator": { "startTime": 1788498830, "endTime": 1791349999, "observedAt": "2026-12-01T00:00:00Z", "uptime": { "network": 87.31 } },
+			"outages": [ { "start": "2026-09-24T10:56:46Z", "end": "2026-09-28T14:51:16Z" } ],
+			"want": { "status": "ok", "expected": "87.39", "diff": "-0.08", "drop": false },
+			"suffix": " (予定 87.39%・差 -0.08)"
+		},
+		{
+			"name": "missing known-outages.json → 予定: 未確認 (push only; the page falls back with a note)",
+			"page": false,
+			"validator": { "startTime": 1788498830, "endTime": 1791349999, "observedAt": "2026-10-03T11:40:00Z", "uptime": { "network": 85.78 } },
+			"outages": null,
+			"want": { "status": "unconfirmed", "expected": null, "diff": null, "drop": false },
+			"suffix": " (予定: 未確認)"
+		},
+		{
+			"name": "known-outages.json is not an array → 予定: 未確認 (push only)",
+			"page": false,
+			"validator": { "startTime": 1788498830, "endTime": 1791349999, "observedAt": "2026-10-03T11:40:00Z", "uptime": { "network": 85.78 } },
+			"outages": { "start": "2026-09-24T10:56:46Z" },
+			"want": { "status": "unconfirmed", "expected": null, "diff": null, "drop": false },
+			"suffix": " (予定: 未確認)"
+		},
+		{
+			"name": "known-outages.json entry with a time string this port cannot read → 予定: 未確認 (push only; the page skips the entry)",
+			"page": false,
+			"validator": { "startTime": 1788498830, "endTime": 1791349999, "observedAt": "2026-10-03T11:40:00Z", "uptime": { "network": 85.78 } },
+			"outages": [ { "start": "Sep 24 2026", "end": "2026-09-28T14:51:16Z" } ],
+			"want": { "status": "unconfirmed", "expected": null, "diff": null, "drop": false },
+			"suffix": " (予定: 未確認)"
+		},
+		{
+			"name": "validator.json without startTime → no expected value (page shows 予定 不明, push 予定: 未確認)",
+			"validator": { "startTime": null, "endTime": 1791349999, "observedAt": "2026-10-03T11:40:00Z", "uptime": { "network": 85.78 } },
+			"outages": [],
+			"want": { "status": "unconfirmed", "expected": null, "diff": null, "drop": false },
+			"suffix": " (予定: 未確認)"
+		},
+		{
+			"name": "no observed uptime → no suffix (notify.sh prints no [Uptime] footer at all)",
+			"validator": { "startTime": 1788498830, "endTime": 1791349999, "observedAt": "2026-10-03T11:40:00Z", "uptime": { "network": null } },
+			"outages": [],
+			"want": { "status": "no_actual", "expected": null, "diff": null, "drop": false },
+			"suffix": ""
+		}
+	],
+	"format": {
+		"_comment": "JS toFixed(2) / StatusCalc.signed parity on values whose binary double is an exact tie or just off one.",
+		"toFixed2": [0.125, 0.375, 87.125, 1.005, 99.995, 100, 85.77687966877177],
+		"signed": [0, -0.001, 0.005, -0.125, -20, 6.375, 0.003120331228231521]
+	}
+}
