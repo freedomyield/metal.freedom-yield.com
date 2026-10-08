@@ -29,6 +29,7 @@
 #                     single-file bind mount is pinned to the inode, so a
 #                     rename would leave the container on the old file); check
 #                     the container now sees the new bytes; `caddy reload`
+#                     (admin API pinned to 127.0.0.1:2019, never localhost)
 #                     inside the container; health (/health = ok and a CSP
 #                     header on /). Any failure after the write restores the
 #                     backup the same way and reloads again.
@@ -62,9 +63,9 @@
 #   WEB_HOST_USER       ssh user (default root; needs docker access)
 #   WEB_CADDY_PROJECT   expected compose project label of caddy-static
 #   WEB_CADDY_FILE      absolute host path bind-mounted at /etc/caddy/Caddyfile
-#   The last two are facts of the web host that are UNVERIFIED in the repo
-#   (docs/DEPLOY_SETUP.md §9.1 lists the read-only commands that establish
-#   them). They are never committed (Constitution §4.2 C5).
+#   The last two are web-host facts, verified 2026-10-08 (project = site;
+#   the bind source is <deploy dir>/caddy/Caddyfile — docs/DEPLOY_SETUP.md §9.1,
+#   with the read-only commands to re-check them). The path is never committed (§4.2 C5).
 #   SKIP_SSH=1          tests only: run the remote half locally. Then
 #                       WEB_CADDY_SRC may replace caddy/Caddyfile and the git
 #                       "committed" check is skipped for that file.
@@ -118,6 +119,9 @@ MODE="$1" PROJECT="$2" FILE="$3" APPROVED="$4" BACKUP="$5"
 C=caddy-static
 IN=/etc/caddy/Caddyfile
 WANT_PORT='80/tcp=127.0.0.1:8085'
+# The admin API listens on 127.0.0.1 only; "localhost" inside the container
+# resolves to ::1 first and is refused (measured on the web host 2026-10-08).
+ADMIN=127.0.0.1:2019
 
 refuse() { echo "REFUSED: $*" >&2; exit 2; }
 sha() { sha256sum "$1" | awk '{print $1}'; }
@@ -200,7 +204,7 @@ put() {
 	cat "$1" > "$FILE" || return 1
 	view > "$TMP/after" 2>/dev/null || return 1
 	[ "$(sha "$TMP/after")" = "$want" ] || { echo "container does not see the new bytes" >&2; return 1; }
-	docker exec "$C" caddy reload --config "$IN" --adapter caddyfile > "$TMP/reload.log" 2>&1 \
+	docker exec "$C" caddy reload --config "$IN" --adapter caddyfile --address "$ADMIN" > "$TMP/reload.log" 2>&1 \
 		|| { tail -n 20 "$TMP/reload.log" >&2; return 1; }
 	echo "reload: ok"
 	health
@@ -313,9 +317,9 @@ fi
 WEB_CADDY_PROJECT="${WEB_CADDY_PROJECT:-}"
 WEB_CADDY_FILE="${WEB_CADDY_FILE:-}"
 printf '%s' "$WEB_CADDY_PROJECT" | grep -qE '^[a-z0-9][a-z0-9_-]{0,63}$' \
-	|| die2 "WEB_CADDY_PROJECT missing or malformed (UNVERIFIED fact; see docs/DEPLOY_SETUP.md §9.1)"
+	|| die2 "WEB_CADDY_PROJECT missing or malformed (web-host fact: site; see docs/DEPLOY_SETUP.md §9.1)"
 printf '%s' "$WEB_CADDY_FILE" | grep -qE '^/[A-Za-z0-9._/-]+/Caddyfile$' \
-	|| die2 "WEB_CADDY_FILE must be an absolute path ending in /Caddyfile (UNVERIFIED fact; see §9.1)"
+	|| die2 "WEB_CADDY_FILE must be an absolute path ending in /Caddyfile (web-host fact; see docs/DEPLOY_SETUP.md §9.1)"
 if printf '%s' "$WEB_CADDY_FILE" | grep -qE '(^|/)[.][.]?(/|$)|//'; then
 	die2 "WEB_CADDY_FILE must not contain . / .. / // segments"
 fi

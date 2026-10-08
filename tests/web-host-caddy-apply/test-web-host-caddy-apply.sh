@@ -71,6 +71,10 @@ exec)
 	"caddy list-modules") echo http.handlers.file_server; [ -f "$F/no-rl" ] || echo http.handlers.rate_limit ;;
 	"caddy reload")
 		echo x >> "$F/reloads"
+		# the real admin API listens on 127.0.0.1 only; "localhost" (the
+		# caddy default) resolves to ::1 there and is refused
+		case " $* " in *" --address 127.0.0.1:2019 "*) ;; *)
+			echo "Error: dial tcp [::1]:2019: connect: connection refused" >&2; exit 1 ;; esac
 		if [ -f "$F/reload-fail" ]; then
 			[ "$(cat "$F/reload-fail")" = always ] || rm -f "$F/reload-fail"
 			echo "Error: loading new config" >&2; exit 1
@@ -149,7 +153,7 @@ run() {
 nreloads() { [ -f "$F/reloads" ] && wc -l < "$F/reloads" | tr -d ' ' || echo 0; }
 nbak() { find "$F/srv/caddy" -name 'Caddyfile.bak-*' | wc -l | tr -d ' '; }
 docker_scoped() { # every docker call is one of the three allowed shapes
-	! grep -vE '^(inspect --type container --format .* caddy-static|exec caddy-static (cat /etc/caddy/Caddyfile|caddy list-modules|caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile)|run --rm --network none --read-only .* --entrypoint caddy sha256:0123456789abcdef validate --config /etc/caddy/Caddyfile --adapter caddyfile)$' "$F/docker.log" | grep -q .
+	! grep -vE '^(inspect --type container --format .* caddy-static|exec caddy-static (cat /etc/caddy/Caddyfile|caddy list-modules|caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile --address 127.0.0.1:2019)|run --rm --network none --read-only .* --entrypoint caddy sha256:0123456789abcdef validate --config /etc/caddy/Caddyfile --adapter caddyfile)$' "$F/docker.log" | grep -q .
 }
 NEWSHA="$(sha "$NEW_CF")"
 
