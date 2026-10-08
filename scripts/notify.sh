@@ -9,6 +9,8 @@
 #   Env: NTFY_TAGS=<tag> — non-empty value overrides the priority-derived
 #     Tags header (= leading emoji) for this one notification, e.g.
 #     NTFY_TAGS=tada. Unset/empty keeps the priority-derived default.
+#   Env: NOTIFY_UPTIME_SUFFIX=<text> — appended right after the auto
+#     "[Uptime] XX%" footer (see below). Unset/empty = unchanged footer.
 # Examples:
 #   bash notify.sh high "Validator renewal" "7 days left to re-AddValidator"
 #   bash notify.sh urgent "metalgo down" "container status: exited"
@@ -90,6 +92,12 @@ fi
 # need to open the dashboard for a quick health glance. Reads from
 # the same validator.json the public site serves; falls back to
 # silence if the file is missing or unparseable.
+#
+# NOTIFY_UPTIME_SUFFIX (optional, default empty = byte-identical footer):
+# text appended directly after "[Uptime] XX%" on the same line. The daily
+# status push sets it to the status page's 予定 (expected) value and the
+# difference, computed by scripts/uptime-expected.py from this same
+# validator.json — so the observed number stays the one this footer prints.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VALIDATOR_JSON="$ROOT/public/api/validator.json"
 if [ -r "$VALIDATOR_JSON" ]; then
@@ -97,7 +105,7 @@ if [ -r "$VALIDATOR_JSON" ]; then
   if [ -n "$UPTIME" ] && [ "$UPTIME" != "null" ]; then
     MSG="${MSG}
 
-[Uptime] ${UPTIME}%"
+[Uptime] ${UPTIME}%${NOTIFY_UPTIME_SUFFIX:-}"
   fi
 fi
 

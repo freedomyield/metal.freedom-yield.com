@@ -289,6 +289,8 @@ fi
 # Note: notify.sh auto-appends a single "[Uptime] XX.XXXX%" footer line to
 # every ntfy body. Do NOT duplicate Uptime here; the auto-appended footer
 # is the single source of truth for the headline number across all pushes.
+# This push adds the 予定/差 to that footer line via NOTIFY_UPTIME_SUFFIX
+# (set just before fyd_notify below).
 BODY=$(cat <<EOF
 ${OVERALL}
 取得時刻: ${NOW_JST}
@@ -312,5 +314,20 @@ metalgo: ${METALGO_S}
 ${NODE_SHORT}${REWARD_BLOCK}${EVIDENCE_BLOCK}
 EOF
 )
+
+# 予定 (expected) uptime + difference next to the footer's observed value —
+# the SAME definition as the /status/ page (status-calc.js), ported in
+# scripts/uptime-expected.py and pinned to it by the shared fixture
+# tests/fixtures/uptime-expected-vectors.json. known-outages.json missing or
+# unreadable → " (予定: 未確認)", never a guess. Any helper failure (python3
+# absent, crash) also degrades to 未確認: the digest itself must still go out.
+KNOWN_OUTAGES_JSON="$ROOT/public/api/known-outages.json"
+UPTIME_SUFFIX=" (予定: 未確認)"
+if command -v python3 >/dev/null 2>&1; then
+  if _suffix="$(python3 "$ROOT/scripts/uptime-expected.py" "$VALIDATOR_JSON" "$KNOWN_OUTAGES_JSON" 2>/dev/null)"; then
+    UPTIME_SUFFIX="$_suffix"
+  fi
+fi
+export NOTIFY_UPTIME_SUFFIX="$UPTIME_SUFFIX"
 
 fyd_notify "$PRIO" "${TITLE_PREFIX} ${DATE_JP}" "$BODY"

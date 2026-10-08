@@ -118,7 +118,7 @@ Useful but assume ntfy.sh push notifications and a few env conventions. Adapt th
 ### `scripts/notify.sh`
 **Purpose:** Push a single ntfy.sh notification. Reads topic from a file (treated as a shared secret — anyone who knows it can publish/subscribe). Used by every alert pipeline below.
 **Dependencies:** `curl`.
-**Env:** `NTFY_TOPIC_FILE` (path to a file holding the topic identifier — set this), `NTFY_SERVER` (default `https://ntfy.sh`), `NTFY_TAGS` (non-empty value overrides the priority-derived Tags emoji for that one notification, e.g. `tada`; unset/empty keeps the default).
+**Env:** `NTFY_TOPIC_FILE` (path to a file holding the topic identifier — set this), `NTFY_SERVER` (default `https://ntfy.sh`), `NTFY_TAGS` (non-empty value overrides the priority-derived Tags emoji for that one notification, e.g. `tada`; unset/empty keeps the default), `NOTIFY_UPTIME_SUFFIX` (text appended right after the auto `[Uptime] XX%` footer; unset/empty keeps the footer unchanged).
 **Usage:** `bash notify.sh <priority> <title> <message...>`.
 **Adapt:** If you don't use ntfy, swap with your own push (Slack webhook, Telegram bot, Pushover etc.) — the calling scripts just exec this one wrapper.
 
@@ -126,6 +126,12 @@ Useful but assume ntfy.sh push notifications and a few env conventions. Adapt th
 **Purpose:** Daily digest composer. Pushes a single notification at one of three slots (`morning` / `evening` / `night`) summarizing validator + host state.
 **Dependencies:** `notify.sh`, `jq`, optionally `public/api/server-status.json` for host metrics.
 **Env:** `METALGO_RPC`, `WALLET_CONFIG` (optional — for wallet balance push, see below).
+**Uptime line:** the `[Uptime]` footer carries the status page's 予定 (expected) value and the difference — `[Uptime] 87.3100% (予定 87.40%・差 -0.09)` — computed by `scripts/uptime-expected.py` and handed to `notify.sh` as `NOTIFY_UPTIME_SUFFIX`; `(予定: 未確認)` when `public/api/known-outages.json` is missing or unreadable, plus a `⚠ 想定外の低下` line when observed is more than 0.5 pt below expected.
+
+### `scripts/uptime-expected.py`
+**Purpose:** Port of `public/status/status-calc.js`'s expected-uptime definition (cycle elapsed minus the known outages in `public/api/known-outages.json`, clipped and merged; drop = observed < expected − 0.5 pt) for shell pushes. Both implementations are pinned to one shared fixture, `tests/fixtures/uptime-expected-vectors.json`, by `tests/daily-status/test-uptime-expected.sh`. Unlike the page, a missing/unreadable outage list yields `予定: 未確認` instead of assuming no outages.
+**Dependencies:** Python 3.8+, standard library only. Read-only (two local files → stdout).
+**Usage:** `python3 scripts/uptime-expected.py [--json] <validator.json> <known-outages.json>`.
 
 ### `scripts/check-anomalies.sh`
 **Purpose:** Anomaly detector. Runs frequently via cron. Compares current state vs. a state file to dedup notifications. Detection rules: container status, disk > 85%, memory > 95%, peer count < 10, validator missing from `getCurrentValidators`, period T-7 / T-3 / T-1, stale public `validator.json` push, and public-site reachability — classified by path (Cloudflare vs. origin, via a direct-to-origin probe) and paged only when a failure lasts into the next run (see `docs/MONITORING_OPS.md` §6.7).
