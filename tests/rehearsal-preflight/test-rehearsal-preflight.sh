@@ -1196,16 +1196,64 @@ fi
 # Part 11 — read-only, and no broadcast pathway
 # ===========================================================================
 # The pre-flight must not modify the repository working tree or the fixture.
-BEFORE_GIT="$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null | sort)"
+#
+# The repository side is measured on a PRIVATE COPY, never on the live
+# checkout. This used to compare `git status --porcelain` of the live working
+# tree before and after, which also sees every concurrent writer (an editor,
+# another session, another suite): measured 2026-10-08, toggling an untracked
+# file in docs/ while this suite ran turned this case red (PASS=95 FAIL=1)
+# with the pre-flight writing nothing — the same defect class as
+# tests/cycle-transition/'s sections E and M. The copy is a shallow clone (so
+# the pre-flight's own `git show HEAD:…` still has a HEAD to read) with the
+# working tree's tracked and untracked non-ignored files laid over it as they
+# are on disk; the snapshot is a content hash of every file in it, .git
+# included, so it is stricter than git status.
+snapshot_tree() { find "$1" -type f -exec shasum {} \; 2>/dev/null | sort; }
+isolated_repo() {
+	local dest="$1"
+	git clone -q --depth 1 "file://${REPO_ROOT}" "$dest" >/dev/null 2>&1 || return 1
+	(cd "$REPO_ROOT" && git ls-files -z -c -o --exclude-standard) |
+		tar -C "$REPO_ROOT" --null -T - -cf - 2>/dev/null |
+		tar -C "$dest" -xf -
+	[ -r "${dest}/scripts/install-rehearsal-preflight.sh" ]
+}
+ISO_RO="${BASE}/iso-readonly"
+if isolated_repo "$ISO_RO"; then
+	pass "read-only: built a private copy of the working tree to measure against"
+else
+	bad "read-only: could not build a private copy of the working tree — the repo-side check would be vacuous"
+fi
+BEFORE_REPO="$(snapshot_tree "$ISO_RO")"
 D="$(fresh readonly-probe)"
 BEFORE_TREE="$(cd "$D" && find . -type f -exec ls -ld {} \; 2>/dev/null | sort)"
-run_pf "$D" >/dev/null 2>&1
+PREFLIGHT="${ISO_RO}/scripts/install-rehearsal-preflight.sh" run_pf "$D" >/dev/null 2>&1
 AFTER_TREE="$(cd "$D" && find . -type f -exec ls -ld {} \; 2>/dev/null | sort)"
-AFTER_GIT="$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null | sort)"
-if [ "$BEFORE_TREE" = "$AFTER_TREE" ] && [ "$BEFORE_GIT" = "$AFTER_GIT" ]; then
+AFTER_REPO="$(snapshot_tree "$ISO_RO")"
+if [ "$BEFORE_TREE" = "$AFTER_TREE" ] && [ "$BEFORE_REPO" = "$AFTER_REPO" ]; then
 	pass "read-only: neither the fixture tree nor the repo working tree changed"
 else
 	bad "read-only: neither the fixture tree nor the repo working tree changed"
+fi
+# MUTATION: the private-copy measurement must still catch a real write. A
+# mutant pre-flight that drops a file into its own repository, run the same
+# way, must change the snapshot.
+ISO_MUT="${BASE}/iso-mut"
+MUT_TARGET='^REPO_ROOT="\$(cd "\$(dirname "\$0")\/.." \&\& pwd)"$'
+if isolated_repo "$ISO_MUT" && \
+	[ "$(grep -c "$MUT_TARGET" "${ISO_MUT}/scripts/install-rehearsal-preflight.sh")" -eq 1 ]; then
+	sed -i.bak "/${MUT_TARGET}/a\\
+: > \"\${REPO_ROOT}/leak-probe\"
+" "${ISO_MUT}/scripts/install-rehearsal-preflight.sh" && rm -f "${ISO_MUT}/scripts/install-rehearsal-preflight.sh.bak"
+	MUT_BEFORE="$(snapshot_tree "$ISO_MUT")"
+	D="$(fresh readonly-mutant)"
+	PREFLIGHT="${ISO_MUT}/scripts/install-rehearsal-preflight.sh" run_pf "$D" >/dev/null 2>&1
+	if [ -e "${ISO_MUT}/leak-probe" ] && [ "$(snapshot_tree "$ISO_MUT")" != "$MUT_BEFORE" ]; then
+		pass "read-only (mutation): a pre-flight that writes into its repository is caught by the private-copy snapshot"
+	else
+		bad "read-only (mutation): a repository write by the pre-flight left the private-copy snapshot unchanged"
+	fi
+else
+	bad "read-only (mutation): target line (REPO_ROOT=…) not found exactly once in the pre-flight copy — the mutation would test nothing"
 fi
 
 # Broadcast-shape scan. Patterns are assembled from fragments so this file's
