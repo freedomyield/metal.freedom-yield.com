@@ -32,6 +32,13 @@
 #      <placeholder>):
 #        registration tx / self stake / endTime / anchor tx / verification /
 #        keys locked
+#      and no value says that nothing was recorded (記録なし / 未確認 / 未記入 /
+#      不明 / unknown / TBD / N/A / a bare "-" or 未) — UNLESS the State
+#      section carries the exact line
+#        - Retroactive: yes (事後作成 YYYY-MM-DD)
+#      i.e. the memo was written after the day from records, and says so.
+#      Even then "registration tx:" must carry a real P-Chain tx id (CB58)
+#      and "anchor tx:" the ledger's id (4.)
 #   4. the "anchor tx:" value contains THE cycle-<C> anchor tx id — taken from
 #      --anchor-tx=, or resolved from --history= (the mainnet line whose
 #      cycle_number is C). Any 64-hex string is not enough: a memo copied
@@ -160,12 +167,28 @@ value_of() {
 	printf '%s\n' "$2" | awk -v k="- $1:" 'index($0, k) == 1 { v = substr($0, length(k) + 1); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v; exit }'
 }
 
-is_real_value() {
+# is_present <value> — non-empty and not a <template placeholder>.
+is_present() {
 	case "$1" in
-	'' | '<'*'>' | TBD | tbd | 未 | 未記入 | - ) return 1 ;;
+	'' | '<'*'>') return 1 ;;
 	esac
 	return 0
 }
+
+# has_placeholder <value> — the value says, anywhere in it, that nothing was
+# recorded. Matched case-insensitively for the Latin spellings (LC_ALL=C so
+# tr leaves the UTF-8 bytes of the Japanese spellings alone).
+has_placeholder() {
+	local lc
+	lc="$(printf '%s' "$1" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
+	case "$lc" in
+	- | 未 | *記録なし* | *未確認* | *未記入* | *不明* | *unknown* | *tbd* | *n/a*) return 0 ;; # MUT:placeholder
+	esac
+	return 1
+}
+
+# A P-Chain transaction id: CB58, base58 alphabet, ~50 characters.
+REG_TX_RE='(^|[^1-9A-HJ-NP-Za-km-z])[1-9A-HJ-NP-Za-km-z]{48,52}([^1-9A-HJ-NP-Za-km-z]|$)'
 
 # ---- 2. State is updated -----------------------------------------------------
 STATE="$(section "State")"
@@ -180,6 +203,19 @@ else
 	esac
 fi
 
+# ---- 2b. retroactive marker ----------------------------------------------------
+# A memo written AFTER the day, from records, may say a value was not recorded
+# (記録なし, 未確認, …). It must say so about itself with this one exact line in
+# its State section; anything else that starts "- Retroactive:" is reported,
+# so a typo cannot pass for the marker.
+RETRO_RE='^- Retroactive: yes \(事後作成 [0-9]{4}-[0-9]{2}-[0-9]{2}\)$'
+RETRO=0
+if printf '%s\n' "$STATE" | grep -qE "$RETRO_RE"; then # MUT:retro
+	RETRO=1
+elif printf '%s\n' "$STATE" | grep -q '^- Retroactive:'; then
+	problem "malformed retroactive marker — the exact line is '- Retroactive: yes (事後作成 YYYY-MM-DD)'"
+fi
+
 # ---- 3. the outcome is recorded ------------------------------------------------
 OUTCOME="$(section "結果")"
 if [ -z "$OUTCOME" ]; then
@@ -187,17 +223,23 @@ if [ -z "$OUTCOME" ]; then
 fi
 for key in "registration tx" "self stake" "endTime" "anchor tx" "verification" "keys locked"; do
 	v="$(value_of "$key" "$OUTCOME")"
-	if ! is_real_value "$v"; then # MUT:keys
+	if ! is_present "$v"; then # MUT:keys
 		problem "outcome key '${key}:' is missing or has no real value"
+	elif has_placeholder "$v" && [ "$RETRO" -ne 1 ]; then
+		problem "outcome key '${key}:' says nothing was recorded ('${v}') — allowed only in a memo marked '- Retroactive: yes (事後作成 YYYY-MM-DD)'"
 	fi
 done
 
-# ---- 4. the anchor tx is THIS cycle's ------------------------------------------
+# ---- 4. the IDs are real, retroactive or not -----------------------------------
+REGV="$(value_of "registration tx" "$OUTCOME")"
+if is_present "$REGV" && ! printf '%s' "$REGV" | grep -qE "$REG_TX_RE"; then # MUT:regid
+	problem "'registration tx:' carries no P-Chain tx id (CB58, ~50 base58 characters): '${REGV}'"
+fi
 TXV="$(value_of "anchor tx" "$OUTCOME")"
 case "$TXV" in
 *"$ANCHOR_TX"*) : ;; # MUT:tx
 *)
-	if is_real_value "$TXV"; then
+	if is_present "$TXV"; then
 		problem "'anchor tx:' does not contain the cycle-${CYCLE} anchor tx id ${ANCHOR_TX} (it reads '${TXV}')"
 	fi
 	;;

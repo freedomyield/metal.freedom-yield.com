@@ -1479,10 +1479,28 @@ the values to pass on a given day are in the day-of value sheet above):
    ```
    Done = exit 0 (`RESULT: COMPLETE`). The checker takes the expected anchor
    tx from the **published** ledger (the mainnet line whose `cycle_number`
-   is N+1), so a memo copied from the previous cycle does not pass. Exit 3 =
-   the memo is missing; 4 = incomplete (each missing item is listed: State
-   not `完了…`, an outcome key absent or a `<placeholder>`, or `anchor tx:`
-   not this cycle's id); 5 = the ledger has no single mainnet line for N+1
+   is N+1), so a memo copied from the previous cycle does not pass.
+
+   **On the day, every outcome value is a measured value.** A value that says
+   nothing was recorded — `記録なし` / `未確認` / `未記入` / `不明` / `unknown` /
+   `TBD` / `N/A` / a bare `-` or `未`, anywhere in the value — fails the check
+   and names the key. Only a memo written **after** the day, from records,
+   may carry them, and it must say so about itself with exactly this line in
+   its `## State` block (anything else starting `- Retroactive:` is reported
+   as malformed):
+   ```markdown
+   - Retroactive: yes (事後作成 YYYY-MM-DD)
+   ```
+   Even then, `registration tx:` must carry a real P-Chain tx id (CB58,
+   ~50 base58 characters) and `anchor tx:` the ledger's id — a retroactive
+   memo restores the IDs from the chain (`scripts/reward-backfill-discover.sh`
+   for the registration tx) rather than writing them off.
+
+   Exit 3 = the memo is missing; 4 = incomplete (each item is listed: State
+   not `完了…`, an outcome key absent or a `<placeholder>`, a "nothing
+   recorded" value without the retroactive marker, `registration tx:`
+   without a CB58 id, or `anchor tx:` not this cycle's id); 5 = the ledger
+   has no single mainnet line for N+1
    (has step 8.5 published?). Fix the memo and re-run; nothing here touches
    the chain, the host or the repo.
 

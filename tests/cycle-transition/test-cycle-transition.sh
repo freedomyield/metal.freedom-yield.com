@@ -545,8 +545,35 @@ mkdir -p "$CANARY/sub"
 printf 'original\n' > "$CANARY/file-a"
 printf 'original\n' > "$CANARY/sub/file-b"
 snapshot() { find "$1" -type f -exec shasum {} \; 2>/dev/null | sort; }
+
+# isolated_repo <dest> — a PRIVATE COPY of this working tree (tracked files
+# plus untracked, non-ignored ones, exactly as they are on disk now), for the
+# "no writes into the repository" measurements below. Those used to compare
+# `git status --porcelain` of the LIVE working tree before and after the run,
+# which also sees every concurrent writer: an editor, another session, or
+# another suite touching the same checkout. Measured 2026-10-08: a file
+# toggled in docs/ while this suite ran turned "--print-only changed the
+# repository working tree" red (PASS=191 FAIL=1) with the orchestrator
+# writing nothing — the exact one-off red of that day's full run. Running a
+# copy of the orchestrator inside a copy nobody else knows about makes the
+# measurement see only the orchestrator, and the snapshot is a content hash of
+# every file, so it is stricter than git status (ignored files count too).
+isolated_repo() {
+	local dest="$1"
+	mkdir -p "$dest"
+	(cd "$REPO_ROOT" && git ls-files -z -c -o --exclude-standard) |
+		tar -C "$REPO_ROOT" --null -T - -cf - 2>/dev/null |
+		tar -C "$dest" -xf -
+	[ -r "${dest}/scripts/cycle-transition.sh" ]
+}
+ISO_PRINT="${TMP}/iso-print"
+if isolated_repo "$ISO_PRINT"; then
+	ok "built a private copy of the working tree for the side-effect measurement"
+else
+	bad "could not build a private copy of the working tree — the repository side-effect checks below would be vacuous"
+fi
 CANARY_BEFORE="$(snapshot "$CANARY")"
-REPO_BEFORE="$(cd "$REPO_ROOT" && git status --porcelain 2>/dev/null | sort)"
+REPO_BEFORE="$(snapshot "$ISO_PRINT")"
 HOME_BEFORE="$(snapshot "$SANDBOX_HOME")"
 
 SIDE_PLAN="${TMP}/plan-sidefx.txt"
@@ -555,7 +582,7 @@ env PATH="${STUBDIR}:${PATH}" \
 	FY_STATE_DIR="${CANARY}/state" \
 	VALIDATOR_HOST="$FAKE_HOST" \
 	VALIDATOR_HOST_KEY="$FAKE_KEY" \
-	bash "$ORCH" --print-only --expect-cycle="$EXPECT_CYCLE" \
+	bash "${ISO_PRINT}/scripts/cycle-transition.sh" --print-only --expect-cycle="$EXPECT_CYCLE" \
 	--ledger="$LEDGER_POST" > "$SIDE_PLAN" 2>/dev/null
 SIDE_RC=$?
 
@@ -579,10 +606,32 @@ if [ "$(snapshot "$SANDBOX_HOME")" = "$HOME_BEFORE" ]; then
 else
 	bad "--print-only wrote into HOME"
 fi
-if [ "$(cd "$REPO_ROOT" && git status --porcelain 2>/dev/null | sort)" = "$REPO_BEFORE" ]; then
-	ok "--print-only changed nothing in the repository working tree"
+if [ "$(snapshot "$ISO_PRINT")" = "$REPO_BEFORE" ]; then
+	ok "--print-only changed nothing in the repository working tree (measured on a private copy)"
 else
 	bad "--print-only changed the repository working tree"
+fi
+# MUTATION: the private-copy measurement must still catch a real write. A
+# mutant orchestrator that drops a file into its own repository, run exactly
+# like the measured one, must change the snapshot.
+ISO_MUT="${TMP}/iso-mut"
+if isolated_repo "$ISO_MUT" && \
+	grep -q '^\. "\${FYCT_SELF_DIR}/lib/side-effects.sh"$' "${ISO_MUT}/scripts/cycle-transition.sh"; then
+	sed -i.bak '/^\. "\${FYCT_SELF_DIR}\/lib\/side-effects.sh"$/a\
+: > "${FYCT_SELF_DIR}/../leak-probe"
+' "${ISO_MUT}/scripts/cycle-transition.sh" && rm -f "${ISO_MUT}/scripts/cycle-transition.sh.bak"
+	MUT_BEFORE="$(snapshot "$ISO_MUT")"
+	env PATH="${STUBDIR}:${PATH}" HOME="$SANDBOX_HOME" FY_STATE_DIR="${CANARY}/state" \
+		VALIDATOR_HOST="$FAKE_HOST" VALIDATOR_HOST_KEY="$FAKE_KEY" \
+		bash "${ISO_MUT}/scripts/cycle-transition.sh" --print-only --expect-cycle="$EXPECT_CYCLE" \
+		--ledger="$LEDGER_POST" > /dev/null 2>&1
+	if [ -e "${ISO_MUT}/leak-probe" ] && [ "$(snapshot "$ISO_MUT")" != "$MUT_BEFORE" ]; then
+		ok "mutation: an orchestrator that writes into its repository is caught by the private-copy snapshot"
+	else
+		bad "MUTATION NOT CAUGHT: a repository write by the orchestrator left the private-copy snapshot unchanged"
+	fi
+else
+	bad "mutation target (the side-effects.sh source line) not found in the orchestrator copy — the mutation would test nothing"
 fi
 # A dry-mode side effect would announce itself; there must be nothing to announce.
 if ! grep -q '^DRY: ' "${PLAN}.err" 2>/dev/null; then
@@ -1391,7 +1440,11 @@ mkdir -p "$CANARY2/sub"
 printf 'original\n' > "$CANARY2/file-a"
 printf 'original\n' > "$CANARY2/sub/file-b"
 CANARY2_BEFORE="$(snapshot "$CANARY2")"
-REPO_BEFORE2="$(cd "$REPO_ROOT" && git status --porcelain 2>/dev/null | sort)"
+# Same private-copy method as section E, for the same reason (a concurrent
+# writer to the live checkout is not a side effect of --status).
+ISO_STATUS="${TMP}/iso-status"
+isolated_repo "$ISO_STATUS" || bad "could not build a private copy of the working tree for --status"
+REPO_BEFORE2="$(snapshot "$ISO_STATUS")"
 FIXTURE_BEFORE="$(snapshot "$STATUS_OK")"
 
 # A FRESH, NEVER-USED HOME. The shared SANDBOX_HOME has already had ~25
@@ -1409,7 +1462,7 @@ ST_SIDEFX="${TMP}/status-sidefx.txt"
 env PATH="${STUBDIR2}:${PATH}" \
 	HOME="$SANDBOX_HOME2" \
 	FY_STATE_DIR="${CANARY2}/state" \
-	bash "$ORCH" --status --expect-cycle="$ST_N" "${OK_ARGS[@]}" > "$ST_SIDEFX" 2>/dev/null
+	bash "${ISO_STATUS}/scripts/cycle-transition.sh" --status --expect-cycle="$ST_N" "${OK_ARGS[@]}" > "$ST_SIDEFX" 2>/dev/null
 ST_SIDEFX_RC=$?
 
 if [ "$ST_SIDEFX_RC" -eq 0 ]; then
@@ -1432,8 +1485,8 @@ if [ "$(snapshot "$SANDBOX_HOME2")" = "$HOME_BEFORE2" ] && [ -z "$(find "$SANDBO
 else
 	bad "--status wrote into HOME: $(find "$SANDBOX_HOME2" -mindepth 1 2>/dev/null | head -3 | tr '\n' ' ')"
 fi
-if [ "$(cd "$REPO_ROOT" && git status --porcelain 2>/dev/null | sort)" = "$REPO_BEFORE2" ]; then
-	ok "--status changed nothing in the repository working tree"
+if [ "$(snapshot "$ISO_STATUS")" = "$REPO_BEFORE2" ]; then
+	ok "--status changed nothing in the repository working tree (measured on a private copy)"
 else
 	bad "--status changed the repository working tree"
 fi
