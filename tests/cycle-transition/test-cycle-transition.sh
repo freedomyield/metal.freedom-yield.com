@@ -141,7 +141,7 @@ done <<EOF
 $JSON_IDS
 EOF
 if [ -z "$MISSING" ]; then
-	ok "every one of the 13 indexed execution units appears in --print-only output"
+	ok "every one of the ${JSON_COUNT} indexed execution units appears in --print-only output"
 else
 	bad "units missing from the plan: ${MISSING}"
 fi
