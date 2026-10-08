@@ -62,9 +62,9 @@ sudo ufw status verbose
 
 **対応分岐** (特記なしは web host):
 
-- Caddyfile を反映した直後から崩れた → [DEPLOY_SETUP.md §9.3](DEPLOY_SETUP.md) の `--rollback` で直前の控えに戻す (反映も戻しも `scripts/web-host-caddy-apply.sh` だけで行う)
-- 配信 container が停止 → `docker start <手順 5 の ID>` (どれか不明なら start せず止めて確認)。web host には本リポの git checkout は無い (deploy dir に git でないコピーは在るが、deploy が更新するのは `public/` だけで、コピーの compose・Caddyfile は古いことがある)。compose で作り直さない (Caddyfile の変更は [DEPLOY_SETUP.md §9](DEPLOY_SETUP.md))
-- nginx 停止 → `sudo nginx -t` で設定を確認してから `sudo systemctl start nginx` (他 vhost も同居するので stop/restart は避ける)
+- Caddyfile を反映した直後から崩れた → [DEPLOY_SETUP.md §9.3](DEPLOY_SETUP.md) の `--rollback` で直前の控えに戻す (反映も戻しも `scripts/web-host-caddy-apply.sh` だけで行う)。`--rollback` は health が落ちていても動く。実行は operator の個別承認: 2026-10-15 10:56 JST より前は operator が自分で実行、発効後は v0.9 の型 (変更ごとの承認 → AI 実行 → AI 検証) で AI も可
+- 配信 container が停止 → `docker start <手順 5 の ID>` (どれか不明なら start せず止めて確認。**実行は operator が個別に承認して自分で行う**: container の起動は v0.9 の範囲外で、発効後も AI は行わない)。web host には本リポの git checkout は無い (deploy dir に git でないコピーは在るが、deploy が更新するのは `public/` だけで、コピーの compose・Caddyfile は古いことがある)。compose で作り直さない (Caddyfile の変更は [DEPLOY_SETUP.md §9](DEPLOY_SETUP.md))
+- nginx 停止 → `sudo nginx -t` で設定を確認してから `sudo systemctl start nginx` (他 vhost も同居するので stop/restart は避ける。**実行は operator が個別に承認して自分で行う**: host 全体の nginx は v0.9 の範囲外で、発効後も AI は行わない)
 - ディスクフル → **診断を先に、削除は本プロジェクトのものだけ** (web host も validator host も他プロジェクトと同居しうる。Constitution §5 の分離と §3.3 の都度承認):
   1. 診断 (どちらの host でも読むだけ): `df -h /` → `docker system df` → 本プロジェクトの path だけ `sudo du -sh <本プロジェクトの path>/*` (web host は配信 dir、validator host は `<deploy_path>`)
   2. 本プロジェクトの不要物だけを名前・label で特定し、消す対象の ID 一覧を operator に示して承認を得てから消す (validator host の変更は §5 により 1 件ごとの承認)。例 (本プロジェクトの compose project で絞る。validator host なら metalgo の project、旧 Caddy の残骸なら `site`): `docker ps -a --filter label=com.docker.compose.project=<project> --filter status=exited` で停止済み container を確認してから ID 指定で `docker rm <ID>`、`docker images --filter dangling=true` は出所を `docker image inspect` で確かめたものだけ ID 指定で `docker rmi <ID>`

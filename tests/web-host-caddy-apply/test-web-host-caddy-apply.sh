@@ -24,8 +24,10 @@
 #   - the host file is overwritten in place (inode kept; container sees it)
 #   - reload or health failure after the write -> automatic rollback (exit 1);
 #     rollback itself failing -> exit 4
-#   - health must pass BEFORE any write (a never-healthy site is refused with
-#     exit 2, never reported as URGENT)
+#   - for --apply, health must pass BEFORE any write (a never-healthy site is
+#     refused with exit 2, never reported as URGENT); --rollback still works
+#     on an unhealthy site; --check reports health and stays read-only
+#   - commands inside caddy-static go through one exact allowlist (cexec)
 #   - a backup whose bytes changed since it was taken is never restored
 #   - only the newest 5 Caddyfile.bak-<UTC> are kept, only after success
 #   - every docker call targets caddy-static (or is the --rm --network none
@@ -311,6 +313,39 @@ for d in 01 02 03 04 05 06; do cp "$OLD_CF" "$F/srv/caddy/Caddyfile.bak-200001${
 echo once > "$F/reload-fail"
 run "$NEW_CF" --apply --approved-sha256="$NEWSHA"
 check "failure: rolled back and no backup pruned (7 kept)" '[ "$RC" = 1 ] && [ "$(nbak)" = 7 ]'
+# --rollback must work on a site whose health is failing (that is when it
+# is needed)
+SICK2_CF="$T/sick2.Caddyfile"; printf ':80 {\n\trespond "BREAKS_HEALTH too"\n}\n' > "$SICK2_CF"
+fresh rollback-unhealthy
+cat "$SICK_CF" > "$HOSTFILE"; cp "$SICK_CF" "$F/live"       # broken now
+cp "$OLD_CF" "$F/srv/caddy/Caddyfile.bak-20000101T000000Z"  # good backup
+run "$NEW_CF" --rollback --backup=Caddyfile.bak-20000101T000000Z
+check "rollback on unhealthy site: exit 0" '[ "$RC" = 0 ]'
+check "rollback on unhealthy site: host + live = good backup" 'cmp -s "$HOSTFILE" "$OLD_CF" && cmp -s "$F/live" "$OLD_CF"'
+check "rollback on unhealthy site: reports health FAILING before" 'printf "%s" "$OUT" | grep -q "health: FAILING before any change"'
+fresh rollback-unhealthy-badbackup
+cat "$SICK_CF" > "$HOSTFILE"; cp "$SICK_CF" "$F/live"
+cp "$SICK2_CF" "$F/srv/caddy/Caddyfile.bak-20000101T000000Z"  # backup also unhealthy
+run "$NEW_CF" --rollback --backup=Caddyfile.bak-20000101T000000Z
+check "rollback, both unhealthy: exit 1 (back to the file as found), not URGENT" '[ "$RC" = 1 ] && ! printf "%s" "$OUT" | grep -q URGENT && printf "%s" "$OUT" | grep -q "as found"'
+check "rollback, both unhealthy: host file = as found" 'cmp -s "$HOSTFILE" "$SICK_CF"'
+# --check stays read-only and reports health as information
+fresh check-unhealthy
+printf 'BREAKS_HEALTH\n' >> "$F/live"
+run "$NEW_CF" --check
+check "check on unhealthy site: exit 10 with diff, health reported" '[ "$RC" = 10 ] && printf "%s" "$OUT" | grep -q "health: FAILING" && printf "%s" "$OUT" | grep -q "^+	respond \"new\""'
+check "check on unhealthy site: nothing written, no reload" 'cmp -s "$HOSTFILE" "$OLD_CF" && [ "$(nreloads)" = 0 ] && [ "$(nbak)" = 0 ]'
+# cexec: the one gate for commands inside caddy-static refuses anything else
+"$SCRIPT" --print-remote > "$T/remote2.sh"
+check "remote: docker exec appears only inside cexec" '[ "$(grep -c "docker exec" "$T/remote2.sh")" = 1 ]'
+fresh cexec
+{ awk '/^C=caddy-static$/,/^ADMIN=/' "$T/remote2.sh"; grep '^refuse()' "$T/remote2.sh"; awk '/^cexec\(\) \{$/,/^}$/' "$T/remote2.sh"; } > "$T/cexec.sh"
+for cmd in "caddy stop" "sh -c id" "cat /etc/passwd" "caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile"; do
+	env PATH="$T/bin:$PATH" FAKE_DIR="$F" bash -c ". \"$T/cexec.sh\"; cexec $cmd" >/dev/null 2>&1; RC=$?
+	check "cexec refuses '$cmd' (exit 2, docker not called)" '[ "$RC" = 2 ] && [ ! -s "$F/docker.log" ]'
+done
+env PATH="$T/bin:$PATH" FAKE_DIR="$F" bash -c ". \"$T/cexec.sh\"; cexec caddy list-modules" >/dev/null 2>&1; RC=$?
+check "cexec allows 'caddy list-modules'" '[ "$RC" = 0 ] && grep -q "^exec caddy-static caddy list-modules$" "$F/docker.log"'
 fresh rollbackfail
 echo always > "$F/reload-fail"
 run "$NEW_CF" --apply --approved-sha256="$NEWSHA"
