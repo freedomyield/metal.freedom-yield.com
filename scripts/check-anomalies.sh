@@ -40,9 +40,10 @@
 #   - T-1 day  default  : 前日 reminder
 #   - T-0 day  default  : 当日 reminder (action 時刻は別途)
 #   - T-10min  urgent   : 旧 stake 解放まで残り 10 分
-# Rationale: in post-expiry issuance mode (current cycle) the only moment the
-# operator can act is at or after endTime when the old stake unlocks. Firing
-# "urgent" alerts T-2 days out is false urgency.
+# Rationale: the next period is registered only after endTime, when the old
+# stake unlocks (docs/VALIDATOR_RENEWAL.md, the only procedure since the
+# operator's decision of 2026-10-08), so that is the only moment the operator
+# can act. Firing "urgent" alerts days earlier is false urgency.
 #
 # Env (side-effect boundary, C3 rollout 2026-08-06):
 #   FY_STATE_DIR / ANOMALY_STATE_DIR
