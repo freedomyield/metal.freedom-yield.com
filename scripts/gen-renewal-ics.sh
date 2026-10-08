@@ -196,11 +196,10 @@ fmt_human() { epoch_to_fmt "$1" Asia/Tokyo '%m/%d %H:%M JST'; }
 
 # Generate one cycle's renewal event. Args: cycle_end_epoch, cycle_number, label, extra_note
 # Public calendar shows a single 🔁 marker per cycle at endTime ± 5 min.
-# Operator-internal prep windows are no longer surfaced publicly because
-# issuance mode varies per cycle (pre-expiry vs post-expiry depending on
-# FREE-balance accounting); a fixed T-2 marker would misrepresent the
-# schedule. Operator-side ntfy alerts (T-7/T-1/T-0/T-10min) carry the
-# per-event urgency.
+# Operator-internal prep windows are not surfaced publicly: the next period
+# is registered only after endTime (docs/VALIDATOR_RENEWAL.md), so the
+# endTime marker is the schedule. Operator-side ntfy alerts
+# (T-7/T-1/T-0/T-10min) carry the per-event urgency.
 gen_cycle() {
   local cycle_end=$1
   local n=$2

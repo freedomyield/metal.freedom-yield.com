@@ -186,7 +186,7 @@ else
 fi
 
 # Period status icon — informational, no false urgency.
-# Action moment in post-expiry issuance mode is at endTime itself (旧 stake 解放);
+# Action moment is at endTime itself (旧 stake 解放; registration happens only after it);
 # the standalone ntfy T-10min alert carries the actual urgency. The digest icon
 # stays calm so the 3×/day push doesn't read as "panic" before there's anything
 # the operator can do.

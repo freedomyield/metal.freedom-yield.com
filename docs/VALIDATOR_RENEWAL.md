@@ -22,25 +22,9 @@ ntfy 通知 4 ポイント(JST 基準、1 サイクル 1 回ずつ発火):
 | **T-0 日(当日)** | 旧 endTime まで wait。wallet を開いてフォームをコピー可能な状態に | default |
 | **T-10 分前** | 旧 stake 解放間近 = 実 action moment。発行手順 Step 2 を即実行 | **urgent** |
 
-**運用モード別の action moment**:
-- **期間後発行モード**(実運用で使ってきたモード): T-0 の endTime 経過後 = 旧 stake 解放後に発行。cycle 1→2 から 5→6 までの 5 回の転換はすべてこのモードで、新 cycle の start は毎回旧 endTime の 13〜44 分後(公開 `cycle-history.jsonl` の `start_iso` / `end_iso` で確認できる。cycle 6 は旧 endTime 2026-10-07 13:30:08 JST に対し start 13:51:35 JST)。`docs/CYCLE_GATE.md` の「cycle 間のメンテナンス枠」も、endTime から submit までの間 validator が set に居ないこと(= このモード)を前提にしている
-- **期間中発行モード**(P-Chain FREE ≥ 新 stake のとき): T-2 日中に Pending 投入してリトライ余裕 48h を確保する、という想定。**成立するかは未検証** — 下の OPEN を参照
+**発行のタイミング(手順はこれ 1 つ)**: T-0 の旧 endTime 経過後 = 旧 stake 解放後に発行する。cycle 1→2 から 5→6 までの 5 回の転換はすべてこの形で、新 cycle の start は毎回旧 endTime の 13〜44 分後(公開 `cycle-history.jsonl` の `start_iso` / `end_iso` で確認できる。cycle 6 は旧 endTime 2026-10-07 13:30:08 JST に対し start 13:51:35 JST)。`docs/CYCLE_GATE.md` の「cycle 間のメンテナンス枠」も、endTime から submit までの間 validator が set に居ないことを前提にしている。
 
-> **OPEN (operator 判断待ち、2026-10-08 記載) — 期間中発行モードは成立するか。**
-> 本書は「期間中発行モード」(旧期間の validating 中に同 NodeID の AddValidator を出し Pending に入れる)と、
-> Case A「旧期間 endTime 経過前に submit すると tx は拒否される(同 NodeID で重複期間は不可)」の両方を書いており、
-> 両立しない。repo と運用記録で確認できたのは次の 3 点だけで、どちらが正しいかは決められない:
-> - 実際の転換(cycle 1→2 〜 5→6 の 5 回)はすべて期間後発行。期間中発行を試した記録は無い(cycle-4 前の準備でも
->   「auto-start UI の下で成立しない可能性」が open question のまま、2026-08-04 も期間後発行で未検証)。
-> - Metal Wallet web には Start Time の入力欄が無く、start は submit 時刻 + 約 5 分で自動確定する(Step 2.2)。
->   期間中に submit すれば start は必ず旧 endTime より前になる。
-> - P-Chain が「同じ NodeID が primary network を validating 中(または pending)の AddValidator」を拒否するか
->   どうかを示す一次資料(Metal / Avalanche の仕様・metalgo のコード・実測)は repo に無い。Case A の
->   「拒否される」も実測ではなく、この文書の記述だけが根拠。
->
-> **確定するまでは期間後発行を既定とする。** 期間中発行を選ぶ日は、事前に testnet か一次資料で
-> 「同 NodeID の重複期間 AddValidator が通るか」を確かめてから operator が決める。確定したら、
-> この OPEN・Step 2 冒頭・Step 2.4・Case A を同じ commit で揃える。
+> **決定 (operator、2026-10-08)**: 旧期間の終了前に次の期間を登録する発行(旧期間の validating 中に同 NodeID の AddValidator を出す形)は、本書の手順から削除した。手順は「旧 endTime 経過後に登録する」だけとする。理由: 5 回の転換はすべて終了後の登録で問題なく済んでおり、終了前の登録は一度も試されておらず、P-Chain が受け付けるかを示す一次資料も repo に無かった。未検証の分岐を手順に残すと当日の判断を増やすだけなので、実績のある 1 つに絞った。
 
 ---
 
@@ -104,10 +88,9 @@ ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HO
 
 ---
 
-## Step 2: tx 発行(モード別)
+## Step 2: tx 発行
 
-- **期間後発行モード**(既定・実運用): T-0 日 endTime 経過後に発行、解放された旧 stake + reward が新 tx の原資(cycle 間のメンテナンス枠はこの間に置く)
-- **期間中発行モード**(P-Chain FREE ≥ 新 stake): T-2 日中に Pending 投入する想定。**未検証** — 「全体タイムライン」の OPEN を参照
+T-0 日、旧 endTime 経過後に発行する。解放された旧 stake + reward が新 tx の原資(cycle 間のメンテナンス枠はこの間に置く)。
 
 ### 2.1 Metal Wallet web を開く
 
@@ -127,7 +110,7 @@ WebAuth wallet は mnemonic 非互換(AddValidator は Metal Wallet web 専用)�
 
 > 旧 11-step 時代の記述(`date +%s` で Unix 秒を計算して Start/End Time にコピペ)は実機の Metal Wallet web と不一致。実機観測(cycle 3 時点)では **Start Time 入力欄自体が無く**、submit 後の auto+5min で確定する。End Time は Unix 秒直接入力ではなく **date picker** で日付を選ぶ。
 > **Wallet UI は変わり得るため、当日 Step 1 (準備 check) の段階で一度 Add Validator フォームを開き、Start Time 欄の有無 / End Time の入力形式を目視確認すること。**
-> 期間後発行モードでは、旧期間 endTime を経過していることが大前提。発行前に画面右上の Available (P) が想定値(旧 stake + reward 解放後の額)に増えていることを目視確認。
+> 旧期間 endTime を経過していることが大前提。発行前に画面右上の Available (P) が想定値(旧 stake + reward 解放後の額)に増えていることを目視確認。
 
 #### Field 一覧
 
@@ -166,7 +149,7 @@ ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HO
        bash scripts/node-info.sh"'
 ```
 
-期間後発行モードでは submit 後約 5 分の start 時刻に **`platform.getCurrentValidators`** に新 entry が現れる(それまでは `platform.getPendingValidators` 側)。期間中発行モードで「旧期間終了の瞬間に Current へ昇格」するかは未検証(「全体タイムライン」の OPEN)。
+submit 後約 5 分の start 時刻に **`platform.getCurrentValidators`** に新 entry が現れる(それまでは `platform.getPendingValidators` 側)。
 
 ---
 
@@ -218,7 +201,7 @@ ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HO
 ### Case A: 旧期間 endTime を経過する前に submit してしまった
 
 - Start Time は入力欄が無く submit 時刻 + 5 分で自動確定するため(Step 2.2 参照)、submit 自体を旧期間 endTime より十分後に行う必要がある
-- 旧期間 endTime 経過前に submit すると、自動確定した Start Time も旧期間 endTime より前になる。この tx が拒否されるか(同 NodeID で重複期間は不可か)は**未検証**(「全体タイムライン」の OPEN)。拒否された場合は下の手順で再 submit する
+- 旧期間 endTime 経過前に submit すると、自動確定した Start Time も旧期間 endTime より前になる。これは本書の手順に無い操作で、P-Chain がどう扱うかは確かめていない(「全体タイムライン」の 2026-10-08 の決定)。tx が拒否された場合は下の手順で再 submit する。通ってしまった場合は、その tx ID を operator-local notes に残し、次の操作に進む前に operator が判断する
 - Metal Wallet web の Available (P) が想定値(旧 stake + reward 解放後の額)に増えていることを目視確認してから再度 submit。tx fee は還ってこないが大した金額ではない
 
 ### Case B: BLS Proof of Possession が間違っている
