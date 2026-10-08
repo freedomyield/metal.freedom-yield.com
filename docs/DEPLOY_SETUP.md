@@ -9,7 +9,7 @@
 - ドメイン `metal.freedom-yield.com` の DNS A レコードを edge CDN で VPS public IP に向ける
 - 22/TCP, 9651/TCP のみ inbound 許可(80/443 は開けない。公開サイトは web host。validator host には Caddy も web server も無い。80/443 の旧ルールと Caddy は 2026-10-07 に現行 host から削除済)
 
-**配信トポロジ (2 ホスト)**: GitHub Actions は repo-tracked static (`public/`) を **2 つの target** に配信する — (1) validator host の checkout の `public/` (2026-10-07 に validator host の Caddy を撤去したので、ここを配信するものは無い。rsync は別の判断で外すまで残している)、(2) 公開 Xserver origin (edge CDN 背後)。この 2 つの配信経路は非対称: validator host は `$DEPLOY_PATH` に本リポの git checkout を持ち、`public/` 以外の git 管理ファイル(`docs/`, `scripts/`, `tests/`, `caddy/Caddyfile`, `docker-compose*.yml` 等)は deploy のたびに `scripts/advance-host-checkout.sh` の `git pull --ff-only` が届ける(§4 参照)。公開 Xserver は git checkout を一切持たず、`rrsync -wo` で metal public dir に封じ込めた専用鍵(`scripts/install-xserver-static-deploy-key.sh` で設置)による `public/` のみの rsync が唯一の配信経路。動的 feed は validator host cron → 受信 wrapper 経由で Xserver に届く(deploy とは別経路)。両 `public/` rsync の除外集合は単一 SoT `deploy/feed-excludes.txt` から生成。詳細は [`docs/DEPLOY_OWNERSHIP_MATRIX.md`](DEPLOY_OWNERSHIP_MATRIX.md)。
+**配信トポロジ (2 ホスト)**: GitHub Actions は repo-tracked static (`public/`) を **2 つの target** に配信する — (1) validator host の checkout の `public/` (2026-10-07 に validator host の Caddy を撤去したので、ここを配信するものは無い。rsync は別の判断で外すまで残している)、(2) 公開 Xserver origin (edge CDN 背後)。この 2 つの配信経路は非対称: validator host は `$DEPLOY_PATH` に本リポの git checkout を持ち、`public/` 以外の git 管理ファイル(`docs/`, `scripts/`, `tests/`, `caddy/Caddyfile`, `docker-compose*.yml` 等)は deploy のたびに `scripts/advance-host-checkout.sh` の `git pull --ff-only` が届ける(§4 参照)。公開 Xserver は git checkout を一切持たず (deploy dir に本リポの git でないコピーは在るが、deploy が更新するのはその `public/` だけ。§9)、`rrsync -wo` で metal public dir に封じ込めた専用鍵(`scripts/install-xserver-static-deploy-key.sh` で設置)による `public/` のみの rsync が唯一の配信経路。動的 feed は validator host cron → 受信 wrapper 経由で Xserver に届く(deploy とは別経路)。両 `public/` rsync の除外集合は単一 SoT `deploy/feed-excludes.txt` から生成。詳細は [`docs/DEPLOY_OWNERSHIP_MATRIX.md`](DEPLOY_OWNERSHIP_MATRIX.md)。
 
 ## 手順
 
@@ -169,6 +169,9 @@ cron backstop の節を参照。
 公開サイトは web host の host nginx → `127.0.0.1:8085` → container `caddy-static` が配信する。
 CI の deploy が web host に対して行うのは `public/` の rsync だけで(鍵が配信 dir に封じ込められている。§7 の 8)、
 **`caddy/Caddyfile` を変えても、それだけでは web host に届かない**。届ける経路はこの節の手順だけ。
+web host の deploy dir には本リポの**git でないコピー** (`.git` なし。compose ファイル・`caddy/`・`docs/`・`.env` 等) が在り、
+`caddy-static` はそのコピーの compose ファイルで起動され、そのコピーの `caddy/Caddyfile` を読む。deploy が更新するのは
+その中の `public/` だけなので、**コピーの他のファイル (compose・Caddyfile) は deploy では更新されない**。
 
 **統治**: web host は他プロジェクトと同居する multi-tenant host なので、Constitution §5 の
 「本プロジェクトの path・unit・名前に限定する。host 全体に効く変更は禁止」が掛かる。§5 の
@@ -186,19 +189,28 @@ CI に web host 用の限定コマンドを足す案は、Caddyfile を書き換
 running の Caddyfile と repo の差を常時見張る案は、web host で docker を読める権限を見張り側に
 新たに与える必要がある。差の確認は下の `--check` で必要な時に行う。
 
-#### 9.1 初回使用の前に: 未確認の事実 (UNVERIFIED)
+#### 9.1 web host の事実 (VERIFIED 2026-10-08)
 
-リポジトリからは次の 4 点を確認できない (SSH を伴う読み取りが要る)。**確認するまで `--apply` を使わない**。
-値は host の内部 path を含むので**リポジトリに書かない** (Constitution §4.2 C5)。実行時に環境変数で渡す。
+リポジトリからは確認できない次の 4 点を、2026-10-08 に下の読み取り専用コマンドで web host 上で確認した。
+具体的な path は host の内部構造なので**リポジトリに書かない** (Constitution §4.2 C5)。実行時に環境変数で渡す。
+web host の構成を変えたら (container の作り直し・deploy dir の移動等)、使う前に同じコマンドで確かめ直す。
 
-| 事実 | 渡し方 | 備考 |
+| 事実 | 確認結果 (2026-10-08) | 渡し方 |
 |---|---|---|
-| `caddy-static` の compose project 名 | `WEB_CADDY_PROJECT` | 本リポの `docker-compose.yml` なら `site` だが、web host のものは未確認 |
-| `/etc/caddy/Caddyfile` の bind 元 (host 上の path) | `WEB_CADDY_FILE` | bind mount でなければこの手順は使えない (script が拒否する) |
-| build context (Dockerfile と compose ファイルの在り処) | — | §9.4 の image 再 build にだけ要る |
-| ssh で入る account が docker を使えるか | `WEB_HOST_USER` (既定 root) | |
+| `caddy-static` の compose project 名 | `site` (compose ファイルは `docker-compose.yml` + `docker-compose.behind-proxy.yml`) | `WEB_CADDY_PROJECT=site` |
+| `/etc/caddy/Caddyfile` の bind 元 | read-only の bind。元は `<deploy dir>/caddy/Caddyfile` (通常ファイル、deploy アカウント所有 644、親は symlink でない dir)。host と container の sha256 は一致 | `WEB_CADDY_FILE=<deploy dir>/caddy/Caddyfile` |
+| build context | `<deploy dir>` (本リポの git でないコピー。`caddy/Dockerfile` を含む)。image は `caddy-static:local` (caddy v2.11.4、`http.handlers.rate_limit` あり) | §9.4 でだけ使う |
+| ssh で入る account | root (docker を使える) | `WEB_HOST_USER=root` (既定) |
 
-確認に使う**読み取り専用**のコマンド (coordinator が web host 上で実行。どれも状態を変えない):
+その他の確認結果: port は `80/tcp` → `127.0.0.1:8085` だけ、`DOMAIN=:80`、`/srv` は `<deploy dir>/public` の read-only bind、
+volume は `site_caddy_config` / `site_caddy_data`。`<deploy dir>` は validator host の deploy path と同じ配置。
+
+**admin API の落とし穴 (IPv6)**: container 内の admin API は `127.0.0.1:2019` だけで listen している。busybox は
+`localhost` を `::1` に解決するので、`http://localhost:2019/` は**拒否される** (2026-10-08 実測)。caddy の既定の
+reload 先も `localhost:2019` なので、script は `caddy reload --address 127.0.0.1:2019` と明示する。手で叩く時も必ず
+`127.0.0.1:2019` を使う。
+
+確かめ直しに使う**読み取り専用**のコマンド (web host 上で実行。どれも状態を変えない):
 
 ```bash
 # 1. compose project・作業 dir・compose ファイル・稼働状態
@@ -212,8 +224,8 @@ docker inspect --type container --format '{{range .Config.Env}}{{println .}}{{en
 # 4. 稼働中の image に rate_limit が入っているか / caddy の版
 docker exec caddy-static caddy list-modules | grep -x http.handlers.rate_limit
 docker exec caddy-static caddy version
-# 5. reload に使う admin API (container 内 localhost:2019) が応答するか (GET のみ)
-docker exec caddy-static wget -q -O /dev/null http://localhost:2019/config/ && echo admin-api-ok
+# 5. reload に使う admin API が応答するか (GET のみ。localhost は ::1 になり拒否されるので 127.0.0.1)
+docker exec caddy-static wget -q -O /dev/null http://127.0.0.1:2019/config/ && echo admin-api-ok
 # 6. host の bind 元と container の見ている内容が同じか・symlink でないか (2 の Source を使う)
 sha256sum <2 の Source>
 docker exec caddy-static cat /etc/caddy/Caddyfile | sha256sum
@@ -241,7 +253,7 @@ container の作り直しになるので、この手順の範囲外。
 bash scripts/web-host-caddy-apply.sh
 
 # 1. 読み取りのみ: scope guard + 稼働中 → repo の diff (exit 0 = 一致 / 10 = 差あり)
-WEB_HOST=<web host> WEB_HOST_KEY=<鍵> WEB_CADDY_PROJECT=<9.1> WEB_CADDY_FILE=<9.1> \
+WEB_HOST=<web host> WEB_HOST_KEY=<鍵> WEB_CADDY_PROJECT=site WEB_CADDY_FILE=<deploy dir>/caddy/Caddyfile \
   bash scripts/web-host-caddy-apply.sh --check
 
 # 2. operator に diff と sha256 を示し、その変更として chat で承認を得る
@@ -259,15 +271,19 @@ curl -sSI https://metal.freedom-yield.com/ | grep -i '^content-security-policy'
 
 1. scope guard — container 名は `caddy-static` 固定 (入力で変えられない)。compose project・Caddyfile の
    bind 元・port (`127.0.0.1:8085` だけ)・host と container の内容一致・symlink でないこと、を全て満たさなければ
-   何も変えずに exit 2
+   何も変えずに exit 2。さらに**書き込む前に** 6 と同じ health を 1 回通す。通らなければ exit 2 (何も変えない)。
+   元から健全でないサイトを「戻しに失敗した (exit 4)」と誤って報告しないため。health は `127.0.0.1:8085` に
+   Host を付けずに当てるので、`DOMAIN` が `:80` 型であることが前提 (§9.1 で確認済み)
 2. 稼働中の image で使い捨て container (`--rm --network none --read-only`) を起こし `caddy validate`。失敗なら exit 2 (何も変えない)
-3. host の Caddyfile を `Caddyfile.bak-<UTC>` に控える (同じ dir。削除はしない)
+3. host の Caddyfile を `Caddyfile.bak-<UTC>` に控え (同じ dir)、控えの sha256 を記録する
 4. host の Caddyfile を**その場で上書き**する。単一ファイルの bind mount は inode に固定されるので、
    rename (mv や多くのエディタの保存) で置き換えると container は古い内容を見続ける。上書き後、container 内から
    新しい内容が見えることを確かめる
-5. container 内で `caddy reload` (停止・再作成はしない)
+5. container 内で `caddy reload --address 127.0.0.1:2019` (停止・再作成はしない。`localhost` は使わない: §9.1 の落とし穴)
 6. `127.0.0.1:8085/health` が `ok`、`/` に CSP ヘッダ。4〜6 のどれかが失敗すれば 3 の控えに同じ方法で戻して
-   reload し直し、exit 1
+   reload し直し、exit 1。戻す前に控えの sha256 が 3 で記録した値と同じか確かめ、違えば戻さずに exit 4
+7. 成功した時だけ、同じ dir の `Caddyfile.bak-<YYYYmmddTHHMMSSZ>` を新しい 5 個まで残し、古いものを消す
+   (その名前の形の通常ファイルだけ。他の名前・symlink・他の dir には触れない。失敗時は証拠として消さない)
 
 使う docker コマンドは `docker inspect … caddy-static` / `docker exec caddy-static {cat, caddy list-modules, caddy reload}` /
 `docker run --rm --network none … caddy validate` だけ。docker compose・build・stop・rm・prune、nginx・systemd・cron・
@@ -284,12 +300,12 @@ curl -sSI https://metal.freedom-yield.com/ | grep -i '^content-security-policy'
   ```
 
 - **exit 4 (自動の戻しが失敗)**: 緊急。web host で `docker logs --tail 50 caddy-static` を見て、
-  `cat <控え> > <WEB_CADDY_FILE>` (その場で上書き。mv しない) → `docker exec caddy-static caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile`。
+  `cat <控え> > <WEB_CADDY_FILE>` (その場で上書き。mv しない) → `docker exec caddy-static caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile --address 127.0.0.1:2019`。
   それでも配信が戻らなければ [INCIDENT_RESPONSE.md §3.1](INCIDENT_RESPONSE.md) へ。いずれも operator に上げてから行う
 
 #### 9.4 `caddy/Dockerfile` の変更 (image の再 build) — 自動化しない
 
-image を作り直すには container の再作成 (短い停止) が要り、web host 上の build context と compose 定義 (§9.1 の 7。未確認) に依存する。
+image を作り直すには container の再作成 (短い停止) が要り、web host 上の build context と compose 定義 (§9.1: deploy dir の git でないコピー) に依存する。そのコピーの `caddy/Dockerfile` と compose ファイルも deploy では更新されないので、先に repo の版と揃える必要がある。
 script はこれを扱わない。必要になったら、§9.1 の結果を元に「build → `caddy validate` (新 image で使い捨て container) →
 本プロジェクトの compose project だけを指定した `up -d --no-deps --force-recreate` → health → 戻し (前の image ID を控えて
 タグを戻す)」を具体的なコマンドと期待値つきで起こし、**その変更として**承認を得てから行う。
@@ -306,7 +322,7 @@ script はこれを扱わない。必要になったら、§9.1 の結果を元�
 ## 関連
 
 - [.github/workflows/deploy.yml](../.github/workflows/deploy.yml) — 実際の workflow 定義
-- [docker-compose.behind-proxy.yml](../docker-compose.behind-proxy.yml) — サイトの Caddy を host の nginx の背後 `127.0.0.1:8085` に置く override(`docker-compose.yml` と合わせて 2 本)。web host の `caddy-static` と同じ形。web host に本リポの checkout は無く、本リポの deploy はこれを起動しない。validator host の Caddy(以前はこの 2 本で deploy.yml が起動)は 2026-10-07 に operator の決定で撤去した(利用者が deploy の health check だけだった)。運用ダッシュボード(`127.0.0.1:8443`、SSH トンネル + BasicAuth、`docker-compose.ops-tunnel.yml` と host `.env` の `OPS_BASIC_AUTH_HASH`)は 2026-10-07 に operator の決定で廃止した(一度も使われず、operator 用 `/status/` ページと重複)。`docker-compose.prod.yml` は Caddy が直接 80/443 を bind する別トポロジ用の override で、どの host でも使っていない
+- [docker-compose.behind-proxy.yml](../docker-compose.behind-proxy.yml) — サイトの Caddy を host の nginx の背後 `127.0.0.1:8085` に置く override(`docker-compose.yml` と合わせて 2 本)。web host の `caddy-static` と同じ形。web host には本リポの git checkout は無く、deploy dir の git でないコピーのこの 2 本で `caddy-static` が起動されている。本リポの deploy はこれを起動せず、コピーの compose・Caddyfile も更新しない (更新は §9)。validator host の Caddy(以前はこの 2 本で deploy.yml が起動)は 2026-10-07 に operator の決定で撤去した(利用者が deploy の health check だけだった)。運用ダッシュボード(`127.0.0.1:8443`、SSH トンネル + BasicAuth、`docker-compose.ops-tunnel.yml` と host `.env` の `OPS_BASIC_AUTH_HASH`)は 2026-10-07 に operator の決定で廃止した(一度も使われず、operator 用 `/status/` ページと重複)。`docker-compose.prod.yml` は Caddy が直接 80/443 を bind する別トポロジ用の override で、どの host でも使っていない
 - [docs/HOST_CHECKOUT_AUTO_ADVANCE.md](HOST_CHECKOUT_AUTO_ADVANCE.md) — validator host の git `HEAD` を `origin/main` に FF-only で追従させる self-heal の仕組み(git advance が担う「`public/` 以外の全ファイル配信」の実装)
 - [docs/DEPLOY_OWNERSHIP_MATRIX.md](DEPLOY_OWNERSHIP_MATRIX.md) — git 配信 vs rsync 配信の単一ルールと、`public/api/` 個別ファイルの所有権表
 - [docs/MAINNET_MIGRATION.md](MAINNET_MIGRATION.md) — Tahoe→mainnet 段階移行(本 deploy 設定もそこに連動)

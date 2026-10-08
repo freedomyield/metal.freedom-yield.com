@@ -29,9 +29,14 @@
 #                     single-file bind mount is pinned to the inode, so a
 #                     rename would leave the container on the old file); check
 #                     the container now sees the new bytes; `caddy reload`
+#                     (admin API pinned to 127.0.0.1:2019, never localhost)
 #                     inside the container; health (/health = ok and a CSP
-#                     header on /). Any failure after the write restores the
-#                     backup the same way and reloads again.
+#                     header on /). The same health check must already pass
+#                     before anything is written (else refuse, exit 2). Any
+#                     failure after the write restores the backup the same
+#                     way (only if its sha256 is unchanged since it was
+#                     taken) and reloads again. After success only the
+#                     newest 5 Caddyfile.bak-<UTC> next to the file are kept.
 #   --rollback --backup=Caddyfile.bak-<YYYYmmddTHHMMSSZ>
 #                     same guard + validate + in-place write + reload + health,
 #                     with a backup written next to the file by --apply.
@@ -62,9 +67,9 @@
 #   WEB_HOST_USER       ssh user (default root; needs docker access)
 #   WEB_CADDY_PROJECT   expected compose project label of caddy-static
 #   WEB_CADDY_FILE      absolute host path bind-mounted at /etc/caddy/Caddyfile
-#   The last two are facts of the web host that are UNVERIFIED in the repo
-#   (docs/DEPLOY_SETUP.md §9.1 lists the read-only commands that establish
-#   them). They are never committed (Constitution §4.2 C5).
+#   The last two are web-host facts, verified 2026-10-08 (project = site;
+#   the bind source is <deploy dir>/caddy/Caddyfile — docs/DEPLOY_SETUP.md §9.1,
+#   with the read-only commands to re-check them). The path is never committed (§4.2 C5).
 #   SKIP_SSH=1          tests only: run the remote half locally. Then
 #                       WEB_CADDY_SRC may replace caddy/Caddyfile and the git
 #                       "committed" check is skipped for that file.
@@ -118,6 +123,9 @@ MODE="$1" PROJECT="$2" FILE="$3" APPROVED="$4" BACKUP="$5"
 C=caddy-static
 IN=/etc/caddy/Caddyfile
 WANT_PORT='80/tcp=127.0.0.1:8085'
+# The admin API listens on 127.0.0.1 only; "localhost" inside the container
+# resolves to ::1 first and is refused (measured on the web host 2026-10-08).
+ADMIN=127.0.0.1:2019
 
 refuse() { echo "REFUSED: $*" >&2; exit 2; }
 sha() { sha256sum "$1" | awk '{print $1}'; }
@@ -163,6 +171,10 @@ image={{.Image}}
 		RL=ABSENT
 	fi
 	echo "guard: ok (container $C, project ok, bind ok, port $WANT_PORT, image ${IMAGE#sha256:}, rate_limit module $RL)"
+	# Baseline: the site must pass the same health check BEFORE any write, so a
+	# later health failure means the change broke it (and "URGENT" is never
+	# reported for a site that was never healthy).
+	health || refuse "site health fails BEFORE any change (/health or CSP header on 127.0.0.1:8085) — not touching it"
 }
 
 validate() { # <file>
@@ -200,20 +212,37 @@ put() {
 	cat "$1" > "$FILE" || return 1
 	view > "$TMP/after" 2>/dev/null || return 1
 	[ "$(sha "$TMP/after")" = "$want" ] || { echo "container does not see the new bytes" >&2; return 1; }
-	docker exec "$C" caddy reload --config "$IN" --adapter caddyfile > "$TMP/reload.log" 2>&1 \
+	docker exec "$C" caddy reload --config "$IN" --adapter caddyfile --address "$ADMIN" > "$TMP/reload.log" 2>&1 \
 		|| { tail -n 20 "$TMP/reload.log" >&2; return 1; }
 	echo "reload: ok"
 	health
 }
 
-restore() { # <backup path>
+restore() { # <backup path> <sha256 it had when it was taken>
 	echo "ROLLING BACK to $(basename "$1")" >&2
+	if [ "$(sha "$1")" != "$2" ]; then
+		echo "URGENT: backup $(basename "$1") changed since it was taken — NOT restoring from it; restore by hand (runbook §9.3)" >&2
+		exit 4
+	fi
 	if put "$1"; then
 		echo "ROLLED BACK: site is on the previous Caddyfile ($(basename "$1"))" >&2
 		exit 1
 	fi
 	echo "URGENT: rollback FAILED — restore $(basename "$1") by hand (runbook §9.3)" >&2
 	exit 4
+}
+
+KEEP=5
+# prune_backups: keep the newest $KEEP Caddyfile.bak-<UTC> next to FILE. Only
+# names of exactly that shape, only regular non-symlink files, only that dir.
+# Called after a successful change, never on failure (keeps the evidence).
+prune_backups() {
+	local d n
+	d="$(dirname "$FILE")"
+	ls -1 "$d" | grep -E '^Caddyfile\.bak-[0-9]{8}T[0-9]{6}Z$' | sort -r | tail -n +$((KEEP + 1)) \
+	| while IFS= read -r n; do
+		if [ -f "$d/$n" ] && [ ! -L "$d/$n" ]; then rm -f -- "$d/$n" && echo "pruned old backup: $n"; fi
+	done
 }
 
 case "$MODE" in
@@ -233,10 +262,11 @@ apply)
 	B="$FILE.bak-$(date -u +%Y%m%dT%H%M%SZ)"
 	[ ! -e "$B" ] || refuse "backup $(basename "$B") already exists"
 	cp -p "$FILE" "$B" || refuse "backup failed"
-	[ "$(sha "$B")" = "$(sha "$FILE")" ] || refuse "backup verification failed"
+	BSHA="$(sha "$B")"
+	[ "$BSHA" = "$(sha "$FILE")" ] || refuse "backup verification failed"
 	echo "BACKUP: $(basename "$B")"
-	if put "$TMP/new"; then echo "APPLIED: sha256 $APPROVED"; exit 0; fi
-	restore "$B" ;;
+	if put "$TMP/new"; then echo "APPLIED: sha256 $APPROVED"; prune_backups; exit 0; fi
+	restore "$B" "$BSHA" ;;
 rollback)
 	case "$BACKUP" in
 		Caddyfile.bak-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z) ;;
@@ -250,9 +280,11 @@ rollback)
 	PRE="$FILE.bak-$(date -u +%Y%m%dT%H%M%SZ)"
 	[ ! -e "$PRE" ] || refuse "backup $(basename "$PRE") already exists"
 	cp -p "$FILE" "$PRE" || refuse "backup failed"
+	PSHA="$(sha "$PRE")"
+	[ "$PSHA" = "$(sha "$FILE")" ] || refuse "backup verification failed"
 	echo "BACKUP: $(basename "$PRE")"
-	if put "$B"; then echo "ROLLBACK APPLIED: $BACKUP"; exit 0; fi
-	restore "$PRE" ;;
+	if put "$B"; then echo "ROLLBACK APPLIED: $BACKUP"; prune_backups; exit 0; fi
+	restore "$PRE" "$PSHA" ;;
 *)
 	refuse "unknown remote mode" ;;
 esac
@@ -313,9 +345,9 @@ fi
 WEB_CADDY_PROJECT="${WEB_CADDY_PROJECT:-}"
 WEB_CADDY_FILE="${WEB_CADDY_FILE:-}"
 printf '%s' "$WEB_CADDY_PROJECT" | grep -qE '^[a-z0-9][a-z0-9_-]{0,63}$' \
-	|| die2 "WEB_CADDY_PROJECT missing or malformed (UNVERIFIED fact; see docs/DEPLOY_SETUP.md §9.1)"
+	|| die2 "WEB_CADDY_PROJECT missing or malformed (web-host fact: site; see docs/DEPLOY_SETUP.md §9.1)"
 printf '%s' "$WEB_CADDY_FILE" | grep -qE '^/[A-Za-z0-9._/-]+/Caddyfile$' \
-	|| die2 "WEB_CADDY_FILE must be an absolute path ending in /Caddyfile (UNVERIFIED fact; see §9.1)"
+	|| die2 "WEB_CADDY_FILE must be an absolute path ending in /Caddyfile (web-host fact; see docs/DEPLOY_SETUP.md §9.1)"
 if printf '%s' "$WEB_CADDY_FILE" | grep -qE '(^|/)[.][.]?(/|$)|//'; then
 	die2 "WEB_CADDY_FILE must not contain . / .. / // segments"
 fi
