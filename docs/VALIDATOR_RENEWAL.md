@@ -55,14 +55,8 @@ ntfy 通知 4 ポイント(JST 基準、1 サイクル 1 回ずつ発火):
 ### 1.3 wallet 残高と stake 額の決定
 
 - Metal Wallet web で wallet をロード(reward 受取先の P-address は operator-local notes 参照)
-- **FREE 残高チェック**(期間終了前に tx を出す場合の前提条件):
-  - 現 self-stake は validator にロック中 → 新 tx は **別の FREE P-Chain 残高** から賄う必要あり
-  - 必要 FREE 残高 ≥ **新 stake 額 + 0.001 METAL**(P-Chain tx fee マージン)
-  - 不足時の事前 inject(T-7 day 中に完了させる):
-    1. external source または別 wallet から **X-Chain** に transfer
-    2. wallet の Cross-Chain で **X-Chain → P-Chain** export/import(5〜15 分 + 1 confirmation)
-    3. P-Chain 着金を Metal Wallet web で確認、`scripts/check-validator.sh` でも cross check 可能
-  - 期間終了後に発行する場合のみ: 解放された旧 stake + 報酬がそのまま新 tx の原資になるので事前 inject 不要
+- **原資**: 旧 endTime 経過後に発行するので、解放された旧 stake + 報酬がそのまま新 tx の原資になる。事前 inject は不要。発行直前の Available (P) の目視確認は Step 2.2
+- **外部 capital を足す場合だけ**: その分は発行前に P-Chain へ入れておく(X-Chain に transfer → wallet の Cross-Chain で **X-Chain → P-Chain** export/import、5〜15 分 + 1 confirmation → Metal Wallet web で着金確認、`scripts/check-validator.sh` でも cross check 可能)。Stake Amount には tx fee マージン(0.001 METAL 程度)を残す
 - **stake 額の決定方針**:
   - 前期間 self-stake + 前期間中報酬 + 外部 capital(その期間に流入した分)を合算
   - 結果値を新 tx の Stake Amount に入れる

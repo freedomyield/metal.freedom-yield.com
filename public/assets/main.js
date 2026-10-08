@@ -950,12 +950,11 @@
 
 	// Operating cadence — compute the next renewal events from
 	// validator.json's current period_end. One marker per cycle at endTime
-	// (= the renewal moment). Operator-internal prep windows are no longer
-	// surfaced publicly because they don't reflect operational reality
-	// uniformly (issuance can be pre-expiry or post-expiry depending on
-	// FREE-balance accounting). Delegators only need to know when the
-	// rollover happens; ntfy alerts (T-7/T-1/T-0/T-10min) carry the
-	// per-event urgency on the operator side.
+	// (= the renewal moment). Operator-internal prep windows are not
+	// surfaced publicly: the next period is registered only after endTime
+	// (docs/VALIDATOR_RENEWAL.md), so the endTime marker is the schedule.
+	// Delegators only need to know when the rollover happens; ntfy alerts
+	// (T-7/T-1/T-0/T-10min) carry the per-event urgency on the operator side.
 	async function loadCadence() {
 		var listHost = document.querySelector('[data-cadence-list]');
 		if (!listHost) return;
