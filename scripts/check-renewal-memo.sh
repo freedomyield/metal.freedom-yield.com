@@ -24,25 +24,30 @@
 # WHAT "COMPLETE" MEANS (canon: docs/CYCLE_GATE.md step 11, which carries the
 # memo template):
 #   1. the memo exists: <memo-dir>/validator-renew-cycle-<C>.md
-#   2. its "## State" section has a "Current phase:" line whose value starts
-#      with 完了 — a memo still reading "Current phase: 1" is STALE, which is
-#      exactly the cycle-6 state of 2026-10-07
+#   2. its "## State" section has a "Current phase:" line whose value is
+#      "完了" alone or "完了" followed by a space or a bracket — "Current phase:
+#      1" is STALE (the cycle-6 state of 2026-10-07), and so is anything that
+#      negates it (完了していない, 未完了, …)
 #   3. its "## 結果" (outcome) section carries every one of these keys as a
-#      "- <key>: <value>" line with a real value (not empty, not a
-#      <placeholder>):
+#      "- <key>: <value>" line with a real value:
 #        registration tx / self stake / endTime / anchor tx / verification /
 #        keys locked
-#      and no value says that nothing was recorded (記録なし / 未確認 / 未記入 /
+#      No value (and not "Current phase:") may still hold a template
+#      placeholder "<…>" or the template's own instruction wording — copying
+#      the step 11 template verbatim, or with the brackets stripped, fails.
+#      No value may say that nothing was recorded (記録なし / 未確認 / 未記入 /
 #      不明 / unknown / TBD / N/A / a bare "-" or 未) — UNLESS the State
 #      section carries the exact line
 #        - Retroactive: yes (事後作成 YYYY-MM-DD)
 #      i.e. the memo was written after the day from records, and says so.
-#      Even then "registration tx:" must carry a real P-Chain tx id (CB58)
-#      and "anchor tx:" the ledger's id (4.)
-#   4. the "anchor tx:" value contains THE cycle-<C> anchor tx id — taken from
+#      The Latin placeholder words are matched as whole words only, so an ID
+#      that contains "tbd" by chance (CB58 can) is not mistaken for one.
+#   4. the IDs are real, retroactive or not: "registration tx:" carries a
+#      P-Chain tx id (CB58, 48-52 base58 characters), and "anchor tx:" carries
+#      exactly one 64-hex id, equal to THE cycle-<C> anchor tx id — taken from
 #      --anchor-tx=, or resolved from --history= (the mainnet line whose
-#      cycle_number is C). Any 64-hex string is not enough: a memo copied
-#      from the previous cycle would carry one.
+#      cycle_number is C). A second, different 64-hex id in the same value is
+#      a failure, not a match.
 #
 # Usage:
 #   check-renewal-memo.sh <C> (--history=<anchor-history.jsonl> | --anchor-tx=<64hex>)
@@ -56,9 +61,10 @@
 #   4  INCOMPLETE — the memo exists but fails one or more of 2-4 (each
 #      failing item is listed on stderr)
 #   5  the expected anchor tx id could not be resolved from --history=
-#      (file unreadable, no mainnet line for cycle C, or more than one tx id)
+#      (file unreadable, a malformed JSON line, no mainnet line for cycle C,
+#      or more than one tx id)
 
-set -u
+set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
@@ -114,11 +120,20 @@ if [ -n "$HISTORY" ]; then
 		echo "check-renewal-memo: jq is required for --history=" >&2
 		exit 5
 	fi
+	# Fail closed on a malformed ledger: a line jq cannot parse is reported and
+	# stops the check, rather than being skipped while earlier lines decide.
+	if ! JQ_ERR="$(jq empty "$HISTORY" 2>&1)"; then # MUT:jsonparse
+		echo "check-renewal-memo: ${HISTORY} is not valid JSON lines — ${JQ_ERR}" >&2
+		exit 5
+	fi
 	# Mainnet lines only: a line without .network predates the field and is
 	# mainnet (the published ledger has only ever carried mainnet anchors).
-	TX_IDS="$(jq -r --argjson c "$CYCLE" \
-		'select(.cycle_number == $c and ((.network // "mainnet-a") == "mainnet-a")) | .tx_id // empty' \
-		"$HISTORY" 2>/dev/null | sort -u)" || TX_IDS=""
+	if ! TX_IDS="$(jq -r --argjson c "$CYCLE" \
+		'select(type == "object" and .cycle_number == $c and ((.network // "mainnet-a") == "mainnet-a")) | .tx_id // empty' \
+		"$HISTORY" | sort -u)"; then
+		echo "check-renewal-memo: could not read the cycle-${CYCLE} lines of ${HISTORY}" >&2
+		exit 5
+	fi
 	TX_N="$(printf '%s' "$TX_IDS" | grep -c . || true)"
 	if [ "$TX_N" -ne 1 ]; then
 		echo "check-renewal-memo: ${HISTORY} has ${TX_N} distinct mainnet tx id(s) for cycle ${CYCLE}, expected exactly 1 — has unit 8.5 published today's anchor?" >&2
@@ -167,40 +182,68 @@ value_of() {
 	printf '%s\n' "$2" | awk -v k="- $1:" 'index($0, k) == 1 { v = substr($0, length(k) + 1); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v; exit }'
 }
 
-# is_present <value> — non-empty and not a <template placeholder>.
-is_present() {
-	case "$1" in
-	'' | '<'*'>') return 1 ;;
-	esac
-	return 0
+B58='1-9A-HJ-NP-Za-km-z'
+# A P-Chain transaction id: CB58, base58 alphabet, 48-52 characters.
+REG_TX_RE="(^|[^${B58}])[${B58}]{48,52}([^${B58}]|\$)"
+
+# has_template_marker <value> — a "<…>" placeholder is still in the value.
+has_template_marker() {
+	printf '%s' "$1" | grep -qE '<[^<>]*>' # MUT:angle
 }
 
-# has_placeholder <value> — the value says, anywhere in it, that nothing was
-# recorded. Matched case-insensitively for the Latin spellings (LC_ALL=C so
-# tr leaves the UTF-8 bytes of the Japanese spellings alone).
-has_placeholder() {
-	local lc
-	lc="$(printf '%s' "$1" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
-	case "$lc" in
-	- | 未 | *記録なし* | *未確認* | *未記入* | *不明* | *unknown* | *tbd* | *n/a*) return 0 ;; # MUT:placeholder
-	esac
+# The step 11 template's own instruction wording (docs/CYCLE_GATE.md). A value
+# containing any of these is the template with its brackets stripped, not an
+# outcome. tests/renewal-memo extracts the template from CYCLE_GATE and
+# proves both the verbatim and the stripped copy fail, so this list cannot
+# drift from the doc silently.
+TEMPLATE_PHRASES=(
+	"AddValidator の P-Chain tx id"
+	"self stake の実値"
+	"unix (JST)"
+	"step 7c の 64hex tx id"
+	"完了判定 ①〜⑤ の各結果"
+	"lock を実測した結果"
+)
+has_template_wording() {
+	local p
+	for p in "${TEMPLATE_PHRASES[@]}"; do
+		case "$1" in
+		*"$p"*) return 0 ;; # MUT:wording
+		esac
+	done
 	return 1
 }
 
-# A P-Chain transaction id: CB58, base58 alphabet, ~50 characters.
-REG_TX_RE='(^|[^1-9A-HJ-NP-Za-km-z])[1-9A-HJ-NP-Za-km-z]{48,52}([^1-9A-HJ-NP-Za-km-z]|$)'
+# has_placeholder <value> — the value says that nothing was recorded.
+# Japanese spellings as substrings (no ID can contain them); Latin spellings
+# only as WHOLE WORDS, case-insensitively (LC_ALL=C so tr leaves the UTF-8
+# bytes alone) — a CB58 or hex ID is one alphanumeric run, so "tbd" or
+# "unknown" occurring inside an ID by chance never matches.
+has_placeholder() {
+	local lc
+	case "$1" in
+	- | 未 | *記録なし* | *未確認* | *未記入* | *不明*) return 0 ;; # MUT:placeholder
+	esac
+	lc="$(printf '%s' "$1" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
+	printf '%s' "$lc" | grep -qE '(^|[^a-z0-9])(unknown|tbd|n/a)([^a-z0-9]|$)' # MUT:wholeword
+}
 
 # ---- 2. State is updated -----------------------------------------------------
 STATE="$(section "State")"
 if [ -z "$STATE" ]; then
 	problem "no '## State' section"
+	PHASE=""
 else
 	PHASE="$(printf '%s\n' "$STATE" | sed -n 's/^- Current phase:[[:space:]]*//p' | head -1)"
-	case "$PHASE" in
-	完了*) : ;; # MUT:state
-	'') problem "the State section has no 'Current phase:' line" ;;
-	*) problem "State is stale: 'Current phase: ${PHASE}' — after the day it must read '完了 …'" ;;
-	esac
+	if [ -z "$PHASE" ]; then
+		problem "the State section has no 'Current phase:' line"
+	elif ! printf '%s' "$PHASE" | grep -qE '^完了($|[ (]|（)'; then # MUT:state
+		problem "State is stale: 'Current phase: ${PHASE}' — after the day it must read '完了 …'"
+	elif printf '%s' "$PHASE" | grep -qiE '未完了|していない|ではない|incomplete|not (yet )?(complete|done)'; then # MUT:negation
+		problem "State negates completion: 'Current phase: ${PHASE}'"
+	elif has_template_marker "$PHASE"; then
+		problem "'Current phase:' still holds a template placeholder: '${PHASE}'"
+	fi
 fi
 
 # ---- 2b. retroactive marker ----------------------------------------------------
@@ -223,27 +266,31 @@ if [ -z "$OUTCOME" ]; then
 fi
 for key in "registration tx" "self stake" "endTime" "anchor tx" "verification" "keys locked"; do
 	v="$(value_of "$key" "$OUTCOME")"
-	if ! is_present "$v"; then # MUT:keys
-		problem "outcome key '${key}:' is missing or has no real value"
-	elif has_placeholder "$v" && [ "$RETRO" -ne 1 ]; then
+	if [ -z "$v" ]; then # MUT:keys
+		problem "outcome key '${key}:' is missing or empty"
+	elif has_template_marker "$v"; then
+		problem "outcome key '${key}:' still holds a template placeholder '<…>': '${v}'"
+	elif has_template_wording "$v"; then
+		problem "outcome key '${key}:' still holds the step 11 template's wording: '${v}'"
+	elif [ "$RETRO" -ne 1 ] && has_placeholder "$v"; then
 		problem "outcome key '${key}:' says nothing was recorded ('${v}') — allowed only in a memo marked '- Retroactive: yes (事後作成 YYYY-MM-DD)'"
 	fi
 done
 
 # ---- 4. the IDs are real, retroactive or not -----------------------------------
 REGV="$(value_of "registration tx" "$OUTCOME")"
-if is_present "$REGV" && ! printf '%s' "$REGV" | grep -qE "$REG_TX_RE"; then # MUT:regid
-	problem "'registration tx:' carries no P-Chain tx id (CB58, ~50 base58 characters): '${REGV}'"
+if [ -n "$REGV" ] && ! printf '%s' "$REGV" | grep -qE "$REG_TX_RE"; then # MUT:regid
+	problem "'registration tx:' carries no P-Chain tx id (CB58, 48-52 base58 characters): '${REGV}'"
 fi
 TXV="$(value_of "anchor tx" "$OUTCOME")"
-case "$TXV" in
-*"$ANCHOR_TX"*) : ;; # MUT:tx
-*)
-	if is_present "$TXV"; then
-		problem "'anchor tx:' does not contain the cycle-${CYCLE} anchor tx id ${ANCHOR_TX} (it reads '${TXV}')"
+if [ -n "$TXV" ]; then
+	# Every 64-hex token in the value, case-folded; exactly one, and it is THE id.
+	TX_TOKENS="$(printf '%s' "$TXV" | LC_ALL=C tr '[:upper:]' '[:lower:]' |
+		grep -oE '(^|[^0-9a-f])[0-9a-f]{64}([^0-9a-f]|$)' | grep -oE '[0-9a-f]{64}' | sort -u || true)"
+	if [ "$TX_TOKENS" != "$ANCHOR_TX" ]; then # MUT:tx
+		problem "'anchor tx:' must carry exactly the cycle-${CYCLE} anchor tx id ${ANCHOR_TX} and no other 64-hex id (it reads '${TXV}')"
 	fi
-	;;
-esac
+fi
 
 if [ "$PROBLEMS" -gt 0 ]; then
 	echo "RESULT: INCOMPLETE (${PROBLEMS} item(s); ${MEMO})"

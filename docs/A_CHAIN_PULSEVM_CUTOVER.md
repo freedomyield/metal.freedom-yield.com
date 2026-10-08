@@ -112,7 +112,7 @@ first PulseVM anchor.
 
 ### 4.1 Before the write freeze
 
-1. Run the last legacy anchor of the cycle as usual (the 16-unit transition,
+1. Run the last legacy anchor of the cycle as usual (the 17-unit transition,
    including unit **10**, the legacy archive). Confirm `VERIFIED <n>` equals the
    number of mainnet ledger lines.
 2. Do **not** schedule a cycle-transition anchor inside the announced window. If

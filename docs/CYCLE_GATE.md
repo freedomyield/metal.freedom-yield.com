@@ -1458,7 +1458,11 @@ the values to pass on a given day are in the day-of value sheet above):
    memo was left behind (the cycle-5 memo was never written, the cycle-6
    memo stopped at Phase 1), although the on-chain and public records were
    complete. If the memo does not exist yet (the day was not started by the
-   agent), create it. The memo must carry at least:
+   agent), create it. The memo must carry at least the lines below, with
+   **every `<…>` replaced by the measured value** — a value that still holds
+   a `<…>`, or this template's wording with the brackets stripped, fails the
+   check (`tests/renewal-memo/` copies this block out of this file and proves
+   both forms fail):
    ```markdown
    ## State
    - Current phase: 完了 (cycle <N+1> 転換完了)
@@ -1466,11 +1470,11 @@ the values to pass on a given day are in the day-of value sheet above):
 
    ## 結果
    - registration tx: <AddValidator の P-Chain tx id (step 0)>
-   - self stake: <self stake (step 0)>
+   - self stake: <self stake の実値 (step 0)>
    - endTime: <unix> (<JST>)
    - anchor tx: <step 7c の 64hex tx id>
-   - verification: 完了判定 ①〜⑤ の結果 (各 PASS / 実測値)
-   - keys locked: testnet + mainnet keystore locked、identity 鍵は agent から削除済
+   - verification: <完了判定 ①〜⑤ の各結果 (PASS / 実測値)>
+   - keys locked: <testnet / mainnet keystore と identity 鍵の lock を実測した結果>
    ```
    Then prove it:
    ```sh
@@ -1492,7 +1496,9 @@ the values to pass on a given day are in the day-of value sheet above):
    - Retroactive: yes (事後作成 YYYY-MM-DD)
    ```
    Even then, `registration tx:` must carry a real P-Chain tx id (CB58,
-   ~50 base58 characters) and `anchor tx:` the ledger's id — a retroactive
+   48-52 base58 characters) and `anchor tx:` exactly the ledger's id (one
+   64-hex id, equal to it — a second, different id in the value fails; the
+   "nothing recorded" words are looked for outside the IDs) — a retroactive
    memo restores the IDs from the chain (`scripts/reward-backfill-discover.sh`
    for the registration tx) rather than writing them off.
 
