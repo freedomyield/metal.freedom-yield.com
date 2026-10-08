@@ -15,6 +15,12 @@
 #   4. memo with the PREVIOUS cycle's anchor tx             -> 4
 #   5. memo with a stale State (Current phase: 1)           -> 4
 #   6. memo with a <placeholder> outcome value              -> 4
+#  6b. day-of memo whose value says nothing was recorded
+#      (記録なし / 未確認 / unknown / TBD / - / N/A …)        -> 4, key named
+#  6c. the same values with the exact retroactive marker in State -> 0;
+#      a malformed marker, or the marker outside State       -> 4
+#  6d. retroactive memo without a real registration / anchor id,
+#      day-of memo whose registration tx is not CB58         -> 4
 #   7. ledger without a mainnet line for the cycle          -> 5
 #   8. usage errors                                         -> 2
 #   M. MUTATION: each check is disabled in a copy of the script and the case
@@ -75,14 +81,15 @@ write_memo() {
 	mkdir -p "$dir"
 	{
 		printf '# Validator Renew — Cycle %s\n\n' "$CYCLE"
-		printf '## State\n- Current phase: %s\n- Last update: 2026-11-06T06:00Z\n\n' "$phase"
-		printf '## Phase 1: 準備 check\n- PASS fixture\n\n'
+		printf '## State\n- Current phase: %s\n- Last update: 2026-11-06T06:00Z\n' "$phase"
+		[ -z "${MEMO_RETRO:-}" ] || printf -- '%s\n' "$MEMO_RETRO"
+		printf '\n## Phase 1: 準備 check\n- PASS fixture\n\n'
 		printf '## 結果\n'
-		printf -- '- registration tx: 2Fixture1111111111111111111111111111111111111111\n'
+		printf -- '- registration tx: %s\n' "${MEMO_REG:-2Fixture1111111111111111111111111111111111111111}"
 		printf -- '- self stake: 1 METAL (fixture)\n'
 		printf -- '- endTime: 1800000000 (fixture)\n'
 		[ "$tx" = "__OMIT__" ] || printf -- '- anchor tx: %s\n' "$tx"
-		printf -- '- verification: 完了判定 ①〜⑤ PASS (fixture)\n'
+		printf -- '- verification: %s\n' "${MEMO_VERIF:-完了判定 ①〜⑤ PASS (fixture)}"
 		printf -- '- keys locked: %s\n' "$locked"
 	} > "${dir}/validator-renew-cycle-${CYCLE}.md"
 }
@@ -129,6 +136,46 @@ grep -q 'State is stale' "${TMP}/err.txt" && ok "the stale-State failure says so
 # ---- 6. placeholder value ---------------------------------------------------------
 expect "memo with a <placeholder> outcome value" 4 "$CHECKER" "$CYCLE" --history="$LEDGER" --memo-dir="$D_PH"
 
+# ---- 6b. "nothing recorded" values: red on a day-of memo -------------------------
+RETRO_LINE='- Retroactive: yes (事後作成 2026-10-08)'
+i=0
+for ph in '記録なし' '未確認' 'unknown' 'Unknown (not captured)' 'TBD' '-' 'N/A' 'testnet lock は記録なし'; do
+	i=$((i + 1))
+	d="${TMP}/dayof-ph-${i}"
+	write_memo "$d" "完了" "$TX_NEW" "$ph"
+	expect "day-of memo with keys locked: '${ph}'" 4 "$CHECKER" "$CYCLE" --history="$LEDGER" --memo-dir="$d"
+	grep -q "keys locked" "${TMP}/err.txt" || bad "day-of placeholder '${ph}': the failure does not name the key"
+done
+D_PH_VERIF="${TMP}/dayof-ph-verif"
+MEMO_VERIF='①〜⑤ の実測値は記録なし' write_memo "$D_PH_VERIF" "完了" "$TX_NEW"
+expect "day-of memo with verification: '…記録なし'" 4 "$CHECKER" "$CYCLE" --history="$LEDGER" --memo-dir="$D_PH_VERIF"
+
+# ---- 6c. the same values pass ONLY with the exact retroactive marker --------------
+D_RETRO="${TMP}/retro-ok"
+MEMO_RETRO="$RETRO_LINE" MEMO_VERIF='checklist 5/5、項目ごとの値は記録なし' \
+	write_memo "$D_RETRO" "完了 (事後作成)" "$TX_NEW" 'mainnet locked、testnet は未確認'
+expect "retroactive memo with '記録なし' / '未確認' values" 0 "$CHECKER" "$CYCLE" --history="$LEDGER" --memo-dir="$D_RETRO"
+D_RETRO_BAD="${TMP}/retro-malformed"
+MEMO_RETRO='- Retroactive: yes' MEMO_VERIF='記録なし' write_memo "$D_RETRO_BAD" "完了" "$TX_NEW"
+expect "malformed retroactive marker does not unlock placeholders" 4 "$CHECKER" "$CYCLE" --history="$LEDGER" --memo-dir="$D_RETRO_BAD"
+grep -q 'malformed retroactive marker' "${TMP}/err.txt" && ok "the malformed marker is reported as such" || bad "the malformed marker is not reported"
+D_RETRO_OUT="${TMP}/retro-outside-state"
+MEMO_VERIF='記録なし' write_memo "$D_RETRO_OUT" "完了" "$TX_NEW"
+printf '\n%s\n' "$RETRO_LINE" >> "${D_RETRO_OUT}/validator-renew-cycle-${CYCLE}.md"
+expect "the marker outside the State section does not count" 4 "$CHECKER" "$CYCLE" --history="$LEDGER" --memo-dir="$D_RETRO_OUT"
+
+# ---- 6d. the IDs must be real even in a retroactive memo ---------------------------
+D_RETRO_NOREG="${TMP}/retro-noreg"
+MEMO_RETRO="$RETRO_LINE" MEMO_REG='記録なし' write_memo "$D_RETRO_NOREG" "完了" "$TX_NEW"
+expect "retroactive memo with registration tx '記録なし'" 4 "$CHECKER" "$CYCLE" --history="$LEDGER" --memo-dir="$D_RETRO_NOREG"
+grep -q 'registration tx' "${TMP}/err.txt" && ok "the missing registration id names the key" || bad "the missing registration id does not name the key"
+D_RETRO_NOTX="${TMP}/retro-notx"
+MEMO_RETRO="$RETRO_LINE" write_memo "$D_RETRO_NOTX" "完了" "記録なし"
+expect "retroactive memo with anchor tx '記録なし'" 4 "$CHECKER" "$CYCLE" --history="$LEDGER" --memo-dir="$D_RETRO_NOTX"
+D_DAYOF_SHORTREG="${TMP}/dayof-shortreg"
+MEMO_REG='2abc (fixture)' write_memo "$D_DAYOF_SHORTREG" "完了" "$TX_NEW"
+expect "day-of memo whose registration tx is not a CB58 id" 4 "$CHECKER" "$CYCLE" --history="$LEDGER" --memo-dir="$D_DAYOF_SHORTREG"
+
 # ---- 7. ledger cannot resolve the cycle ---------------------------------------------
 expect "ledger has no mainnet line for the cycle" 5 "$CHECKER" "$CYCLE" --history="$LEDGER_SHORT" --memo-dir="$D_OK"
 expect "ledger unreadable" 5 "$CHECKER" "$CYCLE" --history="${TMP}/nope.jsonl" --memo-dir="$D_OK"
@@ -172,9 +219,18 @@ mutate exists 's/\[ ! -f "\$MEMO" \]/false/' "memo file missing" 4 \
 # state: accept any Current phase -> the stale memo passes.
 mutate state 's/完了\*)/*)/' "memo with stale State" 0 \
 	"$CYCLE" --history="$LEDGER" --memo-dir="$D_STALE"
-# keys: never flag a missing key -> the placeholder memo passes.
-mutate keys 's/if ! is_real_value "\$v"; then/if false; then/' "memo with a <placeholder> outcome value" 0 \
+# keys: never flag a missing key -> the <placeholder> memo passes.
+mutate keys 's/if ! is_present "\$v"; then/if false; then/' "memo with a <placeholder> outcome value" 0 \
 	"$CYCLE" --history="$LEDGER" --memo-dir="$D_PH"
+# placeholder: never recognise "nothing recorded" -> the day-of 記録なし memo passes.
+mutate placeholder 's/\*記録なし\*/*NEVER-MATCHES*/' "day-of memo with verification '…記録なし'" 0 \
+	"$CYCLE" --history="$LEDGER" --memo-dir="$D_PH_VERIF"
+# retro: treat every memo as retroactive -> the same day-of memo passes.
+mutate retro 's/if printf .%s\\n. "\$STATE" | grep -qE "\$RETRO_RE"; then/if true; then/' "day-of memo with verification '…記録なし'" 0 \
+	"$CYCLE" --history="$LEDGER" --memo-dir="$D_PH_VERIF"
+# regid: never require a real registration id -> the retroactive 記録なし one passes.
+mutate regid 's/! printf .%s. "\$REGV" | grep -qE "\$REG_TX_RE"/false/' "retroactive memo with registration tx '記録なし'" 0 \
+	"$CYCLE" --history="$LEDGER" --memo-dir="$D_RETRO_NOREG"
 # tx: accept any anchor tx value -> the previous cycle's tx passes.
 mutate tx 's/\*"\$ANCHOR_TX"\*)/*)/' "memo with the previous cycle's anchor tx" 0 \
 	"$CYCLE" --history="$LEDGER" --memo-dir="$D_OLDTX"
