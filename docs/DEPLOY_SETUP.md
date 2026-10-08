@@ -173,14 +173,15 @@ web host の deploy dir には本リポの**git でないコピー** (`.git` な
 `caddy-static` はそのコピーの compose ファイルで起動され、そのコピーの `caddy/Caddyfile` を読む。deploy が更新するのは
 その中の `public/` だけなので、**コピーの他のファイル (compose・Caddyfile) は deploy では更新されない**。
 
-**統治**: web host は他プロジェクトと同居する multi-tenant host なので、Constitution §5 の
-「本プロジェクトの path・unit・名前に限定する。host 全体に効く変更は禁止」が掛かる。§5 の
-「変更ごとに chat で承認 → AI 実行 → AI 検証」(v0.7、Operating Model W7)は**文言上 validator host
-だけ**が対象で、web host 上の手作業の変更を明示的に統治する条文は無い (Operating Model の責任表は
-web host の deploy を CI だけに割り当てている)。そこでこの手順は、より厳しい側として **W7 と同じ形**で
-運用する: 変更(下の `--check` の diff と sha256)を operator が chat で**その変更として**承認 →
-AI が Mac から実行 → AI が期待値と照合。operator が自分で実行してもよい。この運用を条文にするか
-(W7 の対象を web host に広げる等)は operator の判断事項で、この節は条文を変えていない。
+**統治**: Constitution §5 v0.9 (`docs/OPERATING_MODEL.md` W7 の web host の範囲) に従う。変更 (下の `--check` の
+diff と sha256) を operator が chat で**その変更として**承認 → AI が Mac から実行 → AI が期待値と照合。対象は本プロジェクトの
+container `caddy-static` と、共有 host 上の本プロジェクトのファイルだけで、§5 の「multi-tenant host では本プロジェクトの
+path・unit・名前に限定する。host 全体に効く変更は禁止」も掛かる。破壊的な操作の個別承認 (§3.3) は変わらない。
+
+**発効日の制限**: v0.9 は緩める改正 (loosening) なので、§9 により**merge の 7 日後に発効する** (merge 予定 2026-10-08 →
+発効 2026-10-15)。**発効日より前は、AI はこの手順を使ってはならない** — web host に接続する `--check` / `--apply` /
+`--rollback` はどれも AI が実行しない (何にも接続しない手順 0 の plan の表示だけは可)。それまでは operator が自分で実行する
+のはよい。発効日までは v0.8 の条文が有効で、web host の手作業の変更を AI に許す条文は無い。
 
 **採らなかった案** (2026-10-08 検討):
 CI に web host 用の限定コマンドを足す案は、Caddyfile を書き換えて reload できる鍵 (= docker を

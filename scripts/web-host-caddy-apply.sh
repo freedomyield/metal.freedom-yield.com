@@ -10,8 +10,11 @@
 # only rsyncs public/ there (its key is confined to the public dir), so a
 # Caddyfile change in this repository otherwise never reaches the site. This
 # script is the supported path. It is run from the Mac by the AI after the
-# operator has approved THAT change in chat (docs/DEPLOY_SETUP.md §9), and the
-# approval is bound to the exact content by --approved-sha256.
+# operator has approved THAT change in chat (Constitution §5 v0.9, Operating
+# Model W7, docs/DEPLOY_SETUP.md §9), and the approval is bound to the exact
+# content by --approved-sha256. v0.9 is a loosening amendment effective seven
+# days after merge (2026-10-15 for a 2026-10-08 merge); before that date the
+# AI runs none of the remote modes, and only the operator may run them.
 #
 # Modes:
 #   (none) | --plan   local only: no ssh, no docker. Prints the repo
