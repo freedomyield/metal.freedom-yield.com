@@ -292,8 +292,70 @@ if (!process.env.STATUS_CALC_MUTANT) {
 	ok(linked === "", "C9 /status/ is not linked from any page (" + linked + ")");
 }
 
-console.log(failures === 0 ? "RESULT: PASS" : "RESULT: FAIL (" + failures + ")");
-process.exit(failures === 0 ? 0 : 1);
+// ---- C15 bootstrap ✅ only from a current validator.json -------------------------
+{
+	const bv = (over, now) => C.bootstrapView(Object.assign(goodValidator(NOW),
+		{ bootstrap: { pChain: true, xChain: true, cChain: true } }, over), now === undefined ? NOW : now);
+	ok(bv({}).text === "P ✅　X ✅　C ✅" && bv({}).state === "is-ok", "C15 current file, all true → ✅ (is-ok)");
+	const stale = bv({ observedAt: iso(NOW - 21 * MIN) });
+	ok(stale.text === "P 未確認　X 未確認　C 未確認" && stale.state === "is-warn", "C15 stale validator.json (>20 min) → 未確認, never ✅");
+	ok(!/✅/.test(bv({ observedAt: iso(NOW + 3 * HOUR) }).text), "C15 future observedAt → no ✅");
+	ok(!/✅/.test(bv({ observedAt: null }).text), "C15 missing observedAt → no ✅");
+	const miss = bv({ bootstrap: { pChain: true, xChain: "yes" } });
+	ok(miss.text === "P ✅　X 未確認　C 未確認" && miss.state === "is-warn", "C15 missing / non-boolean chain → 未確認");
+	ok(C.bootstrapView(null, NOW).text === "P 未確認　X 未確認　C 未確認", "C15 no validator.json → 未確認");
+	const bad = bv({ observedAt: iso(NOW - 21 * MIN), bootstrap: { pChain: false, xChain: true, cChain: true } });
+	ok(bad.text === "P ❌　X 未確認　C 未確認" && bad.state === "is-bad", "C15 false stays ❌ (is-bad)");
+}
+
+// ---- C16 watchdog removes every ✅ from value cells (status.js in a stub DOM) ------
+async function watchdogDomTest() {
+	const html = fs.readFileSync(path.join(REPO, "public/status/index.html"), "utf8");
+	const els = {};
+	const mk = (id, cls) => {
+		const set = new Set(cls);
+		return els[id] = { id, textContent: "", hidden: false, disabled: false,
+			classList: { add: (c) => set.add(c), remove: (...c) => c.forEach((x) => set.delete(x)), contains: (c) => set.has(c) },
+			addEventListener() {} };
+	};
+	for (const m of html.matchAll(/<(\w+)([^>]*)\bid="([^"]+)"/g)) {
+		const cls = (/class="([^"]*)"/.exec(m[2]) || [, ""])[1].split(/\s+/).filter(Boolean);
+		mk(m[3], cls);
+	}
+	let clock = NOW;
+	const intervals = [];
+	const validator = Object.assign(goodValidator(NOW), { bootstrap: { pChain: true, xChain: true, cChain: true } });
+	const bodies = { "/api/watch-status.json": goodWatch(NOW), "/api/validator.json": validator, "/api/known-outages.json": OUT };
+	const document = {
+		readyState: "complete", visibilityState: "visible", title: "",
+		getElementById: (id) => els[id],
+		querySelectorAll: (sel) => sel === ".val" ? Object.values(els).filter((e) => e.classList.contains("val")) : [],
+		addEventListener() {}
+	};
+	const ctx = {
+		document, console, Promise, setTimeout, clearTimeout, AbortController,
+		Date: Object.assign(function () { return new Date(clock); }, { now: () => clock, parse: Date.parse, UTC: Date.UTC }),
+		setInterval: (fn) => { intervals.push(fn); return intervals.length; },
+		fetch: (url) => Promise.resolve({ ok: true, json: () => Promise.resolve(bodies[url.split("?")[0]]) })
+	};
+	ctx.window = ctx; ctx.self = ctx;
+	vm.createContext(ctx);
+	vm.runInContext(fs.readFileSync(process.env.CALC, "utf8"), ctx);
+	vm.runInContext(fs.readFileSync(path.join(REPO, "public/status/status.js"), "utf8"), ctx);
+	await new Promise((r) => setTimeout(r, 50));
+	ok(els["v-bootstrap"].textContent === "P ✅　X ✅　C ✅", "C16 fresh render shows bootstrap ✅ (" + els["v-bootstrap"].textContent + ")");
+	clock = NOW + 4 * MIN; // renderStaleMs (3 min) passed without a render
+	intervals.forEach((fn) => { try { fn(); } catch (e) { /* refresh is async; watchdog is sync */ } });
+	const withCheck = Object.values(els).filter((e) => e.classList.contains("val") && /✅/.test(e.textContent)).map((e) => e.id);
+	ok(withCheck.length === 0, "C16 watchdog leaves no ✅ in any value cell (" + withCheck.join(",") + ")");
+	ok(els["v-bootstrap"].textContent === "P 未確認　X 未確認　C 未確認" && els["v-bootstrap"].classList.contains("is-warn"),
+		"C16 watchdog turns bootstrap ✅ into 未確認 (is-warn)");
+}
+
+watchdogDomTest().catch((e) => { failures++; console.log("FAIL C16 stub DOM threw: " + e.message); }).then(() => {
+	console.log(failures === 0 ? "RESULT: PASS" : "RESULT: FAIL (" + failures + ")");
+	process.exit(failures === 0 ? 0 : 1);
+});
 JS
 
 exit "$fail"

@@ -225,17 +225,8 @@
 		// validator.json itself.
 		setVal("v-observed", whenText(now, obs), obs === null ? "is-unknown"
 			: now - obs > C.LIMITS.validatorStaleMs ? "is-bad" : null);
-		var bs = validator && validator.bootstrap;
-		if (!bs || typeof bs !== "object") {
-			setVal("v-bootstrap", "—", "is-unknown");
-		} else {
-			var allOk = true;
-			setVal("v-bootstrap", [["P", "pChain"], ["X", "xChain"], ["C", "cChain"]].map(function (c) {
-				var x = bs[c[1]];
-				if (x !== true) allOk = false;
-				return c[0] + (x === true ? " ✅" : x === false ? " ❌" : " —");
-			}).join("　"), allOk ? "is-ok" : "is-bad");
-		}
+		var bv = C.bootstrapView(validator, now);
+		setVal("v-bootstrap", bv.text, bv.state);
 		setVal("v-network", validator && validator.network ? String(validator.network) : "—", null);
 		var st = validator && validator.stake ? validator.stake : null;
 		var unit = st && st.unit ? " " + st.unit : "";
@@ -275,8 +266,10 @@
 			var el = $(id);
 			if (el.classList.contains("is-ok")) setState(el, "is-warn");
 		});
-		Array.prototype.forEach.call(document.querySelectorAll(".val.is-ok"), function (el) {
-			setState(el, "is-warn");
+		// Any ✅ in a value cell is no longer vouched for → 未確認 (never ✅).
+		Array.prototype.forEach.call(document.querySelectorAll(".val"), function (el) {
+			if (el.textContent.indexOf("✅") !== -1) el.textContent = el.textContent.replace(/✅/g, "未確認");
+			if (el.classList.contains("is-ok")) setState(el, "is-warn");
 		});
 	}
 
