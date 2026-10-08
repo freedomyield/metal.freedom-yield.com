@@ -302,6 +302,27 @@
 		return out;
 	}
 
+	// Per-chain bootstrap marks from validator.json. ✅ only while the file is
+	// current (observedAt within validatorStaleMs and not in the future);
+	// true from a stale file, or a missing / non-boolean value → 未確認.
+	// false is shown as ❌ whatever the age. Returns { text, state }.
+	var BOOTSTRAP_CHAINS = [["P", "pChain"], ["X", "xChain"], ["C", "cChain"]];
+	function bootstrapView(validator, now) {
+		var bs = validator && validator.bootstrap && typeof validator.bootstrap === "object" ? validator.bootstrap : {};
+		var obs = validator ? toMs(validator.observedAt) : null;
+		var current = obs !== null && !inFuture(obs, now) && now - obs <= LIMITS.validatorStaleMs;
+		var anyBad = false;
+		var allOk = true;
+		var parts = BOOTSTRAP_CHAINS.map(function (c) {
+			var x = bs[c[1]];
+			if (x === false) { anyBad = true; allOk = false; return c[0] + " ❌"; }
+			if (x === true && current) return c[0] + " ✅";
+			allOk = false;
+			return c[0] + " 未確認";
+		});
+		return { text: parts.join("　"), state: anyBad ? "is-bad" : allOk ? "is-ok" : "is-warn" };
+	}
+
 	function pad2(n) { return (n < 10 ? "0" : "") + n; }
 
 	// "HH:MM" in JST, without depending on the device's time zone.
@@ -327,6 +348,7 @@
 		renderStale: renderStale,
 		verdict: verdict,
 		uptimeView: uptimeView,
+		bootstrapView: bootstrapView,
 		jstHHMM: jstHHMM,
 		signed: signed
 	};
