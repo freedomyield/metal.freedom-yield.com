@@ -36,7 +36,7 @@
 	var CHECK_LABELS = {
 		p2p: "外から届く",
 		chain: "ネットワークに接続",
-		fresh: "データ更新"
+		fresh: "データが新しい"
 	};
 	var CHECK_KEYS = ["p2p", "chain", "fresh"];
 

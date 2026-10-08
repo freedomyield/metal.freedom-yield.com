@@ -119,7 +119,18 @@ ok(/外から届く/.test(av.detail) && /VPS provider/.test(av.next) && /DISASTE
 	"C2 p2p alert names the check and the provider-ticket next step");
 const fw = goodWatch(NOW); fw.last.fresh = false;
 const fv = v({ watch: fw });
-ok(fv.code === "alert" && /データ更新/.test(fv.detail), "C2 fresh=false alone → 異常あり (データ更新)");
+ok(fv.code === "alert" && fv.detail === "データが新しい (fresh)", "C2 fresh=false alone → 異常あり (データが新しい (fresh))");
+// One name per check: the verdict texts use exactly the labels of the page's check list.
+const allFail = goodWatch(NOW); allFail.last.p2p = false; allFail.last.chain = false; allFail.last.fresh = false;
+ok(v({ watch: allFail }).detail === "外から届く (p2p)・ネットワークに接続 (chain)・データが新しい (fresh)",
+	"C2 alert detail names every check with the list labels");
+const unkW = goodWatch(NOW); unkW.last.chain = null;
+ok(v({ watch: unkW }).detail === "ネットワークに接続 (chain) を確認できていません。", "C2 unknown detail uses the list label");
+{
+	const listHtml = fs.readFileSync(path.join(process.env.REPO, "public/status/index.html"), "utf8");
+	ok(C.CHECK_KEYS.every((k) => listHtml.indexOf(C.CHECK_LABELS[k] + ' <span class="sub">' + k + "</span>") !== -1),
+		"C2 page check list and status-calc labels are the same names");
+}
 ok(v({ watch: goodWatch(NOW) }).next === null, "C2 OK has no next step");
 ok(/web host/.test(v({ watch: staleW }).next), "C2 stale watch next step = web host / watcher stopped");
 
