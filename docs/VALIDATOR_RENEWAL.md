@@ -51,10 +51,11 @@ ntfy 通知 4 ポイント(JST 基準、1 サイクル 1 回ずつ発火):
 - サイト `https://metal.freedom-yield.com/` の "Period ends" 行で残日数 / endTime 確認
 - または validator host で:
   ```sh
-  ssh -i ~/.ssh/<your_validator_host_key> root@<vps-ip>
-  cd /opt/metal-validator
-  bash scripts/node-info.sh | grep -E "endTime|Self-stake|Total weight"
+  ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
+      'sudo -u deploy bash -c "cd /home/deploy/metal.freedom-yield.com && \
+         bash scripts/node-info.sh | grep -E \"endTime|Self-stake|Total weight\""'
   ```
+  (host の repo は `/home/deploy/metal.freedom-yield.com`、実行ユーザは `deploy` — `docs/CYCLE_GATE.md`「実行者と実行場所」。`node-info.sh` は `public/api/validator.json` を書くので root のまま走らせない)
 
 ### 1.2 次回 duration の確定
 
@@ -89,7 +90,7 @@ ntfy 通知 4 ポイント(JST 基準、1 サイクル 1 回ずつ発火):
 validator host で `info.getNodeID` を叩き `nodePOP` フィールドを取得。Metal Wallet web の Add Validator フォームに貼り付けるため。
 
 ```sh
-ssh -i ~/.ssh/<your_validator_host_key> root@<vps-ip> \
+ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
   'curl -sS -X POST -H "content-type:application/json" \
      --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"info.getNodeID\"}" \
      http://localhost:9650/ext/info' | jq '.result.nodePOP'
@@ -160,9 +161,9 @@ WebAuth wallet は mnemonic 非互換(AddValidator は Metal Wallet web 専用)�
 ### 2.4 P-Chain 登録の確認
 
 ```sh
-ssh -i ~/.ssh/<your_validator_host_key> root@<vps-ip>
-cd /opt/metal-validator
-bash scripts/node-info.sh
+ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
+    'sudo -u deploy bash -c "cd /home/deploy/metal.freedom-yield.com && \
+       bash scripts/node-info.sh"'
 ```
 
 期間後発行モードでは submit 後約 5 分の start 時刻に **`platform.getCurrentValidators`** に新 entry が現れる(それまでは `platform.getPendingValidators` 側)。期間中発行モードで「旧期間終了の瞬間に Current へ昇格」するかは未検証(「全体タイムライン」の OPEN)。
@@ -176,7 +177,9 @@ bash scripts/node-info.sh
 旧 endTime を過ぎたら:
 
 ```sh
-bash scripts/node-info.sh
+ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
+    'sudo -u deploy bash -c "cd /home/deploy/metal.freedom-yield.com && \
+       bash scripts/node-info.sh"'
 ```
 
 期待:
@@ -197,9 +200,9 @@ Metal Wallet web の P-Chain で **旧期間の stake + 報酬** が解放され
 cron で自動更新されるが、即時確認したい場合:
 
 ```sh
-ssh -i ~/.ssh/<your_validator_host_key> root@<vps-ip>
-cd /opt/metal-validator && bash scripts/node-info.sh
-cat public/api/validator.json | jq '.endTime, .stake.self'
+ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
+    'sudo -u deploy bash -c "cd /home/deploy/metal.freedom-yield.com && \
+       bash scripts/node-info.sh && jq \".endTime, .stake.self\" public/api/validator.json"'
 ```
 
 → サイト `https://metal.freedom-yield.com/` をリロードして "N days left" の値が新 duration に基づいた数字になっているか目視。
