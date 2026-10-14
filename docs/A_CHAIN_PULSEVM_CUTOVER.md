@@ -40,6 +40,11 @@ in a chain_id. Chain values change only through a reviewed commit to
 2. **A PulseVM GitHub Release ≥ v1.0.0** (trigger **T7**) and a **mainnet metalgo
    release able to run it** (the Granite line without the `-tahoe` suffix, trigger
    **T6**). The validator upgrade itself follows the usual validator runbooks.
+   *Status 2026-10-14:* the T7 half holds — the PulseVM GitHub Release v1.0.0
+   was published on 2026-10-13 11:50 UTC. The T6 half does not: no v1.14
+   metalgo release exists other than `v1.14.2-tahoe` (a pre-release), and the
+   v1.0.0 release notes state that MetalGo v1.13.5 cannot run that release.
+   T7 alone starts nothing.
 3. **Every OPEN decision in §3 answered by the operator** and the answers
    committed (the profile file for (a)/(b); a Constitution amendment for (c) if
    needed).
