@@ -33,7 +33,7 @@ if [ "$rc" -eq 0 ] && [ "$(head -n 1 "$ENC" 2>/dev/null)" = "$hdr" ] \
 	pass "T1 keygen: encrypted PKCS#8 with scrypt"
 else bad "MUTATION NOT CAUGHT: T1 keygen rc=$rc header/scrypt wrong"; fi
 # T2 public algorithm
-[ "$(fyipq__pub_algorithm "$OSSL" "$PUB")" = "ML-DSA-65" ] && pass "T2 published pub is ML-DSA-65" || bad "T2 pub algorithm"
+[ "$(fyipq__pub_algorithm "$OSSL" "$PUB")" = "ML-DSA-87" ] && pass "T2 published pub is ML-DSA-87" || bad "T2 pub algorithm"
 # T3 no overwrite
 h1="$(fyipq__sha256_hex < "$ENC")"
 run pq-identity-keygen.sh "$PW"; rc=$?

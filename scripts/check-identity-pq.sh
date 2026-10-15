@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# check-identity-pq.sh — repo-mode check of the ML-DSA-65 (FIPS 204) signature
+# check-identity-pq.sh — repo-mode check of the operator identity ML-DSA-87
+# (FIPS 204; FYIPQ_ALGORITHM in scripts/lib/identity-pq.sh) signature
 # over public/api/identity.json. Read-only; no alerting (check-identity-pins.sh
 # is the alerting checker and is deliberately separate).
 #
@@ -13,7 +14,9 @@
 #   0  manifest is schema v1 (no PQ signature expected) or v2 and fully valid
 #   2  cannot run (jq missing, manifest unreadable / invalid JSON, bad usage)
 #   3  v2 manifest but a check failed (files missing, verification_pq fields,
-#      fingerprint mismatch, signature invalid)
+#      fingerprint mismatch, public key or verification_pq.algorithm
+#      not ML-DSA-87,
+#      signature invalid)
 #   4  --require-sig-verify given but no OpenSSL >= 3.5 is available
 set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -82,13 +85,20 @@ if [ -f "$PUB" ]; then
 fi
 
 if [ -n "$OSSL" ]; then
+	# The committed key itself must be the current parameter set: a valid
+	# signature by a key of another ML-DSA level is not the identity key.
+	if [ -f "$PUB" ]; then
+		GOT_ALG="$(fyipq__pub_algorithm "$OSSL" "$PUB")"
+		[ "$GOT_ALG" = "$FYIPQ_ALGORITHM" ] \
+			|| fail "$FYIPQ_PUB_REL is a '${GOT_ALG}' key, expected '${FYIPQ_ALGORITHM}'"
+	fi
 	if [ -f "$PUB" ] && [ -f "$SIG" ]; then
-		fyipq__verify "$OSSL" "$PUB" "$MANIFEST" "$SIG" || fail "ML-DSA-65 signature does not verify"
+		fyipq__verify "$OSSL" "$PUB" "$MANIFEST" "$SIG" || fail "${FYIPQ_ALGORITHM} signature does not verify"
 	fi
 else
 	echo "signature not verified (no OpenSSL >= ${FYIPQ_MIN_OPENSSL})"
 fi
 
 if [ "$FAILS" -ne 0 ]; then exit 3; fi
-echo "OK: schema_version 2, ML-DSA-65 identity checks passed"
+echo "OK: schema_version 2, ${FYIPQ_ALGORITHM} identity checks passed"
 exit 0

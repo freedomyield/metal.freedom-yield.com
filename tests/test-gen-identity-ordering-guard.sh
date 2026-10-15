@@ -54,7 +54,7 @@ skip_pass() {
 }
 
 [ -x "$SCRIPT" ] || { echo "FATAL: gen-identity.sh not executable at $SCRIPT" >&2; exit 1; }
-# gen-identity.sh also signs with ML-DSA-65 (schema v2), so a run that reaches
+# gen-identity.sh also signs with ML-DSA-87 (schema v2), so a run that reaches
 # the end needs an OpenSSL >= 3.5 and a throwaway ML-DSA key.
 # shellcheck source=lib/pq-test-key.sh
 . "${REPO_SRC}/tests/lib/pq-test-key.sh"

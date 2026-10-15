@@ -16,7 +16,10 @@ signer.*
 # The .pub goes into public/.well-known/operator-identity.pub via rename, not by this name.
 freedom-yield-operator-identity
 freedom-yield-operator-identity.pub
-# operator identity ML-DSA-65 key files (live outside the repo; belt and braces)
+# operator identity ML-DSA-87 key files (live outside the repo; belt and braces)
+operator-identity-mldsa87.enc.pem
+operator-identity-mldsa87.unlocked.pem
+# the retired 2026-10-15 ML-DSA-65 key files: still on the operator's Mac
 operator-identity-mldsa65.enc.pem
 operator-identity-mldsa65.unlocked.pem
 # 環境変数 / dotenv

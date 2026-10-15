@@ -82,6 +82,31 @@ OUT="$(FY_OPENSSL=/usr/bin/false FYD_REPO_ROOT="$R" bash "$CHECK" 2>&1)"; RC=$?
 expect "C7b no openssl, no flag" 0
 case "$OUT" in *"signature not verified (no OpenSSL >= 3.5)"*) pass "C7b line printed" ;; *) bad "C7b line missing: $OUT" ;; esac
 
+# C9 manifest claims the previous parameter set (re-signed so only the field
+# differs) -> 3. "ML-DSA-65" is the 2026-10-15 value, used here as the
+# negative fixture: the checker must require the CURRENT algorithm.
+build_repo "$R" 2
+jq '.verification_pq.algorithm="ML-DSA-65"' "$R/public/api/identity.json" > "$WORK/m.json" && cp "$WORK/m.json" "$R/public/api/identity.json"
+cp "$WORK/keys/master.pem" "$WORK/keys/${FYIPQ_UNLOCKED_BASENAME}"
+fyipq__sign "$OSSL" "$WORK/keys/${FYIPQ_UNLOCKED_BASENAME}" "$R/public/api/identity.json" "$R/${FYIPQ_SIG_REL}"
+rm -f "$WORK/keys/${FYIPQ_UNLOCKED_BASENAME}"
+run "$R" --require-sig-verify; expect "C9 verification_pq.algorithm ML-DSA-65" 3
+case "$OUT" in *"verification_pq.algorithm is 'ML-DSA-65', expected 'ML-DSA-87'"*) pass "C9 names the algorithm field" ;; *) bad "C9 output lacks the algorithm field: $OUT" ;; esac
+
+# C10 the committed key is an ML-DSA-65 key, everything else self-consistent
+# (fingerprint of that key, signature by that key, manifest fields current)
+# -> 3: a valid signature by another ML-DSA level is not the identity key.
+build_repo "$R" 2
+"$OSSL" genpkey -algorithm ML-DSA-65 -out "$WORK/k65.pem" </dev/null 2>/dev/null
+"$OSSL" pkey -in "$WORK/k65.pem" -pubout -out "$R/${FYIPQ_PUB_REL}" </dev/null
+jq --arg f "$(fyipq__pub_fingerprint "$R/${FYIPQ_PUB_REL}")" '.verification_pq.pubkey_fingerprint=$f' \
+	"$R/public/api/identity.json" > "$WORK/m.json" && cp "$WORK/m.json" "$R/public/api/identity.json"
+fyipq__sign "$OSSL" "$WORK/k65.pem" "$R/public/api/identity.json" "$R/${FYIPQ_SIG_REL}"
+fyipq__verify "$OSSL" "$R/${FYIPQ_PUB_REL}" "$R/public/api/identity.json" "$R/${FYIPQ_SIG_REL}" \
+	&& pass "C10 fixture: the ML-DSA-65 signature itself verifies" || bad "C10 fixture broken: 65 signature does not verify"
+run "$R" --require-sig-verify; expect "C10 committed key is ML-DSA-65" 3
+case "$OUT" in *"is a 'ML-DSA-65' key, expected 'ML-DSA-87'"*) pass "C10 names the key's algorithm" ;; *) bad "C10 output lacks the key algorithm: $OUT" ;; esac
+
 # C8 unreadable / invalid manifest -> 2
 build_repo "$R" 2; printf 'not json' > "$R/public/api/identity.json"; run "$R"; expect "C8 invalid JSON" 2
 

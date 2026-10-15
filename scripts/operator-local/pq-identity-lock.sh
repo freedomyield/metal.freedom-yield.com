@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/operator-local/pq-identity-lock.sh
 #
-# Delete the unlocked operator identity ML-DSA-65 key (re-lock). Idempotent.
+# Delete the unlocked operator identity ML-DSA-87 key (re-lock). Idempotent.
 # Always prints the full path it checked. Exit 3 + WARNING if that directory
 # holds no encrypted ML-DSA key (wrong HOME / FY_PQ_KEY_DIR).
 # CHAIN: none. PRIME_DIRECTIVE: TESTNET-FIRST — no broadcast pathway.

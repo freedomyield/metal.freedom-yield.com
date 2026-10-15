@@ -8,9 +8,23 @@ LIB="${REPO_SRC}/scripts/lib/identity-pq.sh"
 PASS=0; FAIL=0
 pass() { printf 'PASS  %s\n' "$1"; PASS=$((PASS + 1)); }
 bad()  { printf 'FAIL  %s\n' "$1" >&2; FAIL=$((FAIL + 1)); }
-skip_pass() { echo "SKIP: $1"; echo "RESULT: PASS"; exit 0; }
+skip_pass() { echo "SKIP: $1"; [ "$FAIL" -eq 0 ] || { echo "RESULT: FAIL"; exit 1; }; echo "RESULT: PASS"; exit 0; }
 [ -r "$LIB" ] || { echo "FATAL: $LIB missing" >&2; exit 1; }
 . "$LIB"
+# L0 the current parameter set and every name derived from it, stated as
+# literals here ON PURPOSE: comparing the library with itself could not catch
+# a change of algorithm. Runs before the OpenSSL skip so it always runs.
+for pair in \
+	"FYIPQ_ALGORITHM|ML-DSA-87" \
+	"FYIPQ_PUB_REL|public/.well-known/operator-identity-mldsa87.pub" \
+	"FYIPQ_SIG_REL|public/api/identity.json.mldsa87.sig" \
+	"FYIPQ_PUB_URL|https://metal.freedom-yield.com/.well-known/operator-identity-mldsa87.pub" \
+	"FYIPQ_SIG_URL|https://metal.freedom-yield.com/api/identity.json.mldsa87.sig" \
+	"FYIPQ_ENC_BASENAME|operator-identity-mldsa87.enc.pem" \
+	"FYIPQ_UNLOCKED_BASENAME|operator-identity-mldsa87.unlocked.pem"; do
+	k="${pair%%|*}"; w="${pair#*|}"; g="${!k}"
+	[ "$g" = "$w" ] && pass "L0 $k = $w" || bad "L0 $k is '$g', expected '$w'"
+done
 fy_pq_prereq_or_skip skip_pass
 OSSL="$(fyipq__resolve_openssl)"
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
@@ -58,7 +72,7 @@ fyipq__sign "$OSSL" "$UNL" "$WORK/msg" "$WORK/sig" && fyipq__verify "$OSSL" "$PU
 "$OSSL" pkeyutl -sign -inkey "$UNL" -rawin -in "$WORK/msg" -pkeyopt context-string:other -out "$WORK/sig-other" </dev/null
 fyipq__verify "$OSSL" "$PUB" "$WORK/msg" "$WORK/sig-other" && bad "MUTATION NOT CAUGHT: L4 other context verified" || pass "L4 other context rejected"
 # L5 algorithm label
-[ "$(fyipq__pub_algorithm "$OSSL" "$PUB")" = "ML-DSA-65" ] && pass "L5 algorithm ML-DSA-65" || bad "L5 algorithm"
+[ "$(fyipq__pub_algorithm "$OSSL" "$PUB")" = "ML-DSA-87" ] && pass "L5 algorithm ML-DSA-87" || bad "L5 algorithm"
 # L6 unlocked checks: ok, inside repo, wrong basename, stale
 fyipq__check_unlocked "$UNL" "$WORK/repo" 2>/dev/null && pass "L6 fresh unlocked key accepted" || bad "L6 fresh rejected"
 cp "$UNL" "$WORK/repo/${FYIPQ_UNLOCKED_BASENAME}"
