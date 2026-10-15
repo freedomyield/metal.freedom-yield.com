@@ -2,10 +2,10 @@
 	"$schema": "https://json-schema.org/draft/2020-12/schema",
 	"$id": "https://metal.freedom-yield.com/api/identity.schema.v2.json",
 	"title": "Freedom Yield Metal — Operator Identity Manifest v2",
-	"description": "Formal contract for /api/identity.json at schema_version 2. v2 = v1 plus a REQUIRED verification_pq object: identity.json is signed twice over the same bytes — with the operator identity ed25519 key (ssh-keygen -Y verify, namespace freedom-yield/validator-identity, signature at /api/identity.json.sig, unchanged from v1) AND with an ML-DSA-65 (FIPS 204) key (OpenSSL 3.5+ pkeyutl -verify with context string freedom-yield/validator-identity, signature at /api/identity.json.mldsa65.sig, public key at /.well-known/operator-identity-mldsa65.pub). verification_pq lies inside the bytes the ed25519 signature covers. Everything else is unchanged from /api/identity.schema.v1.json, which stays published for manifests issued at schema_version 1. History of v1: Revised 2026-06-20 as a pre-production correction; further extended 2026-06-21 with additive Merkle DAG anchor fields (dag_root_hash, cycles_history_url, anchor_receipt_url) for Phase α A-chain anchoring per docs/MERKLE_DAG_SPEC.md. See docs/IDENTITY_SCHEMA_CHANGELOG.md for the full history. The model is an operator-signed artifact snapshot. The runtime manifest is generated and signed by scripts/operator-local/gen-identity.sh on the operator's local Mac, NEVER on the validator host or web host. Verification uses ssh-keygen -Y verify with namespace freedom-yield/validator-identity. Companion /api/identity.example.json is a synthetic schema example, NOT a production snapshot. Companion design changelog: docs/IDENTITY_SCHEMA_CHANGELOG.md. The schema URL is a stable discovery endpoint; consumers that need immutable schema semantics SHOULD pin the schema document SHA-256 or the repository commit (see CHANGELOG). A future breaking change will use a new major-version schema URL; retention and deprecation policy for superseded schema versions will be documented when such a version is introduced.",
+	"description": "Formal contract for /api/identity.json at schema_version 2. v2 = v1 plus a REQUIRED verification_pq object: identity.json is signed twice over the same bytes — with the operator identity ed25519 key (ssh-keygen -Y verify, namespace freedom-yield/validator-identity, signature at /api/identity.json.sig, unchanged from v1) AND with an ML-DSA (FIPS 204) key (OpenSSL 3.5+ pkeyutl -verify with context string freedom-yield/validator-identity; since 2026-10-16 the key is ML-DSA-87, signature at /api/identity.json.mldsa87.sig, public key at /.well-known/operator-identity-mldsa87.pub). verification_pq lies inside the bytes the ed25519 signature covers. Everything else is unchanged from /api/identity.schema.v1.json, which stays published for manifests issued at schema_version 1. History of v1: Revised 2026-06-20 as a pre-production correction; further extended 2026-06-21 with additive Merkle DAG anchor fields (dag_root_hash, cycles_history_url, anchor_receipt_url) for Phase α A-chain anchoring per docs/MERKLE_DAG_SPEC.md. See docs/IDENTITY_SCHEMA_CHANGELOG.md for the full history. The model is an operator-signed artifact snapshot. The runtime manifest is generated and signed by scripts/operator-local/gen-identity.sh on the operator's local Mac, NEVER on the validator host or web host. Verification uses ssh-keygen -Y verify with namespace freedom-yield/validator-identity. Companion /api/identity.example.json is a synthetic schema example, NOT a production snapshot. Companion design changelog: docs/IDENTITY_SCHEMA_CHANGELOG.md. The schema URL is a stable discovery endpoint; consumers that need immutable schema semantics SHOULD pin the schema document SHA-256 or the repository commit (see CHANGELOG). A future breaking change will use a new major-version schema URL; retention and deprecation policy for superseded schema versions will be documented when such a version is introduced.",
 	"x-issued-at": "2026-10-15T00:00:00Z",
 	"x-stability": "additive-only-within-v2",
-	"x-baseline-revision": "2026-10-15-identity-pq-signature",
+	"x-baseline-revision": "2026-10-16-mldsa87-reselection",
 	"x-revision-history": [
 		{
 			"date": "2026-06-20",
@@ -31,6 +31,11 @@
 			"date": "2026-10-15",
 			"tag": "v2-identity-pq-signature",
 			"summary": "New major version. schema_version const 2 and a required verification_pq object (algorithm ML-DSA-65, standard FIPS 204, context_string, pubkey_url, pubkey_fingerprint = 'sha256:' + hex SHA-256 of the DER SubjectPublicKeyInfo, signature_url, method, minimum_openssl_version). Every other field is as in v1 (whose history above is carried over). See docs/superpowers/specs/2026-10-15-identity-pq-signature-design.md."
+		},
+		{
+			"date": "2026-10-16",
+			"tag": "mldsa87-reselection",
+			"summary": "Compatible relaxation within v2 (every previously-valid document stays valid; no v3). verification_pq.algorithm changes from const 'ML-DSA-65' to enum ['ML-DSA-65', 'ML-DSA-87'], so the manifest signed with ML-DSA-65 on 2026-10-15 still validates. The current key is ML-DSA-87: the parameter was re-selected on its own merits — ML-DSA-87 is the highest ML-DSA level and the level NSA CNSA 2.0 specifies for all classification levels. The 2026-10-15 premise that the algorithm should follow Metallicus' basic choice of ML-DSA-65 was wrong: Metallicus' CTO publicly stated that ML-DSA-44, -65 and -87 are all supported; ML-DSA-65 only appeared in examples. Current paths: /api/identity.json.mldsa87.sig and /.well-known/operator-identity-mldsa87.pub. See docs/IDENTITY_SCHEMA_CHANGELOG.md and docs/superpowers/specs/2026-10-15-identity-pq-signature-design.md (revision 4)."
 		}
 	],
 	"x-format-guide": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md",
@@ -156,7 +161,7 @@
 		},
 		"verification_pq": {
 			"type": "object",
-			"description": "ADDITIVE in v2 (2026-10-15). The ML-DSA-65 (FIPS 204) signature over the exact bytes of identity.json. Verify with: openssl pkeyutl -verify -pubin -inkey operator-identity-mldsa65.pub -rawin -in identity.json -sigfile identity.json.mldsa65.sig -pkeyopt context-string:freedom-yield/validator-identity (OpenSSL 3.5 or later; LibreSSL cannot). This object is itself covered by the ed25519 signature described in `verification`.",
+			"description": "ADDITIVE in v2 (2026-10-15). The ML-DSA (FIPS 204) signature over the exact bytes of identity.json; since 2026-10-16 the key is ML-DSA-87. Verify the current manifest with: openssl pkeyutl -verify -pubin -inkey operator-identity-mldsa87.pub -rawin -in identity.json -sigfile identity.json.mldsa87.sig -pkeyopt context-string:freedom-yield/validator-identity (OpenSSL 3.5 or later; LibreSSL cannot). This object is itself covered by the ed25519 signature described in `verification`.",
 			"required": [
 				"algorithm",
 				"standard",
@@ -171,7 +176,11 @@
 			"properties": {
 				"algorithm": {
 					"type": "string",
-					"const": "ML-DSA-65"
+					"enum": [
+						"ML-DSA-65",
+						"ML-DSA-87"
+					],
+					"description": "FIPS 204 parameter set. The current key is ML-DSA-87 (since 2026-10-16). ML-DSA-65 is accepted only so that the manifest signed on 2026-10-15 stays valid against this schema."
 				},
 				"standard": {
 					"type": "string",
@@ -185,7 +194,7 @@
 				"pubkey_url": {
 					"type": "string",
 					"format": "uri",
-					"description": "URL of the ML-DSA-65 public key (SubjectPublicKeyInfo PEM)."
+					"description": "URL of the ML-DSA public key (SubjectPublicKeyInfo PEM); for the current key, /.well-known/operator-identity-mldsa87.pub."
 				},
 				"pubkey_fingerprint": {
 					"type": "string",
@@ -195,7 +204,7 @@
 				"signature_url": {
 					"type": "string",
 					"format": "uri",
-					"description": "URL of the raw detached ML-DSA-65 signature over the exact bytes of identity.json."
+					"description": "URL of the raw detached ML-DSA signature over the exact bytes of identity.json; for the current key, /api/identity.json.mldsa87.sig."
 				},
 				"method": {
 					"type": "string",

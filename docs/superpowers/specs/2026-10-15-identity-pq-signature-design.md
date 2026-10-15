@@ -1,4 +1,17 @@
-# Operator identity: additive post-quantum (ML-DSA-65) signature — design
+# Operator identity: additive post-quantum (ML-DSA-87) signature — design
+
+> **Revision 4 (2026-10-16).** Rev 3 chose ML-DSA-65 on the premise that it was
+> "Metallicus' basic choice". That premise was wrong: Metallicus' CTO publicly
+> stated that ML-DSA-44, -65 and -87 are all supported; ML-DSA-65 only appeared
+> in examples. The operator re-selected the parameter on its own merits and
+> chose **ML-DSA-87** (approved in chat 2026-10-16). Rev 4 replaces §3
+> principle 1 and §3.1 with a selection rule that does not depend on
+> Metallicus' examples, moves every description of the current key, its files
+> and its command to ML-DSA-87, relaxes `verification_pq.algorithm` in schema
+> v2 to `enum ["ML-DSA-65", "ML-DSA-87"]` (no v3; the 2026-10-15 manifest
+> stays valid), and drops the example-parameter item from the watch list
+> (§7). The ML-DSA-65 key and its published files of 2026-10-15 are replaced
+> by a normal key rotation (§6).
 
 > **Status:** design spec, approved in chat by the operator on 2026-10-15
 > (brainstorming session), revised the same day after a touchpoint survey
@@ -41,30 +54,28 @@ property of the v1 identity design (`docs/IDENTITY_SCHEMA_CHANGELOG.md`).
 
 ## 3. Design principles (operator-approved)
 
-1. **Follow Metallicus' parameter choice.** Use the ML-DSA parameter set that
-   Metallicus' official materials present as the basic choice. On 2026-10-15
-   that is **ML-DSA-65**: the PR #116 design doc's CLI examples, the official
-   `@metalblockchain/pulsevm-js` README example, and the CTO's published Local
-   Testnet demo account all use ML-DSA-65. (No formal default exists; K1
-   remains the default and 44/65/87 are equally supported.)
+1. **ML-DSA-87.** The identity PQ key uses ML-DSA-87, the highest ML-DSA
+   level and the level NSA CNSA 2.0 specifies for all classification levels
+   (rule in §3.1).
 2. **Removable.** ed25519 stays primary; the PQ signature is a separate file.
    Removing it is deleting one signature file, one public key and one manifest
    block.
 3. **No bespoke verifier.** Verification uses stock OpenSSL ≥ 3.5
    (`openssl pkeyutl -verify`). No project-specific verification tool.
 4. **Small public claim.** Public wording is limited to "identity.json also
-   carries an ML-DSA-65 (FIPS 204) signature". No "quantum-safe validator"
+   carries an ML-DSA-87 (FIPS 204) signature". No "quantum-safe validator"
    claim.
 
-### 3.1 Parameter-following rule
+### 3.1 Parameter selection rule
 
-- **Rule:** the identity PQ key's algorithm follows Metallicus' basic choice.
-- **Trigger to change:** any of PulseVM's official SDK README, its CLI docs,
-  WebAuth, or a formal default moves to ML-DSA-87 or to another scheme
-  (e.g. SLH-DSA, hybrid).
-- **Detection:** added to the PulseVM watch list (baseline `MLDSA65`, see §7).
+- **Rule:** the identity PQ key uses ML-DSA-87, the highest ML-DSA level and
+  the level NSA CNSA 2.0 specifies for all classification levels.
+- **Trigger to change:** only if NIST / CNSA guidance changes or a weakness in
+  ML-DSA-87 is published.
 - **How to change:** a normal key rotation (§6). The manifest names the
-  algorithm, so a change of algorithm is a rotation, not a schema bump.
+  algorithm, so a change of algorithm is a rotation, not a schema bump (a new
+  value in `verification_pq.algorithm` is a compatible relaxation within v2,
+  as on 2026-10-16).
 
 ## 4. Verified feasibility (2026-10-15, throwaway keys only)
 
@@ -74,12 +85,15 @@ be used):
 
 - ML-DSA-87 and ML-DSA-65 sign / verify with `openssl pkeyutl -rawin -pkeyopt
   context-string:freedom-yield/validator-identity`. ML-DSA-65 signature: 3,309
-  bytes. A different context string fails verification (domain separation
+  bytes; ML-DSA-87 signature: 4,627 bytes (re-measured 2026-10-16, OpenSSL
+  3.6.3, throwaway key). A different context string fails verification (domain separation
   from PulseVM's `PulseVM transaction` context).
 - **Encrypted seed-only storage works:**
-  `openssl genpkey -algorithm ML-DSA-65 -provparam ml-dsa.output_formats=seed-only
+  `openssl genpkey -algorithm ML-DSA-87 -provparam ml-dsa.output_formats=seed-only
   | openssl pkcs8 -topk8 -v2 aes-256-cbc -scrypt -passout <src>
-  -provparam ml-dsa.output_formats=seed-only -out <file>` → 290-byte PEM; the
+  -provparam ml-dsa.output_formats=seed-only -out <file>` → 290-byte PEM
+  (same size for ML-DSA-87, re-measured 2026-10-16: the seed is 32 bytes at
+  every level); the
   plaintext never touches disk. Public key derived from it matches the
   unencrypted original byte for byte.
 - KDF: OpenSSL's default PBES2 for `genpkey -aes-256-cbc` is PBKDF2 with 2,048
@@ -101,7 +115,7 @@ be used):
 
 ### 5.1 Key
 
-- Algorithm: **ML-DSA-65** (§3.1).
+- Algorithm: **ML-DSA-87** (§3.1).
 - At rest: the encrypted seed-only PEM of §4 (scrypt, AES-256-CBC), in a
   directory under the operator's home outside the repo (moves with Migration
   Assistant). Backup: the operator's Dashlane.
@@ -146,8 +160,8 @@ by 3, 5 and 6. Operator keystrokes on transition day go from five to six.
 
 | Path | Content |
 |---|---|
-| `/.well-known/operator-identity-mldsa65.pub` | SubjectPublicKeyInfo PEM (`-----BEGIN PUBLIC KEY-----`). Not named `.pem`: `.gitignore:9` and the pre-commit filename check block `*.pem`. |
-| `/api/identity.json.mldsa65.sig` | Raw detached ML-DSA-65 signature over the exact bytes of `identity.json` |
+| `/.well-known/operator-identity-mldsa87.pub` | SubjectPublicKeyInfo PEM (`-----BEGIN PUBLIC KEY-----`). Not named `.pem`: `.gitignore:9` and the pre-commit filename check block `*.pem`. |
+| `/api/identity.json.mldsa87.sig` | Raw detached ML-DSA-87 signature over the exact bytes of `identity.json` |
 | `/api/identity.schema.v2.json` | Schema for `schema_version: 2` |
 
 All are git-deploy owned (committed, delivered by the existing GitHub Actions
@@ -161,7 +175,9 @@ file under `public/api/` and `public/.well-known/`).
 
 - `schema_version: 2`.
 - New block `verification_pq` next to the unchanged `verification` block:
-  - `algorithm` (`"ML-DSA-65"`), `standard` (`"FIPS 204"`)
+  - `algorithm` (`"ML-DSA-87"`; the schema accepts `enum ["ML-DSA-65",
+    "ML-DSA-87"]` since 2026-10-16 so that the 2026-10-15 manifest stays
+    valid), `standard` (`"FIPS 204"`)
   - `context_string` (`"freedom-yield/validator-identity"`)
   - `pubkey_url`, `pubkey_fingerprint` (`sha256:` + hex of the DER SPKI)
   - `signature_url`
@@ -186,7 +202,7 @@ file under `public/api/` and `public/.well-known/`).
    key (exists, its DER SHA-256 is what goes in the manifest).
 2. Build `identity.json` as today (plus `verification_pq`, `schema_version: 2`).
 3. Sign with ed25519 (unchanged).
-4. Sign the same bytes with ML-DSA-65; delete the unlocked file.
+4. Sign the same bytes with ML-DSA-87; delete the unlocked file.
 5. Self-verify **both** (the PQ one against the committed public key file).
 6. Publish both atomically. **If any step fails, publish nothing**
    (fail-closed). No ed25519-only fallback. New dedicated exit codes (free:
@@ -270,8 +286,9 @@ Every property claimed below is proven by a mutation that makes its test fail
 | The verification command in the docs works verbatim | run the documented line as-is in the test |
 
 Watch list additions (baselines 2026-10-15): PR #116 merge state (OPEN);
-activation height (none); ML-DSA parameter used in official PulseVM examples
-(`MLDSA65`).
+activation height (none). (Rev 4: the former "ML-DSA parameter used in
+official PulseVM examples" item is dropped — the parameter no longer follows
+Metallicus' examples, §3.1.)
 
 ## 8. Stage 2 (not in this spec)
 
