@@ -149,6 +149,8 @@
 #   FYP_REHEARSAL_CFG       rehearsal config dir
 #   FYP_MAINNET_CFG         mainnet broadcast config dir
 #   FYP_IDENTITY_KEY        operator identity private key path
+#   FYP_PQ_KEY_DIR          directory holding the ML-DSA identity key (check 5)
+#   FYP_PQ_PUB              committed ML-DSA public key (check 5)
 #   FYP_KEYSTORE_TESTNET    project testnet keystore dir
 #   FYP_KEYSTORE_MAINNET    project mainnet keystore dir
 #   FYP_CURL                curl binary
@@ -264,6 +266,8 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "${REPO_ROOT}/scripts/lib/require-keystore-home.sh"
 # shellcheck source=scripts/lib/cycle-context.sh
 . "${REPO_ROOT}/scripts/lib/cycle-context.sh"
+# shellcheck source=scripts/lib/identity-pq.sh
+. "${REPO_ROOT}/scripts/lib/identity-pq.sh"
 
 # Operator-local paths must keep resolving under the LOGIN home even though
 # this script is (correctly, per §3.5) invoked with HOME=<testnet keystore>.
@@ -274,6 +278,12 @@ LOGIN_HOME="$(fyd_login_home)"
 REHEARSAL_CFG="${FYP_REHEARSAL_CFG:-${LOGIN_HOME}/freedom-yield-rehearsal-config}"
 MAINNET_CFG="${FYP_MAINNET_CFG:-${LOGIN_HOME}/.fy-mainnet-broadcast/config}"
 IDENTITY_KEY="${FYP_IDENTITY_KEY:-${LOGIN_HOME}/.ssh/freedom-yield-operator-identity}"
+# The ML-DSA identity key directory must resolve under the LOGIN home for the
+# same reason (this script runs with HOME=<testnet keystore>); the library's
+# default is ${HOME}/..., so the login-home default is set explicitly here.
+FY_PQ_KEY_DIR="${FYP_PQ_KEY_DIR:-${FY_PQ_KEY_DIR:-${LOGIN_HOME}/.freedom-yield-identity}}"
+export FY_PQ_KEY_DIR
+PQ_PUB="${FYP_PQ_PUB:-${REPO_ROOT}/${FYIPQ_PUB_REL}}"
 KEYSTORE_TESTNET="${FYP_KEYSTORE_TESTNET:-${LOGIN_HOME}/.metal-fy-proton-test}"
 KEYSTORE_MAINNET="${FYP_KEYSTORE_MAINNET:-${LOGIN_HOME}/.metal-fy-proton}"
 
@@ -520,7 +530,7 @@ TESTNET_HYPERION_RPC="${XPR_TESTNET_RPC:-${TESTNET_HISTORY_BASES%% *}}"
 # that variable set was not labelled NON-AUTHORITATIVE, contradicting this
 # section's own "ANY override" rule. No test caught it because every case in
 # the suite already sets several other overrides at once.
-FYP_OVERRIDE_VARS="FYP_LEDGER_URL FYP_ANCHOR_SOURCE_URL FYP_ANCHOR_HISTORY_URL FYP_VALIDATOR_URL XPR_TESTNET_CHAIN_RPC XPR_TESTNET_RPC FYP_CURL FYP_REHEARSAL_CFG FYP_MAINNET_CFG FYP_IDENTITY_KEY FYP_KEYSTORE_TESTNET FYP_KEYSTORE_MAINNET"
+FYP_OVERRIDE_VARS="FYP_LEDGER_URL FYP_ANCHOR_SOURCE_URL FYP_ANCHOR_HISTORY_URL FYP_VALIDATOR_URL XPR_TESTNET_CHAIN_RPC XPR_TESTNET_RPC FYP_CURL FYP_REHEARSAL_CFG FYP_MAINNET_CFG FYP_IDENTITY_KEY FYP_PQ_KEY_DIR FYP_PQ_PUB FYP_KEYSTORE_TESTNET FYP_KEYSTORE_MAINNET"
 OVERRIDES=""
 for v in $FYP_OVERRIDE_VARS; do
 	[ -n "${!v-}" ] && OVERRIDES="${OVERRIDES} ${v}"
@@ -689,12 +699,54 @@ if [ -f "$IDENTITY_KEY" ]; then
 		*)          ID_PROBLEMS="${ID_PROBLEMS} private-key-mode-not-600(${ID_MODE})" ;;
 	esac
 fi
+# ML-DSA-65 half (unit 4's second signature). Read-only: modes, the committed
+# public key's digest, and the absence of an unlocked key. The passphrase is
+# never needed here and no decryption is attempted.
+PQ_ENC="$(fyipq__enc_path)"
+PQ_UNLOCKED="$(fyipq__unlocked_path)"
+PQ_DIR="$(dirname "$PQ_ENC")"
+# GNU first: on GNU stat, `-f` means "file-system status" and prints text with
+# exit 0, so trying the BSD form first would never fall through on Linux.
+PQ_MODE_OF() {
+	local m
+	m="$(stat -c %a "$1" 2>/dev/null)" || m=""
+	case "$m" in ""|*[!0-9]*) m="$(stat -f %Lp "$1" 2>/dev/null)" || m="" ;; esac
+	case "$m" in ""|*[!0-9]*) return 1 ;; esac
+	printf '%s\n' "$m"
+}
+if [ ! -f "$PQ_ENC" ]; then
+	ID_PROBLEMS="${ID_PROBLEMS} missing-mldsa-encrypted-key"
+else
+	[ "$(PQ_MODE_OF "$PQ_ENC")" = "600" ] || ID_PROBLEMS="${ID_PROBLEMS} mldsa-encrypted-key-mode-not-600"
+fi
+if [ -d "$PQ_DIR" ]; then
+	[ "$(PQ_MODE_OF "$PQ_DIR")" = "700" ] || ID_PROBLEMS="${ID_PROBLEMS} mldsa-key-dir-mode-not-700"
+	PQ_DIR_REAL="$(cd "$PQ_DIR" 2>/dev/null && pwd -P)"
+	PQ_REPO_REAL="$(cd "$REPO_ROOT" 2>/dev/null && pwd -P)"
+	case "${PQ_DIR_REAL}/" in
+		"${PQ_REPO_REAL}/"*) ID_PROBLEMS="${ID_PROBLEMS} mldsa-key-dir-inside-repo" ;;
+	esac
+elif [ -f "$PQ_ENC" ]; then
+	ID_PROBLEMS="${ID_PROBLEMS} mldsa-key-dir-unreadable"
+fi
+if [ ! -f "$PQ_PUB" ]; then
+	ID_PROBLEMS="${ID_PROBLEMS} missing-mldsa-public-key"
+elif ! fyipq__pub_fingerprint "$PQ_PUB" >/dev/null 2>&1; then
+	ID_PROBLEMS="${ID_PROBLEMS} mldsa-public-key-fingerprint-failed"
+fi
+PQ_UNLOCKED_NOTE=""
+if [ -e "$PQ_UNLOCKED" ]; then
+	ID_PROBLEMS="${ID_PROBLEMS} mldsa-unlocked-key-present"
+	PQ_UNLOCKED_NOTE="an unlocked ML-DSA key is lying around at ${PQ_UNLOCKED}: run: FY_PQ_KEY_DIR=${PQ_DIR} bash scripts/operator-local/pq-identity-lock.sh (no passphrase) and re-run this pre-flight."
+fi
 if [ -z "$ID_PROBLEMS" ]; then
-	chk_pass 5 "identity key pair present, private key is mode 600" "$IDENTITY_KEY"
+	chk_pass 5 "identity key pair present (private key mode 600); ML-DSA encrypted key mode 600 in a 700 dir, public key fingerprints, nothing unlocked" "$IDENTITY_KEY"
 else
 	chk_fail 5 3 "operator identity key problem" "problems:${ID_PROBLEMS}" \
-		"gen-identity.sh:167-175 exits 1 without the pair. It is unit 4's signing key," \
-		"needed on transition day, not by the rehearsal itself."
+		"gen-identity.sh:167-175 exits 1 without the ed25519 pair. It is unit 4's signing key," \
+		"needed on transition day, not by the rehearsal itself." \
+		"The ML-DSA key (unit 4's second signature) is created and unlocked by" \
+		"scripts/operator-local/pq-identity-unlock.sh; ${PQ_UNLOCKED_NOTE:-the checks above name what is missing.}"
 fi
 
 # ===========================================================================

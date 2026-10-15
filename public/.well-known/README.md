@@ -2,15 +2,14 @@
 
 This directory is reserved for well-known resources served at `https://metal.freedom-yield.com/.well-known/`.
 
-## Planned resources
+## Resources
 
 - `operator-identity.pub` — the OpenSSH-format ed25519 public key used to verify `/api/identity.json` via `ssh-keygen -Y verify` with namespace `freedom-yield/validator-identity` and principal `freedom-yield`.
+- `operator-identity-mldsa65.pub` — the PEM-format ML-DSA-65 (FIPS 204) public key used to verify `/api/identity.json` against `/api/identity.json.mldsa65.sig` via `openssl pkeyutl -verify` (OpenSSL 3.5 or later) with context string `freedom-yield/validator-identity`.
 
 ## Current status
 
-The operator identity public key is **not yet published**. It will be added after the operator generates a dedicated ed25519 identity key on a local workstation.
-
-No empty `operator-identity.pub` is placed here on purpose — an empty key file would appear broken to a verifier and is worse than its absence.
+`operator-identity.pub` has been published since the Phase 5 identity manifest (2026-06-22). `operator-identity-mldsa65.pub` is published together with the first schema v2 `identity.json`; until that manifest is issued it is absent, and an absent file is deliberate — an empty key file would appear broken to a verifier and is worse than its absence.
 
 ## Out of scope (will never be served from here)
 

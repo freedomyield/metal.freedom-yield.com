@@ -56,7 +56,8 @@ unset S1_CODE S2_CODE S3_CODE S4_CODE \
       S1_CODE_SEQ S2_CODE_SEQ S3_CODE_SEQ S4_CODE_SEQ \
       NPM_TS_CODE NPM_TSC_CODE NPM_TS_CODE_SEQ NPM_TSC_CODE_SEQ \
       NPMSEARCH_CODE NPMSEARCH_CODE_SEQ \
-      S6_CODE S6_CODE_SEQ OFFA_CODE OFFB_CODE \
+      S6_CODE S6_CODE_SEQ OFFA_CODE OFFB_CODE PR_CODE DOC_CODE \
+      SEED_PR116 SEED_MLDSA \
       PULSEVM_OFFICIAL_URLS PULSEVM_OFFICIAL_MENTION_RE \
       PULSEVM_NPM_PACKAGES PULSEVM_NPM_OFFICIAL_RE \
       FY_LIVE_OVERRIDE FYD_FETCH_ATTEMPTS \
@@ -83,6 +84,7 @@ CHAIN_A="193526980f523c07a567dda80f5f543e2356518ce1475cf3e03d98ca740b3f67"
 CHAIN_B="aaaaaaaabbbbbbbbccccccccddddddddeeeeeeeeffffffff00000000111111ff"
 
 BASE=""; STUB=""; LOG=""; STATE=""; NOTIFY_STUB=""; NOTIFY_LOG=""
+PR=""; DOC=""
 S1=""; S2=""; S3=""; S4=""; NPM_TS=""; NPM_TSC=""; NPM_SEARCH=""; S6=""; OFFA=""; OFFB=""
 SEED_NPM_WATCH=""; SEED_NPM_FOUND=""
 
@@ -111,6 +113,7 @@ setup() {
 	NPM_TSC="$BASE/npm-pulse-tsc.json"
 	NPM_SEARCH="$BASE/npm-search.json"
 	S6="$BASE/s6.json"; OFFA="$BASE/official-a.html"; OFFB="$BASE/official-b.html"
+	PR="$BASE/pr116.json"; DOC="$BASE/ml-dsa.md"
 	SEED_NPM_WATCH=""
 	SEED_NPM_FOUND=""
 
@@ -143,6 +146,8 @@ statedir="${STUB_STATE_DIR:-.}"
 printf '%s\n' "$url" >> "$statedir/urls.log"
 case "$url" in
 	# S6 BEFORE S1: both URLs contain "releases".
+	*/pulls/116*) key=pr; body="${PR_BODY:-/dev/null}"; code="${PR_CODE:-200}"; seq="" ;;
+	*ml-dsa.md*)  key=doc; body="${DOC_BODY:-/dev/null}"; code="${DOC_CODE:-200}"; seq="" ;;
 	*metalgo*)    key=s6; body="${S6_BODY:-/dev/null}"; code="${S6_CODE:-200}"; seq="${S6_CODE_SEQ:-}" ;;
 	*/official/a) key=offa; body="${OFFA_BODY:-/dev/null}"; code="${OFFA_CODE:-200}"; seq="" ;;
 	*/official/b) key=offb; body="${OFFB_BODY:-/dev/null}"; code="${OFFB_CODE:-200}"; seq="" ;;
@@ -197,6 +202,10 @@ STUBEOF
 	write_s6 "$S6" "v1.13.5" "v1.14.2-tahoe"
 	write_official "$OFFA" plain
 	write_official "$OFFB" plain
+	# S8 as measured 2026-10-15: PR #116 open, its docs/ml-dsa.md example on
+	# MLDSA65.
+	write_pr "$PR" open false
+	write_doc "$DOC" MLDSA65
 }
 teardown() { rm -rf "$BASE"; BASE=""; }
 
@@ -256,6 +265,29 @@ write_official() {
 			mention-id) printf '<p>A-Chain is moving to PulseVM.</p>\n<p>Mainnet chain ID: %s</p>\n' "$id" ;;
 		esac
 		printf '</body></html>\n'
+	} > "$f"
+}
+
+# write_pr <file> <open|closed> <merged true|false> [head-ref]
+# The trimmed shape of GET /repos/MetalBlockchain/pulsevm/pulls/116.
+write_pr() {
+	local ref="${4:-feat/ml-dsa-account-keys}"
+	cat > "$1" <<JSON
+{ "number": 116, "state": "$2", "merged": $3,
+  "head": { "ref": "$ref", "repo": { "full_name": "MetalBlockchain/pulsevm" } } }
+JSON
+}
+
+# write_doc <file> <token> [token...] — a docs/ml-dsa.md whose
+# `--key-type` examples use the given parameter token(s). The wallet line
+# carries a DIFFERENT, decoy token on purpose: only the token after
+# --key-type is the observation.
+write_doc() {
+	local f="$1" t; shift
+	{
+		printf '# ML-DSA account keys\n\n'
+		for t in "$@"; do printf '    pulse create key --key-type %s\n' "$t"; done
+		printf '\n    pulse wallet create_key default MLDSA44\n'
 	} > "$f"
 }
 
@@ -348,6 +380,14 @@ seed_state() {
 		  observations: {release_tag: $tag, sync_notice_present: $sync, mainnet_section_present: $mainnet,
 		                 head_block: $head, chain_ids: [$chain], pages: $pages,
 		                 npm_watch: $npm_watch, npm_discovered: $npm_found}}' > "$STATE"
+	# S8 history is added only when a case asks for it, so every older case
+	# doubles as proof that a schema-2 file written before S8 existed works.
+	if [ -n "${SEED_PR116:-}" ] || [ -n "${SEED_MLDSA:-}" ]; then
+		jq --arg pr "${SEED_PR116:-}" --arg ml "${SEED_MLDSA:-}" \
+			'.observations += ((if $pr != "" then {pr116_state: $pr} else {} end)
+			                 + (if $ml != "" then {mldsa_example_param: $ml} else {} end))' \
+			"$STATE" > "$STATE.tmp" && mv "$STATE.tmp" "$STATE"
+	fi
 }
 
 run_checker() {
@@ -365,6 +405,9 @@ run_checker() {
 	PULSEVM_NPM_PACKAGES="${PULSEVM_NPM_PACKAGES-pulse-ts pulse-tsc}" \
 	PULSEVM_METALGO_RELEASES_URL="https://example.test/repos/metalgo/releases?per_page=30" \
 	PULSEVM_OFFICIAL_URLS="${PULSEVM_OFFICIAL_URLS-https://example.test/official/a https://example.test/official/b}" \
+	PULSEVM_PR116_URL="https://example.test/repos/pulsevm/pulls/116" \
+	PULSEVM_RAW_BASE_URL="https://example.test/raw" \
+	PR_BODY="$PR" PR_CODE="${PR_CODE:-200}" DOC_BODY="$DOC" DOC_CODE="${DOC_CODE:-200}" \
 	S6_BODY="$S6" S6_CODE="${S6_CODE:-200}" S6_CODE_SEQ="${S6_CODE_SEQ:-}" \
 	OFFA_BODY="$OFFA" OFFA_CODE="${OFFA_CODE:-200}" OFFB_BODY="$OFFB" OFFB_CODE="${OFFB_CODE:-200}" \
 	S1_BODY="$S1" S2_BODY="$S2" S3_BODY="$S3" S4_BODY="$S4" \
@@ -1461,9 +1504,9 @@ run_checker >/dev/null 2>&1
 [ -z "$(urls | grep -v 'example\.test' || true)" ] \
 	&& ok "hermetic: every request went to example.test — the suite never touches a real registry or docs site" \
 	|| bad "hermetic: a request escaped to a real host ($(urls | grep -v 'example\.test' | head -3))"
-[ "$(urls | grep -c 'example.test')" -eq 10 ] \
-	&& ok "hermetic: a default run makes exactly 10 requests (S1-S4, two watched names, one search, S6, two official pages)" \
-	|| bad "hermetic: expected 10 requests on a clean run, got $(urls | grep -c 'example.test')"
+[ "$(urls | grep -c 'example.test')" -eq 12 ] \
+	&& ok "hermetic: a default run makes exactly 12 requests (S1-S4, two watched names, one search, S6, two official pages, S8's PR and doc)" \
+	|| bad "hermetic: expected 12 requests on a clean run, got $(urls | grep -c 'example.test')"
 teardown
 
 # ---- case 19 (T6): a plain-semver metalgo v1.14 appears ---------------------
@@ -1659,6 +1702,164 @@ echo "$OUT" | grep -q 'PULSEVM_OFFICIAL_URLS=.* is not a space-separated list of
 	&& grep -q 'metallicus' "$BASE/urls.log" \
 	&& ok "config: a list with one non-https URL is rejected wholesale, loudly, for the default list" \
 	|| bad "config: expected a loud wholesale fallback (out: $OUT) (urls: $(tr '\n' ' ' < "$BASE/urls.log"))"
+teardown
+
+# ---- case 22 (T9): PR #116 and the ML-DSA parameter Metallicus uses ----------
+# Baseline = PR open, example on MLDSA65 (measured 2026-10-15). Only a MOVE away
+# from the recorded reading pages; a source that cannot be read is the ordinary
+# outage path, never a parameter alert.
+setup
+SEED_PR116=open SEED_MLDSA=MLDSA65 seed_state false false "$CHAIN_A" 3406 "v0.6.2"
+OUT="$(run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 0 ] && [ "$(n_alerts)" -eq 0 ] \
+	&& ok "T9 baseline: PR open + MLDSA65 recorded -> silent exit 0" \
+	|| bad "T9 baseline: expected silent exit 0, got $RC ($(alerts))"
+urls | grep -q 'raw/MetalBlockchain/pulsevm/feat/ml-dsa-account-keys/docs/ml-dsa.md' \
+	&& [ "$(calls pr)" -eq 1 ] && [ "$(calls doc)" -eq 1 ] \
+	&& ok "T9 baseline: one PR request and one doc request, the doc read from the PR head branch while open" \
+	|| bad "T9 baseline: wrong requests (pr=$(calls pr) doc=$(calls doc)) $(urls | grep -E 'pulls|ml-dsa' | tr '\n' ' ')"
+[ "$(jq -r '.observations.pr116_state + "/" + .observations.mldsa_example_param' "$STATE")" = "open/MLDSA65" ] \
+	&& ok "T9 baseline: both observations are written to the state file" \
+	|| bad "T9 baseline: state lacks the observations ($(jq -c .observations "$STATE" | cut -c1-200))"
+teardown
+
+setup
+SEED_PR116=open SEED_MLDSA=MLDSA65 seed_state false false "$CHAIN_A" 3406 "v0.6.2"
+write_doc "$DOC" MLDSA87
+OUT="$(run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 3 ] && echo "$OUT" | grep -q 'TRIGGER T9' \
+	&& ok "T9: the doc's --key-type moves MLDSA65 -> MLDSA87 -> exit 3, TRIGGER T9" \
+	|| bad "T9: expected exit 3 + T9, got $RC (out: $OUT)"
+alerts | grep -q '^default|' && alerts | grep -q 'MLDSA87' && alerts | grep -q 'MLDSA65' && alerts | grep -q 'spec §3.1' \
+	&& ok "T9: default priority, names both parameters and spec §3.1" \
+	|| bad "T9: wrong priority or body ($(alerts))"
+assert_alert_shape "T9"
+assert_no_overclaim "T9"
+: > "$NOTIFY_LOG"
+OUT="$(run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 0 ] && [ "$(n_alerts)" -eq 0 ] \
+	&& ok "T9 hysteresis: the new reading is recorded, the next identical run is silent" \
+	|| bad "T9 hysteresis: expected silent exit 0, got $RC ($(alerts))"
+teardown
+
+setup
+SEED_PR116=open SEED_MLDSA=MLDSA65 seed_state false false "$CHAIN_A" 3406 "v0.6.2"
+write_pr "$PR" closed true
+OUT="$(run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 3 ] && echo "$OUT" | grep -q 'TRIGGER T9' && alerts | grep -q 'merged' \
+	&& ok "T9: PR #116 merged -> exit 3, TRIGGER T9 naming the merge" \
+	|| bad "T9: expected exit 3 + T9 (merged), got $RC (out: $OUT)"
+urls | grep -q 'raw/MetalBlockchain/pulsevm/main/docs/ml-dsa.md' \
+	&& ok "T9: once merged the doc is read from main" \
+	|| bad "T9: merged PR but the doc was not read from main ($(urls | grep ml-dsa | tr '\n' ' '))"
+teardown
+
+setup
+SEED_PR116=open SEED_MLDSA=MLDSA65 seed_state false false "$CHAIN_A" 3406 "v0.6.2"
+write_pr "$PR" closed false
+OUT="$(run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 3 ] && alerts | grep -q 'closed' && [ "$(calls doc)" -eq 0 ] \
+	&& ok "T9: PR closed without merge -> exit 3, and no doc request is wasted on a dead branch" \
+	|| bad "T9: closed-unmerged handling wrong: rc=$RC doc_calls=$(calls doc) ($(alerts))"
+teardown
+
+setup
+SEED_PR116=open SEED_MLDSA=MLDSA65 seed_state false false "$CHAIN_A" 3406 "v0.6.2"
+write_doc "$DOC" MLDSA65
+printf '    pulse wallet create_key default MLDSA87\n' >> "$DOC"
+OUT="$(run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 0 ] && [ "$(n_alerts)" -eq 0 ] \
+	&& ok "T9 near-miss: a parameter outside --key-type (wallet line) is not the observation" \
+	|| bad "T9 near-miss: expected silent exit 0, got $RC ($(alerts))"
+teardown
+
+setup
+SEED_PR116=open SEED_MLDSA=MLDSA65 seed_state false false "$CHAIN_A" 3406 "v0.6.2"
+PR_CODE=500 run_checker >/dev/null 2>&1; RC=$?
+[ "$RC" -eq 4 ] && [ "$(n_alerts)" -eq 0 ] && [ "$(calls doc)" -eq 0 ] \
+	&& ok "T9 failure: PR endpoint 500 -> existing exit 4 path, no parameter alert" \
+	|| bad "T9 failure: expected exit 4, no alert, got $RC ($(alerts))"
+[ "$(jq -r '.observations.mldsa_example_param' "$STATE")" = "MLDSA65" ] \
+	&& ok "T9 failure: the previous observation is carried forward, not erased" \
+	|| bad "T9 failure: previous observation lost ($(jq -c .observations "$STATE" | cut -c1-200))"
+DOC_CODE=404 PR_CODE=200 run_checker >/dev/null 2>&1; RC=$?
+[ "$RC" -eq 4 ] && [ "$(n_alerts)" -eq 0 ] \
+	&& ok "T9 failure: doc 404 -> existing exit 4 path, no parameter alert" \
+	|| bad "T9 failure: doc 404 expected exit 4, got $RC ($(alerts))"
+teardown
+
+setup
+SEED_PR116=open SEED_MLDSA=MLDSA65 seed_state false false "$CHAIN_A" 3406 "v0.6.2"
+printf '# ML-DSA\n\nno examples any more\n' > "$DOC"
+run_checker >/dev/null 2>&1; RC=$?
+[ "$RC" -eq 5 ] && [ "$(n_alerts)" -eq 0 ] \
+	&& ok "T9 failure: a doc with no --key-type token is exit 5, not a parameter alert" \
+	|| bad "T9 failure: expected exit 5, got $RC ($(alerts))"
+teardown
+
+# Backward compatibility: a schema-2 file from before S8 existed is compared
+# with the baseline constants (open / MLDSA65).
+setup
+seed_state false false "$CHAIN_A" 3406 "v0.6.2"
+OUT="$(run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 0 ] && [ "$(n_alerts)" -eq 0 ] \
+	&& ok "T9 compat: old state file + reading equal to the baseline -> silent" \
+	|| bad "T9 compat: expected silent exit 0, got $RC ($(alerts))"
+[ "$(jq -r '.observations.pr116_state + "/" + .observations.mldsa_example_param' "$STATE")" = "open/MLDSA65" ] \
+	&& ok "T9 compat: the first observation is recorded" \
+	|| bad "T9 compat: state not updated ($(jq -c .observations "$STATE" | cut -c1-200))"
+echo "$OUT" | grep -q 'first observation of PR #116' \
+	&& ok "T9 compat: the first observation is logged" \
+	|| bad "T9 compat: no first-observation log line (out: $OUT)"
+teardown
+
+setup
+seed_state false false "$CHAIN_A" 3406 "v0.6.2"
+write_doc "$DOC" MLDSA87
+write_pr "$PR" closed true
+OUT="$(run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 3 ] && alerts | grep -q 'merged' && alerts | grep -q 'MLDSA87' && alerts | grep -q 'spec §3.1' \
+	&& ok "T9 compat: old state file + first observation merged/MLDSA87 differs from the baseline -> alert" \
+	|| bad "T9 compat: expected exit 3 naming merged + MLDSA87, got $RC ($(alerts))"
+teardown
+
+# Merged PR without the doc: the PR alert must not be hidden; unknown is no reading.
+setup
+SEED_PR116=open SEED_MLDSA=MLDSA65 seed_state false false "$CHAIN_A" 3406 "v0.6.2"
+write_pr "$PR" closed true
+DOC_CODE=404 run_checker >/dev/null 2>&1; RC=$?
+[ "$RC" -eq 3 ] && alerts | grep -q 'went from open to merged' && ! alerts | grep -q 'key-type' \
+	&& ok "T9 merged+404: exit 3 with the PR alert only, no parameter alert" \
+	|| bad "T9 merged+404: expected exit 3 + PR alert only, got $RC ($(alerts))"
+[ "$(jq -r '.observations.mldsa_example_param + "/" + .observations.mldsa_last_known_param' "$STATE")" = "unknown/MLDSA65" ] \
+	&& ok "T9 merged+404: reading recorded as unknown, last known kept" \
+	|| bad "T9 merged+404: state wrong ($(jq -c .observations "$STATE" | cut -c1-300))"
+: > "$NOTIFY_LOG"
+OUT="$(run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 0 ] && [ "$(n_alerts)" -eq 0 ] \
+	&& ok "T9 merged+404: next run with MLDSA65 is silent (compared with last known)" \
+	|| bad "T9 merged+404: expected silent after recovery, got $RC ($(alerts))"
+teardown
+
+setup
+SEED_PR116=merged SEED_MLDSA=unknown seed_state false false "$CHAIN_A" 3406 "v0.6.2"
+jq '.observations.mldsa_last_known_param = "MLDSA65"' "$STATE" > "$STATE.t" && mv "$STATE.t" "$STATE"
+write_pr "$PR" closed true
+write_doc "$DOC" MLDSA87
+OUT="$(run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 3 ] && alerts | grep -q 'went from MLDSA65 to MLDSA87' \
+	&& ok "T9 unknown: the next real reading MLDSA87 alerts against the last known MLDSA65" \
+	|| bad "T9 unknown: expected alert 65->87, got $RC ($(alerts))"
+teardown
+
+setup
+SEED_PR116=merged SEED_MLDSA=unknown seed_state false false "$CHAIN_A" 3406 "v0.6.2"
+write_pr "$PR" closed true
+printf 'no tokens here\n' > "$DOC"
+OUT="$(run_checker 2>&1)"; RC=$?
+[ "$RC" -eq 0 ] && [ "$(n_alerts)" -eq 0 ] \
+	&& ok "T9 unknown: merged + doc without a token is no reading, not exit 5, not an alert" \
+	|| bad "T9 unknown: expected silent exit 0, got $RC ($(alerts))"
 teardown
 
 # ---- case 12 (shape): the checker never names an /ext/bc/ URL ---------------

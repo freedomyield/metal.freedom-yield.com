@@ -115,6 +115,12 @@ ssh-keygen -Y verify -f "$TMP/allowed" \
   -s "$TMP/sig" &lt; "$TMP/json"
 # 期待値: Good "freedom-yield/validator-identity" signature for freedom-yield with ED25519 key SHA256:rQZNC53Jdp…</code></pre>
 		<p class="note">OpenSSH 8.0+ 必須 (<code>ssh-keygen -Y</code> サブコマンドは 2019-04 から)。 macOS 11+ / モダン Linux / Windows OpenSSH 8.0+ で動作。</p>
+		<p>identity.json は ML-DSA-65 (FIPS 204) 署名も備えています。 OpenSSL 3.5 以降で検証できます。</p>
+		<pre class="cmd-box"><code>curl -sSfO https://metal.freedom-yield.com/api/identity.json
+curl -sSfO https://metal.freedom-yield.com/api/identity.json.mldsa65.sig
+curl -sSfO https://metal.freedom-yield.com/.well-known/operator-identity-mldsa65.pub
+openssl pkeyutl -verify -pubin -inkey operator-identity-mldsa65.pub -rawin -in identity.json -sigfile identity.json.mldsa65.sig -pkeyopt context-string:freedom-yield/validator-identity
+# 期待値: Signature Verified Successfully</code></pre>
 	</section>
 
 	<section class="card data-group">
@@ -131,7 +137,9 @@ ssh-keygen -Y verify -f "$TMP/allowed" \
 				<dt>マニフェスト</dt><dd><a href="/api/identity.json"><code>/api/identity.json</code></a></dd>
 				<dt>署名</dt><dd><a href="/api/identity.json.sig"><code>/api/identity.json.sig</code></a></dd>
 				<dt>公開鍵</dt><dd><a href="/.well-known/operator-identity.pub"><code>/.well-known/operator-identity.pub</code></a></dd>
-				<dt>スキーマ</dt><dd><a href="/api/identity.schema.v1.json"><code>/api/identity.schema.v1.json</code></a> + <a href="/api/identity.example.json">example</a></dd>
+				<dt>ML-DSA-65 署名</dt><dd><a href="/api/identity.json.mldsa65.sig"><code>/api/identity.json.mldsa65.sig</code></a></dd>
+				<dt>ML-DSA-65 公開鍵</dt><dd><a href="/.well-known/operator-identity-mldsa65.pub"><code>/.well-known/operator-identity-mldsa65.pub</code></a></dd>
+				<dt>スキーマ</dt><dd><a href="/api/identity.schema.v2.json"><code>/api/identity.schema.v2.json</code></a> + <a href="/api/identity.example.json">example</a></dd>
 			</dl>
 		</article>
 

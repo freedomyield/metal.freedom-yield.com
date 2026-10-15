@@ -2,12 +2,17 @@ name: verify-identity-manifest
 
 # Verify the signed operator identity manifest at every push / PR.
 #
-# Skip-gracefully behaviour:
+# Skip-gracefully behaviour (ed25519 trio only):
 #   The live artifacts (operator-identity.pub, identity.json, identity.json.sig)
 #   may not exist yet during the Phase 1 preparation window. When any of them
 #   is missing, the job exits 0 with a "not yet live — skipping" message instead
 #   of failing the build. Once all three are present, verification becomes
 #   strict — a bad signature fails the build.
+#   This skip-if-missing applies to the ed25519 trio ONLY. The ML-DSA-65 step
+#   never skips for a schema v2 manifest: a missing .mldsa65.sig / .pub or a
+#   bad signature fails the build (scripts/check-identity-pq.sh
+#   --require-sig-verify). A schema v1 manifest expects no ML-DSA signature.
+#   Runs on ubuntu-26.04 because ML-DSA needs OpenSSL >= 3.5.
 #
 # Security:
 #   - This workflow MUST NOT have access to the operator's private key.
@@ -21,18 +26,26 @@ on:
       - "public/api/identity.json"
       - "public/api/identity.json.sig"
       - "public/.well-known/operator-identity.pub"
+      - "public/api/identity.json.mldsa65.sig"
+      - "public/.well-known/operator-identity-mldsa65.pub"
+      - "scripts/check-identity-pq.sh"
+      - "scripts/lib/identity-pq.sh"
       - ".github/workflows/verify-identity.yml"
   pull_request:
     paths:
       - "public/api/identity.json"
       - "public/api/identity.json.sig"
       - "public/.well-known/operator-identity.pub"
+      - "public/api/identity.json.mldsa65.sig"
+      - "public/.well-known/operator-identity-mldsa65.pub"
+      - "scripts/check-identity-pq.sh"
+      - "scripts/lib/identity-pq.sh"
       - ".github/workflows/verify-identity.yml"
   workflow_dispatch:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
@@ -77,3 +90,8 @@ jobs:
             -I "freedom-yield" \
             -n "freedom-yield/validator-identity" \
             -s "$SIG" < "$JSON"
+
+      - name: openssl version
+        run: openssl version
+      - name: verify ML-DSA-65 signature (schema v2 manifests)
+        run: bash scripts/check-identity-pq.sh --require-sig-verify

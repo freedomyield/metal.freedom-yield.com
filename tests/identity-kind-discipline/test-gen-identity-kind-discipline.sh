@@ -45,6 +45,11 @@ skip_pass() {
 [ -r "$REAL_REGISTRY" ]  || { echo "FATAL: registry not found at $REAL_REGISTRY" >&2; exit 1; }
 command -v jq        >/dev/null 2>&1 || skip_pass "jq unavailable"
 command -v ssh-keygen >/dev/null 2>&1 || skip_pass "ssh-keygen unavailable"
+# gen-identity.sh also signs with ML-DSA-65 (schema v2): runs that reach the
+# end need an OpenSSL >= 3.5 and a throwaway ML-DSA key.
+# shellcheck source=../lib/pq-test-key.sh
+. "${REPO_SRC}/tests/lib/pq-test-key.sh"
+fy_pq_prereq_or_skip skip_pass
 command -v xxd       >/dev/null 2>&1 || skip_pass "xxd unavailable (needed for the >1-leaf Merkle path)"
 
 HN="$(hostname -s 2>/dev/null || hostname)"
@@ -59,6 +64,7 @@ trap cleanup EXIT
 KEYDIR="$WORK/keys"; mkdir -p "$KEYDIR"
 ssh-keygen -t ed25519 -N "" -C "genid-kind-test" -f "$KEYDIR/opkey" >/dev/null 2>&1 \
 	|| skip_pass "ssh-keygen could not generate an ed25519 test key"
+fy_pq_make_master "$KEYDIR" || { echo "FATAL: could not generate an ML-DSA test key" >&2; exit 1; }
 
 sha() {
 	if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | awk '{print $1}'
@@ -158,6 +164,8 @@ RC=0
 run_genid() {
 	local docroot="$1" registry="$2" out="$WORK/out"
 	rm -rf "$out"; mkdir -p "$out/public/api"
+	# gen-identity.sh deletes the unlocked ML-DSA key on exit: re-create it.
+	fy_pq_install "$KEYDIR" "$out"
 	env \
 		PATH="${STUBBIN}:${PATH}" \
 		FY_STUB_DOCROOT="$docroot" \
@@ -165,6 +173,7 @@ run_genid() {
 		REPO_ROOT="$out" \
 		ARTIFACT_BASE="http://stub-host" \
 		OPERATOR_IDENTITY_KEY="${KEYDIR}/opkey" \
+		OPERATOR_PQ_UNLOCKED_KEY="${KEYDIR}/${FYIPQ_UNLOCKED_BASENAME}" \
 		bash "$SCRIPT" 2>&1
 }
 

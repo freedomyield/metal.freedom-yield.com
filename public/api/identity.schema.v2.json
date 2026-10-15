@@ -1,0 +1,358 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://metal.freedom-yield.com/api/identity.schema.v2.json",
+	"title": "Freedom Yield Metal — Operator Identity Manifest v2",
+	"description": "Formal contract for /api/identity.json at schema_version 2. v2 = v1 plus a REQUIRED verification_pq object: identity.json is signed twice over the same bytes — with the operator identity ed25519 key (ssh-keygen -Y verify, namespace freedom-yield/validator-identity, signature at /api/identity.json.sig, unchanged from v1) AND with an ML-DSA-65 (FIPS 204) key (OpenSSL 3.5+ pkeyutl -verify with context string freedom-yield/validator-identity, signature at /api/identity.json.mldsa65.sig, public key at /.well-known/operator-identity-mldsa65.pub). verification_pq lies inside the bytes the ed25519 signature covers. Everything else is unchanged from /api/identity.schema.v1.json, which stays published for manifests issued at schema_version 1. History of v1: Revised 2026-06-20 as a pre-production correction; further extended 2026-06-21 with additive Merkle DAG anchor fields (dag_root_hash, cycles_history_url, anchor_receipt_url) for Phase α A-chain anchoring per docs/MERKLE_DAG_SPEC.md. See docs/IDENTITY_SCHEMA_CHANGELOG.md for the full history. The model is an operator-signed artifact snapshot. The runtime manifest is generated and signed by scripts/operator-local/gen-identity.sh on the operator's local Mac, NEVER on the validator host or web host. Verification uses ssh-keygen -Y verify with namespace freedom-yield/validator-identity. Companion /api/identity.example.json is a synthetic schema example, NOT a production snapshot. Companion design changelog: docs/IDENTITY_SCHEMA_CHANGELOG.md. The schema URL is a stable discovery endpoint; consumers that need immutable schema semantics SHOULD pin the schema document SHA-256 or the repository commit (see CHANGELOG). A future breaking change will use a new major-version schema URL; retention and deprecation policy for superseded schema versions will be documented when such a version is introduced.",
+	"x-issued-at": "2026-10-15T00:00:00Z",
+	"x-stability": "additive-only-within-v2",
+	"x-baseline-revision": "2026-10-15-identity-pq-signature",
+	"x-revision-history": [
+		{
+			"date": "2026-06-20",
+			"tag": "pre-production-correction",
+			"summary": "Pre-production correction baseline. Re-grounded the contract for /api/identity.json prior to first signed publication; established additive-only-within-v1 stability commitment."
+		},
+		{
+			"date": "2026-06-21",
+			"tag": "phase-alpha-anchor-additive",
+			"summary": "Additive within v1: Merkle DAG anchor fields dag_root_hash / cycles_history_url / anchor_receipt_url for Phase α A-chain anchoring per docs/MERKLE_DAG_SPEC.md. All new fields are optional; pre-Phase-α identity.json publications remain valid against this schema unchanged."
+		},
+		{
+			"date": "2026-06-23",
+			"tag": "audit-pointer-additive",
+			"summary": "Additive within v1: audit object grouping anchor_receipt + anchor_history URL pointers. audit holds plain URLs only; identity.json MUST NOT carry a hash of anchor-receipt.json or anchor-history.jsonl (= circular hash dependency avoided). When the legacy top-level anchor_receipt_url is present alongside audit.anchor_receipt, both URLs MUST be equal."
+		},
+		{
+			"date": "2026-08-14",
+			"tag": "kind-discipline",
+			"summary": "Compatible relaxation within v1 (every previously-valid document stays valid). artifact_manifest entries now require only `url`: `sha256` became optional so that an artifact whose bytes change without a commit (publication kind 'stream') can be LISTED without being pinned. Two additive fields carry the reason in-band: per-entry `kind` (stream / static / record, copied from deploy/publication.json) and top-level `pin_policy`. A conditional `allOf` keeps the relaxation from becoming a licence: where `kind` is present, 'stream' MUST NOT carry sha256 and 'static' / 'record' MUST carry it; documents predating `kind` are unconstrained by it and stay valid. Motivation, measured 2026-08-06 against the manifest signed two days earlier (2026-08-04): 4 of its 8 pins were already wrong. THREE were kind='stream' payload pins rewritten by host cron on their own cadence — that is the class this revision removes. The FOURTH was cycle_history_jsonl.schema_sha256, a GIT-TRACKED schema invalidated by an ordinary commit the day before; this revision does NOT address that class, which is detected by scripts/check-identity-pins.sh and repaired by re-issuing the manifest. Consumers MUST NOT read a missing sha256 as a broken manifest — read `kind` and `pin_policy`. See docs/IDENTITY_VERIFICATION.md and docs/superpowers/specs/2026-08-06-single-source-of-truth-design.md (C4)."
+		},
+		{
+			"date": "2026-10-15",
+			"tag": "v2-identity-pq-signature",
+			"summary": "New major version. schema_version const 2 and a required verification_pq object (algorithm ML-DSA-65, standard FIPS 204, context_string, pubkey_url, pubkey_fingerprint = 'sha256:' + hex SHA-256 of the DER SubjectPublicKeyInfo, signature_url, method, minimum_openssl_version). Every other field is as in v1 (whose history above is carried over). See docs/superpowers/specs/2026-10-15-identity-pq-signature-design.md."
+		}
+	],
+	"x-format-guide": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md",
+	"type": "object",
+	"required": [
+		"schema_version",
+		"brand",
+		"node_id",
+		"network",
+		"site",
+		"operator_identity_pubkey_url",
+		"operator_identity_pubkey_fingerprint",
+		"key_iat",
+		"key_exp",
+		"revoked",
+		"verification",
+		"verification_pq",
+		"generated_at"
+	],
+	"additionalProperties": true,
+	"properties": {
+		"_comment": {
+			"type": "string"
+		},
+		"$schema": {
+			"type": "string",
+			"format": "uri"
+		},
+		"schema_version": {
+			"type": "integer",
+			"const": 2
+		},
+		"brand": {
+			"type": "string",
+			"const": "Freedom Yield"
+		},
+		"node_id": {
+			"type": "string",
+			"pattern": "^NodeID-[A-Za-z0-9]{32}$"
+		},
+		"node_id_authority": {
+			"type": "string",
+			"format": "uri",
+			"description": "Authoritative explorer URL where the NodeID's registration can be cross-checked."
+		},
+		"network": {
+			"type": "string",
+			"enum": [
+				"metal-mainnet"
+			]
+		},
+		"site": {
+			"type": "string",
+			"format": "uri",
+			"description": "Canonical site URL the operator controls."
+		},
+		"operator_identity_pubkey_url": {
+			"type": "string",
+			"format": "uri",
+			"description": "URL where the operator identity ed25519 public key is published (typically /.well-known/operator-identity.pub)."
+		},
+		"operator_identity_pubkey_fingerprint": {
+			"type": "string",
+			"description": "OpenSSH SHA-256 fingerprint of the operator identity public key, e.g., 'SHA256:abc123…'. A consumer can compute the same fingerprint via 'ssh-keygen -l -f operator-identity.pub' and compare."
+		},
+		"key_iat": {
+			"type": "string",
+			"format": "date-time",
+			"description": "When this operator identity key was issued (became authoritative)."
+		},
+		"key_exp": {
+			"type": "string",
+			"format": "date-time",
+			"description": "Recommended expiry; operator-declared, NOT cryptographically enforced. Consumers may treat as policy."
+		},
+		"revoked": {
+			"type": "boolean",
+			"description": "true iff this key is no longer authoritative for the brand+node_id. When true, revoked_at + revocation_reason SHOULD be populated."
+		},
+		"revoked_at": {
+			"type": [
+				"string",
+				"null"
+			],
+			"description": "ISO 8601 UTC; null when revoked=false."
+		},
+		"revocation_reason": {
+			"type": [
+				"string",
+				"null"
+			]
+		},
+		"verification": {
+			"type": "object",
+			"required": [
+				"method",
+				"namespace",
+				"principal",
+				"signature_url"
+			],
+			"additionalProperties": true,
+			"properties": {
+				"method": {
+					"type": "string",
+					"const": "ssh-keygen -Y verify"
+				},
+				"minimum_openssh_version": {
+					"type": "string"
+				},
+				"namespace": {
+					"type": "string",
+					"const": "freedom-yield/validator-identity"
+				},
+				"principal": {
+					"type": "string",
+					"const": "freedom-yield"
+				},
+				"signature_url": {
+					"type": "string",
+					"format": "uri"
+				}
+			}
+		},
+		"verification_pq": {
+			"type": "object",
+			"description": "ADDITIVE in v2 (2026-10-15). The ML-DSA-65 (FIPS 204) signature over the exact bytes of identity.json. Verify with: openssl pkeyutl -verify -pubin -inkey operator-identity-mldsa65.pub -rawin -in identity.json -sigfile identity.json.mldsa65.sig -pkeyopt context-string:freedom-yield/validator-identity (OpenSSL 3.5 or later; LibreSSL cannot). This object is itself covered by the ed25519 signature described in `verification`.",
+			"required": [
+				"algorithm",
+				"standard",
+				"context_string",
+				"pubkey_url",
+				"pubkey_fingerprint",
+				"signature_url",
+				"method",
+				"minimum_openssl_version"
+			],
+			"additionalProperties": true,
+			"properties": {
+				"algorithm": {
+					"type": "string",
+					"const": "ML-DSA-65"
+				},
+				"standard": {
+					"type": "string",
+					"const": "FIPS 204"
+				},
+				"context_string": {
+					"type": "string",
+					"const": "freedom-yield/validator-identity",
+					"description": "The FIPS 204 context string the signature is bound to. A signature made under any other context does not verify."
+				},
+				"pubkey_url": {
+					"type": "string",
+					"format": "uri",
+					"description": "URL of the ML-DSA-65 public key (SubjectPublicKeyInfo PEM)."
+				},
+				"pubkey_fingerprint": {
+					"type": "string",
+					"pattern": "^sha256:[0-9a-f]{64}$",
+					"description": "'sha256:' + lowercase hex SHA-256 of the DER SubjectPublicKeyInfo, i.e. of the base64-decoded body of the PEM at pubkey_url. Computable without OpenSSL."
+				},
+				"signature_url": {
+					"type": "string",
+					"format": "uri",
+					"description": "URL of the raw detached ML-DSA-65 signature over the exact bytes of identity.json."
+				},
+				"method": {
+					"type": "string",
+					"description": "The verification command, for a reader with the three files in the current directory."
+				},
+				"minimum_openssl_version": {
+					"type": "string",
+					"const": "3.5"
+				}
+			}
+		},
+		"artifact_manifest": {
+			"type": "object",
+			"description": "Merkle-rooted artifact manifest: each entry binds a leaf artifact's URL to its publication kind and, WHEN THE KIND PERMITS IT, to the content sha256 of that artifact and of its companion schema. A consumer fetches an entry's url, computes sha256(content), and compares to entry.sha256 — but ONLY for entries that carry sha256. An entry without sha256 is a deliberate declaration that the artifact is a moving stream and that no digest of it could survive being signed; it is NOT a truncated or broken entry, and a consumer MUST NOT report it as a verification failure. See the top-level pin_policy object for the rule in the operator's own words, and deploy/publication.json for the declaration each kind is copied from. The set of entries that DO carry sha256 is committed to as a whole by artifact_root (see below). Additive: new artifacts may appear in this map within v1.",
+			"additionalProperties": {
+				"type": "object",
+				"required": [
+					"url"
+				],
+				"additionalProperties": true,
+				"allOf": [
+					{
+						"$comment": "kind='stream' MUST NOT be pinned. This is the whole point of the 2026-08-14 relaxation; without it, dropping sha256 from `required` would also have legalised the defect being removed. Applies only when `kind` is present, so manifests issued before 2026-08-14 (which carry no kind) are unaffected and stay valid.",
+						"if": {
+							"required": [
+								"kind"
+							],
+							"properties": {
+								"kind": {
+									"const": "stream"
+								}
+							}
+						},
+						"then": {
+							"not": {
+								"required": [
+									"sha256"
+								]
+							}
+						}
+					},
+					{
+						"$comment": "kind='static' / 'record' MUST be pinned. Without this, a pin silently dropped from a pinnable artifact would validate — the same silence the manifest exists to prevent.",
+						"if": {
+							"required": [
+								"kind"
+							],
+							"properties": {
+								"kind": {
+									"enum": [
+										"static",
+										"record"
+									]
+								}
+							}
+						},
+						"then": {
+							"required": [
+								"sha256"
+							]
+						}
+					}
+				],
+				"properties": {
+					"url": {
+						"type": "string",
+						"format": "uri"
+					},
+					"kind": {
+						"type": "string",
+						"enum": [
+							"stream",
+							"static",
+							"record"
+						],
+						"description": "ADDITIVE (2026-08-14). The artifact's publication kind, copied from deploy/publication.json. 'stream' = the bytes can change without a commit to the operator's repository (host cron, runtime push), so this entry carries NO sha256. 'static' = the bytes change only when a commit changes them. 'record' = the URL's name is derived from a digest of the content it addresses, so whatever that digest covers cannot change without the name changing too; the name need NOT cover the whole file, and the entry's sha256 is what binds every byte as of signing. 'static' and 'record' entries carry sha256. kind is a SAFE FLOOR, not a summary: a path is classified by its weakest moment, so a consumer that acts only on kind always does the safe thing."
+					},
+					"sha256": {
+						"type": "string",
+						"pattern": "^[a-f0-9]{64}$",
+						"description": "Hex-encoded SHA-256 of the artifact's raw bytes as published. OPTIONAL since 2026-08-14: present iff kind is 'static' or 'record'. Absent for kind 'stream' by design."
+					},
+					"schema_url": {
+						"type": "string",
+						"format": "uri"
+					},
+					"schema_sha256": {
+						"type": "string",
+						"pattern": "^[a-f0-9]{64}$",
+						"description": "Hex-encoded SHA-256 of the companion schema document. Governed by the schema document's OWN publication kind, independently of the payload's: a stream payload with a static schema carries schema_sha256 but no sha256 — pinning the schema is meaningful even when pinning the payload is not."
+					}
+				}
+			}
+		},
+		"pin_policy": {
+			"type": "object",
+			"description": "ADDITIVE (2026-08-14). States, inside the signed bytes, the rule that decides which artifact_manifest entries carry a sha256. It exists so that a third party can tell a deliberately unpinned stream from a missing field without consulting anything outside the manifest.",
+			"additionalProperties": true,
+			"properties": {
+				"source": {
+					"type": "string",
+					"description": "URL of the machine-readable publication registry the kinds are copied from."
+				},
+				"rule": {
+					"type": "string",
+					"description": "The pinning rule in prose."
+				},
+				"merkle_leaves": {
+					"type": "string",
+					"description": "Which digests artifact_root is computed over."
+				}
+			}
+		},
+		"artifact_root": {
+			"type": "string",
+			"pattern": "^[a-f0-9]{64}$",
+			"description": "SHA-256 Merkle root computed over the artifact_manifest entries THAT CARRY A sha256: leaves are each such entry.sha256, ordered alphabetically by key, odd counts duplicate the last leaf, parents are SHA-256(left || right) as raw bytes, hex-encoded at the root. A single leaf is its own root. Entries without sha256 (kind 'stream') contribute no leaf — before 2026-08-14 every listed entry contributed one, which is why the root changed shape at that revision even for an unchanged artifact set. In identity.example.json this field is set to all-zeros (sixty-four '0' characters) to indicate the schema-only preview state; the production runtime identity.json carries the real 64-hex Merkle root after gen-identity.sh computes it from the live artifact bytes. artifact_root commits to the CURRENT set of pinnable published artifacts. NOTE (2026-07-06 DAG-root collapse): the value inscribed on Metal A-chain is NOT this root — it is anchor-receipt.json.dag_root_hash (= anchor-source.json.dag_root_computed, a 3-branch Merkle DAG over identity/observations/artifacts, memo 'fya<S>c<N>:'). Reach it via anchor_receipt_url / audit.anchor_receipt. The formerly-published dag_root_hash field (a separate 2-branch root) is retired; see below."
+		},
+		"dag_root_hash": {
+			"type": "string",
+			"pattern": "^[a-f0-9]{64}$",
+			"description": "RETIRED (2026-07-06, design-stocktake #1 DAG-root collapse). This was the pre-v2 2-branch root SHA-256(raw(identity_branch_root) || raw(cycles_branch_root)), formerly (and incorrectly, after the v2 migration) described as the value anchored on-chain via memo 'fyid1:<dag_root_hash>'. It was NEVER the v2 inscribed value: since Phase α v2, Metal A-chain carries anchor-receipt.json.dag_root_hash (= anchor-source.json.dag_root_computed, a 3-branch DAG, memo 'fya<S>c<N>:'). Advertising a second, non-on-chain root here broke independent verification (a verifier could not find this value on-chain). gen-identity.sh no longer emits this field; identity.json snapshots produced from 2026-07-06 omit it, as do all pre-Phase-α snapshots. The field is retained in the schema as optional purely for backward-compatibility with earlier Phase-α snapshots that still carry it; DO NOT rely on it as the on-chain root. The 2-branch cycles summary is fully retired (cycles-history.json removed 2026-07-06); the single DAG source is anchor-source.json. Reach the on-chain root via anchor_receipt_url / audit.anchor_receipt."
+		},
+		"cycles_history_url": {
+			"type": "string",
+			"format": "uri",
+			"description": "RETIRED (2026-07-06, design-stocktake #1). Formerly the URL of /api/cycles-history.json (the 2-branch cycle-history summary). That file is removed; the single DAG source is now /api/anchor-source.json (.dag_root_computed, 3-branch), reached via anchor_receipt_url. Retained in the schema as optional purely for backward-compatibility with earlier Phase-α snapshots that still carry this field."
+		},
+		"anchor_receipt_url": {
+			"type": "string",
+			"format": "uri",
+			"description": "ADDITIVE (Phase α, 2026-06-21). URL of /api/anchor-receipt.json — the most recent A-chain inscription receipt anchoring this dag_root_hash. MAY be absent between the moment a new dag_root_hash is computed and the moment its anchoring inscription confirms on-chain. From 2026-06-23 also exposed inside the additive `audit` object as `audit.anchor_receipt`; consumers MAY use either pointer (they MUST equal each other when both are present)."
+		},
+		"audit": {
+			"type": "object",
+			"description": "ADDITIVE (Phase α completion, 2026-06-23). Stable pointer object grouping the off-manifest evidence URLs. By keeping these as URL pointers, identity.json itself stays a rotation-driven snapshot (= no per-cycle churn of identity.json's signed bytes); the dynamic per-cycle artifacts live behind these stable URLs. Anti-pattern explicitly avoided: identity.json MUST NOT contain a hash of /api/anchor-receipt.json (or anchor-history.jsonl) because anchor-receipt.json itself references identity.json's dag_root_hash — that would create a circular hash dependency. The `audit` object holds plain URLs only.",
+			"required": [
+				"anchor_receipt",
+				"anchor_history"
+			],
+			"additionalProperties": true,
+			"properties": {
+				"anchor_receipt": {
+					"type": "string",
+					"format": "uri",
+					"description": "URL of /api/anchor-receipt.json — the most recent live anchor's receipt. When present alongside the legacy top-level anchor_receipt_url, both URLs MUST be equal (= consistency invariant verified by gen-identity.sh)."
+				},
+				"anchor_history": {
+					"type": "string",
+					"format": "uri",
+					"description": "URL of /api/anchor-history.jsonl — the append-only ledger of every anchor that has reached verification_status == 'live'. Validated per-line against /api/anchor-history.schema.v1.json. MAY point at a not-yet-existing artifact between identity.json regeneration and the first live anchor; consumers should treat HTTP 404 as 'in preparation' in that window. See project memory project_phase_alpha_anchor_completion_2026_07_04 for the gated transition."
+				}
+			}
+		},
+		"generated_at": {
+			"type": "string",
+			"format": "date-time"
+		}
+	}
+}

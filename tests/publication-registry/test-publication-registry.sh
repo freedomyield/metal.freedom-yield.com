@@ -71,6 +71,9 @@ IDENTITY="${REPO_ROOT}/public/api/identity.json"
 SENDER="${REPO_ROOT}/scripts/push-to-web-host.sh"
 RECEIVER="${REPO_ROOT}/scripts/deploy/receive-subdir-allowlist.snippet.sh"
 IDENTITY_SCHEMA="${REPO_ROOT}/public/api/identity.schema.v1.json"
+# v2 (2026-10-15, ML-DSA-65 signature) carries its own copy of the record
+# clause; v1 stays published for old manifests, so T20 holds BOTH.
+IDENTITY_SCHEMA_V2="${REPO_ROOT}/public/api/identity.schema.v2.json"
 GEN_IDENTITY="${REPO_ROOT}/scripts/operator-local/gen-identity.sh"
 
 PASS=0
@@ -82,7 +85,7 @@ note() { printf '      %s\n' "$1"; }
 TMPDIR_T="$(mktemp -d -t fyd-pubreg.XXXXXX)"
 trap 'rm -rf "$TMPDIR_T"' EXIT
 
-for f in "$REGISTRY" "$SCHEMA" "$RENDER" "$IDENTITY" "$SENDER" "$RECEIVER" "$IDENTITY_SCHEMA" "$GEN_IDENTITY"; do
+for f in "$REGISTRY" "$SCHEMA" "$RENDER" "$IDENTITY" "$SENDER" "$RECEIVER" "$IDENTITY_SCHEMA" "$IDENTITY_SCHEMA_V2" "$GEN_IDENTITY"; do
 	[ -r "$f" ] || { echo "FATAL: missing prerequisite: $f" >&2; exit 2; }
 done
 command -v jq >/dev/null 2>&1 || { echo "FATAL: jq required" >&2; exit 2; }
@@ -1014,13 +1017,17 @@ t20() {
 		bad=1
 	fi
 
-	field_value="$(jq -r '.properties.artifact_manifest.additionalProperties.properties.kind.description // ""' "$IDENTITY_SCHEMA")"
-	if printf '%s' "$field_value" | grep -qF -- "$phrase"; then
-		pass "T20 public/api/identity.schema.v1.json's .kind.description field (not just the file) carries the canonical record clause"
-	else
-		fail "T20 public/api/identity.schema.v1.json's .kind.description field does NOT carry the canonical record clause verbatim — DRIFTED from deploy/publication.json"
-		bad=1
-	fi
+	local schema_file schema_rel
+	for schema_file in "$IDENTITY_SCHEMA" "$IDENTITY_SCHEMA_V2"; do
+		schema_rel="public/api/${schema_file##*/}"
+		field_value="$(jq -r '.properties.artifact_manifest.additionalProperties.properties.kind.description // ""' "$schema_file" 2>/dev/null)"
+		if printf '%s' "$field_value" | grep -qF -- "$phrase"; then
+			pass "T20 ${schema_rel}'s .kind.description field (not just the file) carries the canonical record clause"
+		else
+			fail "T20 ${schema_rel}'s .kind.description field does NOT carry the canonical record clause verbatim — DRIFTED from deploy/publication.json"
+			bad=1
+		fi
+	done
 
 	# gen-identity.sh is bash, not JSON, so there is no field to jq out —
 	# but grepping the whole file has the same decoy risk (an unrelated
@@ -1036,7 +1043,7 @@ t20() {
 		bad=1
 	fi
 
-	[ "$bad" -eq 0 ] && pass "T20 the record-kind defining clause is present verbatim, in the specific field/line, in all 3 authoritative sources"
+	[ "$bad" -eq 0 ] && pass "T20 the record-kind defining clause is present verbatim, in the specific field/line, in all 4 authoritative sources (registry, schema v1, schema v2, generator)"
 }
 t20
 

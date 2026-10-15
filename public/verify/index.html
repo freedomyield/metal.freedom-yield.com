@@ -115,6 +115,12 @@ ssh-keygen -Y verify -f "$TMP/allowed" \
   -s "$TMP/sig" &lt; "$TMP/json"
 # Expect: Good "freedom-yield/validator-identity" signature for freedom-yield with ED25519 key SHA256:rQZNC53Jdp…</code></pre>
 		<p class="note">Requires OpenSSH 8.0+ (<code>ssh-keygen -Y</code> was added in 2019-04). macOS 11+, modern Linux, and Windows OpenSSH 8.0+ are all supported.</p>
+		<p>identity.json also carries an ML-DSA-65 (FIPS 204) signature. Verify it with OpenSSL 3.5 or later.</p>
+		<pre class="cmd-box"><code>curl -sSfO https://metal.freedom-yield.com/api/identity.json
+curl -sSfO https://metal.freedom-yield.com/api/identity.json.mldsa65.sig
+curl -sSfO https://metal.freedom-yield.com/.well-known/operator-identity-mldsa65.pub
+openssl pkeyutl -verify -pubin -inkey operator-identity-mldsa65.pub -rawin -in identity.json -sigfile identity.json.mldsa65.sig -pkeyopt context-string:freedom-yield/validator-identity
+# Expect: Signature Verified Successfully</code></pre>
 	</section>
 
 	<section class="card data-group">
@@ -131,7 +137,9 @@ ssh-keygen -Y verify -f "$TMP/allowed" \
 				<dt>Manifest</dt><dd><a href="/api/identity.json"><code>/api/identity.json</code></a></dd>
 				<dt>Signature</dt><dd><a href="/api/identity.json.sig"><code>/api/identity.json.sig</code></a></dd>
 				<dt>Public key</dt><dd><a href="/.well-known/operator-identity.pub"><code>/.well-known/operator-identity.pub</code></a></dd>
-				<dt>Schema</dt><dd><a href="/api/identity.schema.v1.json"><code>/api/identity.schema.v1.json</code></a> + <a href="/api/identity.example.json">example</a></dd>
+				<dt>ML-DSA-65 signature</dt><dd><a href="/api/identity.json.mldsa65.sig"><code>/api/identity.json.mldsa65.sig</code></a></dd>
+				<dt>ML-DSA-65 public key</dt><dd><a href="/.well-known/operator-identity-mldsa65.pub"><code>/.well-known/operator-identity-mldsa65.pub</code></a></dd>
+				<dt>Schema</dt><dd><a href="/api/identity.schema.v2.json"><code>/api/identity.schema.v2.json</code></a> + <a href="/api/identity.example.json">example</a></dd>
 			</dl>
 		</article>
 

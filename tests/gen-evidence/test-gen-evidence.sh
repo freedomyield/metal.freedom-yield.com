@@ -147,6 +147,19 @@ else
 		"https://metal.freedom-yield.com/api/anchor-history.schema.v2.json" \
 		"$(jq -r '.live_artifacts.anchor_history.formal_schema_url // "MISSING"' "$OUT_JSON")"
 
+	# ML-DSA-65 identity signature discovery (expected strings spelled out here
+	# on purpose: the generator takes them from scripts/lib/identity-pq.sh, so
+	# this pins the published URLs independently of that library).
+	check_eq "PQ: identity_manifest.pq_signature_url" \
+		"https://metal.freedom-yield.com/api/identity.json.mldsa65.sig" \
+		"$(jq -r '.live_artifacts.identity_manifest.pq_signature_url // "MISSING"' "$OUT_JSON")"
+	check_eq "PQ: identity_manifest.pq_pubkey_url" \
+		"https://metal.freedom-yield.com/.well-known/operator-identity-mldsa65.pub" \
+		"$(jq -r '.live_artifacts.identity_manifest.pq_pubkey_url // "MISSING"' "$OUT_JSON")"
+	check_eq "PQ: identity_manifest.formal_schema_url is v2" \
+		"https://metal.freedom-yield.com/api/identity.schema.v2.json" \
+		"$(jq -r '.live_artifacts.identity_manifest.formal_schema_url // "MISSING"' "$OUT_JSON")"
+
 	check_eq "MED-6: in_preparation_artifacts.anchor_receipt no longer present" \
 		"null" "$(jq -r '.in_preparation_artifacts.anchor_receipt // "null"' "$OUT_JSON")"
 	check_eq "MED-6: in_preparation_artifacts.anchor_history no longer present" \

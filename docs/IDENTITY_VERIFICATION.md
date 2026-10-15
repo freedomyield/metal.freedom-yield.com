@@ -6,7 +6,12 @@ This document describes how a third-party evaluator verifies the operator identi
 
 ## Key model (read first)
 
-The identity manifest is signed with a **dedicated ed25519 operator identity key**. Specifically:
+The identity manifest carries **two independent signatures from two dedicated operator identity keys**:
+
+- **ed25519** (primary) — an OpenSSH key, verified with `ssh-keygen -Y verify` (Step 2).
+- **ML-DSA-65** (additive, FIPS 204) — a post-quantum signature over the same `identity.json` bytes, verified with OpenSSL 3.5+ using the context string `freedom-yield/validator-identity` (Step 2b). It is additive: it never replaces the ed25519 signature, and a verifier that ignores it loses nothing it had before.
+
+For both keys, specifically:
 
 - The signing key is **not** the validator's BLS signing key.
 - The signing key is **not** a staking key (`staker.key`).
@@ -23,7 +28,9 @@ A single signature does not by itself prove control of the validator. NodeID bin
 
 - `/api/identity.json` — signed identity manifest (this document's subject)
 - `/api/identity.json.sig` — detached ed25519 signature
+- `/api/identity.json.mldsa65.sig` — detached ML-DSA-65 signature over the same bytes
 - `/.well-known/operator-identity.pub` — current operator identity public key (its SHA-256 is committed inside the DAG's identity branch)
+- `/.well-known/operator-identity-mldsa65.pub` — current operator identity ML-DSA-65 public key (PEM)
 - `/api/anchor-source.json` — the DAG source: the three branch objects (identity / observations / artifacts) and the combined `dag_root_computed`
 - `/api/anchor-receipt.json` — Metal A-chain (an Antelope/EOSIO-family chain, reached at XPR Network endpoints) inscription receipt anchoring `dag_root_computed`
 - `/api/anchor-history.jsonl` — append-only log of every broadcast anchor (cycle → tx_id → dag)
@@ -51,12 +58,14 @@ The byte-level construction rules cited below are specified once in [`MERKLE_DAG
 BASE=https://metal.freedom-yield.com
 curl -sSLfO ${BASE}/api/identity.json
 curl -sSLfO ${BASE}/api/identity.json.sig
+curl -sSLfO ${BASE}/api/identity.json.mldsa65.sig
 curl -sSLfO ${BASE}/.well-known/operator-identity.pub
+curl -sSLfO ${BASE}/.well-known/operator-identity-mldsa65.pub
 curl -sSLfO ${BASE}/api/anchor-source.json
 curl -sSLfO ${BASE}/api/anchor-receipt.json
 ```
 
-A 404 on any of the five URLs is a verification failure: the set must be complete for the chain of evidence to hold.
+A 404 on any of the seven URLs is a verification failure: the set must be complete for the chain of evidence to hold.
 
 ### Step 2 — Verify the operator's signature on identity.json
 
@@ -79,6 +88,25 @@ A successful verification prints `Good "freedom-yield/validator-identity" signat
 | `-s` (signature) | `identity.json.sig` | served at `/api/identity.json.sig` |
 
 A signature failure at this step ends verification; nothing downstream is trustworthy without it.
+
+### Step 2b — verify the ML-DSA-65 signature (OpenSSL 3.5+)
+
+`identity.json` also carries an ML-DSA-65 (FIPS 204) signature over the same bytes. This step needs **OpenSSL 3.5 or later**; it is the only extra tool. The block below fetches the three files and verifies (the `identity.json` fetch repeats Step 1 so the block stands alone):
+
+<!-- pq-verify:begin -->
+```sh
+curl -sSfO https://metal.freedom-yield.com/api/identity.json
+curl -sSfO https://metal.freedom-yield.com/api/identity.json.mldsa65.sig
+curl -sSfO https://metal.freedom-yield.com/.well-known/operator-identity-mldsa65.pub
+openssl pkeyutl -verify -pubin -inkey operator-identity-mldsa65.pub -rawin -in identity.json -sigfile identity.json.mldsa65.sig -pkeyopt context-string:freedom-yield/validator-identity
+```
+<!-- pq-verify:end -->
+
+A successful verification prints `Signature Verified Successfully`.
+
+Which `openssl`: macOS `/usr/bin/openssl` is **LibreSSL** and cannot verify ML-DSA — install Homebrew `openssl@3` and call `$(brew --prefix openssl@3)/bin/openssl`. Ubuntu 26.04's stock `openssl` (3.5) can. The context string `freedom-yield/validator-identity` is part of what was signed; a different context string fails verification.
+
+The manifest's `verification_pq` object names the algorithm and the public key's fingerprint; a v1-schema consumer ignores it.
 
 ### Step 3 — Fingerprint cross-check
 
@@ -228,6 +256,8 @@ A manifest that carries `pin_policy` is post-discipline and every `sha256` in it
 If the operator identity key is rotated, the new `identity.json` reflects the new `operator_identity_pubkey_fingerprint` and a new `key_iat`; a new line appends to `identity-history.jsonl` (the source of `identity_branch.identity_history_root`) with the next `key_seq`; the prior key's line is updated with `superseded_by_key_seq` populated (and `revoked` / `revoked_at` / `revocation_reason` set if the rotation is for cause). The identity branch root changes, hence `dag_root_computed` changes, and the next cycle's anchor commits the new root.
 
 The recommended rotation cadence is 12 months, aligned to a validation-cycle boundary. `ssh-keygen -Y verify` does **not** check `key_iat` / `key_exp`; consumers MAY enforce them as policy.
+
+The ML-DSA-65 key rotates the same way as the ed25519 key and at the same time: a new `identity.json` names the new PQ public key fingerprint and the new `/.well-known/operator-identity-mldsa65.pub`. Its algorithm follows Metallicus' basic choice (design spec §3.1): if Metallicus' SDK, CLI, WebAuth or a formal default moves to another parameter set or scheme, the change is a normal key rotation, not a schema bump.
 
 The validator's on-chain signing keys (staker / BLS) are unaffected by operator identity key rotation; they have no relationship to this manifest. The `<xpr-account>@anchor` key is independent and rotates on its own schedule.
 

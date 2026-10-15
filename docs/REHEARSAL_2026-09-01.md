@@ -227,7 +227,7 @@ ssh-add ~/.ssh/freedom-yield-operator-identity
   の 1 行。
 - **なぜこれをやるか**: `gen-identity.sh` は `ssh-keygen -Y sign -f
   "${OPERATOR_IDENTITY_KEY}"` を秘密鍵の path 直指定で呼ぶ
-  (`scripts/operator-local/gen-identity.sh:895`)。ssh-agent に鍵を載せておくと
+  (`scripts/operator-local/gen-identity.sh:963`)。ssh-agent に鍵を載せておくと
   以降の呼び出しで passphrase プロンプトが出ない(agent が実際の機構である
   ことは暗号化 ed25519 鍵での対照実験で確認済み — agent 有りは無プロンプトで
   成功、agent 無しはプロンプトを出して失敗)。**9/4 当日も同じ操作が必要**

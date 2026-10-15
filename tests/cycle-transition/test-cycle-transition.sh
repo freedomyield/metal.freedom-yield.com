@@ -498,6 +498,11 @@ if printf '%s' "$SIG_LINE" | grep -qF 'public/api/identity.json.sig'; then
 else
 	bad "unit 4b's git add omits public/api/identity.json.sig — a new manifest would be published under the previous cycle's signature"
 fi
+if printf '%s' "$SIG_LINE" | grep -qF 'public/api/identity.json.mldsa65.sig'; then
+	ok "unit 4b stages public/api/identity.json.mldsa65.sig (the ML-DSA signature travels with the manifest)"
+else
+	bad "unit 4b's git add omits public/api/identity.json.mldsa65.sig — a v2 manifest would be published without its ML-DSA signature and CI verify-identity would fail"
+fi
 if printf '%s' "$SIG_LINE" | grep -qF 'public/api/identity.json '; then
 	ok "unit 4b stages public/api/identity.json"
 else
@@ -972,9 +977,10 @@ make_status_pub() {
 	done
 	printf '{"schema_version":1,"nodeId":"%s","startTime":%s,"endTime":%s}\n' \
 		"$STATUS_NODE" "$st" "$en" > "${d}/api/validator.json"
-	printf '{"schema_version":1,"generated_at":"%s"}\n' "$(epoch_iso "$gen")" \
+	printf '{"schema_version":2,"generated_at":"%s"}\n' "$(epoch_iso "$gen")" \
 		> "${d}/api/identity.json"
 	printf 'SSHSIG-fixture-not-a-real-signature\n' > "${d}/api/identity.json.sig"
+	printf 'MLDSA65-fixture-not-a-real-signature\n' > "${d}/api/identity.json.mldsa65.sig"
 	printf '{"schema_version":1,"dag_root_computed":"%s","observations_branch":{"cycle_number_observed":%s}}\n' \
 		"$STATUS_DAG" "$cyc" > "${d}/api/anchor-source.json"
 }
@@ -1148,8 +1154,10 @@ mutate_case() {
 }
 
 mut_drop_row() { head -n $((ST_N - 1)) "${1}/pub/api/cycle-history.jsonl" > "${1}/tmp.jsonl"; mv "${1}/tmp.jsonl" "${1}/pub/api/cycle-history.jsonl"; }
-mut_stale_identity() { printf '{"schema_version":1,"generated_at":"%s"}\n' "$(epoch_iso $((ST_START - 3600)))" > "${1}/pub/api/identity.json"; }
+mut_stale_identity() { printf '{"schema_version":2,"generated_at":"%s"}\n' "$(epoch_iso $((ST_START - 3600)))" > "${1}/pub/api/identity.json"; }
 mut_drop_sig() { rm -f "${1}/pub/api/identity.json.sig"; }
+mut_drop_pq_sig() { rm -f "${1}/pub/api/identity.json.mldsa65.sig"; }
+mut_v1_no_pq_sig() { printf '{"schema_version":1,"generated_at":"%s"}\n' "$(epoch_iso "$ST_GEN")" > "${1}/pub/api/identity.json"; rm -f "${1}/pub/api/identity.json.mldsa65.sig"; }
 mut_local_bytes() { printf '\n' >> "${1}/anchor-local.json"; }
 mut_old_cycle() { printf '{"schema_version":1,"dag_root_computed":"%s","observations_branch":{"cycle_number_observed":%s}}\n' "$STATUS_DAG" "$ST_N" > "${1}/pub/api/anchor-source.json"; cp "${1}/pub/api/anchor-source.json" "${1}/anchor-local.json"; }
 mut_wrong_memo() { make_status_tx "${1}/tx.json" "fya1c${ST_N}"; }
@@ -1159,6 +1167,8 @@ mut_wrong_sig() { make_status_gate "${1}/gate.json" "${STATUS_NODE}-1"; }
 mutate_case "the published ledger is one row short"        1 INCOMPLETE mut_drop_row
 mutate_case "identity generated_at predates the cycle end" 2 INCOMPLETE mut_stale_identity
 mutate_case "identity.json.sig did not publish"            2 INCOMPLETE mut_drop_sig
+mutate_case "identity.json.mldsa65.sig did not publish"       2 INCOMPLETE mut_drop_pq_sig
+mutate_case "a v1 manifest has no ML-DSA signature (legitimately)" 2 COMPLETE mut_v1_no_pq_sig
 mutate_case "the local anchor-source copy differs by one byte" 3 INCOMPLETE mut_local_bytes
 mutate_case "the published anchor-source still names the old cycle" 3 INCOMPLETE mut_old_cycle
 mutate_case "the transaction's memos carry the previous cycle's prefix" 5 INCOMPLETE mut_wrong_memo
@@ -1781,6 +1791,24 @@ if grep -qF 'ssh-add ~/.ssh/freedom-yield-operator-identity' "$CYCLE_GATE_DOC"; 
 else
 	bad "docs/CYCLE_GATE.md no longer carries this ssh-add line — the plan's copy may have drifted"
 fi
+# Stop 2 also carries the ML-DSA unlock, in the same operator line.
+if grep -qE '^ssh-add .* && bash scripts/operator-local/pq-identity-unlock\.sh  # Mac$' "$PLAN"; then
+	ok "stop 2 prints the ML-DSA unlock (pq-identity-unlock.sh) in the operator's line, after the ssh-add"
+else
+	bad "stop 2 does not print scripts/operator-local/pq-identity-unlock.sh — gen-identity.sh would exit 5 (key not unlocked)"
+fi
+STOP2="$(awk '/^# ⏸ STOP 2 /{f=1;next} /^# === PHASE/{f=0} f' "$PLAN")"
+STOP2F="$(printf '%s\n' "$STOP2" | sed 's/^# *//' | tr '\n' ' ' | tr -s ' ')"
+if printf '%s' "$STOP2F" | grep -qF 'pq-identity-lock.sh' &&
+	printf '%s' "$STOP2F" | grep -qiF 'fresh unlock' &&
+	printf '%s' "$STOP2F" | grep -qF 'consumes the unlock on any run' &&
+	printf '%s' "$STOP2F" | grep -qF 'exited 1/6/99' &&
+	printf '%s' "$STOP2F" | grep -qF 'IMMEDIATELY BEFORE UNIT 4' &&
+	! printf '%s' "$STOP2F" | grep -qF 'never reaches signing'; then
+	ok "stop 2: unlock typed right before unit 4, consumed by any run past the early checks, lock script only if unit 4 did not run / exited 1/6/99"
+else
+	bad "stop 2 omits the consumed-on-any-run rule, the immediately-before-unit-4 timing, or the narrowed lock-script condition"
+fi
 # The old, inverted model must be gone, not merely supplemented.
 if ! grep -qF 'Unit 4 prompts for the operator identity key passphrase' "$PLAN"; then
 	ok "the superseded \"unit 4 will prompt you\" model is no longer printed"
@@ -1974,9 +2002,9 @@ elif printf '%s\n' "$CP_BLOCK" | grep -qF 'DELETION' &&
 else
 	bad "CHECKPOINT 2.5 does not say the pending payload is deleted in its commit"
 fi
-# 4b's staged set must therefore stay at the four always-staged files.
-if printf '%s\n' "$B4_BLOCK" | grep -qF 'FOUR entries'; then
-	ok "unit 4b states that its staged set is four files, on a 2.5 cycle as well"
+# 4b's staged set must therefore stay at the five always-staged files.
+if printf '%s\n' "$B4_BLOCK" | grep -qF 'FIVE entries'; then
+	ok "unit 4b states that its staged set is five files, on a 2.5 cycle as well"
 else
 	bad "unit 4b does not state the expected staged set"
 fi
@@ -2030,10 +2058,13 @@ else
 	bad "stop 4 does not require re-locking the testnet keystore as well"
 fi
 # The plan's own count of the operator's keystrokes must match the canon's.
-if grep -qF 'Counting the operator' "$PLAN" && grep -qF 'the whole day: FIVE' "$PLAN"; then
-	ok "the plan counts five operator@TTY actions, matching the canon"
+PLANF="$(sed 's/^# *//' "$PLAN" | tr '\n' ' ' | tr -s ' ')"
+if printf '%s' "$PLANF" | grep -qF 'Counting the operator' && printf '%s' "$PLANF" | grep -qF 'the whole day: SIX' &&
+	printf '%s' "$PLANF" | grep -qF '⑥ the ML-DSA unlock at stop 2' && printf '%s' "$PLANF" | grep -qF '⑤ the TESTNET re-lock' &&
+	! printf '%s' "$PLANF" | grep -qF 'In canon order'; then
+	ok "the plan counts six operator@TTY actions, matching the canon"
 else
-	bad "the plan does not count the operator's five manual actions"
+	bad "the plan does not count the operator's six manual actions"
 fi
 # Checked against what the canon REQUIRES, not against its prose count. The
 # count sentence has itself been wrong (it said five while three other

@@ -42,8 +42,10 @@
       "url": "https://metal.freedom-yield.com/api/identity.json",
       "signature_url": "https://metal.freedom-yield.com/api/identity.json.sig",
       "pubkey_url": "https://metal.freedom-yield.com/.well-known/operator-identity.pub",
+      "pq_signature_url": "https://metal.freedom-yield.com/api/identity.json.mldsa65.sig",
+      "pq_pubkey_url": "https://metal.freedom-yield.com/.well-known/operator-identity-mldsa65.pub",
       "schema_url": "https://metal.freedom-yield.com/api/identity.example.json",
-      "formal_schema_url": "https://metal.freedom-yield.com/api/identity.schema.v1.json",
+      "formal_schema_url": "https://metal.freedom-yield.com/api/identity.schema.v2.json",
       "format_guide_url": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md",
       "operator_guide_url": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/OPERATOR_IDENTITY_SETUP.md",
       "cross_reference_url": "https://metal.freedom-yield.com/api/anchor-source.json"

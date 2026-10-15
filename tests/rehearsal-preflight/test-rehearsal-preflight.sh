@@ -187,6 +187,15 @@ make_fixture() { # <dir>
 	ssh-keygen -t ed25519 -N '' -C 'fyd-preflight-test-fixture' -f "$d/id_key" -q </dev/null
 	chmod 600 "$d/id_key"
 
+	# ML-DSA identity key (check 5): an encrypted-key stand-in (mode 600, dir
+	# 700, outside the repo) and a committed-public-key stand-in. Check 5 only
+	# reads modes and the PEM body's digest, so fabricated bytes are enough.
+	mkdir -p "$d/pq-keys"
+	chmod 700 "$d/pq-keys"
+	printf 'fixture-encrypted-key-placeholder\n' > "$d/pq-keys/operator-identity-mldsa65.enc.pem"
+	chmod 600 "$d/pq-keys/operator-identity-mldsa65.enc.pem"
+	printf '%s\n%s\n%s\n' '-----BEGIN PUBLIC KEY-----' 'QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=' '-----END PUBLIC KEY-----' > "$d/pq-public.pub"
+
 	# cycle-history: CLOSED contiguous rows, so fyc_closed_cycle_count agrees
 	# with itself across all three idioms it cross-checks.
 	: > "$d/cycle-history.jsonl"
@@ -244,6 +253,8 @@ run_pf() {
 		FYP_REHEARSAL_CFG="$d/rehearsal-config" \
 		FYP_MAINNET_CFG="$d/mainnet-config" \
 		FYP_IDENTITY_KEY="$d/id_key" \
+		FYP_PQ_KEY_DIR="${PF_PQ_KEY_DIR:-$d/pq-keys}" \
+		FYP_PQ_PUB="${PF_PQ_PUB:-$d/pq-public.pub}" \
 		FYP_LEDGER_URL="${PF_LEDGER:-$d/cycle-history.jsonl}" \
 		FYP_ANCHOR_SOURCE_URL="${PF_PUB_SRC:-$d/published-anchor-source.json}" \
 		FYP_ANCHOR_HISTORY_URL="${PF_HISTORY:-$d/anchor-history.jsonl}" \
@@ -439,7 +450,7 @@ expect_case "check 2: mainnet keystore dir absent -> exit 8" "$D" 8 "mainnet-key
 # that reads like success and is not.
 MINI="${BASE}/mini-bin"
 mkdir -p "$MINI"
-MINI_TOOLS="sh bash env sed grep egrep jq git node curl ssh-keygen ssh-add timeout date mktemp cat tr cut sort tail head awk cmp ls wc rm id dirname basename uname sha256sum shasum expr"
+MINI_TOOLS="sh bash env sed grep egrep jq git node curl ssh-keygen ssh-add timeout date mktemp cat tr cut sort tail head awk cmp ls wc rm id dirname basename uname sha256sum shasum expr base64 stat"
 for t in $MINI_TOOLS; do
 	p="$(command -v "$t" 2>/dev/null)" || continue
 	[ -n "$p" ] && ln -sf "$p" "${MINI}/${t}" 2>/dev/null
@@ -453,6 +464,7 @@ run_pf_path() { # <fixture> <path>
 		FYP_KEYSTORE_TESTNET="$d/ks-test" FYP_KEYSTORE_MAINNET="$d/ks-main" \
 		FYP_REHEARSAL_CFG="$d/rehearsal-config" FYP_MAINNET_CFG="$d/mainnet-config" \
 		FYP_IDENTITY_KEY="$d/id_key" \
+		FYP_PQ_KEY_DIR="$d/pq-keys" FYP_PQ_PUB="$d/pq-public.pub" \
 		FYP_LEDGER_URL="$d/cycle-history.jsonl" \
 		FYP_ANCHOR_SOURCE_URL="$d/published-anchor-source.json" \
 		FYP_ANCHOR_HISTORY_URL="$d/anchor-history.jsonl" \
@@ -517,6 +529,56 @@ expect_case "check 5: identity private key not mode 600 -> exit 3" "$D" 3 "priva
 D="$(fresh id-nopub)"; rm -f "$D/id_key.pub"
 expect_case "check 5: identity public key absent -> exit 3" "$D" 3 "missing-public-key"
 
+# --- check 5, ML-DSA half ---------------------------------------------------
+D="$(fresh pq-no-enc)"; rm -f "$D/pq-keys/operator-identity-mldsa65.enc.pem"
+expect_case "check 5: encrypted ML-DSA key absent -> exit 3" "$D" 3 "missing-mldsa-encrypted-key"
+
+D="$(fresh pq-enc-mode)"; chmod 644 "$D/pq-keys/operator-identity-mldsa65.enc.pem"
+expect_case "check 5: encrypted ML-DSA key not mode 600 -> exit 3" "$D" 3 "mldsa-encrypted-key-mode-not-600"
+
+D="$(fresh pq-dir-mode)"; chmod 755 "$D/pq-keys"
+expect_case "check 5: ML-DSA key directory not mode 700 -> exit 3" "$D" 3 "mldsa-key-dir-mode-not-700"
+
+# The key dir lives in a mktemp -d (nothing is created inside the checkout):
+# a symlink there that resolves (pwd -P) into the repo is "inside the repo".
+D="$(fresh pq-in-repo)"; PQ_LINK_PARENT="$(mktemp -d)"
+ln -s "$REPO_ROOT/tests" "$PQ_LINK_PARENT/pqdir"
+PF_PQ_KEY_DIR="$PQ_LINK_PARENT/pqdir"; export PF_PQ_KEY_DIR
+expect_case "check 5: ML-DSA key directory inside the repo -> exit 3" "$D" 3 "mldsa-key-dir-inside-repo"
+unset PF_PQ_KEY_DIR; rm -rf "$PQ_LINK_PARENT"
+
+D="$(fresh pq-no-pub)"; rm -f "$D/pq-public.pub"
+expect_case "check 5: committed ML-DSA public key absent -> exit 3" "$D" 3 "missing-mldsa-public-key"
+
+D="$(fresh pq-bad-pub)"; printf 'not a pem\n' > "$D/pq-public.pub"
+expect_case "check 5: committed ML-DSA public key unreadable as a PEM -> exit 3" "$D" 3 "mldsa-public-key-fingerprint-failed"
+
+D="$(fresh pq-unlocked)"; printf 'x\n' > "$D/pq-keys/operator-identity-mldsa65.unlocked.pem"; chmod 600 "$D/pq-keys/operator-identity-mldsa65.unlocked.pem"
+expect_case "check 5: an unlocked ML-DSA key lying around -> exit 3, names the lock script" "$D" 3 "pq-identity-lock.sh"
+expect_case "check 5: the lock hint carries FY_PQ_KEY_DIR=<resolved dir>" "$D" 3 "FY_PQ_KEY_DIR=$D/pq-keys bash scripts/operator-local/pq-identity-lock.sh"
+
+# GNU-like stat: `-f` prints file-system text and exits 0 (as GNU stat does),
+# `-c %a` prints the octal mode. The BSD-first form would take the `-f` text.
+GNUSTAT="${BASE}/gnu-stat-bin"; mkdir -p "$GNUSTAT"
+REAL_STAT="$(command -v stat)"
+# Real octal mode, whichever stat dialect this machine has (the fake must not
+# depend on the very ordering under test).
+if "$REAL_STAT" -c %a "$BASE" >/dev/null 2>&1; then REAL_MODE_ARGS="-c %a"; else REAL_MODE_ARGS="-f %Lp"; fi
+cat > "${GNUSTAT}/stat" <<STATEOF
+#!/bin/sh
+if [ "\$1" = "-f" ]; then echo "  File: \$3  ID: 0 Namelen: 255 Type: ext2/ext3"; exit 0; fi
+if [ "\$1" = "-c" ] && [ "\$2" = "%a" ]; then exec "$REAL_STAT" $REAL_MODE_ARGS "\$3"; fi
+exit 1
+STATEOF
+chmod +x "${GNUSTAT}/stat"
+D="$(fresh pq-gnu-stat)"
+GS_OUT="$(PATH="${GNUSTAT}:${STUB}:${PATH}" run_pf "$D")"; GS_RC=$?
+if [ "$GS_RC" -eq 0 ] && ! printf '%s' "$GS_OUT" | grep -qF "mode-not-"; then
+	pass "check 5: GNU-style stat (-f prints text, -c %a prints the mode) -> mode checks pass" "rc=$GS_RC"
+else
+	bad "check 5: GNU-style stat (-f prints text, -c %a prints the mode) -> mode checks pass" "rc=$GS_RC | $(printf '%s' "$GS_OUT" | grep -o 'mldsa[a-z0-9-]*mode-not-[0-9]*' | tr '\n' ' ')"
+fi
+
 # ===========================================================================
 # Part 6 — check 6 (anchor-source bytes)
 # ===========================================================================
@@ -563,7 +625,7 @@ jq --argjson c "$((CYCLE + 5))" '.observations_branch.cycle_number_observed = $c
 DR_OUT="$(env PATH="${STUB}:${PATH}" HOME="$D/ks-test" \
 	FYP_KEYSTORE_TESTNET="$D/ks-test" FYP_KEYSTORE_MAINNET="$D/ks-main" \
 	FYP_REHEARSAL_CFG="$D/rehearsal-config" FYP_MAINNET_CFG="$D/mainnet-config" \
-	FYP_IDENTITY_KEY="$D/id_key" FYP_LEDGER_URL="$D/cycle-history.jsonl" \
+	FYP_IDENTITY_KEY="$D/id_key" FYP_PQ_KEY_DIR="$D/pq-keys" FYP_PQ_PUB="$D/pq-public.pub" FYP_LEDGER_URL="$D/cycle-history.jsonl" \
 	FYP_ANCHOR_SOURCE_URL="$D/drift.json" FYP_ANCHOR_HISTORY_URL="$D/anchor-history.jsonl" \
 	FYP_VALIDATOR_URL="$D/validator.json" FYP_CURL="${STUB}/curl-stub" \
 	FYP_TEST_ACCOUNT_JSON="$D/account.json" FYP_TEST_PROTON_KEYS="$D/keys.txt" \

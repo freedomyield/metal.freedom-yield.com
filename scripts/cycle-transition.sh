@@ -417,7 +417,7 @@ FYCT_STATUS_BOUNDARY_TOL_S=21600
 fyct__phase_rows() {
 	cat <<'FYCT_PHASE_EOF'
 1|記録 / record|1|OPERATOR, IN THE METAL WALLET WEB UI. Submit the new AddValidator (the stake amount is decided on the day, by the operator, and by nobody else), watch the tx reach Committed on the explorer, and confirm the new entry is visible in the current validator set. This is the one human-driven state change of the day and the precondition for unit 1 below, which waits for that entry to appear. Do NOT start phase 1 on the submit alone. Full field-by-field form: docs/VALIDATOR_RENEWAL.md Step 2.|-
-2|identity|2|OPERATOR, AT A TTY — TYPE THE LINE BELOW YOURSELF, BEFORE UNIT 4. It loads the operator identity key into the ssh-agent; the passphrase is held in Dashlane (see docs/OPERATOR_IDENTITY_SETUP.md) and the AI never receives it. Expect one line back: "Identity added: …". A wrong passphrase breaks nothing and can be retried. WHY IT IS DONE HERE AND NOT INSIDE UNIT 4: gen-identity.sh signs by calling ssh-keygen -Y sign with the private-key PATH, so if the key is not already in the agent it prompts — and unit 4 is run by the AI, non-interactively, where a prompt is a dead stop, not a question. Loading it first is what makes unit 4 runnable at all. The agent does NOT survive across sessions, so a rehearsal that did this last week does not count: it is needed again today. Unit 4 is the key's last use of the day: once gen-identity.sh has exited 0 and will not be re-run, the AI removes the key from the agent again (ssh-add -d with the same path) — no passphrase, so not an operator action.|ssh-add ~/.ssh/freedom-yield-operator-identity
+2|identity|2|OPERATOR, AT A TTY — TYPE THE COMBINED LINE BELOW YOURSELF, BEFORE UNIT 4. It does two things in order: (1) ssh-add loads the operator identity key (ed25519) into the ssh-agent; the passphrase is held in Dashlane (see docs/OPERATOR_IDENTITY_SETUP.md); (2) pq-identity-unlock.sh decrypts the ML-DSA-65 identity key into the operator-local key directory and asks for its OWN passphrase, held in the Dashlane entry named in the AI's ping. The AI never receives either passphrase. Expect "Identity added: …" from the first command and the unlock script's own confirmation from the second. A wrong passphrase breaks nothing and can be retried. WHY IT IS DONE HERE AND NOT INSIDE UNIT 4: gen-identity.sh signs by calling ssh-keygen -Y sign with the private-key PATH, so if the key is not already in the agent it prompts — and unit 4 is run by the AI, non-interactively, where a prompt is a dead stop, not a question. Loading it first is what makes unit 4 runnable at all. The agent does NOT survive across sessions, so a rehearsal that did this last week does not count: it is needed again today. Unit 4 is the key's last use of the day: once gen-identity.sh has exited 0 and will not be re-run, the AI removes the key from the agent again (ssh-add -d with the same path) — no passphrase, so not an operator action. THE ML-DSA KEY HAS NO SEPARATE LOCK KEYSTROKE. Type this line IMMEDIATELY BEFORE UNIT 4, because after 2 hours gen-identity.sh refuses the unlock (exit 5) — the file itself is not deleted by the clock; it stays in the key directory until gen-identity.sh consumes it or pq-identity-lock.sh removes it. gen-identity.sh consumes the unlock on any run that gets past its early argument checks — success or failure. Every re-run of unit 4 needs a fresh unlock (the operator types the stop-2 unlock line again). The lock script, bash scripts/operator-local/pq-identity-lock.sh, is needed only if unit 4 was not run at all, or exited 1/6/99 before its checks; it is idempotent and needs no passphrase, so the AI may run it whenever in doubt.|ssh-add ~/.ssh/freedom-yield-operator-identity && bash scripts/operator-local/pq-identity-unlock.sh
 3|compose|-|-|-
 4|rehearsal|3|OPERATOR, AT A TTY. Unlock the PROJECT TESTNET keystore (HOME=~/.metal-fy-proton-test) — the unlock command itself is handed over in chat, not printed here (see this script's header, "WHY THE KEYSTORE UNLOCK COMMANDS ARE NOT PRINTED"; exact wording in docs/CYCLE_GATE.md step 7a). Unit 7a cannot run against a locked keystore: it exits 2. This is also where testnet broadcast authorization is given — and note that the authorization is NOT this unlock. It is the operator's EXPLICIT INSTRUCTION IN CHAT to run unit 7a, given after the AI has shown the exact command: one instruction authorizes exactly one run, and the AI@Mac then starts unit 7a once. An unlock alone never lets the AI start it (operator decision 2026-10-07; docs/CYCLE_GATE.md actor section). Unit 7a is the testnet keystore's last use of the day, so re-lock it right after unit 7a prints its sentinel line (at the latest at stop 4(b)); units 7b, 7c and 8 never use it.|-
 5|刻印 / inscribe|4|OPERATOR, THREE TIMES — AND (a) IS NOT DUE YET AT THIS LINE. (a) Between unit 7b and unit 7c — and only AFTER unit 7b.5 has printed REACHABLE, NOT before 7b: unlock the SEPARATE MAINNET keystore (HOME=~/.metal-fy-proton) and give the PRIME DIRECTIVE gate-2 per-invocation authorization, naming chain, actor, permission, action, memo and quantity explicitly. Gate 2 is a precondition of 7c, not a review of it — but 7b is a dry run that needs the mainnet keystore HOME only for the separation guard, never an UNLOCKED one, so unlocking here would leave the keystore open one unit longer than necessary. Unit 7b prints the exact unlock line and token ritual itself when it finishes, which is the moment to do this. (b) AFTER unit 7c, confirm the transaction on the explorer by eye, then re-lock BOTH keystores — TWO separate actions, not one: the MAINNET keystore opened at (a), and the TESTNET keystore opened at stop 3, if it was not already re-locked right after unit 7a (if it was, confirm it reads locked). Closing only the mainnet one and calling the day done is the single likeliest omission of the transition, and the canon's completion checklist exists to catch it: both must read locked. Both prompts read "Enter 32 character password (leave empty to create new)", and an empty Enter at either creates a NEW password instead of locking with the existing one — which silently breaks the next cycle's unlock for that keystore.|-
@@ -689,9 +689,9 @@ fyct__unit_commands() {
 		fyct__wrap "  " "A GREEN tests/publication-registry/ IS NOT PROOF THE LIST IS COMPLETE. Its T19 case synthesises both registry fixtures, so it returns the same verdict before and after these edits; what actually reads the real registry and the real manifest is T6, T7 and T14. And neither that suite nor any other exit code covers bullet (b) — for that, read the check-identity-pins.sh output for OBSOLETE-BASELINE."
 		fyct__wrap "  " "The record_caveat on the api/archive/ row was CORRECTED 2026-08-14 (and again 2026-08-17) — the STRUCTURALLY immutable claim this step used to warn about is gone. Read deploy/publication.json's current record_caveat text directly before editing anything under this bullet; do not trust a cached summary of it."
 		fyct__cmd "$m" "bash tests/publication-registry/test-publication-registry.sh"
-		fyct__wrap "  " "public/api/identity.json.sig IS IN THIS LIST AND MUST STAY. gen-identity.sh writes the manifest and its detached signature as a pair (its atomic-publish block moves both), and the real cycle-4 transition commit 90bcdd9 carried exactly those two files. Staging the manifest without the signature publishes a NEW manifest under the PREVIOUS cycle's signature: the public ssh-keygen -Y verify then fails, and unit 9's Phase 1 identity signature check fails with it."
-		fyct__cmd "$m" "git add public/api/identity.json public/api/identity.json.sig deploy/identity-pin-baseline.json deploy/publication.json"
-		fyct__wrap "  " "Then read the staged set back before committing. Expect exactly those FOUR entries, on a checkpoint-2.5 cycle as much as on an ordinary one. Nothing from checkpoint 2.5 is staged here: it committed and pushed public/api/incidents.json, the temporary baseline entry this commit now removes, and the deletion of its own pending payload — all in its own commit, hours earlier."
+		fyct__wrap "  " "public/api/identity.json.sig AND public/api/identity.json.mldsa65.sig ARE IN THIS LIST AND MUST STAY. gen-identity.sh writes the manifest and its two detached signatures (ed25519 and ML-DSA-65) as a set, and the real cycle-4 transition commit 90bcdd9 carried the manifest and the ed25519 signature as a pair. Staging the manifest without BOTH signatures publishes a NEW manifest under the PREVIOUS cycle's signature(s): the public ssh-keygen -Y verify fails, unit 9's Phase 1 identity signature check fails with it, and (without the ML-DSA signature) so does the verify-identity workflow's ML-DSA check on a schema_version 2 manifest."
+		fyct__cmd "$m" "git add public/api/identity.json public/api/identity.json.sig public/api/identity.json.mldsa65.sig deploy/identity-pin-baseline.json deploy/publication.json"
+		fyct__wrap "  " "Then read the staged set back before committing. Expect exactly those FIVE entries, on a checkpoint-2.5 cycle as much as on an ordinary one. Nothing from checkpoint 2.5 is staged here: it committed and pushed public/api/incidents.json, the temporary baseline entry this commit now removes, and the deletion of its own pending payload — all in its own commit, hours earlier."
 		fyct__cmd "$m" "git diff --cached --name-status"
 		fyct__cmd "$m" "git commit -m 'chore(identity): cycle ${INSCRIBE} identity manifest + C4 post-issuance cleanup'"
 		fyct__cmd "$m" "git push"
@@ -843,9 +843,9 @@ fyct_print_plan() {
 	fyct__wrap "  " "WHICH MACHINE IS NOT WHO TYPES, and reading the machine as the actor is a real day-of hazard. docs/CYCLE_GATE.md's 'actor / location' section keeps them apart, so every unit header below names an ACTOR as well as a machine:"
 	fyct__wrap "    " "AI@host      — the AI runs it over ssh. The operator reads the output."
 	fyct__wrap "    " "AI@Mac       — the AI runs it in the Mac working copy. The operator reads the output."
-	fyct__wrap "    " "operator@TTY — THE OPERATOR TYPES IT PERSONALLY. No execution unit carries this: the canon's operator@TTY actions are the ssh-add and the keystore unlock/lock, and those are STOP blocks here, not units."
+	fyct__wrap "    " "operator@TTY — THE OPERATOR TYPES IT PERSONALLY. No execution unit carries this: the canon's operator@TTY actions are the ssh-add, the ML-DSA identity-key unlock and the keystore unlock/lock, and those are STOP blocks here, not units."
 	fyct__wrap "  " "Unit 7a is AI@Mac but it is a testnet broadcast. The rehearsal writes its own broadcast token and calls the broadcast helper non-interactively, so nothing will pause and ask: THE OPERATOR'S EXPLICIT CHAT INSTRUCTION FOR THAT ONE RUN IS THE AUTHORIZATION (operator decision 2026-10-07). The unlock is not the instruction; one instruction = one run; a re-run needs a fresh instruction."
-	fyct__wrap "  " "Counting the operator's own keystrokes for the whole day: FIVE. In canon order — (1) the ssh-add at stop 2, (2) the testnet keystore unlock at stop 3, (3) the mainnet keystore unlock at stop 4(a), (4) the mainnet re-lock at stop 4(b), (5) the TESTNET re-lock, right after unit 7a (at the latest at stop 4(b)). The testnet re-lock is an independent action, and leaving it out is the omission the canon's completion checklist names as the likeliest of the day. (Until 2026-10-07 the count was six, because unit 7a itself was the operator's; it is now the AI's, on the operator's chat instruction.)"
+	fyct__wrap "  " "Counting the operator's own keystrokes for the whole day: SIX. Numbered as docs/CYCLE_GATE.md numbers them (not in time order, so that a ping saying operator@TTY ⑥ means the same action everywhere) — ① the ssh-add at stop 2, ⑥ the ML-DSA unlock at stop 2 (typed on the same combined line as the ssh-add, but a separate passphrase and a separate action; there is NO lock keystroke for it, because gen-identity.sh consumes the unlock itself), ② the testnet keystore unlock at stop 3, ③ the mainnet keystore unlock at stop 4(a), ④ the mainnet re-lock at stop 4(b), ⑤ the TESTNET re-lock, right after unit 7a (at the latest at stop 4(b)). The testnet re-lock is an independent action, and leaving it out is the omission the canon's completion checklist names as the likeliest of the day. (History: the count was six until 2026-10-07, because unit 7a itself was the operator's; from 2026-10-07 it was five, unit 7a having moved to the AI on the operator's chat instruction; with the ML-DSA unlock ⑥ it is six again.)"
 	fyct__wrap "  " "THE DAY PAUSES IN FIVE PLACES, AND ONLY FOUR OF THEM ARE ⏸ STOP BLOCKS. The fifth is ⛔ CHECKPOINT 2.5, printed at the end of unit 2: a canon-only step that is not an execution unit and has no id in the table below. It is not a STOP because the work is the AI's, not the operator's — but it is a full halt to the sequence all the same. Read it before unit 3. On a cycle where it applies, skipping it is the one thing today that cannot be corrected afterwards."
 	fyct__wrap "  " "The four ⏸ STOP blocks are the operator's own actions. This script performs none of them, and it holds no route to a broadcast — phases 4 and 5 print and stop, permanently, enforced by tests/orchestrator-guard/."
 	fyct__wrap "  " "docs/CYCLE_GATE.md remains the canon. This plan restates it with values filled in; where the two differ, an inline comment says so."
@@ -1371,8 +1371,8 @@ fyct__status_crosscheck() {
 # FYCT_GATE_STATE.
 # ---------------------------------------------------------------------------
 fyct_status_report() {
-	local scratch ledger_f ident_f sig_f anchor_f valid_f head_f local_src
-	local have_ledger=0 have_ident=0 have_sig=0 have_anchor=0 have_valid=0
+	local scratch ledger_f ident_f sig_f pqsig_f anchor_f valid_f head_f local_src
+	local have_ledger=0 have_ident=0 have_sig=0 have_pqsig=0 have_anchor=0 have_valid=0
 	local closed="" ledger_rc=0
 	local v1="" v2="" v3="" v5="" v6=""
 	local d1="" d2="" d3="" d5="" d6=""
@@ -1392,6 +1392,7 @@ fyct_status_report() {
 	ledger_f="${scratch}/cycle-history.jsonl"
 	ident_f="${scratch}/identity.json"
 	sig_f="${scratch}/identity.json.sig"
+	pqsig_f="${scratch}/identity.json.mldsa65.sig"
 	anchor_f="${scratch}/anchor-source.json"
 	valid_f="${scratch}/validator.json"
 	head_f="${scratch}/anchor-source.committed.json"
@@ -1399,6 +1400,7 @@ fyct_status_report() {
 	fyct__status_read api/cycle-history.jsonl "$ledger_f" && have_ledger=1
 	fyct__status_read api/identity.json "$ident_f" && have_ident=1
 	fyct__status_read api/identity.json.sig "$sig_f" && have_sig=1
+	fyct__status_read api/identity.json.mldsa65.sig "$pqsig_f" && have_pqsig=1
 	fyct__status_read api/anchor-source.json "$anchor_f" && have_anchor=1
 	fyct__status_read api/validator.json "$valid_f" && have_valid=1
 
@@ -1448,7 +1450,7 @@ fyct_status_report() {
 	printf '============================================================================\n'
 
 	# ---- phase 2 -----------------------------------------------------------
-	local gen_at="" gen_e="" bound="" bound_e=""
+	local gen_at="" gen_e="" bound="" bound_e="" ident_schema=""
 	if [ "$v1" != "COMPLETE" ]; then
 		v2=UNKNOWN
 		d2="phase 1 has not landed, so the cycle boundary to compare against is not published"
@@ -1457,6 +1459,7 @@ fyct_status_report() {
 		d2="the published identity manifest could not be read"
 	else
 		gen_at="$(jq -r '.generated_at // empty' "$ident_f" 2>/dev/null || true)"
+		ident_schema="$(jq -r '.schema_version // empty' "$ident_f" 2>/dev/null || true)"
 		bound="$(jq -r -s --argjson n "$N" 'map(select(.cycle_n == $n)) | .[0].end_iso // empty' "$ledger_f" 2>/dev/null || true)"
 		gen_e="$(fyct__to_epoch "$gen_at" || true)"
 		bound_e="$(fyct__to_epoch "$bound" || true)"
@@ -1469,9 +1472,12 @@ fyct_status_report() {
 		elif [ "$have_sig" -ne 1 ]; then
 			v2=INCOMPLETE
 			d2="the manifest is fresh but api/identity.json.sig did not publish with it"
+		elif [ "$ident_schema" = "2" ] && [ "$have_pqsig" -ne 1 ]; then
+			v2=INCOMPLETE
+			d2="the manifest is fresh but api/identity.json.mldsa65.sig did not publish with it"
 		else
 			v2=COMPLETE
-			d2="published generated_at ${gen_at} is after cycle ${N}'s end ${bound}, and the .sig published with it"
+			d2="published generated_at ${gen_at} is after cycle ${N}'s end ${bound}, and the .sig published with it (plus the ML-DSA .mldsa65.sig when the manifest is schema_version 2)"
 		fi
 	fi
 
@@ -1636,7 +1642,7 @@ fyct_status_report() {
 	fyct__status_wrap "  " "3. UNITS 7.5, 8 AND 8.5 are observed by nothing. Phase 6's post-condition is the gate-state signature written by unit 9, and unit 9 reads only the chain, the published anchor-source and the identity manifest — never the receipt or the anchor ledger. So a day where the signing fragment was never transferred, no receipt was verified, no history row was appended and nothing was published still reads COMPLETE here, with the public anchor-receipt.json and anchor-history.jsonl left serving the PREVIOUS cycle."
 	fyct__status_wrap "  " "4. UNIT 4b's REGISTRY EDITS are observed by nothing. Phase 2 reads generated_at and the presence of the .sig; identity.json carries no cycle number and no registry state. 4b's commit is needed to publish the manifest at all, so a wholly skipped 4b does show up — but doing the commit WITHOUT the deploy/identity-pin-baseline.json and deploy/publication.json edits leaves every post-condition here green while tests/publication-registry/ goes red on main."
 	fyct__status_wrap "  " "4b. UNIT 7b.5 (the host preconditions and the history reachability check) and UNIT 10 (the legacy-chain archive) are observed by nothing. 7b.5 leaves no artifact at all — its only product is the REACHABLE line it prints — and a skipped 10 leaves public/api/legacy-a-chain/ one anchor short, which no post-condition reads. UNIT 11 (the working memo) is observed by nothing here either: the memo is local and never published, so this reading cannot see it. Run scripts/check-renewal-memo.sh itself; until it exits 0 the day is not complete, whatever this report says."
-	fyct__status_wrap "  " "5. Phase 2 confirms that identity.json.sig published alongside the manifest. It does NOT verify the signature. Unit 9's Phase 1 is what performs the cryptographic check."
+	fyct__status_wrap "  " "5. Phase 2 confirms that identity.json.sig, and for a schema_version 2 manifest also identity.json.mldsa65.sig, published alongside the manifest. It does NOT verify either signature. The cryptographic checks are elsewhere: the verify-identity workflow in CI checks the ML-DSA signature, and unit 9's Phase 1 checks the ed25519 one."
 	fyct__status_wrap "  " "6. Phase 3 compares the published bytes against the copy committed IN THE REPOSITORY THIS COMMAND IS RUNNING FROM — this machine's HEAD, not the host's and not the host's live file. Running it on a machine whose HEAD lags the one that committed unit 6 reports INCOMPLETE for a phase that is done. See this script's header for why comparing against a live host copy would be worse."
 	fyct__status_wrap "  " "7. Phase 5 verifies the response it was handed, not its provenance. Capture it at the moment you run this; a response from another machine or another hour is not distinguishable here."
 	fyct__status_wrap "  " "8. Only the phase-1-HAS-landed reading of --expect-cycle has a second observation. The other reading has none and structurally cannot: before the wallet action the two candidate declarations produce identical public state."

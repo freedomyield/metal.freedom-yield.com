@@ -7,6 +7,47 @@ schema v1 and the rationale for any future major version bump. It is
 not a chain-anchored attestation and not equivalent to an external
 append-only log: see the retention note below.
 
+## 2026-10-15 — schema v2: additive ML-DSA-65 signature
+
+### Summary
+
+`identity.schema.v2.json` is `identity.schema.v1.json` with `schema_version`
+const `2` and a required `verification_pq` object next to the unchanged
+`verification` block. `verification_pq` names the algorithm (`ML-DSA-65`),
+standard (`FIPS 204`), context string (`freedom-yield/validator-identity`),
+the public key URL and its `sha256:` fingerprint (of the DER SPKI), the
+signature URL, the OpenSSL verify command, and the minimum OpenSSL version
+(`3.5`). `identity.json` is additionally signed with ML-DSA-65; the detached
+signature is published at `/api/identity.json.mldsa65.sig` and the public key at
+`/.well-known/operator-identity-mldsa65.pub`.
+
+### Why
+
+The identity manifest is a long-lived, publicly verifiable record. A second,
+post-quantum signature over the same bytes lets a verifier check it with
+standard OpenSSL 3.5+, without project-specific tooling, while the existing
+ed25519 signature stays the primary one. The algorithm follows Metallicus'
+basic choice; a change of algorithm is a normal key rotation, not a schema bump.
+
+### Compatibility
+
+Additive. The ed25519 signature, `identity.json.sig` and the `verification`
+block are unchanged, so a v1 consumer ignores `verification_pq` and keeps
+working. The v1 schema stays published for manifests issued before this entry.
+A v2 verifier requires the ML-DSA-65 signature to verify.
+
+### What changed
+
+- New: `identity.schema.v2.json`; `/api/identity.json.mldsa65.sig`;
+  `/.well-known/operator-identity-mldsa65.pub`.
+- `verification_pq` is covered by the ed25519 signature, so the existing key
+  vouches for the PQ key; the PQ signature over the same bytes proves
+  possession.
+- `/api/evidence.json` `live_artifacts.identity_manifest` gains
+  `pq_signature_url` and `pq_pubkey_url`, and `formal_schema_url` points at
+  the v2 schema.
+- Verification recipe: `docs/IDENTITY_VERIFICATION.md` Step 2b.
+
 ## 2026-08-17 — `anchor.chain_backend` is a protocol family, not an execution engine
 
 ### Summary

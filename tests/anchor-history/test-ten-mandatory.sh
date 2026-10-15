@@ -25,7 +25,7 @@ fi
 #   T2  anchor-receipt.phase-beta.example.json passes ajv against same schema
 #   T3  anchor-history.example.jsonl: every line passes ajv against
 #       anchor-history.schema.v1.json
-#   T4  identity.example.json passes ajv against identity.schema.v1.json
+#   T4  identity.example.json passes ajv against identity.schema.v2.json
 #       AND carries the new `audit` object with anchor_receipt + anchor_history
 #       URL pointers
 #   T5  append-anchor-history.sh appends the first record to an empty (= nonexistent)
@@ -132,7 +132,7 @@ fi
 # --- T4: identity.example.json ajv PASS AND audit object present ---------
 
 T4_OK=1
-if ! ajv_validate "${API_DIR}/identity.schema.v1.json" "${API_DIR}/identity.example.json"; then
+if ! ajv_validate "${API_DIR}/identity.schema.v2.json" "${API_DIR}/identity.example.json"; then
 	echo "T4  FAIL  identity.example.json does not validate" >&2
 	T4_OK=0
 fi

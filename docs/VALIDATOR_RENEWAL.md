@@ -258,7 +258,7 @@ State file: `/var/lib/freedom-yield/cycle-gate-state.json` (= operator 承認済
 | wallet 操作 (集約 → 送金 → cross-chain → AddValidator → on-chain Committed 確認。手順⓪) | Metal Wallet web |
 | 手順⑦-c の tx を explorer で目視確認 (AI が URL を報告) | XPR explorer |
 
-**(2) operator@TTY — operator 自身が自分の terminal で打つ 5 箇所** (password / passphrase は AI に渡さない。値は Dashlane):
+**(2) operator@TTY — operator 自身が自分の terminal で打つ 6 箇所** (password / passphrase は AI に渡さない。値は Dashlane):
 
 | # | 操作 | いつ |
 |---|---|---|
@@ -267,13 +267,14 @@ State file: `/var/lib/freedom-yield/cycle-gate-state.json` (= operator 承認済
 | ③ | mainnet keystore の unlock (`HOME=~/.metal-fy-proton`) | 手順⑦-b.5 が `REACHABLE` を出した後、⑦-c の前 |
 | ④ | mainnet keystore の re-lock | 手順⑦-c の直後 |
 | ⑤ | testnet keystore の re-lock | 手順⑦-a の直後 (遅くとも⑦-c の後) |
+| ⑥ | ML-DSA 鍵の unlock (`bash scripts/operator-local/pq-identity-unlock.sh`。①と同じ 1 行で `ssh-add … && bash scripts/operator-local/pq-identity-unlock.sh` と打つ。passphrase は別で、Dashlane entry 名はピング送付時に AI が添える。lock の打鍵は無い) | 手順④の前 |
 
 **(3) chat での認可 (コマンドは打たない)**
 
 - 手順⑦-a: AI が `run-testnet-rehearsal.sh` のコマンドと broadcast される `{chain, actor, permission, action, memo, quantity}` を chat に示し、operator がそれに対して実行を指示する (1 回の指示 = 1 回の起動。unlock そのものは認可ではない。2026-10-07 operator 決定)。
 - 手順⑦-c: PRIME DIRECTIVE gate 2 の per-invocation 認可 (`docs/CYCLE_GATE.md` step 7c の手順)。
 
-identity 鍵の agent からの取り外し (`ssh-add -d`、手順④の後) は passphrase を伴わないので AI@Mac が行う。
+identity 鍵の agent からの取り外し (`ssh-add -d`、手順④の後) は passphrase を伴わないので AI@Mac が行う。ML-DSA 鍵に lock の打鍵は無い。unlock 行は手順④の直前に打つ (2 時間を過ぎると `gen-identity.sh` は拒否するが、平文の seed ファイルは使われるか lock されるまで残る)。`gen-identity.sh` は冒頭の引数チェックを抜けた run では成功・失敗を問わず unlock を消費するので、手順④を再実行するときは毎回 unlock し直す。`bash scripts/operator-local/pq-identity-lock.sh` が要るのは、手順④を実行しなかった場合、または冒頭チェック前に exit 1/6/99 で終わった場合だけ (冪等・passphrase 不要。迷ったら AI@Mac が実行してよい)。
 
 ### AI が裏で自走する技術 task (= operator から見えない)
 
@@ -298,7 +299,7 @@ or non-executable → skip Job B (fail-closed)` という別の stderr 行は出
 止める(**stale な行が公開される、ではなく行が増えないまま止まる**)。
 実測込みの詳細は `docs/CYCLE_GATE.md` step 2 参照
 ③ validator host: `gen-cycle-history.sh` + push — 公開 `cycle-history.jsonl` が 1 行増えたことを実測確認
-④ Mac local: `FY_EXPECT_CYCLE=<N> OPERATOR_IDENTITY_KEY=~/.ssh/freedom-yield-operator-identity bash scripts/operator-local/gen-identity.sh`(**AI@Mac** が実行。identity 鍵は事前に operator が `ssh-add` で agent に載せておく = operator@TTY ① — 載っていないと AI の非対話セッションが passphrase プロンプトで止まる。exit 0 の後 AI が `ssh-add -d` で外す)。`FY_EXPECT_CYCLE=<N>` はサイクル切替時 **MANDATORY**(N = 直前に閉じた cycle 番号。手順③の公開反映前に実行すると exit 7 で hard-stop)。続けて `git add` + `git commit` + `git push origin main`、`gh run watch` で deploy 完了監視
+④ Mac local: `FY_EXPECT_CYCLE=<N> OPERATOR_IDENTITY_KEY=~/.ssh/freedom-yield-operator-identity bash scripts/operator-local/gen-identity.sh`(**AI@Mac** が実行。identity 鍵は事前に operator が `ssh-add` で agent に載せておく = operator@TTY ① — 載っていないと AI の非対話セッションが passphrase プロンプトで止まる。ML-DSA 鍵も事前に operator が unlock しておく = operator@TTY ⑥ — 未 unlock・2 時間超は exit 5。exit 0 の後 AI が `ssh-add -d` で外す。ML-DSA 鍵は `gen-identity.sh` が自分で消す)。`FY_EXPECT_CYCLE=<N>` はサイクル切替時 **MANDATORY**(N = 直前に閉じた cycle 番号。手順③の公開反映前に実行すると exit 7 で hard-stop)。続けて `git add` + `git commit` + `git push origin main`、`gh run watch` で deploy 完了監視
 ⑤ validator host: `FY_EXPECT_CYCLE=<N> bash scripts/gen-anchor-source.sh`(値は `docs/CYCLE_GATE.md` の day-of value sheet)— 新 `anchor-source.json`(3-branch DAG)を compose。`cycle_number_observed` は 公開 `cycle-history.jsonl` の CLOSED_COUNT+1 から自己導出するが、`FY_EXPECT_CYCLE` を渡すと ordering guard が有効になり、CLOSED_COUNT と 不一致(= 手順③がまだ公開反映されていない)なら compose 前に **exit 9** で hard-stop する(未設定なら警告バナーのみで継続、初回 bootstrap 用)。**gen-identity.sh の exit 7 とは別条件** — `gen-anchor-source.sh` では exit 7 は既に「atomic write failed」の意味で使用中のため、意図的に番号を揃えていない(exit 7 と exit 9 を同じ意味と読まない)
 
   > この step は `side-effects: WARNING: state dir falls back to the production default … while FY_LIVE is not "1"` を**ちょうど 1 行**出す。**これは正常**: この script は当該 dir 配下の 2 本の JSONL を**読むだけ**で、live source から DAG を組むのが目的なので、production data を読むのが正しい。**警告文が勧める「テスト用に `FY_STATE_DIR` を sandbox に向ける」に従ってはいけない** — それは test 作者向けの案内で、従うと空の入力から DAG を組んでしまう。`FY_LIVE=1` を足す必要もない(この script は production state を一切書かないので、opt-in は読取の正しさとは無関係)。
@@ -389,8 +390,8 @@ export FY_EXPECT_CYCLE=<N>
 export OPERATOR_IDENTITY_KEY=~/.ssh/freedom-yield-operator-identity
 bash scripts/operator-local/gen-identity.sh
 git add public/api/identity.json public/api/identity.json.sig \
-        public/api/identity-history.jsonl \
-        public/.well-known/operator-identity.pub
+        public/api/identity.json.mldsa65.sig \
+        deploy/identity-pin-baseline.json deploy/publication.json
 git commit -m "feat(identity): re-sign for new cycle"
 git push origin main
 # GitHub Actions Deploy 完了を待つ (= Actions tab 目視 or `gh run watch`)

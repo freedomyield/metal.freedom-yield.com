@@ -169,6 +169,35 @@ jobs:
       # Mirrored in ci-main.yml because this workflow ignores pushes to main.
       - name: identity artifact pins still describe the repo
         run: bash scripts/check-identity-pins.sh --mode=repo
+      - name: check-identity-pq (structure only)
+        run: bash scripts/check-identity-pq.sh
+
+  identity-pq:
+    name: identity ML-DSA-65 suites (ubuntu-26.04)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    env:
+      FY_REQUIRE_PQ: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - name: openssl version
+        run: openssl version
+      - name: Set up schema validator (sanctioned installer, as in the tests job)
+        run: bash scripts/setup-schema-validator.sh
+      - name: identity ML-DSA-65 suites
+        run: |
+          set -u
+          rc=0
+          bash tests/identity-pq-lib/test-identity-pq-lib.sh || rc=1
+          bash tests/pq-identity-tools/test-pq-identity-tools.sh || rc=1
+          bash tests/gen-identity-pq/test-gen-identity-pq.sh || rc=1
+          bash tests/test-gen-identity-ordering-guard.sh || rc=1
+          bash tests/identity-kind-discipline/test-gen-identity-kind-discipline.sh || rc=1
+          bash tests/identity-pq-check/test-check-identity-pq.sh || rc=1
+          bash tests/identity-pq-docs/test-documented-pq-command.sh || rc=1
+          exit "$rc"
+      - name: ML-DSA-65 identity signature (schema v2 manifests)
+        run: bash scripts/check-identity-pq.sh --require-sig-verify
 
   publish-guard:
     name: publish-guard (host identifier / PII) on pushed/PR diff, fail-closed

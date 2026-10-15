@@ -66,6 +66,27 @@ A clean run prints `OK` and nothing else.
   absence, and committed content across the validation, genesis-guard,
   idempotency, and push-failure paths.
 
+## ML-DSA-65 identity key (pq-identity-*.sh)
+
+Post-quantum (FIPS 204) signing key for the identity manifest. Spec:
+`docs/superpowers/specs/2026-10-15-identity-pq-signature-design.md`.
+
+- `pq-identity-keygen.sh` — one-time. Creates the key as a scrypt-encrypted
+  seed-only PEM (no plaintext ever on disk) and writes the public key to
+  `public/.well-known/operator-identity-mldsa65.pub`. Never overwrites an
+  existing key (exit 3). Asks for the passphrase at the terminal.
+- `pq-identity-unlock.sh` — decrypts the key for signing (passphrase at the
+  terminal; needs a TTY). Refuses a key that does not match the committed
+  public key (exit 5). Run it yourself: `bash scripts/operator-local/pq-identity-unlock.sh`.
+- `pq-identity-lock.sh` — deletes the unlocked file. Idempotent.
+
+Key directory: `~/.freedom-yield-identity/` (outside the repo, mode 700).
+`gen-identity.sh` deletes the unlocked key itself right after signing
+(auto-lock); an unlocked key older than 2 hours is refused. The passphrase
+is never seen by the AI. Dashlane entry: named in the AI's ping, never in
+this repo. keygen and unlock refuse to run on the validator/web host (exit 99).
+Tests: `tests/pq-identity-tools/`.
+
 ## Phase 5 runbook
 
 The end-to-end procedure for generating the real operator identity

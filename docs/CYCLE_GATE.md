@@ -363,15 +363,21 @@ AddValidator を出さない — 登録した瞬間から uptime が測られる
 | **AI@Mac** | AI が実行する。operator は出力を読むだけ | Mac の repo working copy |
 | **AI@host** | AI が SSH 経由で実行する。operator は出力を読むだけ | validator host |
 
-**operator@TTY はこの runbook 全体で 5 箇所**: ① step 4 前の `ssh-add`、
+**operator@TTY はこの runbook 全体で 6 箇所**: ① step 4 前の `ssh-add`、
 ② 7a の testnet keystore unlock、③ 7c の mainnet keystore unlock、
 ④ 7c 末尾の mainnet keystore re-lock、
 ⑤ **testnet keystore の re-lock** (② で開けたものを閉じる。**7a の直後** —
-testnet keystore の最後の利用が 7a なので。遅くとも 7c 末尾)。
+testnet keystore の最後の利用が 7a なので。遅くとも 7c 末尾)、
+⑥ **step 4 前の ML-DSA 鍵 unlock** (`pq-identity-unlock.sh`。時系列では ① の
+直後で、① と同じ 1 行 `ssh-add … && bash scripts/operator-local/pq-identity-unlock.sh`
+として打つが、passphrase は別。**lock の打鍵は無い** — `gen-identity.sh` が署名の
+直後に自分で消す。番号を ⑥ にしたのは、①〜⑤ を参照する他の節の番号を動かさない
+ため)。
 **残りの code block はすべて AI が実行する** — 7a の
 `run-testnet-rehearsal.sh` 本体も含む (下の引用ブロック)。
 
-> 列挙の変遷: 2026-08-18 までは 5 箇所 (testnet re-lock 抜け)、2026-08-18 に
+> 列挙の変遷 (2026-10-15 追記: ML-DSA 鍵の unlock = ⑥ を足して 5 → 6 箇所。以下は
+> それ以前の経緯): 2026-08-18 までは 5 箇所 (testnet re-lock 抜け)、2026-08-18 に
 > testnet re-lock を足して 6 箇所、2026-10-07 の operator 決定で 7a 本体を
 > AI@Mac に移して現在の 5 箇所。数は同じ 5 でも中身は別物である。
 >
@@ -842,26 +848,39 @@ the values to pass on a given day are in the day-of value sheet above):
    と同じこと。記入例の 2026-10-07 なら 4 → 5)。
 4. **Mac —**
 
-   **前操作 (operator@TTY) — identity 鍵を ssh-agent に載せる。**
+   **前操作 (operator@TTY) — identity 鍵を ssh-agent に載せ、ML-DSA 鍵を unlock する。**
 
    ```sh
-   ssh-add ~/.ssh/freedom-yield-operator-identity
+   ssh-add ~/.ssh/freedom-yield-operator-identity && bash scripts/operator-local/pq-identity-unlock.sh
    ```
 
-   - **打つ人**: **operator 自身**。passphrase を入力するため、AI には渡さない。
+   - **打つ人**: **operator 自身**。passphrase を 2 回入力するため、AI にはどちらも
+     渡さない。1 つ目 (`ssh-add`) は ed25519 identity 鍵、2 つ目
+     (`pq-identity-unlock.sh`) は ML-DSA-65 鍵の passphrase。
      Dashlane の entry 名はこの repo には書かない — ピング送付時に AI が添える。
    - **目視するもの**: `Identity added: /Users/…/freedom-yield-operator-identity`
-     の 1 行。
+     の 1 行と、unlock スクリプト自身の完了表示。
    - **失敗したら**: `Bad passphrase` → entry 名を AI に確認して打ち直す。
      何も壊れないし何度でもやり直せる。
    - **なぜこれをやるか**: 下の `gen-identity.sh` は
      `ssh-keygen -Y sign -f "${OPERATOR_IDENTITY_KEY}"` を秘密鍵の path 直指定で
-     呼ぶ (`scripts/operator-local/gen-identity.sh:895`)。agent に載っていれば
+     呼ぶ (`scripts/operator-local/gen-identity.sh:963`)。agent に載っていれば
      以降の呼び出しで passphrase プロンプトが出ず、**AI が gen-identity を
      最後まで実行できる**。載せないと AI の非対話セッションがプロンプトで
      止まる。agent はセッションを跨がないので、**転換当日に改めて必要**
      (前日までの稽古で 1 度やっていても当日もう 1 度要る — 例: 9/1 の稽古と
-     9/4 当日)。
+     9/4 当日)。ML-DSA 鍵も同じ理由で当日の unlock が要る: 未 unlock、または
+     unlock から 2 時間超だと `gen-identity.sh` は exit 5 で止まる (時計で消えるわけではない)。
+   - **ML-DSA 鍵に lock の打鍵は無い**: この unlock 行は **unit 4 の直前に打つ**
+     (2 時間を過ぎると `gen-identity.sh` は古い unlock を exit 5 で拒否する。ただし平文の seed ファイルは `gen-identity.sh` が消費するか `pq-identity-lock.sh` が消すまで鍵ディレクトリに残る)。
+     `gen-identity.sh` は、冒頭の引数チェックを抜けた run では成功・失敗を問わず
+     unlock を消費する (自分で鍵を削除する)。したがって **unit 4 を再実行するときは
+     毎回新しく unlock し直す** (operator が stop 2 の unlock 行をもう一度打つ)。
+     `bash scripts/operator-local/pq-identity-lock.sh` が要るのは、unit 4 をそもそも
+     実行しなかった場合、または冒頭チェックの前に exit 1/6/99 で終わった場合だけ。
+     冪等で passphrase を伴わないので、迷ったら AI@Mac が実行してよい。
+     `gen-identity.sh` の exit 5 は ML-DSA 側の前提 (未 unlock・2 時間超) の不備、
+     exit 11 は ML-DSA の署名または自己検証の失敗。
 
    **本体 (AI@Mac):**
 
@@ -941,6 +960,15 @@ the values to pass on a given day are in the day-of value sheet above):
    The suite as a whole is the check that the cleanup was complete: `T6`, `T7`
    and `T14` read the real registry and the real manifest, and they are what
    go red if any bullet above is missed.
+
+   **commit に入れるファイル (これで全部 — 5 つ)**:
+   `git add public/api/identity.json public/api/identity.json.sig public/api/identity.json.mldsa65.sig deploy/identity-pin-baseline.json deploy/publication.json`。
+   `identity.json` と **両方の署名** (ed25519 の `.sig` と ML-DSA の
+   `.mldsa65.sig`) は `gen-identity.sh` が組で書く。**署名を 1 つでも落とすと、新しい
+   manifest が前の cycle の署名のまま公開される** (ssh-keygen -Y verify と unit 9 の
+   Phase 1 が落ちる。`.mldsa65.sig` を落とすと CI の `verify-identity` が
+   schema_version 2 の manifest で落ちる)。`git diff --cached --name-status` で
+   ちょうどこの 5 件になることを確かめてから commit する。
 
 5. **host —**
    ```sh

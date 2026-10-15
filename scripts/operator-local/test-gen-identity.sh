@@ -18,7 +18,8 @@
 #   - This harness routes everything through /tmp and prints PASS/FAIL only.
 #
 # Pre-commit validation policy: ALL schema validations in this script use the
-# LOCAL revised schema at canonical-repo public/api/identity.schema.v1.json.
+# LOCAL revised schema at canonical-repo public/api/identity.schema.v2.json
+# (schema_version 2: ed25519 + ML-DSA-65 signatures, 2026-10-15).
 # We do NOT fetch the live URL — pre-deploy, the live URL still serves the
 # pre-revision content and would not exercise the revised contract.
 #
@@ -29,7 +30,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REAL_REPO="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-LOCAL_SCHEMA="${REAL_REPO}/public/api/identity.schema.v1.json"
+LOCAL_SCHEMA="${REAL_REPO}/public/api/identity.schema.v2.json"
 LOCAL_EXAMPLE="${REAL_REPO}/public/api/identity.example.json"
 
 # Pinned AJV combination. Versions empirically verified to compile draft-2020-12,
@@ -48,6 +49,21 @@ ssh-keygen -t ed25519 -N "" -C "synthetic-test-key DO-NOT-USE" -f "${SYN_KEY}" -
 # 2. Fake REPO_ROOT skeleton: just an empty public/api/ dir is enough.
 FAKE_REPO="${TEST_ROOT}/fake-repo"
 mkdir -p "${FAKE_REPO}/public/api"
+
+# 2.5. Throwaway ML-DSA-65 key in tmp (gen-identity.sh signs with it too and
+#      deletes the unlocked copy on exit, so fy_pq_install runs before EVERY
+#      gen-identity.sh invocation below).
+# shellcheck source=../../tests/lib/pq-test-key.sh
+. "${REAL_REPO}/tests/lib/pq-test-key.sh"
+if ! fyipq__resolve_openssl >/dev/null; then
+	echo "FAIL: no OpenSSL >= ${FYIPQ_MIN_OPENSSL} found; gen-identity.sh needs it for ML-DSA-65." >&2
+	echo "      Install Homebrew openssl@3 or set FY_OPENSSL, then re-run." >&2
+	exit 1
+fi
+PQ_KEYDIR="${TEST_ROOT}/pq-keys"
+mkdir -p "${PQ_KEYDIR}"; chmod 700 "${PQ_KEYDIR}"
+fy_pq_make_master "${PQ_KEYDIR}"
+PQ_UNLOCKED="${PQ_KEYDIR}/${FYIPQ_UNLOCKED_BASENAME}"
 
 HAS_ERROR=0
 
@@ -101,7 +117,9 @@ fi
 # 3. Run gen-identity.sh against the fake repo + synthetic key.
 echo
 echo "=== running gen-identity.sh against synthetic key + fake repo ==="
+fy_pq_install "${PQ_KEYDIR}" "${FAKE_REPO}"
 OPERATOR_IDENTITY_KEY="${SYN_KEY}" \
+OPERATOR_PQ_UNLOCKED_KEY="${PQ_UNLOCKED}" \
 REPO_ROOT="${FAKE_REPO}" \
 KEY_IAT="2026-06-19T00:00:00Z" \
 KEY_EXP="2027-06-19T00:00:00Z" \
@@ -109,9 +127,10 @@ bash "${SCRIPT_DIR}/gen-identity.sh"
 
 OUT_JSON="${FAKE_REPO}/public/api/identity.json"
 OUT_SIG="${FAKE_REPO}/public/api/identity.json.sig"
+OUT_PQ_SIG="${FAKE_REPO}/public/api/identity.json.mldsa65.sig"
 
-if [ ! -f "${OUT_JSON}" ] || [ ! -f "${OUT_SIG}" ]; then
-	echo "FAIL: gen-identity.sh did not produce both output files" >&2
+if [ ! -f "${OUT_JSON}" ] || [ ! -f "${OUT_SIG}" ] || [ ! -f "${OUT_PQ_SIG}" ]; then
+	echo "FAIL: gen-identity.sh did not produce all three output files (identity.json, .sig, .mldsa65.sig)" >&2
 	exit 1
 fi
 
@@ -290,6 +309,16 @@ else
 fi
 rm -f "${ALLOWED}"
 
+# 6.5. ML-DSA-65 verify against the committed (fake-repo) public key.
+echo
+echo "=== 6.5. ML-DSA-65 verify against synthetic PQ public key ==="
+if fyipq__verify "$(fyipq__resolve_openssl)" "${FAKE_REPO}/${FYIPQ_PUB_REL}" "${OUT_JSON}" "${OUT_PQ_SIG}"; then
+	echo "  OK   ML-DSA-65 signature verifies against synthetic PQ pubkey"
+else
+	echo "  FAIL ML-DSA-65 signature verify against synthetic PQ pubkey" >&2
+	HAS_ERROR=1
+fi
+
 # 7. Validate synthetic gen-identity output against LOCAL revised schema (mandatory).
 #    Pre-commit test uses LOCAL revised schema, NEVER the live URL — the live
 #    URL still serves the pre-revision content until deploy.
@@ -319,8 +348,10 @@ ENV_TEST_STDERR="${TEST_ROOT}/env-test-stderr"
 mkdir -p "${ENV_TEST_REPO}/public/api"
 
 ENV_RC=0
+fy_pq_install "${PQ_KEYDIR}" "${ENV_TEST_REPO}"
 if CHAIN_ANCHOR_TX_ID="deadbeefcafebabe1234567890abcdef0123456789abcdefdeadbeef12345678" \
    OPERATOR_IDENTITY_KEY="${SYN_KEY}" \
+   OPERATOR_PQ_UNLOCKED_KEY="${PQ_UNLOCKED}" \
    REPO_ROOT="${ENV_TEST_REPO}" \
    KEY_IAT="2026-06-19T00:00:00Z" \
    KEY_EXP="2027-06-19T00:00:00Z" \
@@ -366,6 +397,13 @@ if [ -f "${ENV_TEST_REPO}/public/api/identity.json.sig" ]; then
 	HAS_ERROR=1
 else
 	echo "  OK   no signature file created"
+fi
+
+if [ -f "${ENV_TEST_REPO}/public/api/identity.json.mldsa65.sig" ]; then
+	echo "  FAIL ML-DSA signature file created despite ERROR exit" >&2
+	HAS_ERROR=1
+else
+	echo "  OK   no ML-DSA signature file created"
 fi
 
 echo

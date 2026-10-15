@@ -20,9 +20,15 @@
 #      tree — matches the algorithm documented in identity.schema.v1.json).
 #   3. Composes identity.json with artifact_manifest + artifact_root.
 #   4. Validates JSON with `jq empty`.
-#   5. Signs with `ssh-keygen -Y sign` using namespace freedom-yield/validator-identity.
-#   6. Self-verifies with `ssh-keygen -Y verify` before publishing.
-#   7. Atomically places identity.json and identity.json.sig in public/api/.
+#   5. Signs with `ssh-keygen -Y sign` using namespace freedom-yield/validator-identity,
+#      and ALSO with ML-DSA-65 (FIPS 204) via OpenSSL >= 3.5 using the unlocked
+#      key made by scripts/operator-local/pq-identity-unlock.sh (schema v2).
+#      The unlocked key is deleted as soon as it has signed, and on every exit
+#      path from the moment its path is resolved (auto-lock).
+#   6. Self-verifies BOTH signatures before publishing; publishes nothing unless
+#      both verify.
+#   7. Atomically places identity.json, identity.json.sig and
+#      identity.json.mldsa65.sig in public/api/.
 #
 # ---------------------------------------------------------------------------
 # kind discipline (C4, spec docs/superpowers/specs/2026-08-06-single-source-of-truth-design.md)
@@ -89,6 +95,20 @@
 #                           inside THIS SCRIPT's own repo — deliberately not
 #                           under REPO_ROOT, which tests point at a throwaway
 #                           output tree).
+#   OPERATOR_PQ_UNLOCKED_KEY path to the unlocked ML-DSA-65 private key made by
+#                           pq-identity-unlock.sh (default: the library's
+#                           fyipq__unlocked_path, i.e.
+#                           ${FY_PQ_KEY_DIR:-~/.freedom-yield-identity}/operator-identity-mldsa65.unlocked.pem).
+#                           Must carry that basename, sit outside the repo and
+#                           be fresher than FY_PQ_UNLOCK_MAX_AGE_SEC. DELETED
+#                           by this script on every exit once resolved.
+#   OPERATOR_PQ_PUBKEY      the committed ML-DSA-65 public key (default:
+#                           ${REPO_ROOT}/public/.well-known/operator-identity-mldsa65.pub).
+#                           The PQ signature must self-verify against it.
+#   FY_OPENSSL              OpenSSL binary to use for ML-DSA (must be OpenSSL,
+#                           not LibreSSL, >= 3.5). When set it is the ONLY
+#                           candidate; default: the Homebrew locations, then PATH.
+#   FY_PQ_UNLOCK_MAX_AGE_SEC refuse an unlocked key older than this (default 7200).
 #
 # Usage:
 #   export OPERATOR_IDENTITY_KEY=~/.ssh/freedom-yield-operator-identity
@@ -99,6 +119,9 @@
 #   2   signing or self-verification failed
 #   3   no live leaf artifact at all — refusing to publish an empty manifest
 #   4   computed artifact_root is not 64-hex
+#   5   ML-DSA precondition: no usable OpenSSL >= 3.5, the ML-DSA public key is
+#       missing / malformed / not ML-DSA-65, or the unlocked key is missing,
+#       stale, misnamed or inside the repo. The unlocked key is deleted.
 #   6   a retired env var (CHAIN_ANCHOR_*) is set
 #   7   FY_EXPECT_CYCLE ordering guard: the published cycle ledger is stale
 #   8   KEY_IAT diverges from the identity-history ledger
@@ -108,6 +131,7 @@
 #       failure this whole change removes.
 #   10  live artifacts exist but NONE of them is pinnable, so artifact_root
 #       would commit to nothing. Distinct from 3 (nothing live at all).
+#   11  ML-DSA signing or ML-DSA self-verification failed — nothing published.
 #   98  the operator identity private key path is inside the repo
 #   99  refusing to run: this looks like the validator host or the web host
 
@@ -184,6 +208,20 @@ REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 SCRIPT_REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PUBLICATION_REGISTRY="${FY_PUBLICATION_REGISTRY:-${SCRIPT_REPO_ROOT}/deploy/publication.json}"
 
+# shellcheck source=../lib/identity-pq.sh
+. "${SCRIPT_REPO_ROOT}/scripts/lib/identity-pq.sh"
+OUT_PQ_SIG="${REPO_ROOT}/${FYIPQ_SIG_REL}"
+PQ_PUB="${OPERATOR_PQ_PUBKEY:-${REPO_ROOT}/${FYIPQ_PUB_REL}}"
+PQ_UNLOCKED="${OPERATOR_PQ_UNLOCKED_KEY:-$(fyipq__unlocked_path)}"
+# Auto-lock: from here on, EVERY exit removes the unlocked ML-DSA key.
+FYID_CLEANUP_FILES=""
+fyid__cleanup() {
+	fyipq__drop_unlocked "${PQ_UNLOCKED}"
+	[ -n "${FYID_CLEANUP_FILES}" ] && rm -f ${FYID_CLEANUP_FILES}
+	return 0
+}
+trap fyid__cleanup EXIT
+
 OUT_DIR="${REPO_ROOT}/public/api"
 OUT_JSON="${OUT_DIR}/identity.json"
 OUT_SIG="${OUT_DIR}/identity.json.sig"
@@ -204,6 +242,18 @@ case "${KEY_REAL}" in
 		exit 98
 		;;
 esac
+
+# ---- 2.1. ML-DSA-65 preconditions (all exit 5). ----------------------------
+# Checked before any network probe so a missing unlock (e.g. a second run on
+# the same day, after the auto-lock removed the key) stops with a clear
+# instruction rather than a cryptic OpenSSL error at signing time.
+PQ_OPENSSL="$(fyipq__resolve_openssl)" || {
+	echo "ERROR: need OpenSSL >= ${FYIPQ_MIN_OPENSSL} (not LibreSSL). Install Homebrew openssl@3 or set FY_OPENSSL." >&2; exit 5; }
+[ -f "${PQ_PUB}" ] || { echo "ERROR: ML-DSA public key not found: ${PQ_PUB} — run pq-identity-keygen.sh first." >&2; exit 5; }
+PQ_FP="$(fyipq__pub_fingerprint "${PQ_PUB}")" || { echo "ERROR: ${PQ_PUB} is not a single PEM PUBLIC KEY block." >&2; exit 5; }
+[ "$(fyipq__pub_algorithm "${PQ_OPENSSL}" "${PQ_PUB}")" = "${FYIPQ_ALGORITHM}" ] || {
+	echo "ERROR: ${PQ_PUB} is not an ${FYIPQ_ALGORITHM} public key." >&2; exit 5; }
+fyipq__check_unlocked "${PQ_UNLOCKED}" "${REPO_ROOT}" "${SCRIPT_REPO_ROOT}" || exit 5
 
 NODE_ID="${NODE_ID:-NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v}"
 NETWORK="${NETWORK:-metal-mainnet}"
@@ -793,9 +843,10 @@ fi
 # ---- 4. Compose identity.json into a tmp file. ------------------------------
 
 TMP_JSON="$(mktemp -t identity.XXXXXX)"
-trap 'rm -f "${TMP_JSON}" "${TMP_JSON}.sig"' EXIT
+TMP_PQ_SIG="${TMP_JSON}.mldsa65.sig"
+FYID_CLEANUP_FILES="${TMP_JSON} ${TMP_JSON}.sig ${TMP_PQ_SIG}"
 
-COMMENT_TEXT="Operator identity manifest for Freedom Yield Metal Blockchain validator. Signed with the operator identity key whose public form is at /.well-known/operator-identity.pub. Verification uses ssh-keygen -Y verify (OpenSSH 8.0+). The validator's staker.key / BLS signer.key are NOT used in this signature. The runtime file is regenerated by scripts/operator-local/gen-identity.sh on the operator's local Mac."
+COMMENT_TEXT="Operator identity manifest for Freedom Yield Metal Blockchain validator. Signed with the operator identity key whose public form is at /.well-known/operator-identity.pub. Verification uses ssh-keygen -Y verify (OpenSSH 8.0+). The validator's staker.key / BLS signer.key are NOT used in this signature. The runtime file is regenerated by scripts/operator-local/gen-identity.sh on the operator's local Mac. An additional ML-DSA-65 (FIPS 204) signature is at /api/identity.json.mldsa65.sig; verify with OpenSSL 3.5+ (see verification_pq)."
 
 jq -n \
 	--arg comment "${COMMENT_TEXT}" \
@@ -818,9 +869,16 @@ jq -n \
 	--arg pin_policy_root "artifact_root is the Merkle root over exactly the sha256 values present in artifact_manifest, in alphabetical key order." \
 	--arg anchor_receipt_url "https://metal.freedom-yield.com/api/anchor-receipt.json" \
 	--arg anchor_history_url "https://metal.freedom-yield.com/api/anchor-history.jsonl" \
+	--arg pq_alg "${FYIPQ_ALGORITHM}" \
+	--arg pq_std "${FYIPQ_STANDARD}" \
+	--arg pq_ctx "${FYIPQ_CONTEXT}" \
+	--arg pq_pub_url "${FYIPQ_PUB_URL}" \
+	--arg pq_fp "${PQ_FP}" \
+	--arg pq_sig_url "${FYIPQ_SIG_URL}" \
+	--arg pq_min "${FYIPQ_MIN_OPENSSL}" \
 	'{
 		_comment: $comment,
-		schema_version: 1,
+		schema_version: 2,
 		brand: $brand,
 		node_id: $node_id,
 		node_id_authority: $node_id_authority,
@@ -839,6 +897,16 @@ jq -n \
 			namespace: $namespace,
 			principal: $principal,
 			signature_url: "https://metal.freedom-yield.com/api/identity.json.sig"
+		},
+		verification_pq: {
+			algorithm: $pq_alg,
+			standard: $pq_std,
+			context_string: $pq_ctx,
+			pubkey_url: $pq_pub_url,
+			pubkey_fingerprint: $pq_fp,
+			signature_url: $pq_sig_url,
+			method: ("openssl pkeyutl -verify -pubin -inkey operator-identity-mldsa65.pub -rawin -in identity.json -sigfile identity.json.mldsa65.sig -pkeyopt context-string:" + $pq_ctx),
+			minimum_openssl_version: $pq_min
 		},
 		artifact_manifest: $artifact_manifest,
 		artifact_root: $artifact_root,
@@ -896,10 +964,18 @@ ssh-keygen -Y sign -f "${OPERATOR_IDENTITY_KEY}" -n "${NAMESPACE}" "${TMP_JSON}"
 
 [[ -f "${TMP_JSON}.sig" ]] || { echo "ERROR: ssh-keygen did not produce ${TMP_JSON}.sig" >&2; exit 2; }
 
+# ML-DSA-65 over the SAME bytes, with the domain-separation context string.
+if ! fyipq__sign "${PQ_OPENSSL}" "${PQ_UNLOCKED}" "${TMP_JSON}" "${TMP_PQ_SIG}"; then
+	fyipq__drop_unlocked "${PQ_UNLOCKED}"
+	echo "ERROR: ML-DSA signing failed — refusing to publish." >&2; exit 11
+fi
+# Auto-lock: the key's only use is done.
+fyipq__drop_unlocked "${PQ_UNLOCKED}"
+
 # ---- 6. Self-verify before publishing. --------------------------------------
 
 ALLOWED="$(mktemp -t allowed_signers.XXXXXX)"
-trap 'rm -f "${TMP_JSON}" "${TMP_JSON}.sig" "${ALLOWED}"' EXIT
+FYID_CLEANUP_FILES="${FYID_CLEANUP_FILES} ${ALLOWED}"
 PUB_LINE="$(cat "${OPERATOR_IDENTITY_KEY}.pub")"
 printf '%s %s\n' "${PRINCIPAL}" "${PUB_LINE}" > "${ALLOWED}"
 
@@ -912,12 +988,18 @@ if ! ssh-keygen -Y verify \
 	exit 2
 fi
 
+# The committed .pub is what verifiers fetch: a sig that does not verify
+# against it (e.g. the .pub was swapped for another key) must not go out.
+if ! fyipq__verify "${PQ_OPENSSL}" "${PQ_PUB}" "${TMP_JSON}" "${TMP_PQ_SIG}"; then
+	echo "ERROR: ML-DSA self-verify failed against ${PQ_PUB} — refusing to publish." >&2; exit 11
+fi
+
 # ---- 7. Atomic publish. -----------------------------------------------------
 
 mv "${TMP_JSON}"     "${OUT_JSON}"
 mv "${TMP_JSON}.sig" "${OUT_SIG}"
-chmod 644 "${OUT_JSON}" "${OUT_SIG}"
-trap - EXIT
+mv "${TMP_PQ_SIG}"   "${OUT_PQ_SIG}"
+chmod 644 "${OUT_JSON}" "${OUT_SIG}" "${OUT_PQ_SIG}"
 rm -f "${ALLOWED}"
 
 LEAF_COUNT="$(jq -r '.artifact_manifest | length' "${OUT_JSON}")"
@@ -926,7 +1008,10 @@ UNPINNED_KEYS="$(jq -r '[.artifact_manifest | to_entries[] | select(.value | has
 
 echo "✓ wrote ${OUT_JSON}"
 echo "✓ wrote ${OUT_SIG}"
+echo "✓ wrote ${OUT_PQ_SIG}"
 echo "  fingerprint:          ${FP}"
+echo "  ML-DSA-65 fingerprint: ${PQ_FP}"
+echo "  ML-DSA key:          auto-locked (unlocked file removed)"
 echo "  namespace:            ${NAMESPACE}"
 echo "  principal:            ${PRINCIPAL}"
 echo "  iat / exp:            ${KEY_IAT} / ${KEY_EXP}"
@@ -945,7 +1030,9 @@ echo "       cp ${OPERATOR_IDENTITY_KEY}.pub ${REPO_ROOT}/public/.well-known/ope
 echo "  2. Stage the files produced by this run + the .pub copy:"
 echo "       git add public/api/identity.json \\"
 echo "               public/api/identity.json.sig \\"
+echo "               public/api/identity.json.mldsa65.sig \\"
 echo "               public/api/identity-history.jsonl \\"
-echo "               public/.well-known/operator-identity.pub"
+echo "               public/.well-known/operator-identity.pub \\"
+echo "               public/.well-known/operator-identity-mldsa65.pub"
 echo "  3. Review the diff and commit."
 echo "  4. After deploy, verify the live URLs with the command in docs/IDENTITY_VERIFICATION.md."

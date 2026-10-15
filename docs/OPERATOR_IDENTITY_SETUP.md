@@ -55,11 +55,14 @@ This is the operator-side runbook for Phase 5 of the
 [`project_merkle_dag_identity_anchor_design`](./IDENTITY_VERIFICATION.md)
 flow. It walks through generating the dedicated operator identity key
 on a local workstation, producing a signed `identity.json` with a real
-`artifact_root`, and publishing the three live surfaces:
+`artifact_root`, and publishing the three core live surfaces:
 
 - `https://metal.freedom-yield.com/api/identity.json`
 - `https://metal.freedom-yield.com/api/identity.json.sig`
 - `https://metal.freedom-yield.com/.well-known/operator-identity.pub`
+
+plus the additive ML-DSA-65 pair, `…/api/identity.json.mldsa65.sig` and
+`…/.well-known/operator-identity-mldsa65.pub` (see "ML-DSA-65 key" below).
 
 A separate document, [`IDENTITY_VERIFICATION.md`](./IDENTITY_VERIFICATION.md),
 covers the verifier side (how a third party can independently confirm
@@ -93,6 +96,9 @@ about the signature but dishonest about the artifact set it binds.
 | Operator identity public key | `~/.ssh/freedom-yield-operator-identity.pub` on the local Mac, and `public/.well-known/operator-identity.pub` in the repo | `0644`, world-readable |
 | Identity manifest | `public/api/identity.json` (generated locally, then committed) | `0644` |
 | Detached signature | `public/api/identity.json.sig` (generated locally, then committed) | `0644` |
+| ML-DSA-65 private key | Encrypted, outside the repo on the local Mac only (`pq-identity-keygen.sh`); unlocked copy is short-lived | `0600` |
+| ML-DSA-65 public key | `public/.well-known/operator-identity-mldsa65.pub` (PEM) | `0644` |
+| ML-DSA-65 signature | `public/api/identity.json.mldsa65.sig` (generated locally, then committed) | `0644` |
 | Passphrase backup | Password manager only (not in repo, not in cloud storage outside the manager) | n/a |
 
 The private key **never** leaves the local Mac and the password manager
@@ -229,20 +235,67 @@ private key (`OpenSSH` or `PEM` style). If the file is multi-line or
 contains a `BEGIN`-style header, you copied the private file by
 mistake — delete it immediately and copy the `.pub` file instead.
 
+This single-line, no-`BEGIN` rule is for the **ed25519** `.pub` only.
+The ML-DSA-65 public key (next section) is a PEM file and legitimately
+has one `-----BEGIN PUBLIC KEY-----` block: that header marks a public
+key. The thing to reject is any `PRIVATE KEY` header in either file.
+
+## ML-DSA-65 key (additive post-quantum signature)
+
+`identity.json` also carries an ML-DSA-65 (FIPS 204) signature from a
+second dedicated key, made by `gen-identity.sh` in the same run as the
+ed25519 signature. The key is generated once and then only unlocked for
+the minutes it is needed. OpenSSL 3.5 or later is required (Homebrew
+`openssl@3`; the macOS `/usr/bin/openssl` is LibreSSL and cannot do it).
+
+1. **Generate (once, on the Mac).** Run
+   `scripts/operator-local/pq-identity-keygen.sh`. It writes the
+   passphrase-encrypted private key outside the repository and writes the
+   public key to `public/.well-known/operator-identity-mldsa65.pub`. On a
+   terminal it asks for the passphrase three times (to encrypt, to verify,
+   and again to derive the public key); type the same one each time.
+2. **Back up.** Save the passphrase and the encrypted key to the Dashlane
+   entry named in the AI's ping. The passphrase is not recoverable; losing
+   it means generating a new key and publishing a key-rotation event.
+3. **Unlock at stop 2.** At the cycle-transition stop that signs the
+   manifest (stop 2), run `scripts/operator-local/pq-identity-unlock.sh`
+   and enter the passphrase. It writes a short-lived unlocked copy that
+   `gen-identity.sh` consumes and deletes.
+4. **Two-hour limit (not an auto-delete).** After two hours
+   `gen-identity.sh` refuses the unlocked copy (exit 5), and it also refuses
+   an in-repo copy. Nothing deletes the plaintext seed file at that point: it
+   stays in the key directory until `gen-identity.sh` consumes it or
+   `pq-identity-lock.sh` removes it.
+5. **Lock, only when needed.** `gen-identity.sh` consumes (deletes) the
+   unlock on any run that gets past its early argument checks, success or
+   failure. The lock script is needed only if `gen-identity.sh` was not run
+   at all, or exited 1, 6 or 99 before those checks. It is idempotent and
+   needs no passphrase, so run
+   `scripts/operator-local/pq-identity-lock.sh` whenever in doubt. It prints
+   the directory it checked; if that directory holds no encrypted ML-DSA key
+   it warns and exits 3 (wrong `HOME` or `FY_PQ_KEY_DIR`).
+
+The private key and the unlocked copy never enter the repository, CI, the
+validator host or the web host. Only the public key (PEM) and the detached
+signature are committed.
+
 ## Step 5 — Review the diff and commit
 
 ```sh
 git status
 git diff -- public/api/identity.json
 git diff -- public/.well-known/operator-identity.pub
+git diff -- public/.well-known/operator-identity-mldsa65.pub
 ```
 
-The three files to add are:
+The five files to add are:
 
 ```sh
 git add public/api/identity.json \
         public/api/identity.json.sig \
-        public/.well-known/operator-identity.pub
+        public/api/identity.json.mldsa65.sig \
+        public/.well-known/operator-identity.pub \
+        public/.well-known/operator-identity-mldsa65.pub
 ```
 
 Commit message style for this project: explain the *why*, single-purpose.
@@ -275,7 +328,7 @@ cleared at <timestamp>.
 git push origin main
 ```
 
-The GitHub Actions deploy job picks up the three files (none of them
+The GitHub Actions deploy job picks up the five files (none of them
 are in the rsync exclude list) and rsyncs them to the web host.
 
 ## Step 7 — Live verification
@@ -315,12 +368,14 @@ To revert Phase 5 cleanly:
 ```sh
 git rm public/api/identity.json \
        public/api/identity.json.sig \
-       public/.well-known/operator-identity.pub
+       public/api/identity.json.mldsa65.sig \
+       public/.well-known/operator-identity.pub \
+       public/.well-known/operator-identity-mldsa65.pub
 git commit -m "revert: pull Phase 5 identity artifacts pending re-issue"
 git push origin main
 ```
 
-On the next deploy, the three URLs return 404 again. The keypair on
+On the next deploy, the five URLs return 404 again. The keypair on
 the local Mac is unaffected; you can re-run `gen-identity.sh` and
 republish whenever the underlying issue is resolved.
 

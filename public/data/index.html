@@ -453,12 +453,13 @@ curl -s "https://metal.freedom-yield.com/api/peers-history/peers-${YDAY}.json.gz
 				<h3>identity.json</h3>
 				<span class="data-tag">GET · JSON · signed</span>
 			</header>
-			<p>Operator identity key-signed manifest bound to the declared Metal NodeID. Signed by a dedicated ed25519 operator identity key independent of the validator's BLS / staking keys. The accompanying detached signature is verified with <code>ssh-keygen -Y verify</code> using namespace <code>freedom-yield/validator-identity</code>.</p>
+			<p>Operator identity key-signed manifest bound to the declared Metal NodeID. Signed by a dedicated ed25519 operator identity key independent of the validator's BLS / staking keys. The accompanying detached signature is verified with <code>ssh-keygen -Y verify</code> using namespace <code>freedom-yield/validator-identity</code>. identity.json also carries an ML-DSA-65 (FIPS 204) signature. Verify it with OpenSSL 3.5 or later.</p>
 			<dl class="data-meta">
-				<dt>URL</dt><dd><a href="/api/identity.json"><code>/api/identity.json</code></a> (+ <a href="/api/identity.json.sig"><code>/api/identity.json.sig</code></a>)</dd>
+				<dt>URL</dt><dd><a href="/api/identity.json"><code>/api/identity.json</code></a> (+ <a href="/api/identity.json.sig"><code>/api/identity.json.sig</code></a>, <a href="/api/identity.json.mldsa65.sig"><code>/api/identity.json.mldsa65.sig</code></a>)</dd>
 				<dt>Public key</dt><dd><a href="/.well-known/operator-identity.pub"><code>/.well-known/operator-identity.pub</code></a> — ed25519, text/plain</dd>
+				<dt>ML-DSA-65 public key</dt><dd><a href="/.well-known/operator-identity-mldsa65.pub"><code>/.well-known/operator-identity-mldsa65.pub</code></a> — text/plain</dd>
 				<dt>Example</dt><dd><a href="/api/identity.example.json"><code>/api/identity.example.json</code></a></dd>
-				<dt>Formal schema</dt><dd><a href="/api/identity.schema.v1.json"><code>/api/identity.schema.v1.json</code></a> — draft 2020-12, includes artifact_manifest + artifact_root Merkle DAG hub</dd>
+				<dt>Formal schema</dt><dd><a href="/api/identity.schema.v2.json"><code>/api/identity.schema.v2.json</code></a> — draft 2020-12, includes artifact_manifest + artifact_root Merkle DAG hub</dd>
 				<dt>Verification procedure</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer" target="_blank"><code>docs/IDENTITY_VERIFICATION.md</code></a></dd>
 				<dt>Status</dt><dd>Active — first published 2026-06-22 as part of Phase 5; rotation cadence ~1 year</dd>
 			</dl>
@@ -469,7 +470,13 @@ curl -sSO https://metal.freedom-yield.com/api/identity.json.sig
 curl -sSO https://metal.freedom-yield.com/.well-known/operator-identity.pub
 echo "freedom-yield $(cat operator-identity.pub)" &gt; allowed_signers
 ssh-keygen -Y verify -f allowed_signers -I freedom-yield \
-  -n freedom-yield/validator-identity -s identity.json.sig &lt; identity.json</code></pre>
+  -n freedom-yield/validator-identity -s identity.json.sig &lt; identity.json
+
+# ML-DSA-65 (OpenSSL 3.5 or later)
+curl -sSfO https://metal.freedom-yield.com/api/identity.json
+curl -sSfO https://metal.freedom-yield.com/api/identity.json.mldsa65.sig
+curl -sSfO https://metal.freedom-yield.com/.well-known/operator-identity-mldsa65.pub
+openssl pkeyutl -verify -pubin -inkey operator-identity-mldsa65.pub -rawin -in identity.json -sigfile identity.json.mldsa65.sig -pkeyopt context-string:freedom-yield/validator-identity</code></pre>
 			</details>
 		</article>
 

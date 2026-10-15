@@ -54,7 +54,12 @@ skip_pass() {
 }
 
 [ -x "$SCRIPT" ] || { echo "FATAL: gen-identity.sh not executable at $SCRIPT" >&2; exit 1; }
+# gen-identity.sh also signs with ML-DSA-65 (schema v2), so a run that reaches
+# the end needs an OpenSSL >= 3.5 and a throwaway ML-DSA key.
+# shellcheck source=lib/pq-test-key.sh
+. "${REPO_SRC}/tests/lib/pq-test-key.sh"
 command -v ssh-keygen >/dev/null 2>&1 || skip_pass "ssh-keygen unavailable"
+fy_pq_prereq_or_skip skip_pass
 command -v xxd        >/dev/null 2>&1 || skip_pass "xxd unavailable (needed for the >1-leaf Merkle path)"
 
 # Refuse to run on anything that looks like a production host — gen-identity.sh
@@ -74,6 +79,7 @@ KEYDIR="$WORK/keys"; mkdir -p "$KEYDIR"
 if ! ssh-keygen -t ed25519 -N "" -C "genid-guard-test" -f "$KEYDIR/opkey" >/dev/null 2>&1; then
 	skip_pass "ssh-keygen could not generate an ed25519 test key"
 fi
+fy_pq_make_master "$KEYDIR" || { echo "FATAL: could not generate an ML-DSA test key" >&2; exit 1; }
 
 # Stub docroot: two live leaves so the artifact_manifest is non-empty AND at
 # least one of them is pinnable. cycle-history.jsonl is added/removed per case
@@ -125,12 +131,15 @@ run_genid() {
 	local fake_repo="$WORK/repo"
 	rm -rf "$fake_repo"
 	mkdir -p "$fake_repo/public/api"
+	# gen-identity.sh deletes the unlocked ML-DSA key on exit: re-create it.
+	fy_pq_install "$KEYDIR" "$fake_repo"
 	local -a envp=(
 		"PATH=${STUBBIN}:${PATH}"
 		"FY_STUB_DOCROOT=${DOCROOT}"
 		"REPO_ROOT=${fake_repo}"
 		"ARTIFACT_BASE=http://stub-host"
 		"OPERATOR_IDENTITY_KEY=${KEYDIR}/opkey"
+		"OPERATOR_PQ_UNLOCKED_KEY=${KEYDIR}/${FYIPQ_UNLOCKED_BASENAME}"
 	)
 	[ -n "$expect" ] && envp+=("FY_EXPECT_CYCLE=${expect}")
 	env "${envp[@]}" bash "$SCRIPT"

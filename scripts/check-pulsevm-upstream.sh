@@ -3,8 +3,8 @@
 # changes that would actually oblige this project to act, and stay silent
 # otherwise.
 #
-# CHAIN: none — read-only HTTP GETs against public third-party URLs (twelve
-#        per run with the default watch lists; see S5 and S7). No broadcast, no
+# CHAIN: none — read-only HTTP GETs against public third-party URLs (fourteen
+#        per run with the default watch lists; see S5, S7 and S8). No broadcast, no
 #        push, no signing, no chain RPC of any kind.
 # PRIME_DIRECTIVE: TESTNET-FIRST — this script has no broadcast pathway.
 #
@@ -49,7 +49,7 @@
 # changed" for that survey and which parts of it were re-measured directly.
 # So there is nothing to build against yet — only something to WATCH. This
 # script is that watch, and its entire design goal is to be silent until one
-# of eight specific things becomes true.
+# of nine specific things becomes true.
 #
 # ---------------------------------------------------------------------------
 # THE ENDPOINTS PAGE AS MEASURED 2026-08-19 (S2, fetched and read directly)
@@ -88,7 +88,7 @@
 # deliberately not attempted here.)
 #
 # ---------------------------------------------------------------------------
-# WHAT IT READS (seven sources — none of them a chain RPC; see below)
+# WHAT IT READS (eight sources — none of them a chain RPC; see below)
 # ---------------------------------------------------------------------------
 #   S1  api.github.com/repos/MetalBlockchain/pulsevm/releases/latest
 #         -> .tag_name                       (recorded; never notifies — see below)
@@ -117,6 +117,14 @@
 #         -> whether each page mentions PulseVM, and any 64-hex value on a
 #            line that also says "chain id". Redirects are followed. A page
 #            that cannot be read does NOT fail the run (see T8).
+#
+#   S8  PR #116 of MetalBlockchain/pulsevm (api.github.com .../pulls/116) and
+#       its docs/ml-dsa.md (raw.githubusercontent.com, read from the PR's head
+#       branch while the PR is open, from main once merged). Two requests at
+#       most. Records the PR state (open|merged|closed) and the ML-DSA
+#       parameter token(s) after `--key-type` (MLDSA44|MLDSA65|MLDSA87) —
+#       the parameter Metallicus uses for account keys, which the operator
+#       identity PQ signature follows (spec §3.1).
 #
 # ---------------------------------------------------------------------------
 # WHY npm IS WATCHED AT ALL (S5)
@@ -274,6 +282,18 @@
 #         A MATCH IS A WORD ON A PAGE, NOT A PLAN. The alert says so, and
 #         names reading the page as the obligation.
 #
+#   T9  [default]  S8: the recorded PR #116 state moved (open -> merged or
+#         closed), or the recorded `--key-type` token set in docs/ml-dsa.md
+#         moved (baseline MLDSA65, measured 2026-10-15). A reading with no
+#         recorded history (a state file written before S8) is compared with
+#         the baseline constants: equal -> silent and recorded, different ->
+#         alert. `unknown` (PR closed, or merged with the doc missing) is no
+#         reading and never alerts; the next real reading is compared with the
+#         last known one (else the baseline). While the PR is OPEN an
+#         unreadable PR or doc is the ordinary exit 4 path and a doc with no
+#         `--key-type` token is exit 5; once merged the doc is read softly so
+#         the PR-state alert is never hidden behind an outage counter.
+#
 #   BASELINE  [high]  no usable prior state -> fires once, says exactly that,
 #         and records a baseline. High because until it runs, this monitor was
 #         not actually watching anything, and the operator should know that
@@ -414,7 +434,7 @@
 # ---------------------------------------------------------------------------
 # FETCH FAILURES (exit 4 / 5) — one page per outage, not one per day
 # ---------------------------------------------------------------------------
-# Every one of the seven sources is someone else's property: a community
+# Every one of the eight sources is someone else's property: a community
 # developer's Vercel deployment, GitHub's unauthenticated API (60 requests/hour
 # per IP, which answers 403 — not 429 — when exhausted), Hyperion, and the npm
 # registry. Paging the operator every
@@ -458,7 +478,7 @@
 # EXIT CODES
 # ---------------------------------------------------------------------------
 #   0  all hard sources read, nothing fired (verbose: one heartbeat line)
-#   3  at least one trigger fired (T1 / T2 / T3 / T4 / T5 / T6 / T7 / T8 / BASELINE) — alerts
+#   3  at least one trigger fired (T1 / T2 / T3 / T4 / T5 / T6 / T7 / T8 / T9 / BASELINE) — alerts
 #   4  a source did not return HTTP 200 after retrying
 #   5  a source returned 200 but its body could not be parsed (or jq is absent)
 #   6  scripts/lib/side-effects.sh is missing/unreadable
@@ -533,6 +553,8 @@
 #   FYD_CURL              curl binary (tests point this at a stub)
 #   FYD_FETCH_ATTEMPTS    max attempts per fetch (default 3)
 #   FYD_RETRY_SLEEP       seconds between attempts (default 3; tests set 0)
+#
+#   PULSEVM_PR116_URL / PULSEVM_RAW_BASE_URL   S8 sources (tests point these at a stub)
 #
 #   PULSEVM_UPSTREAM_LOG        file log (default: repo-local
 #                               ${SCRIPT_DIR}/../logs/pulsevm-upstream.log —
@@ -662,6 +684,8 @@ ENDPOINTS_URL="${PULSEVM_ENDPOINTS_URL:-https://pulsevm.dev/network/endpoints.md
 HEALTH_URL="${PULSEVM_HEALTH_URL:-https://a-chain-alpine-hyperion.metalblockchain.org/v2/health}"
 LLMS_URL="${PULSEVM_LLMS_URL:-https://pulsevm.dev/llms.txt}"
 METALGO_RELEASES_URL="${PULSEVM_METALGO_RELEASES_URL:-https://api.github.com/repos/MetalBlockchain/metalgo/releases?per_page=30}"
+PR116_URL="${PULSEVM_PR116_URL:-https://api.github.com/repos/MetalBlockchain/pulsevm/pulls/116}"
+RAW_BASE_URL="${PULSEVM_RAW_BASE_URL:-https://raw.githubusercontent.com}"
 OFFICIAL_URLS_DEFAULT='https://metallicus.com/ https://www.metalblockchain.org/ https://docs.metalblockchain.org/ https://xprnetwork.org/'
 OFFICIAL_URLS="${PULSEVM_OFFICIAL_URLS:-$OFFICIAL_URLS_DEFAULT}"
 OFFICIAL_MENTION_RE_DEFAULT='pulse[ -]?vm'
@@ -855,6 +879,20 @@ if [ "$PREV_OK" -eq 1 ]; then
 	fi
 	PREV_OFFICIAL_UNREAD="$(jq -r '.observations.official_unread_runs // 0' "$STATE" 2>/dev/null || echo 0)"
 	[[ "$PREV_OFFICIAL_UNREAD" =~ ^[0-9]+$ ]] || PREV_OFFICIAL_UNREAD=0
+fi
+# S8 history (added 2026-10-15). Like T6/T8 it is NOT part of the PREV_OK gate:
+# an older schema-2 file simply has no record; see the baselines below.
+# T9 baselines (measured 2026-10-15): a reading with no recorded history is
+# compared with these, so a first observation that already differs ALERTS.
+T9_BASELINE_PR="open"
+T9_BASELINE_MLDSA="MLDSA65"
+PREV_PR116=""
+PREV_MLDSA=""
+PREV_MLDSA_LAST=""
+if [ "$PREV_OK" -eq 1 ]; then
+	PREV_MLDSA_LAST="$(jq -r '.observations.mldsa_last_known_param | select(type == "string")' "$STATE" 2>/dev/null || true)"
+	PREV_PR116="$(jq -r '.observations.pr116_state | select(type == "string")' "$STATE" 2>/dev/null || true)"
+	PREV_MLDSA="$(jq -r '.observations.mldsa_example_param | select(type == "string")' "$STATE" 2>/dev/null || true)"
 fi
 [ -f "$TMP/prev_chain_ids" ]      || : > "$TMP/prev_chain_ids"
 [ -f "$TMP/prev_pages" ]          || : > "$TMP/prev_pages"
@@ -1161,6 +1199,62 @@ for official_url in $OFFICIAL_URLS; do
 done
 if [ -n "$OFFICIAL_UNREAD_LIST" ]; then CUR_OFFICIAL_UNREAD=$((PREV_OFFICIAL_UNREAD + 1)); else CUR_OFFICIAL_UNREAD=0; fi
 
+# ---- S8: PR #116 and the ML-DSA parameter Metallicus uses (T9) -----------
+# Two requests at most, same transport and retry rules as every other source.
+# A failure here is the ordinary exit 4/5 path: an unreadable source compared
+# nothing, so it can never read as a parameter change.
+fetch_or_fail "S8 PR #116" "$PR116_URL" "$TMP/s8_pr.json"
+CUR_PR116="$(jq -er 'if (.merged // false) == true then "merged"
+                     elif .state == "open" then "open"
+                     elif .state == "closed" then "closed"
+                     else empty end' "$TMP/s8_pr.json" 2>/dev/null || true)"
+[ -n "$CUR_PR116" ] || fail_and_exit 5 "S8 returned 200 but has no usable .state/.merged (${PR116_URL})"
+S8_DOC_REPO="MetalBlockchain/pulsevm"
+S8_DOC_REF="main"
+if [ "$CUR_PR116" = "open" ]; then
+	# While open the file lives only on the PR's head branch (possibly a fork).
+	S8_DOC_REPO="$(jq -r '.head.repo.full_name // empty' "$TMP/s8_pr.json" 2>/dev/null || true)"
+	S8_DOC_REF="$(jq -r '.head.ref // empty' "$TMP/s8_pr.json" 2>/dev/null || true)"
+fi
+# "unknown" = no reading (PR closed, or merged with the doc absent/changed
+# shape). It is never itself an alert; the next real reading is compared with
+# the last known non-unknown value, or the baseline if none was ever known.
+CUR_MLDSA="unknown"
+if [ "$CUR_PR116" != "closed" ]; then
+	if ! { [[ "$S8_DOC_REPO" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] \
+		&& [[ "$S8_DOC_REF" =~ ^[A-Za-z0-9._/-]+$ ]] && [[ "$S8_DOC_REF" != *..* ]]; }; then
+		[ "$CUR_PR116" = "open" ] && fail_and_exit 5 "S8 PR head repo/ref unusable (${PR116_URL})"
+	else
+		S8_DOC_URL="${RAW_BASE_URL}/${S8_DOC_REPO}/${S8_DOC_REF}/docs/ml-dsa.md"
+		if [ "$CUR_PR116" = "open" ]; then
+			fetch_or_fail "S8 ml-dsa doc" "$S8_DOC_URL" "$TMP/s8_doc.md"
+		else
+			# Merged: the PR state change is the news; a missing doc must not
+			# hide it behind an outage counter.
+			s8_code="$(fetch "$S8_DOC_URL" "$TMP/s8_doc.md")"
+			if [ "$s8_code" != "200" ]; then
+				: > "$TMP/s8_doc.md"
+				log "WARN S8 merged but ${S8_DOC_URL} HTTP=${s8_code} — parameter reading is unknown this run"
+			fi
+		fi
+		# Only the token(s) after --key-type: other mentions are not the
+		# parameter Metallicus chose for account keys.
+		S8_TOKENS="$(grep -oE -- '--key-type[ =]+MLDSA(44|65|87)' "$TMP/s8_doc.md" 2>/dev/null \
+			| grep -oE 'MLDSA(44|65|87)' | sort -u | paste -sd'|' - || true)"
+		if [ -n "$S8_TOKENS" ]; then
+			CUR_MLDSA="$S8_TOKENS"
+		elif [ "$CUR_PR116" = "open" ]; then
+			fail_and_exit 5 "S8 doc has no --key-type MLDSA token (${S8_DOC_URL})"
+		fi
+	fi
+fi
+# Last known non-unknown reading (state field, else the old field, else baseline).
+S8_LAST_KNOWN="$PREV_MLDSA_LAST"
+[ -n "$S8_LAST_KNOWN" ] && [ "$S8_LAST_KNOWN" != "unknown" ] || S8_LAST_KNOWN=""
+[ -n "$S8_LAST_KNOWN" ] || { [ -n "$PREV_MLDSA" ] && [ "$PREV_MLDSA" != "unknown" ] && S8_LAST_KNOWN="$PREV_MLDSA"; } || true
+S8_EFF_MLDSA="${S8_LAST_KNOWN:-$T9_BASELINE_MLDSA}"
+if [ "$CUR_MLDSA" = "unknown" ]; then CUR_MLDSA_LAST="$S8_EFF_MLDSA"; else CUR_MLDSA_LAST="$CUR_MLDSA"; fi
+
 # ---- evaluate triggers ---------------------------------------------------
 # PRIORITY SPLIT. Not every trigger deserves the same channel. Three of them
 # say "the ground moved, go and act": the sync notice disappearing (T1), a
@@ -1369,6 +1463,24 @@ if [ "$CUR_OFFICIAL_UNREAD" -eq "$FAILURE_ALERT_AFTER" ] && [ "$CUR_OFFICIAL_UNR
 	add_fire "T8" "OBSERVED: ${CUR_OFFICIAL_UNREAD} consecutive runs could not read Metallicus-owned page(s): ${OFFICIAL_UNREAD_LIST}. NOT ESTABLISHED: anything about those pages — a run that could not read a page compared nothing for it. OBLIGATION: check whether the URL moved or the site is down, and fix PULSEVM_OFFICIAL_URLS (or the default list) so T8 is not silently blind. Paged once per outage"
 fi
 
+# T9 — PR #116 / the ML-DSA parameter. A pure diff against the last recorded
+# reading; with no record (a state file older than S8) it is a first
+# observation: logged and recorded by the state write below, and compared
+# with the constant baseline (T9_BASELINE_PR) rather than skipped — so a first
+# observation that already differs from the baseline DOES alert.
+[ -n "$PREV_PR116" ] || log "INFO first observation of PR #116 (state=${CUR_PR116}, baseline ${T9_BASELINE_PR}) — compared with the baseline"
+if [ "$CUR_PR116" != "${PREV_PR116:-$T9_BASELINE_PR}" ]; then
+	add_fire "T9" "OBSERVED: PR #116 of MetalBlockchain/pulsevm went from ${PREV_PR116:-$T9_BASELINE_PR} to ${CUR_PR116}. NOT ESTABLISHED: that Metallicus' account keys changed parameter or that any network accepts ML-DSA keys; this run read the PR state, not the code. OBLIGATION: read the PR and docs/ml-dsa.md, then review the identity PQ key against spec §3.1 (identity PQ key follows Metallicus' basic choice — review rotation)"
+fi
+if [ "$CUR_MLDSA" = "unknown" ]; then
+	log "INFO ML-DSA example parameter has no reading this run (unknown) — never paged; the next reading is compared with ${S8_EFF_MLDSA}"
+else
+	[ -n "$PREV_MLDSA" ] || [ -n "$PREV_MLDSA_LAST" ] || log "INFO first observation of the ML-DSA example parameter (${CUR_MLDSA}, baseline ${T9_BASELINE_MLDSA}) — compared with the baseline"
+	if [ "$CUR_MLDSA" != "$S8_EFF_MLDSA" ]; then
+		add_fire "T9" "OBSERVED: the --key-type parameter in PulseVM's docs/ml-dsa.md went from ${S8_EFF_MLDSA} to ${CUR_MLDSA}. NOT ESTABLISHED: that Metallicus has made that its basic choice; a docs example can differ from what ships. OBLIGATION: read the doc and the PR, then review the identity PQ key against spec §3.1 (identity PQ key follows Metallicus' basic choice — review rotation)"
+	fi
+fi
+
 # Release tag movement is recorded, never paged.
 if [ "$PREV_OK" -eq 1 ] && [ -n "$PREV_TAG" ] && [ "$PREV_TAG" != "$CUR_TAG" ]; then
 	log "INFO release tag ${PREV_TAG} -> ${CUR_TAG} (recorded, not a trigger)"
@@ -1401,11 +1513,16 @@ if [ -n "$CHAIN_IDS_JSON" ] && [ -n "$PAGES_JSON" ] && [ -n "$NPM_FOUND_JSON" ] 
 		--argjson metalgo_tags "$METALGO_TAGS_JSON" \
 		--argjson official "$OFFICIAL_JSON" \
 		--argjson official_unread "$CUR_OFFICIAL_UNREAD" \
+		--arg pr116 "$CUR_PR116" \
+		--arg mldsa "$CUR_MLDSA" \
+		--arg mldsa_last "$CUR_MLDSA_LAST" \
 		'{release_tag: $tag, sync_notice_present: $sync, mainnet_section_present: $mainnet,
 		  head_block: $head, chain_ids: $chain_ids, pages: $pages,
 		  npm_watch: $npm_watch, npm_discovered: $npm_discovered,
 		  metalgo_mainnet_tags: $metalgo_tags, official_pages: $official,
-		  official_unread_runs: $official_unread}' 2>/dev/null || true)"
+		  official_unread_runs: $official_unread,
+		  pr116_state: $pr116, mldsa_example_param: $mldsa,
+		  mldsa_last_known_param: $mldsa_last}' 2>/dev/null || true)"
 fi
 if [ -z "$CUR_OBS" ]; then
 	# Composing our OWN record failed — that is a local defect, not an
