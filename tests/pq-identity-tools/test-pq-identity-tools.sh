@@ -40,7 +40,8 @@ run pq-identity-keygen.sh "$PW"; rc=$?
 [ "$rc" -eq 3 ] && [ "$(fyipq__sha256_hex < "$ENC")" = "$h1" ] && pass "T3 second keygen exit 3, key unchanged" || bad "T3 rc=$rc"
 # T4 unlock
 run pq-identity-unlock.sh "$PW"; rc=$?
-mode="$(stat -f %Lp "$UNL" 2>/dev/null || stat -c %a "$UNL" 2>/dev/null)"
+mode="$(stat -c %a "$UNL" 2>/dev/null)"
+case "$mode" in ''|*[!0-9]*) mode="$(stat -f %Lp "$UNL" 2>/dev/null)";; esac
 printf 'msg\n' > "$WORK/msg"
 if [ "$rc" -eq 0 ] && [ "$mode" = "600" ] && fyipq__sign "$OSSL" "$UNL" "$WORK/msg" "$WORK/sig" && fyipq__verify "$OSSL" "$PUB" "$WORK/msg" "$WORK/sig"; then
 	pass "T4 unlock: mode 600, signs, verifies against published pub"
