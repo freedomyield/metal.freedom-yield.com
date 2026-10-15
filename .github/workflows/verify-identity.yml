@@ -8,8 +8,8 @@ name: verify-identity-manifest
 #   is missing, the job exits 0 with a "not yet live — skipping" message instead
 #   of failing the build. Once all three are present, verification becomes
 #   strict — a bad signature fails the build.
-#   This skip-if-missing applies to the ed25519 trio ONLY. The ML-DSA-65 step
-#   never skips for a schema v2 manifest: a missing .mldsa65.sig / .pub or a
+#   This skip-if-missing applies to the ed25519 trio ONLY. The ML-DSA-87 step
+#   never skips for a schema v2 manifest: a missing .mldsa87.sig / .pub or a
 #   bad signature fails the build (scripts/check-identity-pq.sh
 #   --require-sig-verify). A schema v1 manifest expects no ML-DSA signature.
 #   Runs on ubuntu-26.04 because ML-DSA needs OpenSSL >= 3.5.
@@ -26,8 +26,8 @@ on:
       - "public/api/identity.json"
       - "public/api/identity.json.sig"
       - "public/.well-known/operator-identity.pub"
-      - "public/api/identity.json.mldsa65.sig"
-      - "public/.well-known/operator-identity-mldsa65.pub"
+      - "public/api/identity.json.mldsa87.sig"
+      - "public/.well-known/operator-identity-mldsa87.pub"
       - "scripts/check-identity-pq.sh"
       - "scripts/lib/identity-pq.sh"
       - ".github/workflows/verify-identity.yml"
@@ -36,8 +36,8 @@ on:
       - "public/api/identity.json"
       - "public/api/identity.json.sig"
       - "public/.well-known/operator-identity.pub"
-      - "public/api/identity.json.mldsa65.sig"
-      - "public/.well-known/operator-identity-mldsa65.pub"
+      - "public/api/identity.json.mldsa87.sig"
+      - "public/.well-known/operator-identity-mldsa87.pub"
       - "scripts/check-identity-pq.sh"
       - "scripts/lib/identity-pq.sh"
       - ".github/workflows/verify-identity.yml"
@@ -93,5 +93,5 @@ jobs:
 
       - name: openssl version
         run: openssl version
-      - name: verify ML-DSA-65 signature (schema v2 manifests)
+      - name: verify ML-DSA-87 signature (schema v2 manifests)
         run: bash scripts/check-identity-pq.sh --require-sig-verify

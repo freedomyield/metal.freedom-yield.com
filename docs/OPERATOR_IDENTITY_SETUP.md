@@ -61,8 +61,8 @@ on a local workstation, producing a signed `identity.json` with a real
 - `https://metal.freedom-yield.com/api/identity.json.sig`
 - `https://metal.freedom-yield.com/.well-known/operator-identity.pub`
 
-plus the additive ML-DSA-65 pair, `…/api/identity.json.mldsa65.sig` and
-`…/.well-known/operator-identity-mldsa65.pub` (see "ML-DSA-65 key" below).
+plus the additive ML-DSA-87 pair, `…/api/identity.json.mldsa87.sig` and
+`…/.well-known/operator-identity-mldsa87.pub` (see "ML-DSA-87 key" below).
 
 A separate document, [`IDENTITY_VERIFICATION.md`](./IDENTITY_VERIFICATION.md),
 covers the verifier side (how a third party can independently confirm
@@ -96,9 +96,9 @@ about the signature but dishonest about the artifact set it binds.
 | Operator identity public key | `~/.ssh/freedom-yield-operator-identity.pub` on the local Mac, and `public/.well-known/operator-identity.pub` in the repo | `0644`, world-readable |
 | Identity manifest | `public/api/identity.json` (generated locally, then committed) | `0644` |
 | Detached signature | `public/api/identity.json.sig` (generated locally, then committed) | `0644` |
-| ML-DSA-65 private key | Encrypted, outside the repo on the local Mac only (`pq-identity-keygen.sh`); unlocked copy is short-lived | `0600` |
-| ML-DSA-65 public key | `public/.well-known/operator-identity-mldsa65.pub` (PEM) | `0644` |
-| ML-DSA-65 signature | `public/api/identity.json.mldsa65.sig` (generated locally, then committed) | `0644` |
+| ML-DSA-87 private key | Encrypted, outside the repo on the local Mac only (`pq-identity-keygen.sh`); unlocked copy is short-lived | `0600` |
+| ML-DSA-87 public key | `public/.well-known/operator-identity-mldsa87.pub` (PEM) | `0644` |
+| ML-DSA-87 signature | `public/api/identity.json.mldsa87.sig` (generated locally, then committed) | `0644` |
 | Passphrase backup | Password manager only (not in repo, not in cloud storage outside the manager) | n/a |
 
 The private key **never** leaves the local Mac and the password manager
@@ -236,13 +236,13 @@ contains a `BEGIN`-style header, you copied the private file by
 mistake — delete it immediately and copy the `.pub` file instead.
 
 This single-line, no-`BEGIN` rule is for the **ed25519** `.pub` only.
-The ML-DSA-65 public key (next section) is a PEM file and legitimately
+The ML-DSA-87 public key (next section) is a PEM file and legitimately
 has one `-----BEGIN PUBLIC KEY-----` block: that header marks a public
 key. The thing to reject is any `PRIVATE KEY` header in either file.
 
-## ML-DSA-65 key (additive post-quantum signature)
+## ML-DSA-87 key (additive post-quantum signature)
 
-`identity.json` also carries an ML-DSA-65 (FIPS 204) signature from a
+`identity.json` also carries an ML-DSA-87 (FIPS 204) signature from a
 second dedicated key, made by `gen-identity.sh` in the same run as the
 ed25519 signature. The key is generated once and then only unlocked for
 the minutes it is needed. OpenSSL 3.5 or later is required (Homebrew
@@ -251,7 +251,7 @@ the minutes it is needed. OpenSSL 3.5 or later is required (Homebrew
 1. **Generate (once, on the Mac).** Run
    `scripts/operator-local/pq-identity-keygen.sh`. It writes the
    passphrase-encrypted private key outside the repository and writes the
-   public key to `public/.well-known/operator-identity-mldsa65.pub`. On a
+   public key to `public/.well-known/operator-identity-mldsa87.pub`. On a
    terminal it asks for the passphrase three times (to encrypt, to verify,
    and again to derive the public key); type the same one each time.
 2. **Back up.** Save the passphrase and the encrypted key to the Dashlane
@@ -285,7 +285,7 @@ signature are committed.
 git status
 git diff -- public/api/identity.json
 git diff -- public/.well-known/operator-identity.pub
-git diff -- public/.well-known/operator-identity-mldsa65.pub
+git diff -- public/.well-known/operator-identity-mldsa87.pub
 ```
 
 The five files to add are:
@@ -293,9 +293,9 @@ The five files to add are:
 ```sh
 git add public/api/identity.json \
         public/api/identity.json.sig \
-        public/api/identity.json.mldsa65.sig \
+        public/api/identity.json.mldsa87.sig \
         public/.well-known/operator-identity.pub \
-        public/.well-known/operator-identity-mldsa65.pub
+        public/.well-known/operator-identity-mldsa87.pub
 ```
 
 Commit message style for this project: explain the *why*, single-purpose.
@@ -368,9 +368,9 @@ To revert Phase 5 cleanly:
 ```sh
 git rm public/api/identity.json \
        public/api/identity.json.sig \
-       public/api/identity.json.mldsa65.sig \
+       public/api/identity.json.mldsa87.sig \
        public/.well-known/operator-identity.pub \
-       public/.well-known/operator-identity-mldsa65.pub
+       public/.well-known/operator-identity-mldsa87.pub
 git commit -m "revert: pull Phase 5 identity artifacts pending re-issue"
 git push origin main
 ```

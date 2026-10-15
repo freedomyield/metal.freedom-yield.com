@@ -173,7 +173,7 @@ jobs:
         run: bash scripts/check-identity-pq.sh
 
   identity-pq:
-    name: identity ML-DSA-65 suites (ubuntu-26.04)
+    name: identity ML-DSA-87 suites (ubuntu-26.04)
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     env:
@@ -184,7 +184,7 @@ jobs:
         run: openssl version
       - name: Set up schema validator (sanctioned installer, as in the tests job)
         run: bash scripts/setup-schema-validator.sh
-      - name: identity ML-DSA-65 suites
+      - name: identity ML-DSA-87 suites
         run: |
           set -u
           rc=0
@@ -196,7 +196,7 @@ jobs:
           bash tests/identity-pq-check/test-check-identity-pq.sh || rc=1
           bash tests/identity-pq-docs/test-documented-pq-command.sh || rc=1
           exit "$rc"
-      - name: ML-DSA-65 identity signature (schema v2 manifests)
+      - name: ML-DSA-87 identity signature (schema v2 manifests)
         run: bash scripts/check-identity-pq.sh --require-sig-verify
 
   publish-guard:
