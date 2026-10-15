@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/operator-local/pq-identity-unlock.sh
 #
-# Decrypt the operator identity ML-DSA-65 key for signing. gen-identity.sh deletes the unlocked file after signing. After 2 hours gen-identity.sh REFUSES the file (exit 5), but the plaintext seed stays in the key dir until gen-identity.sh consumes it or pq-identity-lock.sh removes it.
+# Decrypt the operator identity ML-DSA-87 key for signing. gen-identity.sh deletes the unlocked file after signing. After 2 hours gen-identity.sh REFUSES the file (exit 5), but the plaintext seed stays in the key dir until gen-identity.sh consumes it or pq-identity-lock.sh removes it.
 #
 # MUST NOT BE RUN ON VALIDATOR HOST OR WEB HOST (operator's local Mac only).
 # Never reads validator keys. The passphrase is typed by the operator at the
