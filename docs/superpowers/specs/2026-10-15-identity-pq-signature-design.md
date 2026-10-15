@@ -285,10 +285,12 @@ Every property claimed below is proven by a mutation that makes its test fail
 | Seed never appears in output or logs | grep test over all output |
 | The verification command in the docs works verbatim | run the documented line as-is in the test |
 
-Watch list additions (baselines 2026-10-15): PR #116 merge state (OPEN);
-activation height (none). (Rev 4: the former "ML-DSA parameter used in
-official PulseVM examples" item is dropped — the parameter no longer follows
-Metallicus' examples, §3.1.)
+Watch list additions (baselines 2026-10-15): PR #116 merge state (OPEN),
+automated as `scripts/check-pulsevm-upstream.sh` T9. Activation height is
+NOT automated (rev 3 listed it, but no check was ever built): when T9 fires
+on the merge, the operator-side review reads the activation height by hand.
+(Rev 4: the former "ML-DSA parameter used in official PulseVM examples" item
+is dropped — the parameter no longer follows Metallicus' examples, §3.1.)
 
 ## 8. Stage 2 (not in this spec)
 
