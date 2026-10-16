@@ -92,8 +92,12 @@ permission ごとに生成元が違う。**owner は WebAuth (新 12word 派生)
 1. **frdomyieltst の active/owner 秘密鍵を復元** (現 testnet keystore は anchor しか無い)。
    vault の frdomyieltst 12word を wallet で開いて active/owner の PVT を取り出し:
    ```bash
-   HOME=~/.metal-fy-proton-test proton key:add <frdomyieltst active/owner PVT>
+   HOME=~/.metal-fy-proton-test proton key:add   # prompt に frdomyieltst active/owner PVT を貼る
    ```
+   > **秘密鍵はコマンドの引数に書かない。** 引数に書くと shell history (`~/.zsh_history`) と
+   > `ps` に平文で残る。
+   > `key:add` は引数なしで実行し、**prompt が出てから鍵を貼る** (入力は非表示)。
+   > `key:remove` は「絶対規則」6. の通り使わない。万一必要になった場合も引数なしで実行する。
 2. 各 permission を `bin/safe-broadcast --chain=testnet-a` で差し替え (**active → anchor → owner**)。
    例 (active):
    ```bash
@@ -139,9 +143,9 @@ permission ごとに生成元が違う。**owner は WebAuth (新 12word 派生)
 ```bash
 mv ~/.metal-fy-proton ~/.metal-fy-proton-PRE-ROTATE
 HOME=~/.metal-fy-proton proton chain:set proton
-HOME=~/.metal-fy-proton proton key:add <NEW active PVT>
-HOME=~/.metal-fy-proton proton key:add <NEW anchor PVT>
-HOME=~/.metal-fy-proton proton key:add <fyhistory PVT (据置・MainNet)>
+HOME=~/.metal-fy-proton proton key:add   # prompt に NEW active PVT を貼る
+HOME=~/.metal-fy-proton proton key:add   # prompt に NEW anchor PVT を貼る
+HOME=~/.metal-fy-proton proton key:add   # prompt に fyhistory PVT (据置・MainNet) を貼る
 # owner は追加しない — root 鍵を日常署名面から外す
 chmod 600 ~/.metal-fy-proton/Library/Preferences/@proton/cli-nodejs/proton-cli.json
 HOME=~/.metal-fy-proton proton key:list   # 公開のみ。active/anchor/fyhistory を確認

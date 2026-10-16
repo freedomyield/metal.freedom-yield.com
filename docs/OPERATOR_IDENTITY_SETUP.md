@@ -984,9 +984,13 @@ backup-of-record.
 > imported on the validator host.
 
 ```sh
-ssh "${VALIDATOR_SSH_HOST}" 'sudo -u deploy bash -c "
+# -t allocates a TTY so proton-cli's hidden prompt works; key:add takes no
+# argument (an argument would expose the key in ps and shell history).
+# Paste the content of /etc/freedom-yield/anchor.k1.key (or its Dashlane
+# copy) at the "Enter private key" prompt.
+ssh -t "${VALIDATOR_SSH_HOST}" 'sudo -u deploy bash -c "
   HOME=~/.metal-fy-proton proton chain:set proton
-  HOME=~/.metal-fy-proton proton key:add \$(sudo cat /etc/freedom-yield/anchor.k1.key)
+  HOME=~/.metal-fy-proton proton key:add
   HOME=~/.metal-fy-proton proton key:list
 "'
 ```
@@ -1319,9 +1323,12 @@ ssh "${VALIDATOR_SSH_HOST}" 'sudo -u root bash -c "
   chmod 000 /etc/freedom-yield/anchor.k1.key.*.retired
 "'
 
-# 5. Re-execute B4 (HOME=~/.metal-fy-proton proton key:add for the new key).
-# 6. HOME=~/.metal-fy-proton proton key:remove PUB_K1_<old> from the CLI
-#    keystore on the validator host.
+# 5. Re-execute B4 (`HOME=~/.metal-fy-proton proton key:add` over ssh -t,
+#    no argument; paste the new private key at the hidden prompt).
+# 6. Remove the old key from the CLI keystore on the validator host with
+#    `HOME=~/.metal-fy-proton proton key:remove` over ssh -t, no argument;
+#    paste the OLD private key at the hidden prompt (the CLI matches the
+#    private key itself; a PUB_K1 public key is rejected).
 # 7. Self-test (B5) with the new key. Once clean, the rotation is
 #    complete; the linkauth from A7 carries over (it references the
 #    permission name 'anchor', not a specific pubkey).
