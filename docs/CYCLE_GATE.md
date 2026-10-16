@@ -1289,6 +1289,70 @@ the values to pass on a given day are in the day-of value sheet above):
      **確認フレーズ以外の任意の入力**が abort になる (exit 5)。中止で失われる
      のは 7b の dry-run log だけで、作り直せる。**broadcast は起きていない。**
      迷ったら中止が既定。
+
+   **7c が失敗・不確定に終わったときの暫定の絶対ルール (2026-10-16 operator
+   決定。恒久対策のガードが出るまで有効)。** 7c が **exit 0 以外で終わった**、
+   **64 hex の tx id を出さなかった**、または**結果に少しでも疑いがある**
+   場合 — **AI は新しい認可を求めない。operator も 7c を再実行しない。**
+   いまの経路には「この cycle はもう刻まれている」を断る gate が無い
+   (`docs/superpowers/specs/2026-10-16-anchor-double-inscription-guard-design.md`
+   §1 P-3)。「拒否された」と「届いたか分からない」の区別も付かない (同 P-1)。
+   再実行は二重刻印 (2026-07-01 と同じ種類の事故) になりうる。
+
+   - **「exit 0」だけでは成功ではない。** 署名 CLI は push が失敗しても
+     exit 0 で返る (同 design、key finding 1)。成功の証拠は、
+     `sign-anchor-event.sh` が stdout に出した JSON 断片の **64 hex の
+     `tx_id`** だけである。tx id が無ければ、exit code が何であっても
+     「不確定」として扱う。
+   - **再実行を検討してよいのは、次の (a)(b) が両方済んでから。それでも
+     決めるのは operator** で、AI が新しい per-invocation 認可を求めるのは
+     その決定の後 (手順は上の「per-invocation 認可の手順」をもう一度最初から。
+     token も新しく作る):
+     - **(a) 失敗した試行から 60 分以上待つ。** 署名 CLI は tx を
+       「最終確定ブロックの時刻 + 3000 秒」の有効期限で署名する (同 design
+       §1 P-2)。そのため、結果の分からない push は約 50 分のあいだ後から
+       着地しうる。60 分はその上限に余裕を足した値。
+     - **(b) 同じ cycle の memo prefix `fya<S>c<N>` (その日刻む cycle。
+       記入例の 2026-10-07 なら `fya1c6`) を持つ action が、anchor account
+       から chain 上に 1 つも無いことを read-only で確かめる。** 使うのは
+       `scripts/lib/anchor-history-read.sh` の `ahr_resolve_tx` が step 8 で
+       最初に送るのと同じ Hyperion `get_actions` 要求である。history base は
+       committed の chain profile から、actor は 7c と同じ `xpr-account`
+       から取る。AI@Mac が repo root で実行する (GET のみ。署名も送信も
+       しない):
+       ```sh
+       FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config
+       ACTOR="$(head -n 1 "$FY_CONFIG_DIR/xpr-account")"
+       BASE="$(jq -r '.profiles["xpr-mainnet"].history_bases[0]' config/a-chain-profiles.json)"
+       P=fya1c<N+1>
+       curl -sSf --max-time 20 "$BASE/v2/health" \
+         | jq -r '"\([.health[] | "\(.service)=\(.status)"] | join(" ")) head=\([.health[] | .service_data? | objects | .head_block_num? | numbers] | max) indexed=\([.health[] | .service_data? | objects | .last_indexed_block? | numbers] | max)"'
+       curl -sSf --max-time 20 "$BASE/v2/history/get_actions?account=$ACTOR&limit=50&sort=desc" \
+         | jq -r --arg a "$ACTOR" --arg p "$P" '
+             "actions_returned=\(.actions | length)",
+             (.actions[]
+              | select(.act.account == "eosio.token" and .act.name == "transfer" and .act.data.from == $a)
+              | (.act.data.memo | split(":")[0]) as $m
+              | select($m | test("^fya[0-9]+c[0-9]+"))
+              | "\(if $m == $p or ($m | startswith($p + "-")) then "TARGET" else "other " end) \(.trx_id) block=\(.block_num) \(."@timestamp") \($m)")'
+       ```
+       **「無い」と言えるのは次がすべて成り立つときだけ:** 2 本とも exit 0 で
+       終わる。1 行目の service がすべて `=OK`。`indexed` が `head` から 120
+       block (約 1 分) 以内。`actions_returned=` が出ている。**`TARGET` 行が
+       0 本**。そして**前の cycle の anchor (`fya<S>c<N>`) が `other` 行に
+       見えている** (検索した範囲がそこまで届いている証拠)。
+       **`TARGET` 行が 1 本でもあれば、その cycle は刻まれている。7c は
+       二度と実行しない** — その `trx_id` を operator に示し、step 8 の照合
+       (operator 判断) へ進む。上の条件が 1 つでも欠けたら「無いとは証明
+       できない」。待って (b) をやり直す。7c には進まない。
+       (検証: 2026-10-16 に mainnet で実行。`P=fya1c6` で cycle 6 の 4 action が
+       `TARGET` に、`P=fya1c7` で `TARGET` 0 本・`fya1c6` が `other` に出ることを
+       確認した。)
+   - **恒久対策**は
+     `docs/superpowers/specs/2026-10-16-anchor-double-inscription-guard-design.md`
+     である。wrapper 側で、署名前の chain 照合・結果の分類・600 秒の明示期限・
+     試行 journal を行う。**2026-11-06 の転換の後に**実装し、testnet リハーサルを
+     経て、2026-12 の転換から使う。それまで、このルールに例外は無い。
    `sign-anchor-event.sh` also accepts `--output=<path>`; left unset, its
    stdout is additionally saved to a default path
    `/tmp/fya-<testnet|mainnet>-sign-output.json` — `/tmp/fya-mainnet-sign-output.json`
@@ -1389,6 +1453,21 @@ the values to pass on a given day are in the day-of value sheet above):
    minute and re-run THIS step 8 only. Never re-run 7c — that is a second
    inscription of the same cycle, and no gate refuses it.** (Only the
    testnet rehearsal script prints a `BROADCAST OK` banner; 7c does not.)
+   **If gate 1 keeps failing beyond this lag window** (re-runs of step 8 over
+   several minutes still exit 3), the tx may have been returned an id and
+   then dropped by the producer — a case this step has no branch for yet
+   (`docs/superpowers/specs/2026-10-16-anchor-double-inscription-guard-design.md`
+   §1 P-5). **Still do NOT re-run 7c.** Apply step 7c's interim absolute
+   rule (「7c が失敗・不確定に終わったときの暫定の絶対ルール」): wait at least
+   60 minutes after the 7c attempt, then run its read-only memo-prefix check
+   (b). A `TARGET` line whose `trx_id` equals the fragment's `tx_id` means the
+   tx is on chain and only indexing is behind — keep re-running step 8. A
+   `TARGET` line with a different `trx_id` means the cycle was inscribed by
+   another attempt — STOP. Either way, and also when the check proves the
+   prefix absent, **the operator decides** the next action; the AI does not
+   ask for a new 7c authorization on its own. The permanent fix (a
+   dropped-tx branch for this step) ships with that design, after the
+   2026-11-06 transition.
    `--prev-anchor-tx-id=` is **not derived from anything else** —
    `gen-anchor-receipt.sh` only reads it from this flag (or treats it as
    `null` if omitted); get the value from the host's own
