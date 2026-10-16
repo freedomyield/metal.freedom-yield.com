@@ -43,7 +43,7 @@ set -euo pipefail
 
 REPO_BASE="${REPO_BASE:-$(cd "$(dirname "$0")/.." && pwd)}"
 
-# The ML-DSA-65 URLs come from the one library that owns them (never re-typed
+# The ML-DSA-87 URLs come from the one library that owns them (never re-typed
 # here). Resolved from this script's own location, not REPO_BASE, so a fixture
 # REPO_BASE still gets the real constants.
 # shellcheck source=lib/identity-pq.sh

@@ -5,16 +5,24 @@
 # Must stay bash 3.2 compatible (macOS /bin/bash).
 # CHAIN: none. PRIME_DIRECTIVE: TESTNET-FIRST — no broadcast pathway.
 
-FYIPQ_ALGORITHM="ML-DSA-65"
+# ML-DSA-87: the highest ML-DSA level and the level NSA CNSA 2.0 specifies for
+# all classification levels. Change only if NIST / CNSA guidance changes or a
+# weakness in ML-DSA-87 is published; a change is a normal key rotation (spec
+# §6). Every file name and URL below is derived from FYIPQ_ALGORITHM, so the
+# algorithm is stated exactly once.
+FYIPQ_ALGORITHM="ML-DSA-87"
 FYIPQ_STANDARD="FIPS 204"
 FYIPQ_CONTEXT="freedom-yield/validator-identity"
 FYIPQ_MIN_OPENSSL="3.5"
-FYIPQ_PUB_REL="public/.well-known/operator-identity-mldsa65.pub"
-FYIPQ_SIG_REL="public/api/identity.json.mldsa65.sig"
-FYIPQ_PUB_URL="https://metal.freedom-yield.com/.well-known/operator-identity-mldsa65.pub"
-FYIPQ_SIG_URL="https://metal.freedom-yield.com/api/identity.json.mldsa65.sig"
-FYIPQ_ENC_BASENAME="operator-identity-mldsa65.enc.pem"
-FYIPQ_UNLOCKED_BASENAME="operator-identity-mldsa65.unlocked.pem"
+# File-name tag: "ML-DSA-87" -> "mldsa87" (bash 3.2 has no ${x,,}).
+FYIPQ_FILE_TAG="$(printf '%s' "${FYIPQ_ALGORITHM}" | LC_ALL=C tr -d '-' | LC_ALL=C tr '[:upper:]' '[:lower:]')"
+FYIPQ_SITE_URL="https://metal.freedom-yield.com"
+FYIPQ_PUB_REL="public/.well-known/operator-identity-${FYIPQ_FILE_TAG}.pub"
+FYIPQ_SIG_REL="public/api/identity.json.${FYIPQ_FILE_TAG}.sig"
+FYIPQ_PUB_URL="${FYIPQ_SITE_URL}/${FYIPQ_PUB_REL#public/}"
+FYIPQ_SIG_URL="${FYIPQ_SITE_URL}/${FYIPQ_SIG_REL#public/}"
+FYIPQ_ENC_BASENAME="operator-identity-${FYIPQ_FILE_TAG}.enc.pem"
+FYIPQ_UNLOCKED_BASENAME="operator-identity-${FYIPQ_FILE_TAG}.unlocked.pem"
 FYIPQ_UNLOCK_MAX_AGE_SEC_DEFAULT=7200
 
 fyipq__key_dir()       { printf '%s\n' "${FY_PQ_KEY_DIR:-${HOME}/.freedom-yield-identity}"; }

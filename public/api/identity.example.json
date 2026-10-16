@@ -1,5 +1,5 @@
 {
-	"_comment": "Synthetic schema example for /api/identity.schema.v2.json (schema_version 2: v1 plus the verification_pq object describing the additional ML-DSA-65 (FIPS 204) signature at /api/identity.json.mldsa65.sig). This file is NOT a snapshot of any production identity — it is a fixed demonstration of the schema's shape. It demonstrates the post-2026-08-14 kind discipline: entries whose kind is 'stream' carry NO sha256 on purpose (their bytes change without a commit, so a signed digest could not survive), while 'static' and 'record' entries do. The live /api/identity.json takes this shape from its first re-issue on or after 2026-08-14; manifests signed before that date pin every listed artifact, including streams, and those stream pins are known-stale by construction (deploy/identity-pin-baseline.json). All sha256, fingerprint, hash, and timestamp values shown here are synthetic placeholders that document field formats only; they do not refer to any real artifact, key, or moment in time. Production runtime identity is published at /api/identity.json by scripts/operator-local/gen-identity.sh on the operator's local Mac (signed with the operator identity ed25519 key; the validator's staker.key / BLS signer.key are not used). Phase α A-chain anchoring is reached via the pointer field anchor_receipt_url (added 2026-06-21). The former dag_root_hash and cycles_history_url fields were RETIRED 2026-07-06 (design-stocktake #1 DAG-root collapse) — the single on-chain root is anchor-source.json.dag_root_computed (3-branch), surfaced via anchor-receipt.json, not a field on identity.json. See docs/IDENTITY_SCHEMA_CHANGELOG.md.",
+	"_comment": "Synthetic schema example for /api/identity.schema.v2.json (schema_version 2: v1 plus the verification_pq object describing the additional ML-DSA-87 (FIPS 204) signature at /api/identity.json.mldsa87.sig). This file is NOT a snapshot of any production identity — it is a fixed demonstration of the schema's shape. It demonstrates the post-2026-08-14 kind discipline: entries whose kind is 'stream' carry NO sha256 on purpose (their bytes change without a commit, so a signed digest could not survive), while 'static' and 'record' entries do. The live /api/identity.json takes this shape from its first re-issue on or after 2026-08-14; manifests signed before that date pin every listed artifact, including streams, and those stream pins are known-stale by construction (deploy/identity-pin-baseline.json). All sha256, fingerprint, hash, and timestamp values shown here are synthetic placeholders that document field formats only; they do not refer to any real artifact, key, or moment in time. Production runtime identity is published at /api/identity.json by scripts/operator-local/gen-identity.sh on the operator's local Mac (signed with the operator identity ed25519 key; the validator's staker.key / BLS signer.key are not used). Phase α A-chain anchoring is reached via the pointer field anchor_receipt_url (added 2026-06-21). The former dag_root_hash and cycles_history_url fields were RETIRED 2026-07-06 (design-stocktake #1 DAG-root collapse) — the single on-chain root is anchor-source.json.dag_root_computed (3-branch), surfaced via anchor-receipt.json, not a field on identity.json. See docs/IDENTITY_SCHEMA_CHANGELOG.md.",
 	"schema_version": 2,
 	"brand": "Freedom Yield",
 	"node_id": "NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v",
@@ -21,13 +21,13 @@
 		"signature_url": "https://metal.freedom-yield.com/api/identity.json.sig"
 	},
 	"verification_pq": {
-		"algorithm": "ML-DSA-65",
+		"algorithm": "ML-DSA-87",
 		"standard": "FIPS 204",
 		"context_string": "freedom-yield/validator-identity",
-		"pubkey_url": "https://metal.freedom-yield.com/.well-known/operator-identity-mldsa65.pub",
+		"pubkey_url": "https://metal.freedom-yield.com/.well-known/operator-identity-mldsa87.pub",
 		"pubkey_fingerprint": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-		"signature_url": "https://metal.freedom-yield.com/api/identity.json.mldsa65.sig",
-		"method": "openssl pkeyutl -verify -pubin -inkey operator-identity-mldsa65.pub -rawin -in identity.json -sigfile identity.json.mldsa65.sig -pkeyopt context-string:freedom-yield/validator-identity",
+		"signature_url": "https://metal.freedom-yield.com/api/identity.json.mldsa87.sig",
+		"method": "openssl pkeyutl -verify -pubin -inkey operator-identity-mldsa87.pub -rawin -in identity.json -sigfile identity.json.mldsa87.sig -pkeyopt context-string:freedom-yield/validator-identity",
 		"minimum_openssl_version": "3.5"
 	},
 	"artifact_manifest": {

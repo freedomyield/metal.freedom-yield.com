@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# test-documented-pq-command.sh — the ML-DSA-65 verify block published in
+# test-documented-pq-command.sh — the ML-DSA-87 verify block published in
 # docs/IDENTITY_VERIFICATION.md must be the command that actually verifies:
 # its URLs equal the library constants, and its openssl line, run VERBATIM
-# against fixtures, prints "Signature Verified Successfully". The EN and JA
-# public pages must carry the same openssl line.
+# against fixtures signed with a throwaway ML-DSA-87 key, prints "Signature
+# Verified Successfully". The EN and JA public pages must carry the same
+# openssl line. The fixture file names are the basenames of the library URLs,
+# so a doc line naming any other file (e.g. the retired 2026-10-15 names) fails.
 # CHAIN: none. PRIME_DIRECTIVE: TESTNET-FIRST — safe, no broadcast pathway.
 set -u
 REPO_SRC="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -49,10 +51,14 @@ WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/keys" "$WORK/repo" "$WORK/run"; chmod 700 "$WORK/keys"
 fy_pq_make_master "$WORK/keys"
 fy_pq_install "$WORK/keys" "$WORK/repo"
+# the throwaway key must be the current parameter set (ML-DSA-87)
+key_hdr="$("$OSSL" pkey -pubin -in "$WORK/repo/${FYIPQ_PUB_REL}" -noout -text </dev/null 2>&1 | head -n 1)"
+[ "$key_hdr" = "ML-DSA-87 Public-Key:" ] && pass "D8 throwaway fixture key is ML-DSA-87" || bad "D8 fixture key header: $key_hdr"
+SIG_NAME="${FYIPQ_SIG_URL##*/}"; PUB_NAME="${FYIPQ_PUB_URL##*/}"
 printf '{"fixture":true}\n' > "$WORK/run/identity.json"
 "$OSSL" pkeyutl -sign -inkey "$WORK/keys/master.pem" -rawin -in "$WORK/run/identity.json" \
-	-pkeyopt "context-string:${FYIPQ_CONTEXT}" -out "$WORK/run/identity.json.mldsa65.sig" </dev/null
-cp "$WORK/repo/${FYIPQ_PUB_REL}" "$WORK/run/operator-identity-mldsa65.pub"
+	-pkeyopt "context-string:${FYIPQ_CONTEXT}" -out "$WORK/run/${SIG_NAME}" </dev/null
+cp "$WORK/repo/${FYIPQ_PUB_REL}" "$WORK/run/${PUB_NAME}"
 
 run_line() { # <line>
 	( cd "$WORK/run" && PATH="$(dirname "$OSSL"):$PATH" bash -c "$1" </dev/null 2>&1 )

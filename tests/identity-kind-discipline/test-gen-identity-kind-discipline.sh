@@ -45,7 +45,7 @@ skip_pass() {
 [ -r "$REAL_REGISTRY" ]  || { echo "FATAL: registry not found at $REAL_REGISTRY" >&2; exit 1; }
 command -v jq        >/dev/null 2>&1 || skip_pass "jq unavailable"
 command -v ssh-keygen >/dev/null 2>&1 || skip_pass "ssh-keygen unavailable"
-# gen-identity.sh also signs with ML-DSA-65 (schema v2): runs that reach the
+# gen-identity.sh also signs with ML-DSA-87 (schema v2): runs that reach the
 # end need an OpenSSL >= 3.5 and a throwaway ML-DSA key.
 # shellcheck source=../lib/pq-test-key.sh
 . "${REPO_SRC}/tests/lib/pq-test-key.sh"

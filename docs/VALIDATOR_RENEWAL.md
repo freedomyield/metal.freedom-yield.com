@@ -390,7 +390,7 @@ export FY_EXPECT_CYCLE=<N>
 export OPERATOR_IDENTITY_KEY=~/.ssh/freedom-yield-operator-identity
 bash scripts/operator-local/gen-identity.sh
 git add public/api/identity.json public/api/identity.json.sig \
-        public/api/identity.json.mldsa65.sig \
+        public/api/identity.json.mldsa87.sig \
         deploy/identity-pin-baseline.json deploy/publication.json
 git commit -m "feat(identity): re-sign for new cycle"
 git push origin main

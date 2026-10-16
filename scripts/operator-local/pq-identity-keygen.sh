@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/operator-local/pq-identity-keygen.sh
 #
-# Create the operator identity ML-DSA-65 key: scrypt-encrypted seed-only PEM outside the repo, public key into public/.well-known/.
+# Create the operator identity ML-DSA-87 key: scrypt-encrypted seed-only PEM outside the repo, public key into public/.well-known/.
 #
 # MUST NOT BE RUN ON VALIDATOR HOST OR WEB HOST (operator's local Mac only).
 # Never reads validator keys. The passphrase is typed by the operator at the

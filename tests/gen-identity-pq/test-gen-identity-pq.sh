@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # test-gen-identity-pq.sh — scripts/operator-local/gen-identity.sh signs
-# identity.json with ML-DSA-65 (FIPS 204) as well as ed25519 (schema v2),
+# identity.json with ML-DSA-87 (FIPS 204) as well as ed25519 (schema v2),
 # publishes nothing unless BOTH signatures self-verify, and deletes the
 # unlocked ML-DSA key on every exit path once it has resolved its path.
 # Spec: docs/superpowers/specs/2026-10-15-identity-pq-signature-design.md.
@@ -213,9 +213,9 @@ if [ -f "$J" ]; then
 	[ "$VPQ_OK" -eq 1 ] && pass "P1 verification_pq fields equal the library constants"
 
 	if [ -f "$PQSIG" ] && fyipq__verify "$OSSL" "$PUB" "$J" "$PQSIG"; then
-		pass "P1 the ML-DSA-65 signature verifies against the committed .pub"
+		pass "P1 the ML-DSA-87 signature verifies against the committed .pub"
 	else
-		fail "P1 the ML-DSA-65 signature is missing or does not verify"
+		fail "P1 the ML-DSA-87 signature is missing or does not verify"
 	fi
 
 	if ssh-keygen -Y verify -f "$ALLOWED" -I freedom-yield \
@@ -302,15 +302,36 @@ fy_pq_install "$KEYDIR" "$R_R3"
 run_genid "$R_R3" "$WORK/r3.out" "$WORK/r3.err"; RC=$?
 [ "$RC" -eq 11 ] && pass "R3 .pub swapped -> exit 11 (PQ self-verify failed)" || fail "R3 expected exit 11, got $RC: $(tail -3 "$WORK/r3.err" | tr '\n' '|')"
 R3_PUBLISHED=""
-for f in identity.json identity.json.sig identity.json.mldsa65.sig; do
+for f in identity.json identity.json.sig "$(basename "${FYIPQ_SIG_REL}")"; do
 	[ -e "$R_R3/public/api/$f" ] && R3_PUBLISHED="${R3_PUBLISHED} $f"
 done
 [ -z "$R3_PUBLISHED" ] \
-	&& pass "R3 nothing published (no identity.json, .sig or .mldsa65.sig)" \
+	&& pass "R3 nothing published (no identity.json, .sig or .mldsa87.sig)" \
 	|| fail "R3 MUTATION NOT CAUGHT: published despite a failed PQ self-verify:${R3_PUBLISHED}"
 [ ! -e "$UNLOCKED" ] \
 	&& pass "R3 the unlocked key was deleted" \
 	|| fail "R3 the unlocked key was left on disk after exit 11"
+
+# =============================================================================
+# R4 — a matching key pair of the previous parameter set (ML-DSA-65, the
+#      2026-10-15 key; used here as the negative fixture) -> exit 5 before
+#      signing, nothing published. Without the algorithm precondition this
+#      pair would sign and self-verify cleanly, so only that check stops it.
+# =============================================================================
+R_R4="$(new_repo r4)"
+mkdir -p "$R_R4/public/.well-known"
+"$OSSL" genpkey -algorithm ML-DSA-65 -out "$UNLOCKED" </dev/null 2>/dev/null
+chmod 600 "$UNLOCKED"
+"$OSSL" pkey -in "$UNLOCKED" -pubout -out "$R_R4/${FYIPQ_PUB_REL}" </dev/null
+run_genid "$R_R4" "$WORK/r4.out" "$WORK/r4.err"; RC=$?
+[ "$RC" -eq 5 ] && pass "R4 ML-DSA-65 key pair -> exit 5" || fail "R4 MUTATION NOT CAUGHT: ML-DSA-65 key pair gave exit $RC, expected 5"
+grep -qF "is not an ML-DSA-87 public key" "$WORK/r4.err" \
+	&& pass "R4 the error says the key is not ML-DSA-87" \
+	|| fail "R4 stderr does not name ML-DSA-87: $(tail -3 "$WORK/r4.err" | tr '\n' '|')"
+[ ! -e "$R_R4/public/api/identity.json" ] && [ ! -e "$R_R4/${FYIPQ_SIG_REL}" ] \
+	&& pass "R4 nothing published" \
+	|| fail "R4 published a manifest signed by an ML-DSA-65 key"
+[ ! -e "$UNLOCKED" ] && pass "R4 the unlocked key was deleted" || fail "R4 the unlocked key was left on disk after exit 5"
 
 # =============================================================================
 # P3 — unusable OpenSSL -> exit 5, unlocked key deleted

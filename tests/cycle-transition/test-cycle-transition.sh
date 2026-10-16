@@ -498,10 +498,29 @@ if printf '%s' "$SIG_LINE" | grep -qF 'public/api/identity.json.sig'; then
 else
 	bad "unit 4b's git add omits public/api/identity.json.sig — a new manifest would be published under the previous cycle's signature"
 fi
-if printf '%s' "$SIG_LINE" | grep -qF 'public/api/identity.json.mldsa65.sig'; then
-	ok "unit 4b stages public/api/identity.json.mldsa65.sig (the ML-DSA signature travels with the manifest)"
+if printf '%s' "$SIG_LINE" | grep -qF 'public/api/identity.json.mldsa87.sig'; then
+	ok "unit 4b stages public/api/identity.json.mldsa87.sig (the ML-DSA signature travels with the manifest)"
 else
-	bad "unit 4b's git add omits public/api/identity.json.mldsa65.sig — a v2 manifest would be published without its ML-DSA signature and CI verify-identity would fail"
+	bad "unit 4b's git add omits public/api/identity.json.mldsa87.sig — a v2 manifest would be published without its ML-DSA signature and CI verify-identity would fail"
+fi
+# The orchestrator does not source scripts/lib/identity-pq.sh (its sourced
+# libraries are pinned to two by section J), so the ML-DSA signature path is a
+# literal here. Pin that literal to the library that owns it, so a key or
+# algorithm change in the library cannot leave unit 4b staging (or --status
+# reading) a stale file name. The ML-DSA path in the git add must be exactly
+# the library's — not the library's plus an old one.
+PQ_LIB_SIG_REL="$(bash -c '. "$1"; printf "%s" "$FYIPQ_SIG_REL"' _ "${REPO_ROOT}/scripts/lib/identity-pq.sh" 2>/dev/null || true)"
+PQ_IN_ADD="$(printf '%s\n' "$SIG_LINE" | tr ' ' '\n' | grep -E 'mldsa|identity\.json\.[^ ]*\.sig$' | grep -vxF 'public/api/identity.json.sig' || true)"
+if [ -n "$PQ_LIB_SIG_REL" ] && [ "$PQ_IN_ADD" = "$PQ_LIB_SIG_REL" ]; then
+	ok "unit 4b's only ML-DSA signature path is the library's FYIPQ_SIG_REL (${PQ_LIB_SIG_REL})"
+else
+	bad "unit 4b's ML-DSA signature path(s) [${PQ_IN_ADD}] are not exactly scripts/lib/identity-pq.sh's FYIPQ_SIG_REL [${PQ_LIB_SIG_REL}]"
+fi
+PQ_STATUS_READS="$(grep -oE 'fyct__status_read api/identity\.json\.[^ ]*\.sig' "$ORCH" | sed 's/^fyct__status_read //' | sort -u)"
+if [ -n "$PQ_LIB_SIG_REL" ] && [ "$PQ_STATUS_READS" = "${PQ_LIB_SIG_REL#public/}" ]; then
+	ok "--status reads the library's ML-DSA signature path (${PQ_LIB_SIG_REL#public/})"
+else
+	bad "--status reads [${PQ_STATUS_READS}] but the library's ML-DSA signature is [${PQ_LIB_SIG_REL#public/}]"
 fi
 if printf '%s' "$SIG_LINE" | grep -qF 'public/api/identity.json '; then
 	ok "unit 4b stages public/api/identity.json"
@@ -980,7 +999,7 @@ make_status_pub() {
 	printf '{"schema_version":2,"generated_at":"%s"}\n' "$(epoch_iso "$gen")" \
 		> "${d}/api/identity.json"
 	printf 'SSHSIG-fixture-not-a-real-signature\n' > "${d}/api/identity.json.sig"
-	printf 'MLDSA65-fixture-not-a-real-signature\n' > "${d}/api/identity.json.mldsa65.sig"
+	printf 'MLDSA87-fixture-not-a-real-signature\n' > "${d}/api/identity.json.mldsa87.sig"
 	printf '{"schema_version":1,"dag_root_computed":"%s","observations_branch":{"cycle_number_observed":%s}}\n' \
 		"$STATUS_DAG" "$cyc" > "${d}/api/anchor-source.json"
 }
@@ -1156,8 +1175,8 @@ mutate_case() {
 mut_drop_row() { head -n $((ST_N - 1)) "${1}/pub/api/cycle-history.jsonl" > "${1}/tmp.jsonl"; mv "${1}/tmp.jsonl" "${1}/pub/api/cycle-history.jsonl"; }
 mut_stale_identity() { printf '{"schema_version":2,"generated_at":"%s"}\n' "$(epoch_iso $((ST_START - 3600)))" > "${1}/pub/api/identity.json"; }
 mut_drop_sig() { rm -f "${1}/pub/api/identity.json.sig"; }
-mut_drop_pq_sig() { rm -f "${1}/pub/api/identity.json.mldsa65.sig"; }
-mut_v1_no_pq_sig() { printf '{"schema_version":1,"generated_at":"%s"}\n' "$(epoch_iso "$ST_GEN")" > "${1}/pub/api/identity.json"; rm -f "${1}/pub/api/identity.json.mldsa65.sig"; }
+mut_drop_pq_sig() { rm -f "${1}/pub/api/identity.json.mldsa87.sig"; }
+mut_v1_no_pq_sig() { printf '{"schema_version":1,"generated_at":"%s"}\n' "$(epoch_iso "$ST_GEN")" > "${1}/pub/api/identity.json"; rm -f "${1}/pub/api/identity.json.mldsa87.sig"; }
 mut_local_bytes() { printf '\n' >> "${1}/anchor-local.json"; }
 mut_old_cycle() { printf '{"schema_version":1,"dag_root_computed":"%s","observations_branch":{"cycle_number_observed":%s}}\n' "$STATUS_DAG" "$ST_N" > "${1}/pub/api/anchor-source.json"; cp "${1}/pub/api/anchor-source.json" "${1}/anchor-local.json"; }
 mut_wrong_memo() { make_status_tx "${1}/tx.json" "fya1c${ST_N}"; }
@@ -1167,7 +1186,7 @@ mut_wrong_sig() { make_status_gate "${1}/gate.json" "${STATUS_NODE}-1"; }
 mutate_case "the published ledger is one row short"        1 INCOMPLETE mut_drop_row
 mutate_case "identity generated_at predates the cycle end" 2 INCOMPLETE mut_stale_identity
 mutate_case "identity.json.sig did not publish"            2 INCOMPLETE mut_drop_sig
-mutate_case "identity.json.mldsa65.sig did not publish"       2 INCOMPLETE mut_drop_pq_sig
+mutate_case "identity.json.mldsa87.sig did not publish"       2 INCOMPLETE mut_drop_pq_sig
 mutate_case "a v1 manifest has no ML-DSA signature (legitimately)" 2 COMPLETE mut_v1_no_pq_sig
 mutate_case "the local anchor-source copy differs by one byte" 3 INCOMPLETE mut_local_bytes
 mutate_case "the published anchor-source still names the old cycle" 3 INCOMPLETE mut_old_cycle

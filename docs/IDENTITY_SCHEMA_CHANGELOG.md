@@ -7,6 +7,42 @@ schema v1 and the rationale for any future major version bump. It is
 not a chain-anchored attestation and not equivalent to an external
 append-only log: see the retention note below.
 
+## 2026-10-16 — schema v2: `verification_pq.algorithm` accepts ML-DSA-87 (current key)
+
+### Summary
+
+Compatible relaxation within v2; no v3. `verification_pq.algorithm` changes
+from const `ML-DSA-65` to enum `["ML-DSA-65", "ML-DSA-87"]`. Every document
+that was valid stays valid, including the manifest signed with ML-DSA-65 on
+2026-10-15. The current key is ML-DSA-87: the detached signature is published
+at `/api/identity.json.mldsa87.sig` and the public key at
+`/.well-known/operator-identity-mldsa87.pub`. Schema descriptions that name the
+current paths and command now name the ML-DSA-87 ones.
+
+### Why
+
+The parameter was re-selected on its own merits. ML-DSA-87 is the highest
+ML-DSA level and the level NSA CNSA 2.0 specifies for all classification
+levels. The identity PQ signature is a record meant to be checked by third
+parties against published guidance, so the level that guidance names is the
+one to use. The 2026-10-15 entry below said the algorithm
+"follows Metallicus' basic choice" of ML-DSA-65. That premise was wrong:
+PulseVM PR #116 (MetalBlockchain/pulsevm) implements ML-DSA-44, -65 and -87
+as equal key types with no default among them; ML-DSA-65 only appeared in
+examples. The change of key is a normal key
+rotation, not a schema bump.
+
+### Compatibility
+
+Compatible. A consumer that validated against the 2026-10-15 v2 schema keeps
+validating the 2026-10-15 manifest. Compatibility holds for documents, not
+for pinned schema bytes: a consumer that pinned the 2026-10-15 schema by
+SHA-256 (as the schema advises) must re-pin to accept ML-DSA-87 manifests. A consumer that hard-coded `ML-DSA-65`
+must accept `ML-DSA-87` for manifests issued from 2026-10-16. The ML-DSA-65
+public key and signature from 2026-10-15 are no longer published. The
+verification command is unchanged except for the two file names
+(`docs/IDENTITY_VERIFICATION.md` Step 2b).
+
 ## 2026-10-15 — schema v2: additive ML-DSA-65 signature
 
 ### Summary
@@ -28,6 +64,7 @@ post-quantum signature over the same bytes lets a verifier check it with
 standard OpenSSL 3.5+, without project-specific tooling, while the existing
 ed25519 signature stays the primary one. The algorithm follows Metallicus'
 basic choice; a change of algorithm is a normal key rotation, not a schema bump.
+(Superseded 2026-10-16: this premise was wrong; see the entry above.)
 
 ### Compatibility
 

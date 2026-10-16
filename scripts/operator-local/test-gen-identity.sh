@@ -19,7 +19,7 @@
 #
 # Pre-commit validation policy: ALL schema validations in this script use the
 # LOCAL revised schema at canonical-repo public/api/identity.schema.v2.json
-# (schema_version 2: ed25519 + ML-DSA-65 signatures, 2026-10-15).
+# (schema_version 2: ed25519 + ML-DSA-87 signatures, 2026-10-15).
 # We do NOT fetch the live URL — pre-deploy, the live URL still serves the
 # pre-revision content and would not exercise the revised contract.
 #
@@ -50,13 +50,13 @@ ssh-keygen -t ed25519 -N "" -C "synthetic-test-key DO-NOT-USE" -f "${SYN_KEY}" -
 FAKE_REPO="${TEST_ROOT}/fake-repo"
 mkdir -p "${FAKE_REPO}/public/api"
 
-# 2.5. Throwaway ML-DSA-65 key in tmp (gen-identity.sh signs with it too and
+# 2.5. Throwaway ML-DSA-87 key in tmp (gen-identity.sh signs with it too and
 #      deletes the unlocked copy on exit, so fy_pq_install runs before EVERY
 #      gen-identity.sh invocation below).
 # shellcheck source=../../tests/lib/pq-test-key.sh
 . "${REAL_REPO}/tests/lib/pq-test-key.sh"
 if ! fyipq__resolve_openssl >/dev/null; then
-	echo "FAIL: no OpenSSL >= ${FYIPQ_MIN_OPENSSL} found; gen-identity.sh needs it for ML-DSA-65." >&2
+	echo "FAIL: no OpenSSL >= ${FYIPQ_MIN_OPENSSL} found; gen-identity.sh needs it for ML-DSA-87." >&2
 	echo "      Install Homebrew openssl@3 or set FY_OPENSSL, then re-run." >&2
 	exit 1
 fi
@@ -127,10 +127,10 @@ bash "${SCRIPT_DIR}/gen-identity.sh"
 
 OUT_JSON="${FAKE_REPO}/public/api/identity.json"
 OUT_SIG="${FAKE_REPO}/public/api/identity.json.sig"
-OUT_PQ_SIG="${FAKE_REPO}/public/api/identity.json.mldsa65.sig"
+OUT_PQ_SIG="${FAKE_REPO}/${FYIPQ_SIG_REL}"
 
 if [ ! -f "${OUT_JSON}" ] || [ ! -f "${OUT_SIG}" ] || [ ! -f "${OUT_PQ_SIG}" ]; then
-	echo "FAIL: gen-identity.sh did not produce all three output files (identity.json, .sig, .mldsa65.sig)" >&2
+	echo "FAIL: gen-identity.sh did not produce all three output files (identity.json, .sig, .mldsa87.sig)" >&2
 	exit 1
 fi
 
@@ -309,13 +309,13 @@ else
 fi
 rm -f "${ALLOWED}"
 
-# 6.5. ML-DSA-65 verify against the committed (fake-repo) public key.
+# 6.5. ML-DSA-87 verify against the committed (fake-repo) public key.
 echo
-echo "=== 6.5. ML-DSA-65 verify against synthetic PQ public key ==="
+echo "=== 6.5. ML-DSA-87 verify against synthetic PQ public key ==="
 if fyipq__verify "$(fyipq__resolve_openssl)" "${FAKE_REPO}/${FYIPQ_PUB_REL}" "${OUT_JSON}" "${OUT_PQ_SIG}"; then
-	echo "  OK   ML-DSA-65 signature verifies against synthetic PQ pubkey"
+	echo "  OK   ML-DSA-87 signature verifies against synthetic PQ pubkey"
 else
-	echo "  FAIL ML-DSA-65 signature verify against synthetic PQ pubkey" >&2
+	echo "  FAIL ML-DSA-87 signature verify against synthetic PQ pubkey" >&2
 	HAS_ERROR=1
 fi
 
@@ -399,7 +399,7 @@ else
 	echo "  OK   no signature file created"
 fi
 
-if [ -f "${ENV_TEST_REPO}/public/api/identity.json.mldsa65.sig" ]; then
+if [ -f "${ENV_TEST_REPO}/${FYIPQ_SIG_REL}" ]; then
 	echo "  FAIL ML-DSA signature file created despite ERROR exit" >&2
 	HAS_ERROR=1
 else

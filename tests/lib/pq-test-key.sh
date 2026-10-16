@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pq-test-key.sh — throwaway ML-DSA-65 keys for tests. Sourced.
+# pq-test-key.sh — throwaway ML-DSA-87 keys for tests. Sourced.
 # Requires scripts/lib/identity-pq.sh to be sourced first OR sources it.
 _FY_PQ_TK_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 . "${_FY_PQ_TK_REPO}/scripts/lib/identity-pq.sh"

@@ -9,7 +9,7 @@ This document describes how a third-party evaluator verifies the operator identi
 The identity manifest carries **two independent signatures from two dedicated operator identity keys**:
 
 - **ed25519** (primary) — an OpenSSH key, verified with `ssh-keygen -Y verify` (Step 2).
-- **ML-DSA-65** (additive, FIPS 204) — a post-quantum signature over the same `identity.json` bytes, verified with OpenSSL 3.5+ using the context string `freedom-yield/validator-identity` (Step 2b). It is additive: it never replaces the ed25519 signature, and a verifier that ignores it loses nothing it had before.
+- **ML-DSA-87** (additive, FIPS 204) — a post-quantum signature over the same `identity.json` bytes, verified with OpenSSL 3.5+ using the context string `freedom-yield/validator-identity` (Step 2b). It is additive: it never replaces the ed25519 signature, and a verifier that ignores it loses nothing it had before.
 
 For both keys, specifically:
 
@@ -28,9 +28,9 @@ A single signature does not by itself prove control of the validator. NodeID bin
 
 - `/api/identity.json` — signed identity manifest (this document's subject)
 - `/api/identity.json.sig` — detached ed25519 signature
-- `/api/identity.json.mldsa65.sig` — detached ML-DSA-65 signature over the same bytes
+- `/api/identity.json.mldsa87.sig` — detached ML-DSA-87 signature over the same bytes
 - `/.well-known/operator-identity.pub` — current operator identity public key (its SHA-256 is committed inside the DAG's identity branch)
-- `/.well-known/operator-identity-mldsa65.pub` — current operator identity ML-DSA-65 public key (PEM)
+- `/.well-known/operator-identity-mldsa87.pub` — current operator identity ML-DSA-87 public key (PEM)
 - `/api/anchor-source.json` — the DAG source: the three branch objects (identity / observations / artifacts) and the combined `dag_root_computed`
 - `/api/anchor-receipt.json` — Metal A-chain (an Antelope/EOSIO-family chain, reached at XPR Network endpoints) inscription receipt anchoring `dag_root_computed`
 - `/api/anchor-history.jsonl` — append-only log of every broadcast anchor (cycle → tx_id → dag)
@@ -58,9 +58,9 @@ The byte-level construction rules cited below are specified once in [`MERKLE_DAG
 BASE=https://metal.freedom-yield.com
 curl -sSLfO ${BASE}/api/identity.json
 curl -sSLfO ${BASE}/api/identity.json.sig
-curl -sSLfO ${BASE}/api/identity.json.mldsa65.sig
+curl -sSLfO ${BASE}/api/identity.json.mldsa87.sig
 curl -sSLfO ${BASE}/.well-known/operator-identity.pub
-curl -sSLfO ${BASE}/.well-known/operator-identity-mldsa65.pub
+curl -sSLfO ${BASE}/.well-known/operator-identity-mldsa87.pub
 curl -sSLfO ${BASE}/api/anchor-source.json
 curl -sSLfO ${BASE}/api/anchor-receipt.json
 ```
@@ -89,16 +89,16 @@ A successful verification prints `Good "freedom-yield/validator-identity" signat
 
 A signature failure at this step ends verification; nothing downstream is trustworthy without it.
 
-### Step 2b — verify the ML-DSA-65 signature (OpenSSL 3.5+)
+### Step 2b — verify the ML-DSA-87 signature (OpenSSL 3.5+)
 
-`identity.json` also carries an ML-DSA-65 (FIPS 204) signature over the same bytes. This step needs **OpenSSL 3.5 or later**; it is the only extra tool. The block below fetches the three files and verifies (the `identity.json` fetch repeats Step 1 so the block stands alone):
+`identity.json` also carries an ML-DSA-87 (FIPS 204) signature over the same bytes. This step needs **OpenSSL 3.5 or later**; it is the only extra tool. The block below fetches the three files and verifies (the `identity.json` fetch repeats Step 1 so the block stands alone):
 
 <!-- pq-verify:begin -->
 ```sh
 curl -sSfO https://metal.freedom-yield.com/api/identity.json
-curl -sSfO https://metal.freedom-yield.com/api/identity.json.mldsa65.sig
-curl -sSfO https://metal.freedom-yield.com/.well-known/operator-identity-mldsa65.pub
-openssl pkeyutl -verify -pubin -inkey operator-identity-mldsa65.pub -rawin -in identity.json -sigfile identity.json.mldsa65.sig -pkeyopt context-string:freedom-yield/validator-identity
+curl -sSfO https://metal.freedom-yield.com/api/identity.json.mldsa87.sig
+curl -sSfO https://metal.freedom-yield.com/.well-known/operator-identity-mldsa87.pub
+openssl pkeyutl -verify -pubin -inkey operator-identity-mldsa87.pub -rawin -in identity.json -sigfile identity.json.mldsa87.sig -pkeyopt context-string:freedom-yield/validator-identity
 ```
 <!-- pq-verify:end -->
 
@@ -257,7 +257,7 @@ If the operator identity key is rotated, the new `identity.json` reflects the ne
 
 The recommended rotation cadence is 12 months, aligned to a validation-cycle boundary. `ssh-keygen -Y verify` does **not** check `key_iat` / `key_exp`; consumers MAY enforce them as policy.
 
-The ML-DSA-65 key rotates the same way as the ed25519 key and at the same time: a new `identity.json` names the new PQ public key fingerprint and the new `/.well-known/operator-identity-mldsa65.pub`. Its algorithm follows Metallicus' basic choice (design spec §3.1): if Metallicus' SDK, CLI, WebAuth or a formal default moves to another parameter set or scheme, the change is a normal key rotation, not a schema bump.
+The ML-DSA-87 key rotates the same way as the ed25519 key: a new `identity.json` names the new PQ public key fingerprint and the new `/.well-known/operator-identity-mldsa87.pub`. The key uses ML-DSA-87, the highest ML-DSA level and the level NSA CNSA 2.0 specifies for all classification levels (design spec §3.1). It changes only if NIST / CNSA guidance changes or a weakness in ML-DSA-87 is published, and such a change is a normal key rotation, not a schema bump. The 2026-10-15 manifest was signed with an ML-DSA-65 key; that key was replaced by the ML-DSA-87 key on 2026-10-16 and its public key and signature are no longer published (see `docs/IDENTITY_SCHEMA_CHANGELOG.md`).
 
 The validator's on-chain signing keys (staker / BLS) are unaffected by operator identity key rotation; they have no relationship to this manifest. The `<xpr-account>@anchor` key is independent and rotates on its own schedule.
 
