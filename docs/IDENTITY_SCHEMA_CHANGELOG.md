@@ -27,14 +27,17 @@ levels. The identity PQ signature is a record meant to be checked by third
 parties against published guidance, so the level that guidance names is the
 one to use. The 2026-10-15 entry below said the algorithm
 "follows Metallicus' basic choice" of ML-DSA-65. That premise was wrong:
-Metallicus' CTO publicly stated that ML-DSA-44, -65 and -87 are all supported;
-ML-DSA-65 only appeared in examples. The change of key is a normal key
+PulseVM PR #116 (MetalBlockchain/pulsevm) implements ML-DSA-44, -65 and -87
+as equal key types with no default among them; ML-DSA-65 only appeared in
+examples. The change of key is a normal key
 rotation, not a schema bump.
 
 ### Compatibility
 
 Compatible. A consumer that validated against the 2026-10-15 v2 schema keeps
-validating the 2026-10-15 manifest. A consumer that hard-coded `ML-DSA-65`
+validating the 2026-10-15 manifest. Compatibility holds for documents, not
+for pinned schema bytes: a consumer that pinned the 2026-10-15 schema by
+SHA-256 (as the schema advises) must re-pin to accept ML-DSA-87 manifests. A consumer that hard-coded `ML-DSA-65`
 must accept `ML-DSA-87` for manifests issued from 2026-10-16. The ML-DSA-65
 public key and signature from 2026-10-15 are no longer published. The
 verification command is unchanged except for the two file names

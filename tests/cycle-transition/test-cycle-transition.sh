@@ -510,7 +510,7 @@ fi
 # reading) a stale file name. The ML-DSA path in the git add must be exactly
 # the library's — not the library's plus an old one.
 PQ_LIB_SIG_REL="$(bash -c '. "$1"; printf "%s" "$FYIPQ_SIG_REL"' _ "${REPO_ROOT}/scripts/lib/identity-pq.sh" 2>/dev/null || true)"
-PQ_IN_ADD="$(printf '%s\n' $SIG_LINE | grep -E 'mldsa|identity\.json\.[^ ]*\.sig$' | grep -vxF 'public/api/identity.json.sig' || true)"
+PQ_IN_ADD="$(printf '%s\n' "$SIG_LINE" | tr ' ' '\n' | grep -E 'mldsa|identity\.json\.[^ ]*\.sig$' | grep -vxF 'public/api/identity.json.sig' || true)"
 if [ -n "$PQ_LIB_SIG_REL" ] && [ "$PQ_IN_ADD" = "$PQ_LIB_SIG_REL" ]; then
 	ok "unit 4b's only ML-DSA signature path is the library's FYIPQ_SIG_REL (${PQ_LIB_SIG_REL})"
 else

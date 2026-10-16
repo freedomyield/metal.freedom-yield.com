@@ -1,9 +1,9 @@
 # Operator identity: additive post-quantum (ML-DSA-87) signature — design
 
 > **Revision 4 (2026-10-16).** Rev 3 chose ML-DSA-65 on the premise that it was
-> "Metallicus' basic choice". That premise was wrong: Metallicus' CTO publicly
-> stated that ML-DSA-44, -65 and -87 are all supported; ML-DSA-65 only appeared
-> in examples. The operator re-selected the parameter on its own merits and
+> "Metallicus' basic choice". That premise was wrong: PulseVM PR #116
+> (MetalBlockchain/pulsevm) implements ML-DSA-44, -65 and -87 as equal key types
+> with no default among them; ML-DSA-65 only appeared in examples. The operator re-selected the parameter on its own merits and
 > chose **ML-DSA-87** (approved in chat 2026-10-16). Rev 4 replaces §3
 > principle 1 and §3.1 with a selection rule that does not depend on
 > Metallicus' examples, moves every description of the current key, its files
