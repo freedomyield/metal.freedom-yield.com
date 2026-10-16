@@ -22,7 +22,7 @@ permissions:
 jobs:
   check:
     if: ${{ vars.DEPLOY_ENABLED == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 once the 4 suites failing there are fixed
     timeout-minutes: 3
     env:
       SITE_URL: https://metal.freedom-yield.com/

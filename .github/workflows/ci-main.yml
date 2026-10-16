@@ -28,7 +28,7 @@ on:
 jobs:
   secret-scan:
     name: gitleaks (unconditional main push, no paths-ignore)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 once the 4 suites failing there are fixed
     steps:
       - uses: actions/checkout@v7
         with:
@@ -45,7 +45,7 @@ jobs:
 
   tests:
     name: repo test suites (unconditional main push, no paths-ignore)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 once the 4 suites failing there are fixed
     timeout-minutes: 20  # 2026-10-05: suite grew past 10 min (stress loops); cancelled != green
     steps:
       - uses: actions/checkout@v7
@@ -104,7 +104,7 @@ jobs:
     # Mirrored in validate.yml (branches-ignore: [main]) for the same reason
     # the other two mirrored jobs above are duplicated here — see their
     # comments. A red run here never blocks deploy.yml (no `needs`).
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 once the 4 suites failing there are fixed
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
