@@ -699,7 +699,7 @@ if [ -f "$IDENTITY_KEY" ]; then
 		*)          ID_PROBLEMS="${ID_PROBLEMS} private-key-mode-not-600(${ID_MODE})" ;;
 	esac
 fi
-# ML-DSA-65 half (unit 4's second signature). Read-only: modes, the committed
+# ML-DSA-87 half (unit 4's second signature). Read-only: modes, the committed
 # public key's digest, and the absence of an unlocked key. The passphrase is
 # never needed here and no decryption is attempted.
 PQ_ENC="$(fyipq__enc_path)"

@@ -27,7 +27,7 @@
     },
     {
       "id": "4",
-      "summary": "Mac: regenerate identity.json (ed25519 + ML-DSA-65 signatures) for the new cycle, commit + push + wait for deploy.",
+      "summary": "Mac: regenerate identity.json (ed25519 + ML-DSA-87 signatures) for the new cycle, commit + push + wait for deploy.",
       "scripts": ["operator-local/gen-identity.sh"],
       "cycle_gate_pattern": "4. **Mac —**",
       "validator_renewal_pattern": "④ Mac local: `FY_EXPECT_CYCLE"
