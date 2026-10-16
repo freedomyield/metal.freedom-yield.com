@@ -389,7 +389,12 @@ assert_true "line 4: 　自己 +a / 手数料 +b" "$(printf '%s' "$D_L4" | grep 
 assert_eq "line 5: full-width-space indent + JST maturity date + elapsed/rounded days" "　${EXPECTED_MD} 満期・経過 33/33 日" "$D_L5"
 assert_true "line 6: 25,000 まで残り R (one decimal) | 到達 🎉" "$(printf '%s' "$D_L6" | grep -qE '^25,000 (まで残り [0-9,]+\.[0-9]|到達 🎉)$' && echo 1 || echo 0)"
 assert_true "no '(d/D days)' date-lookalike anywhere in the digest" "$(grep -qE '[0-9]+/[0-9]+ days' "$DIGEST_FILE" && echo 0 || echo 1)"
-assert_true "no parentheses anywhere in the digest (the 4-line form wrapped on a phone)" "$(grep -qE '[()（）]' "$DIGEST_FILE" && echo 0 || echo 1)"
+# Parentheses are matched as fixed strings, not a bracket expression: in a
+# non-UTF-8 locale (LANG unset, e.g. a bare ubuntu docker image) GNU grep reads
+# [（）] as the single bytes EF BC 88 89, and BC is the last byte of 込 in
+# 見込み, so the check failed on a clean digest. -F compares the full
+# multibyte sequences, so the result no longer depends on the locale.
+assert_true "no parentheses anywhere in the digest (the 4-line form wrapped on a phone)" "$(grep -qF -e '(' -e ')' -e '（' -e '）' "$DIGEST_FILE" && echo 0 || echo 1)"
 assert_true "every digest line is <= 30 display columns (full-width = 2)" "$([ "$(max_display_width "$DIGEST_FILE")" -le 30 ] && echo 1 || echo 0)"
 assert_eq "indented lines are exactly lines 2, 4 and 5" "2 4 5" "$(grep -n '^　' "$DIGEST_FILE" | cut -d: -f1 | tr '\n' ' ' | sed 's/ $//')"
 # The projection is the FULL-CYCLE estimate: self = estimate_reward(2000,
@@ -543,7 +548,7 @@ self-stake 2,000 → 2,000
 assert_true "notify body: names Cycle 7" "$(grep -q '^Cycle 7 reward$' "$MATURITY_BODY" && echo 1 || echo 0)"
 assert_eq "notify body: exact eight-line phone-width layout (累積 first, breakdowns indented, tail split)" "$EXPECTED_MATURITY_BODY" "$(cat "$MATURITY_BODY")"
 assert_true "notify body: every line <= 30 display columns" "$([ "$(max_display_width "$MATURITY_BODY")" -le 30 ] && echo 1 || echo 0)"
-assert_true "notify body: no parentheses" "$(grep -qE '[()（）]' "$MATURITY_BODY" && echo 0 || echo 1)"
+assert_true "notify body: no parentheses" "$(grep -qF -e '(' -e ')' -e '（' -e '）' "$MATURITY_BODY" && echo 0 || echo 1)"
 assert_eq "digest lines 1-2 after maturity: 累積 62.8 / 自己 50.5 / 手数料 12.3, one decimal" "累積 62.8 METAL|　自己 50.5 / 手数料 12.3" "$(sed -n '1p' "$DIGEST_FILE")|$(sed -n '2p' "$DIGEST_FILE")"
 
 echo ""

@@ -2028,7 +2028,14 @@ else
 	bad "unit 4b does not state the expected staged set"
 fi
 # And the bullet that no exit code covers must be flagged as such.
-if printf '%s' "$B4_BLOCK" | grep -qF 'DOES NOT CHANGE THE EXIT CODE'; then
+# Matched on the prose re-joined into one line: fyct__wrap breaks at
+# ${#line}, which counts characters under a UTF-8 locale but BYTES under C /
+# POSIX (the bullet carries multibyte '—' and '…'), so the wrap point — and
+# whether this phrase straddles two comment lines — depends on the locale the
+# suite runs in (measured: fails under LC_ALL=C on macOS and with LANG unset
+# on ubuntu 24.04 and 26.04 alike).
+B4_FLAT="$(printf '%s\n' "$B4_BLOCK" | sed -e 's/^#[[:space:]]*//' | tr '\n' ' ')"
+if printf '%s' "$B4_FLAT" | grep -qF 'DOES NOT CHANGE THE EXIT CODE'; then
 	ok "unit 4b flags the one bullet CI cannot fail on"
 else
 	bad "unit 4b does not distinguish the bullet CI cannot fail on from the ones it can"

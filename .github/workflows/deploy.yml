@@ -41,7 +41,7 @@ jobs:
     # (not gated on DEPLOY_ENABLED) so main stays scanned even before a VPS
     # is contracted / deploy is enabled.
     name: gitleaks (push-to-main gate)
-    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 once the 4 suites failing there are fixed
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 after the tests job passes on the real 26.04 runner (2026-10-16: no suite fails only on 26.04 in a runner-like local run)
     steps:
       - uses: actions/checkout@v7
         with:
@@ -77,7 +77,7 @@ jobs:
     # step. Runs unconditionally (not gated on DEPLOY_ENABLED), matching
     # secret-scan above.
     name: publish-guard (host identifier / PII) on pushed diff, fail-closed
-    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 once the 4 suites failing there are fixed
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 after the tests job passes on the real 26.04 runner (2026-10-16: no suite fails only on 26.04 in a runner-like local run)
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
@@ -130,7 +130,7 @@ jobs:
     # neither can be skipped into a pass.
     needs: [secret-scan, publish-guard]
     if: ${{ vars.DEPLOY_ENABLED == 'true' }}
-    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 once the 4 suites failing there are fixed
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 after the tests job passes on the real 26.04 runner (2026-10-16: no suite fails only on 26.04 in a runner-like local run)
     timeout-minutes: 10
     env:
       SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
