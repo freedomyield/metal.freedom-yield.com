@@ -310,7 +310,7 @@ Run `bash tests/run-all-tests.sh` and `shellcheck -x` (P5).
 **Pre-step: Task 0 is read-only and the AI may run it.** Confirm the following, and stop the design if any is false:
 - Hyperion `get_actions` honours `filter`, `skip`, `sort=desc`, `limit=100` on both XPR bases.
 - `/v2/health` has `service_data.head_block_num` and `last_indexed_block`.
-- `proton chain:info` output has `head_block_time` and `last_irreversible_block_time`.
+- `HOME=~/.metal-fy-proton-test proton chain:info` (testnet; for the mainnet profile `HOME=~/.metal-fy-proton proton chain:info` — Constitution §3.5) output has `head_block_time` and `last_irreversible_block_time`.
 - The non-TTY CLI output carries no ANSI codes. If this cannot be observed without a push, just strip them.
 
 **Scenarios:**

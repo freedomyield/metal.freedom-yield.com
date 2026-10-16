@@ -1299,11 +1299,20 @@ the values to pass on a given day are in the day-of value sheet above):
    §1 P-3)。「拒否された」と「届いたか分からない」の区別も付かない (同 P-1)。
    再実行は二重刻印 (2026-07-01 と同じ種類の事故) になりうる。
 
+   - **例外は無い。** 確認フレーズの段階で中止した場合 (exit 5。上の
+     「中止の言い方」のとおり broadcast は起きていない) や、gate 2 の token
+     期限切れで断られた場合も、exit 0 以外なのでこのルールに従う。どの
+     exit 5 が「何も送っていない」かを、いまの出力から確実に見分ける方法が
+     無いためである (同 design §1 P-1)。
    - **「exit 0」だけでは成功ではない。** 署名 CLI は push が失敗しても
      exit 0 で返る (同 design、key finding 1)。成功の証拠は、
      `sign-anchor-event.sh` が stdout に出した JSON 断片の **64 hex の
      `tx_id`** だけである。tx id が無ければ、exit code が何であっても
-     「不確定」として扱う。
+     「不確定」として扱う。(いまの `sign-anchor-event.sh` は、tx_id が
+     64 hex でなければ自分で exit 5 を返す (`:410-413`)。したがって「7c が
+     exit 0 なのに tx_id が無い」は今の実装では起きない。ただし tx_id が
+     あっても着地は保証されない — 同 design key finding 4。それは step 8
+     が扱う。)
    - **再実行を検討してよいのは、次の (a)(b) が両方済んでから。それでも
      決めるのは operator** で、AI が新しい per-invocation 認可を求めるのは
      その決定の後 (手順は上の「per-invocation 認可の手順」をもう一度最初から。
@@ -1312,42 +1321,59 @@ the values to pass on a given day are in the day-of value sheet above):
        「最終確定ブロックの時刻 + 3000 秒」の有効期限で署名する (同 design
        §1 P-2)。そのため、結果の分からない push は約 50 分のあいだ後から
        着地しうる。60 分はその上限に余裕を足した値。
-     - **(b) 同じ cycle の memo prefix `fya<S>c<N>` (その日刻む cycle。
-       記入例の 2026-10-07 なら `fya1c6`) を持つ action が、anchor account
-       から chain 上に 1 つも無いことを read-only で確かめる。** 使うのは
-       `scripts/lib/anchor-history-read.sh` の `ahr_resolve_tx` が step 8 で
-       最初に送るのと同じ Hyperion `get_actions` 要求である。history base は
-       committed の chain profile から、actor は 7c と同じ `xpr-account`
-       から取る。AI@Mac が repo root で実行する (GET のみ。署名も送信も
-       しない):
+     - **(b) その日刻む cycle の memo prefix `fya<S>c<N+1>` (`<N+1>` は
+       day-of value sheet の「その日刻む cycle」。`<S>` は anchor の schema
+       major で、`public/api/anchor-source.json` の `schema_version`。記入例の
+       2026-10-07 なら `fya1c6`) を持つ action が、anchor account から chain
+       上に 1 つも無いことを read-only で確かめる。** prefix は手で書かない。
+       7c が署名に使ったのと同じ `public/api/anchor-source.json` から、
+       `sign-anchor-event.sh` と同じ規則 (`:220-230`, `:296`) で導く。
+       使う要求は、`scripts/lib/anchor-history-read.sh` の `ahr_resolve_tx`
+       が step 8 で最初に送るのと同じ Hyperion `get_actions` である。history
+       base は committed の chain profile から、actor は 7c と同じ
+       `xpr-account` から取る。AI@Mac が repo root で実行する (GET のみ。
+       署名も送信もしない)。P・actor・base のどれかが正しく得られなければ
+       `ABORT` を印字し、何も問い合わせずに終わる — これは「無い」では
+       **ない**:
        ```sh
        FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config
        ACTOR="$(head -n 1 "$FY_CONFIG_DIR/xpr-account")"
        BASE="$(jq -r '.profiles["xpr-mainnet"].history_bases[0]' config/a-chain-profiles.json)"
-       P=fya1c<N+1>
-       curl -sSf --max-time 20 "$BASE/v2/health" \
-         | jq -r '"\([.health[] | "\(.service)=\(.status)"] | join(" ")) head=\([.health[] | .service_data? | objects | .head_block_num? | numbers] | max) indexed=\([.health[] | .service_data? | objects | .last_indexed_block? | numbers] | max)"'
-       curl -sSf --max-time 20 "$BASE/v2/history/get_actions?account=$ACTOR&limit=50&sort=desc" \
-         | jq -r --arg a "$ACTOR" --arg p "$P" '
-             "actions_returned=\(.actions | length)",
-             (.actions[]
-              | select(.act.account == "eosio.token" and .act.name == "transfer" and .act.data.from == $a)
-              | (.act.data.memo | split(":")[0]) as $m
-              | select($m | test("^fya[0-9]+c[0-9]+"))
-              | "\(if $m == $p or ($m | startswith($p + "-")) then "TARGET" else "other " end) \(.trx_id) block=\(.block_num) \(."@timestamp") \($m)")'
+       P="fya$(jq -r '.schema_version' public/api/anchor-source.json)c$(jq -r '.observations_branch.cycle_number_observed' public/api/anchor-source.json)"
+       if printf '%s\n' "$P" | grep -Eqx 'fya[0-9]+c[0-9]+' && [ -n "$ACTOR" ] && printf '%s\n' "$BASE" | grep -Eq '^https://'; then
+         echo "P=$P"
+         curl -sSf --max-time 20 "$BASE/v2/health" \
+           | jq -r '"\([.health[] | "\(.service)=\(.status)"] | join(" ")) head=\([.health[] | .service_data? | objects | .head_block_num? | numbers] | max) indexed=\([.health[] | .service_data? | objects | .last_indexed_block? | numbers] | max)"'
+         curl -sSf --max-time 20 "$BASE/v2/history/get_actions?account=$ACTOR&limit=50&sort=desc" \
+           | jq -r --arg a "$ACTOR" --arg p "$P" '
+               "actions_returned=\(.actions | length)",
+               (.actions[]
+                | select(.act.account == "eosio.token" and .act.name == "transfer" and .act.data.from == $a)
+                | (.act.data.memo | split(":")[0]) as $m
+                | select($m | test("^fya[0-9]+c[0-9]+"))
+                | "\(if $m == $p or ($m | startswith($p + "-")) then "TARGET" else "other " end) \(.trx_id) block=\(.block_num) \(."@timestamp") \($m)")'
+       else
+         echo "ABORT: P='$P' is not fya<S>c<N+1>, or the actor / history base is missing - nothing was checked, this is NOT absent" >&2
+         false
+       fi
        ```
-       **「無い」と言えるのは次がすべて成り立つときだけ:** 2 本とも exit 0 で
-       終わる。1 行目の service がすべて `=OK`。`indexed` が `head` から 120
-       block (約 1 分) 以内。`actions_returned=` が出ている。**`TARGET` 行が
-       0 本**。そして**前の cycle の anchor (`fya<S>c<N>`) が `other` 行に
-       見えている** (検索した範囲がそこまで届いている証拠)。
+       **「無い」と言えるのは次がすべて成り立つときだけ:** 出力の 1 行目が
+       `P=fya<S>c<N+1>` で、その値が value sheet の「その日刻む cycle」と
+       一致する。`ABORT` が出ていない。2 本の問い合わせがどちらも exit 0 で
+       終わる。health の行の service がすべて `=OK`。`indexed` が `head` から
+       120 block (XPR は 0.5 秒/block なので、およそ 1 分) 以内。
+       `actions_returned=` が出ている。**`TARGET` 行が 0 本**。そして
+       **前の cycle (value sheet の「その日閉じる cycle」`<N>`) の anchor
+       `fya<S>c<N>` が `other` 行に見えている** (検索した範囲がそこまで
+       届いている証拠)。
        **`TARGET` 行が 1 本でもあれば、その cycle は刻まれている。7c は
        二度と実行しない** — その `trx_id` を operator に示し、step 8 の照合
        (operator 判断) へ進む。上の条件が 1 つでも欠けたら「無いとは証明
        できない」。待って (b) をやり直す。7c には進まない。
-       (検証: 2026-10-16 に mainnet で実行。`P=fya1c6` で cycle 6 の 4 action が
-       `TARGET` に、`P=fya1c7` で `TARGET` 0 本・`fya1c6` が `other` に出ることを
-       確認した。)
+       (検証: 2026-10-16 に mainnet で実行した。anchor-source から導いた
+       `P=fya1c6` では、cycle 6 の 4 action が `TARGET` に出た。`P=fya1c7`
+       では `TARGET` が 0 本で、`fya1c6` が `other` に出た。P が空のときと
+       `fya1c` のときは `ABORT` になり、問い合わせは送られなかった。)
    - **恒久対策**は
      `docs/superpowers/specs/2026-10-16-anchor-double-inscription-guard-design.md`
      である。wrapper 側で、署名前の chain 照合・結果の分類・600 秒の明示期限・
