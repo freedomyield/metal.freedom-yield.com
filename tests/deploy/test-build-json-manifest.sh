@@ -73,7 +73,7 @@ grep -q '> public/api/build.json' "${WORKFLOW}" \
 # ---- functional: extract the step's own run: block and execute it against
 # synthetic Actions env vars (GITHUB_SHA / GITHUB_REF_NAME / GITHUB_RUN_ID
 # are provided by the real Actions runtime for free; jq is preinstalled on
-# ubuntu-latest, same tool this repo already depends on elsewhere). ----
+# the ubuntu-24.04 runner, same tool this repo already depends on elsewhere). ----
 if ! command -v jq >/dev/null 2>&1; then
 	echo "SKIP: jq unavailable — cannot execute the extracted run: block"
 else
