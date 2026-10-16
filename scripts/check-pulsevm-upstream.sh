@@ -125,7 +125,8 @@
 #       NOT read (removed 2026-10-16): the `--key-type` parameter used in the
 #       PR's docs/ml-dsa.md examples. It was watched on the premise that the
 #       identity PQ key follows "Metallicus' basic choice"; that premise was
-#       wrong (Metallicus states ML-DSA-44/65/87 are all supported), and the
+#       wrong (PR #116 implements ML-DSA-44/65/87 as equal key types with no
+#       default among them), and the
 #       identity PQ key's parameter is now chosen on its own merits (spec
 #       §3.1), so an example's parameter obliges nothing here.
 #
