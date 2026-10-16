@@ -856,7 +856,7 @@ the values to pass on a given day are in the day-of value sheet above):
 
    - **打つ人**: **operator 自身**。passphrase を 2 回入力するため、AI にはどちらも
      渡さない。1 つ目 (`ssh-add`) は ed25519 identity 鍵、2 つ目
-     (`pq-identity-unlock.sh`) は ML-DSA-65 鍵の passphrase。
+     (`pq-identity-unlock.sh`) は ML-DSA-87 鍵の passphrase。
      Dashlane の entry 名はこの repo には書かない — ピング送付時に AI が添える。
    - **目視するもの**: `Identity added: /Users/…/freedom-yield-operator-identity`
      の 1 行と、unlock スクリプト自身の完了表示。
@@ -962,11 +962,11 @@ the values to pass on a given day are in the day-of value sheet above):
    go red if any bullet above is missed.
 
    **commit に入れるファイル (これで全部 — 5 つ)**:
-   `git add public/api/identity.json public/api/identity.json.sig public/api/identity.json.mldsa65.sig deploy/identity-pin-baseline.json deploy/publication.json`。
+   `git add public/api/identity.json public/api/identity.json.sig public/api/identity.json.mldsa87.sig deploy/identity-pin-baseline.json deploy/publication.json`。
    `identity.json` と **両方の署名** (ed25519 の `.sig` と ML-DSA の
-   `.mldsa65.sig`) は `gen-identity.sh` が組で書く。**署名を 1 つでも落とすと、新しい
+   `.mldsa87.sig`) は `gen-identity.sh` が組で書く。**署名を 1 つでも落とすと、新しい
    manifest が前の cycle の署名のまま公開される** (ssh-keygen -Y verify と unit 9 の
-   Phase 1 が落ちる。`.mldsa65.sig` を落とすと CI の `verify-identity` が
+   Phase 1 が落ちる。`.mldsa87.sig` を落とすと CI の `verify-identity` が
    schema_version 2 の manifest で落ちる)。`git diff --cached --name-status` で
    ちょうどこの 5 件になることを確かめてから commit する。
 

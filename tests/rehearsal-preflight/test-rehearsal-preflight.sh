@@ -192,8 +192,8 @@ make_fixture() { # <dir>
 	# reads modes and the PEM body's digest, so fabricated bytes are enough.
 	mkdir -p "$d/pq-keys"
 	chmod 700 "$d/pq-keys"
-	printf 'fixture-encrypted-key-placeholder\n' > "$d/pq-keys/operator-identity-mldsa65.enc.pem"
-	chmod 600 "$d/pq-keys/operator-identity-mldsa65.enc.pem"
+	printf 'fixture-encrypted-key-placeholder\n' > "$d/pq-keys/operator-identity-mldsa87.enc.pem"
+	chmod 600 "$d/pq-keys/operator-identity-mldsa87.enc.pem"
 	printf '%s\n%s\n%s\n' '-----BEGIN PUBLIC KEY-----' 'QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=' '-----END PUBLIC KEY-----' > "$d/pq-public.pub"
 
 	# cycle-history: CLOSED contiguous rows, so fyc_closed_cycle_count agrees
@@ -530,10 +530,10 @@ D="$(fresh id-nopub)"; rm -f "$D/id_key.pub"
 expect_case "check 5: identity public key absent -> exit 3" "$D" 3 "missing-public-key"
 
 # --- check 5, ML-DSA half ---------------------------------------------------
-D="$(fresh pq-no-enc)"; rm -f "$D/pq-keys/operator-identity-mldsa65.enc.pem"
+D="$(fresh pq-no-enc)"; rm -f "$D/pq-keys/operator-identity-mldsa87.enc.pem"
 expect_case "check 5: encrypted ML-DSA key absent -> exit 3" "$D" 3 "missing-mldsa-encrypted-key"
 
-D="$(fresh pq-enc-mode)"; chmod 644 "$D/pq-keys/operator-identity-mldsa65.enc.pem"
+D="$(fresh pq-enc-mode)"; chmod 644 "$D/pq-keys/operator-identity-mldsa87.enc.pem"
 expect_case "check 5: encrypted ML-DSA key not mode 600 -> exit 3" "$D" 3 "mldsa-encrypted-key-mode-not-600"
 
 D="$(fresh pq-dir-mode)"; chmod 755 "$D/pq-keys"
@@ -553,7 +553,7 @@ expect_case "check 5: committed ML-DSA public key absent -> exit 3" "$D" 3 "miss
 D="$(fresh pq-bad-pub)"; printf 'not a pem\n' > "$D/pq-public.pub"
 expect_case "check 5: committed ML-DSA public key unreadable as a PEM -> exit 3" "$D" 3 "mldsa-public-key-fingerprint-failed"
 
-D="$(fresh pq-unlocked)"; printf 'x\n' > "$D/pq-keys/operator-identity-mldsa65.unlocked.pem"; chmod 600 "$D/pq-keys/operator-identity-mldsa65.unlocked.pem"
+D="$(fresh pq-unlocked)"; printf 'x\n' > "$D/pq-keys/operator-identity-mldsa87.unlocked.pem"; chmod 600 "$D/pq-keys/operator-identity-mldsa87.unlocked.pem"
 expect_case "check 5: an unlocked ML-DSA key lying around -> exit 3, names the lock script" "$D" 3 "pq-identity-lock.sh"
 expect_case "check 5: the lock hint carries FY_PQ_KEY_DIR=<resolved dir>" "$D" 3 "FY_PQ_KEY_DIR=$D/pq-keys bash scripts/operator-local/pq-identity-lock.sh"
 
