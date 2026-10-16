@@ -12,7 +12,7 @@ on:
 jobs:
   json:
     name: JSON syntax
-    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 once the 4 suites failing there are fixed
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 after the tests job passes on the real 26.04 runner (2026-10-16: no suite fails only on 26.04 in a runner-like local run)
     steps:
       - uses: actions/checkout@v7
       - name: Validate all JSON
@@ -42,7 +42,7 @@ jobs:
 
   caddy:
     name: Caddyfile
-    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 once the 4 suites failing there are fixed
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 after the tests job passes on the real 26.04 runner (2026-10-16: no suite fails only on 26.04 in a runner-like local run)
     steps:
       - uses: actions/checkout@v7
       - name: Validate Caddyfile
@@ -55,7 +55,7 @@ jobs:
 
   compose:
     name: docker compose configs
-    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 once the 4 suites failing there are fixed
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 after the tests job passes on the real 26.04 runner (2026-10-16: no suite fails only on 26.04 in a runner-like local run)
     env:
       ACME_EMAIL: ci@example.com
       DOMAIN: metal.freedom-yield.com
@@ -76,7 +76,7 @@ jobs:
 
   html:
     name: HTML quick lint
-    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 once the 4 suites failing there are fixed
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 after the tests job passes on the real 26.04 runner (2026-10-16: no suite fails only on 26.04 in a runner-like local run)
     steps:
       - uses: actions/checkout@v7
       - name: Check HTML files have <title>, lang, and viewport
@@ -95,7 +95,7 @@ jobs:
 
   links:
     name: Internal link check
-    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 once the 4 suites failing there are fixed
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 after the tests job passes on the real 26.04 runner (2026-10-16: no suite fails only on 26.04 in a runner-like local run)
     steps:
       - uses: actions/checkout@v7
       - name: Check that internal links resolve to existing files
@@ -123,7 +123,7 @@ jobs:
 
   shellcheck:
     name: Shell scripts
-    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 once the 4 suites failing there are fixed
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 after the tests job passes on the real 26.04 runner (2026-10-16: no suite fails only on 26.04 in a runner-like local run)
     steps:
       - uses: actions/checkout@v7
       - name: shellcheck on scripts/ and .githooks/
@@ -133,7 +133,7 @@ jobs:
 
   secret-scan:
     name: gitleaks
-    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 once the 4 suites failing there are fixed
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 after the tests job passes on the real 26.04 runner (2026-10-16: no suite fails only on 26.04 in a runner-like local run)
     steps:
       - uses: actions/checkout@v7
         with:
@@ -217,7 +217,7 @@ jobs:
     # Mirrored in ci-main.yml because this workflow ignores pushes to main
     # (branches-ignore above) — same reason `tests` and `secret-scan` are
     # mirrored there. A red run here never blocks deploy.yml (no `needs`).
-    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 once the 4 suites failing there are fixed
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 after the tests job passes on the real 26.04 runner (2026-10-16: no suite fails only on 26.04 in a runner-like local run)
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
