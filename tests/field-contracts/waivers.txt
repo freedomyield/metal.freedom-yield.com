@@ -1,0 +1,13 @@
+# Waivers for scripts/check-field-contracts.py
+#
+# Format:  <artifact> <key>  # justification
+# Example: peers.json  region  # enriched at edge by the CDN worker, not by any repo writer
+#
+# A waiver WITHOUT a `#` justification is rejected (the checker exits 2), so a
+# waiver can never be added silently. Waivers are for names that are genuinely
+# dynamic or defined outside this repo — never for "we'll fix it later". If the
+# writer simply does not emit the key, that is the bug the checker exists to
+# find; fix the reader (or the writer) instead of waiving it.
+#
+# Deliberately empty: as of 2026-08-06 every reader key in this repo matches a
+# name its writer actually emits.

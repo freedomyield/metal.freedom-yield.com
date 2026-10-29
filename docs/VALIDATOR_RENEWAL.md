@@ -1,0 +1,575 @@
+# Validator 再登録手順(VALIDATOR_RENEWAL)
+
+現バリデート期間の終了に合わせて **再 AddValidator tx を発行** し、同 NodeID で稼働を続ける手順書。月次サイクル(~30 日)で繰り返し実行する SOP。
+
+> 期限を逃すと validator が P-Chain から消える。同 NodeID で再登録可能だが、消失期間中の uptime はカウント不能、delegator もリセット。
+
+> **適用版バナー (2026-06-29 16:40 JST update)**:
+> - **2026-07-04 cycle 3 開始 transition + 以降全 transition**: 本書末尾の **「新 SOP (= cycle-gate + resume 設計、 2026-06-29 deployed)」** section を使用。 手動 cron disable/enable は廃止、 operator 能動操作は wallet + 鍵の unlock / lock (operator@TTY 5 箇所) + chat での broadcast 認可 + visual verify のみ (同 section「operator の能動操作」、正は `docs/CYCLE_GATE.md`)。
+> - **本書 Step 1 〜 Step 3 (= 旧 11-step) + Phase α canonical memo**: deploy 前の **歴史記録 / 緊急 rollback 時の fallback**。 承認 state を緩めるのは cycle-gate state file の退避 (rollback lever 1) だけで足りる。`cycle-gate.sh` の `chmod -x` (lever 2) は旧 behavior に戻す操作ではなく cycle 記録系を fail-closed で止める操作なので使わない (= 3 段階 rollback 手順は本書末尾「rollback」と `docs/CYCLE_GATE.md` Rollback section)。
+> - 切替の根拠: `docs/CYCLE_GATE.md` 全文。 cycle-gate は 2026-06-29 15:09 JST に T-7 deploy 完了済 + 第 7 ラウンド独立監査 PASS。
+
+---
+
+## 全体タイムライン(各サイクル)
+
+ntfy 通知 4 ポイント(JST 基準、1 サイクル 1 回ずつ発火):
+
+| タイミング | アクション | 通知 priority |
+|---|---|---|
+| **T-7 日** | 来週判断: 次回 duration と stake 額を確定 | default |
+| **T-1 日** | 明日 action day。Wallet ロード確認 + BLS PoP / NodeID 値の照合 | default |
+| **T-0 日(当日)** | 旧 endTime まで wait。wallet を開いてフォームをコピー可能な状態に | default |
+| **T-10 分前** | 旧 stake 解放間近 = 実 action moment。発行手順 Step 2 を即実行 | **urgent** |
+
+**発行のタイミング(手順はこれ 1 つ)**: T-0 の旧 endTime 経過後 = 旧 stake 解放後に発行する。cycle 1→2 から 5→6 までの 5 回の転換はすべてこの形で、新 cycle の start は毎回旧 endTime の 13〜44 分後(公開 `cycle-history.jsonl` の `start_iso` / `end_iso` で確認できる。cycle 6 は旧 endTime 2026-10-07 13:30:08 JST に対し start 13:51:35 JST)。`docs/CYCLE_GATE.md` の「cycle 間のメンテナンス枠」も、endTime から submit までの間 validator が set に居ないことを前提にしている。
+
+> **決定 (operator、2026-10-08)**: 旧期間の終了前に次の期間を登録する発行(旧期間の validating 中に同 NodeID の AddValidator を出す形)は、本書の手順から削除した。手順は「旧 endTime 経過後に登録する」だけとする。理由: 5 回の転換はすべて終了後の登録で問題なく済んでおり、終了前の登録は一度も試されておらず、P-Chain が受け付けるかを示す一次資料も repo に無かった。未検証の分岐を手順に残すと当日の判断を増やすだけなので、実績のある 1 つに絞った。
+
+---
+
+## Step 1: T-7 〜 T-1 — 準備
+
+### 1.1 残日数確認
+
+- サイト `https://metal.freedom-yield.com/` の "Period ends" 行で残日数 / endTime 確認
+- または validator host で:
+  ```sh
+  ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
+      'sudo -u <deploy_user> bash -c "cd <deploy_path> && \
+         bash scripts/node-info.sh | grep -E \"endTime|Self-stake|Total weight\""'
+  ```
+  (host の repo は `<deploy_path>`、実行ユーザは `<deploy_user>` — `docs/CYCLE_GATE.md`「実行者と実行場所」。`node-info.sh` は `public/api/validator.json` を書くので root のまま走らせない)
+
+### 1.2 次回 duration の確定
+
+| Duration | 適用条件 |
+|---|---|
+| **14 日(プロトコル最短)** | 短期で方針変更したい時 |
+| **30 日** | 標準サイクル(default) |
+| **3 ヶ月** | 運用負荷を下げたい |
+| **1 年(最長)** | 長期 commitment |
+
+判断軸の詳細は operator-local notes 参照。
+
+### 1.3 wallet 残高と stake 額の決定
+
+- Metal Wallet web で wallet をロード(reward 受取先の P-address は operator-local notes 参照)
+- **原資**: 旧 endTime 経過後に発行するので、解放された旧 stake + 報酬がそのまま新 tx の原資になる。事前 inject は不要。発行直前の Available (P) の目視確認は Step 2.2
+- **外部 capital を足す場合だけ**: その分は発行前に P-Chain へ入れておく(X-Chain に transfer → wallet の Cross-Chain で **X-Chain → P-Chain** export/import、5〜15 分 + 1 confirmation → Metal Wallet web で着金確認、`scripts/check-validator.sh` でも cross check 可能)。Stake Amount には tx fee マージン(0.001 METAL 程度)を残す
+- **stake 額の決定方針**:
+  - 前期間 self-stake + 前期間中報酬 + 外部 capital(その期間に流入した分)を合算
+  - 結果値を新 tx の Stake Amount に入れる
+  - `max_weight = 5 × self` のルール上、self-stake を増やすほど delegation 受入枠も連動拡大
+- delegationFee は据え置きが原則(変更すると delegator から見て不安定に映る)
+
+### 1.4 BLS Proof of Possession の取得
+
+validator host で `info.getNodeID` を叩き `nodePOP` フィールドを取得。Metal Wallet web の Add Validator フォームに貼り付けるため。
+
+```sh
+ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
+  'curl -sS -X POST -H "content-type:application/json" \
+     --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"info.getNodeID\"}" \
+     http://localhost:9650/ext/info' | jq '.result.nodePOP'
+```
+
+期待される値(staker key 不変なら毎期同じ):
+- `publicKey`: `0x8a95c07e0148b662505e1dd913cf988745050b27eb75f7bb81b02f298b5fa81d0cc8c7d0fff090342c4e61ed725787a8`
+- `proofOfPossession`: `0x923efda8f4fcd1e2ad80a7ea5c467cf780aa22f9c6a689631735bb4b2c9aa4e4feb04108161c148d7ba6e9ce4d4b2baf0ffe93e85e3434e2cb9c756bc03e84d31db1c418221f2ea821a9b58a0b29147b3055d45ccbca37edd9c4b17d5ce6d023`
+
+→ operator-local notes の確定値と一致するはず。差異があれば BLS key が変わっている = アラート、まず原因究明。
+
+---
+
+## Step 2: tx 発行
+
+T-0 日、旧 endTime 経過後に発行する。解放された旧 stake + reward が新 tx の原資(cycle 間のメンテナンス枠はこの間に置く)。
+
+### 2.1 Metal Wallet web を開く
+
+`https://wallet.metalblockchain.org/` で wallet (24 語 mnemonic) をロード。**P-Chain** を選択。
+
+WebAuth wallet は mnemonic 非互換(AddValidator は Metal Wallet web 専用)。
+
+### 2.2 Add Validator フォーム入力
+
+#### Time 計算
+
+| 値 | 計算方法 |
+|---|---|
+| 旧期間 endTime | operator-local notes に記録された epoch |
+| **新 Start Time** | **入力欄なし** — submit 後、wallet 側が自動で「submit 時刻 + 5 分」に確定する |
+| **新 End Time** | date picker で「新 Start Time(≈ submit 時刻 + 5 分)+ duration」に相当する日付を選択 |
+
+> 旧 11-step 時代の記述(`date +%s` で Unix 秒を計算して Start/End Time にコピペ)は実機の Metal Wallet web と不一致。実機観測(cycle 3 時点)では **Start Time 入力欄自体が無く**、submit 後の auto+5min で確定する。End Time は Unix 秒直接入力ではなく **date picker** で日付を選ぶ。
+> **Wallet UI は変わり得るため、当日 Step 1 (準備 check) の段階で一度 Add Validator フォームを開き、Start Time 欄の有無 / End Time の入力形式を目視確認すること。**
+> 旧期間 endTime を経過していることが大前提。発行前に画面右上の Available (P) が想定値(旧 stake + reward 解放後の額)に増えていることを目視確認。
+
+#### Field 一覧
+
+| Field | 値 |
+|---|---|
+| Node ID | `NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v`(同 NodeID で連続) |
+| BLS Public Key | (Step 1.4 で取得) |
+| BLS Proof of Possession | (Step 1.4 で取得) |
+| Start Time | **入力欄なし**(submit 後、自動で「submit 時刻 + 5 分」に確定) |
+| End Time | date picker で上表の **新 End Time** に相当する日付を選択 |
+| Stake Amount | operator-chosen METAL (= NN × 10^9 nMETAL) |
+| Delegation Fee | operator-chosen % |
+| Reward Address | operator-local notes 参照(自 P-Chain) |
+| Delegation Reward Address | typically same as Reward Address |
+
+> **2026-08-04 cycle-4 実測の追加注意**:
+> - **Stake Amount に画面上の MAX/全額表示をそのまま入れない**: 手数料 + おつり分の余裕がなくなり
+>   `UTXOSet.getMinimumSpendable: insufficient funds` で送信が失敗する。想定額から端数を
+>   少し切り下げて入力する。
+> - **End Time の「Max」表示は当てにならない**: 実測ではこの表示が 21 日相当だったが、
+>   date picker では 30 日先の日付も選択可能だった。表示された Max を duration の上限だと
+>   思い込まず、date picker で希望の日付を直接選ぶ。
+
+### 2.3 Tx 確認 + 送信
+
+- フォームを送信 → wallet 確認画面で **全 field を再確認**
+- 特に **NodeID の typo** がないか、**Start Time が旧期間終了より後** か、**Stake Amount が想定通り** か
+- 送信 → tx ID を operator-local notes に記録(リポには commit しない)
+- explorer で tx が Committed になることを確認(通常 1-2 分)
+
+### 2.4 P-Chain 登録の確認
+
+```sh
+ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
+    'sudo -u <deploy_user> bash -c "cd <deploy_path> && \
+       bash scripts/node-info.sh"'
+```
+
+submit 後約 5 分の start 時刻に **`platform.getCurrentValidators`** に新 entry が現れる(それまでは `platform.getPendingValidators` 側)。
+
+---
+
+## Step 3: T-0(期間切替日)— 切替確認
+
+### 3.1 旧期間終了 + 新期間昇格の確認
+
+旧 endTime を過ぎたら:
+
+```sh
+ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
+    'sudo -u <deploy_user> bash -c "cd <deploy_path> && \
+       bash scripts/node-info.sh"'
+```
+
+期待:
+- `endTime` が新期間の値に切り替わっている
+- `Self-stake` が新 stake 額(増額していれば)で表示される
+- `Total weight` も新 self-stake に応じて更新
+- 新 validator entry の uptime は 0% からスタート(chain レベルでは新 instance 扱い)
+  - サイト側の歴史 uptime 表示は別途累積管理
+
+### 3.2 ステーキング報酬の確認
+
+Metal Wallet web の P-Chain で **旧期間の stake + 報酬** が解放されているか確認。
+
+報酬概算: `stake × duration × 年率 × uptime_factor`
+
+### 3.3 サイト validator.json の更新
+
+cron で自動更新されるが、即時確認したい場合:
+
+```sh
+ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
+    'sudo -u <deploy_user> bash -c "cd <deploy_path> && \
+       bash scripts/node-info.sh && jq \".endTime, .stake.self\" public/api/validator.json"'
+```
+
+→ サイト `https://metal.freedom-yield.com/` をリロードして "N days left" の値が新 duration に基づいた数字になっているか目視。
+
+### 3.4 ntfy 通知の確認
+
+新期間に入ると `check-anomalies.sh` が `DAYS_LEFT > 14` を検知して period_alert_sent flags を全 false にリセットするため、次サイクルの T-7 / T-1 / T-0 / T-10min alert が自動的に再武装される。手動操作不要。
+
+---
+
+## 失敗ケースと復旧
+
+### Case A: 旧期間 endTime を経過する前に submit してしまった
+
+- Start Time は入力欄が無く submit 時刻 + 5 分で自動確定するため(Step 2.2 参照)、submit 自体を旧期間 endTime より十分後に行う必要がある
+- 旧期間 endTime 経過前に submit すると、自動確定した Start Time も旧期間 endTime より前になる。これは本書の手順に無い操作で、P-Chain がどう扱うかは確かめていない(「全体タイムライン」の 2026-10-08 の決定)。tx が拒否された場合は下の手順で再 submit する。通ってしまった場合は、その tx ID を operator-local notes に残し、次の操作に進む前に operator が判断する
+- Metal Wallet web の Available (P) が想定値(旧 stake + reward 解放後の額)に増えていることを目視確認してから再度 submit。tx fee は還ってこないが大した金額ではない
+
+### Case B: BLS Proof of Possession が間違っている
+
+- tx は通るが新 entry の BLS が壊れる → validator が consensus に参加できない
+- 期間中ロックなので待つしかない、または BLS key を回し直す([docs/KEY_ROTATION.md](KEY_ROTATION.md))
+
+### Case C: 期限を完全に逃した
+
+- 旧期間終了で validator entry が消える
+- stake + 報酬は P-Chain wallet に解放(資金は失われない)
+- 同 NodeID で改めて AddValidator(Start Time は即時 + duration 自由)
+- ただし validator 消失期間中の uptime はゼロ評価、再開後ゼロから積み直し
+- delegator がいた場合は連動解放
+
+### Case D: VPS が落ちている
+
+- まず VPS の復旧を優先([docs/DISASTER_RECOVERY.md](DISASTER_RECOVERY.md))
+- 復旧後に Step 1.4 から再実行
+- 復旧に時間がかかる場合は Case C の流れに移行
+
+---
+
+---
+
+## 新 SOP (= cycle-gate + resume 設計、 2026-06-29 deployed、 2026-07-04 cycle 3 開始 transition から適用)
+
+> **適用状況 (= 2026-06-29 16:40 JST update)**: ✅ **T-7 deploy 完了 2026-06-29 15:09 JST**、 production active。 2026-07-04 cycle 3 開始 transition (= 5 日後) から本 SOP を live で使用。 上記 Step 1 〜 Step 3 (= 旧 11-step) は historical reference + 緊急 rollback 時の fallback。
+
+### 設計概要
+
+2 component:
+
+- `scripts/cycle-gate.sh` (= passive): 各 cron が broadcast 直前に「現サイクルは operator 承認済か」 を問い合わせる
+- `scripts/resume-after-cycle-start.sh` (= active、v2 = 3 phase): Phase 1 新サイクル開始確認(6 check)+ Phase 2 state file atomic 更新 + Phase 3 report。**broadcast はしない**(anchor 刻印は本書「AI が裏で自走する技術 task」記載の別 Mac-side pipeline が担う)
+
+State file: `/var/lib/freedom-yield/cycle-gate-state.json` (= operator 承認済の cycle signature + dag_root_hash を保持)
+
+詳細仕様 + behavior matrix + rollback 手順は `docs/CYCLE_GATE.md` 参照。
+
+### 廃止される手動操作 (= 旧 11-step との差分)
+
+| 旧 step | 廃止理由 |
+|---|---|
+| 旧 step 2: `/etc/cron.d/metal-anchor-watch` 一時 disable | cycle-gate.sh が approval state を見て自動 defer、 cron 常時 enable で安全 |
+| 旧 step 12: 同 re-enable | 上記の対称で廃止 |
+| 旧 step 8: `uptime-history.sh` 手動 trigger | AI が resume orchestration 内で trigger |
+| 旧 step 9: `gen-cycle-history.sh` + push 手動 trigger | 同上 |
+| 旧 step 11: `post-anchor-event.sh` 手動 trigger | `post-anchor-event.sh` は v2 migration (2026-07-06) で retired。anchor 刻印は `resume-after-cycle-start.sh` とは独立した、Mac-side の `sign-anchor-event.sh` (via `bin/safe-broadcast`) が担う。`resume-after-cycle-start.sh` は cycle-gate 承認 state の書込のみ |
+
+### operator の能動操作
+
+[[feedback_ai_full_orchestration_default]] model α 前提。**正は `docs/CYCLE_GATE.md` の「実行者と実行場所 (actor / location)」節と `scripts/cycle-transition.sh --print-only` の stop 1〜4**。本節はその要約で、食い違ったら CYCLE_GATE 側に合わせる。operator の能動操作は次の 3 種類だけで、残りの code block はすべて AI (AI@Mac / AI@host) が実行する:
+
+**(1) wallet と依頼・目視**
+
+| 操作 | 場所 |
+|---|---|
+| AI に「cycle 切替お願い」と依頼 | 任意の channel |
+| wallet 操作 (集約 → 送金 → cross-chain → AddValidator → on-chain Committed 確認。手順⓪) | Metal Wallet web |
+| 手順⑦-c の tx を explorer で目視確認 (AI が URL を報告) | XPR explorer |
+
+**(2) operator@TTY — operator 自身が自分の terminal で打つ 6 箇所** (password / passphrase は AI に渡さない。値は Dashlane):
+
+| # | 操作 | いつ |
+|---|---|---|
+| ① | `ssh-add ~/.ssh/freedom-yield-operator-identity` (identity 鍵を agent に載せる) | 手順④の前 |
+| ② | testnet keystore の unlock (`HOME=~/.metal-fy-proton-test`) | 手順⑦-a の前 |
+| ③ | mainnet keystore の unlock (`HOME=~/.metal-fy-proton`) | 手順⑦-b.5 が `REACHABLE` を出した後、⑦-c の前 |
+| ④ | mainnet keystore の re-lock | 手順⑦-c の直後 |
+| ⑤ | testnet keystore の re-lock | 手順⑦-a の直後 (遅くとも⑦-c の後) |
+| ⑥ | ML-DSA 鍵の unlock (`bash scripts/operator-local/pq-identity-unlock.sh`。①と同じ 1 行で `ssh-add … && bash scripts/operator-local/pq-identity-unlock.sh` と打つ。passphrase は別で、Dashlane entry 名はピング送付時に AI が添える。lock の打鍵は無い) | 手順④の前 |
+
+**(3) chat での認可 (コマンドは打たない)**
+
+- 手順⑦-a: AI が `run-testnet-rehearsal.sh` のコマンドと broadcast される `{chain, actor, permission, action, memo, quantity}` を chat に示し、operator がそれに対して実行を指示する (1 回の指示 = 1 回の起動。unlock そのものは認可ではない。2026-10-07 operator 決定)。
+- 手順⑦-c: PRIME DIRECTIVE gate 2 の per-invocation 認可 (`docs/CYCLE_GATE.md` step 7c の手順)。
+
+identity 鍵の agent からの取り外し (`ssh-add -d`、手順④の後) は passphrase を伴わないので AI@Mac が行う。ML-DSA 鍵に lock の打鍵は無い。unlock 行は手順④の直前に打つ (2 時間を過ぎると `gen-identity.sh` は拒否するが、平文の seed ファイルは使われるか lock されるまで残る)。`gen-identity.sh` は冒頭の引数チェックを抜けた run では成功・失敗を問わず unlock を消費するので、手順④を再実行するときは毎回 unlock し直す。`bash scripts/operator-local/pq-identity-lock.sh` が要るのは、手順④を実行しなかった場合、または冒頭チェック前に exit 1/6/99 で終わった場合だけ (冪等・passphrase 不要。迷ったら AI@Mac が実行してよい)。
+
+### AI が裏で自走する技術 task (= operator から見えない)
+
+当日順序(厳守。cycle N の閉じ → cycle N+1 の開始):
+
+⓪ **operator (Metal Wallet web)**: 新 AddValidator を submit → explorer で **Committed** を確認 → `platform.getCurrentValidators` に新 entry が見えることまで確認(host の `node-info.sh` 等)。**これだけが人の手による状態変更で、以降の全手順の前提**(form の field と timing は本書 Step 2 参照)。ブロックは慣習ではなく機械的: 新 entry が chain に出るまで手順⑤ `gen-anchor-source.sh` は **exit 4**(`NodeID ... not present in current validators`)、手順⑨ `resume-after-cycle-start.sh` は **exit 2**(`NodeID=... not in current validators (= AddValidator tx not yet observed?)`)で hard-block する。submit しただけで pipeline を始めない — Committed と chain read の両方を待つ
+
+**AI が chain 状態を確認する手段の注記**: `scripts/broadcast-guard.sh`(tier-1)は `/ext/bc/[XPC]` や bare `/ext/[XP]` 宛の `curl`/`wget` を **read/write を区別せず shape だけで無条件 block** する — `platform.getCurrentValidators` の読み取り専用クエリであっても、AI session からの素の `curl .../ext/bc/P` は broadcast 試行と同様に拒否される。採用済みの回避策は chain に直接問い合わせず、5 分毎の `metal-node-info` cron (`node-info.sh`) が既に書いている `public/api/validator.json` を read し、`endTime` / `observedAt` フィールドをファイルの mtime(≤5 分 = fresh、cron 周期と一致)と突き合わせて鮮度確認すること。**この目的で `broadcast-guard.sh` を無効化しない** — guard は設計上無条件であり、cron 生成物を read するのが AI session から chain 状態を見る正しい経路。
+① validator host: node-info tick 待ち — `public/api/validator.json` に新 endTime が反映されたことを確認(古い endTime のまま cycle-recording を走らせると記録がずれるため)
+② validator host: `uptime-history.sh`(cycle N close)。実行コマンドは
+`FY_LIVE=1 bash scripts/uptime-history.sh`。**`FY_LIVE=1` 必須** —
+無いと script は exit 0 で正常終了したように**見える**が、実際は master ledger
+append / `current-cycle-state.json` / cycle-close summary / public preview
+の **4 write すべて**(3 ではない)が `DRY: would …` に化けて何も書かれない
+(`resume-after-cycle-start.sh`(手順⑨)の exit 6 拒否とは違う挙動)。
+「書けた」確認は `DRY:` 行が無いことだけに頼らない — `Closed cycle #<N>: …`
+等 live 実行時のみ出る成功行の方が強い証拠(cycle-gate.sh 欠落時は Job B が
+skip される別経路もあり、そのときも `[uptime-history] cycle-gate.sh missing
+or non-executable → skip Job B (fail-closed)` という別の stderr 行は出る —
+`DRY:` タグが付かないだけで無言ではない)。この step が dry の
+まま先へ進んでも手順③の「+1 行」検証や手順④⑤の exit 7 / exit 9 ガードが
+止める(**stale な行が公開される、ではなく行が増えないまま止まる**)。
+実測込みの詳細は `docs/CYCLE_GATE.md` step 2 参照
+③ validator host: `gen-cycle-history.sh` + push — 公開 `cycle-history.jsonl` が 1 行増えたことを実測確認
+④ Mac local: `FY_EXPECT_CYCLE=<N> OPERATOR_IDENTITY_KEY=~/.ssh/freedom-yield-operator-identity bash scripts/operator-local/gen-identity.sh`(**AI@Mac** が実行。identity 鍵は事前に operator が `ssh-add` で agent に載せておく = operator@TTY ① — 載っていないと AI の非対話セッションが passphrase プロンプトで止まる。ML-DSA 鍵も事前に operator が unlock しておく = operator@TTY ⑥ — 未 unlock・2 時間超は exit 5。exit 0 の後 AI が `ssh-add -d` で外す。ML-DSA 鍵は `gen-identity.sh` が自分で消す)。`FY_EXPECT_CYCLE=<N>` はサイクル切替時 **MANDATORY**(N = 直前に閉じた cycle 番号。手順③の公開反映前に実行すると exit 7 で hard-stop)。続けて `git add` + `git commit` + `git push origin main`、`gh run watch` で deploy 完了監視
+⑤ validator host: `FY_EXPECT_CYCLE=<N> bash scripts/gen-anchor-source.sh`(値は `docs/CYCLE_GATE.md` の day-of value sheet)— 新 `anchor-source.json`(3-branch DAG)を compose。`cycle_number_observed` は 公開 `cycle-history.jsonl` の CLOSED_COUNT+1 から自己導出するが、`FY_EXPECT_CYCLE` を渡すと ordering guard が有効になり、CLOSED_COUNT と 不一致(= 手順③がまだ公開反映されていない)なら compose 前に **exit 9** で hard-stop する(未設定なら警告バナーのみで継続、初回 bootstrap 用)。**gen-identity.sh の exit 7 とは別条件** — `gen-anchor-source.sh` では exit 7 は既に「atomic write failed」の意味で使用中のため、意図的に番号を揃えていない(exit 7 と exit 9 を同じ意味と読まない)
+
+  > この step は `side-effects: WARNING: state dir falls back to the production default … while FY_LIVE is not "1"` を**ちょうど 1 行**出す。**これは正常**: この script は当該 dir 配下の 2 本の JSONL を**読むだけ**で、live source から DAG を組むのが目的なので、production data を読むのが正しい。**警告文が勧める「テスト用に `FY_STATE_DIR` を sandbox に向ける」に従ってはいけない** — それは test 作者向けの案内で、従うと空の入力から DAG を組んでしまう。`FY_LIVE=1` を足す必要もない(この script は production state を一切書かないので、opt-in は読取の正しさとは無関係)。
+⑥ Mac local: `export VALIDATOR_HOST=<validator host の IP or hostname>` + `export VALIDATOR_HOST_KEY=~/.ssh/<your_validator_host_key>` を先に設定した上で `scripts/operator-local/commit-anchor-source.sh --expect-cycle=<N+1>`(値は `docs/CYCLE_GATE.md` の day-of value sheet)で host 側 `anchor-source.json` を検証+commit、続けて push + deploy 完了監視(手順④と同じパターン)。**env 2 つは必須の SSH 座標**(repo には literal を置かない方針): `VALIDATOR_HOST` は未設定なら変数名を挙げて即 refuse、`VALIDATOR_HOST_KEY` は **default が literal placeholder** `~/.ssh/<your_validator_host_key>`(実在しない path)なので未設定だと `ERROR: SSH key not found` → **exit 3** になる(`VALIDATOR_HOST_USER` の default は `root`)。**手順⑤との意味の反転に注意**: `gen-anchor-source.sh` の `FY_EXPECT_CYCLE` は「直前に閉じた cycle 番号」(N)だが、このスクリプトの `--expect-cycle` は fetch した `anchor-source.json` の `observations_branch.cycle_number_observed`(= `gen-anchor-source.sh` が `CLOSED_COUNT + 1` として算出する値)と直接一致比較するため「これから刻む cycle 番号」(N+1)を渡す — `N` を渡すと exit 5 で mismatch する。**commit+push+deploy は必須** — 公開されないと手順⑨の Phase 1 polling が exit 3 でタイムアウトする
+⑦ Mac local: **⑦ は全て Mac 上で、かつ手順⑥の commit + push が landed した後に実行する**(署名対象は commit / push / deploy 済の bytes でなければ、receipt の `url` + `sha256` が刻んだ `dag_root_computed` を含まないファイルを指してしまう)
+  - **⑦-a gate 1 材料(testnet-first)**: `HOME=~/.metal-fy-proton-test proton key:unlock`(operator)→ `HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh --expect-cycle=<N+1>`(AI@Mac が起動。起動前に AI がこのコマンドと broadcast される `{chain, actor, permission, action, memo, quantity}` を chat に示し、operator の実行指示 1 回につき 1 回だけ — `docs/CYCLE_GATE.md`「実行者と実行場所」と step 7a の「事前表示」)(day-of は MANDATORY、`docs/PHASE_ALPHA_TESTNET_DRY_RUN.md` 参照。値は `docs/CYCLE_GATE.md` の day-of value sheet)。出力末尾の `TESTNET REHEARSAL COMPLETE testnet_tx_id=<64hex>` を控え、**直後に operator が testnet keystore を re-lock する**(`HOME=~/.metal-fy-proton-test proton key:lock`、operator@TTY ⑤。testnet keystore の最後の利用は⑦-a。空 Enter 厳禁は⑦-c と同じ)。**この rehearsal 自身の dry-run log は testnet 側の証拠にすぎない** — `target_chain: "testnet-a"` を記録しており、mainnet gate 4 は `--chain` と異なる chain の dry-run log を拒否する。手順⑥が既に landed 済のため、canonical `public/api/anchor-source.json` は既にこの cycle のファイル(`cycle_number_observed == N+1`)— `--source=` override も `--allow-fixture` も不要、default 選択のまま `--expect-cycle=<N+1>` がそのまま通る。**朝のうちに(手順⑥完了前に)hand-built fixture を用意して先に rehearsal する運用は行わない** — その時点の canonical source はまだ前 cycle(`N`)のままで、`N+1` の実 gate-1 evidence を得るには fixture を手作りする必要が生じる。2026-08-04 に実際にこの朝実行を行い、fixture 手作り + dag 再計算の手間とリスク(手順⑥ landed 後の実 source と後で突き合わせる二度手間)が発生した。7a は必ず手順⑥の後、実 canonical source に対して実行する。rehearsal 完了直後に `rm -f /tmp/fyd-broadcast-token` で後始末する(testnet 向けに bound された token は R16 により mainnet ⑦-c に流用できず、5 分 TTL でも自然失効するが、⑦-b/⑦-c の pre-flight 確認時に古い token が `/tmp` に残っているとノイズになるため掃除する)
+  - **⑦-b gate 4 材料(mainnet dry run)**: 経路は 1 本だけ。Mac 上で、既に commit 済の `anchor-source.json` から、**recompose せずに** 生成する:
+    ```sh
+    FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton \
+      bash scripts/preview-cycle-anchor-broadcast.sh \
+        --source=public/api/anchor-source.json \
+        --testnet-tx-id=<控えた tx id>
+    ```
+    このスクリプトは source が `git show HEAD:public/api/anchor-source.json` と byte 一致することを検証し(不一致なら exit 9 で拒否)、続けて公開 `anchor-source.json`(cache-bust 付きで fetch)がまだ同じ bytes を配信していなければ **exit 10** で拒否する(push+deploy 待ちしてから再実行。`--skip-published-check` はオフライン/劣化時専用の bypass)。その後 `$DRYLOG`(default `/tmp/fya-mainnet-dryrun.json`)を書き、gate1/gate3 の read-only pre-check を表示し、⑦-c のコマンドを両 gate 引数入りで出力する。compose も broadcast もしない。**validator host の `sudo -u <deploy_user>` では実行しない** — §3.5 keystore guard が login HOME を **exit 8** で拒否し、かつ host 側で recompose すると `dag_root_computed` が commit 済 bytes と変わる(artifacts branch は 5 分 cron が書き換える live feed を hash しているため)。pre-check 抜きで log だけ欲しい場合の同等形は `FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton bash scripts/sign-anchor-event.sh --chain=mainnet-a --anchor-source=public/api/anchor-source.json --dry-run > /tmp/fya-mainnet-dryrun.json` — こちらも `FY_CONFIG_DIR` は必須で、無いと exit 3 になり redirect が **0 byte** の log を残す(gate 4 まで気づけない)
+  - **⑦-b.5 validator host: history 到達確認(read-only、停止4(a) と ⑦-c の前)**(2026-09-30 追加、A-Chain → PulseVM 移行準備): 手順⑧の `gen-anchor-receipt.sh` は**不可逆な broadcast の後で** tx を history から引き直し、その history base と chain_id を commit 済の chain profile(`config/a-chain-profiles.json`)から読む。だから mainnet keystore を unlock する**前に**、⑧と同じ host・同じ reader code で「引ける」ことを確かめる。host の `sudo -u <deploy_user>` / host repo で ⑧と同じ形で 2 行: (1) 前提条件 `git rev-parse --short HEAD && test -r config/a-chain-profiles.json && test -r scripts/lib/a-chain-profile.sh && test -r scripts/lib/anchor-history-read.sh && jq --version && ! env | grep -e ^FYD_MAINNET_CHAIN_ID= -e ^FYD_TESTNET_CHAIN_ID= -e ^FYD_A_CHAIN_PROFILE_` が exit 0(= host checkout が profile と library を含む commit まで前進済、jq は 1.6 以上、deploy 環境に古い chain override が無い)、(2) `bash scripts/check-anchor-history-reachable.sh --chain=mainnet-a` が `REACHABLE profile=xpr-mainnet … mode=known-tx` を 1 行出して exit 0。**どちらかが非 0 ならその日はここで止める** — 何も署名していないので unlock しない・⑦-c に進まない、待って⑦-b.5 だけ再実行する(exit 2 = profile が receipt に必要な値を出せない、3 = どの history base も既知の anchor を解決できない、4 = 許可された base が別 chain_id を返す、1 = usage/ledger)。前提条件が落ちたら host checkout を前進させる(deploy の host-advance、または host で `scripts/advance-host-checkout.sh`)か、古い変数を元から消す — **override を足して通すことはしない**(override は profile 値の確認にしか使えない)。jq 1.6 未満は check 自身が exit 2 で拒否する
+  - **⑦-c 署名 + broadcast**(⑦-b.5 が `REACHABLE` を出した後のみ): `HOME=~/.metal-fy-proton proton key:unlock` で mainnet keystore(testnet とは別)を unlock し、`FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton bash scripts/sign-anchor-event.sh --chain=mainnet-a --anchor-source=public/api/anchor-source.json --testnet-tx-id=<控えた tx id> --dry-run-log=/tmp/fya-mainnet-dryrun.json`(unlock は operator@TTY ③、署名コマンドは **AI@Mac** が operator の gate 2 per-invocation 認可の後に実行。`bin/safe-broadcast` 4-gate 経由。`--testnet-tx-id` / `--dry-run-log` は gate 1 / gate 4 の必須入力 — 欠くと safe-broadcast が REFUSE する)。**順序に注意**: どの env-prefix 行でも `FY_CONFIG_DIR=...` を `HOME=...` より前に書く。機序(2026-07-31 実測): **zsh**(operator の login shell)は prefix 代入を左→右で適用し、各代入が次の代入の展開に見えるため、`HOME=~/.metal-fy-proton` が先だと `FY_CONFIG_DIR=$HOME/...` の `$HOME` が keystore を指してしまう。bash は simple command の prefix 代入をコマンド実行前の環境に対して展開するので両順序とも動く(ただし pipeline 内では subshell 化して zsh と同じ挙動になる)。どの shell でも正しい順序で書く。**別の罠(2026-08-04 実測)**: `FY_CONFIG_DIR` の tilde は **quote しない**こと — `FY_CONFIG_DIR="~/.fy-mainnet-broadcast/config"` のように quote すると tilde が展開されず literal `~/...` path になり **exit 3**(config dir not readable)で失敗する。上記の順序を守り quote さえしなければ `~` と `$HOME` は同じ挙動になる(2026-08-04 実測、zsh/bash × 順序 正/誤 の全 4 パターン確認済)— 両者に別の分岐は無い。それでも堅牢性のため**絶対 path**(`/Users/<user>/...` 形)で書くことを推奨する — quote の罠も順序ルールも両方回避できる。`sign-anchor-event.sh` は `--output=<path>` も受け付ける — 未指定時は標準出力に加えて既定 path `/tmp/fya-mainnet-sign-output.json`(mainnet 実行の場合。testnet 実行なら `/tmp/fya-testnet-sign-output.json`)にも保存される。この fragment は **Mac 上で生成される**ため、手順⑦.5 で host へ転送してから手順⑧の `--input=` 値として使う。broadcast 後は operator が mainnet keystore を re-lock する(operator@TTY ④): `HOME=~/.metal-fy-proton proton key:lock`。testnet keystore が⑦-a の直後に re-lock 済であることもここで確認する(両方 locked で終わる)。プロンプトは `Enter 32 character password (leave empty to create new)` と表示されるが、**空 Enter は新規 password の作成になるため厳禁** — unlock 時と同じ 32 文字を入力する
+⑦.5 Mac → host: 手順⑦-c の `sign-anchor-event.sh` 出力(既定 `--output=` 保存先 `/tmp/fya-mainnet-sign-output.json`)を host へ転送する。手順⑦-c の散文に埋没していた転送作業を独立 step として明示化(2026-08-06)。host 側で走る手順⑧の `gen-anchor-receipt.sh --input=` が読むのはこの転送先:
+  ```sh
+  scp -i ~/.ssh/<your_validator_host_key> \
+      /tmp/fya-mainnet-sign-output.json \
+      "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}:<deploy_home>/.fya-sign-output.json"
+  ssh -i ~/.ssh/<your_validator_host_key> \
+      "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
+      'chmod 644 <deploy_home>/.fya-sign-output.json'
+  ```
+  `chmod` は防御的措置: `scp` は `root` として接続する(`VALIDATOR_HOST_USER` は未指定=default `root`)が、手順⑧の `gen-anchor-receipt.sh` は `sudo -u <deploy_user>` で走るため、host 側 root の umask 次第では `<deploy_user>` から読めないパーミッションになり得る。
+⑧ validator host: `gen-anchor-receipt.sh`(7-gate verify、`--prev-anchor-tx-id=` に直前 anchor の tx_id を渡す必要あり)+ `FY_LIVE=1 bash append-anchor-history.sh`(**R18 archive の自動 push には `FY_LIVE=1` が必須**。append 自体は gate されないので FY_LIVE 無しでも台帳行は書かれるが、archive push は `DEFERRED: R18 publish …` として見送られ、手動 push コマンドが表示される。C3 rollout 2026-08-06)(= append 成功直後に R18 archive 2 本を自動 push する。詳細は手順⑧.5)
+⑧.5 validator host: 正規(canonical)の flat file 2 本を push する — R18 archive の 2 本とは別物:
+  ```sh
+  bash scripts/push-to-web-host.sh anchor-receipt.json
+  bash scripts/push-to-web-host.sh anchor-history.jsonl
+  ```
+  これを省くと、on-chain anchor は成功済みでも公開 `/api/anchor-receipt.json` / `/api/anchor-history.jsonl` が前 cycle の内容のまま止まる。手順⑨の Phase 1 は `anchor-source.json` の鮮度しか poll しないため、この push 漏れは検知されない。`anchor-source.json` 自体はこの push の対象外(手順⑥で git-deploy 済、`push-to-web-host.sh` では扱わない)。
+
+  R18 per-anchor archive の 2 本(`archive/anchor-source-<dag_root>.json` / `archive/anchor-receipt-<tx_id>.json`)は、この手動 push の対象では**ない**: 2026-08-06(`77fd09d`)以降、`append-anchor-history.sh` が append 成功直後に自動で push する(best-effort — 失敗しても append 自体は失敗させない)。失敗時は stderr + `notify.sh high` alert に "R18 publish FAILED" / "R18 publish skipped" が出るので、その場合だけ表示された retry コマンドを手動実行する。`FYD_PUBLISH_ARCHIVES=0` で自動 push 自体を無効化できるが、通常の cycle 切替では使わない。
+⑨ validator host: `FY_LIVE=1 bash scripts/resume-after-cycle-start.sh --apply`(**`FY_LIVE=1` 必須** — 無いと Phase 1 の前に exit 6 で拒否し、read も poll も write も一切しない。C3 rollout 2026-08-06)(= v2 3 phase: Phase 1 verify 6 check → Phase 2 atomic state write → Phase 3 report。**broadcast なし、explorer URL は出力しない**)
+⑩ Mac local: legacy anchor archive(2026-09-30 追加。⑧.5 の公開と⑨の後): anchor は `eosio.token` transfer の memo = **chain state ではなく history** で、A-Chain が PulseVM に移ると旧 chain の history は配信されなくなりうる(`docs/A_CHAIN_PULSEVM_CUTOVER.md`)。旧 chain が配信されているうちに、今日の anchor の生の history / block 応答を公開・git 管理の `public/api/legacy-a-chain/` に保存する: `curl -fsS 'https://metal.freedom-yield.com/api/anchor-history.jsonl' -o /tmp/fya-anchor-history.jsonl` → `bash scripts/archive-legacy-anchors.sh --from-file=/tmp/fya-anchor-history.jsonl` → `bash scripts/verify-legacy-anchor-archive.sh --history=/tmp/fya-anchor-history.jsonl` → `git add public/api/legacy-a-chain/`(staged は新 `<tx_id>.json` と `manifest.json` の 2 つだけ)→ commit → push → `gh run watch`。read-only の要求だけで、archive 済の anchor は要求なしで skip する。legacy profile を**名前で**(`xpr-mainnet`)読むので cutover 後も旧 chain を指し続ける。完了 = archiver が exit 0 **かつ** verifier が `VERIFIED <n> anchor(s)`(n は前回 +1)。archiver exit 3 = 今回取れなかった record がある(他は保存済)→ 後で再実行すれば続きから、exit 4/5 = fail closed(記録済ファイルと今の chain 応答が食い違う、または chain_id が違う)→ 止めて報告、ファイルを消して通すことは絶対にしない。anchor 自体には一切触れない
+⑪ Mac local: 作業 memo に結果を記録(2026-10-08 operator 決定、2026-11-06 の転換から適用。⑩の後、当日の最後): `docs/tasks/validator-renew-cycle-<N+1>.md`(local の作業 memo、commit しない)に registration tx / self stake / endTime / anchor tx / 検証結果(`docs/CYCLE_GATE.md` 完了判定 ①〜⑤)/ 鍵の lock を `## 結果` として記録し、`## State` の `Current phase:` を `完了 …` に更新する(雛形は `docs/CYCLE_GATE.md` step 11)。続けて AI@Mac が `bash scripts/check-renewal-memo.sh <N+1> --history=/tmp/fya-anchor-history.jsonl`(⑩で取った公開 ledger。read-only、broadcast なし)を実行し **exit 0** を確認する。**validator-renew agent が進めた日も、親 session が `docs/CYCLE_GATE.md` で直接進めた日も必須** — memo が無い・途中で止まっている間は、on-chain と公開面が揃っていても転換は完了ではない(2026-09-04 は cycle 5 の memo が無く、2026-10-07 は cycle 6 の memo が Phase 1 で止まっていた)。exit 3 = memo が無い、4 = 不足項目あり(stderr に列挙)、5 = 公開 ledger に N+1 の mainnet 行が 1 本に定まらない(⑧.5 の公開を確認)
+
+手順⑦の tx id を読取り、explorer URL を operator に報告(resume-after-cycle-start.sh の出力ではなく、手順⑦の broadcast 結果)。
+
+### 緊急 fallback (= AI 不在時の operator 手動経路)
+
+AI が応答不能な場合、 operator は本書「AI が裏で自走する技術 task」の当日順序 ⓪〜⑪(⑦-b.5 / ⑦.5 / ⑧.5 を含む)を以下の手順で手動実行する(anchor pipeline の手順を省くと anchor 刻印が欠落する、または刻印済みでも公開 feed が古いままになるので、⑦-b.5 / ⑦.5 / ⑧.5 を含め全 step を踏む):
+
+```sh
+# ⓪ Metal Wallet web で AddValidator を submit → explorer で Committed 確認 →
+#   getCurrentValidators に新 entry が見えるまで待つ(コマンドなし、operator の手作業)。
+#   これが済むまで ⑤ は exit 4、⑨ は exit 2 で hard-block する。
+
+# ①②③ validator host で cycle-recording を閉じる(node-info tick 確認 → uptime-history → gen-cycle-history → 公開 push)
+# 注意: 下の 4 本は `&&` で連結されている。`&&` は「直前のコマンドが exit 0 で
+# 終わったら次へ進む」としか見ておらず、「意図した write が実際に起きたか」は見ない。
+# uptime-history.sh は FY_LIVE=1 が無いと全 write が `DRY: would …` に化ける
+# loud dry no-op で、それでも exit 0 を返す(docs/CYCLE_GATE.md step 2 で実測済み、
+# resume-after-cycle-start.sh の exit 6 拒否とは違う挙動)。`FY_LIVE=1` を書き忘れると、
+# cycle N の uptime record が閉じられないまま `&&` チェーンは「成功」として
+# gen-cycle-history.sh → push-to-web-host.sh まで素通りする。ただし公開される
+# cycle-history.jsonl は「stale な行」ではない — gen-cycle-history.sh は
+# uptime-cycles.json の .cycles 配列を 1:1 で行に写すだけなので、cycle N の
+# 要素が無ければ cycle N の行は作られない(incidents.json も不変なら前回と
+# byte 一致、incidents.json 側だけ変化していれば既存行の incident 集計が
+# 再計算されて bytes は変わるが、cycle N の行数自体は増えない — いずれも
+# 「stale な cycle N 行が公開される」ではない。docs/CYCLE_GATE.md step 2
+# 参照)。この場合に頼れるのは下の
+# 「公開 cycle-history.jsonl が 1 行増えたことを実測確認」の一文と、
+# 手順④ gen-identity.sh の exit 7 / 手順⑤ gen-anchor-source.sh の exit 9 の
+# ordering guard — どちらも「行が増えていない」ことを機械的に検知する。
+# **緊急 fallback (= 通常経路が壊れている日に使う)** で `FY_LIVE=1` を
+# 書き忘れた場合、これらの下流チェックに気づかず読み飛ばすと発覚が遅れる。
+# node-info.sh / gen-cycle-history.sh / push-to-web-host.sh の 3 本は
+# FY_LIVE の概念自体を持たない(無条件実行、または意図的に非 gate — 詳細は
+# docs/CYCLE_GATE.md step 1/3)ため、この 3 本に `FY_LIVE=1` を足す必要はない。
+ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
+    'sudo -u <deploy_user> bash -c "cd <deploy_path> && \
+       bash scripts/node-info.sh && \
+       FY_LIVE=1 bash scripts/uptime-history.sh && \
+       bash scripts/gen-cycle-history.sh && \
+       bash scripts/push-to-web-host.sh cycle-history.jsonl"'
+# push-to-web-host.sh が無いと公開 URL の cycle-history.jsonl が進まず、手順④の exit 7 /
+# 手順⑤の exit 9 ガードが古いままの行数を読んでしまう。公開 cycle-history.jsonl が 1 行
+# 増えたことを実測確認(公開 URL を curl して行数比較)してから次に進む。
+
+# ④ Mac で identity を再生成(N = 直前に閉じた cycle 番号。手順②③の公開反映前に走らせると exit 7)
+cd <repo>
+git pull origin main
+export FY_EXPECT_CYCLE=<N>
+export OPERATOR_IDENTITY_KEY=~/.ssh/freedom-yield-operator-identity
+bash scripts/operator-local/gen-identity.sh
+git add public/api/identity.json public/api/identity.json.sig \
+        public/api/identity.json.mldsa87.sig \
+        deploy/identity-pin-baseline.json deploy/publication.json
+git commit -m "feat(identity): re-sign for new cycle"
+git push origin main
+# GitHub Actions Deploy 完了を待つ (= Actions tab 目視 or `gh run watch`)
+
+# ⑤ validator host で anchor-source.json を compose (N = 直前に閉じた cycle 番号。
+#    cycle-history.jsonl の CLOSED_COUNT と不一致なら compose 前に exit 9 で hard-stop)
+ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
+    'sudo -u <deploy_user> env FY_EXPECT_CYCLE=<N> bash <deploy_path>/scripts/gen-anchor-source.sh'
+
+# ⑥ Mac で host 側 anchor-source.json を検証+commit、push+deploy
+# --expect-cycle は「これから刻む cycle 番号」(N+1)— ⑤の FY_EXPECT_CYCLE=<N>(閉じた cycle
+# 番号)とは意味が反転する。fetch した anchor-source.json の cycle_number_observed
+# (= CLOSED_COUNT+1)と直接一致比較するため、N を渡すと exit 5 で mismatch する
+# (値は docs/CYCLE_GATE.md の day-of value sheet)。
+bash scripts/operator-local/commit-anchor-source.sh --expect-cycle=<N+1>
+git push origin main
+# GitHub Actions Deploy 完了を待つ。この push が無いと⑨の Phase 1 polling が exit 3 でタイムアウトする。
+
+# ⑦-a Mac で gate 1 材料(testnet rehearsal)。day-of は --expect-cycle=<N+1> が MANDATORY
+#     (docs/PHASE_ALPHA_TESTNET_DRY_RUN.md 参照。値は docs/CYCLE_GATE.md の day-of value sheet)
+#     手順⑥が landed 済のため canonical source は既に cycle N+1 — --source=/--allow-fixture は
+#     不要。朝(手順⑥前)に fixture を手作りして先行実行しない — 2026-08-04 に朝実行して
+#     fixture 手作り + dag 再計算の手間とリスクが発生した。必ず手順⑥の後に実行する。
+HOME=~/.metal-fy-proton-test proton key:unlock
+HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh --expect-cycle=<N+1>
+# 出力末尾の `TESTNET REHEARSAL COMPLETE testnet_tx_id=<64hex>` を控える(以下 <rehearsal-tx-id>)。
+# 完了直後に後始末: testnet 向け token は R16 で mainnet ⑦-c に流用不能・TTL 5 分で失効するが、
+# ⑦-b/⑦-c の pre-flight 確認時のノイズ源になるため掃除する。
+rm -f /tmp/fyd-broadcast-token
+# testnet keystore の最後の利用は⑦-a。ここで re-lock する(空 Enter 厳禁 — unlock と同じ 32 文字)。
+HOME=~/.metal-fy-proton-test proton key:lock
+
+# ⑦-b mainnet gate-4 dry-run-log を Mac 上で生成。手順⑥の commit + push が landed した後に実行し、
+#     commit 済 bytes をそのまま使う(recompose しない)。validator host の sudo -u <deploy_user> では
+#     実行しない — §3.5 keystore guard が login HOME を exit 8 で拒否し、host 側 recompose は
+#     dag_root_computed を変えてしまう(artifacts branch は 5 分 cron が書き換える feed を hash)。
+#     FY_CONFIG_DIR が無いと sign-anchor-event.sh は exit 3 になり 0 byte の log が残る。
+FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton \
+    bash scripts/preview-cycle-anchor-broadcast.sh \
+        --source=public/api/anchor-source.json \
+        --testnet-tx-id=<rehearsal-tx-id>
+# source が git show HEAD:public/api/anchor-source.json と byte 一致しなければ exit 9 で止まる。
+# $DRYLOG (default /tmp/fya-mainnet-dryrun.json) が gate 4 の入力。pre-check 抜きの同等形:
+#   FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton \
+#     bash scripts/sign-anchor-event.sh --chain=mainnet-a \
+#         --anchor-source=public/api/anchor-source.json \
+#         --dry-run > /tmp/fya-mainnet-dryrun.json
+
+# ⑦-b.5 validator host: history 到達確認(read-only、2026-09-30 追加)。⑦-c の不可逆 broadcast の
+#     後で走る⑧が tx を引けることを、unlock する前に確かめる。どちらかが非 0 ならここで止める
+#     (unlock しない・⑦-c に進まない。override を足して通さない)。
+ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
+    'sudo -u <deploy_user> bash -c "cd <deploy_path> && \
+       git rev-parse --short HEAD && test -r config/a-chain-profiles.json && \
+       test -r scripts/lib/a-chain-profile.sh && test -r scripts/lib/anchor-history-read.sh && \
+       jq --version && ! env | grep -e ^FYD_MAINNET_CHAIN_ID= -e ^FYD_TESTNET_CHAIN_ID= -e ^FYD_A_CHAIN_PROFILE_"'
+ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
+    'sudo -u <deploy_user> bash -c "cd <deploy_path> && \
+       bash scripts/check-anchor-history-reachable.sh --chain=mainnet-a"'
+# REACHABLE ... mode=known-tx の 1 行 + exit 0 を確認してから次へ。
+
+# ⑦-c Mac で mainnet keystore を unlock して署名+broadcast。
+#     --testnet-tx-id / --dry-run-log は bin/safe-broadcast の gate 1 / gate 4 必須入力(欠くと REFUSE)。
+#     順序注意: FY_CONFIG_DIR=... は HOME=... より前に書く。機序(2026-07-31 実測): zsh(operator の
+#     login shell)は prefix 代入を左→右で適用し次の代入の展開に見えるため、HOME= が先だと
+#     $HOME が keystore を指す。bash は simple command なら両順序とも動く(pipeline 内は zsh と同じ)。
+#     別の罠(2026-08-04 実測): FY_CONFIG_DIR の tilde は quote しない。
+#     FY_CONFIG_DIR="~/.fy-mainnet-broadcast/config" のように quote すると tilde が展開
+#     されず literal ~/... path になり exit 3(config dir not readable)で失敗する。上記の
+#     順序を守り quote さえしなければ ~ と $HOME は同じ挙動(2026-08-04 実測、zsh/bash ×
+#     順序 正/誤 の全 4 パターン確認済)。堅牢性のため絶対 path(/Users/<user>/... 形)を推奨。
+HOME=~/.metal-fy-proton proton key:unlock
+FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton \
+    bash scripts/sign-anchor-event.sh --chain=mainnet-a \
+        --anchor-source=public/api/anchor-source.json \
+        --testnet-tx-id=<rehearsal-tx-id> \
+        --dry-run-log=/tmp/fya-mainnet-dryrun.json
+# tx id を控えて explorer で visually verify。
+# sign-anchor-event.sh は --output=<path> も受け付ける。未指定時は標準出力に加え既定 path
+# /tmp/fya-mainnet-sign-output.json にも保存される。この fragment は Mac 上で生成されるため、
+# 下の⑦.5 で host へ転送してから⑧の --input= 値として使う。
+
+# broadcast 後は mainnet keystore を re-lock する。プロンプト `Enter 32 character password
+# (leave empty to create new)` で空 Enter すると新規 password 作成になるため厳禁 — unlock
+# 時と同じ 32 文字を入力する。
+HOME=~/.metal-fy-proton proton key:lock
+
+# ⑦.5 Mac → host: 上の⑦-c で作った署名 fragment を host へ転送する(2026-08-06 に独立 step 化)。
+#     host 側で走る⑧の gen-anchor-receipt.sh --input= が読むのはこの転送先。
+scp -i ~/.ssh/<your_validator_host_key> \
+    /tmp/fya-mainnet-sign-output.json \
+    "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}:<deploy_home>/.fya-sign-output.json"
+# scp は root として接続する(VALIDATOR_HOST_USER 未指定 = default root)が、⑧の
+# gen-anchor-receipt.sh は sudo -u <deploy_user> で走る。host 側 root の umask 次第では deploy から
+# 読めないパーミッションになり得るため、念のため読み取り権限を明示しておく。
+ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
+    'chmod 644 <deploy_home>/.fya-sign-output.json'
+
+# ⑧ validator host で receipt 生成 + history append。
+# gen-anchor-receipt.sh は --input=(上の⑦.5 で host に置いた JSON)と
+# --anchor-source=(host 側 anchor-source.json)が必須(欠くと usage error で exit 1)。
+# append-anchor-history.sh は --receipt=(gen-anchor-receipt.sh の --out、default
+# public/api/anchor-receipt.json)が必須。--event-type はサイクル切替の文脈では
+# cyclestart(gen-anchor-receipt.sh 側も --trigger=cyclestart を揃えること)。
+# --prev-anchor-tx-id= は他のどこからも自動導出されない(欠くと null 扱いになり、genesis
+# 以外では append-anchor-history.sh の invariant 6 で fail する)。値は host 側
+# anchor-history.jsonl の最終行 tx_id: `tail -n 1 public/api/anchor-history.jsonl | jq -r '.tx_id'`
+# append 成功直後、append-anchor-history.sh 自身が R18 archive 2 本(archive/anchor-source-
+# <dag_root>.json / archive/anchor-receipt-<tx_id>.json)を自動 push する(2026-08-06 以降、
+# best-effort — 失敗しても append 自体は失敗させない)。canonical な anchor-receipt.json /
+# anchor-history.jsonl 本体の push は自動化されていない — 下の⑧.5 で別途行う。
+ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
+    'sudo -u <deploy_user> bash -c "cd <deploy_path> && \
+       PREV_TX=\$(tail -n 1 public/api/anchor-history.jsonl | jq -r .tx_id) && \
+       bash scripts/gen-anchor-receipt.sh \
+         --input=<deploy_home>/.fya-sign-output.json \
+         --anchor-source=public/api/anchor-source.json \
+         --trigger=cyclestart \
+         --prev-anchor-tx-id=\$PREV_TX && \
+       FY_LIVE=1 bash scripts/append-anchor-history.sh \
+         --receipt=public/api/anchor-receipt.json \
+         --event-type=cyclestart"'
+
+# ⑧.5 validator host: 正規(canonical)の flat file 2 本を push する — R18 archive の 2 本とは別物。
+#     これを省くと on-chain anchor は成功済みでも公開 /api/anchor-receipt.json /
+#     /api/anchor-history.jsonl が前 cycle の内容のまま止まる。⑨の Phase 1 は
+#     anchor-source.json の鮮度しか poll しないため、この push 漏れは検知されない。
+ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
+    'sudo -u <deploy_user> bash -c "cd <deploy_path> && \
+       bash scripts/push-to-web-host.sh anchor-receipt.json && \
+       bash scripts/push-to-web-host.sh anchor-history.jsonl"'
+
+# ⑨ validator host で resume-after-cycle-start.sh を trigger(v2 = 3 phase、broadcast なし)
+ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
+    'sudo -u <deploy_user> env FY_LIVE=1 bash <deploy_path>/scripts/resume-after-cycle-start.sh --apply'
+
+# Phase 3 の report が出力される(state 更新のみ、broadcast も explorer URL も出さない)。
+
+# ⑩ Mac local: legacy anchor archive(2026-09-30 追加。旧 chain が配信されているうちに)。
+curl -fsS 'https://metal.freedom-yield.com/api/anchor-history.jsonl' -o /tmp/fya-anchor-history.jsonl
+bash scripts/archive-legacy-anchors.sh --from-file=/tmp/fya-anchor-history.jsonl
+bash scripts/verify-legacy-anchor-archive.sh --history=/tmp/fya-anchor-history.jsonl
+git add public/api/legacy-a-chain/ && git diff --cached --name-status
+# staged が新 <tx_id>.json + manifest.json の 2 つだけであることを確認してから commit → push → gh run watch。
+
+# ⑪ Mac local: 作業 memo docs/tasks/validator-renew-cycle-<N+1>.md に結果を記録し State を「完了 …」に
+#    更新してから(雛形は docs/CYCLE_GATE.md step 11)、記録を確認する。exit 0 で当日終了。
+bash scripts/check-renewal-memo.sh <N+1> --history=/tmp/fya-anchor-history.jsonl
+```
+
+Phase 1 の identity.json polling は最大 10 分待ち、 deploy 完了 timing が不明でも安全に走る。同様に resume-after-cycle-start.sh の Phase 1 も anchor-source.json の polling を最大 `FY_POLL_MAX_SEC`(default 600 秒)待つ。
+
+### dry-run 経路
+
+承認前に Phase 1 の検証だけを行いたい場合:
+
+```sh
+ssh -i ~/.ssh/<your_validator_host_key> "root@${VALIDATOR_HOST:?set VALIDATOR_HOST first}" \
+    'sudo -u <deploy_user> bash <deploy_path>/scripts/resume-after-cycle-start.sh --dry-run'
+```
+
+Phase 2(state file 書込)は実行されず、Phase 1 verify(6 check: prior-state read / chain query / idempotency / endTime-in-future / anchor-source.json freshness poll / identity 署名 verify)の結果のみ報告。`resume-after-cycle-start.sh` はそもそも broadcast を行わない。
+
+### rollback (= 設計を一時無効化)
+
+3 段階、 軽い順:
+
+1. `rm /var/lib/freedom-yield/cycle-gate-state.json` → 次回 `resume-after-cycle-start.sh` まで gate 無効化 (= backward compat)
+2. **⚠ 使用禁止(通常の cycle transition では使わない)**: `chmod -x <deploy_path>/scripts/cycle-gate.sh`。「gate 無効化」ではなく、cycle 記録系 5 script(`gen-cycle-history.sh` / `uptime-history.sh` Job B / `node-info.sh` / `gen-evidence.sh` / `gen-renewal-ics.sh`)を fail-closed で skip させ公開 feed の記録が止まる操作。`cycle-artifact-write` は既に常時 green なので、この lever でしか relax できない対象はそもそも無い。承認 state を緩めたいだけなら lever 1(state file 退避)を使う
+3. 全 commit revert → 旧 11-step に完全復帰
+
+詳細は `docs/CYCLE_GATE.md` の Rollback section 参照。
+
+---
+
+## 関連
+
+- `docs/CYCLE_GATE.md` — 2-component 設計詳細 + state file schema + behavior matrix + rollback
+- `docs/MAINNET_REGISTRATION.md` — 初回登録時のチェックリスト
+- `docs/KEY_ROTATION.md` — 鍵運用
+- `docs/DISASTER_RECOVERY.md` — VPS 障害時の対応

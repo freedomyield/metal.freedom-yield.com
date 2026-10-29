@@ -1,0 +1,142 @@
+# グローバル設定
+{
+	# 本番では .env の ACME_EMAIL を使用。dev では .invalid を使うので ACME は走らない
+	email {$ACME_EMAIL:dev@example.invalid}
+
+	# Caddy は host nginx の背後にいるので X-Forwarded-For から real client IP を読む
+	# 必要がある。private_ranges は 127/8 + 10/8 + 172.16/12 + 192.168/16 等を内包。
+	# これがないと {client_ip} が常に 127.0.0.1 を返し、rate_limit が機能しない。
+	servers {
+		trusted_proxies static private_ranges
+	}
+
+	# rate_limit の実行順はプラグイン(github.com/mholt/caddy-ratelimit)が自分で
+	# 登録する。以前の `order rate_limit before basic_auth` は basic_auth (運用
+	# ダッシュボード、2026-10-07 廃止) 用で、外しても adapt 結果の JSON は同一 (2026-10-07 確認)。
+}
+
+# サイト設定
+# - 本番: DOMAIN=metal.freedom-yield.com → 自動 HTTPS(Let's Encrypt)
+# - dev : DOMAIN=:80 → port 80 で HTTP のみ(localhost:8080 にマップ)
+{$DOMAIN} {
+	encode zstd gzip
+	root * /srv
+
+	# ── Rate limit(per client IP)──────────────────────────────────
+	# 前段に edge CDN がいるとはいえ、bypass や直 origin 攻撃に備えて
+	# Caddy 側でも quota を設ける。3 zone:
+	#   global    — 通常ユーザの bursty な閲覧は許容、爆撃は遮断
+	#   api       — /api/*.json への scraping attack を抑える
+	# events / window 数字は調整可能。429 で reject、Caddy log 残る。
+	rate_limit {
+		zone global {
+			key    {client_ip}
+			events 300
+			window 1m
+		}
+		zone api_json {
+			match {
+				path /api/*
+			}
+			key    {client_ip}
+			events 90
+			window 1m
+		}
+	}
+
+	# operator 専用パスは 403。/api/server-status.json は validator host の cron
+	# (scripts/server-status.sh) が public/api/ に書き続ける operator 専用の監視データ
+	# (check-anomalies 等が file で読む)。/ops は 2026-10-07 に廃止した運用ダッシュボードの
+	# 旧 path で、古いコピーが残った配信先でも出さないため遮断を残す。
+	@ops_paths path /ops /ops/* /api/server-status.json
+	respond @ops_paths 403
+
+	# /api/*.json は短キャッシュ(validator status / incidents は更新頻度高)
+	@api path /api/*
+	header @api Cache-Control "public, max-age=120, must-revalidate"
+
+	# CORS for the public data: any origin may read with GET / HEAD. Scoped to
+	# /api/* and /llms.txt only; the operator-only path stays excluded.
+	@cors_get {
+		path /api/* /llms.txt
+		not path /api/server-status.json
+		method GET HEAD
+	}
+	header @cors_get Access-Control-Allow-Origin "*"
+
+	# /calendar/*.ics — Validator renewal schedule (iCalendar).
+	# Token-named files (private URL until publicly announced); served as
+	# text/calendar so Google Calendar can subscribe and auto-refresh.
+	# Moderate cache(1h)since the source regenerates daily on validator host.
+	@calendar path /calendar/*.ics
+	header @calendar {
+		Content-Type "text/calendar; charset=utf-8"
+		Cache-Control "public, max-age=3600, must-revalidate"
+	}
+
+	# 画像・アイコン・マニフェストは長めキャッシュ
+	@long_assets path /assets/*.png /assets/*.svg /assets/*.jpg /assets/*.webp /assets/*.woff2 /favicon.ico /manifest.json
+	header @long_assets Cache-Control "public, max-age=86400, stale-while-revalidate=604800"
+
+	# CSS / JS は中キャッシュ + revalidate
+	@code path /styles.css /assets/*.css /assets/*.js
+	header @code Cache-Control "public, max-age=3600, must-revalidate"
+
+	# operator 状態ページの部品は毎回確認 (古い JS が残ると判定ロジックの修正が届かない。
+	# 2026-10-03 に credentials 修正が届かず「読めません」が続いた)。
+	@status_assets path /status/*.js /status/*.css /status/manifest.json
+	header @status_assets Cache-Control "no-cache, must-revalidate"
+
+	# HTML は no-cache(常に最新を確認、ETag で 304 で済む)
+	@html path /*.html / /*/
+	header @html Cache-Control "no-cache, must-revalidate"
+
+	# ヘルスチェック(コンテナhealthcheck用)
+	@health path /health
+	respond @health "ok" 200
+
+	# セキュリティヘッダ(HSTSはHTTPでは無視されるのでdevでも実害なし)
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		# Tighter than the previous strict-origin-when-cross-origin: never
+		# leak the referrer header off-site, matching the noindex stance.
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "geolocation=(), camera=(), microphone=(), payment=(), usb=()"
+		# Server-side index suppression on EVERY response (defense in depth
+		# alongside per-page <meta name="robots"> and /robots.txt Disallow).
+		# Crawlers that fetch URLs without parsing HTML (or that ignore
+		# meta tags) still see noindex via header.
+		X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
+		# CSP: default-src 'none' ベースで、必要なリソース種別だけ明示的に許可(deny-by-default)
+		# - worker-src 'self': PWA service worker (/sw.js) を許可
+		# - connect-src: Metal Blockchain API(P-Chain info / explorer 経由の validator 情報取得用) + Google Analytics 計測
+		# - script-src/img-src: Google Analytics 4 (gtag.js) を許可
+		# - 将来 connect-src を広げる場合は本ファイルに追記し、Caddy reload
+		Content-Security-Policy "default-src 'none'; script-src 'self' https://www.googletagmanager.com; style-src 'self'; img-src 'self' data: https://www.googletagmanager.com https://www.google-analytics.com https://*.google-analytics.com https://tile.openstreetmap.org https://*.tile.openstreetmap.org; font-src 'self'; connect-src 'self' https://api.metalblockchain.org https://explorer.metalblockchain.org https://www.google-analytics.com https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com; manifest-src 'self'; worker-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+		-Server
+	}
+
+	# 本処理: 静的ファイル配信
+	file_server
+
+	# エラー時のカスタムページ(/ja/* なら /ja/404.html、それ以外は /404.html)
+	# 注意: handle 同士は mutually exclusive。最初に match した方だけ実行される
+	handle_errors {
+		@ja_path path_regexp ^/ja(/.*)?$
+		handle @ja_path {
+			rewrite * /ja/404.html
+			file_server
+		}
+		handle {
+			rewrite * /404.html
+			file_server
+		}
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

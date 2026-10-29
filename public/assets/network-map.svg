@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Stylized world map for the Freedom Yield Metal validator site.
+  Continents rendered as simplified silhouettes (not geopolitical, intentionally abstract).
+  Validator dots are decorative — they suggest worldwide distribution without
+  claiming to plot real peer IPs (which would leak operator info).
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 500" role="img" aria-label="Worldwide validators map">
+	<title>Validators worldwide</title>
+
+	<defs>
+		<radialGradient id="usGlow" cx="50%" cy="50%" r="50%">
+			<stop offset="0%" stop-color="#76e4be" stop-opacity="1" />
+			<stop offset="50%" stop-color="#76e4be" stop-opacity="0.35" />
+			<stop offset="100%" stop-color="#76e4be" stop-opacity="0" />
+		</radialGradient>
+		<linearGradient id="connection" x1="0%" y1="0%" x2="100%" y2="0%">
+			<stop offset="0%" stop-color="#6db5ff" stop-opacity="0" />
+			<stop offset="50%" stop-color="#6db5ff" stop-opacity="0.5" />
+			<stop offset="100%" stop-color="#6db5ff" stop-opacity="0" />
+		</linearGradient>
+	</defs>
+
+	<!-- Subtle latitude / longitude grid -->
+	<g stroke="#1a1f2a" stroke-width="0.5" fill="none">
+		<line x1="0" y1="125" x2="1000" y2="125" />
+		<line x1="0" y1="250" x2="1000" y2="250" />
+		<line x1="0" y1="375" x2="1000" y2="375" />
+		<line x1="250" y1="0" x2="250" y2="500" />
+		<line x1="500" y1="0" x2="500" y2="500" />
+		<line x1="750" y1="0" x2="750" y2="500" />
+	</g>
+
+	<!-- Continent silhouettes (intentionally abstract) -->
+	<g fill="#1f2937" fill-opacity="0.7" stroke="#2a3344" stroke-width="0.5">
+		<!-- North America -->
+		<path d="M 110 90 Q 180 70 240 95 Q 280 130 270 200 Q 260 250 220 270 Q 170 280 140 260 Q 100 220 95 170 Q 95 120 110 90 Z" />
+		<!-- Central America bridge -->
+		<path d="M 200 270 Q 215 285 220 305 Q 225 320 215 325 Q 205 322 200 305 Z" />
+		<!-- South America -->
+		<path d="M 230 320 Q 270 320 280 360 Q 290 410 270 450 Q 250 470 235 460 Q 215 420 220 380 Q 220 345 230 320 Z" />
+		<!-- Greenland -->
+		<path d="M 320 70 Q 350 60 360 85 Q 358 110 340 115 Q 325 110 320 90 Z" />
+		<!-- Europe -->
+		<path d="M 455 95 Q 510 85 540 100 Q 555 125 540 145 Q 510 150 480 145 Q 460 130 455 110 Z" />
+		<!-- Africa -->
+		<path d="M 470 170 Q 540 165 565 195 Q 580 250 570 305 Q 555 360 520 380 Q 495 380 480 360 Q 460 310 465 250 Q 465 200 470 170 Z" />
+		<!-- Middle East / Arabia -->
+		<path d="M 555 175 Q 590 175 600 205 Q 600 230 580 235 Q 560 230 555 210 Z" />
+		<!-- Asia (main) -->
+		<path d="M 575 105 Q 700 90 830 110 Q 870 140 855 195 Q 825 225 760 230 Q 690 230 620 215 Q 580 195 575 160 Z" />
+		<!-- India -->
+		<path d="M 680 215 Q 720 215 725 250 Q 720 285 700 290 Q 680 280 675 250 Z" />
+		<!-- Southeast Asia -->
+		<path d="M 770 235 Q 810 235 815 265 Q 810 285 790 285 Q 770 280 765 260 Z" />
+		<!-- Indonesia / archipelago -->
+		<path d="M 790 280 Q 830 280 835 295 Q 830 310 810 308 Z" />
+		<!-- Japan -->
+		<path d="M 860 165 Q 880 165 882 195 Q 880 215 868 215 Q 858 200 858 180 Z" />
+		<!-- Australia -->
+		<path d="M 800 330 Q 870 325 890 355 Q 885 385 855 390 Q 820 385 800 365 Z" />
+	</g>
+
+	<!-- Other validator dots — decorative, suggest worldwide distribution -->
+	<g fill="#6db5ff" fill-opacity="0.6">
+		<!-- North America cluster -->
+		<circle cx="155" cy="160" r="2.5" />
+		<circle cx="180" cy="175" r="2.5" />
+		<circle cx="200" cy="155" r="2.5" />
+		<circle cx="220" cy="180" r="2.5" />
+		<circle cx="170" cy="200" r="2.5" />
+		<circle cx="240" cy="200" r="2.5" />
+		<circle cx="190" cy="135" r="2.5" />
+		<!-- South America -->
+		<circle cx="255" cy="380" r="2.5" />
+		<circle cx="245" cy="410" r="2.5" />
+		<!-- Europe cluster -->
+		<circle cx="475" cy="115" r="2.5" />
+		<circle cx="490" cy="125" r="2.5" />
+		<circle cx="505" cy="115" r="2.5" />
+		<circle cx="520" cy="125" r="2.5" />
+		<circle cx="495" cy="135" r="2.5" />
+		<circle cx="475" cy="130" r="2.5" />
+		<!-- Africa -->
+		<circle cx="500" cy="260" r="2.5" />
+		<circle cx="520" cy="290" r="2.5" />
+		<!-- Middle East -->
+		<circle cx="575" cy="200" r="2.5" />
+		<!-- Asia cluster (Korea/Japan/HK/etc) -->
+		<circle cx="820" cy="170" r="2.5" />
+		<circle cx="845" cy="180" r="2.5" />
+		<circle cx="868" cy="190" r="2.5" />
+		<circle cx="800" cy="195" r="2.5" />
+		<circle cx="780" cy="180" r="2.5" />
+		<circle cx="755" cy="200" r="2.5" />
+		<circle cx="720" cy="190" r="2.5" />
+		<!-- India -->
+		<circle cx="695" cy="245" r="2.5" />
+		<circle cx="710" cy="265" r="2.5" />
+		<!-- SE Asia -->
+		<circle cx="775" cy="255" r="2.5" />
+		<!-- Australia -->
+		<circle cx="830" cy="355" r="2.5" />
+		<circle cx="855" cy="365" r="2.5" />
+	</g>
+
+
+</svg>

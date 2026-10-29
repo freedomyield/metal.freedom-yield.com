@@ -1,0 +1,28 @@
+# サイト本番用オーバーライド(VPS で Caddy を 80/443 で公開)
+#
+# ⚠ 2026-10-07 時点で、この override はどの host でも使っていない。
+#   公開サイトは web host (edge CDN 背後) が配信し、validator host には Caddy が無い
+#   (2026-10-07 撤去)。validator host でこれを使うと 80/443 を公開し、届かない ACME を
+#   回し続ける。
+#
+# 起動:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# 前提:
+#   - .env に DOMAIN(=metal.freedom-yield.com) と ACME_EMAIL(Let's Encrypt 連絡先)を設定済
+#   - VPS の 80/443/TCP と 443/UDP(HTTP/3) が inbound 許可済
+#   - edge DNS A レコード metal -> VPS IP が設定済
+#
+# 注意:
+#   - 本ファイルは「サイト = Caddy 静的配信」だけを扱う
+#   - validator(metalgo)は docker-compose.metalgo.yml で別管理、deploy で再起動しない
+
+services:
+  caddy:
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    environment:
+      - DOMAIN=${DOMAIN:-metal.freedom-yield.com}
+      - ACME_EMAIL=${ACME_EMAIL:?ACME_EMAIL is required for production (Let's Encrypt account)}

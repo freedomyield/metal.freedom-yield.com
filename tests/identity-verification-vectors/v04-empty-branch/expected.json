@@ -1,0 +1,9 @@
+{
+  "vector_name": "v04-empty-branch",
+  "description": "Zero-leaf branch. Sentinel hash convention from MERKLE_DAG_SPEC.md \u00a75: branch_root equals SHA-256(\"\") = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855.",
+  "leaf_count": 0,
+  "branch_root": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "leaf_hashes_in_order": [],
+  "expected_sentinel": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "matches_sentinel": true
+}

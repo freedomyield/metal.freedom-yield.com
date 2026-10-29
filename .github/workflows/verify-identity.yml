@@ -1,0 +1,97 @@
+name: verify-identity-manifest
+
+# Verify the signed operator identity manifest at every push / PR.
+#
+# Skip-gracefully behaviour (ed25519 trio only):
+#   The live artifacts (operator-identity.pub, identity.json, identity.json.sig)
+#   may not exist yet during the Phase 1 preparation window. When any of them
+#   is missing, the job exits 0 with a "not yet live — skipping" message instead
+#   of failing the build. Once all three are present, verification becomes
+#   strict — a bad signature fails the build.
+#   This skip-if-missing applies to the ed25519 trio ONLY. The ML-DSA-87 step
+#   never skips for a schema v2 manifest: a missing .mldsa87.sig / .pub or a
+#   bad signature fails the build (scripts/check-identity-pq.sh
+#   --require-sig-verify). A schema v1 manifest expects no ML-DSA signature.
+#   Runs on ubuntu-26.04 because ML-DSA needs OpenSSL >= 3.5.
+#
+# Security:
+#   - This workflow MUST NOT have access to the operator's private key.
+#   - Verification uses only the committed public key + manifest + detached
+#     signature. No secrets needed.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "public/api/identity.json"
+      - "public/api/identity.json.sig"
+      - "public/.well-known/operator-identity.pub"
+      - "public/api/identity.json.mldsa87.sig"
+      - "public/.well-known/operator-identity-mldsa87.pub"
+      - "scripts/check-identity-pq.sh"
+      - "scripts/lib/identity-pq.sh"
+      - ".github/workflows/verify-identity.yml"
+  pull_request:
+    paths:
+      - "public/api/identity.json"
+      - "public/api/identity.json.sig"
+      - "public/.well-known/operator-identity.pub"
+      - "public/api/identity.json.mldsa87.sig"
+      - "public/.well-known/operator-identity-mldsa87.pub"
+      - "scripts/check-identity-pq.sh"
+      - "scripts/lib/identity-pq.sh"
+      - ".github/workflows/verify-identity.yml"
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: ssh-keygen version
+        run: ssh-keygen -V 2>&1 || ssh -V
+
+      - name: verify ssh signature (skip if not yet live)
+        working-directory: public
+        run: |
+          set -eu
+          PUB=".well-known/operator-identity.pub"
+          JSON="api/identity.json"
+          SIG="api/identity.json.sig"
+
+          missing=0
+          for f in "$PUB" "$JSON" "$SIG"; do
+            if [ ! -f "$f" ]; then
+              echo "missing: $f"
+              missing=1
+            fi
+          done
+
+          if [ "$missing" -ne 0 ]; then
+            echo ""
+            echo "Identity manifest not yet live — skipping verification."
+            echo "This is expected during Phase 1 preparation."
+            exit 0
+          fi
+
+          # All three present — strict verification.
+          # NOTE: use `jq empty`, NOT `jq -e empty`. The `empty` filter produces
+          # no output, and `-e` reads "no result" as exit code 4 even on valid
+          # JSON. See gen-identity.sh §4 for the same fix.
+          jq empty "$JSON" >/dev/null
+
+          ALLOWED="$(mktemp)"
+          printf '%s %s\n' "freedom-yield" "$(cat "$PUB")" > "$ALLOWED"
+
+          ssh-keygen -Y verify \
+            -f "$ALLOWED" \
+            -I "freedom-yield" \
+            -n "freedom-yield/validator-identity" \
+            -s "$SIG" < "$JSON"
+
+      - name: openssl version
+        run: openssl version
+      - name: verify ML-DSA-87 signature (schema v2 manifests)
+        run: bash scripts/check-identity-pq.sh --require-sig-verify

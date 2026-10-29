@@ -1,0 +1,8 @@
+# Test-generated ed25519 key + derived signed fixtures.
+# Regenerated on every test run; never commit (= prevent accidental real-key leak
+# pattern + keep test artifacts reproducible from generation rather than file
+# pinning).
+fixtures/test-identity-key
+fixtures/test-identity-key.pub
+fixtures/identity-signed-by-testkey.json
+fixtures/identity-signed-by-testkey.json.sig

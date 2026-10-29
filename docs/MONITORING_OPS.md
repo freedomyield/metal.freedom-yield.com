@@ -1,0 +1,824 @@
+# Monitoring operations — anomaly pipeline hardening
+
+This document is the design reference for the validator-host anomaly notification pipeline (`scripts/check-anomalies.sh` + supporting scripts). It describes the input/output gates (K-1 through K-4), the candidate-state commit model used by transition processing, the lock-file lifecycle, the operator-only state initialisation script, and the exit-code contract. It is the source of truth for the implementation; if the code disagrees, the code is wrong.
+
+The doc covers design only. It does not change cron schedules, production state files, production thresholds, or any live infrastructure.
+
+## 1. Scope and non-goals
+
+**In scope**
+
+- The flow used by `scripts/check-anomalies.sh` (= 5-minute cron on the validator host) to read inputs, validate state, process transitions, and emit notifications.
+- The supporting operator-only script `scripts/anomaly-state-init.sh` used to bootstrap or reset the baseline state.
+- The lock, counter, and quarantine files that live outside the state file but are part of the pipeline's persistent footprint.
+- The off-host external watch (`scripts/external-watch.sh`, run from the web host, §14): a second, independent watchdog that observes the validator host strictly from the outside. It exists because everything above runs on the validator host and cannot report that host's own silence.
+
+**Out of scope (= tracked elsewhere)**
+
+- The validator itself, its on-chain artefacts, the renewal pipeline, the anchor pipeline, the cycle history pipeline.
+- The site / web host / Caddy / nginx layer itself. (Probing it from the validator host *is* in scope — see §6.7; the external watch that runs *on* the web host is in scope — see §14.)
+- The disaster-recovery drill (= separate workstream, tracked in `docs/DISASTER_RECOVERY.md` + the residual T1 follow-up).
+
+## 2. Pipeline overview
+
+```
+cron (every 5 min, <deploy_user> user)
+   │
+   ▼
+[K-1]  STATUS_JSON syntax + schema gate          ─ exit 2 on fail
+   │
+   ▼
+[K-2]  STATUS_JSON freshness gate                ─ exit 2 or 3 on fail
+   │
+   ▼
+[K-4]  Non-blocking flock                        ─ exit 0 (skip, +counter) | exit 5 (lock dir not openable)
+   │
+   ▼
+[K-3.5] State-file presence + schema validation  ─ exit 4 (corrupt) | exit 7 (missing)
+   │
+   ▼
+[K-3]  Transition processing                     ─ exit 0 | exit 6 (notify perm-fail) | exit 8 (state commit fail)
+   │   (each transition: detect → notify → tentatively update candidate state)
+   │
+   ▼
+       Atomic commit of candidate state          ─ single mktemp + mv at end of run
+   │
+   ▼
+       exit 0 (success) / 6 (some transition notify failed) / 8 (state commit failed)
+```
+
+K-1, K-2 are already implemented and unchanged. K-4 is added in commit C1. K-3.5 is added in commit C2. K-3 (= candidate-state model) is the C4 commit; it is documented here so K-3.5 and K-4 can be designed in alignment with it.
+
+## 3. Exit code contract
+
+| Code | Meaning | State mutation | Notify side effect |
+|---|---|---|---|
+| 0 | Normal completion **or** K-4 skip (= previous run still holds lock) | normal / none | normal (= when reached K-3) / none (= when skipped) |
+| 2 | K-1: STATUS_JSON missing / unreadable / not JSON / missing fields / wrong types | none | none |
+| 3 | K-2: STATUS_JSON stale (age > MAX_AGE_SEC) or future skew (> FUTURE_SKEW_MAX_SEC) | none | none |
+| 4 | K-3.5: state file present but invalid (= JSON parse fail or schema fail) | none (= original file preserved) | best-effort, only on new SHA-256 |
+| 5 | Structural: lock dir missing / unopenable, or state dir missing | none | none |
+| 6 | K-3: one or more transitions' notify attempts permanently failed (= still failing after one in-run retry) | per-transition: failed transitions keep old value; succeeded transitions keep new value; atomic commit at end | (per-transition outcome) |
+| 7 | K-3.5: state file missing | none | best-effort, only on first detection after init (= missing-marker dedup) |
+| 8 | State commit failure (= mktemp / jq / mv / chmod) | partial possible only if commit succeeded for some other process; for this run, final commit failed → no fields advanced | (= notifies already sent; next run may re-detect → duplicate) |
+
+When multiple conditions apply, the script exits with the highest applicable code in this priority order: `8 > 7 > 6 > 5 > 4 > 3 > 2 > 0`.
+
+## 4. K-4: non-blocking flock + contention observability
+
+### 4.1 Lock placement
+
+- File: `${ANOMALY_LOCK_FILE:-/var/lib/freedom-yield/locks/check-anomalies.lock}`
+- Dir:  `/var/lib/freedom-yield/locks/` (= owner `<deploy_user>:<deploy_user>`, mode 0700, persistent across reboots)
+- The lock dir is sibling to the state dir, not nested inside it. This isolates lock lifecycle from any state mutation operation (= state init, quarantine, reset).
+- The lock file is **never deleted** by any pipeline script. `flock` acts on an open file descriptor; the file's existence is the durable handle. State init / reset / quarantine operations do not touch the lock file.
+- Lock dir must be created once during operator setup (= `sudo mkdir -p /var/lib/freedom-yield/locks && sudo chown <deploy_user>:<deploy_user> /var/lib/freedom-yield/locks && sudo chmod 0700 /var/lib/freedom-yield/locks`). The lock file is auto-created on first open by `check-anomalies.sh` (`exec 9>"$LOCK_FILE"`).
+
+### 4.2 Acquisition
+
+```bash
+LOCK_FILE="${ANOMALY_LOCK_FILE:-/var/lib/freedom-yield/locks/check-anomalies.lock}"
+LOCK_DIR="$(dirname "$LOCK_FILE")"
+
+# Lock dir must exist; missing dir is a structural error, not a transient skip.
+if [ ! -d "$LOCK_DIR" ]; then
+  echo "[K-4] lock dir missing: $LOCK_DIR (run anomaly-state-init.sh on a fresh host); exit 5" >&2
+  exit 5
+fi
+
+# Try to open the lock file for write (creates if absent). Failure here = perms.
+if ! exec 9>"$LOCK_FILE"; then
+  echo "[K-4] cannot open lock file: $LOCK_FILE; exit 5" >&2
+  exit 5
+fi
+
+# Non-blocking exclusive lock.
+if ! flock -n 9; then
+  echo "[K-4-SKIP] previous run still holds lock ($LOCK_FILE); incrementing contention counter; exit 0" >&2
+  bump_contention_counter
+  exit 0
+fi
+
+echo "[K-4] lock acquired" >&2
+# Lock is released automatically when fd 9 closes on process exit.
+```
+
+### 4.3 Contention counter
+
+- File: `${ANOMALY_CONTENTION_COUNTER:-/var/lib/freedom-yield/anomaly-contention-counter}` (= sibling to state dir, plain integer, single line)
+- Increment uses its own flock on `${counter}.lock` to avoid concurrent write races.
+- Counter file is created on first bump if absent. Initial value 0.
+- Failure to bump the counter is logged to stderr but **does not abort the main pipeline** (= observability is best-effort; the cron's primary job is anomaly detection, not its own observability).
+
+Reset is operator-driven (`scripts/anomaly-contention-reset.sh` may be added later but is out of scope for the C1 commit). Reading the counter is operator-driven (`cat /var/lib/freedom-yield/anomaly-contention-counter`).
+
+Why a counter rather than a JSONL log: cheaper write, no log rotation needed, sufficient for the only known consumer (= weekly operator glance). JSONL with per-event timestamp is an explicit future enhancement, deferred until a use case actually requires it.
+
+### 4.4 Test surface
+
+- `K4-1` pre-held lock → next process skips (exit 0, counter +1, no state mutation, no transition processing)
+- `K4-2` lock dir non-writable → exit 5
+- `K4-3` consecutive normal runs (= 2 runs back-to-back, both complete)
+- `K4-4` pre-held → released → next run completes normally (= 1st skip, 2nd normal, counter +1 once)
+- `K4-5` 3 consecutive contentions → counter +3
+
+CI runs all five with `$TMP/lock` and `$TMP/counter` (= no touch of production files).
+
+## 5. K-3.5: state-file presence + schema validation + SHA-256 dedup
+
+### 5.1 Sub-cases
+
+| Case | Trigger | State | Quarantine | Notify | Exit |
+|---|---|---|---|---|---|
+| 5.1.a | State dir missing | (= operator never ran init or it was deleted) | none | none | none | 5 |
+| 5.1.b | State file missing, no missing-marker | first detection after init or after manual removal | none | none | best-effort 1 (= one push) + create marker | 7 |
+| 5.1.c | State file missing, marker present | recurring missing | none | none | none (= stderr log only) | 7 |
+| 5.1.d | State file invalid (= JSON parse fail or schema fail), new SHA-256 | first detection of this exact corruption | unchanged | new quarantine dir | best-effort 1 | 4 |
+| 5.1.e | State file invalid, recurring SHA-256 | same exact bytes as a previously quarantined corruption | unchanged | none | none (= stderr log only) | 4 |
+
+### 5.2 Quarantine dir layout
+
+```
+${ANOMALY_STATE_DIR}/quarantine/
+├── README.md                                           # one-time, life-cycle note
+└── <full-sha256-of-corrupt-state>/                    # = directory identity is full SHA-256
+    ├── state.json                                      # exact copy of the corrupted file
+    ├── diag.txt                                        # parse/schema error + first 400 bytes
+    └── first-seen-at.txt                               # ISO-8601 UTC timestamp of first detection
+```
+
+- Identity = **full 64-char SHA-256 hex** of the corrupted file's bytes. This is the dedup key and the directory name.
+- The 8-char prefix (= `sha8`) is included in stderr log lines and notification bodies for human readability only. It is never used as a dedup key — collisions in the 8-char space are not impossible, and the on-disk identity must be deterministic.
+- Existence check is a deterministic path test: `[ -d "${QUAR_DIR}/${FULL_SHA}" ]`. No glob, no listing.
+- A recurrence (= same full SHA) writes nothing new, increments nothing, sends no notification. It only emits a stderr log line so the operator can see the recurrence rate via the cron log if they look.
+
+### 5.3 Missing-marker file
+
+- Path: `${ANOMALY_STATE_DIR}/.missing-notified.marker`
+- Purpose: dedup the "state file missing" notification so the operator is not paged every 5 minutes when the file has been removed (= e.g. operator started reset and was interrupted).
+- Created when 5.1.b fires.
+- **Removed by `scripts/anomaly-state-init.sh` on successful init.** This is the only path that clears the marker; the cron never clears it. After init, a future re-disappearance reopens the dedup → a new push fires (= correct re-notification on re-occurrence).
+- The marker is **not** placed under `quarantine/`; it is a sibling of the state file under the state dir root.
+
+### 5.4 State-file schema (= minimum the cron requires)
+
+The state JSON must be parseable and must contain at least:
+
+```jsonc
+{
+  "metalgo": "running|stopped|<arbitrary string>",
+  "disk": "ok|warn",
+  "memory": "ok|warn",
+  "peers": "ok|warn",
+  "web": "ok|warn",
+  "api_freshness": "ok|warn",
+  "web_incident": null,            // OPTIONAL — see below and §6.7
+  "validator_present": "yes|no",
+  "last_known_end_time": <integer or null>,
+  "delegator_count": <integer or null>,
+  "delegator_total_nmetal": <integer or null>,
+  "period_alert_sent": {
+    "7": <boolean>, "1": <boolean>, "0": <boolean>, "10min": <boolean>
+  }
+}
+```
+
+K-3.5 validation: top-level fields present with the expected types. The script's K-3 transition logic relies on every top-level field; missing field → schema fail → quarantine.
+
+`web_incident` (added 2026-09-24, §6.7) is the one **optional** field. It may be absent or `null`, meaning no public-site incident is open; `anomaly-state-init.sh` writes `null`. When present and not `null` it must be an object with `started_at` (number: epoch of the first failed observation), `last_class` (`cf_path` | `origin_or_path` | `unknown`), `classes` (array of strings, the classes seen in order of first appearance), `runs` (number: consecutive failed runs) and `pushed` (boolean: the outage push was delivered). Any other shape is a schema mismatch and is quarantined like every other mismatch (§5.1). A state file written before the field existed therefore stays valid.
+
+### 5.5 Bootstrap is operator-only
+
+The cron does **not** auto-create a baseline state. That responsibility lives in `scripts/anomaly-state-init.sh`, run manually by the operator. See §7.
+
+### 5.6 Notify behaviour
+
+For 5.1.b and 5.1.d: the notification attempt is best-effort. Its success or failure does **not** change:
+
+- the exit code (= still 7 or 4 respectively)
+- the on-disk preservation (= original state file or quarantine dir remains unchanged regardless of notify outcome)
+- the marker creation (= 5.1.b creates the marker whether or not the notify succeeded — the dedup is about the operator's pager, not about the diagnostic on disk)
+
+Rationale: notification delivery is a separately-degraded path. The durable record is on disk. The operator can discover quarantine dirs / marker files even if every push for the last week was dropped on the floor.
+
+## 6. K-3: transition processing with candidate-state commit
+
+### 6.1 Model
+
+Each cron run:
+
+1. Read on-disk state into an in-memory candidate (= a temp JSON file copy of the live state).
+2. Process every transition rule. For each rule:
+   - Read the current field value from the **candidate** (not from disk).
+   - Detect whether a transition fires.
+   - If yes, call `notify_and_state(prio, title, body, jq_field_path, new_value_json)`:
+     - At most 2 attempts in a single run: 1 initial + 1 in-run retry on retryable failures.
+     - Retry is gated by exit code or HTTP status. Curl `--max-time` provides a bounded per-attempt timeout.
+     - On success (= notify delivered): mutate the **candidate** field to the new value.
+     - On permanent failure: do **not** mutate the candidate field; record the failure into `GLOBAL_NOTIFY_RC=6`.
+3. After all transitions have been processed: atomically commit the candidate to disk:
+   - `mktemp -p "$STATE_DIR" .state.commit.XXXXXX`
+   - `cp` candidate → tmp
+   - Best-effort `sync` of tmp (= durability is best-effort, see §6.5)
+   - `mv tmp "$STATE_FILE"` (= same-filesystem atomic rename)
+   - Best-effort `sync` of state dir
+   - On any commit step failure: leave `$STATE_FILE` untouched, set `GLOBAL_NOTIFY_RC=8`, log to stderr.
+4. Exit with `GLOBAL_NOTIFY_RC` (= 0 on full success; 6 if any transition permanently failed; 8 if the final commit itself failed).
+
+### 6.2 Independence of transitions
+
+A failure of one transition's notify does not affect the next transition's processing. Each transition reads from the candidate and writes to the candidate independently. The script never aborts mid-run on a single notify failure; it continues to the next transition.
+
+This implies the candidate may end up with a heterogeneous mix of new and old field values: successful transitions advance, failed transitions stay. The single end-of-run commit writes this heterogeneous candidate atomically.
+
+### 6.3 Duplicate semantics
+
+There is **no fixed upper bound** on how many notifications a single event may produce over its lifetime. The correct way to state the bound:
+
+- **Per single cron run**: at most 2 attempts per transition (= 1 initial + 1 retry).
+- **Per event lifetime**: if a transition keeps failing across cron runs (= permanent notify failure each run), the same transition re-detects + re-attempts every 5 minutes. There is no in-script counter that caps the lifetime attempts.
+
+Delivery semantics is **at-least-once**. Duplicates are possible and not suppressed by this pipeline. Specifically:
+
+- If notify returns success but the subsequent atomic state commit fails (= rc 8), the next cron run will re-detect the same transition and re-notify.
+- If notify ambiguously succeeds at the transport level but the message did not actually reach the operator device (= ntfy server-side failure window not exposed through HTTP status, or device-side dropped push), the field still advances in the candidate because the script observed HTTP 2xx.
+- Any client-side history-cache behaviour (= ntfy Android client, operator's mail filter, etc.) is **not** a duplicate-suppression guarantee provided by this pipeline. Operators should expect occasional duplicates and design escalation routines accordingly.
+
+### 6.4 Atomic commit details
+
+```bash
+commit_candidate_state() {
+  local candidate="$1"   # path to the in-memory candidate temp file
+  local target="$STATE_FILE"
+  local tmp
+  tmp=$(mktemp -p "$STATE_DIR" ".state.commit.XXXXXX") || {
+    echo "[state] mktemp failed in $STATE_DIR; commit aborted" >&2
+    return 8
+  }
+  if ! cp "$candidate" "$tmp"; then
+    rm -f "$tmp"
+    echo "[state] cp candidate -> tmp failed" >&2
+    return 8
+  fi
+  # Best-effort durability. `sync` of a single file is supported on Linux but
+  # not on all platforms; ignore errors. See §6.5 for the honest framing.
+  sync "$tmp" 2>/dev/null || true
+  if ! mv "$tmp" "$target"; then
+    rm -f "$tmp"
+    echo "[state] atomic rename $tmp -> $target failed" >&2
+    return 8
+  fi
+  chmod 0644 "$target" 2>/dev/null || true
+  sync "$STATE_DIR" 2>/dev/null || true
+  return 0
+}
+```
+
+### 6.5 Durability framing
+
+The commit is **atomic from the perspective of any concurrent reader** of `$STATE_FILE` (= POSIX same-filesystem rename guarantees the reader sees either the old inode or the new one, never a partial write). It is **best-effort durable** with respect to a system crash between the rename and the underlying filesystem flush: we call `sync` on the tmp and the dir, but the actual durability depends on the kernel + filesystem combination and is not guaranteed by this script. The script does not call `fsync(2)` directly (= bash has no portable wrapper) and does not advertise "fsync guarantee". If a crash occurs between rename and flush, the state may revert to the pre-commit value on next boot. This is acceptable for the cron's use case (= 5-minute cadence; next run re-detects and re-notifies if anything was lost).
+
+### 6.6 Counter / non-state mutations
+
+The `delegator_count` and `delegator_total_nmetal` fields are written as a **pair, and only when the notify for that transition succeeded** — both `candidate_set` calls sit inside the `if notify_or_keep …; then` body on each branch. A run where the count did not change writes neither; a run whose notify fails leaves both at their original values. They therefore **do** participate in retry semantics: the next run re-detects the same transition against the unchanged baseline and re-attempts. (Written via candidate field set + atomic commit at end, as everything else in the candidate model is.)
+
+The pairing is load-bearing, not incidental. `delegator_total_nmetal` is read back as the baseline for the `新規 / 離脱 / 差引 <amount>` line in the delegation push, so the stored value means **"the cumulative as of the last push the operator actually received"**, and the printed delta means "what moved since then". A missed push folds its amount into the next one rather than losing it — true only because the two fields advance together with the notification, and broken if either were written unconditionally.
+
+### 6.7 Public-site probe (`web`): classification, persistence gate, diagnostics
+
+Design: [`docs/superpowers/specs/2026-09-24-web-probe-path-classification-design.md`](superpowers/specs/2026-09-24-web-probe-path-classification-design.md). Measuring, classifying and text rendering live in `scripts/lib/web-probe.sh`, which has no side effects. Every state change and every write stays in the `# === observation: web URL availability` and `# === transition: web` blocks of `scripts/check-anomalies.sh`.
+
+**Probes.**
+
+| Probe | When | What it tells |
+|---|---|---|
+| `P_cf` — `GET ${WEB_URL}/health`, 10 s cap | every run | what a visitor sees through Cloudflare |
+| `P_cf` re-probe after `WEB_REPROBE_SLEEP` (30 s) | first probe failed, no incident open, `.web == ok` | absorbs sub-30 s blips |
+| `P_direct` — same URL with `curl --resolve <host>:<port>:${WEB_ORIGIN_IP}` | `P_cf` still failing | whether the origin answers when Cloudflare is bypassed |
+
+A healthy run makes exactly one request. `WEB_ORIGIN_IP` comes only from the cron env (installed by `scripts/install-anomalies-web-origin-env.sh`) and is never committed. When it is unset or not a dotted-quad IPv4, `P_direct` is skipped and logged.
+
+**Classification** (uses the last `P_cf` result and `P_direct`):
+
+| `P_cf` | `P_direct` | class | label in pushes |
+|---|---|---|---|
+| fail | 200 | `cf_path` | Cloudflare 経路 (origin は正常) |
+| fail | fail | `origin_or_path` | origin 停止 または validator host 側の経路 (未判別) |
+| fail | skipped | `unknown` | 判別不能 (origin 直接確認なし) |
+
+**Transitions** (`web_incident` is described in §5.4):
+
+1. `P_cf` 200, no incident → nothing.
+2. `P_cf` 200, incident open, `pushed=false` → no push; one blip-log line; incident cleared.
+3. `P_cf` 200, incident open, `pushed=true` → `公開サイト復旧` (default) with `継続: 約 N 分 (5 分刻みの観測)` and the classes seen. On a delivered push: `.web=ok`, one blip-log line, incident cleared.
+4. `P_cf` fails, no incident → incident opened (`runs=1`, `pushed=false`), diagnostics appended, **no push**.
+5. `P_cf` fails, incident open, `pushed=false` → `runs+1` and a push chosen by the current class: `公開サイトが応答しない (5 分以上継続)` (high) for `origin_or_path` / `unknown`, `公開サイト: Cloudflare 経路で失敗継続 (origin は正常)` (default) for `cf_path`. On a delivered push: `pushed=true`, `.web=warn`.
+6. `P_cf` fails, incident open, `pushed=true` → `runs+1`, diagnostics only.
+
+`pushed` and `.web` advance only after `notify_or_keep` succeeds (K-3, §6.1); a failed push is retried by the next run. `started_at`, `runs`, `classes` and `last_class` are observations and advance every run. A legacy state (`.web=warn` without `web_incident`, written before 2026-09-24) is treated as open and already pushed: no re-probe, no second outage push, and a recovery push that says `継続: 不明` with no blip line.
+
+Every push body that quotes a probe's timing line (transitions 3 and 5 above) has `remote_ip=…` stripped from both the `P_cf` and the `P_direct` line before the body is composed (`sed 's/ remote_ip=[^ ]*//'` in the `# === transition: web` block) — the origin address never reaches an ntfy.sh push, in any class, including `cf_path`, where the origin answering 200 might otherwise tempt a body to quote it. The diagnostics log below is the only place the raw `remote_ip=` (the origin's own address, for `P_direct`) is kept, and it is host-only.
+
+**Logs** (production paths; any other state dir puts them beside that state dir, so a test sandbox never writes `/var/log`):
+
+| File | Content | Written by |
+|---|---|---|
+| `/var/log/anomalies-web-diag.log` | one block per failed observation, header `=== web-diag <UTC ISO> class=<c> ===`, then both `P_cf` runs, `P_direct` (timing line with `curl_rc`, response headers incl. `cf-ray`, curl error) and `mtr -r -n -c 5 -w ${WEB_ORIGIN_IP}` under `timeout 25` | `fyd_live_write --append` |
+| `/var/log/anomalies-web-blips.log` | one line per closed incident: `<start UTC> <end UTC> duration_s=<n> classes=<a,b> pushed=<bool>` | `fyd_live_write --append` |
+
+`scripts/install-anomalies-logrotate.sh` keeps both and `anomalies.log` for 90 days (`daily`, `rotate 90`, `compress`) and creates the two new files as <deploy_user>:<deploy_user> 0644, because the cron user cannot create files in `/var/log`. A failed append is reported on stderr and never blocks the transition. If `mtr` is not installed, the block records `skipped (mtr not installed)`.
+
+**Env knobs:** `WEB_URL`, `WEB_ORIGIN_IP`, `WEB_REPROBE_SLEEP` (30), `WEB_PROBE_MAX_TIME` (10), `WEB_DIAG_TIMEOUT` (25), `WEB_DIAG_LOG`, `WEB_BLIP_LOG`. Only `WEB_ORIGIN_IP` is set in production; the rest exist for tests.
+
+**Latency and runtime.** A real outage now pages on the second failed run, about 5 minutes after the first instead of about 30 s. This is accepted (spec G2). Worst-case run time is about 85 s (10 + 30 + 10 + 10 + 25), well inside the 5-minute cadence, and K-4 (§4) prevents overlap.
+
+**Tests:** `tests/anomalies/test-web-probe-lib.sh` (library), `tests/anomalies/test-web-incident.sh` (multi-run end-to-end in a sandbox), `tests/anomalies/integration-linux.sh` case I9 (real HTTP server going down for two runs).
+
+## 7. anomaly-state-init.sh (operator-only)
+
+### 7.1 Purpose
+
+Single operator-driven entry point to:
+
+- Create state dir + lock dir + counter file (if absent) with correct ownership and permissions.
+- Write a baseline state JSON.
+- Remove the missing-marker file (= unblock future "missing" notifications).
+- Optionally clear stale quarantine dirs (= behind an explicit `--clear-quarantine` flag, off by default).
+
+### 7.2 Concurrency
+
+The init script **acquires the same `ANOMALY_LOCK_FILE` non-blocking** as the cron. If the lock is held, init refuses to proceed and exits non-zero without touching state. This guarantees init and cron never run concurrently.
+
+The lock is **not deleted** by init. Init opens it for write (creating if absent) and holds it via `exec 9>"$LOCK_FILE"; flock -n 9`. On exit, the fd closes and the lock releases. The file persists.
+
+### 7.3 Sequence (= within a single lock hold)
+
+```
+1. acquire ANOMALY_LOCK_FILE non-blocking (exit if held)
+2. mkdir -p state dir + lock dir (= idempotent; chmod 0700 lock dir, 0750 state dir)
+3. validate operator confirmation flag (--confirm required; refuse otherwise)
+4. construct baseline state JSON in a tmp file
+5. atomic mv tmp -> $STATE_FILE
+6. remove ${ANOMALY_STATE_DIR}/.missing-notified.marker if present
+7. (optional, --clear-quarantine) rm -rf ${ANOMALY_STATE_DIR}/quarantine/*
+8. log success + recap (= state path, lock path, counter path, marker removed yes/no)
+9. release lock (= fd close on exit)
+```
+
+Init does **not** modify the contention counter, does **not** touch any in-progress quarantine dirs unless `--clear-quarantine` is passed.
+
+### 7.4 Required flags
+
+- `--confirm` — operator must pass this explicitly. Without it, the script prints what it would do and exits non-zero. Prevents accidental run from history.
+- `--baseline-status=running|stopped` — operator declares the baseline assumption for the metalgo field (no caddy field since 2026-10-07: no Caddy on the validator host; a "caddy" key left in an older state file is ignored) (= default `running` when bootstrapping after a known-good cycle; `stopped` only when bootstrapping after a known-down recovery).
+- `--clear-quarantine` (optional) — wipe quarantine dirs as part of init. Default off.
+- `--clear-counter` (optional) — reset contention counter to 0. Default off.
+
+### 7.5 Cron integration
+
+The init script must **not** appear in any cron file. The cron in `/etc/cron.d/metal-anomalies` runs `check-anomalies.sh` only. Init is a manual operator step, documented as part of the resume-from-pause runbook.
+
+## 8. Test harness policy
+
+### 8.1 Environment isolation
+
+| Resource | Production | CI test | Operator manual E2E |
+|---|---|---|---|
+| State dir | `/var/lib/freedom-yield/` (the validator host) | `$TMP/state` (mktemp) | `$TMP/state` (mktemp) |
+| Lock file | `/var/lib/freedom-yield/locks/check-anomalies.lock` | `$TMP/locks/test.lock` | `$TMP/locks/test.lock` |
+| Counter file | `/var/lib/freedom-yield/anomaly-contention-counter` | `$TMP/counter` | `$TMP/counter` |
+| STATUS_JSON | `public/api/server-status.json` (live) | fixture under `tests/anomalies/fixtures/` | fixture under `tests/anomalies/fixtures/` |
+| VALIDATOR_JSON | `public/api/validator.json` (live) | fixture | fixture |
+| ntfy topic file | `/etc/freedom-yield/ntfy-topic` | unused (= notify path stubbed) | `/etc/freedom-yield/ntfy-topic-test` (= operator-placed, test-only topic) |
+| ntfy transport | real ntfy.sh | **stub** (= no HTTP call) | real ntfy.sh on test-only topic |
+| Thresholds (MAX_AGE_SEC, peer min, disk pct, etc.) | production values | fixture-aligned overrides via env | production values, but **never write to production state / lock / counter** |
+
+### 8.2 CI uses stub notify
+
+`tests/anomalies/stub-notify.sh` mimics notify.sh's argv but does not call `curl`. It appends invocation records to `$TMP/notify-calls.log` and returns an exit code controlled by `STUB_NOTIFY_EXIT` (= default 0). CI test harness sets `NOTIFY=$TMP/stub-notify.sh`. Production `scripts/notify.sh` is never invoked by CI.
+
+### 8.3 Operator-manual E2E
+
+A small subset of tests (= INT-1 single transition end-to-end) runs against the real ntfy.sh transport. Required pre-conditions:
+
+- Operator has created `/etc/freedom-yield/ntfy-topic-test` containing a topic distinct from the production topic.
+- Test messages carry a `TEST:` prefix in the title and an `evt-<8hex>` unique event id in the body, so a delivered test push is unambiguously identifiable.
+- Production state, lock, counter, marker, and quarantine dir are not touched at any point.
+
+This subset runs only when the operator explicitly invokes the manual E2E entry point. CI does not run it.
+
+## 9. Schema-stability discipline
+
+This pipeline maintains three on-disk JSON shapes that consumers depend on:
+
+- `${ANOMALY_STATE_DIR}/anomaly-state.json` — the live state; consumed only by `check-anomalies.sh` itself, so the shape is private to this pipeline. Changes that add fields are additive; changes that remove fields require migration of all in-the-wild state files.
+- `${ANOMALY_STATE_DIR}/quarantine/<sha>/state.json` — exact copy of the corrupted state file; no schema (= it is by construction not conformant).
+- `${ANOMALY_STATE_DIR}/quarantine/<sha>/diag.txt` — free-form diagnostic; not schema-stable.
+- `/var/log/anomalies-web-diag.log` — public-site diagnostics blocks (§6.7); free-form below the `=== web-diag <UTC ISO> class=<c> ===` header line, which is stable.
+- `/var/log/anomalies-web-blips.log` — one line per closed public-site incident (§6.7); the line format `<start UTC> <end UTC> duration_s=<n> classes=<a,b> pushed=<bool>` is stable, because a later digest or a support inquiry reads it.
+
+The cron writes ISO-8601 UTC for the few timestamp fields it owns (= `first-seen-at.txt`).
+
+## 10. Operator setup runbook (= one-time per host)
+
+```bash
+# All commands run as root unless prefixed sudo -u <deploy_user>.
+DEPLOY_USER=<deploy_user>
+STATE_BASE=/var/lib/freedom-yield
+
+mkdir -p "$STATE_BASE"
+mkdir -p "$STATE_BASE/locks"
+chown -R "$DEPLOY_USER:$DEPLOY_USER" "$STATE_BASE"
+chmod 0750 "$STATE_BASE"
+chmod 0700 "$STATE_BASE/locks"
+
+# Initialise baseline state (operator-driven, not cron-driven).
+# FY_LIVE=1 is mandatory: since the 2026-08-06 C3 inversion
+# (scripts/lib/side-effects.sh) this script REFUSES with exit 6 rather than
+# running dry, so that a forgotten opt-in can never print "init complete"
+# while changing nothing.
+sudo -u "$DEPLOY_USER" env FY_LIVE=1 bash scripts/anomaly-state-init.sh \
+  --confirm \
+  --baseline-status=running
+
+# Optional: wipe any prior quarantine dirs / reset counter at the same time.
+# sudo -u "$DEPLOY_USER" env FY_LIVE=1 bash scripts/anomaly-state-init.sh \
+#   --confirm --baseline-status=running \
+#   --clear-quarantine --clear-counter
+
+# Confirm baseline:
+sudo -u "$DEPLOY_USER" jq . "$STATE_BASE/anomaly-state.json"
+ls -la "$STATE_BASE/locks/"
+[ -f "$STATE_BASE/.missing-notified.marker" ] && echo "marker still present (bug)" || echo "marker cleared OK"
+
+# Public-site probe (2026-09-24, §6.7). Run as root after the repo is on the
+# host. The origin address is typed here and lands only in the cron file; it
+# is never committed and the installer does not echo it back.
+bash scripts/install-anomalies-logrotate.sh
+bash scripts/install-anomalies-web-origin-env.sh --origin-ip=<origin IPv4>
+logrotate -d /etc/logrotate.d/anomalies 2>&1 | tail -3
+grep -c '^WEB_ORIGIN_IP=' /etc/cron.d/metal-anomalies     # expect 1
+bash scripts/check-cron-file.sh /etc/cron.d/metal-anomalies
+```
+
+After this setup, the cron line in `/etc/cron.d/metal-anomalies` may be un-commented by the operator. The cron uses the same `ANOMALY_STATE_DIR=/var/lib/freedom-yield` env (= or whatever path the operator standardised).
+
+## 11. Resume-from-pause checklist (= operator-driven, step-by-step)
+
+Each step lists the exact command, the expected output, and the abort criterion. If a step's expected output is not met, **stop and triage** rather than proceeding to the next step. The cron line in `/etc/cron.d/metal-anomalies` MUST stay commented through step 6.
+
+### Step 1 — confirm code base is at the expected commit SHA
+
+```bash
+cd <deploy_path>
+git log -1 --format='%H %s'
+grep -c '^# === 4B.5.2 K-4:' scripts/check-anomalies.sh
+grep -c '^# === 4B.5.2 K-3.5:' scripts/check-anomalies.sh
+grep -c '^# === 4B.5.2 K-3:' scripts/check-anomalies.sh
+test -x scripts/anomaly-state-init.sh && echo "init: executable" || echo "init: NOT executable"
+```
+
+**Expected**:
+
+- `git log -1` shows a SHA at or after `6aa789b` (= C4 K-3 candidate-state).
+- Each `grep -c` returns `1` (= one section each for K-4, K-3.5, K-3).
+- `init: executable`.
+
+**Abort if**: any grep returns `0`, or init script not executable. Re-pull the code base or chmod +x the script.
+
+### Step 2 — confirm host setup is in place
+
+```bash
+ls -la /var/lib/freedom-yield/locks/ 2>&1
+stat -c '%U:%G %a' /var/lib/freedom-yield/locks 2>/dev/null
+stat -c '%U:%G %a' /var/lib/freedom-yield 2>/dev/null
+```
+
+**Expected**:
+
+- `/var/lib/freedom-yield/locks/` exists.
+- Both dirs owned by `<deploy_user>:<deploy_user>`. State dir permission `0750`, lock dir `0700`.
+
+**Abort if**: dir missing or wrong ownership. Run the §10 setup commands as root.
+
+### Step 3 — run the cron's command once by hand, with the cron line still commented
+
+> "By hand" here means *not scheduled*; it does **not** mean "without side effects". Since the 2026-08-06 C3 inversion (`scripts/lib/side-effects.sh`) `FY_LIVE=1` is what turns notifies and state writes on, and this step needs them on for the `rc=7` / `rc=4` verdict below to be real. Drop `FY_LIVE=1` if you only want to look: the run then prints one `DRY: would …` line per suppressed effect and touches nothing.
+
+```bash
+sudo -u <deploy_user> env \
+  FY_LIVE=1 ANOMALY_STATE_DIR=/var/lib/freedom-yield \
+  bash <deploy_path>/scripts/check-anomalies.sh; \
+  echo "rc=$?"
+```
+
+**Expected one of**:
+
+- `rc=0` (= steady state, no transitions).
+- `rc=7` with stderr `[K-3.5] state file missing` (= state file has never been initialised, OR was removed during the maintenance window). Proceed to Step 4 (init).
+- `rc=4` with stderr `[K-3.5] new corruption` or `[K-3.5] state corruption recurrence` (= prior state file is corrupted). Inspect the quarantine dir before initialising.
+- `rc=3` with stderr `[K-2] observedAt stale` (= server-status.json is stale, fix the upstream cron first).
+- `rc=2` with stderr `[K-1]` (= server-status.json missing fields, fix upstream).
+
+**Abort if**:
+
+- `rc=5` (= lock dir missing or unopenable). Re-do Step 2.
+- `rc=8` (= state commit failure). Filesystem issue. Investigate before continuing.
+- Any unexpected stderr that doesn't match a documented gate.
+
+### Step 4 — initialise baseline state (= operator-driven, manual)
+
+Run only if Step 3 returned `rc=7` (= state file missing). If Step 3 returned `rc=4`, first inspect `/var/lib/freedom-yield/quarantine/*/diag.txt` to understand the corruption and decide whether to also pass `--clear-quarantine`.
+
+```bash
+# Plan only — prints what would happen, makes no changes (exit 1, no --confirm).
+sudo -u <deploy_user> bash <deploy_path>/scripts/anomaly-state-init.sh \
+  --baseline-status=running
+# Apply. FY_LIVE=1 is mandatory since the 2026-08-06 C3 inversion
+# (scripts/lib/side-effects.sh); without it the script refuses with exit 6
+# instead of silently doing nothing.
+sudo -u <deploy_user> env FY_LIVE=1 bash <deploy_path>/scripts/anomaly-state-init.sh \
+  --confirm --baseline-status=running
+sudo -u <deploy_user> jq . /var/lib/freedom-yield/anomaly-state.json | head -20
+ls /var/lib/freedom-yield/.missing-notified.marker 2>&1 | head -1
+```
+
+**Expected**:
+
+- Dry-run prints `Plan (no changes will be made without --confirm)` and exits non-zero.
+- Apply prints `[init] lock acquired`, `[init] baseline state written`, `=== init complete ===` and exits 0.
+- `jq .` shows the baseline with `metalgo: "running"`, `disk: "ok"`, etc. (no `caddy` key)
+- `ls .missing-notified.marker` returns "No such file or directory" (= marker was removed or never existed).
+
+**Abort if**:
+
+- Apply step exits non-zero. Possible causes: lock held by another process (= exit 3, retry shortly), state write failure (= exit 4, investigate dir permissions), structural error (= exit 2 / 5).
+- Baseline JSON shows unexpected values.
+
+### Step 5 — re-run the cron and verify steady state
+
+```bash
+sudo -u <deploy_user> env \
+  FY_LIVE=1 ANOMALY_STATE_DIR=/var/lib/freedom-yield \
+  bash <deploy_path>/scripts/check-anomalies.sh; \
+  echo "rc=$?"
+```
+
+**Expected**:
+
+- `rc=0`.
+- stderr contains `[K-4] lock acquired` and either `[K-3] candidate == original (canonical); no commit, mtime preserved` OR `[K-3] committed candidate to ...` (depending on whether observations produced a real change).
+
+**Abort if**:
+
+- Non-zero exit. Re-triage per Step 3.
+
+### Step 6 — verify K-4 contention behaviour
+
+```bash
+# Acquire the lock in background, then immediately invoke the script.
+(
+  flock -x 200; sleep 5
+) 200>/var/lib/freedom-yield/locks/check-anomalies.lock &
+sleep 0.3
+sudo -u <deploy_user> env \
+  FY_LIVE=1 ANOMALY_STATE_DIR=/var/lib/freedom-yield \
+  bash <deploy_path>/scripts/check-anomalies.sh 2>&1 | head -3
+echo "rc=$?"
+wait
+cat /var/lib/freedom-yield/anomaly-contention-counter
+```
+
+**Expected**:
+
+- Stderr contains `[K-4-SKIP] previous run still holds lock`.
+- `rc=0`.
+- Counter is `1` (or one higher than its prior value if not freshly initialised).
+
+**Abort if**: stderr does NOT contain `[K-4-SKIP]`, or counter did not increment.
+
+### Step 7 — operator-manual E2E single-transition (optional, recommended)
+
+Pre-condition: operator has placed a test-only topic at `/etc/freedom-yield/ntfy-topic-test` (= distinct from production). Operator has subscribed to the test topic on Android.
+
+```bash
+# Push a TEST-prefixed message manually via notify.sh (default mode, against test topic).
+NTFY_TOPIC_FILE=/etc/freedom-yield/ntfy-topic-test \
+  bash <deploy_path>/scripts/notify.sh \
+  default "TEST: resume verification $(date -u +%H%M%S)" "evt-$(openssl rand -hex 4) — operator E2E"
+```
+
+**Expected**: Operator's Android receives a notification within 30s, with TEST prefix and a unique event id.
+
+**Abort if**: push not received within 90s. Check ntfy.sh topic subscription, device DND, network.
+
+### Step 8 — un-comment the cron line
+
+```bash
+sudo cat /etc/cron.d/metal-anomalies
+# Operator manually edits /etc/cron.d/metal-anomalies to remove the leading '# ' on the cron line.
+# Then verify:
+sudo cat /etc/cron.d/metal-anomalies | grep -n 'check-anomalies'
+```
+
+**Expected**: the line begins with `*/5 * * * * <deploy_user> bash ...` (= no leading `#`).
+
+**Abort if**: comment removal failed. Re-edit.
+
+### Step 9 — observe two cron firings (= 10 minutes)
+
+```bash
+# Wait ~12 minutes after Step 8, then:
+tail -50 /var/log/anomalies.log
+sudo -u <deploy_user> stat -c '%y' /var/lib/freedom-yield/anomaly-state.json
+```
+
+**Expected**:
+
+- Log contains 2 cron firings (= one per 5-min tick).
+- Each firing logs `[K-4] lock acquired`, and either `[K-3] candidate == original` OR `[K-3] committed candidate`.
+- No `[K-1]`, `[K-2]`, `[K-3.5]`, `[K-4-SKIP]` lines (= unless an actual condition arose).
+
+**Abort if**:
+
+- Cron did not fire (= log unchanged): check `systemctl status cron`, journalctl for cron.
+- Repeated gate failures: re-pause the cron, re-triage.
+
+### Step 10 — resolve the public incident
+
+After 24 hours of clean cron behaviour (= no permanent-fail notifications, no quarantine, no contention counter growth beyond occasional benign skips), update the public `/incidents/` entry from `under_remediation → resolved` and add the resolution date.
+
+## 12. Out of scope for the C0..C3a batch
+
+The current commit batch does not implement:
+
+- K-3 (= the candidate-state commit transition processing). Implementation lands in commit C4, after caller compatibility for `notify.sh` (= C3a inventory + C3b exit-code change) is decided.
+- The fixture test harness (= commit C6).
+- The formal `incidents.schema.v1.json` and incident drafts (= commits C7, C8).
+- The daily-status root-cause fix (= deferred to a separate session per operator decision Q9).
+
+These are tracked separately and require additional operator approval before they are implemented.
+
+## 13. Cross-references
+
+- `docs/CONSTITUTION.md` §3.3 — secrets policy (state files contain no secrets, but the `/etc/freedom-yield/ntfy-topic` file is treated as a shared secret and is not in any repo file).
+- `docs/INCIDENT_RESPONSE.md` — operator playbook for SEV-1..4 events; the cron's role is detection, not response.
+- `docs/DISASTER_RECOVERY.md` — separate workstream; not invoked by this pipeline.
+- `docs/CRON_CONVENTIONS.md` — output capture, log paths, env injection conventions used by every cron entry on the validator host.
+
+## 14. Off-host external watch
+
+`scripts/external-watch.sh` is a watchdog that runs on the **web host**, not on the validator host, and observes the validator from the outside. Its installer is `scripts/install-web-host-external-watch.sh`, run from the operator's Mac.
+
+### 14.1 Why
+
+Starting 2026-09-24 the validator host lost connectivity beyond its provider edge for roughly 100 hours. Every push-capable monitor at the time (§2, the daily digest, the renewal and anchor watches) ran on that same host, so none could deliver an alert about the host being unreachable. A monitor on the silent host cannot report the silence. The only off-host check, the GitHub `uptime.yml` workflow, merely warned after 24 h and stayed green. The external watch moves detection to a host that does not share that failure domain.
+
+It holds no credentials toward the validator host and never listens on a port. Per run it reads one local file (the pushed `validator.json`), opens one TCP connection to the public p2p port (a second one after a 10 s re-probe if the first fails; no payload, no credentials), and makes at most one public RPC call. Only on the transition into a `p2p` alert does it also trace the path once with `mtr` (§14.3).
+
+It pushes to **its own ntfy topic**, never the validator host's. The web host is shared with other projects; a compromise there can then read or forge only the watch's channel, and that topic can be rotated on its own.
+
+### 14.2 The three checks
+
+Each check yields `PASS`, `FAIL` or `UNKNOWN`. `UNKNOWN` never changes state: it neither counts toward an alert nor clears one.
+
+| Check | Observes | FAIL | UNKNOWN / suppression | Alert priority |
+|---|---|---|---|---|
+| `fresh` | `observedAt` of the pushed `validator.json` on the web host | file unreadable, `observedAt` missing or unparseable, or age > 900 s | inside the renewal window (`endTime - 1800 s` to `endTime + 21600 s`), because `node-info.sh` legitimately stops refreshing then | `high` |
+| `p2p` | TCP connect to the validator p2p port | connect fails, then fails again after a 10 s re-probe (5 s timeout each) | none | `urgent` |
+| `chain` | public P-chain RPC `platform.getCurrentValidators`, filtered by `nodeIDs`, field `connected` | `connected` is `false` | RPC unreachable or malformed, validator absent from the response, or `connected` not a boolean | `urgent` |
+
+The RPC response sits behind a 900 s TTL cache (OPERATING_MODEL W9, polite external access); requests filter by `nodeIDs` because otherwise delegators are omitted from the response.
+
+### 14.3 Debounce, recovery and gating
+
+- **2 consecutive observations.** A push fires only when the same check has failed on 2 consecutive observations. `fresh` and `p2p` are observed on every 5-minute run, so they alert after about 5-10 minutes.
+- **A cached RPC sample is counted once.** `chain` observations are 900 s samples, not runs: the sample time is remembered in state, and a run that re-reads the same cached sample does not add a failure. Two failures therefore always mean two distinct samples, and `chain` alerts 15-20 minutes after the first failing sample, which is up to about 30 minutes after the outage begins (the RPC must first report `connected=false`). That latency is the price of RPC politeness and is accepted.
+- **Recovery push.** The first passing run after an alert sends a `default` recovery push with the outage duration and resets the check.
+- **State advances only if the push was delivered** (same principle as `notify_or_keep` in `check-anomalies.sh`): a failed push is retried on the next run and never silently swallowed.
+- **DRY vs `WATCH_LIVE`.** Nothing is sent unless `WATCH_LIVE=1`; otherwise the script prints `DRY: would notify <priority> <title>` to stderr. A DRY run persists the failure counters and `first_fail_at` (so the alert path is reachable in a rehearsal) but never sets a check to `alerting` and never clears an existing `alerting`. Consequence: a LIVE run right after two DRY failing runs alerts on its **first** run, because DRY already advanced the counters. The installer's one-off verification run is DRY, so it is itself subject to this.
+- **Dependency preflight.** `jq`, `curl`, `timeout` and `flock` are all required. A missing one exits 1 with a message instead of degrading into a silent no-op or a false alert.
+- **p2p path diagnosis (mtr + provider ticket draft).** The 2026-09-24 outage lasted ~100 h because nobody escalated to the provider; the break was right past the provider's edge (in a trace taken from the validator side: hops inside its network answered, 100 % loss from the first hop outside it). So on the **transition** into the `p2p` alert only (not on the 5-minute runs while still failing; a push that failed and is retried diagnoses again), the watch runs `timeout -k 5 25 mtr -r -n -c 5 -w <validator host>` (`-k 5`: an mtr that ignores SIGTERM is killed 5 s later, so it cannot hold the run's lock) (same shape as `web_mtr_capture` in `scripts/lib/web-probe.sh`) and classifies the report with a pure function (`external-watch.sh --classify-mtr < report`):
+  - `provider-edge` — some hops answer, every hop from the first silent one to the end is silent; reports the last answering and first silent hop index. The trace runs from the web host (a third-party vantage point) toward the validator host and the classifier knows no ASNs, so it does not say whose network the silent section is in; the draft states only "from an external vantage point, hops answer up to hop N and are silent from hop M onward" and asks the provider to check the upstream path.
+  - `no-route-at-all` — no hop answers (look at the web host's own network first). Neutral draft, no path claim.
+  - `reaches-host` — the target answers ICMP: the path looks fine, the problem is likely the host or the port. The draft is still written but headed `PROBABLY NOT A NETWORK TICKET`; check the host first.
+  - `unknown` — no hop lines (mtr cut off, unparseable, or not installed: `unknown (mtr unavailable)`; nothing is installed, the alert goes out anyway). Neutral draft, no path claim.
+
+  The alert push gains one `経路 (mtr): …` line (class and hop indices only, no address) and a `下書き: metal-fy-watch/log/ticket-draft-<UTC>.txt` line. That file is an English ticket draft for the provider's "Public Network issue" form: the start time (the first FAIL observed), the classification, an observation-only sentence per class (above) and the raw mtr report. It asserts nothing the watch did not measure: whether the server was changed is a placeholder `[operator: confirm no changes were made to the server]` the operator resolves before sending, and any `***` header line is a note to the operator, removed before sending. It holds addresses, so it stays mode 600 on the web host; copy it from there when opening the ticket. `chain` / `fresh` alerts do not run mtr. A DRY run prints `DRY: would capture mtr and write a ticket draft` and runs nothing. Accepted trade-off (operator approval 2026-10-02, recorded as Constitution v0.6 §5 clarification): unlike the p2p probe, mtr takes the validator host in its argv (visible to local users of the shared web host for the few seconds it runs, once per alert). Measured 2026-10-02: `mtr` / `mtr-packet` (cap_net_raw) are present on the web host and run as the watch account.
+
+### 14.4 Exit codes, log, state
+
+| Exit | Meaning |
+|---|---|
+| 0 | Run completed (including runs that were skipped because another instance held the lock) |
+| 1 | Configuration error or missing dependency |
+| 6 | A push failed permanently. The failure counters still advance; only the status change to (or from) `alerting` is withheld, so the next run retries the push |
+| 7 | The state could not be saved (disk full, quota, permissions). That run sends **only** one `urgent` push `外部見張り: 状態を保存できない (ディスク等)`, whose body lists the names of the checks failing in this run (`失敗中の確認: p2p, fresh`, or `なし`; names only, no host values); the per-check alert and recovery pushes are held back for that run, so a failing check cannot double the push rate. The save push is **not** debounced and repeats on every such run, because without saved state no check can ever reach 2 consecutive failures. If that push also fails, the exit is 6. Residual case: the hold-back is decided by a write probe at the start of the run, so if the probe passes but the real save then fails, the per-check push and the save push can both go out in that one run |
+
+Everything lives under `$HOME/metal-fy-watch/` of the site account: directories are mode 700, the scripts in `bin/` are mode 700, and the files in `etc/` are mode 600. (Publishing this relative layout is recorded under "Reclassifications" in `docs/CONSTITUTION.md`, 2026-09-29.)
+
+| Path (relative to `$HOME/metal-fy-watch/`) | Content |
+|---|---|
+| `bin/` | `external-watch.sh` and its bundled copy of `notify.sh` |
+| `etc/watch.env` | strict `KEY=VALUE` config (parsed, never sourced) |
+| `etc/ntfy-topic` | the watch's own ntfy topic, generated on the web host by the installer (bearer secret, `docs/CONSTITUTION.md` §4.1 S5; never in the repo, never printed) |
+| `state/` | `state.json`, the RPC cache, the lock |
+| `log/watch.log` | one line per run; capped at 1 MiB (see below); also the source of the status file (§14.7) |
+| `log/cron.err` | stderr of the cron job (including `DRY:` lines); capped at 1 MiB (see below) |
+| `log/ticket-draft-<UTC>.txt` | provider ticket draft written on a `p2p` alert (§14.3); newest 10 kept, each capped at 1 MiB |
+| `backup/` | backups taken by the installer: `crontab.bak-<ts>` and, when a re-install replaces them, `external-watch.sh.bak-<ts>`, `notify.sh.bak-<ts>`, `watch.env.bak-<ts>`; the newest 10 `*.bak-*` files are kept, counted **across all kinds** |
+
+**Size caps.** The script caps the files it writes under `metal-fy-watch/`, so a long-lived watch does not grow without limit in the site account's quota. Housekeeping deletes or truncates only the files listed here (subject to the residual risk below):
+
+- `log/watch.log` and `log/cron.err`: when a file exceeds 1 MiB (1048576 bytes), it is cut to the newest **512 KiB (half the cap)**, starting at a line boundary. Exception: when the newest line alone is longer than 512 KiB (or unterminated), its last 512 KiB are kept verbatim, so the first line may be partial rather than the file emptied. Both files are rewritten **in place** (same inode): the cron shell holds `cron.err` open for append during the run, and replacing the file would orphan that descriptor and lose the run's stderr. A file that is a symlink, sits in a symlinked `log/`, or has more than one hard link is **not** trimmed (an in-place write would reach the other file sharing the inode); a hard link is reported with the note below.
+- `log/cron.err` is trimmed twice per run: at the very start, before the config is parsed (so a run that exits on a config error, a missing dependency or an unset variable still keeps it bounded; this early trim never creates a directory and never changes the exit code), and again in the end-of-run housekeeping. A cron.err at the cap can therefore exceed it by at most one run's output until the next run.
+- `backup/`: the newest 10 regular files named `*.bak-*` (the only names the installer writes there) by modification time are kept; older ones are deleted. Symlinks, directories and other names are never touched. The count is shared by all backup kinds (see the table), so after a few re-installs the oldest `crontab.bak-*` (the crontab as it was before the first install) is pruned too. Nothing depends on it: a failed crontab write restores from the copy taken in the same run.
+- `log/ticket-draft-*.txt`: the newest 10 are kept (same pruning as `backup/`); each draft is cut at 1 MiB when written.
+- `state/state.json.corrupt-*`: the newest 10 are kept. `state.json`, `lock`, `rpc-cache.json` and every other file in `state/` are never touched.
+- Leaked temp files of a killed run are swept: `log/.trim.XXXXXX`, `state/state.XXXXXX`, `state/rpc-cache.XXXXXX` (exactly `mktemp`'s 6-character suffix, regular files only).
+- Outside `metal-fy-watch/`, `--uninstall` writes one `~/metal-fy-watch-crontab.bak-<ts>` per run and keeps the newest 3 regular files of exactly that name; nothing else in the home is touched.
+- A housekeeping failure or refusal never changes alerting or the exit code; it writes one `note: housekeeping incomplete` line to `watch.log`.
+- The caps have test-only environment overrides (`WATCH_LOG_MAX_BYTES` (also caps each ticket draft), `WATCH_CRONERR_MAX_BYTES`, `WATCH_KEEP_BACKUPS`, `WATCH_KEEP_CORRUPT`, `WATCH_KEEP_DRAFTS`); production uses the defaults. A value that is not a positive integer falls back to the default.
+
+**Residual risk (deletion safety).** Checks and actions are separate system calls, so a process running **as the site account itself** can still race them: swap a checked file for a symlink or hard link in the instant between the final re-check and the write, or retarget `WATCH_HOME` by hand. The windows are narrowed: the trim re-verifies (no symlink, same device/inode, link count 1) immediately before its single write; the prune deletes `./<name>` from inside the directory after verifying it is physically `<parent>/backup` (or `state`); the temp sweeps use `find -delete`. Such an actor already has the account's full rights over every file the race could reach, so no privilege boundary is crossed; the protection is against mistakes and stray links, not against that account.
+
+Log line format:
+
+```
+<UTC ISO time> fresh=<PASS|FAIL|UNKNOWN>(<age>s) p2p=<...> chain=<...>[(cached)] pushes=<n>
+```
+
+Healthy looks like `fresh=PASS(<age under 900>s) p2p=PASS chain=PASS pushes=0`. `chain=PASS(cached)` means the run re-read a sample already counted. Free-text lines start with `note:` (chain RPC unavailable, validator absent, state file corrupt and re-initialised, state save failed, housekeeping incomplete, `p2p diagnosis: <class>, draft <file name>`).
+
+### 14.5 Operator runbook
+
+All commands run **on the operator's Mac** from the repository root. Host values are typed as environment variables for that one command; they are not committed and the installer does not echo them (output shows `<validator host>` and `<web host>`).
+
+**Install**
+
+```bash
+# Plan only: prints what would change (including whether a topic would be
+# generated), changes nothing.
+WEB_HOST=<web host> WEB_HOST_KEY=<path> WATCH_ACCOUNT=<web host account> VALIDATOR_HOST=<validator host> \
+  bash scripts/install-web-host-external-watch.sh --dry-run
+
+# Apply: same environment, no flag.
+WEB_HOST=<web host> WEB_HOST_KEY=<path> WATCH_ACCOUNT=<web host account> VALIDATOR_HOST=<validator host> \
+  bash scripts/install-web-host-external-watch.sh
+```
+
+Optional variables: `WEB_HOST_USER` (login used for the installation), `WATCH_ACCOUNT` (required, no default: the web host account that owns the job, e.g. `WATCH_ACCOUNT=<web host account>`), `FY_WEB_API_DIR` (override of the detected `validator.json` location), `WATCH_PUBLIC_STATUS` (the status file, §14.7: `auto`, `off`, an absolute `*.json` path, or unset to keep the installed setting). `--print-remote` prints the remote script text only. The installer **never contacts the validator host**: `VALIDATOR_HOST` is only written into `etc/watch.env` for the TCP probe. It must run on the Mac, because the topic hand-over needs `pbcopy`/`pbpaste`; without them it refuses.
+
+The installer:
+
+1. **Topic.** On the first install it generates the watch's own topic **on the web host** (`fy-metal-` + 32 hex from `/dev/urandom`, written as the site account, mode 600). If a valid watch topic already exists it is kept; a file of any other shape is refused and left untouched (it is never adopted or silently replaced).
+2. Installs `bin/` and `etc/watch.env`.
+3. Runs the watch once **without** `WATCH_LIVE` and prints its log line (a `WARNING:` line if a check FAILed).
+4. Edits the site account's crontab only between the markers `# BEGIN metal-fy-external-watch` and `# END metal-fy-external-watch` (one `*/5` line with `WATCH_LIVE=1`), after backing the crontab up and verifying that lines outside the markers are byte-identical (abort and restore otherwise).
+5. **Hand-over (first install only).** It copies the new topic straight from the web host into the Mac clipboard and prints only `topic copied to clipboard (not shown)`. The topic is never displayed, never written to the Mac's disk and never in any argv.
+
+**Right after a first install (operator)**
+
+1. Paste the topic into the **password manager** as a **new entry** (separate from the validator host's topic).
+2. In the **ntfy app** on the phone, subscribe to it (paste it as the topic name).
+3. Overwrite the clipboard with something else.
+
+Until step 2 is done the watch's alerts reach nobody. To hand the topic over again later (new phone, lost entry):
+
+```bash
+WEB_HOST=<web host> WEB_HOST_KEY=<path> WATCH_ACCOUNT=<web host account> \
+  bash scripts/install-web-host-external-watch.sh --copy-topic
+```
+
+**Verify**
+
+1. Read the log line the installer printed. Healthy is `fresh=PASS(<age under 900>s) p2p=PASS chain=PASS pushes=0`. During a renewal window `fresh=UNKNOWN` is expected.
+2. After the first cron tick (up to 5 minutes), `log/watch.log` under `$HOME/metal-fy-watch/` (site account) gains a new line; `log/cron.err` stays empty (the cron job is LIVE, so no `DRY:` lines).
+3. Remember the DRY caveat in §14.3 before re-running by hand during an outage.
+
+**Uninstall**
+
+```bash
+WEB_HOST=<web host> WEB_HOST_KEY=<path> WATCH_ACCOUNT=<web host account> \
+  bash scripts/install-web-host-external-watch.sh --uninstall
+```
+
+The installer backs up the crontab to `~/metal-fy-watch-crontab.bak-<ts>` in the site account's home (only the newest 3 of those are kept), removes only the marker-delimited block (same byte-identical verification for everything outside it), then removes `metal-fy-watch/`, **including the watch's topic**. A later install generates a new topic, which must be saved and subscribed to again (the old subscription in the ntfy app can be removed).
+
+### 14.6 Backstop and known gap
+
+- **GitHub backstop.** `.github/workflows/uptime.yml` fails when `validator.json` is more than 1 hour stale, except inside the renewal window (where it emits a notice). It is slow (scheduled GitHub runs in practice fire only every few hours) but independent of both hosts and of their provider.
+- **Known gap: no self-heartbeat.** The watchdog does not report its own death. If the web host itself dies, the validator host's existing public-site probe (§6.7) alerts. If both hosts are silent, only the GitHub backstop remains.
+
+### 14.7 Status file (`/api/watch-status.json`)
+
+Since 2026-10-03 both `/status/` and this file are behind Cloudflare Access (operator only; see `docs/CF_POLICY.md`). The schema below was approved as publishable (Constitution Reclassifications, 2026-10-03), which remains the ceiling if Access is ever removed.
+
+The phone status page (`/status/`) reads `/api/watch-status.json`. The external watch writes it **on the web host**, so the page keeps working while the validator host is unreachable; nothing is pushed from the validator host.
+
+- **Enable.** Re-run the installer with `WATCH_PUBLIC_STATUS=auto` (same `WEB_HOST` / `WEB_HOST_KEY` / `VALIDATOR_HOST` as the install; try `--dry-run` first, which shows `public status: enabled …` and `etc/watch.env: update (changed keys: WATCH_PUBLIC_STATUS )`). `auto` puts `watch-status.json` in the same `api/` directory as the pushed `validator.json`, i.e. the site's served `api/`. The installer refuses (exit 6) if that directory is missing or not writable by the watch account. Later re-installs without the variable keep the setting; `WATCH_PUBLIC_STATUS=off` removes it. The path is written to `etc/watch.env` and never printed.
+- **Content (schema 2).** `{"schema":2,"generated_at":<ISO UTC>,"interval_sec":300,"last":{"t","fresh","p2p","chain","alerting":[…]},"counts_24h":{"runs","fail","unknown","gap"}}`. Only the latest run and 24-hour aggregates over the `watch.log` run lines are public (operator approval 2026-10-03, Constitution Reclassifications): `fail` = runs with any `FAIL`, `unknown` = runs with any `UNKNOWN` and no `FAIL`, `gap` = intervals longer than 7 minutes between consecutive runs (the page adds newest-run → now itself). No per-run timeline is published, so recovery times (and the operator's response hours) cannot be read from it; the per-run log stays private in the watch dir. Each check value is tri-state: `PASS` → `true`, `FAIL` → `false`, `UNKNOWN` (renewal window, RPC unavailable, validator absent from the set) → `null`. `UNKNOWN` is not a failure for the watch, but it is not a confirmation either: the page shows `null` as 未確認 and its verdict as ⚠️ 一部未確認, never ✅. `last` is the newest run (this run) plus `alerting`, the checks whose state is `alerting` (a DRY run never sets that, so it can show `false` with `alerting: []`). The file is built only from the log line's fixed tokens and the check names: no host, address, port, topic, mtr text, ticket or log path can reach it. `note:` lines and anything not in the exact run-line format are skipped.
+- **Write discipline.** Every run (after all pushes, in a subshell) writes a temp `.watch-status.XXXXXX` in the same directory, sets mode 644, and renames it over the target. It refuses a symlinked directory, a symlinked or hard-linked target, a path that is not an absolute `*.json` without `.`/`..` segments, and output larger than 256 KiB. A refusal or failure is one `note: status publish failed` line in `watch.log`; it never delays or changes an alert and never changes the exit code (§14.4). A bad value in `watch.env` disables only the file, never the watch.
+- **Deploy cannot clobber it.** `api/watch-status.json` is in `deploy/feed-excludes.txt` (both deploy rsyncs' `--delete` skip it), in `.gitignore` (the host checkout never tracks or reverts it), and **not** on `scripts/push-to-web-host.sh`'s allowlist on purpose (the validator host cannot overwrite the outside view of itself). See `docs/DEPLOY_OWNERSHIP_MATRIX.md`.
+- **Edge cache.** `/api/*` passes through the CDN with a short max-age, so the page may see a file up to a couple of minutes old; it shows the age from `last.t`.
+- **Page fail-safes.** A `last.t`, `generated_at` or validator `observedAt` more than 2 minutes ahead of the phone's clock shows ⚠️ 時刻が不正 (one of the clocks is wrong, so freshness cannot be judged). Every fetch is aborted after 15 s, and if the screen has not been re-rendered successfully for more than 3 minutes a watchdog replaces the verdict with ⚠️ 更新できていません, so a stalled connection never leaves an old ✅ on screen.

@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Identity verification — Freedom Yield Metal</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="Engineer entry point for verifying Freedom Yield's Phase α identity manifest, cycle audit packet, and the runtime feeds an auditor needs.">
+<link rel="canonical" href="https://metal.freedom-yield.com/verify/">
+<link rel="alternate" hreflang="en" href="https://metal.freedom-yield.com/verify/">
+<link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/verify/">
+<link rel="alternate" hreflang="x-default" href="https://metal.freedom-yield.com/verify/">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#07080c">
+<meta name="color-scheme" content="dark">
+<script defer src="/assets/main.js"></script>
+<link rel="preconnect" href="https://www.googletagmanager.com" crossorigin>
+<link rel="dns-prefetch" href="https://www.googletagmanager.com">
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
+<script defer src="/assets/gtag-init.js"></script>
+<link rel="preload" as="image" href="/assets/photos/focused-work-960.webp" imagesrcset="/assets/photos/focused-work-480.webp 480w, /assets/photos/focused-work-960.webp 960w, /assets/photos/focused-work.webp 1600w" imagesizes="50vw">
+</head>
+<body>
+<a href="#main" class="skip-link">Skip to main content</a>
+
+<nav class="topnav">
+	<div class="topnav-inner">
+		<a href="/" class="brand">Freedom Yield · Metal</a>
+		<details class="nav-menu">
+			<summary class="nav-toggle" aria-label="Open / close menu">
+				<span class="hamburger-icon" aria-hidden="true"></span>
+			</summary>
+						<div class="nav">
+				<a href="/#status">Status</a>
+				<a href="/about-metal/">About</a>
+				<div class="nav-dropdown">
+					<a href="/selection-evidence/" class="nav-dropdown-toggle">For institutions</a>
+					<div class="nav-dropdown-menu">
+						<a href="/selection-evidence/">Selection evidence</a>
+						<a href="/commitments/">Operator commitments</a>
+						<a href="/risk-disclosure/">Risk disclosure</a>
+						<a href="/jurisdiction/">Jurisdiction posture</a>
+						<a href="/security-posture/">Security posture</a>
+						<a href="/continuity/">Continuity</a>
+						<a href="/pledge/">Transparent Validator Pledge</a>
+						<a href="/subnet-readiness/">Subnet readiness</a>
+						<a href="/reference-architecture/">Reference architecture</a>
+						<a href="/subnet-pilot/">Subnet pilot</a>
+						<a href="/decommission/">Decommission policy</a>
+						<a href="/inquiry/">Inquiry</a>
+					</div>
+				</div>
+				<div class="nav-dropdown">
+					<a href="/delegate/" class="nav-dropdown-toggle">For delegators</a>
+					<div class="nav-dropdown-menu">
+						<a href="/delegate/">Delegate</a>
+						<a href="/#status">Live status</a>
+						<a href="/continuity/">Continuity</a>
+					</div>
+				</div>
+				<div class="nav-dropdown">
+					<a href="/data/" class="nav-dropdown-toggle">For engineers</a>
+					<div class="nav-dropdown-menu">
+						<a href="/data/">Open data</a>
+						<a href="/verify/" aria-current="page">Identity verification</a>
+						<a href="/journal/">Cycle journal</a>
+						<a href="/network/">Network observatory</a>
+						<a href="/incidents/">Incident log</a>
+					</div>
+				</div>
+				<a href="/ja/verify/" class="nav-lang" data-ga-event="language_switch" data-ga-param-to="ja">JA</a>
+			</div>
+		</details>
+	</div>
+</nav>
+
+<header class="hero hero--simple hero--photo-verify">
+	<div class="container">
+		<p class="hero-eyebrow">Engineer entry point</p>
+		<h1>Identity verification</h1>
+		<p class="hero-lead">
+			Freedom Yield publishes a cryptographically signed operator identity manifest and a Merkle-DAG audit packet. An independent verifier can reproduce every claim from public artifacts with <code>curl</code>, <code>jq</code>, and <code>ssh-keygen -Y verify</code> — no project-specific tooling required.
+			This page is the single entry point for that audit.
+		</p>
+	</div>
+</header>
+
+<main id="main" class="container">
+
+	<nav class="breadcrumb" aria-label="Breadcrumb">
+		<ol>
+			<li><a href="/">Home</a></li>
+			<li><a href="/data/">Open data</a></li>
+			<li aria-current="page">Identity verification</li>
+		</ol>
+	</nav>
+
+	<section class="card">
+		<figure class="card-figure" aria-hidden="true">
+			<img  src="/assets/photos/focused-work.webp" srcset="/assets/photos/focused-work-480.webp 480w, /assets/photos/focused-work-960.webp 960w, /assets/photos/focused-work.webp 1400w" sizes="(max-width: 600px) 100vw, (max-width: 1200px) 60vw, 800px" width="1400" height="933" alt="" loading="lazy" decoding="async">
+		</figure>
+		<h2>Quick start (60 seconds)</h2>
+		<p>Confirms that the live identity manifest is signed by the operator's published public key:</p>
+		<pre class="cmd-box"><code>TMP=$(mktemp -d)
+curl -sS https://metal.freedom-yield.com/.well-known/operator-identity.pub > "$TMP/pub"
+curl -sS https://metal.freedom-yield.com/api/identity.json                 > "$TMP/json"
+curl -sS https://metal.freedom-yield.com/api/identity.json.sig             > "$TMP/sig"
+printf 'freedom-yield %s\n' "$(cat "$TMP/pub")" > "$TMP/allowed"
+ssh-keygen -Y verify -f "$TMP/allowed" \
+  -I freedom-yield \
+  -n freedom-yield/validator-identity \
+  -s "$TMP/sig" &lt; "$TMP/json"
+# Expect: Good "freedom-yield/validator-identity" signature for freedom-yield with ED25519 key SHA256:rQZNC53Jdp…</code></pre>
+		<p class="note">Requires OpenSSH 8.0+ (<code>ssh-keygen -Y</code> was added in 2019-04). macOS 11+, modern Linux, and Windows OpenSSH 8.0+ are all supported.</p>
+		<p>identity.json also carries an ML-DSA-87 (FIPS 204) signature. Verify it with OpenSSL 3.5 or later.</p>
+		<pre class="cmd-box"><code>curl -sSfO https://metal.freedom-yield.com/api/identity.json
+curl -sSfO https://metal.freedom-yield.com/api/identity.json.mldsa87.sig
+curl -sSfO https://metal.freedom-yield.com/.well-known/operator-identity-mldsa87.pub
+openssl pkeyutl -verify -pubin -inkey operator-identity-mldsa87.pub -rawin -in identity.json -sigfile identity.json.mldsa87.sig -pkeyopt context-string:freedom-yield/validator-identity
+# Expect: Signature Verified Successfully</code></pre>
+	</section>
+
+	<section class="card data-group">
+		<h2>Live artifacts</h2>
+		<p class="data-group-lead">All five Phase α artifacts are live and served from this domain. Each is independently fetchable; together they form a self-describing audit packet.</p>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>Signed identity manifest</h3>
+				<span class="data-tag">live</span>
+			</header>
+			<p>Operator identity, fingerprint, bound artifact set, and the Merkle-DAG root hash. Signed with an ed25519 OpenSSH key whose public form is at <code>/.well-known/operator-identity.pub</code>.</p>
+			<dl class="data-meta">
+				<dt>Manifest</dt><dd><a href="/api/identity.json"><code>/api/identity.json</code></a></dd>
+				<dt>Signature</dt><dd><a href="/api/identity.json.sig"><code>/api/identity.json.sig</code></a></dd>
+				<dt>Public key</dt><dd><a href="/.well-known/operator-identity.pub"><code>/.well-known/operator-identity.pub</code></a></dd>
+				<dt>ML-DSA-87 signature</dt><dd><a href="/api/identity.json.mldsa87.sig"><code>/api/identity.json.mldsa87.sig</code></a></dd>
+				<dt>ML-DSA-87 public key</dt><dd><a href="/.well-known/operator-identity-mldsa87.pub"><code>/.well-known/operator-identity-mldsa87.pub</code></a></dd>
+				<dt>Schema</dt><dd><a href="/api/identity.schema.v2.json"><code>/api/identity.schema.v2.json</code></a> + <a href="/api/identity.example.json">example</a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>Merkle-DAG snapshot</h3>
+				<span class="data-tag">live</span>
+			</header>
+			<p>A three-branch DAG over (i) operator identity-key history, (ii) cycle observations (uptime, fee, self-stake, delegator events), and (iii) the published-artifact manifest. The three branch roots combine into <code>dag_root_computed</code>, the single value inscribed on Metal A-chain (memo <code>fya&lt;S&gt;c&lt;N&gt;:</code>).</p>
+			<dl class="data-meta">
+				<dt>Snapshot</dt><dd><a href="/api/anchor-source.json"><code>/api/anchor-source.json</code></a></dd>
+				<dt>Identity-history leaf log</dt><dd><a href="/api/identity-history.jsonl"><code>/api/identity-history.jsonl</code></a></dd>
+				<dt>Schema</dt><dd><a href="/api/anchor-source.schema.v1.json"><code>/api/anchor-source.schema.v1.json</code></a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>Cycle audit packet</h3>
+				<span class="data-tag">live (append-only)</span>
+			</header>
+			<p>Append-only JSONL feed. One line per closed validation cycle, joining uptime + incidents + stake numbers for that cycle. Each leaf line's sha256 is folded into the observations_branch of the Merkle DAG.</p>
+			<dl class="data-meta">
+				<dt>Feed</dt><dd><a href="/api/cycle-history.jsonl"><code>/api/cycle-history.jsonl</code></a></dd>
+				<dt>Schema</dt><dd><a href="/api/cycle-history.schema.v1.json"><code>/api/cycle-history.schema.v1.json</code></a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>On-chain anchor receipt</h3>
+				<span class="data-tag">live</span>
+			</header>
+			<p>At each cycle transition, the operator inscribes the current <code>dag_root_computed</code> on Metal A-chain (an Antelope/EOSIO-family chain, reached at XPR Network endpoints) using a narrow <code>metalfreedom@anchor</code> permission, across four <code>eosio.token::transfer</code> memos — one per branch root (<code>fya1c&lt;N&gt;-id:</code> / <code>-ob:</code> / <code>-ar:</code>) plus the combined DAG root (<code>fya1c&lt;N&gt;:&lt;dag_root_computed&gt;</code>). A standard Antelope explorer or Hyperion history API is enough to re-verify the inscription. The receipt JSON is the always-latest audit-side index of the most recent inscription.</p>
+			<dl class="data-meta">
+				<dt>Receipt</dt><dd><code>/api/anchor-receipt.json</code> (= always-latest; first anchor inscribed 2026-07-04, tx <a href="https://explorer.xprnetwork.org/transaction/0b70d2aa1d20bc5c4eca8ce7888a7ab6edb02316e927209f524114f1b647938f" rel="noopener noreferrer" target="_blank"><code>0b70d2aa…</code></a>)</dd>
+				<dt>Schema</dt><dd><a href="/api/anchor-receipt.schema.v2.json"><code>/api/anchor-receipt.schema.v2.json</code></a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>On-chain anchor history (append-only ledger)</h3>
+				<span class="data-tag">live</span>
+			</header>
+			<p>Append-only JSONL ledger covering every anchor that has reached <code>verification_status: live</code>. Independent of the always-latest receipt above: <code>anchor-receipt.json</code> rotates per cycle, <code>anchor-history.jsonl</code> accumulates. A verifier walks the ledger to retrace every prior anchoring back to the genesis cycle, then recomputes each line's <code>dag_root_computed</code> from its three branch roots (identity / observations / artifacts).</p>
+			<dl class="data-meta">
+				<dt>Ledger</dt><dd><code>/api/anchor-history.jsonl</code> (= append-only from the first anchor, inscribed 2026-07-04, after the seven-PASS verification chain)</dd>
+				<dt>Schema</dt><dd><a href="/api/anchor-history.schema.v2.json"><code>/api/anchor-history.schema.v2.json</code></a></dd>
+				<dt>Invariants</dt><dd>tx_id unique · (cycle_n, event_type) unique · cycle_n non-decreasing · existing lines byte-for-byte preserved · file terminates with LF</dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>Legacy A-Chain anchor archive (XPR Network)</h3>
+				<span class="data-tag">live</span>
+			</header>
+			<p>The anchors above are transfer memos, i.e. transaction history rather than chain state. The Metal A-Chain is expected to move from the XPR Network onto PulseVM, and history from before such a move is not guaranteed to stay online. So every mainnet anchor on the legacy chain is also preserved here as the chain's own responses, stored verbatim: the Hyperion <code>/v2/history/get_transaction</code> body and the <code>/v1/chain/get_block</code> body for its block, each with its SHA-256. The archive is added to after every cycle's anchor while the legacy chain is served, and it is checkable offline.</p>
+			<dl class="data-meta">
+				<dt>Manifest</dt><dd><a href="/api/legacy-a-chain/manifest.json"><code>/api/legacy-a-chain/manifest.json</code></a> — one entry per anchor: <code>tx_id</code>, <code>block_num</code>, <code>block_id</code>, <code>chain_id</code>, the record's SHA-256 and the SHA-256 of each stored body</dd>
+				<dt>Records</dt><dd><code>/api/legacy-a-chain/&lt;tx_id&gt;.json</code> — fields <code>history_body</code> and <code>block_body</code> hold the responses as strings, byte-for-byte</dd>
+				<dt>Chain</dt><dd>XPR Network mainnet, <code>chain_id</code> <code>384da888112027f0321850a169f737c33e53b388aad48b5adace4bab97f437e0</code></dd>
+			</dl>
+			<p>To verify one anchor without the legacy chain:</p>
+			<ol>
+				<li>Fetch the manifest and the record <code>&lt;tx_id&gt;.json</code>; the SHA-256 of the record file must equal the manifest entry's <code>sha256</code>.</li>
+				<li>Hash the <code>history_body</code> and <code>block_body</code> strings exactly as stored; the digests must equal <code>history_sha256</code> and <code>block_sha256</code> in both the record and the manifest.</li>
+				<li>Parse <code>history_body</code>: exactly four <code>eosio.token::transfer</code> actions, every <code>trx_id</code> equal to the <code>tx_id</code>, every <code>block_num</code> equal to the ledger line's; parse <code>block_body</code>: its <code>id</code> equals the recorded <code>block_id</code>.</li>
+				<li>The four memos are <code>&lt;prefix&gt;-id:</code>, <code>-ob:</code>, <code>-ar:</code> and <code>&lt;prefix&gt;:&lt;dag_root&gt;</code>; the DAG root must equal SHA-256 of the three branch roots concatenated as hex (id, ob, ar), and must equal <code>dag_root_hash</code> of the matching line in <code>/api/anchor-history.jsonl</code>. The authorizing account and permission must equal that line's <code>signing_actor</code> and <code>signing_permission</code>.</li>
+				<li>While the legacy chain is still served, the same <code>tx_id</code> can also be re-fetched live from any XPR Network Hyperion endpoint and compared (volatile fields such as <code>query_time_ms</code> differ; the actions do not).</li>
+			</ol>
+			<dl class="data-meta">
+				<dt>Scripted check</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/scripts/verify-legacy-anchor-archive.sh" rel="noopener noreferrer" target="_blank"><code>scripts/verify-legacy-anchor-archive.sh</code></a> runs steps 1–4 for every mainnet anchor: <code>--archive-dir=</code> the downloaded archive, <code>--history=</code> a downloaded copy of <code>/api/anchor-history.jsonl</code>. No network access.</dd>
+				<dt>Migration notes</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/A_CHAIN_PULSEVM_CUTOVER.md" rel="noopener noreferrer" target="_blank"><code>docs/A_CHAIN_PULSEVM_CUTOVER.md</code></a></dd>
+			</dl>
+		</article>
+
+		<article class="data-endpoint">
+			<header class="data-endpoint-head">
+				<h3>Evidence manifest</h3>
+				<span class="data-tag">live</span>
+			</header>
+			<p>Machine-readable index of every live artifact + the public commitments. One fetch, one parse, the whole audit surface.</p>
+			<dl class="data-meta">
+				<dt>Manifest</dt><dd><a href="/api/evidence.json"><code>/api/evidence.json</code></a></dd>
+				<dt>Discovery</dt><dd>Parse <a href="/api/evidence.json"><code>/api/evidence.json</code></a> directly rather than hardcoding a path — artifacts are grouped under its top-level <code>live_artifacts</code> / <code>in_preparation_artifacts</code> objects, and which artifact sits under which evolves as the operator's tooling catches up to reality. The direct feed links above are unaffected by that and always current.</dd>
+				<dt>Schema</dt><dd><a href="/api/evidence.schema.v1.json"><code>/api/evidence.schema.v1.json</code></a></dd>
+			</dl>
+		</article>
+	</section>
+
+	<section class="card">
+		<h2>Full verifier procedure (seven steps)</h2>
+		<p>The complete recipe — fetch artifacts → signature → fingerprint cross-check → three branch roots → DAG-root recompute → source/receipt equality → on-chain four-memo cross-check — is published in the repository as a reproducible runbook.</p>
+		<dl class="kv">
+			<dt>Verifier recipe</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer" target="_blank"><code>docs/IDENTITY_VERIFICATION.md</code></a></dd>
+			<dt>Merkle-DAG spec</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/MERKLE_DAG_SPEC.md" rel="noopener noreferrer" target="_blank"><code>docs/MERKLE_DAG_SPEC.md</code></a></dd>
+			<dt>Test vectors</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/tree/main/tests/identity-verification-vectors" rel="noopener noreferrer" target="_blank"><code>tests/identity-verification-vectors/</code></a> (5 synthetic vectors with a Python reference implementation; cross-checks the shell verifier bit-for-bit)</dd>
+			<dt>Recent execution report</dt><dd><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/PHASE5_REGEN_EXECUTION_2026-06-22.md" rel="noopener noreferrer" target="_blank"><code>docs/PHASE5_REGEN_EXECUTION_2026-06-22.md</code></a> (= 2026-06-22 second-pass regeneration audit trail, with V1–V11 verification matrix)</dd>
+		</dl>
+	</section>
+
+	<section class="card">
+		<h2>Other engineer-facing surfaces</h2>
+		<ul>
+			<li><a href="/data/">Open data</a> — full catalog of public JSON endpoints with one row per artifact</li>
+			<li><a href="/journal/">Cycle journal</a> — human-readable closed-cycle ledger</li>
+			<li><a href="/network/">Network</a> — node software, region, and metalgo configuration posture</li>
+			<li><a href="/incidents/">Incidents</a> — operator-maintained incident log</li>
+			<li><a href="/reference-architecture/">Reference architecture</a> — full deployment topology</li>
+		</ul>
+	</section>
+
+</main>
+
+<footer class="site-footer">
+	<div class="container">
+		<div class="footer-grid">
+			<div class="footer-brand">
+				<h3>Freedom Yield · Metal</h3>
+				<p>Long-horizon validator on Metal Blockchain. Transparent uptime, public audit trail.</p>
+			</div>
+			<nav class="footer-col" aria-label="For institutions">
+				<h4>For institutions</h4>
+				<ul>
+					<li><a href="/selection-evidence/">Selection evidence</a></li>
+					<li><a href="/commitments/">Commitments</a></li>
+					<li><a href="/risk-disclosure/">Risk disclosure</a></li>
+					<li><a href="/jurisdiction/">Jurisdiction</a></li>
+					<li><a href="/subnet-readiness/">Subnet readiness</a></li>
+					<li><a href="/reference-architecture/">Reference architecture</a></li>
+					<li><a href="/subnet-pilot/">Subnet pilot</a></li>
+					<li><a href="/pledge/">Pledge</a></li>
+					<li><a href="/security-posture/">Security posture</a></li>
+					<li><a href="/decommission/">Decommission</a></li>
+					<li><a href="/inquiry/">Inquiry</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="For delegators">
+				<h4>For delegators</h4>
+				<ul>
+					<li><a href="/delegate/">Delegate</a></li>
+					<li><a href="/#status">Status</a></li>
+					<li><a href="/continuity/">Continuity</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="For engineers">
+				<h4>For engineers</h4>
+				<ul>
+					<li><a href="/verify/">Identity verify</a></li>
+					<li><a href="/data/">Open data</a></li>
+					<li><a href="/journal/">Cycle journal</a></li>
+					<li><a href="/network/">Network</a></li>
+					<li><a href="/incidents/">Incidents</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Resources">
+				<h4>Resources</h4>
+				<ul>
+					<li><a href="/sitemap/">Sitemap</a></li>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer" target="_blank">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer" target="_blank">Explorer ↗</a></li>
+					<li><a href="#acknowledgments">Acknowledgments</a></li>
+					<li><a href="mailto:info@metal.freedom-yield.com">Contact</a></li>
+				</ul>
+			</nav>
+		</div>
+		<hr class="footer-divider">
+		<p class="footer-disclaimer"><strong>Disclaimer:</strong> Freedom Yield is an independent, third-party validator operating on Metal Blockchain. It is not affiliated with, endorsed by, sponsored by, or operated by Metallicus Inc. or the Metal Blockchain Foundation. All trademarks are the property of their respective owners.</p>
+		<div class="footer-bottom">
+			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer" target="_blank">Metal Blockchain</a>.</p>
+			<p>© 2026 Freedom Yield · Metal validator</p>
+		</div>
+	</div>
+</footer>
+
+</body>
+</html>

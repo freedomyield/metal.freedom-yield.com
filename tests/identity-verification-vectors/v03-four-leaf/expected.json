@@ -1,0 +1,19 @@
+{
+  "vector_name": "v03-four-leaf",
+  "description": "cycles_branch with four leaves. Two pairings at level 0 produce two parents; one pairing at level 1 produces the root. Demonstrates multi-level reduction without any duplication.",
+  "leaf_count": 4,
+  "branch_root": "26df2f759ce1630c81f7ba8d4cbb6d35d57491eaed355a16397e2ed616d27d08",
+  "leaf_hashes_in_order": [
+    "dfa85e24275ea27b47ce5d58449ffedb160d5b87946b17de595c3b57fc2de7a6",
+    "b04f34b84bf6fb7231795a750c2044d9bb47334145dcfc5438bc92979f053e88",
+    "384d3f26b74d22f4382f6926bbb88cdf460e4f0daedf4c10a4f14a081b2c9f4d",
+    "89c1a50e0d48abc777b98199ffa6bcfbf8973feb1579b5562be05724b2ca7c90"
+  ],
+  "proof_for_leaf_index": 1,
+  "proof_sibling_hashes": [
+    "dfa85e24275ea27b47ce5d58449ffedb160d5b87946b17de595c3b57fc2de7a6",
+    "6732848916305155a51829e67a2894dbe657964a2143ed99ab003c886feb3a8d"
+  ],
+  "proof_target_leaf_hash": "b04f34b84bf6fb7231795a750c2044d9bb47334145dcfc5438bc92979f053e88",
+  "proof_reverify": true
+}

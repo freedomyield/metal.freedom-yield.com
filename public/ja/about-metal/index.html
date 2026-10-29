@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Metal Blockchain について — Freedom Yield</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="Metal Blockchain は Metallicus 製の Layer-0 チェーン、Avalanche fork。permissionless validator + 5× 委任レバ。">
+<link rel="canonical" href="https://metal.freedom-yield.com/ja/about-metal/">
+<link rel="alternate" hreflang="en" href="https://metal.freedom-yield.com/about-metal/">
+<link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/about-metal/">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<meta name="theme-color" content="#07080c">
+<meta name="color-scheme" content="dark">
+<script type="application/ld+json">
+{
+	"@context": "https://schema.org",
+	"@type": "TechArticle",
+	"headline": "Metal Blockchain について",
+	"description": "Metal Blockchain(Metallicus 製 Layer-0、Avalanche fork)と validator の仕組み解説。",
+	"author": { "@type": "Organization", "name": "Freedom Yield" },
+	"inLanguage": "ja"
+}
+</script>
+<script defer src="/assets/main.js"></script>
+<link rel="preconnect" href="https://www.googletagmanager.com" crossorigin>
+<link rel="dns-prefetch" href="https://www.googletagmanager.com">
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
+<script defer src="/assets/gtag-init.js"></script>
+<link rel="preload" as="image" href="/assets/hero-images/about-metal-960.webp" imagesrcset="/assets/hero-images/about-metal-480.webp 480w, /assets/hero-images/about-metal-960.webp 960w, /assets/hero-images/about-metal.webp 1600w" imagesizes="50vw">
+</head>
+<body>
+<nav class="topnav">
+	<div class="topnav-inner">
+		<a href="/ja/" class="brand">Freedom Yield · Metal</a>
+		<details class="nav-menu">
+			<summary class="nav-toggle" aria-label="メニューを開く / 閉じる">
+				<span class="hamburger-icon" aria-hidden="true"></span>
+			</summary>
+						<div class="nav">
+				<a href="/ja/#status">状態</a>
+				<a href="/ja/about-metal/">概要</a>
+				<div class="nav-dropdown">
+					<a href="/ja/selection-evidence/" class="nav-dropdown-toggle">機関向け</a>
+					<div class="nav-dropdown-menu">
+						<a href="/ja/selection-evidence/">選定エビデンス</a>
+						<a href="/ja/commitments/">運用者の commitment</a>
+						<a href="/ja/risk-disclosure/">リスク開示</a>
+						<a href="/ja/jurisdiction/">管轄姿勢</a>
+						<a href="/ja/security-posture/">セキュリティ姿勢</a>
+						<a href="/ja/continuity/">事業継続性</a>
+						<a href="/ja/pledge/">Transparent Validator Pledge</a>
+						<a href="/ja/subnet-readiness/">Subnet 適性</a>
+						<a href="/ja/reference-architecture/">リファレンスアーキテクチャ</a>
+						<a href="/ja/subnet-pilot/">Subnet pilot</a>
+						<a href="/ja/decommission/">廃止予告ポリシー</a>
+						<a href="/ja/inquiry/">問い合わせ</a>
+					</div>
+				</div>
+				<div class="nav-dropdown">
+					<a href="/ja/delegate/" class="nav-dropdown-toggle">委任者向け</a>
+					<div class="nav-dropdown-menu">
+						<a href="/ja/delegate/">委任する</a>
+						<a href="/ja/#status">ライブ状態</a>
+						<a href="/ja/continuity/">事業継続性</a>
+					</div>
+				</div>
+				<div class="nav-dropdown">
+					<a href="/ja/data/" class="nav-dropdown-toggle">技術者向け</a>
+					<div class="nav-dropdown-menu">
+						<a href="/ja/data/">公開データ</a>
+						<a href="/ja/verify/">アイデンティティ検証</a>
+						<a href="/ja/journal/">運用日誌</a>
+						<a href="/ja/network/">ネットワーク観測</a>
+						<a href="/ja/incidents/">インシデントログ</a>
+					</div>
+				</div>
+				<a href="/about-metal/" class="nav-lang" data-ga-event="language_switch" data-ga-param-to="en">EN</a>
+			</div>
+		</details>
+	</div>
+</nav>
+
+<header class="hero hero--simple hero--photo-about-metal">
+	<div class="container">
+		<p class="hero-eyebrow">背景</p>
+		<h1>About Metal Blockchain</h1>
+		<p class="hero-lead">
+			Metal Blockchain は <strong>Metallicus</strong> 製の <strong>Layer-0 チェーン</strong>(XPR Network = Layer-1 と同じ親会社)。
+			Avalanche fork で、コンセンサスは <em>Snowman</em>。<strong>permissionless validator</strong> で、最小 stake を満たせば
+			誰でもバリデータになれます。
+		</p>
+	</div>
+</header>
+
+<main id="main" class="container">
+
+	<nav class="breadcrumb" aria-label="パンくず">
+		<ol>
+			<li><a href="/ja/">ホーム</a></li>
+			<li aria-current="page">About Metal Blockchain</li>
+		</ol>
+	</nav>
+
+	<section class="card">
+		<figure class="card-figure" aria-hidden="true">
+			<img  src="/assets/photos/circuit-board.webp" srcset="/assets/photos/circuit-board-480.webp 480w, /assets/photos/circuit-board-960.webp 960w, /assets/photos/circuit-board.webp 1600w" sizes="(max-width: 600px) 100vw, (max-width: 1200px) 60vw, 800px" width="1600" height="1067" alt="" loading="lazy" decoding="async">
+		</figure>
+		<h2>XPR Network との違い</h2>
+		<dl class="kv">
+			<dt>XPR Network</dt><dd>Layer-1、Block Producer の consortium 制、既存 BP の multisig 承認が必要</dd>
+			<dt>Metal Blockchain</dt><dd>Layer-0、permissionless、stake ベース。Foundation 議席は最大 5 名の選出制</dd>
+		</dl>
+		<p>
+			両チェーンは Metallicus が運営し、相互接続もされています。
+		</p>
+	</section>
+
+	<figure class="atmosphere-band" aria-hidden="true">
+		<img  src="/assets/photos/datacenter-aisle.webp" srcset="/assets/photos/datacenter-aisle-480.webp 480w, /assets/photos/datacenter-aisle-960.webp 960w, /assets/photos/datacenter-aisle.webp 1600w" sizes="(max-width: 600px) 100vw, (max-width: 1200px) 60vw, 800px" width="1600" height="1200" alt="" loading="lazy" decoding="async">
+		<div class="atmosphere-band-tint" aria-hidden="true"></div>
+		<figcaption class="atmosphere-band-caption">
+			<div class="atmosphere-band-overline">
+				<span>第 I 章</span>
+				<span class="atmosphere-band-overline-rule" aria-hidden="true"></span>
+				<span>Protocol</span>
+			</div>
+			<div class="atmosphere-band-title">バリデーションの仕組み</div>
+			<p class="atmosphere-band-lede">Metal Blockchain validator にできること、できないことを決める 4 つの mechanic。</p>
+		</figcaption>
+	</figure>
+
+	<section class="split-section">
+		<div class="split-bg" aria-hidden="true">
+			<div class="split-bg-photo"><img  src="/assets/photos/dark-code.webp" srcset="/assets/photos/dark-code-480.webp 480w, /assets/photos/dark-code-960.webp 960w, /assets/photos/dark-code.webp 1600w" sizes="(max-width: 600px) 100vw, (max-width: 1200px) 60vw, 800px" width="1600" height="1067" alt="" loading="lazy" decoding="async"></div>
+			<div class="split-bg-pane"></div>
+		</div>
+		<div class="split-section-inner">
+			<h2 class="split-section-title">バリデーションの仕組み</h2>
+			<div class="feature-block">
+				<ul class="feature-grid">
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 3 7l9 5 9-5-9-5z"/><path d="m3 17 9 5 9-5"/><path d="m3 12 9 5 9-5"/></svg>
+						<h3>1. 誰でも参加可能(2,000 METAL から)</h3>
+						<p>プロトコル最小 self stake は 2,000 METAL。XPR と違い既存 validator からの承認は不要。staking key をローカル生成 → <em>Add Validator</em> tx を P-Chain に送信 → start time 到達で active 入り。</p>
+					</li>
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
+						<h3>2. 報酬は uptime ドリブン</h3>
+						<p>Snowman は速度競争ではない。ピアから到達でき正しく投票していれば、公式最小(8 vCPU / 16 GiB)を超えるハードでも報酬は増えない。<strong>性能で殴っても収益は伸びない</strong>のがこのチェーンの特性。</p>
+					</li>
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>
+						<h3>3. 自己 stake が受入枠を決める</h3>
+						<p>最大 stake weight = <code>min(3M METAL, 5 × self_stake)</code>。自己 stake 2,000 → 最大 weight 10,000(うち委任受入可能 8,000)。「skin in the game と受入量を整合」させるプロトコル仕様。</p>
+					</li>
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.5 8 8 9 4.5-1 8-4.5 8-9V6l-8-3z"/><path d="m9 12 2 2 4-4"/></svg>
+						<h3>4. スラッシングなし</h3>
+						<p>Avalanche family にはスラッシング(stake 没収)がない。ダウンタイム時の最悪は「報酬ゼロ」。自己 stake も委任 stake も <strong>end time に必ず返却</strong>(uptime 関係なく)。delegator のリスクは「機会費用」のみ。</p>
+					</li>
+				</ul>
+			</div>
+		</div>
+	</section>
+
+	<figure class="atmosphere-band" aria-hidden="true">
+		<img  src="/assets/photos/metropolis.webp" srcset="/assets/photos/metropolis-480.webp 480w, /assets/photos/metropolis-960.webp 960w, /assets/photos/metropolis.webp 1600w" sizes="(max-width: 600px) 100vw, (max-width: 1200px) 60vw, 800px" width="1600" height="1067" alt="" loading="lazy" decoding="async">
+		<div class="atmosphere-band-tint" aria-hidden="true"></div>
+		<figcaption class="atmosphere-band-caption">
+			<div class="atmosphere-band-overline">
+				<span>第 II 章</span>
+				<span class="atmosphere-band-overline-rule" aria-hidden="true"></span>
+				<span>References</span>
+			</div>
+			<div class="atmosphere-band-title">深堀り先</div>
+			<p class="atmosphere-band-lede">プロトコル仕様、explorer、ツール群の正規 source。</p>
+		</figcaption>
+	</figure>
+
+	<section class="card">
+		<h2>関連リンク</h2>
+		<ul class="link-tile-grid">
+			<li><a class="link-tile" href="https://docs.metalblockchain.org/" rel="noopener noreferrer" target="_blank"><span class="link-tile-label">公式ドキュメント</span><span class="link-tile-host">docs.metalblockchain.org ↗</span></a></li>
+			<li><a class="link-tile" href="https://explorer.metalblockchain.org/" rel="noopener noreferrer" target="_blank"><span class="link-tile-label">Mainnet explorer</span><span class="link-tile-host">explorer.metalblockchain.org ↗</span></a></li>
+			<li><a class="link-tile" href="https://tahoe.metalscan.io/" rel="noopener noreferrer" target="_blank"><span class="link-tile-label">Tahoe testnet explorer</span><span class="link-tile-host">tahoe.metalscan.io ↗</span></a></li>
+			<li><a class="link-tile" href="https://faucet.metalblockchain.org/" rel="noopener noreferrer" target="_blank"><span class="link-tile-label">Tahoe testnet faucet</span><span class="link-tile-host">faucet.metalblockchain.org ↗</span></a></li>
+			<li><a class="link-tile" href="https://wallet.metalblockchain.org/" rel="noopener noreferrer" target="_blank"><span class="link-tile-label">Metal Wallet</span><span class="link-tile-host">wallet.metalblockchain.org ↗</span></a></li>
+		</ul>
+	</section>
+
+	<section id="roadmap" class="card roadmap">
+		<header class="roadmap-header">
+			<p class="roadmap-eyebrow">今後の展望</p>
+			<h2>ロードマップ</h2>
+			<p class="roadmap-lead">validator は終わりのあるプロジェクトではなく、長期間の規律です。約束していること、今後の判断軸を明示します。</p>
+		</header>
+		<ol class="roadmap-list">
+			<li class="roadmap-item roadmap-item--current">
+				<span class="roadmap-dot" aria-hidden="true"></span>
+				<p class="roadmap-period">2026-05 → 2027-05 <span class="roadmap-status roadmap-status--current">進行中</span></p>
+				<h3 class="roadmap-title">Phase 1 — 積み増し</h3>
+				<p class="roadmap-body">12 か月 × 月次 cycle で運用。各 cycle で tx 投入 → ~30 日間稼働 → 再登録。外部資金の段階的 deploy で self-stake を ~3,000 METAL ずつ積み増し、cycle ごとに監査トレース(uptime ledger / incidents / cadence)を公開。委任獲得は積極追求せず、来れば lucky。1 年後に確実に残るもの: 12 cycle 完走実績と公開された監査トレース。</p>
+			</li>
+			<li class="roadmap-item roadmap-item--milestone">
+				<span class="roadmap-dot" aria-hidden="true"></span>
+				<p class="roadmap-period">2027-05 <span class="roadmap-status roadmap-status--milestone">判断点</span></p>
+				<h3 class="roadmap-title">Phase 2 review</h3>
+				<p class="roadmap-body">12 cycle 完走 + 12 か月の監査トレース蓄積。この時点で再判断: cycle 期間を延ばすか? 委任獲得を本格化するか? 判断は今 roadmap に書いた線ではなく、1 年間蓄積した事実ベースで行います。</p>
+			</li>
+			<li class="roadmap-item roadmap-item--future">
+				<span class="roadmap-dot" aria-hidden="true"></span>
+				<p class="roadmap-period">期限なし <span class="roadmap-status roadmap-status--future">Long-term</span></p>
+				<h3 class="roadmap-title">Beyond Phase 2</h3>
+				<p class="roadmap-body">Metal Blockchain ecosystem の進化に合わせて継続的に貢献。validator 運営に終わりはなく、約束できるのは operational quality の継続だけ。</p>
+			</li>
+		</ol>
+	</section>
+</main>
+
+<footer class="site-footer">
+	<div class="container">
+		<div class="footer-grid">
+			<div class="footer-brand">
+				<h3>Freedom Yield · Metal</h3>
+				<p>Metal Blockchain 上で長期視点のバリデータを運営。透明な uptime、誇張なし、地道な稼働継続。</p>
+			</div>
+			<nav class="footer-col" aria-label="機関向け">
+				<h4>機関向け</h4>
+				<ul>
+					<li><a href="/ja/selection-evidence/">選定エビデンス</a></li>
+					<li><a href="/ja/commitments/">Commitment</a></li>
+					<li><a href="/ja/risk-disclosure/">リスク開示</a></li>
+					<li><a href="/ja/jurisdiction/">日本拠点姿勢</a></li>
+					<li><a href="/ja/subnet-readiness/">Subnet 適性</a></li>
+					<li><a href="/ja/reference-architecture/">リファレンスアーキテクチャ</a></li>
+					<li><a href="/ja/subnet-pilot/">Subnet pilot</a></li>
+					<li><a href="/ja/pledge/">Pledge</a></li>
+					<li><a href="/ja/security-posture/">セキュリティ姿勢</a></li>
+					<li><a href="/ja/decommission/">Decommission</a></li>
+					<li><a href="/ja/inquiry/">問い合わせ</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="委任者向け">
+				<h4>委任者向け</h4>
+				<ul>
+					<li><a href="/ja/delegate/">委任する</a></li>
+					<li><a href="/ja/#status">状態</a></li>
+					<li><a href="/ja/continuity/">事業継続性</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="技術者向け">
+				<h4>技術者向け</h4>
+				<ul>
+					<li><a href="/ja/verify/">アイデンティティ検証</a></li>
+					<li><a href="/ja/data/">公開データ</a></li>
+					<li><a href="/ja/journal/">運用日誌</a></li>
+					<li><a href="/ja/network/">ネットワーク</a></li>
+					<li><a href="/ja/incidents/">インシデント</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="関連">
+				<h4>関連</h4>
+				<ul>
+					<li><a href="/ja/sitemap/">サイトマップ</a></li>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer" target="_blank">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer" target="_blank">エクスプローラ ↗</a></li>
+					<li><a href="#acknowledgments">感謝</a></li>
+					<li><a href="mailto:info@metal.freedom-yield.com">お問い合わせ</a></li>
+				</ul>
+			</nav>
+		</div>
+		<hr class="footer-divider">
+		<p class="footer-disclaimer"><strong>免責事項:</strong> Freedom Yield は Metal Blockchain 上で稼働する独立した第三者バリデータです。Metallicus 社および Metal Blockchain Foundation の関連会社・提携先・出資先・公式運営者ではありません。各商標は各権利者に帰属します。</p>
+		<div class="footer-bottom">
+			<p><a href="https://metalblockchain.org/" rel="noopener noreferrer" target="_blank">Metal Blockchain</a> を支える validator として運営しています。</p>
+			<p>© 2026 Freedom Yield · Metal validator</p>
+		</div>
+	</div>
+</footer>
+</body>
+</html>

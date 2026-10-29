@@ -1,0 +1,18 @@
+{
+  "vector_name": "v02-three-leaf-odd",
+  "description": "cycles_branch with three leaves. The last leaf is duplicated at level 0 (= Bitcoin-style odd-count handling) to form pairs; root level emerges after one more pairing of two intermediate parents.",
+  "leaf_count": 3,
+  "branch_root": "191d58c1f2dd3238554232fcccb4b8f2a08a15d704e3d2220f7bc1203e906908",
+  "leaf_hashes_in_order": [
+    "dfa85e24275ea27b47ce5d58449ffedb160d5b87946b17de595c3b57fc2de7a6",
+    "b04f34b84bf6fb7231795a750c2044d9bb47334145dcfc5438bc92979f053e88",
+    "384d3f26b74d22f4382f6926bbb88cdf460e4f0daedf4c10a4f14a081b2c9f4d"
+  ],
+  "proof_for_leaf_index": 2,
+  "proof_sibling_hashes": [
+    "384d3f26b74d22f4382f6926bbb88cdf460e4f0daedf4c10a4f14a081b2c9f4d",
+    "b86200a4e77fa8da67ec55c0407f2029138ea71e0f50f4197eb912b9ccf4f416"
+  ],
+  "proof_target_leaf_hash": "384d3f26b74d22f4382f6926bbb88cdf460e4f0daedf4c10a4f14a081b2c9f4d",
+  "proof_reverify": true
+}

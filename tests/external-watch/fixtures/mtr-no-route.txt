@@ -1,0 +1,4 @@
+Start: 2026-09-25T01:00:00+0000
+HOST: webhost                       Loss%   Snt   Last   Avg  Best  Wrst StDev
+  1.|-- ???                       100.0     5    0.0   0.0   0.0   0.0   0.0
+  2.|-- ???                       100.0     5    0.0   0.0   0.0   0.0   0.0

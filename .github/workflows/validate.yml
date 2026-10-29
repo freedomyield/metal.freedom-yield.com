@@ -1,0 +1,267 @@
+name: Validate
+
+# PR と main 以外への push、および手動発火で走る軽量チェック群。
+# main の push は deploy ワークフロー側で扱う。
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+  workflow_dispatch:
+
+jobs:
+  json:
+    name: JSON syntax
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 after the tests job passes on the real 26.04 runner (2026-10-16: no suite fails only on 26.04 in a runner-like local run)
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate all JSON
+        run: |
+          set -e
+          fail=0
+          while IFS= read -r f; do
+            echo "→ $f"
+            if ! jq empty "$f" 2>/dev/null; then
+              echo "::error file=$f::invalid JSON"
+              fail=1
+            fi
+          done < <(find public -name '*.json' -not -path '*/api/build.json' -not -path '*/api/validator.json')
+          # JSON-LD blocks embedded in HTML
+          while IFS= read -r f; do
+            python3 - "$f" <<'PY' || { echo "::error file=$f::invalid JSON-LD block"; fail=1; }
+          import json, re, sys
+          src = open(sys.argv[1]).read()
+          for m in re.finditer(r'<script type="application/ld\+json">(.+?)</script>', src, re.S):
+              try:
+                  json.loads(m.group(1))
+              except Exception as e:
+                  print("JSON-LD error:", e); sys.exit(1)
+          PY
+          done < <(find public -name '*.html')
+          [ $fail -eq 0 ]
+
+  caddy:
+    name: Caddyfile
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 after the tests job passes on the real 26.04 runner (2026-10-16: no suite fails only on 26.04 in a runner-like local run)
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate Caddyfile
+        run: |
+          docker run --rm \
+            -v "$PWD/caddy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            -e DOMAIN=metal.freedom-yield.com \
+            -e ACME_EMAIL=ci@example.com \
+            caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile
+
+  compose:
+    name: docker compose configs
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 after the tests job passes on the real 26.04 runner (2026-10-16: no suite fails only on 26.04 in a runner-like local run)
+    env:
+      ACME_EMAIL: ci@example.com
+      DOMAIN: metal.freedom-yield.com
+      METAL_NETWORK: tahoe
+      METAL_PUBLIC_IP: 192.0.2.1
+    steps:
+      - uses: actions/checkout@v7
+      - name: site dev (override)
+        run: docker compose -f docker-compose.yml -f docker-compose.override.yml config --quiet
+      - name: site prod
+        run: docker compose -f docker-compose.yml -f docker-compose.prod.yml config --quiet
+      - name: site validator host (deploy.yml file set)
+        run: docker compose -f docker-compose.yml -f docker-compose.behind-proxy.yml config --quiet
+      - name: metalgo local
+        run: docker compose -f docker-compose.metalgo.yml config --quiet
+      - name: metalgo prod
+        run: docker compose -f docker-compose.metalgo.yml -f docker-compose.metalgo.prod.yml config --quiet
+
+  html:
+    name: HTML quick lint
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 after the tests job passes on the real 26.04 runner (2026-10-16: no suite fails only on 26.04 in a runner-like local run)
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check HTML files have <title>, lang, and viewport
+        run: |
+          set -e
+          fail=0
+          for f in $(find public -name '*.html'); do
+            grep -q '<title>' "$f" || { echo "::error file=$f::missing <title>"; fail=1; }
+            grep -q '<html lang=' "$f" || { echo "::error file=$f::missing lang attribute"; fail=1; }
+            grep -q 'name="viewport"' "$f" || { echo "::error file=$f::missing viewport meta"; fail=1; }
+            grep -q 'rel="canonical"' "$f" || { echo "::warning file=$f::missing canonical link"; }
+          done
+          [ $fail -eq 0 ]
+      - name: Check external link rel/target attributes
+        run: bash scripts/apply-external-link-attrs.sh --check public
+
+  links:
+    name: Internal link check
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 after the tests job passes on the real 26.04 runner (2026-10-16: no suite fails only on 26.04 in a runner-like local run)
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check that internal links resolve to existing files
+        run: |
+          set -e
+          fail=0
+          for f in $(find public -name '*.html'); do
+            # extract href values starting with / (internal only), strip query/fragment
+            for href in $(grep -oE 'href="(/[^"#?]+)' "$f" | sed -E 's/href="//'); do
+              # / → /index.html, /foo/ → /foo/index.html, /foo.html → /foo.html
+              if [ "$href" = "/" ]; then
+                target="public/index.html"
+              elif [[ "$href" == */ ]]; then
+                target="public${href}index.html"
+              else
+                target="public${href}"
+              fi
+              if [ ! -e "$target" ]; then
+                echo "::error file=$f::broken internal link $href (expected $target)"
+                fail=1
+              fi
+            done
+          done
+          [ $fail -eq 0 ]
+
+  shellcheck:
+    name: Shell scripts
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 after the tests job passes on the real 26.04 runner (2026-10-16: no suite fails only on 26.04 in a runner-like local run)
+    steps:
+      - uses: actions/checkout@v7
+      - name: shellcheck on scripts/ and .githooks/
+        run: |
+          # shellcheck is preinstalled on the ubuntu-24.04 image
+          find scripts .githooks -type f \( -name '*.sh' -o -path '.githooks/*' \) -print -exec shellcheck -x {} +
+
+  secret-scan:
+    name: gitleaks
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 after the tests job passes on the real 26.04 runner (2026-10-16: no suite fails only on 26.04 in a runner-like local run)
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks CLI (license-free; the marketplace action requires a paid GITLEAKS_LICENSE for org repos)
+        run: |
+          curl -fsSL -o /tmp/gitleaks.tar.gz \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          sudo install -m 755 /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+      - name: Run gitleaks against full history
+        run: gitleaks detect --source . --config .gitleaks.toml --redact --exit-code 1 --no-banner
+
+  tests:
+    name: repo test suites
+    runs-on: ubuntu-26.04  # 2026-10-16: a runner-like docker run confirmed no suite fails only on 26.04; this job is the real-runner check. deploy stays on 24.04 so a red here cannot block deploys. Revert = this one line
+    timeout-minutes: 20  # 2026-10-05: suite grew past 10 min (stress loops); cancelled != green
+    steps:
+      - uses: actions/checkout@v7
+      - name: Record runner locale and tool versions
+        run: |
+          locale || true
+          echo "LANG=${LANG-} LC_ALL=${LC_ALL-}"
+          bash --version | head -1 || true
+          date --version | head -1 || true
+          grep --version | head -1 || true
+      - name: Set up schema validator (sanctioned installer; tests/run-all-tests.sh preflight requires ajv or python3+jsonschema)
+        run: bash scripts/setup-schema-validator.sh
+      - name: bash tests/run-all-tests.sh
+        run: bash tests/run-all-tests.sh
+      # Gate: a commit must not silently invalidate a pin inside the
+      # operator-SIGNED public/api/identity.json. On 2026-08-05 an ordinary
+      # schema edit (7dfc3c4) did exactly that to a manifest signed the day
+      # before (90bcdd9), and nothing noticed for two days. CI cannot repair
+      # it — identity.json is signed with the operator's passphrase-protected
+      # key on their local Mac — so this step only detects and stops. Fix by
+      # reverting the artifact change or re-issuing the manifest; see the
+      # "Repairing a red run" block in scripts/check-identity-pins.sh.
+      # Mirrored in ci-main.yml because this workflow ignores pushes to main.
+      - name: identity artifact pins still describe the repo
+        run: bash scripts/check-identity-pins.sh --mode=repo
+      - name: check-identity-pq (structure only)
+        run: bash scripts/check-identity-pq.sh
+
+  identity-pq:
+    name: identity ML-DSA-87 suites (ubuntu-26.04)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    env:
+      FY_REQUIRE_PQ: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - name: openssl version
+        run: openssl version
+      - name: Set up schema validator (sanctioned installer, as in the tests job)
+        run: bash scripts/setup-schema-validator.sh
+      - name: identity ML-DSA-87 suites
+        run: |
+          set -u
+          rc=0
+          bash tests/identity-pq-lib/test-identity-pq-lib.sh || rc=1
+          bash tests/pq-identity-tools/test-pq-identity-tools.sh || rc=1
+          bash tests/gen-identity-pq/test-gen-identity-pq.sh || rc=1
+          bash tests/test-gen-identity-ordering-guard.sh || rc=1
+          bash tests/identity-kind-discipline/test-gen-identity-kind-discipline.sh || rc=1
+          bash tests/identity-pq-check/test-check-identity-pq.sh || rc=1
+          bash tests/identity-pq-docs/test-documented-pq-command.sh || rc=1
+          exit "$rc"
+      - name: ML-DSA-87 identity signature (schema v2 manifests)
+        run: bash scripts/check-identity-pq.sh --require-sig-verify
+
+  publish-guard:
+    name: publish-guard (host identifier / PII) on pushed/PR diff, fail-closed
+    # scripts/publish-guard.sh is enforced today only inside git hooks
+    # (.githooks/pre-commit, .githooks/pre-push), which are opt-in per clone
+    # (core.hooksPath is never committed). A push or PR from a clone without
+    # hooks installed reaches CI with ZERO layers of this guard having run.
+    # This job is the CI-side backstop: it re-scans the diff independent of
+    # whatever the pushing clone had configured.
+    # Mirrored in ci-main.yml because this workflow ignores pushes to main
+    # (branches-ignore above) — same reason `tests` and `secret-scan` are
+    # mirrored there. A red run here never blocks deploy.yml (no `needs`).
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 after the tests job passes on the real 26.04 runner (2026-10-16: no suite fails only on 26.04 in a runner-like local run)
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Run publish-guard --diff against the pushed/PR diff (fail-closed)
+        env:
+          EVT_BEFORE: ${{ github.event.before }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          GUARD="scripts/publish-guard.sh"
+
+          # Fail-closed: an absent/non-executable guard must STOP the job,
+          # never be treated as "nothing to check, so allow". A guard this
+          # repo cannot run is a guard that caught nothing.
+          if [ ! -x "$GUARD" ]; then
+            echo "::error::${GUARD} is missing or not executable — cannot scan, failing closed." >&2
+            exit 1
+          fi
+
+          ZERO="0000000000000000000000000000000000000000"
+          # PR events carry the true merge-base in PR_BASE_SHA; push events
+          # carry the previous tip in EVT_BEFORE. Prefer the PR base when
+          # both could theoretically be set (pull_request always wins here).
+          BASE="${PR_BASE_SHA:-${EVT_BEFORE:-}}"
+
+          if [ -n "$BASE" ] && [ "$BASE" != "$ZERO" ] && git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+            echo "publish-guard: scanning diff ${BASE}..${HEAD_SHA}"
+            if ! git diff -U0 "${BASE}" "${HEAD_SHA}" | "$GUARD" --diff; then
+              echo "::error::publish-guard detected a forbidden host identifier / PII literal in the diff (see log above)." >&2
+              exit 1
+            fi
+          else
+            # No usable prior SHA (branch creation, force-push whose old tip
+            # is gone, manual dispatch, or a shallow-history edge case) — a
+            # diff cannot be computed. Do NOT skip: fall back to scanning
+            # every tracked file's current content so this run still means
+            # something.
+            echo "publish-guard: no usable base SHA for a diff — scanning the full tracked tree instead of skipping."
+            if ! git ls-files -z | xargs -0 cat -- | "$GUARD" --text; then
+              echo "::error::publish-guard detected a forbidden host identifier / PII literal in the tracked tree (see log above)." >&2
+              exit 1
+            fi
+          fi
+          echo "publish-guard: clean."

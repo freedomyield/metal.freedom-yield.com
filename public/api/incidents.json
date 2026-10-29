@@ -1,0 +1,65 @@
+{
+  "_comment": "Operator-maintained incident log. Per-entry shape conforms to /api/incidents.schema.v1.json.",
+  "validatorSince": "2026-05-19",
+  "incidents": [
+    {
+      "id": "2026-09-25-01",
+      "type": "incident",
+      "detectionDate": "2026-09-25",
+      "confirmedPauseWindowStart": "2026-09-24T10:56:46Z",
+      "confirmedPauseWindowEnd": "2026-09-28T14:51:16Z",
+      "potentiallyAffectedStart": "2026-09-24",
+      "potentiallyAffectedStartStatus": "known",
+      "resolutionDate": "2026-10-03",
+      "title": "Validator unreachable from the network for about 100 hours while the host and node kept running",
+      "severity": "Critical",
+      "status": "resolved",
+      "summary": "From 2026-09-24T10:56:46Z to 2026-09-28T14:51:16Z, about 100 hours, the validator host could not be reached from outside its hosting provider's network, so the node had no connection to its Metal peers and the network observed it as offline for that whole period; the two timestamps are when the node's own health check turned failing and passing again. The host and metalgo kept running throughout: the node container was never restarted, the host was not rebooted, and its logs show no network-configuration change and no login during the window. Path traces taken during the window stopped at the edge of the provider's network; the provider reported no known internal outage and pointed to a likely problem on an external uplink, connectivity returned without any action on the host, and no more specific root cause is available. Network-observed uptime for cycle 5 fell to roughly 85-86% and remained above the 80% reward threshold, so the cycle's rewards were not put at risk; no effect on staked funds or delegations was identified in the records reviewed. The outage was detected only on 2026-09-25 at 00:10 UTC, about 13 hours after it began, because every alert ran on the host that had become unreachable. That detection gap was closed with an external watch running off the validator host (2026-09-29), path-diagnosis tooling with a prepared provider-ticket draft (2026-10-02), and an operator status page (2026-10-03).",
+      "postmortemUrl": null
+    },
+    {
+      "id": "2026-08-17-01",
+      "type": "incident",
+      "detectionDate": "2026-08-17",
+      "confirmedPauseWindowStart": null,
+      "confirmedPauseWindowEnd": null,
+      "potentiallyAffectedStart": "2026-06-23",
+      "potentiallyAffectedStartStatus": "known",
+      "resolutionDate": "2026-09-04",
+      "title": "Anchor receipts published a forward-looking execution-engine label as present-tense fact",
+      "severity": "Minor",
+      "status": "resolved",
+      "summary": "The anchor-receipt schema defined the optional anchor.chain_backend field on 2026-06-23, and the receipt generator wrote it as the unconditional literal \"pulsevm\" — an execution engine announced for Metal A-chain, not the stack observed serving it. Every artifact published from the first anchor onward carried that forward-looking label as present-tense fact: /api/anchor-receipt.json, both lines of /api/anchor-history.jsonl (the cycle 3 anchor of 2026-07-04 and the cycle 4 anchor of 2026-08-04) and the archived receipt at api/archive/anchor-receipt-32529f4aadee1ef9906fd6be5253ceb9ea9a5b8b76b55c0cf41770ec36eefc4c.json. The four synthetic schema examples served from the same path — /api/anchor-receipt.example.json, /api/anchor-receipt.v2.example.json, /api/anchor-receipt.phase-beta.example.json and /api/anchor-history.example.jsonl — carried the same value; they document field shape and describe no transaction, but they are published, so they are listed here too and were corrected in the same change. The transactions were and are served by an Antelope/EOSIO-family stack: the generator resolves them through Hyperion /v2/history/get_actions and /v1/history/get_transaction, and they consist of eosio.token::transfer actions authorized by actor@permission — exactly what the generator's own seven verification gates assert. Nothing else in those artifacts was affected: transaction ids, block numbers, memos, branch roots and dag_root_computed were correct throughout and remain independently verifiable on a public XPR explorer, so none of the integrity checks described in docs/IDENTITY_VERIFICATION.md returns a different result because of this. The correction has two distinct dates: the generator, the ledger writer, the schemas and the published examples were corrected in the repository on 2026-08-17; the corrected schemas and examples are served here no later than this record itself and can be checked directly, while the first receipt actually carrying the corrected value is the cycle 5 anchor of 2026-09-04 — no receipt is generated in between. The field is documented as the protocol family observed serving the chain rather than an execution engine, and a regression test pins the value. The ledger is append-only, so its two existing lines keep the label they were published with, and the cycle 4 archived receipt is content-addressed by transaction id and likewise keeps its published bytes: a holder of an earlier copy will still find \"pulsevm\" in both. One further reference remains in the project's governing document, which may be amended only by the operator; that wording is queued for amendment. No effect on validator operation, delegations, or recorded uptime was identified in the records reviewed.",
+      "postmortemUrl": null
+    },
+    {
+      "id": "2026-08-06-01",
+      "type": "incident",
+      "detectionDate": "2026-08-06",
+      "confirmedPauseWindowStart": null,
+      "confirmedPauseWindowEnd": null,
+      "potentiallyAffectedStart": "2026-07-04",
+      "potentiallyAffectedStartStatus": "known",
+      "resolutionDate": "2026-08-06",
+      "title": "Published cycle-history feed under-reported per-cycle incident counts",
+      "severity": "Minor",
+      "status": "resolved",
+      "summary": "From 2026-07-04, when cycle 2 closed and its row first entered this feed, until 2026-08-06, the derived feed /api/cycle-history.jsonl reported incidents_in_cycle_count: 0 and an empty incidents_in_cycle_ids for every cycle, although incident 2026-06-24-01 falls inside cycle 2. The generator selected incidents by a \"date\" field that the incidents schema does not define; the records carry \"detectionDate\", so every comparison matched nothing and the count silently stayed at zero. The primary record, /api/incidents.json, was correct throughout and 2026-06-24-01 was published there on 2026-06-25, so nothing was withheld: only the derived per-cycle rollup was wrong. The same audit found the public /incidents/ page reading four further fields under names the schema does not define, and rendering a Critical severity with the neutral badge style. All are corrected as of 2026-08-06. /api/cycle-history.jsonl changed from sha256 475bd9127b6c0a8dd2c531e78b3ac611899f9fd32bf3c0977030b6e2a3a75b0c to sha256 e8001d204a8dd0ed41a5755a84dadd36814b4dfda4a394db569449351e210765, and /api/identity.json was re-signed so its pinned hashes match the corrected bytes; a holder of an earlier copy can confirm the change from those two values alone. A contract check now runs in CI and fails the build when any artifact field is read under a name its schema does not define. No effect on validator operation, delegations, or recorded uptime was identified in the records reviewed.",
+      "postmortemUrl": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/FIELD_CONTRACTS.md"
+    },
+    {
+      "id": "2026-06-24-01",
+      "type": "incident",
+      "detectionDate": "2026-06-24",
+      "confirmedPauseWindowEnd": "2026-06-24T11:20:02Z",
+      "potentiallyAffectedStart": null,
+      "potentiallyAffectedStartStatus": "undetermined",
+      "resolutionDate": "2026-06-24",
+      "title": "Anomaly monitoring maintenance pause and delayed resume",
+      "severity": "Minor",
+      "status": "resolved",
+      "summary": "On 2026-06-24, the auxiliary anomaly-monitoring cron pipeline failed to resume after an intentional maintenance pause because a runtime requirement and its cron environment were out of sync. The pipeline was restored at 2026-06-24T11:20:02Z and subsequently completed 13 hours of continuous validation with 157 successful scheduled runs. No effect on validator operation, the on-chain validator entry, delegations, or recorded uptime was identified in the records reviewed. This was an operational monitoring incident, not a validator service incident. A separate daily-status monitoring degradation remains open.",
+      "postmortemUrl": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/postmortems/2026-06-anomaly-monitoring-resume.md"
+    }
+  ]
+}

@@ -1,0 +1,1157 @@
+#!/usr/bin/env bash
+# tests/reward-tracker/test-reward-tracker.sh — end-to-end behavior test for
+# scripts/reward-tracker.sh against a stub metalgo RPC (curl) and a stub
+# ntfy delivery (also curl, intercepted by the same stub — see below).
+#
+# CHAIN: none. No real P-Chain node, no real ntfy.sh delivery — the ONLY
+# `curl` on PATH during these runs is the stub built below, which never
+# makes a network connection. Per the task brief, P-Chain is never contacted
+# for real (not available on this Mac); every scenario is a fixture.
+#
+# Covers (per the reward-tracker.sh task brief):
+#   1. append 1-line shape (schema fields present)
+#   2. append-only: a re-run against the same matured cycle does not
+#      duplicate the line, including the "append happened, state advance
+#      didn't" crash-recovery shape
+#   3. maturity detection fires exactly when the tracked AddValidatorTx
+#      disappears from getCurrentValidators AND uptime-cycles.json's most
+#      recently closed row confirms the same end_unix
+#   4. digest block format (2026-09-07 four-line shape: 累積 with self/fee
+#      breakdown, full-cycle 見込み with breakdown, JST maturity date +
+#      elapsed/rounded days, milestone tail) — including that the 見込み
+#      is the reward AT MATURITY (does not move with elapsed days), that
+#      the cycle length rounds (32.97 -> 33, 16.005 -> 16), and that the
+#      RPC-gap fallback keeps lines 1 + 4 only
+#   5. numeric non-leak: reward-tracker.sh's own combined stdout+stderr,
+#      across every scenario below, never contains a METAL amount — proven
+#      with a mutation-kill check (a MUTANT copy with one added debug echo
+#      of the reward amount must fail this exact grep)
+#   6. ledger schema v2: self_reward_metal / fee_income_metal / split_known /
+#      schema_version on every appended row; the LAST row per cycle_n is
+#      the effective one for every cumulative figure; --backfill appends a
+#      v2 row over a v1-only cycle exactly once and refuses a conflicting
+#      txID; the maturity push carries the self/fee breakdown
+
+set -uo pipefail
+
+REPO="$(cd "$(dirname "$0")/../.." && pwd)"
+TRACKER="$REPO/scripts/reward-tracker.sh"
+
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+
+PASS=0
+FAIL=0
+FAILURES=()
+
+assert_eq() {
+	local label="$1" expected="$2" actual="$3"
+	if [ "$expected" = "$actual" ]; then
+		PASS=$((PASS + 1))
+		printf '  PASS  %-65s expected=%s actual=%s\n' "$label" "$expected" "$actual"
+	else
+		FAIL=$((FAIL + 1))
+		FAILURES+=("$label (expected=$expected, actual=$actual)")
+		printf '  FAIL  %-65s expected=%s actual=%s\n' "$label" "$expected" "$actual"
+	fi
+}
+
+assert_true() {
+	local label="$1" cond="$2"
+	if [ "$cond" = "1" ]; then
+		PASS=$((PASS + 1))
+		printf '  PASS  %s\n' "$label"
+	else
+		FAIL=$((FAIL + 1))
+		FAILURES+=("$label")
+		printf '  FAIL  %s\n' "$label"
+	fi
+}
+
+# max_display_width <file> — widest line in phone columns (East Asian
+# Width W/F/A = 2, else 1), the same rule scripts/reward-tracker.sh's
+# display_width applies. The operator's Android ntfy wraps at ~40; the
+# script promises <= 30 on every line it writes.
+# Counting A (ambiguous width: → — etc.) as 2 is a deliberate safety
+# margin, not a property this suite defends: no line containing an A
+# character sits near the 30-column threshold, so mutating A to 1 is
+# indistinguishable here (every <= 30 assertion still passes either way).
+max_display_width() {
+	python3 - "$1" <<'PY'
+import sys, unicodedata
+w = 0
+for line in open(sys.argv[1], encoding="utf-8").read().split("\n"):
+    w = max(w, sum(2 if unicodedata.east_asian_width(c) in ("W", "F", "A") else 1 for c in line))
+print(w)
+PY
+}
+
+# ===========================================================================
+# Fixture UTXO hex — hand-built the same way tests/reward-tracker/
+# test-reward-utxo-decode.sh does (see that file for the byte-layout
+# citation): self-reward 50.5 METAL + delegatee-fee-reward 12.25 METAL,
+# both under the tracked validator's own AddValidatorTx (TX1) — the exact
+# shape metalgo's rewardValidatorTx() produces (see reward-tracker.sh's own
+# header for the citation).
+# ===========================================================================
+# build_utxo_hex <amt_nmetal> [output_index] — OutputIndex (default 0) is
+# what the 2026-09-07 self/fee split orders by: self at K, fee at K+1
+# (K = 2 below, i.e. one tx output + one stake output — any K works, only
+# adjacency matters).
+build_utxo_hex() {
+	python3 - "$1" "${2:-0}" <<'PY'
+import sys
+amt = int(sys.argv[1])
+idx = int(sys.argv[2])
+parts = [
+    b'\x00\x00', bytes([0x11]) * 32, idx.to_bytes(4, 'big'),
+    bytes([0x22]) * 32, (7).to_bytes(4, 'big'), amt.to_bytes(8, 'big'),
+    (0).to_bytes(8, 'big'), (1).to_bytes(4, 'big'), (1).to_bytes(4, 'big'),
+    bytes([0x33]) * 20,
+]
+print('0x' + b''.join(parts).hex())
+PY
+}
+SELF_REWARD_N=50500000000                            # 50.5 METAL
+SELF_REWARD_HEX="$(build_utxo_hex "$SELF_REWARD_N" 2)"
+FEE_REWARD_HEX="$(build_utxo_hex 12250000000 3)"     # 12.25 METAL
+# Every LATER cycle's potentialReward is deliberately a DIFFERENT value
+# from TX1's: the maturity run must compare TX1's outputs against the hint
+# stored when TX1 was tracked, never against the hint of the cycle that
+# replaced it. With equal values that mix-up is invisible (review I-2).
+NEXT_POTENTIAL_N=99900000000                         # 99.9 METAL, != SELF_REWARD_N
+# Expected combined reward for TX1's maturity: 50.5 + 12.25 = 62.75 METAL
+EXPECTED_REWARD="62.750000000"
+
+# ===========================================================================
+# Sandbox layout
+# ===========================================================================
+STATE_DIR="$TMP/state"
+UPTIME_STATE_DIR="$TMP/uptime-state"
+mkdir -p "$STATE_DIR" "$UPTIME_STATE_DIR" "$TMP/public" "$TMP/bin" "$TMP/record"
+
+VALIDATOR_JSON="$TMP/public/validator.json"
+UPTIME_CYCLES_JSON="$TMP/public/uptime-cycles.json"
+FIX_DIR="$TMP/fixtures"
+mkdir -p "$FIX_DIR"
+
+REWARDS_HISTORY="$STATE_DIR/rewards-history.jsonl"
+TRACKER_STATE="$STATE_DIR/reward-tracker-state.json"
+DIGEST_FILE="$STATE_DIR/reward-digest-line.txt"
+NTFY_LOG="$TMP/record/ntfy-bodies.log"
+
+NODE_ID="NodeID-testFixtureNode11111111111"
+TX1="tx1FixtureAddValidator1111111111111"
+TX2="tx2FixtureAddValidator2222222222222"
+TX_BACKFILL="txBackfillHistoricalCycle33333"
+
+TRACKED_START=1700000000
+TRACKED_END=$((TRACKED_START + 2849105))   # same duration as the calculator fixture
+CYCLE2_END=$((TRACKED_END + 2800000))
+
+echo "{\"nodeId\":\"$NODE_ID\",\"stake\":{\"self\":2000}}" > "$VALIDATOR_JSON"
+printf '{"cycles":[]}\n' > "$UPTIME_CYCLES_JSON"
+echo '{"cycle_n":7}' > "$STATE_DIR/current-cycle-state.json"
+
+# ---- stub curl -------------------------------------------------------------
+# Routes by scanning argv for the first http(s) URL (position varies between
+# reward-tracker's own RPC calls and notify.sh's ntfy.sh call — see header)
+# and, for the RPC route, by the JSON body's "method" field. ntfy posts are
+# recorded (never sent) so the notification test can assert on body content
+# without a real ntfy.sh delivery.
+cat > "$TMP/bin/curl" <<'STUB'
+#!/usr/bin/env bash
+# notify.sh hands curl the ntfy URL in a -K config on a pipe, never in argv
+# (2026-09-29). Fold that url back into argv so routing and the tripwire
+# still see every ntfy call.
+_a=(); _p=""
+for _x in "$@"; do
+	if [ "$_p" = -K ] || [ "$_p" = --config ]; then _x="$(sed -n 's/^url = "\(.*\)"$/\1/p' "$_x")"; fi
+	_a+=("$_x"); _p="$_x"
+done
+set -- "${_a[@]}"
+URL=""
+DATA=""
+HEADERS=""
+prev=""
+for a in "$@"; do
+	case "$prev" in
+		-d|--data) DATA="$a" ;;
+		-H) HEADERS="${HEADERS}${a}
+" ;;
+	esac
+	case "$a" in
+		http*://*) URL="$a" ;;
+	esac
+	prev="$a"
+done
+
+if [[ "$URL" == *"ntfy.sh"* ]]; then
+	{
+		echo "---"
+		printf '%s' "$HEADERS"
+		printf '%s\n' "$DATA"
+	} >> "$STUB_RECORD_DIR/ntfy-bodies.log"
+	echo "ntfy POST: 200"
+	exit 0
+fi
+
+METHOD=$(printf '%s' "$DATA" | grep -oE '"method":"[a-zA-Z.]+"' | head -1 | sed -E 's/.*:"([a-zA-Z.]+)"/\1/')
+case "$METHOD" in
+	platform.getCurrentValidators) cat "$STUB_FIXTURE_DIR/getCurrentValidators.json" ;;
+	platform.getRewardUTXOs)       cat "$STUB_FIXTURE_DIR/getRewardUTXOs.json" ;;
+	platform.getCurrentSupply)     cat "$STUB_FIXTURE_DIR/getCurrentSupply.json" ;;
+	*)
+		echo "stub curl: unrecognized method in body: $DATA" >&2
+		exit 1
+		;;
+esac
+exit 0
+STUB
+chmod +x "$TMP/bin/curl"
+
+# Test-local stand-in for util-linux flock, installed ONLY when the host has
+# none (macOS has no flock by default) — same pattern as
+# tests/side-effects-callers/test-monitoring-side-effects.sh (see that
+# suite's header). It always reports "acquired" and does NOT implement real
+# locking, so this suite can only verify reward-tracker.sh's flock CALL
+# SHAPE (lock file gets created under state/locks/, the script runs to
+# completion through the -n flock call rather than dying on it) — not real
+# cross-process exclusion, which needs a genuine flock and belongs in a
+# Linux-only integration suite if ever added. See the dedicated "flock"
+# section below for the one thing this stand-in DOES let us assert: on a
+# host with a REAL flock, holding the lock file open externally makes
+# reward-tracker.sh's own flock -n fail and the run skip cleanly (exit 0,
+# no state mutated) — that case is SKIPped, not faked, when only the
+# stand-in is available.
+if ! command -v flock >/dev/null 2>&1; then
+	cat > "$TMP/bin/flock" <<'FLOCKEOF'
+#!/usr/bin/env bash
+exit 0
+FLOCKEOF
+	chmod +x "$TMP/bin/flock"
+fi
+
+echo "test-topic" > "$TMP/ntfy-topic"
+
+# write_getCurrentValidators <txID> <start> <end> <weight_nmetal> <fee_pct> <delegators_json_array> [potentialReward_nmetal] [accruedDelegateeReward_nmetal]
+# potentialReward defaults to the self-reward fixture so the live maturity
+# split has its hint; pass "" to model a node response without it.
+# accruedDelegateeReward defaults to 0 (no delegation matured mid-cycle).
+write_getCurrentValidators() {
+	local tx="$1" su="$2" eu="$3" w="$4" fee="$5" delegators="$6" pr="${7-$SELF_REWARD_N}" adr="${8-0}"
+	local pr_field=""
+	[ -n "$pr" ] && pr_field=",\"potentialReward\":\"$pr\""
+	cat > "$FIX_DIR/getCurrentValidators.json" <<JSON
+{"jsonrpc":"2.0","id":1,"result":{"validators":[{"nodeID":"$NODE_ID","txID":"$tx","startTime":"$su","endTime":"$eu","weight":"$w","delegationFee":$fee,"delegators":$delegators$pr_field,"accruedDelegateeReward":"$adr"}]}}
+JSON
+}
+
+write_getCurrentValidators_absent() {
+	echo '{"jsonrpc":"2.0","id":1,"result":{"validators":[]}}' > "$FIX_DIR/getCurrentValidators.json"
+}
+
+write_getRewardUTXOs() {
+	# $1 = space-separated hex strings (may be empty for a 0-reward cycle)
+	local hexes="$1" json_arr="[]"
+	if [ -n "$hexes" ]; then
+		json_arr=$(python3 -c "
+import json, sys
+print(json.dumps(sys.argv[1:]))
+" $hexes)
+	fi
+	cat > "$FIX_DIR/getRewardUTXOs.json" <<JSON
+{"jsonrpc":"2.0","id":1,"result":{"numFetched":"$(echo "$hexes" | wc -w | tr -d ' ')","utxos":$json_arr,"encoding":"hex"}}
+JSON
+}
+
+write_getCurrentSupply() {
+	local supply_n="$1"
+	echo "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"supply\":\"$supply_n\",\"height\":\"12345\"}}" > "$FIX_DIR/getCurrentSupply.json"
+}
+
+# run_tracker <FY_LIVE 0|1> [args...] — invokes reward-tracker.sh in the
+# sandbox, capturing combined stdout+stderr to $LAST_OUT and rc to $LAST_RC.
+LAST_OUT=""
+LAST_RC=0
+run_tracker() {
+	local live="$1"; shift
+	LAST_OUT="$TMP/record/out-$$-$RANDOM.txt"
+	set +e
+	STUB_FIXTURE_DIR="$FIX_DIR" STUB_RECORD_DIR="$TMP/record" \
+		PATH="$TMP/bin:$PATH" \
+		METALGO_RPC="http://127.0.0.1:9650" \
+		VALIDATOR_JSON="$VALIDATOR_JSON" \
+		UPTIME_CYCLES_JSON="$UPTIME_CYCLES_JSON" \
+		FY_STATE_DIR="$STATE_DIR" \
+		UPTIME_STATE_DIR="$UPTIME_STATE_DIR" \
+		NTFY_TOPIC_FILE="$TMP/ntfy-topic" \
+		FY_LIVE="$live" \
+		bash "$TRACKER" "$@" > "$LAST_OUT" 2>&1
+	LAST_RC=$?
+	set -e
+}
+
+echo "=== bootstrap run (no prior state) ==="
+write_getCurrentValidators "$TX1" "$TRACKED_START" "$TRACKED_END" "2000000000000" "3.0" \
+	"[{\"weight\":\"8845000000000\",\"startTime\":\"$TRACKED_START\",\"endTime\":\"$TRACKED_END\"}]"
+write_getCurrentSupply "350000000000000000"
+run_tracker 1
+assert_eq "bootstrap run exits 0" "0" "$LAST_RC"
+# From here on `set -e` is live (run_tracker's tail re-enables it). Every
+# bare `VAR=$(jq|sed|tail|wc … <file-the-tracker-should-have-written>)`
+# below is guarded with the same `[ -f "$f" ] && … || echo …` idiom the
+# flock / dry-mode sections use: without it, a tracker run that failed to
+# write the file (rc!=0 above) turns the NEXT line into a raw crash of the
+# whole suite (jq exit 2 / failed `<` redirect / sed+tail exit 1) instead
+# of a clean FAIL line. Reads that sit inside an assert_* argument are not
+# affected (the substitution's status is masked by the function call) and
+# are left as they are.
+TRACKED_TX_AFTER_BOOTSTRAP="$([ -f "$TRACKER_STATE" ] && jq -r '.tracked_tx' "$TRACKER_STATE" || echo '')"
+assert_eq "state now tracks TX1" "$TX1" "$TRACKED_TX_AFTER_BOOTSTRAP"
+assert_eq "state captured potentialReward (the single-output split hint)" "$SELF_REWARD_N" "$(jq -r '.tracked_potential_reward_nmetal' "$TRACKER_STATE")"
+assert_eq "state recorded accruedDelegateeReward (record only, not used for the split)" "0" "$(jq -r '.tracked_accrued_delegatee_reward_nmetal' "$TRACKER_STATE")"
+assert_true "no rewards-history.jsonl yet (nothing matured)" "$([ ! -s "$REWARDS_HISTORY" ] && echo 1 || echo 0)"
+assert_true "digest file was written" "$([ -s "$DIGEST_FILE" ] && echo 1 || echo 0)"
+
+echo ""
+echo "=== state self-heal: a pre-v2 state file gains the hint fields on the no-change branch ==="
+# Production's in-flight state for the current cycle was written before
+# tracked_potential_reward_nmetal / tracked_accrued_delegatee_reward_nmetal
+# existed. The no-change branch must rewrite the state every run so the
+# hint is on hand by the time the tx matures — never only at bootstrap.
+jq 'del(.tracked_potential_reward_nmetal, .tracked_accrued_delegatee_reward_nmetal)' "$TRACKER_STATE" > "$TRACKER_STATE.tmp" && mv "$TRACKER_STATE.tmp" "$TRACKER_STATE"
+assert_eq "(setup) hint fields stripped from the state file" "null null" "$(jq -r '"\(.tracked_potential_reward_nmetal) \(.tracked_accrued_delegatee_reward_nmetal)"' "$TRACKER_STATE")"
+run_tracker 1
+assert_eq "no-change run exits 0" "0" "$LAST_RC"
+assert_true "no-change run took the 'still in flight' branch" "$(grep -q 'no change — current cycle still in flight' "$LAST_OUT" && echo 1 || echo 0)"
+assert_eq "no-change run restored both hint fields (self-heal)" "$SELF_REWARD_N 0" "$(jq -r '"\(.tracked_potential_reward_nmetal) \(.tracked_accrued_delegatee_reward_nmetal)"' "$TRACKER_STATE")"
+
+echo ""
+echo "=== flock (K-4-style non-blocking exclusion) ==="
+LOCK_FILE_PATH="$STATE_DIR/locks/reward-tracker.lock"
+assert_true "lock file was created under state/locks/" "$([ -e "$LOCK_FILE_PATH" ] && echo 1 || echo 0)"
+
+# Real cross-process contention needs a genuine flock (see the stand-in's
+# own note above this file's fixture setup) — this Mac almost certainly
+# does not have one. Run the case for real wherever flock IS genuine
+# (e.g. the Linux validator host, or a Linux CI runner) rather than fake
+# it with the always-succeed stand-in, which would prove nothing.
+if command -v flock >/dev/null 2>&1 && [ "$(command -v flock)" != "$TMP/bin/flock" ]; then
+	# Hold the SAME lock file open in this shell (fd 8), non-blocking, so
+	# reward-tracker.sh's own -n flock on fd 9 must fail while we hold it.
+	exec 8>"$LOCK_FILE_PATH"
+	flock -n 8
+	# $REWARDS_HISTORY does not exist yet at this point (nothing has matured),
+	# and under `set -e` + pipefail a bare `wc -l < missing-file` assignment
+	# kills the whole suite (the `<` redirect fails, pipefail propagates it out
+	# of the command substitution). Guard with the same [ -f ] idiom the dry-
+	# mode section below already uses. Mac never reaches this branch (no
+	# genuine flock), so this only ever bit on Linux (CI / validator host).
+	PRE_LINES=$([ -f "$REWARDS_HISTORY" ] && wc -l < "$REWARDS_HISTORY" | tr -d ' ' || echo 0)
+	run_tracker 1
+	assert_eq "held-lock run exits 0 (skip, not an error)" "0" "$LAST_RC"
+	assert_true "held-lock run logged a skip, not a normal completion" "$(grep -q 'still holds the lock' "$LAST_OUT" && echo 1 || echo 0)"
+	POST_LINES=$([ -f "$REWARDS_HISTORY" ] && wc -l < "$REWARDS_HISTORY" | tr -d ' ' || echo 0)
+	assert_eq "held-lock run did not append (state untouched)" "$PRE_LINES" "$POST_LINES"
+	exec 8>&-
+else
+	echo "  SKIP  real-lock contention case (no genuine flock on this host — see the stand-in note)"
+fi
+
+echo ""
+echo "=== same-cycle re-run (TX1 still current) ==="
+run_tracker 1
+assert_eq "same-cycle run exits 0" "0" "$LAST_RC"
+assert_true "still no rewards-history.jsonl (nothing matured)" "$([ ! -s "$REWARDS_HISTORY" ] && echo 1 || echo 0)"
+
+echo ""
+echo "=== digest block format (six lines, phone-width) ==="
+echo "  (captured, format-checked below — not printed raw to avoid a false leak-check trip in THIS echo; see the grep assertions)"
+# TRACKED_START/END span 2,849,105 s = 32.976 days -> "33" after rounding
+# (the 2026-09-04 int() gave 32). The fixture start is in 2023, so elapsed
+# clamps to the full length. Maturity date = TRACKED_END in JST, M/D with
+# no leading zeros, computed here independently of the script's shim.
+EXPECTED_MD="$(python3 -c "
+import datetime, sys
+e = int(sys.argv[1])
+d = datetime.datetime.fromtimestamp(e, datetime.timezone(datetime.timedelta(hours=9)))
+print(f'{d.month}/{d.day}')
+" "$TRACKED_END")"
+assert_eq "digest has exactly 6 lines" "6" "$(wc -l < "$DIGEST_FILE" | tr -d ' ')"
+digest_line() { [ -f "$DIGEST_FILE" ] && sed -n "${1}p" "$DIGEST_FILE" || echo ''; }
+D_L1="$(digest_line 1)"; D_L2="$(digest_line 2)"; D_L3="$(digest_line 3)"
+D_L4="$(digest_line 4)"; D_L5="$(digest_line 5)"; D_L6="$(digest_line 6)"
+assert_true "line 1: 累積 N METAL — one decimal, nothing else" "$(printf '%s' "$D_L1" | grep -qE '^累積 [0-9,]+\.[0-9] METAL$' && echo 1 || echo 0)"
+assert_true "line 2: 　自己 a / 手数料 b (full-width-space indent, no parentheses)" "$(printf '%s' "$D_L2" | grep -qE '^　自己 [0-9,]+\.[0-9] / 手数料 [0-9,]+\.[0-9]$' && echo 1 || echo 0)"
+assert_true "line 3: Cycle 7 見込み +M METAL" "$(printf '%s' "$D_L3" | grep -qE '^Cycle 7 見込み \+[0-9,]+\.[0-9] METAL$' && echo 1 || echo 0)"
+assert_true "line 4: 　自己 +a / 手数料 +b" "$(printf '%s' "$D_L4" | grep -qE '^　自己 \+[0-9,]+\.[0-9] / 手数料 \+[0-9,]+\.[0-9]$' && echo 1 || echo 0)"
+assert_eq "line 5: full-width-space indent + JST maturity date + elapsed/rounded days" "　${EXPECTED_MD} 満期・経過 33/33 日" "$D_L5"
+assert_true "line 6: 25,000 まで残り R (one decimal) | 到達 🎉" "$(printf '%s' "$D_L6" | grep -qE '^25,000 (まで残り [0-9,]+\.[0-9]|到達 🎉)$' && echo 1 || echo 0)"
+assert_true "no '(d/D days)' date-lookalike anywhere in the digest" "$(grep -qE '[0-9]+/[0-9]+ days' "$DIGEST_FILE" && echo 0 || echo 1)"
+# Parentheses are matched as fixed strings, not a bracket expression: in a
+# non-UTF-8 locale (LANG unset, e.g. a bare ubuntu docker image) GNU grep reads
+# [（）] as the single bytes EF BC 88 89, and BC is the last byte of 込 in
+# 見込み, so the check failed on a clean digest. -F compares the full
+# multibyte sequences, so the result no longer depends on the locale.
+assert_true "no parentheses anywhere in the digest (the 4-line form wrapped on a phone)" "$(grep -qF -e '(' -e ')' -e '（' -e '）' "$DIGEST_FILE" && echo 0 || echo 1)"
+assert_true "every digest line is <= 30 display columns (full-width = 2)" "$([ "$(max_display_width "$DIGEST_FILE")" -le 30 ] && echo 1 || echo 0)"
+assert_eq "indented lines are exactly lines 2, 4 and 5" "2 4 5" "$(grep -n '^　' "$DIGEST_FILE" | cut -d: -f1 | tr '\n' ' ' | sed 's/ $//')"
+# The projection is the FULL-CYCLE estimate: self = estimate_reward(2000,
+# dur) at the fixture supply, fee = estimate_reward(8845 * 0.03, dur) —
+# both computed here through the same library, no elapsed factor applied.
+# shellcheck source=scripts/lib/reward-calculator.sh
+. "$REPO/scripts/lib/reward-calculator.sh"
+EXP_SELF_FULL="$(estimate_reward 2000 $((TRACKED_END - TRACKED_START)) 350000000)"
+EXP_FEE_FULL="$(estimate_reward "$(awk 'BEGIN{printf "%.9f", 8845*0.03}')" $((TRACKED_END - TRACKED_START)) 350000000)"
+EXP_TOTAL_FULL="$(awk -v s="$EXP_SELF_FULL" -v f="$EXP_FEE_FULL" 'BEGIN{printf "%.9f", s+f}')"
+fmt1() { python3 -c "
+from decimal import Decimal, ROUND_HALF_UP
+import sys
+print(f'{Decimal(sys.argv[1]).quantize(Decimal(\"0.1\"), rounding=ROUND_HALF_UP):,.1f}')" "$1"; }
+assert_eq "line 3 total == full-cycle estimate_reward (self + fee), not scaled by elapsed" \
+	"Cycle 7 見込み +$(fmt1 "$EXP_TOTAL_FULL") METAL" "$D_L3"
+assert_eq "line 4 halves == full-cycle estimate_reward self / fee" \
+	"　自己 +$(fmt1 "$EXP_SELF_FULL") / 手数料 +$(fmt1 "$EXP_FEE_FULL")" "$D_L4"
+EXP_REMAIN="$(awk -v t="$EXP_TOTAL_FULL" 'BEGIN{printf "%.9f", 25000 - (2000 + t)}')"
+assert_eq "line 6 remaining == milestone - (self_stake + full-cycle projection)" "25,000 まで残り $(fmt1 "$EXP_REMAIN")" "$D_L6"
+assert_eq "lines 1-2 with an empty ledger read 累積 0.0 / 自己 0.0 / 手数料 0.0" "累積 0.0 METAL|　自己 0.0 / 手数料 0.0" "$D_L1|$D_L2"
+
+echo ""
+echo "=== digest: RPC-gap fallback keeps 累積 + breakdown + milestone only ==="
+cp "$FIX_DIR/getCurrentSupply.json" "$TMP/record/getCurrentSupply.keep"
+echo '{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"stub outage"}}' > "$FIX_DIR/getCurrentSupply.json"
+run_tracker 1
+assert_eq "gap run exits 0" "0" "$LAST_RC"
+assert_eq "gap digest has exactly 3 lines (no fabricated projection)" "3" "$(wc -l < "$DIGEST_FILE" | tr -d ' ')"
+assert_true "gap digest lines 1-2 are still 累積 + its breakdown" "$(sed -n '1p' "$DIGEST_FILE" | grep -qE '^累積 [0-9,]+\.[0-9] METAL$' && sed -n '2p' "$DIGEST_FILE" | grep -qE '^　自己 ' && echo 1 || echo 0)"
+assert_eq "gap digest line 3 is the milestone against self-stake alone (25,000 - 2,000)" "25,000 まで残り 23,000.0" "$(sed -n '3p' "$DIGEST_FILE")"
+cp "$TMP/record/getCurrentSupply.keep" "$FIX_DIR/getCurrentSupply.json"
+run_tracker 1
+assert_eq "digest is back to 6 lines once supply answers again" "6" "$(wc -l < "$DIGEST_FILE" | tr -d ' ')"
+
+echo ""
+echo "=== maturity: TX1 disappears, TX2 takes over, uptime-cycles.json NOT yet updated ==="
+write_getCurrentValidators "$TX2" "$TRACKED_END" "$CYCLE2_END" "2000000000000" "3.0" "[]" "$NEXT_POTENTIAL_N"
+run_tracker 1
+assert_eq "run with stale uptime-cycles.json still exits 0 (defers, not an error)" "0" "$LAST_RC"
+STILL_TX1="$([ -f "$TRACKER_STATE" ] && jq -r '.tracked_tx' "$TRACKER_STATE" || echo '')"
+assert_eq "state NOT advanced while uptime-cycles.json is stale (retries next run)" "$TX1" "$STILL_TX1"
+assert_true "no reward recorded yet (deferred, correctly)" "$([ ! -s "$REWARDS_HISTORY" ] && echo 1 || echo 0)"
+
+echo ""
+echo "=== uptime-cycles.json catches up; maturity now resolves ==="
+cat > "$UPTIME_CYCLES_JSON" <<JSON
+{"cycles":[{"cycle_n":7,"start_unix":$TRACKED_START,"end_unix":$TRACKED_END,"final_self_stake_metal":2000}]}
+JSON
+write_getRewardUTXOs "$SELF_REWARD_HEX $FEE_REWARD_HEX"
+echo '{"cycle_n":8}' > "$STATE_DIR/current-cycle-state.json"
+
+echo ""
+echo "=== dry mode (FY_LIVE unset): a real maturity is detectable but every"
+echo "    side effect must be suppressed ==="
+# Fixtures at this point already describe a genuine, resolvable maturity
+# (uptime-cycles.json caught up two lines above, getRewardUTXOs set) — dry
+# mode must recognize it (same detection logic) but touch nothing durable.
+DRY_PRE_HISTORY_LINES=$([ -f "$REWARDS_HISTORY" ] && wc -l < "$REWARDS_HISTORY" | tr -d ' ' || echo 0)
+DRY_PRE_TRACKED_TX="$([ -f "$TRACKER_STATE" ] && jq -r '.tracked_tx' "$TRACKER_STATE" || echo '')"
+DRY_PRE_NTFY_LINES=$([ -f "$NTFY_LOG" ] && wc -l < "$NTFY_LOG" | tr -d ' ' || echo 0)
+DRY_PRE_DIGEST_MTIME=""
+# GNU-first stat order (repo convention — broadcast-guard.sh / check-cron-file.sh).
+# GNU stat parses `-f '%m' FILE` as --file-system with '%m' as a file operand:
+# rc!=0 (the fallback IS reached), but FILE's multi-line filesystem dump (free
+# blocks etc., varies per call) is still captured ahead of the fallback's mtime,
+# so a BSD-first probe's pre/post comparison never matches on Linux.
+[ -f "$DIGEST_FILE" ] && DRY_PRE_DIGEST_MTIME="$(stat -c '%Y' "$DIGEST_FILE" 2>/dev/null || stat -f '%m' "$DIGEST_FILE" 2>/dev/null)"
+
+run_tracker 0
+assert_eq "dry run exits 0" "0" "$LAST_RC"
+
+# (a) no append
+DRY_POST_HISTORY_LINES=$([ -f "$REWARDS_HISTORY" ] && wc -l < "$REWARDS_HISTORY" | tr -d ' ' || echo 0)
+assert_eq "(a) dry run: rewards-history.jsonl line count unchanged" "$DRY_PRE_HISTORY_LINES" "$DRY_POST_HISTORY_LINES"
+
+# state file itself: fyd_live_write's dry path leaves it byte-for-byte
+# untouched (see scripts/lib/side-effects.sh), so tracked_tx must still read
+# whatever it was before this dry run (TX1 — the maturity was DETECTED, per
+# the "DRY:" note in stdout below, but never recorded).
+DRY_POST_TRACKED_TX="$([ -f "$TRACKER_STATE" ] && jq -r '.tracked_tx' "$TRACKER_STATE" || echo '')"
+assert_eq "(a) dry run: tracked_tx state file left untouched" "$DRY_PRE_TRACKED_TX" "$DRY_POST_TRACKED_TX"
+
+# (b) no notify
+DRY_POST_NTFY_LINES=$([ -f "$NTFY_LOG" ] && wc -l < "$NTFY_LOG" | tr -d ' ' || echo 0)
+assert_eq "(b) dry run: no ntfy push recorded (fyd_notify never invokes the delegate when dry)" "$DRY_PRE_NTFY_LINES" "$DRY_POST_NTFY_LINES"
+
+# (c) no digest write — fyd_live_write's dry path never creates a file that
+# did not already exist, and never touches the mtime of one that did.
+if [ -n "$DRY_PRE_DIGEST_MTIME" ]; then
+	DRY_POST_DIGEST_MTIME="$(stat -c '%Y' "$DIGEST_FILE" 2>/dev/null || stat -f '%m' "$DIGEST_FILE" 2>/dev/null)"
+	assert_eq "(c) dry run: digest file mtime unchanged (not rewritten)" "$DRY_PRE_DIGEST_MTIME" "$DRY_POST_DIGEST_MTIME"
+else
+	assert_true "(c) dry run: digest file still does not exist (never created while dry)" "$([ ! -e "$DIGEST_FILE" ] && echo 1 || echo 0)"
+fi
+
+# The run DID recognize the maturity (a real "would append" DRY note), so
+# this is not just "dry mode does nothing" — confirm the detection path was
+# actually reached, distinguishing "correctly suppressed" from "never ran".
+assert_true "dry run's own log shows it reached the append/notify DRY path (not a silent no-op)" "$(grep -q 'DRY:' "$LAST_OUT" && echo 1 || echo 0)"
+
+# (d) no numeric leak, in dry mode specifically (mirrors the live-mode
+# non-leak check further down, scoped to just this one dry invocation).
+DRY_LEAK_HITS=$(grep -oE '[0-9][0-9,]*\.[0-9]+' "$LAST_OUT" || true)
+assert_true "(d) dry run: zero decimal-number matches in stdout+stderr" "$([ -z "$DRY_LEAK_HITS" ] && echo 1 || echo 0)"
+
+run_tracker 1
+assert_eq "maturity run exits 0" "0" "$LAST_RC"
+assert_eq "rewards-history.jsonl now has exactly 1 line" "1" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+
+LINE1_JSON="$([ -f "$REWARDS_HISTORY" ] && sed -n '1p' "$REWARDS_HISTORY" || echo '')"
+assert_eq "line: cycle_n" "7" "$(echo "$LINE1_JSON" | jq -r '.cycle_n')"
+assert_eq "line: reward_metal (self 50.5 + fee 12.25)" "$EXPECTED_REWARD" "$(echo "$LINE1_JSON" | jq -r '.reward_metal')"
+assert_eq "line: self_stake_metal (tracked weight 2000 METAL)" "2000.000000000" "$(echo "$LINE1_JSON" | jq -r '.self_stake_metal')"
+assert_eq "line: start_unix" "$TRACKED_START" "$(echo "$LINE1_JSON" | jq -r '.start_unix')"
+assert_eq "line: end_unix" "$TRACKED_END" "$(echo "$LINE1_JSON" | jq -r '.end_unix')"
+assert_eq "line: add_validator_tx" "$TX1" "$(echo "$LINE1_JSON" | jq -r '.add_validator_tx')"
+HAS_OBSERVED_AT=$(echo "$LINE1_JSON" | jq -r 'has("observed_at")')
+assert_eq "line: has observed_at" "true" "$HAS_OBSERVED_AT"
+assert_eq "line (v2): schema_version" "2" "$(echo "$LINE1_JSON" | jq -r '.schema_version')"
+assert_eq "line (v2): split_known true (two adjacent outputs, lower == potentialReward)" "true" "$(echo "$LINE1_JSON" | jq -r '.split_known')"
+assert_eq "line (v2): self_reward_metal = lower-index output (50.5)" "50.500000000" "$(echo "$LINE1_JSON" | jq -r '.self_reward_metal')"
+assert_eq "line (v2): fee_income_metal = higher-index output (12.25)" "12.250000000" "$(echo "$LINE1_JSON" | jq -r '.fee_income_metal')"
+assert_eq "line (v2): self + fee == reward_metal" "true" "$(echo "$LINE1_JSON" | jq -r '(.self_reward_metal + .fee_income_metal) == .reward_metal')"
+# The state now tracks TX2, whose potentialReward differs from TX1's; the
+# split above was decided against TX1's STORED hint (lower output 50.5 ==
+# stored 50.5), which is only observable because the two hints differ.
+assert_eq "state now carries TX2's (different) potentialReward, proving the maturity split used the stored TX1 hint" "$NEXT_POTENTIAL_N" "$(jq -r '.tracked_potential_reward_nmetal' "$TRACKER_STATE")"
+
+NEW_TRACKED="$([ -f "$TRACKER_STATE" ] && jq -r '.tracked_tx' "$TRACKER_STATE" || echo '')"
+assert_eq "state advanced to TX2 after recording TX1's maturity" "$TX2" "$NEW_TRACKED"
+
+assert_true "ntfy body was recorded (notify fired)" "$([ -s "$NTFY_LOG" ] && echo 1 || echo 0)"
+# Push body (phone-width layout): one fact per line, 累積 before the
+# delta (operator's ordering requirement), no parentheses.
+MATURITY_BODY="$TMP/record/maturity-body.txt"
+# A bare pipeline (not an assignment, so no `&&`-list exemption): with no
+# ntfy log the sed fails, and with a header-only log grep -v selects
+# nothing and exits 1 — either way pipefail + set -e would abort the suite
+# here. Guard it so a missing/empty push leaves an EMPTY body file and the
+# assertions below fail cleanly instead.
+[ -f "$NTFY_LOG" ] && { sed -n '/^---$/,$p' "$NTFY_LOG" | tail -n +2 | grep -v '^Priority:\|^Title:\|^Tags:\|^Content-Type:\|^Authorization:' > "$MATURITY_BODY"; } || : > "$MATURITY_BODY"
+EXPECTED_MATURITY_BODY="Cycle 7 reward
+累積 62.75 METAL
+　自己 50.50 / 手数料 12.25
+この cycle +62.75 METAL
+　自己 +50.50 / 手数料 +12.25
+1 cycles recorded
+self-stake 2,000 → 2,000
+25,000 まで残り 22,937.25"
+assert_true "notify body: names Cycle 7" "$(grep -q '^Cycle 7 reward$' "$MATURITY_BODY" && echo 1 || echo 0)"
+assert_eq "notify body: exact eight-line phone-width layout (累積 first, breakdowns indented, tail split)" "$EXPECTED_MATURITY_BODY" "$(cat "$MATURITY_BODY")"
+assert_true "notify body: every line <= 30 display columns" "$([ "$(max_display_width "$MATURITY_BODY")" -le 30 ] && echo 1 || echo 0)"
+assert_true "notify body: no parentheses" "$(grep -qF -e '(' -e ')' -e '（' -e '）' "$MATURITY_BODY" && echo 0 || echo 1)"
+assert_eq "digest lines 1-2 after maturity: 累積 62.8 / 自己 50.5 / 手数料 12.3, one decimal" "累積 62.8 METAL|　自己 50.5 / 手数料 12.3" "$(sed -n '1p' "$DIGEST_FILE")|$(sed -n '2p' "$DIGEST_FILE")"
+
+echo ""
+echo "=== append-only: re-run against the now-matured TX1 does not duplicate ==="
+run_tracker 1
+assert_eq "re-run (TX2 still current) exits 0" "0" "$LAST_RC"
+assert_eq "rewards-history.jsonl STILL has exactly 1 line (no duplicate)" "1" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+
+echo ""
+echo "=== crash-recovery shape: append succeeded once, simulate state not having advanced ==="
+jq --arg tx "$TX1" '.tracked_tx = $tx | .tracked_end_unix = '"$TRACKED_END" "$TRACKER_STATE" > "$TRACKER_STATE.tmp" && mv "$TRACKER_STATE.tmp" "$TRACKER_STATE"
+run_tracker 1
+assert_eq "recovery run exits 0" "0" "$LAST_RC"
+assert_eq "rewards-history.jsonl STILL exactly 1 line (dedupe via history_has_tx)" "1" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+RECOVERED_TX="$([ -f "$TRACKER_STATE" ] && jq -r '.tracked_tx' "$TRACKER_STATE" || echo '')"
+assert_eq "state re-advanced to TX2 without a second append" "$TX2" "$RECOVERED_TX"
+
+echo ""
+echo "=== --backfill (single output, no potentialReward hint -> split refused) ==="
+write_getRewardUTXOs "$(build_utxo_hex 9990000000 2)"   # 9.99 METAL, single UTXO
+cat > "$UPTIME_CYCLES_JSON" <<JSON
+{"cycles":[{"cycle_n":7,"start_unix":$TRACKED_START,"end_unix":$TRACKED_END,"final_self_stake_metal":2000},{"cycle_n":3,"start_unix":1600000000,"end_unix":1602800000,"final_self_stake_metal":1500},{"cycle_n":2,"start_unix":1597000000,"end_unix":1599800000,"final_self_stake_metal":1500}]}
+JSON
+run_tracker 1 --backfill "$TX_BACKFILL" 3
+assert_eq "backfill run exits 0" "0" "$LAST_RC"
+assert_eq "rewards-history.jsonl now has 2 lines" "2" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+LINE2_JSON="$([ -f "$REWARDS_HISTORY" ] && sed -n '2p' "$REWARDS_HISTORY" || echo '')"
+assert_eq "backfilled line: cycle_n=3" "3" "$(echo "$LINE2_JSON" | jq -r '.cycle_n')"
+assert_eq "backfilled line: reward_metal=9.99 METAL" "9.990000000" "$(echo "$LINE2_JSON" | jq -r '.reward_metal')"
+assert_eq "backfilled line: self_stake_metal from uptime-cycles.json (1500)" "1500" "$(echo "$LINE2_JSON" | jq -r '.self_stake_metal')"
+assert_eq "backfilled line (v2): schema_version 2" "2" "$(echo "$LINE2_JSON" | jq -r '.schema_version')"
+assert_eq "backfilled line (v2): split_known false (one output, no hint — never guessed)" "false" "$(echo "$LINE2_JSON" | jq -r '.split_known')"
+assert_eq "backfilled line (v2): self_reward_metal null" "null" "$(echo "$LINE2_JSON" | jq -r '.self_reward_metal')"
+assert_eq "backfilled line (v2): fee_income_metal null" "null" "$(echo "$LINE2_JSON" | jq -r '.fee_income_metal')"
+NTFY_COUNT_BEFORE_BACKFILL=$(grep -c '^---$' "$NTFY_LOG" || true)
+
+run_tracker 1 --backfill "$TX_BACKFILL" 3
+assert_eq "re-running the SAME backfill exits 0 (idempotent no-op on a v2 row)" "0" "$LAST_RC"
+assert_eq "rewards-history.jsonl still 2 lines after repeat backfill" "2" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+NTFY_COUNT_AFTER_BACKFILL=$(grep -c '^---$' "$NTFY_LOG" || true)
+assert_eq "backfill never sends a notification (see header rationale)" "$NTFY_COUNT_BEFORE_BACKFILL" "$NTFY_COUNT_AFTER_BACKFILL"
+
+# Digest line 1 must surface the unsplit backfilled cycle as 内訳不明,
+# never fold it into either half: 累積 72.7 = 62.75 + 9.99.
+run_tracker 1
+# "　自己 50.5 / 手数料 12.3 / 不明 10.0" would be 37 columns, so the
+# breakdown splits: 不明 moves to its own indented line (7-line digest).
+assert_eq "digest shows the unsplit cycle as 不明 on its own indented line (width rule)" "累積 72.7 METAL|　自己 50.5 / 手数料 12.3|　不明 10.0" "$(sed -n '1p' "$DIGEST_FILE")|$(sed -n '2p' "$DIGEST_FILE")|$(sed -n '3p' "$DIGEST_FILE")"
+assert_eq "digest with a 不明 line has 7 lines" "7" "$(wc -l < "$DIGEST_FILE" | tr -d ' ')"
+assert_true "digest with a 不明 line still <= 30 columns everywhere" "$([ "$(max_display_width "$DIGEST_FILE")" -le 30 ] && echo 1 || echo 0)"
+
+echo ""
+echo "=== --backfill: v1-only cycle gets ONE v2 row appended; last row wins ==="
+# Seed a v1 row (2026-09-04 schema, no schema_version) for cycle 2 — the
+# shape already on disk for cycles recorded before this change.
+TX_V1="txV1LegacyCycleTwo22222222222222"
+printf '%s\n' "{\"cycle_n\":2,\"reward_metal\":5.000000000,\"self_stake_metal\":1500,\"start_unix\":1597000000,\"end_unix\":1599800000,\"add_validator_tx\":\"$TX_V1\",\"observed_at\":\"2026-09-04T00:00:00Z\"}" >> "$REWARDS_HISTORY"
+# The chain answers with two adjacent outputs summing to 5.0 (the v1 row's
+# total is unchanged; only the breakdown is new).
+write_getRewardUTXOs "$(build_utxo_hex 4000000000 2) $(build_utxo_hex 1000000000 3)"
+run_tracker 1 --backfill "$TX_V1" 2
+assert_eq "v1->v2 backfill exits 0" "0" "$LAST_RC"
+assert_eq "rewards-history.jsonl now has 4 lines (v1 row kept, v2 row appended)" "4" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+LINE4_JSON="$([ -f "$REWARDS_HISTORY" ] && sed -n '4p' "$REWARDS_HISTORY" || echo '')"
+assert_eq "appended v2 row: cycle_n 2" "2" "$(echo "$LINE4_JSON" | jq -r '.cycle_n')"
+assert_eq "appended v2 row: split_known true" "true" "$(echo "$LINE4_JSON" | jq -r '.split_known')"
+assert_eq "appended v2 row: self 4.0 / fee 1.0" "4.000000000 1.000000000" "$(echo "$LINE4_JSON" | jq -r '"\(.self_reward_metal) \(.fee_income_metal)"')"
+assert_eq "v1 row (line 3) is byte-for-byte untouched (append-only)" "1" "$(sed -n '3p' "$REWARDS_HISTORY" | grep -qF "\"add_validator_tx\":\"$TX_V1\",\"observed_at\":\"2026-09-04T00:00:00Z\"}" && echo 1 || echo 0)"
+assert_true "v1->v2 with AGREEING totals: no 'differs' note" "$(grep -q "v1 row's total differs" "$LAST_OUT" && echo 0 || echo 1)"
+run_tracker 1 --backfill "$TX_V1" 2
+assert_eq "re-running the v1->v2 backfill exits 0" "0" "$LAST_RC"
+assert_eq "rewards-history.jsonl still 4 lines (v2 row appended exactly once)" "4" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+assert_true "repeat run logged the v2 no-op, not another append" "$(grep -q 'already recorded as a v2 row' "$LAST_OUT" && echo 1 || echo 0)"
+# Last-wins cumulative: 62.75 + 9.99 + 5.0 = 77.74 (cycle 2 counted ONCE,
+# with its v2 breakdown): 自己 54.5 / 手数料 13.25 / 内訳不明 9.99.
+run_tracker 1
+assert_eq "digest 累積 counts cycle 2 once, with the v2 breakdown (last row wins)" "累積 77.7 METAL|　自己 54.5 / 手数料 13.3|　不明 10.0" "$(sed -n '1p' "$DIGEST_FILE")|$(sed -n '2p' "$DIGEST_FILE")|$(sed -n '3p' "$DIGEST_FILE")"
+
+echo ""
+echo "=== --backfill: a different txID for an already-recorded cycle is refused ==="
+run_tracker 1 --backfill "txOtherClaimantForCycle2xxxxxxxxx" 2
+assert_eq "conflicting-tx backfill exits 6" "6" "$LAST_RC"
+assert_eq "conflicting-tx backfill appended nothing" "4" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+
+echo ""
+echo "=== --backfill: the SAME txID under a different cycle_n is refused (one tx = one cycle) ==="
+# TX_BACKFILL is recorded as cycle 3 above. cycle 4 has no row yet, so the
+# per-cycle effective-row check alone would let this through and count
+# the same reward twice — the txID-uniqueness guard must refuse it.
+cat > "$UPTIME_CYCLES_JSON" <<JSON
+{"cycles":[{"cycle_n":7,"start_unix":$TRACKED_START,"end_unix":$TRACKED_END,"final_self_stake_metal":2000},{"cycle_n":3,"start_unix":1600000000,"end_unix":1602800000,"final_self_stake_metal":1500},{"cycle_n":2,"start_unix":1597000000,"end_unix":1599800000,"final_self_stake_metal":1500},{"cycle_n":4,"start_unix":1602800000,"end_unix":1605600000,"final_self_stake_metal":1500}]}
+JSON
+run_tracker 1 --backfill "$TX_BACKFILL" 4
+assert_eq "same-tx-other-cycle backfill exits 6" "6" "$LAST_RC"
+assert_eq "same-tx-other-cycle backfill appended nothing (still 4 lines)" "4" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+assert_true "same-tx-other-cycle refusal names the reason (different cycle_n)" "$(grep -q 'already recorded under a different cycle_n' "$LAST_OUT" && echo 1 || echo 0)"
+
+echo ""
+echo "=== --backfill --assert-no-delegators: operator testimony + self-reward sanity band ==="
+# E = the calculator's self-reward estimate for the cycle at the fixture
+# supply (same library the script uses; uptime-cycles.json row values).
+# shellcheck source=scripts/lib/reward-calculator.sh
+. "$REPO/scripts/lib/reward-calculator.sh"
+E4_METAL="$(estimate_reward 1500 $((1605600000 - 1602800000)) 350000000)"
+E4_N="$(python3 -c "from decimal import Decimal; print(int(Decimal('$E4_METAL') * 10**9))")"
+scale_n() { python3 -c "from decimal import Decimal; print(int(Decimal('$1') * Decimal('$2')))"; }
+TX_ND="txNoDelegatorsAssertedCycle4444444"
+PRE_ND_LINES=$([ -f "$REWARDS_HISTORY" ] && wc -l < "$REWARDS_HISTORY" | tr -d ' ' || echo 0)
+
+# (1) two outputs under the flag: the assertion is provably false -> exit 8
+write_getRewardUTXOs "$(build_utxo_hex "$E4_N" 2) $(build_utxo_hex 1000000000 3)"
+run_tracker 1 --backfill "$TX_ND" 4 --assert-no-delegators
+assert_eq "flag + 2 outputs: exit 8 (assertion contradicted)" "8" "$LAST_RC"
+assert_eq "flag + 2 outputs: nothing appended" "$PRE_ND_LINES" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+
+# (2) one output at 2% of E — fee-only magnitude (abort path) -> exit 9
+write_getRewardUTXOs "$(build_utxo_hex "$(scale_n "$E4_N" 0.02)" 2)"
+run_tracker 1 --backfill "$TX_ND" 4 --assert-no-delegators
+assert_eq "flag + 1 output at 2% of E: exit 9 (self-reward sanity check failed)" "9" "$LAST_RC"
+assert_eq "flag + 2%-of-E: nothing appended" "$PRE_ND_LINES" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+assert_true "flag + 2%-of-E: stderr names the cycle and the check, no amount" "$(grep -q 'cycle_n=4: self-reward sanity check failed' "$LAST_OUT" && ! grep -qE '[0-9]\.[0-9]' "$LAST_OUT" && echo 1 || echo 0)"
+
+# (3) one output at 1.5E — outside the band on the high side -> exit 9
+write_getRewardUTXOs "$(build_utxo_hex "$(scale_n "$E4_N" 1.5)" 2)"
+run_tracker 1 --backfill "$TX_ND" 4 --assert-no-delegators
+assert_eq "flag + 1 output at 1.5E: exit 9" "9" "$LAST_RC"
+assert_eq "flag + 1.5E: nothing appended" "$PRE_ND_LINES" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+
+# (4) supply RPC down: E cannot be computed -> exit 9, never "assume fine"
+write_getRewardUTXOs "$(build_utxo_hex "$E4_N" 2)"
+cp "$FIX_DIR/getCurrentSupply.json" "$TMP/record/getCurrentSupply.keep2"
+echo '{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"stub outage"}}' > "$FIX_DIR/getCurrentSupply.json"
+run_tracker 1 --backfill "$TX_ND" 4 --assert-no-delegators
+assert_eq "flag + supply RPC down: exit 9 (check not evaluable)" "9" "$LAST_RC"
+assert_eq "flag + supply RPC down: nothing appended" "$PRE_ND_LINES" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+cp "$TMP/record/getCurrentSupply.keep2" "$FIX_DIR/getCurrentSupply.json"
+
+# (4b) one UNDECODABLE output (wrong Out type) under the flag: the split
+#      is refused, and under the assertion a refusal is exit 8 — never an
+#      unlabelled split_known:false row appended in its place (m-7).
+write_getRewardUTXOs "$(python3 - <<'PY'
+parts = [b'\x00\x00', bytes([0x11]) * 32, (2).to_bytes(4, 'big'), bytes([0x22]) * 32,
+         (22).to_bytes(4, 'big'), (5000000000).to_bytes(8, 'big'), (0).to_bytes(8, 'big'),
+         (1).to_bytes(4, 'big'), (1).to_bytes(4, 'big'), bytes([0x33]) * 20]
+print('0x' + b''.join(parts).hex())
+PY
+)"
+run_tracker 1 --backfill "$TX_ND" 4 --assert-no-delegators
+assert_eq "flag + undecodable output: exit 8 (refused split is never appended under the assertion)" "8" "$LAST_RC"
+assert_eq "flag + undecodable output: nothing appended" "$PRE_ND_LINES" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+write_getRewardUTXOs "$(build_utxo_hex "$E4_N" 2)"
+
+# (5) one output == E exactly -> appended as self, basis on record
+run_tracker 1 --backfill "$TX_ND" 4 --assert-no-delegators
+assert_eq "flag + 1 output == E: exit 0" "0" "$LAST_RC"
+assert_eq "flag + 1 output == E: exactly one row appended" "$((PRE_ND_LINES + 1))" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+ND_ROW="$([ -f "$REWARDS_HISTORY" ] && tail -n 1 "$REWARDS_HISTORY" || echo '')"
+assert_eq "flag row: split_known true, self == total, fee 0" "true $E4_METAL 0" "$(echo "$ND_ROW" | jq -r '"\(.split_known) \(.self_reward_metal) \(.fee_income_metal)"')"
+assert_eq "flag row: split_basis records operator testimony + the sanity check + the band applied" "operator-asserted-no-delegators+self-sanity(0.25)" "$(echo "$ND_ROW" | jq -r '.split_basis')"
+run_tracker 1 --backfill "$TX_ND" 4 --assert-no-delegators
+assert_eq "flag re-run on the v2 row: no-op" "$((PRE_ND_LINES + 1))" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+
+# (6) one output at 1.2E — inside the default 25% band -> appended (cycle 5)
+cat > "$UPTIME_CYCLES_JSON" <<JSON
+{"cycles":[{"cycle_n":7,"start_unix":$TRACKED_START,"end_unix":$TRACKED_END,"final_self_stake_metal":2000},{"cycle_n":3,"start_unix":1600000000,"end_unix":1602800000,"final_self_stake_metal":1500},{"cycle_n":2,"start_unix":1597000000,"end_unix":1599800000,"final_self_stake_metal":1500},{"cycle_n":4,"start_unix":1602800000,"end_unix":1605600000,"final_self_stake_metal":1500},{"cycle_n":5,"start_unix":1605600000,"end_unix":1608400000,"final_self_stake_metal":1500},{"cycle_n":6,"start_unix":1608400000,"end_unix":1611200000,"final_self_stake_metal":1500}]}
+JSON
+TX_ND5="txNoDelegatorsAssertedCycle5555555"
+write_getRewardUTXOs "$(build_utxo_hex "$(scale_n "$E4_N" 1.2)" 2)"
+run_tracker 1 --backfill "$TX_ND5" 5 --assert-no-delegators
+assert_eq "flag + 1 output at 1.2E (inside the band): exit 0, appended" "0 $((PRE_ND_LINES + 2))" "$LAST_RC $(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+
+# (7) v1-only effective row + flag: exactly one v2 row appended, then no-op
+TX_ND6="txNoDelegatorsLegacyV1Cycle666666"
+# The seeded v1 total deliberately DISAGREES with the chain (0.9E vs E):
+# the v2 row must record the chain's total and stderr must flag the pair
+# (cycle_n only, no amounts).
+printf '%s\n' "{\"cycle_n\":6,\"reward_metal\":$(python3 -c "from decimal import Decimal; print(Decimal('$E4_METAL') * Decimal('0.9'))"),\"self_stake_metal\":1500,\"start_unix\":1608400000,\"end_unix\":1611200000,\"add_validator_tx\":\"$TX_ND6\",\"observed_at\":\"2026-09-04T00:00:00Z\"}" >> "$REWARDS_HISTORY"
+write_getRewardUTXOs "$(build_utxo_hex "$E4_N" 2)"
+run_tracker 1 --backfill "$TX_ND6" 6 --assert-no-delegators
+assert_eq "flag + v1-only row: exit 0, one v2 row appended (v1 kept)" "0 $((PRE_ND_LINES + 4))" "$LAST_RC $(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+assert_true "v1->v2 with DIFFERING totals: stderr notes cycle_n=6 (no amount printed)" "$(grep -q "cycle_n=6: the v1 row's total differs" "$LAST_OUT" && ! grep -qE '[0-9]\.[0-9]' "$LAST_OUT" && echo 1 || echo 0)"
+assert_eq "v1->v2 with DIFFERING totals: the v2 row records the chain's total" "$E4_METAL" "$(tail -n 1 "$REWARDS_HISTORY" | jq -r '.reward_metal')"
+assert_eq "flag + v1-only row: appended row is the split one" "true operator-asserted-no-delegators+self-sanity(0.25)" "$(tail -n 1 "$REWARDS_HISTORY" | jq -r '"\(.split_known) \(.split_basis)"')"
+run_tracker 1 --backfill "$TX_ND6" 6 --assert-no-delegators
+assert_eq "flag + v1-only row re-run: no-op" "$((PRE_ND_LINES + 4))" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+
+# (8) unknown --backfill option is a usage error, not silently ignored
+run_tracker 1 --backfill "$TX_ND6" 6 --assert-something-else
+assert_eq "unknown --backfill option: exit 1" "1" "$LAST_RC"
+
+# The non-flag single-output path (cycle 3 above) recorded its refusal
+# reason as evidence too.
+assert_eq "non-flag single-output row carries split_basis refused:single-no-hint" "refused:single-no-hint" "$(sed -n '2p' "$REWARDS_HISTORY" | jq -r '.split_basis')"
+assert_eq "live two-output row carries split_basis utxo-order+potential-reward" "utxo-order+potential-reward" "$(sed -n '1p' "$REWARDS_HISTORY" | jq -r '.split_basis')"
+
+echo ""
+echo "=== zero-reward maturity: no tada, no 🎉, warning-tagged push ==="
+# TX2 (currently tracked, per the crash-recovery section above) matures with
+# ZERO reward UTXOs — the shape metalgo produces when the 80% uptime
+# requirement was missed for that cycle (see reward-tracker.sh's own
+# header note on why this is never a "not yet paid" race). TX3 replaces it.
+TX3="tx3FixtureAddValidator3333333333333"
+CYCLE3_END=$((CYCLE2_END + 2800000))
+cat > "$UPTIME_CYCLES_JSON" <<JSON
+{"cycles":[{"cycle_n":7,"start_unix":$TRACKED_START,"end_unix":$TRACKED_END,"final_self_stake_metal":2000},{"cycle_n":8,"start_unix":$TRACKED_END,"end_unix":$CYCLE2_END,"final_self_stake_metal":2000}]}
+JSON
+write_getCurrentValidators "$TX3" "$CYCLE2_END" "$CYCLE3_END" "2000000000000" "3.0" "[]" "$NEXT_POTENTIAL_N"
+write_getRewardUTXOs ""
+NTFY_LINES_BEFORE_ZERO=$([ -f "$NTFY_LOG" ] && wc -l < "$NTFY_LOG" | tr -d ' ' || echo 0)
+PRE_ZERO_LINES=$([ -f "$REWARDS_HISTORY" ] && wc -l < "$REWARDS_HISTORY" | tr -d ' ' || echo 0)
+run_tracker 1
+assert_eq "zero-reward maturity run exits 0" "0" "$LAST_RC"
+assert_eq "rewards-history.jsonl grew by exactly 1 line" "$((PRE_ZERO_LINES + 1))" "$(wc -l < "$REWARDS_HISTORY" | tr -d ' ')"
+LINE3_JSON="$([ -f "$REWARDS_HISTORY" ] && tail -n 1 "$REWARDS_HISTORY" || echo '')"
+assert_eq "zero-reward line: cycle_n=8" "8" "$(echo "$LINE3_JSON" | jq -r '.cycle_n')"
+assert_eq "zero-reward line: reward_metal=0 (jq-normalized, not 0E-9)" "0" "$(echo "$LINE3_JSON" | jq -r '.reward_metal')"
+assert_eq "zero-reward line: add_validator_tx=TX2" "$TX2" "$(echo "$LINE3_JSON" | jq -r '.add_validator_tx')"
+assert_eq "zero-reward line (v2): split_known true, self 0, fee 0 (plain 0, not 0E-9)" "true 0 0" "$(echo "$LINE3_JSON" | jq -r '"\(.split_known) \(.self_reward_metal) \(.fee_income_metal)"')"
+assert_eq "zero-reward line (v2): split_basis zero-outputs" "zero-outputs" "$(echo "$LINE3_JSON" | jq -r '.split_basis')"
+
+ZERO_PUSH="$([ -f "$NTFY_LOG" ] && tail -n +"$((NTFY_LINES_BEFORE_ZERO + 1))" "$NTFY_LOG" || echo '')"
+assert_true "zero-reward push recorded" "$([ -n "$ZERO_PUSH" ] && echo 1 || echo 0)"
+assert_true "zero-reward push title carries no 🎉" "$(printf '%s' "$ZERO_PUSH" | grep -q '🎉' && echo 0 || echo 1)"
+# Same cumulative-first ordering the >0 push enforces above (operator's
+# requirement) — a 0-METAL cycle still leads with 累積, with the zero delta
+# and the uptime warning folded into the parenthetical tail.
+ZERO_BODY="$TMP/record/zero-body.txt"
+# Same bare-pipeline hazard as the maturity body above: an empty
+# $ZERO_PUSH makes grep -v select nothing (exit 1) and pipefail + set -e
+# would abort here. Empty push -> empty body file -> clean FAILs below.
+[ -n "$ZERO_PUSH" ] && { printf '%s\n' "$ZERO_PUSH" | tail -n +2 | grep -v '^Priority:\|^Title:\|^Tags:\|^Content-Type:\|^Authorization:' > "$ZERO_BODY"; } || : > "$ZERO_BODY"
+ZERO_LAYOUT_OK=$(python3 - "$ZERO_BODY" <<'PY'
+import re, sys
+b = open(sys.argv[1], encoding="utf-8").read()
+ok = re.search(r"^Cycle 8 reward\n累積 [0-9,.]+ METAL\n　自己 [0-9,.]+ / 手数料 [0-9,.]+(\n　不明 [0-9,.]+)?\nこの cycle \+0 METAL\n　check uptime\n[0-9]+ cycles recorded\nself-stake ", b, re.M)
+print(1 if ok else 0)
+PY
+)
+assert_eq "zero-reward push body: 累積 first, then 'この cycle +0 METAL' with an indented 'check uptime' sub-line" "1" "$ZERO_LAYOUT_OK"
+assert_true "zero-reward push body: every line <= 30 display columns" "$([ "$(max_display_width "$ZERO_BODY")" -le 30 ] && echo 1 || echo 0)"
+assert_true "zero-reward push Tags header is NOT tada" "$(printf '%s' "$ZERO_PUSH" | grep -qx 'Tags: tada' && echo 0 || echo 1)"
+# No --tags override was passed, so notify.sh falls back to its own
+# priority-derived default for "high" — see notify.sh's TAGS case block.
+assert_true "zero-reward push Tags header falls back to priority-derived 'warning'" "$(printf '%s' "$ZERO_PUSH" | grep -qx 'Tags: warning' && echo 1 || echo 0)"
+
+# Mutation kill check: a mutant that always treats REWARD_METAL as non-zero
+# (comment out the guard) must send the celebratory push instead — proving
+# the assertions above actually exercise the branch, not just its absence.
+ZERO_MUTANT_ROOT="$TMP/zero-mutant-root"
+mkdir -p "$ZERO_MUTANT_ROOT/scripts"
+ln -s "$REPO/scripts/lib" "$ZERO_MUTANT_ROOT/scripts/lib"
+# fyd_notify resolves its delegate as ${FYD_SCRIPTS_DIR}/notify.sh, where
+# FYD_SCRIPTS_DIR is the PARENT of side-effects.sh's own directory — i.e.
+# this mutant root's own scripts/, not the real repo's. Without this
+# symlink fyd_notify fails closed ("delegate not readable") and NO push
+# is ever attempted, which would make this mutation-kill check pass for
+# the wrong reason (silence, not a wrongly-celebratory push).
+ln -s "$REPO/scripts/notify.sh" "$ZERO_MUTANT_ROOT/scripts/notify.sh"
+ZERO_MUTANT="$ZERO_MUTANT_ROOT/scripts/reward-tracker.sh"
+sed 's/if \[ "\$REWARD_IS_ZERO" = "1" \]; then/if [ "0" = "1" ]; then/' "$TRACKER" > "$ZERO_MUTANT"
+chmod +x "$ZERO_MUTANT"
+if diff -q "$TRACKER" "$ZERO_MUTANT" >/dev/null 2>&1; then
+	FAIL=$((FAIL + 1))
+	FAILURES+=("zero-reward mutation kill check: sed produced no diff — guard not matched")
+	echo "  FAIL  zero-reward mutant sed produced no diff — guard not matched"
+else
+	# Re-run the SAME zero-reward scenario one more cycle forward (TX3 -> TX4)
+	# against the MUTANT binary, so the guard is disabled but everything else
+	# (fixtures, state) is realistic.
+	TX4="tx4FixtureAddValidator4444444444444"
+	CYCLE4_END=$((CYCLE3_END + 2800000))
+	cat > "$UPTIME_CYCLES_JSON" <<JSON
+{"cycles":[{"cycle_n":7,"start_unix":$TRACKED_START,"end_unix":$TRACKED_END,"final_self_stake_metal":2000},{"cycle_n":8,"start_unix":$TRACKED_END,"end_unix":$CYCLE2_END,"final_self_stake_metal":2000},{"cycle_n":9,"start_unix":$CYCLE2_END,"end_unix":$CYCLE3_END,"final_self_stake_metal":2000}]}
+JSON
+	write_getCurrentValidators "$TX4" "$CYCLE3_END" "$CYCLE4_END" "2000000000000" "3.0" "[]" "$NEXT_POTENTIAL_N"
+	write_getRewardUTXOs ""
+	NTFY_LINES_BEFORE_MUTANT=$([ -f "$NTFY_LOG" ] && wc -l < "$NTFY_LOG" | tr -d ' ' || echo 0)
+	set +e
+	STUB_FIXTURE_DIR="$FIX_DIR" STUB_RECORD_DIR="$TMP/record" PATH="$TMP/bin:$PATH" \
+		METALGO_RPC="http://127.0.0.1:9650" VALIDATOR_JSON="$VALIDATOR_JSON" \
+		UPTIME_CYCLES_JSON="$UPTIME_CYCLES_JSON" FY_STATE_DIR="$STATE_DIR" \
+		UPTIME_STATE_DIR="$UPTIME_STATE_DIR" NTFY_TOPIC_FILE="$TMP/ntfy-topic" \
+		FY_LIVE=1 bash "$ZERO_MUTANT" > "$TMP/zero-mutant-out.txt" 2>&1
+	ZERO_MUTANT_RC=$?
+	set -e
+	assert_eq "zero-reward mutant ran to completion (rc=0, not crashed)" "0" "$ZERO_MUTANT_RC"
+	MUTANT_ZERO_PUSH="$([ -f "$NTFY_LOG" ] && tail -n +"$((NTFY_LINES_BEFORE_MUTANT + 1))" "$NTFY_LOG" || echo '')"
+	if printf '%s' "$MUTANT_ZERO_PUSH" | grep -q '🎉'; then
+		PASS=$((PASS + 1))
+		printf '  PASS  mutant (REWARD_IS_ZERO guard disabled) sends the celebratory 🎉 push for a 0-METAL cycle — the guard is load-bearing\n'
+	else
+		FAIL=$((FAIL + 1))
+		FAILURES+=("zero-reward mutation kill check: mutant still did not celebrate a 0-METAL cycle")
+		echo "  FAIL  zero-reward mutant unexpectedly still sent the non-celebratory push"
+	fi
+fi
+
+
+echo ""
+echo "=== digest probes: rounding, JST date, maturity-horizon projection ==="
+# probe_digest <start_unix> <end_unix> [delegators_json] — runs the tracker
+# once in a FRESH sandbox (bootstrap run: no ledger, no prior state) and
+# prints the digest file's content. Each probe is independent, so the
+# assertions below only ever compare digest lines against each other or
+# against values computed here.
+probe_digest() {
+	local su="$1" eu="$2" dels="${3:-[]}" adr="${4:-0}" self_stake="${5:-2000}" ledger_seed="${6:-}"
+	local d="$TMP/probe-$$-$RANDOM"
+	mkdir -p "$d/state" "$d/ustate" "$d/fx"
+	echo "{\"nodeId\":\"$NODE_ID\",\"stake\":{\"self\":$self_stake}}" > "$d/validator.json"
+	[ -n "$ledger_seed" ] && cp "$ledger_seed" "$d/state/rewards-history.jsonl"
+	printf '{"cycles":[]}\n' > "$d/uptime-cycles.json"
+	echo '{"cycle_n":5}' > "$d/state/current-cycle-state.json"
+	cat > "$d/fx/getCurrentValidators.json" <<JSON
+{"jsonrpc":"2.0","id":1,"result":{"validators":[{"nodeID":"$NODE_ID","txID":"$TX1","startTime":"$su","endTime":"$eu","weight":"2000000000000","delegationFee":3.0,"delegators":$dels,"potentialReward":"$SELF_REWARD_N","accruedDelegateeReward":"$adr"}]}}
+JSON
+	cp "$FIX_DIR/getCurrentSupply.json" "$d/fx/getCurrentSupply.json"
+	STUB_FIXTURE_DIR="$d/fx" STUB_RECORD_DIR="$d" PATH="$TMP/bin:$PATH" \
+		METALGO_RPC="http://127.0.0.1:9650" VALIDATOR_JSON="$d/validator.json" \
+		UPTIME_CYCLES_JSON="$d/uptime-cycles.json" FY_STATE_DIR="$d/state" \
+		UPTIME_STATE_DIR="$d/ustate" NTFY_TOPIC_FILE="$TMP/ntfy-topic" FY_LIVE=1 \
+		bash "$TRACKER" > "$d/out.txt" 2>&1
+	cat "$d/state/reward-digest-line.txt"
+}
+
+# (a) 16.005 days must round DOWN to 16 (int(x+0.5) — not ceil), while
+#     32.97 rounds UP to 33 (asserted in the main flow above).
+NOW_EPOCH=$(date -u +%s)
+P_START=$((NOW_EPOCH - 3 * 86400))
+P_END=$((P_START + 1382832))                    # 16.005 days
+PROBE_A="$(probe_digest "$P_START" "$P_END")"
+assert_eq "16.005-day cycle renders as 16 days (round, not ceil); elapsed 3" "経過 3/16 日" "$(printf '%s' "$PROBE_A" | sed -n '5p' | sed 's/.*満期・//')"
+
+# (b) JST maturity date strips leading zeros in BOTH month and day:
+#     2030-03-05 00:30 JST == 2030-03-04T15:30:00Z -> "3/5".
+JST_END=$(python3 -c "
+import datetime
+print(int(datetime.datetime(2030, 3, 4, 15, 30, 0, tzinfo=datetime.timezone.utc).timestamp()))")
+PROBE_B="$(probe_digest $((JST_END - 33 * 86400)) "$JST_END")"
+assert_eq "maturity date is JST M/D with no leading zeros (UTC 3/4 15:30 -> JST 3/5)" "　3/5 満期・経過 0/33 日" "$(printf '%s' "$PROBE_B" | sed -n '5p')"
+
+# (c) The 見込み is the reward AT MATURITY: two cycles of IDENTICAL length
+#     but different elapsed fractions (5 vs 20 days in) must print the SAME
+#     line 2 and line 4, differing only in line 3's elapsed count.
+DELS_C="[{\"weight\":\"8845000000000\",\"startTime\":\"%s\",\"endTime\":\"%s\"}]"
+C1_START=$((NOW_EPOCH - 5 * 86400));  C1_END=$((C1_START + 33 * 86400))
+C2_START=$((NOW_EPOCH - 20 * 86400)); C2_END=$((C2_START + 33 * 86400))
+# shellcheck disable=SC2059  # DELS_C is a format template on purpose
+PROBE_C1="$(probe_digest "$C1_START" "$C1_END" "$(printf "$DELS_C" "$C1_START" "$C1_END")")"
+# shellcheck disable=SC2059
+PROBE_C2="$(probe_digest "$C2_START" "$C2_END" "$(printf "$DELS_C" "$C2_START" "$C2_END")")"
+assert_eq "lines 3-4 (見込み + halves) are identical at 5 and 20 elapsed days — no elapsed factor" \
+	"$(printf '%s' "$PROBE_C1" | sed -n '3,4p')" "$(printf '%s' "$PROBE_C2" | sed -n '3,4p')"
+assert_eq "line 6 (milestone remaining) is identical too — it is built from the same projection" \
+	"$(printf '%s' "$PROBE_C1" | sed -n '6p')" "$(printf '%s' "$PROBE_C2" | sed -n '6p')"
+assert_eq "line 5 differs only in elapsed: 5/33 vs 20/33" "経過 5/33 日|経過 20/33 日" \
+	"$(printf '%s' "$PROBE_C1" | sed -n '5p' | sed 's/.*満期・//')|$(printf '%s' "$PROBE_C2" | sed -n '5p' | sed 's/.*満期・//')"
+assert_true "line 4 fee part is non-zero with a delegator present (the fee projection is wired)" \
+	"$(printf '%s' "$PROBE_C1" | sed -n '4p' | grep -qE '手数料 \+0\.0$' && echo 0 || echo 1)"
+
+# (d) accruedDelegateeReward (fee cut already credited from delegations
+#     that matured mid-cycle, absent from .delegators[]) is ADDED to the
+#     fee projection: same cycle, same delegator, accrued 0 vs 7 METAL ->
+#     line 2's 手数料 differs by exactly 7.0 (and 見込み total by 7.0).
+# shellcheck disable=SC2059
+PROBE_D0="$(probe_digest "$C1_START" "$C1_END" "$(printf "$DELS_C" "$C1_START" "$C1_END")" 0)"
+# shellcheck disable=SC2059
+PROBE_D7="$(probe_digest "$C1_START" "$C1_END" "$(printf "$DELS_C" "$C1_START" "$C1_END")" 7000000000)"
+fee_of() { printf '%s' "$1" | sed -n '4p' | sed -E 's/.*手数料 \+([0-9,.]+)$/\1/' | tr -d ','; }
+total_of() { printf '%s' "$1" | sed -n '3p' | sed -E 's/.*見込み \+([0-9,.]+) METAL$/\1/' | tr -d ','; }
+assert_eq "line 4 手数料 rises by exactly the accruedDelegateeReward (7.0 METAL)" "7.0" \
+	"$(awk -v a="$(fee_of "$PROBE_D7")" -v b="$(fee_of "$PROBE_D0")" 'BEGIN{printf "%.1f", a-b}')"
+assert_eq "line 3 見込み total rises by the same 7.0" "7.0" \
+	"$(awk -v a="$(total_of "$PROBE_D7")" -v b="$(total_of "$PROBE_D0")" 'BEGIN{printf "%.1f", a-b}')"
+assert_eq "line 4 自己 is unchanged by accruedDelegateeReward" \
+	"$(printf '%s' "$PROBE_D0" | sed -n '4p' | sed -E 's/^　自己 ([^ ]+) .*/\1/')" \
+	"$(printf '%s' "$PROBE_D7" | sed -n '4p' | sed -E 's/^　自己 ([^ ]+) .*/\1/')"
+
+# (e) WIDE fixture: five-digit amounts everywhere (a seeded ledger with
+#     自己 12,345.6 / 手数料 12,345.6 and a self-stake whose full-cycle
+#     estimate is five digits). The one-line breakdown would be 33+
+#     columns, so it must split into one indented line per half — and
+#     every line must still be <= 30 columns.
+WIDE_LEDGER="$TMP/wide-ledger.jsonl"
+printf '%s\n' "{\"cycle_n\":4,\"reward_metal\":24691.2,\"self_stake_metal\":1500,\"start_unix\":1602800000,\"end_unix\":1605600000,\"add_validator_tx\":\"txWideFixtureCycle44444444444444\",\"observed_at\":\"2026-09-04T00:00:00Z\",\"schema_version\":2,\"self_reward_metal\":12345.6,\"fee_income_metal\":12345.6,\"split_known\":true,\"split_basis\":\"utxo-order\"}" > "$WIDE_LEDGER"
+# shellcheck disable=SC2059
+PROBE_W="$(probe_digest "$C1_START" "$C1_END" "$(printf "$DELS_C" "$C1_START" "$C1_END")" 0 1480000 "$WIDE_LEDGER")"
+printf '%s\n' "$PROBE_W" > "$TMP/wide-digest.txt"
+assert_true "wide fixture: 累積 is five digits (the fixture is actually wide)" "$(sed -n '1p' "$TMP/wide-digest.txt" | grep -qE '^累積 [0-9]{2},[0-9]{3}\.[0-9] METAL$' && echo 1 || echo 0)"
+assert_eq "wide fixture: the 累積 breakdown splits into one indented line per half" "　自己 12,345.6|　手数料 12,345.6" "$(sed -n '2p' "$TMP/wide-digest.txt")|$(sed -n '3p' "$TMP/wide-digest.txt")"
+assert_true "wide fixture: 見込み is five digits too" "$(grep -qE '^Cycle 5 見込み \+[0-9]{2},[0-9]{3}\.[0-9] METAL$' "$TMP/wide-digest.txt" && echo 1 || echo 0)"
+assert_true "wide fixture: every line <= 30 display columns" "$([ "$(max_display_width "$TMP/wide-digest.txt")" -le 30 ] && echo 1 || echo 0)"
+assert_true "wide fixture: every indented line starts with the full-width space" "$(grep -E '^[^　]' "$TMP/wide-digest.txt" | grep -qE '^(自己|手数料|不明)' && echo 0 || echo 1)"
+assert_eq "realistic fixture (probe C1) has exactly 6 lines" "6" "$(printf '%s\n' "$PROBE_C1" | wc -l | tr -d ' ')"
+
+echo ""
+echo "=== live maturity, single output: split decided by the stored potentialReward ==="
+# Two fresh end-to-end runs (bootstrap -> maturity) with ONE reward output
+# each: equal to potentialReward -> self; different -> the abort-path fee
+# output. Same fixture plumbing as replay_full_scenario below, but with a
+# caller-chosen UTXO set and a captured ledger row.
+single_output_maturity() {
+	local hexes="$1" d="$TMP/single-$$-$RANDOM"
+	local st="$d/state" ust="$d/ustate" fx="$d/fx"
+	mkdir -p "$st" "$ust" "$fx"
+	echo "{\"nodeId\":\"$NODE_ID\",\"stake\":{\"self\":2000}}" > "$d/validator.json"
+	echo '{"cycle_n":7}' > "$st/current-cycle-state.json"
+	printf '{"cycles":[]}\n' > "$d/uptime-cycles.json"
+	cp "$FIX_DIR/getCurrentSupply.json" "$fx/getCurrentSupply.json"
+	cat > "$fx/getCurrentValidators.json" <<JSON
+{"jsonrpc":"2.0","id":1,"result":{"validators":[{"nodeID":"$NODE_ID","txID":"$TX1","startTime":"$TRACKED_START","endTime":"$TRACKED_END","weight":"2000000000000","delegationFee":3.0,"delegators":[],"potentialReward":"$SELF_REWARD_N"}]}}
+JSON
+	STUB_FIXTURE_DIR="$fx" STUB_RECORD_DIR="$d" PATH="$TMP/bin:$PATH" \
+		METALGO_RPC="http://127.0.0.1:9650" VALIDATOR_JSON="$d/validator.json" \
+		UPTIME_CYCLES_JSON="$d/uptime-cycles.json" FY_STATE_DIR="$st" \
+		UPTIME_STATE_DIR="$ust" NTFY_TOPIC_FILE="$TMP/ntfy-topic" FY_LIVE=1 \
+		bash "$TRACKER" > "$d/o1.txt" 2>&1
+	cat > "$fx/getCurrentValidators.json" <<JSON
+{"jsonrpc":"2.0","id":1,"result":{"validators":[{"nodeID":"$NODE_ID","txID":"$TX2","startTime":"$TRACKED_END","endTime":"$CYCLE2_END","weight":"2000000000000","delegationFee":3.0,"delegators":[],"potentialReward":"$NEXT_POTENTIAL_N"}]}}
+JSON
+	cat > "$d/uptime-cycles.json" <<JSON
+{"cycles":[{"cycle_n":7,"start_unix":$TRACKED_START,"end_unix":$TRACKED_END,"final_self_stake_metal":2000}]}
+JSON
+	python3 -c "
+import json, sys
+print(json.dumps({'jsonrpc':'2.0','id':1,'result':{'numFetched':str(len(sys.argv[1:])),'utxos':sys.argv[1:],'encoding':'hex'}}))
+" $hexes > "$fx/getRewardUTXOs.json"
+	STUB_FIXTURE_DIR="$fx" STUB_RECORD_DIR="$d" PATH="$TMP/bin:$PATH" \
+		METALGO_RPC="http://127.0.0.1:9650" VALIDATOR_JSON="$d/validator.json" \
+		UPTIME_CYCLES_JSON="$d/uptime-cycles.json" FY_STATE_DIR="$st" \
+		UPTIME_STATE_DIR="$ust" NTFY_TOPIC_FILE="$TMP/ntfy-topic" FY_LIVE=1 \
+		bash "$TRACKER" > "$d/o2.txt" 2>&1
+	jq -r '"\(.split_known) \(.self_reward_metal) \(.fee_income_metal)"' "$st/rewards-history.jsonl"
+}
+assert_eq "single output == TX1's STORED potentialReward -> self 50.5 / fee 0, known (TX2's differing hint is not what is compared)" "true 50.500000000 0" \
+	"$(single_output_maturity "$SELF_REWARD_HEX")"
+assert_eq "single output != potentialReward -> self 0 / fee 12.25, known (abort path)" "true 0 12.250000000" \
+	"$(single_output_maturity "$FEE_REWARD_HEX")"
+# m-2: LARGER than the hint is equally "not the self reward" — equality,
+# never an ordering, decides the single-output case.
+assert_eq "single output LARGER than potentialReward -> self 0 / fee 70, known (equality, not >=)" "true 0 70.000000000" \
+	"$(single_output_maturity "$(build_utxo_hex 70000000000 2)")"
+
+echo ""
+echo "=== corrupt ledger: one non-JSON line makes EVERY path fail closed (exit 10) ==="
+# Sandbox with a ledger of one valid v2 row (cycle 3, TX_C) followed by one
+# line that is not JSON. Nothing may be appended to, deduplicated against,
+# or summarized from such a file — a parse failure is structural, not
+# "no rows" (review I-4: it used to re-append the recorded txID under a
+# second cycle_n and print 累積 0).
+corrupt_ledger_run() {
+	# $1 = sandbox dir (created here), rest = tracker args
+	local d="$1"; shift
+	local st="$d/state" ust="$d/ustate" fx="$d/fx"
+	mkdir -p "$st" "$ust" "$fx"
+	echo "{\"nodeId\":\"$NODE_ID\",\"stake\":{\"self\":2000}}" > "$d/validator.json"
+	echo '{"cycle_n":7}' > "$st/current-cycle-state.json"
+	cat > "$d/uptime-cycles.json" <<JSON
+{"cycles":[{"cycle_n":3,"start_unix":1600000000,"end_unix":1602800000,"final_self_stake_metal":1500},{"cycle_n":2,"start_unix":1597000000,"end_unix":1599800000,"final_self_stake_metal":1500}]}
+JSON
+	printf '%s\n' "{\"cycle_n\":3,\"reward_metal\":9.990000000,\"self_stake_metal\":1500,\"start_unix\":1600000000,\"end_unix\":1602800000,\"add_validator_tx\":\"$TX_C\",\"observed_at\":\"2026-09-04T00:00:00Z\",\"schema_version\":2,\"self_reward_metal\":null,\"fee_income_metal\":null,\"split_known\":false,\"split_basis\":\"refused:single-no-hint\"}" > "$st/rewards-history.jsonl"
+	printf 'this line is not json\n' >> "$st/rewards-history.jsonl"
+	cp "$FIX_DIR/getCurrentSupply.json" "$fx/getCurrentSupply.json"
+	cat > "$fx/getCurrentValidators.json" <<JSON
+{"jsonrpc":"2.0","id":1,"result":{"validators":[{"nodeID":"$NODE_ID","txID":"$TX1","startTime":"$TRACKED_START","endTime":"$TRACKED_END","weight":"2000000000000","delegationFee":3.0,"delegators":[],"potentialReward":"$SELF_REWARD_N","accruedDelegateeReward":"0"}]}}
+JSON
+	python3 -c "
+import json
+print(json.dumps({'jsonrpc':'2.0','id':1,'result':{'numFetched':'1','utxos':['$(build_utxo_hex 9990000000 2)'],'encoding':'hex'}}))
+" > "$fx/getRewardUTXOs.json"
+	set +e
+	STUB_FIXTURE_DIR="$fx" STUB_RECORD_DIR="$d" PATH="$TMP/bin:$PATH" \
+		METALGO_RPC="http://127.0.0.1:9650" VALIDATOR_JSON="$d/validator.json" \
+		UPTIME_CYCLES_JSON="$d/uptime-cycles.json" FY_STATE_DIR="$st" \
+		UPTIME_STATE_DIR="$ust" NTFY_TOPIC_FILE="$TMP/ntfy-topic" FY_LIVE=1 \
+		bash "$TRACKER" "$@" > "$d/out.txt" 2>&1
+	CORRUPT_RC=$?
+	set -e
+}
+TX_C="txCorruptLedgerProbeCycle3333333333"
+
+CL1="$TMP/corrupt-backfill"
+corrupt_ledger_run "$CL1" --backfill "$TX_C" 2
+assert_eq "corrupt ledger: --backfill of the already-recorded txID under another cycle_n exits 10" "10" "$CORRUPT_RC"
+assert_eq "corrupt ledger: --backfill appended nothing (still 2 lines)" "2" "$(wc -l < "$CL1/state/rewards-history.jsonl" | tr -d ' ')"
+assert_true "corrupt ledger: --backfill names the structural failure on stderr" "$(grep -q 'ledger unparseable' "$CL1/out.txt" && echo 1 || echo 0)"
+
+CL2="$TMP/corrupt-daily"
+corrupt_ledger_run "$CL2"
+assert_eq "corrupt ledger: the normal daily run exits 10" "10" "$CORRUPT_RC"
+assert_true "corrupt ledger: no digest block was generated (累積 0 is never shown for an unreadable ledger)" "$([ ! -e "$CL2/state/reward-digest-line.txt" ] && echo 1 || echo 0)"
+assert_true "corrupt ledger: no in-flight state was written either (nothing runs past the gate)" "$([ ! -e "$CL2/state/reward-tracker-state.json" ] && echo 1 || echo 0)"
+
+echo ""
+echo "=== numeric non-leak: no METAL amount ever appears in stdout/stderr ==="
+# Re-run the full scenario sequence once more end-to-end, capturing every
+# invocation's combined output into one aggregate log, then grep it. A
+# METAL amount looks like one or more digits, optionally comma-grouped,
+# optionally with a decimal fraction — checked broadly (not just "X.YY
+# METAL") because the constitution's ask is "no METAL number", not "no
+# number shaped exactly like the notify body's own formatting".
+AGG_LOG="$TMP/record/aggregate-leak-check.log"
+: > "$AGG_LOG"
+
+replay_full_scenario() {
+	local out_dir="$1" tracker_bin="$2"
+	local st="$out_dir/state" ust="$out_dir/uptime-state" fx="$out_dir/fixtures"
+	mkdir -p "$st" "$ust" "$fx"
+	echo "{\"nodeId\":\"$NODE_ID\",\"stake\":{\"self\":2000}}" > "$out_dir/validator.json"
+	echo '{"cycle_n":7}' > "$st/current-cycle-state.json"
+	printf '{"cycles":[]}\n' > "$out_dir/uptime-cycles.json"
+
+	cat > "$fx/getCurrentValidators.json" <<JSON
+{"jsonrpc":"2.0","id":1,"result":{"validators":[{"nodeID":"$NODE_ID","txID":"$TX1","startTime":"$TRACKED_START","endTime":"$TRACKED_END","weight":"2000000000000","delegationFee":3.0,"delegators":[{"weight":"8845000000000","startTime":"$TRACKED_START","endTime":"$TRACKED_END"}],"potentialReward":"$SELF_REWARD_N"}]}}
+JSON
+	echo "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"supply\":\"350000000000000000\",\"height\":\"1\"}}" > "$fx/getCurrentSupply.json"
+
+	local out1="$out_dir/o1.txt"
+	STUB_FIXTURE_DIR="$fx" STUB_RECORD_DIR="$out_dir" PATH="$TMP/bin:$PATH" \
+		METALGO_RPC="http://127.0.0.1:9650" VALIDATOR_JSON="$out_dir/validator.json" \
+		UPTIME_CYCLES_JSON="$out_dir/uptime-cycles.json" FY_STATE_DIR="$st" \
+		UPTIME_STATE_DIR="$ust" NTFY_TOPIC_FILE="$TMP/ntfy-topic" FY_LIVE=1 \
+		bash "$tracker_bin" > "$out1" 2>&1
+	cat "$out1" >> "$AGG_LOG"
+
+	cat > "$fx/getCurrentValidators.json" <<JSON
+{"jsonrpc":"2.0","id":1,"result":{"validators":[{"nodeID":"$NODE_ID","txID":"$TX2","startTime":"$TRACKED_END","endTime":"$CYCLE2_END","weight":"2000000000000","delegationFee":3.0,"delegators":[],"potentialReward":"$NEXT_POTENTIAL_N"}]}}
+JSON
+	cat > "$out_dir/uptime-cycles.json" <<JSON
+{"cycles":[{"cycle_n":7,"start_unix":$TRACKED_START,"end_unix":$TRACKED_END,"final_self_stake_metal":2000}]}
+JSON
+	python3 -c "
+import json
+print(json.dumps({'jsonrpc':'2.0','id':1,'result':{'numFetched':'2','utxos':['$SELF_REWARD_HEX','$FEE_REWARD_HEX'],'encoding':'hex'}}))
+" > "$fx/getRewardUTXOs.json"
+	local out2="$out_dir/o2.txt"
+	STUB_FIXTURE_DIR="$fx" STUB_RECORD_DIR="$out_dir" PATH="$TMP/bin:$PATH" \
+		METALGO_RPC="http://127.0.0.1:9650" VALIDATOR_JSON="$out_dir/validator.json" \
+		UPTIME_CYCLES_JSON="$out_dir/uptime-cycles.json" FY_STATE_DIR="$st" \
+		UPTIME_STATE_DIR="$ust" NTFY_TOPIC_FILE="$TMP/ntfy-topic" FY_LIVE=1 \
+		bash "$tracker_bin" > "$out2" 2>&1
+	cat "$out2" >> "$AGG_LOG"
+}
+
+REAL_DIR="$TMP/leak-real"
+mkdir -p "$REAL_DIR"
+replay_full_scenario "$REAL_DIR" "$TRACKER"
+
+LEAK_RE='[0-9][0-9,]*\.[0-9]+'
+LEAK_HITS=$(grep -oE "$LEAK_RE" "$AGG_LOG" || true)
+assert_true "real script: zero decimal-number matches across full replay (a cycle_n like '7' or a count don't match this pattern; only a decimal amount does)" "$([ -z "$LEAK_HITS" ] && echo 1 || echo 0)"
+if [ -n "$LEAK_HITS" ]; then
+	echo "  (leaked-looking tokens found in real-script run — should be none):"
+	printf '%s\n' "$LEAK_HITS" | sed 's/^/    /'
+fi
+
+echo ""
+echo "=== mutation kill check: non-leak grep must actually catch a real leak ==="
+echo "(a MUTANT copy of reward-tracker.sh with one added debug echo of"
+echo " REWARD_METAL must fail the same grep the real script passes above.)"
+# The mutant must live at scripts/reward-tracker.sh under SOME root whose
+# scripts/lib/ resolves to the real libraries — reward-tracker.sh computes
+# its own ROOT from $0's dirname (self-locating, like every script in this
+# repo), so a mutant copy dropped in a bare tmp file would resolve ROOT to
+# the wrong place and fail at the side-effects.sh readability check before
+# ever reaching the mutated line. Mirror the real layout with a symlink
+# instead of copying scripts/lib/ wholesale.
+MUTANT_ROOT="$TMP/mutant-root"
+mkdir -p "$MUTANT_ROOT/scripts"
+ln -s "$REPO/scripts/lib" "$MUTANT_ROOT/scripts/lib"
+# Same reasoning as the zero-reward mutant root below: fyd_notify needs
+# notify.sh reachable at THIS root's own scripts/, not just scripts/lib/.
+ln -s "$REPO/scripts/notify.sh" "$MUTANT_ROOT/scripts/notify.sh"
+MUTANT="$MUTANT_ROOT/scripts/reward-tracker.sh"
+sed 's/echo "reward-tracker: appended matured cycle record"/echo "reward-tracker: appended matured cycle record (DEBUG reward=${REWARD_METAL} METAL)"/' \
+	"$TRACKER" > "$MUTANT"
+chmod +x "$MUTANT"
+if diff -q "$TRACKER" "$MUTANT" >/dev/null 2>&1; then
+	FAIL=$((FAIL + 1))
+	FAILURES+=("mutation kill check: sed produced no diff — target line not found, mutation not actually applied")
+	echo "  FAIL  mutant sed produced no diff — target echo not matched"
+else
+	MUTANT_DIR="$TMP/leak-mutant"
+	mkdir -p "$MUTANT_DIR"
+	AGG_LOG="$TMP/record/aggregate-leak-check-mutant.log"
+	: > "$AGG_LOG"
+	replay_full_scenario "$MUTANT_DIR" "$MUTANT"
+	MUTANT_LEAK_HITS=$(grep -oE "$LEAK_RE" "$AGG_LOG" || true)
+	if [ -n "$MUTANT_LEAK_HITS" ]; then
+		PASS=$((PASS + 1))
+		printf '  PASS  mutant (debug echo of REWARD_METAL added) DOES leak a decimal amount (%s) — the non-leak check has teeth\n' "$(printf '%s' "$MUTANT_LEAK_HITS" | head -1)"
+	else
+		FAIL=$((FAIL + 1))
+		FAILURES+=("mutation kill check: mutant still produced zero leak matches — the non-leak grep is not sensitive")
+		echo "  FAIL  mutant unexpectedly leaked nothing — non-leak check is not sensitive"
+	fi
+fi
+
+echo ""
+echo "Total: PASS=$PASS FAIL=$FAIL"
+if [ "$FAIL" -gt 0 ]; then
+	printf '\nFailures:\n'
+	for f in "${FAILURES[@]}"; do printf '  - %s\n' "$f"; done
+	exit 1
+fi
+exit 0

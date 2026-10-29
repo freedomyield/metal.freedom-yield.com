@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>リスク開示 — Freedom Yield Metal</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="本 Metal Blockchain validator への委任・依拠に伴う既知の制約とリスクを率直に開示する — 小規模 self-stake、単一リージョンのインフラ、委任集中、その他。">
+<link rel="canonical" href="https://metal.freedom-yield.com/ja/risk-disclosure/">
+<link rel="alternate" hreflang="en" href="https://metal.freedom-yield.com/risk-disclosure/">
+<link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/risk-disclosure/">
+<link rel="alternate" hreflang="x-default" href="https://metal.freedom-yield.com/risk-disclosure/">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#07080c">
+<meta name="color-scheme" content="dark">
+<script defer src="/assets/main.js"></script>
+<link rel="preconnect" href="https://www.googletagmanager.com" crossorigin>
+<link rel="dns-prefetch" href="https://www.googletagmanager.com">
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
+<script defer src="/assets/gtag-init.js"></script>
+<link rel="preload" as="image" href="/assets/photos/dark-code-960.webp" imagesrcset="/assets/photos/dark-code-480.webp 480w, /assets/photos/dark-code-960.webp 960w, /assets/photos/dark-code.webp 1600w" imagesizes="50vw">
+</head>
+<body>
+<a href="#main" class="skip-link">メイン本文へスキップ</a>
+
+<nav class="topnav">
+	<div class="topnav-inner">
+		<a href="/ja/" class="brand">Freedom Yield · Metal</a>
+		<details class="nav-menu">
+			<summary class="nav-toggle" aria-label="メニューを開く / 閉じる">
+				<span class="hamburger-icon" aria-hidden="true"></span>
+			</summary>
+						<div class="nav">
+				<a href="/ja/#status">状態</a>
+				<a href="/ja/about-metal/">概要</a>
+				<div class="nav-dropdown">
+					<a href="/ja/selection-evidence/" class="nav-dropdown-toggle">機関向け</a>
+					<div class="nav-dropdown-menu">
+						<a href="/ja/selection-evidence/">選定エビデンス</a>
+						<a href="/ja/commitments/">運用者の commitment</a>
+						<a href="/ja/risk-disclosure/" aria-current="page">リスク開示</a>
+						<a href="/ja/jurisdiction/">管轄姿勢</a>
+						<a href="/ja/security-posture/">セキュリティ姿勢</a>
+						<a href="/ja/continuity/">事業継続性</a>
+						<a href="/ja/pledge/">Transparent Validator Pledge</a>
+						<a href="/ja/subnet-readiness/">Subnet 適性</a>
+						<a href="/ja/reference-architecture/">リファレンスアーキテクチャ</a>
+						<a href="/ja/subnet-pilot/">Subnet pilot</a>
+						<a href="/ja/decommission/">廃止予告ポリシー</a>
+						<a href="/ja/inquiry/">問い合わせ</a>
+					</div>
+				</div>
+				<div class="nav-dropdown">
+					<a href="/ja/delegate/" class="nav-dropdown-toggle">委任者向け</a>
+					<div class="nav-dropdown-menu">
+						<a href="/ja/delegate/">委任する</a>
+						<a href="/ja/#status">ライブ状態</a>
+						<a href="/ja/continuity/">事業継続性</a>
+					</div>
+				</div>
+				<div class="nav-dropdown">
+					<a href="/ja/data/" class="nav-dropdown-toggle">技術者向け</a>
+					<div class="nav-dropdown-menu">
+						<a href="/ja/data/">公開データ</a>
+						<a href="/ja/verify/">アイデンティティ検証</a>
+						<a href="/ja/journal/">運用日誌</a>
+						<a href="/ja/network/">ネットワーク観測</a>
+						<a href="/ja/incidents/">インシデントログ</a>
+					</div>
+				</div>
+				<a href="/risk-disclosure/" class="nav-lang" data-ga-event="language_switch" data-ga-param-to="en">EN</a>
+			</div>
+		</details>
+	</div>
+</nav>
+
+<header class="hero hero--simple hero--photo-risk">
+	<div class="container">
+		<p class="hero-eyebrow">合理的評価者が指摘するであろう事項</p>
+		<h1>リスク開示</h1>
+		<p class="hero-lead">
+			本 validator への委任、または本 validator への依拠に伴う既知の制約とリスクを記載する。意図は率直な開示であって威圧ではない。
+			各項目は、合理的な評価者が due diligence で取り上げるであろう事実 — それを我々の側から先に提示する。
+		</p>
+	</div>
+</header>
+
+<main id="main" class="container">
+
+	<nav class="breadcrumb" aria-label="パンくず">
+		<ol>
+			<li><a href="/ja/">ホーム</a></li>
+			<li><a href="/ja/selection-evidence/">選定エビデンス</a></li>
+			<li aria-current="page">リスク開示</li>
+		</ol>
+	</nav>
+
+
+	<div class="layout-with-sidebar">
+		<aside class="section-sidebar">
+			<details class="section-sidebar-details">
+				<summary class="section-sidebar-summary">
+					<span class="section-sidebar-eyebrow">機関向け</span>
+				</summary>
+				<nav class="section-sidebar-nav" aria-label="機関向け page navigation">
+					<ol class="section-sidebar-list">
+					<li><a href="/ja/selection-evidence/">選定エビデンス</a></li>
+					<li><a href="/ja/commitments/">運用者の commitment</a></li>
+					<li><a href="/ja/risk-disclosure/" aria-current="page">リスク開示</a></li>
+					<li><a href="/ja/jurisdiction/">管轄姿勢</a></li>
+					<li><a href="/ja/security-posture/">セキュリティ姿勢</a></li>
+					<li><a href="/ja/continuity/">事業継続性</a></li>
+					<li><a href="/ja/pledge/">Transparent Validator Pledge</a></li>
+					<li><a href="/ja/subnet-readiness/">Subnet 適性</a></li>
+					<li><a href="/ja/reference-architecture/">リファレンスアーキテクチャ</a></li>
+					<li><a href="/ja/subnet-pilot/">Subnet pilot</a></li>
+					<li><a href="/ja/decommission/">廃止予告ポリシー</a></li>
+					<li><a href="/ja/inquiry/">問い合わせ</a></li>
+					</ol>
+				</nav>
+			</details>
+		</aside>
+		<div class="layout-content">
+	<section class="card scenario-group--operator">
+		<figure class="card-figure" aria-hidden="true">
+			<img  src="/assets/photos/dark-code.webp" srcset="/assets/photos/dark-code-480.webp 480w, /assets/photos/dark-code-960.webp 960w, /assets/photos/dark-code.webp 1600w" sizes="(max-width: 600px) 100vw, (max-width: 1200px) 60vw, 800px" width="1600" height="1067" alt="" loading="lazy" decoding="async">
+		</figure>
+		<h2>既知のリスク</h2>
+
+		<article class="continuity-scenario">
+			<h3>1. Self-stake が小規模</h3>
+			<p>Self-stake は小規模である。委任受入容量は protocol 設計により self-stake の 5 倍に上限が設定されている。受入容量は
+			再登録時に運用者が self-stake を追加した分だけ拡大する。現在値は <a href="/ja/#status">status</a> セクションおよび
+			<a href="/ja/journal/">運用日誌</a> に公開しており、cycle 期間中は変動しない。</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>2. validator インフラが単一リージョン</h3>
+			<p>validator は単一リージョンの単一 VPS で稼働している。multi-region failover は存在しない。当該 provider のリージョン
+			障害は validator downtime に直結する。事業継続性ページは本シナリオの復旧 model を文書化しているが、それは「回避」ではなく
+			「復旧」である。</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>3. 委任の集中</h3>
+			<p>少数の大口委任者が受入 stake を集中させる可能性がある。cycle 末に大口委任者 1 件が抜けるだけで本 validator の経済構造は
+			大きく変動する。これは小規模 validator である事実の帰結であり、現スケールにおいて運用者が取り得る mitigation は存在しない。</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>4. subnet 採用は保証されない</h3>
+			<p>本 validator は Metal Blockchain primary network に参加している。将来の subnet validator set への組み入れは、
+			当該 subnet operator の裁量による。本サイト上の表現が事前選定・割当・ subnet operator との bilateral arrangement を
+			意味するものは一切ない。</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>5. public web の可用性 ≠ validator uptime</h3>
+			<p><code>metal.freedom-yield.com</code> が到達不能でも <code>metalgo</code> は consensus signal を発信し続ける場合がある。
+			逆にサイトが見えていても validator が degrade している場合がある。validator の状態確認は必ず
+			<a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer" target="_blank">explorer</a> または
+			<a href="/api/validator.json"><code>/api/validator.json</code></a> で on-chain に確認すること。</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>6. subnet 固有要件は別インフラを要する可能性</h3>
+			<p>subnet validation は通常、<code>metalgo</code> プロセスを追加で要し、専用 capacity も必要となる。本 validator の
+			現行インフラは subnet validation を自動的にカバーしない。subnet 参加は別個の取り組みであり、実施する場合は
+			commitment §8 に従い事前に公示する。</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>7. 規制 / コンプライアンス対応は別途レビューが必要</h3>
+			<p>本 validator は primary network 参加者である。コンプライアンス attestation を要する規制対象 counterparty(銀行、
+			規制対象ファンド、同等の規制対象 entity 等)は、独立の bilateral due diligence を実施する必要がある。本ページは
+			compliance attestation ではなく、本サイトの記述は attestation として解されるものではない。</p>
+		</article>
+
+		<article class="continuity-scenario">
+			<h3>8. 単一運用者依存</h3>
+			<p>本 validator は単一の個人によって運用されている。職務分掌は無く、 on-call rotation チーム / 独立 change-approval
+			board / 組織的な意思決定冗長性は存在しない。 Constitution および Operating Model で validator host の変更について「AI が提案、
+			operator が変更ごとに承認、 AI が実行して検証」という pattern を定義している (operator が自ら実行することもあり、
+			鍵の保管・keystore の解錠・wallet 操作は operator に残る)。 AI は operator の承認なしには動かないため、
+			最終承認の権限は依然として同一人物にあり、 AI assistant は独立した審査者ではない。 日本の
+			営業時間外の応答時間は best-effort であり、 guaranteed ではない。 renewal 時に operator が応答不可になった場合、
+			validator は current cycle 終了時に自然に validator set から離脱し、 委任された stake は no-slashing 仕様により
+			自動的に返却される (continuity ページ参照)。 つまり validator 自体は operator 不在による元本損失リスクを孕まないが、
+			operator の継続的応答に依存する評価者は本制約を考慮されたい。</p>
+		</article>
+	</section>
+
+	<section class="card">
+		<h2>対の文書</h2>
+		<p>運用者が <em>自らに課す</em> commitment は <a href="/ja/commitments/">commitment ページ</a> にある。両ページは
+		セットで読まれることを想定している。</p>
+	</section>
+
+		</div>
+	</div>
+</main>
+
+<footer class="site-footer">
+	<div class="container">
+		<div class="footer-grid">
+			<div class="footer-brand">
+				<h3>Freedom Yield · Metal</h3>
+				<p>Metal Blockchain の long-horizon validator。透明な uptime 開示、公開監査証跡。</p>
+			</div>
+			<nav class="footer-col" aria-label="機関向け">
+				<h4>機関向け</h4>
+				<ul>
+					<li><a href="/ja/selection-evidence/">選定エビデンス</a></li>
+					<li><a href="/ja/commitments/">Commitment</a></li>
+					<li><a href="/ja/risk-disclosure/">リスク開示</a></li>
+					<li><a href="/ja/jurisdiction/">日本拠点姿勢</a></li>
+					<li><a href="/ja/subnet-readiness/">Subnet 適性</a></li>
+					<li><a href="/ja/reference-architecture/">リファレンスアーキテクチャ</a></li>
+					<li><a href="/ja/subnet-pilot/">Subnet pilot</a></li>
+					<li><a href="/ja/pledge/">Pledge</a></li>
+					<li><a href="/ja/security-posture/">セキュリティ姿勢</a></li>
+					<li><a href="/ja/decommission/">Decommission</a></li>
+					<li><a href="/ja/inquiry/">問い合わせ</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="委任者向け">
+				<h4>委任者向け</h4>
+				<ul>
+					<li><a href="/ja/delegate/">委任する</a></li>
+					<li><a href="/ja/#status">状態</a></li>
+					<li><a href="/ja/continuity/">事業継続性</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="技術者向け">
+				<h4>技術者向け</h4>
+				<ul>
+					<li><a href="/ja/verify/">アイデンティティ検証</a></li>
+					<li><a href="/ja/data/">公開データ</a></li>
+					<li><a href="/ja/journal/">運用日誌</a></li>
+					<li><a href="/ja/network/">ネットワーク</a></li>
+					<li><a href="/ja/incidents/">インシデント</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="関連">
+				<h4>関連</h4>
+				<ul>
+					<li><a href="/ja/sitemap/">サイトマップ</a></li>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer" target="_blank">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer" target="_blank">エクスプローラ ↗</a></li>
+					<li><a href="#acknowledgments">感謝</a></li>
+					<li><a href="mailto:info@metal.freedom-yield.com">お問い合わせ</a></li>
+				</ul>
+			</nav>
+		</div>
+		<hr class="footer-divider">
+		<p class="footer-disclaimer"><strong>免責事項:</strong> Freedom Yield は Metal Blockchain 上で稼働する独立した第三者バリデータです。Metallicus 社および Metal Blockchain Foundation の関連会社・提携先・出資先・公式運営者ではありません。各商標は各権利者に帰属します。</p>
+		<div class="footer-bottom">
+			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer" target="_blank">Metal Blockchain</a>.</p>
+			<p>© 2026 Freedom Yield · Metal validator</p>
+		</div>
+	</div>
+</footer>
+</body>
+</html>

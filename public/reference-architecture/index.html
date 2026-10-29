@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reference architecture — Freedom Yield Metal</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="A technical reference architecture for a small, transparent Metal Blockchain validator: two-host topology, push-only data flow, key separation, and the principles behind the operational choices.">
+<link rel="canonical" href="https://metal.freedom-yield.com/reference-architecture/">
+<link rel="alternate" hreflang="en" href="https://metal.freedom-yield.com/reference-architecture/">
+<link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/reference-architecture/">
+<link rel="alternate" hreflang="x-default" href="https://metal.freedom-yield.com/reference-architecture/">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#07080c">
+<meta name="color-scheme" content="dark">
+<script defer src="/assets/main.js"></script>
+<link rel="preconnect" href="https://www.googletagmanager.com" crossorigin>
+<link rel="dns-prefetch" href="https://www.googletagmanager.com">
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
+<script defer src="/assets/gtag-init.js"></script>
+<link rel="preload" as="image" href="/assets/photos/circuit-board-960.webp" imagesrcset="/assets/photos/circuit-board-480.webp 480w, /assets/photos/circuit-board-960.webp 960w, /assets/photos/circuit-board.webp 1600w" imagesizes="50vw">
+</head>
+<body>
+<a href="#main" class="skip-link">Skip to main content</a>
+
+<nav class="topnav">
+	<div class="topnav-inner">
+		<a href="/" class="brand">Freedom Yield · Metal</a>
+		<details class="nav-menu">
+			<summary class="nav-toggle" aria-label="Open / close menu">
+				<span class="hamburger-icon" aria-hidden="true"></span>
+			</summary>
+						<div class="nav">
+				<a href="/#status">Status</a>
+				<a href="/about-metal/">About</a>
+				<div class="nav-dropdown">
+					<a href="/selection-evidence/" class="nav-dropdown-toggle">For institutions</a>
+					<div class="nav-dropdown-menu">
+						<a href="/selection-evidence/">Selection evidence</a>
+						<a href="/commitments/">Operator commitments</a>
+						<a href="/risk-disclosure/">Risk disclosure</a>
+						<a href="/jurisdiction/">Jurisdiction posture</a>
+						<a href="/security-posture/">Security posture</a>
+						<a href="/continuity/">Continuity</a>
+						<a href="/pledge/">Transparent Validator Pledge</a>
+						<a href="/subnet-readiness/">Subnet readiness</a>
+						<a href="/reference-architecture/" aria-current="page">Reference architecture</a>
+						<a href="/subnet-pilot/">Subnet pilot</a>
+						<a href="/decommission/">Decommission policy</a>
+						<a href="/inquiry/">Inquiry</a>
+					</div>
+				</div>
+				<div class="nav-dropdown">
+					<a href="/delegate/" class="nav-dropdown-toggle">For delegators</a>
+					<div class="nav-dropdown-menu">
+						<a href="/delegate/">Delegate</a>
+						<a href="/#status">Live status</a>
+						<a href="/continuity/">Continuity</a>
+					</div>
+				</div>
+				<div class="nav-dropdown">
+					<a href="/data/" class="nav-dropdown-toggle">For engineers</a>
+					<div class="nav-dropdown-menu">
+						<a href="/data/">Open data</a>
+						<a href="/verify/">Identity verification</a>
+						<a href="/journal/">Cycle journal</a>
+						<a href="/network/">Network observatory</a>
+						<a href="/incidents/">Incident log</a>
+					</div>
+				</div>
+				<a href="/ja/reference-architecture/" class="nav-lang" data-ga-event="language_switch" data-ga-param-to="ja">JA</a>
+			</div>
+		</details>
+	</div>
+</nav>
+
+<header class="hero hero--simple hero--photo-reference">
+	<div class="container">
+		<p class="hero-eyebrow">How the operation is built</p>
+		<h1>Reference architecture</h1>
+		<p class="hero-lead">
+			A small validator should be small. This page describes the topology, data flow, and operational
+			principles behind Freedom Yield as it runs today. The intent is twofold: give an evaluator a
+			single technical reference, and document a pattern that another small operator could adopt.
+			Specific providers, IPs, and host paths are intentionally not disclosed; the pattern is the value.
+		</p>
+	</div>
+</header>
+
+<main id="main" class="container">
+
+	<nav class="breadcrumb" aria-label="Breadcrumb">
+		<ol>
+			<li><a href="/">Home</a></li>
+			<li><a href="/selection-evidence/">Selection evidence</a></li>
+			<li aria-current="page">Reference architecture</li>
+		</ol>
+	</nav>
+
+
+	<div class="layout-with-sidebar">
+		<aside class="section-sidebar">
+			<details class="section-sidebar-details">
+				<summary class="section-sidebar-summary">
+					<span class="section-sidebar-eyebrow">For institutions</span>
+				</summary>
+				<nav class="section-sidebar-nav" aria-label="Institutional pages">
+					<ol class="section-sidebar-list">
+					<li><a href="/selection-evidence/">Selection evidence</a></li>
+					<li><a href="/commitments/">Operator commitments</a></li>
+					<li><a href="/risk-disclosure/">Risk disclosure</a></li>
+					<li><a href="/jurisdiction/">Jurisdiction posture</a></li>
+					<li><a href="/security-posture/">Security posture</a></li>
+					<li><a href="/continuity/">Continuity</a></li>
+					<li><a href="/pledge/">Transparent Validator Pledge</a></li>
+					<li><a href="/subnet-readiness/">Subnet readiness</a></li>
+					<li><a href="/reference-architecture/" aria-current="page">Reference architecture</a></li>
+					<li><a href="/subnet-pilot/">Subnet pilot</a></li>
+					<li><a href="/decommission/">Decommission policy</a></li>
+					<li><a href="/inquiry/">Inquiry</a></li>
+					</ol>
+				</nav>
+			</details>
+		</aside>
+		<div class="layout-content">
+	<section class="card">
+		<figure class="card-figure" aria-hidden="true">
+			<img  src="/assets/photos/circuit-board.webp" srcset="/assets/photos/circuit-board-480.webp 480w, /assets/photos/circuit-board-960.webp 960w, /assets/photos/circuit-board.webp 1600w" sizes="(max-width: 600px) 100vw, (max-width: 1200px) 60vw, 800px" width="1600" height="1067" alt="" loading="lazy" decoding="async">
+		</figure>
+		<h2>Two-host topology</h2>
+		<p>The operation runs on two segregated commercial VPS instances. They have different roles, different reachability profiles, and different failure consequences.</p>
+		<details class="data-example" open>
+			<summary>Topology diagram</summary>
+			<pre class="cmd-box"><code>┌────────────────────────────────┐        ┌───────────────────────────────┐
+│  Validator host  (APAC region) │        │  Web host  (Japan region)     │
+│                                │        │                               │
+│  metalgo (Metal mainnet)       │        │  Caddy (HTTPS, CSP)           │
+│  cron-based monitoring         │        │  Static public site           │
+│  retry-with-backoff push       │        │  /api/*.json from validator   │
+│                                │        │                               │
+│  inbound: 9651 (peers only)    │        │  inbound: 80/443 (public)     │
+│  outbound: → web host (push)   │        │  inbound: 22 (operator only)  │
+└────────────────┬───────────────┘        └────────────────▲──────────────┘
+                 │                                         │
+                 │  one-way push (forced-command wrapper)  │
+                 └─────────────────────────────────────────┘</code></pre>
+		</details>
+		<p>The two hosts are sized differently. The validator host is sized for a single-network <code>metalgo</code> workload with comfortable margin. The web host is sized for static serving plus the small JSON files that the validator host writes to it.</p>
+	</section>
+
+	<section class="card">
+		<h2>Why two hosts</h2>
+		<p>The split is the single most consequential architectural decision in this setup, and it predates any feature work. Three reasons:</p>
+		<ol>
+			<li><strong>Validator uptime is the KPI.</strong> A web outage — DDoS, CDN issue, web-server crash — must not affect <code>metalgo</code> consensus signals. Hosting the public site on the same machine couples them; segregating them decouples them.</li>
+			<li><strong>Attack surface separation.</strong> The validator host exposes only peer-to-peer traffic to the public internet. SSH is closed to most of the world; web traffic is not served at all. The web host exposes 80/443 and is the obvious target — but a compromise there does not yield any validator key material.</li>
+			<li><strong>Capacity isolation.</strong> A spike in public-site traffic does not steal CPU from <code>metalgo</code>. A subnet expansion does not steal capacity from the public site.</li>
+		</ol>
+	</section>
+
+	<section class="card">
+		<h2>Validator host role</h2>
+		<ul>
+			<li><code>metalgo</code> binding to peer-to-peer port; staking keys held locally and never read by any other process.</li>
+			<li>Cron-driven health checks at small intervals: peer count, validator status, disk pressure, log anomalies.</li>
+			<li>Cron-driven data generation: validator state, peer geography, uptime history, fee-market summary, cycle ledger. Output is small JSON / JSONL, written atomically.</li>
+			<li>Outbound-only push to the web host using a dedicated SSH key bound to a single command (forced-command wrapper). The wrapper validates filename against an allowlist before atomic <code>mv</code>.</li>
+			<li>Push uses retry-with-backoff because the web host's SSH port sees constant brute-force noise; legitimate pushes occasionally lose to the random-drop logic. Two retries with backoff cover the observed failure rate.</li>
+			<li>Local persistence streams (append-only JSONL) for uptime, gini, peer changes, fee market, node health. These are the source of truth that the web host mirrors.</li>
+		</ul>
+		<p>Validator-host runbooks live in the public repository:</p>
+		<ul>
+			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/DISASTER_RECOVERY.md" rel="noopener noreferrer" target="_blank"><code>docs/DISASTER_RECOVERY.md</code></a></li>
+			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/KEY_ROTATION.md" rel="noopener noreferrer" target="_blank"><code>docs/KEY_ROTATION.md</code></a></li>
+			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/VALIDATOR_RENEWAL.md" rel="noopener noreferrer" target="_blank"><code>docs/VALIDATOR_RENEWAL.md</code></a></li>
+			<li><a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/INCIDENT_RESPONSE.md" rel="noopener noreferrer" target="_blank"><code>docs/INCIDENT_RESPONSE.md</code></a></li>
+		</ul>
+	</section>
+
+	<section class="card">
+		<h2>Web host role</h2>
+		<ul>
+			<li>Caddy serves the static site with automatic HTTPS, HSTS, and a strict <code>Content-Security-Policy</code> (<code>default-src 'none'</code> base, narrow allowlists per directive).</li>
+			<li>No web framework, no application server, no database — the surface is intentionally tiny.</li>
+			<li>Public JSON endpoints under <code>/api/*</code> are written by the validator host's push wrapper. The web host has no validator key material and cannot generate validator data itself.</li>
+			<li>GitHub Actions ships site-shell changes via SSH + rsync. The deploy rsync uses <code>--delete</code> with an explicit per-file exclude list for runtime-generated API feeds, so cron-pushed data is not wiped on deploys.</li>
+		</ul>
+	</section>
+
+	<section class="card">
+		<h2>One-way data flow</h2>
+		<p>All data flows from the validator host to the web host. The web host has no read access to the validator host. The push channel uses:</p>
+		<ul>
+			<li>A dedicated ed25519 SSH key with no privileges beyond invoking the wrapper.</li>
+			<li>A forced-command wrapper on the web host that validates filename against an allowlist (specific filenames, plus a hex-token <code>.ics</code> pattern for calendars).</li>
+			<li>JSON validation on receipt before atomic <code>mv</code> into the public web root.</li>
+			<li>Strict host key checking — no <code>StrictHostKeyChecking=no</code>.</li>
+		</ul>
+		<p>If the push key is compromised, the attacker can only write files whose names match the allowlist, into the specific destination directory, after passing the wrapper's content-type check. They cannot pivot.</p>
+	</section>
+
+	<section class="card">
+		<h2>Key separation</h2>
+		<p>Three distinct key categories, each held in a different place for a different reason:</p>
+		<dl class="data-meta">
+			<dt>Validator staking + BLS keys</dt><dd>Held only on the validator host. Encrypted backups maintained off-host per the rotation runbook. Used only by <code>metalgo</code> for consensus.</dd>
+			<dt>Operator identity key</dt><dd>Dedicated ed25519, held only on the operator's local workstation. Used to sign the off-chain identity manifest via <code>ssh-keygen -Y</code>. Never on validator or web host. Schema and verification procedure are documented at <a href="/api/identity.example.json"><code>/api/identity.example.json</code></a> + <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md" rel="noopener noreferrer" target="_blank"><code>docs/IDENTITY_VERIFICATION.md</code></a>.</dd>
+			<dt>Push key</dt><dd>Validator host → web host, ed25519, scoped to the forced-command wrapper. Cannot escape the wrapper's allowlist.</dd>
+		</dl>
+		<p>The validator's signing keys are never reused for off-chain signing or external authentication. This is a hard rule: every operational signing concern uses a key dedicated to that concern.</p>
+	</section>
+
+	<section class="card">
+		<h2>Monitoring, alerting, persistence</h2>
+		<ul>
+			<li>Cron-based scheduled checks at small intervals; failures are pushed to the operator via mobile push notification.</li>
+			<li>Append-only persistence streams (JSONL) record uptime samples, gini history, peer changes, fee-market history, node-health samples. These are the long-horizon audit trail.</li>
+			<li>Daily digest notifications summarise wallet balances, peer count, and cycle health. The 14-day retention window keeps notification noise bounded.</li>
+			<li>External API calls (RPC, explorer) use TTL caches measured in minutes-to-tens-of-minutes — cron frequency is not API-call frequency.</li>
+		</ul>
+	</section>
+
+	<section class="card">
+		<h2>What this page is not</h2>
+		<p>This is not a copy-pasteable deployment guide, a complete configuration dump, a recommendation that another operator adopt the same providers or specs, or an exhaustive description of every runbook. It is a structural reference: the principles, the topology, and the cross-host invariants. Specific providers, IPs, hostnames, ports, paths, and credentials are intentionally absent from this surface; an operator deciding to follow a similar pattern should make those choices independently from a fresh threat model.</p>
+	</section>
+
+	<section class="card" id="third-party-dependencies">
+		<h2>Third-party dependencies</h2>
+		<p>Production operation relies on the external services listed below. Each entry records purpose, what data the third party can access, the failure impact if that party goes away, and a substitution path. The pattern intentionally avoids any third party having custody of operator key material.</p>
+		<table class="evidence-table">
+			<thead>
+				<tr><th>Service</th><th>Purpose</th><th>Data access</th><th>Failure impact</th><th>Substitution</th></tr>
+			</thead>
+			<tbody>
+				<tr><td data-label="Service">Validator host provider</td><td data-label="Purpose">Hosts <code>metalgo</code> on a single-tenant VPS</td><td data-label="Data access">Standard infrastructure access; no operator-supplied data beyond the running process and its state directory</td><td data-label="Failure impact">Validator offline until restored from backup on a replacement host</td><td data-label="Substitution">Any IaaS offering a Linux VPS with provider firewall and stable IPv4. See <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/VALIDATOR_HOST_SETUP.md" rel="noopener noreferrer" target="_blank"><code>docs/VALIDATOR_HOST_SETUP.md</code></a>.</td></tr>
+				<tr><td data-label="Service">Web host provider</td><td data-label="Purpose">Hosts the static site and the runtime JSON endpoints written by the push wrapper</td><td data-label="Data access">Static files + the push wrapper; no operator secret material; no validator key material</td><td data-label="Failure impact">Public verification surface unavailable; validator unaffected</td><td data-label="Substitution">Any commercial host that supports static files and SSH-based <code>rsync</code> receive. See <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/DEPLOY_SETUP.md" rel="noopener noreferrer" target="_blank"><code>docs/DEPLOY_SETUP.md</code></a>.</td></tr>
+				<tr><td data-label="Service">CDN / edge proxy</td><td data-label="Purpose">Edge cache, DNS hosting, baseline DDoS mitigation, HTTPS termination at edge</td><td data-label="Data access">Standard reverse-proxy role on public HTTP traffic</td><td data-label="Failure impact">Edge cache degraded; origin still serves directly</td><td data-label="Substitution">Any CDN with reverse-proxy and DNS hosting. Current configuration decisions and the rationale for each are documented at <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/CF_POLICY.md" rel="noopener noreferrer" target="_blank"><code>docs/CF_POLICY.md</code></a>.</td></tr>
+				<tr><td data-label="Service">Git hosting + CI</td><td data-label="Purpose">Public source repository + CI-driven deploy of site-shell changes</td><td data-label="Data access">Public source code only; the deploy SSH key for the web host is held by CI as a repository secret</td><td data-label="Failure impact">Deploys halt; manual <code>rsync</code> from the operator's workstation remains available</td><td data-label="Substitution">Any git host that supports SSH-based deploy keys and an Actions-equivalent runner.</td></tr>
+				<tr><td data-label="Service">Upstream Metal RPC endpoint</td><td data-label="Purpose">Network-state queries (peer list, fee market, validator set) used by the data-feed cron jobs</td><td data-label="Data access">Public on-chain queries only; no key material transmitted</td><td data-label="Failure impact">Live network-observatory feeds degrade; validator consensus path unaffected</td><td data-label="Substitution">Any reachable Metal RPC peer. Upstream consumers are documented in <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/EVIDENCE_MANIFEST.md" rel="noopener noreferrer" target="_blank"><code>docs/EVIDENCE_MANIFEST.md</code></a>.</td></tr>
+				<tr><td data-label="Service">Upstream Metal explorer</td><td data-label="Purpose">Block + transaction lookup for cross-verification (anchor receipts, <code>AddValidator</code> transactions)</td><td data-label="Data access">Public on-chain queries only</td><td data-label="Failure impact">Anchor-receipt cross-check links break for visitors; raw on-chain data remains queryable via any other explorer instance or direct RPC</td><td data-label="Substitution">Any Metal explorer instance.</td></tr>
+				<tr><td data-label="Service">Push notification service</td><td data-label="Purpose">Operator-side alerting for monitoring events and daily digests</td><td data-label="Data access">Operator-side only; no delegator or visitor data; alert bodies contain operational summaries</td><td data-label="Failure impact">Operator slower to notice incidents; visible state and incident log are unaffected</td><td data-label="Substitution">Any push-notification service with a topic-based publish API. Substitution patterns are documented in <a href="https://github.com/freedomyield/metal.freedom-yield.com/blob/main/TOOLKIT.md" rel="noopener noreferrer" target="_blank"><code>TOOLKIT.md</code></a>.</td></tr>
+				<tr><td data-label="Service">Operator password manager</td><td data-label="Purpose">Operator-side secret storage (backup passphrases, calendar tokens, dashboard credentials)</td><td data-label="Data access">Operator-side only</td><td data-label="Failure impact">Operator-side recovery becomes manual; public surface unaffected</td><td data-label="Substitution">Any password manager with offline export.</td></tr>
+				<tr><td data-label="Service">Domain registrar</td><td data-label="Purpose">DNS authority delegation for the public domain</td><td data-label="Data access">None (public registration data)</td><td data-label="Failure impact">DNS resolution fails until restored at the registrar level</td><td data-label="Substitution">Any ICANN-accredited registrar.</td></tr>
+			</tbody>
+		</table>
+		<p>No third party has custody of operator key material, delegator funds, or validator-signing material. Each entry above has at least one documented substitution path, and the topology is designed so that the loss of any single non-validator-host dependency degrades the public verification surface rather than the validator itself.</p>
+	</section>
+
+		</div>
+	</div>
+</main>
+
+<footer class="site-footer">
+	<div class="container">
+		<div class="footer-grid">
+			<div class="footer-brand">
+				<h3>Freedom Yield · Metal</h3>
+				<p>Long-horizon validator on Metal Blockchain. Transparent uptime, public audit trail.</p>
+			</div>
+			<nav class="footer-col" aria-label="For institutions">
+				<h4>For institutions</h4>
+				<ul>
+					<li><a href="/selection-evidence/">Selection evidence</a></li>
+					<li><a href="/commitments/">Commitments</a></li>
+					<li><a href="/risk-disclosure/">Risk disclosure</a></li>
+					<li><a href="/jurisdiction/">Jurisdiction</a></li>
+					<li><a href="/subnet-readiness/">Subnet readiness</a></li>
+					<li><a href="/reference-architecture/">Reference architecture</a></li>
+					<li><a href="/subnet-pilot/">Subnet pilot</a></li>
+					<li><a href="/pledge/">Pledge</a></li>
+					<li><a href="/security-posture/">Security posture</a></li>
+					<li><a href="/decommission/">Decommission</a></li>
+					<li><a href="/inquiry/">Inquiry</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="For delegators">
+				<h4>For delegators</h4>
+				<ul>
+					<li><a href="/delegate/">Delegate</a></li>
+					<li><a href="/#status">Status</a></li>
+					<li><a href="/continuity/">Continuity</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="For engineers">
+				<h4>For engineers</h4>
+				<ul>
+					<li><a href="/verify/">Identity verify</a></li>
+					<li><a href="/data/">Open data</a></li>
+					<li><a href="/journal/">Cycle journal</a></li>
+					<li><a href="/network/">Network</a></li>
+					<li><a href="/incidents/">Incidents</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="Resources">
+				<h4>Resources</h4>
+				<ul>
+					<li><a href="/sitemap/">Sitemap</a></li>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer" target="_blank">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer" target="_blank">Explorer ↗</a></li>
+					<li><a href="#acknowledgments">Acknowledgments</a></li>
+					<li><a href="mailto:info@metal.freedom-yield.com">Contact</a></li>
+				</ul>
+			</nav>
+		</div>
+		<hr class="footer-divider">
+		<p class="footer-disclaimer"><strong>Disclaimer:</strong> Freedom Yield is an independent, third-party validator operating on Metal Blockchain. It is not affiliated with, endorsed by, sponsored by, or operated by Metallicus Inc. or the Metal Blockchain Foundation. All trademarks are the property of their respective owners.</p>
+		<div class="footer-bottom">
+			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer" target="_blank">Metal Blockchain</a>.</p>
+			<p>© 2026 Freedom Yield · Metal validator</p>
+		</div>
+	</div>
+</footer>
+</body>
+</html>

@@ -1,0 +1,201 @@
+#!/usr/bin/env bash
+# test-broadcast-guard.sh — regression suite for scripts/broadcast-guard.sh
+# (tier-1 PreToolUse hook enforcing docs/CONSTITUTION.md PRIME DIRECTIVE).
+#
+# CHAIN: none — this test does not broadcast; it drives the guard with
+#        synthetic Claude Code PreToolUse hook JSON inputs and asserts
+#        exit codes.
+#
+# Usage:
+#   bash tests/broadcast-guard/test-broadcast-guard.sh
+#
+# Exit codes:
+#   0  all cases PASS
+#   1  any case FAILED (with per-case detail on stderr)
+
+set -u
+
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+GUARD="${REPO_ROOT}/scripts/broadcast-guard.sh"
+
+if [ ! -x "$GUARD" ]; then
+	echo "FATAL: guard not executable at $GUARD" >&2
+	exit 1
+fi
+
+# Isolate the test from any real operator token so tests are deterministic.
+TEST_TOKEN="$(mktemp -t fyd-guard-test.XXXXXX)"
+export FYD_BROADCAST_TOKEN_FILE="$TEST_TOKEN"
+# Point audit log at a scratch file so tests don't touch the real one.
+TEST_AUDIT_LOG="$(mktemp -t fyd-guard-audit.XXXXXX)"
+export FYD_BROADCAST_AUDIT_LOG="$TEST_AUDIT_LOG"
+
+cleanup() { rm -f "$TEST_TOKEN" "$TEST_AUDIT_LOG"; }
+trap cleanup EXIT
+
+PASS=0
+FAIL=0
+
+run_case() {
+	local name="$1"
+	local expected_rc="$2"
+	local input="$3"
+	local rc
+	echo "$input" | bash "$GUARD" >/dev/null 2>&1
+	rc=$?
+	if [ "$rc" -eq "$expected_rc" ]; then
+		printf 'PASS  %-60s (rc=%d)\n' "$name" "$rc"
+		PASS=$((PASS + 1))
+	else
+		printf 'FAIL  %-60s (rc=%d, expected %d)\n' "$name" "$rc" "$expected_rc" >&2
+		FAIL=$((FAIL + 1))
+	fi
+}
+
+# Ensure clean state: no token file present.
+rm -f "$TEST_TOKEN"
+
+# ---- allow cases (no broadcast shape) ----
+run_case "allow: benign ls" 0 \
+	'{"tool_name":"Bash","tool_input":{"command":"ls -la"}}'
+run_case "allow: git status" 0 \
+	'{"tool_name":"Bash","tool_input":{"command":"git status --short"}}'
+run_case "allow: benign curl (no push_transaction/issueTx path)" 0 \
+	'{"tool_name":"Bash","tool_input":{"command":"curl -sS https://example.com/api/version"}}'
+run_case "allow: non-Bash tool (Read)" 0 \
+	'{"tool_name":"Read","tool_input":{"file_path":"/tmp/x"}}'
+run_case "allow: non-Bash tool (Write)" 0 \
+	'{"tool_name":"Write","tool_input":{"file_path":"/tmp/x","content":"y"}}'
+run_case "allow: empty Bash command" 0 \
+	'{"tool_name":"Bash","tool_input":{"command":""}}'
+run_case "allow: word 'proton' in unrelated context (grep, echo)" 0 \
+	'{"tool_name":"Bash","tool_input":{"command":"grep proton scripts/*.sh"}}'
+run_case "allow: word 'cleos' in unrelated context (which)" 0 \
+	'{"tool_name":"Bash","tool_input":{"command":"which cleos"}}'
+
+# ---- block cases (broadcast shape, no token) ----
+run_case "block: proton action" 2 \
+	'{"tool_name":"Bash","tool_input":{"command":"proton action eosio.token transfer arg"}}'
+run_case "block: proton transaction" 2 \
+	'{"tool_name":"Bash","tool_input":{"command":"proton transaction {}"}}'
+run_case "block: proton transaction:push" 2 \
+	'{"tool_name":"Bash","tool_input":{"command":"proton transaction:push arg"}}'
+run_case "block: cleos push transaction" 2 \
+	'{"tool_name":"Bash","tool_input":{"command":"cleos push transaction tx.json"}}'
+run_case "block: cleos push_transaction (underscore form)" 2 \
+	'{"tool_name":"Bash","tool_input":{"command":"cleos --url=http://x push_transaction tx.json"}}'
+run_case "block: cleos push action" 2 \
+	'{"tool_name":"Bash","tool_input":{"command":"cleos push action eosio.token transfer arg"}}'
+run_case "block: curl push_transaction endpoint" 2 \
+	'{"tool_name":"Bash","tool_input":{"command":"curl -sS -X POST http://api/v1/chain/push_transaction -d @tx.json"}}'
+run_case "block: curl issueTx endpoint" 2 \
+	'{"tool_name":"Bash","tool_input":{"command":"curl -X POST http://node/ext/bc/P/issueTx -d @tx.json"}}'
+run_case "block: curl eth_sendRawTransaction" 2 \
+	'{"tool_name":"Bash","tool_input":{"command":"curl http://node -d {\"method\":\"eth_sendRawTransaction\"}"}}'
+run_case "block: curl /ext/bc/X issueTx" 2 \
+	'{"tool_name":"Bash","tool_input":{"command":"curl http://node/ext/bc/X/issueTx"}}'
+run_case "block: curl /ext/bc/C issueTx" 2 \
+	'{"tool_name":"Bash","tool_input":{"command":"curl http://node/ext/bc/C/issueTx"}}'
+run_case "block: wget push_transaction" 2 \
+	'{"tool_name":"Bash","tool_input":{"command":"wget --post-data=@tx.json http://api/v1/chain/push_transaction"}}'
+run_case "block: metalgo IssueTx" 2 \
+	'{"tool_name":"Bash","tool_input":{"command":"metalgo IssueTx arg"}}'
+
+# ---- R12: Antelope send_transaction + AvalancheGo bare /ext/P /ext/X aliases ----
+run_case "block: curl Antelope send_transaction endpoint" 2 \
+	'{"tool_name":"Bash","tool_input":{"command":"curl -sS -X POST http://api/v1/chain/send_transaction -d @tx.json"}}'
+run_case "block: curl Antelope send_transaction2 endpoint" 2 \
+	'{"tool_name":"Bash","tool_input":{"command":"curl -X POST http://api/v1/chain/send_transaction2 -d @tx.json"}}'
+run_case "block: wget Antelope send_transaction endpoint" 2 \
+	'{"tool_name":"Bash","tool_input":{"command":"wget --post-data=@tx.json http://api/v1/chain/send_transaction"}}'
+run_case "block: curl AvalancheGo bare alias /ext/P (no bc/ segment)" 2 \
+	'{"tool_name":"Bash","tool_input":{"command":"curl -X POST http://node/ext/P -d @tx.json"}}'
+run_case "block: curl AvalancheGo bare alias /ext/X (no bc/ segment)" 2 \
+	'{"tool_name":"Bash","tool_input":{"command":"curl -X POST http://node/ext/X -d @tx.json"}}'
+run_case "block: curl AvalancheGo bare alias /ext/P/ with trailing path" 2 \
+	'{"tool_name":"Bash","tool_input":{"command":"curl -X POST http://node/ext/P/ -d @tx.json"}}'
+run_case "allow: curl to unrelated /ext/Platform path (not the bare /ext/P alias)" 0 \
+	'{"tool_name":"Bash","tool_input":{"command":"curl -sS http://node/ext/Platform/status"}}'
+run_case "allow: word 'send_transaction' in unrelated grep context" 0 \
+	'{"tool_name":"Bash","tool_input":{"command":"grep send_transaction scripts/*.sh"}}'
+
+# ---- C2-1: raw direct broadcast is BLOCKED even with a fresh token ----
+# A broadcast shape reaching tier-1 is always a RAW direct call: the sanctioned
+# wrapper bin/safe-broadcast is invoked as `bin/safe-broadcast ...` (matches no
+# pattern) and its internal proton call is a subprocess the hook never sees.
+# Raw calls bypass gates 1/3/4, so a fresh operator token must NOT override.
+touch "$TEST_TOKEN"
+run_case "block: proton transaction:push WITH fresh token, no safe-broadcast marker" 2 \
+	'{"tool_name":"Bash","tool_input":{"command":"proton transaction:push arg"}}'
+run_case "block: curl issueTx WITH fresh token, no safe-broadcast marker" 2 \
+	'{"tool_name":"Bash","tool_input":{"command":"curl http://node/ext/bc/P/issueTx"}}'
+
+# ---- sanctioned wrapper path: safe-broadcast marker + fresh BOUND token → allow ----
+# bin/safe-broadcast exports FYD_SAFE_BROADCAST=1 before it calls proton; that
+# marker is the only way a broadcast shape is allowed through tier-1. Per
+# R16 the token must also be chain-bound (JSON with a non-empty "chain"),
+# not merely a fresh empty file — see the block case right after this one.
+export FYD_SAFE_BROADCAST=1
+printf '{"chain":"mainnet-a"}' > "$TEST_TOKEN"
+run_case "allow: proton transaction:push WITH safe-broadcast marker + fresh BOUND token (R16)" 0 \
+	'{"tool_name":"Bash","tool_input":{"command":"proton transaction:push arg"}}'
+
+# R16: a fresh token that is NOT chain-bound (legacy bare `touch`, no JSON
+# content) must now be refused at this defense-in-depth layer too — fresh
+# alone is no longer sufficient once FYD_SAFE_BROADCAST=1 is set. Note:
+# `touch` on an ALREADY-EXISTING file only updates mtime, it does not empty
+# the content — truncate explicitly so this is genuinely a bare/legacy token
+# and not leftover bound JSON from the case above.
+: > "$TEST_TOKEN"
+touch "$TEST_TOKEN"
+run_case "block: safe-broadcast marker + fresh but UNBOUND legacy token → block (R16)" 2 \
+	'{"tool_name":"Bash","tool_input":{"command":"proton transaction:push arg"}}'
+unset FYD_SAFE_BROADCAST
+
+# marker present but token missing/stale must STILL block: token freshness is
+# tier-2 gate 2 and is re-checked as defense in depth on the sanctioned path.
+export FYD_SAFE_BROADCAST=1
+rm -f "$TEST_TOKEN"
+run_case "block: safe-broadcast marker but NO token → block" 2 \
+	'{"tool_name":"Bash","tool_input":{"command":"proton transaction:push arg"}}'
+touch "$TEST_TOKEN"
+unset FYD_SAFE_BROADCAST
+
+# Audit log side-effect: only the single sanctioned allow above logged a line.
+AUDIT_LINES="$(wc -l < "$TEST_AUDIT_LOG" | tr -d ' ')"
+if [ "$AUDIT_LINES" -eq 1 ]; then
+	printf 'PASS  %-60s (lines=%d)\n' "audit log: 1 line appended on sanctioned allow" "$AUDIT_LINES"
+	PASS=$((PASS + 1))
+else
+	printf 'FAIL  %-60s (lines=%d, expected 1)\n' "audit log: 1 line appended on sanctioned allow" "$AUDIT_LINES" >&2
+	FAIL=$((FAIL + 1))
+fi
+
+# ---- expired token: block even with token file present ----
+# Backdate the token by 400 seconds (> 300 TTL).
+# Portable touch -d / -t handling: use -t YYYYMMDDhhmm on both GNU + BSD.
+if OLD_TS_UTC="$(date -u -d '@0' +%Y%m%d%H%M 2>/dev/null)"; then
+	# GNU date
+	OLD_TS="$(date -u -d '-400 seconds' +%Y%m%d%H%M)"
+else
+	# BSD date (macOS)
+	OLD_TS="$(date -u -v-400S +%Y%m%d%H%M)"
+fi
+touch -t "$OLD_TS" "$TEST_TOKEN"
+# Set the marker so this exercises the expiry check on the sanctioned path
+# (without the marker the raw-broadcast block would fire first).
+export FYD_SAFE_BROADCAST=1
+run_case "block: safe-broadcast marker + expired token → block" 2 \
+	'{"tool_name":"Bash","tool_input":{"command":"proton transaction:push arg"}}'
+unset FYD_SAFE_BROADCAST
+
+# ---- Summary ----
+echo
+echo "----------------------------------------"
+echo "test-broadcast-guard.sh summary: PASS=$PASS  FAIL=$FAIL"
+if [ "$FAIL" -gt 0 ]; then
+	echo "RESULT: FAIL"
+	exit 1
+fi
+echo "RESULT: PASS"
+exit 0

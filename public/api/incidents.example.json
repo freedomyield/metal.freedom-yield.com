@@ -1,0 +1,51 @@
+{
+	"_comment": "Synthetic example demonstrating /api/incidents.schema.v1.json. All entries are illustrative; none are real events. Validates against incidents.schema.v1.json. Real /api/incidents.json may contain a subset of the entries shown here (e.g. an empty incidents array when no events have been recorded).",
+	"validatorSince": "2026-05-19",
+	"incidents": [
+		{
+			"id": "2026-06-18-01",
+			"type": "incident",
+			"detectionDate": "2026-06-18",
+			"confirmedPauseWindowStart": "2026-06-20T06:06:00Z",
+			"confirmedPauseWindowEnd": null,
+			"potentiallyAffectedStart": null,
+			"potentiallyAffectedStartStatus": "undetermined",
+			"resolutionDate": null,
+			"title": "Monitoring reliability regression (example)",
+			"severity": "Minor",
+			"status": "under_remediation",
+			"summary": "Example entry. Operator-notification path degraded; records reviewed do not indicate validator-side impact. potentiallyAffectedStartStatus=undetermined because the start of the affected window could not be reconstructed from records reviewed.",
+			"postmortemUrl": null
+		},
+		{
+			"id": "2026-05-22-01",
+			"type": "scheduled_maintenance",
+			"detectionDate": "2026-05-22",
+			"confirmedPauseWindowStart": "2026-05-22T13:00:00Z",
+			"confirmedPauseWindowEnd": "2026-05-22T13:45:00Z",
+			"potentiallyAffectedStart": null,
+			"potentiallyAffectedStartStatus": "not_applicable",
+			"resolutionDate": "2026-05-22",
+			"title": "Example: planned web host migration",
+			"severity": "Info",
+			"status": "resolved",
+			"summary": "Example entry. Planned web host migration with announced window; validator itself unaffected. potentiallyAffectedStartStatus=not_applicable because the maintenance was scoped to web and had no operator-impacting start.",
+			"postmortemUrl": null
+		},
+		{
+			"id": "2026-07-04-01",
+			"type": "drill",
+			"detectionDate": "2026-07-04",
+			"confirmedPauseWindowStart": null,
+			"confirmedPauseWindowEnd": null,
+			"potentiallyAffectedStart": "2026-07-04",
+			"potentiallyAffectedStartStatus": "known",
+			"resolutionDate": "2026-07-04",
+			"title": "Example: DR drill tabletop exercise",
+			"severity": "Info",
+			"status": "resolved",
+			"summary": "Example entry. Tabletop walk-through of docs/DISASTER_RECOVERY.md scenario A. potentiallyAffectedStartStatus=known with the date matching the drill day.",
+			"postmortemUrl": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/POSTMORTEM_DRILL_EXAMPLE.md"
+		}
+	]
+}

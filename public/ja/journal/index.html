@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>運用日誌 — Freedom Yield Metal</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="各 validation cycle の長期記録。開始/終了日・最終 uptime・on-chain tx・運用者ノート。">
+<link rel="canonical" href="https://metal.freedom-yield.com/ja/journal/">
+<link rel="alternate" hreflang="en" href="https://metal.freedom-yield.com/journal/">
+<link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/journal/">
+<link rel="alternate" hreflang="x-default" href="https://metal.freedom-yield.com/journal/">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#07080c">
+<meta name="color-scheme" content="dark">
+<script defer src="/assets/main.js"></script>
+<script defer src="/assets/journal.js"></script>
+<link rel="preconnect" href="https://www.googletagmanager.com" crossorigin>
+<link rel="dns-prefetch" href="https://www.googletagmanager.com">
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
+<script defer src="/assets/gtag-init.js"></script>
+<link rel="preload" as="image" href="/assets/hero-images/journal-960.webp" imagesrcset="/assets/hero-images/journal-480.webp 480w, /assets/hero-images/journal-960.webp 960w, /assets/hero-images/journal.webp 1600w" imagesizes="50vw">
+</head>
+<body>
+<a href="#main" class="skip-link">メイン本文へスキップ</a>
+
+<nav class="topnav">
+	<div class="topnav-inner">
+		<a href="/ja/" class="brand">Freedom Yield · Metal</a>
+		<details class="nav-menu">
+			<summary class="nav-toggle" aria-label="メニューを開く / 閉じる">
+				<span class="hamburger-icon" aria-hidden="true"></span>
+			</summary>
+						<div class="nav">
+				<a href="/ja/#status">状態</a>
+				<a href="/ja/about-metal/">概要</a>
+				<div class="nav-dropdown">
+					<a href="/ja/selection-evidence/" class="nav-dropdown-toggle">機関向け</a>
+					<div class="nav-dropdown-menu">
+						<a href="/ja/selection-evidence/">選定エビデンス</a>
+						<a href="/ja/commitments/">運用者の commitment</a>
+						<a href="/ja/risk-disclosure/">リスク開示</a>
+						<a href="/ja/jurisdiction/">管轄姿勢</a>
+						<a href="/ja/security-posture/">セキュリティ姿勢</a>
+						<a href="/ja/continuity/">事業継続性</a>
+						<a href="/ja/pledge/">Transparent Validator Pledge</a>
+						<a href="/ja/subnet-readiness/">Subnet 適性</a>
+						<a href="/ja/reference-architecture/">リファレンスアーキテクチャ</a>
+						<a href="/ja/subnet-pilot/">Subnet pilot</a>
+						<a href="/ja/decommission/">廃止予告ポリシー</a>
+						<a href="/ja/inquiry/">問い合わせ</a>
+					</div>
+				</div>
+				<div class="nav-dropdown">
+					<a href="/ja/delegate/" class="nav-dropdown-toggle">委任者向け</a>
+					<div class="nav-dropdown-menu">
+						<a href="/ja/delegate/">委任する</a>
+						<a href="/ja/#status">ライブ状態</a>
+						<a href="/ja/continuity/">事業継続性</a>
+					</div>
+				</div>
+				<div class="nav-dropdown">
+					<a href="/ja/data/" class="nav-dropdown-toggle">技術者向け</a>
+					<div class="nav-dropdown-menu">
+						<a href="/ja/data/">公開データ</a>
+						<a href="/ja/verify/">アイデンティティ検証</a>
+						<a href="/ja/journal/" aria-current="page">運用日誌</a>
+						<a href="/ja/network/">ネットワーク観測</a>
+						<a href="/ja/incidents/">インシデントログ</a>
+					</div>
+				</div>
+				<a href="/journal/" class="nav-lang" data-ga-event="language_switch" data-ga-param-to="en">EN</a>
+			</div>
+		</details>
+	</div>
+</nav>
+
+<header class="hero hero--simple hero--photo-journal">
+	<div class="container">
+		<p class="hero-eyebrow">運用記録</p>
+		<h1>Cycle journal</h1>
+		<p class="hero-lead">
+			各 validation 期間が 1 entry として記録されていきます: on-chain 日時・最終 uptime・再登録 tx・1 cycle の運用者ノート。
+			月次 cycle を回す Phase 1 期間中は年間 ~12 entries 追加されます。ソース:
+			<a href="/api/uptime-cycles.json"><code>/api/uptime-cycles.json</code></a>。
+		</p>
+	</div>
+</header>
+
+<main id="main" class="container">
+
+	<nav class="breadcrumb" aria-label="パンくず">
+		<ol>
+			<li><a href="/ja/">ホーム</a></li>
+			<li><a href="/ja/data/">公開データ</a></li>
+			<li aria-current="page">Cycle journal</li>
+		</ol>
+	</nav>
+
+	<section class="card journal-summary" data-journal-summary>
+		<dl class="kv">
+			<dt>稼働開始日</dt><dd>2026-05-19</dd>
+			<dt>完了 cycle 数</dt><dd data-field="cycleCount">—</dd>
+			<dt>cycle 中央値 uptime</dt><dd data-field="medianUptime">—</dd>
+			<dt>ソース</dt><dd><a href="/api/uptime-cycles.json"><code>/api/uptime-cycles.json</code></a></dd>
+		</dl>
+	</section>
+
+		<figure class="card-figure" aria-hidden="true">
+			<img  src="/assets/photos/datacenter-aisle.webp" srcset="/assets/photos/datacenter-aisle-480.webp 480w, /assets/photos/datacenter-aisle-960.webp 960w, /assets/photos/datacenter-aisle.webp 1600w" sizes="(max-width: 600px) 100vw, (max-width: 1200px) 60vw, 800px" width="1600" height="1200" alt="" loading="lazy" decoding="async">
+		</figure>
+	<section class="card journal-list-card">
+		<h2>完了済 cycles</h2>
+		<ol class="journal-list" data-journal-list aria-live="polite">
+			<li class="journal-loading" data-journal-loading>読み込み中…</li>
+		</ol>
+		<template data-journal-template>
+			<li class="journal-entry">
+				<header class="journal-entry-head">
+					<span class="journal-cycle-n"></span>
+					<span class="journal-period"></span>
+				</header>
+				<dl class="journal-meta">
+					<dt>最終 uptime</dt><dd class="journal-uptime"></dd>
+					<dt>期間</dt><dd class="journal-duration"></dd>
+					<dt>on-chain audit</dt><dd><a class="journal-explorer" target="_blank" rel="noopener noreferrer">Explorer ↗</a></dd>
+				</dl>
+				<p class="journal-notes"></p>
+			</li>
+		</template>
+		<p class="journal-empty" data-journal-empty hidden>
+			まだクローズした cycle はありません。<strong>Cycle 1</strong> は <strong>2026-06-04 16:17 JST</strong> にクローズ予定で、その後 24 時間以内に最初の entry が記録されます。
+			それまでは TOP ページの <a href="/ja/#status">status カード</a> と <a href="/ja/#track-record">実績</a> でライブ状態を確認できます。
+		</p>
+	</section>
+
+	<section class="card journal-about">
+		<h2>この記録について</h2>
+		<p>
+			このページは long-horizon の台帳です。各 entry は Metal Blockchain P-Chain 上の <code>AddPermissionlessValidatorTx</code> 1 cycle に対応します。
+			<strong>一度書いた entry は後から編集しません</strong> — 誤りが発見されたら次の cycle の note で訂正を追記し、元の entry は immutable record として残します。
+		</p>
+		<p>
+			運用者ノートは意図的に短く書きます: 何が起きたか / 何を学んだか / 次 cycle で何を変えるか。
+			marketing channel ではなく、tx ID だけでは伝わらない監査トレースの一部です。
+		</p>
+	</section>
+
+</main>
+
+<footer class="site-footer">
+	<div class="container">
+		<div class="footer-grid">
+			<div class="footer-brand">
+				<h3>Freedom Yield · Metal</h3>
+				<p>Metal Blockchain の long-horizon validator。透明な uptime 開示、公開監査証跡。</p>
+			</div>
+			<nav class="footer-col" aria-label="機関向け">
+				<h4>機関向け</h4>
+				<ul>
+					<li><a href="/ja/selection-evidence/">選定エビデンス</a></li>
+					<li><a href="/ja/commitments/">Commitment</a></li>
+					<li><a href="/ja/risk-disclosure/">リスク開示</a></li>
+					<li><a href="/ja/jurisdiction/">日本拠点姿勢</a></li>
+					<li><a href="/ja/subnet-readiness/">Subnet 適性</a></li>
+					<li><a href="/ja/reference-architecture/">リファレンスアーキテクチャ</a></li>
+					<li><a href="/ja/subnet-pilot/">Subnet pilot</a></li>
+					<li><a href="/ja/pledge/">Pledge</a></li>
+					<li><a href="/ja/security-posture/">セキュリティ姿勢</a></li>
+					<li><a href="/ja/decommission/">Decommission</a></li>
+					<li><a href="/ja/inquiry/">問い合わせ</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="委任者向け">
+				<h4>委任者向け</h4>
+				<ul>
+					<li><a href="/ja/delegate/">委任する</a></li>
+					<li><a href="/ja/#status">状態</a></li>
+					<li><a href="/ja/continuity/">事業継続性</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="技術者向け">
+				<h4>技術者向け</h4>
+				<ul>
+					<li><a href="/ja/verify/">アイデンティティ検証</a></li>
+					<li><a href="/ja/data/">公開データ</a></li>
+					<li><a href="/ja/journal/">運用日誌</a></li>
+					<li><a href="/ja/network/">ネットワーク</a></li>
+					<li><a href="/ja/incidents/">インシデント</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="関連">
+				<h4>関連</h4>
+				<ul>
+					<li><a href="/ja/sitemap/">サイトマップ</a></li>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer" target="_blank">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer" target="_blank">エクスプローラ ↗</a></li>
+					<li><a href="#acknowledgments">感謝</a></li>
+					<li><a href="mailto:info@metal.freedom-yield.com">お問い合わせ</a></li>
+				</ul>
+			</nav>
+		</div>
+		<hr class="footer-divider">
+		<p class="footer-disclaimer"><strong>免責事項:</strong> Freedom Yield は Metal Blockchain 上で稼働する独立した第三者バリデータです。Metallicus 社および Metal Blockchain Foundation の関連会社・提携先・出資先・公式運営者ではありません。各商標は各権利者に帰属します。</p>
+		<div class="footer-bottom">
+			<p>Built in support of <a href="https://metalblockchain.org/" rel="noopener noreferrer" target="_blank">Metal Blockchain</a>.</p>
+			<p>© 2026 Freedom Yield · Metal validator</p>
+		</div>
+	</div>
+</footer>
+</body>
+</html>

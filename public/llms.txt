@@ -1,0 +1,59 @@
+# Metal Freedom Yield
+
+> Guide to the public data of Metal Freedom Yield, an independent validator on the Metal Blockchain mainnet. The files below are static: JSON and JSONL data, schemas, signatures and public keys, and HTML pages.
+
+All data is free to read. No payment, no registration, no API key. The files are static and are read with GET; nothing here requires authentication. A machine-readable description of the files is at https://metal.freedom-yield.com/api/openapi.json (OpenAPI 3.1). Under /api/* and /llms.txt (GET and HEAD) the server sends Access-Control-Allow-Origin: *. Update intervals differ per file (from every 5 minutes to rarely or by hand); each file's interval is stated on the Open data page (https://metal.freedom-yield.com/data/). Requests are rate-limited per client IP (for /api/*: 90 requests per minute; site-wide: 300 per minute). Over the limit the server answers HTTP 429. Please cache politely (15 minutes or more is fine for most uses). No uptime guarantee is made for the endpoints themselves, only for the validator they describe.
+
+## Data feeds
+
+- [validator.json](https://metal.freedom-yield.com/api/validator.json): Live validator identity, stake, uptime%, and P/X/C-Chain bootstrap status. Updated every 5 minutes.
+- [evidence.json](https://metal.freedom-yield.com/api/evidence.json): Machine-readable evidence manifest combining live validator state with static project commitments and the list of public pages. Updated daily.
+- [uptime-recent.json](https://metal.freedom-yield.com/api/uptime-recent.json): Rolling 90-day window of daily uptime samples. Updated daily.
+- [uptime-cycles.json](https://metal.freedom-yield.com/api/uptime-cycles.json): One row per closed validation period, with on-chain start/end timestamps, final uptime%, and tx ID. Updated on cycle close.
+- [incidents.json](https://metal.freedom-yield.com/api/incidents.json): Operator-maintained incident log. An empty array means no operational anomalies have occurred.
+- [cycle-history.jsonl](https://metal.freedom-yield.com/api/cycle-history.jsonl): Cycle-by-cycle audit packet, one JSON object per line, closed cycles only. Append-only.
+- [peer-geo.json](https://metal.freedom-yield.com/api/peer-geo.json): Geographic distribution of peer validators in this node's peer set. Updated hourly.
+- [peers-gini.json](https://metal.freedom-yield.com/api/peers-gini.json): Last 24 daily samples of validator-set concentration (Gini, top-10 share, validator count).
+- [peers-gini-history.jsonl](https://metal.freedom-yield.com/api/peers-gini-history.jsonl): Full append-only history of the concentration samples, one JSON object per line.
+- [fee-market.json](https://metal.freedom-yield.com/api/fee-market.json): Last 30 daily samples of the validator delegation-fee distribution.
+- [fee-market-history.jsonl](https://metal.freedom-yield.com/api/fee-market-history.jsonl): Full append-only history of the fee-market samples, one JSON object per line.
+- [peers-changes.json](https://metal.freedom-yield.com/api/peers-changes.json): Most recent diff of the active-validator set (joined and departed NodeIDs). Replaced daily.
+- [peers-history-index.json](https://metal.freedom-yield.com/api/peers-history-index.json): Index of daily full-set validator snapshots (date, filename, size).
+- [validator-directory.json](https://metal.freedom-yield.com/api/validator-directory.json): This validator's own NodeID to name, url, and type entry. Updated rarely.
+- [anchor-source.json](https://metal.freedom-yield.com/api/anchor-source.json): The three-branch Merkle DAG snapshot whose combined root is inscribed on Metal A-chain at each cycle transition.
+- [anchor-receipt.json](https://metal.freedom-yield.com/api/anchor-receipt.json): Index of the most recent on-chain anchor and the transaction it was broadcast in. Rotates at each cycle transition.
+- [anchor-history.jsonl](https://metal.freedom-yield.com/api/anchor-history.jsonl): Append-only ledger of every verified anchor, one line per cycle transition.
+- [identity-history.jsonl](https://metal.freedom-yield.com/api/identity-history.jsonl): Append-only log of operator identity-key rotation events, one line per key generation.
+
+## Schemas
+
+- [validator.schema.v1.json](https://metal.freedom-yield.com/api/validator.schema.v1.json): JSON Schema (draft 2020-12) for validator.json.
+- [evidence.schema.v1.json](https://metal.freedom-yield.com/api/evidence.schema.v1.json): JSON Schema for evidence.json.
+- [cycle-history.schema.v1.json](https://metal.freedom-yield.com/api/cycle-history.schema.v1.json): JSON Schema for one line of cycle-history.jsonl.
+- [identity.schema.v2.json](https://metal.freedom-yield.com/api/identity.schema.v2.json): JSON Schema for identity.json, including the artifact manifest.
+- [identity-history.schema.v1.json](https://metal.freedom-yield.com/api/identity-history.schema.v1.json): JSON Schema for one line of identity-history.jsonl.
+- [anchor-source.schema.v1.json](https://metal.freedom-yield.com/api/anchor-source.schema.v1.json): JSON Schema for anchor-source.json.
+- [anchor-receipt.schema.v2.json](https://metal.freedom-yield.com/api/anchor-receipt.schema.v2.json): JSON Schema for anchor-receipt.json (schema_version 2).
+- [anchor-history.schema.v2.json](https://metal.freedom-yield.com/api/anchor-history.schema.v2.json): JSON Schema for one line of anchor-history.jsonl.
+
+## Verifying the identity manifest
+
+identity.json is signed with a dedicated ed25519 operator identity key and with an ML-DSA-87 (FIPS 204) key, independent of the validator's BLS and staking keys. The ed25519 signature is verified with `ssh-keygen -Y verify`, namespace `freedom-yield/validator-identity`, principal `freedom-yield`. The ML-DSA-87 signature is verified with `openssl pkeyutl -verify` (OpenSSL 3.5 or later), context string `freedom-yield/validator-identity`. The full procedure is at https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/IDENTITY_VERIFICATION.md
+
+- [identity.json](https://metal.freedom-yield.com/api/identity.json): Signed manifest bound to the declared Metal NodeID.
+- [identity.json.sig](https://metal.freedom-yield.com/api/identity.json.sig): Detached ed25519 signature of identity.json.
+- [identity.json.mldsa87.sig](https://metal.freedom-yield.com/api/identity.json.mldsa87.sig): Detached ML-DSA-87 signature of identity.json.
+- [operator-identity.pub](https://metal.freedom-yield.com/.well-known/operator-identity.pub): ed25519 public key (OpenSSH format).
+- [operator-identity-mldsa87.pub](https://metal.freedom-yield.com/.well-known/operator-identity-mldsa87.pub): ML-DSA-87 public key (PEM).
+
+## Optional
+
+- [Open data page](https://metal.freedom-yield.com/data/): Human-readable description of every file, with update times and example requests.
+- [Open data page (Japanese)](https://metal.freedom-yield.com/ja/data/): The same page in Japanese.
+- [validator.example.json](https://metal.freedom-yield.com/api/validator.example.json): Example of validator.json.
+- [evidence.example.json](https://metal.freedom-yield.com/api/evidence.example.json): Example of evidence.json.
+- [cycle-history.example.jsonl](https://metal.freedom-yield.com/api/cycle-history.example.jsonl): Example of cycle-history.jsonl.
+- [identity.example.json](https://metal.freedom-yield.com/api/identity.example.json): Example of identity.json.
+- [identity-history.example.jsonl](https://metal.freedom-yield.com/api/identity-history.example.jsonl): Example of identity-history.jsonl.
+- [anchor-source.example.json](https://metal.freedom-yield.com/api/anchor-source.example.json): Example of anchor-source.json.
+- [anchor-receipt.v2.example.json](https://metal.freedom-yield.com/api/anchor-receipt.v2.example.json): Example of anchor-receipt.json (schema_version 2).

@@ -1,0 +1,30 @@
+# metalgo の /data volume を「採用 (adopt)」する override — 既存 volume を持つ host 専用
+#
+# 使うのは、repo より前から在る metalgo の /data volume (= staker keys = NodeID) を
+# そのまま使い続ける host だけ。新 host では使わない (.env に METALGO_DATA_VOLUME を書かない)。
+#
+# 何を防ぐか:
+#   compose が自分で作った named volume には label com.docker.compose.config-hash が付く。
+#   既存 volume のこの hash が repo の volume 定義から計算した値と違うと、compose は
+#   `up` / `create` で "Volume ... exists but doesn't match configuration in compose file.
+#   Recreate (data will be lost)? (y/N)" と聞き、y (または -y / --yes) で volume を
+#   削除して作り直す = staker keys が消える (2026-10-05 リハーサルで実測)。
+#   `external: true` の volume は compose の管理外になり、compose はそれを作らない・
+#   作り直さない・`down -v` でも消さない。存在しなければ up は失敗する (fail closed)。
+#
+# 使い方 (host の .env に METALGO_DATA_VOLUME=<現行の /data volume 名> を書いた上で):
+#   docker compose -f docker-compose.metalgo.yml -f docker-compose.metalgo.prod.yml \
+#     -f docker-compose.metalgo.adopt.yml --dry-run up -d metalgo </dev/null
+#   docker compose -f docker-compose.metalgo.yml -f docker-compose.metalgo.prod.yml \
+#     -f docker-compose.metalgo.adopt.yml up -d metalgo </dev/null      # -y は付けない
+# 事前に scripts/check-compose-naming.sh で RESULT: MATCH を確認する (この override が
+# -f に入り external に解決すること、稼働中コンテナとの drift が無いことを検査する)。
+# scripts/vps-bootstrap.sh は .env に METALGO_DATA_VOLUME があると自動でこれを足す。
+#
+# METALGO_DATA_PATH (bind mount) と併用しない: /data が bind になりこの volume は使われない
+# (check-compose-naming.sh は adopt を MISMATCH にする)。
+
+volumes:
+  metalgo_data:
+    external: true
+    name: ${METALGO_DATA_VOLUME:?METALGO_DATA_VOLUME is required with docker-compose.metalgo.adopt.yml (the existing /data volume name)}

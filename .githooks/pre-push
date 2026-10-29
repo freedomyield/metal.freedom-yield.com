@@ -1,0 +1,225 @@
+#!/usr/bin/env bash
+# Pre-push hook: last line before PUBLICATION.
+#
+# SCOPE: this local gate stops ACCIDENTS. Anyone at this machine can skip it
+# (--no-verify, editing this file), so a deliberate local user is out of
+# scope; the receiving side's walls are GitHub push protection and CI.
+#
+# For each ref being pushed, this hook
+#   1. asks the remote itself, once (`git ls-remote --symref <url>`), what it
+#      publishes. Local refs/remotes/* are never used: they are only this
+#      machine's memory and can be stale or rewritten.
+#   2. picks the BASE commit — what the remote already publishes:
+#        existing ref -> the remote tip git reports for that ref
+#        new ref      -> merge-base with the remote's default branch
+#                        (its HEAD symref, else refs/heads/main)
+#      A remote commit that is not present locally = refused (fetch first).
+#   3. copies the gate (scripts/pre-push-scan.sh, scripts/lib/push-range.sh,
+#      scripts/publish-guard.sh) OUT OF THE BASE COMMIT into a temp dir and
+#      runs that copy. The work tree's copy is never run, so an edit to the
+#      gate cannot switch it off; and a pushed commit that changes any gate
+#      file or .gitleaks.toml is refused by the scanner (protected set:
+#      changing the gate needs the operator's decision).
+#   4. ONLY when the remote has no refs at all (first push into an empty
+#      repo) uses the pushed tip's copy and rules, and only if each of the
+#      five protected files matches the value the operator recorded for it
+#      beforehand. Recording those values is the operator's own step (R3
+#      runbook, outside this repo); nothing here writes them and an AI never
+#      sets them. Every other case without a base, or with a base that has no
+#      gate, is refused.
+#
+# The scanner checks every pushed commit one by one with gitleaks and
+# publish-guard, and refuses on any finding or anything it cannot scan.
+#
+# LIMIT (cannot be prevented here): git runs THIS file from the work tree, so
+# an edit to it takes effect at once. It is kept small so it is easy to
+# review; the operator's local P1 hook and core.hooksPath are what cover it.
+#
+# 有効化: git config core.hooksPath .githooks  (既存設定を共有)
+#
+# stdin (per git): <local ref> <local sha> <remote ref> <remote sha>
+
+set -uo pipefail
+
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+	echo "pre-push: not inside a git work tree — PUSH ABORTED." >&2
+	exit 1
+}
+cd "$ROOT" || exit 1
+REMOTE="${1:-}"
+URL="${2:-}"
+PROTOCOL=3
+GATE=(pre-push-scan:scripts/pre-push-scan.sh push-range:scripts/lib/push-range.sh publish-guard:scripts/publish-guard.sh)
+LS_TIMEOUT="${FYD_PREPUSH_LSREMOTE_TIMEOUT:-30}"
+
+refuse() { echo "pre-push: REFUSED ${1}: ${2}" >&2; }
+abort() {
+	echo "pre-push: PUSH ABORTED (fail-closed). --no-verify での回避は禁止です。" >&2
+	exit 1
+}
+
+# run_capped <seconds> <stdout file> <cmd...>: run cmd; past the limit send
+# TERM, then KILL 2s later. Returns cmd's status, or 124 when cut off.
+run_capped() {
+	local secs="$1" out="$2" pid wd mark
+	shift 2
+	mark="$(mktemp "${TMPDIR:-/tmp}/pre-push-cap.XXXXXX")" || return 125
+	rm -f "$mark"
+	"$@" >"$out" </dev/null &
+	pid=$!
+	(
+		trap 'kill "$sp" 2>/dev/null; exit 0' TERM
+		sleep "$secs" & sp=$!
+		wait "$sp"
+		: >"$mark"
+		kill -TERM "$pid" 2>/dev/null
+		sleep 2 & sp=$!
+		wait "$sp"
+		kill -KILL "$pid" 2>/dev/null
+	) &
+	wd=$!
+	wait "$pid"
+	local rc=$?
+	kill -TERM "$wd" 2>/dev/null
+	wait "$wd" 2>/dev/null
+	if [[ -e "$mark" ]]; then
+		rm -f "$mark"
+		return 124
+	fi
+	return "$rc"
+}
+
+pinned() {
+	# pinned <commit> <name> <path>: the file at <commit> matches its pin
+	local want got
+	want="$(git config --local --get "metal.prepush.pin.${2}" 2>/dev/null || true)"
+	if [[ -z "$want" ]]; then
+		refuse "${1:0:12}" "the remote is empty and no pin recorded for ${3}. 門のファイルの pin は経営者の操作が要る（R3 の手順書 r2-runbook.md §10）。AI は設定しない"
+		return 1
+	fi
+	if ! git cat-file -e "${1}:${3}" 2>/dev/null; then
+		refuse "${1:0:12}" "${3} is absent at the pushed tip"
+		return 1
+	fi
+	got="$(git cat-file blob "${1}:${3}" | perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)')"
+	if [[ "$got" != "$want" ]]; then
+		refuse "${1:0:12}" "${3} at the pushed tip does not match its recorded pin. 門のファイルの pin は経営者の操作が要る（R3 の手順書 r2-runbook.md §10）。AI は設定しない"
+		return 1
+	fi
+	return 0
+}
+
+TMPS=()
+trap 'for t in "${TMPS[@]}"; do rm -rf "$t"; done' EXIT
+LS="$(mktemp -d "${TMPDIR:-/tmp}/pre-push-ls.XXXXXX")" || {
+	refuse "-" "cannot create a temp dir"
+	abort
+}
+TMPS+=("$LS")
+
+# ---- what the remote publishes (asked once) ---------------------------------
+run_capped "$LS_TIMEOUT" "$LS/out" git ls-remote --symref "${URL:-$REMOTE}"
+rc=$?
+if [[ "$rc" -eq 124 ]]; then
+	refuse "-" "git ls-remote timed out after ${LS_TIMEOUT}s"
+	abort
+elif [[ "$rc" -ne 0 ]]; then
+	refuse "-" "git ls-remote failed (rc=${rc}); cannot learn what the remote publishes"
+	abort
+fi
+REMOTE_HAS_REFS=0
+grep -qE $'^[0-9a-f]{40}\trefs/' "$LS/out" && REMOTE_HAS_REFS=1
+DFLT_REF="$(sed -n -E $'s/^ref: (refs\\/[^\t]+)\tHEAD$/\\1/p' "$LS/out" | head -1)"
+[[ -z "$DFLT_REF" ]] && DFLT_REF="refs/heads/main"
+DFLT_SHA="$(awk -F'\t' -v r="$DFLT_REF" '$2 == r { print $1; exit }' "$LS/out")"
+# Every commit the remote advertises that this machine has: the range's --not.
+: >"$LS/remote-shas"
+while read -r sha; do
+	git cat-file -e "${sha}^{commit}" 2>/dev/null && echo "$sha" >>"$LS/remote-shas"
+done < <(grep -oE '^[0-9a-f]{40}' "$LS/out" | sort -u)
+
+REFUSED=0
+while read -r lref lsha rref rsha; do
+	[[ -z "${lref:-}" ]] && continue
+	[[ "$lsha" =~ ^0+$ ]] && continue   # deleting a remote ref: nothing to scan
+
+	tip="$(git rev-parse -q --verify "${lsha}^{commit}" 2>/dev/null || true)"
+	if [[ -z "$tip" ]]; then
+		refuse "$rref" "the pushed object does not lead to a commit"
+		REFUSED=1
+		continue
+	fi
+
+	base=""
+	if ! [[ "$rsha" =~ ^0+$ ]]; then
+		if ! base="$(git rev-parse -q --verify "${rsha}^{commit}" 2>/dev/null)"; then
+			refuse "$rref" "remote commit ${rsha:0:12} not found locally (fetch first)"
+			REFUSED=1
+			continue
+		fi
+	elif [[ -n "$DFLT_SHA" ]]; then
+		if ! git cat-file -e "${DFLT_SHA}^{commit}" 2>/dev/null; then
+			refuse "$rref" "the remote's default branch commit ${DFLT_SHA:0:12} is not present locally (fetch first)"
+			REFUSED=1
+			continue
+		fi
+		base="$(git merge-base "$tip" "$DFLT_SHA" 2>/dev/null || true)"
+	fi
+
+	if [[ -n "$base" ]]; then
+		src="$base"
+		rules="$base"
+		for e in "${GATE[@]}"; do
+			if ! git cat-file -e "${base}:${e#*:}" 2>/dev/null; then
+				refuse "$rref" "the base ${base:0:12} has no usable gate (${e#*:} absent); pins apply only to an empty remote"
+				REFUSED=1
+				continue 2
+			fi
+		done
+	elif [[ "$REMOTE_HAS_REFS" -eq 1 ]]; then
+		refuse "$rref" "the remote has refs but no base was found for ${tip:0:12} (no merge-base with its default branch)"
+		REFUSED=1
+		continue
+	else
+		ok=1
+		for e in "${GATE[@]}"; do
+			pinned "$tip" "${e%%:*}" "${e#*:}" || ok=0
+		done
+		pinned "$tip" gitleaks-toml .gitleaks.toml || ok=0
+		pinned "$tip" pre-push-hook .githooks/pre-push || ok=0
+		if [[ "$ok" -ne 1 ]]; then
+			REFUSED=1
+			continue
+		fi
+		src="$tip"
+		rules="$tip"
+	fi
+
+	t="$(mktemp -d "${TMPDIR:-/tmp}/pre-push-gate.XXXXXX")" || {
+		refuse "$rref" "cannot create a temp dir"
+		REFUSED=1
+		continue
+	}
+	TMPS+=("$t")
+	mkdir -p "$t/scripts/lib"
+	for e in "${GATE[@]}"; do
+		if ! git cat-file blob "${src}:${e#*:}" >"$t/${e#*:}"; then
+			refuse "$rref" "cannot copy ${e#*:} out of ${src:0:12}"
+			REFUSED=1
+			continue 2
+		fi
+	done
+	chmod +x "$t/scripts/pre-push-scan.sh" "$t/scripts/publish-guard.sh"
+
+	if ! printf '%s %s %s %s\n' "$lref" "$lsha" "$rref" "$rsha" \
+		| FYD_PREPUSH_PROTOCOL="$PROTOCOL" FYD_PREPUSH_RULES_FROM="$rules" \
+			FYD_PREPUSH_REMOTE_SHAS="$LS/remote-shas" \
+			bash "$t/scripts/pre-push-scan.sh" "$REMOTE" "$URL"; then
+		REFUSED=1
+	fi
+done
+
+if [[ "$REFUSED" -ne 0 ]]; then
+	abort
+fi
+exit 0

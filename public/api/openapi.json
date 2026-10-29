@@ -1,0 +1,660 @@
+{
+  "openapi": "3.1.0",
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "info": {
+    "title": "Metal Freedom Yield public data",
+    "version": "1.0.0",
+    "description": "Static files, GET only, free, no authentication. Public data files of Metal Freedom Yield, an independent validator on the Metal Blockchain mainnet. A plain-text guide is at https://metal.freedom-yield.com/llms.txt."
+  },
+  "servers": [
+    {
+      "url": "https://metal.freedom-yield.com"
+    }
+  ],
+  "paths": {
+    "/api/validator.json": {
+      "get": {
+        "operationId": "get_validator_json",
+        "summary": "validator.json",
+        "description": "Live validator identity, stake, uptime%, and P/X/C-Chain bootstrap status. Updated every 5 minutes.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./validator.schema.v1.json"
+                }
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "operationId": "head_validator_json",
+        "summary": "validator.json (headers only)",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/evidence.json": {
+      "get": {
+        "operationId": "get_evidence_json",
+        "summary": "evidence.json",
+        "description": "Machine-readable evidence manifest combining live validator state with static project commitments and the list of public pages. Updated daily.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./evidence.schema.v1.json"
+                }
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "operationId": "head_evidence_json",
+        "summary": "evidence.json (headers only)",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/uptime-recent.json": {
+      "get": {
+        "operationId": "get_uptime_recent_json",
+        "summary": "uptime-recent.json",
+        "description": "Rolling 90-day window of daily uptime samples. Updated daily.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "operationId": "head_uptime_recent_json",
+        "summary": "uptime-recent.json (headers only)",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/uptime-cycles.json": {
+      "get": {
+        "operationId": "get_uptime_cycles_json",
+        "summary": "uptime-cycles.json",
+        "description": "One row per closed validation period, with on-chain start/end timestamps, final uptime%, and tx ID. Updated on cycle close.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "operationId": "head_uptime_cycles_json",
+        "summary": "uptime-cycles.json (headers only)",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/incidents.json": {
+      "get": {
+        "operationId": "get_incidents_json",
+        "summary": "incidents.json",
+        "description": "Operator-maintained incident log. An empty array means no operational anomalies have occurred.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "operationId": "head_incidents_json",
+        "summary": "incidents.json (headers only)",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/cycle-history.jsonl": {
+      "get": {
+        "operationId": "get_cycle_history_jsonl",
+        "summary": "cycle-history.jsonl",
+        "description": "Cycle-by-cycle audit packet, one JSON object per line, closed cycles only. Append-only. The server currently sends no Content-Type header for this file.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/jsonl": {
+                "schema": {
+                  "$ref": "./cycle-history.schema.v1.json"
+                }
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "operationId": "head_cycle_history_jsonl",
+        "summary": "cycle-history.jsonl (headers only)",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/peer-geo.json": {
+      "get": {
+        "operationId": "get_peer_geo_json",
+        "summary": "peer-geo.json",
+        "description": "Geographic distribution of peer validators in this node's peer set. Updated hourly.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "operationId": "head_peer_geo_json",
+        "summary": "peer-geo.json (headers only)",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/peers-gini.json": {
+      "get": {
+        "operationId": "get_peers_gini_json",
+        "summary": "peers-gini.json",
+        "description": "Last 24 daily samples of validator-set concentration (Gini, top-10 share, validator count).",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "operationId": "head_peers_gini_json",
+        "summary": "peers-gini.json (headers only)",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/peers-gini-history.jsonl": {
+      "get": {
+        "operationId": "get_peers_gini_history_jsonl",
+        "summary": "peers-gini-history.jsonl",
+        "description": "Full append-only history of the concentration samples, one JSON object per line. The server currently sends no Content-Type header for this file.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/jsonl": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "operationId": "head_peers_gini_history_jsonl",
+        "summary": "peers-gini-history.jsonl (headers only)",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/fee-market.json": {
+      "get": {
+        "operationId": "get_fee_market_json",
+        "summary": "fee-market.json",
+        "description": "Last 30 daily samples of the validator delegation-fee distribution.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "operationId": "head_fee_market_json",
+        "summary": "fee-market.json (headers only)",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/fee-market-history.jsonl": {
+      "get": {
+        "operationId": "get_fee_market_history_jsonl",
+        "summary": "fee-market-history.jsonl",
+        "description": "Full append-only history of the fee-market samples, one JSON object per line. The server currently sends no Content-Type header for this file.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/jsonl": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "operationId": "head_fee_market_history_jsonl",
+        "summary": "fee-market-history.jsonl (headers only)",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/peers-changes.json": {
+      "get": {
+        "operationId": "get_peers_changes_json",
+        "summary": "peers-changes.json",
+        "description": "Most recent diff of the active-validator set (joined and departed NodeIDs). Replaced daily.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "operationId": "head_peers_changes_json",
+        "summary": "peers-changes.json (headers only)",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/peers-history-index.json": {
+      "get": {
+        "operationId": "get_peers_history_index_json",
+        "summary": "peers-history-index.json",
+        "description": "Index of daily full-set validator snapshots (date, filename, size).",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "operationId": "head_peers_history_index_json",
+        "summary": "peers-history-index.json (headers only)",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/validator-directory.json": {
+      "get": {
+        "operationId": "get_validator_directory_json",
+        "summary": "validator-directory.json",
+        "description": "This validator's own NodeID to name, url, and type entry. Updated rarely.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "operationId": "head_validator_directory_json",
+        "summary": "validator-directory.json (headers only)",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/anchor-source.json": {
+      "get": {
+        "operationId": "get_anchor_source_json",
+        "summary": "anchor-source.json",
+        "description": "The three-branch Merkle DAG snapshot whose combined root is inscribed on Metal A-chain at each cycle transition.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./anchor-source.schema.v1.json"
+                }
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "operationId": "head_anchor_source_json",
+        "summary": "anchor-source.json (headers only)",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/anchor-receipt.json": {
+      "get": {
+        "operationId": "get_anchor_receipt_json",
+        "summary": "anchor-receipt.json",
+        "description": "Index of the most recent on-chain anchor and the transaction it was broadcast in. Rotates at each cycle transition.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./anchor-receipt.schema.v2.json"
+                }
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "operationId": "head_anchor_receipt_json",
+        "summary": "anchor-receipt.json (headers only)",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/anchor-history.jsonl": {
+      "get": {
+        "operationId": "get_anchor_history_jsonl",
+        "summary": "anchor-history.jsonl",
+        "description": "Append-only ledger of every verified anchor, one line per cycle transition. The server currently sends no Content-Type header for this file.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/jsonl": {
+                "schema": {
+                  "$ref": "./anchor-history.schema.v2.json"
+                }
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "operationId": "head_anchor_history_jsonl",
+        "summary": "anchor-history.jsonl (headers only)",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/identity-history.jsonl": {
+      "get": {
+        "operationId": "get_identity_history_jsonl",
+        "summary": "identity-history.jsonl",
+        "description": "Append-only log of operator identity-key rotation events, one line per key generation. The server currently sends no Content-Type header for this file.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/jsonl": {
+                "schema": {
+                  "$ref": "./identity-history.schema.v1.json"
+                }
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "operationId": "head_identity_history_jsonl",
+        "summary": "identity-history.jsonl (headers only)",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/identity.json": {
+      "get": {
+        "operationId": "get_identity_json",
+        "summary": "identity.json",
+        "description": "Signed manifest bound to the declared Metal NodeID.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./identity.schema.v2.json"
+                }
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "operationId": "head_identity_json",
+        "summary": "identity.json (headers only)",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/identity.json.sig": {
+      "get": {
+        "operationId": "get_identity_json_sig",
+        "summary": "identity.json.sig",
+        "description": "Detached ed25519 signature of identity.json.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/pgp-signature": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "operationId": "head_identity_json_sig",
+        "summary": "identity.json.sig (headers only)",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/identity.json.mldsa87.sig": {
+      "get": {
+        "operationId": "get_identity_json_mldsa87_sig",
+        "summary": "identity.json.mldsa87.sig",
+        "description": "Detached ML-DSA-87 signature of identity.json.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/pgp-signature": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "operationId": "head_identity_json_mldsa87_sig",
+        "summary": "identity.json.mldsa87.sig (headers only)",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/.well-known/operator-identity.pub": {
+      "get": {
+        "operationId": "get_operator_identity_pub",
+        "summary": "operator-identity.pub",
+        "description": "ed25519 public key (OpenSSH format). The server currently sends this media type for the .pub extension; the content is a text public key.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/vnd.exstream-package": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "operationId": "head_operator_identity_pub",
+        "summary": "operator-identity.pub (headers only)",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/.well-known/operator-identity-mldsa87.pub": {
+      "get": {
+        "operationId": "get_operator_identity_mldsa87_pub",
+        "summary": "operator-identity-mldsa87.pub",
+        "description": "ML-DSA-87 public key (PEM). The server currently sends this media type for the .pub extension; the content is a text public key.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/vnd.exstream-package": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "operationId": "head_operator_identity_mldsa87_pub",
+        "summary": "operator-identity-mldsa87.pub (headers only)",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    }
+  }
+}

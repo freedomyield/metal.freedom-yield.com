@@ -1,0 +1,77 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://metal.freedom-yield.com/api/identity-history.schema.v1.json",
+	"title": "Freedom Yield Metal — Identity History Leaf v1 (per-line)",
+	"description": "Formal contract for EACH LINE of /api/identity-history.jsonl. The file is JSONL (line-delimited JSON): each line is one JSON object conforming to this schema and represents one operator-identity ed25519 key entry. Sorted by key_seq ascending (= 1, 2, 3, ...). Append-only within v1: a new key rotation appends a new line; an existing line is rewritten only when its revoked / revoked_at / revocation_reason transition from false to true, OR when superseded_by_key_seq is set on a previously authoritative key. The leaf source for identity_branch in the Merkle DAG; each line's SHA-256(raw_bytes_as_served) is one Merkle leaf. Companion spec: docs/MERKLE_DAG_SPEC.md §2.1. Schema stability: additive-only within v1; breaking changes go to /api/identity-history.schema.v2.json.",
+	"x-issued-at": "2026-06-21T00:00:00Z",
+	"x-stability": "additive-only-within-v1",
+	"x-baseline-revision": "2026-06-21-phase-alpha-initial",
+	"x-format-guide": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/MERKLE_DAG_SPEC.md",
+	"x-line-format": "Each line of identity-history.jsonl validates against this schema independently. Use jq, ndjson tooling, or stream the file line-by-line.",
+	"type": "object",
+	"required": [
+		"schema_version",
+		"key_seq",
+		"operator_identity_pubkey_fingerprint",
+		"operator_identity_pubkey_url",
+		"key_iat",
+		"key_exp",
+		"revoked",
+		"revoked_at",
+		"revocation_reason",
+		"superseded_by_key_seq"
+	],
+	"additionalProperties": true,
+	"properties": {
+		"schema_version": {
+			"type": "integer",
+			"const": 1
+		},
+		"key_seq": {
+			"type": "integer",
+			"minimum": 1,
+			"description": "Monotone integer. key_seq=1 is the first operator-identity key. Used as the stable cross-reference target from cycle-history.jsonl.signed_by_key_seq."
+		},
+		"operator_identity_pubkey_fingerprint": {
+			"type": "string",
+			"pattern": "^SHA256:[A-Za-z0-9+/=]+$",
+			"description": "OpenSSH SHA-256:<base64>= fingerprint. Same value type as identity.json.operator_identity_pubkey_fingerprint at the time this key_seq was active. A verifier can compute the same fingerprint via 'ssh-keygen -l -f <pubkey>' and compare."
+		},
+		"operator_identity_pubkey_url": {
+			"type": "string",
+			"format": "uri",
+			"description": "URL where the public key bytes (OpenSSH 'ssh-ed25519 ...' line) were served at the time key_iat. For the current authoritative key this is /.well-known/operator-identity.pub. For superseded keys the operator MAY publish at /.well-known/operator-identity.v<key_seq>.pub to preserve verifiability of historical cycles; absence of a historical public key file is honest about its retirement and does not invalidate past cycle entries that reference this fingerprint."
+		},
+		"key_iat": {
+			"type": "string",
+			"format": "date-time",
+			"description": "When this key became authoritative (ISO 8601 UTC)."
+		},
+		"key_exp": {
+			"type": "string",
+			"format": "date-time",
+			"description": "Operator-declared expiry (ISO 8601 UTC). NOT cryptographically enforced; consumers MAY treat as policy."
+		},
+		"revoked": {
+			"type": "boolean",
+			"description": "true iff this key is no longer authoritative AND has been explicitly revoked (not merely naturally superseded by a rotation). When true, revoked_at and revocation_reason MUST be non-null."
+		},
+		"revoked_at": {
+			"type": ["string", "null"],
+			"description": "ISO 8601 UTC; non-null iff revoked=true."
+		},
+		"revocation_reason": {
+			"type": ["string", "null"],
+			"description": "Operator-supplied short reason; non-null iff revoked=true."
+		},
+		"superseded_by_key_seq": {
+			"type": ["integer", "null"],
+			"minimum": 1,
+			"description": "Non-null on a key that has been rotated out by a higher key_seq for ANY reason (routine rotation OR revocation). For the currently authoritative key this is null. For a revoked key this points to the successor key_seq if one exists, else null."
+		},
+		"comment": {
+			"type": "string",
+			"description": "Optional operator-supplied human-readable note (e.g., 'initial production key', 'rotated for routine 12-month cadence'). Informational only; does not affect verification."
+		}
+	}
+}

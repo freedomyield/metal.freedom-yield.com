@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Freedom Yield に委任する — Metal Blockchain</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="Freedom Yield の Metal Blockchain validator への METAL 委任手順。スラッシングなし、元本保証、14 日〜1 年ロック。">
+<link rel="canonical" href="https://metal.freedom-yield.com/ja/delegate/">
+<link rel="alternate" hreflang="en" href="https://metal.freedom-yield.com/delegate/">
+<link rel="alternate" hreflang="ja" href="https://metal.freedom-yield.com/ja/delegate/">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<script defer src="/assets/main.js"></script>
+<meta name="theme-color" content="#07080c">
+<meta name="color-scheme" content="dark">
+<script type="application/ld+json">
+{
+	"@context": "https://schema.org",
+	"@type": "HowTo",
+	"name": "Freedom Yield に METAL を委任する方法",
+	"description": "Metal Blockchain で Freedom Yield validator に委任する手順。",
+	"inLanguage": "ja"
+}
+</script>
+<link rel="preconnect" href="https://www.googletagmanager.com" crossorigin>
+<link rel="dns-prefetch" href="https://www.googletagmanager.com">
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GJY2EJE7BV"></script>
+<script defer src="/assets/gtag-init.js"></script>
+<link rel="preload" as="image" href="/assets/hero-images/delegate-960.webp" imagesrcset="/assets/hero-images/delegate-480.webp 480w, /assets/hero-images/delegate-960.webp 960w, /assets/hero-images/delegate.webp 1600w" imagesizes="50vw">
+</head>
+<body>
+<nav class="topnav">
+	<div class="topnav-inner">
+		<a href="/ja/" class="brand">Freedom Yield · Metal</a>
+		<details class="nav-menu">
+			<summary class="nav-toggle" aria-label="メニューを開く / 閉じる">
+				<span class="hamburger-icon" aria-hidden="true"></span>
+			</summary>
+						<div class="nav">
+				<a href="/ja/#status">状態</a>
+				<a href="/ja/about-metal/">概要</a>
+				<div class="nav-dropdown">
+					<a href="/ja/selection-evidence/" class="nav-dropdown-toggle">機関向け</a>
+					<div class="nav-dropdown-menu">
+						<a href="/ja/selection-evidence/">選定エビデンス</a>
+						<a href="/ja/commitments/">運用者の commitment</a>
+						<a href="/ja/risk-disclosure/">リスク開示</a>
+						<a href="/ja/jurisdiction/">管轄姿勢</a>
+						<a href="/ja/security-posture/">セキュリティ姿勢</a>
+						<a href="/ja/continuity/">事業継続性</a>
+						<a href="/ja/pledge/">Transparent Validator Pledge</a>
+						<a href="/ja/subnet-readiness/">Subnet 適性</a>
+						<a href="/ja/reference-architecture/">リファレンスアーキテクチャ</a>
+						<a href="/ja/subnet-pilot/">Subnet pilot</a>
+						<a href="/ja/decommission/">廃止予告ポリシー</a>
+						<a href="/ja/inquiry/">問い合わせ</a>
+					</div>
+				</div>
+				<div class="nav-dropdown">
+					<a href="/ja/delegate/" class="nav-dropdown-toggle">委任者向け</a>
+					<div class="nav-dropdown-menu">
+						<a href="/ja/delegate/" aria-current="page">委任する</a>
+						<a href="/ja/#status">ライブ状態</a>
+						<a href="/ja/continuity/">事業継続性</a>
+					</div>
+				</div>
+				<div class="nav-dropdown">
+					<a href="/ja/data/" class="nav-dropdown-toggle">技術者向け</a>
+					<div class="nav-dropdown-menu">
+						<a href="/ja/data/">公開データ</a>
+						<a href="/ja/verify/">アイデンティティ検証</a>
+						<a href="/ja/journal/">運用日誌</a>
+						<a href="/ja/network/">ネットワーク観測</a>
+						<a href="/ja/incidents/">インシデントログ</a>
+					</div>
+				</div>
+				<a href="/delegate/" class="nav-lang" data-ga-event="language_switch" data-ga-param-to="en">EN</a>
+			</div>
+		</details>
+	</div>
+</nav>
+
+<header class="hero hero--simple hero--photo-delegate">
+	<div class="container">
+		<p class="hero-eyebrow">委任</p>
+		<h1>Delegate to Freedom Yield</h1>
+		<p class="hero-lead">
+			Validator ノードは 2026-05-19 から <strong>mainnet 稼働中</strong>で、 月次の registration cycle で運用しています。
+			委任を受付中、 ライブ状態と残 capacity は下記 status card で確認できます
+			(<a href="/ja/about-metal/">背景</a>)。
+		</p>
+		<p class="hero-status">現状: <span class="badge badge-ok">Mainnet validator 稼働中(2026-05-19〜)</span></p>
+	</div>
+</header>
+
+<main id="main" class="container">
+
+	<nav class="breadcrumb" aria-label="パンくず">
+		<ol>
+			<li><a href="/ja/">ホーム</a></li>
+			<li aria-current="page">Delegate to Freedom Yield</li>
+		</ol>
+	</nav>
+
+	<section class="card">
+		<figure class="card-figure" aria-hidden="true">
+			<img  src="/assets/photos/team-meeting.webp" srcset="/assets/photos/team-meeting-480.webp 480w, /assets/photos/team-meeting-960.webp 960w, /assets/photos/team-meeting.webp 1400w" sizes="(max-width: 600px) 100vw, (max-width: 1200px) 60vw, 800px" width="1400" height="933" alt="" loading="lazy" decoding="async">
+		</figure>
+		<h2>ライブ委任状態</h2>
+		<p>
+			Freedom Yield は、過大な運用能力を主張するのではなく、公開された運用証跡を重視する small-but-transparent な Metal Blockchain validator です。
+		</p>
+		<div class="delegate-stat-grid" role="group" aria-label="ライブ validator stats">
+			<div class="delegate-stat delegate-stat--nodeid">
+				<span class="delegate-stat-label">NodeID</span>
+				<span class="delegate-stat-value"><code data-field="nodeId">—</code></span>
+			</div>
+			<div class="delegate-stat delegate-stat--stake">
+				<span class="delegate-stat-label">自己 stake</span>
+				<span class="delegate-stat-value" data-field="selfStake">—</span>
+			</div>
+			<div class="delegate-stat delegate-stat--delegators">
+				<span class="delegate-stat-label">委任件数</span>
+				<span class="delegate-stat-value" data-field="delegatorCount">—</span>
+			</div>
+			<div class="delegate-stat delegate-stat--received">
+				<span class="delegate-stat-label">受入合計</span>
+				<span class="delegate-stat-value" data-field="receivedCombined">—</span>
+			</div>
+			<div class="delegate-stat delegate-stat--uptime">
+				<span class="delegate-stat-label">ネットワーク uptime</span>
+				<span class="delegate-stat-value" data-field="uptime">—</span>
+			</div>
+			<div class="delegate-stat delegate-stat--fee">
+				<span class="delegate-stat-label">Delegation fee</span>
+				<span class="delegate-stat-value" data-field="delegationFee">3%</span>
+			</div>
+		</div>
+	</section>
+
+	<section class="split-section">
+		<div class="split-bg" aria-hidden="true">
+			<div class="split-bg-photo"><img  src="/assets/photos/circuit-board.webp" srcset="/assets/photos/circuit-board-480.webp 480w, /assets/photos/circuit-board-960.webp 960w, /assets/photos/circuit-board.webp 1600w" sizes="(max-width: 600px) 100vw, (max-width: 1200px) 60vw, 800px" width="1600" height="1067" alt="" loading="lazy" decoding="async"></div>
+			<div class="split-bg-pane"></div>
+		</div>
+		<div class="split-section-inner">
+			<h2 class="split-section-title">なぜこれらの値が重要で、ハードウェアは重要ではないか</h2>
+			<p>Snowman コンセンサスでは、公式最小(8 vCPU / 16 GiB)を超えるハードを使っても報酬は増えません。委任者にとって本当に重要なのは:</p>
+			<div class="feature-block">
+				<ul class="feature-grid">
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.5 8 8 9 4.5-1 8-4.5 8-9V6l-8-3z"/></svg>
+						<h3>自己 stake</h3>
+						<p>運営者の skin in the game。意図的に小さく抑える方針、現値はトップページのステータスカード。</p>
+					</li>
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>
+						<h3>Uptime 評価値</h3>
+						<p>ネットワークから見た稼働率。80% 以上維持で報酬発生。</p>
+					</li>
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 5 5 19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/></svg>
+						<h3>Delegation fee</h3>
+						<p>委任報酬から運営者が取る割合。プロトコル下限 2%、当方は 3% 設定 — 予測可能、突発的引き上げなし。</p>
+					</li>
+					<li class="feature-card">
+						<svg class="feature-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+						<h3>インシデント履歴</h3>
+						<p>過去の障害と対応の透明性。<a href="/ja/incidents/">incidents</a> 参照。</p>
+					</li>
+				</ul>
+			</div>
+		</div>
+	</section>
+
+	<section class="card">
+		<h2>リスクプロファイル</h2>
+		<div class="risk-card-grid">
+			<article class="risk-card risk-card--safe">
+				<div class="risk-card-head">
+					<span class="risk-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 4.5 3.5 8 8 9 4.5-1 8-4.5 8-9V6l-8-3z"/><path d="m9 12 2 2 4-4"/></svg></span>
+					<h3>スラッシングなし</h3>
+				</div>
+				<span class="risk-card-badge">元本保全</span>
+				<p>Avalanche family にはスラッシング(stake 没収)がありません。最悪でも「この期間の報酬がゼロ」。委任元本(委任した METAL)は uptime に関係なく <strong>end time に必ず返却</strong>されます。</p>
+			</article>
+			<article class="risk-card risk-card--notice">
+				<div class="risk-card-head">
+					<span class="risk-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg></span>
+					<h3>ロック期間</h3>
+				</div>
+				<span class="risk-card-badge">Notice</span>
+				<p>委任は <strong>最短 14 日、最長 1 年</strong>のロックです。途中で引き出すことはできません。ロック期間中は市場価格リスクにさらされます。</p>
+			</article>
+			<article class="risk-card risk-card--info">
+				<div class="risk-card-head">
+					<span class="risk-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg></span>
+					<h3>単一運営者リスク</h3>
+				</div>
+				<span class="risk-card-badge">分散推奨</span>
+				<p>当方のバリデータは 1 ノード構成です。ホストが死んで staking 期間内に復旧できない場合、その期間の報酬を失います。複数の validator に分散することを推奨します。</p>
+			</article>
+		</div>
+	</section>
+
+	<figure class="atmosphere-band" aria-hidden="true">
+		<img  src="/assets/photos/focused-work.webp" srcset="/assets/photos/focused-work-480.webp 480w, /assets/photos/focused-work-960.webp 960w, /assets/photos/focused-work.webp 1400w" sizes="(max-width: 600px) 100vw, (max-width: 1200px) 60vw, 800px" width="1400" height="933" alt="" loading="lazy" decoding="async">
+		<div class="atmosphere-band-tint" aria-hidden="true"></div>
+		<figcaption class="atmosphere-band-caption">
+			<div class="atmosphere-band-overline">
+				<span>Step-by-step</span>
+				<span class="atmosphere-band-overline-rule" aria-hidden="true"></span>
+				<span>委任 flow</span>
+			</div>
+			<div class="atmosphere-band-title">委任の手順</div>
+			<p class="atmosphere-band-lede">METAL 取得から委任受領 receipt 確認までの 5 ステップ。</p>
+		</figcaption>
+	</figure>
+
+	<section class="card">
+		<h2>委任手順(本番開始後)</h2>
+		<ol class="step-flow">
+			<li>取引所 or P2P で METAL を取得</li>
+			<li><a href="https://wallet.metalblockchain.org/" rel="noopener noreferrer" target="_blank">Metal Wallet</a> を開いて wallet を作成 or インポート</li>
+			<li>tokens を P-Chain に移動(X-Chain → P-Chain のクロスチェーン送金)</li>
+			<li>"Earn" → "Add Delegator" を選択、当方の NodeID を貼り付け</li>
+			<li>ロック期間 (14d〜1y) を設定、送信</li>
+			<li>start time 到達後、<a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer" target="_blank">explorer.metalblockchain.org</a> で委任を確認</li>
+		</ol>
+		<p class="note">
+			詳細はリポ内 runbook <code>docs/TAHOE_PIPELINE.md</code> 参照(Tahoe でも faucet 経由で同じ手順を無料で練習可)。
+		</p>
+	</section>
+
+	<section class="card">
+		<h2>問い合わせ</h2>
+		<p><a href="mailto:info@metal.freedom-yield.com">info@metal.freedom-yield.com</a> に email。48 時間以内に返信(JST 営業日)。</p>
+	</section>
+</main>
+
+<footer class="site-footer">
+	<div class="container">
+		<div class="footer-grid">
+			<div class="footer-brand">
+				<h3>Freedom Yield · Metal</h3>
+				<p>Metal Blockchain 上で長期視点のバリデータを運営。透明な uptime、誇張なし、地道な稼働継続。</p>
+			</div>
+			<nav class="footer-col" aria-label="機関向け">
+				<h4>機関向け</h4>
+				<ul>
+					<li><a href="/ja/selection-evidence/">選定エビデンス</a></li>
+					<li><a href="/ja/commitments/">Commitment</a></li>
+					<li><a href="/ja/risk-disclosure/">リスク開示</a></li>
+					<li><a href="/ja/jurisdiction/">日本拠点姿勢</a></li>
+					<li><a href="/ja/subnet-readiness/">Subnet 適性</a></li>
+					<li><a href="/ja/reference-architecture/">リファレンスアーキテクチャ</a></li>
+					<li><a href="/ja/subnet-pilot/">Subnet pilot</a></li>
+					<li><a href="/ja/pledge/">Pledge</a></li>
+					<li><a href="/ja/security-posture/">セキュリティ姿勢</a></li>
+					<li><a href="/ja/decommission/">Decommission</a></li>
+					<li><a href="/ja/inquiry/">問い合わせ</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="委任者向け">
+				<h4>委任者向け</h4>
+				<ul>
+					<li><a href="/ja/delegate/">委任する</a></li>
+					<li><a href="/ja/#status">状態</a></li>
+					<li><a href="/ja/continuity/">事業継続性</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="技術者向け">
+				<h4>技術者向け</h4>
+				<ul>
+					<li><a href="/ja/verify/">アイデンティティ検証</a></li>
+					<li><a href="/ja/data/">公開データ</a></li>
+					<li><a href="/ja/journal/">運用日誌</a></li>
+					<li><a href="/ja/network/">ネットワーク</a></li>
+					<li><a href="/ja/incidents/">インシデント</a></li>
+				</ul>
+			</nav>
+			<nav class="footer-col" aria-label="関連">
+				<h4>関連</h4>
+				<ul>
+					<li><a href="/ja/sitemap/">サイトマップ</a></li>
+					<li><a href="https://metalblockchain.org/" rel="noopener noreferrer" target="_blank">Metal Blockchain ↗</a></li>
+					<li><a href="https://explorer.metalblockchain.org/" rel="noopener noreferrer" target="_blank">エクスプローラ ↗</a></li>
+					<li><a href="#acknowledgments">感謝</a></li>
+					<li><a href="mailto:info@metal.freedom-yield.com">お問い合わせ</a></li>
+				</ul>
+			</nav>
+		</div>
+		<hr class="footer-divider">
+		<p class="footer-disclaimer"><strong>免責事項:</strong> Freedom Yield は Metal Blockchain 上で稼働する独立した第三者バリデータです。Metallicus 社および Metal Blockchain Foundation の関連会社・提携先・出資先・公式運営者ではありません。各商標は各権利者に帰属します。</p>
+		<div class="footer-bottom">
+			<p><a href="https://metalblockchain.org/" rel="noopener noreferrer" target="_blank">Metal Blockchain</a> を支える validator として運営しています。</p>
+			<p>© 2026 Freedom Yield · Metal validator</p>
+		</div>
+	</div>
+</footer>
+</body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "rpc_response": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "validators": [
+        {
+          "nodeID": "NodeID-TEST123",
+          "startTime": "1700000000",
+          "endTime": "1800000000",
+          "weight": "5900000000000",
+          "delegationFee": "30000",
+          "delegators": []
+        }
+      ]
+    }
+  }
+}

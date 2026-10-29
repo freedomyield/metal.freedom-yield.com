@@ -1,0 +1,1148 @@
+#!/usr/bin/env bash
+# reward-tracker.sh — detects a matured validator cycle's confirmed reward,
+# records it append-only (split into self-stake reward / delegation-fee
+# income where the chain's own output order makes that certain), pushes a
+# one-time "🎉 cycle reward" notification, and maintains the six-line
+# morning-digest block: cumulative reward, the IN-PROGRESS cycle's expected
+# reward at maturity (each with its self / fee halves), elapsed days, and
+# the self-stake milestone.
+#
+# CHAIN: none — every RPC call is a read-only POST against the LOCAL metalgo
+#        node (platform.getCurrentValidators / getRewardUTXOs /
+#        getCurrentSupply). No broadcast-capable method is ever called; this
+#        file has no route to bin/safe-broadcast or the Prime Directive's
+#        four gates.
+# PRIME_DIRECTIVE: TESTNET-FIRST — not applicable (no broadcast pathway).
+#
+# ---------------------------------------------------------------------------
+# WHAT THIS TRACKS AND WHY (validator reward = self-stake reward + a cut of
+# every delegator's reward — 2026-09-04 operator correction to the original
+# design, which only modeled the self-stake half)
+# ---------------------------------------------------------------------------
+# Every AddValidatorTx metalgo processes gets a `potentialReward` computed
+# ONCE at registration time (vms/platformvm/reward/calculator.go) and paid
+# out when the tx matures — PROVIDED the uptime requirement was met. When
+# this validator's own AddValidatorTx matures, metalgo ALSO pays out, in the
+# SAME reward event, the accrued "delegatee reward" — the operator's cut
+# (this validator's delegationFee%, currently 3%) of every delegator's own
+# reward over that cycle (vms/platformvm/txs/executor/
+# proposal_tx_executor.go, rewardValidatorTx()). Both amounts are recorded
+# via AddRewardUTXO(txID, …) under the SAME txID — this validator's own
+# AddValidatorTx ID — which is exactly the txID this script tracks and later
+# calls platform.getRewardUTXOs against. So reward_metal recorded below
+# ALREADY combines self-stake reward + delegation-fee income; the ledger's
+# self_reward_metal / fee_income_metal (schema v2, below) only LABEL the two
+# halves of that same total.
+#
+# WHY reward_metal WAS ONE FIELD (2026-09-04), AND HOW IT IS SPLIT NOW
+# (2026-09-07, relative-order method):
+# The 2026-09-04 design recorded one combined reward_metal: both reward
+# outputs share the same TxID and differ only by OutputIndex, and the
+# ABSOLUTE OutputIndex depends on the ORIGINAL AddValidatorTx's own
+# output/stake count (`len(outputs)+len(stake)`), which this script cannot
+# know without fetching and decoding that tx. That reasoning still holds
+# for absolute indices. What it missed is that the split needs only the
+# RELATIVE order, which rewardValidatorTx() fixes: self output at K, fee
+# output at K+1 (commit path). On 2026-09-07 the operator asked for the
+# breakdown, and scripts/lib/reward-utxo-decode.sh's
+# split_reward_utxos_metal now derives it from OutputIndex order — READ
+# THAT FILE'S "SELF / FEE SPLIT" HEADER before touching this: it cites the
+# metalgo source line by line, including the one shape the naive rule gets
+# wrong (a single output on the ABORT path is the delegatee cut, not the
+# self reward, at the SAME index). A single output is therefore split only
+# against the validator's PotentialReward, which platform.getCurrentValidators
+# exposes as `potentialReward` while the tx is current; this script stores
+# it in reward-tracker-state.json (tracked_potential_reward_nmetal) on
+# every run so it is on hand when the tx matures. Every shape the source
+# does not produce is recorded with split_known:false — total kept,
+# breakdown null — never guessed.
+#
+# LEDGER SCHEMA v2 (2026-09-07). Rows keep every v1 field unchanged
+# (reward_metal is still the combined total) and add self_reward_metal /
+# fee_income_metal / split_known / schema_version:2. The file stays
+# APPEND-ONLY: a v1 row is never rewritten. Readers apply the same rule
+# uptime-cycles.json uses — the LAST row for a given cycle_n is the
+# effective one (`[...] | last`) — so --backfill can supersede a v1 row by
+# appending a v2 row for the same cycle, and every cumulative figure is
+# computed over effective rows only. A v1 row that is still effective (or a
+# v2 row with split_known:false) contributes to the cumulative TOTAL and is
+# surfaced as "内訳不明 +N" in the breakdown, never silently folded into
+# either half.
+#
+# ---------------------------------------------------------------------------
+# PROJECTION (the morning digest's "見込み") — reward.Calculator ported
+# ---------------------------------------------------------------------------
+# scripts/lib/reward-calculator.sh's estimate_reward() is a pure port of
+# metalgo's actual reward formula (not the whitepaper — see that file's
+# header for why, and its own fixture test for a real Metal Wallet
+# cross-check). The digest's projection is the reward expected AT MATURITY
+# for the whole in-progress cycle (2026-09-07 operator change — previously
+# it was scaled by the elapsed fraction to show "reward-so-far"; the
+# operator wants the full-cycle figure, which is what estimate_reward()
+# predicts and what the chain will actually pay, and the elapsed days are
+# shown on their own line instead):
+#
+#   self_estimate = estimate_reward(self_stake_metal, cycle_duration_sec)
+#   fee_estimate  = accruedDelegateeReward
+#                 + Σ_current_delegators estimate_reward(delegator_stake_metal * fee_fraction,
+#                                                        delegator_duration_sec)
+#   digest_estimate = self_estimate + fee_estimate
+#
+# accruedDelegateeReward (2026-09-07 review I-3): `.delegators[]` lists
+# only delegations that are STILL staking. A delegation that already
+# matured mid-cycle has had its fee cut credited to this validator in
+# state (rewardDelegatorTx -> SetDelegateeReward), which
+# platform.getCurrentValidators exposes as `accruedDelegateeReward`
+# (metalgo api/validator.go / service.go, read 2026-09-07). Without that
+# term the projection silently forgets every delegation that ended before
+# the morning it is computed. It is exact (already credited, not
+# estimated) and is added in full; the Σ term covers only what is still
+# accruing. The same value is stored in reward-tracker-state.json
+# (tracked_accrued_delegatee_reward_nmetal) as a record — it is NOT used
+# for the maturity split, which stays on potentialReward alone.
+#
+# The `delegator_stake_metal * fee_fraction` term (not
+# `estimate_reward(delegator_stake) * fee_fraction`) is deliberate and
+# mathematically equivalent: estimate_reward's formula is exactly LINEAR in
+# its stake argument (every other term is independent of stake), so scaling
+# the stake INPUT by the fee fraction before the call produces the identical
+# result, integer-truncation noise aside, as scaling the OUTPUT — and it is
+# the shape that mirrors reward.Split()'s actual on-chain semantics (the
+# validator's delegatee cut is fee% of the delegator's *reward*, i.e. the
+# fee is applied inside the linear scaling, not outside it — see
+# proposal_tx_executor.go's `reward.Split(delegator.PotentialReward,
+# vdrTx.Shares())`, where the first return value — shares% of the total —
+# is the delegatee's cut).
+#
+# current_supply_metal for these calls is fetched ONCE per run via
+# platform.getCurrentSupply and cached in $RC_CURRENT_SUPPLY_METAL (see
+# reward-calculator.sh's env-fallback resolution order) — never guessed,
+# never hardcoded. If that RPC fails, the digest's projection segment is
+# omitted (never fabricated) — see compute_and_write_digest().
+#
+# ---------------------------------------------------------------------------
+# STATE (all under fyd_state_dir; production default /var/lib/freedom-yield)
+# ---------------------------------------------------------------------------
+#   rewards-history.jsonl     Append-only. One line per matured, confirmed
+#                             cycle (schema v2, 2026-09-07):
+#                               {"cycle_n":N,"reward_metal":X,
+#                                "self_stake_metal":S,"start_unix":..,
+#                                "end_unix":..,"add_validator_tx":"..",
+#                                "observed_at":"..",
+#                                "schema_version":2,
+#                                "self_reward_metal":a|null,
+#                                "fee_income_metal":b|null,
+#                                "split_known":true|false,
+#                                "split_basis":"<evidence token>"}
+#                             split_basis names the evidence the halves
+#                             rest on (see reward-utxo-decode.sh's
+#                             split_reward_utxos_metal for the tokens;
+#                             "operator-asserted-no-delegators+self-sanity(<tol>)"
+#                             is this script's own, from --backfill
+#                             --assert-no-delegators after the sanity
+#                             check). v1 rows (no schema_version) lack the
+#                             last five keys. Existing lines are NEVER rewritten
+#                             — only appended to, and only under FY_LIVE=1.
+#                             Readers take the LAST row per cycle_n as the
+#                             effective one (see "LEDGER SCHEMA v2" above).
+#   reward-tracker-state.json In-flight tracking: which AddValidatorTx this
+#                             script is currently waiting to mature (txID,
+#                             its startTime/endTime/weight/potentialReward/
+#                             accruedDelegateeReward as observed on the
+#                             latest run). Advances only
+#                             after a maturity is either recorded or
+#                             confirmed to need no recording.
+#   reward-digest-line.txt    SIX lines (three in the fallback), REGENERATED
+#                             every run (not append-only): the morning
+#                             digest block daily-status.sh splices into its
+#                             morning push under [Reward]. Shape (2026-09-07,
+#                             phone-width: every line <= 30 columns, a
+#                             full-width character counting 2):
+#                               累積 N METAL
+#                               　自己 a / 手数料 b
+#                               Cycle 5 見込み +M METAL
+#                               　自己 +a / 手数料 +b
+#                               　10/7 満期・経過 3/33 日
+#                               25,000 まで残り R
+#                             The projection lines (3–5) are omitted (never
+#                             fabricated) when it cannot be computed this
+#                             run; a breakdown line that would exceed the
+#                             width is split into more indented lines.
+#                             The head line 3 (`Cycle N 見込み +M METAL`) does
+#                             NOT go through breakdown_lines, so it does not
+#                             adapt: <= 30 holds while cycle <= 99 and the
+#                             見込み has <= 4 integer digits (`Cycle 99 見込み
+#                             +9,999.9 METAL` is exactly 30); either one
+#                             larger makes it 31.
+#
+# ---------------------------------------------------------------------------
+# NUMERIC NON-LEAK (constitution: no METAL amount on this script's own
+# stdout/stderr — see scripts/daily-status.sh:66's identical discipline)
+# ---------------------------------------------------------------------------
+# Every log line in this script is number-free by construction: confirmation
+# messages name what happened ("appended cycle N", "digest block updated")
+# never how much. The only two places a METAL amount is ever formed into
+# text are (a) the ntfy notification body, passed straight to fyd_notify
+# (whose OWN dry-mode note prints a byte COUNT, never the message — see
+# scripts/lib/side-effects.sh), and (b) the digest block content, piped
+# straight into fyd_live_write (same dry-mode byte-count-only guarantee).
+# Neither path ever touches this script's own echo/printf to stdout/stderr.
+# tests/reward-tracker/test-reward-tracker.sh enforces this with a grep over
+# captured stdout+stderr, and separately proves the check has teeth by
+# re-running against a MUTANT copy with one diagnostic echo of reward_metal
+# added, confirming that mutant is what makes the grep fail.
+#
+# ---------------------------------------------------------------------------
+# Usage:
+#   reward-tracker.sh                        normal daily run
+#   reward-tracker.sh --backfill <txID> <cycle_n>
+#                                             manually record ONE already-
+#                                             matured historical cycle whose
+#                                             AddValidatorTx this script
+#                                             never tracked live (e.g. first
+#                                             deploy of this script, or a
+#                                             gap). Looks up cycle_n's
+#                                             start_unix/end_unix/
+#                                             final_self_stake_metal from
+#                                             public/api/uptime-cycles.json
+#                                             (no live "tracked weight" is
+#                                             available for a backfilled tx).
+#                                             Sends NO notification (backfill
+#                                             is a manual, historical
+#                                             operation — a "🎉 matured"
+#                                             push about the past would be
+#                                             noise) and does not touch the
+#                                             digest file or the live
+#                                             tracking state. Idempotency
+#                                             (2026-09-07): if the effective
+#                                             row for this txID is already a
+#                                             v2 row, no-op; if only a v1 row
+#                                             exists, ONE v2 row is appended
+#                                             (the v1 row is left in place —
+#                                             append-only). No potentialReward
+#                                             hint is available for a
+#                                             historical tx, so a single-
+#                                             output backfill records
+#                                             split_known:false — unless
+#                                             --assert-no-delegators is given.
+#   reward-tracker.sh --backfill <txID> <cycle_n> --assert-no-delegators
+#                                             The operator vouches that NO
+#                                             delegation existed during that
+#                                             cycle. Per rewardValidatorTx()
+#                                             that leaves one self output
+#                                             (commit) or none (abort), so a
+#                                             single output is recorded as
+#                                             self reward — but ONLY after
+#                                             the self-reward sanity check
+#                                             below passes. Two or more
+#                                             outputs prove the assertion
+#                                             false: exit 8, nothing
+#                                             appended. Ledger rows carry
+#                                             split_basis
+#                                             "operator-asserted-no-delegators
+#                                             +self-sanity(<tolerance>)" so
+#                                             the evidence is on record.
+#
+#   SELF-REWARD SANITY CHECK (why the flag alone is not enough): if the
+#   operator's assertion is WRONG and the cycle went down the abort path
+#   (uptime missed), the chain paid the delegatee cut ALONE as one output
+#   at the self output's index — exactly the shape the flag would record
+#   as self reward, split_known:true. To close that residual, the single
+#   output's amount A is compared with E = estimate_reward(
+#   final_self_stake_metal, end_unix - start_unix) at the CURRENT supply
+#   (uptime-cycles.json values, scripts/lib/reward-calculator.sh). E is an
+#   approximation (the chain used the supply at registration), but a
+#   fee-only output is orders of magnitude smaller than the self reward
+#   (delegated stake x 3% x reward rate), so a relative band —
+#   |A - E| / E <= BACKFILL_SELF_TOLERANCE, default 0.25 — separates them
+#   cleanly. Outside the band, or when E cannot be computed (supply RPC
+#   down): exit 9, nothing appended, and the stderr note names only the
+#   cycle_n ("self-reward sanity check failed") — never an amount or ratio.
+#   The row's split_basis records the band that was applied, e.g.
+#   "operator-asserted-no-delegators+self-sanity(0.25)".
+#
+#   SEPARATION PREMISE (re-check if either input changes): a fee-only
+#   output is at most delegationFee x (max delegated weight / self stake)
+#   of E — currently 3% x 5 = 0.15 of E — which must stay well below the
+#   band's lower edge, 1 - tolerance = 0.75. Raising the fee%, the
+#   delegation multiplier, or the tolerance narrows that gap; the default
+#   tolerance is only valid while fee% x multiplier << 1 - tolerance.
+#
+# Env:
+#   METALGO_RPC          metalgo RPC base URL        (default http://127.0.0.1:9650)
+#   FY_RPC_TIMEOUT        curl --max-time seconds     (default 6)
+#   VALIDATOR_JSON        path to validator.json      (default public/api/validator.json)
+#   UPTIME_CYCLES_JSON    path to uptime-cycles.json  (default public/api/uptime-cycles.json)
+#   FY_REWARD_MILESTONE   self-stake milestone, METAL (default 25000)
+#   BACKFILL_SELF_TOLERANCE
+#                         --assert-no-delegators sanity band, relative
+#                         (default 0.25 — see the Usage note above)
+#   FY_LIVE=1              REQUIRED before the rewards-history append, the
+#                          state write, the digest-file write, or the ntfy
+#                          push happen for real (scripts/lib/side-effects.sh).
+#                          Anything else is a loud dry no-op — see that
+#                          library's header. Values are NEVER printed even
+#                          in dry mode (see NUMERIC NON-LEAK above).
+#
+# Exit codes:
+#   0  ran to completion (including "nothing matured, nothing to do")
+#   1  usage error
+#   3  scripts/lib/side-effects.sh missing (structural)
+#   4  scripts/lib/reward-calculator.sh or reward-utxo-decode.sh missing (structural)
+#   5  --backfill: cycle_n not found in uptime-cycles.json
+#   6  --backfill: txID/cycle_n conflict, either direction — cycle_n's
+#      effective ledger row belongs to a DIFFERENT txID, or this txID is
+#      already recorded (any row) under a DIFFERENT cycle_n. Refused: one
+#      AddValidatorTx is one cycle, and the append-only ledger must never
+#      count one reward twice; resolve by hand before retrying
+#   (--backfill against an already-recorded v2 txID is exit 0, an idempotent no-op — not a distinct exit code, since it is not an error)
+#   7  cannot open the flock lock file (structural — locks/ directory unwritable)
+#   8  --backfill --assert-no-delegators: the reward outputs contradict the
+#      assertion (two or more outputs = a fee output exists, or a single
+#      output that a potentialReward hint says is not the self reward).
+#      Nothing appended
+#   9  --backfill --assert-no-delegators: self-reward sanity check failed
+#      or could not be evaluated (single output outside the tolerance band
+#      of the calculator's estimate, or getCurrentSupply unreachable).
+#      Nothing appended
+#  10  rewards-history.jsonl is unparseable (a line is not JSON) —
+#      structural, fail-closed on EVERY path: no --backfill append, no
+#      live-maturity append or dedupe, no digest block (the morning push
+#      must not show 累積 0 for a ledger that could not be read). Repair
+#      the file by hand; the good rows are append-only and stay as they are
+
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+FYD_LIB="${ROOT}/scripts/lib/side-effects.sh"
+if [ ! -r "$FYD_LIB" ]; then
+	echo "reward-tracker: FATAL: side-effects library not readable at $FYD_LIB" >&2
+	exit 3
+fi
+# shellcheck source=scripts/lib/side-effects.sh
+. "$FYD_LIB"
+
+RC_LIB="${ROOT}/scripts/lib/reward-calculator.sh"
+UTXO_LIB="${ROOT}/scripts/lib/reward-utxo-decode.sh"
+if [ ! -r "$RC_LIB" ] || [ ! -r "$UTXO_LIB" ]; then
+	echo "reward-tracker: FATAL: reward-calculator.sh or reward-utxo-decode.sh not readable under ${ROOT}/scripts/lib" >&2
+	exit 4
+fi
+# shellcheck source=scripts/lib/reward-calculator.sh
+. "$RC_LIB"
+# shellcheck source=scripts/lib/reward-utxo-decode.sh
+. "$UTXO_LIB"
+
+METALGO_RPC="${METALGO_RPC:-http://127.0.0.1:9650}"
+RPC_TIMEOUT="${FY_RPC_TIMEOUT:-6}"
+VALIDATOR_JSON="${VALIDATOR_JSON:-$ROOT/public/api/validator.json}"
+UPTIME_CYCLES_JSON="${UPTIME_CYCLES_JSON:-$ROOT/public/api/uptime-cycles.json}"
+FY_REWARD_MILESTONE="${FY_REWARD_MILESTONE:-25000}"
+BACKFILL_SELF_TOLERANCE="${BACKFILL_SELF_TOLERANCE:-0.25}"
+
+STATE_DIR="$(fyd_state_dir)" || exit $?
+REWARDS_HISTORY="${STATE_DIR}/rewards-history.jsonl"
+TRACKER_STATE="${STATE_DIR}/reward-tracker-state.json"
+DIGEST_FILE="${STATE_DIR}/reward-digest-line.txt"
+# Owned by uptime-history.sh, which resolves it via fyd_state_dir's "uptime"
+# role — read it the same way so a test that only overrides
+# UPTIME_STATE_DIR (not FY_STATE_DIR) still finds the same file this script
+# reads. See scripts/lib/side-effects.sh's fyd_state_dir header re: roles.
+UPTIME_STATE_DIR="$(fyd_state_dir uptime)" || exit $?
+CURRENT_CYCLE_STATE="${UPTIME_STATE_DIR}/current-cycle-state.json"
+
+fyd_live_run "create the state dir ${STATE_DIR}" mkdir -p "$STATE_DIR"
+
+# ---- arg parsing -------------------------------------------------------
+BACKFILL=0
+BACKFILL_TX=""
+BACKFILL_CYCLE_N=""
+BACKFILL_NO_DELEGATORS=0
+if [ "${1:-}" = "--backfill" ]; then
+	BACKFILL=1
+	BACKFILL_TX="${2:-}"
+	BACKFILL_CYCLE_N="${3:-}"
+	if [ -z "$BACKFILL_TX" ] || [ -z "$BACKFILL_CYCLE_N" ]; then
+		echo "reward-tracker: usage: reward-tracker.sh --backfill <txID> <cycle_n> [--assert-no-delegators]" >&2
+		exit 1
+	fi
+	if [ "${4:-}" = "--assert-no-delegators" ]; then
+		BACKFILL_NO_DELEGATORS=1
+	elif [ $# -gt 3 ]; then
+		echo "reward-tracker: unknown --backfill option: $4 (only --assert-no-delegators is accepted)" >&2
+		exit 1
+	fi
+elif [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+	sed -n '2,60p' "$0" | sed 's/^# \?//'
+	exit 0
+elif [ $# -gt 0 ]; then
+	echo "reward-tracker: unknown argument: $1" >&2
+	exit 1
+fi
+
+# ---- small helpers (no METAL numbers ever passed to these for echo) -----
+
+# rpc_post <endpoint_suffix> <json_body> — POST to $METALGO_RPC<suffix>.
+# Prints the raw response body (empty on any failure). Never echoes numbers;
+# the caller decides what, if anything, to log.
+rpc_post() {
+	local suffix="$1" body="$2"
+	curl -sS --max-time "$RPC_TIMEOUT" -X POST -H "Content-Type: application/json" \
+		--data "$body" "${METALGO_RPC}${suffix}" 2>/dev/null || true
+}
+
+# fmt_metal <value> <decimals> — comma-grouped fixed-decimal string.
+# python3 (already a hard dependency via reward-calculator.sh) rather than
+# awk: awk's doubles cannot be trusted at these magnitudes across the whole
+# script, and re-deriving a matching precision policy in awk for every call
+# site is more surface area than one shared formatter. Decimal +
+# ROUND_HALF_UP (the same rounding reward-calculator.sh uses for nMETAL),
+# not float formatting: a float f-string rounds half-to-even on the binary
+# value, so 12.25 at one decimal prints "12.2" — a human reading the digest
+# expects "12.3". Non-numeric input formats as 0.
+fmt_metal() {
+	python3 -c "
+import sys
+from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
+v = sys.argv[1]
+d = int(sys.argv[2])
+try:
+    x = Decimal(v)
+except InvalidOperation:
+    x = Decimal(0)
+q = Decimal(1).scaleb(-d)
+print(f'{x.quantize(q, rounding=ROUND_HALF_UP):,.{d}f}')
+" "$1" "$2"
+}
+
+# ---- phone-width rendering (2026-09-07 operator request) -----------------
+# The morning digest and the maturity push are read on a phone (ntfy on
+# Android), which wraps at roughly 40 columns counting a full-width
+# character as 2; a wrapped line breaks the "one fact per line" reading.
+# Every line either script produces is kept within DIGEST_MAX_COLS by
+# construction: no parentheses, one number pair per line, and a breakdown
+# line that would exceed the limit is split further (breakdown_lines).
+DIGEST_MAX_COLS=30
+DIGEST_INDENT="　"   # one full-width space (U+3000) marks a sub-line
+
+# display_width <string> — columns as a phone renders them: East Asian
+# Width W/F = 2, A (ambiguous — "→", "—", "・" in CJK fonts) = 2 to be
+# safe, everything else 1.
+display_width() {
+	python3 -c "
+import sys, unicodedata
+print(sum(2 if unicodedata.east_asian_width(c) in ('W', 'F', 'A') else 1 for c in sys.argv[1]))
+" "$1"
+}
+
+# breakdown_lines <sign> <self> <fee> <unknown|""> <decimals> — prints the
+# indented self / fee [/ 不明] breakdown as ONE line when it fits in
+# DIGEST_MAX_COLS, otherwise progressively split: first 不明 moves to its
+# own line, then self and fee each get one. <sign> is "" (a balance) or
+# "+" (a delta). Every printed line starts with DIGEST_INDENT.
+breakdown_lines() {
+	local sign="$1" self="$2" fee="$3" unknown="$4" d="$5"
+	local s f u=""
+	s="${sign}$(fmt_metal "$self" "$d")"
+	f="${sign}$(fmt_metal "$fee" "$d")"
+	[ -n "$unknown" ] && u="${sign}$(fmt_metal "$unknown" "$d")"
+	local one="${DIGEST_INDENT}自己 ${s} / 手数料 ${f}"
+	[ -n "$u" ] && one="${one} / 不明 ${u}"
+	if [ "$(display_width "$one")" -le "$DIGEST_MAX_COLS" ]; then
+		printf '%s\n' "$one"
+		return 0
+	fi
+	local two="${DIGEST_INDENT}自己 ${s} / 手数料 ${f}"
+	if [ "$(display_width "$two")" -le "$DIGEST_MAX_COLS" ]; then
+		printf '%s\n' "$two"
+		[ -n "$u" ] && printf '%s\n' "${DIGEST_INDENT}不明 ${u}"
+		return 0
+	fi
+	printf '%s\n' "${DIGEST_INDENT}自己 ${s}" "${DIGEST_INDENT}手数料 ${f}"
+	[ -n "$u" ] && printf '%s\n' "${DIGEST_INDENT}不明 ${u}"
+	return 0
+}
+
+# jst_md_of_epoch <epoch> — "M/D" in JST, no leading zeros (the digest's
+# maturity date). GNU `date -d @` vs BSD `date -r` shim, same shape as
+# scripts/gen-renewal-ics.sh's epoch_to_fmt; `%-m` is GNU-only so the
+# zero-strip is done with sed instead.
+if date --version >/dev/null 2>&1; then
+	jst_md_of_epoch() { TZ=Asia/Tokyo date -d "@$1" +%m/%d | sed 's#^0##; s#/0#/#'; }
+else
+	jst_md_of_epoch() { TZ=Asia/Tokyo date -r "$1" +%m/%d | sed 's#^0##; s#/0#/#'; }
+fi
+
+# ---- rewards-history.jsonl helpers --------------------------------------
+# ONE parse site (history_load_all) feeds every reader below, and a parse
+# failure is a STRUCTURAL error (exit 10), never "no rows" (2026-09-07
+# review I-4: with `jq … 2>/dev/null` treated as "no match", a single
+# non-JSON line made --backfill re-append a recorded txID and the digest
+# report 累積 0 — a corrupt ledger was silently fail-open). Every reader
+# returns 10 on that failure and every CALL SITE checks it (`|| exit $?`),
+# because an `exit` inside `$(…)` only leaves the subshell; on top of that
+# the ledger is validated ONCE right after the lock is taken, so neither
+# the --backfill, the live-maturity nor the digest path ever runs against
+# an unparseable file. Readers that answer a yes/no question print "1"/"0"
+# rather than using their return code for it, so rc is free to carry the
+# structural failure. The LAST row per cycle_n is the effective one
+# (append-only supersession — see the header's "LEDGER SCHEMA v2"). None
+# of these ever echo an amount to this script's own stdout/stderr; their
+# output is consumed only by ntfy/digest builders.
+
+LEDGER_UNPARSEABLE_RC=10
+
+# history_load_all — prints the whole ledger as one JSON array ("[]" when
+# the file is absent or empty). rc 10 + stderr note if any line fails to
+# parse; nothing is printed in that case.
+history_load_all() {
+	if [ ! -f "$REWARDS_HISTORY" ] || [ ! -s "$REWARDS_HISTORY" ]; then
+		echo "[]"
+		return 0
+	fi
+	local all
+	if ! all=$(jq -sc '.' "$REWARDS_HISTORY" 2>/dev/null) || [ -z "$all" ]; then
+		echo "reward-tracker: FATAL: ledger unparseable (${REWARDS_HISTORY}) — refusing to read, append to, or summarize a corrupt ledger; repair it by hand (append-only: do not rewrite good rows)" >&2
+		return "$LEDGER_UNPARSEABLE_RC"
+	fi
+	printf '%s\n' "$all"
+}
+
+# history_has_tx <txID> — prints 1 iff ANY row with this add_validator_tx
+# exists (v1 or v2), else 0. Guards the LIVE path against a double-append
+# if the state advance is interrupted between the append and the state
+# write. --backfill uses history_effective_line_for_cycle instead, because
+# it must distinguish "recorded as v1 only" from "recorded as v2".
+history_has_tx() {
+	local all
+	all=$(history_load_all) || return $?
+	jq -r --arg tx "$1" 'if any(.[]; .add_validator_tx == $tx) then 1 else 0 end' <<< "$all"
+}
+
+# history_tx_under_other_cycle <txID> <cycle_n> — prints 1 iff ANY row
+# (v1 or v2, effective or superseded) carries this add_validator_tx with a
+# cycle_n other than the given one, else 0. --backfill's txID-uniqueness
+# guard.
+history_tx_under_other_cycle() {
+	local all
+	all=$(history_load_all) || return $?
+	jq -r --arg tx "$1" --argjson cn "$2" \
+		'if any(.[]; .add_validator_tx == $tx and .cycle_n != $cn) then 1 else 0 end' <<< "$all"
+}
+
+# history_effective_rows — prints a JSON array of the effective rows (last
+# line per cycle_n, file order decides "last"). [] if the file is absent
+# or empty.
+history_effective_rows() {
+	local all
+	all=$(history_load_all) || return $?
+	jq -c 'reduce .[] as $r ({}; .[($r.cycle_n | tostring)] = $r) | [.[]]' <<< "$all"
+}
+
+# history_effective_line_for_cycle <cycle_n> — the effective row for that
+# cycle_n as one compact JSON object, or empty output if none.
+history_effective_line_for_cycle() {
+	local rows
+	rows=$(history_effective_rows) || return $?
+	jq -c --argjson cn "$1" '[.[] | select(.cycle_n == $cn)] | last // empty' <<< "$rows"
+}
+
+# history_cumulative_metal — sum of reward_metal over effective rows.
+history_cumulative_metal() {
+	local rows
+	rows=$(history_effective_rows) || return $?
+	jq '[.[].reward_metal] | add // 0' <<< "$rows"
+}
+
+# history_cumulative_breakdown — prints "<self> <fee> <unknown>" over the
+# effective rows: self/fee sum only rows whose split_known is true;
+# unknown sums reward_metal of every other effective row (v1 rows, and v2
+# rows recorded with split_known:false). self + fee + unknown == the
+# cumulative total by construction.
+history_cumulative_breakdown() {
+	local rows
+	rows=$(history_effective_rows) || return $?
+	jq -r '
+		([.[] | select(.split_known == true) | .self_reward_metal] | add // 0) as $s
+		| ([.[] | select(.split_known == true) | .fee_income_metal] | add // 0) as $f
+		| ([.[] | select(.split_known != true) | .reward_metal] | add // 0) as $u
+		| "\($s) \($f) \($u)"' <<< "$rows"
+}
+
+# history_count — number of effective rows (= distinct cycles recorded).
+history_count() {
+	local rows
+	rows=$(history_effective_rows) || return $?
+	jq 'length' <<< "$rows"
+}
+
+# ---- append one matured-cycle line (shared by live tracking + --backfill)
+# append_reward_line <cycle_n> <reward_metal> <self_stake_metal> \
+#                     <start_unix> <end_unix> <add_validator_tx> \
+#                     <self_reward_metal|-> <fee_income_metal|-> <split_known 0|1> \
+#                     <split_basis>
+# The last four come straight from split_reward_utxos_metal's output line
+# ("-" = refused → recorded as JSON null with split_known:false; basis is
+# the evidence token, recorded verbatim so a reader can see WHY a row's
+# halves are what they are — evidence-based discipline).
+# Returns 0 iff the line was (or, in dry mode, would be) appended.
+append_reward_line() {
+	local cn="$1" reward="$2" self_stake="$3" su="$4" eu="$5" tx="$6"
+	local self_r="$7" fee_r="$8" known="$9" basis="${10}"
+	local self_json="null" fee_json="null" known_json="false"
+	if [ "$known" = "1" ]; then
+		self_json="$self_r"
+		fee_json="$fee_r"
+		known_json="true"
+	fi
+	# jq 1.8's decNumber backend renders an exact-zero decimal like
+	# "0.000000000" back out as "0E-9" — valid JSON, numerically identical,
+	# but inconsistent with every non-zero row's plain decimal form.
+	# `if . == 0 then 0 else .` normalizes only the exact-zero case (a real
+	# 0-reward cycle — see the header note on why that is a legitimate,
+	# non-racy outcome, not a "not yet paid" race) to a plain 0. The same
+	# normalization is applied to the v2 halves (null passes through).
+	local line
+	line=$(jq -nc \
+		--argjson cn "$cn" \
+		--argjson reward "$reward" \
+		--argjson self "$self_stake" \
+		--argjson su "$su" \
+		--argjson eu "$eu" \
+		--arg tx "$tx" \
+		--arg obs "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+		--argjson self_r "$self_json" \
+		--argjson fee_r "$fee_json" \
+		--argjson known "$known_json" \
+		--arg basis "$basis" \
+		'def z: if . == 0 then 0 else . end;
+		 {cycle_n:$cn, reward_metal:($reward|z), self_stake_metal:($self|z), start_unix:$su, end_unix:$eu, add_validator_tx:$tx, observed_at:$obs,
+		  schema_version:2, self_reward_metal:($self_r|z), fee_income_metal:($fee_r|z), split_known:$known, split_basis:$basis}')
+	printf '%s\n' "$line" | fyd_live_write --append "the matured-cycle reward record" "$REWARDS_HISTORY"
+}
+
+# ============================================================================
+# non-blocking flock (mirrors check-anomalies.sh's K-4 pattern)
+# ============================================================================
+# At most one reward-tracker.sh runs concurrently — a slow RPC call (or a
+# manual re-run overlapping a cron tick) must not let a second invocation
+# interleave reads/writes of reward-tracker-state.json / rewards-
+# history.jsonl / reward-digest-line.txt with it. Held for the WHOLE run
+# (both --backfill and the normal daily run touch state), released only on
+# process exit — same shape as check-anomalies.sh's K-4 lock, minus that
+# script's separate operator-run init-script requirement: this subsystem
+# has no equivalent to anomaly-state-init.sh, so the lock directory is
+# created here rather than assumed pre-provisioned. The lock file itself
+# carries no content and is never deleted (flock holds the fd, not the
+# directory entry) — same FYD-GATE(exempt) categorization check-
+# anomalies.sh uses for its own lock backing file: infrastructure, not
+# state, so this mkdir/open is intentionally NOT behind fyd_live_run.
+LOCK_DIR="${STATE_DIR}/locks"
+# FYD-GATE(exempt): lock-dir infra, no content — see the paragraph above.
+mkdir -p "$LOCK_DIR" 2>/dev/null || true
+LOCK_FILE="${REWARD_TRACKER_LOCK_FILE:-${LOCK_DIR}/reward-tracker.lock}"
+if ! exec 9>"$LOCK_FILE"; then
+	echo "reward-tracker: FATAL: cannot open lock file: $LOCK_FILE" >&2
+	exit 7
+fi
+if ! flock -n 9; then
+	echo "reward-tracker: previous run still holds the lock ($LOCK_FILE) — skipping this run (exit 0, not an error)" >&2
+	exit 0
+fi
+
+# Validate the ledger ONCE, under the lock, before any path reads it (see
+# the helpers' header): a corrupt file stops --backfill, the live maturity
+# check AND the digest here, so nothing is appended to, deduplicated
+# against, or summarized from it. Every reader re-checks anyway.
+history_load_all >/dev/null || exit $?
+
+# ============================================================================
+# --backfill mode
+# ============================================================================
+if [ "$BACKFILL" -eq 1 ]; then
+	# Idempotency on the EFFECTIVE row for this cycle_n (see header):
+	#   effective row is v2 and carries this txID  -> no-op
+	#   effective row is v1 and carries this txID  -> append one v2 row
+	#   effective row carries a DIFFERENT txID     -> refuse (exit 6)
+	#   this txID already recorded under ANOTHER
+	#   cycle_n (any row, v1 or v2)                -> refuse (exit 6)
+	#   no row                                     -> append
+	# The second refusal is the txID-uniqueness guard the 2026-09-04
+	# history_has_tx short-circuit used to provide for --backfill: one
+	# AddValidatorTx is one cycle, so the same txID under two cycle_n values
+	# would count one reward twice in every cumulative figure. Checked over
+	# ALL rows, not just effective ones — a tx's cycle never legitimately
+	# changes in an append-only ledger.
+	TX_ELSEWHERE=$(history_tx_under_other_cycle "$BACKFILL_TX" "$BACKFILL_CYCLE_N") || exit $?
+	if [ "$TX_ELSEWHERE" = "1" ]; then
+		echo "reward-tracker: ERROR: this txID is already recorded under a different cycle_n — refusing to count one reward twice" >&2
+		exit 6
+	fi
+	EFFECTIVE_ROW=$(history_effective_line_for_cycle "$BACKFILL_CYCLE_N") || exit $?
+	if [ -n "$EFFECTIVE_ROW" ]; then
+		EFFECTIVE_TX=$(echo "$EFFECTIVE_ROW" | jq -r '.add_validator_tx // empty')
+		EFFECTIVE_SCHEMA=$(echo "$EFFECTIVE_ROW" | jq -r '.schema_version // 1')
+		if [ "$EFFECTIVE_TX" != "$BACKFILL_TX" ]; then
+			echo "reward-tracker: ERROR: cycle_n=${BACKFILL_CYCLE_N} is already recorded under a different txID — refusing to append a conflicting row" >&2
+			exit 6
+		fi
+		if [ "$EFFECTIVE_SCHEMA" -ge 2 ] 2>/dev/null; then
+			echo "reward-tracker: --backfill txID already recorded as a v2 row, nothing to do (idempotent)" >&2
+			exit 0
+		fi
+		echo "reward-tracker: --backfill effective row is v1 — appending a v2 row with the self/fee split (v1 row left in place)" >&2
+		EFFECTIVE_V1_TOTAL=$(echo "$EFFECTIVE_ROW" | jq -r '.reward_metal // empty')
+	fi
+	if [ ! -r "$UPTIME_CYCLES_JSON" ]; then
+		echo "reward-tracker: ERROR: uptime-cycles.json not readable at ${UPTIME_CYCLES_JSON}" >&2
+		exit 5
+	fi
+	CYCLE_ROW=$(jq -c --argjson cn "$BACKFILL_CYCLE_N" \
+		'[.cycles[]? | select(.cycle_n == $cn)] | last // empty' "$UPTIME_CYCLES_JSON")
+	if [ -z "$CYCLE_ROW" ]; then
+		echo "reward-tracker: ERROR: cycle_n=${BACKFILL_CYCLE_N} not found in ${UPTIME_CYCLES_JSON}" >&2
+		exit 5
+	fi
+	B_START=$(echo "$CYCLE_ROW" | jq -r '.start_unix')
+	B_END=$(echo "$CYCLE_ROW" | jq -r '.end_unix')
+	B_SELF_STAKE=$(echo "$CYCLE_ROW" | jq -r '.final_self_stake_metal')
+
+	UTXO_RESP=$(rpc_post "/ext/bc/P" "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"platform.getRewardUTXOs\",\"params\":{\"txID\":\"${BACKFILL_TX}\",\"encoding\":\"hex\"}}")
+	if [ -z "$UTXO_RESP" ] || ! echo "$UTXO_RESP" | jq -e '.result.utxos' >/dev/null 2>&1; then
+		echo "reward-tracker: ERROR: getRewardUTXOs unreachable or unparseable for backfill txID" >&2
+		exit 1
+	fi
+	# No potentialReward hint exists for a historical tx (it is only
+	# exposed while the tx is current), so a single-output cycle is
+	# recorded with split_known:false here — unless the operator asserted
+	# --assert-no-delegators, in which case the lib labels it self reward
+	# and the sanity check below must still pass. See reward-utxo-decode.sh.
+	# ${arr[@]+"${arr[@]}"}: an empty array under set -u is an "unbound
+	# variable" on bash < 4.4 (macOS /bin/bash is 3.2) — this idiom expands
+	# to nothing there instead of aborting.
+	SPLIT_FLAG=()
+	[ "$BACKFILL_NO_DELEGATORS" -eq 1 ] && SPLIT_FLAG=(--assert-no-delegators)
+	read -r B_REWARD B_SELF_R B_FEE_R B_KNOWN B_BASIS \
+		<<< "$(echo "$UTXO_RESP" | jq -r '.result.utxos[]?' | split_reward_utxos_metal ${SPLIT_FLAG[@]+"${SPLIT_FLAG[@]}"})"
+
+	if [ "$BACKFILL_NO_DELEGATORS" -eq 1 ]; then
+		# Under the assertion EVERY refusal is a hard stop (exit 8): the
+		# operator asked for a labelled row, so an unlabelled one
+		# (split_known:false) must never be appended in its place — that
+		# includes an undecodable output, not only a contradiction
+		# (review m-7).
+		case "$B_BASIS" in
+			refused:no-delegators-contradicted|refused:hint-contradicted)
+				echo "reward-tracker: ERROR: cycle_n=${BACKFILL_CYCLE_N}: the reward outputs contradict --assert-no-delegators — nothing appended" >&2
+				exit 8
+				;;
+			refused:*)
+				echo "reward-tracker: ERROR: cycle_n=${BACKFILL_CYCLE_N}: the split was refused (${B_BASIS}) while --assert-no-delegators is set — nothing appended" >&2
+				exit 8
+				;;
+			operator-asserted-no-delegators)
+				# SELF-REWARD SANITY CHECK — see the Usage section. E at the
+				# current supply; A is the single output (== B_REWARD).
+				B_SUPPLY_RESP=$(rpc_post "/ext/bc/P" '{"jsonrpc":"2.0","id":1,"method":"platform.getCurrentSupply","params":{}}')
+				B_SUPPLY_N=$(echo "$B_SUPPLY_RESP" | jq -r '.result.supply // empty' 2>/dev/null)
+				if [ -z "$B_SUPPLY_N" ]; then
+					echo "reward-tracker: ERROR: cycle_n=${BACKFILL_CYCLE_N}: self-reward sanity check could not be evaluated (getCurrentSupply unreachable) — nothing appended" >&2
+					exit 9
+				fi
+				RC_CURRENT_SUPPLY_METAL=$(awk -v n="$B_SUPPLY_N" 'BEGIN{printf "%.9f", n/1000000000}')
+				B_EXPECTED=$(estimate_reward "$B_SELF_STAKE" "$((B_END - B_START))" 2>/dev/null) || B_EXPECTED=""
+				B_SANE=$(awk -v a="$B_REWARD" -v e="${B_EXPECTED:-0}" -v t="$BACKFILL_SELF_TOLERANCE" \
+					'BEGIN{ if (e <= 0) { print "0"; exit } d = a - e; if (d < 0) d = -d; print (d / e <= t) ? "1" : "0" }')
+				if [ "$B_SANE" != "1" ]; then
+					echo "reward-tracker: ERROR: cycle_n=${BACKFILL_CYCLE_N}: self-reward sanity check failed (single output is not within the tolerance band of the calculator's self-reward estimate) — nothing appended" >&2
+					exit 9
+				fi
+				B_BASIS="operator-asserted-no-delegators+self-sanity(${BACKFILL_SELF_TOLERANCE})"
+				;;
+		esac
+	fi
+
+	# v1 -> v2 upgrade: the v2 row records the CHAIN's total. If the v1 row
+	# disagreed, say so (cycle_n only — never the amounts) so the operator
+	# reviews the pair instead of trusting the supersession silently.
+	if [ -n "${EFFECTIVE_V1_TOTAL:-}" ] \
+		&& [ "$(awk -v a="$EFFECTIVE_V1_TOTAL" -v b="$B_REWARD" 'BEGIN{print (a+0 == b+0) ? "1" : "0"}')" != "1" ]; then
+		echo "reward-tracker: NOTE: cycle_n=${BACKFILL_CYCLE_N}: the v1 row's total differs from the chain's total — the v2 row records the chain's; review the pair by hand" >&2
+	fi
+
+	if append_reward_line "$BACKFILL_CYCLE_N" "$B_REWARD" "$B_SELF_STAKE" "$B_START" "$B_END" "$BACKFILL_TX" "$B_SELF_R" "$B_FEE_R" "$B_KNOWN" "$B_BASIS"; then
+		if fyd_is_live; then
+			echo "reward-tracker: backfilled cycle ${BACKFILL_CYCLE_N} (no notification sent — see header)"
+		else
+			echo "reward-tracker: DRY — would backfill cycle ${BACKFILL_CYCLE_N}"
+		fi
+		exit 0
+	fi
+	echo "reward-tracker: ERROR: backfill append failed" >&2
+	exit 1
+fi
+
+# ============================================================================
+# Normal daily run
+# ============================================================================
+
+if [ ! -r "$VALIDATOR_JSON" ]; then
+	echo "reward-tracker: validator.json not readable, skip this run" >&2
+	exit 0
+fi
+NODE_ID=$(jq -r '.nodeId // empty' "$VALIDATOR_JSON")
+if [ -z "$NODE_ID" ]; then
+	echo "reward-tracker: validator.json missing nodeId, skip this run" >&2
+	exit 0
+fi
+
+# Request body built via jq -n --arg (NOT raw string interpolation of
+# $NODE_ID into the JSON literal) for two independent reasons: (1) proper
+# JSON string escaping — a raw ${NODE_ID} substitution would corrupt the
+# request if a node ID ever contained a quote or backslash; (2) it keeps
+# tests/field-contracts/test-field-contracts.sh's writer/reader binder from
+# tracing $NODE_ID (itself correctly bound to validator.json, since it was
+# read from .nodeId two lines above) transitively into $CV_RESP and
+# everything derived from it ($SELF_ENTRY, $CURRENT_TX, the delegator
+# fields, …) — those are a P-Chain RPC response, not validator.json, and
+# mistaking one for the other was reported CRITICAL/HIGH by
+# tests/field-contracts/test-field-contracts.sh (coordinator review,
+# 2026-09-04). cycle-gate.sh's own getCurrentValidators call avoids this
+# because it filters client-side (`jq --arg id "$NODE_ID" 'select(...)'`
+# against an UNFILTERED fetch) rather than filtering server-side — this
+# script must filter server-side (params.nodeIDs) because that is the only
+# way metalgo populates .delegators[] on the response (see this file's own
+# header). The checker already exempts jq's OWN --arg option values
+# (strip_jq_option_values in check-field-contracts.py, added for
+# check-validator.sh's `jq --arg id "$NODE_ID"` pattern); building the curl
+# body through the same idiom applies that existing, deliberate exemption
+# instead of inventing a new one.
+CV_REQ_BODY=$(jq -nc --arg id "$NODE_ID" \
+	'{"jsonrpc":"2.0","id":1,"method":"platform.getCurrentValidators","params":{"nodeIDs":[$id]}}')
+CV_RESP=$(rpc_post "/ext/bc/P" "$CV_REQ_BODY")
+if [ -z "$CV_RESP" ] || ! echo "$CV_RESP" | jq -e '.result.validators' >/dev/null 2>&1; then
+	echo "reward-tracker: getCurrentValidators unreachable or unparseable, skip this run" >&2
+	exit 0
+fi
+SELF_ENTRY=$(echo "$CV_RESP" | jq -c --arg id "$NODE_ID" '.result.validators[]? | select(.nodeID == $id)')
+if [ -z "$SELF_ENTRY" ]; then
+	echo "reward-tracker: own nodeID absent from current validators this run, skip (transient gap or between cycles)" >&2
+	exit 0
+fi
+
+CURRENT_TX=$(echo "$SELF_ENTRY" | jq -r '.txID')
+CURRENT_START=$(echo "$SELF_ENTRY" | jq -r '.startTime')
+CURRENT_END=$(echo "$SELF_ENTRY" | jq -r '.endTime')
+CURRENT_WEIGHT_N=$(echo "$SELF_ENTRY" | jq -r '.weight')
+# potentialReward = the exact self reward the commit path will pay (see the
+# header's split rationale). Captured on EVERY run (write_state below runs
+# on the no-change branch too), so a state file written before this field
+# existed self-heals on the next daily tick, well before the tx matures.
+CURRENT_POTENTIAL_N=$(echo "$SELF_ENTRY" | jq -r '.potentialReward // empty')
+# accruedDelegateeReward = fee income already credited from delegations
+# that matured during this cycle (see the header's PROJECTION section).
+CURRENT_ACCRUED_N=$(echo "$SELF_ENTRY" | jq -r '.accruedDelegateeReward // empty')
+
+[ -f "$TRACKER_STATE" ] || printf '%s\n' '{}' | fyd_live_write "an empty reward-tracker state" "$TRACKER_STATE"
+STATE_JSON=$(cat "$TRACKER_STATE" 2>/dev/null || echo '{}')
+TRACKED_TX=$(echo "$STATE_JSON" | jq -r '.tracked_tx // empty')
+
+write_state() {
+	jq -nc \
+		--arg tx "$CURRENT_TX" \
+		--arg nid "$NODE_ID" \
+		--argjson su "$CURRENT_START" \
+		--argjson eu "$CURRENT_END" \
+		--arg w "$CURRENT_WEIGHT_N" \
+		--arg pr "$CURRENT_POTENTIAL_N" \
+		--arg adr "$CURRENT_ACCRUED_N" \
+		--arg obs "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+		'{tracked_tx:$tx, tracked_node_id:$nid, tracked_start_unix:$su, tracked_end_unix:$eu, tracked_weight_nmetal:$w, tracked_potential_reward_nmetal:$pr, tracked_accrued_delegatee_reward_nmetal:$adr, updated_at:$obs}' \
+		| fyd_live_write "the reward-tracker in-flight state" "$TRACKER_STATE"
+}
+
+if [ -z "$TRACKED_TX" ] || [ "$TRACKED_TX" = "$CURRENT_TX" ]; then
+	# Bootstrap, or same cycle still in flight — nothing matured.
+	write_state
+	if [ -z "$TRACKED_TX" ]; then
+		echo "reward-tracker: bootstrap — now tracking current cycle"
+	else
+		echo "reward-tracker: no change — current cycle still in flight"
+	fi
+else
+	# tracked_tx != CURRENT_TX: the AddValidatorTx this script was tracking
+	# is gone from the current set, replaced by CURRENT_TX. The tracked
+	# cycle matured (or was retired). Resolve which cycle_n it was via
+	# uptime-cycles.json's most recently CLOSED row, cross-checked by
+	# end_unix against what we captured when we started tracking it — see
+	# the header's "resolve cycle_n" note. A mismatch means uptime-
+	# history.sh has not yet written that cycle's close row (its own daily
+	# cron may simply not have run yet today) — defer, do NOT advance state,
+	# so this branch retries on the next run instead of losing the event.
+	TRACKED_START=$(echo "$STATE_JSON" | jq -r '.tracked_start_unix // empty')
+	TRACKED_END=$(echo "$STATE_JSON" | jq -r '.tracked_end_unix // empty')
+	TRACKED_WEIGHT_N=$(echo "$STATE_JSON" | jq -r '.tracked_weight_nmetal // empty')
+	TRACKED_POTENTIAL_N=$(echo "$STATE_JSON" | jq -r '.tracked_potential_reward_nmetal // empty')
+
+	if [ ! -r "$UPTIME_CYCLES_JSON" ]; then
+		echo "reward-tracker: uptime-cycles.json not readable, deferring maturity detection to next run" >&2
+	else
+		LAST_CLOSED=$(jq -c '.cycles[-1]? // empty' "$UPTIME_CYCLES_JSON")
+		LAST_CLOSED_END=$(echo "$LAST_CLOSED" | jq -r '.end_unix // empty' 2>/dev/null)
+		# Structural ledger failure here is a hard stop (exit 10), never a
+		# "not recorded yet" that would append on top of a corrupt file.
+		TRACKED_RECORDED=$(history_has_tx "$TRACKED_TX") || exit $?
+		if [ -z "$LAST_CLOSED" ] || [ "$LAST_CLOSED_END" != "$TRACKED_END" ]; then
+			echo "reward-tracker: uptime-cycles.json last-closed row does not yet match the tracked cycle's end_unix, deferring to next run" >&2
+		elif [ "$TRACKED_RECORDED" = "1" ]; then
+			# Already recorded (e.g. a previous run appended but died before
+			# advancing state). Advance state now and move on.
+			echo "reward-tracker: matured cycle already recorded, advancing tracked state"
+			write_state
+		else
+			CYCLE_N=$(echo "$LAST_CLOSED" | jq -r '.cycle_n')
+			SELF_STAKE_METAL=$(awk -v n="$TRACKED_WEIGHT_N" 'BEGIN{printf "%.9f", n/1000000000}')
+
+			UTXO_RESP=$(rpc_post "/ext/bc/P" "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"platform.getRewardUTXOs\",\"params\":{\"txID\":\"${TRACKED_TX}\",\"encoding\":\"hex\"}}")
+			if [ -z "$UTXO_RESP" ] || ! echo "$UTXO_RESP" | jq -e '.result.utxos' >/dev/null 2>&1; then
+				echo "reward-tracker: getRewardUTXOs unreachable or unparseable, deferring to next run" >&2
+			else
+				# split_reward_utxos_metal prints "<total> <self> <fee> <known> <basis>";
+				# self/fee are "-" when the split was refused (known=0). The
+				# potentialReward hint is what makes a single output decidable —
+				# empty (pre-v2 state file) simply means "refuse", never guess.
+				read -r REWARD_METAL SELF_REWARD_METAL FEE_INCOME_METAL SPLIT_KNOWN SPLIT_BASIS \
+					<<< "$(echo "$UTXO_RESP" | jq -r '.result.utxos[]?' | split_reward_utxos_metal "$TRACKED_POTENTIAL_N")"
+
+				if ! append_reward_line "$CYCLE_N" "$REWARD_METAL" "$SELF_STAKE_METAL" "$TRACKED_START" "$TRACKED_END" "$TRACKED_TX" "$SELF_REWARD_METAL" "$FEE_INCOME_METAL" "$SPLIT_KNOWN" "$SPLIT_BASIS"; then
+					echo "reward-tracker: ERROR: append_reward_line failed, NOT advancing tracked state (will retry next run)" >&2
+					exit 1
+				fi
+
+				echo "reward-tracker: appended matured cycle record"
+				write_state
+
+				# ---- 🎉 / ⚠ notification ------------------------------------
+				# Called unconditionally (live or dry): fyd_notify's own
+				# FY_LIVE gate decides whether this actually reaches ntfy or
+				# prints a "DRY: would notify …" byte-count-only note (see
+				# scripts/lib/side-effects.sh) — matching every other
+				# side-effecting call in this script, and the "FY_LIVE=1 …
+				# dry では DRY: 行" contract from the task brief. Gating this
+				# a second time on fyd_is_live here would be redundant (and
+				# would suppress the dry note the brief explicitly wants).
+				CUM_METAL=$(history_cumulative_metal) || exit $?
+				CUM_BREAKDOWN=$(history_cumulative_breakdown) || exit $?
+				read -r CUM_SELF CUM_FEE CUM_UNKNOWN <<< "$CUM_BREAKDOWN"
+				COUNT=$(history_count) || exit $?
+				NOW_SELF_STAKE=$(jq -r '.stake.self // 0' "$VALIDATOR_JSON")
+				MILESTONE_QTY=$(awk -v s="$NOW_SELF_STAKE" -v x="$REWARD_METAL" 'BEGIN{printf "%.9f", s+x}')
+				REACHED=$(awk -v q="$MILESTONE_QTY" -v m="$FY_REWARD_MILESTONE" 'BEGIN{print (q>=m)?"1":"0"}')
+				REMAIN=$(awk -v q="$MILESTONE_QTY" -v m="$FY_REWARD_MILESTONE" 'BEGIN{v=m-q; if(v<0)v=0; printf "%.2f", v}')
+
+				# Body (2026-09-07 phone-width layout — see the helpers above):
+				#   Cycle N reward
+				#   累積 X METAL
+				#   　自己 A / 手数料 B [/ 不明 C]      (split further if > 30 cols)
+				#   この cycle +Y METAL
+				#   　自己 +a / 手数料 +b | 　内訳不明   (zero branch: 　check uptime)
+				#   N cycles recorded
+				#   self-stake 2,000 → S
+				#   25,000 まで残り R | 25,000 到達 🎉
+				CUM_UNKNOWN_ARG=""
+				[ "$(awk -v u="$CUM_UNKNOWN" 'BEGIN{print (u+0>0)?"1":"0"}')" = "1" ] && CUM_UNKNOWN_ARG="$CUM_UNKNOWN"
+				CUM_LINES="$(breakdown_lines "" "$CUM_SELF" "$CUM_FEE" "$CUM_UNKNOWN_ARG" 2)"
+				if [ "$REACHED" = "1" ]; then
+					MILESTONE_LINE="$(fmt_metal "$FY_REWARD_MILESTONE" 0) 到達 🎉"
+				else
+					MILESTONE_LINE="$(fmt_metal "$FY_REWARD_MILESTONE" 0) まで残り $(fmt_metal "$REMAIN" 2)"
+				fi
+				TAIL_LINES="${COUNT} cycles recorded
+self-stake $(fmt_metal "$RC_MIN_VALIDATOR_STAKE_METAL" 0) → $(fmt_metal "$NOW_SELF_STAKE" 0)
+${MILESTONE_LINE}"
+
+				# REWARD_METAL == 0 is NOT a "not yet paid" race: metalgo's
+				# rewardValidatorTx() writes the reward UTXOs (zero of them, if
+				# the 80% uptime requirement was missed) IN THE SAME onCommitState
+				# transition that removes the staker from getCurrentValidators —
+				# there is no block where the entry is gone but the reward is
+				# still pending, so a same-run getRewardUTXOs read right after
+				# detecting the disappearance can never observe a stale zero.
+				REWARD_IS_ZERO=$(awk -v r="$REWARD_METAL" 'BEGIN{print (r+0==0)?"1":"0"}')
+				if [ "$REWARD_IS_ZERO" = "1" ]; then
+					# No reward this cycle almost always means the 80% uptime
+					# threshold was missed (see StakingConfig.UptimeRequirement in
+					# reward-calculator.sh's header citation) — a degraded outcome,
+					# not a celebration. Coordinator-decided (2026-09-04 review):
+					# no 🎉, no tada tag — omitting --tags lets fyd_notify fall back
+					# to the priority-derived default (high → "warning"), matching
+					# check-anomalies.sh's own "drop the override, let the default
+					# stand" pattern for a non-celebratory high-priority push.
+					# Same 累積-first ordering as the >0 branch below (the
+					# operator's requirement is cumulative first, regardless
+					# of this cycle's outcome — CUM_METAL is computed above,
+					# before this fork, from the history that now includes
+					# this 0 line). The uptime warning is its own indented
+					# sub-line: "この cycle +0 METAL — check uptime" on one line
+					# is 34 columns, over the phone-width limit.
+					BODY="Cycle ${CYCLE_N} reward
+累積 $(fmt_metal "$CUM_METAL" 2) METAL
+${CUM_LINES}
+この cycle +0 METAL
+${DIGEST_INDENT}check uptime
+${TAIL_LINES}"
+					fyd_notify high "⚠ Cycle ${CYCLE_N} reward: 0 METAL" "$BODY" >/dev/null
+				else
+					# This-cycle breakdown: "自己 +a / 手数料 +b" when the split is
+					# known, "内訳不明" when it was refused — never a guessed half.
+					if [ "$SPLIT_KNOWN" = "1" ]; then
+						DELTA_LINES="$(breakdown_lines "+" "$SELF_REWARD_METAL" "$FEE_INCOME_METAL" "" 2)"
+					else
+						DELTA_LINES="${DIGEST_INDENT}内訳不明"
+					fi
+					BODY="Cycle ${CYCLE_N} reward
+累積 $(fmt_metal "$CUM_METAL" 2) METAL
+${CUM_LINES}
+この cycle +$(fmt_metal "$REWARD_METAL" 2) METAL
+${DELTA_LINES}
+${TAIL_LINES}"
+					# tada tag: unlike check-anomalies.sh's delegation push (which
+					# withdraws the celebration when count and amount move opposite
+					# ways), a NON-ZERO matured reward has no "net negative" case —
+					# reward_metal is always >= 0, and this branch is only reached
+					# when it is strictly > 0.
+					fyd_notify --tags=tada high "🎉 Cycle ${CYCLE_N} reward matured" "$BODY" >/dev/null
+				fi
+			fi
+		fi
+	fi
+fi
+
+# ============================================================================
+# Morning digest block (regenerated every run, independent of maturity above)
+# ============================================================================
+# Six lines (2026-09-07 operator format, phone-width — see the helpers
+# above; the 4-line parenthesised form wrapped on Android at ~40 columns):
+#   1  累積 N METAL
+#   2  　自己 a / 手数料 b [/ 不明 c]      (breakdown_lines: split if > 30 cols)
+#   3  Cycle N 見込み +M METAL
+#   4  　自己 +a / 手数料 +b                (breakdown_lines)
+#   5  　M/D 満期・経過 d/D 日
+#   6  25,000 まで残り R  |  25,000 到達 🎉
+# Every amount is fmt_metal'd to ONE decimal (the milestone constant itself
+# stays a bare integer). Lines 3–5 exist only when the projection could be
+# computed this run (cycle_n known, getCurrentSupply answered, calculator
+# ran); otherwise the block is lines 1, 2 and 6, with line 6 measured
+# against the current self-stake alone — never a fabricated projection.
+#
+# Day arithmetic: D (cycle length) is ROUNDED to the nearest day —
+# int(x + 0.5) — because a 32.97-day cycle is "33 days" to a human (the
+# 2026-09-04 int() truncation printed 32); d (elapsed) stays floor'd and
+# clamped to [0, D]. The maturity date is end_unix rendered in JST as M/D
+# with no leading zeros (jst_md_of_epoch).
+compute_and_write_digest() {
+	local now_self_stake now_start now_end supply_resp supply_n supply_metal
+	local line1 proj_head="" proj_lines="" line_days="" line_ms=""
+	local proj_total=""
+
+	now_self_stake=$(jq -r '.stake.self // empty' "$VALIDATOR_JSON")
+	now_start="$CURRENT_START"
+	now_end="$CURRENT_END"
+
+	if [ -n "$now_self_stake" ] && [ -n "$now_start" ] && [ -n "$now_end" ] \
+		&& [ -f "$CURRENT_CYCLE_STATE" ]; then
+		local cycle_n_now
+		cycle_n_now=$(jq -r '.cycle_n // empty' "$CURRENT_CYCLE_STATE" 2>/dev/null)
+
+		supply_resp=$(rpc_post "/ext/bc/P" '{"jsonrpc":"2.0","id":1,"method":"platform.getCurrentSupply","params":{}}')
+		supply_n=$(echo "$supply_resp" | jq -r '.result.supply // empty' 2>/dev/null)
+
+		if [ -n "$cycle_n_now" ] && [ -n "$supply_n" ]; then
+			supply_metal=$(awk -v n="$supply_n" 'BEGIN{printf "%.9f", n/1000000000}')
+			RC_CURRENT_SUPPLY_METAL="$supply_metal"
+
+			local dur_sec=$((now_end - now_start))
+			local self_full
+			self_full=$(estimate_reward "$now_self_stake" "$dur_sec" 2>/dev/null) || self_full=""
+			if [ -n "$self_full" ]; then
+				# ---- fee projection: already-credited accrued fee (delegations
+				# that matured mid-cycle) + full-period estimate per CURRENT
+				# delegator — see the header's PROJECTION section. ----
+				local fee_pct fee_frac fee_full="0"
+				if [ -n "$CURRENT_ACCRUED_N" ]; then
+					fee_full=$(awk -v n="$CURRENT_ACCRUED_N" 'BEGIN{printf "%.9f", n/1000000000}')
+				fi
+				fee_pct=$(echo "$SELF_ENTRY" | jq -r '.delegationFee // 0')
+				fee_frac=$(awk -v f="$fee_pct" 'BEGIN{printf "%.9f", f/100}')
+				local n_del i
+				n_del=$(echo "$SELF_ENTRY" | jq -r '.delegators // [] | length')
+				i=0
+				while [ "$i" -lt "$n_del" ]; do
+					local del_w del_su del_eu del_stake del_dur del_full
+					del_w=$(echo "$SELF_ENTRY" | jq -r ".delegators[$i].weight")
+					del_su=$(echo "$SELF_ENTRY" | jq -r ".delegators[$i].startTime")
+					del_eu=$(echo "$SELF_ENTRY" | jq -r ".delegators[$i].endTime")
+					del_stake=$(awk -v w="$del_w" -v f="$fee_frac" 'BEGIN{printf "%.9f", (w/1000000000)*f}')
+					del_dur=$((del_eu - del_su))
+					del_full=$(estimate_reward "$del_stake" "$del_dur" 2>/dev/null) || del_full=""
+					if [ -n "$del_full" ]; then
+						fee_full=$(awk -v t="$fee_full" -v x="$del_full" 'BEGIN{printf "%.9f", t+x}')
+					fi
+					i=$((i + 1))
+				done
+				proj_total=$(awk -v s="$self_full" -v f="$fee_full" 'BEGIN{printf "%.9f", s+f}')
+
+				# ---- days + maturity date ----
+				local big_now d_days big_d md
+				big_now=$(date -u +%s)
+				big_d=$(awk -v s="$now_start" -v e="$now_end" 'BEGIN{v=int((e-s)/86400 + 0.5); if(v<1)v=1; print v}')
+				d_days=$(awk -v now="$big_now" -v s="$now_start" -v dd="$big_d" 'BEGIN{v=int((now-s)/86400); if(v<0)v=0; if(v>dd)v=dd; print v}')
+				md=$(jst_md_of_epoch "$now_end")
+
+				proj_head="Cycle ${cycle_n_now} 見込み +$(fmt_metal "$proj_total" 1) METAL"
+				proj_lines="$(breakdown_lines "+" "$self_full" "$fee_full" "" 1)"
+				line_days="${DIGEST_INDENT}${md} 満期・経過 ${d_days}/${big_d} 日"
+			fi
+		fi
+	fi
+
+	# ---- lines 1–2: cumulative + breakdown (effective ledger rows) ----
+	# Ledger readers: a structural failure returns 10 out of this function
+	# (the caller exits with it) — the block is NOT written, so the morning
+	# push never shows 累積 0 for a ledger that could not be read.
+	local cum cum_self cum_fee cum_unknown breakdown cum_lines unknown_arg=""
+	cum=$(history_cumulative_metal) || return $?
+	breakdown=$(history_cumulative_breakdown) || return $?
+	read -r cum_self cum_fee cum_unknown <<< "$breakdown"
+	if [ "$(awk -v u="$cum_unknown" 'BEGIN{print (u+0>0)?"1":"0"}')" = "1" ]; then
+		unknown_arg="$cum_unknown"
+	fi
+	line1="累積 $(fmt_metal "$cum" 1) METAL"
+	cum_lines="$(breakdown_lines "" "$cum_self" "$cum_fee" "$unknown_arg" 1)"
+
+	# ---- last line: milestone. Against self-stake + full-cycle projection
+	# when one exists, against self-stake alone otherwise (fallback, never
+	# fabricated). ----
+	local base_self milestone_qty reached remain
+	base_self=$(jq -r '.stake.self // 0' "$VALIDATOR_JSON")
+	milestone_qty=$(awk -v s="$base_self" -v x="${proj_total:-0}" 'BEGIN{printf "%.9f", s+x}')
+	reached=$(awk -v q="$milestone_qty" -v m="$FY_REWARD_MILESTONE" 'BEGIN{print (q>=m)?"1":"0"}')
+	remain=$(awk -v q="$milestone_qty" -v m="$FY_REWARD_MILESTONE" 'BEGIN{v=m-q; if(v<0)v=0; printf "%.9f", v}')
+	if [ "$reached" = "1" ]; then
+		line_ms="$(fmt_metal "$FY_REWARD_MILESTONE" 0) 到達 🎉"
+	else
+		line_ms="$(fmt_metal "$FY_REWARD_MILESTONE" 0) まで残り $(fmt_metal "$remain" 1)"
+	fi
+
+	# Exactly one trailing newline, no blank lines: the consumer
+	# (daily-status.sh) splices every non-empty line as-is.
+	if [ -n "$proj_head" ]; then
+		printf '%s\n' "$line1" "$cum_lines" "$proj_head" "$proj_lines" "$line_days" "$line_ms"
+	else
+		printf '%s\n' "$line1" "$cum_lines" "$line_ms"
+	fi | fyd_live_write "the reward digest block" "$DIGEST_FILE"
+}
+
+compute_and_write_digest || exit $?
+echo "reward-tracker: digest block updated"

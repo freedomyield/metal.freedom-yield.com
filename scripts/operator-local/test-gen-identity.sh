@@ -1,0 +1,420 @@
+#!/usr/bin/env bash
+# scripts/operator-local/test-gen-identity.sh
+#
+# Synthetic-key test harness for gen-identity.sh.
+#
+# Generates a throwaway ed25519 key in a tmp dir, runs gen-identity.sh against
+# a fake REPO_ROOT skeleton, then independently re-verifies the artifact_root
+# the script computed. Used to confirm artifact_root computation is correct
+# WITHOUT touching the real operator identity key or the real repo's
+# public/api/identity.json.
+#
+# Why this exists:
+#   - Merkle-rooted artifact manifest computation must be testable now, but
+#     the real operator identity key (Task #25 / D11 Phase 3) is still HOLD
+#     pending Task #28 cron auto-fire confirmation.
+#   - Producing a real signed identity.json here would risk leaking
+#     synthetic-key-signed bytes into public/api/.
+#   - This harness routes everything through /tmp and prints PASS/FAIL only.
+#
+# Pre-commit validation policy: ALL schema validations in this script use the
+# LOCAL revised schema at canonical-repo public/api/identity.schema.v2.json
+# (schema_version 2: ed25519 + ML-DSA-87 signatures, 2026-10-15).
+# We do NOT fetch the live URL — pre-deploy, the live URL still serves the
+# pre-revision content and would not exercise the revised contract.
+#
+# Usage:
+#   bash scripts/operator-local/test-gen-identity.sh
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REAL_REPO="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+LOCAL_SCHEMA="${REAL_REPO}/public/api/identity.schema.v2.json"
+LOCAL_EXAMPLE="${REAL_REPO}/public/api/identity.example.json"
+
+# Pinned AJV combination. Versions empirically verified to compile draft-2020-12,
+# validate documents, and enforce uri / date-time format checks. Update both
+# values in one place if changing.
+AJV_CLI_VERSION="5.0.0"
+AJV_FORMATS_VERSION="3.0.1"
+
+TEST_ROOT="$(mktemp -d -t fy-test-gen-identity.XXXXXX)"
+trap 'rm -rf "${TEST_ROOT}"' EXIT
+
+# 1. Synthetic ed25519 key in tmp.
+SYN_KEY="${TEST_ROOT}/synthetic-operator-key"
+ssh-keygen -t ed25519 -N "" -C "synthetic-test-key DO-NOT-USE" -f "${SYN_KEY}" -q
+
+# 2. Fake REPO_ROOT skeleton: just an empty public/api/ dir is enough.
+FAKE_REPO="${TEST_ROOT}/fake-repo"
+mkdir -p "${FAKE_REPO}/public/api"
+
+# 2.5. Throwaway ML-DSA-87 key in tmp (gen-identity.sh signs with it too and
+#      deletes the unlocked copy on exit, so fy_pq_install runs before EVERY
+#      gen-identity.sh invocation below).
+# shellcheck source=../../tests/lib/pq-test-key.sh
+. "${REAL_REPO}/tests/lib/pq-test-key.sh"
+if ! fyipq__resolve_openssl >/dev/null; then
+	echo "FAIL: no OpenSSL >= ${FYIPQ_MIN_OPENSSL} found; gen-identity.sh needs it for ML-DSA-87." >&2
+	echo "      Install Homebrew openssl@3 or set FY_OPENSSL, then re-run." >&2
+	exit 1
+fi
+PQ_KEYDIR="${TEST_ROOT}/pq-keys"
+mkdir -p "${PQ_KEYDIR}"; chmod 700 "${PQ_KEYDIR}"
+fy_pq_make_master "${PQ_KEYDIR}"
+PQ_UNLOCKED="${PQ_KEYDIR}/${FYIPQ_UNLOCKED_BASENAME}"
+
+HAS_ERROR=0
+
+# Helper: pinned AJV command as a bash array. Reused for compile + validate so
+# the version pins and flags cannot drift across invocations.
+AJV_CMD=(
+	npx --yes --quiet
+	--package "ajv-cli@${AJV_CLI_VERSION}"
+	--package "ajv-formats@${AJV_FORMATS_VERSION}"
+	ajv
+)
+
+if ! command -v npx >/dev/null 2>&1; then
+	echo "FAIL: npx not installed; pinned AJV is mandatory for this test." >&2
+	echo "      Install Node.js + npm, then re-run." >&2
+	exit 1
+fi
+
+# 0. Compile local revised schema (mandatory).
+echo "=== 0. compile local revised schema (mandatory) ==="
+if "${AJV_CMD[@]}" compile \
+		--spec=draft2020 \
+		--strict=false \
+		-c=ajv-formats \
+		-s "${LOCAL_SCHEMA}" >/dev/null 2>&1; then
+	echo "  OK   ${LOCAL_SCHEMA##*/} compiles cleanly (ajv-cli@${AJV_CLI_VERSION} + ajv-formats@${AJV_FORMATS_VERSION})"
+else
+	echo "  FAIL ${LOCAL_SCHEMA##*/} does NOT compile:" >&2
+	"${AJV_CMD[@]}" compile --spec=draft2020 --strict=false -c=ajv-formats \
+		-s "${LOCAL_SCHEMA}" >&2 || true
+	HAS_ERROR=1
+fi
+
+# 1. Validate LOCAL example against LOCAL revised schema (mandatory).
+echo
+echo "=== 1. validate LOCAL example against LOCAL revised schema (mandatory) ==="
+if "${AJV_CMD[@]}" validate \
+		--spec=draft2020 \
+		--strict=false \
+		-c=ajv-formats \
+		-s "${LOCAL_SCHEMA}" \
+		-d "${LOCAL_EXAMPLE}" >/dev/null 2>&1; then
+	echo "  OK   ${LOCAL_EXAMPLE##*/} validates against revised schema"
+else
+	echo "  FAIL ${LOCAL_EXAMPLE##*/} does NOT validate:" >&2
+	"${AJV_CMD[@]}" validate --spec=draft2020 --strict=false -c=ajv-formats \
+		-s "${LOCAL_SCHEMA}" -d "${LOCAL_EXAMPLE}" >&2 || true
+	HAS_ERROR=1
+fi
+
+# 3. Run gen-identity.sh against the fake repo + synthetic key.
+echo
+echo "=== running gen-identity.sh against synthetic key + fake repo ==="
+fy_pq_install "${PQ_KEYDIR}" "${FAKE_REPO}"
+OPERATOR_IDENTITY_KEY="${SYN_KEY}" \
+OPERATOR_PQ_UNLOCKED_KEY="${PQ_UNLOCKED}" \
+REPO_ROOT="${FAKE_REPO}" \
+KEY_IAT="2026-06-19T00:00:00Z" \
+KEY_EXP="2027-06-19T00:00:00Z" \
+bash "${SCRIPT_DIR}/gen-identity.sh"
+
+OUT_JSON="${FAKE_REPO}/public/api/identity.json"
+OUT_SIG="${FAKE_REPO}/public/api/identity.json.sig"
+OUT_PQ_SIG="${FAKE_REPO}/${FYIPQ_SIG_REL}"
+
+if [ ! -f "${OUT_JSON}" ] || [ ! -f "${OUT_SIG}" ] || [ ! -f "${OUT_PQ_SIG}" ]; then
+	echo "FAIL: gen-identity.sh did not produce all three output files (identity.json, .sig, .mldsa87.sig)" >&2
+	exit 1
+fi
+
+# 3.5. Assert NO chain_anchor field in the output (removed 2026-06-20).
+echo
+echo "=== 3.5. assert no chain_anchor field in output ==="
+if [ "$(jq -r 'has("chain_anchor")' "${OUT_JSON}")" = "false" ]; then
+	echo "  OK   identity.json has no chain_anchor field"
+else
+	echo "  FAIL identity.json still carries chain_anchor field" >&2
+	HAS_ERROR=1
+fi
+
+# 3.6. Assert identity.json's evidence-pointer field is present, and — as of the
+# 2026-07-06 DAG-root collapse (design-stocktake #1) — assert identity.json NO
+# LONGER carries dag_root_hash NOR cycles_history_url. The pre-v2 2-branch root
+# and its cycles-history.json snapshot are retired; the value inscribed on-chain
+# is anchor-source.json.dag_root_computed (3-branch, memo fya<S>c<N>:). identity.json
+# reaches the on-chain evidence purely via anchor_receipt_url / audit, not a
+# competing root. See docs/IDENTITY_SCHEMA_CHANGELOG.md.
+echo
+echo "=== 3.6. assert anchor_receipt_url present + dag_root_hash/cycles_history_url retired ==="
+for field in anchor_receipt_url; do
+	val="$(jq -r --arg f "${field}" '.[$f] // ""' "${OUT_JSON}")"
+	if [ -n "${val}" ]; then
+		echo "  OK   ${field} present: ${val}"
+	else
+		echo "  FAIL ${field} missing from identity.json" >&2
+		HAS_ERROR=1
+	fi
+done
+
+# dag_root_hash AND cycles_history_url MUST be absent from identity.json (collapse invariant).
+for retired in dag_root_hash cycles_history_url; do
+	if [ "$(jq -r --arg f "${retired}" 'has($f)' "${OUT_JSON}")" = "false" ]; then
+		echo "  OK   ${retired} absent (retired — single root lives in anchor-source.json)"
+	else
+		echo "  FAIL identity.json still carries ${retired}: $(jq -r --arg f "${retired}" '.[$f]' "${OUT_JSON}")" >&2
+		HAS_ERROR=1
+	fi
+done
+
+# 3.7. Assert cycles-history.json sibling is NOT produced (retired with collapse #1).
+echo
+echo "=== 3.7. assert cycles-history.json sibling retired (not produced) ==="
+OUT_CYCLES_HISTORY="${FAKE_REPO}/public/api/cycles-history.json"
+if [ -f "${OUT_CYCLES_HISTORY}" ]; then
+	echo "  FAIL gen-identity.sh still produces retired cycles-history.json" >&2
+	HAS_ERROR=1
+else
+	echo "  OK   cycles-history.json not produced (retired — DAG lives in anchor-source.json)"
+fi
+
+# 3.8. Assert identity-history.jsonl was bootstrapped on first run.
+echo
+echo "=== 3.8. assert identity-history.jsonl bootstrap ==="
+OUT_ID_HIST="${FAKE_REPO}/public/api/identity-history.jsonl"
+if [ ! -s "${OUT_ID_HIST}" ]; then
+	echo "  FAIL gen-identity.sh did not bootstrap identity-history.jsonl" >&2
+	HAS_ERROR=1
+else
+	LINE_COUNT="$(wc -l < "${OUT_ID_HIST}" | tr -d ' ')"
+	if [ "${LINE_COUNT}" -ge 1 ]; then
+		# First line must parse as JSON with key_seq=1.
+		FIRST_LINE="$(head -n 1 "${OUT_ID_HIST}")"
+		if printf '%s' "${FIRST_LINE}" | jq empty >/dev/null 2>&1 \
+			&& [ "$(printf '%s' "${FIRST_LINE}" | jq -r '.key_seq // ""')" = "1" ]; then
+			echo "  OK   identity-history.jsonl bootstrapped with key_seq=1"
+		else
+			echo "  FAIL identity-history.jsonl first line is not key_seq=1 JSON: ${FIRST_LINE}" >&2
+			HAS_ERROR=1
+		fi
+	else
+		echo "  FAIL identity-history.jsonl is empty" >&2
+		HAS_ERROR=1
+	fi
+fi
+
+# 4. Independently re-fetch each leaf in the manifest and re-hash.
+echo
+echo "=== independent re-hash of each leaf in artifact_manifest ==="
+# Only entries that CARRY a sha256 are re-hashed. Since the C4 kind discipline
+# (2026-08-14) an entry whose deploy/publication.json kind is `stream` is listed
+# with url + kind and no digest, because the operator cannot sign a claim about
+# bytes a host cron rewrites. Re-hashing such an entry and comparing to an empty
+# string would manufacture a failure out of the correct behaviour. An unpinned
+# entry is instead asserted to BE a declared stream, so a pin silently dropped
+# from a static/record artifact still surfaces here as a failure.
+KEYS="$(jq -r '.artifact_manifest | keys[]' "${OUT_JSON}" | sort)"
+for k in ${KEYS}; do
+	url="$(jq -r --arg k "${k}" '.artifact_manifest[$k].url' "${OUT_JSON}")"
+	kind="$(jq -r --arg k "${k}" '.artifact_manifest[$k].kind // ""' "${OUT_JSON}")"
+	claimed_sha="$(jq -r --arg k "${k}" '.artifact_manifest[$k].sha256 // ""' "${OUT_JSON}")"
+	if [ -z "${claimed_sha}" ]; then
+		if [ "${kind}" = "stream" ]; then
+			echo "  OK   ${k}  unpinned by design (kind=stream)"
+		else
+			echo "  FAIL ${k}  has no sha256 but kind='${kind:-<absent>}' — only kind=stream may be unpinned" >&2
+			HAS_ERROR=1
+		fi
+		continue
+	fi
+	actual_sha="$(curl -sSLf "${url}" | shasum -a 256 | awk '{print $1}')"
+	if [ "${claimed_sha}" = "${actual_sha}" ]; then
+		echo "  OK   ${k}  sha256=${claimed_sha:0:16}… (kind=${kind:-<absent>})"
+	else
+		echo "  FAIL ${k}  claimed=${claimed_sha}  actual=${actual_sha}" >&2
+		HAS_ERROR=1
+	fi
+done
+
+# 5. Independently recompute Merkle root and compare.
+echo
+echo "=== independent Merkle root recompute ==="
+INDEP_LEAVES="$(mktemp -t indep-leaves.XXXXXX)"
+# Leaves are the sha256 values that are PRESENT (C4, 2026-08-14): an entry
+# without one contributes no leaf, so selecting on has("sha256") is what
+# reproduces the generator's tree. Before that revision every listed entry
+# contributed a leaf and this selector was a no-op.
+jq -r '.artifact_manifest | to_entries | sort_by(.key) | .[]
+       | select(.value | has("sha256")) | "\(.key)\t\(.value.sha256)"' "${OUT_JSON}" \
+	> "${INDEP_LEAVES}"
+
+merkle_root_independent() {
+	local cur nxt left right parent count
+	cur="$(mktemp -t indep-merkle.XXXXXX)"
+	awk -F'\t' '{print $2}' "${INDEP_LEAVES}" > "${cur}"
+	count="$(wc -l < "${cur}" | tr -d ' ')"
+	while [ "${count}" -gt 1 ]; do
+		if [ $((count % 2)) -eq 1 ]; then
+			tail -n 1 "${cur}" >> "${cur}"
+		fi
+		nxt="$(mktemp -t indep-merkle.XXXXXX)"
+		while IFS= read -r left && IFS= read -r right; do
+			parent="$(
+				{ printf '%s' "${left}"  | xxd -r -p
+				  printf '%s' "${right}" | xxd -r -p
+				} | shasum -a 256 | awk '{print $1}'
+			)"
+			printf '%s\n' "${parent}" >> "${nxt}"
+		done < "${cur}"
+		mv "${nxt}" "${cur}"
+		count="$(wc -l < "${cur}" | tr -d ' ')"
+	done
+	cat "${cur}"
+	rm -f "${cur}"
+}
+
+INDEP_ROOT="$(merkle_root_independent)"
+CLAIMED_ROOT="$(jq -r '.artifact_root' "${OUT_JSON}")"
+
+if [ "${INDEP_ROOT}" = "${CLAIMED_ROOT}" ]; then
+	echo "  OK   artifact_root matches: ${CLAIMED_ROOT}"
+else
+	echo "  FAIL artifact_root mismatch" >&2
+	echo "       script-claimed:   ${CLAIMED_ROOT}" >&2
+	echo "       independent calc: ${INDEP_ROOT}" >&2
+	HAS_ERROR=1
+fi
+rm -f "${INDEP_LEAVES}"
+
+# 6. ssh-keygen -Y verify against synthetic pubkey.
+echo
+echo "=== ssh-keygen -Y verify against synthetic key ==="
+ALLOWED="$(mktemp -t allowed_signers.XXXXXX)"
+printf 'freedom-yield %s\n' "$(cat "${SYN_KEY}.pub")" > "${ALLOWED}"
+if ssh-keygen -Y verify \
+		-f "${ALLOWED}" \
+		-I "freedom-yield" \
+		-n "freedom-yield/validator-identity" \
+		-s "${OUT_SIG}" < "${OUT_JSON}" >/dev/null 2>&1; then
+	echo "  OK   signature verifies against synthetic pubkey"
+else
+	echo "  FAIL signature verify against synthetic pubkey" >&2
+	HAS_ERROR=1
+fi
+rm -f "${ALLOWED}"
+
+# 6.5. ML-DSA-87 verify against the committed (fake-repo) public key.
+echo
+echo "=== 6.5. ML-DSA-87 verify against synthetic PQ public key ==="
+if fyipq__verify "$(fyipq__resolve_openssl)" "${FAKE_REPO}/${FYIPQ_PUB_REL}" "${OUT_JSON}" "${OUT_PQ_SIG}"; then
+	echo "  OK   ML-DSA-87 signature verifies against synthetic PQ pubkey"
+else
+	echo "  FAIL ML-DSA-87 signature verify against synthetic PQ pubkey" >&2
+	HAS_ERROR=1
+fi
+
+# 7. Validate synthetic gen-identity output against LOCAL revised schema (mandatory).
+#    Pre-commit test uses LOCAL revised schema, NEVER the live URL — the live
+#    URL still serves the pre-revision content until deploy.
+echo
+echo "=== 7. validate synthetic output against LOCAL revised schema (mandatory) ==="
+if "${AJV_CMD[@]}" validate \
+		--spec=draft2020 \
+		--strict=false \
+		-c=ajv-formats \
+		-s "${LOCAL_SCHEMA}" \
+		-d "${OUT_JSON}" >/dev/null 2>&1; then
+	echo "  OK   synthetic identity.json validates against revised schema"
+else
+	echo "  FAIL synthetic identity.json does NOT validate:" >&2
+	"${AJV_CMD[@]}" validate --spec=draft2020 --strict=false -c=ajv-formats \
+		-s "${LOCAL_SCHEMA}" -d "${OUT_JSON}" >&2 || true
+	HAS_ERROR=1
+fi
+
+# 8. Retired-env test: set CHAIN_ANCHOR_TX_ID, expect ERROR + exit 6,
+#    expect NO output file (script exits before main work).
+echo
+echo "=== 8. retired-env test (CHAIN_ANCHOR_TX_ID set, expect ERROR + exit 6) ==="
+ENV_TEST_REPO="${TEST_ROOT}/env-test-repo"
+ENV_TEST_STDOUT="${TEST_ROOT}/env-test-stdout"
+ENV_TEST_STDERR="${TEST_ROOT}/env-test-stderr"
+mkdir -p "${ENV_TEST_REPO}/public/api"
+
+ENV_RC=0
+fy_pq_install "${PQ_KEYDIR}" "${ENV_TEST_REPO}"
+if CHAIN_ANCHOR_TX_ID="deadbeefcafebabe1234567890abcdef0123456789abcdefdeadbeef12345678" \
+   OPERATOR_IDENTITY_KEY="${SYN_KEY}" \
+   OPERATOR_PQ_UNLOCKED_KEY="${PQ_UNLOCKED}" \
+   REPO_ROOT="${ENV_TEST_REPO}" \
+   KEY_IAT="2026-06-19T00:00:00Z" \
+   KEY_EXP="2027-06-19T00:00:00Z" \
+   bash "${SCRIPT_DIR}/gen-identity.sh" \
+       >"${ENV_TEST_STDOUT}" 2>"${ENV_TEST_STDERR}"; then
+	ENV_RC=0
+else
+	ENV_RC=$?
+fi
+
+if [ "${ENV_RC}" -eq 6 ]; then
+	echo "  OK   exit code 6 (retired env detected, no output produced)"
+else
+	echo "  FAIL expected exit 6, got ${ENV_RC}" >&2
+	HAS_ERROR=1
+fi
+
+if grep -q "CHAIN_ANCHOR_TX_ID is set but was retired" "${ENV_TEST_STDERR}"; then
+	echo "  OK   ERROR line emitted on stderr"
+else
+	echo "  FAIL retired-env ERROR line missing on stderr" >&2
+	echo "       --- stderr was: ---" >&2
+	cat "${ENV_TEST_STDERR}" >&2 || true
+	HAS_ERROR=1
+fi
+
+if grep -q "unset CHAIN_ANCHOR_TX_ID CHAIN_ANCHOR_EXPLORER" "${ENV_TEST_STDERR}"; then
+	echo "  OK   unset hint emitted on stderr"
+else
+	echo "  FAIL unset hint missing on stderr" >&2
+	HAS_ERROR=1
+fi
+
+if [ -f "${ENV_TEST_REPO}/public/api/identity.json" ]; then
+	echo "  FAIL output file created despite ERROR exit" >&2
+	HAS_ERROR=1
+else
+	echo "  OK   no output file created"
+fi
+
+if [ -f "${ENV_TEST_REPO}/public/api/identity.json.sig" ]; then
+	echo "  FAIL signature file created despite ERROR exit" >&2
+	HAS_ERROR=1
+else
+	echo "  OK   no signature file created"
+fi
+
+if [ -f "${ENV_TEST_REPO}/${FYIPQ_SIG_REL}" ]; then
+	echo "  FAIL ML-DSA signature file created despite ERROR exit" >&2
+	HAS_ERROR=1
+else
+	echo "  OK   no ML-DSA signature file created"
+fi
+
+echo
+if [ "${HAS_ERROR}" -eq 0 ]; then
+	echo "PASS: gen-identity.sh artifact_root computation is internally consistent"
+	echo "      (revised schema compiles; example validates; synthetic output"
+	echo "       validates; no chain_anchor field; leaves re-hash match; Merkle"
+	echo "       root reproducible; signature verifies; retired env produces"
+	echo "       ERROR + exit 6 with no output)"
+	exit 0
+else
+	echo "FAIL: see errors above" >&2
+	exit 1
+fi

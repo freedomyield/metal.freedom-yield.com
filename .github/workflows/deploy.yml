@@ -1,0 +1,357 @@
+name: Deploy site to VPS
+
+# 必要な GitHub Secrets:
+#   SSH_HOST     - VPS の IP or ホスト名
+#   SSH_USER     - SSH ユーザー(例: <deploy_user>)
+#   SSH_KEY      - 秘密鍵(OpenSSH PEM 形式、改行込みでそのまま貼り付け)
+#   SSH_PORT     - SSH ポート(任意、未設定なら 22)
+#   DEPLOY_PATH  - VPS 上のリポジトリパス(例: <deploy_path>)
+#
+# 必要な Repository Variable(secrets ではなく variables):
+#   DEPLOY_ENABLED=true - これが true になるまで全 job が skip される
+#                         (VPS 契約前は未設定にしておく、CI が赤くならない)
+#
+# 設定場所:
+#   Settings → Secrets and variables → Actions
+#   - "Secrets" タブで SSH_* / DEPLOY_PATH を登録
+#   - "Variables" タブで DEPLOY_ENABLED=true を設定
+#
+# 詳細は docs/DEPLOY_SETUP.md を参照
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'README.md'
+      - 'README.ja.md'
+      - '.gitignore'
+      - 'CLAUDE.md'
+      - 'docs/**'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  secret-scan:
+    # validate.yml's gitleaks job (`secret-scan`) never runs for pushes to
+    # main (`push: branches-ignore: [main]`) — this is the only path a
+    # direct push to main actually takes through CI. Runs unconditionally
+    # (not gated on DEPLOY_ENABLED) so main stays scanned even before a VPS
+    # is contracted / deploy is enabled.
+    name: gitleaks (push-to-main gate)
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 after the tests job passes on the real 26.04 runner (2026-10-16: no suite fails only on 26.04 in a runner-like local run)
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks CLI (license-free; the marketplace action requires a paid GITLEAKS_LICENSE for org repos)
+        run: |
+          curl -fsSL -o /tmp/gitleaks.tar.gz \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          sudo install -m 755 /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+      - name: Run gitleaks against full history
+        run: gitleaks detect --source . --config .gitleaks.toml --redact --exit-code 1 --no-banner
+
+  publish-guard:
+    # The OTHER half of the pre-deploy gate. gitleaks above scans key/token
+    # secrets and does NOT catch host IPs, operator handles, real names, phone
+    # numbers or emails — publish-guard.sh's own header says exactly that, and
+    # the 2026-07-03 incident it was written for (a real validator host IP plus
+    # the operator handle committed into a public-tracked file) went straight
+    # past gitleaks.
+    #
+    # That guard is otherwise enforced only in .githooks/pre-commit and
+    # pre-push, which are opt-in per clone (core.hooksPath is never committed).
+    # ci-main.yml re-runs it on every push to main, but ci-main.yml is a
+    # SEPARATE WORKFLOW and `needs:` cannot cross workflows — so before this job
+    # existed, a push from a hook-less clone published the leak to the live site
+    # first and turned ci-main red afterwards. Red-after-publish is not a gate.
+    #
+    # Deliberately duplicated from ci-main.yml's job of the same name rather
+    # than referenced, for the same reason R6/R8 are duplicated there: a
+    # workflow's gate has to live in the workflow it gates. Keep the two in
+    # step. Runs unconditionally (not gated on DEPLOY_ENABLED), matching
+    # secret-scan above.
+    name: publish-guard (host identifier / PII) on pushed diff, fail-closed
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 after the tests job passes on the real 26.04 runner (2026-10-16: no suite fails only on 26.04 in a runner-like local run)
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Run publish-guard --diff against the pushed diff (fail-closed)
+        env:
+          EVT_BEFORE: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          GUARD="scripts/publish-guard.sh"
+
+          # Fail-closed: an absent/non-executable guard must STOP the job,
+          # never be treated as "nothing to check, so allow". A guard this
+          # repo cannot run is a guard that caught nothing.
+          if [ ! -x "$GUARD" ]; then
+            echo "::error::${GUARD} is missing or not executable — cannot scan, failing closed." >&2
+            exit 1
+          fi
+
+          ZERO="0000000000000000000000000000000000000000"
+          BASE="${EVT_BEFORE:-}"
+
+          if [ -n "$BASE" ] && [ "$BASE" != "$ZERO" ] && git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+            echo "publish-guard: scanning pushed diff ${BASE}..${HEAD_SHA}"
+            if ! git diff -U0 "${BASE}" "${HEAD_SHA}" | "$GUARD" --diff; then
+              echo "::error::publish-guard detected a forbidden host identifier / PII literal in the pushed diff — refusing to deploy it (see log above)." >&2
+              exit 1
+            fi
+          else
+            # No usable prior SHA (branch creation, force-push whose old tip is
+            # gone, workflow_dispatch, or a shallow-history edge case) — a diff
+            # cannot be computed. Do NOT skip: fall back to scanning every
+            # tracked file's current content so this run still means something.
+            echo "publish-guard: no usable prior SHA for a diff — scanning the full tracked tree instead of skipping."
+            if ! git ls-files -z | xargs -0 cat -- | "$GUARD" --text; then
+              echo "::error::publish-guard detected a forbidden host identifier / PII literal in the tracked tree — refusing to deploy it (see log above)." >&2
+              exit 1
+            fi
+          fi
+          echo "publish-guard: clean."
+
+  deploy:
+    # VPS 未契約期間は DEPLOY_ENABLED=true を設定せず、job ごと skip する(CI 失敗扱いにしない)
+    # Gate: a real secret hit (secret-scan) OR a host-identifier / PII literal
+    # (publish-guard) blocks the deploy to the live validator host and to the
+    # public origin, the same way both already block local commits/pushes via
+    # .githooks/pre-commit + pre-push. Both gate jobs run unconditionally, so
+    # neither can be skipped into a pass.
+    needs: [secret-scan, publish-guard]
+    if: ${{ vars.DEPLOY_ENABLED == 'true' }}
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest becomes 26.04 from 2026-10-19 (runner-images#14748); move to 26.04 after the tests job passes on the real 26.04 runner (2026-10-16: no suite fails only on 26.04 in a runner-like local run)
+    timeout-minutes: 10
+    env:
+      SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+    steps:
+      - name: Verify required secrets
+        env:
+          _SSH_HOST: ${{ secrets.SSH_HOST }}
+          _SSH_USER: ${{ secrets.SSH_USER }}
+          _SSH_KEY: ${{ secrets.SSH_KEY }}
+          _DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          missing=()
+          [ -n "$_SSH_HOST" ]    || missing+=("SSH_HOST")
+          [ -n "$_SSH_USER" ]    || missing+=("SSH_USER")
+          [ -n "$_SSH_KEY" ]     || missing+=("SSH_KEY")
+          [ -n "$_DEPLOY_PATH" ] || missing+=("DEPLOY_PATH")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::missing required GitHub Secrets: ${missing[*]}"
+            echo "::error::see docs/DEPLOY_SETUP.md and set them at https://github.com/$GITHUB_REPOSITORY/settings/secrets/actions"
+            exit 1
+          fi
+          # SSH_KEY 以外はトリム(改行混入の事故対策)、SSH_KEY は改行を保持
+          echo "SSH_HOST=$(printf '%s' "$_SSH_HOST" | xargs)"       >> $GITHUB_ENV
+          echo "SSH_USER=$(printf '%s' "$_SSH_USER" | xargs)"       >> $GITHUB_ENV
+          echo "DEPLOY_PATH=$(printf '%s' "$_DEPLOY_PATH" | xargs)" >> $GITHUB_ENV
+          echo "✓ all required secrets are set"
+
+      - uses: actions/checkout@v7
+
+      - name: Cache-bust assets URL with current commit hash
+        # edge CDN PoP / browser cache 対策。
+        # HTML が直接参照する各 JS / CSS の URL に commit hash を付与する。
+        # 各エントリポイントを忘れずに列挙すること(prior oversights)
+        run: |
+          SHORT_SHA="${GITHUB_SHA:0:8}"
+          # JS は <script src="..."> なので src= で検出
+          for asset in "assets/main.js" "assets/hero-3d/main.js" "assets/bg-3d.js"; do
+            find public -name "*.html" -exec \
+              sed -i -E "s|src=\"/${asset}[^\"]*\"|src=\"/${asset}?v=${SHORT_SHA}\"|g" \
+              {} +
+            N=$(grep -rl "${asset}?v=${SHORT_SHA}" public/ | wc -l | tr -d ' ')
+            echo "${N} HTML files reference /${asset}?v=${SHORT_SHA}"
+          done
+          # CSS は <link rel="stylesheet" href="..."> なので href= で検出
+          for asset in "styles.css"; do
+            find public -name "*.html" -exec \
+              sed -i -E "s|href=\"/${asset}[^\"]*\"|href=\"/${asset}?v=${SHORT_SHA}\"|g" \
+              {} +
+            N=$(grep -rl "${asset}?v=${SHORT_SHA}" public/ | wc -l | tr -d ' ')
+            echo "${N} HTML files reference /${asset}?v=${SHORT_SHA}"
+          done
+
+          # ESM 内の relative import('./x.js') にも cache-bust 付与。
+          # main.js だけ HTML から ?v= 付きで読まれても、main.js 内の
+          # `import { X } from './x.js'` は CDN cache に hit して古い
+          # ものが返る事故が起きる(prior cache-version oversight)。
+          # hero-3d は ESM module 群なのでここで一括 rewrite する。
+          for js in public/assets/hero-3d/*.js; do
+            # `from './foo.js';` → `from './foo.js?v=SHA';`
+            # 既に ?v= が付いている場合は SHA だけ差し替え
+            sed -i -E "s|from '\./([a-zA-Z0-9._-]+\.js)(\?v=[a-zA-Z0-9]+)?'|from './\1?v=${SHORT_SHA}'|g" "$js"
+          done
+          NJS=$(grep -l "?v=${SHORT_SHA}" public/assets/hero-3d/*.js 2>/dev/null | wc -l | tr -d ' ')
+          echo "${NJS} hero-3d JS files have relative imports cache-busted to ?v=${SHORT_SHA}"
+
+      - name: Write build.json (deploy manifest)
+        # Verifiable-freshness manifest: lets an operator or evaluator ask
+        # "what commit is actually live right now?" via a single GET,
+        # without needing repo/CI access — closes a long-standing gap
+        # (.gitignore and validate.yml both already assumed this file
+        # would exist, added 2026-08-06). Both rsync legs below are
+        # public/-rooted, so writing it into the runner's local public/
+        # checkout here ships it to the validator host and the web host
+        # public origin in the same run, no separate publish step needed.
+        # Not git-tracked (.gitignore) — regenerated fresh every deploy,
+        # the same way the cache-busted HTML above is, so it deliberately
+        # is NOT in deploy/feed-excludes.txt (that list protects
+        # host-generated feeds from THIS rsync's --delete; build.json is
+        # the opposite — produced by this rsync's own source tree).
+        run: |
+          jq -n \
+            --arg sha "$GITHUB_SHA" \
+            --arg short_sha "${GITHUB_SHA:0:8}" \
+            --arg ref "$GITHUB_REF_NAME" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg deployed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{commit_sha: $sha, commit_short_sha: $short_sha, ref: $ref, workflow_run_id: $run_id, deployed_at: $deployed_at}' \
+            > public/api/build.json
+          echo "wrote public/api/build.json:"
+          cat public/api/build.json
+
+      - name: Set up SSH key
+        env:
+          _SSH_KEY: ${{ secrets.SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          # CR 除去(CRLF で貼り付けられた場合の事故対策)、改行は保持
+          printf '%s' "$_SSH_KEY" | tr -d '\r' > ~/.ssh/id_deploy
+          [ -z "$(tail -c 1 ~/.ssh/id_deploy)" ] || echo "" >> ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -p "$SSH_PORT" "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Ensure deploy path exists
+        run: |
+          ssh -i ~/.ssh/id_deploy -p "$SSH_PORT" -o StrictHostKeyChecking=no \
+            "$SSH_USER@$SSH_HOST" \
+            "mkdir -p '$DEPLOY_PATH'"
+
+      - name: Advance host checkout to origin/main
+        # Delivery-ownership inversion (2026-07-13): git is the ONLY
+        # delivery path for tracked files. We advance the host checkout
+        # BEFORE any rsync so the host (its cron-run scripts) holds the
+        # pushed commit's files — this is enforced, not merely assumed, by
+        # the merge-base assertion below: the host fetches origin/main from
+        # GitHub independently of this runner, so if GitHub's ref
+        # advertisement to the host ever lags the push that triggered this
+        # run, the advance script could exit 0 while the host is still
+        # short of the commit this deploy is shipping, and everything after
+        # it would silently run against stale files. The script is piped
+        # from the runner's checkout (bash -s) — the host executes the
+        # version this push shipped, never a stale on-host copy, which also
+        # lets its self-heal absorb dirt left behind by the pre-inversion
+        # rsync on the very first run. Fail-closed: if the host cannot FF
+        # (real local divergence, host ahead, fetch failure), the script
+        # alerts via on-host ntfy AND this deploy fails loudly here.
+        #
+        # FY_LIVE=1 (2026-08-06, C3 rollout): scripts/lib/side-effects.sh makes
+        # alert DELIVERY opt-in, and this ssh command is the one caller of the
+        # script that gets no cron env header — without the flag the "cannot
+        # FF" / "host is ahead" alerts promised just above would be suppressed,
+        # leaving this step's own failure as the only signal. The script's git
+        # mutations are deliberately NOT gated (it is the host's delivery
+        # mechanism), so the advance itself behaves identically either way.
+        run: |
+          ssh -i ~/.ssh/id_deploy -p "$SSH_PORT" -o StrictHostKeyChecking=no \
+            "$SSH_USER@$SSH_HOST" \
+            "FY_LIVE=1 FYD_REPO_DIR='$DEPLOY_PATH' FYD_NOTIFY='$DEPLOY_PATH/scripts/notify.sh' bash -s" \
+            < scripts/advance-host-checkout.sh
+
+          # Fail-closed post-advance assertion (final-review Important-1):
+          # confirm the commit that triggered this run is now actually
+          # contained in the host's HEAD, rather than trusting the script's
+          # exit 0 alone. $GITHUB_SHA is a default Actions env var already
+          # present in the runner's shell — it expands HERE, runner-side,
+          # into the literal SHA before this string is handed to ssh, so
+          # the remote command carries a fixed value, not an unexpanded
+          # reference to a var the host doesn't have.
+          ssh -i ~/.ssh/id_deploy -p "$SSH_PORT" -o StrictHostKeyChecking=no \
+            "$SSH_USER@$SSH_HOST" \
+            "git -C '$DEPLOY_PATH' merge-base --is-ancestor $GITHUB_SHA HEAD"
+
+      - name: Rsync public/ to VPS
+        # No Caddy on the validator host any more (removed 2026-10-07 by
+        # operator decision; Constitution v0.8 section 5): nothing on this host
+        # serves public/, and nothing on it reads build.json or the cache-bust
+        # stamps. The leg is kept only because dropping it is a separate
+        # decision. This workflow builds, starts and reloads NO container on
+        # the validator host.
+        #
+        # ONLY the deploy-transformed public/ tree travels by rsync — it is
+        # the one artifact git cannot deliver (cache-bust ?v=<sha> markers
+        # are stamped into the runner's copy above, deliberately diverging
+        # from the committed files; the host-side advance discards public/
+        # dirt before each pull, so this never blocks git). Every other
+        # tracked file reaches the host via the git advance step above.
+        # This replaces the pre-2026-07-13 whole-repo rsync whose exclude
+        # blacklist repeatedly leaked git-tracked files (tests/docs/TOOLKIT
+        # in 07-06, CLAUDE.md + bin/ in 07-13) and broke the host's
+        # ff-only pull. Feed excludes (shared SoT: deploy/feed-excludes.txt
+        # via the emitter) still protect host-generated feed files from
+        # --delete; empty prefix because the transfer root is public/,
+        # same as the web-host public-origin leg below.
+        run: |
+          mapfile -t FEED_EXCLUDES < <(bash scripts/deploy/build-rsync-excludes.sh "")
+          rsync -rltvz --delete --inplace \
+            -e "ssh -i ~/.ssh/id_deploy -p $SSH_PORT -o StrictHostKeyChecking=no" \
+            "${FEED_EXCLUDES[@]}" \
+            public/ "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/public/"
+
+      - name: Set up web host deploy key
+        env:
+          _XS_KEY: ${{ secrets.WEB_HOST_SSH_KEY }}
+          XS_HOST: ${{ secrets.WEB_HOST_SSH_HOST }}
+          XS_PORT: ${{ secrets.WEB_HOST_SSH_PORT }}
+        run: |
+          if [ -z "$_XS_KEY" ] || [ -z "$XS_HOST" ]; then
+            echo "WEB_HOST_SSH_* secrets not set — skipping public-web-host deploy"
+            echo "(validator-host deploy already succeeded). See docs/DEPLOY_SETUP.md §5."
+            exit 0
+          fi
+          printf '%s' "$_XS_KEY" | tr -d '\r' > ~/.ssh/id_web_host
+          [ -z "$(tail -c 1 ~/.ssh/id_web_host)" ] || echo "" >> ~/.ssh/id_web_host
+          chmod 600 ~/.ssh/id_web_host
+          ssh-keyscan -p "$XS_PORT" "$XS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Rsync public/ to web host (public origin)
+        # Second deploy target: the public origin behind the edge CDN. The CI
+        # key is rrsync -wo confined to the metal public dir (installed via
+        # scripts/install-web-host-static-deploy-key.sh), so the remote path is
+        # fixed server-side and the client targets the rrsync root ("$HOST:").
+        # Same feed exclusion set as the validator-host rsync, empty prefix
+        # because the source root here is public/, not the repo root. Runs
+        # after the validator-host deploy has already succeeded; a failure here
+        # surfaces the drift without blocking the validator host.
+        env:
+          XS_HOST: ${{ secrets.WEB_HOST_SSH_HOST }}
+          XS_USER: ${{ secrets.WEB_HOST_SSH_USER }}
+          XS_PORT: ${{ secrets.WEB_HOST_SSH_PORT }}
+        run: |
+          if [ ! -f ~/.ssh/id_web_host ] || [ -z "$XS_HOST" ]; then
+            echo "web host deploy key absent — skipping public-origin rsync (see previous step)."
+            exit 0
+          fi
+          mapfile -t FEED_EXCLUDES < <(bash scripts/deploy/build-rsync-excludes.sh "")
+          rsync -rltvz --delete \
+            -e "ssh -i ~/.ssh/id_web_host -p $XS_PORT -o StrictHostKeyChecking=no" \
+            "${FEED_EXCLUDES[@]}" \
+            ./public/ "$XS_USER@$XS_HOST:"
+
+      - name: Public health check
+        run: |
+          sleep 3
+          curl -fsS -o /dev/null https://metal.freedom-yield.com/health \
+            || echo "::warning::public health check failed; check DNS / edge CDN routing"

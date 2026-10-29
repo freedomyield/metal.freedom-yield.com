@@ -1,0 +1,14 @@
+# ローカル開発用オーバーライド(`docker compose up` で自動読込)
+#
+# - TLS は使わず http://localhost:8080 で配信
+# - DOMAIN=:80 は Caddy の「ホスト名にマッチさせず port 80 で待ち受け」設定
+# - ACME(Let's Encrypt)は走らない
+#
+# ポート競合時は HTTP_PORT を .env で変更する(例: HTTP_PORT=18080)
+
+services:
+  caddy:
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+    environment:
+      - DOMAIN=:80

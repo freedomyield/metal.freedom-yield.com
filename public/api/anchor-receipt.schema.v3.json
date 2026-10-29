@@ -1,0 +1,250 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://metal.freedom-yield.com/api/anchor-receipt.schema.v3.json",
+	"title": "Freedom Yield Metal — A-chain Anchor Receipt v3 (HC-single 4-action pack, chain-discriminated)",
+	"description": "v3 = v2 plus REQUIRED chain discrimination: anchor.chain_id, anchor.block_id and anchor.chain_profile. Introduced 2026-09-30 to prepare for the announced migration of the Metal A-Chain from the XPR Network (Antelope) to PulseVM, after which a tx_id or block_num alone no longer says which chain it belongs to. The on-chain shape (4 eosio.token::transfer memos in one transaction) and every v2 field are unchanged; only schema_version (3) and the three required fields differ. A v3 receipt can describe a legacy-chain anchor (chain_id 384da888112027f0321850a169f737c33e53b388aad48b5adace4bab97f437e0, chain_profile 'xpr-mainnet'). The generator (scripts/gen-anchor-receipt.sh) writes v2 by default while the default XPR profile is selected, and v3 on request or whenever a non-default chain profile is selected. v2 (/api/anchor-receipt.schema.v2.json) stays published and valid for receipts that declare schema_version 2.",
+	"x-issued-at": "2026-09-30T00:00:00Z",
+	"x-stability": "additive-only-within-v3",
+	"x-supersedes": "https://metal.freedom-yield.com/api/anchor-receipt.schema.v2.json",
+	"x-format-guide": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/ANCHOR_SOURCE.md",
+	"type": "object",
+	"required": [
+		"schema_version",
+		"schema_version_of_source",
+		"cycle_number",
+		"dag_root_hash",
+		"memo_prefix",
+		"anchor",
+		"anchor_source_url",
+		"generated_at"
+	],
+	"additionalProperties": true,
+	"properties": {
+		"_comment": {
+			"type": "string"
+		},
+		"$schema": {
+			"type": "string",
+			"format": "uri"
+		},
+		"schema_version": {
+			"type": "integer",
+			"const": 3,
+			"description": "Receipt schema major. v3 = v2 + required anchor.chain_id / block_id / chain_profile."
+		},
+		"schema_version_of_source": {
+			"type": "integer",
+			"minimum": 1,
+			"description": "schema_version of the anchor-source.json that produced this receipt."
+		},
+		"cycle_number": {
+			"type": "integer",
+			"minimum": 1,
+			"description": "Freedom Yield internal cycle counter."
+		},
+		"dag_root_hash": {
+			"type": "string",
+			"pattern": "^[a-f0-9]{64}$",
+			"description": "The 64-hex SHA-256 dag_root_computed being anchored."
+		},
+		"memo_prefix": {
+			"type": "string",
+			"pattern": "^fya[0-9]+c[0-9]+$",
+			"description": "Format: fya<schema>c<cycle>. Example: 'fya1c3'."
+		},
+		"anchor": {
+			"type": "object",
+			"required": [
+				"chain",
+				"network",
+				"method",
+				"tx_id",
+				"block_num",
+				"block_time",
+				"explorer_url",
+				"actions",
+				"authorization",
+				"sink",
+				"quantity",
+				"chain_id",
+				"block_id",
+				"chain_profile"
+			],
+			"additionalProperties": true,
+			"properties": {
+				"chain": {
+					"type": "string",
+					"const": "metal-a-chain"
+				},
+				"chain_backend": {
+					"type": "string",
+					"description": "Names the protocol family observed serving the inscribing transaction — NOT an execution engine. For metal-a-chain this is 'antelope' (Antelope/EOSIO history interfaces — Hyperion /v2/history, /v1/history/get_transaction — plus the Antelope action model this receipt's own verify gates assert). Receipts published for the cycle 3 and cycle 4 anchors carry 'pulsevm' instead: a forward-looking label naming an announced future execution engine rather than the family observed serving the chain. Family and engine are different axes, so a later engine change does not by itself make 'antelope' false."
+				},
+				"network": {
+					"type": "string",
+					"enum": [
+						"xpr-mainnet",
+						"xpr-testnet",
+						"mainnet-a",
+						"testnet-a"
+					]
+				},
+				"method": {
+					"type": "string",
+					"const": "hc_single_4_action_pack"
+				},
+				"tx_id": {
+					"type": "string",
+					"pattern": "^[a-f0-9]{64}$"
+				},
+				"block_num": {
+					"type": "integer",
+					"minimum": 1
+				},
+				"block_time": {
+					"type": "string",
+					"format": "date-time"
+				},
+				"explorer_url": {
+					"type": "string",
+					"format": "uri"
+				},
+				"actions": {
+					"type": "array",
+					"minItems": 4,
+					"maxItems": 4,
+					"description": "Order (normative for verification): identity, observations, artifacts, dag_root_summary. dag_root_summary.root_hex MUST equal sha256(identity.root_hex || observations.root_hex || artifacts.root_hex).",
+					"items": {
+						"type": "object",
+						"required": [
+							"branch",
+							"memo",
+							"root_hex"
+						],
+						"additionalProperties": false,
+						"properties": {
+							"branch": {
+								"type": "string",
+								"enum": [
+									"identity",
+									"observations",
+									"artifacts",
+									"dag_root_summary"
+								]
+							},
+							"memo": {
+								"type": "string"
+							},
+							"root_hex": {
+								"type": "string",
+								"pattern": "^[a-f0-9]{64}$"
+							}
+						}
+					}
+				},
+				"authorization": {
+					"type": "object",
+					"required": [
+						"actor",
+						"permission"
+					],
+					"additionalProperties": false,
+					"properties": {
+						"actor": {
+							"type": "string",
+							"pattern": "^[a-z1-5.]{1,12}$"
+						},
+						"permission": {
+							"type": "string",
+							"pattern": "^[a-z1-5.]{1,12}$"
+						}
+					}
+				},
+				"sink": {
+					"type": "string",
+					"pattern": "^[a-z1-5.]{1,12}$"
+				},
+				"quantity": {
+					"type": "string"
+				},
+				"chain_id": {
+					"type": "string",
+					"pattern": "^[a-f0-9]{64}$",
+					"description": "chain_id of the A-Chain the inscribing transaction is on, taken from the reviewed chain profile (config/a-chain-profiles.json) the generator ran under and reconciled with FYD_<ROLE>_CHAIN_ID. The history base that resolved the tx is bound to this chain_id by that profile's allowlist. Receipts from before this field existed are on the legacy XPR Network chain (mainnet 384da888112027f0321850a169f737c33e53b388aad48b5adace4bab97f437e0). REQUIRED in v3."
+				},
+				"block_id": {
+					"type": "string",
+					"pattern": "^[a-f0-9]{64}$",
+					"description": "id of the block holding the transaction, as served by the history base (Hyperion action block_id) or by /v1/chain/get_block on the same base. With chain_id it identifies the block unambiguously across a chain migration, where block_num alone may not. REQUIRED in v3."
+				},
+				"chain_profile": {
+					"type": "string",
+					"pattern": "^[a-z0-9][a-z0-9-]*$",
+					"description": "name of the chain profile (config/a-chain-profiles.json) the generator ran under, e.g. 'xpr-mainnet'. REQUIRED in v3."
+				},
+				"history_base": {
+					"type": "string",
+					"format": "uri",
+					"pattern": "^https://",
+					"description": "the history base URL that resolved and verified the transaction; one of the profile's history_bases (or, testnet rehearsal only, an explicitly allowed unlisted base)."
+				}
+			}
+		},
+		"anchor_source_url": {
+			"type": "string",
+			"format": "uri"
+		},
+		"anchor_source_sha256": {
+			"type": "string",
+			"pattern": "^[a-f0-9]{64}$"
+		},
+		"prev_anchor_tx_id": {
+			"oneOf": [
+				{
+					"type": "null"
+				},
+				{
+					"type": "string",
+					"pattern": "^[a-f0-9]{64}$"
+				}
+			]
+		},
+		"trigger_event": {
+			"type": "string",
+			"enum": [
+				"cyclestart",
+				"cycleend",
+				"idrotate",
+				"heartbeat",
+				"manual"
+			]
+		},
+		"signing_actor": {
+			"type": "string",
+			"pattern": "^[a-z1-5.]{1,12}$"
+		},
+		"signing_permission": {
+			"type": "string",
+			"pattern": "^[a-z1-5.]{1,12}$"
+		},
+		"verification_status": {
+			"type": "string",
+			"enum": [
+				"scheduled",
+				"live",
+				"failed"
+			]
+		},
+		"verified_at": {
+			"type": "string",
+			"format": "date-time"
+		},
+		"generated_at": {
+			"type": "string",
+			"format": "date-time"
+		},
+		"generated_by_script_version": {
+			"type": "string"
+		}
+	}
+}

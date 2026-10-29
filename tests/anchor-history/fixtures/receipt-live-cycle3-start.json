@@ -1,0 +1,34 @@
+{
+	"_comment": "Synthetic LIVE anchor receipt used by tests/anchor-history/test-ten-mandatory.sh — cycle 3 cyclestart event. All hex strings are synthetic placeholders for the schema's field shape. NOT a production snapshot.",
+	"$schema": "https://metal.freedom-yield.com/api/anchor-receipt.schema.v1.json",
+	"schema_version": 1,
+	"dag_root_hash": "aaaa000000000000000000000000000000000000000000000000000000000001",
+	"memo": "fyid1:aaaa000000000000000000000000000000000000000000000000000000000001",
+	"anchor": {
+		"chain": "metal-a-chain",
+		"chain_backend": "pulsevm",
+		"network": "xpr-mainnet",
+		"method": "phase_alpha_token_transfer",
+		"tx_id": "aaaa000000000000000000000000000000000000000000000000000000000001",
+		"block_num": 100000001,
+		"block_time": "2026-07-04T04:00:00Z",
+		"explorer_url": "https://explorer.xprnetwork.org/transaction/aaaa000000000000000000000000000000000000000000000000000000000001",
+		"inscribe_action": {
+			"account": "eosio.token",
+			"name": "transfer",
+			"from": "metalfreedom",
+			"to": "fyhistory",
+			"quantity": "0.0001 XPR",
+			"memo": "fyid1:aaaa000000000000000000000000000000000000000000000000000000000001",
+			"permission": {"actor": "metalfreedom", "permission": "anchor"}
+		}
+	},
+	"cycles_history_url": "https://metal.freedom-yield.com/api/cycles-history.json",
+	"identity_url": "https://metal.freedom-yield.com/api/identity.json",
+	"trigger_event": "cycle_start",
+	"trigger_reference": {"cycle_n": 3},
+	"signing_actor": "metalfreedom",
+	"signing_permission": "anchor",
+	"verification_status": "live",
+	"generated_at": "2026-07-04T04:00:30Z"
+}

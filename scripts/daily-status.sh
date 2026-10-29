@@ -1,0 +1,333 @@
+#!/usr/bin/env bash
+# Daily status digest — push a one-shot snapshot of validator + host state.
+# Runs three times per day (09:00 + 18:00 + 22:00 JST), keyed by an optional slot arg:
+#   daily-status.sh morning   → 🌅 朝の運用状態
+#   daily-status.sh evening   → 🌆 夕方の運用状態
+#   daily-status.sh night     → 🌙 夜の運用状態
+#   daily-status.sh (no arg)  → falls back to neutral title
+# Sends a single ntfy notification at "default" priority — quiet ping, full
+# context in the body so the operator need not open the /status/ page.
+#
+# Env:
+#   FY_LIVE=1  REQUIRED before the digest reaches ntfy. Anything else is a
+#              loud dry no-op printing one "DRY: would notify …" line
+#              (scripts/lib/side-effects.sh, C3 rollout 2026-08-06). The
+#              cron env header carries it; tests deliberately do not.
+#
+# Exit code 3: scripts/lib/side-effects.sh missing (structural).
+set -uo pipefail
+
+SLOT="${1:-}"
+case "$SLOT" in
+  morning) TITLE_PREFIX="🌅 朝の運用状態" ;;
+  evening) TITLE_PREFIX="🌆 夕方の運用状態" ;;
+  night)   TITLE_PREFIX="🌙 夜の運用状態" ;;
+  *)       TITLE_PREFIX="📋 運用状態" ;;
+esac
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+FYD_LIB="${ROOT}/scripts/lib/side-effects.sh"
+if [ ! -r "$FYD_LIB" ]; then
+	echo "[daily-status] FATAL: side-effects library not readable at $FYD_LIB" >&2
+	exit 3
+fi
+# shellcheck source=scripts/lib/side-effects.sh
+. "$FYD_LIB"
+
+# -------- cycle-gate (= digest skip 制御、 fail-closed) --------
+# Skip the entire digest push when the gate is deferred or missing.
+# The digest body includes cycle-related fields (= validator stake, period,
+# uptime); during a transition window the cycle data is in flux and a
+# digest would either confuse the operator or require complex conditional
+# rendering. Cleaner to skip the push entirely. Operator's transition-time
+# awareness comes from the explicit resume-after-cycle-start.sh flow, not
+# from periodic digest.
+CYCLE_GATE_SCRIPT="${ROOT}/scripts/cycle-gate.sh"
+if [ ! -x "${CYCLE_GATE_SCRIPT}" ]; then
+	echo "[daily-status] cycle-gate.sh missing or non-executable → skip digest push (fail-closed)" >&2
+	exit 0
+fi
+if ! "${CYCLE_GATE_SCRIPT}" --side-effect=cycle-aware-notify; then
+	echo "[daily-status] deferred by cycle-gate → skip digest push for this slot" >&2
+	exit 0
+fi
+
+STATUS_JSON="$ROOT/public/api/server-status.json"
+VALIDATOR_JSON="$ROOT/public/api/validator.json"
+WALLET_CONFIG="/etc/freedom-yield/wallet-addresses.json"
+METALGO_RPC="${METALGO_RPC:-http://127.0.0.1:9650}"
+
+if [ ! -f "$STATUS_JSON" ] || [ ! -f "$VALIDATOR_JSON" ]; then
+  echo "missing JSON, skip" >&2
+  exit 0
+fi
+
+# Balance fetch — talks ONLY to local metalgo RPC (no external API).
+# Values appear only in the ntfy push body; never echo'd to stdout / log
+# (operator's personal asset numbers must not be persisted per project policy).
+fetch_balance() {
+  local addrs_json="$1"
+  local stake_amount="${2:-0}"
+  if [ ! -r "$addrs_json" ]; then
+    echo "—"
+    return
+  fi
+  local c_addr p_addr x_addr
+  c_addr=$(jq -r '.validator.cChain' "$addrs_json")
+  p_addr=$(jq -r '.validator.pChain' "$addrs_json")
+  x_addr=$(jq -r '.validator.xChain' "$addrs_json")
+
+  # P-chain unlocked balance (nAVAX, 1 METAL = 1e9)
+  local p_resp p_unlocked p_locked_stakeable p_locked_not
+  p_resp=$(curl -s --max-time 6 -X POST -H "Content-Type: application/json" \
+    --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"platform.getBalance\",\"params\":{\"addresses\":[\"$p_addr\"]}}" \
+    "$METALGO_RPC/ext/bc/P" 2>/dev/null)
+  p_unlocked=$(echo "$p_resp" | jq -r '.result.unlocked // "0"' 2>/dev/null)
+  p_locked_stakeable=$(echo "$p_resp" | jq -r '.result.lockedStakeable // "0"' 2>/dev/null)
+  p_locked_not=$(echo "$p_resp" | jq -r '.result.lockedNotStakeable // "0"' 2>/dev/null)
+
+  # X-chain balance (nAVAX)
+  local x_resp x_bal
+  x_resp=$(curl -s --max-time 6 -X POST -H "Content-Type: application/json" \
+    --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"avm.getBalance\",\"params\":{\"address\":\"$x_addr\",\"assetID\":\"METAL\"}}" \
+    "$METALGO_RPC/ext/bc/X" 2>/dev/null)
+  x_bal=$(echo "$x_resp" | jq -r '.result.balance // "0"' 2>/dev/null)
+
+  # C-chain balance (wei hex, 1 METAL = 1e18)
+  local c_resp c_hex
+  c_resp=$(curl -s --max-time 6 -X POST -H "Content-Type: application/json" \
+    --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_getBalance\",\"params\":[\"$c_addr\",\"latest\"]}" \
+    "$METALGO_RPC/ext/bc/C/rpc" 2>/dev/null)
+  c_hex=$(echo "$c_resp" | jq -r '.result // "0x0"' 2>/dev/null)
+
+  # Convert wei/nAVAX → METAL (P/X: 1e9, C: 1e18). 3 decimals.
+  python3 - "$p_unlocked" "$p_locked_stakeable" "$p_locked_not" "$x_bal" "$c_hex" "$stake_amount" <<'PY' 2>/dev/null
+import sys
+p_u, p_ls, p_ln, x, c_hex, stake = sys.argv[1:7]
+def to_metal_nano(v):
+    try: return int(v) / 1_000_000_000
+    except: return 0
+def to_metal_wei(h):
+    try: return int(h, 16) / 1_000_000_000_000_000_000
+    except: return 0
+def to_float(v):
+    try: return float(v)
+    except: return 0
+pu = to_metal_nano(p_u)
+pls = to_metal_nano(p_ls)
+pln = to_metal_nano(p_ln)
+xv = to_metal_nano(x)
+cv = to_metal_wei(c_hex)
+sv = to_float(stake)
+p_total = pu + pls + pln
+total = p_total + xv + cv + sv
+print(f"P-chain: {p_total:,.3f}")
+if pls > 0 or pln > 0:
+    print(f"  (内訳 unlocked {pu:,.3f} / locked {pls+pln:,.3f})")
+print(f"X-chain: {xv:,.3f}")
+print(f"C-chain: {cv:,.3f}")
+print(f"Staked:  {sv:,.3f} (P-chain ロック)")
+print(f"合計:    {total:,.3f} METAL")
+PY
+}
+
+# Validator
+NODE_ID=$(jq -r '.nodeId // "—"' "$VALIDATOR_JSON")
+NODE_SHORT="${NODE_ID:0:24}…"
+P_BOOT=$(jq -r '.bootstrap.pChain' "$VALIDATOR_JSON")
+X_BOOT=$(jq -r '.bootstrap.xChain' "$VALIDATOR_JSON")
+C_BOOT=$(jq -r '.bootstrap.cChain' "$VALIDATOR_JSON")
+SELF_STAKE=$(jq -r '.stake.self // 0' "$VALIDATOR_JSON")
+TOTAL_RECEIVED=$(jq -r '.stake.totalReceived // 0' "$VALIDATOR_JSON")
+TOTAL_WEIGHT_METAL=$(awk -v s="$SELF_STAKE" -v d="$TOTAL_RECEIVED" 'BEGIN{printf "%.4f", s+d}' | sed -E 's/\.?0+$//')
+# Delegation capacity. Metal caps total weight at max_weight = 5 × self-stake,
+# so the receivable delegation ceiling is 4 × self. The remaining head-room
+# (= ceiling − already received) is the actionable number: when it hits 0 the
+# validator is saturated and new delegations are rejected on-chain.
+CAP_METAL=$(awk -v s="$SELF_STAKE" 'BEGIN{printf "%.4f", s*4}' | sed -E 's/\.?0+$//')
+REMAIN_METAL=$(awk -v s="$SELF_STAKE" -v r="$TOTAL_RECEIVED" 'BEGIN{v=s*4-r; if(v<0)v=0; printf "%.4f", v}' | sed -E 's/\.?0+$//')
+RECEIVED_F=$(awk -v r="$TOTAL_RECEIVED" 'BEGIN{printf "%.4f", r}' | sed -E 's/\.?0+$//')
+# 満枠 = remaining head-room within a dust epsilon of zero.
+if awk -v v="$REMAIN_METAL" 'BEGIN{exit !(v+0<=0.0001)}'; then
+  DELEG_LINE="受入: ${RECEIVED_F} / ${CAP_METAL} METAL 🔒 満枠"
+else
+  DELEG_LINE="受入: ${RECEIVED_F} / ${CAP_METAL} METAL (残枠 ${REMAIN_METAL})"
+fi
+# Bootstrap status is true/true/true for the entire life of a synced node, so
+# it is pure noise in a daily digest. Surface it only when a chain is NOT
+# bootstrapped — the abnormal case that already flips OVERALL to ⚠ 要確認.
+BOOT_WARN=""
+if ! { [ "$P_BOOT" = "true" ] && [ "$X_BOOT" = "true" ] && [ "$C_BOOT" = "true" ]; }; then
+  BOOT_WARN="⚠ Bootstrap: ${P_BOOT:0:1}/${X_BOOT:0:1}/${C_BOOT:0:1}
+"
+fi
+END_TIME=$(jq -r '.endTime // 0' "$VALIDATOR_JSON")
+NOW=$(date +%s)
+DAYS_LEFT=$(( (END_TIME - NOW) / 86400 ))
+
+BALANCE_BODY="$(fetch_balance "$WALLET_CONFIG" "$SELF_STAKE")"
+if [ -z "$BALANCE_BODY" ]; then
+  BALANCE_BODY="(残高取得失敗 — RPC エラー)"
+fi
+
+# Server
+CPU=$(jq -r '.host.cpu.usedPercent' "$STATUS_JSON")
+MEM=$(jq -r '.host.memory.usedPercent' "$STATUS_JSON")
+DISK=$(jq -r '.host.disk.usedPercent' "$STATUS_JSON")
+PEERS=$(jq -r '.metalgo.peerCount // 0' "$STATUS_JSON")
+METALGO_S=$(jq -r '.metalgo.containerStatus' "$STATUS_JSON")
+
+# Overall verdict
+if [ "$P_BOOT" = "true" ] && [ "$X_BOOT" = "true" ] && [ "$C_BOOT" = "true" ] \
+   && [ "$METALGO_S" = "running" ]; then
+  OVERALL="✓ 正常稼働中"
+else
+  OVERALL="⚠ 要確認"
+fi
+
+# Period status icon — informational, no false urgency.
+# Action moment is at endTime itself (旧 stake 解放; registration happens only after it);
+# the standalone ntfy T-10min alert carries the actual urgency. The digest icon
+# stays calm so the 3×/day push doesn't read as "panic" before there's anything
+# the operator can do.
+if [ "$DAYS_LEFT" -lt 0 ]; then PERIOD_STATE="⏰ 期間切れ"
+elif [ "$DAYS_LEFT" -eq 0 ]; then PERIOD_STATE="⏰ 本日終了予定"
+elif [ "$DAYS_LEFT" -eq 1 ]; then PERIOD_STATE="⚠ 明日終了"
+elif [ "$DAYS_LEFT" -le 7 ]; then PERIOD_STATE="ℹ 残 1 週間以内"
+elif [ "$DAYS_LEFT" -le 14 ]; then PERIOD_STATE="ℹ 残 2 週間以内"
+else PERIOD_STATE="✓ 余裕"
+fi
+
+DATE_JP=$(TZ=Asia/Tokyo date '+%m/%d (%a)')
+NOW_JST=$(TZ=Asia/Tokyo date '+%Y-%m-%d %H:%M JST')
+END_DATE_JST=$(TZ=Asia/Tokyo date -d "@$END_TIME" '+%m/%d %H:%M JST')
+
+# Morning slot also carries the evidence-pipeline health row (= what
+# notify-evidence-health.sh used to push standalone at ~01:35 UTC).
+# Consolidating into the morning daily-status avoids the duplicate ntfy
+# observed 2026-06-23. Evening / night slots stay slim.
+#
+# Exit code of `--summary` carries pass/fail so we can escalate the morning
+# push to priority=high on any A1/A2/A3 FAIL (= the legacy standalone push
+# did this; without escalation a degraded evidence pipeline would only
+# surface as a body emoji, defeating Android DND bypass on `urgent`/`high`).
+# Empty stdout means the script itself errored out (jq missing, network
+# down, etc.) — show that explicitly so the operator never silently loses
+# the row.
+EVIDENCE_BLOCK=""
+EVIDENCE_RC=0
+if [ "$SLOT" = "morning" ]; then
+  EVIDENCE_SCRIPT="$(dirname "$0")/notify-evidence-health.sh"
+  if [ -x "$EVIDENCE_SCRIPT" ]; then
+    set +e
+    EVIDENCE_SUMMARY=$(bash "$EVIDENCE_SCRIPT" --summary 2>/dev/null)
+    EVIDENCE_RC=$?
+    set -e
+    if [ -z "$EVIDENCE_SUMMARY" ]; then
+      EVIDENCE_SUMMARY="⚠ evidence health script error (rc=${EVIDENCE_RC})"
+      EVIDENCE_RC=2
+    fi
+    EVIDENCE_BLOCK="
+
+[Evidence health]
+${EVIDENCE_SUMMARY}"
+  fi
+fi
+
+# Morning slot also carries the reward-tracker digest block (累積 reward
+# with self/fee breakdown, in-progress-cycle projection at maturity, JST
+# maturity date + elapsed days, self-stake milestone — see
+# scripts/reward-tracker.sh), when that script has produced one. The file
+# is REGENERATED (not append-only) by reward-tracker.sh's daily cron;
+# absence just means that cron has not run yet (fresh deploy) or FY_LIVE
+# was never set there — never an error condition for daily-status.sh, so a
+# missing file yields no block and no warning, matching the task brief
+# ("ファイル無し → 行なし（エラーにしない）"). fyd_state_dir with no role
+# resolves the same FY_STATE_DIR reward-tracker.sh itself writes to (its
+# own subsystem — see that script's header on why it does not use a named
+# role here).
+#
+# Contract (2026-09-07, phone-width layout): the file holds SIX lines
+# (three in the projection-unavailable fallback), plus one more for each
+# breakdown line the writer had to split to stay <= 30 columns — an
+# unsplit 不明 cycle or five-digit amounts make it 7. Never hard-code the
+# count here: EVERY non-empty line is spliced, in
+# file order, under [Reward]; empty/whitespace-only lines are dropped and
+# the command substitution strips the trailing newline, so the block never
+# ends in a blank line however the writer terminated the file. A file
+# that contains only blank lines yields no block at all (same as absent).
+REWARD_BLOCK=""
+if [ "$SLOT" = "morning" ]; then
+  # shellcheck disable=SC2119  # no role on purpose: the reward subsystem's own dir
+  REWARD_STATE_DIR="$(fyd_state_dir 2>/dev/null || true)"
+  REWARD_DIGEST_FILE="${REWARD_STATE_DIR}/reward-digest-line.txt"
+  if [ -n "$REWARD_STATE_DIR" ] && [ -s "$REWARD_DIGEST_FILE" ]; then
+    REWARD_LINES="$(grep -v '^[[:space:]]*$' "$REWARD_DIGEST_FILE" || true)"
+    if [ -n "$REWARD_LINES" ]; then
+      REWARD_BLOCK="
+
+[Reward]
+${REWARD_LINES}"
+    fi
+  fi
+fi
+
+# Priority escalation: high when validator state is degraded (= OVERALL is
+# ⚠ 要確認 or worse) or when the morning evidence-pipeline check returned
+# non-zero. Otherwise default. urgent is reserved for separate alerters
+# (anomalies / metalgo down / validator drop) per
+# reference_ntfy_notifications.
+PRIO="default"
+case "$OVERALL" in
+  *⚠*|*❌*) PRIO="high" ;;
+esac
+if [ "${EVIDENCE_RC:-0}" -ne 0 ]; then
+  PRIO="high"
+fi
+
+# Multi-line body — ntfy Android renders \n as line break.
+# Note: notify.sh auto-appends a single "[Uptime] XX.XXXX%" footer line to
+# every ntfy body. Do NOT duplicate Uptime here; the auto-appended footer
+# is the single source of truth for the headline number across all pushes.
+# This push adds the 予定/差 to that footer line via NOTIFY_UPTIME_SUFFIX
+# (set just before fyd_notify below).
+BODY=$(cat <<EOF
+${OVERALL}
+取得時刻: ${NOW_JST}
+
+[Validator]
+${BOOT_WARN}Stake: ${SELF_STAKE} METAL (self)
+${DELEG_LINE}
+総 weight: ${TOTAL_WEIGHT_METAL} METAL (self + delegators)
+期限: ${PERIOD_STATE} 残 ${DAYS_LEFT} 日 (${END_DATE_JST})
+通知: 1 週間前 / 前日 / 当日 / 10 分前 (urgent)
+
+[Wallet 残高]
+${BALANCE_BODY}
+
+[Server]
+CPU ${CPU}% / RAM ${MEM}% / Disk ${DISK}%
+Peers: ${PEERS}
+metalgo: ${METALGO_S}
+
+[NodeID]
+${NODE_SHORT}${REWARD_BLOCK}${EVIDENCE_BLOCK}
+EOF
+)
+
+# 予定 (expected) uptime + difference next to the footer's observed value —
+# the SAME definition as the /status/ page (status-calc.js), ported in
+# scripts/uptime-expected.py and pinned to it by the shared fixture
+# tests/fixtures/uptime-expected-vectors.json. known-outages.json missing or
+# unreadable → " (予定: 未確認)", never a guess. Any helper failure (python3
+# absent, crash) also degrades to 未確認: the digest itself must still go out.
+KNOWN_OUTAGES_JSON="$ROOT/public/api/known-outages.json"
+UPTIME_SUFFIX=" (予定: 未確認)"
+if command -v python3 >/dev/null 2>&1; then
+  if _suffix="$(python3 "$ROOT/scripts/uptime-expected.py" "$VALIDATOR_JSON" "$KNOWN_OUTAGES_JSON" 2>/dev/null)"; then
+    UPTIME_SUFFIX="$_suffix"
+  fi
+fi
+export NOTIFY_UPTIME_SUFFIX="$UPTIME_SUFFIX"
+
+fyd_notify "$PRIO" "${TITLE_PREFIX} ${DATE_JP}" "$BODY"

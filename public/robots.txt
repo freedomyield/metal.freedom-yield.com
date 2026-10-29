@@ -1,0 +1,187 @@
+# Current crawl policy: open to AI agents that read on a person's request and
+# to AI search crawlers; closed to training crawlers, general search engines
+# and everyone else.
+#
+# This site is published for institutional readers who arrive at a specific
+# URL. Indexing is still suppressed at two other layers (this file is the
+# only layer that changed):
+#   1. <meta name="robots" content="noindex, nofollow"> on every HTML page
+#   2. X-Robots-Tag: noindex, nofollow, noarchive, nosnippet on every response
+# Both stay on because the AI vendors do not document, in their official bot
+# pages, a per-bot way to lift noindex. The third layer is this file, which
+# now has per-bot groups below.
+#
+# The explicit per-bot lines exist because Cloudflare may inject an
+# "Allow: /" against User-agent: * higher up in the file. Under RFC 9309 a
+# matching specific group is used instead of the wildcard group, so the
+# per-bot entries make our intent unambiguous regardless of any CDN
+# managed-content injection.
+#
+# User-initiated fetchers (ChatGPT-User, Perplexity-User) are documented by
+# their operators as possibly not following robots.txt.
+#
+# If the operator decides to open the site further (e.g., to search engines),
+# the steps are: edit this file, the X-Robots-Tag in caddy/Caddyfile, and each
+# page's meta robots tag.
+
+# ---- Major general-purpose search crawlers ---------------------------------
+User-agent: Googlebot
+Disallow: /
+
+User-agent: Googlebot-Image
+Disallow: /
+
+User-agent: Googlebot-News
+Disallow: /
+
+User-agent: Googlebot-Video
+Disallow: /
+
+User-agent: Bingbot
+Disallow: /
+
+User-agent: Slurp
+Disallow: /
+
+User-agent: DuckDuckBot
+Disallow: /
+
+User-agent: Baiduspider
+Disallow: /
+
+User-agent: YandexBot
+Disallow: /
+
+User-agent: Sogou
+Disallow: /
+
+User-agent: facebookexternalhit
+Disallow: /
+
+User-agent: Twitterbot
+Disallow: /
+
+User-agent: LinkedInBot
+Disallow: /
+
+# ---- AI agents acting on a person's request, and AI search crawlers (allowed) ----
+User-agent: ChatGPT-User
+Allow: /
+Disallow: /status/
+Disallow: /calendar/
+Disallow: /api/server-status.json
+
+User-agent: Claude-User
+Allow: /
+Disallow: /status/
+Disallow: /calendar/
+Disallow: /api/server-status.json
+
+User-agent: Perplexity-User
+Allow: /
+Disallow: /status/
+Disallow: /calendar/
+Disallow: /api/server-status.json
+
+User-agent: OAI-SearchBot
+Allow: /
+Disallow: /status/
+Disallow: /calendar/
+Disallow: /api/server-status.json
+
+User-agent: Claude-SearchBot
+Allow: /
+Disallow: /status/
+Disallow: /calendar/
+Disallow: /api/server-status.json
+
+User-agent: PerplexityBot
+Allow: /
+Disallow: /status/
+Disallow: /calendar/
+Disallow: /api/server-status.json
+
+# ---- AI training crawlers and other AI crawlers (disallowed) ---------------
+User-agent: GPTBot
+Disallow: /
+
+User-agent: ClaudeBot
+Disallow: /
+
+User-agent: Claude-Web
+Disallow: /
+
+User-agent: anthropic-ai
+Disallow: /
+
+User-agent: Google-Extended
+Disallow: /
+
+User-agent: Applebot
+Disallow: /
+
+User-agent: Applebot-Extended
+Disallow: /
+
+User-agent: Meta-ExternalAgent
+Disallow: /
+
+User-agent: Bytespider
+Disallow: /
+
+User-agent: CCBot
+Disallow: /
+
+User-agent: cohere-ai
+Disallow: /
+
+User-agent: Diffbot
+Disallow: /
+
+User-agent: FacebookBot
+Disallow: /
+
+User-agent: YouBot
+Disallow: /
+
+User-agent: Amazonbot
+Disallow: /
+
+User-agent: AwarioRssBot
+Disallow: /
+
+User-agent: AwarioSmartBot
+Disallow: /
+
+User-agent: DataForSeoBot
+Disallow: /
+
+User-agent: ImagesiftBot
+Disallow: /
+
+User-agent: Mistralbot
+Disallow: /
+
+User-agent: omgili
+Disallow: /
+
+User-agent: omgilibot
+Disallow: /
+
+User-agent: peer39_crawler
+Disallow: /
+
+User-agent: SemrushBot
+Disallow: /
+
+User-agent: Timpibot
+Disallow: /
+
+User-agent: Webzio-Extended
+Disallow: /
+
+# ---- Wildcard (last) -------------------------------------------------------
+# Final catch-all. Crawlers that didn't match a specific rule above must
+# treat this as the binding rule.
+User-agent: *
+Disallow: /

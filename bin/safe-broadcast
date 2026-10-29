@@ -1,0 +1,1232 @@
+#!/usr/bin/env bash
+# bin/safe-broadcast — the ONLY sanctioned broadcast pathway on this repo.
+#
+# CHAIN: default testnet-a (Metal A-chain testnet via proton-test).
+#        Mainnet is opt-in only, with all four PRIME DIRECTIVE gates.
+# PRIME_DIRECTIVE: TESTNET-FIRST — this wrapper is the tier-2 mechanical
+#                  enforcement per docs/CONSTITUTION.md §3.4 and
+#                  memory/project_broadcast_enforcement_gate_plan.md.
+#
+# Every broadcast script in this repo MUST invoke this wrapper instead of
+# calling `proton transaction:push` / `proton action` / equivalents directly.
+# Direct calls are still caught by tier-1 broadcast-guard.sh, but the
+# tier-2 wrapper additionally verifies the four PRIME DIRECTIVE gates
+# for mainnet and produces an append-only audit log entry.
+#
+# Usage:
+#   bin/safe-broadcast --tx=<json-file> --chain=<testnet-a|mainnet-a>
+#                      [--testnet-tx-id=<64hex>]
+#                      [--dry-run-log=<log-file>]
+#                      [--operator-token=<file>]
+#                      [--non-interactive]
+#
+# Required:
+#   --tx=<json-file>              Path to transaction JSON containing actions[].
+#                                 File format: {"actions":[{...}, ...]}
+#   --chain=<testnet-a|mainnet-a> Target chain. Explicit mandatory (no default).
+#
+# Mainnet-only additional required:
+#   --testnet-tx-id=<64hex>       tx_id of a successful testnet broadcast of the
+#                                 identical shape. Wrapper resolves it against
+#                                 the testnet Hyperion endpoint and refuses if
+#                                 it cannot be found. As of the 2026-08 shape
+#                                 hardening (see below), the resolved evidence
+#                                 tx's actions and (for anchor-shaped tx) memo
+#                                 prefix must ALSO match the outgoing --tx=.
+#   --dry-run-log=<log-file>      Path to a prior `sign-anchor-event.sh
+#                                 --dry-run` (or equivalent) log for this
+#                                 exact shape. Wrapper refuses if the file is
+#                                 missing or empty. (2026-08 hardening) IF the
+#                                 outgoing --tx= is anchor-shaped, it must
+#                                 ALSO be a JSON object whose recorded
+#                                 memo_prefix (and target_chain, if present)
+#                                 match the outgoing tx. Non-anchor shapes
+#                                 (e.g. updateauth key rotation) keep ONLY
+#                                 the exists/non-empty check above — their
+#                                 dry-run material is plain CLI text, not
+#                                 JSON.
+#
+# Optional:
+#   --operator-token=<file>       Path to authorization token file.
+#                                 Default: /tmp/fyd-broadcast-token (tier-1 guard).
+#                                 5-minute TTL from mtime.
+#   --non-interactive             Skip the interactive confirmation prompt.
+#                                 In non-interactive mode, the token file mtime
+#                                 must be within the last 60 seconds (tighter TTL).
+#
+# ---- R16 (2026-07-08): operator token CONTENT binding ----
+#   The operator token used to prove authorization by FRESHNESS alone (mtime
+#   TTL) — a token touched/created for a TESTNET broadcast could therefore
+#   also authorize an unrelated MAINNET broadcast within the same TTL window.
+#   The token is now additionally checked against the CONTENT it authorizes:
+#
+#     printf '{"chain":"%s","tx_sha256":"%s"}' "<testnet-a|mainnet-a>" \
+#       "$(jq -c . <tx-json-file> | sha256sum | awk '{print $1}')" \
+#       > /tmp/fyd-broadcast-token
+#     # macOS: swap `sha256sum` for `shasum -a 256`
+#
+#   NEW OPERATOR RITUAL — replaces the old bare `touch $OPERATOR_TOKEN_FILE`:
+#     - "chain" binds the token to the target chain. A token whose bound
+#       chain does not match --chain= is REFUSED (both directions — a
+#       testnet-bound token cannot authorize mainnet, and vice versa).
+#     - "tx_sha256" (optional, recommended) binds the token to the EXACT
+#       transaction content — all actions + memos in one hash — which is a
+#       strictly stronger guarantee than chain alone. If present, it MUST
+#       match sha256(`jq -c .` of --tx=<file>) or the broadcast is refused.
+#     - Legacy bare tokens (no JSON content, e.g. a plain `touch`) are still
+#       accepted for TESTNET ONLY, for backward compatibility, with a
+#       deprecation warning on stderr. MAINNET REFUSES an unbound token
+#       unconditionally — fail-closed, since mainnet is exactly the
+#       high-risk direction this hardening exists to close.
+#   scripts/run-testnet-rehearsal.sh already implements the new ritual as a
+#   reference — it composes the tx first, then binds the token to it.
+#
+# ---- Gate 1 / Gate 4 shape binding (2026-08, pre cycle-4 hardening) ----
+#   Audit finding: gate 1 previously only checked that --testnet-tx-id was
+#   64-hex AND resolvable on testnet Hyperion — it never compared the
+#   resolved evidence tx's CONTENT against the outgoing mainnet --tx=. A
+#   testnet tx from an unrelated cycle (e.g. cycle-2 memo prefix fya1c2)
+#   could therefore authorize a cycle-4 mainnet anchor broadcast. Likewise
+#   gate 4 only checked the --dry-run-log file was non-empty — a stale log
+#   from a different shape or a month-old cycle would pass trivially.
+#
+#   Gate 1 now ALSO requires, after successful resolution:
+#     - the resolved testnet evidence tx must yield a non-empty action list
+#       from AT LEAST ONE of three sources, tried in this priority order:
+#       `.traces[].act` (the REAL v1 `get_transaction` shape — one trace
+#       per notified account), `.actions[].act` (defensive fallback, in
+#       case a future endpoint/proxy normalizes this way), `.trx.trx.actions[]`
+#       (raw/unpacked fallback, rare). If all three are empty (or the
+#       response fails to parse), gate 1 REFUSES — "no source matched" is
+#       never treated as an empty, vacuously-passing shape.
+#     - every action in the OUTGOING --tx= must have a JSON-OBJECT `.data`
+#         field. A non-object `.data` (e.g. a hex-serialized action) REFUSES
+#         rather than silently disabling the memo-prefix check (b) below.
+#     (a) the {account,name} action-set of the resolved testnet evidence tx
+#         is IDENTICAL to the {account,name} action-set of the outgoing
+#         --tx=. This applies to every mainnet broadcast shape, anchor or
+#         not (e.g. updateauth key rotation).
+#     (b) IF the outgoing --tx= is anchor-shaped (>=1 action memo matching
+#         ^fya[0-9]+c[0-9]+), the memo-prefix SET derived from the testnet
+#         evidence tx's memos must be exactly equal to the memo-prefix set
+#         derived from the outgoing tx's memos (normally both singleton
+#         sets, e.g. {"fya1c4"}). A cycle-2 evidence tx (prefix fya1c2)
+#         against a cycle-4 outgoing tx (prefix fya1c4) now REFUSES.
+#         Non-anchor shapes (no memo matching the pattern) are exempt from
+#         this sub-check — (a) alone still applies, so the existing
+#         updateauth-based key-rotation rehearsal flow is unaffected.
+#     Mismatch refuses (exit 3) with both the expected and actual shapes
+#     printed to stderr. A jq parse/runtime failure while deriving any of
+#     the above also refuses (exit 3), fail-closed — never silently treated
+#     as an empty/non-matching set.
+#
+#   Gate 4 now ALSO requires, but ONLY when the outgoing --tx= is
+#   anchor-shaped (the SAME anchor-shape test as gate 1(b) above — a
+#   non-anchor shape, e.g. updateauth key rotation, keeps ONLY the
+#   pre-existing exists/non-empty check and nothing more, since that
+#   flow's dry-run material is plain `proton transaction:push --dry-run`
+#   CLI text, not JSON):
+#     (a) --dry-run-log content must parse as a JSON OBJECT
+#         (`jq -e 'type == "object"'` — a bare scalar or array, e.g. `42`
+#         or `[]`, does NOT satisfy this).
+#     (b) the log's top-level `.memo_prefix` field (the field name
+#         `sign-anchor-event.sh --dry-run` actually emits) MUST be present
+#         and match the outgoing tx's memo prefix exactly. Missing or
+#         mismatched refuses.
+#     (c) IF the log has a top-level `.target_chain` field, it must match
+#         --chain= (aliases normalized the same way as gate 3). Absent is
+#         allowed (older/foreign logs may not carry it) — present-and-wrong
+#         refuses.
+#   These reuse the SAME anchor-shape/prefix derivation as gate 1 above, so
+#   the two gates cannot disagree about what "the outgoing shape" is.
+#
+# ---- --endpoint=<url> REMOVED (2026-08-21) ----
+#   This wrapper used to accept --endpoint=<url> into an override variable
+#   with ZERO validation, then append it via `-u <that value>` to the
+#   proton transaction:push args at broadcast time (below). Gate 3 verifies
+#   chain identity by running `proton chain:set` + `proton chain:info`
+#   WITHOUT `-u` — it measures whatever endpoint proton-cli resolves from
+#   ITS OWN config. A caller who also passed --endpoint= therefore made
+#   gate 3 verify chain_id at endpoint A while the irreversible push went
+#   to endpoint B: the flag silently defeated the one gate it should have
+#   been subject to.
+#
+#   This stopped being a theoretical gap on 2026-08-21, when an upstream
+#   project published a byte-exact clone of a real chain's state that
+#   DELIBERATELY advertises the SAME chain_id as the chain it clones. A
+#   chain_id match is therefore no longer proof of which network answered —
+#   the endpoint is. Gate 3 checking identity at a different endpoint than
+#   the one the broadcast actually uses is not merely inelegant, it is
+#   defeated by a network that exists today.
+#
+#   A repo-wide grep (2026-08-21) found NOTHING that ever passed
+#   --endpoint= to this wrapper — the flag existed only in its own
+#   declaration/parsing/help text. Removing it costs no functionality, and
+#   deleting the code path is lower-risk than adding same-endpoint
+#   validation to a day-of executable. --endpoint=* is now an EXPLICIT,
+#   named refusal (exit 2, see the arg-parse `case` below) rather than
+#   falling through to the generic "unknown arg" branch — a future reader
+#   must be TOLD why, not left to rediscover it by reading git blame. Do
+#   NOT re-add this flag as a convenience without ALSO making gate 3
+#   verify identity at the EXACT endpoint the broadcast will use — anything
+#   less reopens this exact gap.
+#
+# ---- Chain profiles (2026-09-30, A-Chain → PulseVM migration readiness) ----
+#   Every chain-specific value this wrapper uses — the expected chain_id
+#   (gate 3), the proton-cli network name (gate 3's chain:set), the node host
+#   allowlist (gate 3), the testnet history bases (gate 1), the push-response
+#   shape — now comes from config/a-chain-profiles.json through
+#   scripts/lib/a-chain-profile.sh. Nothing chain-specific is hard-coded here
+#   any more. The profile is chosen per ROLE (mainnet-a → mainnet,
+#   testnet-a → testnet):
+#     FYD_A_CHAIN_PROFILE_MAINNET  default xpr-mainnet (the current XPR chain)
+#     FYD_A_CHAIN_PROFILE_TESTNET  default xpr-testnet
+#   With the defaults, every decision, message, exit code, audit line and
+#   network call is the same as before profiles existed — pinned by
+#   tests/safe-broadcast/test-safe-broadcast-equivalence.sh against the
+#   pre-profile wrapper. The PulseVM profiles ship with chain_id null and
+#   empty allowlists, so selecting one refuses (exit 4) until reviewed
+#   official values are committed. A migration is a reviewed commit to that
+#   file plus an explicit profile selection — never an env var.
+#
+#   Library refusals map to this wrapper's exit codes (fail closed, before
+#   any proton call or network call):
+#     lib rc 2 (profile file missing/invalid)          → exit 4
+#     lib rc 3 (unknown profile / wrong role)           → exit 4
+#     lib rc 4 (value null/empty, e.g. PulseVM chain_id) → exit 4
+#     lib rc 5 (FYD_*_CHAIN_ID override ≠ profile)      → exit 4
+#     lib rc 6 (jq missing or older than 1.6)           → exit 2
+#     any other non-zero                                → exit 4
+#   Inside gate 1 (the TESTNET profile's evidence values) and gate 3's host
+#   check, a refusal is that gate's own code instead (3).
+#
+# ---- Gate 3 host check (2026-09-30) ----
+#   chain_id stopped being proof of WHICH network answers on 2026-08-21 (a
+#   byte-exact clone advertises the real chain_id; see the --endpoint note
+#   above). The endpoint is the discriminator. After `proton chain:set`,
+#   gate 3 now reads proton-cli's OWN config — the same file and the same
+#   resolution rule scripts/install-rehearsal-preflight.sh check 10 uses:
+#     <HOME>/Library/Preferences/@proton/cli-nodejs/proton-cli.json (macOS;
+#     ${XDG_CONFIG_HOME:-<HOME>/.config}/@proton/cli-nodejs/… elsewhere),
+#   extracting ONLY currentChain / endpoints / networks (never privateKeys):
+#     * currentChain must equal the network gate 3 just selected (proves the
+#       file read is the one proton-cli writes);
+#     * if a top-level `endpoints` stanza exists for that network (an
+#       `endpoint:set` override — proton-cli's runtime authority), EVERY
+#       endpoint in it is checked; otherwise proton-cli uses its built-in
+#       list, whose on-disk copy under `networks` is checked (as check 10
+#       does — the installed package's compiled-in list itself is not read);
+#     * each endpoint must be https and its host (scripts/lib/url-host.sh, a
+#       verbatim copy of check 10's extractor) must EXACTLY equal one of the
+#       selected profile's node_hosts.
+#   Any miss — unreadable/unparseable file, wrong currentChain, no endpoint,
+#   non-string/control-character endpoint, host off the allowlist — refuses
+#   with exit 3 before `proton chain:info` talks to anything. The same file
+#   check runs AGAIN immediately before the push (the config is a plain file
+#   that could be re-pointed while the operator reads the prompt); a failure
+#   there pushes nothing, exits 3 and logs phase=post rc=refused-gate3-recheck. This closes the
+#   clone gap on the MAINNET path too (before, only the testnet rehearsal
+#   pre-flight checked hosts). The default xpr profiles' node_hosts are
+#   check 10's allowlists, so a keystore that passes check 10 passes here.
+#
+# ---- Gate 1 evidence sources (2026-09-30) ----
+#   The testnet evidence tx is looked up on the TESTNET profile's
+#   history_bases, tried in order (xpr-testnet has one:
+#   https://test.proton.eosusa.io — the value that used to be hard-coded).
+#   XPR_TESTNET_RPC, if set, must now EXACTLY equal one of those bases, else
+#   gate 1 refuses (exit 3); before, any value was used unchecked. The answer
+#   counts as "resolved" only if it names the tx and is not marked
+#   `executed: false`. On a testnet profile with push_response "processed"
+#   (the XPR default) `.id` MUST equal the requested id — the rule gate 1
+#   always had — and a `trx_id`, if present, must equal it too; a v2-shaped
+#   answer carrying only `trx_id` does NOT resolve there. On an id-only
+#   (PulseVM) testnet profile, `id` and/or `trx_id` may name it — every one
+#   present must equal the id, at least one must be present.
+#   Actions are then read from `.traces[].act` (v1), `.actions[].act`
+#   (Hyperion v2 get_transaction) or `.trx.trx.actions[]`, with the same
+#   shape-binding checks as before. For a testnet profile whose push_response
+#   is id-only (PulseVM, where history lives only in Hyperion) a
+#   GET <base>/v2/history/get_transaction?id= is tried after the v1 POST; the
+#   default (processed) profiles make exactly the v1 POST they always made.
+#   Which testnet "corresponds" to a mainnet (Constitution PRIME DIRECTIVE
+#   gate 1) is recorded per mainnet profile as gate1_evidence_profile:
+#   xpr-mainnet → xpr-testnet; the PulseVM profiles ship null = an OPEN
+#   operator decision. Gate 1 refuses (exit 3) when it is null, when the
+#   selected testnet profile is not that profile, and — independently — when
+#   the two profiles differ in push_response or lib_equals_head.
+#
+# ---- Push response: id-only (PulseVM profiles only) ----
+#   On a profile with push_response "processed" (XPR/Antelope) the push is
+#   handled exactly as before. With "id-only" (PulseVM returns only
+#   {"transaction_id"} once the tx is admitted to the mempool — it can still
+#   fail at block build):
+#     * BEFORE the broadcast (after gate 3), at least one of the profile's
+#       history_bases must be HEALTHY on GET <base>/v2/health — every
+#       service "OK", head_block_num > 0 and last_indexed_block within
+#       SB_HISTORY_MAX_INDEX_LAG (30) blocks of it — else exit 4: the
+#       confirmation below would be impossible, so nothing is signed;
+#     * AFTER a push that returned a tx_id, the tx is looked up on the
+#       history bases (v1 POST, then v2 GET) until it resolves (as in gate 1)
+#       AND its {account,name} action set equals the outgoing --tx=; bounded:
+#       FYD_SB_CONFIRM_ATTEMPTS rounds (default 20, 1–60) spaced
+#       FYD_SB_CONFIRM_INTERVAL seconds (default 3, 0–30); out-of-range or
+#       non-numeric values fall back to the defaults;
+#     * not confirmed → exit 9, stdout empty, the tx_id printed prominently
+#       on stderr with "a broadcast MAY have happened — verify before
+#       retrying". The push is NEVER retried automatically. A third audit
+#       line (phase=confirm) records the outcome.
+#
+# Environment overrides:
+#   FYD_MAINNET_CHAIN_ID  — CONFIRM-ONLY since 2026-09-30. Unset/empty: the
+#   FYD_TESTNET_CHAIN_ID    selected profile's chain_id is expected (gate 3).
+#                           Set: must EQUAL the profile's chain_id or the run
+#                           is refused before any gate (exit 4); it can never
+#                           replace or fill in a chain_id. A chain migration
+#                           is a reviewed commit to config/a-chain-profiles.json
+#                           plus FYD_A_CHAIN_PROFILE_<ROLE> — not this variable.
+#   FYD_A_CHAIN_PROFILE_MAINNET / FYD_A_CHAIN_PROFILE_TESTNET — see above.
+#   XPR_TESTNET_RPC       — gate-1 history base; must be one of the testnet
+#                           profile's history_bases (see above).
+#
+# Exit codes:
+#   0    broadcast succeeded, tx_id printed to stdout
+#   2    bad arg / usage error (also: jq older than 1.6)
+#   3    PRIME DIRECTIVE gate failed (testnet-tx-id / dry-run-log / chain /
+#        token / gate-3 push-endpoint host)
+#   4    proton chain:get mismatch or command not found; chain profile
+#        unavailable (see the mapping above); id-only profile whose history
+#        is unreachable before the broadcast
+#   5    interactive confirmation aborted
+#   6    broadcast failed (chain rejected the tx or transport error)
+#   7    audit log write failed
+#   8    keystore guard failed — $HOME resolves to the default (shared)
+#        proton-cli keystore; refused per docs/CONSTITUTION.md §3.5
+#   9    id-only profile: the push returned a tx_id but its execution could
+#        not be confirmed in history — a broadcast MAY have happened; the
+#        tx_id is on stderr. Verify before retrying.
+#
+# See also:
+#   docs/CONSTITUTION.md §3.4 + PRIME DIRECTIVE (top of file)
+#   docs/CONSTITUTION.md §3.5 (keystore separation; see the guard below)
+#   scripts/broadcast-guard.sh (tier-1 hook)
+#   scripts/lib/require-keystore-home.sh (the §3.5 guard this wrapper calls)
+#   scripts/lib/a-chain-profile.sh + config/a-chain-profiles.json (chain values)
+#   scripts/lib/url-host.sh (gate 3 host extraction)
+#   memory/project_broadcast_enforcement_gate_plan.md (tier design)
+
+set -u
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=scripts/lib/require-keystore-home.sh
+. "${REPO_ROOT}/scripts/lib/require-keystore-home.sh"
+
+# ---- defaults ----
+TX_JSON_FILE=""
+CHAIN=""
+TESTNET_TX_ID=""
+DRY_RUN_LOG=""
+OPERATOR_TOKEN_FILE="${FYD_BROADCAST_TOKEN_FILE:-/tmp/fyd-broadcast-token}"
+INTERACTIVE=1
+
+# Audit log path (matches broadcast-guard.sh convention). Resolved
+# against the LOGIN home (fyd_login_home, from require-keystore-home.sh
+# above), NOT $HOME — a §3.5-compliant HOME=~/.metal-fy-proton[-test]
+# invocation would otherwise relocate the audit log into the keystore
+# dir and split it from the canonical ~/.fyd-broadcast-audit.log
+# history. Falls back to /tmp only if the login home is unresolvable.
+AUDIT_LOG_PRIMARY="${FYD_BROADCAST_AUDIT_LOG:-/var/log/fyd-broadcast-audit.log}"
+_AUDIT_LOG_LOGIN_HOME="$(fyd_login_home || true)"
+AUDIT_LOG_FALLBACK="${_AUDIT_LOG_LOGIN_HOME:-/tmp}/.fyd-broadcast-audit.log"
+
+# Print the WHOLE header, however long it grows: from line 2 up to the first
+# line that is not a comment. A hardcoded line range silently truncates the
+# moment the header gains a paragraph — and the paragraphs most likely to be
+# added here are incident records (e.g. the "--endpoint=<url> REMOVED"
+# section above), exactly the ones a reader must not lose. This wrapper
+# shipped with a hardcoded '2,168p' that its own --endpoint removal had to
+# bump to '2,196p' by hand; self-terminating removes that failure mode.
+# `sed -E 's/^# ?//'`, not `sed 's/^# \?//'`: `\?` is a GNU extension that
+# BSD sed (the macOS system sed this repo runs under) treats literally, so
+# the comment markers survived and every header line came out still
+# prefixed with `# ` — the exact bug measured 2026-08-17 in
+# scripts/install-rehearsal-preflight.sh and reproduced here on 2026-08-21.
+#
+# ONE sed process, not `sed -n '2,$p' | sed -n '/^[^#]/q;p' | sed -E …`
+# (the form used until 2026-10-05). In that pipeline the middle sed quits at
+# the end of the header while the first is still streaming the rest of this
+# file into the pipe; where SIGPIPE is ignored (GitHub's ubuntu runner) the
+# first GNU sed then printed "sed: couldn't write N items to stdout: Broken
+# pipe" to stderr after a usage error — which broke the byte-for-byte
+# equivalence golden on CI (run 37250135519). Output and exit codes are
+# unchanged (cmp-verified on BSD and GNU sed); only the early-closing pipe
+# is gone.
+usage() { sed -n -E '2,${/^[^#]/q;s/^# ?//;p;}' "$0"; }
+
+# ---- arg parse ----
+for arg in "$@"; do
+	case "$arg" in
+		--tx=*)              TX_JSON_FILE="${arg#*=}" ;;
+		--chain=*)           CHAIN="${arg#*=}" ;;
+		--testnet-tx-id=*)   TESTNET_TX_ID="${arg#*=}" ;;
+		--dry-run-log=*)     DRY_RUN_LOG="${arg#*=}" ;;
+		--operator-token=*)  OPERATOR_TOKEN_FILE="${arg#*=}" ;;
+		--endpoint|--endpoint=*|-u|-u=*)
+			# REMOVED 2026-08-21 (see the "--endpoint=<url> REMOVED" usage-header
+			# section above) — this is a NAMED refusal, not the generic
+			# "unknown arg" branch below, so a future reader is TOLD why rather
+			# than left to guess. Gate 3 (below) verifies the chain_id
+			# proton-cli resolves from its OWN config; this flag used to push
+			# to a DIFFERENT endpoint than the one just verified, so gate 3
+			# proved nothing about where the broadcast actually went. There is
+			# no safe way to accept this flag without also making gate 3
+			# verify identity at that same overridden endpoint.
+			#
+			# Matches every spelling someone reaching for the flag by muscle
+			# memory could plausibly try: bare --endpoint (no value attached,
+			# distinct from the --endpoint=* form below), --endpoint=<url>
+			# (this wrapper's own former flag), and -u / -u=<url> — proton-cli's
+			# OWN underlying flag for the exact same override (see the "actual
+			# broadcast" section below: PROTON_ARGS never carries -u). Someone
+			# who knows proton's CLI and reaches for -u directly deserves the
+			# SAME explanation, not a generic "unknown arg".
+			echo "ERROR: --endpoint=<url> / -u <url> is refused (removed 2026-08-21, not merely unrecognized)" >&2
+			echo "       reason: gate 3 verifies the chain_id proton-cli resolves from its own" >&2
+			echo "       config; overriding the broadcast destination separately would let the" >&2
+			echo "       push go to a DIFFERENT endpoint than the one gate 3 just verified." >&2
+			exit 2
+			;;
+		--non-interactive)   INTERACTIVE=0 ;;
+		-h|--help)           usage; exit 0 ;;
+		*)                   echo "ERROR: unknown arg: $arg" >&2; usage; exit 2 ;;
+	esac
+done
+
+# ---- baseline validation ----
+if [ -z "$TX_JSON_FILE" ]; then
+	echo "ERROR: --tx=<json-file> required" >&2
+	usage
+	exit 2
+fi
+if [ ! -r "$TX_JSON_FILE" ]; then
+	echo "ERROR: tx file not readable: $TX_JSON_FILE" >&2
+	exit 2
+fi
+if ! command -v jq >/dev/null 2>&1; then
+	echo "ERROR: jq required" >&2
+	exit 2
+fi
+if ! jq -e '.actions | type == "array" and length > 0' "$TX_JSON_FILE" >/dev/null 2>&1; then
+	echo "ERROR: tx file must contain non-empty .actions array" >&2
+	exit 2
+fi
+
+# --chain= → role. The accepted spellings are exactly the historical ones
+# (testnet-a / proton-test, mainnet-a / proton); the library's wider alias set
+# (xpr-mainnet …) is deliberately NOT accepted here, so no new spelling can
+# reach a gate.
+case "$CHAIN" in
+	testnet-a|proton-test)  ROLE="testnet"; IS_MAINNET=0 ;;
+	mainnet-a|proton)       ROLE="mainnet"; IS_MAINNET=1 ;;
+	"")  echo "ERROR: --chain=<testnet-a|mainnet-a> required" >&2; exit 2 ;;
+	*)   echo "ERROR: --chain must be testnet-a or mainnet-a, got: $CHAIN" >&2; exit 2 ;;
+esac
+
+# sb_role_of <chain-spelling> — the role a token / dry-run log names, with the
+# same alias set as --chain= above. Gates 2b and 4 compare ROLES (they used to
+# compare proton-cli network names, which only coincide with roles on XPR).
+sb_role_of() {
+	case "$1" in
+		testnet-a|proton-test) printf 'testnet' ;;
+		mainnet-a|proton)      printf 'mainnet' ;;
+		"")                    printf '' ;;
+		*)                     printf 'unrecognized:%s' "$1" ;;
+	esac
+}
+
+# ---- chain profile (see the "Chain profiles" header section) ----
+# Every value below is read through the library, which validates the whole
+# profile file on every call and prints nothing on failure. A failure here
+# refuses before gate 1, before any network call and before any proton call.
+# shellcheck source=scripts/lib/a-chain-profile.sh
+if ! . "${REPO_ROOT}/scripts/lib/a-chain-profile.sh"; then
+	echo "ERROR: chain profile library unusable (${REPO_ROOT}/scripts/lib/a-chain-profile.sh) — refusing, fail-closed" >&2
+	exit 4
+fi
+# shellcheck source=scripts/lib/url-host.sh
+if ! . "${REPO_ROOT}/scripts/lib/url-host.sh"; then
+	echo "ERROR: host-extraction library unusable (${REPO_ROOT}/scripts/lib/url-host.sh) — refusing, fail-closed" >&2
+	exit 4
+fi
+
+# sb_profile_refuse <lib-rc> <what> — map a library refusal to this wrapper's
+# exit code (table in the header). Never returns.
+sb_profile_refuse() {
+	local rc="$1" what="$2" code=4
+	[ "$rc" = "6" ] && code=2
+	echo "ERROR: chain profile for --chain=$CHAIN (role $ROLE): cannot establish $what (a-chain-profile rc $rc; reason above) — refusing before any gate, fail-closed" >&2
+	exit "$code"
+}
+
+PROFILE_NAME="$(acp_profile_name "$ROLE")"               || sb_profile_refuse $? "the selected profile"
+# Expected chain_id (gate 3 compares proton-cli's answer against it). The
+# legacy FYD_<ROLE>_CHAIN_ID override is confirm-only: it must equal the
+# profile value (lib rc 5 otherwise) and can never fill a null chain_id.
+EXPECTED_CHAIN_ID="$(acp_expected_chain_id "$ROLE")"     || sb_profile_refuse $? "the expected chain_id"
+PROTON_CHAIN="$(acp_proton_network "$ROLE")"             || sb_profile_refuse $? "the proton-cli network name"
+PUSH_RESPONSE="$(acp_push_response "$ROLE")"             || sb_profile_refuse $? "the push-response shape"
+case "$PUSH_RESPONSE" in
+	processed|id-only) ;;
+	*) echo "ERROR: chain profile $PROFILE_NAME: unknown push_response '$PUSH_RESPONSE' — refusing" >&2; exit 4 ;;
+esac
+# An EXPLICIT profile selection is announced in the confirmation prompt; the
+# default path (selection variable unset/empty) prints exactly what it
+# always printed.
+case "$ROLE" in
+	mainnet) PROFILE_SELECTION="${FYD_A_CHAIN_PROFILE_MAINNET:-}" ;;
+	*)       PROFILE_SELECTION="${FYD_A_CHAIN_PROFILE_TESTNET:-}" ;;
+esac
+
+# ---- history helpers (gate 1 evidence; id-only execution confirmation) ----
+
+# sb_history_names_tx <json> <tx_id> <mode> — rc 0 iff the history answer is
+# an object that NAMES this tx and is not marked `executed: false`.
+#   mode v1-id  (profiles with push_response "processed" — the XPR default):
+#               `.id` MUST equal <tx_id>, exactly as gate 1 has always
+#               required; a `trx_id`, if also present, must equal it too.
+#               A v2-shaped answer (trx_id only) does NOT resolve here.
+#   mode any-id (id-only profiles — PulseVM, whose history is Hyperion-only):
+#               every id field present (`id`, `trx_id`) must equal <tx_id>
+#               and at least one must be present.
+# Anything else — unknown mode, unparseable input — is rc != 0.
+sb_history_names_tx() {
+	case "${3:-}" in
+		v1-id|any-id) ;;
+		*) return 2 ;;
+	esac
+	printf '%s' "$1" | jq -e --arg id "$2" --arg mode "$3" '
+		if type != "object" then false
+		else ([.id, .trx_id] | map(select(. != null))) as $ids
+		     | (if $mode == "v1-id" then (.id == $id) else (($ids | length) > 0) end)
+		       and ($ids | all(. == $id)) and (.executed != false)
+		end' >/dev/null 2>&1
+}
+
+# sb_history_lookup <base> <tx_id> <try_v2:0|1> <mode> — print the answer that
+# names the tx (rc 0, see sb_history_names_tx for <mode>), or nothing (rc 1).
+# The v1 POST is byte-for-byte the request gate 1 has always made; the
+# Hyperion v2 GET is only tried when <try_v2>=1.
+sb_history_lookup() {
+	local base="$1" id="$2" try_v2="$3" mode="$4" j
+	j="$(curl -sSf --max-time 15 \
+		-X POST -H 'content-type:application/json' \
+		-d "{\"id\":\"${id}\"}" \
+		"${base}/v1/history/get_transaction" 2>/dev/null || echo '{}')"
+	if sb_history_names_tx "$j" "$id" "$mode"; then printf '%s' "$j"; return 0; fi
+	if [ "$try_v2" = "1" ]; then
+		j="$(curl -sSf --max-time 15 \
+			"${base}/v2/history/get_transaction?id=${id}" 2>/dev/null || echo '{}')"
+		if sb_history_names_tx "$j" "$id" "$mode"; then printf '%s' "$j"; return 0; fi
+	fi
+	return 1
+}
+
+# The action list of a resolved history answer, in priority order: v1
+# `.traces[].act` (one trace per notified account), Hyperion v2 / normalized
+# `.actions[].act`, raw `.trx.trx.actions[]`; de-duplicated. Used by gate 1
+# (shape binding) and by the id-only confirmation.
+# shellcheck disable=SC2016  # $t/$a/$r below are jq `as $var` bindings
+# inside a single-quoted jq PROGRAM, not shell variables — must NOT expand.
+HISTORY_ACTIONS_JQ='
+	( [.traces[]?           | {account: .act.account, name: .act.name, memo: (.act.data.memo? // null)}] ) as $t
+	| ( [.actions[]?         | {account: .act.account, name: .act.name, memo: (.act.data.memo? // null)}] ) as $a
+	| ( [.trx.trx.actions[]? | {account: .account,     name: .name,     memo: (.data.memo? // null)}]     ) as $r
+	| ( if   ($t|length) > 0 then $t
+	    elif ($a|length) > 0 then $a
+	    else $r
+	    end )
+	| unique
+'
+
+# ---- id-only history health (checked BEFORE signing) ----
+# A Hyperion /v2/health that merely answers 2xx is not enough: a live
+# PulseVM testnet Hyperion was observed (2026-09-30) answering while it
+# reported its chain RPC as "Error", head_block_num 0 and last_indexed_block
+# 64 — it could never have confirmed a new tx. Healthy means ALL of:
+#   * a non-empty `health` array whose every entry has status "OK";
+#   * a numeric head_block_num (> 0) and last_indexed_block in the entries'
+#     service_data (Hyperion reports them there);
+#   * |head_block_num - last_indexed_block| <= SB_HISTORY_MAX_INDEX_LAG.
+# 30 blocks: PulseVM builds a block only when there are transactions (LIB ==
+# head), so a live indexer sits at or within a few blocks of head; 30
+# tolerates a burst without letting a stalled indexer through. A body
+# lacking either number (e.g. a hyperion-rs shape not seen yet) is NOT
+# healthy — fail closed, before anything is signed.
+SB_HISTORY_MAX_INDEX_LAG=30
+sb_history_healthy() {
+	printf '%s' "$1" | jq -e --argjson n "$SB_HISTORY_MAX_INDEX_LAG" '
+		if type != "object" or (.health | type) != "array" or (.health | length) == 0 then false
+		else ([.health[] | .service_data? | objects | .head_block_num? | numbers] | max) as $h
+		   | ([.health[] | .service_data? | objects | .last_indexed_block? | numbers] | max) as $l
+		   | (.health | all(type == "object" and .status == "OK"))
+		     and $h != null and $l != null and $h > 0
+		     and ($h - $l) <= $n and ($l - $h) <= $n
+		end' >/dev/null 2>&1
+}
+sb_history_health_summary() {
+	[ -n "$1" ] || { printf 'no answer'; return; }
+	printf '%s' "$1" | jq -r '
+		if type != "object" or (.health | type) != "array" then "unparseable health body"
+		else ([.health[] | "\(.service // "?")=\(.status // "?")"] | join(" "))
+		   + " head=\([.health[] | .service_data? | objects | .head_block_num? | numbers] | max)"
+		   + " indexed=\([.health[] | .service_data? | objects | .last_indexed_block? | numbers] | max)"
+		end' 2>/dev/null || printf 'unparseable health body'
+}
+
+# ---- gate 3 host check helpers ----
+
+# The proton-cli config file, located the way proton-cli's `conf` store
+# (env-paths, suffix "nodejs") locates it for the CURRENT $HOME — the same
+# path scripts/install-rehearsal-preflight.sh check 10 reads on macOS.
+sb_proton_cli_config_path() {
+	case "$(uname -s)" in
+		Darwin) printf '%s' "${HOME}/Library/Preferences/@proton/cli-nodejs/proton-cli.json" ;;
+		*)      printf '%s' "${XDG_CONFIG_HOME:-${HOME}/.config}/@proton/cli-nodejs/proton-cli.json" ;;
+	esac
+}
+
+# sb_gate3_refuse <reason...> — gate-3 host refusal (exit 3). Never returns.
+sb_gate3_refuse() {
+	echo "ERROR (gate 3): $1 — refusing to broadcast" >&2
+	shift
+	local l
+	for l in "$@"; do echo "                $l" >&2; done
+	exit 3
+}
+
+# sb_check_push_endpoint — every endpoint proton-cli will use for
+# $PROTON_CHAIN must be https and have a host on the $ROLE profile's
+# node_hosts. See the "Gate 3 host check" header section.
+sb_check_push_endpoint() {
+	local cfg summary cur n_ovr src list n_bad e host rc
+	cfg="$(sb_proton_cli_config_path)"
+	[ -r "$cfg" ] || sb_gate3_refuse "cannot read proton-cli's config, so the endpoint it will push to is unobservable" "expected at: $cfg"
+	# ONLY currentChain + the stanzas for this network — never privateKeys.
+	if ! summary="$(jq -c --arg c "$PROTON_CHAIN" '
+			if type != "object" then error("not an object") else . end
+			| { cur: (.currentChain // null),
+			    ovr: [ (.endpoints // [])[]? | select(type == "object" and .chain == $c) ],
+			    net: [ (.networks  // [])[]? | select(type == "object" and .chain == $c) ] }' \
+			"$cfg" 2>/dev/null)" || [ -z "$summary" ]; then
+		sb_gate3_refuse "proton-cli's config is not a parseable JSON object" "file: $cfg"
+	fi
+	cur="$(printf '%s' "$summary" | jq -r '.cur // empty')"
+	[ "$cur" = "$PROTON_CHAIN" ] || sb_gate3_refuse \
+		"proton-cli's currentChain is '${cur:-<none>}' after 'chain:set $PROTON_CHAIN' — the config read is not the one proton-cli uses" \
+		"file: $cfg"
+	n_ovr="$(printf '%s' "$summary" | jq -r '.ovr | length')"
+	if [ "$n_ovr" != "0" ]; then
+		src="endpoints override (proton endpoint:set) for $PROTON_CHAIN"
+		list="$(printf '%s' "$summary" | jq -c '[.ovr[] | (.endpoints // null) | if type == "array" then .[] else null end]')"
+	else
+		src="built-in list for $PROTON_CHAIN (its on-disk copy under 'networks')"
+		list="$(printf '%s' "$summary" | jq -c '[.net[] | (.endpoints // null) | if type == "array" then .[] else null end]')"
+	fi
+	if [ -z "$list" ] || [ "$list" = "[]" ]; then
+		sb_gate3_refuse "no endpoint for $PROTON_CHAIN found in proton-cli's config ($src)" "file: $cfg"
+	fi
+	# Non-strings and strings with control characters (a newline would split
+	# one value into two "lines" below) are refused outright.
+	n_bad="$(printf '%s' "$list" | jq -r '[.[] | select(type != "string" or test("[[:cntrl:]]"))] | length')"
+	[ "$n_bad" = "0" ] || sb_gate3_refuse "$n_bad malformed endpoint value(s) in the $src" "file: $cfg"
+	while IFS= read -r e; do
+		host="$(fyd_host_of "$e")" || host=""
+		if [ -z "$host" ]; then
+			sb_gate3_refuse "an endpoint proton-cli will use is not a plain https URL: $e" "source: $src"
+		fi
+		acp_host_allowed "$ROLE" "$host"
+		rc=$?
+		if [ "$rc" != "0" ]; then
+			sb_gate3_refuse "the endpoint proton-cli will use is NOT on the $PROFILE_NAME node_hosts allowlist" \
+				"endpoint: $e" \
+				"host:     $host" \
+				"source:   $src" \
+				"allowed:  $(acp_node_hosts "$ROLE" 2>/dev/null | tr '\n' ' ')(a-chain-profile rc $rc)" \
+				"A chain_id match does not identify the network (a byte-exact clone answers the same" \
+				"chain_id); the host does. Fix proton-cli's endpoint — never widen the allowlist to pass."
+		fi
+	done <<-EOF
+	$(printf '%s' "$list" | jq -r '.[]')
+	EOF
+}
+
+if ! command -v proton >/dev/null 2>&1; then
+	echo "ERROR: proton CLI not found in PATH" >&2
+	exit 4
+fi
+
+# ---- PRIME DIRECTIVE gates (mainnet only) ----
+if [ "$IS_MAINNET" = "1" ]; then
+	# Gate 1: testnet-tx-id must be provided and shape-valid.
+	if [ -z "$TESTNET_TX_ID" ]; then
+		echo "ERROR (gate 1): mainnet requires --testnet-tx-id=<64hex> of a prior successful testnet broadcast of the identical shape" >&2
+		exit 3
+	fi
+	if ! echo "$TESTNET_TX_ID" | grep -qE '^[a-f0-9]{64}$'; then
+		echo "ERROR (gate 1): --testnet-tx-id must be 64-char hex, got: $TESTNET_TX_ID" >&2
+		exit 3
+	fi
+	# Which testnet "corresponds" to this mainnet (Constitution PRIME
+	# DIRECTIVE gate 1) is only settled for XPR. Until the operator decides it
+	# for PulseVM, refuse evidence from a testnet whose execution model
+	# differs from the mainnet target's (see the "Gate 1 evidence sources"
+	# header section). Equal on the default xpr profiles.
+	TESTNET_PROFILE_NAME="$(acp_profile_name testnet)" || {
+		echo "ERROR (gate 1): testnet evidence profile unavailable (a-chain-profile rc $?; reason above) — refusing" >&2; exit 3; }
+	TESTNET_PUSH_RESPONSE="$(acp_push_response testnet)" || {
+		echo "ERROR (gate 1): testnet evidence profile $TESTNET_PROFILE_NAME: push_response unavailable (a-chain-profile rc $?) — refusing" >&2; exit 3; }
+	if ! MAINNET_LIB_HEAD="$(acp_lib_equals_head mainnet)" || ! TESTNET_LIB_HEAD="$(acp_lib_equals_head testnet)"; then
+		echo "ERROR (gate 1): lib_equals_head unavailable for the mainnet/testnet profiles — refusing" >&2
+		exit 3
+	fi
+	# The committed answer to "which testnet corresponds to this mainnet":
+	# the mainnet profile's gate1_evidence_profile. null = undecided → refuse;
+	# the selected testnet profile must BE that profile (xpr-mainnet names
+	# xpr-testnet, so the default path is unchanged).
+	if ! GATE1_EVIDENCE_PROFILE="$(acp_gate1_evidence_profile mainnet)"; then
+		echo "ERROR (gate 1): mainnet profile $PROFILE_NAME names no approved gate-1 evidence testnet (gate1_evidence_profile is null or unreadable)." >&2
+		echo "                Which testnet corresponds to this mainnet is an OPEN operator decision — refusing until it is made and committed." >&2
+		exit 3
+	fi
+	if [ "$TESTNET_PROFILE_NAME" != "$GATE1_EVIDENCE_PROFILE" ]; then
+		echo "ERROR (gate 1): testnet evidence profile $TESTNET_PROFILE_NAME is not the one mainnet profile $PROFILE_NAME approves ($GATE1_EVIDENCE_PROFILE) — refusing" >&2
+		exit 3
+	fi
+	if [ "$TESTNET_PUSH_RESPONSE" != "$PUSH_RESPONSE" ] || [ "$TESTNET_LIB_HEAD" != "$MAINNET_LIB_HEAD" ]; then
+		echo "ERROR (gate 1): mainnet profile $PROFILE_NAME (push_response=$PUSH_RESPONSE, lib_equals_head=$MAINNET_LIB_HEAD) and testnet evidence profile $TESTNET_PROFILE_NAME (push_response=$TESTNET_PUSH_RESPONSE, lib_equals_head=$TESTNET_LIB_HEAD) run different execution models." >&2
+		echo "                Which testnet corresponds to this mainnet is an OPEN operator decision — refusing until it is made and committed." >&2
+		exit 3
+	fi
+
+	# Evidence source = the testnet profile's history bases. XPR_TESTNET_RPC
+	# may only NARROW the choice to one of them (it used to be taken as-is).
+	if [ -n "${XPR_TESTNET_RPC:-}" ]; then
+		if ! acp_history_base_allowed testnet "$XPR_TESTNET_RPC"; then
+			echo "ERROR (gate 1): XPR_TESTNET_RPC='${XPR_TESTNET_RPC}' is not one of the testnet profile ($TESTNET_PROFILE_NAME) history bases — refusing (unset it, or use a listed base exactly)" >&2
+			exit 3
+		fi
+		TESTNET_HISTORY_BASES="$XPR_TESTNET_RPC"
+	elif ! TESTNET_HISTORY_BASES="$(acp_history_bases testnet)"; then
+		echo "ERROR (gate 1): testnet profile $TESTNET_PROFILE_NAME has no history base to resolve --testnet-tx-id against — refusing" >&2
+		exit 3
+	fi
+	# Hyperion v2 GET only where history lives solely in Hyperion (id-only
+	# profiles); the default profiles make exactly the v1 POST they always made.
+	# The same split decides how strictly an answer must name the tx: the
+	# processed profiles keep the historical `.id == <tx_id>` rule.
+	TESTNET_TRY_V2=0
+	TESTNET_ID_MODE="v1-id"
+	if [ "$TESTNET_PUSH_RESPONSE" = "id-only" ]; then
+		TESTNET_TRY_V2=1
+		TESTNET_ID_MODE="any-id"
+	fi
+	# For messages: the bases tried (one on xpr-testnet — the same text as ever).
+	TESTNET_RPC="$(printf '%s' "$TESTNET_HISTORY_BASES" | tr '\n' ' ' | sed -e 's/ *$//' -e 's/ /, /g')"
+
+	# Attempt to resolve the tx on testnet. If resolution fails, refuse.
+	if command -v curl >/dev/null 2>&1; then
+		RESOLVE_JSON='{}'
+		while IFS= read -r _base; do
+			[ -n "$_base" ] || continue
+			if RESOLVE_JSON="$(sb_history_lookup "$_base" "$TESTNET_TX_ID" "$TESTNET_TRY_V2" "$TESTNET_ID_MODE")"; then
+				break
+			fi
+			RESOLVE_JSON='{}'
+		done <<-BASES
+		$TESTNET_HISTORY_BASES
+		BASES
+		if ! sb_history_names_tx "$RESOLVE_JSON" "$TESTNET_TX_ID" "$TESTNET_ID_MODE"; then
+			echo "ERROR (gate 1): could not resolve --testnet-tx-id ${TESTNET_TX_ID} against ${TESTNET_RPC}. Verify the shape actually ran on testnet first." >&2
+			exit 3
+		fi
+	else
+		echo "ERROR (gate 1): curl required to resolve testnet tx-id" >&2
+		exit 3
+	fi
+
+	# ---- Gate 1 shape binding (2026-08 hardening, rev 2) ----
+	# Resolution above only proves A testnet tx with this id exists — not
+	# that its shape matches the outgoing mainnet --tx=. Without this, a
+	# testnet evidence tx from an unrelated cycle (e.g. cycle-2 memo
+	# prefix fya1c2) could authorize a cycle-4 mainnet anchor broadcast.
+	# See the "Gate 1 / Gate 4 shape binding" usage-header section above.
+	#
+	# rev 2 fix: the v1 EOSIO history-plugin `get_transaction` endpoint
+	# this wrapper actually calls (above) returns actions under
+	# `.traces[].act` — ONE trace per notified account (e.g. a single
+	# eosio.token::transfer produces 3 duplicate traces: sender, receiver,
+	# RAM/ram-notify — `unique` below collapses these back down). It does
+	# NOT return a top-level `.actions[]` (that is the Hyperion v2 shape —
+	# since 2026-09-30 that endpoint IS asked, but only for id-only testnet
+	# profiles, see the header) and `.trx.trx.actions[]`
+	# is the packed representation, normally `[]` on a public endpoint.
+	# Verified directly against the real testnet endpoint for tx
+	# 070a845f... (the cycle-2 rehearsal tx) while fixing this. Try, in
+	# priority order: .traces[].act, then .actions[].act (defensive, in
+	# case of a future endpoint/proxy that normalizes this way), then
+	# .trx.trx.actions[] (raw unpacked, rare) — and REFUSE if none of the
+	# three yields a non-empty result, rather than silently treating "no
+	# action source matched" as an empty (and therefore vacuously
+	# passing) shape.
+	# The extraction program is HISTORY_ACTIONS_JQ (defined with the history
+	# helpers above, shared with the id-only confirmation) — unchanged from the
+	# TESTNET_ACTIONS_JQ it replaced.
+	if ! TESTNET_ACTIONS="$(printf '%s' "$RESOLVE_JSON" | jq -c "$HISTORY_ACTIONS_JQ" 2>/dev/null)"; then
+		echo "ERROR (gate 1): failed to parse the resolved testnet evidence tx ${TESTNET_TX_ID} (jq error) — refusing, fail-closed" >&2
+		exit 3
+	fi
+	if [ -z "$TESTNET_ACTIONS" ] || [ "$TESTNET_ACTIONS" = "[]" ] || [ "$TESTNET_ACTIONS" = "null" ]; then
+		echo "ERROR (gate 1): could not extract any action from the resolved testnet evidence tx ${TESTNET_TX_ID} (checked .traces[], .actions[], .trx.trx.actions[]) — refusing, fail-closed" >&2
+		exit 3
+	fi
+
+	# (I2) the sanctioned compose path (sign-anchor-event.sh) always emits
+	# each action's .data as a JSON object. A non-object .data (e.g. a
+	# hex-serialized action) cannot be safely introspected for a memo below
+	# — refuse rather than let the anchor-shape check silently disable
+	# itself on such a tx.
+	if ! jq -e '[.actions[] | (.data | type) == "object"] | all' "$TX_JSON_FILE" >/dev/null 2>&1; then
+		echo "ERROR (gate 1): outgoing tx has a non-object .data field on at least one action — cannot verify shape, refusing" >&2
+		exit 3
+	fi
+
+	# (a) action-set match: the {account,name} set of the resolved
+	# testnet evidence tx must be IDENTICAL to the outgoing tx's set.
+	# Applies to every mainnet shape (anchor or not, e.g. updateauth).
+	if ! OUTGOING_ACTION_SET="$(jq -c '[.actions[] | {account: .account, name: .name}] | unique' "$TX_JSON_FILE" 2>/dev/null)"; then
+		echo "ERROR (gate 1): failed to parse the outgoing tx action set (jq error) — refusing, fail-closed" >&2
+		exit 3
+	fi
+	if [ -z "$OUTGOING_ACTION_SET" ] || [ "$OUTGOING_ACTION_SET" = "[]" ] || [ "$OUTGOING_ACTION_SET" = "null" ]; then
+		echo "ERROR (gate 1): outgoing tx action set is empty — refusing, fail-closed" >&2
+		exit 3
+	fi
+	if ! TESTNET_ACTION_SET="$(printf '%s' "$TESTNET_ACTIONS" | jq -c '[.[] | {account, name}] | unique' 2>/dev/null)"; then
+		echo "ERROR (gate 1): failed to derive the testnet evidence action set (jq error) — refusing, fail-closed" >&2
+		exit 3
+	fi
+	if [ "$TESTNET_ACTION_SET" != "$OUTGOING_ACTION_SET" ]; then
+		echo "ERROR (gate 1): testnet evidence tx action shape does not match the outgoing mainnet tx — refusing" >&2
+		echo "                expected (outgoing mainnet --tx=) action set: $OUTGOING_ACTION_SET" >&2
+		echo "                actual (testnet evidence ${TESTNET_TX_ID}) action set:   $TESTNET_ACTION_SET" >&2
+		exit 3
+	fi
+
+	# (b) anchor memo-prefix set match: only applies when the outgoing tx
+	# is anchor-shaped (>=1 memo matching ^fya<schema>c<cycle>). Non-anchor
+	# shapes (e.g. updateauth key rotation — no such memo) are exempt from
+	# this sub-check; (a) above is already the whole gate-1 shape
+	# requirement for them, per the brief's rotation carve-out. An empty
+	# "[]" result here is legitimate DATA (no anchor-shaped memo present),
+	# not a failure — only a nonzero jq exit (parse/runtime error) refuses.
+	if ! OUTGOING_ANCHOR_PREFIXES="$(jq -c '[.actions[] | (.data.memo? // empty) | select(test("^fya[0-9]+c[0-9]+")) | capture("^(?<p>fya[0-9]+c[0-9]+)").p] | unique' "$TX_JSON_FILE" 2>/dev/null)"; then
+		echo "ERROR (gate 1): failed to derive the outgoing tx memo-prefix set (jq error) — refusing, fail-closed" >&2
+		exit 3
+	fi
+	if [ "$OUTGOING_ANCHOR_PREFIXES" != "[]" ] && [ -n "$OUTGOING_ANCHOR_PREFIXES" ]; then
+		if ! TESTNET_ANCHOR_PREFIXES="$(printf '%s' "$TESTNET_ACTIONS" | jq -c '[.[] | (.memo? // empty) | select(test("^fya[0-9]+c[0-9]+")) | capture("^(?<p>fya[0-9]+c[0-9]+)").p] | unique' 2>/dev/null)"; then
+			echo "ERROR (gate 1): failed to derive the testnet evidence memo-prefix set (jq error) — refusing, fail-closed" >&2
+			exit 3
+		fi
+		if [ "$TESTNET_ANCHOR_PREFIXES" != "$OUTGOING_ANCHOR_PREFIXES" ]; then
+			echo "ERROR (gate 1): testnet evidence memo-prefix set does not match the outgoing mainnet anchor tx — refusing" >&2
+			echo "                expected (outgoing mainnet --tx=) memo prefix set: $OUTGOING_ANCHOR_PREFIXES" >&2
+			echo "                actual (testnet evidence ${TESTNET_TX_ID}) memo prefix set:   $TESTNET_ANCHOR_PREFIXES" >&2
+			exit 3
+		fi
+	fi
+
+	# Gate 4: dry-run log must exist and be non-empty (unconditional, every
+	# mainnet shape). For ANCHOR-SHAPED outgoing tx only (2026-08
+	# hardening, scoped per the rotation-flow carve-out below), it must
+	# ALSO be a JSON object with a matching memo_prefix and (if present) a
+	# matching target_chain — see the usage-header section above. Reuses
+	# $OUTGOING_ANCHOR_PREFIXES computed by gate 1 just above — both gates
+	# derive "the outgoing shape" identically, by construction.
+	#
+	# Non-anchor shapes (e.g. updateauth key rotation) keep ONLY this
+	# pre-existing non-empty-file check: their dry-run material comes from
+	# `proton transaction:push --dry-run` directly (see
+	# docs/ANCHOR_ACCOUNT_KEY_ROTATION.md, Phase 2 step 1), which is plain
+	# CLI text, not the JSON `sign-anchor-event.sh --dry-run` emits —
+	# requiring JSON there would break that flow.
+	if [ -z "$DRY_RUN_LOG" ]; then
+		echo "ERROR (gate 4): mainnet requires --dry-run-log=<file> pointing to a prior --dry-run output for this shape" >&2
+		exit 3
+	fi
+	if [ ! -s "$DRY_RUN_LOG" ]; then
+		echo "ERROR (gate 4): dry-run log missing or empty: $DRY_RUN_LOG" >&2
+		exit 3
+	fi
+	if [ "$OUTGOING_ANCHOR_PREFIXES" != "[]" ]; then
+		# (a) must be a JSON OBJECT (M2 — plain `jq -e '.'` would also
+		# accept a bare scalar/array, e.g. `42` or `[]`, as "valid JSON").
+		if ! jq -e 'type == "object"' "$DRY_RUN_LOG" >/dev/null 2>&1; then
+			echo "ERROR (gate 4): anchor-shaped outgoing tx requires a JSON-object dry-run log: $DRY_RUN_LOG" >&2
+			exit 3
+		fi
+		# (b) the log's recorded memo_prefix (the field name
+		# `sign-anchor-event.sh --dry-run` actually emits) must be present
+		# and match the outgoing prefix set exactly.
+		LOG_MEMO_PREFIX="$(jq -r '.memo_prefix // empty' "$DRY_RUN_LOG" 2>/dev/null)"
+		if [ -z "$LOG_MEMO_PREFIX" ]; then
+			echo "ERROR (gate 4): outgoing tx is anchor-shaped but dry-run log has no memo_prefix record: $DRY_RUN_LOG" >&2
+			exit 3
+		fi
+		LOG_MEMO_PREFIX_SET="$(jq -cn --arg p "$LOG_MEMO_PREFIX" '[$p]')"
+		if [ "$LOG_MEMO_PREFIX_SET" != "$OUTGOING_ANCHOR_PREFIXES" ]; then
+			echo "ERROR (gate 4): dry-run log memo_prefix does not match the outgoing mainnet tx — refusing" >&2
+			echo "                expected (outgoing mainnet --tx=) memo prefix set: $OUTGOING_ANCHOR_PREFIXES" >&2
+			echo "                actual (dry-run log ${DRY_RUN_LOG}) memo_prefix:       $LOG_MEMO_PREFIX_SET" >&2
+			exit 3
+		fi
+		# (c) if the log records a target chain, it must match --chain=
+		# (same alias set as --chain=, compared as ROLES — see sb_role_of).
+		# Absent is allowed.
+		LOG_TARGET_CHAIN="$(jq -r '.target_chain // empty' "$DRY_RUN_LOG" 2>/dev/null)"
+		if [ -n "$LOG_TARGET_CHAIN" ]; then
+			LOG_TARGET_CHAIN_NORM="$(sb_role_of "$LOG_TARGET_CHAIN")"
+			if [ "$LOG_TARGET_CHAIN_NORM" != "$ROLE" ]; then
+				echo "ERROR (gate 4): dry-run log target_chain ('$LOG_TARGET_CHAIN') does not match --chain= ($CHAIN) — refusing" >&2
+				exit 3
+			fi
+		fi
+	fi
+fi
+
+# Gate 2 (both testnet + mainnet): operator token must exist and be fresh.
+if [ ! -f "$OPERATOR_TOKEN_FILE" ]; then
+	echo "ERROR (gate 2): operator token missing: $OPERATOR_TOKEN_FILE" >&2
+	echo "                Operator must create a chain-bound token within TTL, e.g.:" >&2
+	echo "                  printf '{\"chain\":\"$CHAIN\"}' > $OPERATOR_TOKEN_FILE" >&2
+	echo "                (see the R16 usage-header section above for the full ritual)" >&2
+	exit 3
+fi
+# Portable mtime read.
+if TOKEN_MTIME="$(stat -c %Y "$OPERATOR_TOKEN_FILE" 2>/dev/null)"; then
+	:
+elif TOKEN_MTIME="$(stat -f %m "$OPERATOR_TOKEN_FILE" 2>/dev/null)"; then
+	:
+else
+	echo "ERROR (gate 2): cannot stat token file: $OPERATOR_TOKEN_FILE" >&2
+	exit 3
+fi
+NOW="$(date +%s)"
+AGE="$((NOW - TOKEN_MTIME))"
+# Non-interactive: tight 60s TTL. Interactive: standard 300s TTL.
+if [ "$INTERACTIVE" = "0" ]; then
+	MAX_AGE=60
+else
+	MAX_AGE=300
+fi
+if [ "$AGE" -ge "$MAX_AGE" ]; then
+	echo "ERROR (gate 2): operator token expired (${AGE}s > ${MAX_AGE}s max)" >&2
+	exit 3
+fi
+
+# Gate 2b (R16, both testnet + mainnet): operator token CONTENT binding.
+#
+# Freshness alone (above) proves an operator recently confirmed SOMETHING —
+# not WHAT. A token touched/created for a TESTNET broadcast could otherwise
+# silently authorize a MAINNET broadcast of a different shape within the
+# same TTL window. Bind the token to the chain it authorizes and, when
+# present, the exact tx content (sha256 of all actions + memos combined).
+# See the "R16: operator token CONTENT binding" section in the usage header
+# above for the operator ritual that produces a bound token.
+TOKEN_CONTENT="$(cat "$OPERATOR_TOKEN_FILE" 2>/dev/null || true)"
+TOKEN_BOUND_CHAIN=""
+TOKEN_BOUND_TX_SHA256=""
+if [ -n "$TOKEN_CONTENT" ] && printf '%s' "$TOKEN_CONTENT" | jq -e 'type == "object"' >/dev/null 2>&1; then
+	TOKEN_BOUND_CHAIN="$(printf '%s' "$TOKEN_CONTENT" | jq -r '.chain // empty' 2>/dev/null)"
+	TOKEN_BOUND_TX_SHA256="$(printf '%s' "$TOKEN_CONTENT" | jq -r '.tx_sha256 // empty' 2>/dev/null)"
+fi
+
+# Normalize the token's declared chain the same way --chain= was normalized
+# above, so "testnet-a" and its alias "proton-test" (etc.) bind identically.
+# Compared as ROLES (sb_role_of), not proton-cli network names: the names
+# are profile values now and need not look like "proton"/"proton-test".
+TOKEN_BOUND_CHAIN_NORM="$(sb_role_of "$TOKEN_BOUND_CHAIN")"
+
+if [ -z "$TOKEN_BOUND_CHAIN" ]; then
+	# Legacy/unbound token: bare `touch`, or content that isn't a JSON object.
+	if [ "$IS_MAINNET" = "1" ]; then
+		echo "ERROR (gate 2): operator token is not chain-bound (legacy/bare token) — MAINNET refuses unbound tokens, fail-closed (R16)" >&2
+		echo "                Create a bound token before broadcasting to mainnet, e.g.:" >&2
+		echo "                  printf '{\"chain\":\"$CHAIN\"}' > $OPERATOR_TOKEN_FILE" >&2
+		echo "                (see the R16 usage-header section above for the full ritual, incl. tx_sha256 binding)" >&2
+		exit 3
+	fi
+	echo "WARNING (gate 2): operator token is not chain-bound (legacy/bare token). Accepted for TESTNET ONLY, for backward compatibility — this will be required for mainnet unconditionally. See the R16 usage-header section above for the new ritual." >&2
+elif [ "$TOKEN_BOUND_CHAIN_NORM" != "$ROLE" ]; then
+	echo "ERROR (gate 2): operator token was bound to chain '$TOKEN_BOUND_CHAIN' but this broadcast targets '$CHAIN' ($PROTON_CHAIN) — refusing (R16 token-chain binding)" >&2
+	exit 3
+elif [ -n "$TOKEN_BOUND_TX_SHA256" ]; then
+	# Stronger binding: the token also names the exact tx content. Verify it
+	# matches the tx we are about to broadcast (same canonicalization as the
+	# audit-log TX_SHA256 computed further below: `jq -c .` then sha256).
+	if command -v sha256sum >/dev/null 2>&1; then
+		ACTUAL_TX_SHA256_FOR_BINDING="$(jq -c . "$TX_JSON_FILE" | sha256sum | awk '{print $1}')"
+	elif command -v shasum >/dev/null 2>&1; then
+		ACTUAL_TX_SHA256_FOR_BINDING="$(jq -c . "$TX_JSON_FILE" | shasum -a 256 | awk '{print $1}')"
+	else
+		ACTUAL_TX_SHA256_FOR_BINDING=""
+	fi
+	if [ -z "$ACTUAL_TX_SHA256_FOR_BINDING" ]; then
+		echo "ERROR (gate 2): cannot compute sha256 for token-content binding check (sha256sum/shasum missing); failing closed (R16)" >&2
+		exit 3
+	fi
+	if [ "$TOKEN_BOUND_TX_SHA256" != "$ACTUAL_TX_SHA256_FOR_BINDING" ]; then
+		echo "ERROR (gate 2): operator token was bound to a different transaction (tx_sha256 mismatch) — refusing (R16 token-content binding)" >&2
+		exit 3
+	fi
+fi
+
+# ---- §3.5 keystore separation guard (fail-closed) ----
+# Placed immediately before gate 3, which issues this wrapper's FIRST actual
+# invocation of the `proton` binary (`proton chain:set` below). Everything
+# above this point (arg parsing, gates 1/2/2b) only reads local files and
+# performs curl/jq work — no proton call has happened yet. Refuse here,
+# before that first invocation, if $HOME resolves to the login default
+# home (i.e. the caller did not scope HOME to a dedicated project
+# keystore). See scripts/lib/require-keystore-home.sh for the check itself.
+require_project_keystore_home "$0" || exit 8
+
+# Gate 3 (both testnet + mainnet): pre-flight chain:get.
+# proton-cli's chain command is interactive by default; use chain:set explicitly
+# then check the config-level current chain.
+proton chain:set "$PROTON_CHAIN" >/dev/null 2>&1 || {
+	echo "ERROR (gate 3): proton chain:set $PROTON_CHAIN failed" >&2
+	exit 4
+}
+# Gate 3 host check (2026-09-30): WHICH endpoint proton-cli will talk to,
+# checked against the profile's node_hosts BEFORE chain:info contacts it —
+# chain_id alone cannot tell a byte-exact clone from the real chain. Exit 3
+# on any miss. See the "Gate 3 host check" header section.
+sb_check_push_endpoint
+# Verify the endpoint proton-cli would broadcast to is the intended chain by
+# comparing its chain_id EXACTLY to the expected constant. This is gate 3:
+# not "a chain answered" (liveness) but "the AUTHORIZED chain answered"
+# (identity). proton chain:info returns JSON; parse .chain_id with jq.
+CHAIN_INFO="$(proton chain:info 2>/dev/null || echo '')"
+ACTUAL_CHAIN_ID="$(printf '%s' "$CHAIN_INFO" | jq -r '.chain_id // empty' 2>/dev/null)"
+if [ -z "$ACTUAL_CHAIN_ID" ]; then
+	echo "ERROR (gate 3): could not parse chain_id from proton chain:info; refusing to broadcast" >&2
+	echo "                Output was:" >&2
+	echo "$CHAIN_INFO" | head -20 >&2
+	exit 4
+fi
+if [ "$ACTUAL_CHAIN_ID" != "$EXPECTED_CHAIN_ID" ]; then
+	echo "ERROR (gate 3): chain_id mismatch — proton is pointed at the WRONG chain; refusing to broadcast" >&2
+	echo "                target chain:   $CHAIN ($PROTON_CHAIN)" >&2
+	echo "                expected chain_id: $EXPECTED_CHAIN_ID" >&2
+	echo "                actual chain_id:   $ACTUAL_CHAIN_ID" >&2
+	exit 4
+fi
+
+# ---- id-only profiles: the confirmation path must work BEFORE we sign (P3) ----
+# An id-only push answer says only "admitted to the mempool"; execution is
+# confirmed afterwards from history. If no history base answers now, that
+# confirmation is impossible — refuse before anything is signed. Profiles
+# with push_response "processed" (the default XPR ones) skip this entirely.
+HISTORY_BASES=""
+if [ "$PUSH_RESPONSE" = "id-only" ]; then
+	if ! command -v curl >/dev/null 2>&1; then
+		echo "ERROR (4): id-only profile $PROFILE_NAME needs curl to confirm execution after the push — refusing before the broadcast" >&2
+		exit 4
+	fi
+	if ! HISTORY_BASES="$(acp_history_bases "$ROLE")"; then
+		echo "ERROR (4): id-only profile $PROFILE_NAME has no history base to confirm execution with — refusing before the broadcast" >&2
+		exit 4
+	fi
+	HISTORY_REACHABLE=0
+	HISTORY_HEALTH_NOTES=""
+	while IFS= read -r _base; do
+		[ -n "$_base" ] || continue
+		_hb="$(curl -sSf --max-time 15 "${_base}/v2/health" 2>/dev/null)" || _hb=""
+		if sb_history_healthy "$_hb"; then
+			HISTORY_REACHABLE=1
+			break
+		fi
+		HISTORY_HEALTH_NOTES="${HISTORY_HEALTH_NOTES}
+                  ${_base}: $(sb_history_health_summary "$_hb")"
+	done <<-BASES
+	$HISTORY_BASES
+	BASES
+	if [ "$HISTORY_REACHABLE" != "1" ]; then
+		echo "ERROR (4): no history base of id-only profile $PROFILE_NAME is HEALTHY (every <base>/v2/health service OK, indexer within ${SB_HISTORY_MAX_INDEX_LAG} blocks of head):${HISTORY_HEALTH_NOTES}" >&2
+		echo "           The push answer would carry only a tx_id and its execution could not be confirmed — refusing BEFORE the broadcast." >&2
+		exit 4
+	fi
+fi
+
+# ---- interactive confirmation prompt (skip if --non-interactive) ----
+if [ "$INTERACTIVE" = "1" ]; then
+	echo "==================== BROADCAST CONFIRMATION ====================" >&2
+	echo "chain:        $CHAIN ($PROTON_CHAIN)" >&2
+	if [ -n "$PROFILE_SELECTION" ] || [ "$PUSH_RESPONSE" != "processed" ]; then
+		echo "chain profile: $PROFILE_NAME ($([ -n "$PROFILE_SELECTION" ] && echo 'explicitly selected' || echo 'default')), chain_id=$EXPECTED_CHAIN_ID, push_response=$PUSH_RESPONSE" >&2
+	fi
+	echo "token binding: chain=${TOKEN_BOUND_CHAIN:-<unbound-legacy>}${TOKEN_BOUND_TX_SHA256:+, tx_sha256=${TOKEN_BOUND_TX_SHA256}}  (R16)" >&2
+	echo "tx JSON file: $TX_JSON_FILE" >&2
+	echo "action count: $(jq '.actions | length' "$TX_JSON_FILE")" >&2
+	echo "actions:" >&2
+	jq -r '.actions[] | "  \(.account)::\(.name)  authorization=\(.authorization | map("\(.actor)@\(.permission)") | join(","))  memo=\(.data.memo // "(no memo)")"' "$TX_JSON_FILE" >&2
+	if [ "$IS_MAINNET" = "1" ]; then
+		echo "MAINNET gates verified: testnet-tx-id=${TESTNET_TX_ID}" >&2
+		echo "                        dry-run-log=${DRY_RUN_LOG}" >&2
+	fi
+	echo "----------------------------------------------------------------" >&2
+	printf "Type 'BROADCAST %s' to confirm (any other input aborts): " "$CHAIN" >&2
+	IFS= read -r REPLY
+	if [ "$REPLY" != "BROADCAST $CHAIN" ]; then
+		echo "ABORTED: confirmation phrase did not match" >&2
+		exit 5
+	fi
+fi
+
+# ---- audit log entry BEFORE broadcast (= we log the intent, then the result) ----
+TS="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+INVOKER="${USER:-unknown}"
+TX_SHA256="$(jq -c . "$TX_JSON_FILE" | sha256sum | awk '{print $1}')"
+LOG_LINE_PRE="$(printf '%s\tinvoker=%s\twrapper=safe-broadcast\tphase=pre\tchain=%s\ttx_sha256=%s\ttestnet_txid=%s' \
+	"$TS" "$INVOKER" "$CHAIN" "$TX_SHA256" "${TESTNET_TX_ID:-none}")"
+
+AUDIT_TARGET="$AUDIT_LOG_PRIMARY"
+if ! ( : >> "$AUDIT_TARGET" ) 2>/dev/null; then
+	AUDIT_TARGET="$AUDIT_LOG_FALLBACK"
+fi
+if ! printf '%s\n' "$LOG_LINE_PRE" >> "$AUDIT_TARGET" 2>/dev/null; then
+	echo "ERROR (7): audit log write failed to $AUDIT_TARGET" >&2
+	exit 7
+fi
+
+# ---- actual broadcast ----
+# proton transaction:push accepts JSON on argv. Mark this call chain as the
+# sanctioned broadcast pathway: the tier-1 guard (broadcast-guard.sh) refuses
+# any RAW broadcast shape unless FYD_SAFE_BROADCAST=1 is set (which only this
+# wrapper does, after the four gates above have passed). Raw direct calls
+# without this marker are blocked even with a fresh token.
+export FYD_SAFE_BROADCAST=1
+BROADCAST_OUT="$(mktemp -t safe-broadcast.XXXXXX)"
+BROADCAST_ERR="$(mktemp -t safe-broadcast.XXXXXX)"
+trap 'rm -f "$BROADCAST_OUT" "$BROADCAST_ERR"' EXIT
+
+PROTON_ARGS=(transaction:push "$(cat "$TX_JSON_FILE")")
+# No -u/--endpoint override is ever appended here — see the "--endpoint=<url>
+# REMOVED" usage-header section above. This always pushes to whatever
+# endpoint proton-cli resolves from its own config, which is EXACTLY the
+# endpoint gate 3 (above) already verified the chain_id of.
+
+# Re-read proton-cli's config right before the push (file read only, no
+# network): gate 3's host check ran before chain:info and the prompt, and a
+# world-writable config could be re-pointed in between (TOCTOU). If it now
+# fails, nothing is pushed; the audit log gets the matching post line.
+if ! ( sb_check_push_endpoint ); then
+	printf '%s\tinvoker=%s\twrapper=safe-broadcast\tphase=post\tchain=%s\ttx_sha256=%s\trc=%s\ttx_id=%s\n' \
+		"$TS" "$INVOKER" "$CHAIN" "$TX_SHA256" "refused-gate3-recheck" "none" >> "$AUDIT_TARGET" 2>/dev/null || true
+	echo "ERROR (gate 3): the push endpoint changed after gate 3 passed — nothing was pushed" >&2
+	exit 3
+fi
+
+BROADCAST_RC=0
+proton "${PROTON_ARGS[@]}" > "$BROADCAST_OUT" 2> "$BROADCAST_ERR" || BROADCAST_RC=$?
+
+# Extract tx_id.
+TX_ID="$(grep -oE '"transaction_id"[[:space:]]*:[[:space:]]*"[a-f0-9]{64}"' "$BROADCAST_OUT" \
+	| head -1 | grep -oE '[a-f0-9]{64}' | head -1 || true)"
+if [ -z "$TX_ID" ]; then
+	TX_ID="$(grep -oE '"id"[[:space:]]*:[[:space:]]*"[a-f0-9]{64}"' "$BROADCAST_OUT" \
+		| head -1 | grep -oE '[a-f0-9]{64}' | head -1 || true)"
+fi
+
+# ---- audit log entry POST broadcast ----
+LOG_LINE_POST="$(printf '%s\tinvoker=%s\twrapper=safe-broadcast\tphase=post\tchain=%s\ttx_sha256=%s\trc=%s\ttx_id=%s' \
+	"$TS" "$INVOKER" "$CHAIN" "$TX_SHA256" "$BROADCAST_RC" "${TX_ID:-none}")"
+printf '%s\n' "$LOG_LINE_POST" >> "$AUDIT_TARGET" 2>/dev/null || true
+
+# sb_may_have_broadcast <tx_id|empty> <why> — the unmissable stderr banner for
+# an outcome that is NOT known to be "nothing happened". Never retries.
+sb_may_have_broadcast() {
+	echo "" >&2
+	echo "################################################################" >&2
+	echo "##  BROADCAST OUTCOME UNKNOWN — $2" >&2
+	echo "##  tx_id: ${1:-<none returned>}" >&2
+	echo "##  chain: $CHAIN ($PROFILE_NAME)" >&2
+	echo "##  a broadcast MAY have happened — verify before retrying" >&2
+	echo "##  (look the tx_id up on the chain's history/explorer; this" >&2
+	echo "##   wrapper never re-sends a push on its own)" >&2
+	echo "################################################################" >&2
+}
+
+# ---- report ----
+if [ "$BROADCAST_RC" -ne 0 ] || [ -z "$TX_ID" ]; then
+	echo "ERROR (6): broadcast failed (rc=$BROADCAST_RC, tx_id=${TX_ID:-empty})" >&2
+	echo "--- proton stderr (last 20 lines) ---" >&2
+	tail -20 "$BROADCAST_ERR" >&2 || true
+	echo "--- proton stdout (last 20 lines) ---" >&2
+	tail -20 "$BROADCAST_OUT" >&2 || true
+	if [ "$PUSH_RESPONSE" = "id-only" ]; then
+		sb_may_have_broadcast "$TX_ID" "the push did not complete cleanly on an id-only chain"
+	fi
+	exit 6
+fi
+
+# ---- id-only profiles: confirm execution from history (never re-push) ----
+# The push answer only proves mempool admission; the tx can still fail at
+# block build. Look it up on the profile's history bases until it resolves
+# (the same "names this tx, not executed:false" rule as gate 1) AND its
+# {account,name} action set equals the outgoing tx's. Bounded; on failure
+# exit 9 with the tx_id — a broadcast MAY have happened.
+if [ "$PUSH_RESPONSE" = "id-only" ]; then
+	CONFIRM_ATTEMPTS="${FYD_SB_CONFIRM_ATTEMPTS:-20}"
+	case "$CONFIRM_ATTEMPTS" in ''|*[!0-9]*) CONFIRM_ATTEMPTS=20 ;; esac
+	{ [ "$CONFIRM_ATTEMPTS" -ge 1 ] && [ "$CONFIRM_ATTEMPTS" -le 60 ]; } 2>/dev/null || CONFIRM_ATTEMPTS=20
+	CONFIRM_INTERVAL="${FYD_SB_CONFIRM_INTERVAL:-3}"
+	case "$CONFIRM_INTERVAL" in ''|*[!0-9]*) CONFIRM_INTERVAL=3 ;; esac
+	{ [ "$CONFIRM_INTERVAL" -ge 0 ] && [ "$CONFIRM_INTERVAL" -le 30 ]; } 2>/dev/null || CONFIRM_INTERVAL=3
+	OUTGOING_SET_FOR_CONFIRM="$(jq -c '[.actions[] | {account: .account, name: .name}] | unique' "$TX_JSON_FILE" 2>/dev/null || true)"
+	CONFIRMED=0
+	CONFIRM_NOTE="not found in history after ${CONFIRM_ATTEMPTS} round(s)"
+	_round=1
+	while [ "$_round" -le "$CONFIRM_ATTEMPTS" ]; do
+		while IFS= read -r _base; do
+			[ -n "$_base" ] || continue
+			if _j="$(sb_history_lookup "$_base" "$TX_ID" 1 any-id)"; then
+				_set="$(printf '%s' "$_j" | jq -c "$HISTORY_ACTIONS_JQ"' | [.[] | {account, name}] | unique' 2>/dev/null || true)"
+				if [ -n "$OUTGOING_SET_FOR_CONFIRM" ] && [ "$OUTGOING_SET_FOR_CONFIRM" != "[]" ] \
+					&& [ "$_set" = "$OUTGOING_SET_FOR_CONFIRM" ]; then
+					CONFIRMED=1
+					CONFIRM_NOTE="confirmed via ${_base} (round ${_round})"
+					break
+				fi
+				CONFIRM_NOTE="history at ${_base} names the tx but its action set (${_set:-unparseable}) is not the outgoing one (${OUTGOING_SET_FOR_CONFIRM:-unparseable})"
+			fi
+		done <<-BASES
+		$HISTORY_BASES
+		BASES
+		[ "$CONFIRMED" = "1" ] && break
+		_round=$((_round + 1))
+		[ "$_round" -le "$CONFIRM_ATTEMPTS" ] && sleep "$CONFIRM_INTERVAL"
+	done
+	LOG_LINE_CONFIRM="$(printf '%s\tinvoker=%s\twrapper=safe-broadcast\tphase=confirm\tchain=%s\ttx_sha256=%s\ttx_id=%s\tconfirmed=%s' \
+		"$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$INVOKER" "$CHAIN" "$TX_SHA256" "$TX_ID" "$CONFIRMED")"
+	printf '%s\n' "$LOG_LINE_CONFIRM" >> "$AUDIT_TARGET" 2>/dev/null || true
+	if [ "$CONFIRMED" != "1" ]; then
+		echo "ERROR (9): push returned tx_id ${TX_ID} but its execution is NOT confirmed: ${CONFIRM_NOTE}" >&2
+		sb_may_have_broadcast "$TX_ID" "execution not confirmed in history"
+		exit 9
+	fi
+fi
+
+# Print JUST the tx_id on stdout so callers can capture it cleanly.
+echo "$TX_ID"
+exit 0

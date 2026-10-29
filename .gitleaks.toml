@@ -1,0 +1,39 @@
+# Gitleaks config — extends defaults with project-specific allow rules.
+# Public repo plan — false positives must be documented here, not silenced
+# with --no-verify.
+
+title = "metal.freedom-yield.com gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Project-level allowlist"
+# Path-based:
+#   - scripts/dr-drill.sh embeds SHA-256 integrity fingerprints of staker key
+#     files. The hashes are irreversible, public-safe, and exist to detect
+#     backup tampering.
+#   - public/api/anchor-source.json (canonical, git-tracked and served via
+#     git-deploy) and its anchor-source.*.json siblings embed 64-char sha256
+#     hex Merkle roots (identity/observations/artifacts branches + dag_root).
+#     These are hashes of the on-chain anchor payload, not secrets. Gitleaks
+#     high-entropy heuristics fire on the hex strings (e.g. manifest_root,
+#     false-positive on generic-api-key rule).
+#   - tests/fixtures/anchor-source.substantive.json is the same kind of file
+#     (a frozen cycle-2 anchor-source snapshot used only by
+#     tests/anchor-source-canonicalizer/ and tests/run-testnet-rehearsal/ as
+#     a fixture) — moved out of public/api/ on 2026-08-05 so an unanchored
+#     historical snapshot no longer sits in the public API tree where an
+#     evaluator could mistake it for live data. Same hex-root false-positive
+#     as above; the move changed its path, not its content or classification.
+#   - tests/cycle-gate/fixtures/test-identity-key(.pub) is a throwaway ed25519
+#     keypair REGENERATED at test time by setup_test_key() in run-tests.sh. It is
+#     git-untracked + .gitignore'd (never enters history), but `gitleaks detect
+#     --no-git` scans the working tree and flags the regenerated file. Not a real
+#     secret; allowlisted so filesystem scans stay clean.
+paths = [
+  '''scripts/dr-drill\.sh''',
+  '''public/api/anchor-source(\.[^/]+)?\.json''',
+  '''tests/fixtures/anchor-source\.substantive\.json''',
+  '''tests/cycle-gate/fixtures/test-identity-key(\.pub)?''',
+]

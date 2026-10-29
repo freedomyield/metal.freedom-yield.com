@@ -1,0 +1,135 @@
+# ---- Secrets (絶対にコミットしない) ----
+# validator/staking 用 private key(metalgo の典型ファイル名)
+*.priv*
+staker.*
+signer.*
+# 一般的な秘密鍵 / 証明書(拡張子で識別、ドキュメントを誤って捕捉しない)
+# 注意: macOS は case-insensitive FS なので `*key*` のような名前マッチは大文字も拾う → 拡張子のみで識別
+*.key
+*.pem
+*.crt
+*.cer
+*.p12
+*.pfx
+*.jks
+# operator identity ed25519 key (no extension → would not match *.key)
+# The .pub goes into public/.well-known/operator-identity.pub via rename, not by this name.
+freedom-yield-operator-identity
+freedom-yield-operator-identity.pub
+# operator identity ML-DSA-87 key files (live outside the repo; belt and braces)
+operator-identity-mldsa87.enc.pem
+operator-identity-mldsa87.unlocked.pem
+# the retired 2026-10-15 ML-DSA-65 key files: still on the operator's Mac
+operator-identity-mldsa65.enc.pem
+operator-identity-mldsa65.unlocked.pem
+# 環境変数 / dotenv
+.env
+.env.*
+!.env.example
+
+# ---- ランタイム生成データ (秘密鍵を含む可能性) ----
+# Caddy: 本番では Let's Encrypt の秘密鍵をここに書く
+caddy/data/
+caddy/config/
+# metalgo: chain DB + staking key(本リポでは named volume を使うので普通は不要、bind mount にしたとき用)
+metalgo/data/
+metalgo/config/
+
+# ---- OS / editor cruft ----
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/
+
+# ---- Build / cache ----
+node_modules/
+dist/
+.cache/
+*.log
+# Python (= scripts/ops/*.py, tests/ops/*.py)
+__pycache__/
+*.pyc
+
+# ---- Runtime-generated site data ----
+# api/validator.json は live metalgo から生成する動的データ(scripts/node-info.sh)
+# schema は public/api/validator.example.json を参照
+public/api/validator.json
+# api/evidence.json は validator.json + 静的 config から日次生成(scripts/gen-evidence.sh)
+# schema は public/api/evidence.example.json を参照
+public/api/evidence.json
+# uptime track record — validator host で生成 + push、ローカル開発時のみ
+# placeholder を置くことがあるが、コミットはしない(動的データ)
+public/api/uptime-recent.json
+public/api/uptime-cycles.json
+public/api/peer-geo.json
+public/api/server-status.json
+public/api/peers.json
+# cycle-history.jsonl は uptime-cycles.json + incidents.json から join 生成(scripts/gen-cycle-history.sh)
+# schema は public/api/cycle-history.example.jsonl を参照
+public/api/cycle-history.jsonl
+# fee-market 履歴 — validator host で生成 + push、 集計と append-only history
+public/api/fee-market.json
+public/api/fee-market-history.jsonl
+# node-health 周期サンプリング — validator host で生成 + push
+public/api/node-health-recent.json
+# peers 動的解析 — validator host で生成 + push (Gini / 変動 / 履歴インデックス)
+public/api/peers-changes.json
+public/api/peers-gini.json
+public/api/peers-gini-history.jsonl
+public/api/peers-history-index.json
+# R18 anchor receipt / history — on-chain anchor 確定後にのみ生成・push される
+# (validator host, scripts/run-anchor-pipeline.sh 経由。cron 常駐ではない)
+public/api/anchor-receipt.json
+public/api/anchor-history.jsonl
+# 外部見張り (scripts/external-watch.sh) が web host 上で直接書く status page 用
+# の feed。push でも git でもない単一 owner、追跡しない。
+public/api/watch-status.json
+# R18 per-anchor archive (gen-anchor-source.sh / gen-anchor-receipt.sh が
+# content-addressed で書く anchor-source-<dag>.json / anchor-receipt-<tx>.json)。
+# 単一 owner = validator host push (scripts/push-to-web-host.sh archive/<name>)。
+# git 追跡すると deploy と push の二重 owner になり silent reversion を生むので
+# 追跡しない。deploy 側の除外は deploy/feed-excludes.txt の api/archive/。
+public/api/archive/
+# peers 日次 snapshot の repo-local staging (本体は host state dir 側)。
+# 同じく push-owned、追跡しない。
+public/api/peers-history/
+# calendar/*.ics は gen-renewal-ics.sh が生成、ファイル名に private token が
+# 入るので絶対コミットしない(public 化前提リポ、token は private URL の要)
+public/calendar/
+# anchor-publish-health の exit-3 alert dedup state (scripts/check-anchor-publish-health.sh)
+# — cron が repo-local logs/ に書く実行時 state、*.log ではないので上の *.log には
+# 引っかからず個別指定が必要
+logs/anchor-publish-health-mismatch-state.json
+# identity-pins の alert dedup state (scripts/check-identity-pins.sh --mode=live)
+# — 同じ理由で個別指定が必要。cron の live 実行が public repo の作業ツリーに
+# untracked JSON を落とさないようにする
+logs/identity-pin-alert-state.json
+# pulsevm 上流監視の前回観測 state (scripts/check-pulsevm-upstream.sh)
+# — 同じ理由で個別指定が必要。中身は「前回 upstream がどう見えたか」の観測記録
+# であって repo の成果物ではない(差分検知の基準そのものなので host ローカル)
+logs/pulsevm-upstream-state.json
+
+# ---- Local-only artifacts ----
+# CI/CD で deploy 時に生成、コミット不要
+public/api/build.json
+# ローカルの Claude Code 等の状態(誤コミット防止)
+# ただし settings.json は tier-1 PreToolUse hook 定義 = repo で共有 mandatory
+# (docs/CONSTITUTION.md PRIME DIRECTIVE + memory/project_broadcast_enforcement_gate_plan.md)
+.claude/*
+!.claude/settings.json
+.local/
+
+# ---- publish-guard local denylist ----
+# scripts/publish-guard.sh が読む local-only の追加禁止文字列リスト。real host IP /
+# operator handle / SSH key 名 等を含むので絶対に tracked にしない。雛形は
+# .publish-denylist.example (tracked、secret なし)。built-in の IP regex + 埋め込み
+# hash で大半は捕捉するので、この denylist は「取りこぼす追加 exact 文字列」用の任意層。
+.publish-denylist
+
+# cycle-gate test ed25519 key — regenerated at test time by setup_test_key(); never commit
+tests/cycle-gate/fixtures/test-identity-key
+tests/cycle-gate/fixtures/test-identity-key.pub
+
+# Per-cycle renewal state files (operator-local; contain host paths / key names)
+docs/tasks/

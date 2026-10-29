@@ -1,0 +1,42 @@
+# Dynamically-pushed feeds — written into the public web root's api/ and
+# calendar/ by the validator-host-side push (scripts/push-to-web-host.sh) and the
+# web-host-side receive wrapper. Any rsync with --delete into a public tree
+# MUST exclude these or the delete erases fresh feeds.
+#
+# Paths are relative to public/. Consumed by
+# scripts/deploy/build-rsync-excludes.sh (single source of truth). Keep in
+# lock-step with docs/DEPLOY_OWNERSHIP_MATRIX.md and the web host receive
+# wrapper allowlist.
+api/validator.json
+api/server-status.json
+api/peer-geo.json
+api/uptime-recent.json
+api/uptime-cycles.json
+api/peers.json
+api/evidence.json
+api/fee-market.json
+api/fee-market-history.jsonl
+api/node-health-recent.json
+api/peers-changes.json
+api/peers-gini.json
+api/peers-gini-history.jsonl
+api/peers-history-index.json
+api/cycle-history.jsonl
+api/anchor-receipt.json
+api/anchor-history.jsonl
+# Written on the web host itself by the off-host external watch
+# (scripts/external-watch.sh, WATCH_PUBLIC_STATUS), not pushed: the deploy
+# must neither deliver nor delete it.
+api/watch-status.json
+# Subdirectory feeds — whole-directory entries (like calendar/) because the
+# member filenames are content-addressed / date-keyed and unbounded:
+#   api/archive/       R18 per-anchor archives (anchor-source-<dag>.json,
+#                      anchor-receipt-<tx>.json) — the pre-images that
+#                      anchor-history.jsonl's archived_*_path fields point at.
+#   api/peers-history/ daily gzipped validator-set snapshots, indexed by
+#                      peers-history-index.json.
+# Both are push-owned end to end (never git-tracked), so the deploy must
+# neither deliver nor delete them.
+api/archive/
+api/peers-history/
+calendar/

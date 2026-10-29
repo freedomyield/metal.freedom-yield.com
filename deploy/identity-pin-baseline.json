@@ -1,0 +1,12 @@
+{
+  "_comment": "Artifact pins in the signed public/api/identity.json that were ALREADY broken when scripts/check-identity-pins.sh was introduced (2026-08-06). This file is an acknowledgement list, not a mute button: a tracked-class entry suppresses the gate only while BOTH pinned_sha256 and observed_sha256 still hold. Re-sign the manifest or edit the artifact again and the entry stops applying, so the break is reported as new. Stream-class entries are documentation only - they never gate anything, because a push-owned feed is rewritten by host cron on its own cadence and its pin is stale by construction. Every entry here is a C4 (stop pinning moving streams / re-issue on artifact change) work item.",
+  "schema_version": 1,
+  "recorded_at": "2026-08-06T05:35:00Z",
+  "recorded_against": {
+    "identity_generated_at": "2026-08-06T05:31:44Z",
+    "identity_signed_by_commit": "7dd2eb6 (re-signed 2026-08-06; both tracked-class entries resolved by that re-issue)",
+    "measurement": "tracked-class observed_sha256 measured against the repo working tree; stream-class observed_sha256 measured against the live published URL at record time (a moving value, informational only)"
+  },
+  "resolution_task": "C4",
+  "known_broken": {}
+}

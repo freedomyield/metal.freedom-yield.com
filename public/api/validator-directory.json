@@ -1,0 +1,13 @@
+{
+  "_comment": "This validator's own publishable metadata. Schema: { name?, url?, type? }. Only the self entry is shipped.",
+  "updated": "2026-06-18",
+  "validators": {
+    "NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v": {
+      "name": "Freedom Yield · Metal",
+      "url": "https://metal.freedom-yield.com/",
+      "type": "self",
+      "notes": "Self. Monthly cycle. Live values at /api/validator.json. Public audit trail at /journal/, /incidents/, /data/.",
+      "self": true
+    }
+  }
+}

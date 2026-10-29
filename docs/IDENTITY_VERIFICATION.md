@@ -1,0 +1,291 @@
+# Identity verification
+
+This document describes how a third-party evaluator verifies the operator identity manifest published by Freedom Yield Metal, end-to-end, from the signed manifest through the on-chain anchor.
+
+> Companion runbook for the **operator side** (key generation, signing, publication, rollback) is in [`OPERATOR_IDENTITY_SETUP.md`](./OPERATOR_IDENTITY_SETUP.md). Byte-level construction rules for the DAG are in [`MERKLE_DAG_SPEC.md`](./MERKLE_DAG_SPEC.md). This document covers the **verifier side**.
+
+## Key model (read first)
+
+The identity manifest carries **two independent signatures from two dedicated operator identity keys**:
+
+- **ed25519** (primary) — an OpenSSH key, verified with `ssh-keygen -Y verify` (Step 2).
+- **ML-DSA-87** (additive, FIPS 204) — a post-quantum signature over the same `identity.json` bytes, verified with OpenSSL 3.5+ using the context string `freedom-yield/validator-identity` (Step 2b). It is additive: it never replaces the ed25519 signature, and a verifier that ignores it loses nothing it had before.
+
+For both keys, specifically:
+
+- The signing key is **not** the validator's BLS signing key.
+- The signing key is **not** a staking key (`staker.key`).
+- The signing key is **not** any private key used by the `metalgo` process.
+- The operator identity key is generated, held, and rotated on the operator's local Mac — not on the validator host or the web host. CI never receives the private key.
+
+A separate `<xpr-account>@anchor` key (XPRNetwork K1 / EOSIO format) lives on the operator's signing machine and signs A-chain inscriptions only. It is scoped via `linkauth` to inscribe-class actions, so a compromise of the anchor key cannot move tokens, change permissions, or deploy contracts. The signing key and the anchor key are independent; the chain of trust binds them through `identity.json`'s `operator_identity_pubkey_fingerprint` (signed by the operator identity key) and the on-chain anchor action's signer permission (`<xpr-account>@anchor`).
+
+This separation is intentional. Each key has one job; reuse for off-chain manifest signing or for unrelated on-chain actions is excluded by design.
+
+## NodeID binding
+
+A single signature does not by itself prove control of the validator. NodeID binding is established by the **collective evidence** across:
+
+- `/api/identity.json` — signed identity manifest (this document's subject)
+- `/api/identity.json.sig` — detached ed25519 signature
+- `/api/identity.json.mldsa87.sig` — detached ML-DSA-87 signature over the same bytes
+- `/.well-known/operator-identity.pub` — current operator identity public key (its SHA-256 is committed inside the DAG's identity branch)
+- `/.well-known/operator-identity-mldsa87.pub` — current operator identity ML-DSA-87 public key (PEM)
+- `/api/anchor-source.json` — the DAG source: the three branch objects (identity / observations / artifacts) and the combined `dag_root_computed`
+- `/api/anchor-receipt.json` — Metal A-chain (an Antelope/EOSIO-family chain, reached at XPR Network endpoints) inscription receipt anchoring `dag_root_computed`
+- `/api/anchor-history.jsonl` — append-only log of every broadcast anchor (cycle → tx_id → dag)
+- `/api/evidence.json` — machine-readable selection-evidence manifest, documented at `docs/EVIDENCE_MANIFEST.md`
+- `/api/validator.json` — live validator state
+- The validator registration record on the public Metal explorer (`https://explorer.metalblockchain.org/`)
+- A public XPRNetwork explorer entry for the inscribing transaction (e.g. `https://explorer.xprnetwork.org/transaction/<tx_id>`)
+- The operator-controlled site at `https://metal.freedom-yield.com/`
+
+An evaluator should not treat any single artifact as conclusive. The whole set agreeing — and the on-chain inscription matching the off-chain DAG root — is the evidence.
+
+## Machine-readable discovery
+
+An automated reviewer can discover the manifest set from `/api/evidence.json`. The `live_artifacts.identity_manifest` object lists the manifest URLs (`url`, `signature_url`, `pubkey_url`, `schema_url`, …); the anchor artifacts (`anchor-source.json`, `anchor-receipt.json`, `anchor-history.jsonl`) carry the on-chain binding.
+
+## Verification procedure (seven steps)
+
+Requires **OpenSSH 8.0+** (the `-Y` subcommand was added in OpenSSH 8.0), `curl`, `jq`, and `sha256sum` or `shasum -a 256`. macOS 11+, modern Linux distros, and Windows OpenSSH 8.0+ are all supported.
+
+The byte-level construction rules cited below are specified once in [`MERKLE_DAG_SPEC.md`](./MERKLE_DAG_SPEC.md). This document is the recipe; the spec is the authority. If the two disagree, the spec is the source of truth and this document is a bug.
+
+### Step 1 — Fetch the artifact set
+
+```sh
+BASE=https://metal.freedom-yield.com
+curl -sSLfO ${BASE}/api/identity.json
+curl -sSLfO ${BASE}/api/identity.json.sig
+curl -sSLfO ${BASE}/api/identity.json.mldsa87.sig
+curl -sSLfO ${BASE}/.well-known/operator-identity.pub
+curl -sSLfO ${BASE}/.well-known/operator-identity-mldsa87.pub
+curl -sSLfO ${BASE}/api/anchor-source.json
+curl -sSLfO ${BASE}/api/anchor-receipt.json
+```
+
+A 404 on any of the seven URLs is a verification failure: the set must be complete for the chain of evidence to hold.
+
+### Step 2 — Verify the operator's signature on identity.json
+
+```sh
+echo "freedom-yield $(cat operator-identity.pub)" > allowed_signers
+ssh-keygen -Y verify \
+  -f allowed_signers \
+  -I freedom-yield \
+  -n freedom-yield/validator-identity \
+  -s identity.json.sig < identity.json
+```
+
+A successful verification prints `Good "freedom-yield/validator-identity" signature for freedom-yield with ED25519 key SHA256:…` and exits 0. The four required parameters are pinned:
+
+| Parameter | Value | Source |
+|---|---|---|
+| `-I` (principal) | `freedom-yield` | manifest `verification.principal` |
+| `-n` (namespace) | `freedom-yield/validator-identity` | manifest `verification.namespace` |
+| `-f` (signers file) | `allowed_signers` (built locally) | composed from `operator-identity.pub` |
+| `-s` (signature) | `identity.json.sig` | served at `/api/identity.json.sig` |
+
+A signature failure at this step ends verification; nothing downstream is trustworthy without it.
+
+### Step 2b — verify the ML-DSA-87 signature (OpenSSL 3.5+)
+
+`identity.json` also carries an ML-DSA-87 (FIPS 204) signature over the same bytes. This step needs **OpenSSL 3.5 or later**; it is the only extra tool. The block below fetches the three files and verifies (the `identity.json` fetch repeats Step 1 so the block stands alone):
+
+<!-- pq-verify:begin -->
+```sh
+curl -sSfO https://metal.freedom-yield.com/api/identity.json
+curl -sSfO https://metal.freedom-yield.com/api/identity.json.mldsa87.sig
+curl -sSfO https://metal.freedom-yield.com/.well-known/operator-identity-mldsa87.pub
+openssl pkeyutl -verify -pubin -inkey operator-identity-mldsa87.pub -rawin -in identity.json -sigfile identity.json.mldsa87.sig -pkeyopt context-string:freedom-yield/validator-identity
+```
+<!-- pq-verify:end -->
+
+A successful verification prints `Signature Verified Successfully`.
+
+Which `openssl`: macOS `/usr/bin/openssl` is **LibreSSL** and cannot verify ML-DSA — install Homebrew `openssl@3` and call `$(brew --prefix openssl@3)/bin/openssl`. Ubuntu 26.04's stock `openssl` (3.5) can. The context string `freedom-yield/validator-identity` is part of what was signed; a different context string fails verification.
+
+The manifest's `verification_pq` object names the algorithm and the public key's fingerprint; a v1-schema consumer ignores it.
+
+### Step 3 — Fingerprint cross-check
+
+```sh
+ssh-keygen -l -f operator-identity.pub
+# 256 SHA256:Abc123… freedom-yield-operator-identity (ED25519)
+#         ^^^^^^^^^^^^
+#         must equal identity.json.operator_identity_pubkey_fingerprint
+```
+
+Redundant with step 2 (the signature already proves the key controls the manifest) but catches accidental key-file substitution by intermediate caches. The same public key's raw-bytes SHA-256 is also committed inside the DAG at `anchor-source.json .identity_branch.operator_ed25519_pubkey_sha256_hex` (reproduce with `cat operator-identity.pub | awk '{print $2}' | base64 -d | tail -c 32 | sha256sum`).
+
+### Step 4 — Recompute the three branch roots
+
+Each branch root is the SHA-256 of the branch object's canonical bytes (`jq -cS` = compact + sorted keys), per [`MERKLE_DAG_SPEC.md`](./MERKLE_DAG_SPEC.md) §3. There is no per-branch Merkle tree — that was the retired 2-branch model.
+
+```sh
+ID_ROOT=$(jq -cS '.identity_branch'     anchor-source.json | sha256sum | awk '{print $1}')
+OB_ROOT=$(jq -cS '.observations_branch' anchor-source.json | sha256sum | awk '{print $1}')
+AR_ROOT=$(jq -cS '.artifacts_branch'    anchor-source.json | sha256sum | awk '{print $1}')
+printf 'id=%s\nob=%s\nar=%s\n' "$ID_ROOT" "$OB_ROOT" "$AR_ROOT"
+```
+
+These three values are what the on-chain branch memos commit to (step 7). The `jq -cS … | sha256sum` pipeline above hashes the `jq -cS` output **including the trailing newline (`0x0a`) that `jq` appends by default** — the authoritative branch root is `sha256(canonical + "\n")`. A verifier that uses a non-jq JCS serializer MUST match jq's compact + sorted-key encoding **and** append one `0x0a` byte if its serializer omits the trailing newline; otherwise the digest will not match the on-chain memo hex. See [`MERKLE_DAG_SPEC.md`](./MERKLE_DAG_SPEC.md) §2.1.
+
+### Step 5 — Recompute dag_root_computed
+
+The DAG root is SHA-256 of the three branch roots concatenated **as their 64-char lowercase-hex ASCII strings** (not raw digest bytes), per [`MERKLE_DAG_SPEC.md`](./MERKLE_DAG_SPEC.md) §4.
+
+```sh
+DAG=$(printf '%s%s%s' "$ID_ROOT" "$OB_ROOT" "$AR_ROOT" | sha256sum | awk '{print $1}')
+echo "$DAG"
+```
+
+### Step 6 — DAG-root equality across source and receipt
+
+Assert both of:
+
+```sh
+jq -r .dag_root_computed anchor-source.json
+jq -r .dag_root_hash     anchor-receipt.json
+```
+
+equal the `DAG` computed in step 5. Any disagreement breaks the chain: the operator has either published an inconsistent `anchor-source.json` or the receipt is stale relative to the source.
+
+### Step 7 — On-chain anchor cross-check (four memos)
+
+The anchor is **four** `eosio.token::transfer` actions, one memo each. Compose the expected memos from the source's schema + cycle:
+
+```sh
+S=$(jq -r .schema_version                             anchor-source.json)
+N=$(jq -r .observations_branch.cycle_number_observed  anchor-source.json)
+printf 'action1  %s\naction2  %s\naction3  %s\naction4  %s\n' \
+  "fya${S}c${N}-id:${ID_ROOT}" \
+  "fya${S}c${N}-ob:${OB_ROOT}" \
+  "fya${S}c${N}-ar:${AR_ROOT}" \
+  "fya${S}c${N}:${DAG}"
+```
+
+Look up the transaction on a public XPRNetwork explorer and assert:
+
+| Field | Expected |
+|---|---|
+| tx_id | `anchor-receipt.json .tx_id` (or `.anchor.tx_id`) |
+| four action memos | exactly the four strings above (branch roots `-id`/`-ob`/`-ar` + the DAG root), in the four `eosio.token::transfer` actions |
+| signer permission | `<xpr-account>@anchor` on each action |
+| `from` | `<xpr-account>` (config `xpr-account`) |
+| `to` | NOT equal to `from`; the dedicated sink (config `anchor-sink`) |
+| block height / timestamp | matches the receipt fields |
+
+The `from != to` invariant is forced by the XPRNetwork `eosio.token` contract (`eosio.token.cpp` L99 `check(from != to, "cannot transfer to self")`) and is observable on every receipt. The signer permission binds the actions to `<xpr-account>@anchor`; if signed by `@active` or `@owner` instead, the receipt is not honoring the narrow-permission discipline the operator declared, and the evaluator SHOULD flag it.
+
+Publishing the three branch roots on-chain alongside the DAG root lets an evaluator confirm each branch independently and recompute the DAG root (step 5) from chain data alone.
+
+## Artifact manifest — what the signature pins, and what it deliberately does not
+
+`identity.json` carries an `artifact_manifest` object. Each entry names one published artifact. **Not every entry carries a `sha256`, and that is the contract, not a defect.**
+
+A digest inside a signed document is a claim about bytes. It can only hold for bytes that cannot change without the operator committing that change. The repository declares that property for every published path in [`deploy/publication.json`](../deploy/publication.json), and `gen-identity.sh` copies the declaration into each entry as `kind`:
+
+| `kind` | What it means | `sha256` present? |
+|---|---|---|
+| `record` | A URL named by a digest of what it contains — see the scope note below for exactly how far that name reaches | yes |
+| `static` | Bytes change only when a commit in the operator's repository changes them | yes |
+| `stream` | Bytes can change without any commit — host cron or runtime push rewrites them on their own cadence | **no** |
+
+`kind` is a **safe floor**, not a summary: a path is classified by its weakest moment, so a verifier that acts on `kind` alone always does the safe thing. The rule is also restated in-band, inside the signed bytes, as the top-level `pin_policy` object — so the manifest explains itself without reference to this document.
+
+#### Scope note on `record` — what the URL's name binds, and what it does not
+
+The only `record` in the manifest is `anchor_source_archive_json`, at `/api/archive/anchor-source-<64-hex>.json`. Stated plainly, because "content-addressed" reads stronger than what was measured (2026-08-14):
+
+- The `<64-hex>` in the name is `dag_root_computed`, derived from **the three branch objects and nothing else** (steps 4–5 above). You can recompute it from the fetched file and confirm it equals the name. `gen-identity.sh` does exactly that before agreeing to pin — re-deriving the three roots rather than reading the file's own `dag_root_computed` field, since a self-declared digest proves nothing about the bytes carrying it.
+- The file **also** carries `computed_at`, `computed_by_script` and `computed_from_git_commit`, and **none of those sits inside any branch**. Changing `computed_at` leaves the derived root — and therefore the file name — unchanged while the file's SHA-256 changes. The generator writes the archive with an unconditional overwrite. So the same URL can in principle serve different bytes under the same honest name.
+- Therefore: **the URL's name binds the three branch roots; the `sha256` in the manifest binds the whole file as of signing.** If you fetch this URL and the digest does not match, do not stop there — recompute the three branch roots. If they still fold to the value in the file name, the three branch objects are canonically identical to the ones that were anchored and the anchored DAG is unaffected; the difference lies somewhere outside them, and **the fold does not say where**. The file's other top-level keys are `$schema`, `schema_version`, `computed_at`, `computed_by_script` and `computed_from_git_commit`, plus the file's own `dag_root_computed` — measured 2026-08-14, changing any one of them leaves the fold still matching the name, so "the difference must be a provenance field" does not follow. If they do not fold to it, that is a real finding.
+
+The receipt half of `/api/archive/` (`anchor-receipt-<tx_id>.json`) is deliberately **not** pinned here: it is named by a transaction id rather than by a digest of itself, so its name binds nothing about its contents at all.
+
+Because `gen-identity.sh` runs before the current cycle's anchor is composed, the record pinned in any given manifest is **the pre-image of the previous cycle's anchor**, not of the cycle that manifest opens. Read its `observations_branch.cycle_number_observed` rather than assuming it is the newest.
+
+### How to check the pinned entries
+
+```sh
+BASE=https://metal.freedom-yield.com
+jq -r '.artifact_manifest | to_entries[]
+       | select(.value.sha256 != null)
+       | "\(.value.sha256)  \(.value.url)"' identity.json |
+while read -r want url; do
+  got=$(curl -sSLf "$url" | sha256sum | awk '{print $1}')
+  [ "$want" = "$got" ] && echo "OK   $url" || echo "FAIL $url ($want != $got)"
+done
+```
+
+Do the same for `schema_sha256` / `schema_url`. A payload's schema is a separate publication with its own `kind`: a `stream` payload can have a `static` schema, so an entry may carry `schema_sha256` while carrying no `sha256`. That is the pin being placed where it can actually hold.
+
+**A `FAIL` on any entry that carries a `sha256` is a real finding.** Report it. Those artifacts are delivered by the git deploy or are content-addressed; nothing but an operator error or an interfering intermediary makes them differ.
+
+### The unpinned entries
+
+An entry without `sha256` asserts exactly two things: the artifact is published at that URL, and the operator classifies it as a moving stream. It asserts nothing about the bytes served there at any moment. **Do not compute a digest of a `kind: "stream"` artifact and compare it to anything in this manifest — there is nothing to compare it to.**
+
+Point-in-time digests of the stream artifacts do exist, and they are stronger evidence than a manifest pin would be, because they are timestamped by a blockchain rather than by the operator: `anchor-source.json` `.artifacts_branch.public_api_files_hashed[]` captures the digest of each public artifact at the instant the anchor was composed, and that branch is folded into `dag_root_computed`, which step 7 above finds inscribed on Metal A-chain. A stream's bytes at anchor time are therefore verifiable against the chain; a stream's bytes *right now* are, correctly, claimed by nobody.
+
+### Recomputing `artifact_root`
+
+`artifact_root` is the SHA-256 Merkle root over **the `sha256` values that are present**, in alphabetical key order — odd counts duplicate the last leaf, a parent is `SHA-256(raw(left) || raw(right))`, and a single leaf is its own root. Entries without `sha256` contribute no leaf.
+
+```sh
+jq -r '.artifact_manifest | to_entries | sort_by(.key)[]
+       | select(.value.sha256 != null) | .value.sha256' identity.json
+# fold the resulting list per the rule above; the result must equal .artifact_root
+```
+
+### Manifests issued before 2026-08-14
+
+This discipline is applied by the generator from 2026-08-14; a manifest takes the shape above from the operator's first re-issue on or after that date. **Measured 2026-08-14: the manifest currently served at `/api/identity.json` (`generated_at` `2026-08-06T05:31:44Z`) predates it.** It carries a `sha256` on all five of its entries, four of which are `kind: "stream"` in the registry (`evidence_json`, `validator_json`, `cycle_history_jsonl`, `uptime_cycles_json`), and it carries no `kind` and no `pin_policy` fields at all.
+
+For that manifest, and any older one, a verifier should:
+
+- treat a digest mismatch on those four artifacts as **carrying no information** — it is expected at an unpredictable rate, since the feeds are rewritten by host cron on their own cadence, and a momentary *match* is equally uninformative. All four are named as such in [`deploy/publication.json`](../deploy/publication.json) under `known_kind_violations`. [`deploy/identity-pin-baseline.json`](../deploy/identity-pin-baseline.json) names three of the four (`cycle_history_jsonl.sha256` is recorded only in the registry) and records specific digests from the **2026-08-04** manifest, not from the one served today — read the `c4_status` block there before comparing values;
+- treat a mismatch on `incidents_json` or on any `schema_sha256` as a real finding, exactly as above. One such break is already on record: an ordinary commit on 2026-08-05 edited a git-tracked schema and invalidated `cycle_history_jsonl.schema_sha256` in the manifest signed the day before. That failure mode is *not* addressed by the kind discipline — it is what `scripts/check-identity-pins.sh` exists to catch, and it is repaired by re-issuing the manifest.
+
+A manifest that carries `pin_policy` is post-discipline and every `sha256` in it is meant to hold.
+
+## Rotation and revocation
+
+If the operator identity key is rotated, the new `identity.json` reflects the new `operator_identity_pubkey_fingerprint` and a new `key_iat`; a new line appends to `identity-history.jsonl` (the source of `identity_branch.identity_history_root`) with the next `key_seq`; the prior key's line is updated with `superseded_by_key_seq` populated (and `revoked` / `revoked_at` / `revocation_reason` set if the rotation is for cause). The identity branch root changes, hence `dag_root_computed` changes, and the next cycle's anchor commits the new root.
+
+The recommended rotation cadence is 12 months, aligned to a validation-cycle boundary. `ssh-keygen -Y verify` does **not** check `key_iat` / `key_exp`; consumers MAY enforce them as policy.
+
+The ML-DSA-87 key rotates the same way as the ed25519 key: a new `identity.json` names the new PQ public key fingerprint and the new `/.well-known/operator-identity-mldsa87.pub`. The key uses ML-DSA-87, the highest ML-DSA level and the level NSA CNSA 2.0 specifies for all classification levels (design spec §3.1). It changes only if NIST / CNSA guidance changes or a weakness in ML-DSA-87 is published, and such a change is a normal key rotation, not a schema bump. The 2026-10-15 manifest was signed with an ML-DSA-65 key; that key was replaced by the ML-DSA-87 key on 2026-10-16 and its public key and signature are no longer published (see `docs/IDENTITY_SCHEMA_CHANGELOG.md`).
+
+The validator's on-chain signing keys (staker / BLS) are unaffected by operator identity key rotation; they have no relationship to this manifest. The `<xpr-account>@anchor` key is independent and rotates on its own schedule.
+
+## Why a DAG anchor rather than just a signed manifest
+
+A signed manifest alone proves only that the operator wrote the manifest at the moment of signing. It does not prove the manifest existed at any specific earlier time, and a malicious operator could silently re-sign a different history later. The DAG anchor adds an **independent existence-time proof**: once `dag_root_computed` is committed to Metal A-chain at a block with a known timestamp, the operator cannot later modify any branch source without producing a different DAG root that contradicts the on-chain memos.
+
+The anchor does not prevent the operator from publishing a new, contradicting DAG later; it commits the operator to a specific state at a specific time, and lets evaluators detect contradictions trivially (the prior on-chain memos still point at a different root).
+
+## Why not BLS / staking key for the off-chain signature?
+
+1. **Separation of concerns.** The validator's signing keys exist to sign consensus messages. Reusing them for off-chain manifest signing widens their attack surface for no on-chain benefit.
+2. **Operational safety.** Reading validator key material to produce an external signature is operationally risky. The operator identity key is intentionally kept off the validator host, the web host, and CI.
+3. **Toolchain.** BLS12-381 is not directly supported by common verification tooling. `ssh-keygen -Y verify` with ed25519 is universally available and produces a one-line, copy-pasteable verification.
+
+## Scope limits
+
+This identity manifest and DAG anchor are a verifiable binding from a stable public key to an operator brand and a NodeID, plus a cumulative on-chain commitment to the identity-key history, the cycle observations, and the published artifact set. They are not:
+
+- a compliance attestation
+- a regulatory disclosure
+- a KYC document
+- a guarantee of any future operational behavior
+
+For honest disclosure of known limitations, see `/risk-disclosure/`. For unilateral commitments, see `/commitments/`.
+
+## See also
+
+- [`MERKLE_DAG_SPEC.md`](./MERKLE_DAG_SPEC.md) — canonical byte-level construction rules referenced by this recipe.
+- [`OPERATOR_IDENTITY_SETUP.md`](./OPERATOR_IDENTITY_SETUP.md) — operator-side runbook for the off-chain signing key.
+- [`IDENTITY_SCHEMA_CHANGELOG.md`](./IDENTITY_SCHEMA_CHANGELOG.md) — design history, including the retirement of the 2-branch `fyid1:` model.

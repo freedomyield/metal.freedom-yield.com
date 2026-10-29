@@ -1,0 +1,262 @@
+# Freedom Yield Validator — Constitution
+
+> **Status:** v0.9 (draft) — the v0.9 web-host bullet in [§5](#5-infrastructure-separation) is a loosening amendment and takes effect seven days after merge (merged 2026-10-08 10:56 JST (merge commit 6da8456) → effective 2026-10-15 10:56 JST (merge + 7 days)); see the changelog.
+> **Scope:** Metal Blockchain mainnet validator operation under the "Freedom Yield" brand.
+> **Authority:** This document is the supreme reference for the project. All other documents (`OPERATING_MODEL.md`, runbooks, scripts, public copy) MUST conform to it.
+
+The key words **MUST**, **MUST NOT**, **SHALL**, **SHALL NOT**, **SHOULD**, **MAY** in this document are to be interpreted as described in RFC 2119.
+
+---
+
+# ⛔ PRIME DIRECTIVE — TESTNET-FIRST FOR ALL BROADCASTS ⛔
+
+**This directive supersedes every other section of this Constitution, every runbook, every AI-generated plan, every task list, every operator convenience, and every schedule. Any conflict is resolved in favor of this directive without exception.**
+
+**MUST NOT invoke, from any human or AI-driven session, any command or API call that broadcasts a transaction to any mainnet (Metal P-Chain, C-Chain, X-Chain, A-Chain/XPRNetwork, or any subnet) unless ALL of the following are simultaneously true:**
+
+1. The identical command shape — same actor, same permission, same action list, same memo scheme, same signer, same library version — has been successfully executed end-to-end on the corresponding testnet, and the resulting testnet tx has been observed and reviewed by the operator.
+2. The operator has explicitly authorized THIS SPECIFIC mainnet broadcast in the same turn or a directly-referenced prior turn, naming `{chain, actor, permission, action, memo, quantity}` verbatim.
+3. A pre-flight `chain:get` (or equivalent) has been executed and its output has been verified to match the authorized chain.
+4. Any `--dry-run` or offline-sign capability of the command has been exhausted, and the operator has reviewed the composed transaction JSON.
+
+**Rationale — burned into this Constitution on 2026-07-01T04:24Z:** On that date, an AI-driven exploratory session self-described as "testnet で試行" invoked `proton transaction:push` without a chain check and broadcast a live mainnet A-chain transaction (tx `997881e844befaf9c159c741988fe99e8ca566a52e539639ab83517b1f36100a`, memo `fyid1v1c2-test-single`). This single choice permanently polluted the anchor namespace of a project whose entire institutional narrative depended on the first broadcast being substantive. The economic cost was 0.0001 XPR; the narrative cost was total. Testnet exists precisely to absorb this class of mistake. Bypassing it, even inadvertently, is a project-level regression that no post-hoc discipline can undo.
+
+**Any AI session that reads this Constitution and proceeds to invoke a broadcast-capable command in violation of this Prime Directive is in constitutional violation of the highest order, regardless of what it or its user believed at the time. The correct behavior on ambiguity is: refuse, stop, ask.**
+
+**Any script, tool, or documentation that introduces a broadcast pathway MUST embed, in its first ten lines, an explicit `# PRIME_DIRECTIVE: TESTNET-FIRST` marker and MUST default to a testnet endpoint. Mainnet is opt-in only, per invocation, with operator authorization satisfying (1)–(4) above.**
+
+**This section is the first substantive content of the Constitution because a Constitution that does not prevent the specific failure that motivated its own amendment is worthless.**
+
+See also: [§3.4 Broadcast prohibitions](#34-broadcast-prohibitions-mainnet-first-ban) for enforcement detail, [`memory/feedback_no_unauthorized_broadcast.md`](<operator-memory>/feedback_no_unauthorized_broadcast.md) for the AI-side memo, and CLAUDE.md for the session-boot mention that MUST direct every new AI session to this section before any anchor-related work.
+
+---
+
+## 0. Purpose and Authority
+
+This Constitution defines the inviolable principles that govern this validator project.
+
+- It is the **single source of truth** for what we will and will not do.
+- All operational documents, code, scripts, public copy, AI assistance, and outward communication MUST be consistent with this document.
+- Where any other source (runbook, memory note, suggestion from any AI, advice from a third party, prior commit message) conflicts with this Constitution, the Constitution prevails until amended under [§9](#9-amendment-process).
+- This document is itself public. It SHALL NOT contain any item classified SECRET ([§4.1](#41-secret-classification)) and SHOULD NOT contain any item classified CONFIDENTIAL ([§4.2](#42-confidential-classification)) beyond categorical reference.
+
+## 1. Mission and Identity
+
+- The project operates a **Metal Blockchain mainnet validator** under the public brand **"Freedom Yield"**.
+- The validator is independent infrastructure. It is **not** affiliated with Metallicus, Metal Pay, the Metal Blockchain Foundation, or any related entity.
+- The operator is a private actor. The operator's legal entity name SHALL NOT appear in any public artifact. Only the "Freedom Yield" brand identifies this validator publicly.
+- Public posture: **small, transparent, honest, jurisdictionally Japan**. The project prioritizes verifiable operational records over claims about scale.
+- Strategic analysis, market interpretation, and future opportunity assessment are outside the scope of this Constitution. This Constitution governs conduct regardless of strategy.
+
+## 2. Operating Priority Order
+
+When two operating concerns conflict, the **lower-numbered** one wins. From highest to lowest:
+
+1. **Validator health** — the `metalgo` process, peer connectivity, sealed-key integrity, and inclusion in the active validator set.
+2. **Information hygiene** — preventing leakage of items defined in [§4.1 SECRET](#41-secret-classification).
+3. **Disclosure integrity** — public-facing data MUST be truthful, current, and verifiable.
+4. **Observation and monitoring** — dashboards, persistence streams, push notifications, alerts.
+5. **User-facing site quality** — UI, copy, design polish.
+6. **Velocity** — speed of shipping new features.
+
+Anything not on this list ranks below all of the above. When in doubt, descend the list, not ascend.
+
+## 3. Absolute Prohibitions
+
+The following are forbidden without exception. Any of these is a **constitutional violation** and MUST be reverted immediately upon discovery.
+
+### 3.1 Identity prohibitions
+
+- MUST NOT publish the operator's legal entity name in any artifact: repository, site, docs, commit message, issue, pull request, public push notification, or any AI chat shared externally.
+- MUST NOT publish the operator's personal income, other businesses, personal assets, or any financial figure not directly attributable to this validator's on-chain activity.
+- The default posture is inbound-first. Outbound contact with network-related entities requires explicit operator approval and MUST be limited to a specific operational purpose.
+
+### 3.2 Claim prohibitions
+
+- MUST NOT make inflated capability claims (e.g. "institutional-ready", "multi-region", "subnet operator", "enterprise SLA") that exceed delivered reality.
+- MUST NOT use superlative or boast language: "best", "strongest", "most reliable", "largest", "the only". The public narrative is collaboration, not competition.
+- MUST NOT denigrate, name unfavorably, or compare against other validators in public materials.
+- MUST NOT manufacture urgency in notifications, status pages, or push messages. Anomaly tone is reserved for real anomalies; scheduled events are not emergencies.
+
+### 3.3 Operational prohibitions
+
+- MUST NOT commit any validator private key, BLS signing key, certificate private part, wallet mnemonic, seed phrase, or passphrase to any repository, in any form, encrypted or plaintext.
+- MUST NOT bypass the operating priority order ([§2](#2-operating-priority-order)). Observability or UX changes that risk validator health are rejected by default.
+- MUST NOT take destructive infrastructure action — key rotation, host rebuild, snapshot deletion, force push, database drop, configuration wipe — without explicit operator approval for that specific action in that specific context.
+- MUST NOT add or modify monetization channels (donations, paid services, retail marketing surfaces) without operator approval and conformance to [§7](#7-public-claims-and-disclosure-standard).
+- MUST NOT introduce refactors, abstractions, or "while I'm here" cleanup that were not explicitly requested. A bug fix fixes the bug.
+
+### 3.4 Broadcast prohibitions (mainnet-first ban)
+
+Any command or API call that causes a state-changing transaction to be accepted by a live blockchain — Metal P-Chain, Metal C-Chain, Metal X-Chain, Metal A-Chain (XPRNetwork/PulseVM), or any subnet — is a **broadcast**. Broadcasts are irreversible and permanently visible.
+
+- **MUST NOT start any new broadcast pipeline, script, tool, or command sequence on mainnet.** The first execution on **any** new mechanism — new CLI flag, new script path, new library version, new keypair, new memo scheme, new action shape, new signer — MUST be against a testnet or an equivalent throwaway environment. Only after the exact same pipeline has been successfully executed end-to-end on testnet may the operator authorize a mainnet run.
+- MUST NOT use mainnet as an exploratory or verification target. "Try it on mainnet to see what happens" is a constitutional violation, regardless of amount transferred or memo content. Testnet exists precisely to absorb mistakes.
+- MUST NOT invoke a broadcast-capable command (`proton action`, `proton transaction:push`, `cleos push_transaction`, RPC `push_transaction` / `issueTx` / `eth_sendRawTransaction`, or any equivalent) without: (a) explicit per-broadcast operator authorization naming the exact `{chain, actor, permission, action, memo, quantity}`; (b) a completed pre-flight check confirming `chain:get` matches the authorized chain; (c) a successful prior testnet execution of the same command shape.
+- MUST NOT rely on "the command will probably fail" as a substitute for authorization. If a broadcast-capable command is invoked, it MUST be assumed to succeed.
+- MUST NOT justify a mainnet broadcast by its small economic cost. The cost is not measured in fees; the cost is measured in permanent chain-state pollution and institutional-narrative damage.
+- The default execution chain for every new script MUST be testnet, set explicitly at the top of the script or by an unambiguous env var with a testnet default. Mainnet is opt-in only, at operator's per-invocation authorization.
+- Any file, script, or documentation that introduces a broadcast pathway MUST include, in its header, an explicit `# CHAIN: <testnet|mainnet>` marker declaring the intended target, and MUST default to testnet.
+
+### 3.5 Keystore separation prohibitions (proton-cli key custody)
+
+On 2026-07-10, while separating keystores across multiple projects that had been co-resident in a single shared default `proton-cli` keystore, plaintext private keys for this project's owner, active, and anchor permissions were pasted into a chat transcript from unprefixed CLI output and had to be rotated. The root cause was co-residency in the default keystore combined with commands presented without an explicit `HOME` scope. This subsection exists to prevent recurrence.
+
+- MUST NOT present, in any AI assistance, documentation, runbook, or script, a `proton-cli` command without an explicit project-scoped keystore prefix: `HOME=~/.metal-fy-proton proton …` for mainnet, `HOME=~/.metal-fy-proton-test proton …` for testnet. A bare `proton …` invocation is a violation even when offered only as an illustrative example.
+- MUST NOT use the default (shared) `proton-cli` keystore — the one resolved under the login `HOME` at `Library/Preferences/@proton/cli-nodejs/proton-cli.json` — for this project, under any circumstance.
+- MUST create a dedicated project keystore before any key operation if one does not already exist. Falling back to the default keystore for convenience or because the dedicated keystore is missing is prohibited.
+- MUST keep testnet and mainnet keys in separate dedicated keystores (separate `HOME` values). They MUST NOT share a keystore file.
+- MUST NOT reuse a keypair across networks. The same keypair MUST NOT appear on both testnet and mainnet.
+- MUST keep the account and permission topology — the shape of permission structure, thresholds, and key counts — identical between testnet and mainnet. This is what makes a testnet rehearsal a faithful stand-in for mainnet behavior, which PRIME DIRECTIVE gate 1 (testnet-first success on the identical command shape) depends on.
+
+See also [§4.1 SECRET classification](#41-secret-classification) (S1/S2 govern the keys themselves) and [`docs/ANCHOR_ACCOUNT_KEY_ROTATION.md`](ANCHOR_ACCOUNT_KEY_ROTATION.md) for the rotation runbook that implements recovery from a keystore-custody incident.
+
+## 4. Information Hygiene
+
+This is the most strictly enforced chapter. The repository is **public**; Git history is permanent and unforgivable.
+
+### 4.1 SECRET classification
+
+Items classified SECRET MUST NOT appear in any of:
+
+- The repository (any branch, any commit, any path, including in history that could be rewritten).
+- Public-facing site content, JSON endpoints, or logs served publicly.
+- Issues, pull requests, code review comments, commit messages.
+- AI chat transcripts shared with any third party, including other AI tools.
+- Screenshots, recordings, or pasted content shared externally.
+- Operating documents (`OPERATING_MODEL.md`, runbooks) committed to this repo.
+
+**SECRET items:**
+
+| # | Item |
+|---|---|
+| S1 | Validator staking private key, BLS private key, TLS certificate private parts |
+| S2 | Any wallet mnemonic, seed phrase, or private key (any chain, any role) |
+| S3 | Any wallet passphrase, file encryption passphrase, key-decryption phrase |
+| S4 | BasicAuth credentials for operator dashboards, peers page, or any private endpoint |
+| S5 | ntfy topic identifier (it is a bearer secret; possessing the name grants publish/subscribe) |
+| S6 | Renewal calendar token URL or any component of it |
+| S7 | Server login details: usernames, SSH key paths on the operator's workstation, SSH key fingerprints, SSH passwords, sudo passwords |
+| S8 | Specific IP addresses and specific hostnames of the validator host and the web host |
+| S9 | On-host filesystem paths in operator-controlled directories that store secrets, configuration containing secrets, or path patterns that reveal infrastructure layout |
+| S10 | Any third-party API key, signing key, bearer token, OAuth secret, or webhook secret used by this project |
+| S11 | Wallet addresses other than those the operator has chosen to publish on the public site; addresses MUST be reviewed before disclosure |
+
+When in doubt about an item not listed, treat it as SECRET until classified otherwise.
+
+### 4.2 CONFIDENTIAL classification
+
+CONFIDENTIAL items are not bearer secrets, but their disclosure shapes infrastructure attackability or operational predictability. Default behavior is **do not publish**. Disclosure requires explicit operator approval, recorded per artifact.
+
+| # | Item | Permitted form |
+|---|---|---|
+| C1 | Cloud provider name per infrastructure role, data center region, provider plan tier | Default: not published. Aggregate categorical reference only ("two-host separation across providers and regions"). Naming a provider or region requires per-artifact operator approval. |
+| C2 | Specific VPS CPU model, RAM size, disk size | Architectural context only when materially relevant to a public artifact; never as a public commitment. |
+| C3 | Specific monitoring tools, dependency versions known to carry CVEs | Refer by category in public docs ("a uptime-tracking daemon"); avoid specific tool names where they would expose attack surface. |
+| C4 | Operating schedule details, on-call hours, vacation windows | Public-facing cadence statements MAY describe windows in the aggregate; specific times that reveal operator absence SHALL NOT be published. |
+| C5 | Internal directory structure under operator-controlled paths | Refer abstractly; do not publish full paths even when files at those paths are themselves public. |
+
+### 4.3 PUBLIC classification
+
+Anything not classified above is PUBLIC, subject to truthfulness and to [§3](#3-absolute-prohibitions). PUBLIC items include:
+
+- The brand name "Freedom Yield".
+- The validator NodeID and its Proof of Possession.
+- Self-stake amount, fee rate, delegator count, validation cycle metadata.
+- Validator and delegation transaction IDs.
+- Explorer URLs referencing public on-chain validator artifacts.
+- Public site endpoints under `metal.freedom-yield.com`.
+- High-level architecture descriptions (two-host separation, automated deploy, monitoring discipline).
+- Operator jurisdiction stated as "Japan" without further specificity.
+
+### 4.4 Disclosure decision rule
+
+- When uncertain about the classification of an item, treat it as the **more restrictive** class.
+- Moving an item to a less restrictive class requires explicit operator approval and a written justification at the bottom of this document under "Reclassifications".
+- AI assistants encountering a potentially SECRET or CONFIDENTIAL item in chat MUST stop and ask before reproducing it in any artifact.
+
+## 5. Infrastructure Separation
+
+- The validator host and the web host MUST remain physically separate, on different providers, in different regions.
+- Network data flow between them MUST be unidirectional — validator host outward to web host only — through a single, narrow, key-authenticated channel.
+  - *Clarification (v0.5 — drafted by AI; approved by the operator on 2026-09-29 as a clarification of this section, effective at merge per [§9](#9-amendment-process)):* a reachability probe — a TCP connection attempt from the web host to the validator host's **public** peer-to-peer port, carrying no payload and no credentials — is not a "data flow" under this rule and is permitted. It moves no project data in either direction and gives the web host no ability to act on the validator host. Everything else in this section is unchanged.
+  - *Clarification (v0.6 — drafted by AI; approved by the operator on 2026-10-02 as a clarification of this section, effective at merge per [§9](#9-amendment-process)):* a path trace (`mtr`) from the web host toward the validator host's public address, run only when the external watch's peer-to-peer probe has just turned into an alert (at most once per alert), is likewise not a "data flow" under this rule and is permitted. Like the v0.5 probe it carries no payload and no credentials, moves no project data, and gives the web host no ability to act on the validator host; its output (which contains addresses) stays in the watch's private directory on the web host and is never pushed. Accepted trade-off: for the few seconds it runs, the validator host's address — already public as a network peer — is visible in the process list to other local users of the shared web host. Everything else in this section is unchanged.
+- The web host SHALL NOT possess credentials capable of acting on the validator host.
+- On a multi-tenant host where this project shares space with other operator projects, every action MUST be scoped to this project's paths, unit names, and project-prefixed identifiers. Host-wide configuration changes (host-wide nginx, system-wide cron, system-wide firewall flush, host-wide package operations) are prohibited.
+- Automated deploy pipelines apply to the web host, and to the validator host only along one fixed CI path (*v0.7; narrowed by v0.8*). On a push to `main` the CI pipeline (`.github/workflows/deploy.yml`, line numbers as of v0.8): (a) ensures the deploy path exists (`mkdir -p`, step "Ensure deploy path exists", `:236-240`); (b) advances the validator host's checkout of this repository to the pushed commit with `scripts/advance-host-checkout.sh` piped from the runner (step "Advance host checkout to origin/main", `:242-283`) — a fast-forward-only pull, preceded by discarding deploy dirt under `public/` and by a lossless self-heal that reverts (`git checkout --`) or removes (`rm --`) only files byte-identical to the incoming commit, never `reset` or `merge`; and (c) rsyncs the deploy-built `public/` tree into that checkout (step "Rsync public/ to VPS", `:285-311`). Since *v0.8* no web server is deployed to the validator host, and the CI pipeline MUST NOT build, start, stop, recreate, reload or configure **any** container there (the v0.7 step (d), "build, bring up and reload the project's site Caddy", is withdrawn). Delivering tracked files by the fast-forward in (b) is part of this path, including files that other host components read — e.g. the `metalgo` compose files and scripts run by the host's cron; such a file takes effect on the host only through a W7 change (compose files) or at the cron's next tick (scripts). The CI pipeline MUST NOT start, stop, recreate or configure the `metalgo` container, MUST NOT touch its data volume or keys, and MUST NOT edit the host's crontab, packages, or firewall.
+- Every other validator-host change (*v0.7*) is **operator-approved per change, AI-executed, and AI-verified**: the AI presents the specific change — commands or diff, expected output, rollback steps — and executes it on the host only after the operator has explicitly approved **that change** in chat; the AI then verifies the result against the expected output, and any mismatch halts and returns to the operator. An approval covers only the change it names; silence, a keystore unlock, or a standing or general instruction is not approval. The operator MAY execute any change personally instead. The operator's own manual work is limited to keystore unlock / lock, entering passwords and passphrases, wallet-UI operations, and validator key generation, installation, and destruction (Operating Model W5); these are never delegated to the AI. Nothing in this bullet authorizes a broadcast (governed solely by the PRIME DIRECTIVE and [§3.4](#34-broadcast-prohibitions-mainnet-first-ban)), relaxes [§3.3](#33-operational-prohibitions)'s requirement of explicit approval for each destructive action, or moves validator key generation, installation, or destruction (Operating Model W5) out of the operator's hands.
+- Manual changes on the web host (*v0.9 — a loosening amendment, **effective seven days after merge**: merged 2026-10-08 10:56 JST (merge commit 6da8456) → effective 2026-10-15 10:56 JST (merge + 7 days); see the changelog*) follow the same pattern as the validator-host bullet above: **operator-approved per change, AI-executed, and AI-verified**. The AI presents the specific change — commands or diff, expected output, rollback steps — and executes it on the web host only after the operator has explicitly approved **that change** in chat; it then verifies the result against the expected output, and any mismatch halts and returns to the operator. An approval covers only the change it names; silence or a standing or general instruction is not approval. The operator MAY execute any change personally instead. The scope is limited to this project's own container `caddy-static` and this project's own files on that shared host: inspecting and executing commands inside `caddy-static` (e.g. `caddy reload`), a throwaway validation container run from `caddy-static`'s running image with no network and removed on exit, and writing this project's own files (e.g. its Caddyfile, and the dated backups kept beside it, of which only the newest few are retained). It does not authorize creating, recreating, stopping or removing `caddy-static` itself, touching any other project's container or files, or any host-wide operation; the multi-tenant scoping bullet above applies in full. CI's web-host path remains the `public/` rsync only. Nothing in this bullet relaxes [§3.3](#33-operational-prohibitions)'s requirement of explicit approval for each destructive action, gives the web host any credential capable of acting on the validator host, or authorizes a broadcast. **Until the effective date, the v0.8 text governs:** no section authorizes the AI to execute a manual change on the web host, so the AI MUST NOT execute one; the operator MAY execute such a change personally.
+- Infrastructure-altering changes (key rotation, host rebuild, provider migration, `metalgo` upgrade, dependency change affecting validator code path) MUST be planned with documented rollback steps before execution.
+
+## 6. Communication Discipline
+
+This chapter governs how the operator and AI assistants communicate during the work.
+
+- **Verify before reporting.** "Done", "fixed", "deployed" claims MUST be backed by direct verification: the actual command output, the rendered page read back, the endpoint hit and inspected. Inference is not verification.
+- **Propagate conceptual changes.** When a concept, alert definition, or model is renamed or restructured, every surface using it (scripts, public HTML, JSON, CI, calendar files, push notification templates, docs) MUST be located by full-repository search and updated in the same change.
+- **Two failures, stop.** If the same operation fails twice in distinct attempts, halt. Surface the assumption that may be wrong before a third attempt under the same assumption.
+- **No false urgency.** Scheduled events are not anomalies. Anomaly tone is reserved for real anomalies. Push notifications carry this discipline.
+- **No silent scope expansion.** AI MUST NOT introduce refactors, abstractions, dependency changes, or "cleanup while I'm here" that were not explicitly requested.
+- **Sanitize before pasting.** Before any operator or AI shares a transcript, screenshot, or excerpt externally — including to other AI tools — SECRET ([§4.1](#41-secret-classification)) items MUST be removed and CONFIDENTIAL ([§4.2](#42-confidential-classification)) items reviewed.
+
+## 7. Public Claims and Disclosure Standard
+
+Any public claim — on the site, in `/api/*` endpoints, in social posts, in third-party listings — MUST satisfy all of:
+
+- **Truthful at time of writing.** No statement may exceed delivered reality.
+- **Verifiable on chain or by the reader.** Where the claim references a measurable property (uptime, NodeID, stake, fee, cycle count, delegator count), the underlying data MUST be linked or exposed such that an independent reader can confirm it.
+- **Current.** Stale claims (past-cycle data presented as current, deprecated commitments) MUST be removed or clearly relabeled within one week of becoming stale.
+- **Honest about scale.** Disclosure of stake size, validator age, and delegator count MUST be plain and current. Inflation, padding, or omission designed to suggest larger scale is forbidden by [§3.2](#32-claim-prohibitions).
+- **Honest about jurisdiction and structure.** Operator jurisdiction (Japan) MAY be stated. Operator legal entity name MUST NOT ([§3.1](#31-identity-prohibitions)). Affiliation language ("we are X", "we partner with Y") MUST NOT misrepresent independent operation.
+- **Plain about absence.** When a capability is not present, the public site MUST NOT imply it. Silence is permitted; implication is not.
+
+## 8. Scope Boundaries
+
+- This Constitution applies only to the Freedom Yield Metal Blockchain validator project. Functionality, branding-specific copy, or financial framing from any other project SHALL NOT be merged into this repository.
+- Other ventures operated by the same operator are **out of scope of this Constitution**. No reference to them appears here. No financial figure from them appears here. No code from them is imported here.
+- Tax, accounting, insurance, corporate filings, and operator personal compliance matters are **out of scope of this Constitution**. They are handled outside this repository, in records not governed by this document.
+- Future scope expansion (e.g. running a subnet, operating additional validators, offering paid services) requires constitutional amendment under [§9](#9-amendment-process), not a code change.
+
+## 9. Amendment Process
+
+- This Constitution may be amended only by the operator. AI assistance MAY draft proposed amendments but MAY NOT enact them.
+- An amendment requires:
+  1. A pull request that modifies this document.
+  2. A version bump in the front-matter `Status:` line.
+  3. A changelog entry at the bottom of this document summarizing what changed and why.
+  4. Explicit operator approval at merge time.
+- **Tightening amendments** (adding a prohibition, narrowing a classification, raising a priority) take effect at merge.
+- **Loosening amendments** (removing a prohibition, broadening a classification, lowering a priority) take effect **seven days after merge**, during which window the operator may revert without further process.
+- Suggestions from external advisors, AI tools, or community input do not amend this document; they may motivate the operator to open an amendment pull request.
+
+---
+
+## Changelog
+
+- **v0.5** — *Drafted by AI; approved by the operator on 2026-09-29 as a clarification (not a loosening amendment), effective at merge per [§9](#9-amendment-process).* **What:** adds one clarification under [§5](#5-infrastructure-separation): a reachability probe (a TCP connection attempt without payload or credentials) from the web host to the validator host's public peer-to-peer port is not a "data flow" under the unidirectional-flow rule and is permitted. Everything else in §5 is unchanged: project data still flows only validator host → web host through the single key-authenticated channel, and the web host still holds no credential that can act on the validator host. **Why:** starting 2026-09-24 the validator host was unreachable for about 100 hours and no alert was delivered, because every push-capable monitor ran on that same host. The off-host external watch (`scripts/external-watch.sh`, `docs/MONITORING_OPS.md` §14) detects this class of outage from the web host within about 10 minutes, and its fastest check is exactly such a probe of the port that is already open to the whole internet. Operator decision of 2026-09-29 to keep the probe and record this interpretation.
+- **v0.6** — *Drafted by AI; approved by the operator on 2026-10-02 as a clarification (not a loosening amendment), effective at merge per [§9](#9-amendment-process).* **What:** adds one clarification under [§5](#5-infrastructure-separation): an `mtr` path trace from the web host toward the validator host's public address, at most once per peer-to-peer alert, is not a "data flow" and is permitted; the process-list visibility of the (already public) address on the shared web host is an accepted trade-off. **Why:** the 2026-09-24 outage lasted about 100 hours largely because nobody escalated to the provider; the provider later answered that its own network had no known outage and that an external uplink was the likely cause. Capturing the trace at the moment of the alert gives the operator a ready ticket draft (`scripts/external-watch.sh`, `docs/MONITORING_OPS.md` §14.3) and the partition-scenario runbook (`docs/DISASTER_RECOVERY.md`) its first signal.
+- **v0.7** — *Drafted by AI; approved by the operator in chat on 2026-10-07 as a **clarification**, effective immediately (2026-10-07), the same treatment as v0.5 and v0.6. The operator was told in chat that by its text this change is otherwise a loosening amendment, which under [§9](#9-amendment-process) would take effect seven days after merge, and chose immediate effect, knowingly waiving that cooling-off period for this amendment, on the ground that validator-host work has been run this way since the operator's rule of 2026-08-04 and the text lagged the practice.* **What:** in [§5](#5-infrastructure-separation), the v0.6 bullet "Automated deploy pipelines apply to the web host only. Validator-host changes are operator-approved and operator-executed. AI assistance MAY produce commands, reviewable diffs, and verification steps; execution and approval rest with the operator." is replaced by two bullets: (1) the CI pipeline's actual, sanctioned path onto the validator host as `.github/workflows/deploy.yml` performs it — deploy-path `mkdir` (`:236`), checkout advance by fast-forward with the lossless self-heal of `scripts/advance-host-checkout.sh` (`:242`), `public/` rsync (`:285`), site-Caddy build / up / reload with the site compose files only (`:306`, `:331`) — where delivering tracked files (including `metalgo` compose files and cron-run scripts) is part of the path, but CI never starts, stops, recreates or configures the `metalgo` container, never touches its data volume or keys, and never edits crontab, packages or firewall; and (2) the pattern for every other validator-host change: operator approval per change in chat → AI executes on the host → AI verifies against the expected output; the operator's manual work stays limited to keystore unlock / lock, passwords / passphrases, wallet-UI operations, and W5 key generation / installation / destruction. All other §5 rules — host separation, unidirectional data flow, no web-host credential to the validator host, multi-tenant scoping, documented rollback before infrastructure-altering changes — and [§3.3](#33-operational-prohibitions)'s per-action approval for destructive actions are unchanged. `docs/OPERATING_MODEL.md` (roles, W6, W7, cadence table, responsibility matrix), `CLAUDE.md` and `docs/CYCLE_GATE.md`'s maintenance-window section are aligned. **Why:** an audit found that `docs/CYCLE_GATE.md`'s maintenance-window section has host steps executed by AI@host after an operator's chat approval, contradicting v0.6 §5 and Operating Model W7; and that `.github/workflows/deploy.yml` acts on the validator host (the steps above), contradicting "Automated deploy pipelines apply to the web host only" and W6's "The validator host is not touched". The operator chose to make the text match the practised pattern — every host command executed by the AI from a per-change-approved plan and verified against stated expectations — rather than to change the practice.
+- **v0.8** — *Drafted by AI; approved by the operator in chat on 2026-10-07 as a **tightening amendment**, effective at merge per [§9](#9-amendment-process).* **What:** in [§5](#5-infrastructure-separation), CI's sanctioned path onto the validator host loses step (d) "builds, brings up and reloads the project's site Caddy with the site compose files only"; the path is now deploy-path `mkdir`, checkout fast-forward with the lossless self-heal, and the `public/` rsync only, and the CI pipeline MUST NOT build, start, stop, recreate, reload or configure any container on the validator host (v0.7 forbade this for the `metalgo` container only). This narrows what CI may do and adds a prohibition, so it is a tightening under §9 and takes effect at merge; no cooling-off period applies. The `public/` rsync is kept for now even though nothing on the validator host reads it any more; withdrawing it would be a further tightening for a later decision. Everything else in §5 is unchanged. `docs/OPERATING_MODEL.md` (roles, W6) and `CLAUDE.md` are aligned. **Why:** after the operator ops dashboard was abolished on 2026-10-07, the validator host's `caddy-static` (compose project `site`, bound to `127.0.0.1:8085`) served nothing; its only client was the deploy workflow's own health check, while the public site is served by the web host. The operator decided on 2026-10-07 to remove that Caddy from the validator host: an unused, internet-facing-software container on the validator host is attack surface and resource use with no benefit, and keeping CI's authority to rebuild it would recreate it on every deploy.
+- **v0.9** — *Drafted by AI; approved by the operator in chat on 2026-10-08 as a **loosening amendment**. The operator did not ask for immediate effect, so under [§9](#9-amendment-process) it takes effect **seven days after merge** (merged 2026-10-08 10:56 JST (merge commit 6da8456) → effective 2026-10-15 10:56 JST (merge + 7 days)); during that window the operator may revert it without further process, and until it takes effect the v0.8 text governs (the AI executes no manual web-host change; the operator may do so personally).* **What:** adds one bullet to [§5](#5-infrastructure-separation): manual changes on the web host follow the validator-host pattern of v0.7 — operator approval per change in chat → AI executes → AI verifies against the expected output — limited to this project's own container `caddy-static` (commands inside it such as `caddy reload`, and a throwaway, network-less validation container from its running image) and this project's own files on that shared host. Not covered: creating, recreating, stopping or removing `caddy-static`, any other project's container or files, and any host-wide operation. The multi-tenant scoping bullet, CI's web-host path (the `public/` rsync only), [§3.3](#33-operational-prohibitions)'s per-action approval for destructive actions, the rule that the web host holds no credential that can act on the validator host, and the PRIME DIRECTIVE are unchanged. `docs/OPERATING_MODEL.md` (roles, W6, W7, cadence table, responsibility matrix), `CLAUDE.md` and `docs/DEPLOY_SETUP.md` §9 are aligned. **Why:** a Caddyfile change in this repository reaches the public site only through a manual change on the web host (`scripts/web-host-caddy-apply.sh`, `docs/DEPLOY_SETUP.md` §9), and an audit on 2026-10-08 found that no section governed such a change while the Operating Model's responsibility matrix gave the AI no role in it and W6 said no container is started there. The operator chose to govern web-host changes by the same, already-practised pattern as validator-host changes, scoped to this project's own container and files, rather than leave the procedure without a rule.
+- **v0.4** — Added [§3.5 Keystore separation prohibitions](#35-keystore-separation-prohibitions-proton-cli-key-custody), a **tightening amendment** (effective at merge per [§9](#9-amendment-process)) proposed by the operator on 2026-07-13. New rules: every `proton-cli` command presented to the operator MUST carry an explicit project-scoped `HOME` prefix (`~/.metal-fy-proton` mainnet / `~/.metal-fy-proton-test` testnet); the default shared keystore MUST NOT be used for this project; a dedicated keystore MUST be created before any key operation rather than falling back to the default; testnet and mainnet keys MUST live in separate keystores and MUST NOT be reused across networks; account/permission topology MUST stay identical between testnet and mainnet so testnet rehearsal remains a faithful stand-in for mainnet. Trigger: on 2026-07-10, while separating keystores across co-resident projects, plaintext owner/active/anchor private keys for this project were pasted into a chat transcript from an unprefixed `proton-cli` command run against the shared default keystore, requiring a full key rotation. Root cause was co-residency in a default keystore combined with commands presented without an explicit `HOME` scope.
+- **v0.3** — Elevated the testnet-first rule from §3.4 (one of many sub-sections) to a **PRIME DIRECTIVE** placed at the very top of the Constitution, before §0, in unmissable form. §3.4 retained as enforcement detail. Rationale: operator determined that a rule tucked inside §3.4 was insufficient deterrent for the class of error that motivated v0.2; the rule must be the first thing any human or AI reads in this document, and it must override every other section. Trigger: same 2026-07-01T04:24Z event as v0.2, but with the additional observation that the AI session had access to §3.4 in principle and still failed the discipline — codification alone is not enforcement; placement matters.
+- **v0.2** — Added §3.4 Broadcast prohibitions (mainnet-first ban). Triggered by an AI-driven unauthorized mainnet A-chain broadcast on 2026-07-01T04:24Z during an exploratory investigation that was self-described as "testnet で試行" but was executed without any chain check. The event proved that "obvious" testnet-first discipline requires constitutional-level codification, not just operational memo. New rule: any new broadcast pipeline MUST first execute successfully on testnet; mainnet is opt-in only after per-invocation operator authorization.
+- **v0.1** — Applied public-repository tone and information-hygiene cleanup before publication.
+- **v0** — Initial draft. Establishes the ten chapters, the SECRET / CONFIDENTIAL / PUBLIC classification, and the operator-only amendment process.
+
+## Reclassifications
+
+- **2026-10-27** — *Approved by the operator on 2026-10-27 ("推奨で").* The three XPR account names used for anchoring, history and testnet rehearsal appear on the public site's verification pages, in anchor receipt examples, in the legacy A-chain records, in docs and in tests, and are PUBLIC. Justification: anyone can look them up in a block explorer from a public transaction id, so hiding them would not protect anything and would only break the verification procedure (matching the actor of the four memos). These accounts exist for anchoring only; funds are never sent directly from the operator's holding wallets. Scope: changes to private keys or to the permission structure are out of scope (S1/S2 unchanged), and wallet addresses (S11) are unchanged.
+- **2026-10-03** — *Approved by the operator on 2026-10-03.* The external watch's **latest** result (the three checks `fresh` / `p2p` / `chain` as pass, fail or unconfirmed, plus the names of checks currently alerting) and its **24-hour aggregate counts** (runs, failed runs, unconfirmed-only runs, gaps longer than 7 minutes) are PUBLIC, published by the watch on the web host as `/api/watch-status.json` for the operator's phone status page (`/status/`). Operational state of this kind is [§4.2](#42-confidential-classification) C4 material. Justification: the latest reachability is already observable by anyone who connects to the validator's public peer-to-peer port, so publishing it adds no new knowledge; the per-run timeline is deliberately **not** published (an earlier draft that exposed 5-minute results for 24 hours was rejected by the operator in favour of aggregates), so the operator's response hours cannot be read from recovery times. The per-run log stays private in the watch directory on the web host. The file carries no host, address, port, topic, path or diagnostic text. *Same-day update (operator decision, 2026-10-03):* the page and this file were then placed behind Cloudflare Access (operator-only, one-time PIN; `docs/CF_POLICY.md`), so they are no longer served to third parties; this entry remains the ceiling of what may be exposed if that protection is ever removed. The 2026-09-24..28 outage window (`/api/known-outages.json`) is published so the page can compute the expected uptime; the outage itself is already visible as the drop in the public daily uptime record (`/api/uptime-recent.json`).
+- **2026-09-29** — *Approved by the operator on 2026-09-29.* The web-host watch layout `$HOME/metal-fy-watch/{bin,etc,state,log,backup}` — including the relative location of the watch's own topic file, `etc/ntfy-topic` — is [§4.1](#41-secret-classification) S9 material (a path pattern under an operator-controlled directory that stores a secret). It is published with operator approval because it names no host and no account: relative to an unnamed account home it reveals no infrastructure identity. The installer, the watch and the runbook (`scripts/install-web-host-external-watch.sh`, `scripts/external-watch.sh`, `docs/MONITORING_OPS.md` §14) need this literal layout to function and to be reviewable. The topic value itself remains S5 and is never published.
+- **2026-07-13** — The operator-workstation `proton-cli` keystore paths named by [§3.5](#35-keystore-separation-prohibitions-proton-cli-key-custody) (`~/.metal-fy-proton`, `~/.metal-fy-proton-test`, and the default shared-keystore location under `Library/Preferences/@proton/cli-nodejs/`) are [§4.2](#42-confidential-classification) C5 material (internal directory structure under an operator-controlled path). They are published here with operator approval because §3.5's enforcement is mechanical — guard scripts and presented commands assert against these exact literal path strings — and cannot function if the paths are abstracted away. The paths were already public via `docs/ANCHOR_ACCOUNT_KEY_ROTATION.md` prior to this amendment; this entry is the C5 approval record, not a new disclosure.
+
+---
+
+## See also
+
+- `docs/OPERATING_MODEL.md` — concrete workflows, cadences, and responsibility assignment that implement this Constitution. Where they conflict, this Constitution prevails.
+- `docs/SECURITY_LAYERS.md` — defense-in-depth implementation for the web side.
+- `docs/INCIDENT_RESPONSE.md` — incident runbook implementing the response side of W4.
+- `docs/KEY_ROTATION.md` — key rotation runbook implementing W5.
+- `docs/VALIDATOR_RENEWAL.md` — cycle renewal runbook implementing W3.

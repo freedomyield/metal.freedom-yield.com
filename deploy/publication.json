@@ -1,0 +1,708 @@
+{
+  "_comment": "Declared inventory of what this repository publishes THROUGH THE THREE GOVERNED SURFACES listed in coverage.governs, and of the derived files that must agree with it. It is NOT an inventory of every published byte: 179 files under public/ are tracked and deployed and this file names 30 of them; the remaining 149 are covered by a checked disjointness rule (T9), not by enumeration. WHAT THIS GUARANTEES TODAY: nothing is generated FROM this file at runtime yet. deploy/feed-excludes.txt, .gitignore and scripts/push-to-web-host.sh are still hand-maintained and are still what the deploy and the push actually obey. All this file buys, as of C1 Phase 0, is that scripts/deploy/render-publication.sh can reproduce those three regions byte-for-byte from here, and tests/publication-registry/ fails if it ever cannot. That is a detector, not an enforcement: a hand edit to one of those three files that is NOT mirrored here turns the test red, but nothing stops the edit from being made or deployed. Turning consumers around to read this file is C1 Phase 1 and later.",
+  "schema_version": 1,
+  "recorded_at": "2026-08-07",
+  "spec": "docs/superpowers/specs/2026-08-06-single-source-of-truth-design.md (C1)",
+
+  "kind_definitions": {
+    "_comment": "The taxonomy is defined by ONE measurable question: can these bytes change without a commit to this repository? That question is what decides whether a sha256 pin in a signed manifest can survive, which is the only thing the kind gate acts on.",
+    "stream": "Content can change without any commit — host cron, runtime push, or an operator writing straight to the public tree. A pin taken at signing time goes stale on its own. MUST NOT appear in pinned_by.",
+    "record": "The URL's NAME is derived from a digest of the content it addresses, so whatever that digest covers cannot change without the name changing too. Safe to pin. CORRECTED 2026-08-14 — this read 'Immutable once written, at a URL that never resolves to different bytes', which is stronger than any record this repository actually publishes. A name binds only what its digest covers, and that need NOT be the whole file: for api/archive/ it is the three DAG branches and not the provenance fields sitting beside them, and the generator overwrites an existing archive unconditionally. What binds every byte is the sha256 in the signed manifest, as of signing. Read the row's record_caveat for how far a given name reaches before pinning on the strength of this kind alone.",
+    "static": "Changes only when a commit in this repository changes it, and is delivered by the git deploy. Safe to pin, on the condition that the commit which changes it also re-issues the pin — that condition is what scripts/check-identity-pins.sh enforces.",
+    "_kind_is_the_floor": "kind is the SAFE FLOOR, never a summary. A consumer that reads only .kind and nothing else must always end up doing the safe thing, so a path is classified by its WEAKEST moment, not its typical one. Qualifier fields (becomes_record_after, record_caveat) may only WIDEN what a consumer that understands them may do; they never narrow what .kind already permits, and a consumer that ignores them stays correct. This is why api/peers-history/ is kind=stream even though every snapshot older than the current UTC day is immutable: at any instant one member is being rewritten, and a consumer pinning on the strength of .kind alone would pin exactly that one."
+  },
+
+  "coverage": {
+    "_comment": "Read this before treating this file as a source of truth for anything. It is deliberately placed above the data.",
+    "governs": [
+      "deploy/feed-excludes.txt — the whole file",
+      ".gitignore — only the '# ---- Runtime-generated site data ----' section, from that header to the line before the next '# ---- ' header",
+      "scripts/push-to-web-host.sh — only two regions: the 'Allowed targets' header comment table, and the flat-filename case pattern line"
+    ],
+    "does_not_govern": [
+      {
+        "surface": "The rest of the tracked public/ tree (HTML pages, CSS, JS, images, fonts) — everything under public/ that is neither public/api/* nor public/.well-known/*.",
+        "measured": "149 files: git ls-files public/ = 179 total, git ls-files public/api/ public/.well-known/ = 30, and all 30 of those ARE enumerated in publications[] (T16 fails if that stops being true in either direction). 179 - 30 = 149 unenumerated, 2026-08-07.",
+        "why_excluded": "They have exactly one owner (the git deploy), are never pushed, and are never pinned, so there is no lock-step obligation for a registry to hold. tests/publication-registry/ checks the claim rather than assuming it: T9 asserts every tracked file under public/ is disjoint from every feed exclude and every push name, so any of the 149 that ever acquires a second owner is named by a failing test. T16 separately asserts that the two prefixes this file DOES claim (public/api/, public/.well-known/) are enumerated exhaustively — adding a tracked file under either without a row here is a failure."
+      },
+      {
+        "surface": "/etc/cron.d on the validator host — the cron files that actually invoke the producers.",
+        "measured": "Seven cron basenames have a creating installer in this repo (metal-host-advance, metal-anchor-watch, metal-anchor-publish-health, metal-identity-pins, metal-host-drift, metal-watch-validators, metal-pulsevm-watch — grep of scripts/install-*.sh for cron.d/, re-measured 2026-08-17 when metal-pulsevm-watch landed; the same grep returned six on 2026-08-07). NONE of them produces a publication listed here. Of the 21 push-owned publications (publisher push / push-subdir / push-out-of-band), 17 name a cron and ALL 17 carry owner.cron_installer_in_repo=false, i.e. zero of them have a repo-verifiable command body. The other 3 — api/anchor-receipt.json, api/anchor-history.jsonl, api/archive/ — are on NO cron at all and carry cron_installer_in_repo=null; they are produced by hand through scripts/run-anchor-pipeline.sh after an on-chain broadcast. The 21st, api/watch-status.json (added 2026-10-03), runs on the web host, not the validator host: it is written by scripts/external-watch.sh from a user-crontab block whose installer IS in this repo (scripts/install-web-host-external-watch.sh), so it carries cron_file=null and cron_installer_in_repo=true. Do not read this as 'push implies cron'.",
+        "why_excluded": "A registry cannot govern text it cannot read. The spec (§9) records that 15 project cron files run in production and 7 have no repo installer; that count was measured on the host, not by this file, and is not re-measured here. What IS measured here is the repo side: the schedule, the arguments, and the environment that decide when and where a producer writes are outside this file for every push-owned publication. Do not read owner.producer as 'the registry controls this artifact' — it means only 'this script contains the write'."
+      },
+      {
+        "surface": "The web host's forced-command receive wrapper (/home/<deploy user>/bin/receive-metal-push).",
+        "measured": "Its flat-filename allowlist is operator-local and not in this repo. Only the subdirectory block is (scripts/deploy/receive-subdir-allowlist.snippet.sh), and tests/publication-registry/ checks that block's basename patterns against this file and against the sender.",
+        "why_excluded": "Adding a name here and to the sender still leaves the receiver to be changed by hand on the host. A push whose name is new here will be rejected remotely until that happens."
+      },
+      {
+        "surface": "Whether anything listed here is actually reachable at its public URL right now.",
+        "measured": "Not measured. No HTTP request is made by this file or by its tests.",
+        "why_excluded": "Phase 0 is offline and hermetic by construction. Liveness is the reconciler's job (spec §9), not the registry's."
+      }
+    ]
+  },
+
+  "publications": [
+    {
+      "path": "api/validator.json",
+      "kind": "stream",
+      "publisher": "push",
+      "owner": {
+        "producer": "scripts/node-info.sh",
+        "producer_evidence": "scripts/node-info.sh:32 OUT=\"${ROOT}/public/api/validator.json\"",
+        "runs_on": "validator-host",
+        "cron_file": "metal-node-info",
+        "cron_installer_in_repo": false
+      },
+      "push_name": "validator.json",
+      "push_target": "/public/api/validator.json",
+      "push_content_check": "JSON-validated",
+      "rsync_delete_exclude": true,
+      "gitignored": true,
+      "git_tracked": false,
+      "pinned_by": []
+    },
+    {
+      "path": "api/server-status.json",
+      "kind": "stream",
+      "publisher": "push-out-of-band",
+      "owner": {
+        "producer": "scripts/server-status.sh",
+        "producer_evidence": "scripts/server-status.sh:12 OUT=\"${OUT:-${REPO_BASE}/public/api/server-status.json}\"",
+        "runs_on": "validator-host",
+        "cron_file": "metal-server-status",
+        "cron_installer_in_repo": false
+      },
+      "push_name": null,
+      "rsync_delete_exclude": true,
+      "gitignored": true,
+      "git_tracked": false,
+      "pinned_by": [],
+      "note": "The one asymmetric entry: excluded from the deploy's --delete, but NOT on scripts/push-to-web-host.sh's allowlist. scripts/push-to-web-host.sh (header, 'Note:') states it is delivered by a different mechanism and does not name it. This file does not know what that mechanism is; it is not in the repo."
+    },
+    {
+      "path": "api/peer-geo.json",
+      "kind": "stream",
+      "publisher": "push",
+      "owner": {
+        "producer": "scripts/peer-geo.py",
+        "producer_evidence": "scripts/peer-geo.py:45 OUT_PATH = sys.argv[1] if len(sys.argv) > 1 else \"/tmp/peer-geo.json\" ... :150 json.dump(output, f). Note the default: run with no argument this script does NOT write anywhere under public/api/ at all. The destination is an argument supplied by the (repo-external) cron, so the binding between this producer and this publication is the one thing here that cannot be verified from the repo.",
+        "runs_on": "validator-host",
+        "cron_file": "freedom-yield-peer-geo",
+        "cron_installer_in_repo": false
+      },
+      "push_name": "peer-geo.json",
+      "push_target": "/public/api/peer-geo.json",
+      "push_content_check": "JSON-validated",
+      "rsync_delete_exclude": true,
+      "gitignored": true,
+      "git_tracked": false,
+      "pinned_by": []
+    },
+    {
+      "path": "api/uptime-recent.json",
+      "kind": "stream",
+      "publisher": "push",
+      "owner": {
+        "producer": "scripts/uptime-history.sh",
+        "producer_evidence": "scripts/uptime-history.sh:86 OUT_RECENT=\"${ROOT}/public/api/uptime-recent.json\"",
+        "runs_on": "validator-host",
+        "cron_file": "metal-uptime-history",
+        "cron_installer_in_repo": false
+      },
+      "push_name": "uptime-recent.json",
+      "push_target": "/public/api/uptime-recent.json",
+      "push_content_check": "JSON-validated",
+      "rsync_delete_exclude": true,
+      "gitignored": true,
+      "git_tracked": false,
+      "pinned_by": []
+    },
+    {
+      "path": "api/uptime-cycles.json",
+      "kind": "stream",
+      "publisher": "push",
+      "owner": {
+        "producer": "scripts/uptime-history.sh",
+        "producer_evidence": "scripts/uptime-history.sh:87 OUT_CYCLES=\"${ROOT}/public/api/uptime-cycles.json\"",
+        "runs_on": "validator-host",
+        "cron_file": "metal-uptime-history",
+        "cron_installer_in_repo": false
+      },
+      "push_name": "uptime-cycles.json",
+      "push_target": "/public/api/uptime-cycles.json",
+      "push_content_check": "JSON-validated",
+      "rsync_delete_exclude": true,
+      "gitignored": true,
+      "git_tracked": false,
+      "pinned_by": []
+    },
+    {
+      "path": "api/peers.json",
+      "kind": "stream",
+      "publisher": "push",
+      "owner": {
+        "producer": "scripts/peer-validators.sh",
+        "producer_evidence": "scripts/peer-validators.sh:57 OUT=\"${OUT:-$ROOT/public/api/peers.json}\"",
+        "runs_on": "validator-host",
+        "cron_file": "metal-peer-validators",
+        "cron_installer_in_repo": false
+      },
+      "push_name": "peers.json",
+      "push_target": "/public/api/peers.json",
+      "push_content_check": "JSON-validated",
+      "rsync_delete_exclude": true,
+      "gitignored": true,
+      "git_tracked": false,
+      "pinned_by": []
+    },
+    {
+      "path": "api/evidence.json",
+      "kind": "stream",
+      "publisher": "push",
+      "owner": {
+        "producer": "scripts/gen-evidence.sh",
+        "producer_evidence": "scripts/gen-evidence.sh:62 OUT=\"${REPO_BASE}/public/api/evidence.json\"",
+        "runs_on": "validator-host",
+        "cron_file": "metal-evidence",
+        "cron_installer_in_repo": false
+      },
+      "push_name": "evidence.json",
+      "push_target": "/public/api/evidence.json",
+      "push_content_check": "JSON-validated",
+      "rsync_delete_exclude": true,
+      "gitignored": true,
+      "git_tracked": false,
+      "pinned_by": []
+    },
+    {
+      "path": "api/fee-market.json",
+      "kind": "stream",
+      "publisher": "push",
+      "owner": {
+        "producer": "scripts/peer-analytics.py",
+        "producer_evidence": "scripts/peer-analytics.py:256-258 OUT_FEE ... fy_write(\"the public fee-market preview\", OUT_FEE, ...) — invoked from scripts/peer-validators.sh:245. NOT scripts/node-info.sh, which docs/DEPLOY_OWNERSHIP_MATRIX.md names as the producer; node-info.sh contains zero occurrences of 'fee-market'.",
+        "runs_on": "validator-host",
+        "cron_file": "metal-peer-validators",
+        "cron_installer_in_repo": false
+      },
+      "push_name": "fee-market.json",
+      "push_target": "/public/api/fee-market.json",
+      "push_content_check": "JSON-validated",
+      "rsync_delete_exclude": true,
+      "gitignored": true,
+      "git_tracked": false,
+      "pinned_by": []
+    },
+    {
+      "path": "api/fee-market-history.jsonl",
+      "kind": "stream",
+      "publisher": "push",
+      "owner": {
+        "producer": "scripts/peer-analytics.py",
+        "producer_evidence": "scripts/peer-analytics.py:261-262 OUT_FEE_HISTORY ... fy_write(\"the public full fee-market history mirror\", ...) — same correction as api/fee-market.json.",
+        "runs_on": "validator-host",
+        "cron_file": "metal-peer-validators",
+        "cron_installer_in_repo": false
+      },
+      "push_name": "fee-market-history.jsonl",
+      "push_target": "/public/api/fee-market-history.jsonl",
+      "push_content_check": "JSONL",
+      "rsync_delete_exclude": true,
+      "gitignored": true,
+      "git_tracked": false,
+      "pinned_by": []
+    },
+    {
+      "path": "api/node-health-recent.json",
+      "kind": "stream",
+      "publisher": "push",
+      "owner": {
+        "producer": "scripts/node-health-daily.sh",
+        "producer_evidence": "scripts/node-health-daily.sh:52 OUT_PUBLIC=\"${ROOT}/public/api/node-health-recent.json\"",
+        "runs_on": "validator-host",
+        "cron_file": "metal-node-health",
+        "cron_installer_in_repo": false
+      },
+      "push_name": "node-health-recent.json",
+      "push_target": "/public/api/node-health-recent.json",
+      "push_content_check": "JSON-validated",
+      "rsync_delete_exclude": true,
+      "gitignored": true,
+      "git_tracked": false,
+      "pinned_by": []
+    },
+    {
+      "path": "api/peers-changes.json",
+      "kind": "stream",
+      "publisher": "push",
+      "owner": {
+        "producer": "scripts/peer-analytics.py",
+        "producer_evidence": "destination injected by scripts/peer-validators.sh:241 OUT_CHANGES=\"${ROOT}/public/api/peers-changes.json\" into the python3 call at :245",
+        "runs_on": "validator-host",
+        "cron_file": "metal-peer-validators",
+        "cron_installer_in_repo": false
+      },
+      "push_name": "peers-changes.json",
+      "push_target": "/public/api/peers-changes.json",
+      "push_content_check": "JSON-validated",
+      "rsync_delete_exclude": true,
+      "gitignored": true,
+      "git_tracked": false,
+      "pinned_by": []
+    },
+    {
+      "path": "api/peers-gini.json",
+      "kind": "stream",
+      "publisher": "push",
+      "owner": {
+        "producer": "scripts/peer-analytics.py",
+        "producer_evidence": "destination injected by scripts/peer-validators.sh:242 OUT_GINI=\"${ROOT}/public/api/peers-gini.json\"",
+        "runs_on": "validator-host",
+        "cron_file": "metal-peer-validators",
+        "cron_installer_in_repo": false
+      },
+      "push_name": "peers-gini.json",
+      "push_target": "/public/api/peers-gini.json",
+      "push_content_check": "JSON-validated",
+      "rsync_delete_exclude": true,
+      "gitignored": true,
+      "git_tracked": false,
+      "pinned_by": []
+    },
+    {
+      "path": "api/peers-gini-history.jsonl",
+      "kind": "stream",
+      "publisher": "push",
+      "owner": {
+        "producer": "scripts/peer-analytics.py",
+        "producer_evidence": "destination injected by scripts/peer-validators.sh:243 OUT_GINI_HISTORY=\"${ROOT}/public/api/peers-gini-history.jsonl\"",
+        "runs_on": "validator-host",
+        "cron_file": "metal-peer-validators",
+        "cron_installer_in_repo": false
+      },
+      "push_name": "peers-gini-history.jsonl",
+      "push_target": "/public/api/peers-gini-history.jsonl",
+      "push_content_check": "JSONL",
+      "rsync_delete_exclude": true,
+      "gitignored": true,
+      "git_tracked": false,
+      "pinned_by": []
+    },
+    {
+      "path": "api/peers-history-index.json",
+      "kind": "stream",
+      "publisher": "push",
+      "owner": {
+        "producer": "scripts/peer-validators.sh",
+        "producer_evidence": "scripts/peer-validators.sh:381 SNAPSHOT_INDEX=\"${ROOT}/public/api/peers-history-index.json\" (inline python3, not peer-analytics.py)",
+        "runs_on": "validator-host",
+        "cron_file": "metal-peer-validators",
+        "cron_installer_in_repo": false
+      },
+      "push_name": "peers-history-index.json",
+      "push_target": "/public/api/peers-history-index.json",
+      "push_content_check": "JSON-validated",
+      "rsync_delete_exclude": true,
+      "gitignored": true,
+      "git_tracked": false,
+      "pinned_by": []
+    },
+    {
+      "path": "api/cycle-history.jsonl",
+      "kind": "stream",
+      "publisher": "push",
+      "owner": {
+        "producer": "scripts/gen-cycle-history.sh",
+        "producer_evidence": "scripts/gen-cycle-history.sh:107 OUT=\"${OUT_JSONL:-${ROOT}/public/api/cycle-history.jsonl}\"",
+        "runs_on": "validator-host",
+        "cron_file": "metal-cycle-history",
+        "cron_installer_in_repo": false
+      },
+      "push_name": "cycle-history.jsonl",
+      "push_target": "/public/api/cycle-history.jsonl",
+      "push_content_check": "JSONL",
+      "rsync_delete_exclude": true,
+      "gitignored": true,
+      "git_tracked": false,
+      "pinned_by": []
+    },
+    {
+      "path": "api/anchor-receipt.json",
+      "kind": "stream",
+      "publisher": "push",
+      "owner": {
+        "producer": "scripts/gen-anchor-receipt.sh",
+        "producer_evidence": "scripts/gen-anchor-receipt.sh:55 OUT_FILE=\"${REPO_ROOT}/public/api/anchor-receipt.json\"",
+        "runs_on": "validator-host",
+        "cron_file": null,
+        "cron_installer_in_repo": null,
+        "invocation_note": "Not on a cron. Produced only after an on-chain broadcast, from scripts/run-anchor-pipeline.sh."
+      },
+      "push_name": "anchor-receipt.json",
+      "push_target": "/public/api/anchor-receipt.json",
+      "push_content_check": "JSON-validated",
+      "rsync_delete_exclude": true,
+      "gitignored": true,
+      "git_tracked": false,
+      "pinned_by": [],
+      "note": "gitignored was FALSE until 2026-08-14 — measured with git check-ignore and git ls-files --error-unmatch on 2026-08-07, when nothing prevented this path from being committed (which would have given it the deploy as a second owner). Fixed by adding public/api/anchor-receipt.json to .gitignore's runtime-generated-site-data section; T13 now holds gitignored=true to git check-ignore."
+    },
+    {
+      "path": "api/anchor-history.jsonl",
+      "kind": "stream",
+      "publisher": "push",
+      "owner": {
+        "producer": "scripts/append-anchor-history.sh",
+        "producer_evidence": "scripts/append-anchor-history.sh:128 HISTORY=\"${FYD_HISTORY_FILE:-${REPO_ROOT}/public/api/anchor-history.jsonl}\"",
+        "runs_on": "validator-host",
+        "cron_file": null,
+        "cron_installer_in_repo": null,
+        "invocation_note": "Not on a cron. Appended once per anchor event, from scripts/run-anchor-pipeline.sh."
+      },
+      "push_name": "anchor-history.jsonl",
+      "push_target": "/public/api/anchor-history.jsonl",
+      "push_content_check": "JSONL",
+      "rsync_delete_exclude": true,
+      "gitignored": true,
+      "git_tracked": false,
+      "pinned_by": [],
+      "note": "Same measured-then-fixed history as api/anchor-receipt.json: excluded from --delete, on the push allowlist, and added to .gitignore's runtime-generated-site-data section 2026-08-14 (was neither tracked nor ignored before that)."
+    },
+    {
+      "path": "api/watch-status.json",
+      "kind": "stream",
+      "publisher": "push-out-of-band",
+      "owner": {
+        "producer": "scripts/external-watch.sh",
+        "producer_evidence": "scripts/external-watch.sh publish_status: writes WATCH_PUBLIC_STATUS from etc/watch.env (the installer sets it to <api dir of validator.json>/watch-status.json)",
+        "runs_on": "web-host",
+        "cron_file": null,
+        "cron_installer_in_repo": true,
+        "invocation_note": "Every 5 minutes from the site account's crontab block '# BEGIN metal-fy-external-watch', installed by scripts/install-web-host-external-watch.sh (WATCH_PUBLIC_STATUS=auto). Not an /etc/cron.d file, hence cron_file null."
+      },
+      "push_name": null,
+      "rsync_delete_exclude": true,
+      "gitignored": true,
+      "git_tracked": false,
+      "pinned_by": [],
+      "note": "Written in place on the web host by the off-host external watch (docs/MONITORING_OPS.md section 14), never pushed from the validator host, so the status page keeps working while the validator host is unreachable. Excluded from --delete so a deploy cannot erase it; NOT on scripts/push-to-web-host.sh's allowlist on purpose: the validator host must never be able to overwrite the watch's view of it."
+    },
+    {
+      "path": "api/archive/",
+      "entry_type": "directory",
+      "kind": "record",
+      "publisher": "push-subdir",
+      "owner": {
+        "producer": "scripts/gen-anchor-source.sh + scripts/gen-anchor-receipt.sh",
+        "producer_evidence": "scripts/gen-anchor-receipt.sh:405 ARCHIVE_FILE=\"${ARCHIVE_DIR}/anchor-receipt-${TX_ID}.json\"; pushed by scripts/append-anchor-history.sh:549 fyd_push \"$push_arg\"",
+        "runs_on": "validator-host",
+        "cron_file": null,
+        "cron_installer_in_repo": null
+      },
+      "push_prefix": "archive",
+      "member_pattern": "^anchor-(source|receipt)-[a-f0-9]{64}\\.json$",
+      "rsync_delete_exclude": true,
+      "gitignored": true,
+      "git_tracked": false,
+      "pinned_by": ["api/identity.json#artifact_manifest.anchor_source_archive_json.sha256"],
+      "record_caveat": "CORRECTED 2026-08-14 — neither half of this prefix is immutable by construction, and the superseded text claimed the anchor-source half was. anchor-source-<dag_root>.json: the <dag_root> in the name is dag_root_computed, and scripts/gen-anchor-source.sh:638-641 folds it from the three branch objects and nothing else (identity_branch, observations_branch, artifacts_branch each jq -cS then sha256; dag_root = sha256 of the three hex digests concatenated in that order). The same file also carries computed_at, computed_by_script and computed_from_git_commit as top-level siblings of those branches (scripts/gen-anchor-source.sh:656-658), and none of the three enters the fold; the archive copy is then written with an unconditional rename (:780 builds ARCHIVE_FILE as anchor-source-<DAG_ROOT>.json, :787 renames the temp file onto it), which overwrites whatever already sits at that name. Measured 2026-08-14 against the tracked public/api/anchor-source.json: editing only the computed_at value leaves the root re-derived from the three branches — and therefore the file name — unchanged, while the file's sha256 changes. Reproduce by hashing each of the three branch objects with jq -cS piped to sha256, concatenating the three hex digests in identity/observations/artifacts order and hashing that string. So the URL's name binds the three branch roots; a sha256 in a signed manifest binds the whole file as of signing. identity.json's pin_policy (scripts/operator-local/gen-identity.sh) carries that same wording verbatim, machine-checked against kind_definitions.record by tests/publication-registry/ (T20) and against public/api/identity.example.json by tests/identity-kind-discipline/. CORRECTED 2026-08-17 (the reference in the preceding sentence): the canonical clause T20 compares against lives in kind_definitions.record -- the taxonomy authority at the top of this registry -- and NOT in this row. The earlier text said 'machine-checked against this row's canonical clause', which named the wrong field: T20's phrase is extracted from exactly three places, .kind_definitions.record here, .properties.artifact_manifest.additionalProperties.properties.kind.description in public/api/identity.schema.v1.json, and the pin_policy_rule --arg line in scripts/operator-local/gen-identity.sh. record_caveat is not one of the three, and a scan of this registry finds the clause in kind_definitions.record only. This row's record_caveat is UNCHECKED prose about how far the api/archive/ naming scheme reaches, and describing it as machine-checked claimed a guarantee nothing provides. Do not restore the earlier claim. docs/IDENTITY_VERIFICATION.md explains the same facts in its own operator-facing prose, deliberately not verbatim -- it says plainly that pin_policy explains itself without reference to that document -- so it must not contradict this row, but is not held to matching it word for word. CORRECTED 2026-08-17: an earlier draft of this sentence claimed docs/IDENTITY_VERIFICATION.md also carries the same wording and must stay in step; that overstated what T20 actually enforces (T20 does not check that file) and understated the gap between a declared obligation and a checked one. Do not restore the earlier claim. anchor-receipt-<tx_id>.json is weaker again: it is named by the transaction id (scripts/gen-anchor-receipt.sh:405), which binds nothing at all about its contents, and it carries generated_at (:314) under the same unconditional rename (:412), so re-running the generator for one tx writes different bytes to the same URL. In practice each receipt is produced once, immediately after its broadcast, so that URL is stable by operating discipline only. Whoever acts on kind=record for this prefix (C4) pins the anchor-source half only, re-derives the three roots from the fetched bytes rather than trusting the file's own dag_root_computed field, and treats a regeneration of either half as a re-pin event. The superseded text justified STRUCTURALLY immutable with a grep of gen-anchor-source.sh for generated_at returning zero hits: the grep was accurate, the field is spelled computed_at, and the conclusion did not follow. Do not restore it.",
+      "note": "kind=record for the prefix. This is the shape the spec's kind discipline wants api/anchor-source.json to move to (C4). Read record_caveat before pinning anything here: the naming scheme reaches less far than kind=record on its own suggests, and it reaches nothing at all on the receipt half."
+    },
+    {
+      "path": "api/peers-history/",
+      "entry_type": "directory",
+      "kind": "stream",
+      "publisher": "push-subdir",
+      "owner": {
+        "producer": "scripts/peer-validators.sh",
+        "producer_evidence": "scripts/peer-validators.sh:252 SNAPSHOT_DIR=\"${STATE_DIR}/peers-history\" (master), :284 PUBLISH_DIR=\"${ROOT}/public/api/peers-history\" (repo-local staging), pushed at :336 fyd_push \"peers-history/peers-${date}.json.gz\"",
+        "runs_on": "validator-host",
+        "cron_file": "metal-peer-validators",
+        "cron_installer_in_repo": false
+      },
+      "push_prefix": "peers-history",
+      "member_pattern": "^peers-[0-9]{4}-[0-9]{2}-[0-9]{2}\\.json\\.gz$",
+      "rsync_delete_exclude": true,
+      "gitignored": true,
+      "git_tracked": false,
+      "pinned_by": [],
+      "becomes_record_after": "utc-day-close",
+      "note": "kind=stream, NOT record, and the date key does not make it one. Measured 2026-08-07: scripts/peer-validators.sh:254-256 recomputes SNAPSHOT=\"${SNAPSHOT_DIR}/peers-${TODAY}.json.gz\" and gzips peers.json over it on EVERY run, and :361 calls publish_snapshot_date \"$TODAY\" unconditionally — the PUBLISHED_LEDGER is consulted only to decide whether to APPEND a ledger line (:347) and to drive the past-day backlog loop (:372), never to decide whether to push today. So the published URL for the current UTC day resolves to different bytes several times a day, which is exactly what kind=record forbids. becomes_record_after=utc-day-close is the true, narrower fact: a member stops changing once its UTC day has passed. That qualifier is the only thing that may license pinning a closed day; .kind alone must never be read as permission (see kind_definitions._kind_is_the_floor). The master copy lives in the host state dir, not in the repo — the repo path is a staging mirror."
+    },
+    {
+      "path": "calendar/",
+      "entry_type": "directory",
+      "kind": "stream",
+      "publisher": "push",
+      "owner": {
+        "producer": "scripts/gen-renewal-ics.sh",
+        "producer_evidence": "scripts/gen-renewal-ics.sh:35 OUT_DIR=\"${CALENDAR_OUT_DIR:-$ROOT/public/calendar}\"",
+        "runs_on": "validator-host",
+        "cron_file": "metal-renewal-ics",
+        "cron_installer_in_repo": false
+      },
+      "push_name": null,
+      "rsync_delete_exclude": true,
+      "gitignored": true,
+      "git_tracked": false,
+      "pinned_by": [],
+      "note": "The directory is one --delete exclude, but the push allowlist names its members individually (schedule.ics and a 16-64 hex token name), so the two push_allowlist_only entries below carry those. Member filenames embed a private token; never committed."
+    },
+
+    { "path": "api/anchor-source.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "scripts/gen-anchor-source.sh", "producer_evidence": "scripts/gen-anchor-source.sh:100 OUT_FILE=\"${OUT_FILE:-${ROOT}/public/api/anchor-source.json}\"; transferred to git by scripts/operator-local/commit-anchor-source.sh", "runs_on": "validator-host", "cron_file": null, "cron_installer_in_repo": null }, "rsync_delete_exclude": false, "gitignored": false, "git_tracked": true, "pinned_by": [],
+      "kind_note": "kind=static under the definition above (its published bytes change only when a commit changes them). Semantically it is a record — the signed pre-image of one anchor event — served at a mutable URL. The spec calls that the category error behind the 2026-07-07 stale-publication incident and assigns the fix to C4. It is NOT counted as a kind violation here because it is not pinned by anything, so no gate has anything to act on." },
+    { "path": "api/identity.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "scripts/operator-local/gen-identity.sh", "producer_evidence": "scripts/operator-local/gen-identity.sh:226 OUT_JSON=\"${OUT_DIR}/identity.json\"", "runs_on": "operator-mac", "cron_file": null, "cron_installer_in_repo": null }, "rsync_delete_exclude": false, "gitignored": false, "git_tracked": true, "pinned_by": [], "note": "This is the file that HOLDS the pins (artifact_manifest); it is not itself pinned." },
+    { "path": "api/identity.json.sig", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "scripts/operator-local/gen-identity.sh", "producer_evidence": "scripts/operator-local/gen-identity.sh:227 OUT_SIG=\"${OUT_DIR}/identity.json.sig\"", "runs_on": "operator-mac", "cron_file": null, "cron_installer_in_repo": null }, "rsync_delete_exclude": false, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/identity.json.mldsa87.sig", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "scripts/operator-local/gen-identity.sh", "producer_evidence": "scripts/operator-local/gen-identity.sh:213 OUT_PQ_SIG=\"${REPO_ROOT}/${FYIPQ_SIG_REL}\"", "runs_on": "operator-mac", "cron_file": null, "cron_installer_in_repo": null }, "rsync_delete_exclude": false, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/identity-history.jsonl", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "scripts/operator-local/gen-identity.sh", "producer_evidence": "scripts/operator-local/gen-identity.sh:231 ID_HISTORY_FILE=\"${OUT_DIR}/identity-history.jsonl\"", "runs_on": "operator-mac", "cron_file": null, "cron_installer_in_repo": null }, "rsync_delete_exclude": false, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/incidents.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "producer_evidence": "no script writes it; scripts/gen-cycle-history.sh:106 reads it as INCIDENTS and its header at :9 calls it 'operator-maintained incident log'", "runs_on": "repo", "cron_file": null, "cron_installer_in_repo": null }, "rsync_delete_exclude": false, "gitignored": false, "git_tracked": true, "pinned_by": ["api/identity.json#artifact_manifest.incidents_json.sha256"] },
+    { "path": "api/known-outages.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "producer_evidence": "no script writes it; public/status/status-calc.js reads it for the expected-uptime value on the operator status page", "runs_on": "repo", "cron_file": null, "cron_installer_in_repo": null }, "rsync_delete_exclude": false, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/validator-directory.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "producer_evidence": "no script writes it; referenced only by public/data/index.html and public/ja/data/index.html", "runs_on": "repo", "cron_file": null, "cron_installer_in_repo": null }, "rsync_delete_exclude": false, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/openapi.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "producer_evidence": "no script writes it; referenced by public/llms.txt (the plain-text guide to the public data)", "runs_on": "repo", "cron_file": null, "cron_installer_in_repo": null }, "rsync_delete_exclude": false, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": ".well-known/operator-identity.pub", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "producer_evidence": "copied by hand from the operator Mac's ed25519 public key; .gitignore:18 blocks the source filename so only the renamed copy can be tracked", "runs_on": "repo", "cron_file": null, "cron_installer_in_repo": null }, "rsync_delete_exclude": false, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": ".well-known/operator-identity-mldsa87.pub", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "scripts/operator-local/pq-identity-keygen.sh", "producer_evidence": "scripts/operator-local/pq-identity-keygen.sh writes ${REPO_ROOT}/${FYIPQ_PUB_REL} (scripts/lib/identity-pq.sh FYIPQ_PUB_REL) on the operator Mac; the private key stays outside the repo", "runs_on": "operator-mac", "cron_file": null, "cron_installer_in_repo": null }, "rsync_delete_exclude": false, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": ".well-known/README.md", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "producer_evidence": "no script writes it; git ls-files public/.well-known/ returns exactly this file, operator-identity.pub and operator-identity-mldsa87.pub", "runs_on": "repo", "cron_file": null, "cron_installer_in_repo": null }, "rsync_delete_exclude": false, "gitignored": false, "git_tracked": true, "pinned_by": [],
+      "note": "Added 2026-08-07 after review: it was the one tracked file inside a prefix this registry claims to enumerate that had no row, which is precisely the omission class the registry exists to make impossible. T16 now fails on any such gap. Its BODY is separately known to be stale (it says the operator identity public key is not yet published, while the sibling .pub has been live for some time) — that is a public-copy defect outside this task's scope and is deliberately not touched here." },
+    { "path": "api/build.json", "kind": "stream", "publisher": "deploy-runner", "owner": { "producer": ".github/workflows/deploy.yml (step: Write build.json (deploy manifest))", "producer_evidence": "grep of .github/workflows/deploy.yml for api/build.json", "runs_on": "github-actions", "cron_file": null, "cron_installer_in_repo": null }, "rsync_delete_exclude": false, "gitignored": true, "git_tracked": false, "pinned_by": [],
+      "note": "The fourth shape: written into the runner's own public/ checkout before both rsync legs, so it rides the normal deploy and needs no --delete exclude. gitignored via .gitignore:98, which sits in the 'Local-only artifacts' section, NOT in the section this registry renders." },
+
+    { "path": "api/legacy-a-chain/", "entry_type": "directory", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "scripts/archive-legacy-anchors.sh (run after every legacy-chain anchor as cycle-transition unit 10, and before the A-Chain migration; output committed)", "producer_evidence": "scripts/archive-legacy-anchors.sh OUT_DIR=\"${REPO_ROOT}/public/api/legacy-a-chain\"", "runs_on": "repo" }, "member_pattern": "^(manifest|[a-f0-9]{64})\\.json$", "gitignored": false, "git_tracked": true, "pinned_by": [],
+      "note": "Verbatim Hyperion get_transaction + get_block bodies of every pre-migration anchor tx, plus manifest.json with sha256s (checked offline by scripts/verify-legacy-anchor-archive.sh). Deliberately NOT under api/archive/, which is push-owned and feed-excluded: this directory is git-tracked and delivered by the normal deploy, so it is not in deploy/feed-excludes.txt (that list exists to stop the deploy from delivering or deleting push-owned feeds; this is the opposite case) and not in .gitignore. kind=static, not record: the file name is the tx_id, which binds nothing about the bytes; integrity is the manifest sha256 plus git history. T16 treats this directory row as covering every tracked member whose basename matches member_pattern." },
+    { "path": "api/anchor-history.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/anchor-history.schema.v2.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/anchor-history.schema.v3.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/anchor-receipt.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/anchor-receipt.schema.v2.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/anchor-receipt.schema.v3.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/anchor-source.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/cycle-history.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": ["api/identity.json#artifact_manifest.cycle_history_jsonl.schema_sha256"] },
+    { "path": "api/evidence.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": ["api/identity.json#artifact_manifest.evidence_json.schema_sha256"] },
+    { "path": "api/identity-history.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/identity.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/identity.schema.v2.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/incidents.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": ["api/identity.json#artifact_manifest.incidents_json.schema_sha256"] },
+    { "path": "api/validator.schema.v1.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": ["api/identity.json#artifact_manifest.validator_json.schema_sha256"] },
+
+    { "path": "api/anchor-history.example.jsonl", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/anchor-history.v3.example.jsonl", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/anchor-receipt.example.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/anchor-receipt.phase-beta.example.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/anchor-receipt.v2.example.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/anchor-receipt.v3.example.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/anchor-source.example.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/cycle-history.example.jsonl", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/evidence.example.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/identity-history.example.jsonl", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/identity.example.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/incidents.example.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] },
+    { "path": "api/validator.example.json", "kind": "static", "publisher": "git-deploy", "owner": { "producer": "operator (git commit)", "runs_on": "repo" }, "gitignored": false, "git_tracked": true, "pinned_by": [] }
+  ],
+
+  "push_allowlist_only": [
+    {
+      "_comment": "Names the push wrapper accepts that are not one-file publications: they are members of the calendar/ directory entry above. Kept out of publications[] so that 'one path, one row' stays true there.",
+      "push_name": "schedule.ics",
+      "push_target": "/public/calendar/schedule.ics",
+      "push_content_check": "ICS-validated",
+      "member_of": "calendar/"
+    },
+    {
+      "push_name": "<16-64 hex>.ics",
+      "push_target": "/public/calendar/<name>.ics",
+      "push_content_check": "ICS-validated",
+      "member_of": "calendar/",
+      "case_pattern": "*.ics",
+      "basename_pattern": "^[a-f0-9]{16,64}\\.ics$"
+    }
+  ],
+
+  "known_kind_violations": {
+    "_comment": "Acknowledgement list for the kind gate (kind=stream MUST NOT appear in any pinned_by), following the same expiry design as deploy/identity-pin-baseline.json: an entry suppresses the gate only while the violation it describes is still exactly the violation present. If the named pin disappears from public/api/identity.json's artifact_manifest, or the named path stops being kind=stream, the entry no longer applies and the test reports it as OBSOLETE — so this cannot become a permanent mute. Every entry is a C4 work item. NOT AN ALERT PATH: this gate acts on the registry's own declarations, not on live bytes. It says nothing about whether a pin currently matches; that is scripts/check-identity-pins.sh's job.",
+    "resolution_task": "C4",
+    "measured_at": "2026-08-07",
+    "measured_against": {
+      "identity_generated_at": "2026-08-06T05:31:44Z",
+      "pin_count": 8,
+      "method": "jq over .artifact_manifest of public/api/identity.json; each entry contributes <key>.sha256 and, where present, <key>.schema_sha256"
+    },
+    "violations": {}
+  },
+
+  "known_doc_drift": {
+    "_comment": "Documentation that this registry measured to be WRONG about a fact the registry itself now carries. Same expiry design as everything else here: each entry records the exact wrong text, and the test fails as OBSOLETE the moment the doc is corrected, so the registry cannot go on describing a defect that no longer exists. This block exists because the alternative — leaving the correction only in prose inside owner.producer_evidence — would turn silently false the day someone fixes the doc, which is the same failure mode the drift baselines were built to avoid. Empty 2026-08-14: the one entry this block ever carried (deploy_ownership_matrix.wrong_producer) was resolved by correcting the four matrix rows in docs/DEPLOY_OWNERSHIP_MATRIX.md; T17 requires this block to be empty exactly when that is true."
+  },
+
+  "known_render_drift": {
+    "_comment": "Places where a target file's CURRENT bytes are not what this registry would render, recorded rather than fixed because Phase 0 must not modify the target files. Same expiry design as known_kind_violations: each entry pins both what is expected and what is there, so any change to either side makes the entry stop applying and the test reports it as OBSOLETE. Empty 2026-08-14: the one entry this block ever carried (push_allowlist_doc.missing_rows — scripts/push-to-web-host.sh's header table was missing the anchor-receipt.json / anchor-history.jsonl rows) was resolved by adding the two rows, so canonical and as-built render identically again; T5 requires this block to be empty exactly when that is true."
+  },
+
+  "derived": {
+    "_comment": "Rendering instructions. Each output declares its own ORDER because the three target files list the same paths in three different orders, and the comment text that belongs to each entry differs per file. tests/publication-registry/ checks that every order list agrees with publications[] in both directions, so an entry cannot be added to one without the other.",
+
+    "feed_excludes": {
+      "target_file": "deploy/feed-excludes.txt",
+      "header": [
+        "# Dynamically-pushed feeds — written into the public web root's api/ and",
+        "# calendar/ by the validator-host-side push (scripts/push-to-web-host.sh) and the",
+        "# web-host-side receive wrapper. Any rsync with --delete into a public tree",
+        "# MUST exclude these or the delete erases fresh feeds.",
+        "#",
+        "# Paths are relative to public/. Consumed by",
+        "# scripts/deploy/build-rsync-excludes.sh (single source of truth). Keep in",
+        "# lock-step with docs/DEPLOY_OWNERSHIP_MATRIX.md and the web host receive",
+        "# wrapper allowlist."
+      ],
+      "order": [
+        { "path": "api/validator.json" },
+        { "path": "api/server-status.json" },
+        { "path": "api/peer-geo.json" },
+        { "path": "api/uptime-recent.json" },
+        { "path": "api/uptime-cycles.json" },
+        { "path": "api/peers.json" },
+        { "path": "api/evidence.json" },
+        { "path": "api/fee-market.json" },
+        { "path": "api/fee-market-history.jsonl" },
+        { "path": "api/node-health-recent.json" },
+        { "path": "api/peers-changes.json" },
+        { "path": "api/peers-gini.json" },
+        { "path": "api/peers-gini-history.jsonl" },
+        { "path": "api/peers-history-index.json" },
+        { "path": "api/cycle-history.jsonl" },
+        { "path": "api/anchor-receipt.json" },
+        { "path": "api/anchor-history.jsonl" },
+        { "path": "api/watch-status.json", "comment_before": [
+          "# Written on the web host itself by the off-host external watch",
+          "# (scripts/external-watch.sh, WATCH_PUBLIC_STATUS), not pushed: the deploy",
+          "# must neither deliver nor delete it." ] },
+        {
+          "path": "api/archive/",
+          "comment_before": [
+            "# Subdirectory feeds — whole-directory entries (like calendar/) because the",
+            "# member filenames are content-addressed / date-keyed and unbounded:",
+            "#   api/archive/       R18 per-anchor archives (anchor-source-<dag>.json,",
+            "#                      anchor-receipt-<tx>.json) — the pre-images that",
+            "#                      anchor-history.jsonl's archived_*_path fields point at.",
+            "#   api/peers-history/ daily gzipped validator-set snapshots, indexed by",
+            "#                      peers-history-index.json.",
+            "# Both are push-owned end to end (never git-tracked), so the deploy must",
+            "# neither deliver nor delete them."
+          ]
+        },
+        { "path": "api/peers-history/" },
+        { "path": "calendar/" }
+      ]
+    },
+
+    "gitignore_block": {
+      "target_file": ".gitignore",
+      "section_header": "# ---- Runtime-generated site data ----",
+      "path_prefix": "public/",
+      "extract_rule": "from the line equal to section_header, up to but not including the next line beginning '# ---- ', with trailing blank lines removed",
+      "order": [
+        { "path": "api/validator.json", "comment_before": [
+          "# api/validator.json は live metalgo から生成する動的データ(scripts/node-info.sh)",
+          "# schema は public/api/validator.example.json を参照" ] },
+        { "path": "api/evidence.json", "comment_before": [
+          "# api/evidence.json は validator.json + 静的 config から日次生成(scripts/gen-evidence.sh)",
+          "# schema は public/api/evidence.example.json を参照" ] },
+        { "path": "api/uptime-recent.json", "comment_before": [
+          "# uptime track record — validator host で生成 + push、ローカル開発時のみ",
+          "# placeholder を置くことがあるが、コミットはしない(動的データ)" ] },
+        { "path": "api/uptime-cycles.json" },
+        { "path": "api/peer-geo.json" },
+        { "path": "api/server-status.json" },
+        { "path": "api/peers.json" },
+        { "path": "api/cycle-history.jsonl", "comment_before": [
+          "# cycle-history.jsonl は uptime-cycles.json + incidents.json から join 生成(scripts/gen-cycle-history.sh)",
+          "# schema は public/api/cycle-history.example.jsonl を参照" ] },
+        { "path": "api/fee-market.json", "comment_before": [
+          "# fee-market 履歴 — validator host で生成 + push、 集計と append-only history" ] },
+        { "path": "api/fee-market-history.jsonl" },
+        { "path": "api/node-health-recent.json", "comment_before": [
+          "# node-health 周期サンプリング — validator host で生成 + push" ] },
+        { "path": "api/peers-changes.json", "comment_before": [
+          "# peers 動的解析 — validator host で生成 + push (Gini / 変動 / 履歴インデックス)" ] },
+        { "path": "api/peers-gini.json" },
+        { "path": "api/peers-gini-history.jsonl" },
+        { "path": "api/peers-history-index.json" },
+        { "path": "api/anchor-receipt.json", "comment_before": [
+          "# R18 anchor receipt / history — on-chain anchor 確定後にのみ生成・push される",
+          "# (validator host, scripts/run-anchor-pipeline.sh 経由。cron 常駐ではない)" ] },
+        { "path": "api/anchor-history.jsonl" },
+        { "path": "api/watch-status.json", "comment_before": [
+          "# 外部見張り (scripts/external-watch.sh) が web host 上で直接書く status page 用",
+          "# の feed。push でも git でもない単一 owner、追跡しない。" ] },
+        { "path": "api/archive/", "comment_before": [
+          "# R18 per-anchor archive (gen-anchor-source.sh / gen-anchor-receipt.sh が",
+          "# content-addressed で書く anchor-source-<dag>.json / anchor-receipt-<tx>.json)。",
+          "# 単一 owner = validator host push (scripts/push-to-web-host.sh archive/<name>)。",
+          "# git 追跡すると deploy と push の二重 owner になり silent reversion を生むので",
+          "# 追跡しない。deploy 側の除外は deploy/feed-excludes.txt の api/archive/。" ] },
+        { "path": "api/peers-history/", "comment_before": [
+          "# peers 日次 snapshot の repo-local staging (本体は host state dir 側)。",
+          "# 同じく push-owned、追跡しない。" ] },
+        { "path": "calendar/", "comment_before": [
+          "# calendar/*.ics は gen-renewal-ics.sh が生成、ファイル名に private token が",
+          "# 入るので絶対コミットしない(public 化前提リポ、token は private URL の要)" ] }
+      ],
+      "trailer": {
+        "_comment": "Lines that live inside the same .gitignore section but are NOT publications — cron-written alert-dedup state under logs/. They are carried verbatim so the rendered block covers the WHOLE section: with them, nothing can be inserted anywhere in the section without breaking byte equality. Without them the check would only cover the section's head and an entry appended at the bottom would slip through.",
+        "lines": [
+          "# anchor-publish-health の exit-3 alert dedup state (scripts/check-anchor-publish-health.sh)",
+          "# — cron が repo-local logs/ に書く実行時 state、*.log ではないので上の *.log には",
+          "# 引っかからず個別指定が必要",
+          "logs/anchor-publish-health-mismatch-state.json",
+          "# identity-pins の alert dedup state (scripts/check-identity-pins.sh --mode=live)",
+          "# — 同じ理由で個別指定が必要。cron の live 実行が public repo の作業ツリーに",
+          "# untracked JSON を落とさないようにする",
+          "logs/identity-pin-alert-state.json",
+          "# pulsevm 上流監視の前回観測 state (scripts/check-pulsevm-upstream.sh)",
+          "# — 同じ理由で個別指定が必要。中身は「前回 upstream がどう見えたか」の観測記録",
+          "# であって repo の成果物ではない(差分検知の基準そのものなので host ローカル)",
+          "logs/pulsevm-upstream-state.json"
+        ]
+      }
+    },
+
+    "push_allowlist_doc": {
+      "target_file": "scripts/push-to-web-host.sh",
+      "region_start": "# Allowed targets (must stay in lock-step with the case statement below):",
+      "region_end_before": "# Why the subdirectory prefixes exist: anchor-history.jsonl publishes",
+      "extract_rule": "from region_start up to but not including region_end_before, with trailing lines that are exactly '#' removed",
+      "layout": { "name_field_width": 28, "target_field_width": 40, "indent": "#   ", "arrow": "→ " },
+      "flat_order": [
+        "validator.json", "peer-geo.json", "uptime-recent.json", "uptime-cycles.json",
+        "peers.json", "peers-changes.json", "peers-gini.json", "peers-gini-history.jsonl",
+        "peers-history-index.json", "fee-market.json", "fee-market-history.jsonl",
+        "node-health-recent.json", "evidence.json", "cycle-history.jsonl",
+        "anchor-receipt.json", "anchor-history.jsonl",
+        "schedule.ics", "<16-64 hex>.ics"
+      ],
+      "subdir_header": [
+        "#",
+        "# Allowed SUBDIRECTORY targets (added 2026-08-05; exactly two prefixes, each",
+        "# with a strict basename pattern — anything else is rejected before ssh):"
+      ],
+      "subdir_rows": [
+        { "name": "archive/anchor-source-<64 lowercase hex>.json", "target": "/public/api/archive/<basename>" },
+        { "name": "archive/anchor-receipt-<64 lowercase hex>.json", "target": "/public/api/archive/<basename>" },
+        { "name": "peers-history/peers-YYYY-MM-DD.json.gz", "target": "/public/api/peers-history/<basename>" }
+      ]
+    },
+
+    "push_allowlist_case": {
+      "target_file": "scripts/push-to-web-host.sh",
+      "extract_rule": "the single line whose content, trimmed, both starts with 'validator.json|' and ends with ')'",
+      "indent": "  ",
+      "order": [
+        "validator.json", "peer-geo.json", "uptime-recent.json", "uptime-cycles.json",
+        "peers.json", "peers-changes.json", "peers-gini.json", "peers-gini-history.jsonl",
+        "peers-history-index.json", "fee-market.json", "fee-market-history.jsonl",
+        "node-health-recent.json", "evidence.json", "cycle-history.jsonl",
+        "anchor-receipt.json", "anchor-history.jsonl"
+      ]
+    }
+  }
+}

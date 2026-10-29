@@ -1,0 +1,50 @@
+{
+  "vector_name": "v05-full-dag",
+  "description": "End-to-end DAG: two-leaf identity_branch (key rotation) plus four-leaf cycles_branch (with cross-ref to identity_branch). Demonstrates dag_root_hash = SHA-256(raw(identity_root)||raw(cycles_root)).",
+  "identity_branch": {
+    "leaf_count": 2,
+    "branch_root": "8494a8e5a02ecf0fd7960acf9880a53feb9077b7a1745f3c04f2f750abf94524",
+    "leaf_hashes_in_order": [
+      "35fd2621fb34db5b30dfde671c13601bf479e305bc5d295f0c940ee695c2b056",
+      "c829e3187d57af642d0b8558459b774b7f14f2c719927ef49abfeda949ce3365"
+    ]
+  },
+  "cycles_branch": {
+    "leaf_count": 4,
+    "branch_root": "b54356c13488519d6a9fe30f86f50465d0a9b8d3899c8fda2ca34d1ba9744c71",
+    "leaf_hashes_in_order": [
+      "dfa85e24275ea27b47ce5d58449ffedb160d5b87946b17de595c3b57fc2de7a6",
+      "b04f34b84bf6fb7231795a750c2044d9bb47334145dcfc5438bc92979f053e88",
+      "384d3f26b74d22f4382f6926bbb88cdf460e4f0daedf4c10a4f14a081b2c9f4d",
+      "5c617db3346cc2c2960792d725d85c770b26192ef600ce9e8b9acd5437005e3c"
+    ]
+  },
+  "dag_root_hash": "c3f67f4aa9742691d73f9d2fcfea1c8fffcaa8d023718cb40da4c2b7c076a4a0",
+  "memo_for_anchor": "fyid1:c3f67f4aa9742691d73f9d2fcfea1c8fffcaa8d023718cb40da4c2b7c076a4a0",
+  "cross_ref_check": [
+    {
+      "cycle_n": 1,
+      "signed_by_key_seq": 1,
+      "signed_by_pubkey_fingerprint": "SHA256:V1AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+      "matches_identity_entry_key_seq_1": true
+    },
+    {
+      "cycle_n": 2,
+      "signed_by_key_seq": 1,
+      "signed_by_pubkey_fingerprint": "SHA256:V1AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+      "matches_identity_entry_key_seq_1": true
+    },
+    {
+      "cycle_n": 3,
+      "signed_by_key_seq": 1,
+      "signed_by_pubkey_fingerprint": "SHA256:V1AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+      "matches_identity_entry_key_seq_1": true
+    },
+    {
+      "cycle_n": 4,
+      "signed_by_key_seq": 2,
+      "signed_by_pubkey_fingerprint": "SHA256:V2BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+      "matches_identity_entry_key_seq_2": true
+    }
+  ]
+}

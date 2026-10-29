@@ -1,0 +1,114 @@
+# scripts/operator-local/
+
+**This directory is excluded from `scripts/sync-to-validator-host.sh`.**
+
+Anything inside `operator-local/` MUST NOT be deployed to the validator host
+or the web host. Scripts here run on the operator's local Mac only.
+
+These helpers may handle the operator identity key, an ed25519 keypair
+independent of the validator's `staker.key` and BLS `signer.key`. The
+private key MUST live only on the operator's local Mac and in the
+operator's password manager backup. It MUST NEVER be copied to the
+validator host, the web host, the repository, CI, or any cloud storage
+outside the password manager.
+
+The validator's `staker.key`, BLS `signer.key`, and any other `metalgo`
+signing material are out of scope for everything in this directory.
+These helpers MUST NEVER read, copy, or invoke `metalgo` signing keys.
+
+## Sync exclusion
+
+`scripts/sync-to-validator-host.sh` carries an `--exclude='operator-local/'`
+rule. Before relying on it, confirm with a dry-run:
+
+```sh
+VALIDATOR_HOST=<host> ./scripts/sync-to-validator-host.sh --dry-run \
+  | grep -i operator-local && echo "LEAK" || echo "OK"
+```
+
+A clean run prints `OK` and nothing else.
+
+## Contents
+
+- `gen-identity.sh` — composes and signs `public/api/identity.json` with
+  the operator's local ed25519 key. Probes each leaf artifact URL,
+  computes its content sha256, and binds the set under
+  `artifact_manifest` + `artifact_root` (SHA-256 Merkle root, alphabetical
+  key order, odd-duplicate, raw bytes). Never reads validator keys.
+  Refuses to run on production hosts. See
+  `docs/IDENTITY_VERIFICATION.md` for the signing model and the seven-
+  step end-to-end verification procedure.
+
+- `test-gen-identity.sh` — synthetic-key test harness for Phase 3
+  Merkle DAG logic. Generates a throwaway ed25519 key in a tmp dir,
+  runs `gen-identity.sh` against a fake `REPO_ROOT`, re-fetches every
+  leaf and recomputes the Merkle root independently, then verifies
+  the signature against the synthetic pubkey. Output never lands in
+  the real repo.
+
+- `commit-anchor-source.sh` — the host→git transfer path for
+  `public/api/anchor-source.json` (plan A4). Fetches the validator
+  host's current checkout of that file over SSH (or `--input-file` for
+  manual/offline use), validates it (jq parse, schema, `--expect-cycle=N`
+  match, non-null `identity_branch.prev_anchor_root`/`prev_anchor_tx`
+  unless `--allow-genesis`), shows a diff summary against the repo copy,
+  then `git add` + a single-purpose commit naming the cycle number and
+  the `dag_root_computed` prefix. Never pushes unless `--push` is given.
+  Same host-refusal guard as `gen-identity.sh`. Companion protection:
+  `scripts/advance-host-checkout.sh` preserves host-composed
+  anchor-source.json dirt from its own public/ discard while it waits
+  for this script to run — see `docs/DEPLOY_OWNERSHIP_MATRIX.md`.
+
+- `test-commit-anchor-source.sh` — hermetic test harness for
+  `commit-anchor-source.sh`. Builds a throwaway git repo, feeds fixture
+  JSON via `--input-file` / `FYD_ANCHOR_FETCH_STUB` — no real SSH
+  connection is ever made — and asserts exit codes, commit presence/
+  absence, and committed content across the validation, genesis-guard,
+  idempotency, and push-failure paths.
+
+## ML-DSA-87 identity key (pq-identity-*.sh)
+
+Post-quantum (FIPS 204) signing key for the identity manifest. Spec:
+`docs/superpowers/specs/2026-10-15-identity-pq-signature-design.md`.
+
+- `pq-identity-keygen.sh` — one-time. Creates the key as a scrypt-encrypted
+  seed-only PEM (no plaintext ever on disk) and writes the public key to
+  `public/.well-known/operator-identity-mldsa87.pub`. Never overwrites an
+  existing key (exit 3). Asks for the passphrase at the terminal.
+- `pq-identity-unlock.sh` — decrypts the key for signing (passphrase at the
+  terminal; needs a TTY). Refuses a key that does not match the committed
+  public key (exit 5). Run it yourself: `bash scripts/operator-local/pq-identity-unlock.sh`.
+- `pq-identity-lock.sh` — deletes the unlocked file. Idempotent.
+
+Key directory: `~/.freedom-yield-identity/` (outside the repo, mode 700).
+`gen-identity.sh` deletes the unlocked key itself right after signing
+(auto-lock); an unlocked key older than 2 hours is refused. The passphrase
+is never seen by the AI. Dashlane entry: named in the AI's ping, never in
+this repo. keygen and unlock refuse to run on the validator/web host (exit 99).
+Tests: `tests/pq-identity-tools/`.
+
+## Phase 5 runbook
+
+The end-to-end procedure for generating the real operator identity
+key, signing the live `identity.json`, and publishing the three Phase 5
+surfaces is in [`docs/OPERATOR_IDENTITY_SETUP.md`](../../docs/OPERATOR_IDENTITY_SETUP.md).
+That runbook is the teaching reference: read it once for context.
+
+At execution time, run from the compact one-page checklists instead:
+[`docs/PHASE5_CHECKLIST.md`](../../docs/PHASE5_CHECKLIST.md) for the
+signed-manifest publish. It carries the section-keyed gate checks,
+command-by-command copy-paste blocks, live verification, rollback, and
+symptom-keyed failure decision trees.
+
+- `backup-host-config.sh` — encrypted off-host backup of the validator
+  host's untracked config (`/etc/freedom-yield/` + the deployed checkout's
+  `.env`). AI-run, non-interactive: streams `tar -cf -` over ssh straight
+  into `age -R` to the operator identity ssh-ed25519 PUBLIC key, so no
+  plaintext touches disk and no passphrase is ever asked. Verifies without
+  decrypting (names of the encrypted stream, age header recipient tag,
+  exact size, host sha256 manifest of hashes + names), encrypts the
+  manifest to the same key (its plaintext never leaves the run's temp dir),
+  then copies only the `.tar.age` and `.tar.age.manifest.age` to Dropbox. `--dry-run` lists names;
+  `--restore-help` prints the operator's disaster-only decrypt (needs the
+  identity PRIVATE key). Never reads `metalgo` keys.
+  Tests: `tests/backup-host-config/`.

@@ -1,0 +1,302 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://metal.freedom-yield.com/api/anchor-receipt.schema.v1.json",
+	"title": "Freedom Yield Metal — A-chain Anchor Receipt v1",
+	"description": "Formal contract for /api/anchor-receipt.json. The receipt republishes the most recent Metal A-chain (an Antelope/EOSIO-family chain, reached at XPR Network endpoints) inscription that anchors a Merkle DAG root committed by /api/identity.json and summarised by /api/cycles-history.json. The receipt is a content-addressed pointer: an evaluator may independently look up the receipt's tx_id on a public XPR explorer and assert memo == \"fyid1:\" + dag_root_hash. The receipt is regenerated each time a new inscription is broadcast (= cycle start, cycle end, or identity key rotation). Method discriminator: the anchor.method enum identifies whether the inscription is the Phase α minimal form (= eosio.token::transfer) or the Phase β dedicated form (= metalfreedom::inscribe smart-contract action). Companion design: docs/MERKLE_DAG_SPEC.md. Schema stability: additive-only within v1; breaking changes go to /api/anchor-receipt.schema.v2.json and the v1 URL stays reachable for at least 18 months.",
+	"x-issued-at": "2026-06-21T00:00:00Z",
+	"x-stability": "additive-only-within-v1",
+	"x-baseline-revision": "2026-08-17-chain-backend-family-correction",
+	"x-revision-history": [
+		{"date": "2026-06-21", "tag": "phase-alpha-initial", "summary": "Initial v1 schema covering Phase α (eosio.token::transfer) + Phase β (metalfreedom::inscribe) receipts via anchor.method discriminator."},
+		{"date": "2026-06-23", "tag": "audit-fields-additive", "summary": "Additive within v1: top-level convenience denormalizations signing_actor / signing_permission, top-level verification_status state-machine, anchor.chain_backend execution-engine label. All new fields are optional; existing receipts remain valid against this schema unchanged."},
+		{"date": "2026-08-17", "tag": "chain-backend-family-correction", "summary": "Descriptive correction, not a structural change: no property added, removed or constrained (anchor.chain_backend remains an unconstrained string), so every document that validated before still validates and x-stability additive-only-within-v1 holds. anchor.chain_backend was described as the execution engine and documented as 'pulsevm'; it is now described as the protocol family observed serving the transaction, and the generator writes 'antelope'. Receipts and ledger lines published for the cycle 3 and cycle 4 anchors keep 'pulsevm'. The anchor.chain description also dropped an unsupported identity claim between Metal A-chain and XPR Network."}
+	],
+	"x-format-guide": "https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/MERKLE_DAG_SPEC.md",
+	"type": "object",
+	"required": [
+		"schema_version",
+		"dag_root_hash",
+		"memo",
+		"anchor",
+		"cycles_history_url",
+		"identity_url",
+		"generated_at"
+	],
+	"additionalProperties": true,
+	"properties": {
+		"_comment": {
+			"type": "string"
+		},
+		"$schema": {
+			"type": "string",
+			"format": "uri"
+		},
+		"schema_version": {
+			"type": "integer",
+			"const": 1
+		},
+		"dag_root_hash": {
+			"type": "string",
+			"pattern": "^[a-f0-9]{64}$",
+			"description": "The 64-hex SHA-256 DAG root being anchored. Equals identity.json.dag_root_hash and cycles-history.json.dag_root_hash for the same publication moment."
+		},
+		"memo": {
+			"type": "string",
+			"pattern": "^fyid1:[a-f0-9]{64}$",
+			"description": "The exact memo string carried by the on-chain inscription. MUST equal 'fyid1:' + dag_root_hash. The 'fyid1:' prefix (Freedom Yield identity, format version 1) lets future on-chain parsers distinguish our inscriptions and lets us migrate to 'fyid2:' without colliding with intervening unrelated memos."
+		},
+		"anchor": {
+			"type": "object",
+			"required": ["chain", "network", "method", "tx_id", "block_num", "block_time", "explorer_url", "inscribe_action"],
+			"additionalProperties": true,
+			"properties": {
+				"chain": {
+					"type": "string",
+					"const": "metal-a-chain",
+					"description": "Metal Blockchain A-chain: one of the four chains of the Metal Blockchain Primary Network. It is an Antelope/EOSIO-family chain, reached at XPR Network endpoints."
+				},
+				"chain_backend": {
+					"type": "string",
+					"description": "Names the protocol family observed serving the inscribing transaction — NOT an execution engine. For metal-a-chain this is 'antelope': the transaction is resolved through Antelope/EOSIO history interfaces (Hyperion /v2/history/get_actions, then /v1/history/get_transaction) and carries the Antelope action model (eosio.token::transfer authorized by actor@permission), which is what an evaluator re-checks against the transaction. Receipts and ledger lines published for the cycle 3 and cycle 4 anchors carry 'pulsevm' instead — a forward-looking label naming an announced future execution engine rather than the family observed serving the chain. The value is written by the generator at generation time, so a receipt regenerated from one of those transactions after the correction reads 'antelope' while the corresponding append-only ledger line keeps what it was published with. Because family and engine are different axes, a later engine change does not by itself make 'antelope' false; the value changes when the observed interfaces and action model do. This convenience field lets evaluators searching for stack-specific vocabulary hit a direct field without parsing the method discriminator. Optional and additive within v1; consumers MAY ignore."
+				},
+				"network": {
+					"type": "string",
+					"enum": ["xpr-mainnet", "xpr-testnet"],
+					"description": "xpr-mainnet for production receipts; xpr-testnet appears only in dry-run example data."
+				},
+				"method": {
+					"type": "string",
+					"enum": ["phase_alpha_token_transfer", "phase_beta_sc_inscribe"],
+					"description": "Discriminator for which on-chain mechanism was used. Phase α uses the minimum-cost eosio.token::transfer with the memo carrying the binding (action shape: account/name/from/to/quantity/memo/permission). Phase β uses a dedicated metalfreedom::inscribe smart-contract action with a six-field typed payload (action shape: account/name/data/authorization). The if/then/else blocks in this schema dispatch inscribe_action.required on this discriminator so a single receipt schema cleanly covers both eras. See scripts/operator-local/contract/metalfreedom-anchor.spec.md for the Phase β action specification."
+				},
+				"tx_id": {
+					"type": "string",
+					"pattern": "^[a-f0-9]{64}$",
+					"description": "64-hex XPRNetwork transaction id."
+				},
+				"block_num": {
+					"type": "integer",
+					"minimum": 1
+				},
+				"block_time": {
+					"type": "string",
+					"format": "date-time"
+				},
+				"explorer_url": {
+					"type": "string",
+					"format": "uri",
+					"description": "Public XPRNetwork explorer URL pointing at the inscribing transaction. Independent verifier MUST be able to load this URL and read back the same tx_id, memo, action account, action name, and signer permission."
+				},
+				"inscribe_action": {
+					"type": "object",
+					"required": ["account", "name"],
+					"additionalProperties": true,
+					"properties": {
+						"account": {
+							"type": "string",
+							"description": "On-chain contract account that owns the action. For phase_alpha_token_transfer: 'eosio.token'. For phase_beta_sc_inscribe: 'metalfreedom'."
+						},
+						"name": {
+							"type": "string",
+							"description": "Action name. For phase_alpha_token_transfer: 'transfer'. For phase_beta_sc_inscribe: 'inscribe'."
+						},
+						"from": {
+							"type": "string",
+							"pattern": "^[a-z1-5.]{1,12}$",
+							"description": "Phase α only. Source XPR account = 'metalfreedom' (the operator-controlled account holding the anchor permission). Omitted in Phase β SC inscribe receipts (the metalfreedom::inscribe action has no from/to semantics)."
+						},
+						"to": {
+							"type": "string",
+							"pattern": "^[a-z1-5.]{1,12}$",
+							"description": "Phase α only. Destination XPR account. MUST NOT equal 'from' — the XPRNetwork eosio.token contract rejects self-transfer at the contract level ('cannot transfer to self', eosio.token.cpp L99). The destination is a separate sink account distinct from 'metalfreedom'; the specific sink name is operator-chosen (see docs/MERKLE_DAG_SPEC.md §6 and the Phase α design memo). Omitted in Phase β receipts."
+						},
+						"quantity": {
+							"type": "string",
+							"description": "Phase α only. XPR asset quantity in the standard EOSIO string form, e.g. '0.0001 XPR'. The minimum on-chain quantity allowed by the eosio.token contract for Phase α self-anchoring. Omitted in Phase β receipts."
+						},
+						"memo": {
+							"type": "string",
+							"pattern": "^fyid1:[a-f0-9]{64}$",
+							"description": "Phase α only. MUST equal the top-level memo field. Repeated here for direct visual cross-check against the explorer's view of the action. Omitted in Phase β receipts (the binding is in data.root_hash instead)."
+						},
+						"permission": {
+							"type": "object",
+							"required": ["actor", "permission"],
+							"additionalProperties": false,
+							"properties": {
+								"actor": {
+									"type": "string",
+									"pattern": "^[a-z1-5.]{1,12}$",
+									"description": "Antelope/EOSIO account name of the signer. For production mainnet receipts this is the operator-controlled 'metalfreedom' account; for testnet rehearsal receipts (= docs/PHASE_ALPHA_TESTNET_DRY_RUN.md) this is the throwaway test account. The schema accepts both shapes via the XPR account pattern rather than a const so the same schema URL validates mainnet AND testnet receipts. Cross-account binding (= 'is this really the operator?') is established off-schema: identity.json's signed manifest names the operator brand and binds it to the anchor permission lineage; the on-chain explorer cross-check (IDENTITY_VERIFICATION.md §8) confirms the action's signer matches what the receipt declares."
+								},
+								"permission": {
+									"type": "string",
+									"const": "anchor",
+									"description": "Narrow child permission scoped via linkauth to inscribe-class actions only. Compromise of the anchor key cannot move tokens, change permissions, or deploy contracts; it can only re-broadcast an anchor with a different root, which an evaluator's chain-of-trust check would reject as soon as the operator publishes a contradicting signed identity.json. The PERMISSION NAME (= 'anchor') is an operator convention applied to both mainnet and testnet rehearsals; const is preserved here because changing the permission name across environments would break the receipt's authority chain claim."
+								}
+							},
+							"description": "Phase α: required (= the singular {actor, permission} signer). Phase β: optional (= a parallel `authorization` array is used instead, mirroring the Antelope/EOSIO action.authorization shape)."
+						},
+						"data": {
+							"type": "object",
+							"required": ["cycle_id", "event_type", "root_hash", "prev_root", "leaf_hash", "payload"],
+							"additionalProperties": true,
+							"properties": {
+								"cycle_id": {
+									"type": "integer",
+									"minimum": 1,
+									"description": "P-Chain cycle number this inscription pertains to. uint32_t at the contract level."
+								},
+								"event_type": {
+									"type": "string",
+									"enum": ["cyclestart", "cycleend", "idrotate"],
+									"description": "Antelope name-typed enum. Constrained by the contract via check() in the inscribe action body."
+								},
+								"root_hash": {
+									"type": "string",
+									"pattern": "^[a-f0-9]{64}$",
+									"description": "64-hex SHA-256. Equals the top-level dag_root_hash for this inscription."
+								},
+								"prev_root": {
+									"type": "string",
+									"pattern": "^[a-f0-9]{64}$",
+									"description": "64-hex. The most recently accepted root_hash, fetched from the contract's `roots` table at inscription time. For the first Phase β inscription (= genesis) this is 64 zero characters '0000...0000'; the contract enforces this via the genesis check."
+								},
+								"leaf_hash": {
+									"type": "string",
+									"pattern": "^[a-f0-9]{64}$",
+									"description": "64-hex. The specific leaf being asserted in this event (= the cycle-start leaf hash for cyclestart, the identity-history leaf hash for idrotate). The contract does NOT validate this hash against the root; off-chain verifiers do so."
+								},
+								"payload": {
+									"type": "string",
+									"maxLength": 256,
+									"description": "Optional structured metadata (JSON-encoded), UTF-8, up to 256 bytes (= contract-enforced, matches Phase α memo limit). MAY be empty string."
+								}
+							},
+							"description": "Phase β only. The structured action payload of metalfreedom::inscribe. Six fields per scripts/operator-local/contract/metalfreedom-anchor.spec.md §2.1. Omitted in Phase α receipts."
+						},
+						"authorization": {
+							"type": "array",
+							"minItems": 1,
+							"items": {
+								"type": "object",
+								"required": ["actor", "permission"],
+								"additionalProperties": false,
+								"properties": {
+									"actor": {
+										"type": "string",
+										"pattern": "^[a-z1-5.]{1,12}$"
+									},
+									"permission": {
+										"type": "string",
+										"pattern": "^[a-z1-5.]{1,12}$"
+									}
+								}
+							},
+							"description": "Phase β only. Antelope/EOSIO-style action.authorization. For phase_beta_sc_inscribe: authorization[0] = {actor: 'metalfreedom', permission: 'anchor'}. Omitted in Phase α receipts (the singular `permission` field is used instead)."
+						}
+					}
+				}
+			},
+			"allOf": [
+				{
+					"if": {
+						"properties": { "method": { "const": "phase_alpha_token_transfer" } },
+						"required": ["method"]
+					},
+					"then": {
+						"properties": {
+							"inscribe_action": {
+								"required": ["account", "name", "from", "to", "quantity", "memo", "permission"]
+							}
+						}
+					}
+				},
+				{
+					"if": {
+						"properties": { "method": { "const": "phase_beta_sc_inscribe" } },
+						"required": ["method"]
+					},
+					"then": {
+						"properties": {
+							"inscribe_action": {
+								"required": ["account", "name", "data", "authorization"]
+							}
+						}
+					}
+				}
+			]
+		},
+		"cycles_history_url": {
+			"type": "string",
+			"format": "uri",
+			"description": "URL of /api/cycles-history.json — the DAG snapshot whose root this receipt anchors. The DAG snapshot in turn references the leaf source JSONL documents."
+		},
+		"identity_url": {
+			"type": "string",
+			"format": "uri",
+			"description": "URL of /api/identity.json — the signed manifest that carries the operator's commitment to this dag_root_hash via its additive dag_root_hash field. The receipt and the signed manifest cross-reference each other."
+		},
+		"trigger_event": {
+			"type": "string",
+			"enum": ["cycle_start", "cycle_end", "identity_rotation", "manual"],
+			"description": "What caused this anchor to be broadcast. Informational; the on-chain inscription is the canonical commitment regardless."
+		},
+		"trigger_reference": {
+			"type": "object",
+			"description": "Optional structured pointer to the triggering on-chain or off-chain event (e.g., the cycle_n that started, the key_seq that rotated). Additive shape; consumers MAY ignore.",
+			"additionalProperties": true
+		},
+		"signing_actor": {
+			"type": "string",
+			"pattern": "^[a-z1-5.]{1,12}$",
+			"description": "Denormalized convenience copy of the signing account: equals anchor.inscribe_action.permission.actor for Phase α receipts, and anchor.inscribe_action.authorization[0].actor for Phase β receipts. Top-level placement lets AI / curl-driven evaluators read the signer in one jq hop without branching on the method discriminator. For production mainnet receipts this is always 'metalfreedom'. When present, MUST equal the corresponding nested value (= consistency invariant enforced by gen-anchor-receipt.sh at receipt-generation time)."
+		},
+		"signing_permission": {
+			"type": "string",
+			"pattern": "^[a-z1-5.]{1,12}$",
+			"description": "Denormalized convenience copy of the signing permission name: equals anchor.inscribe_action.permission.permission for Phase α receipts, and anchor.inscribe_action.authorization[0].permission for Phase β receipts. For production mainnet receipts this is always 'anchor' (= the narrow linkauth-scoped child permission, see docs/MERKLE_DAG_SPEC.md §key-separation). When present, MUST equal the corresponding nested value."
+		},
+		"verification_status": {
+			"type": "string",
+			"enum": ["scheduled", "broadcast", "live", "failed"],
+			"description": "State of this receipt within the broadcast-to-live verification chain. State machine semantics:\n\n  'scheduled' — anchor has not yet been broadcast. The receipt is a pre-cycle-start template carrying the intended dag_root_hash but no tx_id / block_num / block_time / explorer_url yet (those are zeroed). Public docs reference such receipts with an 'in preparation' badge.\n\n  'broadcast' — tx has been submitted to the chain. The receipt now carries a real tx_id, but the post-broadcast verification has not finished. The receipt may not yet be authoritative.\n\n  'live' — all SEVEN post-broadcast conditions independently re-PASSed at receipt-generation time: (1) tx re-fetchable from a public RPC/indexer using the recorded tx_id, (2) memo == 'fyid1:' + dag_root_hash, (3) action account/name match the method discriminator, (4) signing_actor matches the nested value AND equals the operator-declared anchor account, (5) signing_permission matches the nested value AND equals 'anchor', (6) JSON Schema validation of THIS receipt PASSes against /api/anchor-receipt.schema.v1.json, (7) explorer_url returns 200 with consistent tx data on independent fetch. Receipts MUST NOT be set to 'live' until every one of these is re-checked at publication time — broadcast alone does not authorise 'live'.\n\n  'failed' — at least one condition did not PASS within the operator's confirmation window. The receipt remains published as a NEGATIVE artifact (= auditable evidence that an anchor attempt occurred and was abandoned) and is NOT swapped into the live anchor pointer.\n\nThis field is REQUIRED in receipts generated from 2026-06-23 onwards, but kept schema-optional during v1 for backward compatibility with receipts generated before this revision."
+		},
+		"generated_at": {
+			"type": "string",
+			"format": "date-time"
+		}
+	},
+	"allOf": [
+		{
+			"_comment": "Top-level signing_actor / signing_permission must equal their nested counterparts when both are present (= the denormalization invariant). The if/then dispatches on anchor.method to choose between the Phase α nested location (anchor.inscribe_action.permission) and the Phase β nested location (anchor.inscribe_action.authorization[0]).",
+			"if": {
+				"properties": {
+					"signing_actor": { "type": "string" },
+					"anchor": {
+						"properties": { "method": { "const": "phase_alpha_token_transfer" } },
+						"required": ["method"]
+					}
+				},
+				"required": ["signing_actor", "anchor"]
+			},
+			"then": {
+				"properties": {
+					"anchor": {
+						"properties": {
+							"inscribe_action": {
+								"properties": {
+									"permission": {
+										"properties": {
+											"actor": { "type": "string" }
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	]
+}
