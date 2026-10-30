@@ -38,6 +38,20 @@
 #   C11 --dry-run never runs age and writes nothing
 #   C12 VALIDATOR_HOST unset -> refuse before any ssh
 #
+# --restore-drill (real `age`, a throwaway unencrypted key; skipped without age):
+#   D1  a correct backup + manifest -> exit 0, log "matched=7/7  OK"; the key
+#       is derived from the recipient path, and no .pub is needed
+#   D2  a changed byte in the encrypted backup -> exit 1, "FAIL decrypt"
+#   D3  a changed manifest hash -> exit 1, the file NAME is shown, no hash is
+#   D4  a manifest line dropped / one extra file in the tar / empty -> exit 1
+#   D5  the scratch dir never survives: OK, FAIL and a TERM mid-run
+#   D6  the scratch dir is mode 700 when age writes into it
+#   D7  no host is touched; only the log file appears under HOME
+#   D8  the identity path reaches age only (no other tool's argv)
+#   D9  symlink / ".." / absolute members -> exit 1, "FAIL unsafe-member"
+#   D10 no argument -> newest dated file; missing manifest/file -> exit 2, no log
+#   D11 log line shape, mode 600, no absolute path, no hash
+#
 # BACKUP_SCRIPT_UNDER_TEST=<path>  run the cases against another script
 # BACKUP_TEST_ONLY=<case>          run one case (used by the mutation loop)
 
@@ -286,6 +300,7 @@ if want happy; then
 	assert_contains "restore-help: shows the age decrypt with the private key" "age -d -i $TMP/keys/id_ed25519 " "$OUT"
 	assert_contains "restore-help: shows the manifest decrypt" ".tar.age.manifest.age" "$OUT"
 	assert_eq "restore-help: contacts nothing" "0" "$(calls_of ssh)"
+	assert_contains "restore-help: points at the drill" "--restore-drill" "$OUT"
 fi
 
 if want realage; then
@@ -397,10 +412,268 @@ if want nohost; then
 	assert_eq "nohost: ssh never ran" "0" "$(calls_of ssh)"
 fi
 
+# ===== --restore-drill (D1..D11) ===================================================
+# Real `age` and a throwaway unencrypted ssh-ed25519 identity (no passphrase, so
+# nothing is typed). The drill makes plaintext by design, so run_case (whose
+# poller hunts plaintext under HOME) is NOT used: TMPDIR is outside HOME, and
+# the checks are "nothing is left" instead.
+DRILL_LOGFILE="$TMP/home/fy-restore-drill.log"
+DS="$TMP/dscratch"; DTMP="$TMP/drilltmp"; DBIN="$TMP/dbin"; OUTSIDE="$TMP/outside"
+DBK="$TMP/home/fy-host-config-backup-20260101.tar.age"
+KEYPATH="$KEYS/id_ed25519"
+mkdir -p "$DS" "$DTMP" "$DBIN" "$OUTSIDE"
+# argv-logging wrappers for every tool the drill could hand the key to
+for c in tar cp mv shasum cat grep perl head sed awk cut sort comm find tr wc rm chmod mkdir basename date mktemp stat ls; do
+	real="$(command -v "$c" 2>/dev/null)" || continue
+	cat >"$DBIN/$c" <<STUB
+#!/usr/bin/env bash
+printf '%s\t%s\n' "$c" "\$*" >>"\$STUB_CALLS"
+exec "$real" "\$@"
+STUB
+	chmod +x "$DBIN/$c"
+done
+cp "$BIN/ssh" "$DBIN/ssh"
+# age wrapper: logs argv, records the mode of the -o parent dir, can hold (TERM test)
+cat >"$DBIN/age" <<STUB
+#!/usr/bin/env bash
+printf 'age\t%s\n' "\$*" >>"\$STUB_CALLS"
+prev=""; o=""
+for a in "\$@"; do [ "\$prev" = -o ] && o="\$a"; prev="\$a"; done
+if [ -n "\$o" ]; then d="\$(dirname "\$o")"; { stat -c %a "\$d" 2>/dev/null || stat -f %Lp "\$d"; } >>"\$STUB_WORKMODE"; fi
+if [ -n "\${STUB_AGE_HOLD:-}" ]; then : >"\$STUB_AGE_HOLD"; sleep 6; exit 1; fi
+exec "$REAL_AGE" "\$@"
+STUB
+chmod +x "$DBIN/age"
+
+build_denv() {
+	DENV=(env -i PATH="$DBIN:/usr/bin:/bin:/usr/sbin:/sbin" HOME="$TMP/home" TMPDIR="$DTMP"
+		BACKUP_RECIPIENT_PUBKEY="${T_PUB-$PUB}"
+		STUB_CALLS="$CALLS" STUB_SSH_COUNTER="$LOGS/ssh-count" STUB_EXPECTED_REMOTE=none STUB_EXPECTED_HASH=none
+		STUB_WORKMODE="$LOGS/workmode" STUB_AGE_HOLD="${T_HOLD:-}")
+	[ -z "${T_IDENT:-}" ] || DENV+=(BACKUP_IDENTITY="$T_IDENT")
+}
+drill_run() { # args to the script; stdin closed
+	build_denv
+	OUT="$("${DENV[@]}" bash "$SCRIPT" "$@" 2>"$LOGS/stderr" 0<&-)"
+	RC=$?
+	ERR="$(cat "$LOGS/stderr")"
+}
+drill_reset() { reset_env; rm -rf "$DTMP" "$OUTSIDE" "$DS"; mkdir -p "$DTMP" "$OUTSIDE" "$DS"; }
+drill_left() { find "$DTMP" -mindepth 1 -maxdepth 1 -name 'fy-hcb-drill.*' | sort; }
+last_log() { tail -1 "$DRILL_LOGFILE" 2>/dev/null; }
+log_status() { last_log | sed -E 's/^.*matched=[0-9]+\/[0-9]+  //'; }
+enc() { "$REAL_AGE" -R "$PUB" -o "$2" <"$1"; }
+fx_manifest() { # $1 root of a fixture host tree, $2 out
+	( cd "$1/etc" && find freedom-yield ! -type d -exec shasum -a 256 {} + && cd "$1/deploy" && shasum -a 256 .env ) | LC_ALL=C sort -k2 >"$2"
+}
+std_fixture() { # builds $DS/backup.tar and $DS/manifest.txt from the fixture host
+	tar -C "$TMP/host/etc" -cf "$DS/backup.tar" freedom-yield -C "$TMP/host/deploy" .env
+	fx_manifest "$TMP/host" "$DS/manifest.txt"
+}
+put_pair() { # $1 yyyymmdd — encrypts $DS/backup.tar and $DS/manifest.txt into HOME
+	enc "$DS/backup.tar" "$TMP/home/fy-host-config-backup-$1.tar.age" \
+		&& enc "$DS/manifest.txt" "$TMP/home/fy-host-config-backup-$1.tar.age.manifest.age"
+}
+drill_fail_common() { # <label> <reason>
+	assert_eq "$1: exit 1" "1" "$RC"
+	assert_eq "$1: log says FAIL $2" "FAIL $2" "$(log_status)"
+	assert_eq "$1: no scratch dir left" "" "$(drill_left)"
+}
+DRILL_OK=1
+if [ -z "$REAL_AGE" ]; then
+	DRILL_OK=0
+	if [ -n "${CI:-}" ]; then echo "FAIL: age not available (CI must run the drill cases)"; exit 1; fi
+	echo "SKIP: restore-drill cases (age not installed)"
+fi
+
+if [ "$DRILL_OK" = 1 ] && want drillok; then
+	echo "== restore drill: a correct backup (D1) =="
+	drill_reset; std_fixture; put_pair 20260101
+	drill_run --restore-drill "$DBK"
+	assert_eq "drillok: exit 0" "0" "$RC"
+	assert_eq "drillok: log is one line" "1" "$(grep -c . "$DRILL_LOGFILE" 2>/dev/null)"
+	assert_contains "drillok: log says matched=7/7  OK" "matched=7/7  OK" "$(last_log)"
+	assert_eq "drillok: age argv is exactly -d -i <identity> -o <work> <file> (manifest, backup)" \
+		"-d -i $KEYPATH ${DBK}.manifest.age|-d -i $KEYPATH $DBK" \
+		"$(grep '^age	' "$CALLS" | cut -f2 | sed 's/ -o [^ ]*//' | tr '\n' '|' | sed 's/|$//')"
+	no_prompt "drillok"
+	assert_eq "drillok: no scratch dir left" "" "$(drill_left)"
+fi
+
+if [ "$DRILL_OK" = 1 ] && want drillnopub; then
+	echo "== restore drill: no .pub needed (D1) =="
+	drill_reset; std_fixture; put_pair 20260101
+	T_PUB="$TMP/missing.pub" T_IDENT="$KEYPATH" drill_run --restore-drill "$DBK"
+	assert_eq "drillnopub: exit 0 without any .pub" "0" "$RC"
+	assert_contains "drillnopub: log says OK" "matched=7/7  OK" "$(last_log)"
+fi
+
+if [ "$DRILL_OK" = 1 ] && want drilltamper; then
+	echo "== restore drill: a changed byte in the backup (D2) =="
+	drill_reset; std_fixture; put_pair 20260101
+	perl -e 'open(my $h, "+<:raw", $ARGV[0]) or die; my $n = -s $ARGV[0]; seek($h, $n - 20, 0); read($h, my $b, 1);
+		seek($h, $n - 20, 0); print $h chr(ord($b) ^ 0xff); close $h' "$DBK"
+	drill_run --restore-drill "$DBK"
+	drill_fail_common "drilltamper" "decrypt"
+fi
+
+if [ "$DRILL_OK" = 1 ] && want drillmanifest; then
+	echo "== restore drill: manifest and tar disagree (D3 D4) =="
+	BADH="0000000000000000000000000000000000000000000000000000000000000000"
+	drill_reset; std_fixture
+	REALH="$(grep '  freedom-yield/ntfy-topic$' "$DS/manifest.txt" | awk '{print $1}')"
+	sed "s/^[0-9a-f]\{64\}  freedom-yield\/ntfy-topic\$/$BADH  freedom-yield\/ntfy-topic/" "$DS/manifest.txt" >"$DS/m2" && mv "$DS/m2" "$DS/manifest.txt"
+	put_pair 20260101
+	drill_run --restore-drill "$DBK"
+	assert_eq "drillmanifest-hash: exit 1" "1" "$RC"
+	assert_contains "drillmanifest-hash: the file name is shown" "freedom-yield/ntfy-topic" "$OUT$ERR"
+	assert_not_contains "drillmanifest-hash: no manifest hash on screen" "$BADH" "$OUT$ERR"
+	assert_not_contains "drillmanifest-hash: no real hash on screen" "$REALH" "$OUT$ERR"
+	assert_eq "drillmanifest-hash: log says FAIL mismatch, 6 of 7" "matched=6/7  FAIL mismatch" "$(last_log | sed -E 's/^.*  matched=/matched=/')"
+	assert_eq "drillmanifest-hash: no scratch dir left" "" "$(drill_left)"
+	drill_reset; std_fixture
+	grep -v 'watch-list.json' "$DS/manifest.txt" >"$DS/m2" && mv "$DS/m2" "$DS/manifest.txt"
+	put_pair 20260101
+	drill_run --restore-drill "$DBK"
+	assert_eq "drillmanifest-drop: exit 1" "1" "$RC"
+	assert_contains "drillmanifest-drop: the unlisted file is named" "freedom-yield/watch-list.json" "$OUT$ERR"
+	cp -R "$TMP/host" "$DS/hostx"; printf 'x\n' >"$DS/hostx/etc/freedom-yield/extra-file"
+	tar -C "$DS/hostx/etc" -cf "$DS/backup.tar" freedom-yield -C "$DS/hostx/deploy" .env
+	fx_manifest "$TMP/host" "$DS/manifest.txt"
+	put_pair 20260101
+	drill_run --restore-drill "$DBK"
+	assert_eq "drillmanifest-extra: exit 1" "1" "$RC"
+	assert_contains "drillmanifest-extra: the extra file is named" "freedom-yield/extra-file" "$OUT$ERR"
+	drill_reset; std_fixture
+	tar -cf "$DS/backup.tar" -T /dev/null; : >"$DS/manifest.txt"
+	put_pair 20260101
+	drill_run --restore-drill "$DBK"
+	assert_eq "drillmanifest-empty: exit 1" "1" "$RC"
+	assert_eq "drillmanifest-empty: log says FAIL mismatch" "FAIL mismatch" "$(log_status)"
+fi
+
+if [ "$DRILL_OK" = 1 ] && want drillclean; then
+	echo "== restore drill: the scratch dir never survives (D5) =="
+	drill_reset; std_fixture; put_pair 20260101
+	drill_run --restore-drill "$DBK"
+	assert_eq "drillclean: OK run exit 0" "0" "$RC"
+	assert_eq "drillclean: no fy-hcb-drill dir left after OK" "" "$(drill_left)"
+	assert_eq "drillclean: the marker is nowhere after OK" "" "$(grep -D skip -rlF "$MARKER" "$DTMP" "$TMP/home" 2>/dev/null)"
+	perl -e 'open(my $h, "+<:raw", $ARGV[0]) or die; my $n = -s $ARGV[0]; seek($h, $n - 20, 0); read($h, my $b, 1);
+		seek($h, $n - 20, 0); print $h chr(ord($b) ^ 0xff); close $h' "$DBK"
+	drill_run --restore-drill "$DBK"
+	assert_eq "drillclean: FAIL run exit 1" "1" "$RC"
+	assert_eq "drillclean: no fy-hcb-drill dir left after FAIL" "" "$(drill_left)"
+	assert_eq "drillclean: the marker is nowhere after FAIL" "" "$(grep -D skip -rlF "$MARKER" "$DTMP" "$TMP/home" 2>/dev/null)"
+	drill_reset; std_fixture; put_pair 20260101
+	T_HOLD="$LOGS/age-started"; build_denv; unset T_HOLD
+	"${DENV[@]}" bash "$SCRIPT" --restore-drill "$DBK" >"$LOGS/out" 2>"$LOGS/stderr" 0<&- &
+	DPID=$!
+	i=0; while [ ! -e "$LOGS/age-started" ] && [ "$i" -lt 60 ]; do sleep 2; i=$((i + 1)); done
+	kill -TERM "$DPID" 2>/dev/null
+	wait "$DPID"; RC=$?
+	assert_eq "drillclean: TERM exit 143" "143" "$RC"
+	assert_eq "drillclean: TERM leaves no fy-hcb-drill dir" "" "$(drill_left)"
+	assert_eq "drillclean: TERM is logged as FAIL interrupted" "FAIL interrupted" "$(log_status)"
+fi
+
+if [ "$DRILL_OK" = 1 ] && want drillmode; then
+	echo "== restore drill: scratch dir mode (D6) =="
+	drill_reset; std_fixture; put_pair 20260101
+	drill_run --restore-drill "$DBK"
+	assert_eq "drillmode: exit 0" "0" "$RC"
+	assert_eq "drillmode: age wrote into a mode 700 dir (manifest, backup)" "700 700" "$(tr '\n' ' ' <"$LOGS/workmode" | sed 's/ $//')"
+fi
+
+if [ "$DRILL_OK" = 1 ] && want drillhost; then
+	echo "== restore drill: no host, no write outside the log (D7) =="
+	drill_reset; std_fixture; put_pair 20260101
+	find "$TMP/home" | LC_ALL=C sort >"$DS/before"
+	drill_run --restore-drill "$DBK"
+	find "$TMP/home" | LC_ALL=C sort >"$DS/after"
+	assert_eq "drillhost: exit 0 with no VALIDATOR_* variables" "0" "$RC"
+	assert_eq "drillhost: ssh never ran" "0" "$(calls_of ssh)"
+	assert_eq "drillhost: only the log file appeared under HOME" "> $DRILL_LOGFILE" "$(diff "$DS/before" "$DS/after" | grep '^[<>]')"
+fi
+
+if [ "$DRILL_OK" = 1 ] && want drillkey; then
+	echo "== restore drill: the identity path reaches age only (D8) =="
+	drill_reset; std_fixture; put_pair 20260101
+	drill_run --restore-drill "$DBK"
+	assert_eq "drillkey: exit 0" "0" "$RC"
+	assert_eq "drillkey: age was handed the identity twice" "2" "$(grep '^age	' "$CALLS" | grep -cF -- "-i $KEYPATH")"
+	assert_eq "drillkey: no other tool's argv names the identity" "0" "$(grep -v '^age	' "$CALLS" | grep -cF -- "$KEYPATH")"
+fi
+
+if [ "$DRILL_OK" = 1 ] && want drillunsafe; then
+	echo "== restore drill: unsafe archive members (D9) =="
+	drill_reset; std_fixture; cp "$DS/manifest.txt" "$DS/good-manifest.txt"
+	mkdir -p "$DS/sym"; printf 'a\n' >"$DS/sym/a.txt"; ln -s /etc/hostname "$DS/sym/lnk"
+	tar -C "$DS/sym" -cf "$DS/backup.tar" a.txt lnk
+	put_pair 20260101
+	drill_run --restore-drill "$DBK"
+	drill_fail_common "drillunsafe-symlink" "unsafe-member"
+	drill_reset; std_fixture
+	mkdir -p "$DS/dd/sub"; printf 'x\n' >"$DS/dd/evilfile"
+	( cd "$DS/dd/sub" && tar -cPf "$DS/backup.tar" ../evilfile )
+	put_pair 20260101
+	drill_run --restore-drill "$DBK"
+	drill_fail_common "drillunsafe-dotdot" "unsafe-member"
+	drill_reset; std_fixture
+	printf 'x\n' >"$OUTSIDE/abs.txt"
+	tar -cPf "$DS/backup.tar" "$OUTSIDE/abs.txt"; rm -f "$OUTSIDE/abs.txt"
+	put_pair 20260101
+	drill_run --restore-drill "$DBK"
+	drill_fail_common "drillunsafe-absolute" "unsafe-member"
+	assert_eq "drillunsafe-absolute: nothing was created outside the scratch dir" "" "$(ls -A "$OUTSIDE")"
+fi
+
+if [ "$DRILL_OK" = 1 ] && want drillselect; then
+	echo "== restore drill: which file (D10) =="
+	drill_reset; std_fixture; put_pair 20260101
+	perl -e 'open(my $h, "+<:raw", $ARGV[0]) or die; my $n = -s $ARGV[0]; seek($h, $n - 20, 0); read($h, my $b, 1);
+		seek($h, $n - 20, 0); print $h chr(ord($b) ^ 0xff); close $h' "$DBK"
+	put_pair 20260202
+	cp "$TMP/home/fy-host-config-backup-20260202.tar.age" "$TMP/home/fy-host-config-backup-20260404.tar.age.VERIFY-FAILED"
+	drill_run --restore-drill
+	assert_eq "drillselect: no argument picks the newest (the older one is corrupt): exit 0" "0" "$RC"
+	assert_contains "drillselect: the log names the newest" "fy-host-config-backup-20260202.tar.age  matched=7/7  OK" "$(last_log)"
+	rm -f "$DRILL_LOGFILE"
+	rm -f "${DBK}.manifest.age"; : >"$CALLS"
+	drill_run --restore-drill "$DBK"
+	assert_eq "drillselect: missing manifest: exit 2" "2" "$RC"
+	assert_eq "drillselect: missing manifest: no log written" "" "$(ls "$DRILL_LOGFILE" 2>/dev/null)"
+	assert_eq "drillselect: missing manifest: age never ran" "0" "$(calls_of age)"
+	drill_run --restore-drill "$TMP/home/fy-host-config-backup-19990101.tar.age"
+	assert_eq "drillselect: missing file: exit 2" "2" "$RC"
+	assert_eq "drillselect: missing file: no log written" "" "$(ls "$DRILL_LOGFILE" 2>/dev/null)"
+	drill_reset
+	drill_run --restore-drill
+	assert_eq "drillselect: nothing to drill: exit 2" "2" "$RC"
+	drill_run --help
+	assert_contains "drillselect: --help documents the drill" "--restore-drill" "$OUT"
+	assert_contains "drillselect: --help reaches the exit codes" "99 refused" "$OUT"
+fi
+
+if [ "$DRILL_OK" = 1 ] && want drilllog; then
+	echo "== restore drill: the log line (D11) =="
+	drill_reset; std_fixture; put_pair 20260101
+	drill_run --restore-drill "$DBK"
+	perl -e 'open(my $h, "+<:raw", $ARGV[0]) or die; my $n = -s $ARGV[0]; seek($h, $n - 20, 0); read($h, my $b, 1);
+		seek($h, $n - 20, 0); print $h chr(ord($b) ^ 0xff); close $h' "$DBK"
+	drill_run --restore-drill "$DBK"
+	assert_eq "drilllog: two runs, two lines" "2" "$(grep -c . "$DRILL_LOGFILE")"
+	assert_eq "drilllog: every line has the documented shape" "0" \
+		"$(grep -cvE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z  fy-host-config-backup-[0-9]{8}\.tar\.age  matched=[0-9]+/[0-9]+  (OK|FAIL( [a-z-]+)?)$' "$DRILL_LOGFILE")"
+	assert_eq "drilllog: mode 600" "600" "$(mode_of "$DRILL_LOGFILE")"
+	assert_eq "drilllog: no absolute path in the log" "0" "$(grep -c '/home\|/tmp\|/Users\|/var' "$DRILL_LOGFILE")"
+	assert_eq "drilllog: no hash in the log" "0" "$(grep -cE '[0-9a-f]{64}' "$DRILL_LOGFILE")"
+fi
+
 # --- break-the-property ---------------------------------------------------------
 # Each mutant breaks exactly one claim; re-running the named case against it
 # MUST fail, for the claimed reason ($4 must be among the failures).
-# Not mutated: --restore-help (prints text only; its assertion is the check).
+# Not mutated: --restore-help and --help (print text only; their assertions are the check).
 if [ -z "$ONLY" ] && [ -z "${BACKUP_SCRIPT_UNDER_TEST:-}" ]; then
 	echo "== break-the-property (each mutant must make its case fail) =="
 	MUT="$TMP/mutants"; mkdir -p "$MUT"
@@ -481,6 +754,65 @@ if [ -z "$ONLY" ] && [ -z "${BACKUP_SCRIPT_UNDER_TEST:-}" ]; then
 	# C12: no VALIDATOR_HOST guard.
 	mutate no-host-guard nohost 's/\[ -n "\$VALIDATOR_HOST" \] \|\| die 2/true || die 2/' \
 		'nohost: ssh never ran'
+	# D1: the drill is gated on a recipient .pub too.
+	mutate drill-needs-pub drillnopub 's/^(\tDRILL_IDENTITY=.*)$/$1\n\t[ -f "\$RECIPIENT" ] || die 2 "needs pub"/m' \
+		'drillnopub: exit 0 without any .pub'
+	# D2: a failed decryption of the backup is ignored.
+	mutate decrypt-ignored drilltamper 's/-o "\$WORK\/backup\.tar" "\$DRILL_FILE" \|\| drill_fail decrypt "could not open the backup"/-o "\$WORK\/backup.tar" "\$DRILL_FILE" || true/' \
+		'drilltamper: log says FAIL decrypt'
+	# D3: whole lines (hashes) are printed instead of names.
+	mutate shows-hashes drillmanifest 's/^\tstrip_hash\(\) \{.*$/\tstrip_hash() { cat; }/m' \
+		'drillmanifest-hash: no manifest hash on screen'
+	# D3/D4: the comparison verdict is ignored.
+	mutate no-compare drillmanifest 's/if \[ -n "\$DIFF_NAMES" \] \|\| \[ "\$DRILL_TOTAL" -lt 1 \]; then/if false; then/' \
+		'drillmanifest-hash: exit 1'
+	# D4: an empty manifest counts as a match.
+	mutate empty-ok drillmanifest 's/\|\| \[ "\$DRILL_TOTAL" -lt 1 \]/|| [ "\$DRILL_TOTAL" -lt 0 ]/' \
+		'drillmanifest-empty: exit 1'
+	# D5: the scratch dir is not removed.
+	mutate no-cleanup drillclean 's/if \[ -n "\$WORK" \]; then rm -rf "\$WORK"; fi/:/' \
+		'drillclean: no fy-hcb-drill dir left after OK'
+	# D5: TERM does not run the exit trap.
+	# (bash runs the EXIT trap on a fatal TERM too, so the claim this breaks is
+	# the reason: without its own trap the run is logged "error", not "interrupted")
+	mutate no-term-trap drillclean 's/^\ttrap \x27DRILL_REASON=interrupted; exit 143\x27 TERM\n//m' \
+		'drillclean: TERM is logged as FAIL interrupted'
+	# D5: no exit trap at all.
+	mutate no-exit-trap drillclean 's/^\ttrap drill_exit EXIT\n//m' \
+		'drillclean: TERM leaves no fy-hcb-drill dir'
+	# D6: the scratch dir is left world-readable.
+	mutate loose-workdir drillmode 's/chmod 700 "\$WORK"/chmod 755 "\$WORK"/' \
+		'drillmode: age wrote into a mode 700 dir (manifest, backup)'
+	# D7: the drill reaches for the host.
+	mutate drill-ssh drillhost 's/^(\tmkdir "\$WORK\/x")$/$1\n\tssh -n nowhere true || true/m' \
+		'drillhost: ssh never ran'
+	# D7: the drill writes a stray file under HOME.
+	mutate drill-stray drillhost 's/^(\tmkdir "\$WORK\/x")$/$1\n\t: >"\$HOME\/stray"/m' \
+		'drillhost: only the log file appeared under HOME'
+	# D8: the identity file is read by another tool.
+	mutate key-read drillkey 's/^(\tmkdir "\$WORK\/x")$/$1\n\tshasum -a 256 "\$DRILL_IDENTITY" >\/dev\/null/m' \
+		"drillkey: no other tool's argv names the identity"
+	# D9: the member-type check is off.
+	mutate no-type-check drillunsafe 's/grep -qE \x27\[\^-d\]\x27/grep -qE \x27^\\0\$\x27/' \
+		'drillunsafe-symlink: log says FAIL unsafe-member'
+	# D9: the name check is off.
+	mutate no-name-check drillunsafe 's/grep -qE \x27\^\/\|\(\^\|\/\)\\\.\\\.\(\/\|\$\)\x27/grep -qE \x27^\\0\$\x27/' \
+		'drillunsafe-dotdot: log says FAIL unsafe-member'
+	# D10: the oldest file is picked.
+	mutate pick-oldest drillselect 's/if \[ -f "\$f" \]; then DRILL_FILE="\$f"; fi/if [ -f "\$f" ] \&\& [ -z "\$DRILL_FILE" ]; then DRILL_FILE="\$f"; fi/' \
+		'drillselect: no argument picks the newest (the older one is corrupt): exit 0'
+	# D10: a missing manifest is not a precondition.
+	mutate no-manifest-check drillselect 's/\t\[ -f "\$DRILL_MANIFEST" \] \|\| die 2 [^\n]*\n//' \
+		'drillselect: missing manifest: exit 2'
+	# D11: the log is world-readable.
+	mutate loose-log drilllog 's/^umask 077$/umask 022/m; s/\t\tchmod 600 "\$DRILL_LOG"\n//' \
+		'drilllog: mode 600'
+	# D11: the log carries the full path.
+	mutate log-abs-path drilllog 's/"\$\(basename "\$DRILL_FILE"\)" \\\n/"\$DRILL_FILE" \\\n/' \
+		'drilllog: no absolute path in the log'
+	# D11: the log line loses its shape.
+	mutate log-shape drilllog 's/matched=%s\/%s  %s/matched=%s\/%s %s/' \
+		'drilllog: every line has the documented shape'
 fi
 
 echo

@@ -9,13 +9,17 @@
 # Neither is in git, and before this script neither had a copy anywhere but
 # the validator host itself (docs/DISASTER_RECOVERY.md, 前提 section).
 #
-# Runs on the operator's Mac, NON-INTERACTIVELY: the AI runs it routinely.
-# It never asks for a passphrase and never reads stdin. Never on a server.
+# Backup / --dry-run run on the operator's Mac, NON-INTERACTIVELY: the AI runs
+# them routinely. They never ask for a passphrase and never read stdin. Never
+# on a server. --restore-drill is the one exception: the OPERATOR runs it in a
+# terminal, and `age` itself asks for the private key's passphrase there.
 #
 # Encryption: `age` to the operator identity SSH PUBLIC key (ssh-ed25519).
 # Encrypting needs only the public key, so nobody types anything. Decrypting
 # needs the matching PRIVATE key (and its passphrase) — disaster only; see
-# --restore-help. This script never reads, asks for or accepts a private key.
+# --restore-help. Backup / --dry-run never read, ask for or accept a private
+# key; --restore-drill only hands the key's PATH to `age -d -i` (it never opens
+# the file itself and never sees the passphrase).
 #
 # How the plaintext is kept off disk:
 #   ssh <host> 'tar -C /etc -cf - freedom-yield -C <DEPLOY_PATH> .env'
@@ -49,6 +53,22 @@
 #   4. only after a passing verify: copy the two .age files (backup + manifest)
 #      to the Dropbox backup directory, check both copies' sha256.
 #
+# Restore drill (--restore-drill [<file>.tar.age], OPERATOR, quarterly): proves
+# a backup can really be opened. It touches no host and no Dropbox:
+#   1. pick the file (the argument, or the newest
+#      fy-host-config-backup-<yyyymmdd>.tar.age in $BACKUP_OUT_DIR) and its
+#      <file>.manifest.age; either one missing -> exit 2, nothing written
+#   2. decrypt both with `age -d -i <identity>` (age asks for the passphrase
+#      twice, on the terminal) into a mode-700 scratch dir under $TMPDIR
+#   3. refuse the archive unless every member is a regular file or a directory
+#      (no symlink / hardlink / device) and no name is absolute or has ".."
+#   4. extract it inside the scratch dir, hash every file, and compare names
+#      and sha256 with the manifest; only NAMES of differing files are shown
+#   5. append one line to $BACKUP_DRILL_LOG (mode 600):
+#      <UTC time>  <file basename>  matched=<n>/<manifest lines>  OK|FAIL [reason]
+#   The scratch dir is removed on every exit, including INT / TERM / HUP
+#   (SIGKILL alone cannot be handled and would leave it; it is mode 700).
+#
 # Usage (AI, routine — no operator input):
 #   VALIDATOR_HOST=<host> VALIDATOR_SSH_KEY=~/.ssh/<key> \
 #     bash scripts/operator-local/backup-host-config.sh            # backup
@@ -56,6 +76,8 @@
 #     bash scripts/operator-local/backup-host-config.sh --dry-run  # names only
 #   bash scripts/operator-local/backup-host-config.sh --restore-help
 #                       # prints how the OPERATOR decrypts in a disaster
+# Usage (OPERATOR, in a terminal; age asks for the key passphrase):
+#   bash scripts/operator-local/backup-host-config.sh --restore-drill [<file>]
 #
 # Env:
 #   VALIDATOR_HOST          validator host (REQUIRED for backup / --dry-run)
@@ -66,13 +88,18 @@
 #                           (default: <deploy_path>)
 #   BACKUP_RECIPIENT_PUBKEY age recipient: an ssh-ed25519 PUBLIC key file
 #                           (default: ~/.ssh/freedom-yield-operator-identity.pub)
-#   BACKUP_OUT_DIR          where the .tar.age is written (default: $HOME)
+#   BACKUP_OUT_DIR          where the .tar.age is written (default: $HOME);
+#                           --restore-drill looks for the newest one here
 #   BACKUP_DROPBOX_DIR      off-site copy dir (default: $HOME/Dropbox/metal-validator-backup)
+#   BACKUP_IDENTITY         --restore-drill only: the age identity (private key)
+#                           file (default: BACKUP_RECIPIENT_PUBKEY minus ".pub")
+#   BACKUP_DRILL_LOG        --restore-drill only: the log (default: $HOME/fy-restore-drill.log)
 #
 # Exit codes:
 #   0  success
-#   1  verification failed (backup kept as *.VERIFY-FAILED, not copied)
-#   2  usage / precondition refused (nothing written)
+#   1  verification failed (backup kept as *.VERIFY-FAILED, not copied);
+#      for --restore-drill: the drill failed (logged FAIL)
+#   2  usage / precondition refused (nothing written; no drill log line)
 #   3  host stream or encryption failed (partial kept as *.INCOMPLETE)
 #   4  backup verified locally, but the Dropbox copy could not be made/checked
 #   99 refused: this looks like a server, not the operator's Mac
@@ -88,14 +115,19 @@ REQUIRED_NAMES=("${CONFIG_NAME}/" ".env")
 # Known config entries: a missing one is reported as a WARN, not a refusal.
 KNOWN_NAMES=(web-host ntfy-topic calendar-token wallet-addresses.json watch-list.json)
 
-usage() { sed -n '2,78p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,105p' "$0" | sed 's/^# \{0,1\}//'; }
 die() { local rc="$1"; shift; echo "ERROR: $*" >&2; exit "$rc"; }
 
 MODE="backup"
+DRILL_FILE=""
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--dry-run) MODE="dry-run" ;;
 		--restore-help) MODE="restore-help" ;;
+		--restore-drill)
+			MODE="restore-drill"
+			# an optional file: the next argument, unless it is another option
+			if [ $# -gt 1 ] && [[ "$2" != --* ]]; then DRILL_FILE="$2"; shift; fi ;;
 		-h|--help) usage; exit 0 ;;
 		*) die 2 "unknown argument: $1 (see --help)" ;;
 	esac
@@ -115,7 +147,9 @@ The backup is encrypted with age to the operator identity public key
 Only the matching PRIVATE key decrypts it:
   $PRIV
 age prompts for that key's passphrase on the terminal. Nothing in the
-routine backup / drill flow ever needs it.
+routine backup flow ever needs it. Practise the restore every quarter, with
+nothing written outside a scratch dir, using:
+  bash scripts/operator-local/backup-host-config.sh --restore-drill
 
 1. Pick the file (no decryption needed to check it):
      ls -l ~/fy-host-config-backup-<yyyymmdd>.tar.age ~/fy-host-config-backup-<yyyymmdd>.tar.age.manifest.age
@@ -151,6 +185,88 @@ fi
 if [ -d /home/deploy ] && id deploy >/dev/null 2>&1; then
 	echo "REFUSE: a 'deploy' user exists here — this looks like a server. Run on the operator's Mac." >&2
 	exit 99
+fi
+
+# ---- --restore-drill: open a real backup into a scratch dir and compare ----
+# Placed before the recipient check on purpose: opening needs the private key
+# only, so a missing .pub does not block the drill. No ssh, no Dropbox, no
+# VALIDATOR_* here. The key file is only tested with `[ -f ]` and handed to
+# `age -d -i`; age asks for the passphrase on the terminal, never this script.
+if [ "$MODE" = "restore-drill" ]; then
+	DRILL_OUT_DIR="${BACKUP_OUT_DIR:-$HOME}"
+	DRILL_LOG="${BACKUP_DRILL_LOG:-$HOME/fy-restore-drill.log}"
+	DRILL_IDENTITY="${BACKUP_IDENTITY:-${RECIPIENT%.pub}}"
+	if [ -z "$DRILL_FILE" ]; then
+		# the glob expands in name order: the last match is the newest date
+		for f in "$DRILL_OUT_DIR"/fy-host-config-backup-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].tar.age; do
+			if [ -f "$f" ]; then DRILL_FILE="$f"; fi
+		done
+		[ -n "$DRILL_FILE" ] || die 2 "no fy-host-config-backup-<yyyymmdd>.tar.age in $DRILL_OUT_DIR (pass a file)"
+	fi
+	DRILL_MANIFEST="${DRILL_FILE}.manifest.age"
+	[ -f "$DRILL_FILE" ] || die 2 "backup file not found: $DRILL_FILE"
+	[ -f "$DRILL_MANIFEST" ] || die 2 "manifest not found: $DRILL_MANIFEST"
+	[ -f "$DRILL_IDENTITY" ] || die 2 "identity (private key) file not found: $DRILL_IDENTITY (set BACKUP_IDENTITY)"
+	command -v age >/dev/null 2>&1 || die 2 "age not found (brew install age)"
+
+	WORK=""
+	DRILL_REASON="error"
+	DRILL_LOGGED=0
+	DRILL_MATCHED=0
+	DRILL_TOTAL=0
+	drill_log() { # $1 OK|FAIL, $2 optional reason
+		printf '%s  %s  matched=%s/%s  %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(basename "$DRILL_FILE")" \
+			"$DRILL_MATCHED" "$DRILL_TOTAL" "$1${2:+ $2}" >>"$DRILL_LOG" || return 0
+		chmod 600 "$DRILL_LOG"
+	}
+	# shellcheck disable=SC2329  # runs from the EXIT trap
+	drill_exit() {
+		if [ -n "$WORK" ] && [ "$DRILL_LOGGED" != "1" ]; then DRILL_LOGGED=1; drill_log FAIL "$DRILL_REASON" || true; fi
+		if [ -n "$WORK" ]; then rm -rf "$WORK"; fi
+	}
+	drill_fail() { DRILL_REASON="$1"; echo "FAIL ($1): $2" >&2; exit 1; }
+	strip_hash() { sed 's/^[[:space:]]*[0-9a-f]\{64\}  //'; }
+	trap drill_exit EXIT
+	trap 'DRILL_REASON=interrupted; exit 130' INT
+	trap 'DRILL_REASON=interrupted; exit 143' TERM
+	trap 'DRILL_REASON=interrupted; exit 129' HUP
+
+	WORK="$(mktemp -d "${TMPDIR:-/tmp}/fy-hcb-drill.XXXXXX")"
+	chmod 700 "$WORK"
+
+	echo "Restore drill: $(basename "$DRILL_FILE") (age asks for the key passphrase twice)" >&2
+	age -d -i "$DRILL_IDENTITY" -o "$WORK/manifest" "$DRILL_MANIFEST" || drill_fail decrypt "could not open the manifest"
+	age -d -i "$DRILL_IDENTITY" -o "$WORK/backup.tar" "$DRILL_FILE" || drill_fail decrypt "could not open the backup"
+
+	# Only regular files and directories, and no name that leaves the dir.
+	TAR_LONG="$(tar -tvf "$WORK/backup.tar")" || drill_fail unsafe-member "the archive cannot be listed"
+	if printf '%s\n' "$TAR_LONG" | cut -c1 | grep -qE '[^-d]'; then
+		drill_fail unsafe-member "the archive has a member that is not a plain file or directory"
+	fi
+	TAR_NAMES="$(tar -tf "$WORK/backup.tar")" || drill_fail unsafe-member "the archive cannot be listed"
+	if printf '%s\n' "$TAR_NAMES" | grep -qE '^/|(^|/)\.\.(/|$)'; then
+		drill_fail unsafe-member "the archive has an absolute or '..' member name"
+	fi
+	mkdir "$WORK/x"
+	tar -C "$WORK/x" -xf "$WORK/backup.tar" || drill_fail extract "the archive could not be extracted"
+
+	# The manifest is '<sha256>  <name>' lines and nothing else.
+	BAD_LINES="$(grep -vcE '^[0-9a-f]{64}  [^[:cntrl:]]+$' "$WORK/manifest" || true)"
+	[ "$BAD_LINES" = "0" ] || drill_fail mismatch "the manifest has $BAD_LINES line(s) that are not '<sha256>  <name>'"
+	DRILL_TOTAL="$(grep -c . "$WORK/manifest" || true)"
+	LC_ALL=C sort "$WORK/manifest" >"$WORK/man.sorted"
+	( cd "$WORK/x" && find . ! -type d -exec shasum -a 256 {} + ) | sed 's|  \./|  |' | LC_ALL=C sort >"$WORK/actual.sorted"
+	DRILL_MATCHED="$(LC_ALL=C comm -12 "$WORK/man.sorted" "$WORK/actual.sorted" | grep -c . || true)"
+	DIFF_NAMES="$(LC_ALL=C comm -3 "$WORK/man.sorted" "$WORK/actual.sorted" | strip_hash | LC_ALL=C sort -u)"
+	if [ -n "$DIFF_NAMES" ] || [ "$DRILL_TOTAL" -lt 1 ]; then
+		echo "Files that differ from the manifest or exist on only one side (names only):" >&2
+		sed 's/^/  /' <<<"$DIFF_NAMES" >&2
+		drill_fail mismatch "$DRILL_MATCHED of $DRILL_TOTAL manifest entries match"
+	fi
+	drill_log OK
+	DRILL_LOGGED=1
+	echo "OK: $DRILL_MATCHED of $DRILL_TOTAL files match the manifest (log: $DRILL_LOG)"
+	exit 0
 fi
 
 # ---- helpers ---------------------------------------------------------------
