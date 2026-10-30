@@ -131,6 +131,20 @@ if [ "\$n" = "\${STUB_SSH_FAIL_CALL:-0}" ]; then
 	"$REAL_TAR" -C "\$root/etc" -cf - freedom-yield | head -c 700; exit 255
 fi
 "$REAL_TAR" -C "\$root/etc" -cf - freedom-yield -C "\$root/deploy" .env
+rc=\$?
+# Hold the stream open until the poller has finished 3 more full passes, so a
+# plaintext copy taken from this stream exists on disk while the poller looks,
+# however fast the machine is (C1 must not depend on timing: on a fast Linux
+# runner the mutant's copy lived shorter than one 10 ms poll). No passes in
+# time -> recorded, and no_plaintext_anywhere fails loudly.
+if [ -n "\${STUB_POLL_TICKS:-}" ]; then
+	t0=\$(wc -c <"\$STUB_POLL_TICKS"); i=0
+	while [ "\$(wc -c <"\$STUB_POLL_TICKS")" -lt \$((t0 + 3)) ]; do
+		i=\$((i + 1)); [ \$i -gt 500 ] && { echo "ssh call \$n" >>"\$STUB_POLL_TIMEOUT"; break; }
+		sleep 0.01
+	done
+fi
+exit \$rc
 STUB
 chmod +x "$BIN/ssh"
 # age stub: `-R <pubkey> -o <out>` only. Header per the age v1 spec, payload
@@ -167,7 +181,8 @@ reset_env() {
 	: >"$TMP/home/.ssh/id_test"; : >"$CALLS"; : >"$LOGS/poll-hits"
 }
 start_poller() {
-	( while :; do grep -D skip -rlF "$MARKER" "$TMP/home" >>"$LOGS/poll-hits" 2>/dev/null; sleep 0.01; done ) &
+	: >"$LOGS/poll-ticks"
+	( while :; do grep -D skip -rlF "$MARKER" "$TMP/home" >>"$LOGS/poll-hits" 2>/dev/null; printf . >>"$LOGS/poll-ticks"; sleep 0.01; done ) &
 	POLL_PID=$!
 }
 stop_poller() { kill "$POLL_PID" 2>/dev/null; wait "$POLL_PID" 2>/dev/null; POLL_PID=""; }
@@ -182,7 +197,7 @@ run_case() {
 		STUB_FIX="$TMP/host" STUB_FIX_ALT="$TMP/host-alt" STUB_SSH_ALT_CALLS="${T_ALT_CALLS:-}" \
 		STUB_SSH_FAIL_CALL="${T_FAIL_CALL:-0}" STUB_HASH_DROP="${T_HASH_DROP:-}" STUB_HASH_LEAK="${T_HASH_LEAK:-}" \
 		STUB_AGE_BADTAG="${T_AGE_BADTAG:-}" STUB_AGE_TWO="${T_AGE_TWO:-}" STUB_AGE_SHORT="${T_AGE_SHORT:-}" \
-		STUB_AGE_REAL="${T_AGE_REAL:-}" \
+		STUB_AGE_REAL="${T_AGE_REAL:-}" STUB_POLL_TICKS="$LOGS/poll-ticks" STUB_POLL_TIMEOUT="$LOGS/poll-timeout" \
 		bash "$SCRIPT" "$@" 2>"$LOGS/stderr" 0<&-)"
 	RC=$?
 	ERR="$(cat "$LOGS/stderr")"
@@ -194,6 +209,7 @@ out_files() { find "$TMP/home" -maxdepth 1 -name 'fy-host-config-backup-*' | sor
 dropbox_files() { find "$TMP/home/Dropbox/metal-validator-backup" -type f | sort; }
 calls_of() { grep -c "^$1	" "$CALLS" || true; }
 no_plaintext_anywhere() { # $1 label
+	assert_eq "$1: poller ran full passes while each stream was held open" "" "$(cat "$LOGS/poll-timeout" 2>/dev/null)"
 	assert_eq "$1: poller saw no plaintext during the run" "" "$(sort -u "$LOGS/poll-hits")"
 	assert_eq "$1: no plaintext left under HOME/TMPDIR" "" "$(grep -D skip -rlF "$MARKER" "$TMP/home" 2>/dev/null)"
 }
