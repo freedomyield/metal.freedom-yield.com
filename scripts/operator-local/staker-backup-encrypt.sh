@@ -67,8 +67,9 @@ trap cleanup EXIT
 echo "鍵のバックアップを作ります。元: $SRC"
 echo "新しいパスワードを 2 回聞きます（1 回目＝入力、2 回目＝打ち間違いの確認）。"
 echo "先に Dashlane に保存し、そこから貼り付けてください。"
-read -rs -p "  新しいパスワード: " P1; echo
-read -rs -p "  もう一度、同じパスワード: " P2; echo
+NO_INPUT="パスワードを読めません。パスワードを打てるターミナル（ターミナル.app）で実行してください。何も作っていません"
+read -rs -p "  新しいパスワード: " P1 || die 1 "$NO_INPUT"; echo
+read -rs -p "  もう一度、同じパスワード: " P2 || die 1 "$NO_INPUT"; echo
 [ "$P1" = "$P2" ] || { unset P1 P2; die 1 "2 回のパスワードが違います。何も作っていません"; }
 [ "${#P1}" -ge "$MIN_LEN" ] || { unset P1 P2; die 1 "パスワードが短すぎます（${MIN_LEN} 文字以上）。何も作っていません"; }
 export PP_FOR_OPENSSL="$P1"
