@@ -64,7 +64,8 @@ else
 fi
 ( cd "$TMP/e1" && shasum -a 256 -c "$OUTNAME.sha256" >/dev/null 2>&1 ) \
 	&& ok "E5 .sha256 matches" || bad "E5 .sha256 matches" "missing or wrong"
-[ "$(stat -f '%Lp' "$TMP/e1/$OUTNAME" 2>/dev/null || stat -c '%a' "$TMP/e1/$OUTNAME")" = 600 ] \
+# GNU stat first: on Linux `stat -f` is filesystem status and succeeds with other output
+[ "$(stat -c '%a' "$TMP/e1/$OUTNAME" 2>/dev/null || stat -f '%Lp' "$TMP/e1/$OUTNAME")" = 600 ] \
 	&& ok "E5 mode 600" || bad "E5 mode 600" "other mode"
 
 # E2
