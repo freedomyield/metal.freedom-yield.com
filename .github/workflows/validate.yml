@@ -170,6 +170,8 @@ jobs:
           tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
           sudo install -m 755 /tmp/gitleaks /usr/local/bin/gitleaks
           gitleaks version
+      - name: Install age (tests/backup-host-config runs the restore drill with the real tool)
+        run: sudo apt-get update && sudo apt-get install -y age && age --version
       - name: bash tests/run-all-tests.sh
         run: bash tests/run-all-tests.sh
       # Gate: a commit must not silently invalidate a pin inside the
