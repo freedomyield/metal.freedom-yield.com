@@ -109,6 +109,10 @@ Severity model: **CRITICAL** = unknown key guarded by a default (`// ""`, `|| "â
 **Related:** the host's untracked config is backed up by `scripts/operator-local/backup-host-config.sh` (operator-local; backup and `--dry-run` are non-interactive: `age`-encrypted to an ssh-ed25519 public key, verified without decrypting; restoring needs the matching private key, used only in a disaster and in the quarterly `--restore-drill`, which the operator runs in a terminal).
 **Frequency:** quarterly; untested backups aren't backups.
 
+### `scripts/operator-local/staker-backup-encrypt.sh`
+**Purpose:** Make the encrypted staker key backup (`~/staker-backup-<yyyymmdd>.tar.gz.enc`) from the disk-encrypted plaintext copy, in the layout `dr-drill.sh` expects. In the same run it opens the new file again and compares the SHA-256 of all three key files with the source; any difference deletes the partial file and exits non-zero. Writes `<file>.sha256` next to it. The operator runs it in a terminal (new passphrase, typed then confirmed); afterwards `bash scripts/dr-drill.sh` proves the saved passphrase opens it.
+**Dependencies:** `openssl`, `tar`, `shasum`.
+
 ---
 
 ## Tier 2 â€” Reusable with assumptions
