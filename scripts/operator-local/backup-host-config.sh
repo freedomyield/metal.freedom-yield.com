@@ -250,8 +250,11 @@ if [ "$MODE" = "restore-drill" ]; then
 	WORK="$(mktemp -d "${TMPDIR:-/tmp}/fy-hcb-drill.XXXXXX")"
 	chmod 700 "$WORK"
 
-	echo "Restore drill: $(basename "$DRILL_FILE") (age asks for the key passphrase twice)" >&2
+	echo "Restore drill: $(basename "$DRILL_FILE")" >&2
+	echo "パスワードを 2 回聞きます。2 回とも同じパスワードです（2 つのファイルを 1 つずつ開くため）。" >&2
+	echo "[1/2] ハッシュの一覧を開きます" >&2
 	age -d -i "$DRILL_IDENTITY" -o "$WORK/manifest" "$DRILL_MANIFEST" || drill_fail decrypt "could not open the manifest"
+	echo "[2/2] バックアップの本体を開きます（もう一度、同じパスワード）" >&2
 	age -d -i "$DRILL_IDENTITY" -o "$WORK/backup.tar" "$DRILL_FILE" || drill_fail decrypt "could not open the backup"
 
 	# Only regular files and directories, and no name that leaves the dir.

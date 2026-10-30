@@ -219,7 +219,8 @@ else
   # ── Step 1: decrypt ──────────────────────────────────────────────────
   echo
   echo "[1/5] Decrypt encrypted backup"
-  read -rs -p "  Enter passphrase: " PP
+  echo "  開くファイル: $(basename "$ENCRYPTED_BACKUP")"
+  read -rs -p "  このファイルを暗号化した時のパスワード（1 回だけ）: " PP
   echo
   export PP_FOR_OPENSSL="$PP"
   unset PP
