@@ -489,6 +489,42 @@ printf '%s\n' "$OUT7B" | grep -q "RESULT: ALL PASS" \
 	&& fail "case7b: an empty custom-pattern run reported RESULT: ALL PASS" \
 	|| pass "case7b: an empty custom-pattern run never reported RESULT: ALL PASS"
 
+# =====================================================================
+# case 8 — a failing suite's FAIL line is shown even when it is followed by
+# more than 30 lines of output (the runner used to print only the tail, so
+# the line naming the failure could be cut off). Mutant: drop the FAIL-line
+# block; the same fixture must then lose the FAIL line.
+# =====================================================================
+write_noisy_fail() { # <path>
+	{
+		printf '%s\n' '#!/usr/bin/env bash'
+		printf '%s\n' 'echo "FAIL  zz-case8-the-failing-assertion"'
+		printf '%s\n' 'i=0; while [ $i -lt 40 ]; do echo "PASS  filler $i"; i=$((i + 1)); done'
+		printf '%s\n' 'exit 1'
+	} > "$1"
+	chmod +x "$1"
+}
+M_FAILLINES_FROM='if [ -n "$fail_lines" ]; then'
+M_FAILLINES_TO='if false; then # MUTANT: FAIL-line block disabled'
+C8="$TMP/case8"; build_fixture "$C8"
+write_noisy_fail "$C8/repo/tests/fixture/test-02.sh"
+OUT8="$(bash "$C8/repo/tests/run-all-tests.sh" 2>&1)"; RC8=$?
+[ "$RC8" -ne 0 ] && pass "case8: a failing suite makes the run non-zero (rc=$RC8)" \
+	|| fail "case8: the run exited 0 with a failing suite"
+printf '%s\n' "$OUT8" | grep -qF 'FAIL  zz-case8-the-failing-assertion' \
+	&& pass "case8: the FAIL line is shown although 40 lines follow it" \
+	|| fail "case8: the FAIL line was cut off by the tail"
+C8M="$TMP/case8m"; build_fixture "$C8M"
+write_noisy_fail "$C8M/repo/tests/fixture/test-02.sh"
+if apply_mutation "$C8M/repo/tests/run-all-tests.sh" "$M_FAILLINES_FROM" "$M_FAILLINES_TO"; then
+	OUT8M="$(bash "$C8M/repo/tests/run-all-tests.sh" 2>&1)"
+	printf '%s\n' "$OUT8M" | grep -qF 'FAIL  zz-case8-the-failing-assertion' \
+		&& fail "case8: mutant still shows the FAIL line — the fixture no longer exercises the cut-off" \
+		|| pass "case8: mutant (FAIL-line block off) loses the FAIL line, as predicted"
+else
+	fail "case8: mutation needle not found in the runner"
+fi
+
 # ---- summary -----------------------------------------------------------------
 echo
 echo "----------------------------------------"

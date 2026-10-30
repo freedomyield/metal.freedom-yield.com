@@ -296,6 +296,16 @@ run_suite() {
 		echo "FAIL (rc=$rc)"
 		if [ "$VERBOSE" = "0" ]; then
 			echo "--- $rel_path stderr / stdout ---"
+			# The tail alone can hide the line that says what failed when a
+			# suite prints more than 30 lines after it; so every FAIL / FATAL
+			# line is printed first (capped), then the tail as before. Only
+			# lines the suite already prints are shown — nothing new.
+			fail_lines="$(printf '%s\n' "$out" | grep -E '^[[:space:]]*(FAIL|FATAL)' | head -50 || true)"
+			if [ -n "$fail_lines" ]; then
+				echo "--- FAIL / FATAL lines (all, up to 50) ---"
+				printf '%s\n' "$fail_lines"
+				echo "--- last 30 lines ---"
+			fi
 			echo "$out" | tail -30
 			echo "--- end ---"
 		fi
