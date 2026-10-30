@@ -120,12 +120,17 @@ die() { local rc="$1"; shift; echo "ERROR: $*" >&2; exit "$rc"; }
 
 MODE="backup"
 DRILL_FILE=""
+# One mode per run: a later option must not silently replace an earlier one.
+set_mode() {
+	if [ "$MODE" != "backup" ] && [ "$MODE" != "$1" ]; then die 2 "$1 cannot be combined with --$MODE (see --help)"; fi
+	MODE="$1"
+}
 while [ $# -gt 0 ]; do
 	case "$1" in
-		--dry-run) MODE="dry-run" ;;
-		--restore-help) MODE="restore-help" ;;
+		--dry-run) set_mode "dry-run" ;;
+		--restore-help) set_mode "restore-help" ;;
 		--restore-drill)
-			MODE="restore-drill"
+			set_mode "restore-drill"
 			# an optional file: the next argument, unless it is another option
 			if [ $# -gt 1 ] && [[ "$2" != --* ]]; then DRILL_FILE="$2"; shift; fi ;;
 		-h|--help) usage; exit 0 ;;
@@ -221,8 +226,19 @@ if [ "$MODE" = "restore-drill" ]; then
 	}
 	# shellcheck disable=SC2329  # runs from the EXIT trap
 	drill_exit() {
+		local left=0
+		if [ -n "$WORK" ]; then
+			# a dir or file the archive made unwritable must not keep the plaintext alive
+			chmod -R u+rwX "$WORK" 2>/dev/null || true
+			rm -rf "$WORK" 2>/dev/null || true
+			if [ -e "$WORK" ]; then
+				left=1
+				DRILL_REASON="cleanup"
+				echo "WARNING: the scratch dir could not be removed and may hold plaintext: $WORK (remove it by hand)" >&2
+			fi
+		fi
 		if [ -n "$WORK" ] && [ "$DRILL_LOGGED" != "1" ]; then DRILL_LOGGED=1; drill_log FAIL "$DRILL_REASON" || true; fi
-		if [ -n "$WORK" ]; then rm -rf "$WORK"; fi
+		if [ "$left" = "1" ]; then exit 1; fi
 	}
 	drill_fail() { DRILL_REASON="$1"; echo "FAIL ($1): $2" >&2; exit 1; }
 	strip_hash() { sed 's/^[[:space:]]*[0-9a-f]\{64\}  //'; }
@@ -240,15 +256,21 @@ if [ "$MODE" = "restore-drill" ]; then
 
 	# Only regular files and directories, and no name that leaves the dir.
 	TAR_LONG="$(tar -tvf "$WORK/backup.tar")" || drill_fail unsafe-member "the archive cannot be listed"
-	if printf '%s\n' "$TAR_LONG" | cut -c1 | grep -qE '[^-d]'; then
+	# counts, not `grep -q` in a pipe: under pipefail an early-exiting grep would
+	# SIGPIPE the producer and let a dangerous member through
+	BAD_TYPES="$(cut -c1 <<<"$TAR_LONG" | grep -cE '[^-d]' || true)"
+	if [ "$BAD_TYPES" != "0" ]; then
 		drill_fail unsafe-member "the archive has a member that is not a plain file or directory"
 	fi
 	TAR_NAMES="$(tar -tf "$WORK/backup.tar")" || drill_fail unsafe-member "the archive cannot be listed"
-	if printf '%s\n' "$TAR_NAMES" | grep -qE '^/|(^|/)\.\.(/|$)'; then
+	BAD_NAMES="$(grep -cE '^/|(^|/)\.\.(/|$)' <<<"$TAR_NAMES" || true)"
+	if [ "$BAD_NAMES" != "0" ]; then
 		drill_fail unsafe-member "the archive has an absolute or '..' member name"
 	fi
 	mkdir "$WORK/x"
 	tar -C "$WORK/x" -xf "$WORK/backup.tar" || drill_fail extract "the archive could not be extracted"
+	# members with modes like 0500 / 000 must still be hashable and removable
+	chmod -R u+rwX "$WORK/x"
 
 	# The manifest is '<sha256>  <name>' lines and nothing else.
 	BAD_LINES="$(grep -vcE '^[0-9a-f]{64}  [^[:cntrl:]]+$' "$WORK/manifest" || true)"

@@ -51,6 +51,11 @@
 #   D9  symlink / ".." / absolute members -> exit 1, "FAIL unsafe-member"
 #   D10 no argument -> newest dated file; missing manifest/file -> exit 2, no log
 #   D11 log line shape, mode 600, no absolute path, no hash
+#   D12 members with mode 0500 / 000 are hashed and removed; an unremovable
+#       scratch dir is a loud failure (exit 1, "FAIL cleanup" if not yet logged)
+#   D13 a huge member list cannot slip a symlink / ".." past the checks
+#   D14 --restore-drill with --dry-run / --restore-help -> exit 2
+#   D8b the identity variable is only tested (-f) and passed to `age -d -i`
 #
 # BACKUP_SCRIPT_UNDER_TEST=<path>  run the cases against another script
 # BACKUP_TEST_ONLY=<case>          run one case (used by the mutation loop)
@@ -433,6 +438,28 @@ STUB
 	chmod +x "$DBIN/$c"
 done
 cp "$BIN/ssh" "$DBIN/ssh"
+# rm wrapper: can refuse to remove the drill scratch dir (STUB_RM_FAIL=1)
+real_rm="$(command -v rm)"
+cat >"$DBIN/rm" <<STUB
+#!/usr/bin/env bash
+printf 'rm\t%s\n' "\$*" >>"\$STUB_CALLS"
+if [ "\${STUB_RM_FAIL:-}" = 1 ]; then case "\$*" in *fy-hcb-drill*) exit 1 ;; esac; fi
+exec "$real_rm" "\$@"
+STUB
+chmod +x "$DBIN/rm"
+# ustar <out>: stdin lines "TYPE OCTALMODE NAME [CONTENT|LINKNAME]" -> a tar with exactly those members
+ustar() {
+	perl -e '
+		my $o = "";
+		while (<STDIN>) { chomp; my ($t, $m, $n, $c) = split / /, $_, 4; $c //= "";
+			my $body = $t eq "0" ? $c : ""; my $link = $t eq "2" ? $c : "";
+			my $h = pack("a100 a8 a8 a8 a12 a12 a8 a1 a100 a6 a2 a32 a32 a8 a8 a155", $n, sprintf("%07o", oct($m)),
+				"0000000", "0000000", sprintf("%011o", length $body), "00000000000", "        ", $t, $link, "ustar", "00", "", "", "", "", "");
+			my $s = 0; $s += ord for split //, $h; substr($h, 148, 8) = sprintf("%06o", $s) . "\0 ";
+			$o .= $h . ("\0" x (512 - length $h));
+			$o .= $body . ("\0" x ((512 - length($body) % 512) % 512)) if length $body; }
+		$o .= "\0" x 1024; open(F, ">:raw", $ARGV[0]) or die; print F $o; close F' "$1"
+}
 # age wrapper: logs argv, records the mode of the -o parent dir, can hold (TERM test)
 cat >"$DBIN/age" <<STUB
 #!/usr/bin/env bash
@@ -449,7 +476,7 @@ build_denv() {
 	DENV=(env -i PATH="$DBIN:/usr/bin:/bin:/usr/sbin:/sbin" HOME="$TMP/home" TMPDIR="$DTMP"
 		BACKUP_RECIPIENT_PUBKEY="${T_PUB-$PUB}"
 		STUB_CALLS="$CALLS" STUB_SSH_COUNTER="$LOGS/ssh-count" STUB_EXPECTED_REMOTE=none STUB_EXPECTED_HASH=none
-		STUB_WORKMODE="$LOGS/workmode" STUB_AGE_HOLD="${T_HOLD:-}")
+		STUB_WORKMODE="$LOGS/workmode" STUB_AGE_HOLD="${T_HOLD:-}" STUB_RM_FAIL="${T_RMFAIL:-}")
 	[ -z "${T_IDENT:-}" ] || DENV+=(BACKUP_IDENTITY="$T_IDENT")
 }
 drill_run() { # args to the script; stdin closed
@@ -458,7 +485,7 @@ drill_run() { # args to the script; stdin closed
 	RC=$?
 	ERR="$(cat "$LOGS/stderr")"
 }
-drill_reset() { reset_env; rm -rf "$DTMP" "$OUTSIDE" "$DS"; mkdir -p "$DTMP" "$OUTSIDE" "$DS"; }
+drill_reset() { reset_env; chmod -R u+rwX "$DTMP" "$DS" 2>/dev/null; rm -rf "$DTMP" "$OUTSIDE" "$DS"; mkdir -p "$DTMP" "$OUTSIDE" "$DS"; }
 drill_left() { find "$DTMP" -mindepth 1 -maxdepth 1 -name 'fy-hcb-drill.*' | sort; }
 last_log() { tail -1 "$DRILL_LOGFILE" 2>/dev/null; }
 log_status() { last_log | sed -E 's/^.*matched=[0-9]+\/[0-9]+  //'; }
@@ -603,6 +630,8 @@ if [ "$DRILL_OK" = 1 ] && want drillkey; then
 	assert_eq "drillkey: exit 0" "0" "$RC"
 	assert_eq "drillkey: age was handed the identity twice" "2" "$(grep '^age	' "$CALLS" | grep -cF -- "-i $KEYPATH")"
 	assert_eq "drillkey: no other tool's argv names the identity" "0" "$(grep -v '^age	' "$CALLS" | grep -cF -- "$KEYPATH")"
+	assert_eq "drillkey: the script only tests (-f) and passes (age -d -i) the identity" "" \
+		"$(grep -n 'DRILL_IDENTITY' "$SCRIPT" | grep -vE '^[0-9]+:[[:space:]]*DRILL_IDENTITY=|\[ -f "\$DRILL_IDENTITY" \]|age -d -i "\$DRILL_IDENTITY"')"
 fi
 
 if [ "$DRILL_OK" = 1 ] && want drillunsafe; then
@@ -626,6 +655,57 @@ if [ "$DRILL_OK" = 1 ] && want drillunsafe; then
 	drill_run --restore-drill "$DBK"
 	drill_fail_common "drillunsafe-absolute" "unsafe-member"
 	assert_eq "drillunsafe-absolute: nothing was created outside the scratch dir" "" "$(ls -A "$OUTSIDE")"
+fi
+
+if [ "$DRILL_OK" = 1 ] && want drillperm; then
+	echo "== restore drill: read-only members, unremovable scratch dir (D12) =="
+	drill_reset; std_fixture
+	printf '5 500 ro/\n0 644 ro/f a\n0 000 g b\n' | ustar "$DS/backup.tar"
+	{ printf a | shasum -a 256 | awk '{print $1 "  ro/f"}'; printf b | shasum -a 256 | awk '{print $1 "  g"}'; } >"$DS/manifest.txt"
+	put_pair 20260101
+	drill_run --restore-drill "$DBK"
+	assert_eq "drillperm: a 0500 dir and a 000 file: exit 0" "0" "$RC"
+	assert_contains "drillperm: matched=2/2  OK" "matched=2/2  OK" "$(last_log)"
+	assert_eq "drillperm: no scratch dir left" "" "$(drill_left)"
+	drill_reset; std_fixture; put_pair 20260101
+	T_RMFAIL=1 drill_run --restore-drill "$DBK"
+	assert_eq "drillleft: OK run, scratch dir stuck: exit 1" "1" "$RC"
+	assert_contains "drillleft: loud warning" "could not be removed" "$ERR"
+	assert_eq "drillleft: the OK that was already logged stays" "OK" "$(log_status)"
+	drill_reset; std_fixture; put_pair 20260101
+	perl -e 'open(my $h, "+<:raw", $ARGV[0]) or die; my $n = -s $ARGV[0]; seek($h, $n - 20, 0); read($h, my $b, 1);
+		seek($h, $n - 20, 0); print $h chr(ord($b) ^ 0xff); close $h' "$DBK"
+	T_RMFAIL=1 drill_run --restore-drill "$DBK"
+	assert_eq "drillleft: FAIL run, scratch dir stuck: exit 1" "1" "$RC"
+	assert_eq "drillleft: logged as FAIL cleanup" "FAIL cleanup" "$(log_status)"
+fi
+
+if [ "$DRILL_OK" = 1 ] && want drillbig; then
+	echo "== restore drill: a huge member list (D13) =="
+	drill_reset; std_fixture
+	{ echo "2 777 evil /etc/hostname"; perl -e 'for (1..3000) { printf "0 644 %s%04d x\n", "d" x 90, $_ }'; } | ustar "$DS/backup.tar"
+	put_pair 20260101
+	drill_run --restore-drill "$DBK"
+	drill_fail_common "drillbig-symlink" "unsafe-member"
+	drill_reset; std_fixture
+	{ echo "0 644 ../evil x"; perl -e 'for (1..3000) { printf "0 644 %s%04d x\n", "d" x 90, $_ }'; } | ustar "$DS/backup.tar"
+	put_pair 20260101
+	drill_run --restore-drill "$DBK"
+	drill_fail_common "drillbig-dotdot" "unsafe-member"
+fi
+
+if [ "$DRILL_OK" = 1 ] && want drillmodes; then
+	echo "== restore drill: one mode per run (D14) =="
+	drill_reset; std_fixture; put_pair 20260101
+	drill_run --dry-run --restore-drill "$DBK"
+	assert_eq "drillmodes: --dry-run then --restore-drill: exit 2" "2" "$RC"
+	assert_contains "drillmodes: says why" "cannot be combined" "$ERR"
+	drill_run --restore-drill "$DBK" --dry-run
+	assert_eq "drillmodes: --restore-drill then --dry-run: exit 2" "2" "$RC"
+	drill_run --restore-help --restore-drill "$DBK"
+	assert_eq "drillmodes: --restore-help then --restore-drill: exit 2" "2" "$RC"
+	assert_eq "drillmodes: nothing ran" "0" "$(calls_of age)"
+	assert_eq "drillmodes: nothing logged" "" "$(ls "$DRILL_LOGFILE" 2>/dev/null)"
 fi
 
 if [ "$DRILL_OK" = 1 ] && want drillselect; then
@@ -770,7 +850,7 @@ if [ -z "$ONLY" ] && [ -z "${BACKUP_SCRIPT_UNDER_TEST:-}" ]; then
 	mutate empty-ok drillmanifest 's/\|\| \[ "\$DRILL_TOTAL" -lt 1 \]/|| [ "\$DRILL_TOTAL" -lt 0 ]/' \
 		'drillmanifest-empty: exit 1'
 	# D5: the scratch dir is not removed.
-	mutate no-cleanup drillclean 's/if \[ -n "\$WORK" \]; then rm -rf "\$WORK"; fi/:/' \
+	mutate no-cleanup drillclean 's/rm -rf "\$WORK" 2>\/dev\/null \|\| true/:/' \
 		'drillclean: no fy-hcb-drill dir left after OK'
 	# D5: TERM does not run the exit trap.
 	# (bash runs the EXIT trap on a fatal TERM too, so the claim this breaks is
@@ -793,11 +873,29 @@ if [ -z "$ONLY" ] && [ -z "${BACKUP_SCRIPT_UNDER_TEST:-}" ]; then
 	mutate key-read drillkey 's/^(\tmkdir "\$WORK\/x")$/$1\n\tshasum -a 256 "\$DRILL_IDENTITY" >\/dev\/null/m' \
 		"drillkey: no other tool's argv names the identity"
 	# D9: the member-type check is off.
-	mutate no-type-check drillunsafe 's/grep -qE \x27\[\^-d\]\x27/grep -qE \x27^\\0\$\x27/' \
+	mutate no-type-check drillunsafe 's/grep -cE \x27\[\^-d\]\x27/grep -cE \x27^\\0\$\x27/' \
 		'drillunsafe-symlink: log says FAIL unsafe-member'
 	# D9: the name check is off.
-	mutate no-name-check drillunsafe 's/grep -qE \x27\^\/\|\(\^\|\/\)\\\.\\\.\(\/\|\$\)\x27/grep -qE \x27^\\0\$\x27/' \
+	mutate no-name-check drillunsafe 's/grep -cE \x27\^\/\|\(\^\|\/\)\\\.\\\.\(\/\|\$\)\x27/grep -cE \x27^\\0\$\x27/' \
 		'drillunsafe-dotdot: log says FAIL unsafe-member'
+	# D9: only the absolute-name half of the name check is off.
+	mutate no-abs-check drillunsafe 's/grep -cE \x27\^\/\|\(\^\|\/\)/grep -cE \x27(^|\/)/' \
+		'drillunsafe-absolute: log says FAIL unsafe-member'
+	# D8b: the identity file is opened by a shell redirect.
+	mutate key-redirect drillkey 's/^(\tmkdir "\$WORK\/x")$/$1\n\t: <"\$DRILL_IDENTITY"/m' \
+		'drillkey: the script only tests (-f) and passes (age -d -i) the identity'
+	# D12: members with mode 0500 / 000 are not made usable after extraction.
+	mutate no-extract-chmod drillperm 's/^\tchmod -R u\+rwX "\$WORK\/x"\n//m' \
+		'drillperm: a 0500 dir and a 000 file: exit 0'
+	# D12: a scratch dir that cannot be removed is not noticed.
+	mutate left-unnoticed drillperm 's/if \[ -e "\$WORK" \]; then/if false; then/' \
+		'drillleft: OK run, scratch dir stuck: exit 1'
+	# D13: the type check as a pipe into `grep -q` (fail-open under pipefail).
+	mutate type-pipe-q drillbig 's/BAD_TYPES="\$\(cut -c1 <<<"\$TAR_LONG" \| grep -cE \x27\[\^-d\]\x27 \|\| true\)"/BAD_TYPES=0; if printf "%s\\n" "\$TAR_LONG" | grep -qE \x27^[^-d]\x27; then BAD_TYPES=1; fi/' \
+		'drillbig-symlink: log says FAIL unsafe-member'
+	# D14: a later option silently replaces an earlier mode.
+	mutate mode-override drillmodes 's/if \[ "\$MODE" != "backup" \] && \[ "\$MODE" != "\$1" \]; then die/if false; then die/' \
+		'drillmodes: --dry-run then --restore-drill: exit 2'
 	# D10: the oldest file is picked.
 	mutate pick-oldest drillselect 's/if \[ -f "\$f" \]; then DRILL_FILE="\$f"; fi/if [ -f "\$f" ] \&\& [ -z "\$DRILL_FILE" ]; then DRILL_FILE="\$f"; fi/' \
 		'drillselect: no argument picks the newest (the older one is corrupt): exit 0'
