@@ -292,6 +292,160 @@ echo "$OUT2" | grep -q -- '--allow-uncommitted given' \
 	|| bad "regression: unexpected curl call on the --allow-uncommitted path"
 teardown
 
+# ---- gate 1 pre-check ([4/5]) must ask the SAME question bin/safe-broadcast's
+#      gate 1 asks (2026-11-06: the preview sent no content-type, the live
+#      history endpoint answered 400, and every preview showed MISS) ----------
+# CHAIN: none — no network. A recording `curl` and `proton` stub sit first on
+# PATH; the fixture repo carries a stub scripts/sign-anchor-event.sh so the
+# script runs all the way through [4/5] and exits 0.
+HIST_TX="$(printf '%064d' 7)"
+G1_STUBDIR=""; G1_LOG=""; G1_TREE=""; G1_TREE_V2=""
+g1_setup() {
+	setup
+	G1_STUBDIR="$BASE/stubbin"; G1_LOG="$BASE/hist-requests.log"; : > "$G1_LOG"
+	mkdir -p "$G1_STUBDIR" "$BASE/cfg" "$FIXTURE_REPO/scripts"
+	: > "$BASE/cfg/xpr-account"; : > "$BASE/cfg/anchor-sink"
+	cat > "$FIXTURE_REPO/scripts/sign-anchor-event.sh" <<'SIGNEOF'
+#!/usr/bin/env bash
+printf '%s\n' '{"tx":{"actions":[{"authorization":[{"actor":"a","permission":"anchor"}],"data":{"memo":"fya1c4","to":"x","quantity":"0.0001 XPR"}}]}}'
+SIGNEOF
+	cat > "$G1_STUBDIR/proton" <<'PEOF'
+#!/usr/bin/env bash
+echo '{}'
+PEOF
+	# History endpoint emulation (the 2026-11-06 behaviour): a v1 POST without
+	# `content-type:application/json` is a 400 (curl -f -> rc 22, no body;
+	# without -f the error body is printed). V1_BODY / V2_BODY serve the answers.
+	cat > "$G1_STUBDIR/curl" <<'CEOF'
+#!/usr/bin/env bash
+method=GET; ctype=0; url=""; fflag=0
+while [ $# -gt 0 ]; do
+	case "$1" in
+		-X) method="$2"; shift 2 ;;
+		-H) case "$(printf '%s' "$2" | tr 'A-Z' 'a-z' | tr -d ' ')" in content-type:application/json*) ctype=1 ;; esac; shift 2 ;;
+		-d) method=POST; shift 2 ;;
+		--max-time) shift 2 ;;
+		-[a-zA-Z]*) case "$1" in *f*) fflag=1 ;; esac; shift ;;
+		http*) url="$1"; shift ;;
+		*) shift ;;
+	esac
+done
+printf '%s ct=%s %s\n' "$method" "$ctype" "$url" >> "${HIST_LOG:?}"
+case "$url" in
+	*/v1/history/get_transaction)
+		if [ "$method" != POST ] || [ "$ctype" != 1 ]; then
+			[ "$fflag" = 1 ] && exit 22
+			printf '%s' "{\"code\":400,\"message\":\"body must have required property 'id'\"}"; exit 0
+		fi
+		[ -n "${V1_BODY:-}" ] || exit 22
+		printf '%s' "$V1_BODY" ;;
+	*/v2/history/get_transaction\?id=*)
+		[ -n "${V2_BODY:-}" ] || exit 22
+		printf '%s' "$V2_BODY" ;;
+	*) exit 22 ;;
+esac
+CEOF
+	chmod +x "$G1_STUBDIR/curl" "$G1_STUBDIR/proton"
+	# Throwaway copies of scripts/ + config/ so this suite can run a MUTANT of
+	# the script and an id-only profile without touching the real tree.
+	G1_TREE="$BASE/tree"; mkdir -p "$G1_TREE"
+	cp -R "$REPO_ROOT/scripts" "$G1_TREE/scripts"; cp -R "$REPO_ROOT/config" "$G1_TREE/config"
+	G1_TREE_V2="$BASE/tree-v2"; mkdir -p "$G1_TREE_V2"
+	cp -R "$REPO_ROOT/scripts" "$G1_TREE_V2/scripts"; cp -R "$REPO_ROOT/config" "$G1_TREE_V2/config"
+	jq '.profiles["xpr-mainnet"].push_response="id-only" | .profiles["xpr-testnet"].push_response="id-only"' \
+		"$REPO_ROOT/config/a-chain-profiles.json" > "$G1_TREE_V2/config/a-chain-profiles.json"
+}
+# g1_run <script> [VAR=val ...] — runs [1/5]..[5/5] with the stubs.
+g1_run() {
+	local script="$1"; shift
+	env PATH="$G1_STUBDIR:$PATH" HIST_LOG="$G1_LOG" CURL_URL_LOG="$CURL_LOG" \
+		HOME="$TEST_HOME" REPO="$FIXTURE_REPO" FY_CONFIG_DIR="$BASE/cfg" \
+		DRYLOG="$BASE/dryrun.json" FYD_CURL="$CURL_STUB" "$@" \
+		bash "$script" --source=public/api/anchor-source.json \
+			--testnet-tx-id="$HIST_TX" --skip-published-check 2>&1
+}
+g1_line() { printf '%s\n' "$1" | grep 'gate1 testnet-tx' | head -1; }
+V1_OK="{\"id\":\"$HIST_TX\",\"block_num\":123,\"traces\":[]}"
+
+# G1: the v1 POST carries content-type -> block_num shown, check mark
+g1_setup
+OUT="$(g1_run "$SCRIPT" V1_BODY="$V1_OK")"; RC=$?
+LINE="$(g1_line "$OUT")"
+[ "$RC" -eq 0 ] && ok "gate1: preview runs through [4/5] to exit 0" || bad "gate1: expected exit 0, got $RC (out: $OUT)"
+case "$LINE" in *"block_num: 123"*"✓"*) ok "gate1: v1 POST with content-type resolves -> block_num + check" ;; *) bad "gate1: expected 'block_num: 123 ✓', got: $LINE" ;; esac
+grep -q '^POST ct=1 .*/v1/history/get_transaction$' "$G1_LOG" \
+	&& ok "gate1: request is a POST with content-type:application/json" \
+	|| bad "gate1: no POST+content-type request seen (log: $(cat "$G1_LOG"))"
+teardown
+
+# G2 (mutant): drop the content-type header -> the stubbed endpoint answers 400
+#      -> MISS. G1 above fails against this mutant.
+g1_setup
+sed -i.bak "s/-H 'content-type:application\/json'//" "$G1_TREE/scripts/preview-cycle-anchor-broadcast.sh"
+if cmp -s "$G1_TREE/scripts/preview-cycle-anchor-broadcast.sh" "$REPO_ROOT/scripts/preview-cycle-anchor-broadcast.sh"; then
+	bad "mutant(no content-type): the sed did not change the script (mutation not applied)"
+else
+	OUT="$(g1_run "$G1_TREE/scripts/preview-cycle-anchor-broadcast.sh" V1_BODY="$V1_OK")"
+	LINE="$(g1_line "$OUT")"
+	case "$LINE" in *"block_num: 123"*) bad "mutant(no content-type) NOT caught: still resolved ($LINE)" ;; *) ok "mutant(no content-type) caught: gate1 does not resolve ($LINE)" ;; esac
+fi
+teardown
+
+# G3: v1 answers for a DIFFERENT tx id -> safe-broadcast's gate 1 would refuse,
+#     so the preview must not show a check mark (never looser than the real gate).
+g1_setup
+OUT="$(g1_run "$SCRIPT" V1_BODY="{\"id\":\"$(printf '%064d' 9)\",\"block_num\":123}")"
+LINE="$(g1_line "$OUT")"
+case "$LINE" in *"✓"*|*"block_num: 123"*) bad "gate1: foreign tx id must not resolve, got: $LINE" ;; *) ok "gate1: answer naming another tx -> MISS, no check" ;; esac
+teardown
+
+# G4: v1 answers executed:false -> real gate refuses -> no check mark.
+g1_setup
+OUT="$(g1_run "$SCRIPT" V1_BODY="{\"id\":\"$HIST_TX\",\"block_num\":123,\"executed\":false}")"
+LINE="$(g1_line "$OUT")"
+case "$LINE" in *"✓"*) bad "gate1: executed:false must not show a check, got: $LINE" ;; *) ok "gate1: executed:false -> no check" ;; esac
+teardown
+
+# G5: processed profile (default): v1 fails + v2 would answer -> safe-broadcast
+#     does NOT try v2 there, so the preview must not either.
+g1_setup
+OUT="$(g1_run "$SCRIPT" V2_BODY="{\"trx_id\":\"$HIST_TX\",\"block_num\":456}")"
+LINE="$(g1_line "$OUT")"
+case "$LINE" in *"✓"*) bad "gate1: processed profile must not fall back to v2, got: $LINE" ;; *) ok "gate1: processed profile -> v1 only, no check from v2" ;; esac
+! grep -q '/v2/history/' "$G1_LOG" \
+	&& ok "gate1: processed profile made no v2 request" \
+	|| bad "gate1: unexpected v2 request on a processed profile"
+teardown
+
+# G6: id-only profile: v1 fails, v2 answers -> resolved via v2 (same as gate 1).
+g1_setup
+OUT="$(g1_run "$G1_TREE_V2/scripts/preview-cycle-anchor-broadcast.sh" V2_BODY="{\"trx_id\":\"$HIST_TX\",\"block_num\":456}")"
+LINE="$(g1_line "$OUT")"
+case "$LINE" in *"block_num: 456"*"✓"*) ok "gate1: id-only profile resolves through the v2 GET" ;; *) bad "gate1: id-only v2 fallback expected 'block_num: 456 ✓', got: $LINE (out: $OUT)" ;; esac
+teardown
+
+# G7 (mutant): remove the v2 attempt in the id-only run -> must stop resolving.
+g1_setup
+sed -i.bak 's/if \[ "\$try_v2" = "1" \]; then/if [ "$try_v2" = "never" ]; then/' "$G1_TREE_V2/scripts/preview-cycle-anchor-broadcast.sh"
+if cmp -s "$G1_TREE_V2/scripts/preview-cycle-anchor-broadcast.sh" "$REPO_ROOT/scripts/preview-cycle-anchor-broadcast.sh"; then
+	bad "mutant(no v2): mutation not applied"
+else
+	OUT="$(g1_run "$G1_TREE_V2/scripts/preview-cycle-anchor-broadcast.sh" V2_BODY="{\"trx_id\":\"$HIST_TX\",\"block_num\":456}")"
+	LINE="$(g1_line "$OUT")"
+	case "$LINE" in *"block_num: 456"*) bad "mutant(no v2) NOT caught: still resolved ($LINE)" ;; *) ok "mutant(no v2) caught: id-only run no longer resolves ($LINE)" ;; esac
+fi
+teardown
+
+# G8: the lookup helpers in the preview are identical to bin/safe-broadcast's
+#     (one question, two askers: compare the definitions mechanically).
+extract_fn() { awk -v n="$2" '$0 ~ "^"n"\\(\\) \\{" {p=1} p {print} p && /^}/ {exit}' "$1"; }
+for FN in sb_history_names_tx sb_history_lookup; do
+	A="$(extract_fn "$REPO_ROOT/bin/safe-broadcast" "$FN")"
+	B="$(extract_fn "$SCRIPT" "$FN")"
+	if [ -n "$A" ] && [ "$A" = "$B" ]; then ok "drift guard: $FN identical in preview and bin/safe-broadcast"
+	else bad "drift guard: $FN missing or differs between preview and bin/safe-broadcast"; fi
+done
+
 # ---- summary ----------------------------------------------------------------
 echo "test-preview-cycle-anchor-broadcast.sh summary: PASS=$PASS  FAIL=$FAIL"
 if [ "$FAIL" -eq 0 ]; then

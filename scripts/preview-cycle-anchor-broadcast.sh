@@ -181,7 +181,64 @@ if [ -n "${XPR_TESTNET_RPC:-}" ]; then
 		XPR_TESTNET_RPC_REFUSED=1
 	fi
 fi
-TESTNET_HIST="${TESTNET_HIST_BASE}/v1/history/get_transaction"
+
+# ---- gate 1 evidence lookup — the SAME question bin/safe-broadcast asks ----
+# The two helpers below are a verbatim copy of bin/safe-broadcast's (that file
+# is executable-only and cannot be sourced). tests/preview-cycle-anchor-
+# broadcast/ compares the two definitions mechanically, so a drift fails the
+# suite. Why: until 2026-11-06 this preview POSTed without a content-type
+# header, the history endpoint answered 400, and every preview showed MISS
+# while the real gate resolved the same tx.
+sb_history_names_tx() {
+	case "${3:-}" in
+		v1-id|any-id) ;;
+		*) return 2 ;;
+	esac
+	printf '%s' "$1" | jq -e --arg id "$2" --arg mode "$3" '
+		if type != "object" then false
+		else ([.id, .trx_id] | map(select(. != null))) as $ids
+		     | (if $mode == "v1-id" then (.id == $id) else (($ids | length) > 0) end)
+		       and ($ids | all(. == $id)) and (.executed != false)
+		end' >/dev/null 2>&1
+}
+
+sb_history_lookup() {
+	local base="$1" id="$2" try_v2="$3" mode="$4" j
+	j="$(curl -sSf --max-time 15 \
+		-X POST -H 'content-type:application/json' \
+		-d "{\"id\":\"${id}\"}" \
+		"${base}/v1/history/get_transaction" 2>/dev/null || echo '{}')"
+	if sb_history_names_tx "$j" "$id" "$mode"; then printf '%s' "$j"; return 0; fi
+	if [ "$try_v2" = "1" ]; then
+		j="$(curl -sSf --max-time 15 \
+			"${base}/v2/history/get_transaction?id=${id}" 2>/dev/null || echo '{}')"
+		if sb_history_names_tx "$j" "$id" "$mode"; then printf '%s' "$j"; return 0; fi
+	fi
+	return 1
+}
+
+# Evidence bases and strictness, derived as bin/safe-broadcast gate 1 derives
+# them: XPR_TESTNET_RPC may only narrow to one allowed base (otherwise the real
+# gate REFUSES — nothing is looked up and the [4/5] line shows MISS); the
+# Hyperion v2 GET is tried only on id-only profiles, whose answers need only
+# name the tx (any-id); processed profiles keep the `.id == <tx_id>` rule.
+TESTNET_HISTORY_BASES=""
+G1_LOOKUP_OK=1
+if [ "$XPR_TESTNET_RPC_REFUSED" = "1" ]; then
+	G1_LOOKUP_OK=0
+elif [ -n "${XPR_TESTNET_RPC:-}" ]; then
+	TESTNET_HISTORY_BASES="$XPR_TESTNET_RPC"
+else
+	TESTNET_HISTORY_BASES="$(acp_history_bases testnet)" || G1_LOOKUP_OK=0
+fi
+TESTNET_TRY_V2=0
+TESTNET_ID_MODE="v1-id"
+if ! TESTNET_PUSH_RESPONSE="$(acp_push_response testnet)"; then
+	G1_LOOKUP_OK=0
+elif [ "$TESTNET_PUSH_RESPONSE" = "id-only" ]; then
+	TESTNET_TRY_V2=1
+	TESTNET_ID_MODE="any-id"
+fi
 MAINNET_PROFILE_NAME="$(acp_profile_name mainnet)" || MAINNET_PROFILE_NAME="?"
 # The single tracked path whose committed bytes are the signing contract.
 CANONICAL_TRACKED_PATH="public/api/anchor-source.json"
@@ -375,7 +432,23 @@ jq -r '.tx.actions[] |
 
 echo
 echo "── [4/5] read-only gate pre-checks (safe-broadcast enforces these for real) ──"
-G1=$(curl -s --max-time 15 "$TESTNET_HIST" -d "{\"id\":\"$TESTNET_TX_ID\"}" 2>/dev/null | jq -r '.block_num // .actions[0].block_num // "MISS"' 2>/dev/null || echo ERR)
+# Same lookup as bin/safe-broadcast gate 1 (helpers above): a check mark only
+# when that gate would resolve this tx; refused/unresolvable -> MISS.
+G1=MISS
+if ! command -v curl >/dev/null 2>&1; then
+	G1=ERR
+elif [ "$G1_LOOKUP_OK" = "1" ]; then
+	G1_JSON=""
+	while IFS= read -r _base; do
+		[ -n "$_base" ] || continue
+		if G1_JSON="$(sb_history_lookup "$_base" "$TESTNET_TX_ID" "$TESTNET_TRY_V2" "$TESTNET_ID_MODE")"; then
+			G1="$(printf '%s' "$G1_JSON" | jq -r '.block_num // .actions[0].block_num // "MISS"' 2>/dev/null || echo ERR)"
+			break
+		fi
+	done <<-BASES
+	$TESTNET_HISTORY_BASES
+	BASES
+fi
 echo "  gate1 testnet-tx ${TESTNET_TX_ID:0:8}…  block_num: $G1  $([ "$G1" != MISS ] && [ "$G1" != ERR ] && echo '✓' || echo '(verify)')"
 if [ "$XPR_TESTNET_RPC_REFUSED" = "1" ]; then
   echo "  ✗ gate1 WILL REFUSE: XPR_TESTNET_RPC='${XPR_TESTNET_RPC}' is not one of the testnet profile's history bases — unset it"
