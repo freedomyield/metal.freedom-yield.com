@@ -436,6 +436,60 @@ else
 fi
 teardown
 
+# G9: XPR_TESTNET_RPC that is NOT one of the profile's bases -> gate 1 REFUSES,
+#     so the preview must not look anything up (no request at all) and must not
+#     show a check mark even though the stub would answer.
+EVIL_BASE="https://not-a-profile-base.example.invalid"
+g1_setup
+OUT="$(g1_run "$SCRIPT" V1_BODY="$V1_OK" XPR_TESTNET_RPC="$EVIL_BASE")"
+LINE="$(g1_line "$OUT")"
+case "$LINE" in *"✓"*|*"block_num: 123"*) bad "refuse: foreign XPR_TESTNET_RPC must not resolve, got: $LINE" ;; *) ok "refuse: XPR_TESTNET_RPC outside the profile -> MISS, no check" ;; esac
+[ ! -s "$G1_LOG" ] && ok "refuse: no history request was made" || bad "refuse: unexpected request(s): $(cat "$G1_LOG")"
+printf '%s\n' "$OUT" | grep -q 'gate1 WILL REFUSE' && ok "refuse: the WILL REFUSE note is printed" || bad "refuse: WILL REFUSE note missing"
+teardown
+
+# G9b: mutant A (the refuse branch looks up the profile's bases anyway) must fail G9.
+g1_setup
+awk '$0=="\tG1_LOOKUP_OK=0" && !d {print "\tTESTNET_HISTORY_BASES=\"$(acp_history_bases testnet)\""; d=1; next} {print}' \
+	"$REPO_ROOT/scripts/preview-cycle-anchor-broadcast.sh" > "$G1_TREE/scripts/preview-cycle-anchor-broadcast.sh"
+if cmp -s "$G1_TREE/scripts/preview-cycle-anchor-broadcast.sh" "$REPO_ROOT/scripts/preview-cycle-anchor-broadcast.sh"; then
+	bad "mutant A (refuse branch looks up anyway): mutation not applied"
+else
+	OUT="$(g1_run "$G1_TREE/scripts/preview-cycle-anchor-broadcast.sh" V1_BODY="$V1_OK" XPR_TESTNET_RPC="$EVIL_BASE")"
+	LINE="$(g1_line "$OUT")"
+	case "$LINE" in *"✓"*) ok "mutant A caught: a refused XPR_TESTNET_RPC would have shown a check ($LINE)" ;; *) bad "mutant A NOT caught: $LINE" ;; esac
+fi
+teardown
+
+# G9c: XPR_TESTNET_RPC equal to the profile's base is allowed -> resolves, and
+#      only that base is asked.
+g1_setup
+ALLOWED_BASE="$(jq -r '.profiles["xpr-testnet"].history_bases[0]' "$REPO_ROOT/config/a-chain-profiles.json")"
+OUT="$(g1_run "$SCRIPT" V1_BODY="$V1_OK" XPR_TESTNET_RPC="$ALLOWED_BASE")"
+LINE="$(g1_line "$OUT")"
+case "$LINE" in *"block_num: 123"*"✓"*) ok "narrow: XPR_TESTNET_RPC = an allowed base still resolves" ;; *) bad "narrow: expected resolve, got: $LINE" ;; esac
+teardown
+
+# G10: processed profile (id strictness v1-id): a v2-shaped answer (trx_id only,
+#      no .id) is NOT accepted by gate 1 -> the preview must not show a check.
+g1_setup
+OUT="$(g1_run "$SCRIPT" V1_BODY="{\"trx_id\":\"$HIST_TX\",\"block_num\":9}")"
+LINE="$(g1_line "$OUT")"
+case "$LINE" in *"✓"*|*"block_num: 9"*) bad "strict: trx_id-only answer must not resolve on a processed profile, got: $LINE" ;; *) ok "strict: processed profile rejects an answer without .id" ;; esac
+teardown
+
+# G10b: mutant B (strictness loosened to any-id) must fail G10.
+g1_setup
+sed -i.bak 's/^TESTNET_ID_MODE="v1-id"$/TESTNET_ID_MODE="any-id"/' "$G1_TREE/scripts/preview-cycle-anchor-broadcast.sh"
+if cmp -s "$G1_TREE/scripts/preview-cycle-anchor-broadcast.sh" "$REPO_ROOT/scripts/preview-cycle-anchor-broadcast.sh"; then
+	bad "mutant B (any-id on processed): mutation not applied"
+else
+	OUT="$(g1_run "$G1_TREE/scripts/preview-cycle-anchor-broadcast.sh" V1_BODY="{\"trx_id\":\"$HIST_TX\",\"block_num\":9}")"
+	LINE="$(g1_line "$OUT")"
+	case "$LINE" in *"✓"*) ok "mutant B caught: loosened strictness would show a check ($LINE)" ;; *) bad "mutant B NOT caught: $LINE" ;; esac
+fi
+teardown
+
 # G8: the lookup helpers in the preview are identical to bin/safe-broadcast's
 #     (one question, two askers: compare the definitions mechanically).
 extract_fn() { awk -v n="$2" '$0 ~ "^"n"\\(\\) \\{" {p=1} p {print} p && /^}/ {exit}' "$1"; }

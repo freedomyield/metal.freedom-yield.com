@@ -29,5 +29,11 @@ nd_code_has() { # <name> <ERE>
 nd_code_has "PV2 sources the profile library"       '\. "\$\{SCRIPT_DIR\}/lib/a-chain-profile\.sh"'
 nd_code_has "PV3 gate-3 chain_id = safe-broadcast's" 'EXPECTED_CHAIN_ID="\$\(acp_expected_chain_id mainnet\)"'
 nd_code_has "PV4 gate-1 base from testnet profile"   'TESTNET_HIST_BASE="\$\(acp_history_bases testnet \| head -1\)"'
-nd_code_has "PV5 gate-1 URL built from that base"    '^TESTNET_HIST="\$\{TESTNET_HIST_BASE\}/v1/history/get_transaction"'
+# PV5 (rewritten 2026-11-06): the gate-1 lookup is now safe-broadcast's own
+# helper, run over ALL the testnet profile's history bases (it used to build
+# one URL from the first base). Intent kept: the URL is built only from a
+# profile base, never from a literal; XPR_TESTNET_RPC may only narrow.
+nd_code_has "PV5a gate-1 bases = the testnet profile's"  'TESTNET_HISTORY_BASES="\$\(acp_history_bases testnet\)"'
+nd_code_has "PV5b gate-1 URL built from a profile base"  '"\$\{base\}/v1/history/get_transaction"'
+nd_code_has "PV5c XPR_TESTNET_RPC only narrows to an allowed base" 'acp_history_base_allowed testnet "\$XPR_TESTNET_RPC"'
 nd_finish test-no-drift-preview-cycle-anchor-broadcast
