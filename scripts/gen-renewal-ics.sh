@@ -231,9 +231,34 @@ EOF
 TMP=$(mktemp "${OUT_DIR}/.${TOKEN}.ics.XXXXXX")
 trap 'rm -f "$TMP"' EXIT
 
+# RFC 5545 3.1: every line ends in CRLF and no physical line exceeds 75
+# octets; a longer logical line is folded as CRLF + one space. Counting is
+# in BYTES (LC_ALL=C), and a cut never lands inside a UTF-8 character: if the
+# byte after the cut is a continuation byte (0x80-0xBF) the cut backs off to
+# the character boundary. Continuation lines carry the leading space inside
+# their 75 octets, so they hold 74 octets of content.
+ics_fold() {
+  LC_ALL=C awk '{
+    sub(/\r$/, "")
+    line = $0
+    first = 1
+    while (1) {
+      lim = first ? 75 : 74
+      if (length(line) <= lim) {
+        printf "%s%s\r\n", (first ? "" : " "), line
+        break
+      }
+      cut = lim
+      while (cut > 0 && substr(line, cut + 1, 1) >= "\200" && substr(line, cut + 1, 1) <= "\277") cut--
+      if (cut == 0) cut = lim
+      printf "%s%s\r\n", (first ? "" : " "), substr(line, 1, cut)
+      line = substr(line, cut + 1)
+      first = 0
+    }
+  }'
+}
+
 {
-  # ICS bytes use CRLF in spec but Google Calendar accepts LF too. Keep LF for
-  # simplicity; if a stricter consumer complains, post-process with sed.
   cat <<EOF
 BEGIN:VCALENDAR
 VERSION:2.0
@@ -290,7 +315,7 @@ EOF
   gen_cycle "$C3" "$N3" "月次 (Renewal #${N3}, 推定)" "\\n月次サイクル推定 (前回 endTime + 30 日)。"
 
   echo "END:VCALENDAR"
-} > "$TMP"
+} | ics_fold > "$TMP"
 
 chmod 644 "$TMP"
 # Write to both the token path and the public schedule path.

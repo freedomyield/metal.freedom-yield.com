@@ -1,0 +1,68 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Freedom Yield//Metal Validator Schedule//EN
+METHOD:PUBLISH
+X-WR-CALNAME:Metal Validator Renewal
+X-WR-TIMEZONE:Asia/Tokyo
+X-WR-CALDESC:Metal Blockchain validator (Freedom Yield) renewal schedule. Auto-generated daily from on-chain endTime.
+BEGIN:VTIMEZONE
+TZID:Asia/Tokyo
+BEGIN:STANDARD
+DTSTART:19700101T000000
+TZOFFSETFROM:+0900
+TZOFFSETTO:+0900
+TZNAME:JST
+END:STANDARD
+END:VTIMEZONE
+BEGIN:VEVENT
+UID:metal-current-period-deadbeefdeadbeefdeadbeef@freedom-yield.com
+DTSTAMP:X
+DTSTART;VALUE=DATE:20250616
+DTEND;VALUE=DATE:20250717
+SUMMARY:📊 Validator 稼働期間 (current)
+DESCRIPTION:現在のバリデート期間。startTime / endTime は P-Chain 上の値。\n\nNodeID: NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v\nendTime: 07/16 00:06 JST\nDoc: https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/VALIDATOR_RENEWAL.md
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+UID:metal-renewal-4-deadbeefdeadbeefdeadbeef@freedom-yield.com
+DTSTAMP:X
+DTSTART;TZID=Asia/Tokyo:20250716T000140
+DTEND;TZID=Asia/Tokyo:20250716T010640
+SUMMARY:🔁 Validator Renewal #4
+DESCRIPTION:次回 (Renewal #4)\n旧期間 endTime: 07/16 00:06 JST\n新サイクルへの rollover。Pending → Current 昇格を観察、サイト validator.json 更新と uptime カウンタリセットを確認。\n\nNodeID: NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v\nDoc: https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/VALIDATOR_RENEWAL.md
+LOCATION:metal.freedom-yield.com
+BEGIN:VALARM
+ACTION:DISPLAY
+DESCRIPTION:Renewal #4 5 分前
+TRIGGER:-PT5M
+END:VALARM
+END:VEVENT
+BEGIN:VEVENT
+UID:metal-renewal-5-deadbeefdeadbeefdeadbeef@freedom-yield.com
+DTSTAMP:X
+DTSTART;TZID=Asia/Tokyo:20250815T000940
+DTEND;TZID=Asia/Tokyo:20250815T011440
+SUMMARY:🔁 Validator Renewal #5
+DESCRIPTION:月次 (Renewal #5, 推定)\n旧期間 endTime: 08/15 00:14 JST\n新サイクルへの rollover。Pending → Current 昇格を観察、サイト validator.json 更新と uptime カウンタリセットを確認。\n月次サイクル本格運用。dates は #4 確定後に再計算されます。\n\nNodeID: NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v\nDoc: https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/VALIDATOR_RENEWAL.md
+LOCATION:metal.freedom-yield.com
+BEGIN:VALARM
+ACTION:DISPLAY
+DESCRIPTION:Renewal #5 5 分前
+TRIGGER:-PT5M
+END:VALARM
+END:VEVENT
+BEGIN:VEVENT
+UID:metal-renewal-6-deadbeefdeadbeefdeadbeef@freedom-yield.com
+DTSTAMP:X
+DTSTART;TZID=Asia/Tokyo:20250914T001740
+DTEND;TZID=Asia/Tokyo:20250914T012240
+SUMMARY:🔁 Validator Renewal #6
+DESCRIPTION:月次 (Renewal #6, 推定)\n旧期間 endTime: 09/14 00:22 JST\n新サイクルへの rollover。Pending → Current 昇格を観察、サイト validator.json 更新と uptime カウンタリセットを確認。\n月次サイクル推定 (前回 endTime + 30 日)。\n\nNodeID: NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v\nDoc: https://github.com/freedomyield/metal.freedom-yield.com/blob/main/docs/VALIDATOR_RENEWAL.md
+LOCATION:metal.freedom-yield.com
+BEGIN:VALARM
+ACTION:DISPLAY
+DESCRIPTION:Renewal #6 5 分前
+TRIGGER:-PT5M
+END:VALARM
+END:VEVENT
+END:VCALENDAR

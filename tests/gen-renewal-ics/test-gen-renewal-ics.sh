@@ -226,7 +226,10 @@ else
 	grep -q "Renewal #6, 推定" "$OUT3_ICS" \
 		&& pass "3-closed-cycles: second estimated renewal is #6" \
 		|| fail "3-closed-cycles: '#6' estimated renewal missing"
-	grep -q "dates は #4 確定後に再計算されます" "$OUT3_ICS" \
+	# RFC 5545 folding (工程 5) may split this long DESCRIPTION line, so
+	# compare against the unfolded logical line.
+	LC_ALL=C awk '{ sub(/\r$/, "") } /^ /{ printf "%s", substr($0, 2); next } NR > 1 { printf "\n" } { printf "%s", $0 } END { printf "\n" }' "$OUT3_ICS" \
+		| grep -q "dates は #4 確定後に再計算されます" \
 		&& pass "3-closed-cycles: estimated-renewal note references #4 (the real current renewal), not #1" \
 		|| fail "3-closed-cycles: estimated-renewal note does not reference #4"
 
@@ -399,6 +402,100 @@ else
 		fi
 	fi
 fi
+
+# ---- case 7: RFC 5545 conformance (section 3.1 line endings + folding).
+# Invariants: (a) every line ends in CRLF (b) every physical line is <= 75
+# octets (c) unfolding (remove CRLF + one space) gives back exactly the
+# logical lines the pre-fix script emitted (golden-logical-lines.ics, with
+# DTSTAMP normalized; fixture-identical to case 3's inputs) (d) no fold cuts
+# a UTF-8 character: every physical line decodes as UTF-8 on its own.
+# (e) case 8: mutants of the fold step must make the check fail.
+GOLDEN_ICS="${REPO_ROOT}/tests/gen-renewal-ics/golden-logical-lines.ics"
+ics_check() {
+	# $1 = ics file ; prints one violation token per line (empty = clean)
+	python3 -I -c '
+import sys
+raw = open(sys.argv[1], "rb").read()
+golden = open(sys.argv[2], "rb").read().split(b"\n")
+if golden and golden[-1] == b"": golden.pop()
+bad = []
+if not raw.endswith(b"\r\n"): bad.append("no-final-crlf")
+phys = raw.split(b"\r\n")
+if phys and phys[-1] == b"": phys.pop()
+if any(b"\n" in l or b"\r" in l for l in phys): bad.append("bare-lf-or-cr")
+if any(len(l) > 75 for l in phys): bad.append("line-over-75-octets")
+for l in phys:
+    try: l.decode("utf-8")
+    except UnicodeDecodeError:
+        bad.append("split-utf8-char"); break
+logical = []
+for l in phys:
+    if l.startswith(b" ") and logical: logical[-1] += l[1:]
+    else: logical.append(l)
+logical = [b"DTSTAMP:X" if l.startswith(b"DTSTAMP:") else l for l in logical]
+if logical != golden: bad.append("unfold-differs-from-golden")
+print("\n".join(bad))
+' "$1" "$GOLDEN_ICS"
+}
+run_ics case7 3
+RC7=$?
+if [ "$RC7" -ne 0 ] || [ ! -r "$LAST_ICS" ]; then
+	fail "rfc5545: script did not produce an .ics file (rc=$RC7)"
+else
+	R7="$(ics_check "$LAST_ICS")"
+	if [ -z "$R7" ]; then
+		pass "rfc5545: CRLF everywhere, <=75 octets, unfold == pre-fix lines, no split UTF-8 char"
+	else
+		fail "rfc5545: violations: $(echo "$R7" | tr '\n' ' ')"
+	fi
+	cmp -s "$LAST_ICS" "$LAST_OUT_DIR/schedule.ics" \
+		&& pass "rfc5545: public schedule.ics is byte-identical to the token file" \
+		|| fail "rfc5545: schedule.ics differs from the token file"
+fi
+
+# ---- case 8: mutants of the fold step must be caught by ics_check. Each
+# mutant is a sed-edited copy of the real script (cycle-gate.sh linked in).
+run_mutant() {
+	local name="$1" sedexpr="$2"
+	local mroot="$WORK/mut-$name"
+	mkdir -p "$mroot/scripts" "$mroot/out"
+	ln -s "${REPO_ROOT}/scripts/cycle-gate.sh" "$mroot/scripts/cycle-gate.sh"
+	sed "$sedexpr" "$SCRIPT" > "$mroot/scripts/gen-renewal-ics.sh"
+	if cmp -s "$SCRIPT" "$mroot/scripts/gen-renewal-ics.sh"; then
+		fail "mutant $name: sed did not change the script (mutation point missing)"
+		return
+	fi
+	VALIDATOR_JSON="$FIXTURE_VALIDATOR_JSON" CALENDAR_OUT_DIR="$mroot/out" \
+		CALENDAR_TOKEN_FILE="$TOKEN_FILE" CYCLE_HISTORY_JSONL="$WORK/cycle-history-case7.jsonl" \
+		bash "$mroot/scripts/gen-renewal-ics.sh" >/dev/null 2>&1
+	local r
+	r="$(ics_check "$mroot/out/${TOKEN}.ics" 2>&1)"
+	if [ -n "$r" ]; then
+		pass "mutant $name caught ($(echo "$r" | tr '\n' ' '))"
+	else
+		fail "mutant $name was NOT caught"
+	fi
+}
+# "chars" mutant: fold by CHARACTER count (75 chars) instead of octets. The
+# host awk is byte-based in every locale, so the mutant swaps in a
+# char-counting python folder.
+cat > "$WORK/charfold.py" <<'PY'
+import sys
+for line in sys.stdin.buffer.read().decode("utf-8").split("\n")[:-1]:
+    first = True
+    while True:
+        n = 75 if first else 74
+        out = line[:n]
+        sys.stdout.buffer.write((("" if first else " ") + out + "\r\n").encode("utf-8"))
+        line = line[n:]
+        first = False
+        if not line:
+            break
+PY
+run_mutant chars "s|ics_fold > \"\$TMP\"|python3 -I $WORK/charfold.py > \"\$TMP\"|"
+run_mutant lf 's/\\r\\n/\\n/g'
+run_mutant splitchar 's/while (cut > 0 .*) cut--/while (0) cut--/'
+run_mutant nofold 's/if (length(line) <= lim)/if (1)/'
 
 echo
 echo "----------------------------------------"
