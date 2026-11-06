@@ -44,6 +44,10 @@ esac
 if [ "${FAKE_AJV_VERDICT:-}" = "invalid" ]; then
 	echo "$data invalid" >&2; exit 1
 fi
+# ajv could not read the data even though it is a .json file
+if [ "${FAKE_AJV_VERDICT:-}" = "unreadable" ]; then
+	echo "error: Unexpected token ':' in JSON at position 3" >&2; exit 1
+fi
 python3 - "$schema" "$data" <<'PY'
 import json, sys
 schema = json.load(open(sys.argv[1]))
@@ -62,6 +66,7 @@ chmod +x "$TEST_DIR/bin/ajv"
 REAL_MKTEMP="$(command -v mktemp)"
 cat > "$TEST_DIR/bin/mktemp" <<STUB
 #!/usr/bin/env bash
+[ -n "\${FAKE_MKTEMP_FAIL:-}" ] && exit 1
 exec "$REAL_MKTEMP" -d "$TEST_DIR/tmp/x.XXXXXX"
 STUB
 chmod +x "$TEST_DIR/bin/mktemp"
@@ -105,6 +110,10 @@ run_suite() { # label dir-of-fn-files
 		check "$label $s: non-conforming data fails via ajv" 6 "$rc"
 		FAKE_AJV_VERDICT=invalid call "$fn" "$TEST_DIR/good"; rc=$?
 		check "$label $s: ajv 'invalid' verdict gives non-zero" 6 "$rc"
+		FAKE_AJV_VERDICT=unreadable call "$fn" "$TEST_DIR/good"; rc=$?
+		check "$label $s: ajv 'Unexpected token' (could not read) is not a pass" 6 "$rc"
+		FAKE_MKTEMP_FAIL=1 call "$fn" "$TEST_DIR/good"; rc=$?
+		check "$label $s: mktemp failure is not a pass" 6 "$rc"
 		call "$fn" "$TEST_DIR/garbage"; rc=$?
 		nonzero "$label $s: unparseable data is not a pass" "$rc"
 		if [ "$(leaks)" = "0" ]; then ok "$label $s: no temp files leaked"; else ng "$label $s: temp files leaked"; rm -rf "$TEST_DIR/tmp"; mkdir -p "$TEST_DIR/tmp"; fi
@@ -153,6 +162,9 @@ mutant() { # name sed-expr
 }
 mutant "pass the extension-less file to ajv (no .json copy)" 's|-d "\$ajv_data"|-d "$data_file"|'
 mutant "ajv verdict ignored (always pass)" 's|-d "\$ajv_data" 2>&1)"; then|-d "$ajv_data" 2>\&1)" \|\| true; then|'
+mutant "ajv 'Unexpected' (unreadable) treated as pass" '/failed schema validation against \$schema (ajv)/i\
+		case "$out" in *Unexpected*) return 0 ;; esac'
+mutant "mktemp failure treated as pass" '/cannot create a temp dir/{n;s/return 6/return 0/;}'
 mutant "temp dir never removed" 's|rm -rf "\$ajv_dir"|:|'
 
 echo
