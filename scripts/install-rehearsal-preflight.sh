@@ -159,7 +159,8 @@
 # check is still evaluated and reported, so one run shows every problem):
 #   0  every check PASSED
 #   1  usage error
-#   2  a prerequisite tool is missing            (check 1)
+#   2  a prerequisite tool is missing            (check 1), or no JSON-schema
+#      validator is available                    (check 11: ajv, or python3+jsonschema)
 #   3  an operator-local config/key file is missing or malformed (checks 3-5),
 #      or check 10's chain endpoint allowlist is violated by a proton-cli.json
 #      entry OR by an XPR_TESTNET_CHAIN_RPC/XPR_TESTNET_RPC value (the latter
@@ -1506,6 +1507,37 @@ else
 		"testnet allowlist: ${TESTNET_HOST_ALLOWLIST:-<unavailable>}" \
 		"mainnet allowlist: ${MAINNET_HOST_ALLOWLIST:-<unavailable>}" \
 		"testnet history bases: ${TESTNET_HISTORY_BASES:-<unavailable>}"
+fi
+
+# ===========================================================================
+# Check 11 — a JSON-schema validator is available (ajv, or python3+jsonschema)
+# ===========================================================================
+# The anchor pipeline's mandatory schema gate (schema_validate_or_die in
+# gen-anchor-source.sh / gen-anchor-receipt.sh / append-anchor-history.sh)
+# needs one of these two. On 2026-11-01 a nightly package upgrade moved
+# /opt/homebrew/bin/python3 from 3.14 to 3.15; jsonschema lived only in the
+# 3.14 site-packages, and the loss was first noticed on transition day, at
+# unit 6 (commit-anchor-source.sh), with the operator already standing there.
+# The test is the SAME as scripts/setup-schema-validator.sh (have_ajv /
+# have_jsonschema), evaluated against the python3 that is first on PATH NOW.
+# Fail-closed: only an explicit success of one probe passes; anything else
+# (missing tool, import error, a probe that hangs or cannot run) is red.
+echo "── check 11 — JSON-schema validator available (ajv or python3+jsonschema) ──"
+V11_HAVE=""
+if command -v ajv >/dev/null 2>&1; then
+	V11_HAVE="ajv"
+elif command -v python3 >/dev/null 2>&1 \
+	&& command -v timeout >/dev/null 2>&1 \
+	&& timeout 30 python3 -c 'import jsonschema' >/dev/null 2>&1; then
+	V11_HAVE="python3+jsonschema"
+fi
+if [ -n "$V11_HAVE" ]; then
+	chk_pass 11 "JSON-schema validator available" "${V11_HAVE}"
+else
+	chk_fail 11 2 "no JSON-schema validator on PATH (ajv absent; python3 cannot import jsonschema)" \
+		"The anchor pipeline's schema gate will stop at unit 6. A package upgrade can swap the python3 that has jsonschema." \
+		"Fix (installs via package managers only):" \
+		"  SETUP_VALIDATOR_PREFER=python bash scripts/setup-schema-validator.sh"
 fi
 
 # ===========================================================================

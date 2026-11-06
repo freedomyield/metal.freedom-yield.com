@@ -136,6 +136,11 @@ cat "${FYP_TEST_ACCOUNT_JSON:-/dev/null}"
 CURL_STUB
 chmod +x "${STUB}/curl-stub"
 
+# ajv stub: check 11 (a JSON-schema validator is available) needs one on PATH.
+# Its negative cases live in tests/rehearsal-preflight/test-validator-check.sh.
+printf '#!/usr/bin/env bash\nexit 0\n' > "${STUB}/ajv"
+chmod +x "${STUB}/ajv"
+
 cat > "${STUB}/gtimeout" <<'GT_STUB'
 #!/usr/bin/env bash
 exec "$@"
@@ -296,11 +301,11 @@ expect_case() {
 BASE_OUT="$(run_pf "$GOOD")"; BASE_RC=$?
 if [ "$BASE_RC" -eq 0 ] \
    && printf '%s' "$BASE_OUT" | grep -qF "VERDICT: PRE-FLIGHT GREEN" \
-   && [ "$(printf '%s' "$BASE_OUT" | grep -c '^  PASS  \[')" -eq 10 ] \
+   && [ "$(printf '%s' "$BASE_OUT" | grep -c '^  PASS  \[')" -eq 11 ] \
    && ! printf '%s' "$BASE_OUT" | grep -q '^  FAIL  \['; then
-	pass "baseline: all ten checks PASS on a good fixture" "rc=$BASE_RC"
+	pass "baseline: all eleven checks PASS on a good fixture" "rc=$BASE_RC"
 else
-	bad "baseline: all ten checks PASS on a good fixture" \
+	bad "baseline: all eleven checks PASS on a good fixture" \
 		"rc=$BASE_RC passes=$(printf '%s' "$BASE_OUT" | grep -c '^  PASS  \[') $(printf '%s' "$BASE_OUT" | grep '^  FAIL' | tr '\n' ' ')"
 fi
 
@@ -457,6 +462,7 @@ for t in $MINI_TOOLS; do
 done
 ln -sf "${STUB}/proton"     "${MINI}/proton"
 ln -sf "${STUB}/curl-stub"  "${MINI}/curl-stub"
+ln -sf "${STUB}/ajv"        "${MINI}/ajv"
 
 run_pf_path() { # <fixture> <path>
 	local d="$1" p="$2"
