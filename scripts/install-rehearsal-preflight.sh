@@ -159,7 +159,8 @@
 # check is still evaluated and reported, so one run shows every problem):
 #   0  every check PASSED
 #   1  usage error
-#   2  a prerequisite tool is missing            (check 1)
+#   2  a prerequisite tool is missing            (check 1), or no JSON-schema
+#      validator is available                    (check 11: ajv, or python3+jsonschema)
 #   3  an operator-local config/key file is missing or malformed (checks 3-5),
 #      or check 10's chain endpoint allowlist is violated by a proton-cli.json
 #      entry OR by an XPR_TESTNET_CHAIN_RPC/XPR_TESTNET_RPC value (the latter
