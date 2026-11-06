@@ -526,10 +526,27 @@ schema_validate_or_die() {
 		return 6
 	fi
 	if command -v ajv >/dev/null 2>&1; then
-		if out="$(ajv --spec=draft2020 --strict=false validate -s "$schema" -d "$data_file" 2>&1)"; then
+		# ajv-cli 5 picks its parser from the data file's extension, so an
+		# extension-less mktemp file fails with "Unexpected token" even
+		# when valid. Copy the data to a ".json" file first. If the copy
+		# cannot be made, fail closed (never treat "could not read" as pass).
+		local ajv_dir ajv_data
+		if ! ajv_dir="$(mktemp -d)" || [ -z "$ajv_dir" ] || [ ! -d "$ajv_dir" ]; then
+			echo "ERROR: cannot create a temp dir for ajv (cannot validate $label)" >&2
+			return 6
+		fi
+		ajv_data="$ajv_dir/data.json"
+		if ! cp -- "$data_file" "$ajv_data"; then
+			rm -rf "$ajv_dir"
+			echo "ERROR: cannot copy $label to a .json temp file for ajv" >&2
+			return 6
+		fi
+		if out="$(ajv --spec=draft2020 --strict=false validate -s "$schema" -d "$ajv_data" 2>&1)"; then
+			rm -rf "$ajv_dir"
 			echo "OK: $label schema-valid (ajv)" >&2
 			return 0
 		fi
+		rm -rf "$ajv_dir"
 		echo "ERROR (6): $label failed schema validation against $schema (ajv)" >&2
 		printf '%s\n' "$out" >&2
 		return 6
