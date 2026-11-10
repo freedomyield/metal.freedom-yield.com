@@ -88,7 +88,7 @@ files but excludes `.git/` — never advances HEAD" — was accurate when
 written (2026-07-09) and remains accurate as history: at that time nothing
 in any deploy leg advanced the host checkout. It is **no longer true of
 `deploy.yml` today**. As of the 2026-07-13 delivery-ownership inversion
-(see `docs/superpowers/plans/2026-07-13-deploy-git-sot-inversion.md`),
+(see `docs/archive/plans/2026-07-13-deploy-git-sot-inversion.md`),
 `deploy.yml`'s **"Advance host checkout to origin/main"** step pipes and
 runs this very spec's own primary mechanism
 (`scripts/advance-host-checkout.sh`) directly, at every deploy, before any

@@ -425,3 +425,4 @@ tmp file は secret-safe 確認後 削除済 (= grep `password|token|secret|key|
 ## append rule
 
 新 snapshot は本 doc 末尾に追加。 過去 snapshot は変更しない (= audit trail 保全)。 古い snapshot は 30 日経過後に **deprecated** マーク + 過去 30 日のみ active として表示可。
+**REVISION 2026-11-10T10:38Z**: the three audits cited at :421-422 moved unchanged to docs/audits/ (simplify cut A).
