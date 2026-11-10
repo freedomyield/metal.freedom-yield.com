@@ -1,0 +1,377 @@
+# Design: simplify refactor (2026-11-10)
+
+vault を引いた結果: このプロジェクトのリファクタ・シェルの共通部品に当たるノートは vault に無し（命中は一般の記事と開発の雑記だけ）。設計は repo の文書と実物だけを根拠にした。
+機械化した道具か、しない理由: 設計の下調べは 1 回限りなので、その場の集計の命令（git grep・sed・diff）と使い捨ての読み取り専用の python で数えた。進める時に繰り返す確かめは、§9 の門の道具 3 本（G1・G2・G3）にして機械に数えさせる。
+
+**Status:** design only. Nothing was written to code, tests or existing documents, nothing was run against a network or a host, and nothing was broadcast while producing it. Citations are file:line as of main `0367552`. The public history starts at `2ecb799` (2026-10-29), so `git log` / `git blame` cannot explain anything older; reasons were read from the documents and code comments instead. Claims that could not be checked are marked **UNVERIFIED** (collected in §14).
+
+**Key findings that change the survey (`.superpowers/sdd/2026-11-10-simplify/survey.md`):**
+
+1. **Most "unused" scripts are manual or host-installed tools.** `scripts/check-validator-period.sh` is copied to the host's daily cron by `scripts/vps-bootstrap.sh:274-314`. `scripts/install-delegator-feed-started-at.sh` writes a host config file that `gen-anchor-source.sh` reads into the anchor source (`scripts/install-delegator-feed-started-at.sh:5-11`). Only one script can be removed on repo evidence alone (§4.2).
+2. **Three of the 15 candidate documents are still load-bearing.** `docs/PHASE_ALPHA_AUDIT_HANDOFF.md` is a URL inside the generated public evidence (`scripts/gen-evidence.sh:231,239`) and two public pages. `docs/PHASE_ALPHA_TESTNET_DRY_RUN.md` is named in runtime messages of a transition script (`scripts/run-testnet-rehearsal.sh:260,383`). `docs/REHEARSAL_2026-09-01.md` is cited by the canonical freeze rule (`docs/CYCLE_GATE.md:1747,1758`).
+3. **The stated reason for copying `schema_validate_or_die` is stale.** Each copy says "no cross-script sourcing convention exists in this repo" (`scripts/append-anchor-history.sh:518-521`, `scripts/gen-anchor-source.sh:687-690`, `scripts/operator-local/commit-anchor-source.sh:282-286`). The same scripts already source libraries (`scripts/gen-anchor-receipt.sh:195,197`; `scripts/append-anchor-history.sh:143,150`; `scripts/gen-anchor-source.sh:60`). The differences between the copies have a documented reason: each script's own exit-code table (`scripts/gen-anchor-source.sh:21-32`: exit 7 is taken, so "no validator" is 8 there).
+4. **Every holder of `sha256_pipe` and `schema_validate_or_die` is a transition script** under the script freeze (`docs/CYCLE_GATE.md:1715-1750`). By `docs/cycle-transition-steps.json`: the `sha256_pipe` holders run in units 7b, 7c, 8 and 10; the four `schema_validate_or_die` holders run in units 5, 6 and 8 (one table for those four: §5.4). Together, units 5, 6, 7b, 7c, 8, 10.
+5. **`external-watch.sh` cannot read `side-effects.sh` as installed today.** The installer ships exactly two files to the web host as base64 (`scripts/install-web-host-external-watch.sh:468-469,848-849`), and CI's only web-host path is the `public/` rsync (`docs/CONSTITUTION.md:188`). It has its own opt-in, `WATCH_LIVE` (`scripts/external-watch.sh:19`).
+6. **The duplicated notify retry policy is the same in all three copies:** rc 2, 4 or 5 is retryable (`scripts/check-anomalies.sh:557-562`, `scripts/check-watch-validators.sh:123-128`, `scripts/notify-anchor-transition.sh:115-120`). It encodes `notify.sh`'s exit codes, which `side-effects.sh` passes through verbatim (`scripts/lib/side-effects.sh:62-70`).
+
+---
+
+## 1. Intent and why
+
+The operator asked (2026-11-10): "既存プロジェクトで、リファクタリングをして、シンプルにしたいです。整えれる箇所がないか、確認をお願いします。" The supervisor's recommended order (candidates 1·2 → 3 → 4·5; 6·7 after the 2026-12-07 transition) was accepted.
+
+"Simpler" here means three things a reader feels:
+
+- **Fewer live documents to read.** A finished audit or an executed plan sitting next to live runbooks is read as current. This repository has a history of sessions following the wrong document (memory notes on reading stale plans). Moving finished records out of the live set, unchanged, removes that trap.
+- **One copy of each shared rule.** Four copies of the schema check carry the comment "keep the four in sync". A rule kept in sync by hand is the same root the 2026-08-06 design named: "the correct state is copied by hand into several places" (`docs/superpowers/specs/2026-08-06-single-source-of-truth-design.md:11`). This design continues that work for shell functions.
+- **A gate that keeps it that way.** Without a machine check, copies return. Each cut ships with its gate.
+
+The Constitution forbids unrequested refactors (`docs/CONSTITUTION.md:87`). This one was requested; its scope is exactly this document.
+
+## 2. Goals, non-goals, anti-goals
+
+**Goals**
+
+- G-1. Cut A: move 9 finished records (5,690 lines) out of the live document set, content byte-identical; delete one abandoned stub script.
+- G-2. Cut B: one library copy of `fetch` (3 monitors) and of `schema_validate_or_die` (4 anchor scripts).
+- G-3. Cut C: one library copy of the notify retry policy; one shared test-assertion helper for test suites.
+- G-4. Three gate tools (§9) so that moved paths and removed copies cannot silently come back.
+
+**Non-goals**
+
+- Changing what any script does, prints, exits with, or writes.
+- Unifying values whose difference has no recorded reason (for example `--max-time 15` vs `20`, §5.1). They are kept as arguments.
+- Cut D items (§7). Each gets its own design after 2026-12-07.
+- Fixing bugs found on the way. They go to `.superpowers/comments/` (a bug fix fixes the bug, in its own change).
+
+**Anti-goals (the refactor has failed if any of these happens, even if it "works")**
+
+- A-1. The bytes of any inscription input or output change: `anchor-source.json`, the receipt, the history line, the memo.
+- A-2. Any exit code, stdout byte, or written file of a migrated script changes for the same inputs. stderr also stays byte-identical (§5.2 explains how), so the equivalence gate needs no exception list.
+- A-3. The suite roster count, or any suite's count of passing cases, goes down.
+- A-4. A public URL changes (`public/**`, generated `public/api/*.json`).
+- A-5. A transition script changes inside the freeze without a re-rehearsal (§3 C-4).
+- A-6. Any work needs a host login, a `proton` command, or a broadcast.
+
+## 3. Constraints
+
+- **C-1. PRIME DIRECTIVE** (`docs/CONSTITUTION.md:11-28`). No session broadcasts. Every test stubs `proton`, `curl` and `ssh`. The tier-1 hook blocks raw broadcast text (`scripts/broadcast-guard.sh`). Implementers do not type such text, even in a test.
+- **C-2. Requested refactor only** (`docs/CONSTITUTION.md:87`). Nothing outside §4–§6 is touched.
+- **C-3. Testnet first for a new script path** (`docs/CONSTITUTION.md:93`). Cut B's anchor part changes code in transition units. None of them broadcasts, but a changed transition script must be exercised by a rehearsal before its next mainnet day (C-4).
+- **C-4. Script freeze and the next transition.** The next transition is 2026-12-07 13:00:20 JST (`docs/tasks/validator-renew-cycle-7.md:89`). After a rehearsal for it, a change to a transition script is allowed only with a re-rehearsal (`docs/CYCLE_GATE.md:1715-1727`). The freeze also covers `bin/safe-broadcast`, `scripts/lib/side-effects.sh`, `scripts/cycle-gate.sh`, `scripts/node-info.sh` (`:1737-1744`). The supervisor's rule adds: from 2026-11-23 (two weeks before), transition scripts are not changed at all (`.superpowers/sdd/2026-11-10-simplify/org.md:20`).
+- **C-5. Pending higher-priority work on the same files.** The double-inscription guard (`docs/superpowers/specs/2026-10-16-anchor-double-inscription-guard-design.md`) is decided but not implemented (no `ahr_find_cycle_anchor` in the tree). It edits `bin/safe-broadcast`, `scripts/sign-anchor-event.sh`, `scripts/run-testnet-rehearsal.sh`, `scripts/lib/cycle-context.sh`, `scripts/lib/anchor-history-read.sh`, `scripts/preview-cycle-anchor-broadcast.sh` (its §9). This design does not touch those six files.
+- **C-6. Public repository** (`docs/CONSTITUTION.md:114-176`). No host identifier, address, account name or personal name enters any file or commit message. `scripts/publish-guard.sh` and gitleaks run on every change (`.github/workflows/ci-main.yml:30`).
+- **C-7. No host contact.** All work is in the repository. Changes reach the validator host only through CI's fast-forward of its checkout (W6). A changed cron script takes effect there **at the cron's next tick after deploy** (`docs/CONSTITUTION.md:186`). That is why the monitor changes in cut B are tier 2, not tier 1.
+- **C-8. Append-only audit documents** (W11, `docs/OPERATING_MODEL.md:155-169`). Audit documents are never edited in place. A move with byte-identical content is not an edit. A dated note may be appended.
+- **C-9. Rename discipline** (W9, `docs/OPERATING_MODEL.md:144`). Every surface that names a moved path changes in the same commit. G1 (§9) checks it.
+- **C-10. Scripts that run without the repository beside them.** `scripts/advance-host-checkout.sh` is piped from the CI runner and resolves its library with a fallback (`scripts/advance-host-checkout.sh:278-293`). `scripts/external-watch.sh` runs from a two-file bundle (finding 5). Neither gets a new library dependency.
+
+## 4. Cut A — finished documents and unused scripts
+
+### 4.1 Documents: the list
+
+Destination rule (design-room call, §13 D-1): **audit records go to `docs/audits/`**, the home W11 already names (`docs/OPERATING_MODEL.md:157`). **Executed plans go to `docs/archive/plans/`**, with a 5-line `docs/archive/README.md` that says "historical records; not instructions; the live runbooks are in `docs/`". File names do not change. Every move is `git mv` with content byte-identical (rename similarity 100%).
+
+"Finished" means all of: the work it plans or audits is in main; a live document or spec carries the current design; no runtime message, public page or generated artifact names it; no open operator decision lives in it.
+
+| # | File (lines) | Decision | Reason | Destination | References to fix (file:line) |
+|---|---|---|---|---|---|
+| 1 | `docs/CYCLE_GATE_IMPLEMENTATION_AUDIT.md` (326) | **move** | W11 audit of the June cycle-gate rollout (T-1..T-6), done 2026-06-29 per its own banner | `docs/audits/` | none live. Cited only by W11 records: `docs/CYCLE_GATE_DAILY_OBSERVATION.md:422`, files 2–3, `docs/audits/*`. Append a dated note (below) |
+| 2 | `docs/CYCLE_GATE_T55_AUDIT.md` (299) | **move** | Same rollout, T-5.5 audit; banner "T-7 deploy 完了済 2026-06-29" (`:5`) | `docs/audits/` | none live. Cited by files 1, 3 and `docs/audits/*` |
+| 3 | `docs/CYCLE_GATE_TRD2_AUDIT.md` (329) | **move** | Same rollout, 6th-round audit; same banner (`:5`) | `docs/audits/` | none live. `docs/CYCLE_GATE_DAILY_OBSERVATION.md:421` (W11, note below) |
+| 4 | `docs/PHASE_ALPHA_AUDIT_HANDOFF.md` (195) | **keep** | Its GitHub URL is written into the generated public evidence (`scripts/gen-evidence.sh:231,239`; `public/api/evidence.example.json:64,72`) and linked from `public/selection-evidence/index.html:355`, `public/ja/selection-evidence/index.html:355`. Moving it changes public output (A-4) | — | — |
+| 5 | `docs/PHASE_ALPHA_TESTNET_DRY_RUN.md` (509) | **keep** | Live runbook. Named in runtime messages of a frozen script (`scripts/run-testnet-rehearsal.sh:71,245,260,383`), in `scripts/sign-anchor-event.sh:99`, `scripts/lib/cycle-context.sh:441`, `docs/CYCLE_GATE.md:1052,1732`, `docs/VALIDATOR_RENEWAL.md:308,414`; and the 10-16 design edits it (its §6) | — | — |
+| 6 | `docs/REHEARSAL_2026-09-01.md` (461) | **keep** | W11 record still cited by the canonical freeze rule (`docs/CYCLE_GATE.md:260,1747,1758`) and by `scripts/install-rehearsal-preflight.sh:1574` (frozen) | — | — |
+| 7 | `docs/superpowers/plans/2026-07-06-anchor-static-propagation-convergence.md` (582) | **move** | Executed plan; its spec stays in `specs/`; it already marks a step "Superseded 2026-07-13" (`:252`) | `docs/archive/plans/` | none live (`docs/audits/constitution-2026-07-07-C1-C6-audit.md:56` is W11) |
+| 8 | `docs/superpowers/plans/2026-07-09-host-checkout-auto-advance.md` (138) | **move** | Executed plan; spec and `docs/HOST_CHECKOUT_AUTO_ADVANCE.md` carry the design | `docs/archive/plans/` | none |
+| 9 | `docs/superpowers/plans/2026-07-13-deploy-git-sot-inversion.md` (336) | **move** | Executed; the current model is in `.github/workflows/deploy.yml` and `docs/CONSTITUTION.md:186` | `docs/archive/plans/` | `docs/superpowers/specs/2026-07-09-host-checkout-auto-advance-design.md:91` → `docs/archive/plans/2026-07-13-deploy-git-sot-inversion.md`. (`plans/2026-07-06-…:252` moves with it) |
+| 10 | `docs/superpowers/plans/2026-08-06-c3-completion-and-guard-coverage.md` (214) | **move** | Executed plan for C3 of the 08-06 spec; `scripts/lib/side-effects.sh` is live | `docs/archive/plans/` | none |
+| 11 | `docs/superpowers/plans/2026-09-24-web-probe-path-classification.md` (2,871) | **move** | Executed plan; every live cite points at the **spec** of the same date (`scripts/check-anomalies.sh:20,646`, `scripts/lib/web-probe.sh:8`, …), not the plan | `docs/archive/plans/` | none |
+| 12 | `docs/superpowers/plans/2026-09-29-external-watch-log-caps.md` (85) | **keep** | A "spec + plan" (`:1`): the only design record of the log caps of a live component | — | — |
+| 13 | `docs/superpowers/plans/2026-09-29-external-watch.md` (192) | **keep** | "spec + plan" (`:1-3`) of the live external watch; its rules G1/G2 are cited by `plans/2026-09-30-…:32` and 12 | — | — |
+| 14 | `docs/superpowers/plans/2026-09-30-pulsevm-migration-readiness.md` (126) | **keep** | Not finished: triggers T6/T8 still wait upstream and "OPEN operator decisions (a)…" (`:112-118`). Its rules P2/P5 are cited with line numbers by `docs/superpowers/specs/2026-10-16-anchor-double-inscription-guard-design.md:68,263` | — | — |
+| 15 | `docs/superpowers/plans/2026-10-15-identity-pq-signature.md` (595) | **move** | Executed (main switched to ML-DSA-87); the spec of the same date is what code cites (`scripts/lib/identity-pq.sh:4`, `public/api/identity.schema.v2.json:33,38`) | `docs/archive/plans/` | none |
+
+Totals: **move 9** (3 audits 954 lines + 6 plans 4,736 lines = 5,690 lines), **keep 6**.
+
+Appended note (W11 allows appending, not editing): one dated line at the end of `docs/CYCLE_GATE_DAILY_OBSERVATION.md`: `**REVISION <UTC>**: the three audits cited at :421-422 moved unchanged to docs/audits/ (simplify cut A).`
+
+Other `docs/` files the survey flagged as possible (all **keep** in this cut; design-room call D-3):
+
+| File | Why it stays now |
+|---|---|
+| `docs/PHASE5_CHECKLIST.md` | Cited by `scripts/notify-evidence-health.sh:17`, `scripts/operator-local/README.md:98`, `docs/OPERATOR_IDENTITY_SETUP.md:46` |
+| `docs/PHASE5_REGEN_EXECUTION_2026-06-22.md` | Linked from `public/verify/index.html:242` and `public/ja/verify/index.html:242` (A-4) |
+| `docs/PHASE6_CHECKLIST.md` | 27-line tombstone, but listed in `README.md:14` and `docs/OPERATOR_IDENTITY_SETUP.md:48`; a later pass may move it with the README edit |
+| `docs/MAINNET_MIGRATION.md`, `docs/TAHOE_PIPELINE.md` | `TAHOE_PIPELINE.md` is named on `public/delegate/index.html:237` and `public/ja/delegate/index.html:233`; the two cite each other |
+| `docs/tasks/*` | `scripts/check-renewal-memo.sh:79` reads this directory (unit 11) |
+| `docs/audits/*` | Already the archive of audits |
+
+### 4.2 Scripts: the list
+
+Evidence searched for every script: all tracked files (`git grep` of the file name, which covers the cron installers `scripts/install-*-cron.sh`, `docs/CRON_CONVENTIONS.md`, `deploy/publication.json`, `.github/workflows/*`, git hooks and `tests/`). The repository cannot see the host's cron directories: 7 production crons have no installer in the repo (`docs/superpowers/specs/2026-08-06-single-source-of-truth-design.md:239`). So "no reference in the repo" proves "unused" only for a script that also cannot run (or says it is dead).
+
+| Script (lines) | Decision | Evidence |
+|---|---|---|
+| `scripts/operator-local/archive/test-phase6-memo-mock.abandoned.sh` (15) | **delete** (`git rm`) | Says "ABANDONED 2026-06-20" and only prints that and exits 1 (`:4-15`); mode 100644, not executable; cited only by W11 audits `docs/audits/constitution-2026-07-06T10-54-audit.md:157` and `…T11-45-audit.md:146` (historical, not edited). The directory becomes empty and disappears with it |
+| `scripts/sanitize-history.sh` (142) | **keep** | A manual emergency tool (history scrub after a leak; prints the force-push for the operator, `:1-22`). "Called from nowhere" is expected for a manual tool. Listed in `TOOLKIT.md:216` |
+| `scripts/security-audit.sh` (110) | **keep** | Header: "Designed to be run via /etc/cron.monthly/ or via SSH" (`:6`). Whether the host has it installed is **UNVERIFIED** and needs a host read (Q3) |
+| `scripts/check-validator-period.sh` (36) | **keep** | Installed on the host's daily cron by `scripts/vps-bootstrap.sh:274-314` |
+| `scripts/install-delegator-feed-started-at.sh` (52) | **keep** | Writes the host config file that `gen-anchor-source.sh` puts into the anchor source (`:5-11`). Needed again on a host rebuild. (It is missing from `docs/DISASTER_RECOVERY.md`; that is a comment, not this cut) |
+| `scripts/ops/b6-enable-metal-anomalies-cron.py` (986) | **keep** (operator may decide otherwise, Q2) | A one-time tool from 2026-06, but it has a suite (`tests/ops/test_b6_enable_cron.py`) and is cited as evidence by `docs/postmortems/2026-06-anomaly-monitoring-resume.md:27,86,107`. Removing it lowers the roster (A-3) |
+
+### 4.3 Cut A, how it is built
+
+- One commit for the 9 moves + the one reference fix + the appended note + `docs/archive/README.md`; one commit for the script deletion; one commit adding G1 (§9) and its suite. Order: G1 first, so the move commit is checked by it.
+- No `TOOLKIT.md` change (the deleted stub is not listed there).
+- CI deploy skips `docs/**` changes (`.github/workflows/deploy.yml:24-29`), so the move commit does not trigger a deploy; the deletion commit does (it touches `scripts/`), and that deploy only fast-forwards the host checkout.
+
+## 5. Cut B — one copy of each duplicated function
+
+### 5.1 What is consolidated, what is not
+
+Measured with a throwaway read-only parser over `git ls-files scripts bin` (108 bash files): 29 function names are defined in two or more files. Cut B handles the survey's five; cut C handles the notify ones.
+
+| Function | Copies | Same meaning? | Decision |
+|---|---|---|---|
+| `fetch` | `scripts/check-anchor-publish-health.sh:324-337`, `scripts/check-identity-pins.sh:445-458`, `scripts/check-pulsevm-upstream.sh:973-987` | Same retry loop (stop at the first 200; `FYD_FETCH_ATTEMPTS` default 3; `FYD_RETRY_SLEEP` default 3; print the final status code; body in the outfile). Two differences: `--max-time 15` in the first vs `20` in the other two (**reason UNVERIFIED**); pulsevm stops on any 4xx (reason written at `:967-972`: a moved page or an exhausted rate limit cannot succeed, and retrying is impolite to a third party) | **B-1: consolidate**, keeping both differences as arguments |
+| `schema_validate_or_die` | `scripts/append-anchor-history.sh:522-572` = `scripts/gen-anchor-receipt.sh:431-481` (identical); `scripts/gen-anchor-source.sh:691-741`; `scripts/operator-local/commit-anchor-source.sh:287-337` | Same logic (ajv with a `.json` copy, then python3+jsonschema, else fail closed). Differences are only: message prefix `ERROR (6):`/`ERROR (7):` vs `ERROR:`; "no validator" returns 7 vs 8 (each script's exit table, finding 3); `commit-anchor-source` adds " (see scripts/setup-schema-validator.sh)" to one message | **B-2: consolidate**, keeping all three differences as options |
+| `sha256_pipe`, `sha256_file`, `sha256_str` | 5 anchor scripts; `gen-anchor-source.sh:132-139`'s `sha256_file` is a different function (readability check, `exit 3`) | Same output; the "no tool" branch exits with each script's own code (1 or 2) | **Not consolidated** (D-6): one-line tool selection in broadcast-path scripts; a new sourced file would add a freeze-list member and a rehearsal dependency to save about 25 lines |
+| `shq` | `scripts/install-web-host-external-watch.sh:776`, `scripts/install-web-host-subdir-allowlist.sh:354`, `scripts/web-host-caddy-apply.sh:415` | Identical one-liner | **Not consolidated** (D-6): one line each; the three scripts source nothing today |
+| `url_to_public_path` / `url_to_registry_path` | `scripts/check-identity-pins.sh`, `scripts/operator-local/gen-identity.sh` | Kept apart on purpose, held by an expiring test (`scripts/check-identity-pins.sh:522-538`; `tests/publication-registry/` T22) | **Not consolidated**: the existing decision stands |
+
+### 5.2 Library shape
+
+New files, one concern each, like the existing libraries (`scripts/lib/*.sh` each say "the single …" on line 2). Bash 3.2 compatible (the Mac runs it). Each file: header with `# CHAIN: none` and `# PRIME_DIRECTIVE: TESTNET-FIRST` in the first 10 lines (`docs/CONSTITUTION.md:26` asks it only of broadcast paths; adding it costs nothing and matches `scripts/check-anchor-history-reachable.sh:6-15`), no side effects at source time, never `exit` (only `return`), no reads of `FY_LIVE`.
+
+**B-1. `scripts/lib/fetch-retry.sh`**
+
+```
+fy_fetch_retry [--max-time=SECONDS] [--no-retry-4xx] -- URL OUTFILE
+  stdout: the final attempt's HTTP status code ("000" on transport failure), no newline
+  OUTFILE: the final attempt's body
+  return: 0 always after a valid call; 64 on a usage error
+  env (unchanged names): FYD_FETCH_ATTEMPTS (default 3), FYD_RETRY_SLEEP (default 3), CURL (the caller's)
+```
+
+Callers: `check-anchor-publish-health.sh` → `--max-time=15`; `check-identity-pins.sh` → `--max-time=20`; `check-pulsevm-upstream.sh` → `--max-time=20 --no-retry-4xx`. Each script's `fetch()` becomes a one-line wrapper with the same name and arguments, so no other line in the script changes. `--max-time` has no default: a missing value is a usage error (64), so a caller cannot silently change its timeout.
+
+**B-2. `scripts/lib/schema-validate.sh`**
+
+```
+fy_schema_validate [--tagged] [--no-validator-rc=N] [--hint=TEXT] -- SCHEMA DATA_FILE LABEL
+  return: 0 valid | 6 invalid or schema unreadable or temp-copy failure | N no validator (default 7)
+  stderr: byte-identical to today's copy for the same options:
+    --tagged          "ERROR (6): …" / "ERROR (N): …"  (append-anchor-history, gen-anchor-receipt)
+    (no --tagged)     "ERROR: …"                        (gen-anchor-source, commit-anchor-source)
+    --hint=TEXT       inserted before the final "." of the no-validator message (commit-anchor-source only)
+```
+
+Callers keep a one-line `schema_validate_or_die()` wrapper with today's name and arguments:
+`append-anchor-history.sh` and `gen-anchor-receipt.sh` → `--tagged`; `gen-anchor-source.sh` → `--no-validator-rc=8`; `commit-anchor-source.sh` → `--no-validator-rc=8 --hint=' (see scripts/setup-schema-validator.sh)'` (exact bytes copied from `:335`). The stale "no cross-script sourcing" comments (finding 3) are replaced by one line naming the library. `docs/SCHEMA_VALIDATOR_CONVENTIONS.md:20-24` ("each carry an identical … function") is updated in the same commit (W9). `commit-anchor-source.sh` sources nothing today; it gains the load lines below, resolved from its own directory.
+
+**When the library cannot be loaded.** The guard sits at the library-load lines near the top of each script, not inside the wrapper, so the wrapper stays one line (G2's wrapper rule, §9). Each script assigns the path, checks it is readable, and sources it:
+
+```
+SV_LIB="<repo root>/scripts/lib/schema-validate.sh"
+[ -r "$SV_LIB" ] || { echo "<script>: FATAL: cannot load scripts/lib/schema-validate.sh — cannot validate" >&2; exit <rc>; }
+. "$SV_LIB"      || { echo "<script>: FATAL: cannot load scripts/lib/schema-validate.sh — cannot validate" >&2; exit <rc>; }
+```
+
+| Script | Where the guard sits | `<rc>` | Why this code |
+|---|---|---|---|
+| `scripts/gen-anchor-receipt.sh` | after its existing loads (`:194-197`) | 7 | its "no JSON schema validator available" code (`:62`); exit-table row `scripts/lib/cycle-context.sh:471` |
+| `scripts/append-anchor-history.sh` | after its existing loads (`:141-150`) | 7 | its "no validator" code (`:55`); row `scripts/lib/cycle-context.sh:479` |
+| `scripts/gen-anchor-source.sh` | after its existing load (`:60`) | 8 | its "no validator" code (`:23`); row `scripts/lib/cycle-context.sh:435` |
+| `scripts/operator-local/commit-anchor-source.sh` | before its first fetch | 4 | its "did not validate" code, which already folds in "no validator" (`:100-102`); it already exits 4 literally (`:342`) |
+
+Each code already means "validation could not run", and each row already exists, so no exit code and no exit-table row is added (the table is in `scripts/lib/cycle-context.sh`, which this design does not edit, C-5). The new stderr line can appear only when a tracked library file is missing from the checkout, a state that cannot exist before the change; every equivalence scenario has the library present, so A-2 holds. B-P3's mutation (the library returns 0 with no validator) is unchanged.
+
+### 5.3 Properties and how they are checked
+
+| # | Property | Check | Mutation that must turn the check red |
+|---|---|---|---|
+| B-P1 | Inscription artifacts unchanged | G3 (§9): run each anchor script's existing fixture scenarios at the base commit and at head; `anchor-source.json`, receipt and history line byte-identical | make `fy_schema_validate` return 0 on the python path for invalid data |
+| B-P2 | rc / stdout / stderr unchanged for every migrated script | G3 on the existing suites' scenarios: `tests/gen-anchor-source/`, `tests/gen-anchor-receipt/`, `tests/append-anchor-history/`, `tests/anchor-publish-health/`, `tests/identity-pins/`, `tests/pulsevm-upstream/` | drop `--tagged` in one caller (stderr changes); change `--no-validator-rc=8` to 7 (rc changes) |
+| B-P3 | Fail closed when no validator | existing "no JSON schema validator available" cases (`tests/gen-anchor-source/test-gen-anchor-source.sh:314`, `tests/append-anchor-history/test-r13-r18-schema-archive.sh:152`, `tests/gen-anchor-receipt/test-r13-r18-schema-archive.sh:269`) stay green | lib returns 0 when neither validator exists |
+| B-P4 | The ajv `.json`-copy rule holds | `tests/schema-validate-ajv-path/` is retargeted to the library, run once per caller option set (4 sets), so its case count stays at least the same (A-3) | remove the `.json` copy |
+| B-P5 | 4xx behaviour differs exactly where it does today | new cases in `tests/pulsevm-upstream/` and `tests/anchor-publish-health/`: a stub curl returning 404 then 200 → pulsevm sees 404 after 1 call; publish-health sees 200 after 2 | ignore `--no-retry-4xx` |
+| B-P6 | No copy remains | G2 (§9) passes with the rows for `fetch` and `schema_validate_or_die` removed from its allowlist (the one-line wrappers pass G2's wrapper rule) | re-add an inline `fetch()` body in one script |
+| B-P7 | Libraries never exit and never touch side effects | a suite greps each new lib for `exit`, `fyd_notify`, `fyd_push`, `FY_LIVE` (fixed list) | add `exit 1` to a lib |
+
+**The three validator paths of B-2, and where each is checked.** `fy_schema_validate` has three paths. B-P1 (artifact bytes) and B-P2 (rc/stdout/stderr) are run by G3 once per path that can be set up; B-P4 is per path too.
+
+| Path | Real or stub | Where | Evidence |
+|---|---|---|---|
+| ajv | **Stub**: the fake `ajv` that mimics ajv-cli 5's extension-based parsing, already in `tests/schema-validate-ajv-path/test-schema-validate-ajv-path.sh:30-40` (moved to a shared fixture so G3 can use it). A real ajv is not checked on this Mac: it is not installed here (measured 2026-11-10) | Mac and CI | the fake: `tests/schema-validate-ajv-path/test-schema-validate-ajv-path.sh:1-10,30-40`. CI installs a validator with `scripts/setup-schema-validator.sh` (`.github/workflows/validate.yml:164-165`, `.github/workflows/ci-main.yml:59-60`), which keeps an existing ajv or python3+jsonschema and otherwise installs ajv first (`scripts/setup-schema-validator.sh:25-33,71-79`); which one a CI runner ends with is **UNVERIFIED**, so a real-ajv run is UNVERIFIED |
+| python3 + jsonschema | **Real** | Mac (present, measured 2026-11-10); CI only if the runner ends with it (UNVERIFIED) | the python branch of the function (`scripts/append-anchor-history.sh:554-569`); `tests/run-all-tests.sh:133-175` refuses to run without ajv or python3+jsonschema |
+| none | **Real absence**: a PATH farm without `ajv` and `python3`, as the existing no-validator cases do | Mac and CI | `tests/gen-anchor-source/test-gen-anchor-source.sh:304-314`; the same case in `tests/append-anchor-history/test-r13-r18-schema-archive.sh:152` and `tests/gen-anchor-receipt/test-r13-r18-schema-archive.sh:269` |
+
+Tiers (§10): B-1 is tier 2; B-2 is tier 3.
+
+### 5.4 Timing
+
+- **B-1** touches three monitors on the validator host's cron, none in the transition set or the freeze extension. It may land before 2026-11-23. It takes effect on the host at the next cron tick after deploy (C-7). Nobody logs into the host to check it: the three monitors' own alerting is the signal, and a read-only log check would be a separate W7 change for the operator to approve.
+- **B-2** touches the four transition scripts below (units 5, 6, 8). Two options; the operator chooses (Q1).
+
+| Script holding `schema_validate_or_die` | Unit (`docs/cycle-transition-steps.json`) | Runs on | Under the freeze? |
+|---|---|---|---|
+| `scripts/gen-anchor-source.sh` | 5 (`:38`) | validator host (phase 3, `docs/superpowers/specs/2026-08-06-single-source-of-truth-design.md:88`) | yes, named at `docs/CYCLE_GATE.md:1722` |
+| `scripts/operator-local/commit-anchor-source.sh` | 6 (`:45`) | operator Mac (phase 3, same `:88`) | yes, named at `docs/CYCLE_GATE.md:1726` |
+| `scripts/gen-anchor-receipt.sh` | 8 (`:87`) | validator host (phase 6, same spec `:97`) | yes, `docs/CYCLE_GATE.md:1724` |
+| `scripts/append-anchor-history.sh` | 8 (`:87`) | validator host (phase 6, same spec `:97`) | yes, `docs/CYCLE_GATE.md:1725` |
+
+## 6. Cut C — notify policy and test helpers
+
+### 6.1 Candidate 4: log, alert, die, notify (part C-notify)
+
+What the copies really are:
+
+- `alert()` (7 copies) is one line of logic in five of them: `fyd_notify "$1" "$2" "$3" || log "WARN: notify failed (alert was: $2 — $3)"` (`scripts/check-host-drift.sh:88-96`, `scripts/check-identity-pins.sh:397-399`, `scripts/check-pulsevm-upstream.sh:802-807`, `scripts/check-anchor-publish-health.sh:192-201`, `scripts/run-anchor-pipeline.sh:153-163` with `LOG`). The rest of each copy is comments. The two others differ for a reason: `advance-host-checkout.sh` has a fallback for a missing library (C-10); `append-anchor-history.sh:649-659` writes to stderr with `echo` because it has no `log()`.
+- `log()` and `die()` differ because each script writes to its own log file or prefix. `check-pulsevm-upstream.sh:788-800` gates its log-file append on `fyd_is_live`; `check-anchor-publish-health.sh:184-190` appends without that gate. That difference has no recorded reason; per the rule, it is not merged here (noted in comments for a separate fix).
+- The notify retry policy is duplicated with the same meaning (finding 6), around slightly different wrappers: `attempt_notify` (4), `notify_or_keep` (3), `retryable_notify_rc` (3).
+
+**Decision:** move only the **retry policy** into `scripts/lib/side-effects.sh`, next to `fyd_notify`, the single notify exit. Leave `log`, `alert`, `die` in each script (each is the script's adapter to its own log channel; merging them would change log bytes that host logs and tests read, A-2).
+
+Connection (added functions; nothing existing in `side-effects.sh` changes):
+
+```
+fyd_notify_retryable_rc RC
+  return 0 if RC is 2, 4 or 5 (transport / 429 / 5xx from notify.sh), else 1
+
+fyd_notify_retry_once [--tags=T] [--sleep=SECONDS] -- PRIO TITLE BODY
+  calls fyd_notify --strict [--tags=T] PRIO TITLE BODY >/dev/null
+  if that rc is retryable: sleep SECONDS (default 5), call once more
+  return: the final rc, verbatim (0 also in dry mode, as fyd_notify)
+  prints nothing of its own
+```
+
+Callers: `check-anomalies.sh` (`--tags` when given; fixed 5 s; keeps its own `[K-3]` message and `rc_priority_set 6`), `check-watch-validators.sh` (`--sleep="${NOTIFY_RETRY_SLEEP:-5}"`; keeps its own message), `notify-anchor-transition.sh` (its `exit 5` mapping stays in the script). Their `attempt_notify`/`retryable_notify_rc` copies are deleted; `notify_or_keep` stays per script as a thin wrapper.
+
+**`external-watch.sh` is out of scope** (finding 5). Bringing it in would mean shipping a third file and re-running the web-host installer, a W7 change needing the operator's per-change approval, for a script whose `WATCH_LIVE` opt-in already does the same job and is tested (`tests/external-watch/`).
+
+**Timing:** `side-effects.sh` is in the freeze extension (`docs/CYCLE_GATE.md:1743`), so C-notify lands after 2026-12-07.
+
+Properties: rc of each caller unchanged for notify rc 0, 1, 2, 3, 4, 5, 64 (table-driven cases in `tests/side-effects/`, mutation: treat 3 as retryable); exactly 2 attempts at most (call-count stub, mutation: retry twice); the DRY line still appears in dry mode (`tests/side-effects-callers/`, unchanged); G2 rows for `attempt_notify` and `retryable_notify_rc` removed (`notify_or_keep` stays per script, with its row). Tier 2.
+
+### 6.2 Candidate 5: test helpers (part C-tests)
+
+`tests/lib/` holds only `pq-test-key.sh`. Suites define their own `ok`/`bad`/`pass`/`fail`/`assert_eq` (survey: 72/70/34/20/20 definitions) in at least six spellings (two-space indent, padding `%-70s`, `✓`, stdout vs stderr). `cleanup`/`setup`/`teardown`/`run` are fixture-specific and stay.
+
+The runner's contract with a suite is small (`tests/run-all-tests.sh:288-305`): the exit code; a summary line matching `^(test-.*summary:|RESULTS:|Ran [0-9]+ tests? in)`; failure lines matching `^[[:space:]]*(FAIL|FATAL)`.
+
+New `tests/lib/assert.sh`:
+
+```
+t_pass NAME          -> "PASS  NAME" on stdout; PASS+=1
+t_fail NAME [WHY]    -> "FAIL  NAME[  (WHY)]" on stderr; FAIL+=1
+t_assert_eq NAME WANT GOT
+t_summary SUITE      -> "test-SUITE summary: PASS=<n> FAIL=<m>"; return 0 iff FAIL=0
+```
+
+Migration: one test directory per commit. A suite keeps its own `ok`/`bad`/`no` names as one-line wrappers if that is shorter than renaming call sites. Properties per commit: the suite's exit code and its multiset of (status, case name) pairs are identical before and after, by G3 suite mode (§9), which reads `✓`/`✗` and `PASS`/`FAIL` as the same statuses and does not compare marker text; after the commit the suite's summary line matches the runner's pattern; the roster line is unchanged; for each migrated suite of a tier-3 script, one mutation of the script under test still turns the suite red (recorded in the report). Suites that print `✓`/`✗` today will print `PASS`/`FAIL`, which also makes their failures visible to the runner's FAIL grep (`tests/run-all-tests.sh:303`). Tier 1-equivalent (tests only), except the mutation spot checks for tier-3 suites. May run in parallel with B (separate files).
+
+## 7. Cut D — direction only (after 2026-12-07, each with its own design)
+
+- **Candidate 6, installer scripts.** Seven cron installers (91–174 lines) share most of their text; three web-host allowlist installers share large blocks. Direction: one generator per family driven by a small table (name, schedule, command, env), with `scripts/check-cron-file.sh` as the existing lint. Not now: every installer is re-run on a host, which is a W7 change per host and per cron, and the cron installers write the files that `FY_LIVE=1` depends on (`docs/superpowers/specs/2026-08-06-single-source-of-truth-design.md:229`).
+- **Candidate 7, very large scripts.** `scripts/cycle-transition.sh` (1,922 lines), `scripts/install-rehearsal-preflight.sh` (1,657), `scripts/check-pulsevm-upstream.sh` (1,493), `scripts/check-anomalies.sh` (1,271) and others. Direction: split by phase or by check into sourced parts behind the same entry point. Not now: the first two are transition tools under the freeze, and a split changes line numbers that runbooks and designs cite (`docs/superpowers/specs/2026-08-06-single-source-of-truth-design.md:141-176`).
+- **Compose files and Makefile.** Four Caddy compose files remain although the validator host has served no web server since v0.8 (`docs/CONSTITUTION.md:186`); the Makefile header still says "Tahoe testnet". Direction: find which of them the web host's `caddy-static` and the local preview still use (**UNVERIFIED**), move the rest, and update the "8443"/"ops dashboard" leftovers (survey). Not now: `docs/CONSTITUTION.md` and W7 tooling cite them, and the check needs the web host's state.
+- **`TOOLKIT.md` (351 lines, hand-written).** Direction: generate it from a fixed header block in each script, with a gate that fails when a script has no block. Not now: it touches every script's header, including frozen ones.
+
+## 8. Where it connects / how to remove it
+
+| Cut | Seams (the only places parts talk) | How it is added | How it is removed |
+|---|---|---|---|
+| A | File paths only. G1 reads `git diff --name-status -M` and file contents | `git mv` in one commit; G1 in its own commit | `git revert` of the move commit restores every path and the one reference; the appended note stays (append-only; it then describes a move that was undone, and a second dated note says so). G1 can stay: with no moves in range it passes |
+| B | A function name and its options (§5.2). The lib is reached by one `.` line per caller | **Add-only first:** commit 1 adds the lib + its suite and touches no caller. Then **one commit per caller** replaces the body of that caller's function with the one-line wrapper and removes its G2 allowlist row | `git revert` of one caller's commit brings back that caller's inline copy and its allowlist row; the other callers are untouched. The lib, with no callers, can stay or be reverted last |
+| C-notify | `fyd_notify_retryable_rc`, `fyd_notify_retry_once` in `side-effects.sh` | Same pattern: add-only commit, then one commit per caller | Revert per caller |
+| C-tests | `tests/lib/assert.sh` functions and the runner's three line patterns | Add-only commit, then one commit per test directory | Revert per directory |
+
+**No runtime switch (design-room call D-7).** The house rule asks for an on/off config key (`~/.claude/CLAUDE.md`, design principles). A refactor that keeps both the old and the new body behind a key keeps the duplication it exists to remove, and doubles what a rehearsal must cover. Here the on/off unit is the commit: every caller switches in exactly one commit that a single `git revert` undoes. G2 makes a half-reverted state visible (an inline copy without its allowlist row fails).
+
+## 9. Gate tools
+
+All three are scripts. Each has a suite under `tests/` with fixtures and one mutation per failure condition, which `tests/run-all-tests.sh` runs (so both CI workflows run them: `.github/workflows/ci-main.yml:70-71`). G2 needs no base, so its suite also runs it on the real tree on every run. G1 and G3 compare against a base commit, so the integration step runs them on the real tree with `--base=<main before the merge>` as part of the pre-merge gate. Each fails closed: a missing input, an unreadable file, a git error or an unknown line form is a failure, never a pass.
+
+**G1 `scripts/check-doc-moves.sh` (cut A)**
+
+- Input: `--base=<commit>` (required; missing → exit 2), the tracked tree at HEAD.
+- Reads `git diff --name-status -M <base> HEAD`.
+- Fails (exit 1) when: a rename under `docs/` or `scripts/` has similarity below 100; a file under `docs/` is deleted; a moved file's basename appears in a tracked file outside the exempt set in any form other than its new path; a deleted script's path appears outside the exempt set.
+- Exempt set (fixed in the script, not a parameter): `docs/audits/**`, `docs/archive/**`, `docs/CYCLE_GATE_DAILY_OBSERVATION.md` (W11 records; their citations are as of their date); and the records of this move itself: tracked files directly under `docs/superpowers/specs/` or `docs/superpowers/plans/` whose file name contains `simplify-refactor`. This design names the old paths on purpose (§4.1, §4.2) to say what moved, it is committed before the move commit, and the implementation plan will do the same, so both read like W11 records: their paths are as of their date. The implementation plan MUST therefore be saved with `simplify-refactor` in its file name. The rule stays narrow: two directories, one topic word, no other spec or plan. Hand check against §4.1 and §4.2: every old path written there is in this file, which the rule exempts, so the move commit has 0 violations from it; the only live reference to an old path, `docs/superpowers/specs/2026-07-09-host-checkout-auto-advance-design.md:91`, is changed in the move commit (§4.1 row 9). G1 reads tracked files only; `.superpowers/` is excluded by `.git/info/exclude`.
+- Output: one line per violation `VIOLATION <file>:<line> <old> -> <new>`, then `OK <n> moves` or `FAIL <k>`. Exit 0 / 1 / 2.
+
+**G2 `scripts/check-duplicate-functions.sh` (cuts B, C)**
+
+- Input: `git ls-files scripts bin` (bash files: `*.sh`, and `bin/*` whose first line names bash or sh); allowlist `scripts/duplicate-functions.allow` (TSV: `name`, `file`, `reason`; `#` comments).
+- Wrapper rule (the only automatic exception, and only when all three hold): the body has exactly one line that is not blank or a comment; that line's first word is a function defined in `scripts/lib/`; and the same file contains, on a line that is not a comment, the literal path `scripts/lib/<file>` of the library that defines it (scripts load libraries through variables such as `SV_LIB` or `FYD_LIB`, so the check is on the literal path, not on the `.` line). Such a definition is a wrapper, not a copy. Anything else is a copy. The fail-closed guard for a missing library lives at the load lines (§5.2), outside the wrapper, which is why a wrapper can stay one line: for example `schema_validate_or_die() { fy_schema_validate --tagged -- "$@"; }` with `SV_LIB="…/scripts/lib/schema-validate.sh"` in the same file meets all three conditions.
+- Fails (exit 1) when: a name is defined in two or more files and a copy outside `scripts/lib/` has no allowlist row; a name defined in `scripts/lib/` is also defined outside it (no allowlist can excuse this); an allowlist row matches no copy, or its name is no longer duplicated (`OBSOLETE`, so the list shrinks in the same commit that removes a copy).
+- Exit 2 on a malformed row, an unreadable file or a git error.
+- Initial allowlist: every current duplicate, with a reason (29 names by the design room's throwaway count; the tool's own count is the one that counts). Rows for `fetch`, `schema_validate_or_die`, `attempt_notify`, `retryable_notify_rc` disappear during B and C.
+
+**G3 `scripts/check-refactor-equivalence.sh` (cuts B, C)**
+
+- Input: `--base=<commit>` and `--cases=<tsv>` (columns: script path, args, env, fixture dir, output files to compare, validator path `ajv-stub|python|none` (§5.3), optional list of fields to normalize).
+- Materializes the base tree with `git worktree add --detach` into a temp dir; runs base and head with the same fixtures, `HOME` and `TMPDIR` in a temp dir, `FY_LIVE` unset, and a stub directory first on `PATH` for `curl`, `ssh`, `scp`, `proton`, `cleos` (stubs record calls and fail unless the case provides a response). Before each run it checks that `command -v proton ssh` resolve to the stubs; otherwise exit 2. The validator is set by the case's validator column, as in the table in §5.3; a case whose validator path cannot be set up on this machine exits 2 (could not run), never "equal".
+- Compares rc, stdout, stderr and each listed output file byte for byte. A field may be normalized only if the case row names it (for clocks); any other difference fails.
+- Suite mode: `--suite=<dir>` runs an existing suite at base and head and compares two things only: the exit code, and the multiset of (status, case name) pairs. A case line is optional leading whitespace, then a marker, then whitespace, then the name (trailing whitespace trimmed, so `%-70s` padding does not count). The marker table is fixed: `PASS` and `✓` mean pass; `FAIL` and `✗` mean fail. Marker text, other lines and the summary line are not compared. So a suite that printed `  ✓ X` / `  ✗ X` before and prints `PASS  X` / `FAIL  X` after compares equal, and a lost, renamed or flipped case compares different. (The `✓` suites today: `tests/deploy/test-build-json-manifest.sh:42-43` prints `  ✓ %s` / `  ✗ %s` and `RESULTS: …` at `:124`; the same pair appears in six more suites under `tests/deploy/` and `tests/install-web-host-*/`.)
+- Exit 0 equal, 1 different, 2 could not run. Removes its worktree on every exit.
+- **UNVERIFIED:** which anchor scripts accept a fixed clock. Task 0 of the plan measures it; a script without one is compared with named normalized fields only.
+
+## 10. Audit tier per component
+
+Tiers follow `.superpowers/sdd/mac-operations-rules.md` rule 19. In a mixed bundle each component keeps its own tier.
+
+| Component | Tier | Why | How it is checked |
+|---|---|---|---|
+| A: document moves, stub deletion, `docs/archive/README.md` | 1-equivalent | Writes no state; changes no behaviour; no public URL changes (rows 4–6 stay) | Machine gates only: G1, `scripts/publish-guard.sh`, gitleaks, `bash tests/run-all-tests.sh`. No reviewer |
+| G1, G2, G3 | 2 | They are judgment parts: a wrong pass hides a regression | Fail-closed design (§9); a mutation per failure condition, recorded red then green; one reviewer at the end of the bundle |
+| B-1: `fetch-retry.sh` + 3 monitors | 2 | Host cron scripts that write state and logs and notify | G3 on their suites; B-P2, B-P5, B-P6 with mutations; one reviewer at the end of the bundle |
+| B-2: `schema-validate.sh` + 4 anchor scripts | 3 | The check that stands between a malformed artifact and the inscription | G3 byte-identity of the artifacts (B-P1) and of rc/stdout/stderr (B-P2); mutation net B-P1..B-P4, B-P7; a blind reviewer who did not implement it; the real-thing gate is the testnet rehearsal before the next mainnet transition (the operator unlocks the testnet keystore; the AI never broadcasts) |
+| C-notify: retry policy in `side-effects.sh` + 3 callers | 2 | Notification and the alert state that depends on it | Table-driven rc cases with mutations (§6.1); `tests/side-effects-callers/` unchanged and green; one reviewer at the end of the bundle |
+| C-tests: `tests/lib/assert.sh` + suite migrations | 1-equivalent | Test code only | G3 suite mode (same case names and counts); for each migrated suite of a tier-3 script, one mutation of that script still turns the suite red |
+
+Kept for every tier, whatever the supervisor decides about reviewers: the break-to-prove mutations, checking that each claimed commit exists (`git cat-file -t`), and the pre-merge gate.
+
+## 11. No AI in the flow
+
+Every gate and check above is a bash script run by `tests/run-all-tests.sh` locally and in CI. None calls Claude or any LLM API, and none reads an API key. G2's suite includes a case that greps the three gate scripts for `anthropic`, `openai`, `claude`, `API_KEY` and fails on any hit.
+
+## 12. Open questions for the operator
+
+1. **When should B-2 (the schema check in four transition scripts) land?**
+   - (a) **After the 2026-12-07 transition (recommended).** Before 12/7 the same rehearsal window is needed by the double-inscription guard (C-5), which protects the inscription itself; the Constitution ranks speed last (`docs/CONSTITUTION.md:60`). B-1, A and C-tests can still land before 11/23.
+   - (b) Before 2026-11-23, covered by the pre-12/7 testnet rehearsal. Faster, but one rehearsal then proves two changes at once, and a B-2 problem found on the rehearsal day delays the guard.
+2. **`scripts/ops/b6-enable-metal-anomalies-cron.py` (986 lines, a one-time tool from 2026-06).**
+   - (a) **Keep (recommended).** It is cited as evidence by the postmortem, and removing it lowers the suite count (anti-goal A-3).
+   - (b) Delete it and `tests/ops/`, accepting a roster of one fewer suite.
+3. **`scripts/security-audit.sh` may be installed on the host's monthly cron.** Knowing requires a read-only look at the host, which is a W7 change needing your per-change approval.
+   - (a) **Do not look now; keep the script (recommended).** Cost of keeping: 110 lines.
+   - (b) Approve a read-only check later; if it is not installed, delete it in a later pass.
+
+## 13. Calls made by the design room
+
+These are the design room's decisions. The operator has not agreed to them yet.
+
+- D-1. Audit records move to `docs/audits/` (W11's home) and executed plans to `docs/archive/plans/`, instead of everything to `docs/archive/`. One home for audits; one clearly-labelled place for "do not follow".
+- D-2. "spec + plan" files and plans with open decisions stay in `plans/` (rows 12–14).
+- D-3. The extra `docs/` candidates stay in this cut (§4.1 second table).
+- D-4. Script decisions in §4.2 (one deletion; the rest kept for the reasons given).
+- D-5. Differences without a recorded reason (`--max-time` 15/20, the ungated log append) are kept as arguments or left alone, not merged.
+- D-6. One-line helpers (`sha256_*`, `shq`) are not consolidated; they go into G2's allowlist with reasons.
+- D-7. No runtime switch; the revert of one commit is the on/off unit (§8).
+- D-8. stderr stays byte-identical in B-2 (hence the `--tagged`/`--hint` options), so G3 needs no exception list.
+- D-9. `log`/`alert`/`die` stay per script; only the notify retry policy moves (§6.1). `external-watch.sh` and `advance-host-checkout.sh` stay out.
+- D-10. G2 uses condition-based staleness (`OBSOLETE`), not dates, so it never fails on a calendar date alone.
+- D-11. New library files carry the `# CHAIN: none` / `# PRIME_DIRECTIVE` header even though they are not broadcast paths.
+
+## 14. UNVERIFIED
+
+- Why `check-anchor-publish-health.sh` uses `--max-time 15` and the other two use 20.
+- Whether the host runs `scripts/security-audit.sh` from its monthly cron.
+- Whether anything outside the repository (the operator's own shell, a host cron with no installer) calls `test-phase6-memo-mock.abandoned.sh`. Its body only prints and exits 1, so a call would already fail today.
+- Which anchor scripts accept a fixed clock for G3.
+- Which compose files the web host and local preview still use (cut D).
+- The duplicate-name count (29) is from a throwaway parser; G2's parser may count differently.
+- Whether `scripts/sanitize-history.sh` still runs cleanly against the rebuilt public history (not run; it rewrites history).
+- Which validator (ajv or python3+jsonschema) a CI runner ends with after `scripts/setup-schema-validator.sh`; therefore whether B-2 is ever run against a real ajv (this Mac has none).
