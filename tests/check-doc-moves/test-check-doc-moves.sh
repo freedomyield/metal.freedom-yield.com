@@ -220,5 +220,5 @@ if printf '%s\n' "$OUT" | grep -q 'similarity'; then bad "nondocs_rename: simila
 
 cd "$REPO_ROOT" || exit 1
 echo ""
-echo "check-doc-moves suite: ${PASS} passed, ${FAIL} failed"
+echo "test-check-doc-moves.sh summary: PASS=${PASS}  FAIL=${FAIL}"
 [ "$FAIL" -eq 0 ]
