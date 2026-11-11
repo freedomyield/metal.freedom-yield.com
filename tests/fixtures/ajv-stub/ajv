@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+data=""; schema=""
+while [ "$#" -gt 0 ]; do
+	case "$1" in
+		-d) data="$2"; shift 2 ;;
+		-s) schema="$2"; shift 2 ;;
+		*) shift ;;
+	esac
+done
+case "$data" in
+	*.json) ;;
+	*) echo "error: Unexpected token ':' in $data" >&2; exit 1 ;;
+esac
+if [ "${FAKE_AJV_VERDICT:-}" = "invalid" ]; then
+	echo "$data invalid" >&2; exit 1
+fi
+# ajv could not read the data even though it is a .json file
+if [ "${FAKE_AJV_VERDICT:-}" = "unreadable" ]; then
+	echo "error: Unexpected token ':' in JSON at position 3" >&2; exit 1
+fi
+python3 - "$schema" "$data" <<'PY'
+import json, sys
+schema = json.load(open(sys.argv[1]))
+data = json.load(open(sys.argv[2]))
+missing = [k for k in schema.get("required", []) if k not in data]
+if missing:
+	print("invalid: missing", missing, file=sys.stderr); sys.exit(1)
+print("valid")
+PY
