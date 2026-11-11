@@ -42,10 +42,10 @@ if ! command -v jq >/dev/null 2>&1; then
 	exit 1
 fi
 
-PASS=0
-FAIL=0
-ok()  { PASS=$((PASS + 1)); echo "PASS  $1"; }
-bad() { FAIL=$((FAIL + 1)); echo "FAIL  $1"; }
+# shellcheck source=tests/lib/assert.sh
+. "$REPO_ROOT/tests/lib/assert.sh"
+ok()  { t_pass "$1"; }
+bad() { t_fail "$1"; }
 
 BASE="$(mktemp -d -t gen-cycle-history-test.XXXXXX)"
 trap 'rm -rf "$BASE"' EXIT
@@ -139,6 +139,4 @@ TOTAL0="$(jq -s 'map(.incidents_in_cycle_count) | add' "$T/public/api/cycle-hist
 	|| bad "7 empty incident log (rc=$RC total=$TOTAL0): $OUT"
 
 echo
-echo "test-incident-attribution.sh summary: PASS=$PASS  FAIL=$FAIL"
-[ "$FAIL" -eq 0 ] || exit 1
-exit 0
+t_summary incident-attribution
