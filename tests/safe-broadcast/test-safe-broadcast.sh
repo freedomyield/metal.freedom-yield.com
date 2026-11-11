@@ -18,6 +18,8 @@
 set -u
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# shellcheck source=tests/lib/assert.sh
+. "$REPO_ROOT/tests/lib/assert.sh"
 WRAPPER="${REPO_ROOT}/bin/safe-broadcast"
 
 if [ ! -x "$WRAPPER" ]; then
@@ -381,9 +383,6 @@ cat > "$TEST_DRY_LOG_NO_PREFIX" <<'JSON'
 }
 JSON
 
-PASS=0
-FAIL=0
-
 run_case() {
 	local name="$1"
 	local expected_rc="$2"
@@ -397,11 +396,9 @@ run_case() {
 	fi
 	rc=$?
 	if [ "$rc" -eq "$expected_rc" ]; then
-		printf 'PASS  %-70s (rc=%d)\n' "$name" "$rc"
-		PASS=$((PASS + 1))
+		t_pass "$(printf '%-70s (rc=%d)' "$name" "$rc")"
 	else
-		printf 'FAIL  %-70s (rc=%d, expected %d)\n' "$name" "$rc" "$expected_rc" >&2
-		FAIL=$((FAIL + 1))
+		t_fail "$(printf '%-70s (rc=%d, expected %d)' "$name" "$rc" "$expected_rc")"
 	fi
 }
 
@@ -430,22 +427,19 @@ run_case_grep() {
 	fi
 	rc=$?
 	if [ "$rc" -ne "$expected_rc" ]; then
-		printf 'FAIL  %-70s (rc=%d, expected %d)\n' "$name" "$rc" "$expected_rc" >&2
+		t_fail "$(printf '%-70s (rc=%d, expected %d)' "$name" "$rc" "$expected_rc")"
 		sed 's/^/      | /' "$stderr_file" >&2
-		FAIL=$((FAIL + 1))
 		rm -f "$stderr_file"
 		return
 	fi
 	if ! grep -qF "$expected_msg" "$stderr_file"; then
-		printf 'FAIL  %-70s (rc=%d OK, but stderr missing expected substring: %s)\n' "$name" "$rc" "$expected_msg" >&2
+		t_fail "$(printf '%-70s (rc=%d OK, but stderr missing expected substring: %s)' "$name" "$rc" "$expected_msg")"
 		printf '      captured stderr:\n' >&2
 		sed 's/^/      | /' "$stderr_file" >&2
-		FAIL=$((FAIL + 1))
 		rm -f "$stderr_file"
 		return
 	fi
-	printf 'PASS  %-70s (rc=%d, stderr matched)\n' "$name" "$rc"
-	PASS=$((PASS + 1))
+	t_pass "$(printf '%-70s (rc=%d, stderr matched)' "$name" "$rc")"
 	rm -f "$stderr_file"
 }
 
@@ -508,18 +502,14 @@ run_case_grep "arg: -u=<url> refuses explicitly" 2 \
 # reintroduced and re-truncating the header.
 HELP_OUT="$(bash "$WRAPPER" --help 2>&1)"
 if printf '%s\n' "$HELP_OUT" | grep -qE '^# '; then
-	printf 'FAIL  %-70s (found a line still prefixed with "# ")\n' "help: no line retains a literal comment-marker prefix" >&2
-	FAIL=$((FAIL + 1))
+	t_fail "$(printf '%-70s (found a line still prefixed with "# ")' "help: no line retains a literal comment-marker prefix")"
 else
-	printf 'PASS  %-70s\n' "help: no line retains a literal comment-marker prefix"
-	PASS=$((PASS + 1))
+	t_pass "$(printf '%-70s' "help: no line retains a literal comment-marker prefix")"
 fi
 if printf '%s\n' "$HELP_OUT" | grep -qF -- "--endpoint=<url> REMOVED"; then
-	printf 'PASS  %-70s\n' "help: reaches the newest header section (not truncated by a stale hardcoded range)"
-	PASS=$((PASS + 1))
+	t_pass "$(printf '%-70s' "help: reaches the newest header section (not truncated by a stale hardcoded range)")"
 else
-	printf 'FAIL  %-70s (newest header section missing from --help output)\n' "help: reaches the newest header section" >&2
-	FAIL=$((FAIL + 1))
+	t_fail "$(printf '%-70s (newest header section missing from --help output)' "help: reaches the newest header section")"
 fi
 
 # ---- usage path writes nothing but its own message to stderr (2026-10-05) ----
@@ -537,11 +527,9 @@ for _i in $(seq 400); do
 	[ "$_err" = "ERROR: --tx=<json-file> required" ] || SB_PIPE_LEAKS=$((SB_PIPE_LEAKS + 1))
 done
 if [ "$SB_PIPE_LEAKS" -eq 0 ]; then
-	printf 'PASS  %-70s\n' "usage: stderr is only the ERROR line (400x, SIGPIPE ignored)"
-	PASS=$((PASS + 1))
+	t_pass "$(printf '%-70s' "usage: stderr is only the ERROR line (400x, SIGPIPE ignored)")"
 else
-	printf 'FAIL  %-70s (%s/400 runs had extra stderr)\n' "usage: stderr is only the ERROR line (400x, SIGPIPE ignored)" "$SB_PIPE_LEAKS" >&2
-	FAIL=$((FAIL + 1))
+	t_fail "$(printf '%-70s (%s/400 runs had extra stderr)' "usage: stderr is only the ERROR line (400x, SIGPIPE ignored)" "$SB_PIPE_LEAKS")"
 fi
 
 # ---- gate 2 (token) failure paths (exit 3) ----
@@ -900,11 +888,9 @@ unset STUB_CHAIN_ID
 
 # ---- audit log: no line written on gate refusal (pre-log happens only after gates pass) ----
 if [ ! -s "$TEST_AUDIT" ]; then
-	printf 'PASS  %-70s (empty)\n' "audit log: no lines on gate refusal"
-	PASS=$((PASS + 1))
+	t_pass "$(printf '%-70s (empty)' "audit log: no lines on gate refusal")"
 else
-	printf 'FAIL  %-70s (unexpected content: %d bytes)\n' "audit log: no lines on gate refusal" "$(wc -c < "$TEST_AUDIT")" >&2
-	FAIL=$((FAIL + 1))
+	t_fail "$(printf '%-70s (unexpected content: %d bytes)' "audit log: no lines on gate refusal" "$(wc -c < "$TEST_AUDIT")")"
 fi
 
 # ---- audit log FALLBACK path (§3.5 follow-up): resolves against the LOGIN
@@ -932,20 +918,16 @@ PROBE
 	rm -f "$FALLBACK_PROBE"
 	EXPECTED_FALLBACK="${LOGIN_HOME}/.fyd-broadcast-audit.log"
 	if [ "$RESOLVED_FALLBACK" = "$EXPECTED_FALLBACK" ]; then
-		printf 'PASS  %-70s (%s)\n' "audit log fallback: HOME=keystore fixture → resolves under LOGIN home" "$RESOLVED_FALLBACK"
-		PASS=$((PASS + 1))
+		t_pass "$(printf '%-70s (%s)' "audit log fallback: HOME=keystore fixture → resolves under LOGIN home" "$RESOLVED_FALLBACK")"
 	else
-		printf 'FAIL  %-70s (got [%s], expected [%s])\n' "audit log fallback: HOME=keystore fixture → resolves under LOGIN home" "$RESOLVED_FALLBACK" "$EXPECTED_FALLBACK" >&2
-		FAIL=$((FAIL + 1))
+		t_fail "$(printf '%-70s (got [%s], expected [%s])' "audit log fallback: HOME=keystore fixture → resolves under LOGIN home" "$RESOLVED_FALLBACK" "$EXPECTED_FALLBACK")"
 	fi
 	case "$RESOLVED_FALLBACK" in
 		"$TEST_HOME"/*)
-			printf 'FAIL  %-70s (resolved under keystore fixture: %s)\n' "audit log fallback: does NOT relocate into the keystore dir" "$RESOLVED_FALLBACK" >&2
-			FAIL=$((FAIL + 1))
+			t_fail "$(printf '%-70s (resolved under keystore fixture: %s)' "audit log fallback: does NOT relocate into the keystore dir" "$RESOLVED_FALLBACK")"
 			;;
 		*)
-			printf 'PASS  %-70s\n' "audit log fallback: does NOT relocate into the keystore dir"
-			PASS=$((PASS + 1))
+			t_pass "$(printf '%-70s' "audit log fallback: does NOT relocate into the keystore dir")"
 			;;
 	esac
 else
@@ -956,7 +938,7 @@ fi
 # ---- Summary ----
 echo
 echo "----------------------------------------"
-echo "test-safe-broadcast.sh summary: PASS=$PASS  FAIL=$FAIL"
+t_summary safe-broadcast || true
 if [ "$FAIL" -gt 0 ]; then
 	echo "RESULT: FAIL"
 	exit 1

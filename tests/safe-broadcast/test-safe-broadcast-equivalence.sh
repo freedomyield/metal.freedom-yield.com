@@ -53,6 +53,8 @@ WRITE=0
 
 # shellcheck source=tests/safe-broadcast/sb-harness.sh
 . "$HERE/sb-harness.sh"
+# shellcheck source=tests/lib/assert.sh
+. "$ROOT/tests/lib/assert.sh"
 sbh_init
 trap 'rm -rf "$SBH_T"' EXIT
 
@@ -202,15 +204,16 @@ fi
 
 N="$(grep -c '^=== ' "$OUT")"
 if [ ! -r "$GOLDEN" ]; then
-	echo "FAIL golden file missing: $GOLDEN"
+	t_fail "golden file missing: $GOLDEN"
+	t_summary safe-broadcast-equivalence || true
 	exit 1
 fi
 if diff -u "$GOLDEN" "$OUT" > "$T/diff.txt"; then
-	echo "PASS all $N default-profile scenarios reproduce the pre-profile wrapper byte-for-byte (rc, stdout, stderr, audit, call order)"
-	echo "test-safe-broadcast-equivalence.sh: PASS=$N FAIL=0"
+	t_pass "all $N default-profile scenarios reproduce the pre-profile wrapper byte-for-byte (rc, stdout, stderr, audit, call order)"
+	t_summary safe-broadcast-equivalence
 	exit 0
 fi
-echo "FAIL default-profile behaviour differs from the pre-profile wrapper:"
+t_fail "default-profile behaviour differs from the pre-profile wrapper:"
 sed 's/^/  /' "$T/diff.txt" | head -80
-echo "test-safe-broadcast-equivalence.sh: FAIL"
+t_summary safe-broadcast-equivalence || true
 exit 1

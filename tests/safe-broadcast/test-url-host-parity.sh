@@ -17,10 +17,10 @@ set -u
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PF="$ROOT/scripts/install-rehearsal-preflight.sh"
 AT='@'
-PASS=0
-FAIL=0
-ok()  { PASS=$((PASS + 1)); printf 'PASS %s\n' "$1"; }
-bad() { FAIL=$((FAIL + 1)); printf 'FAIL %s\n     %s\n' "$1" "$2"; }
+# shellcheck source=tests/lib/assert.sh
+. "$ROOT/tests/lib/assert.sh"
+ok()  { t_pass "$1"; }
+bad() { t_fail "$1"; printf '     %s\n' "$2"; }
 
 # shellcheck source=scripts/lib/url-host.sh
 . "$ROOT/scripts/lib/url-host.sh"
@@ -88,5 +88,4 @@ else
 fi
 
 echo "---"
-echo "test-url-host-parity.sh: PASS=$PASS FAIL=$FAIL"
-[ "$FAIL" -eq 0 ]
+t_summary url-host-parity

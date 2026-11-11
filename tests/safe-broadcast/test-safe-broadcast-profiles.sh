@@ -27,12 +27,12 @@ trap 'rm -rf "$SBH_T"' EXIT
 T="$SBH_T"
 W="$ROOT/bin/safe-broadcast"
 CFG="$(sbh_cfg_path)"
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$ROOT/tests/lib/assert.sh"
 
-ok()  { PASS=$((PASS + 1)); printf 'PASS  %s\n' "$1"; }
+ok()  { t_pass "$1"; }
 bad() {
-	FAIL=$((FAIL + 1)); printf 'FAIL  %s\n      %s\n' "$1" "$2"
+	t_fail "$1"; printf '      %s\n' "$2"
 	sed 's/^/      err| /' "$T/err" | head -12
 	sed 's/^/      call| /' "$SBH_CALLS" | head -12
 }
@@ -392,5 +392,4 @@ check "T1 config re-pointed to a clone after gate 3 → nothing pushed, exit 3, 
 	"nocall:proton transaction:push" "audit:phase=pre" "audit:rc=refused-gate3-recheck"
 
 echo "---"
-echo "test-safe-broadcast-profiles.sh: PASS=$PASS FAIL=$FAIL"
-[ "$FAIL" -eq 0 ]
+t_summary safe-broadcast-profiles
