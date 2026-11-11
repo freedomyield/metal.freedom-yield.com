@@ -41,8 +41,11 @@ canonical_leaf_hash() {
 	printf '%s\n' "${record}" | sha256_stdin
 }
 
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# shellcheck source=../lib/assert.sh
+. "${REPO_ROOT}/tests/lib/assert.sh"
 fail() { echo "FAIL: $*" >&2; exit 1; }
-pass() { echo "PASS  $*"; }
+pass() { t_pass "$*"; }
 
 # --- baseline canonical record ---
 # Compact JSON, deterministic key order (jq -c output shape).
@@ -174,4 +177,4 @@ echo "  - pretty-print (D)           : drifts                         [DRIFT]"
 echo "  - key reorder (E)            : drifts                         [DRIFT]"
 echo "  - trailing blank line (F)    : skipped; set unchanged         [VALID]"
 echo ""
-echo "Result: 6 pass, 0 fail"
+t_summary jsonl-encoding-regression
