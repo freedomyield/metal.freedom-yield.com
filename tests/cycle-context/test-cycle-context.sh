@@ -75,14 +75,14 @@ LIB="${REPO_ROOT}/scripts/lib/cycle-context.sh"
 SCRIPTS_DIR="${REPO_ROOT}/scripts"
 STEPS_JSON="${REPO_ROOT}/docs/cycle-transition-steps.json"
 
-PASS=0
-FAIL=0
-pass() { printf 'PASS  %s\n' "$1"; PASS=$((PASS + 1)); }
-fail() { printf 'FAIL  %s\n' "$1" >&2; FAIL=$((FAIL + 1)); }
+# shellcheck source=tests/lib/assert.sh
+. "${REPO_ROOT}/tests/lib/assert.sh"
+pass() { t_pass "$1"; }
+fail() { t_fail "$1"; }
 
 finish() {
 	echo
-	echo "test-cycle-context.sh summary: PASS=$PASS  FAIL=$FAIL"
+	t_summary cycle-context || true
 	if [ "$FAIL" -gt 0 ]; then
 		echo "RESULT: FAIL"
 		exit 1
