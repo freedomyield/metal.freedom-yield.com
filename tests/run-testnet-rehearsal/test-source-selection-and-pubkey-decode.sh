@@ -60,11 +60,11 @@ if ! command -v node >/dev/null 2>&1; then
 	exit 1
 fi
 
-PASS=0
-FAIL=0
+# shellcheck source=../lib/assert.sh
+. "$REPO_ROOT/tests/lib/assert.sh"
 
-pass() { printf 'PASS  %-78s%s\n' "$1" "${2:+ ($2)}"; PASS=$((PASS + 1)); }
-fail_case() { printf 'FAIL  %-78s%s\n' "$1" "${2:+ ($2)}" >&2; FAIL=$((FAIL + 1)); }
+pass() { t_pass "$(printf '%-78s%s' "$1" "${2:+ ($2)}")"; }
+fail_case() { t_fail "$(printf '%-78s%s' "$1" "${2:+ ($2)}")"; }
 
 # ============================================================
 # Part 1: scripts/lib/eosio-pubkey-raw-hex.js (format-normalized decode)
@@ -395,7 +395,7 @@ fi
 # ---- Summary ----
 echo
 echo "----------------------------------------"
-echo "test-source-selection-and-pubkey-decode.sh summary: PASS=$PASS  FAIL=$FAIL"
+t_summary source-selection-and-pubkey-decode || :
 if [ "$FAIL" -gt 0 ]; then
 	echo "RESULT: FAIL"
 	exit 1

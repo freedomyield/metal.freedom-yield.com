@@ -55,10 +55,10 @@ set -u
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
-PASS=0
-FAIL=0
-pass() { printf 'PASS  %-78s%s\n' "$1" "${2:+ ($2)}"; PASS=$((PASS + 1)); }
-fail_case() { printf 'FAIL  %-78s%s\n' "$1" "${2:+ ($2)}" >&2; FAIL=$((FAIL + 1)); }
+# shellcheck source=../lib/assert.sh
+. "$REPO_ROOT/tests/lib/assert.sh"
+pass() { t_pass "$(printf '%-78s%s' "$1" "${2:+ ($2)}")"; }
+fail_case() { t_fail "$(printf '%-78s%s' "$1" "${2:+ ($2)}")"; }
 
 # Files held to the STRICT bar: zero reference to FY_LIVE, side-effects.sh,
 # publish-scan, or publication.json at all. These are the actual broadcast
@@ -193,7 +193,7 @@ fi
 
 echo
 echo "----------------------------------------"
-echo "test-pipeline-not-fy-live-gated.sh summary: PASS=$PASS  FAIL=$FAIL"
+t_summary pipeline-not-fy-live-gated || :
 if [ "$FAIL" -gt 0 ]; then
 	echo "RESULT: FAIL"
 	exit 1

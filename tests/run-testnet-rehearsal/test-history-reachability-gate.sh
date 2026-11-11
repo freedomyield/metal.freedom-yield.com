@@ -46,10 +46,10 @@ for c in node jq timeout; do
 done
 TIMEOUT_BIN="$(command -v timeout)"
 
-PASS=0
-FAIL=0
-pass() { printf 'PASS  %-72s%s\n' "$1" "${2:+ ($2)}"; PASS=$((PASS + 1)); }
-fail_case() { printf 'FAIL  %-72s%s\n' "$1" "${2:+ ($2)}" >&2; FAIL=$((FAIL + 1)); }
+# shellcheck source=../lib/assert.sh
+. "$REPO_ROOT/tests/lib/assert.sh"
+pass() { t_pass "$(printf '%-72s%s' "$1" "${2:+ ($2)}")"; }
+fail_case() { t_fail "$(printf '%-72s%s' "$1" "${2:+ ($2)}")"; }
 
 BOGUS_USER="fyd-test-fixture-user-does-not-exist-67890"
 FAKE_ACCOUNT="rehearsaltst"   # fabricated, never a real on-chain account
@@ -216,7 +216,7 @@ else
 fi
 
 echo
-echo "test-history-reachability-gate.sh summary: PASS=$PASS  FAIL=$FAIL"
+t_summary history-reachability-gate || :
 if [ "$FAIL" -gt 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"
 exit 0
