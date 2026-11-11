@@ -509,3 +509,114 @@ Each property gets at least one mutation of `scripts/check-refactor-equivalence.
 - D-18. The G3 change lands as four separately revertable commits, before any directory lane.
 
 Questions for the operator from this amendment: none. The calls above are listed so they can be checked while reading.
+
+## 16. Amendment 2026-11-12 — G3 suite mode, second pass
+
+Status: design-room calls D-19..D-25 below; the operator has not agreed to them yet. Nothing above this section is rewritten. Where a sentence of §15 no longer holds, this section names it as "§15.x: <sentence> — cancelled → §16.y"; the rest of §15 stands. Audit tier: unchanged (G3 tier 2; test-directory work 1-equivalent, with the tier-3 spot checks of §6.2). Inputs: the G3 lane report `.superpowers/sdd/2026-11-10-simplify/g3-suite-impl-report.md` (reviewer type A, step 0, the re-run of the 68, the red-suite investigation) and its machine records in the session scratchpad (`g3-suite/s0/step0.tsv`, `g3-suite/p/`, `g3-suite/i1`..`i3`), L1 at 7f2efa8, T1 at f05d77b. Unchanged and not weakened anywhere below: a red base exits 2 (D-15).
+
+### 16.1 Revert unit: a stack, newest first (D-19)
+
+- §15.7: "The G3 lane lands as four commits, each revertable alone … `git revert` of one restores §9's behaviour for that part only." — cancelled → this subsection. Measured: a lone `git revert` of 1c1dde3 or of bcea20a conflicts (rc 1, 1, 0, 0 for the four); the parts edit neighbouring lines of `g3_run` and `g3_suite_mode`.
+- Call (recommended): keep the commits and make the sentence true. **The L1 commits revert cleanly as a stack, newest first.** To remove part k: revert every later L1 commit, then k; putting the later parts back is a new lane, re-proved by the G3 suite.
+- Why not re-cut the commits so each reverts alone: the code layout of one 640-line file would bend around a git property, the reviewed commits would need a new review, and the property breaks again with the next unrelated edit to the file, so it cannot be kept true. The stack form stays true as long as later G3 changes land on top, which is how every change lands. D-7 still holds: the unit of removal is commits, never a runtime switch.
+- How it is checked (machine; a throwaway worktree at the L1 tip, removed afterwards), over every L1 commit on the branch at review time (four today, six after 16.7's L1+): from newest to oldest, `git revert --no-commit <c>; echo rc=$?` → rc 0 each time, and the G3 suite (`tests/check-refactor-equivalence/`) is green after each step (a part and its own cases leave together); after the last step `git diff --quiet 7757566 -- scripts/check-refactor-equivalence.sh tests/check-refactor-equivalence TOOLKIT.md` → rc 0. Any rc ≠ 0 stops the lane (FIX FIRST). The report holds one line per step: commit, revert rc, suite rc. This closes the reviewer's type A; no code changes for it.
+
+### 16.2 Time limit: default 900 s; override per call (D-20)
+
+- §15.4: "default 600" — cancelled → this subsection. The range 1..3600 and every other rule of §15.4 stand.
+- Measured: step 0 (three G3 calls in parallel, base + head per call) over 81 directories: median 12 s, 90th percentile 70 s, longest `pre-push-scan` 463 s; `cycle-transition` stopped at 900 s. Bare single runs of the `pre-push-scan` suite: 264, 266, 313 s (I3). The limit bounds one single run.
+- Call (recommended): **default 900 s**, about 2.9 times the longest measured single run. Expiry is exit 2 (safe side, never `OK`), so the value decides only how often load causes a spurious exit 2; the lanes ran up to 7 workers at load 40, and a gate that turns red for load stops being read as binary. 600 s leaves 1.9 times; 1800 s only makes a real hang cost more.
+- Override, suite mode: the existing `--timeout=<n>` of that call. G3 is called once per directory, so per call is per directory. No per-directory table now: no tracked script loops over directories; a lane writes the value it used in its report. When a tracked caller appears, its list is the single source.
+- Override, cases mode: the form is fixed now and built when the first tracked cases file needs it (B-2 at the earliest): an optional 8th column `timeout`, same rule as `--timeout` (digits, 1..3600, anything else exit 2), empty = the call's limit. Not built in this pass, because an unused column would be an untested seam.
+- Check: the default is one constant and no suite case can wait 900 s; it is checked by reading (`grep -c '^G3_TIMEOUT=900$'` → 1, and the usage comment says 900). P3, P3c, P3d keep their explicit values.
+
+### 16.3 `sign-anchor-event` and `cycle-transition`: out of this cut (D-21)
+
+- §15.2, kind M row: "`cycle-transition`, … one suite in `sign-anchor-event` (5)" — cancelled for these two → this subsection. Kind M is now `cycle-transition-steps`, `renewal-memo`, `notify-anchor-transition` (3); lanes M1/M2 change in 16.7.
+- `sign-anchor-event`, measured: the step-0 exit 2 is `no case lines at base` from `test-block-time-failclosed.sh`. Read: three of its five files (`test-block-time-failclosed.sh`, `test-quantity-config.sh`, `test-xpr-account-config.sh`) are legacy tests that print one `SKIP:` line and exit 0 unless `RUN_LEGACY_TESTS=1` (`:16-19` of each); the `FAIL:` lines that suggested kind M are their pre-flight exits. The other two files use the default `PASS ` table. No file is kind M; the directory has a new shape, files with no case line by design.
+- Call (recommended): **the whole directory is out of this cut.** It tests the anchor signer (tier 3). The legacy files are kept for history only; migrating them gains nothing, and G3 cannot read them. Proving only the two live files would need a file filter in G3, a new judgment part in a tier-2 gate for two suites. Not recommended: a `--suite-file=` argument; migrating the legacy files under `RUN_LEGACY_TESTS=1` (it runs a retired flow).
+- `cycle-transition`, measured: kind not determined; its G3 call ran past 900 s at step 0 (rc 143). Read: colon form `  ok:` / `  FAIL:` (`:46-47`), 2229 lines, the suite of the transition orchestrator (tier 3, §3 C-4).
+- Call (recommended): **out of this cut; revisit after 2026-12-07.** Whether it is slow or hangs under G3 is unknown; finding out costs up to two hour-long runs, and changing the helper of the transition's own suite before the 12/7 transition puts a fresh change in front of the rehearsal for a small gain. After 12/7: one machine measurement (bare `time`, then G3 `--base=HEAD --markers=colon --timeout=3600`, not in parallel); if it finishes with the kind-M result, it becomes a kind-M lane.
+- Both keep their own helpers; the roster and its counts do not change (A-3).
+
+### 16.4 The six suite files red under G3's environment (D-22)
+
+Causes (I1–I3; every one is green in bare bash at fc3c6b2, e35ab40 and 0367552, consistent with the runner):
+
+| File(s) | Cause under G3 | Migration on main |
+|---|---|---|
+| `peer-validators` (1) | needs the real `curl` (`file://`, test:76-77); G3's stub answers | a94e547 |
+| `sync-to-validator-host`, `push-to-web-host` (1 each) | two SIGHUP cases each; the run inherits HUP as ignored from G3's caller (each suite's perl wrapper restores INT and QUIT only, test:66 and :76). Reproduced in bare bash with `trap '' HUP`; that G3's caller had HUP ignored is inferred | 1bd5e88, 1dca77b |
+| `agent-readability` (1) | reads a list under `HOME` (test:280); G3 gives an empty `HOME`. Not `curl`, as §15.2 assumed | none (D-14) |
+| `side-effects-callers` feed, monitoring (2) | sets `REAL_CURL` from `command -v curl` and so gets the stub (read, not run) | none (T2 left it out) |
+
+Calls, by cause (recommended first):
+
+1. **HUP: (a), fix G3's run start.** The perl start (`G3_PG_START`) sets HUP, INT, QUIT, PIPE, ALRM, TERM, USR1 and USR2 to their default action before `setpgrp` and `exec`. It is a fix, not a loosening: both sides get the same start state; that state equals a foreground run in CI and under `tests/run-all-tests.sh`; today it depends on who called G3, and bash itself ignores INT and QUIT in the background child (`( … ) &`, `:310-313`). It can turn an exit 2 into `OK` only when the base is really green under default signals. Then the two migrations are re-proved with the new G3 (base = parent of each): exit 0 → proven; any other exit → (d) for that directory, decided by the result, with no new design call.
+2. **curl, `peer-validators`: (d), revert the migration a94e547.** It is kind N, and D-14's reasons apply unchanged. No later commit touches `tests/peer-validators` (checked 2026-11-12), so the revert is clean, and its proof needs no judgment: `git diff --quiet a94e547^ HEAD -- tests/peer-validators` → rc 0, and the suite green under the runner. `side-effects-callers` is kind N as well and out of this cut (nothing merged).
+3. **HOME, `agent-readability`: D-14 stands; only its cause is corrected.** Rejected: the second half of (a), "pass the `HOME` files it needs by name". It would copy a work-machine list (a rule-8 item, `.superpowers/sdd/mac-operations-rules.md`) into G3's runs and make a proof depend on this machine; CI skips that case already (`CI=true`).
+- Rejected for all: (b) real tools for named suites: such a suite gets the network and the real `ssh`/`proton` in every run, including the head commit G3 is proving, so the gate's main property (§9) would depend on a list. (c) a proof tool outside G3: it needs the marker table again (two sources) or a new extraction mode in G3, and it runs suites with the real `ssh`/`proton` on `PATH`. Each costs more than one suite on the shared helper is worth.
+
+### 16.5 `pre-push-scan`: kind T; proving a migration that landed before its pin (D-23)
+
+- `pre-push-scan` joins kind T (§15.2). Measured: base green; the new G3 on 762f377 exits 1, and the only difference is one case name that carries measured seconds (`refused within the time limit (<n>s)`, test:484, inside a loop over two modes).
+- The §15.2 order (pin, then migrate, then G3 compares the migration) does not hold as is: on main the migration is already in, and a pin lands after it, so a pinned tree exists only on the head side. It holds once the same pin is applied to both sides in throwaway commits:
+  - P = the pin on top of the bundle, `tests/pre-push-scan/**` only, proved by §15.2 (a)–(c) as form 1 (16.6). P is the only commit that is merged.
+  - B' = 762f377^ plus the same pin; H' = 762f377 plus the same pin. Both live only in the lane's worktree (never merged, never pushed); their hashes go in the report. Check: B', H' and P are each form 1, and the pinned name text on their `+` lines is identical. Then `check-refactor-equivalence.sh --base=B' --suite=tests/pre-push-scan` run at H' → exit 0. That is the proof of 762f377.
+- No later commit touches `tests/pre-push-scan` after 762f377 (checked 2026-11-12). If the pin cannot be written as the same text at B', the lane stops and returns.
+
+### 16.6 Pin commits: two forms (D-24)
+
+- §15.2 (c) stands as **form 1**: the diff touches only that directory's suite files and only string literals in name position (the reviewer reads it).
+- **Form 2**, added: a pin may also change how a name is built, or which assertion call carries it, when the name is not a literal (a loop variable) or the assertion prints its compared values into the name. Seen in T1: reward-tracker 92b2956 (`assert_eq` → `assert_true` over the same `=` comparison; the two values move to a `note:` line printed on mismatch); external-watch f05d77b (a `case` maps the two run-varying loop values, port and work dir, to fixed words; the checked value is unchanged).
+- Form 2 is accepted only when all of these hold (machine unless said), in addition to §15.2 (a) and (b):
+  - (c2-1) `git diff --name-only <parent> <pin>` lists only that directory's suite files.
+  - (c2-2) Per suite file, the count of check calls is unchanged: `git show <c>:<file> | grep -oE '(^|[[:space:];])(assert_[a-z_]+|ok|bad)[[:space:]]+"' | wc -l` is equal at the parent and at the pin (it also counts `then ok "…"` forms; the design room ran it on T1 2026-11-12: 169 = 169 for 92b2956, 358 = 358 for f05d77b).
+  - (c2-3) For each form-2 case, one break-to-prove on the test's input, not on the script: make the checked condition false (for example, touch the digest between the two mtime reads; put the port into the status JSON). That case is `FAIL` at the parent and at the pin; the input is restored and not committed; both runs' rc and case line go in the report.
+  - (c2-4) The reviewer reads the hunk (test code), as for form 1.
+- Call (recommended): widen with these checks and keep T1's three commits as they are. Why not have the worker rewrite into form 1: external-watch's names come from a loop variable, so no string-only edit can pin them; the only form-1 route restructures the loop, a bigger change to the test than form 2. Why the extra checks: form 2 touches the line that decides PASS or FAIL, so reading alone is not enough evidence that the check still bites.
+- T1's form-2 cases: reward-tracker 1 (the dry-run mtime case), external-watch 2 (the `p2p port` and `work dir` names). The external-watch seconds name (`:1027`) and all of deploy (1dd24eb) are form 1.
+
+### 16.7 Lanes (replaces §15.8's table and merge order; §15.8's other rules stand)
+
+| Lane | Directories | Files it may touch | Depends on | Proof; break-to-prove |
+|---|---|---|---|---|
+| L1+ | — | `scripts/check-refactor-equivalence.sh`, `tests/check-refactor-equivalence/**`, the G3 row of `TOOLKIT.md` | — | Two commits on top of 7f2efa8: (5) default 900 s (16.2, checked by reading); (6) signal defaults at run start (16.4-1). New rows: **P7** G3 started by a caller with `trap '' HUP INT QUIT`; a fixture suite sends HUP to its own short `sleep` child and passes only if the child died of HUP → exit 0. Mutations: drop HUP from the list → exit 2; drop the reset → exit 2. **P7b** just outside: a fixture suite that sets `trap '' HUP` itself still has HUP ignored (G3 resets only the start state) → its case passes (regression row, no mutation). Then 16.1's revert check over all six commits. Reviewer once, reading only (5), (6) and the revert-check record |
+| R2 | `sync-to-validator-host`, `push-to-web-host`; the 68; the proofs recorded before (6) | none; writes only its report | L1+ reviewed | new G3 on 1bd5e88 and 1dca77b (base = parent) → exit 0 each; the 68 again: the 64 that exited 0 still exit 0 (P6 for commit 6); N's G3 runs and T1/T2's pin checks (a), (b) again, same results as recorded. No mutation (runs only) |
+| V | `peer-validators`; `sync-to-validator-host` / `push-to-web-host` only if R2 is not exit 0 for them | `tests/<dir>/**` of these | peer: none; the other two: R2 | `git revert <migration>`; `git diff --quiet <migration>^ HEAD -- tests/<dir>` → rc 0; suite green bare. Break-to-prove: none (no new claim; the evidence is the empty diff to an already-tested tree) |
+| T1 | `external-watch`, `deploy`, `reward-tracker` | `tests/<dir>/**` of these | L1+ reviewed | keep 92b2956, 1dd24eb, f05d77b; add (c2-1)..(c2-3) for the three form-2 cases; then one migration commit per directory, G3 `OK` |
+| T2 | `preview-cycle-anchor-broadcast`, `pq-identity-tools` | `tests/<dir>/**` of these | L1+ reviewed | one migration commit per directory, G3 `OK`; tier 3: one script mutation still turns the suite red, restored, not committed |
+| T3 | `pre-push-scan` | `tests/pre-push-scan/**` | L1+ reviewed | 16.5: P by §15.2 (a)–(c), form 1; B' and H', then G3 exit 0 |
+| M1 | `cycle-transition-steps` | `tests/<dir>/**` | L1+ reviewed | G3 `--markers=colon` `OK`; tier 3: one script mutation still red |
+| M2 | `renewal-memo`, `notify-anchor-transition` | `tests/<dir>/**` of these | L1+ reviewed | G3 `--markers=colon` `OK` |
+| (none) | `cycle-transition`, `sign-anchor-event` (16.3); `side-effects-callers` (16.4); `watch-validators`, `agent-readability` (D-14) | — | — | — |
+
+- Proofs are per commit and recorded in lane reports (§15.7); a G3 suite-mode run from main to the bundle tip cannot replace them (across a pin the base names vary; across V the base is red). Proofs recorded with G3 at 7f2efa8 before (6) existed (N's three directories, T1's and T2's pin checks (a) and (b)) are re-run once by R2 with the final G3, same commands, same expected results; every later lane proves with the final G3 because it starts after L1+.
+- Order: L1+ first; after its review, R2 then V's conditional part in sequence; V's `peer-validators` part, T1, T2, T3, M1, M2 in parallel (no shared file), within the headcount.
+- Merge order of the bundle: L1's six commits → N's three → V → T2 → T1 → T3 → M1 → M2.
+
+### 16.8 Where it connects / how to remove it
+
+- Seams: the perl start string `G3_PG_START` (signals) and the constant `G3_TIMEOUT` in G3; each test directory's own files; later, cases column 8 (not built now). Nothing calls G3 at runtime.
+- Removal: (6), then (5), revert from the top of the L1 stack (16.1); after both, G3 behaves as at 7f2efa8. A V revert is undone by reverting it (the migration is then back and unproven, as today). Pin commits revert per directory (the names vary again; nothing else changes). B' and H' never leave the lane's worktree.
+- Direction of each change: (6) gives both sides the CI start state, alike. (5) is the only change here that lets a run go longer; it can turn a former timeout exit 2 into a compared result, never into `OK` without a green base and equal cases. Form 2 adds a route with more checks than form 1; form 1 is unchanged. V and the "out of this cut" rows only take things out.
+
+### 16.9 UNVERIFIED
+
+- That G3's caller had HUP ignored at step 0 and in the re-run of the 68 (reproduced in bare bash with `trap '' HUP`; not measured inside G3). R2 settles it by result: if 1bd5e88 or 1dca77b still exit non-zero after (6), the cause lies elsewhere and V reverts that migration.
+- The cause in `side-effects-callers` (read, not run). It does not change a call: the directory is out of this cut either way.
+- Why `cycle-transition` ran past 900 s under G3 (slow or hanging): after 12/7 (16.3).
+- That P7's probe (a HUP to a child, then its wait status) behaves the same under the `bash` that G3 runs as `$BASH` on this Mac and on the CI runner; the lane picks the probe and records both.
+- That the count pattern of (c2-2) matches every check-call style in the T1 directories; the lane reports the counts, and a style the pattern misses is a stop-and-return, not a widening.
+
+### 16.10 Calls made by the design room (2026-11-12)
+
+- D-19. The L1 commits revert as a stack, newest first; no re-cut. Cancels §15.7's "each revertable alone".
+- D-20. Default limit 900 s (cancels §15.4's 600); per-call override in suite mode; cases column 8 fixed in form, built later.
+- D-21. `sign-anchor-event` and `cycle-transition` are out of this cut; `cycle-transition` is revisited after 2026-12-07.
+- D-22. HUP: G3 restores default signals at run start, then the two migrations are re-proved; `peer-validators`: revert a94e547; `agent-readability` and `side-effects-callers`: kind N. No real tools in G3, no proof tool outside it.
+- D-23. `pre-push-scan` is kind T; its merged migration is proved with throwaway pinned commits on both sides.
+- D-24. Pin form 2, accepted only with the machine checks of 16.6; T1's commits kept.
+- D-25. Lanes, order and merge order as 16.7.
+
+Questions for the operator from this amendment: none. The calls above are listed so they can be checked while reading.
