@@ -15,6 +15,7 @@
 set -u
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$REPO_ROOT/tests/lib/assert.sh"
 INSTALLER="${REPO_ROOT}/scripts/install-cron-audit-markers.sh"
 CHECKER="${REPO_ROOT}/scripts/check-cron-file.sh"
 
@@ -23,10 +24,8 @@ if [ ! -f "$INSTALLER" ]; then
 	exit 1
 fi
 
-PASS=0
-FAIL=0
-ok()  { PASS=$((PASS + 1)); echo "PASS  $1"; }
-bad() { FAIL=$((FAIL + 1)); echo "FAIL  $1"; }
+ok()  { t_pass "$1"; }
+bad() { t_fail "$1"; }
 
 # ---- fixtures ---------------------------------------------------------------
 DIR=""
@@ -413,7 +412,7 @@ else
 fi
 
 # ---- summary ------------------------------------------------------------------
-echo "test-install-cron-audit-markers.sh summary: PASS=$PASS  FAIL=$FAIL"
+t_summary install-cron-audit-markers
 if [ "$FAIL" -eq 0 ]; then
 	echo "RESULT: PASS"
 	exit 0
