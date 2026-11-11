@@ -1,0 +1,91 @@
+# duplicate-functions.allow — rows for scripts/check-duplicate-functions.sh (gate G2).
+# Format: name<TAB>file<TAB>reason. One row per non-wrapper copy, outside scripts/lib/, of a
+# function name defined in two or more scripts. Comment lines and blank lines are ignored.
+# A row that matches no such copy is reported OBSOLETE; remove a row when its copy is removed.
+# Initial rows: made from the gate's own COPY output on 2026-11-11, not counted by hand.
+LOG	scripts/check-anchor-history-reachable.sh	existing duplicate as of 2026-11-11; no decision yet
+LOG	scripts/run-anchor-pipeline.sh	existing duplicate as of 2026-11-11; no decision yet
+alert	scripts/advance-host-checkout.sh	each script's own log channel (spec 6.1)
+alert	scripts/check-anchor-publish-health.sh	each script's own log channel (spec 6.1)
+alert	scripts/check-host-drift.sh	each script's own log channel (spec 6.1)
+alert	scripts/check-identity-pins.sh	each script's own log channel (spec 6.1)
+alert	scripts/check-pulsevm-upstream.sh	each script's own log channel (spec 6.1)
+attempt_notify	scripts/check-anomalies.sh	C-notify: after 2026-12-07 (spec 6.1)
+attempt_notify	scripts/check-watch-validators.sh	C-notify: after 2026-12-07 (spec 6.1)
+attempt_notify	scripts/external-watch.sh	C-notify: after 2026-12-07 (spec 6.1)
+attempt_notify	scripts/notify-anchor-transition.sh	C-notify: after 2026-12-07 (spec 6.1)
+bad	scripts/operator-local/test-commit-anchor-source.sh	existing duplicate as of 2026-11-11; no decision yet
+bad	scripts/verify-legacy-anchor-archive.sh	existing duplicate as of 2026-11-11; no decision yet
+cleanup	scripts/dr-drill.sh	existing duplicate as of 2026-11-11; no decision yet
+cleanup	scripts/operator-local/staker-backup-encrypt.sh	existing duplicate as of 2026-11-11; no decision yet
+die	scripts/check-compose-naming.sh	each script's own log channel (spec 6.1)
+die	scripts/check-doc-moves.sh	each script's own log channel (spec 6.1)
+die	scripts/check-identity-pins.sh	each script's own log channel (spec 6.1)
+die	scripts/deploy/render-publication.sh	each script's own log channel (spec 6.1)
+die	scripts/operator-local/backup-host-config.sh	each script's own log channel (spec 6.1)
+die	scripts/operator-local/staker-backup-encrypt.sh	each script's own log channel (spec 6.1)
+die2	scripts/install-web-host-external-watch.sh	existing duplicate as of 2026-11-11; no decision yet
+die2	scripts/web-host-caddy-apply.sh	existing duplicate as of 2026-11-11; no decision yet
+fail	scripts/check-cron-file.sh	existing duplicate as of 2026-11-11; no decision yet
+fail	scripts/check-identity-pq.sh	existing duplicate as of 2026-11-11; no decision yet
+fail	scripts/dr-drill.sh	existing duplicate as of 2026-11-11; no decision yet
+fail	scripts/run-testnet-rehearsal.sh	existing duplicate as of 2026-11-11; no decision yet
+fetch	scripts/check-anchor-publish-health.sh	B-1: moves to scripts/lib/fetch-retry.sh (spec 5.1)
+fetch	scripts/check-identity-pins.sh	B-1: moves to scripts/lib/fetch-retry.sh (spec 5.1)
+fetch	scripts/check-pulsevm-upstream.sh	B-1: moves to scripts/lib/fetch-retry.sh (spec 5.1)
+iso_utc_of_epoch	scripts/check-anchor-publish-health.sh	existing duplicate as of 2026-11-11; no decision yet
+iso_utc_of_epoch	scripts/gen-anchor-source.sh	existing duplicate as of 2026-11-11; no decision yet
+log	scripts/advance-host-checkout.sh	each script's own log channel (spec 6.1)
+log	scripts/check-anchor-publish-health.sh	each script's own log channel (spec 6.1)
+log	scripts/check-host-drift.sh	each script's own log channel (spec 6.1)
+log	scripts/check-identity-pins.sh	each script's own log channel (spec 6.1)
+log	scripts/check-pulsevm-upstream.sh	each script's own log channel (spec 6.1)
+log	scripts/resume-after-cycle-start.sh	each script's own log channel (spec 6.1)
+log	scripts/vps-bootstrap.sh	each script's own log channel (spec 6.1)
+mask	scripts/install-web-host-external-watch.sh	existing duplicate as of 2026-11-11; no decision yet
+mask	scripts/web-host-caddy-apply.sh	existing duplicate as of 2026-11-11; no decision yet
+note	scripts/check-cron-file.sh	existing duplicate as of 2026-11-11; no decision yet
+note	scripts/install-rehearsal-preflight.sh	existing duplicate as of 2026-11-11; no decision yet
+notify_or_keep	scripts/check-anomalies.sh	C-notify: after 2026-12-07 (spec 6.1)
+notify_or_keep	scripts/check-watch-validators.sh	C-notify: after 2026-12-07 (spec 6.1)
+notify_or_keep	scripts/external-watch.sh	C-notify: after 2026-12-07 (spec 6.1)
+pass	scripts/check-cron-file.sh	existing duplicate as of 2026-11-11; no decision yet
+pass	scripts/dr-drill.sh	existing duplicate as of 2026-11-11; no decision yet
+refuse	scripts/pre-push-scan.sh	existing duplicate as of 2026-11-11; no decision yet
+refuse	scripts/web-host-caddy-apply.sh	existing duplicate as of 2026-11-11; no decision yet
+remove_from	scripts/install-web-host-anchor-source-allowlist.sh	existing duplicate as of 2026-11-11; no decision yet
+remove_from	scripts/install-web-host-sig-allowlist.sh	existing duplicate as of 2026-11-11; no decision yet
+require_cmd	scripts/gen-anchor-source.sh	existing duplicate as of 2026-11-11; no decision yet
+require_cmd	scripts/operator-local/commit-anchor-source.sh	existing duplicate as of 2026-11-11; no decision yet
+retryable_notify_rc	scripts/check-anomalies.sh	C-notify: after 2026-12-07 (spec 6.1)
+retryable_notify_rc	scripts/check-watch-validators.sh	C-notify: after 2026-12-07 (spec 6.1)
+retryable_notify_rc	scripts/notify-anchor-transition.sh	C-notify: after 2026-12-07 (spec 6.1)
+sb_history_lookup	bin/safe-broadcast	existing duplicate as of 2026-11-11; no decision yet
+sb_history_lookup	scripts/preview-cycle-anchor-broadcast.sh	existing duplicate as of 2026-11-11; no decision yet
+sb_history_names_tx	bin/safe-broadcast	existing duplicate as of 2026-11-11; no decision yet
+sb_history_names_tx	scripts/preview-cycle-anchor-broadcast.sh	existing duplicate as of 2026-11-11; no decision yet
+schema_validate_or_die	scripts/append-anchor-history.sh	B-2: decision Q1 (spec 5.4)
+schema_validate_or_die	scripts/gen-anchor-receipt.sh	B-2: decision Q1 (spec 5.4)
+schema_validate_or_die	scripts/gen-anchor-source.sh	B-2: decision Q1 (spec 5.4)
+schema_validate_or_die	scripts/operator-local/commit-anchor-source.sh	B-2: decision Q1 (spec 5.4)
+sha256_file	scripts/archive-legacy-anchors.sh	kept (spec 5.1, D-6)
+sha256_file	scripts/gen-anchor-source.sh	kept (spec 5.1, D-6)
+sha256_file	scripts/verify-legacy-anchor-archive.sh	kept (spec 5.1, D-6)
+sha256_pipe	scripts/archive-legacy-anchors.sh	kept (spec 5.1, D-6)
+sha256_pipe	scripts/gen-anchor-receipt.sh	kept (spec 5.1, D-6)
+sha256_pipe	scripts/preview-cycle-anchor-broadcast.sh	kept (spec 5.1, D-6)
+sha256_pipe	scripts/sign-anchor-event.sh	kept (spec 5.1, D-6)
+sha256_pipe	scripts/verify-legacy-anchor-archive.sh	kept (spec 5.1, D-6)
+sha256_str	scripts/gen-anchor-source.sh	kept (spec 5.1, D-6)
+sha256_str	scripts/verify-legacy-anchor-archive.sh	kept (spec 5.1, D-6)
+shq	scripts/install-web-host-external-watch.sh	kept (spec 5.1, D-6)
+shq	scripts/install-web-host-subdir-allowlist.sh	kept (spec 5.1, D-6)
+shq	scripts/web-host-caddy-apply.sh	kept (spec 5.1, D-6)
+state_write	scripts/check-identity-pins.sh	existing duplicate as of 2026-11-11; no decision yet
+state_write	scripts/check-pulsevm-upstream.sh	existing duplicate as of 2026-11-11; no decision yet
+usage	bin/safe-broadcast	existing duplicate as of 2026-11-11; no decision yet
+usage	scripts/anomaly-state-init.sh	existing duplicate as of 2026-11-11; no decision yet
+usage	scripts/check-renewal-memo.sh	existing duplicate as of 2026-11-11; no decision yet
+usage	scripts/operator-local/backup-host-config.sh	existing duplicate as of 2026-11-11; no decision yet
+web_run	scripts/install-web-host-external-watch.sh	existing duplicate as of 2026-11-11; no decision yet
+web_run	scripts/web-host-caddy-apply.sh	existing duplicate as of 2026-11-11; no decision yet
