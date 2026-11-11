@@ -213,7 +213,9 @@ assert_eq "  mode 644" "644" "$(file_mode_of "$SPATH")"
 assert_eq "  no publish note" "0" "$(grep -c 'status publish failed' "$C/home/log/watch.log")"
 SJ="$(cat "$SPATH" 2>/dev/null)"
 for leak in 127.0.0.1 10.9.8.7 "$P2P_PORT" fy-test-topic ticket draft mtr provider-edge note "$C" validator.json "$FAKE_NODE" rpc.invalid log/; do
-  assert_not_contains "  no host/path/topic string: $leak" "$leak" "$SJ"
+  # the port and the work dir differ per run, so the case name carries a fixed word for them (pinned)
+  case "$leak" in "$P2P_PORT") leak_name="p2p port" ;; "$C") leak_name="work dir" ;; *) leak_name="$leak" ;; esac
+  assert_not_contains "  no host/path/topic string: $leak_name" "$leak" "$SJ"
 done
 
 echo "== public status file: UNKNOWN this run -> null in last =="
@@ -1022,7 +1024,7 @@ ERR="$(WATCH_MTR_TIMEOUT=1 "$REAL_TIMEOUT" 30 env WATCH_LIVE=1 PATH="$BIN:$PATH"
   WATCH_MTR="$MTR_CMD" STUB_MTR_LOG="$C/mtr.log" bash "$SCRIPT" 2>&1 >/dev/null)"; RC=$?
 T1="$(date +%s)"
 assert_eq "TERM-ignoring mtr: run finishes on its own and the alert goes out" "0|1" "$RC|$(pushes)"
-if [ "$((T1 - T0))" -lt 20 ]; then ok "  bounded by timeout + kill-after ($((T1 - T0)) s)"; else bad "  bounded by timeout + kill-after" "took $((T1 - T0)) s"; fi
+if [ "$((T1 - T0))" -lt 20 ]; then ok "  bounded by timeout + kill-after"; else bad "  bounded by timeout + kill-after" "took $((T1 - T0)) s"; fi
 assert_contains "  mtr wrapped with -k 5" "-k 5 1 $BIN/mtr-hang -r -n -c 5 -w 127.0.0.1" "$(cat "$C/timeout.argv")"
 assert_contains "  draft records the kill" "(mtr exited rc=137" "$(cat "$C/home/log/$(draft_name "$((NOW + 300))")" 2>/dev/null)"
 
