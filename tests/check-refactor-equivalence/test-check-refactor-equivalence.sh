@@ -348,27 +348,27 @@ t_expect "fixture dir only untracked in the working tree: exit 2 (HEAD is what c
 
 # ---- stubs -----------------------------------------------------------------------------
 for c in curl ssh scp proton cleos; do
-	t_pair 'out="$($1 a b 2>&1)"; rc=$?; echo "rc=$rc out=$out"' 'echo "rc=1 out=g3-stub: '"$c"' not provided by the case"'
+	t_pair 'out="$($1 a.invalid b 2>&1)"; rc=$?; echo "rc=$rc out=$out"' 'echo "rc=1 out=g3-stub: '"$c"' not provided by the case"'
 	t_cases_one "$c" - - - -; t_run_cases
 	t_expect "stub $c: without a fixture stub it fails with the g3-stub message" 0 "OK 1 equal"
 done
 for c in curl proton ssh; do
 	t_init
-	t_script scripts/toy.sh 'out="$($1 a b)"; echo "[$out]"; out="$($1 c)"; echo "[$out]"'; t_commit base; t_mark_base
+	t_script scripts/toy.sh 'out="$($1 a.invalid b)"; echo "[$out]"; out="$($1 c.invalid)"; echo "[$out]"'; t_commit base; t_mark_base
 	printf '#!/bin/sh\ncat "$(dirname "$0")/../../calls.log"\n' | t_put "fxd/stubs/$c" 755
-	t_script scripts/toy.sh "echo \"[${c} a b]\"; echo \"[${c} a b\"; echo \"${c} c]\""
+	t_script scripts/toy.sh "echo \"[${c} a.invalid b]\"; echo \"[${c} a.invalid b\"; echo \"${c} c.invalid]\""
 	t_commit head
 	t_cases_one "$c" - fxd - -; t_run_cases
 	t_expect "stub $c: every call is recorded (cmd + args, appended) and the fixture stub is used" 0 "OK 1 equal"
 done
 t_init
-t_script scripts/toy.sh 'out="$(curl a b)"; echo "$?:$out"'; t_commit base; t_mark_base
+t_script scripts/toy.sh 'out="$(curl a.invalid b)"; echo "$?:$out"'; t_commit base; t_mark_base
 printf '#!/bin/sh\necho "FIXTURE-CURL $*"\nexit 7\n' | t_put fxd/stubs/curl 755
-t_script scripts/toy.sh 'echo "7:FIXTURE-CURL a b"'; t_commit head
+t_script scripts/toy.sh 'echo "7:FIXTURE-CURL a.invalid b"'; t_commit head
 t_cases_one x - fxd - -; t_run_cases
 t_expect "stub: a fixture stub's rc and output pass through" 0 "OK 1 equal"
 t_init
-t_script scripts/toy.sh 'out="$(curl a b 2>&1)"; echo "$?:$out"'; t_commit base; t_mark_base
+t_script scripts/toy.sh 'out="$(curl a.invalid b 2>&1)"; echo "$?:$out"'; t_commit base; t_mark_base
 printf '#!/bin/sh\necho "FIXTURE-CURL $*"\nexit 7\n' | t_put fxd/stubs/curl 644
 t_script scripts/toy.sh 'echo "1:g3-stub: curl not provided by the case"'; t_commit head
 t_cases_one x - fxd - -; t_run_cases
@@ -472,6 +472,23 @@ t_script scripts/toy.sh 'echo hi'; t_commit base; t_mark_base
 t_script scripts/toy.sh 'echo hi # head'; t_commit head
 t_cases_one x - - - ajv-stub; t_run_cases
 t_expect "validator ajv-stub without tests/fixtures/ajv-stub/ajv in HEAD: exit 2" 2
+
+# ---- things that make the run itself impossible: exit 2, nothing left behind -----------
+t_pair 'echo hi' 'echo hi'
+t_cases_one x - - - -
+rm -rf "$R/.git/worktrees"; echo "not a directory" > "$R/.git/worktrees"
+t_run_cases
+rm -f "$R/.git/worktrees"
+t_expect "git worktree add fails (.git/worktrees is a regular file): exit 2, never equal" 2
+if [ "$RC" -eq 2 ] && ! printf '%s' "$ERRTXT" | grep -q 'worktree add'; then t_bad "worktree add failure: reason must say worktree add ($ERRTXT)"; fi
+
+t_pair 'echo hi' 'echo hi'
+t_cases_one x - - - -
+chmod 000 "$CASES"
+t_run_cases
+chmod 644 "$CASES"
+t_expect "cases file unreadable (chmod 000): exit 2" 2
+if [ "$RC" -eq 2 ] && ! printf '%s' "$ERRTXT" | grep -q 'unreadable'; then t_bad "unreadable cases file: reason must say unreadable ($ERRTXT)"; fi
 
 # ---- arguments -------------------------------------------------------------------------
 t_pair 'echo hi' 'echo hi'
