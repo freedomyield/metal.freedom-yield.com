@@ -29,8 +29,9 @@ CFG="${REPO_ROOT}/config/a-chain-profiles.json"
 
 PASS=0
 FAIL=0
-ok()  { PASS=$((PASS + 1)); printf 'PASS %s\n' "$1"; }
-bad() { FAIL=$((FAIL + 1)); printf 'FAIL %s\n' "$1"; [ -n "${2:-}" ] && printf '     %s\n' "$2"; }
+. "${REPO_ROOT}/tests/lib/assert.sh"
+ok()  { t_pass "$1"; }
+bad() { t_fail "$1"; [ -n "${2:-}" ] && printf '     %s\n' "$2"; }
 
 WORK="$(mktemp -d -t acp-test.XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT
@@ -318,5 +319,4 @@ EXTRA_ENV='FYD_A_CHAIN_PROFILE_MAINNET=nope' run 'acp_chain_id mainnet' >/dev/nu
 expect "F02 stderr carries the reason prefix" "$(grep -c '^a-chain-profile: ' "$WORK/err")" "1"
 
 echo "---"
-echo "a-chain-profile: PASS=${PASS} FAIL=${FAIL}"
-[ "$FAIL" -eq 0 ]
+t_summary a-chain-profile

@@ -16,11 +16,12 @@
 
 ND_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ND_CFG="${ND_REPO_ROOT}/config/a-chain-profiles.json"
-ND_PASS=0
-ND_FAIL=0
+PASS=0
+FAIL=0
+. "${ND_REPO_ROOT}/tests/lib/assert.sh"
 
-nd_ok()  { ND_PASS=$((ND_PASS + 1)); printf 'PASS %s\n' "$1"; }
-nd_bad() { ND_FAIL=$((ND_FAIL + 1)); printf 'FAIL %s\n     %s\n' "$1" "$2"; }
+nd_ok()  { t_pass "$1"; }
+nd_bad() { t_fail "$1"; printf '     %s\n' "$2"; }
 
 # nd_extract <repo-relative-file> <sed -E regex with ONE capture group>
 # Prints the capture; returns 1 unless exactly one line matches.
@@ -69,6 +70,5 @@ nd_set_eq() {
 
 nd_finish() {
 	echo "---"
-	echo "$1: PASS=${ND_PASS} FAIL=${ND_FAIL}"
-	[ "$ND_FAIL" -eq 0 ] && [ "$ND_PASS" -gt 0 ]
+	t_summary "${1#test-}" && [ "$PASS" -gt 0 ]
 }
