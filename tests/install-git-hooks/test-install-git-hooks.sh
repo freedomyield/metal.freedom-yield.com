@@ -21,10 +21,10 @@ if [ ! -f "$INSTALLER" ]; then
 	exit 1
 fi
 
-PASS=0
-FAIL=0
-ok()  { PASS=$((PASS + 1)); echo "PASS  $1"; }
-bad() { FAIL=$((FAIL + 1)); echo "FAIL  $1"; }
+# shellcheck source=tests/lib/assert.sh
+. "$REPO_ROOT/tests/lib/assert.sh"
+ok()  { t_pass "$1"; }
+bad() { t_fail "$1"; }
 
 # ---- fixtures ----------------------------------------------------------------
 WORK=""
@@ -113,7 +113,7 @@ RC=$?
 rm -rf "$NOGIT"
 
 # ---- summary ----------------------------------------------------------------------
-echo "test-install-git-hooks.sh summary: PASS=$PASS  FAIL=$FAIL"
+t_summary install-git-hooks || true
 if [ "$FAIL" -eq 0 ]; then
 	echo "RESULT: PASS"
 	exit 0
