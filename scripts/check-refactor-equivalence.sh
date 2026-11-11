@@ -10,11 +10,16 @@
 #   bash scripts/check-refactor-equivalence.sh --base=<commit> --cases=<tsv>
 #   bash scripts/check-refactor-equivalence.sh --base=<commit> --suite=<dir>
 #   optional: --timeout=<seconds>  limit of each single run, digits 1..3600, default 600
+#   optional, suite mode only: --markers=colon  also read `ok:` / `PASS:` (pass) and
+#             `FAIL:` (fail) case lines; every suite file must have one at base
 #
 # Cases mode: each row of the TSV runs one script at both sides with the same
 # fixture, and compares rc, stdout, stderr and the listed output files byte for byte.
 # Suite mode: every executable test-*.sh directly in <dir> is run at both sides and
 # only the exit code and the multiset of (status, case name) pairs are compared.
+# A case line is: optional whitespace, a marker, whitespace, the name (trailing blanks
+# trimmed). Markers: PASS and ✓ (pass), FAIL and ✗ (fail); with --markers=colon also
+# exactly ok: or PASS: (pass) and FAIL: (fail), case-sensitive, then at least one blank.
 # The base run must be green (rc 0 and no fail case line); a red base is exit 2,
 # because red at both sides with the same fail cases would otherwise compare equal.
 #
@@ -42,7 +47,9 @@
 #      not shadow proton/ssh, zero cases, a validator that cannot be set up, a suite
 #      whose base run is red (`<id>: base is red (rc=<n>, fail cases=<k>): ...`), a run
 #      that exceeded --timeout (`<id>: timeout after <n>s at base|head`; the run's
-#      process group gets TERM, then KILL 5 s later if anything is left).
+#      process group gets TERM, then KILL 5 s later if anything is left), --markers
+#      that is not `colon`, given twice or with --cases, or --markers=colon on a suite
+#      file with no colon-form case line at base.
 #
 # Fail closed: every unexpected state is exit 2 or exit 1, never a quiet pass.
 # Both sides run in a `git worktree add --detach` under one mktemp directory; a trap
@@ -104,6 +111,8 @@ have_cases=0
 have_suite=0
 G3_TIMEOUT=600
 have_timeout=0
+G3_MARKERS=""
+have_markers=0
 for arg in "$@"; do
 	case "$arg" in
 		--base=*)
@@ -130,7 +139,13 @@ for arg in "$@"; do
 			G3_TIMEOUT=$((10#$G3_TIMEOUT))
 			[ "$G3_TIMEOUT" -ge 1 ] && [ "$G3_TIMEOUT" -le 3600 ] || g3_die "--timeout out of range 1..3600: $G3_TIMEOUT"
 			;;
-		*) g3_die "unknown argument: $arg (usage: --base=<commit> (--cases=<tsv> | --suite=<dir>) [--timeout=<seconds>])" ;;
+		--markers=*)
+			[ "$have_markers" -eq 0 ] || g3_die "--markers given twice"
+			have_markers=1
+			G3_MARKERS="${arg#--markers=}"
+			[ "$G3_MARKERS" = "colon" ] || g3_die "unknown marker set: '$G3_MARKERS' (known: colon)"
+			;;
+		*) g3_die "unknown argument: $arg (usage: --base=<commit> (--cases=<tsv> | --suite=<dir> [--markers=colon]) [--timeout=<seconds>])" ;;
 	esac
 done
 [ "$have_base" -eq 1 ] && [ -n "$G3_BASE" ] || g3_die "--base=<commit> is required"
@@ -139,6 +154,7 @@ if [ "$have_cases" -eq 1 ] && [ "$have_suite" -eq 1 ]; then g3_die "--cases and 
 if [ "$have_cases" -eq 0 ] && [ "$have_suite" -eq 0 ]; then g3_die "one of --cases=<tsv> or --suite=<dir> is required"; fi
 if [ "$have_cases" -eq 1 ] && [ -z "$G3_CASES" ]; then g3_die "--cases is empty"; fi
 if [ "$have_suite" -eq 1 ] && [ -z "$G3_SUITE" ]; then g3_die "--suite is empty"; fi
+if [ "$have_markers" -eq 1 ] && [ "$have_cases" -eq 1 ]; then g3_die "--markers cannot be combined with --cases"; fi
 
 G3_PWD="$PWD"
 if [ "$have_cases" -eq 1 ]; then
@@ -520,18 +536,31 @@ g3_list_suites() { # commit dir -> sorted file names (basename) of executable te
 	} | LC_ALL=C sort
 }
 
-g3_extract_cases() { # stdout-file stderr-file -> "status<TAB>name" lines on stdout
+g3_extract_cases() { # stdout-file stderr-file colon-count-file -> "status<TAB>name" lines on stdout
 	local re='^[[:space:]]*(PASS|FAIL|✓|✗)[[:space:]]+(.+)$' line st name
+	local rec='^[[:space:]]*(ok:|PASS:|FAIL:)[[:space:]]+(.+)$' ncolon=0
 	while IFS= read -r line || [ -n "$line" ]; do
 		if [[ $line =~ $re ]]; then
-			st="${BASH_REMATCH[1]}"
-			name="${BASH_REMATCH[2]}"
-			name="${name%"${name##*[![:space:]]}"}"
-			[ -n "$name" ] || continue
-			case "$st" in PASS|✓) st=pass ;; *) st=fail ;; esac
-			printf '%s\t%s\n' "$st" "$name"
+			:
+		elif [ "$G3_MARKERS" = "colon" ] && [[ $line =~ $rec ]]; then
+			:
+		else
+			continue
 		fi
+		st="${BASH_REMATCH[1]}"
+		name="${BASH_REMATCH[2]}"
+		name="${name%"${name##*[![:space:]]}"}"
+		[ -n "$name" ] || continue
+		case "$st" in
+			PASS|✓) st=pass ;;
+			FAIL|✗) st=fail ;;
+			ok:|PASS:) st=pass; ncolon=$((ncolon + 1)) ;;
+			FAIL:) st=fail; ncolon=$((ncolon + 1)) ;;
+			*) st=fail ;;
+		esac
+		printf '%s\t%s\n' "$st" "$name"
 	done < <(cat "$1" "$2")
+	printf '%s\n' "$ncolon" > "$3"
 }
 
 g3_suite_mode() {
@@ -567,7 +596,11 @@ g3_suite_mode() {
 		G3_R_SCRIPT="$id"
 		G3_R_ID="$id"
 		G3_R_COMMIT="$G3_BASEC"; G3_R_SIDE=base; g3_run "$B"
-		g3_extract_cases "$B/stdout" "$B/stderr" | LC_ALL=C sort > "$B/cases"
+		g3_extract_cases "$B/stdout" "$B/stderr" "$B/ncolon" | LC_ALL=C sort > "$B/cases"
+		# §15.2 kind M: --markers=colon must be needed by every suite file it is used on
+		if [ "$G3_MARKERS" = "colon" ] && [ "$(cat "$B/ncolon")" = "0" ]; then
+			g3_die "$id: --markers=colon but no colon-form case line at base"
+		fi
 		# §15.3: a red base proves nothing (red at both sides would compare equal).
 		brc="$(cat "$B/rc")"
 		bf="$(grep -c '^fail'$'\t' "$B/cases" || true)"
@@ -575,7 +608,7 @@ g3_suite_mode() {
 			g3_die "$id: base is red (rc=$brc, fail cases=$bf): cannot prove equivalence"
 		fi
 		G3_R_COMMIT="$G3_HEADC"; G3_R_SIDE=head; g3_run "$H"
-		g3_extract_cases "$H/stdout" "$H/stderr" | LC_ALL=C sort > "$H/cases"
+		g3_extract_cases "$H/stdout" "$H/stderr" "$H/ncolon" | LC_ALL=C sort > "$H/cases"
 		bc="$(wc -l < "$B/cases" | tr -d ' ')"; hc="$(wc -l < "$H/cases" | tr -d ' ')"
 		[ "$bc" -gt 0 ] || g3_die "$id: no case lines at base (cannot compare)"
 		[ "$hc" -gt 0 ] || g3_die "$id: no case lines at HEAD (cannot compare)"

@@ -685,6 +685,61 @@ t_expect "suite: directory with '..': exit 2" 2
 t_run --base="$BASE" --suite=tests/s/
 t_expect "suite: trailing slash on the directory is fine" 0 "OK 1 equal"
 
+# ---- --markers=colon (§15.2 kind M, §15.6 P2..P2d) -------------------------------------
+t_run_colon() { t_run --base="$BASE" --suite=tests/s --markers=colon; }
+# P2: the colon set is opt-in
+t_suite_pair 'echo "  ok: alpha"; exit 0' 'echo "  ok: alpha"; exit 0'
+t_run_suite
+t_expect "markers (P2): a colon-only suite without --markers: exit 2" 2
+if [ "$RC" -eq 2 ] && ! printf '%s' "$ERRTXT" | grep -qF 'no case lines at base'; then t_bad "markers (P2): reason must say no case lines at base ($ERRTXT)"; fi
+t_run_colon
+t_expect "markers (P2): the same suite with --markers=colon: equal" 0 "SUITE tests/s/test-a.sh base_rc=0 head_rc=0 cases=1/1" "OK 1 equal"
+# P2b: the colon set compares across forms
+t_suite_pair 'echo "  ok: alpha"; echo "PASS: beta"; exit 0' 'echo "PASS  alpha"; echo "PASS  beta"; exit 0'
+t_run_colon
+t_expect "markers (P2b): '  ok: X' and 'PASS: X' before, 'PASS  X' after: equal" 0 "OK 1 equal"
+t_suite_pair 'echo "  ok: alpha"; exit 0' 'echo "FAIL  alpha"; exit 0'
+t_run_colon
+t_expect_diffs "markers (P2b): '  ok: X' before, 'FAIL  X' after: differs" "DIFF tests/s/test-a.sh case-only-at-base pass:alpha" "DIFF tests/s/test-a.sh case-only-at-head fail:alpha"
+t_suite_pair 'echo "  ok: alpha"; exit 0' 'echo "  FAIL: alpha"; exit 0'
+t_run_colon
+t_expect_diffs "markers (P2b): '  ok: X' before, '  FAIL: X' after: FAIL: is a fail case" "DIFF tests/s/test-a.sh case-only-at-base pass:alpha" "DIFF tests/s/test-a.sh case-only-at-head fail:alpha"
+t_suite_pair 'echo "PASS: alpha"; echo "  ok: beta"; exit 0' 'echo "PASS  beta"; exit 0'
+t_run_colon
+t_expect_diffs "markers (P2b): 'PASS: X' at base with X missing at head: differs" "DIFF tests/s/test-a.sh case-only-at-base pass:alpha"
+# P2c: just outside: not case lines under the colon set
+t_suite_pair 'echo "  ok: real"; echo "OK: x1"; echo "ok x2"; echo "ok:x3"; echo "okay: x4"; echo "not ok: x5"; echo "Pass: x6"; echo "fail: x7"; echo "PASS:x8"; exit 0' \
+             'echo "PASS  real"; exit 0'
+t_run_colon
+t_expect "markers (P2c): OK:, 'ok X', ok:X, okay:, 'not ok:', Pass:, fail:, PASS:X are not case lines" 0 "SUITE tests/s/test-a.sh base_rc=0 head_rc=0 cases=1/1" "OK 1 equal"
+# P2d: bad use (the unknown and empty sets on a suite that would otherwise be equal)
+t_suite_pair 'echo "PASS  alpha"; exit 0' 'echo "PASS  alpha"; exit 0'
+t_run --base="$BASE" --suite=tests/s --markers=tap
+t_expect "markers (P2d): unknown set --markers=tap: exit 2" 2
+if [ "$RC" -eq 2 ] && ! printf '%s' "$ERRTXT" | grep -qF 'unknown marker set'; then t_bad "markers (P2d): reason must say unknown marker set ($ERRTXT)"; fi
+t_run --base="$BASE" --suite=tests/s --markers=
+t_expect "markers (P2d): empty --markers=: exit 2" 2
+t_suite_pair 'echo "  ok: alpha"; exit 0' 'echo "  ok: alpha"; exit 0'
+t_run --base="$BASE" --suite=tests/s --markers=colon --markers=colon
+t_expect "markers (P2d): --markers given twice: exit 2" 2
+t_pair 'echo hi' 'echo hi'
+t_cases_one x - - - -
+t_run --base="$BASE" --cases="$CASES" --markers=colon
+t_expect "markers (P2d): --markers with --cases: exit 2" 2
+t_suite_pair 'echo "PASS  alpha"; exit 0' 'echo "PASS  alpha"; exit 0'
+t_run_colon
+t_expect "markers (P2d): --markers=colon on a suite with no colon line at base: exit 2" 2
+if [ "$RC" -eq 2 ] && ! printf '%s' "$ERRTXT" | grep -qF 'no colon-form case line at base'; then t_bad "markers (P2d): reason must say no colon-form case line at base ($ERRTXT)"; fi
+t_suite_pair 'echo "PASS  alpha"; exit 0' 'echo "  ok: alpha"; exit 0'
+t_run_colon
+t_expect "markers (P2d): a colon line at head only does not count: exit 2" 2
+# P5: instability is seen, not masked (two runs of one commit)
+t_init
+# fixed width (8 digits), so that masking each digit, or each run of digits, would compare equal
+t_script tests/s/test-a.sh 'echo "PASS  case-$((RANDOM % 9000 + 1000))$((RANDOM % 9000 + 1000))"; exit 0'; t_commit base; t_mark_base
+t_run --base=HEAD --suite=tests/s
+t_expect "suite (P5): a case name with \$RANDOM, --base=HEAD: differs" 1
+
 # ======================================================================================
 # CLEANUP ON A SIGNAL
 # ======================================================================================
