@@ -15,8 +15,9 @@ set -u
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 LIB="${REPO_ROOT}/scripts/lib/host-account.sh"
 PASS=0; FAIL=0
-ok()  { PASS=$((PASS + 1)); echo "PASS  $1"; }
-bad() { FAIL=$((FAIL + 1)); echo "FAIL  $1"; }
+. "${REPO_ROOT}/tests/lib/assert.sh"
+ok()  { t_pass "$1"; }
+bad() { t_fail "$1"; }
 
 BASE="$(mktemp -d -t host-account-test.XXXXXX)"
 trap 'rm -rf "$BASE"' EXIT
@@ -86,6 +87,5 @@ RC=$?
 	&& ok "installer: a root-owned checkout stops it with exit 5 and writes nothing" \
 	|| bad "installer: a root-owned checkout stops it with exit 5 and writes nothing (rc=$RC)"
 
-echo "test-host-account.sh summary: PASS=$PASS  FAIL=$FAIL"
-[ "$FAIL" -eq 0 ] && { echo "RESULT: PASS"; exit 0; }
+t_summary host-account && { echo "RESULT: PASS"; exit 0; }
 echo "RESULT: FAIL"; exit 1

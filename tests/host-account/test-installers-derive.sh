@@ -25,8 +25,9 @@
 set -u
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PASS=0; FAIL=0
-ok()  { PASS=$((PASS + 1)); echo "PASS  $1"; }
-bad() { FAIL=$((FAIL + 1)); echo "FAIL  $1"; }
+. "${REPO_ROOT}/tests/lib/assert.sh"
+ok()  { t_pass "$1"; }
+bad() { t_fail "$1"; }
 
 BASE="$(mktemp -d -t host-account-inst.XXXXXX)"
 trap 'rm -rf "$BASE"' EXIT
@@ -191,6 +192,5 @@ else
 	echo "SKIP  check-cron-file: no regular file under /var/log on this machine"
 fi
 
-echo "test-installers-derive.sh summary: PASS=$PASS  FAIL=$FAIL"
-[ "$FAIL" -eq 0 ] && { echo "RESULT: PASS"; exit 0; }
+t_summary installers-derive && { echo "RESULT: PASS"; exit 0; }
 echo "RESULT: FAIL"; exit 1
