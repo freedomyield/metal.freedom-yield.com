@@ -53,10 +53,10 @@ set -u
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 BOOTSTRAP="${REPO_ROOT}/scripts/vps-bootstrap.sh"
 
-PASS=0
-FAIL=0
-ok()  { PASS=$((PASS + 1)); echo "PASS  $1"; }
-bad() { FAIL=$((FAIL + 1)); echo "FAIL  $1${2:+ — $2}"; }
+# shellcheck source=../lib/assert.sh
+. "$REPO_ROOT/tests/lib/assert.sh"
+ok()  { t_pass "$1"; }
+bad() { t_fail "$1" ${2:+"$2"}; }
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -319,7 +319,7 @@ else
 	ok "T7 hardcoded metalgo_data staking path is gone from vps-bootstrap.sh"
 fi
 
-echo "test-vps-bootstrap-staking-dir.sh summary: PASS=$PASS  FAIL=$FAIL"
+t_summary vps-bootstrap-staking-dir || true
 if [ "$FAIL" -eq 0 ]; then echo "RESULT: PASS"; exit 0; fi
 echo "RESULT: FAIL"
 exit 1
