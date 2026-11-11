@@ -47,6 +47,7 @@
 set -u
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$REPO_ROOT/tests/lib/assert.sh"
 LIB="${REPO_ROOT}/scripts/lib/side-effects.sh"
 PUSH_SCRIPT="${REPO_ROOT}/scripts/push-to-web-host.sh"
 
@@ -110,13 +111,10 @@ export LIB STUB_LOG
 export FYD_NOTIFY="$NOTIFY_STUB"
 export FYD_PUSH_TO_WEB_HOST="$PUSH_STUB"
 
-PASS=0
-FAIL=0
-
 SKIP=0
 
-pass() { printf 'PASS  %-72s%s\n' "$1" "${2:+ ($2)}"; PASS=$((PASS + 1)); }
-fail_case() { printf 'FAIL  %-72s%s\n' "$1" "${2:+ ($2)}" >&2; FAIL=$((FAIL + 1)); }
+pass() { t_pass "$(printf '%-72s%s' "$1" "${2:+ ($2)}")"; }
+fail_case() { t_fail "$(printf '%-72s%s' "$1" "${2:+ ($2)}")"; }
 skip_case() { printf 'SKIP  %-72s%s\n' "$1" "${2:+ ($2)}"; SKIP=$((SKIP + 1)); }
 
 # The two fd-0-CLOSED cases assert "returns at all", which needs a real
@@ -758,8 +756,8 @@ fi
 # ---- Summary ----
 echo
 echo "----------------------------------------"
-echo "test-side-effects.sh summary: PASS=$PASS  FAIL=$FAIL  SKIP=$SKIP"
-if [ "$FAIL" -gt 0 ]; then
+echo "SKIP=$SKIP"
+if ! t_summary side-effects; then
 	echo "RESULT: FAIL"
 	exit 1
 fi
