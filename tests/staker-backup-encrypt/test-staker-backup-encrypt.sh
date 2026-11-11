@@ -29,9 +29,10 @@ for t in openssl tar shasum; do
 	command -v "$t" >/dev/null 2>&1 || { [ -n "${CI:-}" ] && { echo "FAIL: $t missing"; exit 1; }; echo "SKIP: $t"; exit 0; }
 done
 
-PASS=0; FAIL=0
-ok() { PASS=$((PASS + 1)); printf '  PASS  %s\n' "$1"; }
-bad() { FAIL=$((FAIL + 1)); printf '  FAIL  %s  (%s)\n' "$1" "$2"; }
+# shellcheck source=../lib/assert.sh
+. "$REPO/tests/lib/assert.sh"
+ok() { t_pass "$1"; }
+bad() { t_fail "$1" "$2"; }
 
 PP="encrypt-test-passphrase-0123"
 setup() {
@@ -88,7 +89,6 @@ run "$TMP/e4" "short"$'\n'"short"$'\n'; rc=$?
 	&& ok "E4 short passphrase -> refused, nothing written" || bad "E4 short passphrase" "rc=$rc"
 
 echo
-echo "RESULT: $PASS passed, $FAIL failed"
 
 # --- mutants: each breaks one claim; the suite must fail on it ---------------
 if [ -z "${SCRIPT_UNDER_TEST:-}" ]; then
@@ -108,6 +108,5 @@ if [ -z "${SCRIPT_UNDER_TEST:-}" ]; then
 	mutant overwrite 's/\[ ! -e "\$OUT" \] && //'
 	mutant minlen  's/MIN_LEN=16/MIN_LEN=1/'
 	mutant shafile 's/shasum -a 256 "\$\(basename "\$OUT"\)" >/echo x >/'
-	echo "RESULT (with mutants): $PASS passed, $FAIL failed"
 fi
-[ "$FAIL" = 0 ]
+t_summary staker-backup-encrypt
