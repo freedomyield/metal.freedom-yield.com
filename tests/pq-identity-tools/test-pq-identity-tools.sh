@@ -88,7 +88,7 @@ ENC="$KD/${FYIPQ_ENC_BASENAME}"; PUB="$FR/${FYIPQ_PUB_REL}"
 for src in "pass:x" "env:FOO" "file:relative-pw" "file:$WORK/nonexistent"; do
 	for sc in pq-identity-keygen.sh pq-identity-unlock.sh; do
 		FOO=x run "$sc" "FY_PQ_PASSIN=$src"; rc=$?
-		if [ "$rc" -eq 4 ] && [ ! -e "$KD" ] && [ ! -e "$PUB" ]; then pass "T10 $sc refuses $src (exit 4, nothing created)"
+		if [ "$rc" -eq 4 ] && [ ! -e "$KD" ] && [ ! -e "$PUB" ]; then pass "T10 $sc refuses ${src//$WORK/<tmp>} (exit 4, nothing created)"
 		else bad "MUTATION NOT CAUGHT: T10 $sc accepted $src rc=$rc"; fi
 	done
 done
