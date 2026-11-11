@@ -19,6 +19,7 @@
 set -u
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$REPO_ROOT/tests/lib/assert.sh"
 CHECKER="${REPO_ROOT}/scripts/check-cron-file.sh"
 
 if [ ! -f "$CHECKER" ]; then
@@ -26,10 +27,8 @@ if [ ! -f "$CHECKER" ]; then
 	exit 1
 fi
 
-PASS=0
-FAIL=0
-ok()  { PASS=$((PASS + 1)); echo "PASS  $1"; }
-bad() { FAIL=$((FAIL + 1)); echo "FAIL  $1"; }
+ok()  { t_pass "$1"; }
+bad() { t_fail "$1"; }
 
 DIR=""
 setup()    { DIR="$(mktemp -d -t check-cron-file-test.XXXXXX)"; }
@@ -515,7 +514,7 @@ LIST_B="$(grep -m1 '^KNOWN_SIDE_EFFECT_CRON_BASENAMES=' "$ENV_HEADERS")"
 	|| bad "KNOWN_SIDE_EFFECT_CRON_BASENAMES identical in check-cron-file.sh and install-cron-env-headers.sh (A: $LIST_A | B: $LIST_B)"
 
 # ---- summary --------------------------------------------------------------------------
-echo "test-check-cron-file.sh summary: PASS=$PASS  FAIL=$FAIL"
+t_summary check-cron-file
 if [ "$FAIL" -eq 0 ]; then
 	echo "RESULT: PASS"
 	exit 0
