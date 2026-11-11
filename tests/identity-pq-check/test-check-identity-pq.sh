@@ -5,9 +5,9 @@ set -u
 REPO_SRC="$(cd "$(dirname "$0")/../.." && pwd)"
 CHECK="${REPO_SRC}/scripts/check-identity-pq.sh"
 . "${REPO_SRC}/tests/lib/pq-test-key.sh"
-PASS=0; FAIL=0
-pass() { printf 'PASS  %s\n' "$1"; PASS=$((PASS + 1)); }
-bad()  { printf 'FAIL  %s\n' "$1" >&2; FAIL=$((FAIL + 1)); }
+. "${REPO_SRC}/tests/lib/assert.sh"
+pass() { t_pass "$1"; }
+bad()  { t_fail "$1"; }
 skip_pass() { echo "SKIP: $1"; echo "RESULT: PASS"; exit 0; }
 fy_pq_prereq_or_skip skip_pass
 command -v jq >/dev/null 2>&1 || { echo "FATAL: jq missing" >&2; exit 1; }
@@ -110,5 +110,4 @@ case "$OUT" in *"is a 'ML-DSA-65' key, expected 'ML-DSA-87'"*) pass "C10 names t
 # C8 unreadable / invalid manifest -> 2
 build_repo "$R" 2; printf 'not json' > "$R/public/api/identity.json"; run "$R"; expect "C8 invalid JSON" 2
 
-echo "passed=$PASS failed=$FAIL"
-if [ "$FAIL" -eq 0 ]; then echo "RESULT: PASS"; else echo "RESULT: FAIL"; exit 1; fi
+t_summary identity-pq-check || exit 1
