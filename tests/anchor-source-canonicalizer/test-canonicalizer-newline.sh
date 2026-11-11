@@ -38,20 +38,18 @@ SUBSTANTIVE="${REPO_ROOT}/tests/fixtures/anchor-source.substantive.json"
 EXPECTED_HASH_WITH_NEWLINE="840665c70f72f55ae110a9ebd5dc6e397985c76b543af6e4ca6330fb5dacf763"
 EXPECTED_HASH_NO_NEWLINE="01d25505b26294db62f0830ed2d4be95e0d58132f6c26104c492fb4442b708f3"
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "${REPO_ROOT}/tests/lib/assert.sh"
 FAIL_LINES=()
 
 assert_eq() {
 	local label="$1" expected="$2" actual="$3"
 	if [ "$expected" = "$actual" ]; then
-		printf '  ✓ PASS: %s\n' "$label"
-		PASS=$((PASS + 1))
+		t_pass "PASS: $label"
 	else
-		printf '  ✗ FAIL: %s\n' "$label"
+		t_fail "FAIL: $label"
 		printf '         expected: %s\n' "$expected"
 		printf '         actual:   %s\n' "$actual"
-		FAIL=$((FAIL + 1))
 		FAIL_LINES+=("$label")
 	fi
 }
@@ -59,11 +57,9 @@ assert_eq() {
 assert_neq() {
 	local label="$1" a="$2" b="$3"
 	if [ "$a" != "$b" ]; then
-		printf '  ✓ PASS: %s\n' "$label"
-		PASS=$((PASS + 1))
+		t_pass "PASS: $label"
 	else
-		printf '  ✗ FAIL: %s (values were equal)\n' "$label"
-		FAIL=$((FAIL + 1))
+		t_fail "FAIL: $label (values were equal)"
 		FAIL_LINES+=("$label")
 	fi
 }
@@ -157,7 +153,8 @@ fi
 
 # --- summary -----------------------------------------------------------------
 
-printf '\n%s summary: PASS=%d  FAIL=%d\n' "$(basename "$0")" "$PASS" "$FAIL"
+echo
+t_summary canonicalizer-newline || true
 if [ "$FAIL" -gt 0 ]; then
 	printf 'failed cases:\n'
 	for l in "${FAIL_LINES[@]}"; do printf '  - %s\n' "$l"; done
