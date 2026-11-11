@@ -57,9 +57,10 @@ fi
 T="$(mktemp -d -t ew-installer-test.XXXXXX)"
 trap 'rm -rf "$T"' EXIT
 
-PASS=0; FAIL=0
-ok()  { PASS=$((PASS + 1)); echo "PASS  $1"; }
-bad() { FAIL=$((FAIL + 1)); echo "FAIL  $1"; }
+# shellcheck source=../lib/assert.sh
+. "$REPO/tests/lib/assert.sh"
+ok()  { t_pass "$1"; }
+bad() { t_fail "$1"; }
 check() { if eval "$2"; then ok "$1"; else bad "$1${3:+ — $3}"; fi; }
 
 ME="$(id -un)"
@@ -664,5 +665,4 @@ check "no run printed any topic (stub or generated)" '! grep -qF "$STUB_TOPIC" "
 check "no run printed the web host or key path" '! grep -qF 198.51.100.23 "$ALL_OUT" && ! grep -qF "$T/key" "$ALL_OUT"'
 
 echo
-echo "test-install-web-host-external-watch.sh summary: $PASS PASS / $FAIL FAIL"
-[ "$FAIL" -eq 0 ]
+t_summary install-web-host-external-watch
