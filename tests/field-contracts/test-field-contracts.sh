@@ -29,6 +29,7 @@
 set -u
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$REPO_ROOT/tests/lib/assert.sh"
 CHECKER="${REPO_ROOT}/scripts/check-field-contracts.py"
 
 if [ ! -f "$CHECKER" ]; then
@@ -40,10 +41,8 @@ if ! command -v python3 >/dev/null 2>&1; then
 	exit 1
 fi
 
-PASS=0
-FAIL=0
-ok()  { PASS=$((PASS + 1)); echo "PASS  $1"; }
-bad() { FAIL=$((FAIL + 1)); echo "FAIL  $1"; }
+ok()  { t_pass "$1"; }
+bad() { t_fail "$1"; }
 
 BASE="$(mktemp -d -t field-contracts-test.XXXXXX)"
 cleanup() { rm -rf "$BASE"; }
@@ -345,6 +344,5 @@ echo
 # (`^(test-.*summary:|RESULTS:|Ran [0-9]+ tests? in)`). Anything else makes the
 # aggregator print this suite as an empty "PASS ()" and the case counts vanish
 # from CI output — the suite still gates, but silently.
-echo "test-field-contracts.sh summary: PASS=$PASS  FAIL=$FAIL"
-[ "$FAIL" -eq 0 ] || exit 1
+t_summary field-contracts || exit 1
 exit 0
