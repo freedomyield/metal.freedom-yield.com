@@ -60,11 +60,11 @@ set -u
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ORCHESTRATOR="${REPO_ROOT}/scripts/cycle-transition.sh"
 
-PASS=0
-FAIL=0
+# shellcheck source=../lib/assert.sh
+. "$REPO_ROOT/tests/lib/assert.sh"
 
-pass() { printf 'PASS  %-70s%s\n' "$1" "${2:+ ($2)}"; PASS=$((PASS + 1)); }
-fail_case() { printf 'FAIL  %-70s%s\n' "$1" "${2:+ ($2)}" >&2; FAIL=$((FAIL + 1)); }
+pass() { t_pass "$(printf '%-70s%s' "$1" "${2:+ ($2)}")"; }
+fail_case() { t_fail "$(printf '%-70s%s' "$1" "${2:+ ($2)}")"; }
 
 # scan_target <path> -> prints exactly one of: MISSING | CLEAN | HIT:<line>
 #
@@ -206,7 +206,7 @@ esac
 # ---- Summary ----
 echo
 echo "----------------------------------------"
-echo "test-orchestrator-guard.sh summary: PASS=$PASS  FAIL=$FAIL"
+t_summary orchestrator-guard || true
 if [ "$FAIL" -gt 0 ]; then
 	echo "RESULT: FAIL"
 	exit 1
