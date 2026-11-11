@@ -35,24 +35,24 @@ set -uo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 SCRIPTS="${REPO}/scripts"
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "${REPO}/tests/lib/assert.sh"
 FAILURES=()
 assert_true() {
 	local label="$1" cond="$2"
 	if [ "$cond" = "1" ]; then
-		PASS=$((PASS + 1)); printf '  PASS  %s\n' "$label"
+		t_pass "$label"
 	else
-		FAIL=$((FAIL + 1)); FAILURES+=("$label"); printf '  FAIL  %s\n' "$label"
+		FAILURES+=("$label"); t_fail "$label"
 	fi
 }
 assert_eq() {
 	local label="$1" expected="$2" actual="$3"
 	if [ "$expected" = "$actual" ]; then
-		PASS=$((PASS + 1)); printf '  PASS  %-55s expected=%s actual=%s\n' "$label" "$expected" "$actual"
+		t_pass "$(printf '%-55s expected=%s actual=%s' "$label" "$expected" "$actual")"
 	else
-		FAIL=$((FAIL + 1)); FAILURES+=("$label (expected=$expected, actual=$actual)")
-		printf '  FAIL  %-55s expected=%s actual=%s\n' "$label" "$expected" "$actual"
+		FAILURES+=("$label (expected=$expected, actual=$actual)")
+		t_fail "$(printf '%-55s expected=%s actual=%s' "$label" "$expected" "$actual")"
 	fi
 }
 
@@ -250,9 +250,8 @@ open(dst, "w").write(text)
 PYEOF2
 chmod +x "$MUTANT"
 if diff -q "${SCRIPTS}/daily-status.sh" "$MUTANT" >/dev/null 2>&1; then
-	FAIL=$((FAIL + 1))
 	FAILURES+=("mutation kill check: mutant sed produced no diff — guard not matched")
-	echo "  FAIL  mutant produced no diff — guard not matched"
+	t_fail "mutant produced no diff — guard not matched"
 else
 	: > "$NTFY_BODY_LOG"
 	env FY_LIVE=1 NTFY_TOPIC_FILE="${S}/topic" METALGO_RPC="http://127.0.0.1:1" \
@@ -260,17 +259,15 @@ else
 		bash "$MUTANT" evening >/dev/null 2>&1
 	MUTANT_PUSH="$(cat "$NTFY_BODY_LOG")"
 	if printf '%s' "$MUTANT_PUSH" | grep -qF '[Reward]'; then
-		PASS=$((PASS + 1))
-		printf '  PASS  mutant (morning-only guard removed) leaks [Reward] onto the evening push — the gate is load-bearing\n'
+		t_pass "mutant (morning-only guard removed) leaks [Reward] onto the evening push — the gate is load-bearing"
 	else
-		FAIL=$((FAIL + 1))
 		FAILURES+=("mutation kill check: mutant still did not show [Reward] on evening")
-		echo "  FAIL  mutant unexpectedly still hid [Reward] on evening"
+		t_fail "mutant unexpectedly still hid [Reward] on evening"
 	fi
 fi
 
 echo ""
-echo "Total: PASS=$PASS FAIL=$FAIL"
+t_summary reward-splice || true
 if [ "$FAIL" -gt 0 ]; then
 	printf '\nFailures:\n'
 	for f in "${FAILURES[@]}"; do printf '  - %s\n' "$f"; done

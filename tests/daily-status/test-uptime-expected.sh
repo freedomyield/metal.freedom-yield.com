@@ -49,12 +49,12 @@ for tool in node python3 jq; do
 	fi
 done
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "${REPO}/tests/lib/assert.sh"
 FAILURES=()
 ok() {
-	if [ "$1" = "1" ]; then PASS=$((PASS + 1)); printf '  PASS  %s\n' "$2"
-	else FAIL=$((FAIL + 1)); FAILURES+=("$2"); printf '  FAIL  %s\n' "$2"; fi
+	if [ "$1" = "1" ]; then t_pass "$2"
+	else FAILURES+=("$2"); t_fail "$2"; fi
 }
 count_lines() {
 	# stdin "PASS …"/"FAIL …" lines → add to the counters
@@ -265,7 +265,7 @@ PY
 		local label="$1"; shift
 		local out rc
 		out="$(env "$@" UPTIME_TEST_CORE_ONLY=1 bash "$SELF" </dev/null 2>&1)"; rc=$?
-		ok "$([ "$rc" -ne 0 ] && echo 1 || echo 0)" "mutant killed: ${label} ($(printf '%s\n' "$out" | grep -c '  FAIL ') core FAILs)"
+		ok "$([ "$rc" -ne 0 ] && echo 1 || echo 0)" "mutant killed: ${label} ($(printf '%s\n' "$out" | grep -cE '^[[:space:]]*FAIL ') core FAILs)"
 	}
 	run_mutant() {
 		# $1 label, $2 src, $3 dst, $4 old, $5 new, $6 env var to point at dst
@@ -293,7 +293,7 @@ PY
 fi
 
 echo ""
-echo "Total: PASS=$PASS FAIL=$FAIL"
+t_summary uptime-expected || true
 if [ "$FAIL" -gt 0 ]; then
 	printf '\nFailures:\n'
 	for f in "${FAILURES[@]}"; do printf '  - %s\n' "$f"; done
