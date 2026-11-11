@@ -481,7 +481,7 @@ for mode in alrm term; do
 	FYD_PREPUSH_COMMIT_TIMEOUT=2 PUSH_PATH="$WORK/slowbin:$PATH" do_push origin main
 	t1=$(date +%s)
 	expect_block "$label: gitleaks ignoring ${mode} past the limit -> refused" "timed out"
-	if [ $((t1 - t0)) -lt 20 ]; then ok "$label: refused within the time limit ($((t1 - t0))s)"; else bad "$label: refused within the time limit (took $((t1 - t0))s)"; fi
+	if [ $((t1 - t0)) -lt 20 ]; then ok "$label: refused within the time limit (under 20s)"; else bad "$label: refused within the time limit (took $((t1 - t0))s)"; fi
 	teardown
 done
 
