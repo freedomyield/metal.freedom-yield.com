@@ -191,7 +191,7 @@ PUB_CODE=200 PUB_BODY_FILE="$PUB_BODY_FILE" run_preview >/dev/null 2>&1
 CB1="$(sed -n '1p' "$CURL_LOG" | grep -oE 'cb=[^&[:space:]]+')"
 CB2="$(sed -n '2p' "$CURL_LOG" | grep -oE 'cb=[^&[:space:]]+')"
 [ -n "$CB1" ] && [ -n "$CB2" ] && [ "$CB1" != "$CB2" ] \
-	&& ok "cache-buster: two invocations use two different cb= values ($CB1 vs $CB2)" \
+	&& ok "cache-buster: two invocations use two different cb= values" \
 	|| bad "cache-buster: expected distinct cb= values, got '$CB1' and '$CB2'"
 teardown
 
