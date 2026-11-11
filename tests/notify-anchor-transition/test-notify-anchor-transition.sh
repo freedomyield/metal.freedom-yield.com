@@ -27,8 +27,10 @@ printf '%s|%s|%s\n' "$1" "$2" "${*:3}" >> "${NOTIFY_LOG}"
 EOF
 chmod +x "$STUB"
 
-fail() { echo "FAIL: $1"; exit 1; }
-pass() { echo "PASS: $1"; }
+# shellcheck source=../lib/assert.sh
+. "${ROOT}/tests/lib/assert.sh"
+fail() { t_fail "$1"; exit 1; }
+pass() { t_pass "$1"; }
 
 # Case 1: cyclestart → notify called (high, Mac guidance), exit 0
 NOTIFY_LOG="${TMP}/n1.log"; : > "$NOTIFY_LOG"; rc=0
@@ -135,5 +137,6 @@ FY_LIVE=1 ANCHOR_NOTIFY="$STUB10" NOTIFY_RETRY_SLEEP=0 bash "$DRIVER" --event-ty
 [ "$(cat "$CTR10")" -eq 2 ] || fail "flaky-then-success notify should attempt twice (ctr: $(cat "$CTR10"))"
 pass "notify.sh fails once then succeeds on retry → driver exit 0 (confirmed within this run)"
 
+t_summary notify-anchor-transition || true
 echo "ALL PASS (notify-anchor-transition)"
 exit 0
