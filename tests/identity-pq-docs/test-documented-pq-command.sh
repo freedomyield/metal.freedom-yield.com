@@ -10,9 +10,10 @@
 set -u
 REPO_SRC="$(cd "$(dirname "$0")/../.." && pwd)"
 . "${REPO_SRC}/tests/lib/pq-test-key.sh"
-PASS=0; FAIL=0
-pass() { printf 'PASS  %s\n' "$1"; PASS=$((PASS + 1)); }
-bad()  { printf 'FAIL  %s\n' "$1" >&2; FAIL=$((FAIL + 1)); }
+# shellcheck source=tests/lib/assert.sh
+. "${REPO_SRC}/tests/lib/assert.sh"
+pass() { t_pass "$1"; }
+bad()  { t_fail "$1"; }
 skip_pass() { echo "SKIP: $1"; echo "RESULT: PASS"; exit 0; }
 DOC="${REPO_SRC}/docs/IDENTITY_VERIFICATION.md"
 ID_URL="https://metal.freedom-yield.com/api/identity.json"
@@ -36,7 +37,7 @@ OSSL_LINE="$(printf '%s\n' "$BLOCK" | grep '^openssl ')"
 
 # An empty line would make every grep -F below pass vacuously.
 if [ -z "$OSSL_LINE" ] || [ "$n_ossl" != "1" ]; then
-	echo "passed=$PASS failed=$FAIL"; echo "RESULT: FAIL"; exit 1
+	t_summary documented-pq-command || true; echo "RESULT: FAIL"; exit 1
 fi
 
 # public pages carry the same openssl line (HTML text: &lt; etc. absent in this line)
@@ -75,5 +76,5 @@ printf 'x' >> "$WORK/run/identity.json"
 mout2="$(run_line "$OSSL_LINE")"
 case "$mout2" in *"Signature Verified Successfully"*) bad "MUTATION NOT CAUGHT: D7 tampered manifest verifies" ;; *) pass "D7m tampered manifest does not verify" ;; esac
 
-echo "passed=$PASS failed=$FAIL"
+t_summary documented-pq-command || true
 if [ "$FAIL" -eq 0 ]; then echo "RESULT: PASS"; else echo "RESULT: FAIL"; exit 1; fi
