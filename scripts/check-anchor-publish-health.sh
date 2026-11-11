@@ -162,6 +162,13 @@ if [ ! -r "$FYD_LIB" ]; then
 fi
 # shellcheck source=scripts/lib/side-effects.sh
 . "$FYD_LIB"
+FYD_FR_LIB="${SCRIPT_DIR}/../scripts/lib/fetch-retry.sh"
+if [ ! -r "$FYD_FR_LIB" ]; then
+	printf 'check-anchor-publish-health: FATAL: fetch-retry library not readable at %s\n' "$FYD_FR_LIB" >&2
+	exit 6
+fi
+# shellcheck source=scripts/lib/fetch-retry.sh
+. "$FYD_FR_LIB"
 
 SOURCE_URL="${ANCHOR_SOURCE_URL:-https://metal.freedom-yield.com/api/anchor-source.json}"
 RECEIPT_URL="${ANCHOR_RECEIPT_URL:-https://metal.freedom-yield.com/api/anchor-receipt.json}"
@@ -321,20 +328,7 @@ mismatch_state_clear() {
 # attempts, never after the last one. Contract unchanged for callers: prints
 # exactly the FINAL attempt's HTTP status code, and the outfile holds the
 # FINAL attempt's body.
-fetch() {
-	local url="$1" outfile="$2"
-	local attempts="${FYD_FETCH_ATTEMPTS:-3}"
-	local sleep_s="${FYD_RETRY_SLEEP:-3}"
-	local attempt=1 code
-	while :; do
-		code="$("$CURL" -sS -o "$outfile" -w "%{http_code}" --max-time 15 "$url" 2>/dev/null || echo "000")"
-		[ "$code" = "200" ] && break
-		[ "$attempt" -ge "$attempts" ] && break
-		sleep "$sleep_s"
-		attempt=$((attempt + 1))
-	done
-	printf '%s' "$code"
-}
+fetch() { fy_fetch_retry --max-time=15 -- "$@"; }
 
 if ! command -v jq >/dev/null 2>&1; then
 	log "ERROR jq not found — cannot content-verify anchor-source.json"
