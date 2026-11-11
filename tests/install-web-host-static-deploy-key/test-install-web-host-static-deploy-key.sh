@@ -5,9 +5,9 @@ set -u
 DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "${DIR}/../.." && pwd)"
 INSTALLER="${REPO}/scripts/install-web-host-static-deploy-key.sh"
-PASS=0; FAIL=0
-ok(){ PASS=$((PASS+1)); printf '  ✓ %s\n' "$1"; }
-no(){ FAIL=$((FAIL+1)); printf '  ✗ %s\n' "$1"; }
+. "${REPO}/tests/lib/assert.sh"
+ok(){ t_pass "$1"; }
+no(){ t_fail "$1"; }
 
 WORK=""; cleanup(){ [ -n "${WORK}" ] && rm -rf "${WORK}"; }; trap cleanup EXIT
 
@@ -50,5 +50,4 @@ setup; if CI_PUBKEY="${WORK}/nope.pub" SKIP_SSH=1 AUTHORIZED_KEYS_FILE="${AK}" \
   no "T5 should fail"; else ok "T5 fails closed on missing pubkey"; fi
 
 echo ""
-printf 'RESULTS: %s PASS / %s FAIL\n' "${PASS}" "${FAIL}"
-[ "${FAIL}" -eq 0 ]
+t_summary install-web-host-static-deploy-key
