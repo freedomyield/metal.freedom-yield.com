@@ -74,8 +74,9 @@ PASS=0
 FAIL=0
 SKIP=0
 
-pass() { printf 'PASS  %-70s%s\n' "$1" "${2:+ ($2)}"; PASS=$((PASS + 1)); }
-fail_case() { printf 'FAIL  %-70s%s\n' "$1" "${2:+ ($2)}" >&2; FAIL=$((FAIL + 1)); }
+. "${REPO_ROOT}/tests/lib/assert.sh"
+pass() { t_pass "$(printf '%-70s%s' "$1" "${2:+ ($2)}")"; }
+fail_case() { t_fail "$(printf '%-70s%s' "$1" "${2:+ ($2)}")"; }
 skip_case() { printf 'SKIP  %-70s%s\n' "$1" "${2:+ ($2)}"; SKIP=$((SKIP + 1)); }
 
 # ============================================================
@@ -331,8 +332,8 @@ fi
 # ---- Summary ----
 echo
 echo "----------------------------------------"
-echo "test-keystore-guard.sh summary: PASS=$PASS  FAIL=$FAIL  SKIP=$SKIP"
-if [ "$FAIL" -gt 0 ]; then
+echo "SKIP=$SKIP"
+if ! t_summary keystore-guard; then
 	echo "RESULT: FAIL"
 	exit 1
 fi
