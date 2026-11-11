@@ -526,10 +526,35 @@ t_suite_pair() { # base-suite-body head-suite-body : tests/s/test-a.sh at two co
 }
 t_run_suite() { t_run --base="$BASE" --suite=tests/s; }
 
+# §15.3 (P6): this case was "equal" (exit 0) before the red-base rule; a base that is red
+# (rc 1, one fail case) proves nothing, so the same pair is now exit 2 (P1).
 t_suite_pair 'echo "  ✓ alpha"; echo "  ✓ beta"; echo "  ✗ gamma"; echo "RESULTS: 2 passed, 1 failed"; exit 1' \
              'echo "PASS  alpha"; echo "PASS  beta"; echo "FAIL  gamma"; echo "test-a summary: PASS=2 FAIL=1"; exit 1'
 t_run_suite
-t_expect "suite: '  ✓ X' before and 'PASS  X' after (and ✗ -> FAIL): equal" 0 "SUITE tests/s/test-a.sh base_rc=1 head_rc=1 cases=3/3" "OK 1 equal"
+t_expect "suite (P1): red at both sides with the same fail cases (rc 1): exit 2, no OK" 2
+if [ "$RC" -eq 2 ] && ! printf '%s' "$ERRTXT" | grep -qF 'tests/s/test-a.sh: base is red (rc=1, fail cases=1): cannot prove equivalence'; then t_bad "suite (P1): reason must say base is red with rc and fail count ($ERRTXT)"; fi
+
+t_suite_pair 'echo "  ✓ alpha"; echo "  ✓ beta"; echo "RESULTS: 2 passed"; exit 0' \
+             'echo "PASS  alpha"; echo "PASS  beta"; echo "test-a summary: PASS=2 FAIL=0"; exit 0'
+t_run_suite
+t_expect "suite: '  ✓ X' before and 'PASS  X' after: equal" 0 "SUITE tests/s/test-a.sh base_rc=0 head_rc=0 cases=2/2" "OK 1 equal"
+
+t_suite_pair 'echo "PASS  gamma"; exit 0' 'echo "  ✗ gamma"; exit 0'
+t_run_suite
+t_expect_diffs "suite: '  ✗ X' is a fail case (same status as FAIL)" "DIFF tests/s/test-a.sh case-only-at-base pass:gamma" "DIFF tests/s/test-a.sh case-only-at-head fail:gamma"
+
+t_suite_pair 'echo "PASS  alpha"; echo "FAIL  x"; exit 0' 'echo "PASS  alpha"; echo "FAIL  x"; exit 0'
+t_run_suite
+t_expect "suite (P1b): rc 0 but a fail case at base: exit 2" 2
+if [ "$RC" -eq 2 ] && ! printf '%s' "$ERRTXT" | grep -qF 'base is red (rc=0, fail cases=1)'; then t_bad "suite (P1b): reason must say base is red (rc=0, fail cases=1) ($ERRTXT)"; fi
+
+t_suite_pair 'echo "PASS  alpha"; exit 1' 'echo "PASS  alpha"; exit 1'
+t_run_suite
+t_expect "suite (P1): rc 1 at base without a fail case: exit 2" 2
+
+t_suite_pair 'echo "PASS  alpha"; echo "PASS  beta"; exit 0' 'echo "PASS  alpha"; echo "FAIL  beta"; exit 1'
+t_run_suite
+t_expect_diffs "suite (P1c): base green, head red: exit 1 with DIFF, not exit 2" "DIFF tests/s/test-a.sh rc" "DIFF tests/s/test-a.sh case-only-at-base pass:beta" "DIFF tests/s/test-a.sh case-only-at-head fail:beta"
 
 t_suite_pair 'printf "PASS  %s\n" alpha; exit 0' 'printf "PASS  %-70s\n" alpha; exit 0'
 t_run_suite

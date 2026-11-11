@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # check-refactor-equivalence.sh — gate G3 of the 2026-11-10 simplify refactor.
+# CHAIN: none — local temporary directories and git worktrees only.
+# PRIME_DIRECTIVE: TESTNET-FIRST — safe (nothing here can reach a chain).
 #
 # Proves that a refactor changed nothing observable: the same script (or the same
 # test suite) is run at a base commit and at HEAD, and the results are compared.
@@ -12,6 +14,8 @@
 # fixture, and compares rc, stdout, stderr and the listed output files byte for byte.
 # Suite mode: every executable test-*.sh directly in <dir> is run at both sides and
 # only the exit code and the multiset of (status, case name) pairs are compared.
+# The base run must be green (rc 0 and no fail case line); a red base is exit 2,
+# because red at both sides with the same fail cases would otherwise compare equal.
 #
 # Cases file: tab-separated, 6 or 7 columns, `#` lines and blank lines ignored,
 # `-` means empty:
@@ -32,15 +36,13 @@
 #   1  different; DIFF lines, then `FAIL <k>`
 #   2  could not run (no OK is printed): one line `check-refactor-equivalence: <reason>`
 #      on stderr. Missing or bad input, git failure, malformed row, a stub that does
-#      not shadow proton/ssh, zero cases, a validator that cannot be set up.
+#      not shadow proton/ssh, zero cases, a validator that cannot be set up, a suite
+#      whose base run is red (`<id>: base is red (rc=<n>, fail cases=<k>): ...`).
 #
 # Fail closed: every unexpected state is exit 2 or exit 1, never a quiet pass.
 # Both sides run in a `git worktree add --detach` under one mktemp directory; a trap
 # on EXIT, INT and TERM removes the worktree and the directory on every exit.
 # curl, ssh, scp, proton and cleos are stubs: no network, no host, no broadcast.
-#
-# CHAIN: none — local temporary directories and git worktrees only.
-# PRIME_DIRECTIVE: TESTNET-FIRST — safe (nothing here can reach a chain).
 
 set -Eeuo pipefail
 export LC_ALL=C
@@ -487,7 +489,7 @@ g3_suite_mode() {
 	[ -s "$bl" ] || g3_die "no executable test-*.sh in $dir at base"
 	[ -s "$hl" ] || g3_die "no executable test-*.sh in $dir at HEAD"
 
-	local B="$G3_T/res/base" H="$G3_T/res/head" id before bc hc brc hrc
+	local B="$G3_T/res/base" H="$G3_T/res/head" id before bc hc brc hrc bf
 	G3_R_ARGS=(); G3_R_ENV=(); G3_R_OUTFILES=(); G3_R_FIXDIR=""; G3_R_VALIDATOR=""; G3_R_CWD="tree"
 	# files at one side only
 	while IFS= read -r f; do
@@ -509,8 +511,14 @@ g3_suite_mode() {
 		rm -rf "$B" "$H"
 		G3_R_SCRIPT="$id"
 		G3_R_COMMIT="$G3_BASEC"; g3_run "$B"
-		G3_R_COMMIT="$G3_HEADC"; g3_run "$H"
 		g3_extract_cases "$B/stdout" "$B/stderr" | LC_ALL=C sort > "$B/cases"
+		# §15.3: a red base proves nothing (red at both sides would compare equal).
+		brc="$(cat "$B/rc")"
+		bf="$(grep -c '^fail'$'\t' "$B/cases" || true)"
+		if [ "$brc" != "0" ] || [ "$bf" != "0" ]; then
+			g3_die "$id: base is red (rc=$brc, fail cases=$bf): cannot prove equivalence"
+		fi
+		G3_R_COMMIT="$G3_HEADC"; g3_run "$H"
 		g3_extract_cases "$H/stdout" "$H/stderr" | LC_ALL=C sort > "$H/cases"
 		bc="$(wc -l < "$B/cases" | tr -d ' ')"; hc="$(wc -l < "$H/cases" | tr -d ' ')"
 		[ "$bc" -gt 0 ] || g3_die "$id: no case lines at base (cannot compare)"
