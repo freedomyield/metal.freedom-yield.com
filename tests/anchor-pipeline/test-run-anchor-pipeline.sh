@@ -46,11 +46,10 @@ if [ ! -f "$ORCH" ]; then
 	exit 1
 fi
 
-PASS=0
-FAIL=0
-
-ok()   { PASS=$((PASS + 1)); echo "PASS  $1"; }
-bad()  { FAIL=$((FAIL + 1)); echo "FAIL  $1"; }
+# shellcheck source=tests/lib/assert.sh
+. "$REPO_ROOT/tests/lib/assert.sh"
+ok()  { t_pass "$1"; }
+bad() { t_fail "$1"; }
 
 # ---- harness ---------------------------------------------------------------
 # build_harness: fresh tempdir with the REAL orchestrator + 5 recording stubs
@@ -388,10 +387,4 @@ args_of check-anchor-history-reachable | grep -qx -- '--chain=mainnet-a' \
 destroy_harness
 
 # ---- summary -----------------------------------------------------------------
-echo "test-run-anchor-pipeline.sh summary: PASS=$PASS  FAIL=$FAIL"
-if [ "$FAIL" -eq 0 ]; then
-	echo "RESULT: PASS"
-	exit 0
-fi
-echo "RESULT: FAIL"
-exit 1
+t_summary run-anchor-pipeline
