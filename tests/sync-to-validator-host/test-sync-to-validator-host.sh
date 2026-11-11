@@ -65,10 +65,10 @@ if [ -z "$SIGDFL_PERL" ]; then
 fi
 SIGDFL=( "$SIGDFL_PERL" -e '$SIG{INT}="DEFAULT"; $SIG{QUIT}="DEFAULT"; exec { $ARGV[0] } @ARGV or die "exec: $!"' -- )
 
-PASS=0
-FAIL=0
-ok()  { PASS=$((PASS + 1)); echo "PASS  $1"; }
-bad() { FAIL=$((FAIL + 1)); echo "FAIL  $1"; }
+# shellcheck source=../lib/assert.sh
+. "$REPO_ROOT/tests/lib/assert.sh"
+ok()  { t_pass "$1"; }
+bad() { t_fail "$1"; }
 
 # Forbidden payload assembled at runtime so this tracked file never contains a
 # flaggable literal (same technique as tests/publish-guard/test-publish-guard.sh).
@@ -311,7 +311,7 @@ for SIGNAME in INT HUP; do
 done
 
 # ---- summary ---------------------------------------------------------------
-echo "test-sync-to-validator-host.sh summary: PASS=$PASS  FAIL=$FAIL"
+t_summary sync-to-validator-host || :
 if [ "$FAIL" -eq 0 ]; then
 	echo "RESULT: PASS"
 	exit 0
