@@ -1223,6 +1223,26 @@ echo "$OUT" | grep -q 'kind-new=0' \
 	&& ok "k8 SIMULATED post-9/4 state: summary reports kind-new=0" || bad "k8 summary kind-new=0 (out: $OUT)"
 rm -rf "$K8_BASE"
 
+# ---- case B-P5 (fetch-retry): live fetch passes --max-time 20 ---------------
+build_fake_repo
+make_curl_stub
+mv "$BASE/curl-stub.sh" "$BASE/curl-real.sh"
+cat > "$BASE/curl-stub.sh" <<WRAPEOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$BASE/args.log"
+exec "$BASE/curl-real.sh" "\$@"
+WRAPEOF
+chmod +x "$BASE/curl-stub.sh"
+serve "$FAKE/public/api/identity.json"     identity.json
+serve "$FAKE/public/api/alpha.json"        alpha.json
+serve "$FAKE/public/api/stream.json"       stream.json
+serve "$FAKE/public/api/alpha.schema.json" alpha.schema.json
+run_live >/dev/null 2>&1
+[ "$(grep -c -- '--max-time 20 ' "$BASE/args.log" 2>/dev/null)" -ge 1 ] && ! grep -v -- '--max-time 20 ' "$BASE/args.log" | grep -q . \
+	&& ok "bp5 live: every curl call carries --max-time 20" \
+	|| bad "bp5 live: curl calls did not all carry --max-time 20 ($(sort -u "$BASE/args.log" 2>/dev/null | head -3 | tr '\n' ';'))"
+teardown
+
 echo
 echo "test-check-identity-pins.sh summary: ${PASS} PASS / ${FAIL} FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

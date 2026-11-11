@@ -573,6 +573,34 @@ else
 	ok "dead-recover: no executable push-to-web-host.sh call (auto-recover removed)"
 fi
 
+# ---- case B-P5 (fetch-retry): --max-time value and 4xx-is-retried ------------
+# Pins the fetch() contract that the shared library must keep: curl is called
+# with --max-time 15, and (unlike pulsevm-upstream) a 4xx IS retried.
+setup
+SRC_BODY_FILE="$BASE/src.json"; RCPT_BODY_FILE="$BASE/rcpt.json"
+write_source  "$SRC_BODY_FILE"  "$ROOT_MATCH"
+write_receipt "$RCPT_BODY_FILE" "$ROOT_MATCH"
+REAL_STUB="$STUB"
+STUB="$BASE/args-stub.sh"
+cat > "$STUB" <<WRAPEOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$BASE/args.log"
+exec "$REAL_STUB" "\$@"
+WRAPEOF
+chmod +x "$STUB"
+SRC_CODE_SEQ="404 200" RCPT_CODE=200 run_checker >/dev/null 2>&1
+RC=$?
+[ "$RC" -eq 0 ] \
+	&& ok "bp5: 404 then 200 on the source is retried and heals -> exit 0" \
+	|| bad "bp5: expected exit 0, got $RC"
+[ "$(src_calls)" -eq 2 ] \
+	&& ok "bp5: 404 is retried (exactly 2 source curl calls; no --no-retry-4xx here)" \
+	|| bad "bp5: expected 2 source curl calls, got $(src_calls)"
+[ "$(grep -c -- '--max-time 15 ' "$BASE/args.log" 2>/dev/null)" -ge 1 ] && ! grep -v -- '--max-time 15 ' "$BASE/args.log" | grep -q . \
+	&& ok "bp5: every curl call carries --max-time 15" \
+	|| bad "bp5: curl calls did not all carry --max-time 15 ($(sort -u "$BASE/args.log" | head -3 | tr '\n' ';'))"
+teardown
+
 # ---- summary -----------------------------------------------------------------
 echo "test-check-anchor-publish-health.sh summary: PASS=$PASS  FAIL=$FAIL"
 if [ "$FAIL" -eq 0 ]; then

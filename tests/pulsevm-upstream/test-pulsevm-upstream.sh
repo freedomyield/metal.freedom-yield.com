@@ -2067,6 +2067,25 @@ done
 	&& ok "harness: every knob run_checker defaults is cleared at suite start, so no case can be steered by an ambient export" \
 	|| bad "harness: run_checker reads these from the ambient environment without clearing them first:${RC_UNCLEARED}"
 
+# ---- case B-P5 (fetch-retry): a 4xx is not retried; --max-time is 20 -----------
+setup
+REAL_STUB="$STUB"
+STUB="$BASE/args-stub.sh"
+cat > "$STUB" <<WRAPEOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$BASE/args.log"
+exec "$REAL_STUB" "\$@"
+WRAPEOF
+chmod +x "$STUB"
+S1_CODE_SEQ="404 200" run_checker >/dev/null 2>&1
+[ "$(calls s1)" -eq 1 ] \
+	&& ok "bp5: a 404 on a source is not retried (exactly 1 curl call, even though a 200 would follow)" \
+	|| bad "bp5: expected 1 s1 curl call after a 404, got $(calls s1)"
+[ "$(grep -c -- '--max-time 20 ' "$BASE/args.log" 2>/dev/null)" -ge 1 ] && ! grep -v -- '--max-time 20 ' "$BASE/args.log" | grep -q . \
+	&& ok "bp5: every curl call carries --max-time 20" \
+	|| bad "bp5: curl calls did not all carry --max-time 20 ($(sort -u "$BASE/args.log" | head -3 | tr '\n' ';'))"
+teardown
+
 # ---- summary ---------------------------------------------------------------
 echo "test-pulsevm-upstream.sh summary: PASS=$PASS  FAIL=$FAIL"
 if [ "$FAIL" -eq 0 ]; then
