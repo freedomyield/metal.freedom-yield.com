@@ -22,8 +22,8 @@ NOTIFY="$REPO/scripts/notify.sh"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-PASS=0
-FAIL=0
+# shellcheck source=../lib/assert.sh
+. "$REPO/tests/lib/assert.sh"
 FAILURES=()
 
 # Topic file under $TMP — production /etc/* is never read.
@@ -64,12 +64,10 @@ sent_tags() {
 assert_eq() {
   local label="$1" expected="$2" actual="$3"
   if [ "$expected" = "$actual" ]; then
-    PASS=$((PASS + 1))
-    printf '  PASS  %-55s expected=%s actual=%s\n' "$label" "$expected" "$actual"
+    t_pass "$(printf '%-55s expected=%s actual=%s' "$label" "$expected" "$actual")"
   else
-    FAIL=$((FAIL + 1))
     FAILURES+=("$label (expected=$expected, actual=$actual)")
-    printf '  FAIL  %-55s expected=%s actual=%s\n' "$label" "$expected" "$actual"
+    t_fail "$(printf '%-55s expected=%s actual=%s' "$label" "$expected" "$actual")"
   fi
 }
 
@@ -100,7 +98,7 @@ run_notify default NTFY_TAGS=
 assert_eq "NTFY_TAGS empty, prio=default → Tags: information_source" "information_source" "$(sent_tags)"
 
 echo ""
-echo "Total: PASS=$PASS FAIL=$FAIL"
+t_summary tags-override || :
 if [ "$FAIL" -gt 0 ]; then
   printf '\nFailures:\n'
   for f in "${FAILURES[@]}"; do printf '  - %s\n' "$f"; done

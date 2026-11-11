@@ -26,8 +26,8 @@ NOTIFY="$REPO/scripts/notify.sh"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-PASS=0
-FAIL=0
+# shellcheck source=../lib/assert.sh
+. "$REPO/tests/lib/assert.sh"
 FAILURES=()
 
 # Topic file under $TMP — production /etc/* is never read.
@@ -73,12 +73,10 @@ run_strict() {
 assert_rc() {
   local label="$1" expected="$2" actual="$3"
   if [ "$expected" = "$actual" ]; then
-    PASS=$((PASS + 1))
-    printf '  PASS  %-50s expected=%s actual=%s\n' "$label" "$expected" "$actual"
+    t_pass "$(printf '%-50s expected=%s actual=%s' "$label" "$expected" "$actual")"
   else
-    FAIL=$((FAIL + 1))
     FAILURES+=("$label (expected=$expected, actual=$actual)")
-    printf '  FAIL  %-50s expected=%s actual=%s\n' "$label" "$expected" "$actual"
+    t_fail "$(printf '%-50s expected=%s actual=%s' "$label" "$expected" "$actual")"
   fi
 }
 
@@ -129,7 +127,7 @@ write_stub_curl 200 0; run_strict; assert_rc "topic file empty"       1 $?
 echo "test-topic-string" > "$TOPIC_FILE"
 
 echo ""
-echo "Total: PASS=$PASS FAIL=$FAIL"
+t_summary strict-exit-classification || :
 if [ "$FAIL" -gt 0 ]; then
   printf '\nFailures:\n'
   for f in "${FAILURES[@]}"; do printf '  - %s\n' "$f"; done

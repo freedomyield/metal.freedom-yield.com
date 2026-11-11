@@ -26,9 +26,10 @@ NOTIFY="${NOTIFY_UNDER_TEST:-$REPO/scripts/notify.sh}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-PASS=0; FAIL=0
-ok()  { PASS=$((PASS + 1)); printf '  PASS  %s\n' "$1"; }
-bad() { FAIL=$((FAIL + 1)); printf '  FAIL  %s\n' "$1"; }
+# shellcheck source=../lib/assert.sh
+. "$REPO/tests/lib/assert.sh"
+ok()  { t_pass "$1"; }
+bad() { t_fail "$1"; }
 
 TOPIC="faketopic-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
 printf '%s\n' "$TOPIC" > "$TMP/topic"
@@ -79,5 +80,4 @@ if [ "$(cat "$TMP/cfg.log")" = 'url = "https://ntfy.sh/odd\"top\\ic"' ]; then ok
 else bad "config escapes \" and \\ (got: $(cat "$TMP/cfg.log"))"; fi
 
 echo
-echo "test-topic-not-in-argv.sh: PASS=$PASS FAIL=$FAIL"
-[ "$FAIL" -eq 0 ]
+t_summary topic-not-in-argv

@@ -24,8 +24,8 @@ NOTIFY="$REPO/scripts/notify.sh"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-PASS=0
-FAIL=0
+# shellcheck source=../lib/assert.sh
+. "$REPO/tests/lib/assert.sh"
 FAILURES=()
 
 TOPIC_FILE="$TMP/topic"
@@ -58,24 +58,20 @@ run_default() {
 assert_rc() {
   local label="$1" expected="$2" actual="$3"
   if [ "$expected" = "$actual" ]; then
-    PASS=$((PASS + 1))
-    printf '  PASS  %-50s expected=%s actual=%s\n' "$label" "$expected" "$actual"
+    t_pass "$(printf '%-50s expected=%s actual=%s' "$label" "$expected" "$actual")"
   else
-    FAIL=$((FAIL + 1))
     FAILURES+=("$label (expected=$expected, actual=$actual)")
-    printf '  FAIL  %-50s expected=%s actual=%s\n' "$label" "$expected" "$actual"
+    t_fail "$(printf '%-50s expected=%s actual=%s' "$label" "$expected" "$actual")"
   fi
 }
 
 assert_contains() {
   local label="$1" needle="$2" haystack="$3"
   if [[ "$haystack" == *"$needle"* ]]; then
-    PASS=$((PASS + 1))
-    printf '  PASS  %-50s needle=%s\n' "$label" "$needle"
+    t_pass "$(printf '%-50s needle=%s' "$label" "$needle")"
   else
-    FAIL=$((FAIL + 1))
     FAILURES+=("$label (needle '$needle' not found in '$haystack')")
-    printf '  FAIL  %-50s needle=%s NOT in output\n' "$label" "$needle"
+    t_fail "$(printf '%-50s needle=%s NOT in output' "$label" "$needle")"
   fi
 }
 
@@ -96,12 +92,10 @@ done
 write_stub_curl 000 28
 run_default >/dev/null; rc=$?
 if [ "$rc" -ne 0 ]; then
-  PASS=$((PASS + 1))
-  printf '  PASS  %-50s rc=%s (non-zero)\n' "default mode curl rc=28 → non-zero exit" "$rc"
+  t_pass "$(printf '%-50s rc=%s (non-zero)' "default mode curl rc=28 → non-zero exit" "$rc")"
 else
-  FAIL=$((FAIL + 1))
   FAILURES+=("default mode curl rc=28 should be non-zero, was $rc")
-  printf '  FAIL  %-50s rc=%s\n' "default mode curl rc=28 → non-zero exit" "$rc"
+  t_fail "$(printf '%-50s rc=%s' "default mode curl rc=28 → non-zero exit" "$rc")"
 fi
 
 # === topic file missing → exit 1 =========================================
@@ -119,7 +113,7 @@ assert_rc "default mode topic empty → exit 1" 1 $rc
 echo "test-topic-string" > "$TOPIC_FILE"
 
 echo ""
-echo "Total: PASS=$PASS FAIL=$FAIL"
+t_summary default-mode-byte-identical || :
 if [ "$FAIL" -gt 0 ]; then
   printf '\nFailures:\n'
   for f in "${FAILURES[@]}"; do printf '  - %s\n' "$f"; done
