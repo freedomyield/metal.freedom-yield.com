@@ -37,15 +37,15 @@ REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 SCRIPT="${REPO_ROOT}/scripts/gen-evidence.sh"
 REAL_SCHEMA="${REPO_ROOT}/public/api/evidence.schema.v1.json"
 
-PASS=0
-FAIL=0
-pass() { printf 'PASS  %-70s\n' "$1"; PASS=$((PASS + 1)); }
-fail() { printf 'FAIL  %-70s\n' "$1" >&2; FAIL=$((FAIL + 1)); }
+# shellcheck source=tests/lib/assert.sh
+. "${REPO_ROOT}/tests/lib/assert.sh"
+pass() { t_pass "$1"; }
+fail() { t_fail "$1"; }
 
 skip_pass() {
 	echo "SKIP: $1"
 	echo
-	echo "test-gen-evidence.sh summary: PASS=$PASS  FAIL=$FAIL"
+	t_summary gen-evidence || true
 	echo "RESULT: PASS"
 	exit 0
 }
@@ -186,7 +186,7 @@ fi
 
 echo
 echo "----------------------------------------"
-echo "test-gen-evidence.sh summary: PASS=$PASS  FAIL=$FAIL"
+t_summary gen-evidence || true
 if [ "$FAIL" -gt 0 ]; then
 	echo "RESULT: FAIL"
 	exit 1
