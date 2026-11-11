@@ -76,10 +76,10 @@ IDENTITY_SCHEMA="${REPO_ROOT}/public/api/identity.schema.v1.json"
 IDENTITY_SCHEMA_V2="${REPO_ROOT}/public/api/identity.schema.v2.json"
 GEN_IDENTITY="${REPO_ROOT}/scripts/operator-local/gen-identity.sh"
 
-PASS=0
-FAIL=0
-pass() { PASS=$((PASS + 1)); printf 'PASS  %s\n' "$1"; }
-fail() { FAIL=$((FAIL + 1)); printf 'FAIL  %s\n' "$1"; }
+# shellcheck source=../lib/assert.sh
+. "$REPO_ROOT/tests/lib/assert.sh"
+pass() { t_pass "$1"; }
+fail() { t_fail "$1"; }
 note() { printf '      %s\n' "$1"; }
 
 TMPDIR_T="$(mktemp -d -t fyd-pubreg.XXXXXX)"
@@ -1478,6 +1478,5 @@ t15() {
 t15
 
 echo
-echo "test-publication-registry.sh summary: PASS=${PASS}  FAIL=${FAIL}"
-[ "$FAIL" -eq 0 ] || exit 1
+t_summary publication-registry || exit 1
 exit 0
