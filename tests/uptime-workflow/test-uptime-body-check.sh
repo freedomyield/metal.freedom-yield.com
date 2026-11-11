@@ -28,10 +28,10 @@ set -u
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 WORKFLOW="${REPO_ROOT}/.github/workflows/uptime.yml"
 
-PASS=0
-FAIL=0
-ok()  { PASS=$((PASS + 1)); echo "PASS  $1"; }
-bad() { FAIL=$((FAIL + 1)); echo "FAIL  $1"; }
+# shellcheck source=tests/lib/assert.sh
+. "$REPO_ROOT/tests/lib/assert.sh"
+ok()  { t_pass "$1"; }
+bad() { t_fail "$1"; }
 
 if [ ! -f "$WORKFLOW" ]; then
 	echo "FATAL: workflow not found at $WORKFLOW" >&2
@@ -56,7 +56,7 @@ awk '
 EXTRACT_RC=$?
 if [ "$EXTRACT_RC" -ne 0 ] || ! tail -1 "$BLOCK_FILE" | grep -qx 'fi'; then
 	bad "extract: exactly one EXPECTED_TOKEN if-block found in uptime.yml (awk rc=$EXTRACT_RC) — reformatted?"
-	echo "test-uptime-body-check.sh summary: PASS=$PASS  FAIL=$FAIL"
+	t_summary uptime-body-check || true
 	echo "RESULT: FAIL"
 	exit 1
 fi
@@ -144,7 +144,7 @@ $(printf '%s\n' "$out" | tail -5)"
 done
 
 # ---- summary -----------------------------------------------------------------
-echo "test-uptime-body-check.sh summary: PASS=$PASS  FAIL=$FAIL"
+t_summary uptime-body-check || true
 if [ "$FAIL" -eq 0 ]; then
 	echo "RESULT: PASS"
 	exit 0

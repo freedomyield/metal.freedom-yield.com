@@ -34,10 +34,10 @@ else
 	exit 0
 fi
 
-PASS=0
-FAIL=0
-ok()  { PASS=$((PASS + 1)); echo "PASS  $1"; }
-bad() { FAIL=$((FAIL + 1)); echo "FAIL  $1"; }
+# shellcheck source=tests/lib/assert.sh
+. "$REPO_ROOT/tests/lib/assert.sh"
+ok()  { t_pass "$1"; }
+bad() { t_fail "$1"; }
 
 WORK="$(mktemp -d -t uptime-freshness-test.XXXXXX)"
 # shellcheck disable=SC2329 # invoked via trap
@@ -114,6 +114,6 @@ expect_fail_guard "missing observedAt inside the window fails"      "{\"phase\":
 expect_fail_guard "unparseable observedAt inside the window fails"  "{\"phase\":\"x\",\"network\":\"n\",\"observedAt\":\"not-a-date\",\"endTime\":$IN_WIN_END}"
 expect_fail "non-numeric endTime gives no window"           "{\"phase\":\"x\",\"network\":\"n\",\"observedAt\":\"$(iso $((NOW-7200)))\",\"endTime\":\"soon\"}" $NOW
 
-echo "test-uptime-freshness.sh summary: PASS=$PASS  FAIL=$FAIL"
+t_summary uptime-freshness || true
 if [ "$FAIL" -eq 0 ]; then echo "RESULT: PASS"; exit 0; fi
 echo "RESULT: FAIL"; exit 1
