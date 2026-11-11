@@ -32,9 +32,11 @@ command -v jq >/dev/null 2>&1 || {
   if [ -n "${CI:-}" ]; then echo "FAIL: jq not available (CI must run this suite)"; exit 1; fi
   echo "SKIP: jq not available"; exit 0; }
 
-PASS=0; FAIL=0; FAILURES=()
-ok() { PASS=$((PASS + 1)); printf '  PASS  %s\n' "$1"; }
-bad() { FAIL=$((FAIL + 1)); FAILURES+=("$1 ($2)"); printf '  FAIL  %s  (%s)\n' "$1" "$2"; }
+FAILURES=()
+# shellcheck source=../lib/assert.sh
+. "$REPO/tests/lib/assert.sh"
+ok() { t_pass "$1"; }
+bad() { FAILURES+=("$1 ($2)"); t_fail "$1" "$2"; }
 assert_eq() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "expected='$2' actual='$3'"; fi; }
 assert_contains() { case "$3" in *"$2"*) ok "$1" ;; *) bad "$1" "missing '$2' in '$3'" ;; esac; }
 assert_not_contains() { case "$3" in *"$2"*) bad "$1" "unexpected '$2' in '$3'" ;; *) ok "$1" ;; esac; }
@@ -336,6 +338,6 @@ fi
 cp "$TMP/good.sh" "$GOOD_SCRIPT"
 
 echo
-echo "PASS=$PASS FAIL=$FAIL"
+t_summary check-compose-naming || true
 if [ "$FAIL" -ne 0 ]; then printf '  - %s\n' "${FAILURES[@]}"; exit 1; fi
 exit 0

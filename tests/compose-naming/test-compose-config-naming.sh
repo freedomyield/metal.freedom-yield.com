@@ -43,9 +43,11 @@ command -v docker >/dev/null 2>&1 || skip_or_fail "docker not available"
 docker compose version >/dev/null 2>&1 || skip_or_fail "docker compose v2 not available"
 REAL_DOCKER="$(command -v docker)"
 
-PASS=0; FAIL=0; FAILURES=()
-ok() { PASS=$((PASS + 1)); printf '  PASS  %s\n' "$1"; }
-bad() { FAIL=$((FAIL + 1)); FAILURES+=("$1 ($2)"); printf '  FAIL  %s  (%s)\n' "$1" "$2"; }
+FAILURES=()
+# shellcheck source=../lib/assert.sh
+. "$REPO/tests/lib/assert.sh"
+ok() { t_pass "$1"; }
+bad() { FAILURES+=("$1 ($2)"); t_fail "$1" "$2"; }
 assert_eq() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "expected='$2' actual='$3'"; fi; }
 assert_contains() { case "$3" in *"$2"*) ok "$1" ;; *) bad "$1" "missing '$2' in '$3'" ;; esac; }
 
@@ -172,6 +174,6 @@ assert_eq "T6b (rationale) COMPOSE_PROJECT_NAME would rename the site stack" "t-
   "$(site COMPOSE_PROJECT_NAME=t-proj)"
 
 echo
-echo "PASS=$PASS FAIL=$FAIL"
+t_summary compose-config-naming || true
 if [ "$FAIL" -ne 0 ]; then printf '  - %s\n' "${FAILURES[@]}"; exit 1; fi
 exit 0
