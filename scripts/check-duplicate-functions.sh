@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # check-duplicate-functions.sh — gate G2 of the 2026-11-10 simplify refactor.
+# CHAIN: none — reads git and files only; touches no host, no network, no broadcast.
+# PRIME_DIRECTIVE: TESTNET-FIRST — safe.
 #
 # A function name defined in two or more shell scripts is allowed only when every
 # definition is a thin wrapper around a library function, or when a row in
@@ -46,9 +48,6 @@
 # Where it connects: run by hand or by a runner; reads git and the work tree only.
 # How to remove it: delete this file, the allowlist and tests/check-duplicate-functions/;
 # nothing else refers to them.
-#
-# CHAIN: none — reads git and files only; touches no host, no network, no broadcast.
-# PRIME_DIRECTIVE: TESTNET-FIRST — safe.
 
 set -euo pipefail
 export LC_ALL=C
