@@ -67,12 +67,11 @@
 set -u
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$REPO_ROOT/tests/lib/assert.sh"
 SCRIPT="${REPO_ROOT}/scripts/gen-renewal-ics.sh"
 
-PASS=0
-FAIL=0
-pass() { printf 'PASS  %-70s\n' "$1"; PASS=$((PASS + 1)); }
-fail() { printf 'FAIL  %-70s\n' "$1" >&2; FAIL=$((FAIL + 1)); }
+pass() { t_pass "$1"; }
+fail() { t_fail "$1"; }
 
 [ -f "$SCRIPT" ] || { echo "FATAL: script not found at $SCRIPT" >&2; exit 1; }
 if ! command -v jq >/dev/null 2>&1; then
@@ -499,8 +498,7 @@ run_mutant nofold 's/if (length(line) <= lim)/if (1)/'
 
 echo
 echo "----------------------------------------"
-echo "test-gen-renewal-ics.sh summary: PASS=$PASS  FAIL=$FAIL"
-if [ "$FAIL" -gt 0 ]; then
+if ! t_summary gen-renewal-ics; then
 	echo "RESULT: FAIL"
 	exit 1
 fi
