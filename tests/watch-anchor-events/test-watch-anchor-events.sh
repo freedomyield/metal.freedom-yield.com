@@ -35,8 +35,9 @@ fi
 PASS=0
 FAIL=0
 FAILURES=()
-ok()  { PASS=$((PASS + 1)); echo "PASS  $1"; }
-bad() { FAIL=$((FAIL + 1)); FAILURES+=("$1"); echo "FAIL  $1"; }
+. "${REPO}/tests/lib/assert.sh"
+ok()  { t_pass "$1"; }
+bad() { FAILURES+=("$1"); t_fail "$1"; }
 
 NODE_ID="NodeID-testwatchanchor1111111111111111111"
 
@@ -182,8 +183,7 @@ echo "$OUT" | grep -qi 'DRY-RUN' && ok "dry-run: prints intent" \
 	|| bad "dry-run: state file untouched (actual=$(state_is_present))"
 
 # ---- summary ------------------------------------------------------------
-echo "test-watch-anchor-events.sh summary: PASS=$PASS  FAIL=$FAIL"
-if [ "$FAIL" -eq 0 ]; then
+if t_summary watch-anchor-events; then
 	echo "RESULT: PASS"
 	exit 0
 fi
