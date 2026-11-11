@@ -29,10 +29,10 @@ if [ ! -x "$SCRIPT" ]; then
 	exit 1
 fi
 
-PASS=0
-FAIL=0
-pass() { printf 'PASS  %-70s\n' "$1"; PASS=$((PASS + 1)); }
-fail() { printf 'FAIL  %-70s\n' "$1" >&2; FAIL=$((FAIL + 1)); }
+# shellcheck source=../lib/assert.sh
+. "$REPO_ROOT/tests/lib/assert.sh"
+pass() { t_pass "$1"; }
+fail() { t_fail "$1"; }
 check_eq() {
 	local label="$1" expected="$2" actual="$3"
 	if [ "$expected" = "$actual" ]; then
@@ -360,7 +360,7 @@ check_eq "CRITICAL#2 --check on now-compliant uppercase <A>: exit 0" "0" "$UPPER
 # ---- summary ----------------------------------------------------------------
 echo
 echo "----------------------------------------"
-echo "test-apply-external-link-attrs.sh summary: PASS=$PASS  FAIL=$FAIL"
+t_summary apply-external-link-attrs || :
 if [ "$FAIL" -gt 0 ]; then
 	echo "RESULT: FAIL"
 	exit 1
