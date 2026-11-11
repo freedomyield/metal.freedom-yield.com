@@ -61,14 +61,13 @@ set -u
 exec </dev/null
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$REPO/tests/lib/assert.sh"
 SCRIPT="${REPO}/scripts/check-anomalies.sh"
 
-PASS=0
-FAIL=0
 SKIP=0
 FAILURES=()
-ok()   { PASS=$((PASS + 1)); printf 'PASS  %s\n' "$1"; }
-bad()  { FAIL=$((FAIL + 1)); FAILURES+=("$1${2:+ — $2}"); printf 'FAIL  %s%s\n' "$1" "${2:+ — $2}" >&2; }
+ok()   { t_pass "$1"; }
+bad()  { FAILURES+=("$1${2:+ — $2}"); t_fail "$1" ${2:+"$2"}; }
 skip() { SKIP=$((SKIP + 1)); printf 'SKIP  %s%s\n' "$1" "${2:+ — $2}"; }
 
 TMP="$(mktemp -d -t fy-deleg-body.XXXXXX)"
@@ -273,7 +272,8 @@ assert_body_lacks() {
 if [ "$GNU_DATE" -eq 0 ]; then
 	skip "delegation notify body cases" "host date lacks -d and gdate is absent"
 	echo
-	echo "test-delegation-notify-body.sh summary: PASS=$PASS  FAIL=$FAIL  SKIP=$SKIP"
+	echo "SKIP=$SKIP"
+	t_summary delegation-notify-body
 	echo "RESULT: PASS"
 	exit 0
 fi
@@ -695,7 +695,8 @@ else
 fi
 
 echo
-echo "test-delegation-notify-body.sh summary: PASS=$PASS  FAIL=$FAIL  SKIP=$SKIP"
+echo "SKIP=$SKIP"
+t_summary delegation-notify-body
 if [ "$FAIL" -eq 0 ]; then
 	echo "RESULT: PASS"
 	exit 0

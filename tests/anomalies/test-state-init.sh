@@ -18,6 +18,7 @@
 set -uo pipefail
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$REPO/tests/lib/assert.sh"
 INIT="$REPO/scripts/anomaly-state-init.sh"
 
 TMP=$(mktemp -d)
@@ -29,8 +30,6 @@ if [ "$(id -u)" = "0" ]; then
   chmod 0755 "$TMP"
 fi
 
-PASS=0
-FAIL=0
 SKIP=0
 FAILURES=()
 
@@ -45,25 +44,25 @@ have_unpriv() { id "$UNPRIV_USER" >/dev/null 2>&1; }
 
 assert_rc() {
   local label="$1" expected="$2" actual="$3"
+  local shown
+  shown="$(printf '%-60s expected=%s actual=%s' "$label" "$expected" "$actual")"
   if [ "$expected" = "$actual" ]; then
-    PASS=$((PASS + 1))
-    printf '  PASS  %-60s expected=%s actual=%s\n' "$label" "$expected" "$actual"
+    t_pass "$shown"
   else
-    FAIL=$((FAIL + 1))
     FAILURES+=("$label (expected=$expected, actual=$actual)")
-    printf '  FAIL  %-60s expected=%s actual=%s\n' "$label" "$expected" "$actual"
+    t_fail "$shown"
   fi
 }
 
 assert_eq() {
   local label="$1" expected="$2" actual="$3"
+  local shown
+  shown="$(printf '%-60s expected=%s actual=%s' "$label" "$expected" "$actual")"
   if [ "$expected" = "$actual" ]; then
-    PASS=$((PASS + 1))
-    printf '  PASS  %-60s expected=%s actual=%s\n' "$label" "$expected" "$actual"
+    t_pass "$shown"
   else
-    FAIL=$((FAIL + 1))
     FAILURES+=("$label (expected='$expected', actual='$actual')")
-    printf '  FAIL  %-60s expected=%s actual=%s\n' "$label" "$expected" "$actual"
+    t_fail "$shown"
   fi
 }
 
@@ -375,8 +374,8 @@ else
 fi
 
 echo ""
-echo "Total: PASS=$PASS FAIL=$FAIL SKIP=$SKIP"
-if [ "$FAIL" -gt 0 ]; then
+echo "Total: SKIP=$SKIP"
+if ! t_summary state-init; then
   printf '\nFailures:\n'
   for f in "${FAILURES[@]}"; do printf '  - %s\n' "$f"; done
   exit 1

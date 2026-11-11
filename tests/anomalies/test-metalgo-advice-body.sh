@@ -30,13 +30,12 @@ set -u
 exec </dev/null
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$REPO/tests/lib/assert.sh"
 SCRIPT="${SCRIPT_UNDER_TEST:-${REPO}/scripts/check-anomalies.sh}"
 LABEL='label=com.docker.compose.service=metalgo'
 
-PASS=0
-FAIL=0
-ok()  { PASS=$((PASS + 1)); printf 'PASS  %s\n' "$1"; }
-bad() { FAIL=$((FAIL + 1)); printf 'FAIL  %s%s\n' "$1" "${2:+ — $2}" >&2; }
+ok()  { t_pass "$1"; }
+bad() { t_fail "$1" ${2:+"$2"}; }
 
 # render_body <title> — prints the rendered body for the alert with that title.
 render_body() {
@@ -86,5 +85,5 @@ grep -qF 'metalgo-mainnet' "$SCRIPT" \
 	&& bad "check-anomalies: no 'metalgo-mainnet' anywhere" "$(grep -nF 'metalgo-mainnet' "$SCRIPT" | head -3)" \
 	|| ok "check-anomalies: no 'metalgo-mainnet' anywhere"
 
-printf '\n%d PASS, %d FAIL\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ]
+printf '\n'
+t_summary metalgo-advice-body

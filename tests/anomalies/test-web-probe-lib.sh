@@ -13,23 +13,20 @@ set -uo pipefail
 exec </dev/null
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$REPO/tests/lib/assert.sh"
 LIB="${REPO}/scripts/lib/web-probe.sh"
 
 TMP="$(mktemp -d -t fy-web-probe-lib.XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
 
-PASS=0
-FAIL=0
 FAILURES=()
 assert_eq() {
 	local label="$1" expected="$2" actual="$3"
 	if [ "$expected" = "$actual" ]; then
-		PASS=$((PASS + 1))
-		printf '  PASS  %s\n' "$label"
+		t_pass "$label"
 	else
-		FAIL=$((FAIL + 1))
 		FAILURES+=("$label (expected='$expected', actual='$actual')")
-		printf '  FAIL  %s expected=[%s] actual=[%s]\n' "$label" "$expected" "$actual"
+		t_fail "$label" "expected=[$expected] actual=[$actual]"
 	fi
 }
 assert_rc() {    # <label> <expected rc> <cmd...>
@@ -41,12 +38,10 @@ assert_rc() {    # <label> <expected rc> <cmd...>
 }
 assert_re() {    # <label> <ERE> <text>
 	if grep -qE -- "$2" <<<"$3"; then
-		PASS=$((PASS + 1))
-		printf '  PASS  %s\n' "$1"
+		t_pass "$1"
 	else
-		FAIL=$((FAIL + 1))
 		FAILURES+=("$1 (no line matches /$2/)")
-		printf '  FAIL  %s — no line matches /%s/\n' "$1" "$2"
+		t_fail "$1" "no line matches /$2/"
 	fi
 }
 
@@ -221,8 +216,7 @@ for pat in fyd_ notify candidate_set STATE_FILE /var/log /var/lib; do
 done
 
 echo ""
-echo "Total: PASS=$PASS FAIL=$FAIL"
-if [ "$FAIL" -gt 0 ]; then
+if ! t_summary web-probe-lib; then
 	printf '\nFailures:\n'
 	for f in "${FAILURES[@]}"; do printf '  - %s\n' "$f"; done
 	exit 1

@@ -17,25 +17,23 @@
 set -uo pipefail
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$REPO/tests/lib/assert.sh"
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
 export TMP
 
-PASS=0
-FAIL=0
 FAILURES=()
 
 assert_eq() {
-  local label="$1" expected="$2" actual="$3"
+  local label="$1" expected="$2" actual="$3" shown
+  shown="$(printf '%-60s expected=%s actual=%s' "$label" "$expected" "$actual")"
   if [ "$expected" = "$actual" ]; then
-    PASS=$((PASS + 1))
-    printf '  PASS  %-60s expected=%s actual=%s\n' "$label" "$expected" "$actual"
+    t_pass "$shown"
   else
-    FAIL=$((FAIL + 1))
     FAILURES+=("$label (expected='$expected', actual='$actual')")
-    printf '  FAIL  %-60s expected=%s actual=%s\n' "$label" "$expected" "$actual"
+    t_fail "$shown"
   fi
 }
 
@@ -500,8 +498,7 @@ out=$(run_isolated test_state_untouched)
 assert_eq "STATE_FILE bytes unchanged during transition processing" "UNTOUCHED" "$out"
 
 echo ""
-echo "Total: PASS=$PASS FAIL=$FAIL"
-if [ "$FAIL" -gt 0 ]; then
+if ! t_summary candidate-state; then
   printf '\nFailures:\n'
   for f in "${FAILURES[@]}"; do printf '  - %s\n' "$f"; done
   exit 1

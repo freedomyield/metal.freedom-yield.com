@@ -25,24 +25,22 @@
 set -uo pipefail
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$REPO/tests/lib/assert.sh"
 SCRIPT="$REPO/scripts/check-anomalies.sh"
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-PASS=0
-FAIL=0
 FAILURES=()
 
 assert_eq() {
-  local label="$1" expected="$2" actual="$3"
+  local label="$1" expected="$2" actual="$3" shown
+  shown="$(printf '%-55s expected=%s actual=%s' "$label" "$expected" "$actual")"
   if [ "$expected" = "$actual" ]; then
-    PASS=$((PASS + 1))
-    printf '  PASS  %-55s expected=%s actual=%s\n' "$label" "$expected" "$actual"
+    t_pass "$shown"
   else
-    FAIL=$((FAIL + 1))
     FAILURES+=("$label (expected='$expected', actual='$actual')")
-    printf '  FAIL  %-55s expected=%s actual=%s\n' "$label" "$expected" "$actual"
+    t_fail "$shown"
   fi
 }
 
@@ -285,8 +283,7 @@ assert_eq "sustained outage: 1 notify"          "1"      "$(calls_of "$OUT")"
 assert_eq "sustained outage: candidate -> warn" '"warn"' "$(field_of "$OUT")"
 
 echo ""
-echo "Total: PASS=$PASS FAIL=$FAIL"
-if [ "$FAIL" -gt 0 ]; then
+if ! t_summary api-freshness-broken; then
   printf '\nFailures:\n'
   for f in "${FAILURES[@]}"; do printf '  - %s\n' "$f"; done
   exit 1

@@ -36,50 +36,41 @@ set -uo pipefail
 exec </dev/null
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$REPO/tests/lib/assert.sh"
 SCRIPT="${REPO}/scripts/check-anomalies.sh"
 
-PASS=0
-FAIL=0
 FAILURES=()
 assert_eq() {
 	local label="$1" expected="$2" actual="$3"
 	if [ "$expected" = "$actual" ]; then
-		PASS=$((PASS + 1))
-		printf '  PASS  %s\n' "$label"
+		t_pass "$label"
 	else
-		FAIL=$((FAIL + 1))
 		FAILURES+=("$label (expected='$expected', actual='$actual')")
-		printf '  FAIL  %s expected=[%s] actual=[%s]\n' "$label" "$expected" "$actual"
+		t_fail "$label" "expected=[$expected] actual=[$actual]"
 	fi
 }
 assert_has() {   # <label> <fixed string> <text>
 	if grep -qF -- "$2" <<<"$3"; then
-		PASS=$((PASS + 1))
-		printf '  PASS  %s\n' "$1"
+		t_pass "$1"
 	else
-		FAIL=$((FAIL + 1))
 		FAILURES+=("$1 (missing '$2')")
-		printf '  FAIL  %s — missing [%s]\n' "$1" "$2"
+		t_fail "$1" "missing [$2]"
 	fi
 }
 assert_not_has() {   # <label> <fixed string> <text>  — I1: no origin-IP leak
 	if grep -qF -- "$2" <<<"$3"; then
-		FAIL=$((FAIL + 1))
 		FAILURES+=("$1 (unexpectedly contains '$2')")
-		printf '  FAIL  %s — unexpectedly contains [%s]\n' "$1" "$2"
+		t_fail "$1" "unexpectedly contains [$2]"
 	else
-		PASS=$((PASS + 1))
-		printf '  PASS  %s\n' "$1"
+		t_pass "$1"
 	fi
 }
 assert_re() {    # <label> <ERE> <text>
 	if grep -qE -- "$2" <<<"$3"; then
-		PASS=$((PASS + 1))
-		printf '  PASS  %s\n' "$1"
+		t_pass "$1"
 	else
-		FAIL=$((FAIL + 1))
 		FAILURES+=("$1 (no line matches /$2/)")
-		printf '  FAIL  %s — no line matches /%s/\n' "$1" "$2"
+		t_fail "$1" "no line matches /$2/"
 	fi
 }
 
@@ -492,8 +483,7 @@ for bad in \
 done
 
 echo ""
-echo "Total: PASS=$PASS FAIL=$FAIL"
-if [ "$FAIL" -gt 0 ]; then
+if ! t_summary web-incident; then
 	printf '\nFailures:\n'
 	for f in "${FAILURES[@]}"; do printf '  - %s\n' "$f"; done
 	exit 1
