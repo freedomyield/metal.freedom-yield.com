@@ -31,15 +31,15 @@ PASS=0
 FAIL=0
 FAILURES=()
 
+. "$REPO/tests/lib/assert.sh"
 assert_eq() {
-  local label="$1" expected="$2" actual="$3"
+  local label="$1" expected="$2" actual="$3" shown
+  shown="$(printf '%-55s expected=%s actual=%s' "$label" "$expected" "$actual")"
   if [ "$expected" = "$actual" ]; then
-    PASS=$((PASS + 1))
-    printf '  PASS  %-55s expected=%s actual=%s\n' "$label" "$expected" "$actual"
+    t_pass "$shown"
   else
-    FAIL=$((FAIL + 1))
     FAILURES+=("$label (expected='$expected', actual='$actual')")
-    printf '  FAIL  %-55s expected=%s actual=%s\n' "$label" "$expected" "$actual"
+    t_fail "$shown"
   fi
 }
 
@@ -107,8 +107,7 @@ write_stub_curl_body '{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"
 assert_eq "RPC error object -> \"null\"" "null" "$(run_probe C)"
 
 echo ""
-echo "Total: PASS=$PASS FAIL=$FAIL"
-if [ "$FAIL" -gt 0 ]; then
+if ! t_summary bootstrap-probe; then
   printf '\nFailures:\n'
   for f in "${FAILURES[@]}"; do printf '  - %s\n' "$f"; done
   exit 1
