@@ -15,13 +15,12 @@
 set -u
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$REPO_ROOT/tests/lib/assert.sh"
 G1="${REPO_ROOT}/scripts/check-doc-moves.sh"
 GITQ=(-c user.email=t@t -c user.name=t -c commit.gpgsign=false)
 
-PASS=0
-FAIL=0
-ok()  { PASS=$((PASS + 1)); echo "PASS  $1"; }
-bad() { FAIL=$((FAIL + 1)); echo "FAIL  $1"; }
+ok()  { t_pass "$1"; }
+bad() { t_fail "$1"; }
 
 WORK=""
 cleanup() { [ -n "$WORK" ] && rm -rf "$WORK"; WORK=""; }
@@ -270,5 +269,4 @@ outside_case "exempt_outside_repo_root_simplify_refactor" "2099-simplify-refacto
 
 cd "$REPO_ROOT" || exit 1
 echo ""
-echo "test-check-doc-moves.sh summary: PASS=${PASS}  FAIL=${FAIL}"
-[ "$FAIL" -eq 0 ]
+t_summary check-doc-moves
