@@ -218,6 +218,56 @@ run_g1 --base="$BASE"
 expect "nondocs_rename: similarity not checked, basename ref still caught" 1 "VIOLATION docs/ref.md:1 notes.txt -> misc/notes.txt"
 if printf '%s\n' "$OUT" | grep -q 'similarity'; then bad "nondocs_rename: similarity must not be flagged"; else ok "nondocs_rename: no similarity line"; fi
 
+# ---- scripts/ rename: similarity below 100 is a violation (spec: "under docs/ or scripts/") -
+# old and new both under scripts/ (docs/ not involved): a changed body must be flagged.
+fresh_repo
+printf '#!/usr/bin/env bash\necho one\necho two\necho three\necho four\n' > scripts/move.sh
+git add scripts/move.sh && git "${GITQ[@]}" commit -q -m mv && BASE="$(git rev-parse HEAD)"
+mkdir -p scripts/sub && git mv scripts/move.sh scripts/sub/move.sh
+printf '#!/usr/bin/env bash\necho one\necho two\necho three\necho CHANGED\n' > scripts/sub/move.sh && commit_all
+run_g1 --base="$BASE"
+expect "scripts_rename_similarity: scripts/ -> scripts/, rc 1, similarity VIOLATION" 1 "VIOLATION scripts/sub/move.sh:0 scripts/move.sh -> scripts/sub/move.sh similarity"
+
+# old under scripts/, new outside both docs/ and scripts/: the old side alone must count.
+fresh_repo
+printf '#!/usr/bin/env bash\necho one\necho two\necho three\necho four\n' > scripts/move.sh
+git add scripts/move.sh && git "${GITQ[@]}" commit -q -m mv && BASE="$(git rev-parse HEAD)"
+mkdir -p tools && git mv scripts/move.sh tools/move.sh
+printf '#!/usr/bin/env bash\necho one\necho two\necho three\necho CHANGED\n' > tools/move.sh && commit_all
+run_g1 --base="$BASE"
+expect "scripts_rename_similarity_old_side: scripts/ -> tools/, rc 1, similarity VIOLATION" 1 "VIOLATION tools/move.sh:0 scripts/move.sh -> tools/move.sh similarity"
+
+# old outside, new under scripts/: the new side alone must count.
+fresh_repo
+printf '#!/usr/bin/env bash\necho one\necho two\necho three\necho four\n' > tools_move.sh
+git add tools_move.sh && git "${GITQ[@]}" commit -q -m mv && BASE="$(git rev-parse HEAD)"
+git mv tools_move.sh scripts/move.sh
+printf '#!/usr/bin/env bash\necho one\necho two\necho three\necho CHANGED\n' > scripts/move.sh && commit_all
+run_g1 --base="$BASE"
+expect "scripts_rename_similarity_new_side: other -> scripts/, rc 1, similarity VIOLATION" 1 "VIOLATION scripts/move.sh:0 tools_move.sh -> scripts/move.sh similarity"
+
+# ---- exempt set is narrow: the file just outside each exempt element still counts -----------
+# Each case moves docs/A.md and puts one file naming the old path just outside one element
+# of the exempt set. G1 must report exactly that file (rc 1, one VIOLATION, FAIL 1).
+outside_case() { # name relative-path-of-referencing-file
+	local name="$1" ref="$2"
+	fresh_repo
+	mkdir -p "$(dirname "$ref")"
+	printf 'mentions docs/A.md\n' > "$ref"
+	git add "$ref" && git "${GITQ[@]}" commit -q -m outside && BASE="$(git rev-parse HEAD)"
+	mkdir -p docs/audits && git mv docs/A.md docs/audits/A.md && commit_all
+	run_g1 --base="$BASE"
+	expect "${name}: rc 1, VIOLATION ${ref}:1" 1 "VIOLATION ${ref}:1 docs/A.md -> docs/audits/A.md"
+	if [ "$RC" -eq 1 ] && ! printf '%s\n' "$OUT" | grep -qxF "FAIL 1"; then bad "${name}: count must be exactly FAIL 1"; fi
+}
+outside_case "exempt_outside_audits_prefix" "docs/auditsX.md"
+outside_case "exempt_outside_audits_dash_dir" "docs/audits-old/note.md"
+outside_case "exempt_outside_archive_prefix" "docs/archiveX.md"
+outside_case "exempt_outside_docs_a_prefix" "docs/ahead.md"
+outside_case "exempt_outside_cycle_gate_other" "docs/CYCLE_GATE_OTHER.md"
+outside_case "exempt_outside_superpowers_other_dir" "docs/superpowers/notes/2099-simplify-refactor-x.md"
+outside_case "exempt_outside_repo_root_simplify_refactor" "2099-simplify-refactor-x.md"
+
 cd "$REPO_ROOT" || exit 1
 echo ""
 echo "test-check-doc-moves.sh summary: PASS=${PASS}  FAIL=${FAIL}"
