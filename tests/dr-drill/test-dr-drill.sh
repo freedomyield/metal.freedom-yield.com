@@ -28,6 +28,7 @@
 set -uo pipefail
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$REPO/tests/lib/assert.sh"
 REAL_SCRIPT="$REPO/scripts/dr-drill.sh"
 SCRIPT="${DRILL_SCRIPT_UNDER_TEST:-$REAL_SCRIPT}"
 ONLY="${DRILL_TEST_ONLY:-}"
@@ -42,9 +43,9 @@ for t in openssl tar shasum jq; do
 	command -v "$t" >/dev/null 2>&1 || skip_or_fail "$t not available"
 done
 
-PASS=0; FAIL=0; FAILURES=()
-ok() { PASS=$((PASS + 1)); printf '  PASS  %s\n' "$1"; }
-bad() { FAIL=$((FAIL + 1)); FAILURES+=("$1 ($2)"); printf '  FAIL  %s  (%s)\n' "$1" "$2"; }
+FAILURES=()
+ok() { t_pass "$1"; }
+bad() { FAILURES+=("$1 ($2)"); t_fail "$1" "$2"; }
 assert_eq() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "expected='$2' actual='$3'"; fi; }
 assert_contains() { case "$3" in *"$2"*) ok "$1" ;; *) bad "$1" "missing '$2'" ;; esac; }
 assert_not_contains() { case "$3" in *"$2"*) bad "$1" "unexpected '$2'" ;; *) ok "$1" ;; esac; }
@@ -241,6 +242,5 @@ if [ -z "$ONLY" ] && [ -z "${DRILL_SCRIPT_UNDER_TEST:-}" ]; then
 fi
 
 echo
-echo "RESULT: $PASS passed, $FAIL failed"
-if [ "$FAIL" -gt 0 ]; then printf '  - %s\n' "${FAILURES[@]}"; exit 1; fi
+t_summary dr-drill || { printf '  - %s\n' "${FAILURES[@]}"; exit 1; }
 exit 0
