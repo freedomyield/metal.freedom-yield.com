@@ -44,10 +44,10 @@ done
 TIMEOUT_BIN="$(command -v timeout 2>/dev/null || true)"
 [ -n "$TIMEOUT_BIN" ] || { echo "FATAL: timeout(1) required for this suite" >&2; exit 1; }
 
-PASS=0
-FAIL=0
-pass() { printf 'PASS  %-72s%s\n' "$1" "${2:+ ($2)}"; PASS=$((PASS + 1)); }
-bad()  { printf 'FAIL  %-72s%s\n' "$1" "${2:+ ($2)}" >&2; FAIL=$((FAIL + 1)); }
+# shellcheck source=../lib/assert.sh
+. "$REPO_ROOT/tests/lib/assert.sh"
+pass() { t_pass "$(printf '%-72s%s' "$1" "${2:+ ($2)}")"; }
+bad()  { t_fail "$(printf '%-72s%s' "$1" "${2:+ ($2)}")"; }
 
 BASE="$(mktemp -d -t fya-preflight-suite.XXXXXX)"
 cleanup() { rm -rf "$BASE"; }
@@ -1404,7 +1404,7 @@ fi
 # ---- Summary ----
 echo
 echo "----------------------------------------"
-echo "test-rehearsal-preflight.sh summary: PASS=$PASS  FAIL=$FAIL"
+t_summary rehearsal-preflight || true
 if [ "$FAIL" -gt 0 ]; then
 	echo "RESULT: FAIL"
 	exit 1

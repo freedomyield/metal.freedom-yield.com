@@ -23,10 +23,10 @@ set -u
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PREFLIGHT_REL="scripts/install-rehearsal-preflight.sh"
 
-PASS=0
-FAIL=0
-pass() { printf 'PASS  %s\n' "$1"; PASS=$((PASS + 1)); }
-bad()  { printf 'FAIL  %s%s\n' "$1" "${2:+ ($2)}" >&2; FAIL=$((FAIL + 1)); }
+# shellcheck source=../lib/assert.sh
+. "$REPO_ROOT/tests/lib/assert.sh"
+pass() { t_pass "$1"; }
+bad()  { t_fail "$1${2:+ ($2)}"; }
 
 BASE="$(mktemp -d -t fya-validator-check.XXXXXX)"
 trap 'rm -rf "$BASE"' EXIT
@@ -118,5 +118,4 @@ else
 	pass "(c)  mutant 'check 11 always passes' is caught (case (a) fails on it)"
 fi
 
-echo "validator-check: PASS=${PASS} FAIL=${FAIL}"
-[ "$FAIL" -eq 0 ]
+t_summary validator-check
