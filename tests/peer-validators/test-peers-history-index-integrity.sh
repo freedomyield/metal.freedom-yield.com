@@ -44,10 +44,10 @@ REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 SCRIPT="${REPO_ROOT}/scripts/peer-validators.sh"
 ANALYTICS="${REPO_ROOT}/scripts/peer-analytics.py"
 
-# shellcheck source=../lib/assert.sh
-. "$REPO_ROOT/tests/lib/assert.sh"
-pass() { t_pass "$1"; }
-fail() { t_fail "$1"; }
+PASS=0
+FAIL=0
+pass() { printf 'PASS  %-70s\n' "$1"; PASS=$((PASS + 1)); }
+fail() { printf 'FAIL  %-70s\n' "$1" >&2; FAIL=$((FAIL + 1)); }
 check_eq() {
 	local label="$1" expected="$2" actual="$3"
 	if [ "$expected" = "$actual" ]; then pass "$label"; else fail "$label (expected='$expected' actual='$actual')"; fi
@@ -56,7 +56,7 @@ check_eq() {
 skip_pass() {
 	echo "SKIP: $1"
 	echo
-	t_summary peers-history-index-integrity || :
+	echo "test-peers-history-index-integrity.sh summary: PASS=$PASS  FAIL=$FAIL"
 	echo "RESULT: PASS"
 	exit 0
 }
@@ -325,7 +325,7 @@ check_eq "(e2) self-heal: index now advertises today (count=1)" "1" "$(INDEX | j
 # ---- summary ---------------------------------------------------------------
 echo
 echo "----------------------------------------"
-t_summary peers-history-index-integrity || :
+echo "test-peers-history-index-integrity.sh summary: PASS=$PASS  FAIL=$FAIL"
 if [ "$FAIL" -gt 0 ]; then
 	echo "RESULT: FAIL"
 	exit 1
