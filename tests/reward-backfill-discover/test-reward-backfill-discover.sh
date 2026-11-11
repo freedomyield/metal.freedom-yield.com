@@ -36,31 +36,27 @@ SCRIPT="$REPO/scripts/reward-backfill-discover.sh"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "${REPO}/tests/lib/assert.sh"
 FAILURES=()
 
 assert_eq() {
 	local label="$1" expected="$2" actual="$3"
 	if [ "$expected" = "$actual" ]; then
-		PASS=$((PASS + 1))
-		printf '  PASS  %-70s expected=%s actual=%s\n' "$label" "$expected" "$actual"
+		t_pass "$(printf '%-70s expected=%s actual=%s' "$label" "$expected" "$actual")"
 	else
-		FAIL=$((FAIL + 1))
 		FAILURES+=("$label (expected=$expected, actual=$actual)")
-		printf '  FAIL  %-70s expected=%s actual=%s\n' "$label" "$expected" "$actual"
+		t_fail "$(printf '%-70s expected=%s actual=%s' "$label" "$expected" "$actual")"
 	fi
 }
 
 assert_true() {
 	local label="$1" cond="$2"
 	if [ "$cond" = "1" ]; then
-		PASS=$((PASS + 1))
-		printf '  PASS  %s\n' "$label"
+		t_pass "$(printf '%s' "$label")"
 	else
-		FAIL=$((FAIL + 1))
 		FAILURES+=("$label")
-		printf '  FAIL  %s\n' "$label"
+		t_fail "$(printf '%s' "$label")"
 	fi
 }
 
@@ -308,9 +304,8 @@ run_matcher_mutant() {
 	local repl_esc="${repl//&/\\&}"
 	sed "s|${MATCHER_EXPR}|${repl_esc}|" "$SCRIPT" > "$mut"
 	if diff -q "$SCRIPT" "$mut" >/dev/null 2>&1; then
-		FAIL=$((FAIL + 1))
 		FAILURES+=("$label: sed produced no diff — matcher not matched, mutation not applied")
-		printf '  FAIL  %s: mutant sed produced no diff\n' "$label"
+		t_fail "$(printf '%s: mutant sed produced no diff' "$label")"
 		return
 	fi
 	local save_agg="$AGG_LOG"
@@ -322,12 +317,10 @@ run_matcher_mutant() {
 	real_row_present=$(has_line "$LAST_OUT" "$(printf '%s\t%s\t%s\t%s\tmatched' "$cn" "$vtx" "$vs" "$ve")")
 	decoy_claimed=$(grep -c "^${cn}"$'\t'"${decoy}"$'\t' "$LAST_OUT" || true)
 	if [ "$real_row_present" = "0" ] && [ "$decoy_claimed" = "1" ]; then
-		PASS=$((PASS + 1))
-		printf '  PASS  %s: mutant wrongly claims the decoy for cycle %s and drops the real row — the boundary is load-bearing\n' "$label" "$cn"
+		t_pass "$(printf '%s: mutant wrongly claims the decoy for cycle %s and drops the real row — the boundary is load-bearing' "$label" "$cn")"
 	else
-		FAIL=$((FAIL + 1))
 		FAILURES+=("$label: mutant still produced the correct cycle $cn row (real_row_present=$real_row_present decoy_claimed=$decoy_claimed) — the decoy has no bite")
-		printf '  FAIL  %s: mutant still correct for cycle %s (real_row_present=%s decoy_claimed=%s)\n' "$label" "$cn" "$real_row_present" "$decoy_claimed"
+		t_fail "$(printf '%s: mutant still correct for cycle %s (real_row_present=%s decoy_claimed=%s)' "$label" "$cn" "$real_row_present" "$decoy_claimed")"
 	fi
 }
 run_matcher_mutant "window-only matcher (end key dropped)"     '$2 - s >= 0 && $2 - s <= tol' "$TXDECOY_S" 2 "$TX2" "$C2S" "$C2E"
@@ -440,9 +433,8 @@ MUTANT="$TMP/mutant-reward-backfill-discover.sh"
 sed 's|# (tx JSON handled in-memory only; never echoed — see OUTPUT HYGIENE)|printf "MUTANT-RAW %s\\n" "$RESP"|' \
 	"$SCRIPT" > "$MUTANT"
 if diff -q "$SCRIPT" "$MUTANT" >/dev/null 2>&1; then
-	FAIL=$((FAIL + 1))
 	FAILURES+=("mutation kill: sed produced no diff — marker comment not matched, mutation not applied")
-	echo "  FAIL  mutant sed produced no diff — marker comment not matched"
+	t_fail "mutant sed produced no diff — marker comment not matched"
 else
 	MUT_AGG="$TMP/record/aggregate-mutant.log"
 	SAVE_AGG="$AGG_LOG"
@@ -453,12 +445,10 @@ else
 	assert_eq "mutant still exits 0 on the happy path (leak, not crash)" "0" "$LAST_RC"
 	MUT_HITS=$(grep -cF 'fixtureleakcanary' "$MUT_AGG" || true)
 	if [ "$MUT_HITS" -gt 0 ]; then
-		PASS=$((PASS + 1))
-		printf '  PASS  mutant (raw-response printf) DOES leak the canary (%s hits) — the hygiene grep has teeth\n' "$MUT_HITS"
+		t_pass "$(printf 'mutant (raw-response printf) DOES leak the canary (%s hits) — the hygiene grep has teeth' "$MUT_HITS")"
 	else
-		FAIL=$((FAIL + 1))
 		FAILURES+=("mutation kill: mutant leaked nothing — the hygiene grep is not sensitive")
-		echo "  FAIL  mutant unexpectedly leaked nothing — hygiene grep is not sensitive"
+		t_fail "mutant unexpectedly leaked nothing — hygiene grep is not sensitive"
 	fi
 fi
 
@@ -475,12 +465,10 @@ FORBIDDEN_F="eth_""sendRawTransaction"
 FORBIDDEN_G="send_""transaction"
 for needle in "$FORBIDDEN_A" "$FORBIDDEN_B" "$FORBIDDEN_C" "$FORBIDDEN_D" "$FORBIDDEN_E" "$FORBIDDEN_F" "$FORBIDDEN_G"; do
 	if grep -qF -- "$needle" "$SCRIPT"; then
-		FAIL=$((FAIL + 1))
 		FAILURES+=("forbidden string '$needle' present in scripts/reward-backfill-discover.sh")
-		printf '  FAIL  forbidden string %s present in the script\n' "$needle"
+		t_fail "$(printf 'forbidden string %s present in the script' "$needle")"
 	else
-		PASS=$((PASS + 1))
-		printf '  PASS  forbidden string %s absent from the script\n' "$needle"
+		t_pass "$(printf 'forbidden string %s absent from the script' "$needle")"
 	fi
 done
 METHODS_FOUND=$(grep -ohE 'platform\.[A-Za-z]+' "$SCRIPT" | sort -u | tr '\n' ' ')
@@ -488,7 +476,7 @@ assert_eq "only the two read-only RPC methods appear in the script" \
 	"platform.getCurrentValidators platform.getTx " "$METHODS_FOUND"
 
 echo ""
-echo "test-reward-backfill-discover.sh summary: PASS=$PASS FAIL=$FAIL"
+t_summary reward-backfill-discover || true
 if [ "$FAIL" -gt 0 ]; then
 	printf '\nFailures:\n'
 	for f in "${FAILURES[@]}"; do printf '  - %s\n' "$f"; done
