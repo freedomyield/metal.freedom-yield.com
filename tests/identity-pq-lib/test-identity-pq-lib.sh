@@ -6,8 +6,9 @@ REPO_SRC="$(cd "$(dirname "$0")/../.." && pwd)"
 LIB="${REPO_SRC}/scripts/lib/identity-pq.sh"
 . "${REPO_SRC}/tests/lib/pq-test-key.sh"
 PASS=0; FAIL=0
-pass() { printf 'PASS  %s\n' "$1"; PASS=$((PASS + 1)); }
-bad()  { printf 'FAIL  %s\n' "$1" >&2; FAIL=$((FAIL + 1)); }
+. "${REPO_SRC}/tests/lib/assert.sh"
+pass() { t_pass "$1"; }
+bad()  { t_fail "$1"; }
 skip_pass() { echo "SKIP: $1"; [ "$FAIL" -eq 0 ] || { echo "RESULT: FAIL"; exit 1; }; echo "RESULT: PASS"; exit 0; }
 [ -r "$LIB" ] || { echo "FATAL: $LIB missing" >&2; exit 1; }
 . "$LIB"
@@ -106,5 +107,4 @@ touch "$UNL"
 fyipq__drop_unlocked "$WORK/keys/other.pem"; [ -f "$WORK/keys/other.pem" ] && pass "L7 other file kept" || bad "L7 deleted a non-unlocked file"
 fyipq__drop_unlocked "$UNL"; [ ! -e "$UNL" ] && pass "L7 unlocked file deleted" || bad "L7 unlocked not deleted"
 
-echo "test-identity-pq-lib.sh summary: PASS=$PASS FAIL=$FAIL"
-[ "$FAIL" -eq 0 ] && { echo "RESULT: PASS"; exit 0; } || { echo "RESULT: FAIL"; exit 1; }
+t_summary identity-pq-lib && { echo "RESULT: PASS"; exit 0; } || { echo "RESULT: FAIL"; exit 1; }
