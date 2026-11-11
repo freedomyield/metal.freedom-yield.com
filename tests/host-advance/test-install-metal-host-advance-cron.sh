@@ -27,10 +27,10 @@ if [ ! -f "$INSTALLER" ]; then
 	exit 1
 fi
 
-PASS=0
-FAIL=0
-ok()  { PASS=$((PASS + 1)); echo "PASS  $1"; }
-bad() { FAIL=$((FAIL + 1)); echo "FAIL  $1"; }
+# shellcheck source=../lib/assert.sh
+. "$REPO_ROOT/tests/lib/assert.sh"
+ok()  { t_pass "$1"; }
+bad() { t_fail "$1"; }
 
 DIR=""
 setup()    { DIR="$(mktemp -d -t advance-cron-test.XXXXXX)"; }
@@ -150,7 +150,7 @@ RC=$?
 teardown
 
 # ---- summary -----------------------------------------------------------------------
-echo "test-install-metal-host-advance-cron.sh summary: PASS=$PASS  FAIL=$FAIL"
+t_summary install-metal-host-advance-cron || true
 if [ "$FAIL" -eq 0 ]; then
 	echo "RESULT: PASS"
 	exit 0
