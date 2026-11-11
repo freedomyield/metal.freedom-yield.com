@@ -22,8 +22,9 @@ ARCHIVER="${ARCHIVER:-${REPO_ROOT}/scripts/archive-legacy-anchors.sh}"
 VERIFIER="${VERIFIER:-${REPO_ROOT}/scripts/verify-legacy-anchor-archive.sh}"
 
 PASS=0; FAIL=0
-ok()  { PASS=$((PASS + 1)); printf 'PASS  %s\n' "$1"; }
-bad() { FAIL=$((FAIL + 1)); printf 'FAIL  %s\n' "$1" >&2; }
+. "${REPO_ROOT}/tests/lib/assert.sh"
+ok()  { t_pass "$1"; }
+bad() { t_fail "$1"; }
 check() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 (expected='$2' actual='$3')"; fi; }
 
 for f in "$ARCHIVER" "$VERIFIER"; do
@@ -326,5 +327,4 @@ check "profile: no chain literal left in the archiver or the verifier" 0 \
 		| while IFS= read -r v; do grep -hF -- "$v" "$ARCHIVER" "$VERIFIER"; done | grep -c .)"
 
 echo "----"
-echo "passed=$PASS failed=$FAIL"
-[ "$FAIL" -eq 0 ]
+t_summary legacy-anchor-archive
