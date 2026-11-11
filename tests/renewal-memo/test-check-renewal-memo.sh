@@ -44,13 +44,13 @@ REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 CHECKER="${REPO_ROOT}/scripts/check-renewal-memo.sh"
 CYCLE_GATE_DOC="${REPO_ROOT}/docs/CYCLE_GATE.md"
 
-PASS=0
-FAIL=0
-ok() { PASS=$((PASS + 1)); echo "  ok: $1"; }
-bad() { FAIL=$((FAIL + 1)); echo "  FAIL: $1"; }
+# shellcheck source=../lib/assert.sh
+. "${REPO_ROOT}/tests/lib/assert.sh"
+ok() { t_pass "$1"; }
+bad() { t_fail "$1"; }
 
 finish() {
-	echo "test-check-renewal-memo.sh summary: PASS=$PASS  FAIL=$FAIL"
+	t_summary check-renewal-memo || true
 	if [ "$FAIL" -eq 0 ]; then
 		echo "RESULT: PASS"
 		exit 0
