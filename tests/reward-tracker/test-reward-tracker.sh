@@ -486,7 +486,9 @@ assert_eq "(b) dry run: no ntfy push recorded (fyd_notify never invokes the dele
 # did not already exist, and never touches the mtime of one that did.
 if [ -n "$DRY_PRE_DIGEST_MTIME" ]; then
 	DRY_POST_DIGEST_MTIME="$(stat -c '%Y' "$DIGEST_FILE" 2>/dev/null || stat -f '%m' "$DIGEST_FILE" 2>/dev/null)"
-	assert_eq "(c) dry run: digest file mtime unchanged (not rewritten)" "$DRY_PRE_DIGEST_MTIME" "$DRY_POST_DIGEST_MTIME"
+	# The mtimes vary per run, so they stay out of the case name (pinned); a mismatch still prints them.
+	assert_true "(c) dry run: digest file mtime unchanged (not rewritten)" "$([ "$DRY_PRE_DIGEST_MTIME" = "$DRY_POST_DIGEST_MTIME" ] && echo 1 || echo 0)"
+	[ "$DRY_PRE_DIGEST_MTIME" = "$DRY_POST_DIGEST_MTIME" ] || echo "  note: digest mtime before=$DRY_PRE_DIGEST_MTIME after=$DRY_POST_DIGEST_MTIME"
 else
 	assert_true "(c) dry run: digest file still does not exist (never created while dry)" "$([ ! -e "$DIGEST_FILE" ] && echo 1 || echo 0)"
 fi
