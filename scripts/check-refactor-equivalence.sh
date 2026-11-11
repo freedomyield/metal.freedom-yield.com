@@ -22,7 +22,9 @@
 # `-` means empty:
 #   1 script           repo-relative path, tracked at both sides
 #   2 args             space-separated words; the token {FIXTURE} becomes the fixture copy
-#   3 env              space-separated KEY=VALUE (KEY in PATH HOME TMPDIR FY_LIVE is refused)
+#   3 env              space-separated KEY=VALUE; reserved keys are refused (exit 2):
+#                      PATH HOME TMPDIR FY_LIVE ENV IFS CDPATH GLOBIGNORE SHELLOPTS PS4 and
+#                      every key starting with BASH LD_ DYLD_ GIT_ PYTHON PERL5 G3_
 #   4 fixture dir      repo-relative, taken from HEAD (same bytes for both sides)
 #   5 output files     comma-separated, relative to the fixture copy
 #   6 validator        ajv-stub | python | none | -
@@ -281,7 +283,7 @@ g3_run() { # outdir
 	# The stubs must shadow the real tools under exactly this environment.
 	expected=""
 	for c in $G3_STUB_CMDS; do expected="${expected}${t}/stubs/${c}"$'\n'; done
-	got="$(cd "$t/fx" && env -u BASH_ENV -u ENV -u FY_LIVE "HOME=$t/home" "TMPDIR=$t/tmp" "PATH=$runpath" \
+	got="$(cd "$t/fx" && env -u BASH_ENV -u ENV -u FY_LIVE -u SHELLOPTS -u BASHOPTS -u BASH_XTRACEFD -u CDPATH -u GLOBIGNORE -u PS4 "HOME=$t/home" "TMPDIR=$t/tmp" "PATH=$runpath" \
 		"$BASH" -c 'for c in curl ssh scp proton cleos; do command -v "$c" || echo "MISSING:$c"; done' </dev/null 2>/dev/null)" || g3_die "stub check could not run"
 	got="${got}"$'\n'
 	[ "$got" = "$expected" ] || g3_die "stubs do not shadow curl/ssh/scp/proton/cleos in the run environment"
@@ -290,7 +292,7 @@ g3_run() { # outdir
 	[ "$G3_R_CWD" = "tree" ] && cwd="$t/tree"
 	local rc=0
 	(
-		cd "$cwd" && exec env -u BASH_ENV -u ENV -u FY_LIVE "HOME=$t/home" "TMPDIR=$t/tmp" "PATH=$runpath" \
+		cd "$cwd" && exec env -u BASH_ENV -u ENV -u FY_LIVE -u SHELLOPTS -u BASHOPTS -u BASH_XTRACEFD -u CDPATH -u GLOBIGNORE -u PS4 "HOME=$t/home" "TMPDIR=$t/tmp" "PATH=$runpath" \
 			${G3_R_ENV[@]+"${G3_R_ENV[@]}"} "$G3_PERL" -e "$G3_PG_START" "$t/pg-started" "$BASH" "$t/tree/$G3_R_SCRIPT" ${G3_R_ARGS[@]+"${G3_R_ARGS[@]}"}
 	) </dev/null >"$out/stdout" 2>"$out/stderr" &
 	G3_CHILD=$!
@@ -397,7 +399,12 @@ g3_validate_rows() {
 				case "$w" in *=*) ;; *) g3_die "$l: env word without '=': $w" ;; esac
 				k="${w%%=*}"; v="${w#*=}"
 				LC_ALL=C grep -Eq '^[A-Z_][A-Z0-9_]*$' <<< "$k" || g3_die "$l: bad env key: $k"
-				case "$k" in PATH|HOME|TMPDIR|FY_LIVE) g3_die "$l: env key $k is reserved" ;; esac
+				# §15.5: keys that could run something other than the script, change which
+				# program answers, swap the validator's module or point git elsewhere
+				case "$k" in
+					PATH|HOME|TMPDIR|FY_LIVE|ENV|IFS|CDPATH|GLOBIGNORE|SHELLOPTS|PS4) g3_die "$l: env key $k is reserved" ;;
+					BASH*|LD_*|DYLD_*|GIT_*|PYTHON*|PERL5*|G3_*) g3_die "$l: env key $k is reserved" ;;
+				esac
 				g3_check_no_forbidden "$l: env value" "$v"
 			done
 			set +f

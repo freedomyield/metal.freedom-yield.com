@@ -246,6 +246,39 @@ t_pair 'echo "${EMPTYV-unset}|${WITHEQ-unset}"' 'echo "|a=b"'
 t_cases_one x 'EMPTYV= WITHEQ=a=b' - - -; t_run_cases
 t_expect "env: empty value and a value containing =" 0 "OK 1 equal"
 
+# §15.5 (P4): keys that could make the shell run something else, swap a program or a
+# module, or point git elsewhere are reserved: exact names and prefixes
+t_pair 'echo hi' 'echo hi'
+for k in ENV IFS CDPATH GLOBIGNORE SHELLOPTS PS4 BASH_ENV BASHOPTS LD_PRELOAD DYLD_INSERT_LIBRARIES GIT_DIR PYTHONPATH PERL5LIB G3_X; do
+	t_cases_one x "${k}=1" - - -; t_run_cases
+	t_expect "env (P4): reserved key $k: exit 2" 2
+	if [ "$RC" -eq 2 ] && ! printf '%s' "$ERRTXT" | grep -qF "env key $k is reserved"; then t_bad "env (P4): reserved key $k: reason must say 'env key $k is reserved' ($ERRTXT)"; fi
+done
+# P4b: just outside: still accepted, and the run happens with the value
+t_pair 'echo "${TZ-n}|${LC_ALL-n}|${GITHUB_SHA-n}|${XBASH_ENV-n}|${FYD_X-n}"' 'echo "UTC|C|x|1|1"'
+t_cases_one x 'TZ=UTC LC_ALL=C GITHUB_SHA=x XBASH_ENV=1 FYD_X=1' - - -; t_run_cases
+t_expect "env (P4b): TZ LC_ALL GITHUB_SHA XBASH_ENV FYD_X are accepted and reach the run" 0 "OK 1 equal"
+# P4c: the six shell keys a caller exports do not reach the run (suite and cases mode)
+G3_SIX='SHELLOPTS BASHOPTS BASH_XTRACEFD CDPATH GLOBIGNORE PS4'
+# SHELLOPTS and BASHOPTS are read-only in a shell, so they are given to G3 through env(1)
+t_run_six() {
+	OUT="$(cd "$R" && env SHELLOPTS=braceexpand BASHOPTS=extglob BASH_XTRACEFD=2 CDPATH=/nonexistent-g3 GLOBIGNORE=zz-g3-none "PS4=+g3 " TMPDIR="$WORK/tmp" bash "$G3" "$@" 2>"$WORK/stderr" </dev/null)"
+	RC=$?
+	ERRTXT="$(cat "$WORK/stderr")"
+}
+t_init
+t_script tests/s/test-a.sh "for k in $G3_SIX; do if env | grep -q \"^\$k=\"; then echo \"PASS  \$k=inherited\"; else echo \"PASS  \$k=unset\"; fi; done; exit 0"
+t_commit base; t_mark_base
+t_script tests/s/test-a.sh "for k in $G3_SIX; do echo \"PASS  \$k=unset\"; done; exit 0"
+t_commit head
+t_run_six --base="$BASE" --suite=tests/s
+t_expect "env (P4c): suite mode: the caller's SHELLOPTS BASHOPTS BASH_XTRACEFD CDPATH GLOBIGNORE PS4 do not reach the suite" 0 "OK 1 equal"
+t_pair "for k in $G3_SIX; do if env | grep -q \"^\$k=\"; then echo \"\$k=inherited\"; else echo \"\$k=unset\"; fi; done" \
+       "for k in $G3_SIX; do echo \"\$k=unset\"; done"
+t_cases_one x - - - -
+t_run_six --base="$BASE" --cases="$CASES"
+t_expect "env (P4c): cases mode: the caller's six shell keys do not reach the script" 0 "OK 1 equal"
+
 # ---- args column -----------------------------------------------------------------------
 t_pair 'echo hi' 'echo hi'
 for ch in "'" '"' '\' '$' '`' ';' '|' '&' '<' '>' '(' ')'; do
