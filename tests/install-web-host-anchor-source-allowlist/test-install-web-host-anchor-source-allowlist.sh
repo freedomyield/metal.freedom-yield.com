@@ -49,9 +49,10 @@ INSTALLER="${REPO}/scripts/install-web-host-anchor-source-allowlist.sh"
 
 [ -f "$INSTALLER" ] || { echo "FATAL: installer not found at $INSTALLER" >&2; exit 1; }
 
-PASS=0; FAIL=0
-ok(){ PASS=$((PASS+1)); printf '  ✓ %s\n' "$1"; }
-no(){ FAIL=$((FAIL+1)); printf '  ✗ %s\n' "$1"; }
+# shellcheck source=../lib/assert.sh
+. "$REPO/tests/lib/assert.sh"
+ok(){ t_pass "$1"; }
+no(){ t_fail "$1"; }
 
 WORK=""; cleanup(){ [ -n "${WORK}" ] && rm -rf "${WORK}"; }; trap cleanup EXIT
 WORK="$(mktemp -d)"
@@ -388,7 +389,7 @@ echo "$REMOTE_OUT" | grep -q 'OK: anchor-source.json removed' \
 
 echo
 echo "----------------------------------------"
-echo "RESULTS: ${PASS} PASS / ${FAIL} FAIL"
+t_summary install-web-host-anchor-source-allowlist || true
 [ "$FAIL" -eq 0 ] && { echo "RESULT: PASS"; exit 0; }
 echo "RESULT: FAIL"
 exit 1
