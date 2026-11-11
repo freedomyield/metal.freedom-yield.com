@@ -131,6 +131,12 @@ run_g2
 expect_refused "allow_absent: no allowlist file (rc 2)"
 
 mkrepo; commit
+rm -f scripts/duplicate-functions.allow
+ln -s /dev/null scripts/duplicate-functions.allow
+run_g2
+expect_refused "allow_not_regular: the allowlist is a symlink to /dev/null, not a regular file (rc 2)"
+
+mkrepo; commit
 chmod 000 scripts/duplicate-functions.allow
 run_g2
 expect_refused "allow_unreadable: allowlist not readable (rc 2)"
@@ -384,6 +390,8 @@ variant "wrapper_c1_no_closing: no closing brace at the definition indentation" 
 	'. "$ROOT/scripts/lib/fetch-retry.sh"\nfetch() {\n\t_fy_fetch_retry_fetch "$@"\n  }\n'
 variant "wrapper_c1_subshell: a subshell body" copy \
 	'. "$ROOT/scripts/lib/fetch-retry.sh"\nfetch() ( _fy_fetch_retry_fetch "$@" )\n'
+variant "wrapper_c1_comment_brace_body: a comment after the definition, then a 2-line body (valid bash)" copy \
+	'. "$ROOT/scripts/lib/fetch-retry.sh"\nfetch() # _fy_fetch_retry_fetch }\n{\n\t_fy_fetch_retry_fetch "$@"\n\t_fy_fetch_retry_fetch "$@"\n}\n'
 variant "wrapper_c1_brace_next_line: the opening brace on the next line" copy \
 	'. "$ROOT/scripts/lib/fetch-retry.sh"\nfetch()\n{\n\t_fy_fetch_retry_fetch "$@"\n}\n'
 variant "wrapper_c1_empty_body: an empty body" copy \
