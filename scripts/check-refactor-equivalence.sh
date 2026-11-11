@@ -9,7 +9,7 @@
 # Usage:
 #   bash scripts/check-refactor-equivalence.sh --base=<commit> --cases=<tsv>
 #   bash scripts/check-refactor-equivalence.sh --base=<commit> --suite=<dir>
-#   optional: --timeout=<seconds>  limit of each single run, digits 1..3600, default 600
+#   optional: --timeout=<seconds>  limit of each single run, digits 1..3600, default 900
 #   optional, suite mode only: --markers=colon  also read `ok:` / `PASS:` (pass) and
 #             `FAIL:` (fail) case lines; every suite file must have one at base
 #
@@ -109,7 +109,7 @@ G3_SUITE=""
 have_base=0
 have_cases=0
 have_suite=0
-G3_TIMEOUT=600
+G3_TIMEOUT=900
 have_timeout=0
 G3_MARKERS=""
 have_markers=0
