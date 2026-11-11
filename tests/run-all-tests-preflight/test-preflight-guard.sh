@@ -60,6 +60,7 @@
 set -u
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$REPO_ROOT/tests/lib/assert.sh"
 GUARD_SCRIPT="${REPO_ROOT}/tests/run-all-tests.sh"
 
 if [ ! -f "$GUARD_SCRIPT" ]; then
@@ -67,10 +68,8 @@ if [ ! -f "$GUARD_SCRIPT" ]; then
 	exit 1
 fi
 
-PASS=0
-FAIL=0
-pass() { printf 'PASS  %-70s\n' "$1"; PASS=$((PASS + 1)); }
-fail() { printf 'FAIL  %-70s\n' "$1" >&2; FAIL=$((FAIL + 1)); }
+pass() { t_pass "$1"; }
+fail() { t_fail "$1"; }
 
 TMP="$(mktemp -d -t preflight-guard-test.XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
@@ -319,8 +318,7 @@ echo "$OUT8" | grep -q "not re-invoked" \
 # ---- summary -----------------------------------------------------------------
 echo
 echo "----------------------------------------"
-echo "test-preflight-guard.sh summary: PASS=$PASS  FAIL=$FAIL"
-if [ "$FAIL" -gt 0 ]; then
+if ! t_summary preflight-guard; then
 	echo "RESULT: FAIL"
 	exit 1
 fi
