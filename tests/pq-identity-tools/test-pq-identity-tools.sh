@@ -5,9 +5,10 @@ set -u
 REPO_SRC="$(cd "$(dirname "$0")/../.." && pwd)"
 OL="${REPO_SRC}/scripts/operator-local"
 . "${REPO_SRC}/tests/lib/pq-test-key.sh"
-PASS=0; FAIL=0
-pass() { printf 'PASS  %s\n' "$1"; PASS=$((PASS + 1)); }
-bad()  { printf 'FAIL  %s\n' "$1" >&2; FAIL=$((FAIL + 1)); }
+# shellcheck source=../lib/assert.sh
+. "${REPO_SRC}/tests/lib/assert.sh"
+pass() { t_pass "$1"; }
+bad()  { t_fail "$1"; }
 skip_pass() { echo "SKIP: $1"; echo "RESULT: PASS"; exit 0; }
 fy_pq_prereq_or_skip skip_pass
 OSSL="$(fyipq__resolve_openssl)"
@@ -104,5 +105,5 @@ run pq-identity-keygen.sh "$PW"; rc=$?
 [ "$rc" -eq 0 ] && [ -f "$ENC" ] && [ -f "$PUB" ] && pass "T11 re-run keygen succeeds" || bad "T11 re-run rc=$rc"
 KD="$KD0"; FR="$FR0"
 
-echo "test-pq-identity-tools.sh summary: PASS=$PASS FAIL=$FAIL"
+t_summary pq-identity-tools || true
 [ "$FAIL" -eq 0 ] && { echo "RESULT: PASS"; exit 0; } || { echo "RESULT: FAIL"; exit 1; }
