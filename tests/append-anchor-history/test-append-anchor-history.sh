@@ -69,8 +69,8 @@ printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB_NOOP_DIR/notify.sh"
 chmod +x "$STUB_NOOP_DIR/push.sh" "$STUB_NOOP_DIR/notify.sh"
 export FYD_PUSH_TO_WEB_HOST="$STUB_NOOP_DIR/push.sh" FYD_NOTIFY="$STUB_NOOP_DIR/notify.sh"
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$REPO_ROOT/tests/lib/assert.sh"
 
 run_case() {
 	local name="$1"
@@ -84,22 +84,18 @@ run_case() {
 	fi
 	rc=$?
 	if [ "$rc" -eq "$expected_rc" ]; then
-		printf 'PASS  %-70s (rc=%d)\n' "$name" "$rc"
-		PASS=$((PASS + 1))
+		t_pass "$(printf '%-70s (rc=%d)' "$name" "$rc")"
 	else
-		printf 'FAIL  %-70s (rc=%d, expected %d)\n' "$name" "$rc" "$expected_rc" >&2
-		FAIL=$((FAIL + 1))
+		t_fail "$(printf '%-70s (rc=%d, expected %d)' "$name" "$rc" "$expected_rc")"
 	fi
 }
 
 check_expr() {
 	local name="$1" expected="$2" actual="$3"
 	if [ "$actual" = "$expected" ]; then
-		printf 'PASS  %-70s (value=%s)\n' "$name" "$actual"
-		PASS=$((PASS + 1))
+		t_pass "$(printf '%-70s (value=%s)' "$name" "$actual")"
 	else
-		printf 'FAIL  %-70s (actual=%s, expected=%s)\n' "$name" "$actual" "$expected" >&2
-		FAIL=$((FAIL + 1))
+		t_fail "$(printf '%-70s (actual=%s, expected=%s)' "$name" "$actual" "$expected")"
 	fi
 }
 
@@ -256,19 +252,15 @@ make_receipt "$FRESH_CYCLE_RECEIPT" \
 FRESH_CYCLE_STDERR="$TEST_DIR/fresh-cycle-stderr.txt"
 if bash "$SCRIPT" --receipt="$FRESH_CYCLE_RECEIPT" --history="$GENESIS_HIST" --event-type=cyclestart \
 		>/dev/null 2>"$FRESH_CYCLE_STDERR"; then
-	printf 'PASS  %-70s (rc=0)\n' "fresh (non-dup) cycle_number append succeeds"
-	PASS=$((PASS + 1))
+	t_pass "$(printf '%-70s (rc=0)' "fresh (non-dup) cycle_number append succeeds")"
 else
-	printf 'FAIL  %-70s (rc=%d)\n' "fresh (non-dup) cycle_number append succeeds" "$?" >&2
-	FAIL=$((FAIL + 1))
+	t_fail "$(printf '%-70s (rc=%d)' "fresh (non-dup) cycle_number append succeeds" "$?")"
 fi
 if grep -qi "integer expression" "$FRESH_CYCLE_STDERR"; then
-	echo "FAIL  fresh cycle_number append: stderr polluted with 'integer expression' error" >&2
+	t_fail "fresh cycle_number append: stderr polluted with 'integer expression' error"
 	sed 's/^/       stderr: /' "$FRESH_CYCLE_STDERR" >&2
-	FAIL=$((FAIL + 1))
 else
-	echo "PASS  fresh cycle_number append: stderr clean of 'integer expression' error"
-	PASS=$((PASS + 1))
+	t_pass "fresh cycle_number append: stderr clean of 'integer expression' error"
 fi
 
 # ---- coverage: invariant 2 must still REJECT a genuine (cycle_number,
@@ -294,21 +286,13 @@ run_case "invariant 2 refusal: genuine (cycle_number=4, cyclestart) duplicate" 4
 GENESIS_LINES_AFTER_DUP="$(wc -l < "$GENESIS_HIST" | tr -d ' ')"
 GENESIS_HASH_AFTER_DUP="$(history_hash "$GENESIS_HIST")"
 if [ "$GENESIS_LINES_BEFORE_DUP" = "$GENESIS_LINES_AFTER_DUP" ] && [ "$GENESIS_HASH_BEFORE_DUP" = "$GENESIS_HASH_AFTER_DUP" ]; then
-	printf 'PASS  %-70s (lines=%s, unchanged)\n' "invariant 2 refusal: history unchanged after rejected dup" "$GENESIS_LINES_AFTER_DUP"
-	PASS=$((PASS + 1))
+	t_pass "$(printf '%-70s (lines=%s, unchanged)' "invariant 2 refusal: history unchanged after rejected dup" "$GENESIS_LINES_AFTER_DUP")"
 else
-	printf 'FAIL  %-70s (lines before=%s after=%s)\n' "invariant 2 refusal: history unchanged after rejected dup" \
-		"$GENESIS_LINES_BEFORE_DUP" "$GENESIS_LINES_AFTER_DUP" >&2
-	FAIL=$((FAIL + 1))
+	t_fail "$(printf '%-70s (lines before=%s after=%s)' "invariant 2 refusal: history unchanged after rejected dup" \
+		"$GENESIS_LINES_BEFORE_DUP" "$GENESIS_LINES_AFTER_DUP")"
 fi
 
 # ---- Summary ----
 echo
 echo "----------------------------------------"
-echo "test-append-anchor-history.sh summary: PASS=$PASS  FAIL=$FAIL"
-if [ "$FAIL" -gt 0 ]; then
-	echo "RESULT: FAIL"
-	exit 1
-fi
-echo "RESULT: PASS"
-exit 0
+t_summary append-anchor-history

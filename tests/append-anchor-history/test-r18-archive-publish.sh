@@ -64,10 +64,10 @@ fi
 TMP="$(mktemp -d -t append-history-r18-publish.XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
 
-PASS=0
-FAIL=0
-pass() { printf 'PASS  %-70s\n' "$1"; PASS=$((PASS + 1)); }
-fail() { printf 'FAIL  %-70s\n' "$1" >&2; FAIL=$((FAIL + 1)); }
+# shellcheck source=tests/lib/assert.sh
+. "$REPO_ROOT/tests/lib/assert.sh"
+pass() { t_pass "$1"; }
+fail() { t_fail "$1"; }
 check_eq() {
 	local label="$1" expected="$2" actual="$3"
 	if [ "$expected" = "$actual" ]; then
@@ -537,10 +537,4 @@ fi
 # ---- summary -----------------------------------------------------------------
 echo
 echo "----------------------------------------"
-echo "test-r18-archive-publish.sh summary: PASS=$PASS  FAIL=$FAIL"
-if [ "$FAIL" -gt 0 ]; then
-	echo "RESULT: FAIL"
-	exit 1
-fi
-echo "RESULT: PASS"
-exit 0
+t_summary r18-archive-publish

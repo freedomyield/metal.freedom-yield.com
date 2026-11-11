@@ -16,10 +16,10 @@
 set -u
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-PASS=0
-FAIL=0
-ok()   { PASS=$((PASS + 1)); printf 'PASS  %s\n' "$1"; }
-bad()  { FAIL=$((FAIL + 1)); printf 'FAIL  %s\n' "$1"; }
+# shellcheck source=tests/lib/assert.sh
+. "$REPO_ROOT/tests/lib/assert.sh"
+ok()   { t_pass "$1"; }
+bad()  { t_fail "$1"; }
 skip() { printf 'SKIP  %s\n' "$1"; }
 
 WORK="$(mktemp -d -t era-invariant.XXXXXX)"
@@ -177,7 +177,4 @@ append "$WORK/h10b.jsonl" "$(receipt 3 3000 "$(txn 2)" 2 "$LEG_M" xpr-mainnet "$
 [ "$RC" -eq 0 ] && [ "$RC2" -eq 0 ] && ok "E10 equal override, and a null-chain_id selection (rc 4), are tolerated for a legacy line" || bad "E10 tolerated cases rc=$RC/$RC2 $(cat "$WORK/err")"
 
 echo "---"
-echo "test-chain-era-invariant.sh summary: PASS=$PASS  FAIL=$FAIL"
-[ "$FAIL" -eq 0 ] && { echo "RESULT: PASS"; exit 0; }
-echo "RESULT: FAIL"
-exit 1
+t_summary chain-era-invariant
