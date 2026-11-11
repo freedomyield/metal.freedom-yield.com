@@ -30,7 +30,6 @@ fail	scripts/check-cron-file.sh	existing duplicate as of 2026-11-11; no decision
 fail	scripts/check-identity-pq.sh	existing duplicate as of 2026-11-11; no decision yet
 fail	scripts/dr-drill.sh	existing duplicate as of 2026-11-11; no decision yet
 fail	scripts/run-testnet-rehearsal.sh	existing duplicate as of 2026-11-11; no decision yet
-fetch	scripts/check-identity-pins.sh	B-1: moves to scripts/lib/fetch-retry.sh (spec 5.1)
 fetch	scripts/check-pulsevm-upstream.sh	B-1: moves to scripts/lib/fetch-retry.sh (spec 5.1)
 iso_utc_of_epoch	scripts/check-anchor-publish-health.sh	existing duplicate as of 2026-11-11; no decision yet
 iso_utc_of_epoch	scripts/gen-anchor-source.sh	existing duplicate as of 2026-11-11; no decision yet

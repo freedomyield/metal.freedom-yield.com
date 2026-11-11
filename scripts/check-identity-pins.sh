@@ -368,6 +368,13 @@ if [ ! -r "$FYD_LIB" ]; then
 fi
 # shellcheck source=scripts/lib/side-effects.sh
 . "$FYD_LIB"
+FYD_FR_LIB="${SCRIPT_DIR}/../scripts/lib/fetch-retry.sh"
+if [ ! -r "$FYD_FR_LIB" ]; then
+	echo "check-identity-pins: FATAL: fetch-retry library not readable at $FYD_FR_LIB" >&2
+	exit 5
+fi
+# shellcheck source=scripts/lib/fetch-retry.sh
+. "$FYD_FR_LIB"
 
 REPO_ROOT="${FYD_REPO_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 IDENTITY_FILE="${FYD_IDENTITY_FILE:-${REPO_ROOT}/public/api/identity.json}"
@@ -442,20 +449,7 @@ REGISTRY_JSON="$(jq -c '.' "$REGISTRY_FILE" 2>/dev/null)" \
 # Same shape as check-anchor-publish-health.sh's fetch(): stop at the first
 # 200 so a transient cross-region blip does not read as breakage, and print
 # exactly the final attempt's status code.
-fetch() {
-	local url="$1" outfile="$2"
-	local attempts="${FYD_FETCH_ATTEMPTS:-3}"
-	local sleep_s="${FYD_RETRY_SLEEP:-3}"
-	local attempt=1 code
-	while :; do
-		code="$("$CURL" -sS -o "$outfile" -w "%{http_code}" --max-time 20 "$url" 2>/dev/null || echo "000")"
-		[ "$code" = "200" ] && break
-		[ "$attempt" -ge "$attempts" ] && break
-		sleep "$sleep_s"
-		attempt=$((attempt + 1))
-	done
-	printf '%s' "$code"
-}
+fetch() { fy_fetch_retry --max-time=20 -- "$@"; }
 
 # ---- 1. load the manifest ----------------------------------------------------
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/identity-pins.XXXXXX")" || die "mktemp -d failed"

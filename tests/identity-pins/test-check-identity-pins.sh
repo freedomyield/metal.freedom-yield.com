@@ -1037,6 +1037,7 @@ if k10_assert_extraction "$K10_SRC" kind_is_pinnable "k10"; then
 	K10_MUT_DIR="$K10_TMP/scripts"
 	mkdir -p "$K10_MUT_DIR/lib"
 	ln -sf "${REPO_ROOT}/scripts/lib/side-effects.sh" "$K10_MUT_DIR/lib/side-effects.sh"
+	ln -sf "${REPO_ROOT}/scripts/lib/fetch-retry.sh" "$K10_MUT_DIR/lib/fetch-retry.sh"
 	K10_MUT_CHECKER="$K10_MUT_DIR/check-identity-pins.sh"
 	sed 's/^\([[:space:]]*\)static|record)$/\1static)/' "$CHECKER" > "$K10_MUT_CHECKER"
 	if cmp -s "$K10_MUT_CHECKER" "$CHECKER"; then
