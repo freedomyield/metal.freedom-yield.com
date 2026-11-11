@@ -78,10 +78,10 @@ if [ ! -f "$SCRIPT" ]; then
 	exit 1
 fi
 
-PASS=0
-FAIL=0
-ok()  { PASS=$((PASS + 1)); echo "PASS  $1"; }
-bad() { FAIL=$((FAIL + 1)); echo "FAIL  $1"; }
+# shellcheck source=../lib/assert.sh
+. "$REPO_ROOT/tests/lib/assert.sh"
+ok()  { t_pass "$1"; }
+bad() { t_fail "$1"; }
 
 GITQ=(-c user.email=t@t -c user.name=t -c commit.gpgsign=false)
 DUMMY_TX_ID="$(printf '%064d' 1)"
@@ -501,7 +501,7 @@ for FN in sb_history_names_tx sb_history_lookup; do
 done
 
 # ---- summary ----------------------------------------------------------------
-echo "test-preview-cycle-anchor-broadcast.sh summary: PASS=$PASS  FAIL=$FAIL"
+t_summary preview-cycle-anchor-broadcast || true
 if [ "$FAIL" -eq 0 ]; then
 	echo "RESULT: PASS"
 	exit 0
