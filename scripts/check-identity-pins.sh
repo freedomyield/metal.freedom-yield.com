@@ -250,7 +250,8 @@
 #   4  --mode=live only: a `tracked` pin's URL could not be fetched, so the
 #      comparison could not be made (mismatches are never masked by this —
 #      a fetched 200 that mismatches is still exit 3)
-#   5  structural: scripts/lib/side-effects.sh is not readable. 5, not 3:
+#   5  structural: scripts/lib/side-effects.sh (or scripts/lib/fetch-retry.sh)
+#      is not readable. 5, not 3:
 #      3 already means "a tracked pin broke" and renumbering it would lie to
 #      every caller that branches on it (CI, the cron's log grep). 2 is also
 #      taken, by "cannot run" conditions that ALERT — and alerting is exactly

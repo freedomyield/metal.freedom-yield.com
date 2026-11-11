@@ -88,6 +88,7 @@
 #      (cannot content-verify)
 #   5  served but anchor-source.json is unparseable / missing dag_root_computed
 #      (or jq is unavailable)
+#   6  scripts/lib/side-effects.sh or scripts/lib/fetch-retry.sh is not readable
 #
 # Logging:
 #   Every non-OK event is written to stderr (for cron mail) and, when the path

@@ -484,7 +484,7 @@
 #   3  at least one trigger fired (T1 / T2 / T3 / T4 / T5 / T6 / T7 / T8 / T9 / BASELINE) — alerts
 #   4  a source did not return HTTP 200 after retrying
 #   5  a source returned 200 but its body could not be parsed (or jq is absent)
-#   6  scripts/lib/side-effects.sh is missing/unreadable
+#   6  scripts/lib/side-effects.sh (or scripts/lib/fetch-retry.sh) is missing/unreadable
 #
 # There is deliberately no 64 here. scripts/lib/side-effects.sh returns 64 for
 # "you called me wrong", but every call site in this file either swallows it
