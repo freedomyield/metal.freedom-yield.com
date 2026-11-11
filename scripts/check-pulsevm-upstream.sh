@@ -681,6 +681,13 @@ if [ ! -r "$FYD_LIB" ]; then
 fi
 # shellcheck source=scripts/lib/side-effects.sh
 . "$FYD_LIB"
+FYD_FR_LIB="${SCRIPT_DIR}/../scripts/lib/fetch-retry.sh"
+if [ ! -r "$FYD_FR_LIB" ]; then
+	printf 'check-pulsevm-upstream: FATAL: fetch-retry library not readable at %s\n' "$FYD_FR_LIB" >&2
+	exit 6
+fi
+# shellcheck source=scripts/lib/fetch-retry.sh
+. "$FYD_FR_LIB"
 
 RELEASES_URL="${PULSEVM_RELEASES_URL:-https://api.github.com/repos/MetalBlockchain/pulsevm/releases/latest}"
 ENDPOINTS_URL="${PULSEVM_ENDPOINTS_URL:-https://pulsevm.dev/network/endpoints.md}"
@@ -970,21 +977,7 @@ fail_and_exit() {
 # cannot succeed and is impolite to a third party; 5xx and connection failures
 # (000) still get the full retry budget, which is where transient blips
 # actually live.
-fetch() {
-	local url="$1" outfile="$2"
-	local attempts="${FYD_FETCH_ATTEMPTS:-3}"
-	local sleep_s="${FYD_RETRY_SLEEP:-3}"
-	local attempt=1 code
-	while :; do
-		code="$("$CURL" -sS -o "$outfile" -w "%{http_code}" --max-time 20 "$url" 2>/dev/null || echo "000")"
-		[ "$code" = "200" ] && break
-		case "$code" in 4??) break ;; esac
-		[ "$attempt" -ge "$attempts" ] && break
-		sleep "$sleep_s"
-		attempt=$((attempt + 1))
-	done
-	printf '%s' "$code"
-}
+fetch() { fy_fetch_retry --max-time=20 --no-retry-4xx -- "$@"; }
 
 # fetch_soft <url> <outfile> — S7 only: follows redirects (a homepage that moved
 # to www. is not an outage) and NEVER exits. Same retry rules as fetch().
