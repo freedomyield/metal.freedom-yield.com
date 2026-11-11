@@ -314,7 +314,7 @@ All three are scripts. Each has a suite under `tests/` with fixtures and one mut
 - Input: `--base=<commit>` and `--cases=<tsv>` (columns: script path, args, env, fixture dir, output files to compare, validator path `ajv-stub|python|none` (§5.3), optional list of fields to normalize).
 - Materializes the base tree with `git worktree add --detach` into a temp dir; runs base and head with the same fixtures, `HOME` and `TMPDIR` in a temp dir, `FY_LIVE` unset, and a stub directory first on `PATH` for `curl`, `ssh`, `scp`, `proton`, `cleos` (stubs record calls and fail unless the case provides a response). Before each run it checks that `command -v proton ssh` resolve to the stubs; otherwise exit 2. The validator is set by the case's validator column, as in the table in §5.3; a case whose validator path cannot be set up on this machine exits 2 (could not run), never "equal".
 - Compares rc, stdout, stderr and each listed output file byte for byte. A field may be normalized only if the case row names it (for clocks); any other difference fails.
-- Suite mode: `--suite=<dir>` runs an existing suite at base and head and compares two things only: the exit code, and the multiset of (status, case name) pairs. A case line is optional leading whitespace, then a marker, then whitespace, then the name (trailing whitespace trimmed, so `%-70s` padding does not count). The marker table is fixed: `PASS` and `✓` mean pass; `FAIL` and `✗` mean fail. Marker text, other lines and the summary line are not compared. So a suite that printed `  ✓ X` / `  ✗ X` before and prints `PASS  X` / `FAIL  X` after compares equal, and a lost, renamed or flipped case compares different. (The `✓` suites today: `tests/deploy/test-build-json-manifest.sh:42-43` prints `  ✓ %s` / `  ✗ %s` and `RESULTS: …` at `:124`; the same pair appears in six more suites under `tests/deploy/` and `tests/install-web-host-*/`.)
+- Suite mode: `--suite=<dir>` runs an existing suite at base and head and compares two things only: the exit code, and the multiset of (status, case name) pairs. A case line is optional leading whitespace, then a marker, then whitespace, then the name (trailing whitespace trimmed, so `%-70s` padding does not count). The marker table is fixed: `PASS` and `✓` mean pass; `FAIL` and `✗` mean fail. Marker text, other lines and the summary line are not compared. So a suite that printed `  ✓ X` / `  ✗ X` before and prints `PASS  X` / `FAIL  X` after compares equal, and a lost, renamed or flipped case compares different. (The `✓` suites today: `tests/deploy/test-build-json-manifest.sh:42-43` prints `  ✓ %s` / `  ✗ %s` and `RESULTS: …` at `:124`; the same pair appears in six more suites under `tests/deploy/` and `tests/install-web-host-*/`.) → §15
 - Exit 0 equal, 1 different, 2 could not run. Removes its worktree on every exit.
 - **UNVERIFIED:** which anchor scripts accept a fixed clock. Task 0 of the plan measures it; a script without one is compared with named normalized fields only.
 
@@ -375,3 +375,137 @@ These are the design room's decisions. The operator has not agreed to them yet.
 - The duplicate-name count (29) is from a throwaway parser; G2's parser may count differently.
 - Whether `scripts/sanitize-history.sh` still runs cleanly against the rebuilt public history (not run; it rewrites history).
 - Which validator (ajv or python3+jsonschema) a CI runner ends with after `scripts/setup-schema-validator.sh`; therefore whether B-2 is ever run against a real ajv (this Mac has none).
+
+## 15. Amendment 2026-11-11 — G3 suite mode
+
+Status: design-room calls (D-12..D-18 below); the operator has not agreed to them yet. Nothing above this section is rewritten; §9's suite-mode bullet only gains the pointer "→ §15". Audit tier: G3 stays tier 2 (§10); the test-directory migrations stay 1-equivalent, with the tier-3 mutation spot checks of §6.2.
+
+### 15.1 Why
+
+C-tests migrated 68 test directories under G3 suite mode; 13 were left (`.superpowers/sdd/2026-11-10-simplify/cut-b1-gates-report.md`, "終わらなかった所"). They fall into three kinds (15.2). Two gaps were also recorded (`.superpowers/comments/2026-11-11.md`, [g3]): a run has no time limit, and the cases-mode env column reserves only `PATH HOME TMPDIR FY_LIVE` (`scripts/check-refactor-equivalence.sh:351`). Reading the suite-mode code for this amendment found a third, which is the most important: suite mode compares only the exit code and the case multiset (`:520-524`), so a suite that is **red at both sides with the same failing cases compares equal** (`OK`). That is a pass without evidence and contradicts §9's "fails closed". 15.3 closes it before anything else lands.
+
+### 15.2 The 13 directories, by kind, and the call for each kind
+
+| Kind | Directories | Call (recommended first) |
+|---|---|---|
+| T — a case name carries a time, a random number or a temp path, so it differs between two runs of the same commit | `external-watch`, `deploy`, `reward-tracker`, `preview-cycle-anchor-broadcast`, `pq-identity-tools`, `side-effects-callers` (6) | **Pin the name in the test** (D-12) |
+| M — the marker has a colon (`  ok: X` / `  FAIL: X`, or `PASS: X` / `FAIL: X`), which the fixed table does not read | `cycle-transition`, `cycle-transition-steps`, `renewal-memo`, `notify-anchor-transition`, one suite in `sign-anchor-event` (5) | **Fix G3: an opt-in, named marker set `--markers=colon`** (D-13) |
+| N — the suite needs the real `curl`, so under G3's stub it is red at base and at head | `watch-validators`, `agent-readability` (2) | **Do not prove in G3; do not migrate in this cut** (D-14) |
+
+**Kind T — pin the name in the test (D-12).**
+- Why not in G3: the name varies between two runs of the *same* commit, so the instability belongs to the test, not to the refactor (comment m2). Masking digits or paths in G3 would let two different cases compare equal in every suite, which loosens the gate for all 81 directories to help 6. Temp paths in case names also put work-machine absolute paths into CI logs (`.superpowers/sdd/mac-operations-rules.md` rule 8).
+- How: per directory, commit 1 ("pin") replaces only the varying part of each affected case name with a fixed word; the varying value stays in the check itself and may stay in the failure reason. Commit 2 is the assert migration, proven by G3 suite mode like the other 68.
+- How the pin commit is proven (G3 cannot compare it, since its base names vary), all by machine except (c):
+  - (a) `check-refactor-equivalence.sh --base=HEAD --suite=<dir>` at the pin commit exits 0: two independent runs of one commit give the same multiset, so the names are now stable. The same command at the pin commit's parent exits 1, which is how a directory is classified as kind T (15.8, step 0). If it already exits 0 at the parent, the directory is not kind T: no pin commit.
+  - (b) `--base=<parent>` at the pin commit: the `SUITE` line shows `base_rc=0 head_rc=0` and equal counts; every `DIFF` line is `case-only-at-base pass:` or `case-only-at-head pass:`; the two kinds are equal in number, and that number equals the number of pinned names written in the lane report.
+  - (c) The commit's diff touches only that directory's suite files and only string literals in name position (the reviewer reads it; test code).
+- Second option (not recommended): a G3 argument naming, per suite file, a literal name prefix compared by prefix only. Narrower than masking, but it adds a judgment part to a tier-2 gate for a property the test can simply have.
+- Third option (not recommended): prove without G3. Weaker than (a)–(c), which already use G3.
+
+**Kind M — `--markers=colon` (D-13).**
+- Forms seen on main fc3c6b2: `  ok: $1` / `  FAIL: $1` (`tests/cycle-transition/test-cycle-transition.sh:46-47`, `tests/cycle-transition-steps/test-cycle-transition-steps.sh:49-50`, `tests/renewal-memo/test-check-renewal-memo.sh:49-50`); `PASS: $1` / `FAIL: $1` (`tests/notify-anchor-transition/test-notify-anchor-transition.sh:30-31`).
+- Rule: with `--markers=colon`, a case line is also: optional leading whitespace, then exactly `ok:` or `PASS:` (pass) or `FAIL:` (fail), case-sensitive, then at least one whitespace, then the name (trailing whitespace trimmed). The default table of §9 is unchanged and still applies; the colon set is added to it at both sides. Without the argument nothing changes.
+- Fail closed: an unknown set name, `--markers` given twice, `--markers` with `--cases`, or `--markers=colon` on a suite file that has no colon-form line at base → exit 2. The last rule keeps the option from being left on by habit (the same idea as G2's `OBSOLETE`, D-10).
+- Why G3 and not the test: turning `ok:` into `PASS  ` *is* the migration; the base output stays unreadable to G3 whatever the test does. Why not "other proof": G3 can do it with a small named opt-in, and counting more lines can only add `DIFF`s, never hide a lost case.
+- These suites test transition scripts (§3 C-4). The migration changes tests only, never a script under `scripts/` or `bin/`, so the freeze is not engaged. Call: land them before the pre-12/7 rehearsal, so the rehearsal runs the migrated suites, or else after 2026-12-07. `cycle-transition*` and `sign-anchor-event` cover tier-3 scripts: one mutation of the script still turns the suite red (§6.2).
+
+**Kind N — not proven in G3, not migrated in this cut (D-14).**
+- A `curl` pass-through in G3 would open the gate's main safety property (no network, no host, no broadcast, §9) on every run. Rejected.
+- Shipping a curl stub inside the suite changes what it tests: `tests/watch-validators/test-check-watch-validators.sh:54` and `:228` use the real `curl file://` and its transport-error path on purpose. That is a test redesign, out of scope.
+- A separate proof outside G3 would need a second copy of the marker table and extraction (two sources of truth), for two suites. The gain (two suites on the shared helper) is smaller than that cost. The two suites keep their own helpers; the roster and their counts do not change (A-3 holds). If they are ever redesigned not to need the real `curl`, G3 proves their migration then.
+- With 15.3 in place, G3 on these directories exits 2 ("base is red"), never `OK`.
+
+### 15.3 Suite mode: the base must be green (D-15)
+
+- For each suite file: if the base run's rc is not 0, or the base output has any fail-status case line, G3 exits 2 with `check-refactor-equivalence: <id>: base is red (rc=<n>, fail cases=<k>): cannot prove equivalence`. No `OK` is printed.
+- Base green and head red is unchanged: `DIFF <id> rc` and/or the case lines, exit 1 (a real difference, not "could not run").
+- Cases mode is unchanged: a non-zero rc is a normal, compared result there.
+- No switch to allow a red base (that switch would be the hole; D-7's reasoning).
+- This tightens existing behaviour: a red/red suite that was `OK` becomes exit 2. It never turns a non-`OK` into `OK`. The G3 lane re-runs the new G3 over the 68 migrated directories (base = parent of each migration commit, head = that commit); every one must still exit 0. Any exit 2 means that migration was never proven: it is reported to the supervisor, not fixed in the lane.
+
+### 15.4 Time limit per run (D-16)
+
+- `--timeout=<seconds>`, optional, digits only, 1..3600; default 600. Given twice, empty, `0`, `3601`, a sign or a unit → exit 2.
+- It bounds each single run: one script (cases mode) or one suite file (suite mode) at one side. The whole G3 call is bounded by runs × limit; an outer limit on the pre-merge step is not designed here.
+- On expiry: TERM to the run's process group, KILL 5 s later if anything is left; then exit 2 with `check-refactor-equivalence: <id>: timeout after <n>s at base|head`. Never a `DIFF` that lets the run continue, never `OK`: a run that did not finish proves nothing.
+- The run starts as the leader of its own process group (perl `setpgrp(0,0); exec …`; perl is already required by G3 for the PATH farm, `:193`; no new dependency). One background watchdog, whose PID G3 records, does the TERM/KILL. G3 signals only the recorded PID and process group, never by name (rule 1; hook `block-mass-kill.py`). The existing EXIT/INT/TERM trap also stops the recorded group and watchdog before it removes the worktree. macOS has no `timeout(1)` by default, so G3 must not depend on it.
+- Why 600: no suite time under G3 has been measured (15.9). The G3 lane times every suite once (15.8, step 0); if the slowest exceeds 300 s, it returns to the design room before the default is fixed.
+
+### 15.5 Reserved env keys (D-17)
+
+- Rule: a key is reserved when it can make the shell run something other than the script under test, change which program answers a command, swap the validator's module, or point git at another repository. Both sides would then agree for a reason that is not the script — a false "equal".
+- Cases mode, column 3 (exit 2 `env key <k> is reserved`), in addition to `PATH HOME TMPDIR FY_LIVE`:
+  - exact: `ENV`, `IFS`, `CDPATH`, `GLOBIGNORE`, `SHELLOPTS`, `PS4`;
+  - prefixes: `BASH` (covers `BASH_ENV`, `BASHOPTS`, `BASH_XTRACEFD`, …), `LD_`, `DYLD_`, `GIT_`, `PYTHON`, `PERL5`, `G3_`.
+  - Still allowed (the "just outside"): `TZ` (needed for clocks), `LC_*` (G3 already exports `LC_ALL=C`; a row's value applies to both sides alike), `GITHUB_*` (does not start with `GIT_`), `FY_*`/`FYD_*` other than `FY_LIVE`.
+- Suite mode passes no row env (`:491`) but inherits the caller's environment apart from `BASH_ENV ENV FY_LIVE` and the three it sets (`:259`). Add `-u` for `SHELLOPTS BASHOPTS BASH_XTRACEFD CDPATH GLOBIGNORE PS4` to both `env` lines (`:250`, `:259`). `env -u` cannot remove a prefix, so prefixes apply to rows only.
+- Second option (not recommended now): an allowlist of key forms. Stronger in the 5.3 sense, but it would change which existing rows are legal; tracked cases files on main: 0 (`git ls-files`, 2026-11-11), yet the lanes' scratch rows and G3's own suite fixtures use keys not surveyed. Revisit when a cases file is first tracked.
+
+### 15.6 Properties and the break-to-prove table
+
+Each property gets at least one mutation of `scripts/check-refactor-equivalence.sh` that turns the G3 suite red, recorded red then green (§10). "Just outside" rows are the case closest to the exception that must keep the old result.
+
+| # | Property | Case(s) in the G3 suite | Mutation that must turn it red |
+|---|---|---|---|
+| P1 | Red base → exit 2 | fixture suite red at both sides with the same fail cases (rc 1) → exit 2, no `OK` | remove the base-red check (today's behaviour → `OK`) |
+| P1b | rc 0 but a fail case at base → exit 2 | fixture prints `FAIL  x`, exits 0 at both sides → exit 2 | check rc only |
+| P1c | Just outside: base green, head red → exit 1 with `DIFF`, not exit 2 | fixture green at base, red at head | apply the red check to head too |
+| P2 | Colon set is opt-in | colon-only suite without `--markers` → exit 2 "no case lines at base" (as today) | make the colon set the default |
+| P2b | Colon set compares across forms | base `  ok: X`, head `PASS  X` → exit 0; base `  ok: X`, head `FAIL  X` → exit 1; base `PASS: X` with X missing at head → exit 1 | map `FAIL:` to pass; drop `PASS:` from the set |
+| P2c | Just outside: not case lines under the colon set | `OK: X`, `ok X`, `ok:X`, `okay: X`, `not ok: X` at base only → no case from them (they cannot create a `DIFF` or a count) | case-insensitive match; `\s*` instead of `\s+` after the colon; unanchored match |
+| P2d | Bad use → exit 2 | `--markers=tap`; `--markers` twice; with `--cases`; `--markers=colon` on a suite with no colon line at base | remove each check (one mutation per condition) |
+| P3 | Timeout → exit 2 | `--timeout=2`, fixture sleeps 30 → exit 2 within 2+5+slack s, message names the side; the test bounds its own wait (perl `alarm`) so a broken G3 fails instead of hanging | disable the watchdog; never exit 2 on expiry |
+| P3b | The whole process group is stopped | fixture starts a background child that writes its PID; after G3 returns, `kill -0 <pid>` fails | signal the leader PID only |
+| P3c | Just outside: a run that ends in time is a normal result | `--timeout=5`, fixture ends in 1 s → exit 0 | fire at 0 s / treat limit as already expired |
+| P3d | Argument check | `0`, `3601`, `10s`, `-1`, empty, twice → exit 2; `1` and `3600` accepted | widen or drop the range check |
+| P4 | Reserved keys refused | one row each: `ENV`, `IFS`, `CDPATH`, `GLOBIGNORE`, `SHELLOPTS`, `PS4`, `BASH_ENV`, `BASHOPTS`, `LD_PRELOAD`, `DYLD_INSERT_LIBRARIES`, `GIT_DIR`, `PYTHONPATH`, `PERL5LIB`, `G3_X` → exit 2 | drop one exact key; drop one prefix (one mutation each class) |
+| P4b | Just outside: still accepted | `TZ=UTC`, `LC_ALL=C`, `GITHUB_SHA=x`, `XBASH_ENV=1`, `FYD_X=1` → run happens | prefix match unanchored (substring); `GIT` without `_` |
+| P4c | Suite-mode child does not inherit the six shell keys | caller exports `SHELLOPTS=xtrace` etc.; the fixture suite prints whether each is set → unset | drop one `-u` |
+| P5 | Instability is seen, not masked | fixture suite whose case name contains `$RANDOM`, `--base=HEAD` → exit 1 | any normalization of digits in names |
+| P6 | Existing cases keep their meaning | the current G3 suite (`PASS=130`) stays green; any existing case whose expectation changes is listed in the lane report with its reason (only P1 may cause one) | — (regression, not a mutation) |
+
+### 15.7 Where it connects / how to remove it
+
+- Seams: G3's command line (`--markers=`, `--timeout=`), the env-key check of cases column 3, the case-line extraction (`g3_extract_cases`), the process start and the two `env` lines in `g3_run`, and the per-suite comparison in `g3_suite_mode`. Nothing else changes; no other script calls G3 at runtime.
+- Added only: both arguments are optional. Without them, G3 behaves as §9 except three tightenings (red base → exit 2; a 600 s limit; more reserved keys). Each can only turn a former `OK` or hang into exit 2, never a former non-`OK` into `OK`. No existing cases row changes meaning unless it used a reserved key, and such a row was already unsafe.
+- The G3 lane lands as four commits, each revertable alone: (1) red base, (2) timeout, (3) reserved keys, (4) `--markers=colon`. `git revert` of one restores §9's behaviour for that part only.
+- The migrated suites never call G3; G3 is their proof at merge time, recorded in the lane report. Reverting (4) does not break the kind-M suites; only a later re-proof of those commits would need it back. Kind-T pin commits revert per directory (the names vary again; nothing else changes).
+- No runtime switch, for D-7's reason; a switch for 15.3 would be the hole.
+
+### 15.8 Lanes and the files each may touch
+
+| Step / lane | Directories | Files it may touch | Depends on |
+|---|---|---|---|
+| 0 (inside L1, first, no code) | all 13 + the 68 | none; writes only its lane report | — |
+| L1 G3 | — | `scripts/check-refactor-equivalence.sh`, `tests/check-refactor-equivalence/**`, the G3 row of `TOOLKIT.md` | — |
+| T1 | `external-watch`, `deploy`, `reward-tracker` | `tests/<dir>/**` of these only | L1 reviewed |
+| T2 | `preview-cycle-anchor-broadcast`, `pq-identity-tools`, `side-effects-callers` | `tests/<dir>/**` of these only | L1 reviewed |
+| M1 | `cycle-transition`, `cycle-transition-steps` | `tests/<dir>/**` of these only | L1 reviewed |
+| M2 | `renewal-memo`, `notify-anchor-transition`, `sign-anchor-event` (the colon suite only) | `tests/<dir>/**` of these only | L1 reviewed |
+| (none) | `watch-validators`, `agent-readability` | — | — (D-14) |
+
+- Step 0, by machine: for each of the 13, run the current G3 with `--base=HEAD --suite=<dir>` and record exit code and the time (`time`); this confirms the kind (T exits 1; M exits 2 "no case lines"; N shows `base_rc` ≠ 0) and finds which `sign-anchor-event` file is kind M. Also time the 68. A directory whose measured kind differs from 15.2 goes back to the supervisor before its lane starts.
+- No lane touches `scripts/**` (other than L1's one file), `bin/**`, `tests/lib/assert.sh`, `tests/run-all-tests.sh`, any workflow, or another lane's directory. A lane that needs one of them stops and returns.
+- T1, T2, M1, M2 may run in parallel (no shared file) after L1, within the headcount (`~/.claude/bin/org-headcount`). Each directory is one commit (kind M) or two (kind T: pin, then migrate). Merge order of the bundle: L1's four commits first, then the directory lanes in any order.
+- Each lane's proof: kind T as 15.2 (a)–(c) then G3 OK; kind M: G3 `--markers=colon` OK; tier-3 directories (`preview-cycle-anchor-broadcast`, `pq-identity-tools`, `cycle-transition*`, `sign-anchor-event`): one script mutation still red, the script restored and not committed. One reviewer at the end of the bundle for L1 (tier 2).
+
+### 15.9 UNVERIFIED
+
+- Which `sign-anchor-event` suite file is kind M (the report says one; step 0 finds it).
+- Why `agent-readability` is red under the stubs: its suite file shows no direct `curl`; it may reach `curl` through a script it calls (step 0 records `base_rc`).
+- That `deploy` and `side-effects-callers` are kind T (from the report; not re-measured by the design room).
+- That `--base=HEAD` runs with the current G3: nothing refuses base = HEAD (`:123-124` resolve both independently), but the design room ran nothing.
+- Whether an existing G3 suite case expects `OK` for a red/red suite (P6 lists it if so).
+- The slowest suite's time under G3 (step 0), and hence whether 600 s is right.
+
+### 15.10 Calls made by the design room (2026-11-11)
+
+- D-12. Kind T: pin names in the test; no name masking in G3.
+- D-13. Kind M: an opt-in named marker set `--markers=colon`; the default table unchanged.
+- D-14. Kind N: no curl pass-through; not migrated in this cut.
+- D-15. Suite mode: a red base exits 2; no switch.
+- D-16. A per-run limit, default 600 s, expiry exits 2; process group stopped by recorded PID only.
+- D-17. Reserved env keys by exact name and prefix (cases column 3), plus six more `env -u` names in both run environments; an allowlist is left for when a cases file is first tracked.
+- D-18. The G3 change lands as four separately revertable commits, before any directory lane.
+
+Questions for the operator from this amendment: none. The calls above are listed so they can be checked while reading.
