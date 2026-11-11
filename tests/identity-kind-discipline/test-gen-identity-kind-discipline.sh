@@ -30,13 +30,14 @@ REAL_REGISTRY="${REPO_SRC}/deploy/publication.json"
 
 PASS=0
 FAIL=0
-pass() { printf 'PASS  %s\n' "$1"; PASS=$((PASS + 1)); }
-fail() { printf 'FAIL  %s\n' "$1" >&2; FAIL=$((FAIL + 1)); }
+. "${REPO_SRC}/tests/lib/assert.sh"
+pass() { t_pass "$1"; }
+fail() { t_fail "$1"; }
 
 skip_pass() {
 	echo "SKIP: $1"
 	echo
-	echo "test-gen-identity-kind-discipline.sh summary: PASS=$PASS  FAIL=$FAIL"
+	t_summary gen-identity-kind-discipline
 	echo "RESULT: PASS"
 	exit 0
 }
@@ -483,8 +484,7 @@ done
 
 echo
 echo "----------------------------------------"
-echo "test-gen-identity-kind-discipline.sh summary: PASS=$PASS  FAIL=$FAIL"
-if [ "$FAIL" -gt 0 ]; then
+if ! t_summary gen-identity-kind-discipline; then
 	echo "RESULT: FAIL"
 	exit 1
 fi
