@@ -36,10 +36,10 @@ for f in "$SNIPPET" "$INSTALLER" "$PUSHER"; do
 	[ -f "$f" ] || { echo "FATAL: not found: $f" >&2; exit 1; }
 done
 
-PASS=0
-FAIL=0
-ok()  { PASS=$((PASS + 1)); echo "PASS  $1"; }
-bad() { FAIL=$((FAIL + 1)); echo "FAIL  $1"; }
+# shellcheck source=tests/lib/assert.sh
+. "$REPO_ROOT/tests/lib/assert.sh"
+ok()  { t_pass "$1"; }
+bad() { t_fail "$1"; }
 
 DAG_HEX="$(printf 'a%.0s' $(seq 1 64))"
 TX_HEX="$(printf 'b%.0s' $(seq 1 64))"
@@ -799,10 +799,4 @@ grep -q 'FY-SUBDIR-ALLOWLIST-V1' "$WRAP" \
 teardown
 
 # ---- summary ---------------------------------------------------------------
-echo "test-install-web-host-subdir-allowlist.sh summary: PASS=$PASS  FAIL=$FAIL"
-if [ "$FAIL" -eq 0 ]; then
-	echo "RESULT: PASS"
-	exit 0
-fi
-echo "RESULT: FAIL"
-exit 1
+t_summary install-web-host-subdir-allowlist
