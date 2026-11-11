@@ -22,11 +22,11 @@ INSTALLER="${REPO_ROOT}/scripts/install-anomalies-web-origin-env.sh"
 CHECKER="${REPO_ROOT}/scripts/check-cron-file.sh"
 BOOTSTRAP="${REPO_ROOT}/scripts/vps-bootstrap.sh"
 
-PASS=0
-FAIL=0
 SKIP=0
-ok()   { PASS=$((PASS + 1)); echo "PASS  $1"; }
-bad()  { FAIL=$((FAIL + 1)); echo "FAIL  $1${2:+ — $2}"; }
+# shellcheck source=../lib/assert.sh
+. "$REPO_ROOT/tests/lib/assert.sh"
+ok()   { t_pass "$1"; }
+bad()  { t_fail "$1" ${2:+"$2"}; }
 skip() { SKIP=$((SKIP + 1)); echo "SKIP  $1${2:+ — $2}"; }
 mode_of() { stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1"; }
 
@@ -135,7 +135,8 @@ else
 	skip "T9 root gate" "running as root"
 fi
 
-echo "test-install-anomalies-web-origin-env.sh summary: PASS=$PASS  FAIL=$FAIL  SKIP=$SKIP"
+echo "SKIP=$SKIP"
+t_summary install-anomalies-web-origin-env || true
 if [ "$FAIL" -eq 0 ]; then
 	echo "RESULT: PASS"
 	exit 0
