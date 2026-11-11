@@ -27,8 +27,9 @@ fi
 
 PASS=0
 FAIL=0
-ok()  { PASS=$((PASS + 1)); echo "PASS  $1"; }
-bad() { FAIL=$((FAIL + 1)); echo "FAIL  $1"; }
+. "${REPO_ROOT}/tests/lib/assert.sh"
+ok()  { t_pass "$1"; }
+bad() { t_fail "$1"; }
 
 DIR=""
 setup() {
@@ -154,8 +155,7 @@ echo "$OUT" | grep -q 'removed disabled marker' \
 teardown
 
 # ---- summary --------------------------------------------------------------------------
-echo "test-install-anchor-watch-alert-only.sh summary: PASS=$PASS  FAIL=$FAIL"
-if [ "$FAIL" -eq 0 ]; then
+if t_summary install-anchor-watch-alert-only; then
 	echo "RESULT: PASS"
 	exit 0
 fi
