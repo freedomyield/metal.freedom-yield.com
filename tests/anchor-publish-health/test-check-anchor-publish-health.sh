@@ -601,6 +601,25 @@ RC=$?
 	|| bad "bp5: curl calls did not all carry --max-time 15 ($(sort -u "$BASE/args.log" | head -3 | tr '\n' ';'))"
 teardown
 
+# ---- case bp6: the fetch-retry library is unreadable -> exit 6 --------
+# Exercised on a COPY of the checker in a scripts/ tree of its own that has the
+# real side-effects library (symlinked) but NO scripts/lib/fetch-retry.sh, so the
+# real library is never touched or moved and the side-effects check is passed.
+setup
+NOFR_DIR="$BASE/nofr"
+mkdir -p "$NOFR_DIR/scripts/lib"
+cp "$CHECKER" "$NOFR_DIR/scripts/check-anchor-publish-health.sh"
+ln -sf "${REPO_ROOT}/scripts/lib/side-effects.sh" "$NOFR_DIR/scripts/lib/side-effects.sh"
+NOFR_RC=0
+NOFR_OUT="$(bash "$NOFR_DIR/scripts/check-anchor-publish-health.sh" 2>&1)" || NOFR_RC=$?
+[ "$NOFR_RC" -eq 6 ] \
+	&& ok "bp6: an unreadable fetch-retry library refuses to run (exit 6) rather than running without retries" \
+	|| bad "bp6: expected exit 6, got $NOFR_RC (out: $NOFR_OUT)"
+echo "$NOFR_OUT" | grep -q 'fetch-retry library not readable' \
+	&& ok "bp6: the refusal names the missing fetch-retry library" \
+	|| bad "bp6: refusal message missing (out: $NOFR_OUT)"
+teardown
+
 # ---- summary -----------------------------------------------------------------
 echo "test-check-anchor-publish-health.sh summary: PASS=$PASS  FAIL=$FAIL"
 if [ "$FAIL" -eq 0 ]; then

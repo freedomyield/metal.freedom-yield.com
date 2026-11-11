@@ -1244,6 +1244,24 @@ run_live >/dev/null 2>&1
 	|| bad "bp5 live: curl calls did not all carry --max-time 20 ($(sort -u "$BASE/args.log" 2>/dev/null | head -3 | tr '\n' ';'))"
 teardown
 
+# ---- case case B-P6 (fetch-retry lib): the fetch-retry library is unreadable -> exit 5 --------
+# Exercised on a COPY of the checker in a scripts/ tree of its own that has the
+# real side-effects library (symlinked) but NO scripts/lib/fetch-retry.sh, so the
+# real library is never touched or moved and the side-effects check is passed.
+NOFR_DIR="$(mktemp -d -t identity-pins-nofr.XXXXXX)"
+mkdir -p "$NOFR_DIR/scripts/lib"
+cp "$CHECKER" "$NOFR_DIR/scripts/check-identity-pins.sh"
+ln -sf "${REPO_ROOT}/scripts/lib/side-effects.sh" "$NOFR_DIR/scripts/lib/side-effects.sh"
+NOFR_RC=0
+NOFR_OUT="$(bash "$NOFR_DIR/scripts/check-identity-pins.sh" 2>&1)" || NOFR_RC=$?
+[ "$NOFR_RC" -eq 5 ] \
+	&& ok "case B-P6 (fetch-retry lib): an unreadable fetch-retry library refuses to run (exit 5) rather than running without retries" \
+	|| bad "case B-P6 (fetch-retry lib): expected exit 5, got $NOFR_RC (out: $NOFR_OUT)"
+echo "$NOFR_OUT" | grep -q 'fetch-retry library not readable' \
+	&& ok "case B-P6 (fetch-retry lib): the refusal names the missing fetch-retry library" \
+	|| bad "case B-P6 (fetch-retry lib): refusal message missing (out: $NOFR_OUT)"
+rm -rf "$NOFR_DIR"
+
 echo
 echo "test-check-identity-pins.sh summary: ${PASS} PASS / ${FAIL} FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

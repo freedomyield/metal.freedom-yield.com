@@ -991,6 +991,25 @@ echo "$OUT" | grep -q 'side-effects library not readable' \
 	|| bad "exit6: refusal message missing (out: $OUT)"
 teardown
 
+# ---- case case 10g: the fetch-retry library is unreadable -> exit 6 --------
+# Exercised on a COPY of the checker in a scripts/ tree of its own that has the
+# real side-effects library (symlinked) but NO scripts/lib/fetch-retry.sh, so the
+# real library is never touched or moved and the side-effects check is passed.
+setup
+NOFR_DIR="$BASE/nofr"
+mkdir -p "$NOFR_DIR/scripts/lib"
+cp "$CHECKER" "$NOFR_DIR/scripts/check-pulsevm-upstream.sh"
+ln -sf "${REPO_ROOT}/scripts/lib/side-effects.sh" "$NOFR_DIR/scripts/lib/side-effects.sh"
+NOFR_RC=0
+NOFR_OUT="$(bash "$NOFR_DIR/scripts/check-pulsevm-upstream.sh" 2>&1)" || NOFR_RC=$?
+[ "$NOFR_RC" -eq 6 ] \
+	&& ok "case 10g: an unreadable fetch-retry library refuses to run (exit 6) rather than running without retries" \
+	|| bad "case 10g: expected exit 6, got $NOFR_RC (out: $NOFR_OUT)"
+echo "$NOFR_OUT" | grep -q 'fetch-retry library not readable' \
+	&& ok "case 10g: the refusal names the missing fetch-retry library" \
+	|| bad "case 10g: refusal message missing (out: $NOFR_OUT)"
+teardown
+
 # ---- case 11a (DRY): the repo's REAL logs/ is untouched ----------------------
 # Deliberately runs against the checker's OWN default LOG and STATE paths — no
 # override — so the containment claim is measured where it matters, and
