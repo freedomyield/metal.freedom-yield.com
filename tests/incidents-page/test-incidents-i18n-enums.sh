@@ -50,10 +50,10 @@ if ! command -v jq >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
 	exit 1
 fi
 
-PASS=0
-FAIL=0
-ok()  { PASS=$((PASS + 1)); echo "PASS  $1"; }
-bad() { FAIL=$((FAIL + 1)); echo "FAIL  $1"; }
+# shellcheck source=tests/lib/assert.sh
+. "$REPO_ROOT/tests/lib/assert.sh"
+ok()  { t_pass "$1"; }
+bad() { t_fail "$1"; }
 
 # Enum values straight out of the schema — never a copy kept in this test, so
 # adding a severity or status level to the schema makes this suite demand a
@@ -175,6 +175,4 @@ else
 fi
 
 echo
-echo "test-incidents-i18n-enums.sh summary: PASS=$PASS  FAIL=$FAIL"
-[ "$FAIL" -eq 0 ] || exit 1
-exit 0
+t_summary incidents-i18n-enums
