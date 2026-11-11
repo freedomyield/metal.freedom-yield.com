@@ -18,11 +18,11 @@ REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 INSTALLER="${REPO_ROOT}/scripts/install-anomalies-logrotate.sh"
 BOOTSTRAP="${REPO_ROOT}/scripts/vps-bootstrap.sh"
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$REPO_ROOT/tests/lib/assert.sh"
 SKIP=0
-ok()   { PASS=$((PASS + 1)); echo "PASS  $1"; }
-bad()  { FAIL=$((FAIL + 1)); echo "FAIL  $1${2:+ — $2}"; }
+ok()   { t_pass "$1"; }
+bad()  { t_fail "$1${2:+ — $2}"; }
 skip() { SKIP=$((SKIP + 1)); echo "SKIP  $1${2:+ — $2}"; }
 mode_of() { stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1"; }
 
@@ -322,10 +322,5 @@ else
 	skip "T9/T10/T11 validation joined with main config" "logrotate not installed here (verified on the validator host at rollout)"
 fi
 
-echo "test-install-anomalies-logrotate.sh summary: PASS=$PASS  FAIL=$FAIL  SKIP=$SKIP"
-if [ "$FAIL" -eq 0 ]; then
-	echo "RESULT: PASS"
-	exit 0
-fi
-echo "RESULT: FAIL"
-exit 1
+echo "SKIP=$SKIP"
+t_summary install-anomalies-logrotate
