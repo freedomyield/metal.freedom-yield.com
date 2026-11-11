@@ -50,6 +50,7 @@ TESTNET_HISTORY="https://test.proton.eosusa.io"
 
 PASS=0
 FAIL=0
+. "${REPO_ROOT}/tests/lib/assert.sh"
 
 run_case() {
 	local name="$1"
@@ -63,11 +64,9 @@ run_case() {
 	fi
 	rc=$?
 	if [ "$rc" -eq "$expected_rc" ]; then
-		printf 'PASS  %-70s (rc=%d)\n' "$name" "$rc"
-		PASS=$((PASS + 1))
+		t_pass "$(printf '%-70s (rc=%d)' "$name" "$rc")"
 	else
-		printf 'FAIL  %-70s (rc=%d, expected %d)\n' "$name" "$rc" "$expected_rc" >&2
-		FAIL=$((FAIL + 1))
+		t_fail "$(printf '%-70s (rc=%d, expected %d)' "$name" "$rc" "$expected_rc")"
 	fi
 }
 
@@ -174,8 +173,7 @@ fi
 # ---- Summary ----
 echo
 echo "----------------------------------------"
-echo "test-gen-anchor-receipt.sh summary: PASS=$PASS  FAIL=$FAIL"
-if [ "$FAIL" -gt 0 ]; then
+if ! t_summary gen-anchor-receipt; then
 	echo "RESULT: FAIL"
 	exit 1
 fi

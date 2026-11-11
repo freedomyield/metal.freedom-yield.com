@@ -18,8 +18,9 @@ set -u
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PASS=0
 FAIL=0
-ok()   { PASS=$((PASS + 1)); printf 'PASS  %s\n' "$1"; }
-bad()  { FAIL=$((FAIL + 1)); printf 'FAIL  %s\n' "$1"; }
+. "${REPO_ROOT}/tests/lib/assert.sh"
+ok()   { t_pass "$1"; }
+bad()  { t_fail "$1"; }
 skip() { printf 'SKIP  %s\n' "$1"; }
 
 WORK="$(mktemp -d -t receipt-chain.XXXXXX)"
@@ -226,7 +227,6 @@ if [ "$REAL_VALIDATOR" = 1 ]; then
 else skip "C11 example validation (no validator)"; fi
 
 echo "---"
-echo "test-chain-aware-receipt.sh summary: PASS=$PASS  FAIL=$FAIL"
-[ "$FAIL" -eq 0 ] && { echo "RESULT: PASS"; exit 0; }
+t_summary chain-aware-receipt && { echo "RESULT: PASS"; exit 0; }
 echo "RESULT: FAIL"
 exit 1
