@@ -100,7 +100,7 @@ PASS=0; FAIL=0
 check_exists() {
 	local path="$1" label="$2"
 	if [ -e "${path}" ]; then
-		echo "  PASS ${label} preserved at ${path}"
+		echo "  PASS ${label} preserved"
 		PASS=$((PASS+1))
 	else
 		echo "  FAIL ${label} unexpectedly deleted at ${path}"
