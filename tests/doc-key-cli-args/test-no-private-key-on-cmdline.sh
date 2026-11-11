@@ -12,9 +12,10 @@
 set -u
 REPO_SRC="$(cd "$(dirname "$0")/../.." && pwd)"
 SELF_REL="tests/doc-key-cli-args/test-no-private-key-on-cmdline.sh"
-PASS=0; FAIL=0
-pass() { printf 'PASS  %s\n' "$1"; PASS=$((PASS + 1)); }
-bad()  { printf 'FAIL  %s\n' "$1" >&2; FAIL=$((FAIL + 1)); }
+# shellcheck source=../lib/assert.sh
+. "$REPO_SRC/tests/lib/assert.sh"
+pass() { t_pass "$1"; }
+bad()  { t_fail "$1"; }
 
 # Whitespace after the command name followed by anything but `#` is an
 # argument. A backtick directly after the name (no space) closes inline code.
@@ -65,5 +66,5 @@ else
 	printf '%s\n' "$hits" >&2
 fi
 
-echo "test-no-private-key-on-cmdline summary: passed=$PASS failed=$FAIL"
+t_summary no-private-key-on-cmdline || true
 if [ "$FAIL" -eq 0 ]; then echo "RESULT: PASS"; else echo "RESULT: FAIL"; exit 1; fi
