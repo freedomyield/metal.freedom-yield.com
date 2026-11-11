@@ -49,10 +49,10 @@ if [ ! -x "$SCRIPT" ]; then
 	exit 1
 fi
 
-PASS=0
-FAIL=0
-pass() { printf 'PASS  %-70s\n' "$1"; PASS=$((PASS + 1)); }
-fail() { printf 'FAIL  %-70s\n' "$1" >&2; FAIL=$((FAIL + 1)); }
+# shellcheck source=../lib/assert.sh
+. "$REPO_ROOT/tests/lib/assert.sh"
+pass() { t_pass "$(printf '%-70s' "$1")"; }
+fail() { t_fail "$(printf '%-70s' "$1")"; }
 check_eq() {
 	local label="$1" expected="$2" actual="$3"
 	if [ "$expected" = "$actual" ]; then
@@ -353,7 +353,7 @@ fi
 # ---- summary -----------------------------------------------------------------
 echo
 echo "----------------------------------------"
-echo "test-setup-schema-validator.sh summary: PASS=$PASS  FAIL=$FAIL"
+t_summary setup-schema-validator || true
 if [ "$FAIL" -gt 0 ]; then
 	echo "RESULT: FAIL"
 	exit 1
