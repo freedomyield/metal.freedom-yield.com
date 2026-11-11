@@ -43,15 +43,15 @@ STEPS_JSON="${REPO_ROOT}/docs/cycle-transition-steps.json"
 CYCLE_GATE_DOC="${REPO_ROOT}/docs/CYCLE_GATE.md"
 RENEWAL_DOC="${REPO_ROOT}/docs/VALIDATOR_RENEWAL.md"
 
-PASS=0
-FAIL=0
+# shellcheck source=../lib/assert.sh
+. "${REPO_ROOT}/tests/lib/assert.sh"
 
-ok()  { PASS=$((PASS + 1)); echo "  ok: $1"; }
-bad() { FAIL=$((FAIL + 1)); echo "  FAIL: $1"; }
+ok()  { t_pass "$1"; }
+bad() { t_fail "$1"; }
 
 if ! command -v jq >/dev/null 2>&1; then
-	echo "  FAIL: jq required for this suite" >&2
-	echo "test-cycle-transition-steps.sh summary: PASS=0  FAIL=1"
+	bad "jq required for this suite"
+	t_summary cycle-transition-steps || true
 	echo "RESULT: FAIL"
 	exit 1
 fi
@@ -63,14 +63,14 @@ for f in "$STEPS_JSON" "$CYCLE_GATE_DOC" "$RENEWAL_DOC"; do
 	fi
 done
 if [ "$FAIL" -gt 0 ]; then
-	echo "test-cycle-transition-steps.sh summary: PASS=$PASS  FAIL=$FAIL"
+	t_summary cycle-transition-steps || true
 	echo "RESULT: FAIL"
 	exit 1
 fi
 
 if ! jq empty "$STEPS_JSON" >/dev/null 2>&1; then
 	bad "docs/cycle-transition-steps.json is not valid JSON"
-	echo "test-cycle-transition-steps.sh summary: PASS=$PASS  FAIL=$FAIL"
+	t_summary cycle-transition-steps || true
 	echo "RESULT: FAIL"
 	exit 1
 fi
@@ -126,7 +126,7 @@ while IFS=$'\t' read -r id script; do
 	fi
 done < <(jq -r '.steps[] | .id as $id | .scripts[]? | [$id, .] | @tsv' "$STEPS_JSON")
 
-echo "test-cycle-transition-steps.sh summary: PASS=$PASS  FAIL=$FAIL"
+t_summary cycle-transition-steps || true
 if [ "$FAIL" -eq 0 ]; then
 	echo "RESULT: PASS"
 	exit 0
