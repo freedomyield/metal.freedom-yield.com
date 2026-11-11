@@ -682,6 +682,111 @@ else
 	t_ok "SIGTERM during a run: the script that was running is gone"
 fi
 
+# ======================================================================================
+# TIME LIMIT PER RUN (§15.4)
+# ======================================================================================
+# t_run_bounded <seconds> <g3 args...>: like t_run, but the test bounds its own wait with
+# perl alarm (2+5+10 s), so a G3 that never stops a run fails here instead of hanging.
+ELAPSED=0
+t_run_bounded() {
+	local lim="$1" s0
+	shift
+	s0="$(date +%s)"
+	OUT="$(cd "$R" && TMPDIR="$WORK/tmp" perl -e 'alarm shift; exec { $ARGV[0] } @ARGV; exit 127' "$lim" bash "$G3" "$@" 2>"$WORK/stderr" </dev/null)"
+	RC=$?
+	ELAPSED=$(( $(date +%s) - s0 ))
+	ERRTXT="$(cat "$WORK/stderr")"
+}
+# t_gone <name> <pid-file>: the process whose PID the fixture recorded must be gone
+t_gone() {
+	local p
+	p="$(cat "$2" 2>/dev/null)"
+	if [ -z "$p" ]; then
+		t_bad "$1 (the fixture did not record its background child)"
+	elif ps -p "$p" >/dev/null 2>&1; then
+		kill -KILL "$p" 2>/dev/null
+		t_bad "$1 (a background child of the run, TERM ignored, is still alive)"
+	else
+		t_ok "$1"
+	fi
+}
+
+# P3: suite mode, the run outlives --timeout=2 -> exit 2 naming the side, within 2+5+slack
+t_suite_pair 'sleep 30; echo "PASS  a"; exit 0' 'sleep 30; echo "PASS  a"; exit 0'
+t_run_bounded 17 --base="$BASE" --suite=tests/s --timeout=2
+t_expect "timeout (P3): suite run longer than --timeout=2: exit 2, never OK" 2
+if [ "$RC" -eq 2 ] && ! printf '%s' "$ERRTXT" | grep -qxF 'check-refactor-equivalence: tests/s/test-a.sh: timeout after 2s at base'; then t_bad "timeout (P3): reason must be 'timeout after 2s at base' ($ERRTXT)"; fi
+if [ "$ELAPSED" -ge 2 ] && [ "$ELAPSED" -le 17 ]; then t_ok "timeout (P3): returned after the limit and within 2+5+10 s"; else t_bad "timeout (P3): returned after ${ELAPSED}s"; fi
+
+# P3: cases mode, the same limit; a timed-out run is exit 2, never a compared result
+t_pair 'sleep 30; echo a' 'sleep 30; echo a'
+t_cases_one x - - - -
+t_run_bounded 17 --base="$BASE" --cases="$CASES" --timeout=2
+t_expect "timeout (P3): cases run longer than --timeout=2: exit 2, never a compared result" 2
+if [ "$RC" -eq 2 ] && ! printf '%s' "$ERRTXT" | grep -qxF 'check-refactor-equivalence: L1: timeout after 2s at base'; then t_bad "timeout (P3): cases reason must be 'L1: timeout after 2s at base' ($ERRTXT)"; fi
+
+# P3: the side is named (base in time, head too long -> at head)
+t_pair 'echo a' 'sleep 30; echo a'
+t_cases_one x - - - -
+t_run_bounded 17 --base="$BASE" --cases="$CASES" --timeout=2
+t_expect "timeout (P3): base in time, head too long: exit 2" 2
+if [ "$RC" -eq 2 ] && ! printf '%s' "$ERRTXT" | grep -qxF 'check-refactor-equivalence: L1: timeout after 2s at head'; then t_bad "timeout (P3): reason must say at head ($ERRTXT)"; fi
+
+# P3b: the whole process group is stopped, including a child that ignores TERM (KILL after 5 s)
+t_init
+BGF="$WORK/bgpid"
+t_script tests/s/test-a.sh "( trap '' TERM; exec sleep 300 ) & echo \$! > '$BGF'; sleep 30; echo 'PASS  a'"
+t_commit base; t_mark_base; t_commit head
+t_run_bounded 17 --base="$BASE" --suite=tests/s --timeout=2
+t_expect "timeout (P3b): exit 2" 2
+t_gone "timeout (P3b): the run's whole process group is stopped after G3 returned" "$BGF"
+
+# the EXIT/INT/TERM trap also stops the recorded group (a background child of the run)
+t_init
+BGF="$WORK/bgpid"
+t_script scripts/toy.sh "( trap '' TERM; exec sleep 300 ) & echo \$! > '$BGF'; echo \$\$ > \"\$FIFO\"; exec sleep 20"
+t_commit base; t_mark_base; t_commit head
+mkfifo "$WORK/fifo"
+t_cases_one x "FIFO=$WORK/fifo" - - -
+exec 3<>"$WORK/fifo"
+( cd "$R" && TMPDIR="$WORK/tmp" exec bash "$G3" --base="$BASE" --cases="$CASES" ) >"$WORK/sig.out" 2>"$WORK/sig.err" </dev/null &
+BGPID=$!
+CPID=""
+if read -t 30 -u 3 CPID; then
+	kill -TERM "$BGPID" 2>/dev/null
+	wait "$BGPID" 2>/dev/null
+	RC=$?
+else
+	kill -KILL "$BGPID" 2>/dev/null; wait "$BGPID" 2>/dev/null; RC=99
+fi
+BGPID=""
+exec 3<&-
+OUT="$(cat "$WORK/sig.out")"; ERRTXT="$(cat "$WORK/sig.err")"
+t_expect "SIGTERM during a run with a background child: exit 143, worktree and temp dir removed" 143
+t_gone "SIGTERM during a run: the trap stops the run's whole process group" "$BGF"
+
+# P3c: just outside: a run that ends in time is a normal result
+t_suite_pair 'sleep 1; echo "PASS  a"; exit 0' 'sleep 1; echo "PASS  a"; exit 0'
+t_run_bounded 17 --base="$BASE" --suite=tests/s --timeout=5
+t_expect "timeout (P3c): a suite run that ends in 1 s under --timeout=5: OK" 0 "OK 1 equal"
+t_pair 'sleep 1; echo a' 'sleep 1; echo a'
+t_cases_one x - - - -
+t_run_bounded 17 --base="$BASE" --cases="$CASES" --timeout=5
+t_expect "timeout (P3c): a cases run that ends in 1 s under --timeout=5: OK" 0 "OK 1 equal"
+
+# P3d: the argument
+t_suite_pair 'echo "PASS  a"; exit 0' 'echo "PASS  a"; exit 0'
+for v in 0 3601 10s -1 '' 00000 +5 ' 5'; do
+	t_run_bounded 17 --base="$BASE" --suite=tests/s "--timeout=$v"
+	t_expect "timeout (P3d): --timeout='$v': exit 2" 2
+done
+t_run_bounded 17 --base="$BASE" --suite=tests/s --timeout=5 --timeout=5
+t_expect "timeout (P3d): --timeout given twice: exit 2" 2
+for v in 1 3600; do
+	t_run_bounded 17 --base="$BASE" --suite=tests/s "--timeout=$v"
+	t_expect "timeout (P3d): --timeout=$v is accepted" 0 "OK 1 equal"
+done
+
 cd "$REPO_ROOT" || exit 1
 echo ""
 echo "test-check-refactor-equivalence.sh summary: PASS=${PASS}  FAIL=${FAIL}"

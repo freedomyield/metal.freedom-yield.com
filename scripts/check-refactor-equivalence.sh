@@ -9,6 +9,7 @@
 # Usage:
 #   bash scripts/check-refactor-equivalence.sh --base=<commit> --cases=<tsv>
 #   bash scripts/check-refactor-equivalence.sh --base=<commit> --suite=<dir>
+#   optional: --timeout=<seconds>  limit of each single run, digits 1..3600, default 600
 #
 # Cases mode: each row of the TSV runs one script at both sides with the same
 # fixture, and compares rc, stdout, stderr and the listed output files byte for byte.
@@ -37,11 +38,16 @@
 #   2  could not run (no OK is printed): one line `check-refactor-equivalence: <reason>`
 #      on stderr. Missing or bad input, git failure, malformed row, a stub that does
 #      not shadow proton/ssh, zero cases, a validator that cannot be set up, a suite
-#      whose base run is red (`<id>: base is red (rc=<n>, fail cases=<k>): ...`).
+#      whose base run is red (`<id>: base is red (rc=<n>, fail cases=<k>): ...`), a run
+#      that exceeded --timeout (`<id>: timeout after <n>s at base|head`; the run's
+#      process group gets TERM, then KILL 5 s later if anything is left).
 #
 # Fail closed: every unexpected state is exit 2 or exit 1, never a quiet pass.
 # Both sides run in a `git worktree add --detach` under one mktemp directory; a trap
 # on EXIT, INT and TERM removes the worktree and the directory on every exit.
+# Each run starts as the leader of its own process group (perl setpgrp); one watchdog
+# per run, by recorded PID, stops that group on expiry, and the trap stops the
+# recorded group and watchdog too. Nothing is ever signalled by name.
 # curl, ssh, scp, proton and cleos are stubs: no network, no host, no broadcast.
 
 set -Eeuo pipefail
@@ -54,6 +60,7 @@ trap 'g3_die "unexpected failure (line $LINENO)"' ERR
 G3_TOP=""
 G3_T=""
 G3_CHILD=""
+G3_WD=""
 G3_CLEANED=0
 
 g3_cleanup() {
@@ -61,7 +68,13 @@ g3_cleanup() {
 	trap - ERR
 	[ "$G3_CLEANED" -eq 0 ] || return 0
 	G3_CLEANED=1
+	if [ -n "$G3_WD" ]; then
+		kill -KILL "$G3_WD" 2>/dev/null || true
+		wait "$G3_WD" 2>/dev/null || true
+		G3_WD=""
+	fi
 	if [ -n "$G3_CHILD" ]; then
+		kill -KILL -- "-$G3_CHILD" 2>/dev/null || true
 		kill -KILL "$G3_CHILD" 2>/dev/null || true
 		wait "$G3_CHILD" 2>/dev/null || true
 		G3_CHILD=""
@@ -87,6 +100,8 @@ G3_SUITE=""
 have_base=0
 have_cases=0
 have_suite=0
+G3_TIMEOUT=600
+have_timeout=0
 for arg in "$@"; do
 	case "$arg" in
 		--base=*)
@@ -104,7 +119,16 @@ for arg in "$@"; do
 			have_suite=1
 			G3_SUITE="${arg#--suite=}"
 			;;
-		*) g3_die "unknown argument: $arg (usage: --base=<commit> (--cases=<tsv> | --suite=<dir>))" ;;
+		--timeout=*)
+			[ "$have_timeout" -eq 0 ] || g3_die "--timeout given twice"
+			have_timeout=1
+			G3_TIMEOUT="${arg#--timeout=}"
+			case "$G3_TIMEOUT" in ''|*[!0-9]*) g3_die "--timeout must be digits only, 1..3600: $G3_TIMEOUT" ;; esac
+			[ "${#G3_TIMEOUT}" -le 4 ] || g3_die "--timeout out of range 1..3600: $G3_TIMEOUT"
+			G3_TIMEOUT=$((10#$G3_TIMEOUT))
+			[ "$G3_TIMEOUT" -ge 1 ] && [ "$G3_TIMEOUT" -le 3600 ] || g3_die "--timeout out of range 1..3600: $G3_TIMEOUT"
+			;;
+		*) g3_die "unknown argument: $arg (usage: --base=<commit> (--cases=<tsv> | --suite=<dir>) [--timeout=<seconds>])" ;;
 	esac
 done
 [ "$have_base" -eq 1 ] && [ -n "$G3_BASE" ] || g3_die "--base=<commit> is required"
@@ -125,6 +149,13 @@ cd "$G3_TOP" || g3_die "cannot enter the repository root"
 G3_BASEC="$(git rev-parse --verify --quiet "${G3_BASE}^{commit}" 2>/dev/null)" || g3_die "base is not a commit: $G3_BASE"
 G3_HEADC="$(git rev-parse --verify --quiet "HEAD^{commit}" 2>/dev/null)" || g3_die "HEAD is not a commit"
 G3_ORIG_PATH="$PATH"
+G3_PERL="$(command -v perl 2>/dev/null)" || g3_die "perl is required"
+case "$G3_PERL" in /*) ;; *) g3_die "perl is not an executable on PATH: $G3_PERL" ;; esac
+
+# Start of a run: become the leader of a new process group, leave a marker, then exec.
+G3_PG_START='my $ok = shift; setpgrp(0, 0) or exit 125; open(my $h, ">", $ok) or exit 125; close($h); exec { $ARGV[0] } @ARGV; unlink($ok); exit 126;'
+# Watchdog of a run: after the limit, mark, TERM the group, KILL it 5 s later if anything is left.
+G3_WATCHDOG='my ($pg, $n, $mark) = @ARGV; sleep($n); if (open(my $h, ">", $mark)) { close($h); } kill("TERM", -$pg); for (1 .. 50) { select(undef, undef, undef, 0.1); exit(3) unless kill(0, -$pg); } kill("KILL", -$pg); exit(3);'
 
 # ---- validators of a path / name ---------------------------------------------------------
 # A repo-relative path: plain characters, no leading slash or dash, no `..` segment.
@@ -214,12 +245,13 @@ g3_build_farm() { # name excluded-name-regex
 
 # ---- one run of one script at one side ---------------------------------------------------
 # Globals read: G3_R_COMMIT G3_R_SCRIPT G3_R_FIXDIR G3_R_VALIDATOR G3_R_CWD (fx|tree)
+#               G3_R_ID G3_R_SIDE (base|head; for the timeout message)
 #               G3_R_ARGS (array) G3_R_ENV (array) G3_R_OUTFILES (array)
 # Writes into $1: rc, stdout, stderr, files/<path>
 g3_run() { # outdir
-	local out="$1" t="$G3_T" runpath c expected got
+	local out="$1" t="$G3_T" runpath c expected got wdrc
 	mkdir -p "$out/files"
-	rm -rf "$t/tree" "$t/fx" "$t/home" "$t/tmp" "$t/calls.log" "$t/stubs/ajv"
+	rm -rf "$t/tree" "$t/fx" "$t/home" "$t/tmp" "$t/calls.log" "$t/stubs/ajv" "$t/pg-started" "$t/timed-out"
 	git worktree add --detach --quiet "$t/tree" "$G3_R_COMMIT" >/dev/null 2>&1 || g3_die "git worktree add failed for $G3_R_COMMIT"
 	mkdir -p "$t/fx" "$t/home" "$t/tmp"
 	: > "$t/calls.log"
@@ -259,11 +291,26 @@ g3_run() { # outdir
 	local rc=0
 	(
 		cd "$cwd" && exec env -u BASH_ENV -u ENV -u FY_LIVE "HOME=$t/home" "TMPDIR=$t/tmp" "PATH=$runpath" \
-			${G3_R_ENV[@]+"${G3_R_ENV[@]}"} "$BASH" "$t/tree/$G3_R_SCRIPT" ${G3_R_ARGS[@]+"${G3_R_ARGS[@]}"}
+			${G3_R_ENV[@]+"${G3_R_ENV[@]}"} "$G3_PERL" -e "$G3_PG_START" "$t/pg-started" "$BASH" "$t/tree/$G3_R_SCRIPT" ${G3_R_ARGS[@]+"${G3_R_ARGS[@]}"}
 	) </dev/null >"$out/stdout" 2>"$out/stderr" &
 	G3_CHILD=$!
+	"$G3_PERL" -e "$G3_WATCHDOG" "$G3_CHILD" "$G3_TIMEOUT" "$t/timed-out" </dev/null >/dev/null 2>&1 &
+	G3_WD=$!
 	wait "$G3_CHILD" || rc=$?
+	if [ -e "$t/timed-out" ]; then
+		# expired: let the watchdog finish (TERM, then KILL 5 s later if anything is left)
+		wait "$G3_WD" 2>/dev/null || true
+		G3_WD=""; G3_CHILD=""
+		g3_die "$G3_R_ID: timeout after ${G3_TIMEOUT}s at $G3_R_SIDE"
+	fi
+	wdrc=0
+	kill -KILL "$G3_WD" 2>/dev/null || true
+	wait "$G3_WD" 2>/dev/null || wdrc=$?
+	G3_WD=""
+	# a watchdog that ended on its own has fired, even if its marker could not be written
+	[ "$wdrc" -eq 137 ] || g3_die "$G3_R_ID: timeout after ${G3_TIMEOUT}s at $G3_R_SIDE"
 	G3_CHILD=""
+	[ -e "$t/pg-started" ] || g3_die "$G3_R_ID: the run did not start in its own process group at $G3_R_SIDE (rc=$rc)"
 	printf '%s\n' "$rc" > "$out/rc"
 
 	local f
@@ -413,8 +460,9 @@ g3_cases_mode() {
 		before=$G3_DIFFS
 		rm -rf "$B" "$H"
 		g3_split_row "$i"
-		G3_R_COMMIT="$G3_BASEC"; g3_run "$B"
-		G3_R_COMMIT="$G3_HEADC"; g3_run "$H"
+		G3_R_ID="$id"
+		G3_R_COMMIT="$G3_BASEC"; G3_R_SIDE=base; g3_run "$B"
+		G3_R_COMMIT="$G3_HEADC"; G3_R_SIDE=head; g3_run "$H"
 
 		if [ "${ROW_NORM[$i]}" != "-" ]; then
 			g3_normalize "$B/stdout" "${ROW_NORM[$i]}"; g3_normalize "$H/stdout" "${ROW_NORM[$i]}"
@@ -510,7 +558,8 @@ g3_suite_mode() {
 		before=$G3_DIFFS
 		rm -rf "$B" "$H"
 		G3_R_SCRIPT="$id"
-		G3_R_COMMIT="$G3_BASEC"; g3_run "$B"
+		G3_R_ID="$id"
+		G3_R_COMMIT="$G3_BASEC"; G3_R_SIDE=base; g3_run "$B"
 		g3_extract_cases "$B/stdout" "$B/stderr" | LC_ALL=C sort > "$B/cases"
 		# §15.3: a red base proves nothing (red at both sides would compare equal).
 		brc="$(cat "$B/rc")"
@@ -518,7 +567,7 @@ g3_suite_mode() {
 		if [ "$brc" != "0" ] || [ "$bf" != "0" ]; then
 			g3_die "$id: base is red (rc=$brc, fail cases=$bf): cannot prove equivalence"
 		fi
-		G3_R_COMMIT="$G3_HEADC"; g3_run "$H"
+		G3_R_COMMIT="$G3_HEADC"; G3_R_SIDE=head; g3_run "$H"
 		g3_extract_cases "$H/stdout" "$H/stderr" | LC_ALL=C sort > "$H/cases"
 		bc="$(wc -l < "$B/cases" | tr -d ' ')"; hc="$(wc -l < "$H/cases" | tr -d ' ')"
 		[ "$bc" -gt 0 ] || g3_die "$id: no case lines at base (cannot compare)"
