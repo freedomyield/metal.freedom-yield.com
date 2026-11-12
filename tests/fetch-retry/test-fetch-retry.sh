@@ -11,7 +11,7 @@ REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 LIB="${LIB:-$REPO_ROOT/scripts/lib/fetch-retry.sh}"
 T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
-PASS=0; FAILN=0
+PASS=0; FAILN=0; SKIPN=0
 
 ok()   { PASS=$((PASS + 1)); printf 'PASS %s\n' "$1"; }
 fail() { FAILN=$((FAILN + 1)); printf 'FAIL %s — %s\n' "$1" "$2"; }
@@ -45,7 +45,8 @@ run() {
 	printf '%s\n' "$1" > "$T/script"; shift
 	rm -f "$T/count" "$T/args" "$T/body" "$T/sleeps"
 	# sleep is replaced inside the subshell: it records its argument and never really sleeps
-	OUT="$( ( . "$LIB"; sleep() { printf '%s\n' "$1" >> "$T/sleeps"; }; CURL="$T/curl-stub" fy_fetch_retry "$@" ) 2>"$T/err"; echo "rc=$?" )"
+	# RUN_LC (optional) names the locale the subshell runs in; the lib is loaded under it
+	OUT="$( ( [ -n "${RUN_LC:-}" ] && export LC_ALL="$RUN_LC"; . "$LIB"; sleep() { printf '%s\n' "$1" >> "$T/sleeps"; }; CURL="$T/curl-stub" fy_fetch_retry "$@" ) 2>"$T/err"; echo "rc=$?" )"
 	RC="${OUT##*rc=}"; OUT="${OUT%rc=*}"
 	ERR="$(cat "$T/err")"
 	SLEEPN="$(wc -l < "$T/sleeps" 2>/dev/null | tr -d ' ')"; SLEEPN="${SLEEPN:-0}"
@@ -159,6 +160,59 @@ FYD_FETCH_ATTEMPTS=abc run "200 new" --max-time=15 -- "$U" "$T/pre"
 eq "attempts=alpha outfile-content" "$(cat "$T/pre")" "keep"
 if [ "$T/pre" -ot "$T/ref" ]; then ok "attempts=alpha outfile-mtime"; else fail "attempts=alpha outfile-mtime" "mtime changed"; fi
 
+# --- shape checks are ASCII-only whatever the caller's locale (audit B1) ---
+# Under ja_JP.UTF-8 on this Mac's bash 3.2 a range such as [0-9] also matches the full-width digits
+# U+FF10..FF19, so a range-based check lets FYD_FETCH_ATTEMPTS=<full-width 1> through and the loop
+# never stops. The cases below run the lib under that locale with full-width values.
+JA_LC="ja_JP.UTF-8"
+FW0=$'\xef\xbc\x90'; FW1=$'\xef\xbc\x91'; FW3=$'\xef\xbc\x93'; FW5=$'\xef\xbc\x95'; FW6=$'\xef\xbc\x96'
+skip() { SKIPN=$((SKIPN + 1)); printf 'SKIP %s — %s\n' "$1" "$2"; }
+# probe: does the range [0-9] match a full-width digit in this bash under that locale?
+# hit = the locale is in force and the old range-based check would have let the value through
+JA_PROBE="$(LC_ALL="$JA_LC" "$BASH" -c 'case "$1" in [0-9]) printf hit ;; *) printf miss ;; esac' _ "$FW1" 2>/dev/null)"
+JA_OK=0
+if [ "$JA_PROBE" = "hit" ]; then
+	JA_OK=1
+elif [ "$(uname -s)" = "Darwin" ]; then
+	fail "ja-locale-probe" "probe=[$JA_PROBE] locale=$JA_LC bash=$BASH_VERSION: on Darwin the full-width cases must run, so this is a failure, not a skip"
+else
+	JA_WHY="probe=[$JA_PROBE] locale=$JA_LC bash=$BASH_VERSION uname=$(uname -s)"
+fi
+[ "$JA_OK" = 1 ] && ok "ja-locale-probe"
+
+# jabad <name> <attempts> <sleep> <max-time value> <expected stderr>: one shape rejected under the ja locale
+jabad() {
+	local n="$1" a="$2" s="$3" m="$4" want="$5"
+	if [ "$JA_OK" != 1 ]; then skip "$n" "$JA_WHY"; return 0; fi
+	RUN_LC="$JA_LC" FYD_FETCH_ATTEMPTS="$a" FYD_RETRY_SLEEP="$s" run "500 z" --max-time="$m" -- "$U" "$T/body"
+	eq "$n rc" "$RC" "64"; eq "$n no-curl" "$CALLS" "0"; eq "$n stdout-empty" "$OUT" ""
+	if [ -e "$T/body" ]; then fail "$n no-outfile" "OUTFILE was created"; else ok "$n no-outfile"; fi
+	eq "$n stderr" "$ERR" "$want"; eq "$n stderr-lines" "$(wc -l < "$T/err" | tr -d ' ')" "1"
+}
+MSG_M="fy_fetch_retry: --max-time=SECONDS (integer) is required"
+jabad "ja attempts=fw1" "$FW1" 2 15 "$MSG_A"
+jabad "ja attempts=fw10" "$FW1$FW0" 2 15 "$MSG_A"
+jabad "ja attempts=fw5" "$FW5" 2 15 "$MSG_A"
+jabad "ja sleep=fw6" 2 "$FW6" 15 "$MSG_S"
+jabad "ja sleep=fw60" 2 "$FW6$FW0" 15 "$MSG_S"
+jabad "ja sleep=fw30" 2 "$FW3$FW0" 15 "$MSG_S"
+jabad "ja sleep=fw0" 2 "$FW0" 15 "$MSG_S"
+jabad "ja max-time=fw15" 2 0 "$FW1$FW5" "$MSG_M"
+jabad "ja max-time=fw1" 2 0 "$FW1" "$MSG_M"
+# the ASCII values that must keep working under the same locale (run on every host)
+jaok() { # name attempts sleep max-time want-calls want-sleep
+	RUN_LC="$JA_LC" FYD_FETCH_ATTEMPTS="$2" FYD_RETRY_SLEEP="$3" run "500 z" --max-time="$4" -- "$U" "$T/body"
+	eq "$1 rc" "$RC" "0"; eq "$1 calls" "$CALLS" "$5"; eq "$1 code" "$OUT" "500"
+	eq "$1 sleep" "$SLEEPV" "$6"
+}
+jaok "ja ascii attempts=1" 1 0 15 1 ""
+jaok "ja ascii attempts=10" 10 0 15 10 "0 "
+jaok "ja ascii sleep=0" 2 0 15 2 "0 "
+jaok "ja ascii sleep=60" 2 60 15 2 "60 "
+RUN_LC="$JA_LC" run "200 ok" --max-time=15 -- "$U" "$T/body"
+eq "ja ascii max-time=15 rc" "$RC" "0"; eq "ja ascii max-time=15 calls" "$CALLS" "1"
+eq "ja ascii max-time=15 args" "$(cat "$T/args")" "-sS -o $T/body -w %{http_code} --max-time 15 $U"
+
 # the curl line
 run "200 ok" --max-time=15 -- "$U" "$T/body"
 eq "curl args 15" "$(cat "$T/args")" "-sS -o $T/body -w %{http_code} --max-time 15 $U"
@@ -198,5 +252,5 @@ head -10 "$LIB" | grep -q '^# PRIME_DIRECTIVE: TESTNET-FIRST' && ok "header-prim
 HITS="$(grep -nE '\bexit\b|fyd_notify|fyd_push|FY_LIVE' "$LIB" | wc -l | tr -d ' ')"
 eq "B-P7 no exit/notify/push/FY_LIVE" "$HITS" "0"
 
-printf 'test-fetch-retry summary: %s passed, %s failed\n' "$PASS" "$FAILN"
+printf 'test-fetch-retry summary: %s passed, %s failed, %s skipped\n' "$PASS" "$FAILN" "$SKIPN"
 [ "$FAILN" -eq 0 ]

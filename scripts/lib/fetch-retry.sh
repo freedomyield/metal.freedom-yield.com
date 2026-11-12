@@ -24,7 +24,8 @@
 # this replaces. Stops at the first 200; sleeps between attempts, never after
 # the last. A malformed FYD_FETCH_ATTEMPTS / FYD_RETRY_SLEEP is rejected with 64
 # before any curl call (the earlier "behaves as in those copies" rule is
-# cancelled: design spec §17).
+# cancelled: design spec §17). The shape checks list the ASCII digits (no a-b
+# range), so they hold in any caller locale (a range matches full-width digits).
 #
 # Library rules (B-P7): never ends the caller's shell, no side effects when sourced.
 
@@ -45,7 +46,7 @@ fy_fetch_retry() {
 		shift
 	done
 	case "$max_time" in
-	"" | *[!0-9]*) _fy_fetch_retry_usage "--max-time=SECONDS (integer) is required"; return 64 ;;
+	"" | *[!0123456789]*) _fy_fetch_retry_usage "--max-time=SECONDS (integer) is required"; return 64 ;;
 	esac
 	if [ "$#" -ne 2 ] || [ -z "$1" ] || [ -z "$2" ]; then
 		_fy_fetch_retry_usage "need exactly: -- URL OUTFILE"
@@ -55,11 +56,11 @@ fy_fetch_retry() {
 	local attempts="${FYD_FETCH_ATTEMPTS:-3}"
 	local sleep_s="${FYD_RETRY_SLEEP:-3}"
 	case "$attempts" in
-	[1-9] | 10) ;;
+	[123456789] | 10) ;;
 	*) _fy_fetch_retry_usage "FYD_FETCH_ATTEMPTS must be an integer 1..10"; return 64 ;;
 	esac
 	case "$sleep_s" in
-	0 | [1-9] | [1-5][0-9] | 60) ;;
+	0 | [123456789] | [12345][0123456789] | 60) ;;
 	*) _fy_fetch_retry_usage "FYD_RETRY_SLEEP must be an integer 0..60"; return 64 ;;
 	esac
 	local attempt=1 code
