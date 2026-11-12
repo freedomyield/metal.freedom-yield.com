@@ -387,6 +387,29 @@ echo "$REMOTE_OUT" | grep -q 'OK: anchor-source.json removed' \
 	&& no "T15 remote: falsely reported success despite the syntax failure" \
 	|| ok "T15 remote: does not report false success"
 
+# =============================================================================
+# T16: entry guard -- WEB_ADMIN_KEY unreadable => exit 2 BEFORE any ssh/scp.
+# Safety: the run is hermetic (env -i, HOME in the temp dir, reserved host
+# name host.invalid) and PATH starts with recording stubs for every network
+# tool; if the guard is ever broken the script reaches a stub, never a host.
+# rc alone is not enough (exit 2 is not unique to this branch), so the
+# branch's own stderr sentence and a zero stub-call count are checked too.
+# =============================================================================
+echo "[T16] unreadable WEB_ADMIN_KEY => exit 2, key-not-readable message, no ssh/scp call"
+G_HOME="${WORK}/guard-home"; G_BIN="${WORK}/guard-bin"; G_LOG="${WORK}/guard-calls.log"
+mkdir -p "$G_HOME" "$G_BIN"; : > "$G_LOG"
+for tool in ssh scp sftp rsync curl; do
+	printf '#!/bin/sh\necho "%s $*" >> "%s"\nexit 97\n' "$tool" "$G_LOG" > "$G_BIN/$tool"
+	chmod +x "$G_BIN/$tool"
+done
+G_ERR="$(env -i PATH="$G_BIN:/usr/bin:/bin" HOME="$G_HOME" SKIP_SSH=0 \
+	WEB_ADMIN_HOST=host.invalid WEB_ADMIN_KEY="$G_HOME/no-such-key" \
+	"$BASH" "$INSTALLER" 2>&1 >/dev/null)"; G_RC=$?
+[ "$G_RC" = 2 ] && ok "T16 exits 2 when the key is unreadable" || no "T16 expected exit 2, got $G_RC"
+echo "$G_ERR" | grep -q 'SSH key not readable' && ok "T16 prints the key-not-readable message" || no "T16 key-not-readable message missing"
+G_CALLS="$(wc -l < "$G_LOG" | tr -d ' ')"
+[ "$G_CALLS" = 0 ] && ok "T16 made no ssh/scp/network call" || no "T16 stub network tool was called $G_CALLS time(s): $(head -1 "$G_LOG")"
+
 echo
 echo "----------------------------------------"
 t_summary install-web-host-anchor-source-allowlist || true
