@@ -898,6 +898,59 @@ t_run_suite
 t_expect "signals (P7b): a suite that sets trap '' HUP itself still has HUP ignored: exit 0" 0 "SUITE tests/s/test-a.sh base_rc=0 head_rc=0 cases=1/1" "OK 1 equal"
 T_PRE=""
 
+# ======================================================================================
+# A REAPED RUN IS NEVER SIGNALLED (N6)
+# ======================================================================================
+# Once `wait` has collected the run, its PID can be reused. A TERM that arrives in the
+# few commands between that wait and the end of g3_run must not make g3_cleanup send KILL
+# to the (reaped) PID or its group. The hook (BASH_ENV, sourced only by G3's own bash; the
+# run itself starts with env -u BASH_ENV) wraps the builtins `kill` and `wait`: `kill`
+# logs its arguments, and the first `wait` that is not about the run (the watchdog wait
+# after the run was collected) sends TERM to G3 itself right after it returns. No clock,
+# no load: the signal lands at the same command every time.
+# Remaining window (not closed here): the watchdog's own TERM to the group between the
+# run's collection and the watchdog's KILL.
+t_pair 'echo "out:$1"' 'echo "out:$1"'
+X2_LOG="$WORK/x2.log"
+X2_HOOK="$WORK/x2-hook.sh"
+cat > "$X2_HOOK" <<'HOOK'
+kill() { printf 'kill %s\n' "$*" >> "$X2_LOG"; builtin kill "$@"; }
+wait() {
+	local wrc=0
+	builtin wait "$@" || wrc=$?
+	if [ "$#" -eq 1 ]; then
+		if [ -z "${X2_RUN:-}" ]; then
+			X2_RUN="$1"
+			printf 'run %s\n' "$1" >> "$X2_LOG"
+		elif [ "$1" != "$X2_RUN" ] && [ -z "${X2_SENT:-}" ]; then
+			X2_SENT=1
+			printf 'term-sent\n' >> "$X2_LOG"
+			builtin kill -TERM "$$"
+		fi
+	fi
+	return "$wrc"
+}
+HOOK
+: > "$X2_LOG"
+t_cases_one x - - - -
+T_PRE="export BASH_ENV='$X2_HOOK' X2_LOG='$X2_LOG'"
+t_run_cases
+T_PRE=""
+t_expect "reaped run (N6): TERM right after the run was collected: exit 143, worktree and temp dir removed" 143
+if grep -qx 'term-sent' "$X2_LOG" && grep -q '^kill -KILL ' "$X2_LOG"; then
+	t_ok "reaped run (N6): the hook sent the TERM and the cleanup ran through the hook's kill"
+else
+	t_bad "reaped run (N6): the hook did not fire or did not see the cleanup ($(tr '\n' '|' < "$X2_LOG"))"
+fi
+X2_PID="$(sed -n 's/^run //p' "$X2_LOG" | head -n 1)"
+if [ -z "$X2_PID" ]; then
+	t_bad "reaped run (N6): the hook did not see the run's wait"
+elif awk -v p="$X2_PID" '$1 == "kill" { for (i = 2; i <= NF; i++) if ($i == p || $i == "-" p) found = 1 } END { exit found ? 0 : 1 }' "$X2_LOG"; then
+	t_bad "reaped run (N6): cleanup signalled the collected run's PID or group ($(grep -E "kill .*-?$X2_PID" "$X2_LOG" | tr '\n' '|'))"
+else
+	t_ok "reaped run (N6): no signal was sent to the collected run's PID or group"
+fi
+
 cd "$REPO_ROOT" || exit 1
 echo ""
 echo "test-check-refactor-equivalence.sh summary: PASS=${PASS}  FAIL=${FAIL}"
