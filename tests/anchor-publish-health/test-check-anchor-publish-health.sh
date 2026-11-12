@@ -620,6 +620,40 @@ echo "$NOFR_OUT" | grep -q 'fetch-retry library not readable' \
 	|| bad "bp6: refusal message missing (out: $NOFR_OUT)"
 teardown
 
+# ---- case bp6b: the fetch-retry library is readable but fails to load -> exit 6 ----
+# Same scripts/ tree as bp6, but scripts/lib/fetch-retry.sh EXISTS and has a
+# syntax error, so the `-r` test passes and only the `.` itself fails. The run
+# is live (FY_LIVE=1) with the curl stub and the notify stub wired in, so an
+# unguarded checker would carry on without the library and visibly write its
+# log, its state and an alert; the guarded one must stop with the same refusal
+# bp6 sees, before any curl call and before writing anything.
+setup
+NOFR_DIR="$BASE/nofr"
+mkdir -p "$NOFR_DIR/scripts/lib"
+cp "$CHECKER" "$NOFR_DIR/scripts/check-anchor-publish-health.sh"
+ln -sf "${REPO_ROOT}/scripts/lib/side-effects.sh" "$NOFR_DIR/scripts/lib/side-effects.sh"
+printf 'fy_fetch_retry() {\n\tif then fi\n' > "$NOFR_DIR/scripts/lib/fetch-retry.sh"
+NOFR_RC=0
+NOFR_OUT="$(FY_LIVE=1 FYD_CURL="$STUB" FYD_NOTIFY="$NOTIFY_STUB" \
+	ANCHOR_PUBLISH_HEALTH_LOG="$LOG" ANCHOR_PUBLISH_HEALTH_MISMATCH_STATE="$MISMATCH_STATE" \
+	ANCHOR_SOURCE_URL="https://example.test/api/anchor-source.json" \
+	ANCHOR_RECEIPT_URL="https://example.test/api/anchor-receipt.json" \
+	STUB_STATE_DIR="$BASE" FYD_RETRY_SLEEP=0 FYD_FETCH_ATTEMPTS=3 \
+	bash "$NOFR_DIR/scripts/check-anchor-publish-health.sh" 2>&1)" || NOFR_RC=$?
+[ "$NOFR_RC" -eq 6 ] \
+	&& ok "bp6b: a fetch-retry library that fails to load refuses to run (exit 6), the same code as an unreadable one" \
+	|| bad "bp6b: expected exit 6, got $NOFR_RC (out: $NOFR_OUT)"
+printf '%s\n' "$NOFR_OUT" | grep -Fxq "check-anchor-publish-health: FATAL: fetch-retry library not readable at $NOFR_DIR/scripts/../scripts/lib/fetch-retry.sh" \
+	&& ok "bp6b: the refusal is the same FATAL line bp6 sees" \
+	|| bad "bp6b: FATAL line missing (out: $NOFR_OUT)"
+[ "$(src_calls)" -eq 0 ] && [ ! -e "$BASE/rcpt.count" ] \
+	&& ok "bp6b: no curl call was made" \
+	|| bad "bp6b: curl was called (source: $(src_calls))"
+[ ! -e "$LOG" ] && [ ! -e "$MISMATCH_STATE" ] && [ ! -e "$NOTIFY_LOG" ] \
+	&& ok "bp6b: no log, no state file and no alert was written" \
+	|| bad "bp6b: the checker wrote a log, a state file or an alert"
+teardown
+
 # ---- case bp7: a malformed FYD_FETCH_ATTEMPTS is not a 200 -> exit 2, alerts ---
 # Every served fixture below is a healthy 200. The checker still fails (and
 # alerts) because fy_fetch_retry rejects the value with 64 and an empty stdout,

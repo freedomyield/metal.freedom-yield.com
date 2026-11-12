@@ -1010,6 +1010,39 @@ echo "$NOFR_OUT" | grep -q 'fetch-retry library not readable' \
 	|| bad "case 10g: refusal message missing (out: $NOFR_OUT)"
 teardown
 
+# ---- case case 10h: the fetch-retry library is readable but fails to load -> exit 6 ----
+# Same scripts/ tree as case 10g, but scripts/lib/fetch-retry.sh EXISTS and has
+# a syntax error, so the `-r` test passes and only the `.` itself fails. The run
+# is live (FY_LIVE=1) with the curl stub and the notify stub wired in, so an
+# unguarded checker would carry on without the library and visibly write its
+# log, its state and an alert; the guarded one must stop with the same refusal
+# case 10g sees, before any curl call and before writing anything.
+setup
+NOFR_DIR="$BASE/nofr"
+mkdir -p "$NOFR_DIR/scripts/lib"
+cp "$CHECKER" "$NOFR_DIR/scripts/check-pulsevm-upstream.sh"
+ln -sf "${REPO_ROOT}/scripts/lib/side-effects.sh" "$NOFR_DIR/scripts/lib/side-effects.sh"
+printf 'fy_fetch_retry() {\n\tif then fi\n' > "$NOFR_DIR/scripts/lib/fetch-retry.sh"
+NOFR_RC=0
+NOFR_OUT="$(FY_LIVE=1 FYD_CURL="$STUB" FYD_NOTIFY="$NOTIFY_STUB" \
+	PULSEVM_UPSTREAM_LOG="$LOG" PULSEVM_UPSTREAM_STATE="$STATE" \
+	PULSEVM_RELEASES_URL="https://example.test/repos/pulsevm/releases/latest" \
+	STUB_STATE_DIR="$BASE" FYD_RETRY_SLEEP=0 FYD_FETCH_ATTEMPTS=3 \
+	bash "$NOFR_DIR/scripts/check-pulsevm-upstream.sh" 2>&1)" || NOFR_RC=$?
+[ "$NOFR_RC" -eq 6 ] \
+	&& ok "case 10h: a fetch-retry library that fails to load refuses to run (exit 6), the same code as an unreadable one" \
+	|| bad "case 10h: expected exit 6, got $NOFR_RC (out: $NOFR_OUT)"
+printf '%s\n' "$NOFR_OUT" | grep -Fxq "check-pulsevm-upstream: FATAL: fetch-retry library not readable at $NOFR_DIR/scripts/../scripts/lib/fetch-retry.sh" \
+	&& ok "case 10h: the refusal is the same FATAL line case 10g sees" \
+	|| bad "case 10h: FATAL line missing (out: $NOFR_OUT)"
+[ ! -s "$BASE/urls.log" ] \
+	&& ok "case 10h: no curl call was made" \
+	|| bad "case 10h: curl was called ($(wc -l < "$BASE/urls.log" | tr -d ' ') time(s))"
+[ ! -e "$LOG" ] && [ ! -e "$STATE" ] && [ ! -e "$NOTIFY_LOG" ] \
+	&& ok "case 10h: no log, no state file and no alert was written" \
+	|| bad "case 10h: the checker wrote a log, a state file or an alert"
+teardown
+
 # ---- case 11a (DRY): the repo's REAL logs/ is untouched ----------------------
 # Deliberately runs against the checker's OWN default LOG and STATE paths — no
 # override — so the containment claim is measured where it matters, and
