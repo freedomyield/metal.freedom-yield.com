@@ -638,3 +638,10 @@ Questions for the operator from this amendment: none. The calls above are listed
 - §15.10 D-16: "default 600 s" — cancelled → §16.2 (D-20). The rest of D-16 (a per-run limit, expiry exits 2, process group stopped by recorded PID only) stands.
 - Reason: §16.2 and D-20 cancel "§15.4's 600" by name only; the three mentions above were left without a cancelling line. Change of words only: the code, TOOLKIT and §16.2 already say 900.
 - Where it connects / how to remove it: no seam (words only). To remove, revert this commit.
+
+## 19. Amendment 2026-11-12 — the three monitors' library load line
+
+- Change: commit ae98f08 appended `|| { <FATAL line>; exit <rc> }` to the library-load line (`. "$FYD_FR_LIB"`) of `check-anchor-publish-health.sh`, `check-identity-pins.sh` and `check-pulsevm-upstream.sh`. Before it, only the `[ ! -r ... ]` check sat in front of the load, so a library that was readable but fails to load (a syntax error, for instance) let the script go on without `fy_fetch_retry`.
+- Now a failed load stops the monitor with the same FATAL sentence ("fetch-retry library not readable at <path>") and the same exit code as the "not readable" branch: exit 6 for `check-anchor-publish-health`, exit 5 for `check-identity-pins`, exit 6 for `check-pulsevm-upstream` (the values in each script's exit-code table). No curl call is made.
+- Reading of §17: "the code of the three monitors is unchanged" is a sentence about the §17 bundle (the entry check inside `fy_fetch_retry`). This section supplements it with ae98f08; it does not cancel it.
+- Where it connects / how to remove it: the seam is one load line per monitor. To remove, revert 2cb5242, 5cd1914 and ae98f08, newest first (the §16.1 stack form); reverting only ae98f08 leaves the two test commits red.
