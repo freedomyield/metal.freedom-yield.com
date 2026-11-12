@@ -19,7 +19,8 @@ eq()   { # name got want
 	if [ "$2" = "$3" ]; then ok "$1"; else fail "$1" "got [$2] want [$3]"; fi
 }
 
-# stub curl: line N of $T/script is "CODE[ BODY]" or "FAIL"; past the end repeats the last.
+# stub curl: line N of $T/script is "CODE[ BODY]" or "FAIL"; past the end repeats the last;
+# past call 12 it always answers 200 (see the cap line below).
 cat > "$T/curl-stub" <<'STUB'
 #!/usr/bin/env bash
 T="$(dirname "$0")"
@@ -30,6 +31,7 @@ line="$(sed -n "${n}p" "$T/script")"
 [ -z "$line" ] && line="$(tail -n 1 "$T/script")"
 code="${line%% *}"; body=""
 case "$line" in *" "*) body="${line#* }" ;; esac
+[ "$n" -gt 12 ] && code=200   # safety cap: a loop that would not stop ends here, so a broken lib fails by assertion, not by timeout
 out=""
 while [ "$#" -gt 0 ]; do [ "$1" = "-o" ] && out="$2"; shift; done
 [ "$code" = "FAIL" ] && exit 7
@@ -41,10 +43,13 @@ chmod +x "$T/curl-stub"
 # run <script-lines> <args...> : sets OUT RC ERR CALLS BODY
 run() {
 	printf '%s\n' "$1" > "$T/script"; shift
-	rm -f "$T/count" "$T/args" "$T/body"
-	OUT="$( ( . "$LIB"; CURL="$T/curl-stub" fy_fetch_retry "$@" ) 2>"$T/err"; echo "rc=$?" )"
+	rm -f "$T/count" "$T/args" "$T/body" "$T/sleeps"
+	# sleep is replaced inside the subshell: it records its argument and never really sleeps
+	OUT="$( ( . "$LIB"; sleep() { printf '%s\n' "$1" >> "$T/sleeps"; }; CURL="$T/curl-stub" fy_fetch_retry "$@" ) 2>"$T/err"; echo "rc=$?" )"
 	RC="${OUT##*rc=}"; OUT="${OUT%rc=*}"
 	ERR="$(cat "$T/err")"
+	SLEEPN="$(wc -l < "$T/sleeps" 2>/dev/null | tr -d ' ')"; SLEEPN="${SLEEPN:-0}"
+	SLEEPV="$(sort -u "$T/sleeps" 2>/dev/null | tr '\n' ' ')"
 	CALLS="$(cat "$T/count" 2>/dev/null || echo 0)"
 	BODY="$(cat "$T/body" 2>/dev/null)"
 }
@@ -84,15 +89,75 @@ eq "attempts=1 calls" "$CALLS" "1"; eq "attempts=1 code" "$OUT" "500"
 FYD_FETCH_ATTEMPTS=5 run "500 z" --max-time=15 -- "$U" "$T/body"
 eq "attempts=5 calls" "$CALLS" "5"
 
-# unusual FYD_FETCH_ATTEMPTS: same as the copies (0 -> one call; non-numeric -> never stops on its own, test bounded by a 200)
-FYD_FETCH_ATTEMPTS=0 run "500 z" --max-time=15 -- "$U" "$T/body"
-eq "attempts=0 calls" "$CALLS" "1"; eq "attempts=0 code" "$OUT" "500"
-FYD_FETCH_ATTEMPTS=abc run "$(printf '500 a\n500 b\n200 c')" --max-time=15 -- "$U" "$T/body"
-eq "attempts=abc keeps retrying until 200" "$OUT" "200"; eq "attempts=abc calls" "$CALLS" "3"
-case "$ERR" in *"integer"*) ok "attempts=abc stderr noise like the copies" ;; *) fail "attempts=abc stderr noise like the copies" "stderr: $ERR" ;; esac
-FYD_RETRY_SLEEP=abc run "$(printf '500 a\n200 c')" --max-time=15 -- "$U" "$T/body"
-eq "sleep=abc still returns" "$OUT" "200"; eq "sleep=abc calls" "$CALLS" "2"
-FYD_RETRY_SLEEP=0 run "200 ok" --max-time=15 -- "$U" "$T/body"
+# FYD_FETCH_ATTEMPTS: unset / empty -> default 3; a well-formed 1..10 -> that many calls (500 stub)
+run "500 z" --max-time=15 -- "$U" "$T/body"
+eq "attempts=unset calls" "$CALLS" "3"; eq "attempts=unset rc" "$RC" "0"
+FYD_FETCH_ATTEMPTS="" run "500 z" --max-time=15 -- "$U" "$T/body"
+eq "attempts=empty calls" "$CALLS" "3"; eq "attempts=empty rc" "$RC" "0"
+FYD_FETCH_ATTEMPTS=3 run "500 z" --max-time=15 -- "$U" "$T/body"
+eq "attempts=3 calls" "$CALLS" "3"
+FYD_FETCH_ATTEMPTS=10 run "500 z" --max-time=15 -- "$U" "$T/body"
+eq "attempts=10 calls" "$CALLS" "10"; eq "attempts=10 code" "$OUT" "500"
+# FYD_RETRY_SLEEP: unset / empty -> default 3; a well-formed 0..60 is handed to sleep as is
+unset FYD_RETRY_SLEEP
+run "500 z" --max-time=15 -- "$U" "$T/body"
+eq "sleep=unset passed" "$SLEEPV" "3 "; eq "sleep=unset times" "$SLEEPN" "2"
+export FYD_RETRY_SLEEP=0
+FYD_RETRY_SLEEP="" run "500 z" --max-time=15 -- "$U" "$T/body"
+eq "sleep=empty passed" "$SLEEPV" "3 "; eq "sleep=empty times" "$SLEEPN" "2"
+for v in 0 3 60; do
+	FYD_RETRY_SLEEP="$v" run "500 z" --max-time=15 -- "$U" "$T/body"
+	eq "sleep=$v passed" "$SLEEPV" "$v "; eq "sleep=$v times" "$SLEEPN" "2"; eq "sleep=$v rc" "$RC" "0"
+done
+
+# a malformed value is a usage error: 64, no curl, nothing on stdout, no OUTFILE, no sleep,
+# exactly one stderr line naming the key (never the value)
+MSG_A="fy_fetch_retry: FYD_FETCH_ATTEMPTS must be an integer 1..10"
+MSG_S="fy_fetch_retry: FYD_RETRY_SLEEP must be an integer 0..60"
+badval() { # name key value expected-message
+	local n="$1" k="$2" v="$3" want="$4"
+	if [ "$k" = FYD_FETCH_ATTEMPTS ]; then
+		FYD_FETCH_ATTEMPTS="$v" run "500 z" --max-time=15 -- "$U" "$T/body"
+	else
+		FYD_RETRY_SLEEP="$v" run "500 z" --max-time=15 -- "$U" "$T/body"
+	fi
+	eq "$n rc" "$RC" "64"; eq "$n no-curl" "$CALLS" "0"; eq "$n stdout-empty" "$OUT" ""
+	if [ -e "$T/body" ]; then fail "$n no-outfile" "OUTFILE was created"; else ok "$n no-outfile"; fi
+	eq "$n no-sleep" "$SLEEPN" "0"
+	eq "$n stderr" "$ERR" "$want"; eq "$n stderr-lines" "$(wc -l < "$T/err" | tr -d ' ')" "1"
+}
+badval "attempts=0" FYD_FETCH_ATTEMPTS 0 "$MSG_A"
+badval "attempts=11" FYD_FETCH_ATTEMPTS 11 "$MSG_A"
+badval "attempts=neg" FYD_FETCH_ATTEMPTS -1 "$MSG_A"
+badval "attempts=frac" FYD_FETCH_ATTEMPTS 1.5 "$MSG_A"
+badval "attempts=alpha" FYD_FETCH_ATTEMPTS abc "$MSG_A"
+badval "attempts=lead-zero" FYD_FETCH_ATTEMPTS 03 "$MSG_A"
+badval "attempts=plus" FYD_FETCH_ATTEMPTS +3 "$MSG_A"
+badval "attempts=lead-space" FYD_FETCH_ATTEMPTS " 3" "$MSG_A"
+badval "attempts=trail-space" FYD_FETCH_ATTEMPTS "3 " "$MSG_A"
+badval "attempts=newline" FYD_FETCH_ATTEMPTS $'3\n' "$MSG_A"
+badval "attempts=hex" FYD_FETCH_ATTEMPTS 0x3 "$MSG_A"
+badval "attempts=exp" FYD_FETCH_ATTEMPTS 1e1 "$MSG_A"
+badval "attempts=huge" FYD_FETCH_ATTEMPTS 99999999999999999999 "$MSG_A"
+badval "sleep=61" FYD_RETRY_SLEEP 61 "$MSG_S"
+badval "sleep=neg" FYD_RETRY_SLEEP -1 "$MSG_S"
+badval "sleep=frac" FYD_RETRY_SLEEP 0.5 "$MSG_S"
+badval "sleep=alpha" FYD_RETRY_SLEEP abc "$MSG_S"
+badval "sleep=lead-zero" FYD_RETRY_SLEEP 03 "$MSG_S"
+badval "sleep=double-zero" FYD_RETRY_SLEEP 00 "$MSG_S"
+badval "sleep=plus" FYD_RETRY_SLEEP +1 "$MSG_S"
+badval "sleep=lead-space" FYD_RETRY_SLEEP " 0" "$MSG_S"
+badval "sleep=trail-space" FYD_RETRY_SLEEP "0 " "$MSG_S"
+badval "sleep=newline" FYD_RETRY_SLEEP $'0\n' "$MSG_S"
+badval "sleep=huge" FYD_RETRY_SLEEP 99999999999999999999 "$MSG_S"
+# both malformed: the FYD_FETCH_ATTEMPTS line only
+FYD_FETCH_ATTEMPTS=abc FYD_RETRY_SLEEP=abc run "500 z" --max-time=15 -- "$U" "$T/body"
+eq "both-bad rc" "$RC" "64"; eq "both-bad stderr" "$ERR" "$MSG_A"; eq "both-bad no-curl" "$CALLS" "0"
+# an OUTFILE that already exists is left exactly as it was (content and mtime)
+printf 'keep' > "$T/pre"; touch -t 200001010000 "$T/pre"; touch -t 200101010000 "$T/ref"
+FYD_FETCH_ATTEMPTS=abc run "200 new" --max-time=15 -- "$U" "$T/pre"
+eq "attempts=alpha outfile-content" "$(cat "$T/pre")" "keep"
+if [ "$T/pre" -ot "$T/ref" ]; then ok "attempts=alpha outfile-mtime"; else fail "attempts=alpha outfile-mtime" "mtime changed"; fi
 
 # the curl line
 run "200 ok" --max-time=15 -- "$U" "$T/body"

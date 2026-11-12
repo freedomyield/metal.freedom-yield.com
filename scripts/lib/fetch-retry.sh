@@ -11,17 +11,20 @@
 #     stdout : the FINAL attempt's HTTP status code ("000" on transport
 #              failure), no trailing newline
 #     OUTFILE: the FINAL attempt's body
-#     return : 0 after a valid call, 64 on a usage error
-#     env    : FYD_FETCH_ATTEMPTS (default 3), FYD_RETRY_SLEEP (default 3),
-#              CURL (the caller's curl, required)
+#     return : 0 after a valid call, 64 on a usage error (a malformed
+#              FYD_FETCH_ATTEMPTS / FYD_RETRY_SLEEP is a usage error)
+#     env    : FYD_FETCH_ATTEMPTS (default 3; integer 1..10, no sign, no
+#              leading 0), FYD_RETRY_SLEEP (default 3; integer 0..60, no sign,
+#              no leading 0 except 0 itself), CURL (the caller's curl, required)
 #   --max-time is required (the monitors differ: 15 vs 20 seconds, no recorded
 #   reason, so it stays an argument). --no-retry-4xx stops at the first 4xx
 #   (pulsevm-upstream: a 404 on a third party cannot succeed on retry).
 #
 # The curl call, the loop and the stop rules are the bytes of the three copies
 # this replaces. Stops at the first 200; sleeps between attempts, never after
-# the last. A non-numeric or 0 FYD_FETCH_ATTEMPTS / FYD_RETRY_SLEEP behaves as
-# in those copies (unchanged on purpose).
+# the last. A malformed FYD_FETCH_ATTEMPTS / FYD_RETRY_SLEEP is rejected with 64
+# before any curl call (the earlier "behaves as in those copies" rule is
+# cancelled: design spec §17).
 #
 # Library rules (B-P7): never ends the caller's shell, no side effects when sourced.
 
@@ -51,6 +54,14 @@ fy_fetch_retry() {
 	local url="$1" outfile="$2"
 	local attempts="${FYD_FETCH_ATTEMPTS:-3}"
 	local sleep_s="${FYD_RETRY_SLEEP:-3}"
+	case "$attempts" in
+	[1-9] | 10) ;;
+	*) _fy_fetch_retry_usage "FYD_FETCH_ATTEMPTS must be an integer 1..10"; return 64 ;;
+	esac
+	case "$sleep_s" in
+	0 | [1-9] | [1-5][0-9] | 60) ;;
+	*) _fy_fetch_retry_usage "FYD_RETRY_SLEEP must be an integer 0..60"; return 64 ;;
+	esac
 	local attempt=1 code
 	while :; do
 		code="$("$CURL" -sS -o "$outfile" -w "%{http_code}" --max-time "$max_time" "$url" 2>/dev/null || echo "000")"
