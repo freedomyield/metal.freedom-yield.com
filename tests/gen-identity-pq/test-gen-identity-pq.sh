@@ -21,6 +21,8 @@
 #   R2  stale unlocked key -> exit 5 and the stale file is deleted
 #   R3  committed .pub swapped for another key -> exit 11, nothing published,
 #       unlocked file deleted
+#   R5  nothing at the ML-DSA public key path -> exit 5, says "ML-DSA public
+#       key not found", nothing written
 #   P3  FY_OPENSSL unusable -> exit 5, unlocked file deleted
 #   P4  early non-PQ failure (exit 7) still deletes the unlocked file
 #   P5  a generator whose context string is wrong produces a sig the real
@@ -332,6 +334,22 @@ grep -qF "is not an ML-DSA-87 public key" "$WORK/r4.err" \
 	&& pass "R4 nothing published" \
 	|| fail "R4 published a manifest signed by an ML-DSA-65 key"
 [ ! -e "$UNLOCKED" ] && pass "R4 the unlocked key was deleted" || fail "R4 the unlocked key was left on disk after exit 5"
+
+# =============================================================================
+# R5 — nothing at the ML-DSA public key path -> exit 5 with the "not found"
+#      sentence (the "not a PEM" branch also exits 5, so the sentence is what
+#      tells the two apart), nothing published
+# =============================================================================
+R_R5="$(new_repo r5)"
+rm -f "$R_R5/${FYIPQ_PUB_REL}"
+run_genid "$R_R5" "$WORK/r5.out" "$WORK/r5.err"; RC=$?
+[ "$RC" -eq 5 ] && pass "R5 no ML-DSA public key -> exit 5" || fail "R5 expected exit 5, got $RC"
+grep -qF "ML-DSA public key not found" "$WORK/r5.err" \
+	&& pass "R5 the error says the ML-DSA public key was not found" \
+	|| fail "R5 stderr does not say 'ML-DSA public key not found': $(tail -3 "$WORK/r5.err" | tr '\n' '|')"
+[ ! -e "$R_R5/public/api/identity.json" ] && [ ! -e "$R_R5/${FYIPQ_SIG_REL}" ] \
+	&& pass "R5 nothing published" \
+	|| fail "R5 published an identity without an ML-DSA public key"
 
 # =============================================================================
 # P3 — unusable OpenSSL -> exit 5, unlocked key deleted
