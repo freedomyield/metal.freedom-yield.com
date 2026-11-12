@@ -318,6 +318,8 @@ g3_run() { # outdir
 	"$G3_PERL" -e "$G3_WATCHDOG" "$G3_CHILD" "$G3_TIMEOUT" "$t/timed-out" </dev/null >/dev/null 2>&1 &
 	G3_WD=$!
 	wait "$G3_CHILD" || rc=$?
+	# collected: from here no signal path may name this PID (it can be reused)
+	G3_CHILD=""
 	if [ -e "$t/timed-out" ]; then
 		# expired: let the watchdog finish (TERM, then KILL 5 s later if anything is left)
 		wait "$G3_WD" 2>/dev/null || true
@@ -330,7 +332,6 @@ g3_run() { # outdir
 	G3_WD=""
 	# a watchdog that ended on its own has fired, even if its marker could not be written
 	[ "$wdrc" -eq 137 ] || g3_die "$G3_R_ID: timeout after ${G3_TIMEOUT}s at $G3_R_SIDE"
-	G3_CHILD=""
 	[ -e "$t/pg-started" ] || g3_die "$G3_R_ID: the run did not start in its own process group at $G3_R_SIDE (rc=$rc)"
 	printf '%s\n' "$rc" > "$out/rc"
 
