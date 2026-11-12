@@ -491,6 +491,44 @@ grep -q "whitespace-only content is not genesis" "$STDERR10" \
 	&& pass "whitespace-only history: error message explicitly distinguishes from genuine genesis" \
 	|| fail "whitespace-only history: message does not distinguish from genesis; got: $(cat "$STDERR10" 2>/dev/null | tr '\n' '|')"
 
+# ---- case 11: pubkey URL fetch fails -> exit 4, named message, nothing written
+# A stub curl that fails ONLY for the pubkey URL (every other fetch and the
+# P-chain POST delegate to the fixture stub, and every call is logged).
+# exit 4 is also the code of the later P-chain RPC failures, so rc alone is
+# not enough: the pubkey-specific stderr sentence must be present too, and
+# the RPC POST must never have been reached.
+FARM_PUBKEY_FAIL="$TMP/bin-pubkey-fail"
+mkdir -p "$FARM_PUBKEY_FAIL"
+cp "$FARM_VALID/ajv" "$FARM_PUBKEY_FAIL/ajv"
+CALLS11="$TMP/out/run11.curl-calls"
+: > "$CALLS11"
+cat > "$FARM_PUBKEY_FAIL/curl" <<PKEOF
+#!/usr/bin/env bash
+echo "\$*" >> "$CALLS11"
+case "\$*" in
+	*operator-identity.pub*) echo "STUB CURL: pubkey fetch forced to fail" >&2; exit 22 ;;
+esac
+exec "$TMP/bin/curl" "\$@"
+PKEOF
+chmod +x "$FARM_PUBKEY_FAIL/curl"
+OUT11="$TMP/out/anchor-source-run11.json"
+PATH="$FARM_PUBKEY_FAIL:$PATH" bash "$SCRIPT" --out="$OUT11" >/dev/null 2>"$TMP/out/run11.stderr"
+RC11=$?
+check_eq "pubkey fetch failure -> exit 4" "4" "$RC11"
+grep -q "cannot fetch operator pubkey" "$TMP/out/run11.stderr" \
+	&& pass "pubkey fetch failure emits the pubkey-specific error message" \
+	|| fail "pubkey fetch failure: pubkey-specific message missing; got: $(tr '\n' '|' < "$TMP/out/run11.stderr")"
+if [ -e "$OUT11" ]; then
+	fail "pubkey fetch failure must NOT write $OUT11"
+else
+	pass "pubkey fetch failure did not write the canonical file"
+fi
+if grep -q "POST" "$CALLS11"; then
+	fail "pubkey fetch failure: script went on to the P-chain RPC POST"
+else
+	pass "pubkey fetch failure: P-chain RPC POST never reached"
+fi
+
 # ---- summary -----------------------------------------------------------------
 echo
 echo "----------------------------------------"
