@@ -43,14 +43,16 @@ CADDYFILE="$REPO/caddy/Caddyfile"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-PASS=0; FAIL=0; FAILURES=()
-ok() { PASS=$((PASS + 1)); printf '  PASS  %s\n' "$1"; }
-bad() { FAIL=$((FAIL + 1)); FAILURES+=("$1 ($2)"); printf '  FAIL  %s  (%s)\n' "$1" "$2"; }
+FAILURES=()
+# shellcheck source=../lib/assert.sh
+. "$REPO/tests/lib/assert.sh"
+ok() { t_pass "$1"; }
+bad() { FAILURES+=("$1 ($2)"); t_fail "$1" "$2"; }
 assert_eq() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "expected='$2' actual='$3'"; fi; }
 
 finish() {
   echo
-  echo "PASS=$PASS FAIL=$FAIL"
+  t_summary validator-host-no-caddy || true
   if [ "$FAIL" -ne 0 ]; then printf '  - %s\n' "${FAILURES[@]}"; exit 1; fi
   exit 0
 }

@@ -40,9 +40,10 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "${DIR}/../.." && pwd)"
 WORKFLOW="${REPO}/.github/workflows/deploy.yml"
 
-PASS=0; FAIL=0
-ok(){ PASS=$((PASS+1)); printf '  ✓ %s\n' "$1"; }
-no(){ FAIL=$((FAIL+1)); printf '  ✗ %s\n' "$1"; }
+# shellcheck source=../lib/assert.sh
+. "${REPO}/tests/lib/assert.sh"
+ok(){ t_pass "$1"; }
+no(){ t_fail "$1"; }
 
 [ -f "${WORKFLOW}" ] || { echo "FAIL: workflow not found at ${WORKFLOW}" >&2; exit 1; }
 
@@ -132,5 +133,5 @@ grep -Fq -- './ "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/"' "${WORKFLOW}" \
   && no "workflow still contains the old whole-repo rsync shape (./ ... \$DEPLOY_PATH/)" \
   || ok "old whole-repo rsync shape (./ ... \$DEPLOY_PATH/) is gone"
 
-printf 'RESULTS: %s PASS / %s FAIL\n' "${PASS}" "${FAIL}"
+t_summary host-rsync-excludes || true
 [ "${FAIL}" -eq 0 ]

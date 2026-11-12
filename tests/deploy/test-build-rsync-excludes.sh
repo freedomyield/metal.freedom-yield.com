@@ -4,9 +4,10 @@ set -u
 DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "${DIR}/../.." && pwd)"
 EMIT="${REPO}/scripts/deploy/build-rsync-excludes.sh"
-PASS=0; FAIL=0
-ok(){ PASS=$((PASS+1)); printf '  ✓ %s\n' "$1"; }
-no(){ FAIL=$((FAIL+1)); printf '  ✗ %s\n' "$1"; }
+# shellcheck source=../lib/assert.sh
+. "${REPO}/tests/lib/assert.sh"
+ok(){ t_pass "$1"; }
+no(){ t_fail "$1"; }
 
 # repo-root-rooted shape: prefix public/ (no live rsync leg uses this
 # prefix anymore — both the validator-host and web host legs are
@@ -63,5 +64,5 @@ if FEED_EXCLUDES_FILE=/nonexistent bash "${EMIT}" "public/" >/dev/null 2>&1; the
   no "missing list should fail"
 else ok "missing list fails closed"; fi
 
-printf 'RESULTS: %s PASS / %s FAIL\n' "${PASS}" "${FAIL}"
+t_summary build-rsync-excludes || true
 [ "${FAIL}" -eq 0 ]

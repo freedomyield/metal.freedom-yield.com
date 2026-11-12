@@ -95,38 +95,33 @@ rsync -rltv --delete \
 	"${EXCLUDE_ARGS[@]}" \
 	"${SRC}/" "${DST}/" >/dev/null
 
-PASS=0; FAIL=0
+# shellcheck source=../lib/assert.sh
+. "${REPO_ROOT}/tests/lib/assert.sh"
 
 check_exists() {
 	local path="$1" label="$2"
 	if [ -e "${path}" ]; then
-		echo "  PASS ${label} preserved"
-		PASS=$((PASS+1))
+		t_pass "${label} preserved"
 	else
-		echo "  FAIL ${label} unexpectedly deleted at ${path}"
-		FAIL=$((FAIL+1))
+		t_fail "${label} unexpectedly deleted at ${path}"
 	fi
 }
 
 check_absent() {
 	local path="$1" label="$2"
 	if [ ! -e "${path}" ]; then
-		echo "  PASS ${label} correctly deleted (junk drop)"
-		PASS=$((PASS+1))
+		t_pass "${label} correctly deleted (junk drop)"
 	else
-		echo "  FAIL ${label} survived deletion at ${path}"
-		FAIL=$((FAIL+1))
+		t_fail "${label} survived deletion at ${path}"
 	fi
 }
 
 check_content() {
 	local path="$1" expect="$2" label="$3"
 	if [ "$(cat "${path}" 2>/dev/null)" = "${expect}" ]; then
-		echo "  PASS ${label} content matches expected '${expect}'"
-		PASS=$((PASS+1))
+		t_pass "${label} content matches expected '${expect}'"
 	else
-		echo "  FAIL ${label} content mismatch; got '$(cat "${path}" 2>/dev/null)' expected '${expect}'"
-		FAIL=$((FAIL+1))
+		t_fail "${label} content mismatch; got '$(cat "${path}" 2>/dev/null)' expected '${expect}'"
 	fi
 }
 
@@ -197,5 +192,5 @@ check_absent  "${XS}/dst/api/old-removed.json"        "web host non-feed orphan"
 rm -rf "${XS}"
 
 echo ""
-echo "Result: ${PASS} pass, ${FAIL} fail"
+t_summary rsync-delete-protection || true
 [ "${FAIL}" -eq 0 ]

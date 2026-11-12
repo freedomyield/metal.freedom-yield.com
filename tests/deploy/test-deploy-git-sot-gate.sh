@@ -38,9 +38,10 @@ WORKFLOW="${FYD_WORKFLOW_FILE:-${REPO}/.github/workflows/deploy.yml}"
 ADVANCE_SCRIPT="${REPO}/scripts/advance-host-checkout.sh"
 CRON_INSTALLER="${REPO}/scripts/install-metal-host-advance-cron.sh"
 
-PASS=0; FAIL=0
-ok(){ PASS=$((PASS+1)); printf '  ✓ %s\n' "$1"; }
-no(){ FAIL=$((FAIL+1)); printf '  ✗ %s\n' "$1"; }
+# shellcheck source=../lib/assert.sh
+. "${REPO}/tests/lib/assert.sh"
+ok(){ t_pass "$1"; }
+no(){ t_fail "$1"; }
 
 [ -f "${WORKFLOW}" ] || { echo "FAIL: workflow not found at ${WORKFLOW}" >&2; exit 1; }
 [ -f "${ADVANCE_SCRIPT}" ] || { echo "FAIL: advance script not found at ${ADVANCE_SCRIPT}" >&2; exit 1; }
@@ -155,5 +156,5 @@ else
   no "scripts/install-metal-host-advance-cron.sh is missing, or no longer references advance-host-checkout.sh"
 fi
 
-printf 'RESULTS: %s PASS / %s FAIL\n' "${PASS}" "${FAIL}"
+t_summary deploy-git-sot-gate || true
 [ "${FAIL}" -eq 0 ]
