@@ -620,3 +620,13 @@ Calls, by cause (recommended first):
 - D-25. Lanes, order and merge order as 16.7.
 
 Questions for the operator from this amendment: none. The calls above are listed so they can be checked while reading.
+
+## 17. Amendment 2026-11-12 — fy_fetch_retry rejects a malformed FYD_FETCH_ATTEMPTS / FYD_RETRY_SLEEP
+
+- Change: `fy_fetch_retry` checks both keys after its argument checks and before the first curl call. Unset or empty keeps the default 3. `FYD_FETCH_ATTEMPTS` must be an integer 1..10 and `FYD_RETRY_SLEEP` an integer 0..60, written without sign, space or leading zero (`0` itself is allowed for sleep); anything else is a usage error, FYD_FETCH_ATTEMPTS first.
+- A usage error means: return 64, no curl call, no sleep, nothing on stdout, OUTFILE neither created nor touched, one stderr line `fy_fetch_retry: <KEY> must be an integer <range>` (the value is not echoed). The lib does not fall back to the default and does not exit (B-P7).
+- Reading of §5.2 "return: 0 always after a valid call": "valid call" covers the two keys as well as the arguments; a malformed key is a usage error, i.e. 64.
+- Cancelled: the lib header sentence "A non-numeric or 0 FYD_FETCH_ATTEMPTS / FYD_RETRY_SLEEP behaves as in those copies (unchanged on purpose)" (a lib comment, not in this document). Reason: a non-numeric attempts value looped until a 200 arrived with no bound. Replaced by a pointer to this section.
+- Callers: the code of the three monitors is unchanged. Status 64 with an empty stdout falls into their existing "not 200" branch, so a malformed key ends as that monitor's fetch failure and takes its alert path; one case per monitor pins it.
+- Out of scope, left as is: `fetch_soft` in `check-pulsevm-upstream.sh` is a copy that does not use the lib and keeps the old behaviour for the same inputs.
+- Where it connects / how to remove it: the only seam is the entry check inside `fy_fetch_retry`. To remove, revert the three commits of this bundle, newest first (the §16.1 stack form); reverting only the lib commit leaves the three monitor cases red.
