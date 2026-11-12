@@ -40,31 +40,27 @@ TRACKER="$REPO/scripts/reward-tracker.sh"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-PASS=0
-FAIL=0
 FAILURES=()
+# shellcheck source=../lib/assert.sh
+. "$REPO/tests/lib/assert.sh"
 
 assert_eq() {
 	local label="$1" expected="$2" actual="$3"
 	if [ "$expected" = "$actual" ]; then
-		PASS=$((PASS + 1))
-		printf '  PASS  %-65s expected=%s actual=%s\n' "$label" "$expected" "$actual"
+		t_pass "$(printf '%-65s expected=%s actual=%s' "$label" "$expected" "$actual")"
 	else
-		FAIL=$((FAIL + 1))
 		FAILURES+=("$label (expected=$expected, actual=$actual)")
-		printf '  FAIL  %-65s expected=%s actual=%s\n' "$label" "$expected" "$actual"
+		t_fail "$(printf '%-65s expected=%s actual=%s' "$label" "$expected" "$actual")"
 	fi
 }
 
 assert_true() {
 	local label="$1" cond="$2"
 	if [ "$cond" = "1" ]; then
-		PASS=$((PASS + 1))
-		printf '  PASS  %s\n' "$label"
+		t_pass "$label"
 	else
-		FAIL=$((FAIL + 1))
 		FAILURES+=("$label")
-		printf '  FAIL  %s\n' "$label"
+		t_fail "$label"
 	fi
 }
 
@@ -813,9 +809,8 @@ ZERO_MUTANT="$ZERO_MUTANT_ROOT/scripts/reward-tracker.sh"
 sed 's/if \[ "\$REWARD_IS_ZERO" = "1" \]; then/if [ "0" = "1" ]; then/' "$TRACKER" > "$ZERO_MUTANT"
 chmod +x "$ZERO_MUTANT"
 if diff -q "$TRACKER" "$ZERO_MUTANT" >/dev/null 2>&1; then
-	FAIL=$((FAIL + 1))
 	FAILURES+=("zero-reward mutation kill check: sed produced no diff — guard not matched")
-	echo "  FAIL  zero-reward mutant sed produced no diff — guard not matched"
+	t_fail "zero-reward mutant sed produced no diff — guard not matched"
 else
 	# Re-run the SAME zero-reward scenario one more cycle forward (TX3 -> TX4)
 	# against the MUTANT binary, so the guard is disabled but everything else
@@ -839,12 +834,10 @@ JSON
 	assert_eq "zero-reward mutant ran to completion (rc=0, not crashed)" "0" "$ZERO_MUTANT_RC"
 	MUTANT_ZERO_PUSH="$([ -f "$NTFY_LOG" ] && tail -n +"$((NTFY_LINES_BEFORE_MUTANT + 1))" "$NTFY_LOG" || echo '')"
 	if printf '%s' "$MUTANT_ZERO_PUSH" | grep -q '🎉'; then
-		PASS=$((PASS + 1))
-		printf '  PASS  mutant (REWARD_IS_ZERO guard disabled) sends the celebratory 🎉 push for a 0-METAL cycle — the guard is load-bearing\n'
+		t_pass "mutant (REWARD_IS_ZERO guard disabled) sends the celebratory 🎉 push for a 0-METAL cycle — the guard is load-bearing"
 	else
-		FAIL=$((FAIL + 1))
 		FAILURES+=("zero-reward mutation kill check: mutant still did not celebrate a 0-METAL cycle")
-		echo "  FAIL  zero-reward mutant unexpectedly still sent the non-celebratory push"
+		t_fail "zero-reward mutant unexpectedly still sent the non-celebratory push"
 	fi
 fi
 
@@ -1129,9 +1122,8 @@ sed 's/echo "reward-tracker: appended matured cycle record"/echo "reward-tracker
 	"$TRACKER" > "$MUTANT"
 chmod +x "$MUTANT"
 if diff -q "$TRACKER" "$MUTANT" >/dev/null 2>&1; then
-	FAIL=$((FAIL + 1))
 	FAILURES+=("mutation kill check: sed produced no diff — target line not found, mutation not actually applied")
-	echo "  FAIL  mutant sed produced no diff — target echo not matched"
+	t_fail "mutant sed produced no diff — target echo not matched"
 else
 	MUTANT_DIR="$TMP/leak-mutant"
 	mkdir -p "$MUTANT_DIR"
@@ -1140,17 +1132,15 @@ else
 	replay_full_scenario "$MUTANT_DIR" "$MUTANT"
 	MUTANT_LEAK_HITS=$(grep -oE "$LEAK_RE" "$AGG_LOG" || true)
 	if [ -n "$MUTANT_LEAK_HITS" ]; then
-		PASS=$((PASS + 1))
-		printf '  PASS  mutant (debug echo of REWARD_METAL added) DOES leak a decimal amount (%s) — the non-leak check has teeth\n' "$(printf '%s' "$MUTANT_LEAK_HITS" | head -1)"
+		t_pass "$(printf 'mutant (debug echo of REWARD_METAL added) DOES leak a decimal amount (%s) — the non-leak check has teeth' "$(printf '%s' "$MUTANT_LEAK_HITS" | head -1)")"
 	else
-		FAIL=$((FAIL + 1))
 		FAILURES+=("mutation kill check: mutant still produced zero leak matches — the non-leak grep is not sensitive")
-		echo "  FAIL  mutant unexpectedly leaked nothing — non-leak check is not sensitive"
+		t_fail "mutant unexpectedly leaked nothing — non-leak check is not sensitive"
 	fi
 fi
 
 echo ""
-echo "Total: PASS=$PASS FAIL=$FAIL"
+t_summary reward-tracker || true
 if [ "$FAIL" -gt 0 ]; then
 	printf '\nFailures:\n'
 	for f in "${FAILURES[@]}"; do printf '  - %s\n' "$f"; done

@@ -13,31 +13,27 @@ set -uo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 LIB="$REPO/scripts/lib/reward-utxo-decode.sh"
 
-PASS=0
-FAIL=0
 FAILURES=()
+# shellcheck source=../lib/assert.sh
+. "$REPO/tests/lib/assert.sh"
 
 assert_eq() {
 	local label="$1" expected="$2" actual="$3"
 	if [ "$expected" = "$actual" ]; then
-		PASS=$((PASS + 1))
-		printf '  PASS  %-65s expected=%s actual=%s\n' "$label" "$expected" "$actual"
+		t_pass "$(printf '%-65s expected=%s actual=%s' "$label" "$expected" "$actual")"
 	else
-		FAIL=$((FAIL + 1))
 		FAILURES+=("$label (expected=$expected, actual=$actual)")
-		printf '  FAIL  %-65s expected=%s actual=%s\n' "$label" "$expected" "$actual"
+		t_fail "$(printf '%-65s expected=%s actual=%s' "$label" "$expected" "$actual")"
 	fi
 }
 
 assert_rc() {
 	local label="$1" expected_rc="$2" actual_rc="$3"
 	if [ "$expected_rc" = "$actual_rc" ]; then
-		PASS=$((PASS + 1))
-		printf '  PASS  %-65s expected_rc=%s actual_rc=%s\n' "$label" "$expected_rc" "$actual_rc"
+		t_pass "$(printf '%-65s expected_rc=%s actual_rc=%s' "$label" "$expected_rc" "$actual_rc")"
 	else
-		FAIL=$((FAIL + 1))
 		FAILURES+=("$label (expected_rc=$expected_rc, actual_rc=$actual_rc)")
-		printf '  FAIL  %-65s expected_rc=%s actual_rc=%s\n' "$label" "$expected_rc" "$actual_rc"
+		t_fail "$(printf '%-65s expected_rc=%s actual_rc=%s' "$label" "$expected_rc" "$actual_rc")"
 	fi
 }
 
@@ -205,17 +201,14 @@ if ! diff -q "$LIB" "$SPLIT_MUTANT" >/dev/null 2>&1; then
 		printf '%s\n%s\n' "$SELF_K2" "$FEE_K5" | split_reward_utxos_metal
 	)"
 	if [ "$SPLIT_MUTANT_OUT" = "62.750000000 50.500000000 12.250000000 1 utxo-order" ]; then
-		PASS=$((PASS + 1))
-		echo "  PASS  mutant (consecutive-index guard disabled) SPLITS the (2,5) gap pair as if adjacent — the guard is load-bearing"
+		t_pass "mutant (consecutive-index guard disabled) SPLITS the (2,5) gap pair as if adjacent — the guard is load-bearing"
 	else
-		FAIL=$((FAIL + 1))
 		FAILURES+=("split mutation kill: mutant still refused the gap pair (out=$SPLIT_MUTANT_OUT)")
-		echo "  FAIL  split mutant unexpectedly still refused: $SPLIT_MUTANT_OUT"
+		t_fail "split mutant unexpectedly still refused: $SPLIT_MUTANT_OUT"
 	fi
 else
-	FAIL=$((FAIL + 1))
 	FAILURES+=("split mutation kill: sed did not change the file — guard not found at expected shape")
-	echo "  FAIL  split mutant sed produced no diff — guard not matched"
+	t_fail "split mutant sed produced no diff — guard not matched"
 fi
 rm -f "$SPLIT_MUTANT"
 
@@ -240,23 +233,20 @@ if ! diff -q "$LIB" "$MUTANT" >/dev/null 2>&1; then
 	read -r MUTANT_RC MUTANT_OUT < "${MUTANT}.result"
 	rm -f "${MUTANT}.result"
 	if [ "$MUTANT_RC" = "0" ]; then
-		PASS=$((PASS + 1))
-		printf '  PASS  mutant (type-ID guard disabled) MISPARSES the wrong-type UTXO (rc=0, amount=%s) instead of refusing — the guard is load-bearing\n' "$MUTANT_OUT"
+		t_pass "$(printf 'mutant (type-ID guard disabled) MISPARSES the wrong-type UTXO (rc=0, amount=%s) instead of refusing — the guard is load-bearing' "$MUTANT_OUT")"
 	else
-		FAIL=$((FAIL + 1))
 		FAILURES+=("mutation kill check: mutant still refused (rc=$MUTANT_RC) — the sed patch did not actually disable the guard")
-		printf '  FAIL  mutant unexpectedly still refused (rc=%s) — guard patch ineffective\n' "$MUTANT_RC"
+		t_fail "$(printf 'mutant unexpectedly still refused (rc=%s) — guard patch ineffective' "$MUTANT_RC")"
 	fi
 else
-	FAIL=$((FAIL + 1))
 	FAILURES+=("mutation kill check: sed did not change the file — type-ID guard not found at expected shape")
-	echo "  FAIL  mutant sed produced no diff — guard not matched, mutation not actually applied"
+	t_fail "mutant sed produced no diff — guard not matched, mutation not actually applied"
 fi
 rm -f "$MUTANT" "${MUTANT}.result"
 trap - EXIT
 
 echo ""
-echo "Total: PASS=$PASS FAIL=$FAIL"
+t_summary reward-utxo-decode || true
 if [ "$FAIL" -gt 0 ]; then
 	printf '\nFailures:\n'
 	for f in "${FAILURES[@]}"; do printf '  - %s\n' "$f"; done

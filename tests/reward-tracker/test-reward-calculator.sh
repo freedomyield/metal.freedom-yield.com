@@ -34,9 +34,9 @@ set -uo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 LIB="$REPO/scripts/lib/reward-calculator.sh"
 
-PASS=0
-FAIL=0
 FAILURES=()
+# shellcheck source=../lib/assert.sh
+. "$REPO/tests/lib/assert.sh"
 
 assert_within_pct() {
 	local label="$1" expected="$2" actual="$3" tol_pct="$4"
@@ -47,36 +47,30 @@ assert_within_pct() {
 	flag="${ok%% *}"
 	pct="${ok##* }"
 	if [ "$flag" = "1" ]; then
-		PASS=$((PASS + 1))
-		printf '  PASS  %-60s expected≈%s actual=%s (%.4f%% off, tol %s%%)\n' "$label" "$expected" "$actual" "$pct" "$tol_pct"
+		t_pass "$(printf '%-60s expected≈%s actual=%s (%.4f%% off, tol %s%%)' "$label" "$expected" "$actual" "$pct" "$tol_pct")"
 	else
-		FAIL=$((FAIL + 1))
 		FAILURES+=("$label (expected≈$expected actual=$actual, ${pct}% off > ${tol_pct}% tolerance)")
-		printf '  FAIL  %-60s expected≈%s actual=%s (%.4f%% off, tol %s%%)\n' "$label" "$expected" "$actual" "$pct" "$tol_pct"
+		t_fail "$(printf '%-60s expected≈%s actual=%s (%.4f%% off, tol %s%%)' "$label" "$expected" "$actual" "$pct" "$tol_pct")"
 	fi
 }
 
 assert_eq() {
 	local label="$1" expected="$2" actual="$3"
 	if [ "$expected" = "$actual" ]; then
-		PASS=$((PASS + 1))
-		printf '  PASS  %-60s expected=%s actual=%s\n' "$label" "$expected" "$actual"
+		t_pass "$(printf '%-60s expected=%s actual=%s' "$label" "$expected" "$actual")"
 	else
-		FAIL=$((FAIL + 1))
 		FAILURES+=("$label (expected=$expected, actual=$actual)")
-		printf '  FAIL  %-60s expected=%s actual=%s\n' "$label" "$expected" "$actual"
+		t_fail "$(printf '%-60s expected=%s actual=%s' "$label" "$expected" "$actual")"
 	fi
 }
 
 assert_rc() {
 	local label="$1" expected_rc="$2" actual_rc="$3"
 	if [ "$expected_rc" = "$actual_rc" ]; then
-		PASS=$((PASS + 1))
-		printf '  PASS  %-60s expected_rc=%s actual_rc=%s\n' "$label" "$expected_rc" "$actual_rc"
+		t_pass "$(printf '%-60s expected_rc=%s actual_rc=%s' "$label" "$expected_rc" "$actual_rc")"
 	else
-		FAIL=$((FAIL + 1))
 		FAILURES+=("$label (expected_rc=$expected_rc, actual_rc=$actual_rc)")
-		printf '  FAIL  %-60s expected_rc=%s actual_rc=%s\n' "$label" "$expected_rc" "$actual_rc"
+		t_fail "$(printf '%-60s expected_rc=%s actual_rc=%s' "$label" "$expected_rc" "$actual_rc")"
 	fi
 }
 
@@ -156,23 +150,20 @@ if ! diff -q "$LIB" "$MUTANT" >/dev/null 2>&1; then
 	MUTANT_WITHIN="$(awk -v e="$FIXTURE_TARGET_METAL" -v a="$MUTANT_ACTUAL" \
 		'BEGIN{d=a-e; if(d<0)d=-d; pct=(d/e)*100; print (pct<=1)?"1":"0"}')"
 	if [ "$MUTANT_WITHIN" = "0" ]; then
-		PASS=$((PASS + 1))
-		printf '  PASS  mutant (MIN/MAX consumption rate swapped) falls OUTSIDE 1%% tolerance (actual=%s) — the fixture check has teeth\n' "$MUTANT_ACTUAL"
+		t_pass "$(printf 'mutant (MIN/MAX consumption rate swapped) falls OUTSIDE 1%% tolerance (actual=%s) — the fixture check has teeth' "$MUTANT_ACTUAL")"
 	else
-		FAIL=$((FAIL + 1))
 		FAILURES+=("mutation kill check: mutant STILL passed the fixture tolerance (actual=$MUTANT_ACTUAL) — the fixture assertion is not sensitive to this constant")
-		printf '  FAIL  mutant unexpectedly still within tolerance (actual=%s) — fixture check is not sensitive\n' "$MUTANT_ACTUAL"
+		t_fail "$(printf 'mutant unexpectedly still within tolerance (actual=%s) — fixture check is not sensitive' "$MUTANT_ACTUAL")"
 	fi
 else
-	FAIL=$((FAIL + 1))
 	FAILURES+=("mutation kill check: sed did not change the file — RC_MIN_CONSUMPTION_RATE/RC_MAX_CONSUMPTION_RATE literals not found at expected shape")
-	echo "  FAIL  mutant sed produced no diff — constants not matched, mutation not actually applied"
+	t_fail "mutant sed produced no diff — constants not matched, mutation not actually applied"
 fi
 rm -f "$MUTANT"
 trap - EXIT
 
 echo ""
-echo "Total: PASS=$PASS FAIL=$FAIL"
+t_summary reward-calculator || true
 if [ "$FAIL" -gt 0 ]; then
 	printf '\nFailures:\n'
 	for f in "${FAILURES[@]}"; do printf '  - %s\n' "$f"; done
