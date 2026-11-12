@@ -30,9 +30,11 @@ for t in jq python3 timeout; do
 done
 REAL_TIMEOUT="$(command -v timeout)"
 
-PASS=0; FAIL=0; FAILURES=()
-ok() { PASS=$((PASS + 1)); printf '  PASS  %s\n' "$1"; }
-bad() { FAIL=$((FAIL + 1)); FAILURES+=("$1 ($2)"); printf '  FAIL  %s  (%s)\n' "$1" "$2"; }
+FAILURES=()
+# shellcheck source=../lib/assert.sh
+. "$REPO/tests/lib/assert.sh"
+ok() { t_pass "$1"; }
+bad() { FAILURES+=("$1 ($2)"); t_fail "$1" "$2"; }
 assert_eq() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "expected='$2' actual='$3'"; fi; }
 assert_contains() { case "$3" in *"$2"*) ok "$1" ;; *) bad "$1" "missing '$2' in '$3'" ;; esac; }
 absent() { if [ ! -e "$2" ]; then ok "$1"; else bad "$1" "exists: $2"; fi; }
@@ -280,7 +282,7 @@ assert_eq "push failure: exit 6 kept, status still published, not alerting" "6|[
 }
 if [ "${WATCH_TEST_ONLY_STATUS:-0}" = 1 ]; then
   status_suite
-  echo; echo "RESULT: $PASS passed, $FAIL failed"
+  echo; t_summary external-watch || true
   if [ "$FAIL" -ne 0 ]; then printf ' - %s\n' "${FAILURES[@]}"; exit 1; fi
   exit 0
 fi
@@ -1068,6 +1070,6 @@ assert_not_contains "  push does not report a failed draft" "下書き: 作成�
 status_suite
 
 echo
-echo "RESULT: $PASS passed, $FAIL failed"
+t_summary external-watch || true
 if [ "$FAIL" -ne 0 ]; then printf ' - %s\n' "${FAILURES[@]}"; exit 1; fi
 exit 0
