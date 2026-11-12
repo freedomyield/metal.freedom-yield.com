@@ -630,3 +630,11 @@ Questions for the operator from this amendment: none. The calls above are listed
 - Callers: the code of the three monitors is unchanged. Status 64 with an empty stdout falls into their existing "not 200" branch, so a malformed key ends as that monitor's fetch failure and takes its alert path; one case per monitor pins it.
 - Out of scope, left as is: `fetch_soft` in `check-pulsevm-upstream.sh` is a copy that does not use the lib and keeps the old behaviour for the same inputs.
 - Where it connects / how to remove it: the only seam is the entry check inside `fy_fetch_retry`. To remove, revert the three commits of this bundle, newest first (the §16.1 stack form); reverting only the lib commit leaves the three monitor cases red.
+
+## 18. Amendment 2026-11-12 — the remaining 600 s mentions
+
+- §15.7: "a 600 s limit" — cancelled → §16.2 (D-20). The limit is 900 s; the tightening it names (a per-run limit whose expiry is exit 2) stands.
+- §15.9: "whether 600 s is right" — cancelled → §16.2 (D-20). The question was answered there: the measured longest single run is 313 s, and the default is 900 s.
+- §15.10 D-16: "default 600 s" — cancelled → §16.2 (D-20). The rest of D-16 (a per-run limit, expiry exits 2, process group stopped by recorded PID only) stands.
+- Reason: §16.2 and D-20 cancel "§15.4's 600" by name only; the three mentions above were left without a cancelling line. Change of words only: the code, TOOLKIT and §16.2 already say 900.
+- Where it connects / how to remove it: no seam (words only). To remove, revert this commit.
