@@ -29,10 +29,15 @@ echo "================================================================"
 
 echo "[T1] installs a restricted line for the CI key"
 setup; OUT="$(run)"; RC=$?
+# restrictions are checked on the CI key's own line only (the fixture's co-tenant line also has no-pty)
+CILINE="$(grep 'freedom-yield-static-deploy' "${AK}" | grep 'rrsync -wo' || true)"
 if [ "${RC}" = 0 ] \
    && grep -q 'command="rrsync -wo /home/acct/metal.freedom-yield.com/public"' "${AK}" \
-   && grep -q 'freedom-yield-static-deploy' "${AK}" \
-   && grep -q 'no-pty' "${AK}"; then ok "T1 restricted line installed"; else no "T1 (rc=${RC})"; fi
+   && [ -n "${CILINE}" ] \
+   && printf '%s' "${CILINE}" | grep -q 'no-pty' \
+   && printf '%s' "${CILINE}" | grep -q 'no-agent-forwarding' \
+   && printf '%s' "${CILINE}" | grep -q 'no-port-forwarding' \
+   && printf '%s' "${CILINE}" | grep -q 'no-X11-forwarding'; then ok "T1 restricted line installed"; else no "T1 (rc=${RC})"; fi
 
 echo "[T2] the unrelated co-tenant entry is untouched"
 grep -q 'AAAAOTHER other@x' "${AK}" && ok "T2 other entry preserved" || no "T2 other entry lost"
