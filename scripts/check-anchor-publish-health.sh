@@ -170,7 +170,7 @@ if [ ! -r "$FYD_FR_LIB" ]; then
 	exit 6
 fi
 # shellcheck source=scripts/lib/fetch-retry.sh
-. "$FYD_FR_LIB"
+. "$FYD_FR_LIB" || { printf 'check-anchor-publish-health: FATAL: fetch-retry library not readable at %s\n' "$FYD_FR_LIB" >&2; exit 6; }
 
 SOURCE_URL="${ANCHOR_SOURCE_URL:-https://metal.freedom-yield.com/api/anchor-source.json}"
 RECEIPT_URL="${ANCHOR_RECEIPT_URL:-https://metal.freedom-yield.com/api/anchor-receipt.json}"

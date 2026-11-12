@@ -689,7 +689,7 @@ if [ ! -r "$FYD_FR_LIB" ]; then
 	exit 6
 fi
 # shellcheck source=scripts/lib/fetch-retry.sh
-. "$FYD_FR_LIB"
+. "$FYD_FR_LIB" || { printf 'check-pulsevm-upstream: FATAL: fetch-retry library not readable at %s\n' "$FYD_FR_LIB" >&2; exit 6; }
 
 RELEASES_URL="${PULSEVM_RELEASES_URL:-https://api.github.com/repos/MetalBlockchain/pulsevm/releases/latest}"
 ENDPOINTS_URL="${PULSEVM_ENDPOINTS_URL:-https://pulsevm.dev/network/endpoints.md}"

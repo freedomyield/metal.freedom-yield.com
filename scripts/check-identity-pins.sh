@@ -377,7 +377,7 @@ if [ ! -r "$FYD_FR_LIB" ]; then
 	exit 5
 fi
 # shellcheck source=scripts/lib/fetch-retry.sh
-. "$FYD_FR_LIB"
+. "$FYD_FR_LIB" || { echo "check-identity-pins: FATAL: fetch-retry library not readable at $FYD_FR_LIB" >&2; exit 5; }
 
 REPO_ROOT="${FYD_REPO_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 IDENTITY_FILE="${FYD_IDENTITY_FILE:-${REPO_ROOT}/public/api/identity.json}"
