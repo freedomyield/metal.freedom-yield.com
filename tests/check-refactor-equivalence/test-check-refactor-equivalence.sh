@@ -875,6 +875,29 @@ for v in 1 3600; do
 	t_expect "timeout (P3d): --timeout=$v is accepted" 0 "OK 1 equal"
 done
 
+# ======================================================================================
+# SIGNALS AT RUN START (§16.4-1)
+# ======================================================================================
+# The probe: the suite starts a short `sleep` child, sends it HUP and reads its wait
+# status. 129 (128 + HUP) means the child died of HUP; 0 means HUP was ignored (a
+# signal ignored when a program starts stays ignored across fork and exec).
+T_HUP_PROBE='sleep 3 & p=$!; kill -HUP "$p"; wait "$p"; rc=$?'
+# P7: G3's caller ignores HUP, INT and QUIT; each run still starts with HUP at its
+# default action, so the child dies of HUP at both sides -> equal
+t_suite_pair "$T_HUP_PROBE"'; if [ "$rc" -eq 129 ]; then echo "PASS  child died of HUP"; exit 0; fi; echo "FAIL  child died of HUP (rc=$rc)"; exit 1' \
+             "$T_HUP_PROBE"'; if [ "$rc" -eq 129 ]; then echo "PASS  child died of HUP"; exit 0; fi; echo "FAIL  child died of HUP (rc=$rc)"; exit 1'
+T_PRE="trap '' HUP INT QUIT"
+t_run_suite
+t_expect "signals (P7): caller with trap '' HUP INT QUIT: the run's HUP is at its default (child dies of HUP): exit 0" 0 "SUITE tests/s/test-a.sh base_rc=0 head_rc=0 cases=1/1" "OK 1 equal"
+# P7b: just outside: a suite that ignores HUP itself keeps it ignored (G3 resets only
+# the state the run starts with)
+t_suite_pair "trap '' HUP; $T_HUP_PROBE"'; if [ "$rc" -eq 0 ]; then echo "PASS  child kept HUP ignored"; exit 0; fi; echo "FAIL  child kept HUP ignored (rc=$rc)"; exit 1' \
+             "trap '' HUP; $T_HUP_PROBE"'; if [ "$rc" -eq 0 ]; then echo "PASS  child kept HUP ignored"; exit 0; fi; echo "FAIL  child kept HUP ignored (rc=$rc)"; exit 1'
+T_PRE="trap '' HUP INT QUIT"
+t_run_suite
+t_expect "signals (P7b): a suite that sets trap '' HUP itself still has HUP ignored: exit 0" 0 "SUITE tests/s/test-a.sh base_rc=0 head_rc=0 cases=1/1" "OK 1 equal"
+T_PRE=""
+
 cd "$REPO_ROOT" || exit 1
 echo ""
 echo "test-check-refactor-equivalence.sh summary: PASS=${PASS}  FAIL=${FAIL}"

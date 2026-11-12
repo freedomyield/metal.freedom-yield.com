@@ -54,9 +54,10 @@
 # Fail closed: every unexpected state is exit 2 or exit 1, never a quiet pass.
 # Both sides run in a `git worktree add --detach` under one mktemp directory; a trap
 # on EXIT, INT and TERM removes the worktree and the directory on every exit.
-# Each run starts as the leader of its own process group (perl setpgrp); one watchdog
-# per run, by recorded PID, stops that group on expiry, and the trap stops the
-# recorded group and watchdog too. Nothing is ever signalled by name.
+# Each run starts with HUP INT QUIT PIPE ALRM TERM USR1 USR2 at their default action,
+# whatever G3's caller ignored, as the leader of its own process group (perl setpgrp);
+# one watchdog per run, by recorded PID, stops that group on expiry, and the trap stops
+# the recorded group and watchdog too. Nothing is ever signalled by name.
 # curl, ssh, scp, proton and cleos are stubs: no network, no host, no broadcast.
 
 set -Eeuo pipefail
@@ -170,8 +171,10 @@ G3_ORIG_PATH="$PATH"
 G3_PERL="$(command -v perl 2>/dev/null)" || g3_die "perl is required"
 case "$G3_PERL" in /*) ;; *) g3_die "perl is not an executable on PATH: $G3_PERL" ;; esac
 
-# Start of a run: become the leader of a new process group, leave a marker, then exec.
-G3_PG_START='my $ok = shift; setpgrp(0, 0) or exit 125; open(my $h, ">", $ok) or exit 125; close($h); exec { $ARGV[0] } @ARGV; unlink($ok); exit 126;'
+# Start of a run (§16.4-1): set HUP INT QUIT PIPE ALRM TERM USR1 USR2 to their default
+# action (a signal ignored by G3's caller would otherwise stay ignored in the run), become
+# the leader of a new process group, leave a marker, then exec.
+G3_PG_START='$SIG{$_} = "DEFAULT" for qw(HUP INT QUIT PIPE ALRM TERM USR1 USR2); my $ok = shift; setpgrp(0, 0) or exit 125; open(my $h, ">", $ok) or exit 125; close($h); exec { $ARGV[0] } @ARGV; unlink($ok); exit 126;'
 # Watchdog of a run: after the limit, mark, TERM the group, KILL it 5 s later if anything is left.
 G3_WATCHDOG='my ($pg, $n, $mark) = @ARGV; sleep($n); if (open(my $h, ">", $mark)) { close($h); } kill("TERM", -$pg); for (1 .. 50) { select(undef, undef, undef, 0.1); exit(3) unless kill(0, -$pg); } kill("KILL", -$pg); exit(3);'
 
