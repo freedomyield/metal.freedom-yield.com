@@ -646,12 +646,39 @@ NOFR_OUT="$(FY_LIVE=1 FYD_CURL="$STUB" FYD_NOTIFY="$NOTIFY_STUB" \
 printf '%s\n' "$NOFR_OUT" | grep -Fxq "check-anchor-publish-health: FATAL: fetch-retry library not readable at $NOFR_DIR/scripts/../scripts/lib/fetch-retry.sh" \
 	&& ok "bp6b: the refusal is the same FATAL line bp6 sees" \
 	|| bad "bp6b: FATAL line missing (out: $NOFR_OUT)"
-[ "$(src_calls)" -eq 0 ] && [ ! -e "$BASE/rcpt.count" ] \
-	&& ok "bp6b: no curl call was made" \
-	|| bad "bp6b: curl was called (source: $(src_calls))"
 [ ! -e "$LOG" ] && [ ! -e "$MISMATCH_STATE" ] && [ ! -e "$NOTIFY_LOG" ] \
 	&& ok "bp6b: no log, no state file and no alert was written" \
 	|| bad "bp6b: the checker wrote a log, a state file or an alert"
+teardown
+
+# ---- case bp6c: a library that defines fy_fetch_retry and then fails to load -> no curl ----
+# bp6b's library defines nothing, so even an unguarded checker never reaches curl
+# and "no curl call" could not fail there. Here the library is the real one with a
+# syntax error appended: fy_fetch_retry IS defined when the source fails, so a
+# checker that carries on would fetch through the curl stub. The guarded one stops
+# first (same exit code, same FATAL line) and the stub is never called.
+setup
+NOFR_DIR="$BASE/nofr"
+mkdir -p "$NOFR_DIR/scripts/lib"
+cp "$CHECKER" "$NOFR_DIR/scripts/check-anchor-publish-health.sh"
+ln -sf "${REPO_ROOT}/scripts/lib/side-effects.sh" "$NOFR_DIR/scripts/lib/side-effects.sh"
+{ cat "${REPO_ROOT}/scripts/lib/fetch-retry.sh"; printf '\nif then fi\n'; } > "$NOFR_DIR/scripts/lib/fetch-retry.sh"
+NOFR_RC=0
+NOFR_OUT="$(FY_LIVE=1 FYD_CURL="$STUB" FYD_NOTIFY="$NOTIFY_STUB" \
+	ANCHOR_PUBLISH_HEALTH_LOG="$LOG" ANCHOR_PUBLISH_HEALTH_MISMATCH_STATE="$MISMATCH_STATE" \
+	ANCHOR_SOURCE_URL="https://example.test/api/anchor-source.json" \
+	ANCHOR_RECEIPT_URL="https://example.test/api/anchor-receipt.json" \
+	STUB_STATE_DIR="$BASE" FYD_RETRY_SLEEP=0 FYD_FETCH_ATTEMPTS=3 \
+	bash "$NOFR_DIR/scripts/check-anchor-publish-health.sh" 2>&1)" || NOFR_RC=$?
+[ "$NOFR_RC" -eq 6 ] \
+	&& ok "bp6c: a library that defines fy_fetch_retry and then fails to load still refuses to run (exit 6)" \
+	|| bad "bp6c: expected exit 6, got $NOFR_RC (out: $NOFR_OUT)"
+printf '%s\n' "$NOFR_OUT" | grep -Fxq "check-anchor-publish-health: FATAL: fetch-retry library not readable at $NOFR_DIR/scripts/../scripts/lib/fetch-retry.sh" \
+	&& ok "bp6c: the refusal is the same FATAL line bp6 sees" \
+	|| bad "bp6c: FATAL line missing (out: $NOFR_OUT)"
+[ "$(src_calls)" -eq 0 ] && [ ! -e "$BASE/rcpt.count" ] \
+	&& ok "bp6c: no curl call was made" \
+	|| bad "bp6c: curl was called (source: $(src_calls))"
 teardown
 
 # ---- case bp7: a malformed FYD_FETCH_ATTEMPTS is not a 200 -> exit 2, alerts ---

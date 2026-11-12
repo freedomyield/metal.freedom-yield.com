@@ -1035,12 +1035,38 @@ NOFR_OUT="$(FY_LIVE=1 FYD_CURL="$STUB" FYD_NOTIFY="$NOTIFY_STUB" \
 printf '%s\n' "$NOFR_OUT" | grep -Fxq "check-pulsevm-upstream: FATAL: fetch-retry library not readable at $NOFR_DIR/scripts/../scripts/lib/fetch-retry.sh" \
 	&& ok "case 10h: the refusal is the same FATAL line case 10g sees" \
 	|| bad "case 10h: FATAL line missing (out: $NOFR_OUT)"
-[ ! -s "$BASE/urls.log" ] \
-	&& ok "case 10h: no curl call was made" \
-	|| bad "case 10h: curl was called ($(wc -l < "$BASE/urls.log" | tr -d ' ') time(s))"
 [ ! -e "$LOG" ] && [ ! -e "$STATE" ] && [ ! -e "$NOTIFY_LOG" ] \
 	&& ok "case 10h: no log, no state file and no alert was written" \
 	|| bad "case 10h: the checker wrote a log, a state file or an alert"
+teardown
+
+# ---- case case 10i: a library that defines fy_fetch_retry and then fails to load -> no curl ----
+# Case 10h's library defines nothing, so even an unguarded checker never reaches
+# curl and "no curl call" could not fail there. Here the library is the real one
+# with a syntax error appended: fy_fetch_retry IS defined when the source fails,
+# so a checker that carries on would fetch through the curl stub. The guarded one
+# stops first (same exit code, same FATAL line) and the stub is never called.
+setup
+NOFR_DIR="$BASE/nofr"
+mkdir -p "$NOFR_DIR/scripts/lib"
+cp "$CHECKER" "$NOFR_DIR/scripts/check-pulsevm-upstream.sh"
+ln -sf "${REPO_ROOT}/scripts/lib/side-effects.sh" "$NOFR_DIR/scripts/lib/side-effects.sh"
+{ cat "${REPO_ROOT}/scripts/lib/fetch-retry.sh"; printf '\nif then fi\n'; } > "$NOFR_DIR/scripts/lib/fetch-retry.sh"
+NOFR_RC=0
+NOFR_OUT="$(FY_LIVE=1 FYD_CURL="$STUB" FYD_NOTIFY="$NOTIFY_STUB" \
+	PULSEVM_UPSTREAM_LOG="$LOG" PULSEVM_UPSTREAM_STATE="$STATE" \
+	PULSEVM_RELEASES_URL="https://example.test/repos/pulsevm/releases/latest" \
+	STUB_STATE_DIR="$BASE" FYD_RETRY_SLEEP=0 FYD_FETCH_ATTEMPTS=3 \
+	bash "$NOFR_DIR/scripts/check-pulsevm-upstream.sh" 2>&1)" || NOFR_RC=$?
+[ "$NOFR_RC" -eq 6 ] \
+	&& ok "case 10i: a library that defines fy_fetch_retry and then fails to load still refuses to run (exit 6)" \
+	|| bad "case 10i: expected exit 6, got $NOFR_RC (out: $NOFR_OUT)"
+printf '%s\n' "$NOFR_OUT" | grep -Fxq "check-pulsevm-upstream: FATAL: fetch-retry library not readable at $NOFR_DIR/scripts/../scripts/lib/fetch-retry.sh" \
+	&& ok "case 10i: the refusal is the same FATAL line case 10g sees" \
+	|| bad "case 10i: FATAL line missing (out: $NOFR_OUT)"
+[ ! -s "$BASE/urls.log" ] \
+	&& ok "case 10i: no curl call was made" \
+	|| bad "case 10i: curl was called ($(wc -l < "$BASE/urls.log" | tr -d ' ') time(s))"
 teardown
 
 # ---- case 11a (DRY): the repo's REAL logs/ is untouched ----------------------
