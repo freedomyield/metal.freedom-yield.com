@@ -951,6 +951,62 @@ else
 	t_ok "reaped run (N6): no signal was sent to the collected run's PID or group"
 fi
 
+# ======================================================================================
+# THE GROUP IS STILL STOPPED DURING THE TIMEOUT GRACE (N6 follow-up)
+# ======================================================================================
+# After a time-out the watchdog sends TERM to the run's group and waits up to 5 s before
+# KILL. A TERM/INT to G3 in that grace must still make the cleanup KILL the group (a
+# grandchild that ignores TERM would survive otherwise). The hook is the N6 one with one
+# change: the wait on the watchdog sends the TERM to G3 BEFORE it waits, i.e. at the
+# start of the grace.
+t_init
+BGF="$WORK/bgpid"
+t_script scripts/toy.sh "( trap '' TERM; exec sleep 300 ) & echo \$! > '$BGF'; sleep 30"; t_commit base; t_mark_base; t_commit head
+X2_LOG="$WORK/x2g.log"
+X2_HOOK="$WORK/x2g-hook.sh"
+cat > "$X2_HOOK" <<'HOOK'
+kill() { printf 'kill %s\n' "$*" >> "$X2_LOG"; builtin kill "$@"; }
+wait() {
+	local wrc=0
+	if [ "$#" -eq 1 ] && [ -n "${X2_RUN:-}" ] && [ "$1" != "$X2_RUN" ] && [ -z "${X2_SENT:-}" ]; then
+		X2_SENT=1
+		printf 'term-sent\n' >> "$X2_LOG"
+		builtin kill -TERM "$$"
+	fi
+	builtin wait "$@" || wrc=$?
+	if [ "$#" -eq 1 ] && [ -z "${X2_RUN:-}" ]; then
+		X2_RUN="$1"
+		printf 'run %s\n' "$1" >> "$X2_LOG"
+	fi
+	return "$wrc"
+}
+HOOK
+: > "$X2_LOG"
+t_cases_one x - - - -
+T_PRE="export BASH_ENV='$X2_HOOK' X2_LOG='$X2_LOG'"
+t_run --base="$BASE" --cases="$CASES" --timeout=1
+T_PRE=""
+t_expect "grace (N6): TERM at the start of the time-out grace: exit 143, worktree and temp dir removed" 143
+if grep -qx 'term-sent' "$X2_LOG"; then
+	t_ok "grace (N6): the hook sent the TERM inside the grace"
+else
+	t_bad "grace (N6): the hook did not fire ($(tr '\n' '|' < "$X2_LOG"))"
+fi
+X2_GONE=0
+for X2_TRY in 1 2 3; do
+	if [ -s "$BGF" ] && ! ps -p "$(cat "$BGF")" >/dev/null 2>&1; then X2_GONE=1; break; fi
+	[ -s "$BGF" ] || break
+	sleep 2
+done
+if [ ! -s "$BGF" ]; then
+	t_bad "grace (N6): the fixture did not record its TERM-ignoring grandchild"
+elif [ "$X2_GONE" -eq 1 ]; then
+	t_ok "grace (N6): the TERM-ignoring grandchild of the run is gone after G3 returned"
+else
+	kill -KILL "$(cat "$BGF")" 2>/dev/null
+	t_bad "grace (N6): the TERM-ignoring grandchild of the run survived the cleanup"
+fi
+
 cd "$REPO_ROOT" || exit 1
 echo ""
 echo "test-check-refactor-equivalence.sh summary: PASS=${PASS}  FAIL=${FAIL}"
