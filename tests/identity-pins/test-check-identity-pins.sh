@@ -1262,6 +1262,40 @@ echo "$NOFR_OUT" | grep -q 'fetch-retry library not readable' \
 	|| bad "case B-P6 (fetch-retry lib): refusal message missing (out: $NOFR_OUT)"
 rm -rf "$NOFR_DIR"
 
+# ---- case bp7: a malformed FYD_FETCH_ATTEMPTS is not a 200 -> exit 4 + alert --
+# Every URL is served as a healthy 200. The checker still fails (and alerts)
+# because fy_fetch_retry rejects the value with 64 and an empty stdout, which
+# the unchanged `[ "$CODE" = "200" ]` test treats as not served. No curl call.
+build_fake_repo
+make_curl_stub
+serve "$FAKE/public/api/identity.json"     identity.json
+serve "$FAKE/public/api/alpha.json"        alpha.json
+serve "$FAKE/public/api/alpha.schema.json" alpha.schema.json
+serve "$FAKE/public/api/stream.json"       stream.json
+cat > "$BASE/curl-count.sh" <<CNTEOF
+#!/usr/bin/env bash
+echo x >> "$BASE/curl.calls"
+exec "$BASE/curl-stub.sh" "\$@"
+CNTEOF
+chmod +x "$BASE/curl-count.sh"
+OUT="$(FY_LIVE=1 \
+	FYD_REPO_ROOT="$FAKE" \
+	FYD_REGISTRY="$FAKE/deploy/publication.json" \
+	FYD_IDENTITY_URL="https://example.test/api/identity.json" \
+	FYD_CURL="$BASE/curl-count.sh" \
+	STUB_DIR="$STUB_DIR" \
+	FYD_FETCH_ATTEMPTS=abc FYD_RETRY_SLEEP=0 \
+	IDENTITY_PIN_LOG="$LOGFILE" \
+	IDENTITY_PIN_ALERT_STATE="$STATE" \
+	FYD_NOTIFY="$NOTIFY_STUB" \
+	bash "$CHECKER" --mode=live 2>&1)"; RC=$?
+[ "$RC" -eq 4 ] && ok "bp7 live: malformed FYD_FETCH_ATTEMPTS with a healthy manifest → exit 4" || bad "bp7 live: expected exit 4 (actual=$RC)"
+[ "$(alert_count)" -eq 1 ] \
+	&& ok "bp7 live: the failure enters the alert path (1 push)" || bad "bp7 live: expected 1 push, got $(alert_count)"
+[ ! -s "$BASE/curl.calls" ] \
+	&& ok "bp7 live: no curl call was made" || bad "bp7 live: curl was called $(wc -l < "$BASE/curl.calls" | tr -d ' ') time(s)"
+teardown
+
 echo
 echo "test-check-identity-pins.sh summary: ${PASS} PASS / ${FAIL} FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

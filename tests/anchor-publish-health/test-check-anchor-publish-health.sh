@@ -620,6 +620,27 @@ echo "$NOFR_OUT" | grep -q 'fetch-retry library not readable' \
 	|| bad "bp6: refusal message missing (out: $NOFR_OUT)"
 teardown
 
+# ---- case bp7: a malformed FYD_FETCH_ATTEMPTS is not a 200 -> exit 2, alerts ---
+# Every served fixture below is a healthy 200. The checker still fails (and
+# alerts) because fy_fetch_retry rejects the value with 64 and an empty stdout,
+# which the unchanged "HTTP != 200" branch treats as not served. No curl call.
+setup
+SRC_BODY_FILE="$BASE/src.json"; RCPT_BODY_FILE="$BASE/rcpt.json"
+write_source  "$SRC_BODY_FILE"  "$ROOT_MATCH"
+write_receipt "$RCPT_BODY_FILE" "$ROOT_MATCH"
+OUT="$(FYD_FETCH_ATTEMPTS=abc SRC_CODE=200 RCPT_CODE=200 run_checker 2>&1)"
+RC=$?
+[ "$RC" -eq 2 ] \
+	&& ok "bp7: malformed FYD_FETCH_ATTEMPTS with healthy 200s -> exit 2 (not served branch)" \
+	|| bad "bp7: expected exit 2, got $RC (out: $OUT)"
+alerts | grep -q 'exit 2' \
+	&& ok "bp7: the failure enters the alert path (alert surfaces exit code 2)" \
+	|| bad "bp7: alert missing (alerts: $(alerts))"
+[ "$(src_calls)" -eq 0 ] \
+	&& ok "bp7: no curl call was made" \
+	|| bad "bp7: expected 0 source curl calls, got $(src_calls)"
+teardown
+
 # ---- summary -----------------------------------------------------------------
 echo "test-check-anchor-publish-health.sh summary: PASS=$PASS  FAIL=$FAIL"
 if [ "$FAIL" -eq 0 ]; then

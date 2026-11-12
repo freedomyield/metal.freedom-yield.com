@@ -82,7 +82,8 @@
 # Exit codes:
 #   0  served AND dag_root_computed matches the anchored root (verbose: heartbeat)
 #   2  anchor-source.json not served (HTTP != 200 on every retry attempt) —
-#      alert, no recover
+#      alert, no recover (a malformed FYD_FETCH_ATTEMPTS / FYD_RETRY_SLEEP
+#      is rejected by fy_fetch_retry with an empty status and counts here too)
 #   3  served but dag_root_computed MISMATCHES the anchored root (stale publish)
 #   4  served but the receipt could not be fetched/parsed after retrying
 #      (cannot content-verify)

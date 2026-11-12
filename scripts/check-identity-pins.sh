@@ -249,7 +249,9 @@
 #   3  NEW breakage on a `tracked` pin (mismatch, or the pinned file is gone)
 #   4  --mode=live only: a `tracked` pin's URL could not be fetched, so the
 #      comparison could not be made (mismatches are never masked by this —
-#      a fetched 200 that mismatches is still exit 3)
+#      a fetched 200 that mismatches is still exit 3). A malformed
+#      FYD_FETCH_ATTEMPTS / FYD_RETRY_SLEEP is rejected by fy_fetch_retry
+#      with an empty status and counts as "could not be fetched" too
 #   5  structural: scripts/lib/side-effects.sh (or scripts/lib/fetch-retry.sh)
 #      is not readable. 5, not 3:
 #      3 already means "a tracked pin broke" and renumbering it would lie to

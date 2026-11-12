@@ -2105,6 +2105,25 @@ S1_CODE_SEQ="404 200" run_checker >/dev/null 2>&1
 	|| bad "bp5: curl calls did not all carry --max-time 20 ($(sort -u "$BASE/args.log" | head -3 | tr '\n' ';'))"
 teardown
 
+# ---- case bp7: a malformed FYD_FETCH_ATTEMPTS is not a 200 -> exit 4, pages ---
+# Every source is served as a healthy 200. The checker still fails (and, on the
+# third consecutive failure, pages) because fy_fetch_retry rejects the value
+# with 64 and an empty stdout, which the unchanged fetch_or_fail treats as
+# unreadable. No curl call reaches the first source.
+setup
+seed_state true false "$CHAIN_A" 3406 "v0.6.2" "" 2
+RC=0; FYD_FETCH_ATTEMPTS=abc run_checker >/dev/null 2>&1 || RC=$?
+[ "$RC" -eq 4 ] \
+	&& ok "bp7: malformed FYD_FETCH_ATTEMPTS with healthy 200s -> exit 4" \
+	|| bad "bp7: expected exit 4, got $RC"
+[ "$(n_alerts)" -eq 1 ] \
+	&& ok "bp7: the failure enters the alert path (failure #3 pages once)" \
+	|| bad "bp7: expected 1 alert, got $(n_alerts) ($(alerts))"
+[ "$(calls s1)" -eq 0 ] \
+	&& ok "bp7: no curl call was made" \
+	|| bad "bp7: expected 0 s1 curl calls, got $(calls s1)"
+teardown
+
 # ---- summary ---------------------------------------------------------------
 echo "test-pulsevm-upstream.sh summary: PASS=$PASS  FAIL=$FAIL"
 if [ "$FAIL" -eq 0 ]; then

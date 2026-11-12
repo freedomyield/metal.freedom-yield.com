@@ -482,7 +482,9 @@
 # ---------------------------------------------------------------------------
 #   0  all hard sources read, nothing fired (verbose: one heartbeat line)
 #   3  at least one trigger fired (T1 / T2 / T3 / T4 / T5 / T6 / T7 / T8 / T9 / BASELINE) — alerts
-#   4  a source did not return HTTP 200 after retrying
+#   4  a source did not return HTTP 200 after retrying (a malformed
+#      FYD_FETCH_ATTEMPTS / FYD_RETRY_SLEEP is rejected by fy_fetch_retry
+#      with an empty status and counts here too)
 #   5  a source returned 200 but its body could not be parsed (or jq is absent)
 #   6  scripts/lib/side-effects.sh (or scripts/lib/fetch-retry.sh) is missing/unreadable
 #
