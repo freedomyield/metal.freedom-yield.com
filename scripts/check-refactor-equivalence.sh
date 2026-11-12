@@ -70,6 +70,7 @@ trap 'g3_die "unexpected failure (line $LINENO)"' ERR
 G3_TOP=""
 G3_T=""
 G3_CHILD=""
+G3_PG=""   # the run's group number, set only while the time-out grace is waited out
 G3_WD=""
 G3_CLEANED=0
 
@@ -82,6 +83,12 @@ g3_cleanup() {
 		kill -KILL "$G3_WD" 2>/dev/null || true
 		wait "$G3_WD" 2>/dev/null || true
 		G3_WD=""
+	fi
+	if [ -n "$G3_PG" ]; then
+		# time-out grace: the watchdog has sent TERM to this group and not yet KILL; the
+		# group is stopped here (never the collected PID itself)
+		kill -KILL -- "-$G3_PG" 2>/dev/null || true
+		G3_PG=""
 	fi
 	if [ -n "$G3_CHILD" ]; then
 		kill -KILL -- "-$G3_CHILD" 2>/dev/null || true
@@ -270,7 +277,7 @@ g3_build_farm() { # name excluded-name-regex
 #               G3_R_ARGS (array) G3_R_ENV (array) G3_R_OUTFILES (array)
 # Writes into $1: rc, stdout, stderr, files/<path>
 g3_run() { # outdir
-	local out="$1" t="$G3_T" runpath c expected got wdrc
+	local out="$1" t="$G3_T" runpath c expected got wdrc child
 	mkdir -p "$out/files"
 	rm -rf "$t/tree" "$t/fx" "$t/home" "$t/tmp" "$t/calls.log" "$t/stubs/ajv" "$t/pg-started" "$t/timed-out"
 	git worktree add --detach --quiet "$t/tree" "$G3_R_COMMIT" >/dev/null 2>&1 || g3_die "git worktree add failed for $G3_R_COMMIT"
@@ -317,13 +324,15 @@ g3_run() { # outdir
 	G3_CHILD=$!
 	"$G3_PERL" -e "$G3_WATCHDOG" "$G3_CHILD" "$G3_TIMEOUT" "$t/timed-out" </dev/null >/dev/null 2>&1 &
 	G3_WD=$!
-	wait "$G3_CHILD" || rc=$?
-	# collected: from here no signal path may name this PID (it can be reused)
+	child="$G3_CHILD"
+	wait "$child" || rc=$?
+	# collected: from here no signal path may name this PID (it can be reused); only the group, only in the time-out grace below
 	G3_CHILD=""
 	if [ -e "$t/timed-out" ]; then
 		# expired: let the watchdog finish (TERM, then KILL 5 s later if anything is left)
+		G3_PG="$child"
 		wait "$G3_WD" 2>/dev/null || true
-		G3_WD=""; G3_CHILD=""
+		G3_WD=""; G3_CHILD=""; G3_PG=""
 		g3_die "$G3_R_ID: timeout after ${G3_TIMEOUT}s at $G3_R_SIDE"
 	fi
 	wdrc=0
