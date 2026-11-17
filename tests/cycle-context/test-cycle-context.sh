@@ -811,9 +811,9 @@ echo "=== T10b: each row's PROSE is anchored to its own exit site ==="
 # The header entry is the script's authoritative one-line statement of what
 # the code means, it is one comparable size per code, and it is written
 # independently of this table — so agreeing with it is evidence, not
-# tautology. Where a script documents nothing (gen-renewal-ics.sh and
-# run-testnet-rehearsal.sh have no exit table at all; append-anchor-history's
-# stops before 8), there is no claim to compare against and the row is
+# tautology. Where a script documents nothing (gen-renewal-ics.sh has no exit
+# table at all; append-anchor-history's stops before 8; run-testnet-rehearsal.sh
+# has had one since 2026-11-17), there is no claim to compare against and the row is
 # reported as UNPINNED rather than scored against a proxy.
 evidence_for() {
 	local path="$1" code="$2"

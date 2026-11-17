@@ -47,7 +47,7 @@ bad() {
 sel() { [ -z "${OC_ONLY:-}" ] || printf '%s' "$1" | grep -Eq "^(${OC_ONLY})\$"; }
 
 # check <name> <rc> [err:<s>] [noerr:<s>] [out:<exact>] [call:<s>] [nocall:<s>]
-#       [calls:<s>=<n>] [audit:<s>] [noaudit] [alines:<n>] [noproton]
+#       [calls:<s>=<n>] [nthfind:<n>=<s>] [audit:<s>] [noaudit] [alines:<n>] [noproton]
 check() {
 	local name="$1" want_rc="$2" a why="" k n
 	shift 2
@@ -68,6 +68,9 @@ check() {
 			alines:*) n="$(grep -c '' "$T/audit.log")"
 			          [ "$n" = "${a#alines:}" ] || why="audit has $n line(s), want ${a#alines:}" ;;
 			noproton) grep -q '^proton ' "$SBH_CALLS" && why="proton-cli stub was invoked: $(grep '^proton ' "$SBH_CALLS" | head -1)" ;;
+			nthfind:*) k="${a#nthfind:}"   # <n>=<text>: the n-th ahr_find_cycle_anchor call line holds <text>
+			          n="$(grep -F 'ahr_find_cycle_anchor ' "$SBH_CALLS" | sed -n "${k%%=*}p")"
+			          case "$n" in *"${k#*=}"*) ;; *) why="find call ${k%%=*} is '${n}', want text '${k#*=}'" ;; esac ;;
 		esac
 	done
 	if [ -z "$why" ]; then ok "$name"; else bad "$name" "$why"; fi
@@ -210,7 +213,8 @@ check "A3-two bases: first unreadable, second clear with a floor → proceeds, p
 begin "$TT"; ahr_set find.1 "$CLEAR_FLOOR" 0; ahr_set find.2 "$FOUND" 0
 sbh_run - '' "$TW" -- "${TARGS[@]}"
 check "A3-two bases: first clear with a floor, second found → 11 (the blocking answer wins)" 11 \
-	"calls:ahr_find_cycle_anchor=2" "nocall:proton transaction:push" noaudit
+	"calls:ahr_find_cycle_anchor=2" "nocall:proton transaction:push" noaudit \
+	"nthfind:1=$BASE_TEST" "nthfind:2=https://fx-hist-b.example.net"
 fi
 
 if sel J1; then
