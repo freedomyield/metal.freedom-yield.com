@@ -721,12 +721,14 @@ esac
 #   mode any-id (id-only profiles — PulseVM, whose history is Hyperion-only):
 #               every id field present (`id`, `trx_id`) must equal <tx_id>
 #               and at least one must be present.
-# Anything else — unknown mode, unparseable input — is rc != 0.
+# Anything else — unknown mode, unparseable input, an answer that is not
+# exactly ONE JSON value (jq -e decides by the last value only) — is rc != 0.
 sb_history_names_tx() {
 	case "${3:-}" in
 		v1-id|any-id) ;;
 		*) return 2 ;;
 	esac
+	sb_is_one_json_object "$1" || return 1
 	printf '%s' "$1" | jq -e --arg id "$2" --arg mode "$3" '
 		if type != "object" then false
 		else ([.id, .trx_id] | map(select(. != null))) as $ids
