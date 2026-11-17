@@ -213,6 +213,10 @@ expect "K1-3 the first base is clear, the second serves another chain -> 3" 3 ""
 reset; live "$H1" "$CID_M" "fya1c8-id:x"; printf '%s' '{"actions":[]}xyz' > "$WORK/resp/$H1/actions-0.json"
 chk --chain=mainnet-a --memo-prefix=fya1c9
 expect "K1-3 the page is one value followed by garbage -> 3" 3 ""
+reset; live "$H1" "$CID_M" "fya1c8-id:x"
+jq -nc --arg l "$LIB_NEW" --arg h "$HEAD_LATE" '{head_block_time: $h, last_irreversible_block_time: $l}' > "$WORK/resp/$H1/get_info.json"
+chk --chain=mainnet-a --memo-prefix=fya1c9 "--not-before=$E"
+expect "K1-3 --not-before: get_info gives both times (LIB past E) but no chain_id, a floor is shown -> 3" 3 ""
 
 # ---- K1-4 --not-before ----------------------------------------------------------------
 NB="--not-before=$E"
@@ -322,8 +326,9 @@ src cnull '{"schema_version":1,"observations_branch":{"cycle_number_observed":nu
 src cmiss '{"schema_version":1,"observations_branch":{}}'
 src smiss '{"observations_branch":{"cycle_number_observed":7}}'
 src czero '{"schema_version":1,"observations_branch":{"cycle_number_observed":0}}'
+src szero '{"schema_version":0,"observations_branch":{"cycle_number_observed":7}}'
 src empty ''
-for s in two trail sstr cfrac cnull cmiss smiss czero empty; do
+for s in two trail sstr cfrac cnull cmiss smiss czero szero empty; do
 	chk --chain=mainnet-a "--anchor-source=$WORK/src-$s.json"; usage_case "K1-1 bad --anchor-source [$s]"
 done
 chk --chain=mainnet-a "--anchor-source=$WORK/src-does-not-exist.json"; usage_case "K1-1 --anchor-source is unreadable"
@@ -367,6 +372,10 @@ chk --chain=mainnet-a --memo-prefix=fya1c9 --actor=fxother
 reset; live "$H1" "$CID_M" "fya1c8-id:x"
 chk --chain=mainnet-a --memo-prefix=fya1c9
 [ "$(calls_matching "account=$ACTOR&")" -ge 1 ] && t_pass "K1-ACT the default actor is line 1 of FY_CONFIG_DIR/xpr-account" || t_fail "K1-ACT default actor" "calls=$(cat "$WORK/calls.log")"
+reset; live "$H1" "$CID_M" "fya1c8-id:x"
+mkdir -p "$WORK/cfg-two"; printf '%s\n%s\n' "$ACTOR" "fxother" > "$WORK/cfg-two/xpr-account"
+run_chk FY_CONFIG_DIR="$WORK/cfg-two" bash "$CHECK" --chain=mainnet-a --memo-prefix=fya1c9
+[ "$RC" -eq 0 ] && [ "$(calls_matching "account=$ACTOR&")" -ge 1 ] && [ "$(calls_matching "account=fxother&")" = 0 ] && t_pass "K1-ACT a two-line actor file: only line 1 is used" || t_fail "K1-ACT two-line actor file" "rc=$RC calls=$(cat "$WORK/calls.log")"
 
 # ---- K1-RO read only, two libraries, no hidden range / default forms -----------------------
 BODY="$WORK/body.txt"
