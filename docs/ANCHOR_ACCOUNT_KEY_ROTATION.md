@@ -49,6 +49,10 @@ resource: metalfreedom は CPU/NET/RAM とも潤沢 → updateauth のチャー�
 6. keystore の内容更新は **`key:remove` を使わない** (暗号化済 keystore に remove すると IV 破壊の
    proton-cli バグ)。「退避 → 正しい鍵で作り直し」。cf. `reference_proton_keystore_per_project_network_separation`。
 
+> **注記 (2026-11-17。二重刻印の守りの設計 `docs/superpowers/specs/2026-10-16-anchor-double-inscription-guard-design.md` の Q3 = 全ての形)**:
+> wrapper は tx の形を問わず、有効期限の header と結果の分類を付ける。したがって、この回し方は新しい wrapper の上で testnet で 1 回通してから、次の mainnet で使う (Constitution §3.4 の 1 項目目 = 新しい仕組みは testnet が先)。
+> tx の JSON に `expiration` などの header の項目 (設計書 §5 の 1) を入れると、wrapper が exit 2 で断る。
+
 ## updateauth payload テンプレート
 
 tx JSON (`bin/safe-broadcast --tx=<file>` に渡す形)。`<NEW_*_PUB>` は Phase 0 で生成した**公開鍵**に置換。
