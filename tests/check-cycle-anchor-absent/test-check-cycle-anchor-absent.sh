@@ -218,6 +218,54 @@ jq -nc --arg l "$LIB_NEW" --arg h "$HEAD_LATE" '{head_block_time: $h, last_irrev
 chk --chain=mainnet-a --memo-prefix=fya1c9 "--not-before=$E"
 expect "K1-3 --not-before: get_info gives both times (LIB past E) but no chain_id, a floor is shown -> 3" 3 ""
 
+# ---- K1-3 (answer shape) the reader's answer must be exactly ONE JSON object --------------
+# A copy of the tree whose lib copy answers from files (no curl at all): the answer of
+# ahr_find_cycle_anchor and of ahr_chain_times is whatever the case writes into mock/.
+# Only the copy is changed; the real library file is untouched.
+MTREE="$WORK/tree-mock"
+mk_tree "$MTREE"
+MCHECK="$MTREE/scripts/$SCR"
+mkdir -p "$WORK/mock"
+cat >> "$MTREE/scripts/lib/anchor-history-read.sh" <<'MOCK'
+# ---- answer mock (suite only): every answer comes from a file ----
+ahr_observed_chain_id() { cat "$CCAA_T_WORK/mock/cid"; }
+ahr_index_fresh() { return 0; }
+ahr_find_cycle_anchor() { cat "$CCAA_T_WORK/mock/find"; }
+ahr_chain_times() { cat "$CCAA_T_WORK/mock/times"; }
+MOCK
+mock() { # <chain_id> <find answer> [<chain-times answer>] — the exact bytes the mocked library answers
+	printf '%s' "$1" > "$WORK/mock/cid"; printf '%s' "$2" > "$WORK/mock/find"; printf '%s' "${3:-}" > "$WORK/mock/times"
+	: > "$WORK/calls.log"
+}
+mchk() { run_chk bash "$MCHECK" "$@"; }
+MCLEAR='{"verdict":"clear","trx_id":null,"block_num":null,"timestamp":null,"scanned":4,"floor":"fya1c8"}'
+MFOUNDL='{"verdict":"found_later","trx_id":"'"$(printf 'c%.0s' $(seq 1 64))"'","block_num":7,"timestamp":"2026-11-01T00:00:00.000","scanned":1,"floor":null}'
+MTIMES='{"head_block_time":"'"$HEAD_LATE"'","last_irreversible_block_time":"'"$LIB_NEW"'"}'
+
+mock "$CID_M" "$MCLEAR"
+mchk --chain=mainnet-a --memo-prefix=fya1c9
+expect "K1-3 the mocked reader answers one clear+floor object -> 0 and the ABSENT line (control: the mock passes a good answer)" 0 "$ABS_M"
+[ "$(calls)" = 0 ] && t_pass "K1-3 the mocked tree sends no request" || t_fail "K1-3 the mocked tree sends no request" "calls=$(cat "$WORK/calls.log")"
+
+mock "$CID_M" "$MCLEAR $MFOUNDL"
+mchk --chain=mainnet-a --memo-prefix=fya1c9
+expect "K1-3 the reader answers two JSON values on one line (clear+floor then found_later) -> 3, not 0" 3 ""
+mock "$CID_M" "$MFOUNDL $MCLEAR"
+mchk --chain=mainnet-a --memo-prefix=fya1c9
+expect "K1-3 the reader answers two JSON values on one line (found_later then clear+floor) -> 3" 3 ""
+mock "$CID_T" "$MCLEAR $MCLEAR"
+mchk --chain=testnet-a --memo-prefix=fya1c9
+expect "K1-3 the reader answers two clear+floor values on one line (testnet role) -> 3" 3 ""
+mock "$CID_M" "$MCLEAR x"
+mchk --chain=mainnet-a --memo-prefix=fya1c9
+expect "K1-3 the reader answers one object followed by trailing text -> 3" 3 ""
+mock "$CID_M" "$MCLEAR" "$MTIMES"
+mchk --chain=mainnet-a --memo-prefix=fya1c9 "--not-before=$E"
+expect "K1-3 --not-before control: one chain-times object past E -> 0 with not_before and lib_time" 0 "$ABS_M not_before=$E lib_time=$LIB_NEW"
+mock "$CID_M" "$MCLEAR" "$MTIMES {\"x\":1}"
+mchk --chain=mainnet-a --memo-prefix=fya1c9 "--not-before=$E"
+expect "K1-3 --not-before: the chain-times answer holds two JSON values (the second without a time) -> 3" 3 ""
+
 # ---- K1-4 --not-before ----------------------------------------------------------------
 NB="--not-before=$E"
 reset; live "$H1" "$CID_M" "fya1c8-id:x"; info "$H1" "$CID_M" "$LIB_OLD" "$HEAD_LATE"
