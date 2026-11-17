@@ -560,6 +560,21 @@ if ! jq -e '.actions | type == "array" and length > 0' "$TX_JSON_FILE" >/dev/nul
 	exit 2
 fi
 
+# sb_is_one_json_object <text> — rc 0 iff the text is exactly ONE JSON value
+# and that value is an object (nothing before it, nothing after it, nothing
+# unparseable). `jq -e` decides by the LAST value and `jq -r` prints one line
+# per value, so a text holding two values slips past a plain read; every place
+# that reads JSON handed in from outside runs this first and treats a "no" like
+# an unreadable answer (the safe side of that place).
+sb_is_one_json_object() {
+	printf '%s' "$1" | jq -s -e 'length == 1 and (.[0] | type) == "object"' >/dev/null 2>&1
+}
+
+if ! sb_is_one_json_object "$(cat "$TX_JSON_FILE")"; then
+	echo "ERROR: the tx file is not exactly one JSON object — refusing (exit 2)" >&2
+	exit 2
+fi
+
 # sb_in_list <value> <element...> — rc 0 iff <value> equals one of the elements.
 sb_in_list() {
 	local v="$1" e
@@ -706,12 +721,14 @@ esac
 #   mode any-id (id-only profiles — PulseVM, whose history is Hyperion-only):
 #               every id field present (`id`, `trx_id`) must equal <tx_id>
 #               and at least one must be present.
-# Anything else — unknown mode, unparseable input — is rc != 0.
+# Anything else — unknown mode, unparseable input, an answer that is not
+# exactly ONE JSON value (jq -e decides by the last value only) — is rc != 0.
 sb_history_names_tx() {
 	case "${3:-}" in
 		v1-id|any-id) ;;
 		*) return 2 ;;
 	esac
+	sb_is_one_json_object "$1" || return 1
 	printf '%s' "$1" | jq -e --arg id "$2" --arg mode "$3" '
 		if type != "object" then false
 		else ([.id, .trx_id] | map(select(. != null))) as $ids
@@ -964,6 +981,7 @@ sb_cycle_answer_usable() {
 	case "$1" in
 		''|*$'\n'*) return 1 ;;
 	esac
+	sb_is_one_json_object "$1" || return 1
 	printf '%s' "$1" | jq -e '
 		type == "object"
 		and (.verdict == "found" or .verdict == "found_later" or .verdict == "clear")
@@ -1440,7 +1458,7 @@ if [ "$IS_MAINNET" = "1" ]; then
 	if [ "$OUTGOING_ANCHOR_PREFIXES" != "[]" ]; then
 		# (a) must be a JSON OBJECT (M2 — plain `jq -e '.'` would also
 		# accept a bare scalar/array, e.g. `42` or `[]`, as "valid JSON").
-		if ! jq -e 'type == "object"' "$DRY_RUN_LOG" >/dev/null 2>&1; then
+		if ! sb_is_one_json_object "$(cat "$DRY_RUN_LOG")"; then
 			echo "ERROR (gate 4): anchor-shaped outgoing tx requires a JSON-object dry-run log: $DRY_RUN_LOG" >&2
 			exit 3
 		fi
@@ -1520,7 +1538,7 @@ fi
 TOKEN_CONTENT="$(cat "$OPERATOR_TOKEN_FILE" 2>/dev/null || true)"
 TOKEN_BOUND_CHAIN=""
 TOKEN_BOUND_TX_SHA256=""
-if [ -n "$TOKEN_CONTENT" ] && printf '%s' "$TOKEN_CONTENT" | jq -e 'type == "object"' >/dev/null 2>&1; then
+if [ -n "$TOKEN_CONTENT" ] && sb_is_one_json_object "$TOKEN_CONTENT"; then
 	TOKEN_BOUND_CHAIN="$(printf '%s' "$TOKEN_CONTENT" | jq -r '.chain // empty' 2>/dev/null)"
 	TOKEN_BOUND_TX_SHA256="$(printf '%s' "$TOKEN_CONTENT" | jq -r '.tx_sha256 // empty' 2>/dev/null)"
 fi
@@ -1592,7 +1610,10 @@ sb_check_push_endpoint
 # not "a chain answered" (liveness) but "the AUTHORIZED chain answered"
 # (identity). proton chain:info returns JSON; parse .chain_id with jq.
 CHAIN_INFO="$(proton chain:info 2>/dev/null || echo '')"
-ACTUAL_CHAIN_ID="$(printf '%s' "$CHAIN_INFO" | jq -r '.chain_id // empty' 2>/dev/null)"
+ACTUAL_CHAIN_ID=""
+if sb_is_one_json_object "$CHAIN_INFO"; then
+	ACTUAL_CHAIN_ID="$(printf '%s' "$CHAIN_INFO" | jq -r '.chain_id // empty' 2>/dev/null)"
+fi
 if [ -z "$ACTUAL_CHAIN_ID" ]; then
 	echo "ERROR (gate 3): could not parse chain_id from proton chain:info; refusing to broadcast" >&2
 	echo "                Output was:" >&2
@@ -1706,7 +1727,10 @@ fi
 # clocks the expiration and the journal need. Sampling AFTER the prompt keeps
 # the full EXPIRE_SECONDS.
 CHAIN_INFO_2="$(proton chain:info 2>/dev/null || echo '')"
-ACTUAL_CHAIN_ID_2="$(printf '%s' "$CHAIN_INFO_2" | jq -r 'if (.chain_id | type) == "string" then .chain_id else "" end' 2>/dev/null)"
+ACTUAL_CHAIN_ID_2=""
+if sb_is_one_json_object "$CHAIN_INFO_2"; then
+	ACTUAL_CHAIN_ID_2="$(printf '%s' "$CHAIN_INFO_2" | jq -r 'if (.chain_id | type) == "string" then .chain_id else "" end' 2>/dev/null)"
+fi
 if [ "$ACTUAL_CHAIN_ID_2" != "$EXPECTED_CHAIN_ID" ]; then
 	echo "ERROR (gate 3, after the prompt): the chain_id read right before the push is not the expected one (or could not be read) — refusing, nothing was signed" >&2
 	echo "                expected chain_id: $EXPECTED_CHAIN_ID" >&2
