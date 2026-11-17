@@ -42,11 +42,24 @@
 #   2  anchor-source.json missing / invalid / dag_root mismatch
 #   3  config file missing (xpr-account / anchor-sink)
 #   4  bin/safe-broadcast missing or non-executable
-#   5  broadcast failed (safe-broadcast propagated non-zero)
+#   5  nothing was sent, or the chain rejected the transaction so nothing
+#      landed (the broadcast helper exited 2 to 8). A retry needs a new
+#      per-invocation authorization and a new token
 #   6  receipt shape assembly failed
 #   7  signing host lacks the proton CLI (broadcast runs only on the operator's Mac)
 #   8  keystore guard failed — $HOME resolves to the default (shared)
 #      proton-cli keystore; refused per docs/CONSTITUTION.md §3.5
+#   9  OUTCOME UNKNOWN: the broadcast MAY have landed (the helper exited 9
+#      or 10, or with an unlisted code such as an interrupt, or it exited 0
+#      without exactly one 64-hex tx id on its stdout). Do NOT re-authorize
+#      or re-run until the last irreversible block time is past the
+#      expiration the helper printed, and the read-only absence checker passes
+#   10  ALREADY INSCRIBED: this cycle's anchor, or a later one, is already on
+#      chain and nothing was signed (the helper exited 11). Stop the day's
+#      inscription and reconcile at step 8
+#   11  NOT SENT: the absence of this cycle cannot be proven, or an earlier
+#      attempt for this memo prefix may still land (the helper exited 12 or
+#      13). Wait, then re-run with a new authorization and a new token
 #
 # Usage:
 #   sign-anchor-event.sh --chain=<testnet-a|mainnet-a>
@@ -145,7 +158,7 @@ for arg in "$@"; do
 		--non-interactive)   NON_INTERACTIVE=1 ;;
 		--dry-run)           DRY_RUN=1 ;;
 		--output=*)          OUTPUT_FILE="${arg#*=}" ;;
-		-h|--help)           sed -n '2,121p' "$0" | sed 's/^# \?//'; exit 0 ;;
+		-h|--help)           sed -n '2,134p' "$0" | sed 's/^# \?//'; exit 0 ;;
 		*)                   echo "ERROR: unknown arg: $arg" >&2; exit 1 ;;
 	esac
 done
@@ -190,6 +203,88 @@ write_output_fragment() {
 	if ! printf '%s\n' "$content" 2>/dev/null > "$file"; then
 		echo "WARN: failed to write output fragment to $file (stdout above is authoritative; continuing)" >&2
 	fi
+}
+
+# -------- the wrapper's result: class and messages (double-inscription guard) --------
+# The broadcast helper's exit code is a contract (bin/safe-broadcast header):
+# 2-8 nothing was sent or the chain rejected it, 9/10 outcome unknown, 11 this
+# cycle is already inscribed, 12 absence cannot be proven, 13 an earlier attempt
+# may still land. Only exit 0 with exactly one 64-hex line on stdout is a success.
+# Everything not in the table is UNKNOWN (fail closed: "may have landed").
+#
+# sae_wrapper_outcome_class <rc> <stdout> — prints the class word. Pure: no I/O.
+# The hex digits are listed, not written as a range: a range matches full-width
+# digits under this machine's UTF-8 locale.
+sae_wrapper_outcome_class() {
+	local rc="$1" out="$2"
+	case "$rc" in
+		0)
+			if [ "${#out}" -eq 64 ]; then
+				case "$out" in
+					*[!0123456789abcdef]*) printf 'unknown' ;;
+					*) printf 'submitted' ;;
+				esac
+			else
+				printf 'unknown'
+			fi
+			;;
+		2|3|4|5|6|7|8) printf 'not_sent' ;;
+		9|10) printf 'unknown' ;;
+		11) printf 'inscribed' ;;
+		12) printf 'absence_unproven' ;;
+		13) printf 'attempt_live' ;;
+		*) printf 'unknown' ;;
+	esac
+}
+
+# sae_wrapper_class_words <rc> — what a not-sent wrapper exit means, in plain words.
+sae_wrapper_class_words() {
+	case "$1" in
+		2) printf 'bad argument or transaction shape' ;;
+		3) printf 'PRIME DIRECTIVE gate' ;;
+		4) printf 'chain, profile or library check' ;;
+		5) printf 'aborted at the confirmation prompt' ;;
+		6) printf 'REJECTED by the chain' ;;
+		7) printf 'audit log could not be written' ;;
+		8) printf 'keystore guard' ;;
+		*) printf 'unlisted exit' ;;
+	esac
+}
+
+# The messages go to stderr only. The wrapper's own stderr (the expiration line
+# among it) is not captured, so it is already on the screen above these lines.
+sae_report_not_sent() {
+	local rc="$1"
+	if [ "$rc" = "6" ]; then
+		echo "ERROR (5): REJECTED by the chain — nothing will land (wrapper exit ${rc}: $(sae_wrapper_class_words "$rc"))" >&2
+	else
+		echo "ERROR (5): nothing was sent (wrapper exit ${rc}: $(sae_wrapper_class_words "$rc"))" >&2
+	fi
+	echo "           a retry needs a NEW per-invocation authorization and a new token" >&2
+}
+
+sae_report_unknown() {
+	local rc="$1"
+	echo "ERROR (9): OUTCOME UNKNOWN — the broadcast MAY have landed (wrapper exit ${rc})" >&2
+	[ "$rc" != "0" ] || echo "           stdout is not one 64-hex tx id (an exit status of 0 alone is not a success)" >&2
+	echo "           do NOT re-authorize or re-run: wait until the last irreversible block time is past the expiration" >&2
+	echo "           printed above, then run the read-only absence checker scripts/check-cycle-anchor-absent.sh;" >&2
+	echo "           only its exit status 0 permits a new authorization (docs/CYCLE_GATE.md 7c)" >&2
+}
+
+sae_report_inscribed() {
+	echo "ERROR (10): ALREADY INSCRIBED — this cycle's anchor, or a later one, is on chain; nothing was signed (wrapper exit ${1})" >&2
+	echo "           stop the day's inscription and go to step 8 reconciliation (docs/CYCLE_GATE.md); never run this step again for this cycle" >&2
+}
+
+sae_report_absence_unproven() {
+	echo "ERROR (11): NOT SENT — cannot prove the cycle is absent (wrapper exit ${1}): history is unreadable, stale or its page budget is used up" >&2
+	echo "           wait and re-run with a new per-invocation authorization and a new token" >&2
+}
+
+sae_report_attempt_live() {
+	echo "ERROR (11): NOT SENT — an earlier attempt for this memo prefix may still land (wrapper exit ${1})" >&2
+	echo "           wait until its expiration is irreversibly past, then re-run with a new per-invocation authorization and a new token" >&2
 }
 
 # -------- prerequisites --------
@@ -407,10 +502,16 @@ SAFE_ARGS=(--tx="$TX_FILE" --chain="$CHAIN")
 TX_ID=""
 BROADCAST_RC=0
 TX_ID="$(bash "$SAFE_BROADCAST" "${SAFE_ARGS[@]}")" || BROADCAST_RC=$?
-if [ "$BROADCAST_RC" -ne 0 ] || ! echo "$TX_ID" | grep -qE '^[a-f0-9]{64}$'; then
-	echo "ERROR (5): safe-broadcast failed (rc=$BROADCAST_RC, tx_id=${TX_ID:-empty})" >&2
-	exit 5
-fi
+OUTCOME_CLASS="$(sae_wrapper_outcome_class "$BROADCAST_RC" "$TX_ID")"
+case "$OUTCOME_CLASS" in
+	submitted)        ;;
+	not_sent)         sae_report_not_sent "$BROADCAST_RC"; exit 5 ;;
+	unknown)          sae_report_unknown "$BROADCAST_RC"; exit 9 ;;
+	inscribed)        sae_report_inscribed "$BROADCAST_RC"; exit 10 ;;
+	absence_unproven) sae_report_absence_unproven "$BROADCAST_RC"; exit 11 ;;
+	attempt_live)     sae_report_attempt_live "$BROADCAST_RC"; exit 11 ;;
+	*)                sae_report_unknown "$BROADCAST_RC"; exit 9 ;;
+esac
 
 # -------- emit JSON receipt fragment on stdout --------
 RECEIPT_JSON="$(jq -n \

@@ -39,7 +39,9 @@
 #     4/10 detect that state and exit 2 with the unlock instruction — they
 #     never report it as "the key was never imported".
 #   - Broadcast authorization: this script auto-creates the
-#     /tmp/fyd-broadcast-token file (5-minute TTL), bound to chain=testnet-a
+#     /tmp/fyd-broadcast-token file (5-minute TTL; FYD_BROADCAST_TOKEN_FILE
+#     changes the path, exactly as it does for bin/safe-broadcast, so the two
+#     always agree), bound to chain=testnet-a
 #     and the exact composed tx (tx_sha256) per R16, so bin/safe-broadcast
 #     admits the invocation. The token is mechanics, not authorization:
 #     the per-invocation authorization is the operator's explicit chat
@@ -49,7 +51,8 @@
 #
 # Usage:
 #   HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh \
-#       [--source=<path>] [--allow-fixture] [--expect-cycle=<N>]
+#       [--source=<path>] [--allow-fixture] [--expect-cycle=<N>] \
+#       [--allow-existing-cycle-anchor]
 #
 # Options:
 #   --source=<path>     Anchor-source JSON to inscribe. Default: the
@@ -79,6 +82,33 @@
 #                       run (useful for exploratory/schema-shape runs) but
 #                       prints a non-fatal reminder, since an unverified
 #                       cycle number is not real gate-1 evidence either.
+#   --allow-existing-cycle-anchor
+#                       Testnet only, no value. Passed once, as the last
+#                       argument, to bin/safe-broadcast, which then does not
+#                       refuse a cycle whose anchor is already on the testnet
+#                       (use it to rehearse a cycle that was rehearsed before),
+#                       and passes a scan that ran dry without a floor (the
+#                       testnet history holds no entry of the actor) with a
+#                       WARNING. Without it neither is allowed.
+#
+# Exit codes:
+#   0  the rehearsal completed and printed the sentinel line
+#   1  a pre-check or usage error, the broadcast helper refused or the chain
+#      rejected the transaction (nothing landed), or a step after the
+#      broadcast (8-9/10) failed - read the FAIL line
+#   2  the project testnet keystore is locked (the unlock probe failed)
+#   8  keystore guard failed: HOME is not the project testnet keystore
+#   9  OUTCOME UNKNOWN: the testnet push MAY have landed (the helper exited 9
+#      or 10, or with an unlisted code such as an interrupt, or it exited 0
+#      without exactly one 64-hex tx id on its stdout). Do not re-run until
+#      the expiration printed above is irreversibly past
+#   10  ALREADY INSCRIBED on testnet: this cycle's anchor, or a later one, is
+#      already on the testnet (the helper exited 11). Re-run with
+#      --allow-existing-cycle-anchor only when this cycle was already
+#      rehearsed
+#   11  NOT SENT: the absence of this cycle cannot be proven on the testnet,
+#      or an earlier attempt for this memo prefix may still land (the helper
+#      exited 12 or 13). Wait, then re-run
 #
 # What it does:
 #   1.  Resolve + print the anchor-source file that will be inscribed
@@ -105,8 +135,8 @@
 #       hang; timeout applied).
 #   5.  Compose 4-action tx JSON via sign-anchor-event.sh --dry-run,
 #       save to a tmpfile.
-#   6.  Create broadcast token (/tmp/fyd-broadcast-token, TTL 5 min,
-#       chain+tx-bound per R16).
+#   6.  Create broadcast token (/tmp/fyd-broadcast-token, or the path in
+#       FYD_BROADCAST_TOKEN_FILE; TTL 5 min, chain+tx-bound per R16).
 #   7.  Invoke bin/safe-broadcast --chain=testnet-a with the composed tx.
 #   8.  Reassemble the sign-anchor-event JSON shape for receipt input.
 #   9.  Extract tx_id, fetch tx from testnet Hyperion, run the
@@ -151,12 +181,17 @@ REHEARSAL_CFG="${LOGIN_HOME}/freedom-yield-rehearsal-config"
 ANCHOR_SOURCE_ARG=""
 ALLOW_FIXTURE=0
 EXPECT_CYCLE=""
+# The testnet-only override of bin/safe-broadcast's check A. The flag's text lives
+# here only (argument parsing, the wrapper call and the messages read this name).
+ALLOW_EXISTING_FLAG="--allow-existing-cycle-anchor"
+ALLOW_EXISTING=0
 for arg in "$@"; do
 	case "$arg" in
 		--source=*)         ANCHOR_SOURCE_ARG="${arg#--source=}" ;;
 		--allow-fixture)    ALLOW_FIXTURE=1 ;;
 		--expect-cycle=*)   EXPECT_CYCLE="${arg#--expect-cycle=}" ;;
-		-h|--help)          sed -n '2,112p' "$0" | sed 's/^# \?//'; exit 0 ;;
+		"$ALLOW_EXISTING_FLAG") ALLOW_EXISTING=1 ;;
+		-h|--help)          sed -n '2,145p' "$0" | sed 's/^# \?//'; exit 0 ;;
 		*)                  echo "ERROR: unknown arg: $arg" >&2; exit 1 ;;
 	esac
 done
@@ -193,10 +228,65 @@ fi
 #                          refuse anything else (the check refuses BEFORE
 #                          the broadcast, which is the point).
 DRY_RUN_LOG="${LOGIN_HOME}/.fya-testnet-dryrun-log.json"
-TOKEN_FILE="/tmp/fyd-broadcast-token"
+# The token path is bin/safe-broadcast's own definition (same variable, same default),
+# so the file written at step 6/10 is the file the wrapper reads at step 7/10.
+TOKEN_FILE="${FYD_BROADCAST_TOKEN_FILE:-/tmp/fyd-broadcast-token}"
 
 step() { printf '\n=== step %s ===\n' "$*"; }
 fail() { printf '\nFAIL: %s\n' "$*" >&2; exit 1; }
+
+# ---- the wrapper's result: class and messages (double-inscription guard) ----
+# Same table as scripts/sign-anchor-event.sh (tests pin both with the same rc list):
+# 2-8 nothing was sent or the chain rejected it, 9/10 outcome unknown, 11 already
+# inscribed, 12 absence cannot be proven, 13 an earlier attempt may still land.
+# Only exit 0 with exactly one 64-hex line on stdout is a success; anything not in
+# the table (an interrupt, a crash) is UNKNOWN: the push may have landed.
+#
+# rtr_wrapper_outcome_class <rc> <stdout> — prints the class word. Pure: no I/O.
+# The hex digits are listed, not written as a range: a range matches full-width
+# digits under this machine's UTF-8 locale.
+rtr_wrapper_outcome_class() {
+	local rc="$1" out="$2"
+	case "$rc" in
+		0)
+			if [ "${#out}" -eq 64 ]; then
+				case "$out" in
+					*[!0123456789abcdef]*) printf 'unknown' ;;
+					*) printf 'submitted' ;;
+				esac
+			else
+				printf 'unknown'
+			fi
+			;;
+		2|3|4|5|6|7|8) printf 'not_sent' ;;
+		9|10) printf 'unknown' ;;
+		11) printf 'inscribed' ;;
+		12) printf 'absence_unproven' ;;
+		13) printf 'attempt_live' ;;
+		*) printf 'unknown' ;;
+	esac
+}
+
+# rtr_report_wrapper_failure <class> <rc> — the FAIL text of a class that is not
+# "nothing was sent" (that one goes through fail()). stderr only.
+rtr_report_wrapper_failure() {
+	local class="$1" rc="$2"
+	case "$class" in
+		inscribed)
+			printf '\nFAIL (10): ALREADY INSCRIBED ON TESTNET (wrapper exit %s) — nothing was signed.\n' "$rc" >&2
+			printf '  If this cycle was already rehearsed on testnet, re-run with %s.\n' "$ALLOW_EXISTING_FLAG" >&2 ;;
+		absence_unproven)
+			printf '\nFAIL (11): NOT SENT — cannot prove the cycle is absent on testnet (wrapper exit %s); wait and re-run.\n' "$rc" >&2
+			printf '  When the testnet history holds no entry of the actor, %s also passes a scan that ran dry without a floor (J1 (a)).\n' "$ALLOW_EXISTING_FLAG" >&2 ;;
+		attempt_live)
+			printf '\nFAIL (11): NOT SENT — an earlier attempt for this memo prefix may still land (wrapper exit %s);\n' "$rc" >&2
+			printf '  wait until its expiration is irreversibly past, then re-run.\n' >&2 ;;
+		*)
+			printf '\nFAIL (9): OUTCOME UNKNOWN — the testnet push MAY have landed (wrapper exit %s).\n' "$rc" >&2
+			[ "$rc" != "0" ] || printf '  stdout is not one 64-hex tx id (an exit status of 0 alone is not a success).\n' >&2
+			printf '  do not re-run 7a until the expiration printed above is irreversibly past.\n' >&2 ;;
+	esac
+}
 
 # ---- §3.5 keystore separation guard (fail-closed) ----
 # Must precede this script's FIRST proton invocation (step 3 below), and
@@ -485,30 +575,45 @@ echo "  token created at $TOKEN_FILE (chain=testnet-a, tx_sha256=${TOKEN_TX_SHA2
 # ---- step 7: invoke bin/safe-broadcast ----
 step "7/10 invoke bin/safe-broadcast --chain=testnet-a --non-interactive"
 # non-interactive tightens TTL to 60s but we just touched; safe.
+# The wrapper's arguments are an array: the override flag is added once, last, and
+# only when it was given (never by default).
+BROADCAST_ARGS=(--tx="$TX_FILE" --chain=testnet-a --non-interactive)
+if [ "$ALLOW_EXISTING" -eq 1 ]; then
+	BROADCAST_ARGS+=("$ALLOW_EXISTING_FLAG")
+	echo "  override: ${ALLOW_EXISTING_FLAG} passed to the wrapper (testnet only; a WARNING is printed when the cycle's absence is not provable)"
+fi
 BROADCAST_OUT="$(mktemp -t fya-testnet-bcast.XXXXXX)"
 BROADCAST_ERR="$(mktemp -t fya-testnet-bcast-err.XXXXXX)"
 trap 'rm -f "$TX_FILE" "$BROADCAST_OUT" "$BROADCAST_ERR"' EXIT
 
 BROADCAST_RC=0
 FY_CONFIG_DIR="${REHEARSAL_CFG}" bash "${REPO_ROOT}/bin/safe-broadcast" \
-	--tx="$TX_FILE" \
-	--chain=testnet-a \
-	--non-interactive \
+	"${BROADCAST_ARGS[@]}" \
 	> "$BROADCAST_OUT" 2> "$BROADCAST_ERR" || BROADCAST_RC=$?
 
-if [ "$BROADCAST_RC" -ne 0 ]; then
+# The wrapper's expiration line is the date a later retry waits for: show it whatever
+# the outcome. Its WARNING lines (check A could not prove the cycle) are shown below
+# when the push succeeded; on every other outcome the stderr tail shows them.
+grep '^expiration=' "$BROADCAST_ERR" >&2 || true
+
+TX_ID="$(cat "$BROADCAST_OUT")"
+OUTCOME_CLASS="$(rtr_wrapper_outcome_class "$BROADCAST_RC" "$TX_ID")"
+if [ "$OUTCOME_CLASS" != "submitted" ]; then
 	echo "safe-broadcast exit rc=$BROADCAST_RC" >&2
 	echo "--- stderr (last 30 lines) ---" >&2
 	tail -30 "$BROADCAST_ERR" >&2
 	echo "--- stdout (last 10 lines) ---" >&2
 	tail -10 "$BROADCAST_OUT" >&2
-	fail "safe-broadcast failed"
 fi
-
-TX_ID="$(cat "$BROADCAST_OUT" | tr -d '[:space:]')"
-if ! echo "$TX_ID" | grep -qE '^[a-f0-9]{64}$'; then
-	fail "extracted tx_id malformed: '$TX_ID'"
-fi
+case "$OUTCOME_CLASS" in
+	submitted)        grep '^WARNING' "$BROADCAST_ERR" >&2 || true ;;
+	not_sent)         fail "safe-broadcast refused or the chain rejected the tx — nothing landed (wrapper exit ${BROADCAST_RC})" ;;
+	unknown)          rtr_report_wrapper_failure "$OUTCOME_CLASS" "$BROADCAST_RC"; exit 9 ;;
+	inscribed)        rtr_report_wrapper_failure "$OUTCOME_CLASS" "$BROADCAST_RC"; exit 10 ;;
+	absence_unproven) rtr_report_wrapper_failure "$OUTCOME_CLASS" "$BROADCAST_RC"; exit 11 ;;
+	attempt_live)     rtr_report_wrapper_failure "$OUTCOME_CLASS" "$BROADCAST_RC"; exit 11 ;;
+	*)                rtr_report_wrapper_failure unknown "$BROADCAST_RC"; exit 9 ;;
+esac
 echo "  BROADCAST OK  tx_id=$TX_ID"
 
 # ---- step 8: reconstruct sign-anchor-event JSON for gen-anchor-receipt input ----
