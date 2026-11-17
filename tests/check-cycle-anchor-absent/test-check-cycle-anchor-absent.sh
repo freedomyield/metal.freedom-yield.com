@@ -301,7 +301,9 @@ for p in fya1c fyac1 fya1c1x FYA1C1 fya1c1c2 fya1c9-id:x ""; do
 done
 
 # probe: does a range expression match a full-width digit under this bash + locale?
-JA_RANGE="$( export LC_ALL=ja_JP.UTF-8; case "１" in *[!0-9]*) echo no ;; *) echo yes ;; esac )"
+# shellcheck disable=SC2194  # the word is a constant on purpose: it is a full-width digit probe
+ja_range_probe() { export LC_ALL=ja_JP.UTF-8; case "１" in *[!0-9]*) echo no ;; *) echo yes ;; esac; }
+JA_RANGE="$(ja_range_probe)"
 if [ "$JA_RANGE" = yes ]; then
 	chk_ja --chain=mainnet-a "--memo-prefix=fya１c1"; usage_case "K1-1 full-width digit in --memo-prefix (ja_JP.UTF-8)"
 	chk_ja --chain=mainnet-a --memo-prefix=fya1c9 "--actor=ｆxanchor"; usage_case "K1-1 full-width letter in --actor (ja_JP.UTF-8)"
@@ -338,12 +340,13 @@ chk --chain=mainnet-a --memo-prefix=fya1c9 --not-before=2026-13-45T00:00:00; usa
 chk --chain=mainnet-a --memo-prefix=fya1c9 --not-before=yesterday;            usage_case "K1-1 --not-before is not a time (word)"
 
 # jq / curl missing from PATH -> 1 (a PATH that holds only the tools the script needs before that check)
+BASH_BIN="$(command -v bash)"
 mkdir -p "$WORK/bin-nojq" "$WORK/bin-nocurl"
 for t in dirname head tr cat sed; do ln -sf "$(command -v "$t")" "$WORK/bin-nojq/$t"; ln -sf "$(command -v "$t")" "$WORK/bin-nocurl/$t"; done
 ln -sf "$(command -v jq)" "$WORK/bin-nocurl/jq"
-OUT="$( FY_CONFIG_DIR="$WORK/cfg" PATH="$WORK/bin-nojq" bash "$CHECK" --chain=mainnet-a --memo-prefix=fya1c9 2>"$WORK/err")"; RC=$?; ERR="$(cat "$WORK/err")"
+OUT="$( FY_CONFIG_DIR="$WORK/cfg" PATH="$WORK/bin-nojq" "$BASH_BIN" "$CHECK" --chain=mainnet-a --memo-prefix=fya1c9 2>"$WORK/err")"; RC=$?; ERR="$(cat "$WORK/err")"
 usage_case "K1-1 jq is not on PATH"
-OUT="$( FY_CONFIG_DIR="$WORK/cfg" PATH="$WORK/bin-nocurl" bash "$CHECK" --chain=mainnet-a --memo-prefix=fya1c9 2>"$WORK/err")"; RC=$?; ERR="$(cat "$WORK/err")"
+OUT="$( FY_CONFIG_DIR="$WORK/cfg" PATH="$WORK/bin-nocurl" "$BASH_BIN" "$CHECK" --chain=mainnet-a --memo-prefix=fya1c9 2>"$WORK/err")"; RC=$?; ERR="$(cat "$WORK/err")"
 usage_case "K1-1 the HTTP tool is not on PATH"
 
 chk -h; case "$OUT" in *"--not-before"*"Exit codes"*) [ "$RC" -eq 0 ] && [ "$(calls)" = 0 ] && t_pass "K1-1 -h prints the usage and exit codes, rc 0, no request" || t_fail "K1-1 -h" "rc=$RC calls=$(calls)";; *) t_fail "K1-1 -h prints the usage" "rc=$RC out=[$OUT]";; esac
