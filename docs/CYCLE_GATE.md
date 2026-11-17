@@ -1096,17 +1096,24 @@ the values to pass on a given day are in the day-of value sheet above):
      確定するまで 7a をやり直さない (wrapper の journal が E まで、rehearsal の
      exit **11** で断る。何も送らない)。exit **10** = この cycle の刻印が
      testnet に既に在る (dress run など)。exit **11** = 何も送っていない
-     (前の試行がまだ着地しうる、または testnet の履歴で無いと証明できない)。
+     (前の試行がまだ着地しうる、または testnet の履歴で無いと証明できない、
+     または記録 (audit log)・LIB の時刻が読めない)。**この Mac で主の audit log
+     が書けず、予備の audit log もまだ無い時は、最初の run が wrapper の
+     exit 13 (rehearsal・7c とも exit 11) で止まる。何も送らない。安全な側
+     なので迂回せず、報告する。**
      **どの exit でも、やり直しは上の「認可 1 回 = 起動 1 回」のまま** (AI が
      報告し、operator の改めての実行指示を取ってから)。
    - **`--allow-existing-cycle-anchor` (testnet だけの旗。mainnet では wrapper
-     が拒む)**: 使うのは、ちょうど 2 つの時だけ。exit **10** が出た時 (その
-     cycle を testnet で既に刻んだ) と、exit **11** が「床の無い尽きた走査」で
-     出た時 (testnet の base が actor の履歴を持たない。設計書 §11.3・§11.10)。
-     どちらも、拒みを 1 回見てから、operator の新しい実行指示で付ける。
-     **最初の run から付けない。** AI は WARN の行 (見つけた tx か、床の無い
-     尽きた走査) を chat に示す。それ以外の exit **11** (履歴が読めない・古い・
-     前の試行がまだ生きている) には付けず、待ってから operator の指示を取る。
+     が拒み、後の cycle の刻印は testnet でも通さない)**: 使うのは、ちょうど
+     2 つの時だけ。(1) exit **10** で、印字された刻印が**その日の cycle のもの**
+     の時 (その cycle を testnet で既に刻んだ)。(2) exit **11** が「床の無い
+     尽きた走査」で出た時 (testnet の base が actor の履歴を持たない。設計書
+     §11.3・§11.10)。どちらも、拒みを 1 回見てから、operator の新しい実行指示
+     で付ける。**最初の run から付けない。** AI は WARN の行 (見つけた tx か、
+     床の無い尽きた走査) を chat に示す。それ以外の exit **11** (履歴が読めない・
+     古い・前の試行がまだ生きている・記録 (audit log) か LIB の時刻が読めない)
+     には付けず、待ってから operator の指示を取る。**後の cycle の刻印の
+     exit 10 は、この旗でも通らない。止めて報告する。**
      testnet での命令の形 (書くだけ。ここで走らせない):
      `HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh --expect-cycle=<N+1> --allow-existing-cycle-anchor`
    - **誰が起動し、何が認可か**: 起動は AI@Mac、認可は chat での operator の
@@ -1336,9 +1343,10 @@ the values to pass on a given day are in the day-of value sheet above):
    - **exit 10** = 既に刻まれている。その日の刻印を止め、印字された trx_id を
      operator に示し、step 8 の照合へ。
    - **exit 11** = 何も送っていない (無いと証明できない、または前の試行が
-     まだ着地しうる)。待ってから、次の「再実行を検討してよい条件」へ。mainnet
-     に上書きの旗は無い (`--allow-existing-cycle-anchor` は testnet だけで、
-     wrapper は mainnet でこの旗を拒む。設計書 §7 の A8)。
+     まだ着地しうる、または記録・LIB の時刻が読めない (7a の注))。待ってから、
+     次の「再実行を検討してよい条件」へ。mainnet に上書きの旗は無い
+     (`--allow-existing-cycle-anchor` は testnet だけで、wrapper は mainnet で
+     この旗を拒む。後の cycle の刻印は testnet でも通さない。設計書 §7 の A8)。
    - **表に無い exit と、tx_id の無い exit 0 は、exit 9 と同じに扱う** (安全な側)。
    - **再実行を検討してよい条件 (どの exit でも共通。次の 3 つが全て揃ってから。
      exit 5 と exit 11 にも課す)**: (1) AI が the absence check (読み取りだけ)

@@ -488,11 +488,13 @@ broadcast is authorized. Full context: `docs/CYCLE_GATE.md` step 7b.
   printed `expiration=<E>` is irreversibly past (the wrapper's journal refuses a
   sooner run with exit 11 and sends nothing). Exit **10** = this cycle's anchor
   is already on testnet (for example an earlier dress run). Exit **11** =
-  nothing was sent: an earlier attempt may still land, or testnet history
-  cannot prove the cycle absent. `--allow-existing-cycle-anchor` is a
-  testnet-only flag. It is added only on the operator's new instruction, after
-  one refusal has been seen, and only for exit 10 or for an exit 11 caused by
-  an exhausted scan with no floor; never for any other exit 11.
+  nothing was sent: an earlier attempt may still land, testnet history cannot
+  prove the cycle absent, or the audit log or LIB time cannot be read.
+  `--allow-existing-cycle-anchor` is a testnet-only flag and never passes a
+  later cycle's anchor (stop and report). It is added only on the operator's
+  new instruction, after one refusal has been seen, and only for an exit 10
+  whose printed anchor is this cycle's, or for an exit 11 caused by an
+  exhausted scan with no floor; never for any other exit 11.
 
 ## Phase β note
 
