@@ -11,7 +11,8 @@
 # Case names start with their property id (A3, A3h, A4, A5, A6, FOUND, IN,
 # ENT, ORD, END, T, REQ, R1) so a mutation report maps to cases.
 # ok/bad always return 0, so `cond && ok || bad` is a safe if/else here.
-# shellcheck disable=SC2015
+# SC2030/SC2031: the locale and TZ cases set LC_ALL / TZ inside a subshell on purpose.
+# shellcheck disable=SC2015,SC2030,SC2031
 set -u
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -305,7 +306,7 @@ for p in "" fya1c fyac1 fya1c1x fya1c1: "FYA1C1" "fya1c1c1" "fya c1" "fya1c1 "; 
 done
 # Full-width forms: the Mac's bash 3.2 lets [0-9] and [a-z] match them under a
 # Japanese UTF-8 locale. Probe it in the same kind of subshell the cases use.
-ja_probe() { ( LC_ALL=ja_JP.UTF-8; export LC_ALL; case "１" in [0-9]) exit 0 ;; esac; exit 1 ); }
+ja_probe() { ( LC_ALL=ja_JP.UTF-8; export LC_ALL; fw="１"; case "$fw" in [0-9]) exit 0 ;; esac; exit 1 ); }
 if ja_probe; then
 	reset; run_find_ja "$BASE" "$ACTOR" "fya１c1"
 	expect_rc3 "IN prefix with a full-width digit (ja_JP.UTF-8)" ahr_find_cycle_anchor 0
@@ -430,8 +431,8 @@ t_assert_eq "T round trip utc -> epoch -> utc" 2026-12-07T04:00:21 "$OUT"
 for bad in "" 2026-11-17 "2026-11-17 04:45:12" 2026-11-17T04:45:12+09:00 2026-11-17T04:45:12.1234567 2026-11-17T04:45:12.Z \
 	2026-02-30T00:00:00 2026-13-01T00:00:00 "２026-11-17T04:45:12" "2026-11-17T04:45:12
 " 2026-11-17T04:45:12ZZ x; do
-	utc2epoch "$bad"
-	{ defined ahr_utc_to_epoch && [ "$RC" -eq 3 ] && [ -z "$OUT" ]; } && t_pass "T utc_to_epoch refuses [$bad]" || t_fail "T utc_to_epoch refuses [$bad]" "rc=$RC out=[$OUT]"
+	utc2epoch "$bad"; label="$(printf '%s' "$bad" | tr '\n' '~')"
+	{ defined ahr_utc_to_epoch && [ "$RC" -eq 3 ] && [ -z "$OUT" ]; } && t_pass "T utc_to_epoch refuses [$label]" || t_fail "T utc_to_epoch refuses [$label]" "rc=$RC out=[$OUT]"
 done
 for bad in "" -1 1.5 abc "１２" 1e3 9999999999999; do
 	epoch2utc "$bad"
