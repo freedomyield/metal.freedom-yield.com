@@ -180,11 +180,20 @@ CCAA_FLOOR=""
 CCAA_LIB_TIME=""
 CCAA_PRESENT_LINE=""
 
+# ccaa__is_one_json_object <text> — rc 0 only when the WHOLE text is exactly one
+# JSON value and that value is an object. Two values (in any order), trailing
+# text, an empty answer or a non-object are all rc 1 (jq -e fails on a parse
+# error too), so nothing that is not one library answer is ever read.
+ccaa__is_one_json_object() {
+	printf '%s' "${1:-}" | jq -s -e 'length == 1 and (.[0] | type) == "object"' >/dev/null 2>&1
+}
+
 # ccaa__lib_time <base> — sets CCAA_LIB_TIME and CCAA_LIB_EPOCH; rc 1 when unreadable.
 CCAA_LIB_EPOCH=""
 ccaa__lib_time() {
 	local times
 	times="$(ahr_chain_times "$1")" || return 1
+	ccaa__is_one_json_object "$times" || return 1
 	CCAA_LIB_TIME="$(printf '%s' "$times" | jq -r 'select(type == "object" and (.last_irreversible_block_time | type) == "string") | .last_irreversible_block_time')"
 	[ -n "$CCAA_LIB_TIME" ] || return 1
 	CCAA_LIB_EPOCH="$(ahr_utc_to_epoch "$CCAA_LIB_TIME")" || return 1
@@ -196,6 +205,10 @@ ccaa__read_verdict() {
 	local kind verdict trx block ts
 	local hex='[0123456789abcdef]'
 	local tsch='[0123456789TZ:.-]'
+	if ! ccaa__is_one_json_object "$1"; then
+		ccaa__log "$2: the cycle-anchor reader did not answer exactly one JSON object"
+		CCAA_OUTCOME=unreadable; return 0
+	fi
 	kind="$(printf '%s' "$1" | jq -r --arg hex "$hex" --arg tsch "$tsch" '
 		select(type == "object")
 		| if (.verdict == "found" or .verdict == "found_later")
