@@ -278,7 +278,7 @@ sae_report_inscribed() {
 }
 
 sae_report_absence_unproven() {
-	echo "ERROR (11): NOT SENT — cannot prove the cycle is absent (wrapper exit ${1}): history is unreadable, stale or its page budget is used up" >&2
+	echo "ERROR (11): NOT SENT — cannot prove the cycle is absent (wrapper exit ${1}): history is unreadable, stale, its page budget is used up, or it ran out without showing the previous cycle's anchor (the floor)" >&2
 	echo "           wait and re-run with a new per-invocation authorization and a new token" >&2
 }
 
