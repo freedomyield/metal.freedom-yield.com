@@ -381,25 +381,24 @@ fi
 
 if sel B5; then
 echo "── B5 the attempt journal ──"
-begin "$TT"; jpre "$(tz -60)" testnet-a fya1c3 "$(tn 300)"
-go -- "${TARGS[@]}"
-check "B5-a same-prefix pre line with no post line, E after LIB → 13, no push, nothing appended" 13 \
-	"err:fya1c3" "err:$(tn 300)" "err:LIB" "nocall:proton transaction:push" "alines:1"
-begin "$TT"; jpre "$(tz -60)" testnet-a fya1c3 "$(tn 300)"; jpost "$(tz -60)" testnet-a 0 submitted
-go -- "${TARGS[@]}"
-check "B5-outcome=submitted, E after LIB → 13" 13 "nocall:proton transaction:push" "alines:2"
-begin "$TT"; jpre "$(tz -60)" testnet-a fya1c3 "$(tn 300)"; jpost "$(tz -60)" testnet-a 10 unknown
-go -- "${TARGS[@]}"
-check "B5-outcome=unknown, E after LIB → 13" 13 "nocall:proton transaction:push" "alines:2"
-begin "$TT"; jpre "$(tz -60)" testnet-a fya1c3 "$(tn 300)"; jpost "$(tz -60)" testnet-a 1
-go -- "${TARGS[@]}"
-check "B5-an old post line with no outcome= (rc only) does not release the line → 13" 13 "nocall:proton transaction:push"
-begin "$TT"; jpre "$(tz -60)" testnet-a fya1c3 "$(tn 300)"; jpost "$(tz -60)" testnet-a 6 rejected
-go -- "${TARGS[@]}"
-check "B5-outcome=rejected → the line is ignored, pushes" 0 "calls:proton transaction:push=1"
-begin "$TT"; jpre "$(tz -60)" testnet-a fya1c3 "$(tn 300)"; jpost "$(tz -60)" testnet-a refused-gate3-recheck refused-gate3-recheck
-go -- "${TARGS[@]}"
-check "B5-outcome=refused-gate3-recheck → ignored, pushes" 0 "calls:proton transaction:push=1"
+B5TS="$(tz -60)"; B5E="$(tn 300)"   # computed once: pre and post must carry the SAME time
+b5() { # <name> <want-rc> <post-rc|-> <outcome|-> [checks...] — a same-prefix pre line, E after LIB, optionally its post line
+	local n="$1" r="$2" prc="$3" o="$4"
+	shift 4
+	begin "$TT"; jpre "$B5TS" testnet-a fya1c3 "$B5E"
+	if [ "$prc" != "-" ]; then
+		if [ "$o" = "-" ]; then jpost "$B5TS" testnet-a "$prc"; else jpost "$B5TS" testnet-a "$prc" "$o"; fi
+	fi
+	go -- "${TARGS[@]}"
+	check "$n" "$r" "$@"
+}
+b5 "B5-a same-prefix pre line with no post line, E after LIB → 13, no push, nothing appended" 13 - - \
+	"err:fya1c3" "err:$B5E" "err:LIB" "nocall:proton transaction:push" "alines:1"
+b5 "B5-outcome=submitted, E after LIB → 13" 13 0 submitted "nocall:proton transaction:push" "alines:2"
+b5 "B5-outcome=unknown, E after LIB → 13" 13 10 unknown "nocall:proton transaction:push" "alines:2"
+b5 "B5-an old post line with no outcome= (rc only) does not release the line → 13" 13 1 - "nocall:proton transaction:push"
+b5 "B5-outcome=rejected → the line is ignored, pushes" 0 6 rejected "calls:proton transaction:push=1"
+b5 "B5-outcome=refused-gate3-recheck → ignored, pushes" 0 refused-gate3-recheck refused-gate3-recheck "calls:proton transaction:push=1"
 fi
 
 if sel B6; then
@@ -488,7 +487,7 @@ go -- "${TARGS[@]}"
 check "JR-the audit log cannot be read → 13, nothing sent" 13 "err:audit log" "nocall:proton transaction:push"
 chmod 600 "$T/audit.log"
 # lib_equals_head: PulseVM-like profile compares against HEAD; the xpr profile against LIB
-jq '.profiles["xpr-testnet"].lib_equals_head = true' "$PROFILES" > "$T/libhead.json"
+jq '.profiles["xpr-testnet"].lib_equals_head = true | .profiles["xpr-mainnet"].lib_equals_head = true' "$PROFILES" > "$T/libhead.json"
 sbh_tree "$T/libheadtree" "$ROOT/bin/safe-broadcast" "$T/libhead.json"
 begin "$TT"; jpre "$(tz -60)" testnet-a fya1c3 "$(tn -100)"
 sbh_run - '' "$T/libheadtree/bin/safe-broadcast" -- "${TARGS[@]}"

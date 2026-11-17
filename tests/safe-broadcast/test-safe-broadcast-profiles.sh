@@ -25,7 +25,11 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 sbh_init
 trap 'rm -rf "$SBH_T"' EXIT
 T="$SBH_T"
-W="$ROOT/bin/safe-broadcast"
+# Run a TREE around the repo wrapper whose copy of scripts/lib/anchor-history-read.sh
+# is the harness stub: the wrapper loads that library for every run (exit 4 if a
+# function is missing), and none of these cases is about history reading.
+sbh_tree "$T/maintree" "$ROOT/bin/safe-broadcast"
+W="$T/maintree/bin/safe-broadcast"
 CFG="$(sbh_cfg_path)"
 # shellcheck source=tests/lib/assert.sh
 . "$ROOT/tests/lib/assert.sh"
@@ -305,7 +309,7 @@ check "P8 PulseVM profile with proton-cli still on its built-in XPR hosts → ga
 
 pvm_reset
 sbh_run - '' "$PW" "${PVM_ENV[@]}" STUB_PUSH_MODE=crash -- "${PVM_ARGS[@]}"
-check "P9 id-only push errors → exit 6 with the MAY-have-broadcast banner" 6 "err:a broadcast MAY have happened"
+check "P9 id-only push errors → exit 10 (outcome unknown) with the MAY-have-broadcast banner" 10 "err:a broadcast MAY have happened" "err:earliest possible retry"
 
 pvm_reset
 sbh_run - '' "$PW" "${PVM_ENV[@]}" FYD_SB_CONFIRM_ATTEMPTS=999 -- "${PVM_ARGS[@]}"

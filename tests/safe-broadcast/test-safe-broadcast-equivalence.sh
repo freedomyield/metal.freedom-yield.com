@@ -58,7 +58,14 @@ WRITE=0
 sbh_init
 trap 'rm -rf "$SBH_T"' EXIT
 
-W="${SB_EQ_WRAPPER:-$ROOT/bin/safe-broadcast}"
+# Default: a TREE around the repo wrapper whose copy of scripts/lib/anchor-history-read.sh
+# is the harness stub (the wrapper loads that library for every run, and none of the
+# scenarios below reads history). SB_EQ_WRAPPER (a full base tree) still wins.
+if [ -z "${SB_EQ_WRAPPER:-}" ]; then
+	sbh_tree "$SBH_T/tree" "$ROOT/bin/safe-broadcast"
+	SB_EQ_WRAPPER="$SBH_T/tree/bin/safe-broadcast"
+fi
+W="$SB_EQ_WRAPPER"
 case "$W" in /*) ;; *) W="$PWD/$W" ;; esac
 T="$SBH_T"
 # Run from the temp root: the exit-7 scenario's fallback audit path is the
