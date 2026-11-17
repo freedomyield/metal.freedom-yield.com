@@ -19,6 +19,7 @@
 #                      [--dry-run-log=<log-file>]
 #                      [--operator-token=<file>]
 #                      [--non-interactive]
+#                      [--allow-existing-cycle-anchor]
 #
 # Required:
 #   --tx=<json-file>              Path to transaction JSON containing actions[].
@@ -53,6 +54,16 @@
 #   --non-interactive             Skip the interactive confirmation prompt.
 #                                 In non-interactive mode, the token file mtime
 #                                 must be within the last 60 seconds (tighter TTL).
+#   --allow-existing-cycle-anchor TESTNET ONLY (refused on mainnet with exit 2; also
+#                                 exit 2 on a tx that is not anchor-shaped). Lets
+#                                 check A (below) pass when this cycle's anchor
+#                                 is already on chain, or when a scan ended
+#                                 without seeing an earlier cycle's anchor
+#                                 (a floor), with a WARNING on stderr. It never
+#                                 overrides "a LATER cycle is on chain" (11), an
+#                                 unreadable history (12) or the attempt journal
+#                                 (13). It is a per-run argument, not a switch
+#                                 that turns the guard off: there is none.
 #
 # ---- R16 (2026-07-08): operator token CONTENT binding ----
 #   The operator token used to prove authorization by FRESHNESS alone (mtime
@@ -276,6 +287,78 @@
 #       retrying". The push is NEVER retried automatically. A third audit
 #       line (phase=confirm) records the outcome.
 #
+# ---- Double-inscription guard (design 2026-10-16, section 11) ----
+#   A cycle's anchor must reach the chain once. The push CLI exits 0 even when
+#   the push fails, can re-send on its own to another endpoint, and prints no
+#   tx_id on an ambiguous failure, so "it failed, run it again" can inscribe a
+#   cycle twice. Four parts, all for the anchor shape (a memo ^fya<n>c<n>)
+#   unless said otherwise; there is NO setting that switches them off (the
+#   only removal is reverting the commits). Nothing here talks to a history
+#   service itself: scripts/lib/anchor-history-read.sh does (loaded for EVERY
+#   run before any network or proton call; a missing library, a missing
+#   function or a non-numeric AHR_INDEX_MAX_LAG_BLOCKS refuses with exit 4).
+#
+#   Shape judgment (every run, exit 2, nothing called). The tx file has ONE
+#   top-level key, `actions` (an allowed-list: expiration, ref_block_*,
+#   max_*_usage_*, delay_sec, context_free_actions, transaction_extensions and
+#   any unknown key are refused). Every action's .data is an object. An
+#   anchor-shaped tx names exactly ONE memo prefix; every action carries a
+#   non-empty authorization naming one and the same actor A; every
+#   .data.from is A.
+#
+#   Cycle-anchor presence check (check A). For each history base of the
+#   profile, in order: the index must be fresh (ahr_index_fresh), then
+#   ahr_find_cycle_anchor <base> <A> <prefix> must give ONE line of JSON in
+#   the agreed shape; anything else makes that base unusable. found_later (a
+#   later cycle is on chain) or found (this cycle is) refuses at once, exit 11,
+#   and no other base is read. "clear" is believed only when the same answer
+#   shows a floor (an earlier cycle's anchor): decision J1 (a). A clear
+#   without a floor, or no usable base at all, refuses with exit 12 (nothing is
+#   sent; wait and re-run); on testnet --allow-existing-cycle-anchor accepts
+#   the floor-less clear and a found, with a WARNING. It runs before the
+#   confirmation screen and once more right before the push.
+#
+#   Attempt journal. A push may have reached the chain although the run
+#   ended in doubt, so a re-run must wait until the earlier attempt can no
+#   longer land. From the audit file of THIS run (the one this run appends
+#   to; unreadable -> 13), every `phase=pre` line of this wrapper for the same
+#   role and the same memo_prefix is an attempt whose expiration E is its
+#   `expiration=` (or, with no expiration, its time + 3600 s: the CLI default
+#   is LIB + 3000 s). An attempt blocks (exit 13) while E >= the chain's
+#   LIB time (head time on a lib_equals_head profile), unless its post line
+#   says outcome=rejected or refused-*. A line that cannot be read (time,
+#   chain, expiration) refuses too. Once E < LIB, check A decides. A LIB
+#   time missing from chain:info also refuses with 13 (never defaulted).
+#
+#   Expiration. The CLI has no expiration option, but an `expiration` key in
+#   the pushed JSON wins. The wrapper pushes the tx file plus
+#   expiration = (head_block_time of a SECOND chain:info, read after the
+#   prompt) + EXPIRE_SECONDS (600), as YYYY-MM-DDTHH:MM:SS (no Z); the tx file
+#   itself is never changed. That second chain:info re-checks the chain_id
+#   (exit 4 if it differs). stderr says `expiration=<E>` after every push.
+#
+#   Outcome classification (every shape; the output is stdout and stderr with
+#   ANSI sequences removed; the first rule that fits wins):
+#     a  rc != 0                                                    unknown 10
+#     b  a stack line or an RPC failure text in the output
+#        (SB_RPC_DUMP_SIGNALS), even with a tx_id                   unknown 10
+#     c  tx_id + processed profile + stdout is one JSON object whose
+#        processed.receipt.status is absent or "executed"           submitted
+#        (id-only profile: a tx_id is enough, the confirmation
+#        below decides 0 or 9)
+#     c' tx_id otherwise                                            unknown 10
+#     e  "duplicate transaction"                                    unknown 10
+#     d  no tx_id, processed profile, exactly one non-Hint line
+#        (plus at most one Hint: line), and it contains one of
+#        SB_REJECTION_ALLOWLIST                                     rejected 6
+#     f  anything else (empty, {}, deadline exceeded, id-only
+#        without a tx_id)                                           unknown 10
+#   e is looked at before d so a line that is both allowed and a duplicate
+#   never reads as "safe to resend". Only the exit codes 6 and 0 let a caller
+#   treat the tx as not sent / sent; 10 prints the BROADCAST OUTCOME UNKNOWN
+#   banner with the expiration, "earliest possible retry" and the memo prefix.
+#   The post audit line carries outcome=submitted|rejected|unknown.
+#
 # Environment overrides:
 #   FYD_MAINNET_CHAIN_ID  — CONFIRM-ONLY since 2026-09-30. Unset/empty: the
 #   FYD_TESTNET_CHAIN_ID    selected profile's chain_id is expected (gate 3).
@@ -290,20 +373,36 @@
 #
 # Exit codes:
 #   0    broadcast succeeded, tx_id printed to stdout
-#   2    bad arg / usage error (also: jq older than 1.6)
+#   2    bad arg / usage error (also: jq older than 1.6; a tx file with a
+#        top-level key other than `actions`; a tx shape the guard cannot judge;
+#        --allow-existing-cycle-anchor on mainnet or on a tx that is not
+#        anchor-shaped)
 #   3    PRIME DIRECTIVE gate failed (testnet-tx-id / dry-run-log / chain /
 #        token / gate-3 push-endpoint host)
 #   4    proton chain:get mismatch or command not found; chain profile
 #        unavailable (see the mapping above); id-only profile whose history
-#        is unreachable before the broadcast
+#        is unreachable before the broadcast; the history library unusable;
+#        the chain_id or a chain clock (head time, or LIB when the tx is not
+#        anchor-shaped) unreadable in the chain:info read right before the push
 #   5    interactive confirmation aborted
-#   6    broadcast failed (chain rejected the tx or transport error)
+#   6    the chain REJECTED the tx (processed profile only: one clean error
+#        line from the allowlist) — nothing will land, fixing the cause and
+#        re-running is safe
 #   7    audit log write failed
 #   8    keystore guard failed — $HOME resolves to the default (shared)
 #        proton-cli keystore; refused per docs/CONSTITUTION.md §3.5
 #   9    id-only profile: the push returned a tx_id but its execution could
 #        not be confirmed in history — a broadcast MAY have happened; the
 #        tx_id is on stderr. Verify before retrying.
+#   10   the outcome is UNKNOWN (the push may have landed): see "Outcome
+#        classification". The retry rule is on the banner.
+#   11   this cycle's anchor, or a later cycle's, is already on chain; refused
+#        before signing (prints the trx_id, block and time found)
+#   12   cannot show that the cycle is absent: the history is unreadable, stale,
+#        of the wrong shape, or ended without a floor (nothing was sent)
+#   13   an earlier attempt for this memo prefix may still land, refused until
+#        its expiration is irreversibly past; also: the audit log or the
+#        chain's LIB time cannot be read (nothing was sent)
 #
 # See also:
 #   docs/CONSTITUTION.md §3.4 + PRIME DIRECTIVE (top of file)
@@ -327,6 +426,46 @@ TESTNET_TX_ID=""
 DRY_RUN_LOG=""
 OPERATOR_TOKEN_FILE="${FYD_BROADCAST_TOKEN_FILE:-/tmp/fyd-broadcast-token}"
 INTERACTIVE=1
+ALLOW_EXISTING_CYCLE_ANCHOR=0
+
+# ---- double-inscription guard: constants and rule data ----
+# PLAIN assignments on purpose: no environment variable can change them. A
+# knob that weakens a broadcast gate is a fail-open path; the guard is removed
+# by reverting its commits, never by a setting (design 2026-10-16 section 11.5).
+EXPIRE_SECONDS=600
+# The CLI's own expiration is LIB + 3000 s, so an attempt logged without an
+# expiration (written before this guard, or a refused one) can still land for
+# at most this long after it was logged.
+SB_LEGACY_EXPIRY_BOUND_SECONDS=3600
+# What a clean node rejection looks like (outcome rule d; "Outcome
+# classification" in the header). One element per wording: a new wording is one
+# added element. Matched case-sensitively as substrings.
+SB_REJECTION_ALLOWLIST=(
+	'assertion failure'
+	'transaction net usage is too high'
+	'tx_net_usage_exceeded'
+	'billed CPU time'
+	'tx_cpu_usage_exceeded'
+	'ram_usage_exceeded'
+	'insufficient ram'
+	'missing authority'
+	'missing required authority'
+	'overdrawn balance'
+	'unknown key'
+	'expired transaction'
+)
+# The rejections whose cure (buying NET) is itself a broadcast: they get an
+# extra stderr line. A subset of the allowlist above.
+SB_NET_EXHAUSTED_TEXTS=('transaction net usage is too high' 'tx_net_usage_exceeded')
+# An RPC-layer exception dump (console.log(e) inside @proton/js) means a fetch
+# failed somewhere and the library may have re-sent the push elsewhere (rule b).
+SB_RPC_DUMP_SIGNALS=('FetchError' 'AbortError' 'RpcError' 'isFetchError' 'ECONNRESET' 'ETIMEDOUT' 'socket hang up' 'aborted')
+# Top-level tx keys other than `actions` are refused (exit 2); these eight are
+# the transaction header fields, named in the message when one is present.
+SB_REFUSED_HEADER_FIELDS=(
+	'expiration' 'ref_block_num' 'ref_block_prefix' 'max_net_usage_words'
+	'max_cpu_usage_ms' 'delay_sec' 'context_free_actions' 'transaction_extensions'
+)
 
 # Audit log path (matches broadcast-guard.sh convention). Resolved
 # against the LOGIN home (fyd_login_home, from require-keystore-home.sh
@@ -396,6 +535,7 @@ for arg in "$@"; do
 			exit 2
 			;;
 		--non-interactive)   INTERACTIVE=0 ;;
+		--allow-existing-cycle-anchor) ALLOW_EXISTING_CYCLE_ANCHOR=1 ;;
 		-h|--help)           usage; exit 0 ;;
 		*)                   echo "ERROR: unknown arg: $arg" >&2; usage; exit 2 ;;
 	esac
@@ -420,6 +560,40 @@ if ! jq -e '.actions | type == "array" and length > 0' "$TX_JSON_FILE" >/dev/nul
 	exit 2
 fi
 
+# sb_in_list <value> <element...> — rc 0 iff <value> equals one of the elements.
+sb_in_list() {
+	local v="$1" e
+	shift
+	for e in "$@"; do
+		[ "$e" = "$v" ] && return 0
+	done
+	return 1
+}
+
+# sb_check_tx_header_fields — the tx file carries ONE top-level key, `actions`
+# (the list of allowed shapes, not a list of forbidden ones: an unknown key is
+# refused too). The wrapper adds the only header field itself (expiration, see
+# "Expiration"); a caller-supplied expiration would defeat the retry rule and
+# delay_sec would create a deferred tx. Exit 2, before anything is called.
+sb_check_tx_header_fields() {
+	local extra k
+	jq -e 'keys == ["actions"]' "$TX_JSON_FILE" >/dev/null 2>&1 && return 0
+	extra="$(jq -r 'keys | map(select(. != "actions")) | .[]' "$TX_JSON_FILE" 2>/dev/null)"
+	echo "ERROR: tx file carries top-level key(s) other than \"actions\" — refusing (exit 2)" >&2
+	while IFS= read -r k; do
+		[ -n "$k" ] || continue
+		if sb_in_list "$k" "${SB_REFUSED_HEADER_FIELDS[@]}"; then
+			echo "       $k: a transaction header field — the wrapper sets expiration itself and uses no other header field" >&2
+		else
+			echo "       $k: not a key this wrapper accepts" >&2
+		fi
+	done <<-EOF
+	$extra
+	EOF
+	exit 2
+}
+sb_check_tx_header_fields
+
 # --chain= → role. The accepted spellings are exactly the historical ones
 # (testnet-a / proton-test, mainnet-a / proton); the library's wider alias set
 # (xpr-mainnet …) is deliberately NOT accepted here, so no new spelling can
@@ -430,6 +604,12 @@ case "$CHAIN" in
 	"")  echo "ERROR: --chain=<testnet-a|mainnet-a> required" >&2; exit 2 ;;
 	*)   echo "ERROR: --chain must be testnet-a or mainnet-a, got: $CHAIN" >&2; exit 2 ;;
 esac
+
+# The testnet-only override of check A. A mainnet run never gets it.
+if [ "$ALLOW_EXISTING_CYCLE_ANCHOR" = "1" ] && [ "$IS_MAINNET" = "1" ]; then
+	echo "ERROR: --allow-existing-cycle-anchor is testnet-only (refused on mainnet) — refusing (exit 2)" >&2
+	exit 2
+fi
 
 # sb_role_of <chain-spelling> — the role a token / dry-run log names, with the
 # same alias set as --chain= above. Gates 2b and 4 compare ROLES (they used to
@@ -457,6 +637,26 @@ if ! . "${REPO_ROOT}/scripts/lib/url-host.sh"; then
 	echo "ERROR: host-extraction library unusable (${REPO_ROOT}/scripts/lib/url-host.sh) — refusing, fail-closed" >&2
 	exit 4
 fi
+# The history reader (check A, the time helpers). Loaded for EVERY run, before
+# any network or proton call, and checked for the exact things this wrapper
+# calls: a stale or partial library refuses (exit 4) instead of failing later,
+# half way through a gate.
+# shellcheck source=scripts/lib/anchor-history-read.sh
+if ! . "${REPO_ROOT}/scripts/lib/anchor-history-read.sh"; then
+	echo "ERROR: anchor-history library unusable (${REPO_ROOT}/scripts/lib/anchor-history-read.sh) — refusing, fail-closed" >&2
+	exit 4
+fi
+for _fn in ahr_find_cycle_anchor ahr_index_fresh ahr_utc_to_epoch ahr_epoch_to_utc; do
+	if ! declare -F "$_fn" >/dev/null 2>&1; then
+		echo "ERROR: anchor-history library (${REPO_ROOT}/scripts/lib/anchor-history-read.sh) does not define $_fn — refusing, fail-closed" >&2
+		exit 4
+	fi
+done
+case "${AHR_INDEX_MAX_LAG_BLOCKS-}" in
+	''|*[!0123456789]*)
+		echo "ERROR: anchor-history library (${REPO_ROOT}/scripts/lib/anchor-history-read.sh): AHR_INDEX_MAX_LAG_BLOCKS is not a number — refusing, fail-closed" >&2
+		exit 4 ;;
+esac
 
 # sb_profile_refuse <lib-rc> <what> — map a library refusal to this wrapper's
 # exit code (table in the header). Never returns.
@@ -477,6 +677,15 @@ PUSH_RESPONSE="$(acp_push_response "$ROLE")"             || sb_profile_refuse $?
 case "$PUSH_RESPONSE" in
 	processed|id-only) ;;
 	*) echo "ERROR: chain profile $PROFILE_NAME: unknown push_response '$PUSH_RESPONSE' — refusing" >&2; exit 4 ;;
+esac
+# Which clock "irreversible" means on this chain (the attempt journal compares
+# an attempt's expiration against it): LIB, or the head when the chain has no
+# reversible window.
+LIB_EQUALS_HEAD="$(acp_lib_equals_head "$ROLE")"         || sb_profile_refuse $? "the LIB/head rule"
+case "$LIB_EQUALS_HEAD" in
+	true)  SB_LIB_FIELD="head_block_time" ;;
+	false) SB_LIB_FIELD="last_irreversible_block_time" ;;
+	*) echo "ERROR: chain profile $PROFILE_NAME: lib_equals_head is '$LIB_EQUALS_HEAD', not true/false — refusing" >&2; exit 4 ;;
 esac
 # An EXPLICIT profile selection is announced in the confirmation prompt; the
 # default path (selection variable unset/empty) prints exactly what it
@@ -659,9 +868,374 @@ sb_check_push_endpoint() {
 	EOF
 }
 
+# ---- double-inscription guard: functions ----
+# One job per function. The sections of the usage header (check A, attempt
+# journal, expiration, outcome classification) say what each rule is for.
+
+# sb_audit_value <line> <key> — the value of `key=` in a TAB-separated audit
+# line; rc 1 when the key is absent (an empty value is still rc 0).
+sb_audit_value() {
+	local kv
+	local -a fields
+	IFS=$'\t' read -r -a fields <<< "$1"
+	for kv in ${fields[@]+"${fields[@]}"}; do
+		case "$kv" in
+			"$2="*) printf '%s' "${kv#"$2="}"; return 0 ;;
+		esac
+	done
+	return 1
+}
+
+# sb_epoch_or_empty <iso-time> — epoch seconds via the library helper, or ""
+# when the text is missing or not a time (never a default).
+sb_epoch_or_empty() {
+	local e
+	[ -n "$1" ] || return 0
+	e="$(ahr_utc_to_epoch "$1" 2>/dev/null)" || return 0
+	case "$e" in
+		''|*[!0123456789]*) return 0 ;;
+	esac
+	printf '%s' "$e"
+}
+
+# sb_chain_times_from_info <chain:info-json> — read the chain's two clocks into
+# SB_HEAD_EPOCH and SB_LIB_EPOCH ("" when missing or unreadable). SB_LIB_EPOCH
+# is "the irreversible time" of THIS profile: last_irreversible_block_time, or
+# head_block_time when the profile says the chain has no reversible window.
+sb_chain_times_from_info() {
+	local head_s lib_s
+	head_s="$(printf '%s' "$1" | jq -r 'if (.head_block_time | type) == "string" then .head_block_time else "" end' 2>/dev/null)"
+	lib_s="$(printf '%s' "$1" | jq -r 'if (.last_irreversible_block_time | type) == "string" then .last_irreversible_block_time else "" end' 2>/dev/null)"
+	SB_HEAD_EPOCH="$(sb_epoch_or_empty "$head_s")"
+	if [ "$LIB_EQUALS_HEAD" = "true" ]; then
+		SB_LIB_EPOCH="$SB_HEAD_EPOCH"
+	else
+		SB_LIB_EPOCH="$(sb_epoch_or_empty "$lib_s")"
+	fi
+}
+
+# sb_judge_shape — decide, from the tx file alone, which shape this is, and
+# refuse (exit 2, nothing called) a shape the guard cannot reason about. Sets
+# ANCHOR_SHAPE (1 = a cycle-anchor memo is present), ANCHOR_PREFIX,
+# ANCHOR_ACTOR and MEMO_PREFIX_FIELD (the audit value).
+sb_judge_shape() {
+	local n_pre
+	ANCHOR_SHAPE=0; ANCHOR_PREFIX=""; ANCHOR_ACTOR=""; MEMO_PREFIX_FIELD="none"
+	if ! jq -e '[.actions[] | (.data | type) == "object"] | all' "$TX_JSON_FILE" >/dev/null 2>&1; then
+		echo "ERROR: an action's .data is not an object — the tx shape cannot be judged, refusing (exit 2)" >&2
+		exit 2
+	fi
+	if [ "$OUTGOING_ANCHOR_PREFIXES" = "[]" ]; then
+		if [ "$ALLOW_EXISTING_CYCLE_ANCHOR" = "1" ]; then
+			echo "ERROR: --allow-existing-cycle-anchor applies to an anchor-shaped tx only (this tx has no cycle-anchor memo) — refusing (exit 2)" >&2
+			exit 2
+		fi
+		return 0
+	fi
+	ANCHOR_SHAPE=1
+	n_pre="$(printf '%s' "$OUTGOING_ANCHOR_PREFIXES" | jq -r 'length' 2>/dev/null)"
+	if [ "$n_pre" != "1" ]; then
+		echo "ERROR: the tx names more than one memo prefix ($OUTGOING_ANCHOR_PREFIXES) — check A decides ONE cycle, refusing (exit 2)" >&2
+		exit 2
+	fi
+	ANCHOR_PREFIX="$(printf '%s' "$OUTGOING_ANCHOR_PREFIXES" | jq -r '.[0]')"
+	MEMO_PREFIX_FIELD="$ANCHOR_PREFIX"
+	ANCHOR_ACTOR="$(jq -r '
+		[.actions[] | .authorization] as $auths
+		| if ($auths | all(type == "array" and length > 0 and all(type == "object" and (.actor | type) == "string")))
+		  then ([$auths[][] | .actor] | unique) as $u | (if ($u | length) == 1 then $u[0] else "" end)
+		  else "" end' "$TX_JSON_FILE" 2>/dev/null)"
+	if [ -z "$ANCHOR_ACTOR" ]; then
+		echo "ERROR: every action must carry a non-empty authorization naming ONE and the same actor (it is empty, malformed or mixes actors) — refusing (exit 2)" >&2
+		exit 2
+	fi
+	if ! jq -e --arg a "$ANCHOR_ACTOR" '[.actions[] | .data.from] | all(type == "string" and . == $a)' "$TX_JSON_FILE" >/dev/null 2>&1; then
+		echo "ERROR: every action's data.from must be a string equal to the authorization actor — refusing (exit 2)" >&2
+		exit 2
+	fi
+}
+
+# ---- check A: is this cycle's anchor already on chain? ----
+
+# sb_cycle_answer_usable <answer> — one line, one JSON object of the agreed
+# shape: verdict found|found_later|clear, floor null or a string, and for
+# found/found_later a string trx_id, a numeric block_num, a string timestamp.
+sb_cycle_answer_usable() {
+	case "$1" in
+		''|*$'\n'*) return 1 ;;
+	esac
+	printf '%s' "$1" | jq -e '
+		type == "object"
+		and (.verdict == "found" or .verdict == "found_later" or .verdict == "clear")
+		and has("floor") and (.floor == null or (.floor | type) == "string")
+		and (if .verdict == "clear" then true
+		     else ((.trx_id | type) == "string") and ((.block_num | type) == "number") and ((.timestamp | type) == "string") end)' >/dev/null 2>&1
+}
+
+# sb_cycle_refuse_found <answer> — exit 11. Never returns.
+sb_cycle_refuse_found() {
+	local v
+	v="$(printf '%s' "$1" | jq -r '.verdict')"
+	echo "ERROR (11): the cycle anchor for memo prefix $ANCHOR_PREFIX is already on chain ($v) — nothing was signed" >&2
+	echo "            actor:     $ANCHOR_ACTOR" >&2
+	echo "            trx_id:    $(printf '%s' "$1" | jq -r '.trx_id')" >&2
+	echo "            block_num: $(printf '%s' "$1" | jq -r '.block_num')" >&2
+	echo "            timestamp: $(printf '%s' "$1" | jq -r '.timestamp')" >&2
+	echo "            Sending again would inscribe the cycle twice." >&2
+	if [ "$ROLE" = "testnet" ] && [ "$v" = "found" ]; then
+		echo "            (testnet only: --allow-existing-cycle-anchor sends anyway; it never overrides a later cycle)" >&2
+	fi
+	exit 11
+}
+
+# sb_cycle_refuse_unreadable <notes> — exit 12. Never returns.
+sb_cycle_refuse_unreadable() {
+	echo "ERROR (12): cannot show that the cycle for memo prefix $ANCHOR_PREFIX is absent from the chain's history — nothing was sent" >&2
+	printf '%s' "$1" >&2
+	echo "            Wait (an index that is behind catches up), then re-run. The wrapper does not guess." >&2
+	exit 12
+}
+
+# sb_check_cycle_anchor — check A, for an anchor-shaped tx (see the header).
+# Returns 0 to go on, or exits 11 / 12. A blocking answer stops the scan at
+# once; every other base is still read.
+sb_check_cycle_anchor() {
+	local bases base answer notes="" nl n_floor=0 n_nofloor=0 n_warned=0 flagged=0
+	nl=$'\n'
+	if [ "$ROLE" = "testnet" ] && [ "$ALLOW_EXISTING_CYCLE_ANCHOR" = "1" ]; then flagged=1; fi
+	if ! bases="$(acp_history_bases "$ROLE")" || [ -z "$bases" ]; then
+		sb_cycle_refuse_unreadable "            (profile $PROFILE_NAME lists no history base)${nl}"
+	fi
+	while IFS= read -r base; do
+		[ -n "$base" ] || continue
+		if ! ahr_index_fresh "$base" "$AHR_INDEX_MAX_LAG_BLOCKS"; then
+			notes="${notes}            ${base}: the index is stale or unreadable${nl}"
+			continue
+		fi
+		if ! answer="$(ahr_find_cycle_anchor "$base" "$ANCHOR_ACTOR" "$ANCHOR_PREFIX")" || ! sb_cycle_answer_usable "$answer"; then
+			notes="${notes}            ${base}: not a usable answer (unreadable, or not the agreed shape)${nl}"
+			continue
+		fi
+		case "$(printf '%s' "$answer" | jq -r '.verdict')" in
+			found_later) sb_cycle_refuse_found "$answer" ;;
+			found)
+				[ "$flagged" = "1" ] || sb_cycle_refuse_found "$answer"
+				echo "WARNING (check A): --allow-existing-cycle-anchor: the anchor for $ANCHOR_PREFIX is already on chain ($(printf '%s' "$answer" | jq -r '.trx_id')) — sending anyway (testnet only)" >&2
+				n_warned=$((n_warned + 1)) ;;
+			*)
+				if [ "$(printf '%s' "$answer" | jq -r '.floor | type')" = "string" ]; then
+					n_floor=$((n_floor + 1))
+				else
+					n_nofloor=$((n_nofloor + 1))
+					notes="${notes}            ${base}: the history ended and no floor (an earlier cycle's anchor) was seen${nl}"
+				fi ;;
+		esac
+	done <<-EOF
+	$bases
+	EOF
+	if [ "$n_floor" -gt 0 ] || [ "$n_warned" -gt 0 ]; then return 0; fi
+	if [ "$n_nofloor" -gt 0 ] && [ "$flagged" = "1" ]; then
+		echo "WARNING (check A): --allow-existing-cycle-anchor: the history ended and no floor (an earlier cycle's anchor) was seen, so the absence of $ANCHOR_PREFIX is NOT proven — sending anyway (testnet only)" >&2
+		return 0
+	fi
+	sb_cycle_refuse_unreadable "$notes"
+}
+
+# ---- attempt journal: may an earlier attempt for this prefix still land? ----
+
+# sb_attempt_is_released <ts> <tx_sha256> — rc 0 iff the attempt logged at <ts>
+# has post line(s) and ALL of them say it cannot land (outcome rejected, or
+# refused-*). A post line with no outcome= (older runs) never releases.
+sb_attempt_is_released() {
+	local line o seen=0
+	while IFS= read -r line; do
+		[ -n "$line" ] || continue
+		seen=1
+		o="$(sb_audit_value "$line" outcome)" || o=""
+		case "$o" in
+			rejected|refused-*) ;;
+			*) return 1 ;;
+		esac
+	done <<-EOF
+	$(grep -F -- "$1"$'\t' "$AUDIT_TARGET" | grep -F -- $'\twrapper=safe-broadcast\tphase=post\t' | grep -F -- $'\ttx_sha256='"$2"$'\t')
+	EOF
+	[ "$seen" = "1" ]
+}
+
+# sb_journal_refuse <message-line...> — exit 13. Never returns.
+sb_journal_refuse() {
+	local l
+	echo "ERROR (13): $1 — nothing was sent" >&2
+	shift
+	for l in "$@"; do echo "            $l" >&2; done
+	exit 13
+}
+
+# sb_journal_entry <line> <lib_epoch> — judge one `phase=pre` line of this
+# wrapper; exits 13 when it blocks or cannot be read, else returns 0.
+sb_journal_entry() {
+	local line="$1" lib_epoch="$2" ts ts_epoch chain role pfx exp e_epoch e_utc sha
+	ts="${line%%$'\t'*}"
+	ts_epoch="$(sb_epoch_or_empty "$ts")"
+	[ -n "$ts_epoch" ] || sb_journal_refuse "an attempt line in the audit log has an unreadable time ('$ts')" "line: $line"
+	chain="$(sb_audit_value "$line" chain)" || chain=""
+	role="$(sb_role_of "$chain")"
+	case "$role" in
+		''|unrecognized:*) sb_journal_refuse "an attempt line in the audit log names a chain this wrapper does not know ('$chain')" "line: $line" ;;
+	esac
+	[ "$role" = "$ROLE" ] || return 0
+	e_epoch=$((ts_epoch + SB_LEGACY_EXPIRY_BOUND_SECONDS))
+	if pfx="$(sb_audit_value "$line" memo_prefix)"; then
+		[ "$pfx" = "$ANCHOR_PREFIX" ] || return 0
+		if exp="$(sb_audit_value "$line" expiration)" && [ "$exp" != "none" ]; then
+			e_epoch="$(sb_epoch_or_empty "$exp")"
+			[ -n "$e_epoch" ] || sb_journal_refuse "an attempt line in the audit log has an unreadable expiration ('$exp')" "line: $line"
+		fi
+	fi
+	[ "$e_epoch" -ge "$lib_epoch" ] || return 0
+	sha="$(sb_audit_value "$line" tx_sha256)" || sha=""
+	sb_attempt_is_released "$ts" "$sha" && return 0
+	e_utc="$(ahr_epoch_to_utc "$e_epoch" 2>/dev/null)" || e_utc="$e_epoch"
+	sb_journal_refuse "an earlier attempt for memo prefix $ANCHOR_PREFIX may still land" \
+		"logged:     $ts (phase=pre)" \
+		"expiration: $e_utc" \
+		"chain LIB:  $(ahr_epoch_to_utc "$lib_epoch" 2>/dev/null) ($SB_LIB_FIELD)" \
+		"Re-run only after the LIB is past the expiration AND check A (a fresh run does it) finds nothing on chain."
+}
+
+# sb_check_attempt_journal <lib_epoch> — the attempt journal, for an
+# anchor-shaped tx. Reads the one audit file chosen for this run.
+sb_check_attempt_journal() {
+	local line
+	if [ ! -r "$AUDIT_TARGET" ]; then
+		sb_journal_refuse "the audit log cannot be read, so earlier attempts cannot be ruled out" "file: $AUDIT_TARGET"
+	fi
+	if [ -z "$1" ]; then
+		sb_journal_refuse "the chain's irreversible time cannot be read (chain:info has no usable $SB_LIB_FIELD)" "an earlier attempt cannot be ruled out without it"
+	fi
+	while IFS= read -r line; do
+		[ -n "$line" ] || continue
+		sb_journal_entry "$line" "$1"
+	done <<-EOF
+	$(grep -F -- $'\twrapper=safe-broadcast\tphase=pre\t' "$AUDIT_TARGET")
+	EOF
+}
+
+# ---- outcome classification ----
+
+# sb_strip_ansi — drop ANSI colour / cursor sequences (ESC [ ... letter).
+sb_strip_ansi() {
+	sed -E "s,$(printf '\033')\\[[0123456789;:?]*[ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@],,g"
+}
+
+# sb_output_has_rpc_dump <text> — rc 0 iff the text carries an RPC-layer
+# exception dump (a stack line, or one of SB_RPC_DUMP_SIGNALS).
+sb_output_has_rpc_dump() {
+	local sig
+	printf '%s\n' "$1" | grep -Eq '^[[:space:]]+at ' && return 0
+	for sig in "${SB_RPC_DUMP_SIGNALS[@]}"; do
+		printf '%s\n' "$1" | grep -qF -- "$sig" && return 0
+	done
+	return 1
+}
+
+# sb_output_is_clean_rejection <text> — rc 0 iff the text is exactly ONE
+# non-Hint line (plus at most one `Hint:` line) and that line contains one of
+# SB_REJECTION_ALLOWLIST.
+sb_output_is_clean_rejection() {
+	local line n_main=0 n_hint=0 main="" e
+	while IFS= read -r line; do
+		[ -n "$line" ] || continue
+		case "$line" in
+			'Hint:'*) n_hint=$((n_hint + 1)) ;;
+			*) n_main=$((n_main + 1)); main="$line" ;;
+		esac
+	done <<-EOF
+	$1
+	EOF
+	[ "$n_main" = "1" ] && [ "$n_hint" -le 1 ] || return 1
+	for e in "${SB_REJECTION_ALLOWLIST[@]}"; do
+		case "$main" in
+			*"$e"*) return 0 ;;
+		esac
+	done
+	return 1
+}
+
+# sb_receipt_is_executed <stdout-text> — rc 0 iff stdout is exactly one JSON
+# object whose processed.receipt.status is absent/null or "executed".
+sb_receipt_is_executed() {
+	printf '%s\n' "$1" | jq -s -e '
+		length == 1 and (.[0] | type == "object") and (.[0]
+		| if ((.processed | type) == "object") and ((.processed.receipt | type) == "object")
+		  then (.processed.receipt.status == null or .processed.receipt.status == "executed")
+		  else true end)' >/dev/null 2>&1
+}
+
+# sb_classify_push_outcome <rc> <tx_id> <stdout-text> <stderr-text> <push_response>
+# — prints submitted | rejected | unknown. A pure function of its arguments:
+# the first rule that fits wins (design section 4; rule e is looked at before
+# d on purpose, so a line that is both allowed and a duplicate never says
+# "safe to resend").
+sb_classify_push_outcome() {
+	local rc="$1" tx_id="$2" out_plain all
+	out_plain="$(printf '%s' "$3" | sb_strip_ansi)"
+	all="$(printf '%s\n%s' "$3" "$4" | sb_strip_ansi)"
+	if [ "$rc" != "0" ]; then echo unknown; return 0; fi
+	if sb_output_has_rpc_dump "$all"; then echo unknown; return 0; fi
+	if [ -n "$tx_id" ]; then
+		if [ "$5" = "id-only" ]; then echo submitted
+		elif sb_receipt_is_executed "$out_plain"; then echo submitted
+		else echo unknown; fi
+		return 0
+	fi
+	if printf '%s\n' "$all" | grep -qF 'duplicate transaction'; then echo unknown; return 0; fi
+	if [ "$5" = "processed" ] && sb_output_is_clean_rejection "$all"; then echo rejected; return 0; fi
+	echo unknown
+}
+
+# sb_output_names_net <text> — rc 0 iff the text names NET exhaustion.
+sb_output_names_net() {
+	local e
+	for e in "${SB_NET_EXHAUSTED_TEXTS[@]}"; do
+		printf '%s\n' "$1" | grep -qF -- "$e" && return 0
+	done
+	return 1
+}
+
+# ---- audit lines ----
+
+# sb_write_audit_pre <expiration|none> — append the phase=pre line (sets TS).
+# rc 1 when the append fails.
+sb_write_audit_pre() {
+	local txid_field="none"
+	[ -z "$TESTNET_TX_ID" ] || txid_field="$TESTNET_TX_ID"
+	TS="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+	LOG_LINE_PRE="$(printf '%s\tinvoker=%s\twrapper=safe-broadcast\tphase=pre\tchain=%s\ttx_sha256=%s\ttestnet_txid=%s\tmemo_prefix=%s\texpiration=%s\tprofile=%s' \
+		"$TS" "$INVOKER" "$CHAIN" "$TX_SHA256" "$txid_field" "$MEMO_PREFIX_FIELD" "$1" "$PROFILE_NAME")"
+	printf '%s\n' "$LOG_LINE_PRE" >> "$AUDIT_TARGET" 2>/dev/null
+}
+
+# sb_write_audit_post <rc-field> <tx_id|none> <outcome> — append the phase=post
+# line for the attempt whose pre line carries $TS (best effort, like before).
+sb_write_audit_post() {
+	printf '%s\tinvoker=%s\twrapper=safe-broadcast\tphase=post\tchain=%s\ttx_sha256=%s\trc=%s\ttx_id=%s\toutcome=%s\n' \
+		"$TS" "$INVOKER" "$CHAIN" "$TX_SHA256" "$1" "$2" "$3" >> "$AUDIT_TARGET" 2>/dev/null || true
+}
+
 if ! command -v proton >/dev/null 2>&1; then
 	echo "ERROR: proton CLI not found in PATH" >&2
 	exit 4
+fi
+
+# The anchor memo-prefix set of the OUTGOING tx. Derived for BOTH roles (check
+# A and the attempt journal need it on testnet too; gate 1(b) and gate 4, in
+# the mainnet block below, use the same variable, so all of them agree on what
+# "the outgoing shape" is). "[]" is legitimate DATA (not an anchor shape); only
+# a jq failure refuses.
+if ! OUTGOING_ANCHOR_PREFIXES="$(jq -c '[.actions[] | (.data.memo? // empty) | select(test("^fya[0-9]+c[0-9]+")) | capture("^(?<p>fya[0-9]+c[0-9]+)").p] | unique' "$TX_JSON_FILE" 2>/dev/null)"; then
+	echo "ERROR (gate 1): failed to derive the outgoing tx memo-prefix set (jq error) — refusing, fail-closed" >&2
+	exit 3
 fi
 
 # ---- PRIME DIRECTIVE gates (mainnet only) ----
@@ -825,13 +1399,9 @@ if [ "$IS_MAINNET" = "1" ]; then
 	# is anchor-shaped (>=1 memo matching ^fya<schema>c<cycle>). Non-anchor
 	# shapes (e.g. updateauth key rotation — no such memo) are exempt from
 	# this sub-check; (a) above is already the whole gate-1 shape
-	# requirement for them, per the brief's rotation carve-out. An empty
-	# "[]" result here is legitimate DATA (no anchor-shaped memo present),
-	# not a failure — only a nonzero jq exit (parse/runtime error) refuses.
-	if ! OUTGOING_ANCHOR_PREFIXES="$(jq -c '[.actions[] | (.data.memo? // empty) | select(test("^fya[0-9]+c[0-9]+")) | capture("^(?<p>fya[0-9]+c[0-9]+)").p] | unique' "$TX_JSON_FILE" 2>/dev/null)"; then
-		echo "ERROR (gate 1): failed to derive the outgoing tx memo-prefix set (jq error) — refusing, fail-closed" >&2
-		exit 3
-	fi
+	# requirement for them, per the brief's rotation carve-out. The set is
+	# OUTGOING_ANCHOR_PREFIXES, derived above for both roles; "[]" is
+	# legitimate DATA (no anchor-shaped memo present).
 	if [ "$OUTGOING_ANCHOR_PREFIXES" != "[]" ] && [ -n "$OUTGOING_ANCHOR_PREFIXES" ]; then
 		if ! TESTNET_ANCHOR_PREFIXES="$(printf '%s' "$TESTNET_ACTIONS" | jq -c '[.[] | (.memo? // empty) | select(test("^fya[0-9]+c[0-9]+")) | capture("^(?<p>fya[0-9]+c[0-9]+)").p] | unique' 2>/dev/null)"; then
 			echo "ERROR (gate 1): failed to derive the testnet evidence memo-prefix set (jq error) — refusing, fail-closed" >&2
@@ -902,6 +1472,11 @@ if [ "$IS_MAINNET" = "1" ]; then
 		fi
 	fi
 fi
+
+# ---- shape judgment (both roles; exit 2, nothing has been called) ----
+# Which shape is this (anchor / not), and is it one the guard can reason about?
+# See "Cycle-anchor presence check" in the header.
+sb_judge_shape
 
 # Gate 2 (both testnet + mainnet): operator token must exist and be fresh.
 if [ ! -f "$OPERATOR_TOKEN_FILE" ]; then
@@ -1068,6 +1643,23 @@ if [ "$PUSH_RESPONSE" = "id-only" ]; then
 	fi
 fi
 
+# ---- the audit file of this run (chosen once; the attempt journal reads it) ----
+AUDIT_TARGET="$AUDIT_LOG_PRIMARY"
+if ! ( : >> "$AUDIT_TARGET" ) 2>/dev/null; then
+	AUDIT_TARGET="$AUDIT_LOG_FALLBACK"
+fi
+
+# ---- double-inscription guard, first pass (anchor-shaped tx only) ----
+# Before the confirmation screen, so the operator is refused early and visibly:
+# (1) may an earlier attempt for this prefix still land? (13) (2) is this
+# cycle's anchor already on chain? (11 / 12). The chain's irreversible time
+# comes from the chain:info answer gate 3 just read.
+if [ "$ANCHOR_SHAPE" = "1" ]; then
+	sb_chain_times_from_info "$CHAIN_INFO"
+	sb_check_attempt_journal "$SB_LIB_EPOCH"
+	sb_check_cycle_anchor
+fi
+
 # ---- interactive confirmation prompt (skip if --non-interactive) ----
 if [ "$INTERACTIVE" = "1" ]; then
 	echo "==================== BROADCAST CONFIRMATION ====================" >&2
@@ -1093,24 +1685,75 @@ if [ "$INTERACTIVE" = "1" ]; then
 	fi
 fi
 
-# ---- audit log entry BEFORE broadcast (= we log the intent, then the result) ----
-TS="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+# ---- right before the push: the second pass of the guard ----
 INVOKER="${USER:-unknown}"
 TX_SHA256="$(jq -c . "$TX_JSON_FILE" | sha256sum | awk '{print $1}')"
-LOG_LINE_PRE="$(printf '%s\tinvoker=%s\twrapper=safe-broadcast\tphase=pre\tchain=%s\ttx_sha256=%s\ttestnet_txid=%s' \
-	"$TS" "$INVOKER" "$CHAIN" "$TX_SHA256" "${TESTNET_TX_ID:-none}")"
 
-AUDIT_TARGET="$AUDIT_LOG_PRIMARY"
-if ! ( : >> "$AUDIT_TARGET" ) 2>/dev/null; then
-	AUDIT_TARGET="$AUDIT_LOG_FALLBACK"
+# Re-read proton-cli's config right before the push (file read only, no
+# network): gate 3's host check ran before chain:info and the prompt, and a
+# world-writable config could be re-pointed in between (TOCTOU). If it now
+# fails, nothing is pushed; the audit log gets the matching pre / post pair
+# (pre with expiration=none: no expiration was ever set).
+if ! ( sb_check_push_endpoint ); then
+	sb_write_audit_pre "none" || true
+	sb_write_audit_post "refused-gate3-recheck" "none" "refused-gate3-recheck"
+	echo "ERROR (gate 3): the push endpoint changed after gate 3 passed — nothing was pushed" >&2
+	exit 3
 fi
-if ! printf '%s\n' "$LOG_LINE_PRE" >> "$AUDIT_TARGET" 2>/dev/null; then
+
+# Second chain:info, after the prompt: the chain identity again (the endpoint
+# could have been re-pointed while the operator read the screen) and the two
+# clocks the expiration and the journal need. Sampling AFTER the prompt keeps
+# the full EXPIRE_SECONDS.
+CHAIN_INFO_2="$(proton chain:info 2>/dev/null || echo '')"
+ACTUAL_CHAIN_ID_2="$(printf '%s' "$CHAIN_INFO_2" | jq -r 'if (.chain_id | type) == "string" then .chain_id else "" end' 2>/dev/null)"
+if [ "$ACTUAL_CHAIN_ID_2" != "$EXPECTED_CHAIN_ID" ]; then
+	echo "ERROR (gate 3, after the prompt): the chain_id read right before the push is not the expected one (or could not be read) — refusing, nothing was signed" >&2
+	echo "                expected chain_id: $EXPECTED_CHAIN_ID" >&2
+	echo "                actual chain_id:   $ACTUAL_CHAIN_ID_2" >&2
+	exit 4
+fi
+sb_chain_times_from_info "$CHAIN_INFO_2"
+
+# Second pass (anchor-shaped tx only): the same two checks as before the
+# prompt, now with the clocks of this moment.
+if [ "$ANCHOR_SHAPE" = "1" ]; then
+	sb_check_attempt_journal "$SB_LIB_EPOCH"
+	sb_check_cycle_anchor
+fi
+
+# ---- expiration (see "Expiration" in the header) ----
+# E = the chain's head time + EXPIRE_SECONDS, from the answer above (not the
+# Mac's clock). The pushed JSON is the tx file plus that one key; the file
+# itself is never changed, so the token's tx_sha256 binding and the gate 1 /
+# gate 4 derivations see the tx the operator authorized.
+if [ -z "$SB_HEAD_EPOCH" ]; then
+	echo "ERROR (4): head_block_time is missing or unreadable in the chain:info read right before the push — the expiration cannot be set; nothing was signed" >&2
+	exit 4
+fi
+if [ -z "$SB_LIB_EPOCH" ]; then
+	echo "ERROR (4): $SB_LIB_FIELD is missing or unreadable in the chain:info read right before the push — nothing was signed" >&2
+	exit 4
+fi
+EXPIRATION_EPOCH=$((SB_HEAD_EPOCH + EXPIRE_SECONDS))
+EXPIRATION_UTC="$(ahr_epoch_to_utc "$EXPIRATION_EPOCH" 2>/dev/null)" || EXPIRATION_UTC=""
+PUSH_TX_JSON=""
+if [ -n "$EXPIRATION_UTC" ]; then
+	PUSH_TX_JSON="$(jq -c --arg e "$EXPIRATION_UTC" '. + {expiration: $e}' "$TX_JSON_FILE" 2>/dev/null)" || PUSH_TX_JSON=""
+fi
+if [ -z "$PUSH_TX_JSON" ]; then
+	echo "ERROR (4): cannot compose the pushed JSON with its expiration — nothing was signed" >&2
+	exit 4
+fi
+
+# ---- audit log entry BEFORE broadcast (= we log the intent, then the result) ----
+if ! sb_write_audit_pre "$EXPIRATION_UTC"; then
 	echo "ERROR (7): audit log write failed to $AUDIT_TARGET" >&2
 	exit 7
 fi
 
 # ---- actual broadcast ----
-# proton transaction:push accepts JSON on argv. Mark this call chain as the
+# The transaction:push subcommand accepts JSON on argv. Mark this call chain as the
 # sanctioned broadcast pathway: the tier-1 guard (broadcast-guard.sh) refuses
 # any RAW broadcast shape unless FYD_SAFE_BROADCAST=1 is set (which only this
 # wrapper does, after the four gates above have passed). Raw direct calls
@@ -1120,25 +1763,16 @@ BROADCAST_OUT="$(mktemp -t safe-broadcast.XXXXXX)"
 BROADCAST_ERR="$(mktemp -t safe-broadcast.XXXXXX)"
 trap 'rm -f "$BROADCAST_OUT" "$BROADCAST_ERR"' EXIT
 
-PROTON_ARGS=(transaction:push "$(cat "$TX_JSON_FILE")")
+PROTON_ARGS=(transaction:push "$PUSH_TX_JSON")
 # No -u/--endpoint override is ever appended here — see the "--endpoint=<url>
 # REMOVED" usage-header section above. This always pushes to whatever
 # endpoint proton-cli resolves from its own config, which is EXACTLY the
 # endpoint gate 3 (above) already verified the chain_id of.
 
-# Re-read proton-cli's config right before the push (file read only, no
-# network): gate 3's host check ran before chain:info and the prompt, and a
-# world-writable config could be re-pointed in between (TOCTOU). If it now
-# fails, nothing is pushed; the audit log gets the matching post line.
-if ! ( sb_check_push_endpoint ); then
-	printf '%s\tinvoker=%s\twrapper=safe-broadcast\tphase=post\tchain=%s\ttx_sha256=%s\trc=%s\ttx_id=%s\n' \
-		"$TS" "$INVOKER" "$CHAIN" "$TX_SHA256" "refused-gate3-recheck" "none" >> "$AUDIT_TARGET" 2>/dev/null || true
-	echo "ERROR (gate 3): the push endpoint changed after gate 3 passed — nothing was pushed" >&2
-	exit 3
-fi
-
 BROADCAST_RC=0
 proton "${PROTON_ARGS[@]}" > "$BROADCAST_OUT" 2> "$BROADCAST_ERR" || BROADCAST_RC=$?
+# Every ending after the push says which expiration the attempt carried.
+echo "expiration=$EXPIRATION_UTC" >&2
 
 # Extract tx_id.
 TX_ID="$(grep -oE '"transaction_id"[[:space:]]*:[[:space:]]*"[a-f0-9]{64}"' "$BROADCAST_OUT" \
@@ -1148,10 +1782,17 @@ if [ -z "$TX_ID" ]; then
 		| head -1 | grep -oE '[a-f0-9]{64}' | head -1 || true)"
 fi
 
-# ---- audit log entry POST broadcast ----
-LOG_LINE_POST="$(printf '%s\tinvoker=%s\twrapper=safe-broadcast\tphase=post\tchain=%s\ttx_sha256=%s\trc=%s\ttx_id=%s' \
-	"$TS" "$INVOKER" "$CHAIN" "$TX_SHA256" "$BROADCAST_RC" "${TX_ID:-none}")"
-printf '%s\n' "$LOG_LINE_POST" >> "$AUDIT_TARGET" 2>/dev/null || true
+# ---- classify what the push said, then audit log entry POST broadcast ----
+PUSH_OUT_TEXT="$(cat "$BROADCAST_OUT")"
+PUSH_ERR_TEXT="$(cat "$BROADCAST_ERR")"
+PUSH_CLASS="$(sb_classify_push_outcome "$BROADCAST_RC" "$TX_ID" "$PUSH_OUT_TEXT" "$PUSH_ERR_TEXT" "$PUSH_RESPONSE")"
+case "$PUSH_CLASS" in
+	submitted|rejected|unknown) ;;
+	*) PUSH_CLASS="unknown" ;;
+esac
+POST_TX_ID="none"
+[ -z "$TX_ID" ] || POST_TX_ID="$TX_ID"
+sb_write_audit_post "$BROADCAST_RC" "$POST_TX_ID" "$PUSH_CLASS"
 
 # sb_may_have_broadcast <tx_id|empty> <why> — the unmissable stderr banner for
 # an outcome that is NOT known to be "nothing happened". Never retries.
@@ -1161,24 +1802,37 @@ sb_may_have_broadcast() {
 	echo "##  BROADCAST OUTCOME UNKNOWN — $2" >&2
 	echo "##  tx_id: ${1:-<none returned>}" >&2
 	echo "##  chain: $CHAIN ($PROFILE_NAME)" >&2
+	echo "##  memo prefix: $MEMO_PREFIX_FIELD   expiration set: $EXPIRATION_UTC" >&2
+	echo "##  earliest possible retry: after the chain's last irreversible block time is past $EXPIRATION_UTC" >&2
 	echo "##  a broadcast MAY have happened — verify before retrying" >&2
 	echo "##  (look the tx_id up on the chain's history/explorer; this" >&2
 	echo "##   wrapper never re-sends a push on its own)" >&2
 	echo "################################################################" >&2
 }
 
-# ---- report ----
-if [ "$BROADCAST_RC" -ne 0 ] || [ -z "$TX_ID" ]; then
-	echo "ERROR (6): broadcast failed (rc=$BROADCAST_RC, tx_id=${TX_ID:-empty})" >&2
+# sb_report_push_output — the last lines proton printed, for the operator.
+sb_report_push_output() {
 	echo "--- proton stderr (last 20 lines) ---" >&2
 	tail -20 "$BROADCAST_ERR" >&2 || true
 	echo "--- proton stdout (last 20 lines) ---" >&2
 	tail -20 "$BROADCAST_OUT" >&2 || true
-	if [ "$PUSH_RESPONSE" = "id-only" ]; then
-		sb_may_have_broadcast "$TX_ID" "the push did not complete cleanly on an id-only chain"
-	fi
-	exit 6
-fi
+}
+
+# ---- report ----
+case "$PUSH_CLASS" in
+	rejected)
+		echo "ERROR (6): the chain REJECTED the transaction (rc=$BROADCAST_RC) — nothing will land; fix the cause, then re-run" >&2
+		sb_report_push_output
+		if sb_output_names_net "$(printf '%s\n%s' "$PUSH_OUT_TEXT" "$PUSH_ERR_TEXT" | sb_strip_ansi)"; then
+			echo "NET exhausted: buying NET is itself a broadcast — never buy resources on the day of a cycle transition; see the runbook" >&2
+		fi
+		exit 6 ;;
+	unknown)
+		echo "ERROR (10): the outcome of the push is UNKNOWN (rc=$BROADCAST_RC, tx_id=$POST_TX_ID) — it may have landed" >&2
+		sb_report_push_output
+		sb_may_have_broadcast "$TX_ID" "the push output shows neither a clean rejection nor an executed receipt"
+		exit 10 ;;
+esac
 
 # ---- id-only profiles: confirm execution from history (never re-push) ----
 # The push answer only proves mempool admission; the tx can still fail at
