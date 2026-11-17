@@ -493,7 +493,7 @@ teardown
 # G8: the lookup helpers in the preview are identical to bin/safe-broadcast's
 #     (one question, two askers: compare the definitions mechanically).
 extract_fn() { awk -v n="$2" '$0 ~ "^"n"\\(\\) \\{" {p=1} p {print} p && /^}/ {exit}' "$1"; }
-for FN in sb_history_names_tx sb_history_lookup; do
+for FN in sb_is_one_json_object sb_history_names_tx sb_history_lookup; do
 	A="$(extract_fn "$REPO_ROOT/bin/safe-broadcast" "$FN")"
 	B="$(extract_fn "$SCRIPT" "$FN")"
 	if [ -n "$A" ] && [ "$A" = "$B" ]; then ok "drift guard: $FN identical in preview and bin/safe-broadcast"

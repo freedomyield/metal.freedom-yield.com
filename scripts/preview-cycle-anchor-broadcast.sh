@@ -189,11 +189,16 @@ fi
 # suite. Why: until 2026-11-06 this preview POSTed without a content-type
 # header, the history endpoint answered 400, and every preview showed MISS
 # while the real gate resolved the same tx.
+sb_is_one_json_object() {
+	printf '%s' "$1" | jq -s -e 'length == 1 and (.[0] | type) == "object"' >/dev/null 2>&1
+}
+
 sb_history_names_tx() {
 	case "${3:-}" in
 		v1-id|any-id) ;;
 		*) return 2 ;;
 	esac
+	sb_is_one_json_object "$1" || return 1
 	printf '%s' "$1" | jq -e --arg id "$2" --arg mode "$3" '
 		if type != "object" then false
 		else ([.id, .trx_id] | map(select(. != null))) as $ids

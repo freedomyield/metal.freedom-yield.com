@@ -61,6 +61,8 @@ sb_history_lookup	bin/safe-broadcast	existing duplicate as of 2026-11-11; no dec
 sb_history_lookup	scripts/preview-cycle-anchor-broadcast.sh	existing duplicate as of 2026-11-11; no decision yet
 sb_history_names_tx	bin/safe-broadcast	existing duplicate as of 2026-11-11; no decision yet
 sb_history_names_tx	scripts/preview-cycle-anchor-broadcast.sh	existing duplicate as of 2026-11-11; no decision yet
+sb_is_one_json_object	bin/safe-broadcast	existing duplicate as of 2026-11-17 (drift-guarded copy); no decision yet
+sb_is_one_json_object	scripts/preview-cycle-anchor-broadcast.sh	existing duplicate as of 2026-11-17 (drift-guarded copy); no decision yet
 schema_validate_or_die	scripts/append-anchor-history.sh	B-2: decision Q1 (spec 5.4)
 schema_validate_or_die	scripts/gen-anchor-receipt.sh	B-2: decision Q1 (spec 5.4)
 schema_validate_or_die	scripts/gen-anchor-source.sh	B-2: decision Q1 (spec 5.4)
