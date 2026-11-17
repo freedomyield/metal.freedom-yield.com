@@ -204,6 +204,15 @@ expect_rc3 "A3h head_block_num missing -> 3" ahr_index_fresh 1
 reset; health 0 0
 run_fresh "$BASE" 30
 expect_rc3 "A3h head 0 -> 3" ahr_index_fresh 1
+reset; health 0 10
+run_fresh "$BASE" 30
+expect_rc3 "A3h head 0, indexed within lag -> 3" ahr_index_fresh 1
+reset; health 0 30
+run_fresh "$BASE" 30
+expect_rc3 "A3h head 0, indexed equal to lag -> 3" ahr_index_fresh 1
+reset; health 10 0
+run_fresh "$BASE" 30
+[ "$RC" -eq 0 ] && t_pass "A3h head positive, indexed 0, within lag -> 0" || t_fail "A3h head positive, indexed 0, within lag" "rc=$RC"
 reset; health 1000 1000 Error
 run_fresh "$BASE" 30
 expect_rc3 "A3h an entry whose status is not OK -> 3" ahr_index_fresh 1
