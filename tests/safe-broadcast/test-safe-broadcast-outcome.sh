@@ -175,6 +175,24 @@ a3 "A3-answer: floor is a number → 12" "not a usable answer" \
 	ahr_set find '{"verdict":"clear","trx_id":null,"block_num":null,"timestamp":null,"scanned":1,"floor":7}' 0
 a3 "A3-answer: two lines → 12" "not a usable answer" ahr_set find "$CLEAR_FLOOR
 $CLEAR_FLOOR" 0
+# an answer holding more than one JSON value is not "one object of the agreed shape"
+FLAGARGS=("${TARGS[@]}" --allow-existing-cycle-anchor)
+begin "$TT"; ahr_set find "$CLEAR_FLOOR $FOUND_LATER" 0
+go -- "${FLAGARGS[@]}"
+check "A3-answer holds two JSON values (clear+floor then found_later) → 12, no push" 12 \
+	"err:not a usable answer" "err:nothing was sent" "nocall:proton transaction:push" noaudit
+begin "$TT"; ahr_set find "$FOUND_LATER $CLEAR_FLOOR" 0
+go -- "${FLAGARGS[@]}"
+check "A3-answer holds two JSON values (found_later then clear+floor) → 12, no push" 12 \
+	"err:not a usable answer" "err:nothing was sent" "nocall:proton transaction:push" noaudit
+begin "$MT"; ahr_set find "$CLEAR_FLOOR $FOUND_LATER" 0
+go -- "${MARGS[@]}"
+check "A3-answer holds two JSON values, mainnet (no flag) → 12, no push" 12 \
+	"err:not a usable answer" "nocall:proton transaction:push" noaudit
+begin "$TT"; ahr_set find "$CLEAR_FLOOR trailing" 0
+go -- "${FLAGARGS[@]}"
+check "A3-answer is one object followed by trailing text → 12, no push" 12 \
+	"err:not a usable answer" "nocall:proton transaction:push" noaudit
 # a profile with no history base at all
 jq '.profiles["xpr-testnet"].history_bases = []' "$PROFILES" > "$T/nobase.json"
 sbh_tree "$T/nobasetree" "$ROOT/bin/safe-broadcast" "$T/nobase.json"
@@ -273,6 +291,11 @@ mk tx-from-other.json '.actions[0].data.from = "fxstranger"'
 sh_case "SH-data.from differs from the authorization actor → 2" tx-from-other.json "data.from must be"
 mk tx-no-auth.json '.actions[0].authorization = []'
 sh_case "SH-authorization is empty → 2" tx-no-auth.json "non-empty authorization"
+# the tx file is exactly ONE JSON object (jq -e looks at the last value only)
+cat "$T/tx-c3.json" "$T/tx-c3.json" > "$T/tx-two-objects.json"
+sh_case "SH-tx file holds two JSON objects → 2" tx-two-objects.json "not exactly one JSON object"
+{ cat "$T/tx-c3.json"; printf ' trailing text\n'; } > "$T/tx-trailing.json"
+sh_case "SH-tx file is one object followed by trailing text → 2" tx-trailing.json "tx file"
 fi
 
 if sel LD; then
@@ -399,6 +422,13 @@ b5 "B5-outcome=unknown, E after LIB → 13" 13 10 unknown "nocall:proton transac
 b5 "B5-an old post line with no outcome= (rc only) does not release the line → 13" 13 1 - "nocall:proton transaction:push"
 b5 "B5-outcome=rejected → the line is ignored, pushes" 0 6 rejected "calls:proton transaction:push=1"
 b5 "B5-outcome=refused-gate3-recheck → ignored, pushes" 0 refused-gate3-recheck refused-gate3-recheck "calls:proton transaction:push=1"
+# the boundary E = LIB: the stub's LIB is the pre line's expiration, to the second
+begin "$TT"; jpre "$B5TS" testnet-a fya1c3 "$B5E"
+go "STUB_LIB_TIME=$B5E.000" -- "${TARGS[@]}"
+check "B5-E equal to LIB → 13 (equal blocks too), no push" 13 "err:fya1c3" "nocall:proton transaction:push" "alines:1"
+begin "$TT"; jpre "$B5TS" testnet-a fya1c3 "$B5E"
+go "STUB_LIB_TIME=$(tn 301).000" -- "${TARGS[@]}"
+check "B5-E before LIB → the line is ignored, pushes" 0 "calls:proton transaction:push=1"
 fi
 
 if sel B6; then
@@ -502,6 +532,26 @@ echo "── C2 the second chain:info is checked again ──"
 begin "$TT"
 go "STUB_CHAIN_ID_2=ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" -- "${TARGS[@]}"
 check "C2-chain_id differs on the second chain:info → 4, nothing sent, no pre line" 4 \
+	"err:after the prompt" "calls:proton chain:info=2" "nocall:proton transaction:push" noaudit
+# a chain:info answer holding two JSON values (jq -r prints one line per value)
+CI_OK="$(jq -nc --arg c "$SBH_XPR_TEST_CID" --arg h "$(tn 0).500" --arg l "$(tn -170).000" '{chain_id: $c, head_block_num: 1, head_block_time: $h, last_irreversible_block_time: $l}')"
+CI_OTHER='{"head_block_num":2}'
+CI_WRONG='{"chain_id":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}'
+begin "$TT"
+go "STUB_CHAIN_INFO_RAW=$CI_OK $CI_OTHER" -- "${TARGS[@]}"
+check "C3-first chain:info holds two JSON objects (right chain_id first) → 4, no push" 4 \
+	"err:could not parse chain_id" "nocall:proton transaction:push" noaudit
+begin "$TT"
+go "STUB_CHAIN_INFO_RAW=$CI_OTHER $CI_OK" -- "${TARGS[@]}"
+check "C3-first chain:info holds two JSON objects (no chain_id first, right one second) → 4, no push" 4 \
+	"err:could not parse chain_id" "nocall:proton transaction:push" noaudit
+begin "$TT"
+go "STUB_CHAIN_INFO_RAW=$CI_WRONG $CI_OK" -- "${TARGS[@]}"
+check "C3-first chain:info holds two JSON objects (wrong chain_id first) → 4, no push" 4 \
+	"nocall:proton transaction:push" noaudit
+begin "$TT"
+go "STUB_CHAIN_INFO_RAW_2=$CI_OK $CI_OTHER" -- "${TARGS[@]}"
+check "C2-second chain:info holds two JSON objects (right chain_id in the first) → 4, no push, no pre line" 4 \
 	"err:after the prompt" "calls:proton chain:info=2" "nocall:proton transaction:push" noaudit
 fi
 
