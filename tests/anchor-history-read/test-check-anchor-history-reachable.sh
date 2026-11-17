@@ -235,11 +235,11 @@ for f in "$REPO_ROOT/scripts/check-anchor-history-reachable.sh" "$REPO_ROOT/scri
 		ok "R15 $(basename "$f") has no write/broadcast path"
 	fi
 done
-grep -vE '^[[:space:]]*#' "$REPO_ROOT/scripts/lib/anchor-history-read.sh" | grep -oE '/v[12]/[a-z_]+/[a-z_]+' | sort -u > "$WORK/endpoints"
-if [ "$(tr '\n' ' ' < "$WORK/endpoints")" = "/v1/chain/get_block /v1/chain/get_info /v1/history/get_transaction /v2/history/get_actions /v2/history/get_transaction " ]; then
-	ok "R15 the reader's endpoint set is exactly the five read endpoints"
+grep -vE '^[[:space:]]*#' "$REPO_ROOT/scripts/lib/anchor-history-read.sh" | grep -oE '/v[12]/[a-z_]+(/[a-z_]+)?' | sort -u > "$WORK/endpoints"
+if [ "$(tr '\n' ' ' < "$WORK/endpoints")" = "/v1/chain/get_block /v1/chain/get_info /v1/history/get_transaction /v2/health /v2/history/get_actions /v2/history/get_transaction " ]; then
+	ok "L1 R15 the reader's endpoint set is exactly the six read endpoints (five history/chain reads + /v2/health)"
 else
-	bad "R15 endpoint set changed: $(tr '\n' ' ' < "$WORK/endpoints")"
+	bad "L1 R15 endpoint set changed: $(tr '\n' ' ' < "$WORK/endpoints")"
 fi
 
 echo "---"
