@@ -334,11 +334,24 @@ else .actions as $acts
   | if .ok then {ok, decided, raw: ($acts | length), added, seen, result} else {ok: false} end
 end'
 
+# ahr__one_json_value — stdin: a response body. Prints it as one compact line
+# only when the WHOLE body is exactly one JSON value; zero values, two or more,
+# or anything after the value (a broken character included) is rc 3. Every
+# check-A reader goes through this, so a second value or trailing text can
+# never hide a match or change a verdict.
+ahr__one_json_value() {
+	local out
+	out="$(jq -c -s 'if length == 1 then .[0] else empty end' 2>/dev/null)" || return 3
+	[ -n "$out" ] || return 3
+	printf '%s\n' "$out"
+}
+
 # ahr__scan_page <body> <actor> <schema> <cycle> <seen-json> — one state line.
 ahr__scan_page() {
-	local out
-	out="$(printf '%s' "$1" | jq -c --arg actor "$2" --arg s "$3" --arg m "$4" --argjson seen "$5" \
-		"$AHR__JQ_SCAN_PAGE" 2>/dev/null | head -n 1)" || return 3
+	local one out
+	one="$(printf '%s' "$1" | ahr__one_json_value)" || return 3
+	out="$(printf '%s' "$one" | jq -c --arg actor "$2" --arg s "$3" --arg m "$4" --argjson seen "$5" \
+		"$AHR__JQ_SCAN_PAGE" 2>/dev/null)" || return 3
 	[ -n "$out" ] || return 3
 	printf '%s\n' "$out"
 }
@@ -394,24 +407,26 @@ end'
 # ahr_index_fresh: max_lag may have leading zeros (read as decimal) and at most
 # 9 digits; anything longer is refused rather than wrapped around.
 ahr_index_fresh() {
-	local base="${1:-}" lag="${2:-}" body
+	local base="${1:-}" lag="${2:-}" body one
 	ahr__valid_base "$base" || return 3
 	ahr__is_digits "$lag" && [ "${#lag}" -le 9 ] || return 3
 	body="$(ahr__fetch "${base}/v2/health")" || return 3
-	printf '%s' "$body" | jq -e --argjson n "$((10#$lag))" "$AHR__JQ_FRESH" >/dev/null 2>&1 || return 3
+	one="$(printf '%s' "$body" | ahr__one_json_value)" || return 3
+	printf '%s' "$one" | jq -e --argjson n "$((10#$lag))" "$AHR__JQ_FRESH" >/dev/null 2>&1 || return 3
 }
 
 ahr_chain_times() {
-	local base="${1:-}" body out
+	local base="${1:-}" body one out
 	ahr__valid_base "$base" || return 3
 	body="$(curl -sSf --max-time "$AHR_MAX_TIME" -X POST \
 		"${base}/v1/chain/get_info" 2>/dev/null)" || return 3
-	out="$(printf '%s' "$body" | jq -c --arg re "$AHR__UTC_RE" '
+	one="$(printf '%s' "$body" | ahr__one_json_value)" || return 3
+	out="$(printf '%s' "$one" | jq -c --arg re "$AHR__UTC_RE" '
 		select(type == "object"
 		       and (.head_block_time | type) == "string" and (.head_block_time | test($re))
 		       and (.last_irreversible_block_time | type) == "string"
 		       and (.last_irreversible_block_time | test($re)))
-		| {head_block_time, last_irreversible_block_time}' 2>/dev/null | head -n 1)"
+		| {head_block_time, last_irreversible_block_time}' 2>/dev/null)"
 	[ -n "$out" ] || return 3
 	printf '%s\n' "$out"
 }

@@ -161,6 +161,19 @@ reset; printf '%s' '{"actions":{"a":1}}' > "$WORK/resp/actions-0.json"
 run_find "$BASE" "$ACTOR" fya1c1
 expect_rc3 "A3 actions is an object, not an array" ahr_find_cycle_anchor 1
 
+reset; printf '%s' '{"actions":[]}xyz' > "$WORK/resp/actions-0.json"
+run_find "$BASE" "$ACTOR" fya1c1
+expect_rc3 "A3 P1 one JSON value followed by garbage" ahr_find_cycle_anchor 1
+
+reset; fpage 0 3; put 0 1 "$ACTOR" "$SINK" "fya1c1"
+{ printf '%s\n' '{"actions":[]}'; cat "$WORK/resp/actions-0.json"; } > "$WORK/resp/actions-0.n" && mv "$WORK/resp/actions-0.n" "$WORK/resp/actions-0.json"
+run_find "$BASE" "$ACTOR" fya1c1
+expect_rc3 "A3 P2 an empty page followed by a second value that holds the match (no hidden match)" ahr_find_cycle_anchor 1
+
+reset; : > "$WORK/resp/actions-0.json"
+run_find "$BASE" "$ACTOR" fya1c1
+expect_rc3 "A3 zero JSON values (empty body, curl succeeded)" ahr_find_cycle_anchor 1
+
 reset; for k in 0 1 2 3 4 5 6 7 8 9; do fpage "$k" 100; done
 run_find "$BASE" "$ACTOR" fya1c1
 expect_rc3 "A3 ten full pages with no decision (page budget, no 11th request)" ahr_find_cycle_anchor 10
@@ -209,6 +222,19 @@ expect_rc3 "A3h body is not JSON -> 3" ahr_index_fresh 1
 reset
 run_fresh "$BASE" 30
 expect_rc3 "A3h curl failure -> 3" ahr_index_fresh 1
+reset; health 1000 900; stale="$(cat "$WORK/resp/health.json")"; health 1000 1000; fresh="$(cat "$WORK/resp/health.json")"
+printf '%s%s' "$stale" "$fresh" > "$WORK/resp/health.json"
+run_fresh "$BASE" 30
+expect_rc3 "A3h P4 stale value then a fresh value (the last value must not decide)" ahr_index_fresh 1
+printf '%s%s' "$fresh" "$stale" > "$WORK/resp/health.json"; : > "$WORK/calls.log"
+run_fresh "$BASE" 30
+expect_rc3 "A3h P4 fresh value then a stale value (the first value must not decide)" ahr_index_fresh 1
+printf '%s%s' "$fresh" "xyz" > "$WORK/resp/health.json"; : > "$WORK/calls.log"
+run_fresh "$BASE" 30
+expect_rc3 "A3h one fresh value followed by garbage" ahr_index_fresh 1
+: > "$WORK/resp/health.json"; : > "$WORK/calls.log"
+run_fresh "$BASE" 30
+expect_rc3 "A3h zero JSON values (empty body, curl succeeded)" ahr_index_fresh 1
 for ml in "" x -1 1.5 "１0"; do
 	reset; health 1000 1000
 	run_fresh "$BASE" "$ml"
@@ -234,6 +260,20 @@ expect_verdict "A4 a different schema is neither found nor floor (read to the en
 reset; fpage 0 8; put 0 3 "$ACTOR" "$SINK" "fya1c01"
 run_find "$BASE" "$ACTOR" fya1c1
 expect_verdict "A4 cycle compared as a number: fya1c01 is cycle 1" 1 "$(want_at found 0 3 4 null)"
+
+# Cycle order is numeric where digit-string order is not: 10 > 9 although "10" < "9".
+reset; fpage 0 6; put 0 5 "$ACTOR" "$SINK" "fya1c10:abcd"
+run_find "$BASE" "$ACTOR" fya1c9
+expect_verdict "A4 send fya1c9, only fya1c10 on chain -> found_later (10 is later than 9)" 1 "$(want_at found_later 0 5 6 null)"
+reset; fpage 0 8; put 0 3 "$ACTOR" "$SINK" "fya1c9:abcd"
+run_find "$BASE" "$ACTOR" fya1c10
+expect_verdict "A4 send fya1c10, fya1c9 is the floor -> clear, floor fya1c9 (9 is earlier than 10)" 1 "$(want clear null null null 4 '"fya1c9"')"
+reset; fpage 0 8; put 0 3 "$ACTOR" "$SINK" "fya10c5:abcd"
+run_find "$BASE" "$ACTOR" fya9c1
+expect_verdict "A4 send fya9c1, fya10c5 is another schema (not found, not floor)" 1 "$(want clear null null null 8 null)"
+reset; fpage 0 8; put 0 3 "$ACTOR" "$SINK" "fya9c5:abcd"
+run_find "$BASE" "$ACTOR" fya10c1
+expect_verdict "A4 send fya10c1, fya9c5 is another schema (not found, not floor)" 1 "$(want clear null null null 8 null)"
 
 for m in "fya1c1" "fya1c1:7f3a" "fya1c1 note" "fya1c1_x"; do
 	reset; fpage 0 8; put 0 3 "$ACTOR" "$SINK" "$m"
@@ -383,6 +423,15 @@ case "$(cat "$WORK/calls.log")" in *"-X POST"*"$BASE/v1/chain/get_info") t_pass 
 reset; printf '%s' '{"head_block_time":"2026-11-17T04:45:12.500Z","last_irreversible_block_time":"2026-11-17T04:45:12Z"}' > "$WORK/resp/get_info.json"
 run_times "$BASE"
 t_assert_eq "T chain_times keeps a served Z and a served fraction untouched" '{"head_block_time":"2026-11-17T04:45:12.500Z","last_irreversible_block_time":"2026-11-17T04:45:12Z"}' "$OUT"
+reset; printf '%sgarbage' "$INFO_OK" > "$WORK/resp/get_info.json"
+run_times "$BASE"
+expect_rc3 "T P3 a valid get_info value followed by garbage" ahr_chain_times 1
+reset; printf '%s%s' "$INFO_OK" "$INFO_OK" > "$WORK/resp/get_info.json"
+run_times "$BASE"
+expect_rc3 "T P3 two JSON values in one body" ahr_chain_times 1
+reset; : > "$WORK/resp/get_info.json"
+run_times "$BASE"
+expect_rc3 "T zero JSON values (empty body, curl succeeded)" ahr_chain_times 1
 reset; printf '%s' '{"head_block_time":"2026-11-17T04:45:12.500"}' > "$WORK/resp/get_info.json"
 run_times "$BASE"
 expect_rc3 "T chain_times LIB missing (not filled from head)" ahr_chain_times 1
