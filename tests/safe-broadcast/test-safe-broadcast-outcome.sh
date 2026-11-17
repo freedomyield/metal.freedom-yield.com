@@ -553,6 +553,16 @@ begin "$TT"
 go "STUB_CHAIN_INFO_RAW_2=$CI_OK $CI_OTHER" -- "${TARGS[@]}"
 check "C2-second chain:info holds two JSON objects (right chain_id in the first) → 4, no push, no pre line" 4 \
 	"err:after the prompt" "calls:proton chain:info=2" "nocall:proton transaction:push" noaudit
+# the other files read from outside: the dry-run log and the operator token
+printf '{"x":1}\n{"dry_run":true,"target_chain":"mainnet-a","memo_prefix":"fya1c4"}\n' > "$T/dry-two.json"
+begin "$MT"; ahr_set find "$CLEAR_FLOOR" 0
+go -- "${MARGS[@]/--dry-run-log=*/--dry-run-log=$T/dry-two.json}"
+check "C2-dry-run log holds two JSON objects → 3 (gate 4), no push" 3 \
+	"err:gate 4" "nocall:proton transaction:push" noaudit
+begin '{"chain":"mainnet-a"} {"x":1}'; ahr_set find "$CLEAR_FLOOR" 0
+go -- "${MARGS[@]}"
+check "C2-operator token holds two JSON objects → not chain-bound → mainnet refused 3" 3 \
+	"err:gate 2" "nocall:proton transaction:push" noaudit
 fi
 
 if sel MV; then
