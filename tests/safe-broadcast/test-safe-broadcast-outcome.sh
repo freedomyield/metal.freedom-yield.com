@@ -268,11 +268,11 @@ sh_case "SH-testnet: .data is not an object → 2" tx-hex.json "not an object"
 mk tx-two-prefix.json '.actions += [(.actions[0] | .data.memo = "fya1c9-x")]'
 sh_case "SH-two memo prefixes → 2" tx-two-prefix.json "more than one memo prefix"
 mk tx-mixed-actor.json '.actions += [(.actions[0] | .authorization[0].actor = "fxstranger" | .data.from = "fxstranger")]'
-sh_case "SH-two different authorization actors → 2" tx-mixed-actor.json "actor"
+sh_case "SH-two different authorization actors → 2" tx-mixed-actor.json "ONE and the same actor"
 mk tx-from-other.json '.actions[0].data.from = "fxstranger"'
-sh_case "SH-data.from differs from the authorization actor → 2" tx-from-other.json "data.from"
+sh_case "SH-data.from differs from the authorization actor → 2" tx-from-other.json "data.from must be"
 mk tx-no-auth.json '.actions[0].authorization = []'
-sh_case "SH-authorization is empty → 2" tx-no-auth.json "authorization"
+sh_case "SH-authorization is empty → 2" tx-no-auth.json "non-empty authorization"
 fi
 
 if sel LD; then
