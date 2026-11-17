@@ -20,12 +20,26 @@ set -u
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 # shellcheck source=tests/lib/assert.sh
 . "$REPO_ROOT/tests/lib/assert.sh"
-WRAPPER="${REPO_ROOT}/bin/safe-broadcast"
+# The shared harness gives us sbh_tree (a minimal repo tree around a copy of the
+# wrapper). Only sbh_tree / sbh_ahr_stub_lib are used here; sbh_init is NOT
+# called — this suite keeps its own proton / curl stubs below.
+# shellcheck source=tests/safe-broadcast/sb-harness.sh
+. "$REPO_ROOT/tests/safe-broadcast/sb-harness.sh"
+SOURCE_WRAPPER="${REPO_ROOT}/bin/safe-broadcast"
 
-if [ ! -x "$WRAPPER" ]; then
-	echo "FATAL: safe-broadcast not executable at $WRAPPER" >&2
+if [ ! -x "$SOURCE_WRAPPER" ]; then
+	echo "FATAL: safe-broadcast not executable at $SOURCE_WRAPPER" >&2
 	exit 1
 fi
+# The wrapper loads scripts/lib/anchor-history-read.sh (fail-closed, exit 4):
+# run a tree whose copy of that library is the harness STUB, so no case here
+# depends on the real library or on the network. The stub keeps its state in
+# SBH_AHR_DIR (a directory of this suite's own).
+SB_TREE="$(mktemp -d -t safe-bcast-tree.XXXXXX)"
+SBH_AHR_DIR="$(mktemp -d -t safe-bcast-ahr.XXXXXX)"
+export SBH_AHR_DIR
+sbh_tree "$SB_TREE" "$SOURCE_WRAPPER"
+WRAPPER="$SB_TREE/bin/safe-broadcast"
 
 # ---- isolate token + audit log ----
 TEST_TOKEN="$(mktemp -t safe-bcast-token.XXXXXX)"
@@ -80,7 +94,13 @@ case "$1" in
 		c="$(cfg)"
 		if [ -f "$c" ]; then t="$(mktemp)"; jq --arg n "$2" '.currentChain = $n' "$c" > "$t" && mv "$t" "$c"; fi
 		exit 0 ;;
-	chain:info) echo "{\"chain_id\":\"${STUB_CHAIN_ID:-71ee83bcf52142d61019d95f9cc5427ba6a0d7ff8accd9e2088ae2abeaf3d3dd}\",\"head_block_num\":1}" ; exit 0 ;;
+	chain:info)
+		# the two chain times the wrapper reads (head now; LIB 170 s behind)
+		jq -nc --arg c "${STUB_CHAIN_ID:-71ee83bcf52142d61019d95f9cc5427ba6a0d7ff8accd9e2088ae2abeaf3d3dd}" \
+			'{chain_id: $c, head_block_num: 1,
+			  head_block_time: ((now | floor | todate | rtrimstr("Z")) + ".500"),
+			  last_irreversible_block_time: (((now | floor) - 170 | todate | rtrimstr("Z")) + ".000")}'
+		exit 0 ;;
 	*)          exit 0 ;;
 esac
 STUB
@@ -253,7 +273,7 @@ cleanup() {
 	rm -f "$TEST_TOKEN" "$TEST_AUDIT" "$TEST_TX_VALID" "$TEST_TX_EMPTY" "$TEST_DRY_LOG" \
 		"$TEST_TX_CYCLE4" "$TEST_TX_UPDATEAUTH" "$TEST_TX_HEXDATA" \
 		"$TEST_DRY_LOG_CYCLE4" "$TEST_DRY_LOG_NONJSON" "$TEST_DRY_LOG_WRONG_CHAIN" "$TEST_DRY_LOG_NO_PREFIX"
-	rm -rf "$STUB_DIR" "$TEST_HOME" "$FIXTURE_DIR"
+	rm -rf "$STUB_DIR" "$TEST_HOME" "$FIXTURE_DIR" "$SB_TREE" "$SBH_AHR_DIR"
 }
 trap cleanup EXIT
 

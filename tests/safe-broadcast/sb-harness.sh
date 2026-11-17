@@ -19,9 +19,16 @@
 #                             and a FIXTURE profile file relative to itself
 #                             (the library has no env var for its file path)
 #   sbh_token <json|''>       fresh operator token with that content
+#   sbh_ahr_stub_lib <file>   write the STUB of scripts/lib/anchor-history-read.sh
+#                             (the T1 library: the 4 functions the wrapper
+#                             calls + AHR_INDEX_MAX_LAG_BLOCKS). sbh_tree
+#                             always installs it; the real library is never
+#                             copied into a test tree
 #   sbh_reset                 clean state for the next scenario: pristine
 #                             proton-cli.json, empty audit/call logs, no
-#                             history delays (set token/delays AFTER this)
+#                             history delays, empty $SBH_AHR_DIR, chain:info
+#                             counter and saved push argument gone (set
+#                             token/delays AFTER this)
 #   sbh_run <name> <stdin> <wrapper> [VAR=value ...] -- <args ...>
 #                             run one scenario; leaves SBH_RC and the files
 #                             $SBH_T/out, err, audit.log, calls.log behind
@@ -32,10 +39,27 @@
 #   STUB_CHAIN_ID=<hex>       chain:info answers this chain_id (default: the
 #                             real id of the chain the fixture config's
 #                             currentChain names — proton / proton-test)
-#   STUB_CHAIN_INFO_RAW=<s>   chain:info prints <s> verbatim
+#   STUB_CHAIN_INFO_RAW=<s>   chain:info prints <s> verbatim (every call)
+#   STUB_HEAD_TIME=<s>        chain:info's head_block_time string (default:
+#                             now, ".500" fraction); STUB_LIB_TIME likewise
+#                             last_irreversible_block_time (default: now - 170 s,
+#                             ".000"). STUB_OMIT_LIB=1 / STUB_OMIT_HEAD_TIME=1
+#                             leave that key out
+#   STUB_HEAD_TIME_2 / STUB_LIB_TIME_2 / STUB_CHAIN_ID_2 /
+#   STUB_OMIT_LIB_2 / STUB_OMIT_HEAD_TIME_2 / STUB_CHAIN_INFO_RAW_2
+#                             the same, for the 2nd and later chain:info call
+#                             only (the count lives in $SBH_T/chaininfo.count)
 #   STUB_CHAINSET_RC=<n>      chain:set exits <n>
 #   STUB_CHAINSET_NOWRITE=1   chain:set does not update currentChain
-#   STUB_PUSH_MODE=processed|idfield|idonly|fail|noid
+#   STUB_PUSH_MODE=processed|processed_soft|idfield|idonly|noid|crash|
+#                  reject_assert|reject_assert_ansi|reject_net|dup|
+#                  dump_then_assert|abort|garbage
+#                             what transaction:push prints (stdout, rc 0 —
+#                             the real CLI exits 0 even when the push fails);
+#                             only `crash` differs: one stderr line, rc 1
+#                             (it was called `fail` before the guard). The
+#                             stub saves its push argument in
+#                             $SBH_T/push-arg.json (overwritten per call)
 #   STUB_HEALTH_FAIL=1        <base>/v2/health fails
 #   $SBH_T/health/<host>.json  body <base>/v2/health answers for that host
 #                             (default: healthy — all OK, head 1000, indexed 998)
@@ -72,8 +96,9 @@ sbh_cfg_path() {
 sbh_init() {
 	SBH_T="$(mktemp -d -t sbh.XXXXXX)"
 	SBH_T="$(cd "$SBH_T" && pwd -P)"
-	mkdir -p "$SBH_T/stub" "$SBH_T/home" "$SBH_T/hist/v1" "$SBH_T/hist/v2" "$SBH_T/hist/delay" "$SBH_T/health"
+	mkdir -p "$SBH_T/stub" "$SBH_T/home" "$SBH_T/hist/v1" "$SBH_T/hist/v2" "$SBH_T/hist/delay" "$SBH_T/health" "$SBH_T/ahr"
 	export SBH_T
+	export SBH_AHR_DIR="$SBH_T/ahr"
 	export SBH_CALLS="$SBH_T/calls.log"
 	export FYD_BROADCAST_TOKEN_FILE="$SBH_T/token"
 	export FYD_BROADCAST_AUDIT_LOG="$SBH_T/audit.log"
@@ -114,8 +139,16 @@ case "$1" in
 		exit 0 ;;
 	chain:info)
 		echo "proton chain:info" >> "$SBH_CALLS"
-		if [ -n "${STUB_CHAIN_INFO_RAW:-}" ]; then printf '%s\n' "$STUB_CHAIN_INFO_RAW"; exit 0; fi
-		cid="${STUB_CHAIN_ID:-}"
+		cnt="$SBH_T/chaininfo.count"; n=0; [ -f "$cnt" ] && n="$(cat "$cnt")"
+		n=$((n + 1)); echo "$n" > "$cnt"
+		# pick <NAME>: STUB_<NAME>_2 on the 2nd and later call when set, else STUB_<NAME>
+		pick() {
+			local v="STUB_$1" v2="STUB_$1_2"
+			if [ "$n" -ge 2 ] && [ -n "${!v2:-}" ]; then printf '%s' "${!v2}"; else printf '%s' "${!v:-}"; fi
+		}
+		raw="$(pick CHAIN_INFO_RAW)"
+		if [ -n "$raw" ]; then printf '%s\n' "$raw"; exit 0; fi
+		cid="$(pick CHAIN_ID)"
 		if [ -z "$cid" ]; then
 			cc="$(jq -r '.currentChain // empty' "$(cfg)" 2>/dev/null)"
 			case "$cc" in
@@ -123,7 +156,15 @@ case "$1" in
 				*)      cid="71ee83bcf52142d61019d95f9cc5427ba6a0d7ff8accd9e2088ae2abeaf3d3dd" ;;
 			esac
 		fi
-		printf '{"chain_id":"%s","head_block_num":1}\n' "$cid"
+		ht="$(pick HEAD_TIME)"
+		if [ -z "$ht" ]; then ht="$(jq -nr 'now | floor | todate | rtrimstr("Z")').500"; fi
+		lt="$(pick LIB_TIME)"
+		if [ -z "$lt" ]; then lt="$(jq -nr '(now | floor - 170) | todate | rtrimstr("Z")').000"; fi
+		ol="$(pick OMIT_LIB)"; oh="$(pick OMIT_HEAD_TIME)"
+		jq -nc --arg cid "$cid" --arg ht "$ht" --arg lt "$lt" --arg ol "$ol" --arg oh "$oh" \
+			'{chain_id: $cid, head_block_num: 1}
+			 + (if $oh == "1" then {} else {head_block_time: $ht} end)
+			 + (if $ol == "1" then {} else {last_irreversible_block_time: $lt} end)'
 		if [ "${STUB_CHAININFO_REPOINT:-0}" = "1" ]; then
 			c="$(cfg)"; cc="$(jq -r '.currentChain' "$c")"
 			t="$(mktemp)"; jq --arg c "$cc" '.endpoints = [{"chain": $c, "endpoints": ["https://xpr-clone.example.net"]}]' "$c" > "$t" && mv "$t" "$c"
@@ -131,13 +172,28 @@ case "$1" in
 		exit 0 ;;
 	transaction:push)
 		echo "proton transaction:push" >> "$SBH_CALLS"
+		printf '%s' "$2" > "$SBH_T/push-arg.json"
 		tx="f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000"
+		esc="$(printf '\033')"
 		case "${STUB_PUSH_MODE:-processed}" in
-			processed) printf '{"transaction_id":"%s","processed":{"id":"%s","block_num":42,"receipt":{"status":"executed"}}}\n' "$tx" "$tx" ;;
-			idfield)   printf '{"id":"%s"}\n' "$tx" ;;
-			idonly)    printf '{"transaction_id":"%s"}\n' "$tx" ;;
-			noid)      printf '{}\n' ;;
-			fail)      echo "Error: assertion failure with message: stub" >&2; exit 1 ;;
+			processed)      printf '{"transaction_id":"%s","processed":{"id":"%s","block_num":42,"receipt":{"status":"executed"}}}\n' "$tx" "$tx" ;;
+			processed_soft) printf '{"transaction_id":"%s","processed":{"id":"%s","block_num":42,"receipt":{"status":"soft_fail"}}}\n' "$tx" "$tx" ;;
+			idfield)        printf '{"id":"%s"}\n' "$tx" ;;
+			idonly)         printf '{"transaction_id":"%s"}\n' "$tx" ;;
+			noid)           printf '{}\n' ;;
+			crash)          echo "Error: assertion failure with message: stub" >&2; exit 1 ;;
+			reject_assert)  echo "Error: assertion failure with message: stub reject" ;;
+			reject_assert_ansi)
+				printf '%s[31mError: assertion failure with message: stub reject%s[39m\n' "$esc" "$esc"
+				printf '%s[33mHint: stub hint%s[39m\n' "$esc" "$esc" ;;
+			reject_net)     echo "Error: transaction net usage is too high: 128 > 0"; echo "Hint: stub net hint" ;;
+			dup)            echo "Error: duplicate transaction $tx" ;;
+			dump_then_assert)
+				echo "FetchError: request to https://node.example failed, reason: socket hang up"
+				echo "    at ClientRequest.<anonymous> (node_modules/x.js:1:1)"
+				echo "Error: assertion failure with message: stub reject" ;;
+			abort)          echo "AbortError: The user aborted a request."; echo "    at fetch (node_modules/x.js:1:1)" ;;
+			garbage)        echo "Error: deadline exceeded" ;;
 		esac
 		exit 0 ;;
 	*)
@@ -260,6 +316,57 @@ STUB
 	printf '{"trx_id":"%s","executed":true,"actions":[%s]}\n' "$SBH_V2SHAPE" "$tr_c4" > "$SBH_T/hist/v1/$SBH_V2SHAPE.json"
 }
 
+# sbh_ahr_stub_lib <dest-file> — write the STUB of scripts/lib/anchor-history-read.sh
+# (the T1 library). It defines exactly what bin/safe-broadcast checks for after
+# sourcing it: the four functions and AHR_INDEX_MAX_LAG_BLOCKS. Behaviour is
+# driven by files in $SBH_AHR_DIR (see the header); counting is by file, so it
+# stays right when the wrapper calls it inside $( ). The two time helpers
+# really compute (jq fromdateiso8601 / todate, no `date`), with the accepted
+# shapes of the T1 contract: YYYY-MM-DDTHH:MM:SS, an optional .<1-6 digits>,
+# an optional Z; anything else is rc 3.
+sbh_ahr_stub_lib() {
+	cat > "$1" <<'LIB'
+# STUB of scripts/lib/anchor-history-read.sh for tests/safe-broadcast.
+AHR_INDEX_MAX_LAG_BLOCKS=30
+ahr__bump() { # <name> — print the new call number of <name>
+	local f="$SBH_AHR_DIR/$1.count" n=0
+	[ -f "$f" ] && n="$(cat "$f")"
+	n=$((n + 1)); echo "$n" > "$f"; printf '%s' "$n"
+}
+ahr__pick() { # <name> <n> <ext> — the per-call file, else the generic one, else nothing
+	if [ -f "$SBH_AHR_DIR/$1.$2.$3" ]; then printf '%s' "$SBH_AHR_DIR/$1.$2.$3"
+	elif [ -f "$SBH_AHR_DIR/$1.$3" ]; then printf '%s' "$SBH_AHR_DIR/$1.$3"; fi
+}
+ahr_find_cycle_anchor() {
+	local n f rc=0 out
+	n="$(ahr__bump find)"
+	[ -n "${SBH_CALLS-}" ] && echo "ahr_find_cycle_anchor $1 $2 $3" >> "$SBH_CALLS"
+	f="$(ahr__pick find "$n" rc)"; [ -n "$f" ] && rc="$(cat "$f")"
+	out="$(ahr__pick find "$n" out)"
+	if [ -n "$out" ]; then cat "$out"
+	elif [ "$rc" = "0" ]; then
+		echo '{"verdict":"clear","trx_id":null,"block_num":null,"timestamp":null,"scanned":4,"floor":"fya1c1"}'
+	fi
+	return "$rc"
+}
+ahr_index_fresh() {
+	local n f rc=0
+	n="$(ahr__bump fresh)"
+	[ -n "${SBH_CALLS-}" ] && echo "ahr_index_fresh $1 $2" >> "$SBH_CALLS"
+	f="$(ahr__pick fresh "$n" rc)"; [ -n "$f" ] && rc="$(cat "$f")"
+	return "$rc"
+}
+ahr_utc_to_epoch() {
+	jq -nr --arg s "${1:-}" '$s | if test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z?$")
+		then sub("\\.[0-9]+"; "") | sub("Z$"; "") | . + "Z" | fromdateiso8601
+		else error("bad time") end' 2>/dev/null || return 3
+}
+ahr_epoch_to_utc() {
+	jq -nr --arg s "${1:-}" '$s | if test("^[0-9]+$") then (tonumber | todate | rtrimstr("Z")) else error("bad epoch") end' 2>/dev/null || return 3
+}
+LIB
+}
+
 # sbh_tree <dir> <wrapper-source> [<profiles.json>] — minimal repo tree.
 sbh_tree() {
 	local d="$1" w="$2" cfg="${3:-}" root
@@ -270,6 +377,7 @@ sbh_tree() {
 	cp "$root/scripts/lib/require-keystore-home.sh" "$d/scripts/lib/"
 	[ -f "$root/scripts/lib/a-chain-profile.sh" ] && cp "$root/scripts/lib/a-chain-profile.sh" "$d/scripts/lib/"
 	[ -f "$root/scripts/lib/url-host.sh" ] && cp "$root/scripts/lib/url-host.sh" "$d/scripts/lib/"
+	sbh_ahr_stub_lib "$d/scripts/lib/anchor-history-read.sh"
 	cp "${cfg:-$root/config/a-chain-profiles.json}" "$d/config/a-chain-profiles.json"
 }
 
@@ -283,6 +391,10 @@ sbh_reset() {
 	: > "$SBH_T/audit.log"
 	: > "$SBH_CALLS"
 	rm -f "$SBH_T/hist/delay/"*
+	# the guard stubs' state: the library stub's files, the chain:info call
+	# counter and the saved push argument (guarded: never rm an empty path)
+	if [ -n "${SBH_AHR_DIR-}" ] && [ -d "$SBH_AHR_DIR" ]; then rm -f "$SBH_AHR_DIR"/*; fi
+	rm -f "$SBH_T/chaininfo.count" "$SBH_T/push-arg.json"
 }
 
 # sbh_run <name> <stdin> <wrapper> [VAR=value ...] -- <args ...>

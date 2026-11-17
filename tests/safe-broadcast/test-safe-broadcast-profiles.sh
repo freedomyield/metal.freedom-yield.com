@@ -304,7 +304,7 @@ check "P8 PulseVM profile with proton-cli still on its built-in XPR hosts → ga
 	"err:NOT on the pulsevm-mainnet node_hosts allowlist" "nocall:proton transaction:push"
 
 pvm_reset
-sbh_run - '' "$PW" "${PVM_ENV[@]}" STUB_PUSH_MODE=fail -- "${PVM_ARGS[@]}"
+sbh_run - '' "$PW" "${PVM_ENV[@]}" STUB_PUSH_MODE=crash -- "${PVM_ARGS[@]}"
 check "P9 id-only push errors → exit 6 with the MAY-have-broadcast banner" 6 "err:a broadcast MAY have happened"
 
 pvm_reset

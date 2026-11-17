@@ -186,14 +186,14 @@ sc "push: mainnet alias proton"        '{"chain":"proton"}' '' -- --tx="$T/tx-c4
 sc "push: mainnet updateauth + text dry-run" "$MAIN_TOKEN" '' -- --tx="$T/tx-upd.json" "${M[@]}" --testnet-tx-id="$SBH_UPD_SAME" --dry-run-log="$T/dry-text.txt"
 sc "push: answer carries only id"      '' '' STUB_PUSH_MODE=idfield -- --tx="$T/tx-c3.json" --chain=testnet-a --non-interactive
 sc "push: answer carries only transaction_id" '' '' STUB_PUSH_MODE=idonly -- --tx="$T/tx-c3.json" --chain=testnet-a --non-interactive
-sc "push: chain rejects"               '' '' STUB_PUSH_MODE=fail -- --tx="$T/tx-c3.json" --chain=testnet-a --non-interactive
+sc "push: chain rejects"               '' '' STUB_PUSH_MODE=crash -- --tx="$T/tx-c3.json" --chain=testnet-a --non-interactive
 sc "push: answer without any id"       '' '' STUB_PUSH_MODE=noid -- --tx="$T/tx-c3.json" --chain=testnet-a --non-interactive
 # Exit 7: both audit targets unwritable — the primary is a DIRECTORY, and the
 # fallback lives under the login home, which the `id` stub makes a
 # nonexistent relative path. Refused BEFORE the push, nothing is written.
 sc "audit: log write fails (primary a directory, no login home) → exit 7" '' '' \
 	"PATH=$SBH_PATH_NOUSER" "FYD_BROADCAST_AUDIT_LOG=$T" -- --tx="$T/tx-c3.json" --chain=testnet-a --non-interactive
-sc "push: mainnet chain rejects"       "$MAIN_TOKEN" '' STUB_PUSH_MODE=fail -- --tx="$T/tx-c4.json" "${M[@]}" --testnet-tx-id="$SBH_CYCLE4" --dry-run-log="$T/dry-c4.json"
+sc "push: mainnet chain rejects"       "$MAIN_TOKEN" '' STUB_PUSH_MODE=crash -- --tx="$T/tx-c4.json" "${M[@]}" --testnet-tx-id="$SBH_CYCLE4" --dry-run-log="$T/dry-c4.json"
 
 if [ "$WRITE" = "1" ]; then
 	mkdir -p "$(dirname "$GOLDEN")"
