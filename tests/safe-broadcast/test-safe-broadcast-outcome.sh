@@ -400,6 +400,20 @@ check "B4-tx_id confirmed in history → 0" 0 "out:$SBH_TXID" "audit:confirmed=1
 pvm_begin; pvm_hist; pvm_run STUB_PUSH_MODE=idonly_with_dump
 check "B4-tx_id but the output carries an RPC dump → 10, no confirmation lookup" 10 \
 	"err:BROADCAST OUTCOME UNKNOWN" "nocall:get_transaction" "audit:outcome=unknown"
+# the history answer of the confirmation is exactly ONE object (jq -e decides by the last value)
+V13_OK="{\"trx_id\":\"$SBH_TXID\",\"executed\":true,\"actions\":[$act3]}"
+V13_FALSE="{\"trx_id\":\"$SBH_TXID\",\"executed\":false,\"actions\":[$act3]}"
+pvm_begin; printf '%s\n%s\n' "$V13_FALSE" "$V13_OK" > "$T/hist/v2/$SBH_TXID.json"; pvm_run STUB_PUSH_MODE=idonly
+check "V13-B4-id-only confirmation answer holds two JSON values (executed:false then a naming object) → 9, never confirmed" 9 \
+	"err:is NOT confirmed" "err:not found in history after 1 round(s)" "noerr:names the tx but" "audit:confirmed=0"
+pvm_begin; printf '%s %s' "$V13_OK" "$V13_FALSE" > "$T/hist/v2/$SBH_TXID.json"; pvm_run STUB_PUSH_MODE=idonly
+check "V13-B4-id-only confirmation answer holds two JSON values (a naming object then executed:false) → 9, never confirmed" 9 \
+	"err:is NOT confirmed" "err:not found in history after 1 round(s)" "noerr:names the tx but" "audit:confirmed=0"
+pvm_begin; printf '%s\n%s\n' "$V13_OK" "$V13_OK" > "$T/hist/v2/$SBH_TXID.json"; pvm_run STUB_PUSH_MODE=idonly
+check "V13-B4-id-only confirmation answer holds the same naming object twice → 9, never confirmed" 9 \
+	"err:is NOT confirmed" "err:not found in history after 1 round(s)" "noerr:names the tx but" "audit:confirmed=0"
+pvm_begin; pvm_hist; pvm_run STUB_PUSH_MODE=idonly
+check "V14-B4-control: one naming object (the same shape) → 0" 0 "out:$SBH_TXID" "audit:confirmed=1" "audit:outcome=submitted"
 fi
 
 if sel B5; then
@@ -563,6 +577,35 @@ begin '{"chain":"mainnet-a"} {"x":1}'; ahr_set find "$CLEAR_FLOOR" 0
 go -- "${MARGS[@]}"
 check "C2-operator token holds two JSON objects → not chain-bound → mainnet refused 3" 3 \
 	"err:gate 2" "nocall:proton transaction:push" noaudit
+fi
+
+if sel V; then
+echo "── V gate 1 testnet evidence: the history answer is exactly ONE JSON object ──"
+V_OTHER="$(printf '90f0%.0s' 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16)"
+V11ID="$(printf 'fa110011%.0s' 1 2 3 4 5 6 7 8)"
+V12ID="$(printf 'fa120012%.0s' 1 2 3 4 5 6 7 8)"
+V12BID="$(printf 'fa12b012%.0s' 1 2 3 4 5 6 7 8)"
+V14ID="$(printf 'fa140014%.0s' 1 2 3 4 5 6 7 8)"
+V_TR='{"act":{"account":"eosio.token","name":"transfer","data":{"memo":"fya1c4-test"}}}'
+v_good() { printf '{"id":"%s","block_num":100,"traces":[%s,%s]}' "$1" "$V_TR" "$V_TR"; }
+v_nameless() { printf '{"id":"%s","block_num":100,"traces":[]}' "$V_OTHER"; }
+v_margs() { VARGS=(--tx="$T/tx-c4.json" --chain=mainnet-a --non-interactive --testnet-tx-id="$1" --dry-run-log="$T/dry-c4.json"); }
+v_margs "$V11ID"; { v_nameless; printf '\n'; v_good "$V11ID"; printf '\n'; } > "$T/hist/v1/$V11ID.json"
+begin "$MT"; go -- "${VARGS[@]}"
+check "V11-G1-testnet evidence answer holds two JSON values (the last names the tx) → 3, no push" 3 \
+	"err:ERROR (gate 1): could not resolve --testnet-tx-id $V11ID" "nocall:proton transaction:push" noaudit
+v_margs "$V12ID"; { v_good "$V12ID"; printf '\n'; v_nameless; printf '\n'; } > "$T/hist/v1/$V12ID.json"
+begin "$MT"; go -- "${VARGS[@]}"
+check "V12-G1-testnet evidence answer holds two JSON values (the first names the tx) → 3, no push" 3 \
+	"err:ERROR (gate 1): could not resolve --testnet-tx-id $V12ID" "nocall:proton transaction:push" noaudit
+v_margs "$V12BID"; { v_good "$V12BID"; printf '\n'; v_good "$V12BID"; printf '\n'; } > "$T/hist/v1/$V12BID.json"
+begin "$MT"; go -- "${VARGS[@]}"
+check "V12-G1-testnet evidence answer holds the same naming object twice → 3, no push" 3 \
+	"err:ERROR (gate 1): could not resolve --testnet-tx-id $V12BID" "nocall:proton transaction:push" noaudit
+v_margs "$V14ID"; { v_good "$V14ID"; printf '\n'; } > "$T/hist/v1/$V14ID.json"
+begin "$MT"; go -- "${VARGS[@]}"
+check "V14-G1-control: one naming object (the same shape) passes gate 1 → 0" 0 \
+	"out:$SBH_TXID" "calls:proton transaction:push=1" "noerr:could not resolve"
 fi
 
 if sel MV; then
