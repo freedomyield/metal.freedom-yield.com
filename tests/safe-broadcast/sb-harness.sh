@@ -53,7 +53,8 @@
 #   STUB_CHAINSET_NOWRITE=1   chain:set does not update currentChain
 #   STUB_PUSH_MODE=processed|processed_soft|idfield|idonly|noid|crash|
 #                  reject_assert|reject_assert_ansi|reject_net|dup|
-#                  dump_then_assert|abort|garbage
+#                  dump_then_assert|abort|garbage|dup_assert|
+#                  assert_with_signal|idonly_with_dump
 #                             what transaction:push prints (stdout, rc 0 —
 #                             the real CLI exits 0 even when the push fails);
 #                             only `crash` differs: one stderr line, rc 1
@@ -194,6 +195,14 @@ case "$1" in
 				echo "Error: assertion failure with message: stub reject" ;;
 			abort)          echo "AbortError: The user aborted a request."; echo "    at fetch (node_modules/x.js:1:1)" ;;
 			garbage)        echo "Error: deadline exceeded" ;;
+			# the next three exist to pin the ORDER of the classification rules:
+			# one line that is allowed AND names a duplicate; one allowed line
+			# that names an RPC failure; an id-only answer followed by a stack line
+			dup_assert)     echo "Error: assertion failure with message: duplicate transaction" ;;
+			assert_with_signal) echo "Error: assertion failure with message: socket hang up" ;;
+			idonly_with_dump)
+				printf '{"transaction_id":"%s"}\n' "$tx"
+				echo "    at ClientRequest.<anonymous> (node_modules/x.js:1:1)" ;;
 		esac
 		exit 0 ;;
 	*)
