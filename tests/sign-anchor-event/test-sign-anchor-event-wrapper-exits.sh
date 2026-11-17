@@ -44,7 +44,7 @@ for f in "$SCRIPT_SRC" "$KEYSTORE_LIB_SRC" "$WRAPPER_SRC" "$ANCHOR_SOURCE" "$PRO
 done
 command -v jq >/dev/null 2>&1 || { echo "FATAL: jq required" >&2; exit 1; }
 
-# shellcheck source=../lib/assert.sh
+# shellcheck source=tests/lib/assert.sh
 . "${REPO_ROOT}/tests/lib/assert.sh"
 
 # ---- the same rc lists as the rehearsal suite ---------------------------------

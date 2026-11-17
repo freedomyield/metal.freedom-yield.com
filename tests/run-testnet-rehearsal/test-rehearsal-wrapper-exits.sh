@@ -61,7 +61,7 @@ for c in node jq timeout; do
 done
 TIMEOUT_BIN="$(command -v timeout)"
 
-# shellcheck source=../lib/assert.sh
+# shellcheck source=tests/lib/assert.sh
 . "${REPO_ROOT}/tests/lib/assert.sh"
 
 # ---- the same rc lists as the sign-anchor-event suite --------------------------
