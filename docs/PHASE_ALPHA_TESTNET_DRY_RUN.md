@@ -481,6 +481,20 @@ broadcast is authorized. Full context: `docs/CYCLE_GATE.md` step 7b.
 - **Step 9/10 (`gen-anchor-receipt.sh`) exits 4** — one of gates 2–7
   failed; the script prints which one and the expected vs. actual
   values. Do not proceed to mainnet with this run's `tx_id`.
+- **Step 7/10 exits 9, 10 or 11** (the double-inscription guard; design
+  `docs/superpowers/specs/2026-10-16-anchor-double-inscription-guard-design.md`
+  §4 and §11.10; the 7a bullets in `docs/CYCLE_GATE.md` have the detail) —
+  exit **9** = outcome UNKNOWN: do not run the rehearsal again until the
+  printed `expiration=<E>` is irreversibly past (the wrapper's journal refuses a
+  sooner run with exit 11 and sends nothing). Exit **10** = this cycle's anchor
+  is already on testnet (for example an earlier dress run). Exit **11** =
+  nothing was sent: an earlier attempt may still land, testnet history cannot
+  prove the cycle absent, or the audit log or LIB time cannot be read.
+  `--allow-existing-cycle-anchor` is a testnet-only flag and never passes a
+  later cycle's anchor (stop and report). It is added only on the operator's
+  new instruction, after one refusal has been seen, and only for an exit 10
+  whose printed anchor is this cycle's, or for an exit 11 caused by an
+  exhausted scan with no floor; never for any other exit 11.
 
 ## Phase β note
 

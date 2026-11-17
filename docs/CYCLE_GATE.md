@@ -1091,6 +1091,31 @@ the values to pass on a given day are in the day-of value sheet above):
      「やり直してよいか」の分岐そのもの。**どの exit でも、やり直しは AI が
      この 1 問の答えを報告した上で operator の改めての実行指示を取ってから**
      (認可 1 回 = 起動 1 回)。
+   - **rehearsal の exit 9・10・11 (新しい守り。設計書 §4・§11.10)**:
+     exit **9** = 結果が不明 (UNKNOWN)。印字された `expiration=<E>` が
+     確定するまで 7a をやり直さない (wrapper の journal が E まで、rehearsal の
+     exit **11** で断る。何も送らない)。exit **10** = この cycle の刻印が
+     testnet に既に在る (dress run など)。exit **11** = 何も送っていない
+     (前の試行がまだ着地しうる、または testnet の履歴で無いと証明できない、
+     または記録 (audit log)・LIB の時刻が読めない)。**この Mac で主の audit log
+     が書けず、予備の audit log もまだ無い時は、最初の run が wrapper の
+     exit 13 (rehearsal・7c とも exit 11) で止まる。何も送らない。安全な側
+     なので迂回せず、報告する。**
+     **どの exit でも、やり直しは上の「認可 1 回 = 起動 1 回」のまま** (AI が
+     報告し、operator の改めての実行指示を取ってから)。
+   - **`--allow-existing-cycle-anchor` (testnet だけの旗。mainnet では wrapper
+     が拒み、後の cycle の刻印は testnet でも通さない)**: 使うのは、ちょうど
+     2 つの時だけ。(1) exit **10** で、印字された刻印が**その日の cycle のもの**
+     の時 (その cycle を testnet で既に刻んだ)。(2) exit **11** が「床の無い
+     尽きた走査」で出た時 (testnet の base が actor の履歴を持たない。設計書
+     §11.3・§11.10)。どちらも、拒みを 1 回見てから、operator の新しい実行指示
+     で付ける。**最初の run から付けない。** AI は WARN の行 (見つけた tx か、
+     床の無い尽きた走査) を chat に示す。それ以外の exit **11** (履歴が読めない・
+     古い・前の試行がまだ生きている・記録 (audit log) か LIB の時刻が読めない)
+     には付けず、待ってから operator の指示を取る。**後の cycle の刻印の
+     exit 10 は、この旗でも通らない。止めて報告する。**
+     testnet での命令の形 (書くだけ。ここで走らせない):
+     `HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh --expect-cycle=<N+1> --allow-existing-cycle-anchor`
    - **誰が起動し、何が認可か**: 起動は AI@Mac、認可は chat での operator の
      明示的な実行指示 (上の「実行者と実行場所」節の引用ブロック、2026-10-07
      operator 決定)。
@@ -1262,7 +1287,7 @@ the values to pass on a given day are in the day-of value sheet above):
    認可の**性質**の説明であって手順ではない。当日の唯一の不可逆な承認なので、
    ここで手順として書き下す:
 
-   - **AI が提示するもの (5 点)** — いずれも `bin/safe-broadcast:567-577` の
+   - **AI が提示するもの (5 点)** — いずれも `bin/safe-broadcast:1072-1094` の
      `BROADCAST CONFIRMATION` ブロックと 7b の出力から取る、**AI の要約では
      なく実出力**: ① `chain:` (= `mainnet-a`)、② `token binding:`
      (`chain=…, tx_sha256=…` — R16 の content binding)、③ `action count:` と
@@ -1283,102 +1308,80 @@ the values to pass on a given day are in the day-of value sheet above):
      (復唱が PRIME DIRECTIVE gate 2 の実体)。認可が成立して初めて AI は
      上の `sign-anchor-event.sh` を実行してよい。実行すると
      `bin/safe-broadcast` が対話プロンプトを出し、確認フレーズは
-     **`BROADCAST mainnet-a` の完全一致**である (`:579-584`)。
+     **`BROADCAST mainnet-a` の完全一致**である (`bin/safe-broadcast:1088-1093`)。
    - **中止の言い方** — chat で「**中止**」または「**止めて**」の一言で足りる。
      理由の説明は要らないし、求められない。プロンプトまで進んでいた場合は
      **確認フレーズ以外の任意の入力**が abort になる (exit 5)。中止で失われる
      のは 7b の dry-run log だけで、作り直せる。**broadcast は起きていない。**
      迷ったら中止が既定。
 
-   **7c が失敗・不確定に終わったときの暫定の絶対ルール (2026-10-16 operator
-   決定。恒久対策のガードが出るまで有効)。** 7c が **exit 0 以外で終わった**、
-   **64 hex の tx id を出さなかった**、または**結果に少しでも疑いがある**
-   場合 — **AI は新しい認可を求めない。operator も 7c を再実行しない。**
-   いまの経路には「この cycle はもう刻まれている」を断る gate が無い
-   (`docs/superpowers/specs/2026-10-16-anchor-double-inscription-guard-design.md`
-   §1 P-3)。「拒否された」と「届いたか分からない」の区別も付かない (同 P-1)。
-   再実行は二重刻印 (2026-07-01 と同じ種類の事故) になりうる。
+   **7c が exit 0 以外で終わった・tx_id が無い・結果に疑いがある時 (設計書
+   `docs/superpowers/specs/2026-10-16-anchor-double-inscription-guard-design.md`
+   の §4・§6・§11.10)。**
+   **exit 0 以外で終わった・64 hex の tx_id が無い・wrapper の class の行が
+   読めない・結果に少しでも疑いがある — AI は新しい認可を求めない。operator も
+   7c を再実行しない。まず読み取り (下の the absence check) で確かめ、決めるのは
+   operator。** wrapper (`bin/safe-broadcast`) は push の結果を分類して class の
+   行を出し、`sign-anchor-event.sh` はそれを次の exit で返す:
 
-   - **例外は無い。** 確認フレーズの段階で中止した場合 (exit 5。上の
-     「中止の言い方」のとおり broadcast は起きていない) や、gate 2 の token
-     期限切れで断られた場合も、exit 0 以外なのでこのルールに従う。どの
-     exit 5 が「何も送っていない」かを、いまの出力から確実に見分ける方法が
-     無いためである (同 design §1 P-1)。
-   - **「exit 0」だけでは成功ではない。** 署名 CLI は push が失敗しても
-     exit 0 で返る (同 design、key finding 1)。成功の証拠は、
-     `sign-anchor-event.sh` が stdout に出した JSON 断片の **64 hex の
-     `tx_id`** だけである。tx id が無ければ、exit code が何であっても
-     「不確定」として扱う。(いまの `sign-anchor-event.sh` は、tx_id が
-     64 hex でなければ自分で exit 5 を返す (`:410-413`)。したがって「7c が
-     exit 0 なのに tx_id が無い」は今の実装では起きない。ただし tx_id が
-     あっても着地は保証されない — 同 design key finding 4。それは step 8
-     が扱う。)
-   - **再実行を検討してよいのは、次の (a)(b) が両方済んでから。それでも
-     決めるのは operator** で、AI が新しい per-invocation 認可を求めるのは
-     その決定の後 (手順は上の「per-invocation 認可の手順」をもう一度最初から。
-     token も新しく作る):
-     - **(a) 失敗した試行から 60 分以上待つ。** 署名 CLI は tx を
-       「最終確定ブロックの時刻 + 3000 秒」の有効期限で署名する (同 design
-       §1 P-2)。そのため、結果の分からない push は約 50 分のあいだ後から
-       着地しうる。60 分はその上限に余裕を足した値。
-     - **(b) その日刻む cycle の memo prefix `fya<S>c<N+1>` (`<N+1>` は
-       day-of value sheet の「その日刻む cycle」。`<S>` は anchor の schema
-       major で、`public/api/anchor-source.json` の `schema_version`。記入例の
-       2026-10-07 なら `fya1c6`) を持つ action が、anchor account から chain
-       上に 1 つも無いことを read-only で確かめる。** prefix は手で書かない。
-       7c が署名に使ったのと同じ `public/api/anchor-source.json` から、
-       `sign-anchor-event.sh` と同じ規則 (`:220-230`, `:296`) で導く。
-       使う要求は、`scripts/lib/anchor-history-read.sh` の `ahr_resolve_tx`
-       が step 8 で最初に送るのと同じ Hyperion `get_actions` である。history
-       base は committed の chain profile から、actor は 7c と同じ
-       `xpr-account` から取る。AI@Mac が repo root で実行する (GET のみ。
-       署名も送信もしない)。P・actor・base のどれかが正しく得られなければ
-       `ABORT` を印字し、何も問い合わせずに終わる — これは「無い」では
-       **ない**:
-       ```sh
-       FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config
-       ACTOR="$(head -n 1 "$FY_CONFIG_DIR/xpr-account")"
-       BASE="$(jq -r '.profiles["xpr-mainnet"].history_bases[0]' config/a-chain-profiles.json)"
-       P="fya$(jq -r '.schema_version' public/api/anchor-source.json)c$(jq -r '.observations_branch.cycle_number_observed' public/api/anchor-source.json)"
-       if printf '%s\n' "$P" | grep -Eqx 'fya[0-9]+c[0-9]+' && [ -n "$ACTOR" ] && printf '%s\n' "$BASE" | grep -Eq '^https://'; then
-         echo "P=$P"
-         curl -sSf --max-time 20 "$BASE/v2/health" \
-           | jq -r '"\([.health[] | "\(.service)=\(.status)"] | join(" ")) head=\([.health[] | .service_data? | objects | .head_block_num? | numbers] | max) indexed=\([.health[] | .service_data? | objects | .last_indexed_block? | numbers] | max)"'
-         curl -sSf --max-time 20 "$BASE/v2/history/get_actions?account=$ACTOR&limit=50&sort=desc" \
-           | jq -r --arg a "$ACTOR" --arg p "$P" '
-               "actions_returned=\(.actions | length)",
-               (.actions[]
-                | select(.act.account == "eosio.token" and .act.name == "transfer" and .act.data.from == $a)
-                | (.act.data.memo | split(":")[0]) as $m
-                | select($m | test("^fya[0-9]+c[0-9]+"))
-                | "\(if $m == $p or ($m | startswith($p + "-")) then "TARGET" else "other " end) \(.trx_id) block=\(.block_num) \(."@timestamp") \($m)")'
-       else
-         echo "ABORT: P='$P' is not fya<S>c<N+1>, or the actor / history base is missing - nothing was checked, this is NOT absent" >&2
-         false
-       fi
-       ```
-       **「無い」と言えるのは次がすべて成り立つときだけ:** 出力の 1 行目が
-       `P=fya<S>c<N+1>` で、その値が value sheet の「その日刻む cycle」と
-       一致する。`ABORT` が出ていない。2 本の問い合わせがどちらも exit 0 で
-       終わる。health の行の service がすべて `=OK`。`indexed` が `head` から
-       120 block (XPR は 0.5 秒/block なので、およそ 1 分) 以内。
-       `actions_returned=` が出ている。**`TARGET` 行が 0 本**。そして
-       **前の cycle (value sheet の「その日閉じる cycle」`<N>`) の anchor
-       `fya<S>c<N>` が `other` 行に見えている** (検索した範囲がそこまで
-       届いている証拠)。
-       **`TARGET` 行が 1 本でもあれば、その cycle は刻まれている。7c は
-       二度と実行しない** — その `trx_id` を operator に示し、step 8 の照合
-       (operator 判断) へ進む。上の条件が 1 つでも欠けたら「無いとは証明
-       できない」。待って (b) をやり直す。7c には進まない。
-       (検証: 2026-10-16 に mainnet で実行した。anchor-source から導いた
-       `P=fya1c6` では、cycle 6 の 4 action が `TARGET` に出た。`P=fya1c7`
-       では `TARGET` が 0 本で、`fya1c6` が `other` に出た。P が空のときと
-       `fya1c` のときは `ABORT` になり、問い合わせは送られなかった。)
-   - **恒久対策**は
-     `docs/superpowers/specs/2026-10-16-anchor-double-inscription-guard-design.md`
-     である。wrapper 側で、署名前の chain 照合・結果の分類・600 秒の明示期限・
-     試行 journal を行う。**2026-11-06 の転換の後に**実装し、testnet リハーサルを
-     経て、2026-12 の転換から使う。それまで、このルールに例外は無い。
+   - **exit 0 だけでは成功ではない。** 成功の証拠は、`sign-anchor-event.sh` が
+     stdout に出した JSON 断片の **64 hex の `tx_id`** だけである。tx_id が
+     無ければ、exit が何であっても不確定として扱う。tx_id があっても着地は
+     保証されない。着地は step 8 が確かめる。
+   - **exit 5** = 何も着地していない (送る前に断られた・確認の段で中止した・
+     node が拒んだ)。wrapper の class の行で理由を読む。原因を直してから、
+     下の「再実行を検討してよい条件」へ。
+   - **exit 9** = OUTCOME UNKNOWN。**認可を求めない。** 7c の stderr か Mac の
+     audit log の `expiration=<E>` を拾い、the absence check を
+     `--not-before=<E>` で走らせる。その exit で: 4 → E がまだ確定していない。
+     待って、もう一度 the absence check を走らせる。3 → 無いと証明できない。
+     待って、もう一度走らせる。7c には進まない。10 → 刻まれている。7c は二度と
+     走らせない。その trx_id を operator に示し、step 8 の照合 (operator の判断)
+     へ。0 → 無い・E も確定済み。AI は結果を報告し、次の「再実行を検討して
+     よい条件」の (2)(3) へ。the absence check のそれ以外の exit (2・1・表に
+     無いもの) は 3 と同じ。
+   - **exit 10** = 既に刻まれている。その日の刻印を止め、印字された trx_id を
+     operator に示し、step 8 の照合へ。
+   - **exit 11** = 何も送っていない (無いと証明できない、または前の試行が
+     まだ着地しうる、または記録・LIB の時刻が読めない (7a の注))。待ってから、
+     次の「再実行を検討してよい条件」へ。mainnet に上書きの旗は無い
+     (`--allow-existing-cycle-anchor` は testnet だけで、wrapper は mainnet で
+     この旗を拒む。後の cycle の刻印は testnet でも通さない。設計書 §7 の A8)。
+   - **表に無い exit と、tx_id の無い exit 0 は、exit 9 と同じに扱う** (安全な側)。
+   - **再実行を検討してよい条件 (どの exit でも共通。次の 3 つが全て揃ってから。
+     exit 5 と exit 11 にも課す)**: (1) AI が the absence check (読み取りだけ)
+     を走らせ、exit 0 を operator に見せた。失敗した試行が `expiration=<E>` を
+     印字していたら、必ず `--not-before=<E>` を付ける。(2) operator が再実行を
+     決めた。(3) その後で、上の「per-invocation 認可の手順」を最初からもう一度
+     (token も新しく作る)。
+
+   **the absence check (読み取りだけ。7c の箱と step 8 で同じ 1 つ)。**
+   AI@Mac が repo root で実行する (GET のみ。署名も送信もしない)。actor は既定の
+   `$FY_CONFIG_DIR/xpr-account`。`--not-before=<E>` は E が無い時だけ外す。prefix
+   は手で書かず、`--anchor-source` の file から script が導く:
+
+   ```sh
+   FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config bash scripts/check-cycle-anchor-absent.sh --chain=mainnet-a --anchor-source=public/api/anchor-source.json --not-before=<E>
+   ```
+
+   - exit は設計書 §6 のとおり。**0** = 無い (前の cycle の刻印が同じ答えの中に
+     見えた上で、その prefix が無い。`--not-before` があれば E も確定済み)。
+     **10** = 在る (trx_id・block・時刻を印字)。**4** = E がまだ確定していない。
+     **3** = 履歴が読めない・古い、または前の cycle の刻印が見えないまま走査が
+     尽きた (無いとは言えない)。**2** = profile が使えない。**1** = 使い方の
+     誤り。
+   - **前の cycle の刻印が見えないまま走査が尽きた時は、どの chain でも 0 に
+     ならない** (設計書 §11.10。J1 = (a))。「履歴が空」と「base が履歴を失った」
+     を区別できないため。
+   - **NET の注記。** 「transaction net usage is too high」は node が拒んだ
+     ことを示す。着地しない (exit 5)。**当日に資源を買わない** (`resources::buyplan`
+     はそれ自体が 4 つの門の要る別の送信。`docs/CONSTITUTION.md` の PRIME
+     DIRECTIVE)。既定は NET の回復を待つことで、そのあと上の「再実行を検討して
+     よい条件」へ。
+   - 後ろの守りとして、wrapper 自身の journal が E まで同じ prefix の送信を断る
+     (wrapper の exit 13 → 7c の exit 11)。これは再実行してよい理由ではない。
+     上の 3 つの条件が先である。
+
    `sign-anchor-event.sh` also accepts `--output=<path>`; left unset, its
    stdout is additionally saved to a default path
    `/tmp/fya-<testnet|mainnet>-sign-output.json` — `/tmp/fya-mainnet-sign-output.json`
@@ -1474,26 +1477,33 @@ the values to pass on a given day are in the day-of value sheet above):
    (Step 7b.5 proved the bases answer; it cannot prove the NEW tx is already
    indexed — that is this transient.) Observed on the 2026-09-01 testnet
    rehearsal: both v2 and v1 resolved the same tx about a minute later.
-   **If step 7c exited 0 — `sign-anchor-event.sh` wrote its JSON receipt
-   fragment with a 64-hex `tx_id` to stdout — the tx exists: wait about a
-   minute and re-run THIS step 8 only. Never re-run 7c — that is a second
-   inscription of the same cycle, and no gate refuses it.** (Only the
-   testnet rehearsal script prints a `BROADCAST OK` banner; 7c does not.)
-   **If gate 1 keeps failing beyond this lag window** (re-runs of step 8 over
-   several minutes still exit 3), the tx may have been returned an id and
-   then dropped by the producer — a case this step has no branch for yet
-   (`docs/superpowers/specs/2026-10-16-anchor-double-inscription-guard-design.md`
-   §1 P-5). **Still do NOT re-run 7c.** Apply step 7c's interim absolute
-   rule (「7c が失敗・不確定に終わったときの暫定の絶対ルール」): wait at least
-   60 minutes after the 7c attempt, then run its read-only memo-prefix check
-   (b). A `TARGET` line whose `trx_id` equals the fragment's `tx_id` means the
-   tx is on chain and only indexing is behind — keep re-running step 8. A
-   `TARGET` line with a different `trx_id` means the cycle was inscribed by
-   another attempt — STOP. Either way, and also when the check proves the
-   prefix absent, **the operator decides** the next action; the AI does not
-   ask for a new 7c authorization on its own. The permanent fix (a
-   dropped-tx branch for this step) ships with that design, after the
-   2026-11-06 transition.
+   **Enter the decision tree below only if step 7c exited 0 and wrote a
+   64-hex `tx_id` into its fragment.** For any other 7c outcome, use the box
+   in step 7c (「7c が exit 0 以外で終わった・tx_id が無い・結果に疑いがある時」).
+   (Only the testnet rehearsal script prints a `BROADCAST OK` banner; 7c does
+   not.)
+   - **(i)** Wait about a minute and run THIS step 8 only, again. Repeat
+     until the printed expiration `<E>` has passed. Step 7c is not run again.
+   - **(ii)** If gate 1 still fails after `<E>`, the AI@Mac runs the absence
+     check of step 7c with `--not-before=<E>` (E is the `expiration=` field of
+     7c's stderr, or of the Mac audit log). By its exit:
+     - **4** → E is not yet irreversibly past: wait, then run the check again.
+     - **3** → absence cannot be proven: wait, then run the check again. Do
+       not go to 7c.
+     - **10**, with a trx_id equal to the fragment's `tx_id` → indexing lag
+       only: run step 8 again.
+     - **10**, with a different trx_id → **STOP. Operator reconciliation.**
+       Another attempt inscribed the cycle, so the fragment's `tx_id` is wrong.
+     - **0** → **DROPPED**: nothing was inscribed. 7c can be run again only
+       after the three conditions in the 7c box (the absence check's exit 0
+       shown to the operator, the operator's decision, then the
+       per-invocation authorization from its first step with a new token).
+       The 7a and 7b evidence stays valid (same shape, same prefix).
+     - any other exit → the same as 3.
+   **Never re-run 7c from this step on your own — that is a second
+   inscription of the same cycle.** The wrapper refuses a second 7c only when
+   it can read the first from chain history or from this Mac's journal; that
+   is a backstop, not a permission.
    `--prev-anchor-tx-id=` is **not derived from anything else** —
    `gen-anchor-receipt.sh` only reads it from this flag (or treats it as
    `null` if omitted); get the value from the host's own
@@ -1741,7 +1751,9 @@ execution units call, even where `docs/cycle-transition-steps.json`'s own
 entry is `[]` even though it is an scp round-trip, and unit 7c's entry names
 only `sign-anchor-event.sh`, not the `bin/safe-broadcast` wrapper it always
 invokes). Specifically: `bin/safe-broadcast`, `scripts/lib/side-effects.sh`,
-`scripts/cycle-gate.sh`, and `scripts/node-info.sh` are in scope for the same
+`scripts/lib/anchor-history-read.sh`, `scripts/cycle-gate.sh`,
+`scripts/node-info.sh`, and `scripts/check-cycle-anchor-absent.sh`
+are in scope for the same
 freeze. This matters concretely: `bin/safe-broadcast`'s gate 1 / gate 4
 hardening is the one piece of code a testnet rehearsal cannot exercise at all
 (mainnet-only gates — see `docs/REHEARSAL_2026-09-01.md` F1), so its "0
@@ -1820,6 +1832,15 @@ literal mention in both this doc's model α runbook and
 pipeline but nowhere in either doc) would have failed this test on sight.
 Add a step to the pipeline → add it to the JSON and both docs in the same
 commit, or this test goes red in CI.
+
+The double-inscription guard (design:
+`docs/superpowers/specs/2026-10-16-anchor-double-inscription-guard-design.md`)
+is covered by new suites that `tests/run-all-tests.sh` finds by its
+`test-*.sh` glob: `tests/anchor-history-read/test-ahr-find-cycle-anchor.sh`
+(the cycle-anchor presence read), `tests/safe-broadcast/test-safe-broadcast-outcome.sh`
+(outcome classification, the expiration header, the attempt journal), and the
+directory `tests/check-cycle-anchor-absent/` (the absence check; the suite's
+file name there is set by its own task).
 
 Not covered here (covered elsewhere):
 

@@ -129,11 +129,18 @@ first PulseVM anchor.
 - Upstream keeps transaction admission closed for at least the maximum transaction
   lifetime (about an hour). **No anchor, testnet rehearsal or any other broadcast
   is attempted during the window.**
-- What the code does if someone tries anyway: on the legacy profile a halted
-  chain rejects the push (exit 6 — check the chain before any retry); on an
-  id-only profile an admitted-but-never-executed transaction is reported as exit
-  **9** with the tx_id on stderr ("a broadcast MAY have happened — verify before
-  retrying"). Never re-push on exit 9: look the tx_id up in history first.
+- What the code does if someone tries anyway: on the legacy profile a push into
+  a halted chain is classed UNKNOWN (wrapper exit 10): nothing is sent again
+  until the printed expiration `<E>` is irreversibly past, so look the chain and
+  history up first (design §4). On an id-only profile an
+  admitted-but-never-executed transaction is reported as exit **9** with the
+  tx_id on stderr ("a broadcast MAY have happened — verify before retrying"),
+  and a failure that carries no tx_id is exit 10 there too (design §4, the
+  id-only note). Never re-push on exit 9: look the tx_id up in history first.
+- The wrapper puts an expiration header on the transaction of every profile
+  (design §5, `docs/superpowers/specs/2026-10-16-anchor-double-inscription-guard-design.md`).
+  Whether PulseVM honours that header is UNVERIFIED, and stays so until one
+  testnet run on a PulseVM profile has passed.
 - After the cut, **never select `xpr-mainnet` for a broadcast again**. The legacy
   profile remains in the file for reading and verifying legacy records (the ledger,
   the archive) only.
@@ -182,8 +189,10 @@ matching `FYD_A_CHAIN_PROFILE_TESTNET`) in the shell that runs each step.
    history until the transaction is seen executed with the composed memos. Exit 0
    = confirmed. Exit 9 = not confirmed in the bounded wait — the transaction MAY
    exist: look it up before anything else, and never re-push blindly. (Unit 7c
-   calls the wrapper through `sign-anchor-event.sh`, which reports every wrapper
-   failure as its own exit 5 — read the wrapper's message to tell 6 from 9.)
+   calls the wrapper through `sign-anchor-event.sh`, which maps the wrapper's
+   classes to exit 5 (nothing landed), 9 (outcome unknown), 10 (already
+   inscribed) and 11 (cannot prove the cycle absent, or an earlier attempt is
+   still live) — design §4; read the wrapper's class line.)
 5. Unit 8 writes a **v3** receipt (`chain_id`, `chain_profile`, `block_id`) and
    the append starts a new chain_id era (or continues it, per §3(b)).
 6. By hand, independently: fetch the transaction from one listed history base
