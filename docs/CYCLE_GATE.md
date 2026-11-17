@@ -1338,7 +1338,7 @@ the values to pass on a given day are in the day-of value sheet above):
    - **exit 11** = 何も送っていない (無いと証明できない、または前の試行が
      まだ着地しうる)。待ってから、次の「再実行を検討してよい条件」へ。mainnet
      に上書きの旗は無い (`--allow-existing-cycle-anchor` は testnet だけで、
-     wrapper は mainnet でこの旗を拒む。設計書 §3 の A8)。
+     wrapper は mainnet でこの旗を拒む。設計書 §7 の A8)。
    - **表に無い exit と、tx_id の無い exit 0 は、exit 9 と同じに扱う** (安全な側)。
    - **再実行を検討してよい条件 (どの exit でも共通。次の 3 つが全て揃ってから。
      exit 5 と exit 11 にも課す)**: (1) AI が the absence check (読み取りだけ)
