@@ -20,7 +20,7 @@
 | D1 | R1 は `--expect-cycle=<N+1>`（まだ刻んでいない次の cycle） | `--expect-cycle=<C>`。C は当日の正本 `public/api/anchor-source.json` の `observations_branch.cycle_number_observed`（既に刻んだ cycle の稽古＝DRESS。9/1 と同じ） | 稽古は `--expect-cycle` が正本の値と違えば step 1/10 で止まる（`c46894b:scripts/run-testnet-rehearsal.sh:343-346`）。`--source=` の見本の file は `--allow-fixture` が要り、gate 1 の証拠にならない（同 `:306-318`） |
 | D2 | R3（旗つきの再実行）が R1 と別 | R1 の 2 回目（旗つき）が R3 を兼ねる。R3 を別に打たない | DRESS では、旗なしで送れる道が無い（§4 の分岐。`docs/superpowers/specs/…-design.md` §11.10 の表） |
 | D3 | （R2a の旗の有無は書かれていない） | R2a は**旗なし** | 呼ぶ順は journal が先、check A が後（`beb5061:bin/safe-broadcast:1659-1660`、2 回目は `:1720-1722`）。旗なしでも journal の断り（wrapper 13）が先に出る。旗をつけると、有効期限 E が過ぎた後に打った時に check A の「見つかった」を旗が通し、送らないはずの run が送ってしまう |
-| D4 | R4 は「設定の `anchor-sink` を存在しない口座にした設定」で稽古を走らせる | 稽古の起動は設定の置き場を差し替えられないので、R4 の経路は未決（§4） | 設定の置き場は固定（`c46894b:scripts/run-testnet-rehearsal.sh:160-167`、環境変数で変えられない） |
+| D4 | R4 は「設定の `anchor-sink` を存在しない口座にした設定」で稽古を走らせる | **行わない**（2026-11-17 総監督の決定。経営者の指摘による） | ― |
 
 ## 1. 前提の確かめ（AI が打つ読み取りだけ）
 
@@ -107,7 +107,7 @@ EOF
 - **断られると分かっている run（R1 の 1 回目・R2a・R2b）も解錠が要る。** 稽古の step 3/10 が鍵の一覧を読み、step 4/10 が口座を読むので、錠がかかっていると終了コード 2 で止まる（`c46894b:scripts/run-testnet-rehearsal.sh:445-460`・`:512-519`。断る判断は step 7/10 の wrapper の中で、その後ろ）。
 - **公開鍵の確かめ**: 稽古の step 3/10 が、チェーン上の現在の公開鍵が手元のキーストアに在ることを確かめる（`present: … (matches current on-chain key)`）。出なければ終了コード 1 で止まる。
 - 経営者が打つ解錠・施錠の命令は、各 run の節にある（毎回同じ形）。この節では再掲しない。
-- 依頼の粒度（1 ピング 1 判断）: ピング A = R1 の 1 回目。ピング B = R1 の 2 回目と R2a（有効期限に近いので続けて。§3.3）。ピング C = R2b（E が確定した後）。R5 は AI だけ。R4 は経営者が「やる」と決めた時だけ。
+- 依頼の粒度（1 ピング 1 判断）: ピング A = R1 の 1 回目。ピング B = R1 の 2 回目と R2a（有効期限に近いので続けて。§3.3）。ピング C = R2b（E が確定した後）。R5 は AI だけ。R4 は行わない（§4）。
 
 ## 3. R1〜R5 を 1 つずつ
 
@@ -359,31 +359,9 @@ HOME=~/.metal-fy-proton-test proton key:lock
 rm -f "$RH_LOGS/rh-vars.sh"
 ```
 
-## 4. R4（任意）: やる・やらない
+## 4. R4: 行わない
 
-**経営者が「やる」と決めた時だけ。** 目的: 存在しない送り先の口座で、チェーンが断ること（wrapper 6・`outcome=rejected`）と、その断りの記録が次の run を journal で止めないこと。testnet だけで、何も本番に変えない。
-
-**この文書の時点では、R4 の経路が決まっていない（D4）。** 稽古の起動は設定の置き場を `~/freedom-yield-rehearsal-config`（ログインの home の下）に固定していて、環境変数でも引数でも変えられない（`c46894b:scripts/run-testnet-rehearsal.sh:160-167`・`:362-371`・`:537`）。「設定の写しを作って送り先だけ替える」やり方は、稽古の起動では使えない。残る形は次のとおりで、**どれにするかは経営者が「やる」と決める時に、監督と決める**。
-- (i) 本物の設定の `anchor-sink` の 1 行を一時的に存在しない口座名にして稽古を打ち、すぐ元に戻す。本物の設定を触るので、戻しの確かめ（件数と判定だけ）が要る。
-- (ii) `scripts/sign-anchor-event.sh` を、設定の写しを指して直に走らせる（送信の経路は同じ wrapper だが、稽古の起動ではなく、旗 `--allow-existing-cycle-anchor` を渡せない。手順は別に設計する）。
-
-**存在しない口座名の決め方**: 当日に AI が `get_account` で「無い」ことを読み取りで確かめた名前を使う。架空の名前の例をこの文書に書かない（「当日に決めて、無いことを確かめた名前」と書く）。
-
-打つ人: AI（読み取りだけ）。
-
-```
-. "$RH_LOGS/rh-vars.sh" && curl -sS --max-time 20 -X POST -H 'content-type: application/json' -d '{"account_name":"<当日に決めた名前>"}' "$(jq -r '"https://" + .profiles["xpr-testnet"].node_hosts[0]' "$PROFILES")/v1/chain/get_account" | jq 'has("error")'
-```
-
-- 期待: `true`（口座が無い）。`false` ならその名前は使わない。
-
-**期待（やる時）**: 稽古の終了コード 1（`safe-broadcast refused or the chain rejected the tx — nothing landed (wrapper exit 6)`）。audit log の post の行が `outcome=rejected`。続けて、元の設定で稽古を 1 回打つと、journal が止めない（その run は §3.1 の期待のどれかになる）。
-
-| 欄 | 記入 |
-|---|---|
-| やる・やらない | （空欄。経営者が決める） |
-| 日時 | （空欄） |
-| 採った経路（i か ii） | （空欄） |
+**R4 は行わない**（2026-11-17 総監督の決定。経営者の指摘による）。R4 の命令・経路・記入の欄は、この文書から外した。
 
 ## 5. 結果を書く節（稽古の当日に追記する。空欄の枠）
 
@@ -405,7 +383,6 @@ rm -f "$RH_LOGS/rh-vars.sh"
 | R2b | （空欄） | （空欄） | （空欄） | （空欄） |
 | R5（P） | （空欄） | （空欄） | （空欄） | （空欄） |
 | R5（NEXT） | （空欄） | なし | （空欄） | （空欄） |
-| R4（やった時だけ） | （空欄） | （空欄） | （空欄） | （空欄） |
 
 | 欄 | 記入 |
 |---|---|
