@@ -43,6 +43,21 @@
 #   now: refused before any gate), an XPR_TESTNET_RPC that is not one of the
 #   profile's history bases (old: used unchecked; now: gate 1 refuses), and
 #   any proton-cli.json that fails the new host check.
+#   Also NOT here (2026-11-17, the double-inscription guard): the 21 scenarios
+#   that reach the confirmation screen or the push. Each now passes through the
+#   history library, check A, the attempt journal, the second chain:info, the
+#   expiration header and the outcome classification, so its record changed on
+#   purpose; they are pinned in test-safe-broadcast-outcome.sh (group MV), and
+#   their blocks were DELETED from the golden file (nothing was regenerated):
+#     gate 1: XPR_TESTNET_RPC = the profile's history base
+#     gate 2b: testnet, proton-test alias token
+#     gate 3: override EQUAL to the profile (testnet) / (mainnet) / empty override = unset
+#     confirm: testnet wrong phrase / EOF / correct phrase; mainnet correct phrase
+#     push: testnet processed, proton-test alias, chain+sha bound; mainnet cycle-4,
+#           alias proton, updateauth + text dry-run; answer with only id / only
+#           transaction_id; chain rejects (now 10); answer without any id (now 10);
+#           mainnet chain rejects (now 10)
+#     audit: log write fails (now 13: the journal cannot be read)
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -75,7 +90,6 @@ OUT="$T/actual.txt"
 : > "$OUT"
 
 MAIN_TOKEN='{"chain":"mainnet-a"}'
-C3_SHA="$(jq -c . "$T/tx-c3.json" | { if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi; } | awk '{print $1}')"
 
 # sc <name> <token-content|@stale|@none> <stdin> [VAR=v ...] -- <args...>
 sc() {
@@ -150,7 +164,6 @@ sc "gate 1: non-object .data"    "$MAIN_TOKEN" '' -- --tx="$T/tx-hex.json" "${M[
 sc "gate 1: updateauth vs transfer evidence" "$MAIN_TOKEN" '' -- --tx="$T/tx-upd.json" "${M[@]}" --testnet-tx-id="$SBH_UPD_DIFF" --dry-run-log="$T/dry-c3.json"
 sc "gate 1: v2-shaped answer (trx_id, no id) on the v1 endpoint → refuse" "$MAIN_TOKEN" '' -- --tx="$T/tx-c4.json" "${M[@]}" --testnet-tx-id="$SBH_V2SHAPE" --dry-run-log="$T/dry-c4.json"
 sc "gate 1: curl missing"        "$MAIN_TOKEN" '' "PATH=$SBH_PATH_NOCURL" -- --tx="$T/tx-c4.json" "${M[@]}" --testnet-tx-id="$SBH_CYCLE4" --dry-run-log="$T/dry-c4.json"
-sc "gate 1: XPR_TESTNET_RPC = the profile's history base" "$MAIN_TOKEN" '' XPR_TESTNET_RPC=https://test.proton.eosusa.io -- --tx="$T/tx-c3.json" "${M[@]}" --testnet-tx-id="$SBH_R16" --dry-run-log="$T/dry-c3.json"
 
 # ---- gate 4 ----
 sc "gate 4: no dry-run log"      "$MAIN_TOKEN" '' -- --tx="$T/tx-c3.json" "${M[@]}" --testnet-tx-id="$SBH_R16"
@@ -165,42 +178,17 @@ sc "gate 2b: mainnet, testnet-bound token" '{"chain":"testnet-a"}' '' -- --tx="$
 sc "gate 2b: mainnet, bare token"          ''                      '' -- --tx="$T/tx-c3.json" "${M[@]}" --testnet-tx-id="$SBH_R16" --dry-run-log="$T/dry-c3.json"
 sc "gate 2b: mainnet, unrecognized chain"  '{"chain":"moon"}'      '' -- --tx="$T/tx-c3.json" "${M[@]}" --testnet-tx-id="$SBH_R16" --dry-run-log="$T/dry-c3.json"
 sc "gate 2b: testnet, tx_sha256 mismatch"  "{\"chain\":\"testnet-a\",\"tx_sha256\":\"$SBH_ZERO\"}" '' -- --tx="$T/tx-c3.json" --chain=testnet-a --non-interactive
-sc "gate 2b: testnet, proton-test alias token" '{"chain":"proton-test"}' '' -- --tx="$T/tx-c3.json" --chain=testnet-a --non-interactive
 
 # ---- gate 3 ----
 sc "gate 3: testnet chain_id mismatch" '' '' STUB_CHAIN_ID=ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff -- --tx="$T/tx-c3.json" --chain=testnet-a --non-interactive
 sc "gate 3: mainnet answers testnet id" "$MAIN_TOKEN" '' STUB_CHAIN_ID="$SBH_XPR_TEST_CID" -- --tx="$T/tx-c4.json" "${M[@]}" --testnet-tx-id="$SBH_CYCLE4" --dry-run-log="$T/dry-c4.json"
 sc "gate 3: chain:set fails"     '' '' STUB_CHAINSET_RC=1 -- --tx="$T/tx-c3.json" --chain=testnet-a --non-interactive
 sc "gate 3: chain:info unparseable" '' '' 'STUB_CHAIN_INFO_RAW=Error: connect ECONNREFUSED' -- --tx="$T/tx-c3.json" --chain=testnet-a --non-interactive
-sc "gate 3: override EQUAL to the profile (testnet)" '' '' FYD_TESTNET_CHAIN_ID="$SBH_XPR_TEST_CID" -- --tx="$T/tx-c3.json" --chain=testnet-a --non-interactive
-sc "gate 3: override EQUAL to the profile (mainnet)" "$MAIN_TOKEN" '' FYD_MAINNET_CHAIN_ID="$SBH_XPR_MAIN_CID" -- --tx="$T/tx-c4.json" "${M[@]}" --testnet-tx-id="$SBH_CYCLE4" --dry-run-log="$T/dry-c4.json"
-sc "gate 3: empty override = unset" '' '' FYD_TESTNET_CHAIN_ID= -- --tx="$T/tx-c3.json" --chain=testnet-a --non-interactive
 
-# ---- confirmation prompt ----
-sc "confirm: testnet, wrong phrase" '' 'yes' -- --tx="$T/tx-c3.json" --chain=testnet-a
-sc "confirm: testnet, EOF"          '' ''    -- --tx="$T/tx-c3.json" --chain=testnet-a
-sc "confirm: testnet, correct phrase → push" '' 'BROADCAST testnet-a
-' -- --tx="$T/tx-c3.json" --chain=testnet-a
-sc "confirm: mainnet, correct phrase → push" "$MAIN_TOKEN" 'BROADCAST mainnet-a
-' -- --tx="$T/tx-c4.json" --chain=mainnet-a --testnet-tx-id="$SBH_CYCLE4" --dry-run-log="$T/dry-c4.json"
-
-# ---- the push (processed profile: trace in the answer) ----
-sc "push: testnet processed → tx_id"   '' '' -- --tx="$T/tx-c3.json" --chain=testnet-a --non-interactive
-sc "push: testnet proton-test alias"   '' '' -- --tx="$T/tx-c3.json" --chain=proton-test --non-interactive
-sc "push: testnet chain+sha bound"     "{\"chain\":\"testnet-a\",\"tx_sha256\":\"$C3_SHA\"}" '' -- --tx="$T/tx-c3.json" --chain=testnet-a --non-interactive
-sc "push: mainnet cycle-4 all gates"   "$MAIN_TOKEN" '' -- --tx="$T/tx-c4.json" "${M[@]}" --testnet-tx-id="$SBH_CYCLE4" --dry-run-log="$T/dry-c4.json"
-sc "push: mainnet alias proton"        '{"chain":"proton"}' '' -- --tx="$T/tx-c4.json" --chain=proton --non-interactive --testnet-tx-id="$SBH_CYCLE4" --dry-run-log="$T/dry-c4.json"
-sc "push: mainnet updateauth + text dry-run" "$MAIN_TOKEN" '' -- --tx="$T/tx-upd.json" "${M[@]}" --testnet-tx-id="$SBH_UPD_SAME" --dry-run-log="$T/dry-text.txt"
-sc "push: answer carries only id"      '' '' STUB_PUSH_MODE=idfield -- --tx="$T/tx-c3.json" --chain=testnet-a --non-interactive
-sc "push: answer carries only transaction_id" '' '' STUB_PUSH_MODE=idonly -- --tx="$T/tx-c3.json" --chain=testnet-a --non-interactive
-sc "push: chain rejects"               '' '' STUB_PUSH_MODE=crash -- --tx="$T/tx-c3.json" --chain=testnet-a --non-interactive
-sc "push: answer without any id"       '' '' STUB_PUSH_MODE=noid -- --tx="$T/tx-c3.json" --chain=testnet-a --non-interactive
-# Exit 7: both audit targets unwritable — the primary is a DIRECTORY, and the
-# fallback lives under the login home, which the `id` stub makes a
-# nonexistent relative path. Refused BEFORE the push, nothing is written.
-sc "audit: log write fails (primary a directory, no login home) → exit 7" '' '' \
-	"PATH=$SBH_PATH_NOUSER" "FYD_BROADCAST_AUDIT_LOG=$T" -- --tx="$T/tx-c3.json" --chain=testnet-a --non-interactive
-sc "push: mainnet chain rejects"       "$MAIN_TOKEN" '' STUB_PUSH_MODE=crash -- --tx="$T/tx-c4.json" "${M[@]}" --testnet-tx-id="$SBH_CYCLE4" --dry-run-log="$T/dry-c4.json"
+# ---- confirmation prompt and the push ----
+# (no scenario here: every one of them now passes through check A, the attempt
+#  journal, the expiration header and the outcome classification — they are
+#  pinned in test-safe-broadcast-outcome.sh, group MV)
 
 if [ "$WRITE" = "1" ]; then
 	mkdir -p "$(dirname "$GOLDEN")"
