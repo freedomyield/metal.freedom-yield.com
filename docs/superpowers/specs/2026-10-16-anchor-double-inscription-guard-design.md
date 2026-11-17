@@ -606,3 +606,10 @@ So §11.3 (a) and §11.5's no-off-switch become the design: check A says CLEAR o
 | R5 | The checker for R1's prefix with `--not-before=<E>` → 10 with R1's tx; the next unused prefix → 0 | R1's prefix: 10 if the base indexed R1's tx, else 3 (the T4 reading above). The next unused prefix: 0 only when R1's anchor is visible as the floor; otherwise 3. §8's "0" is the expectation under (b) | Exit 0 needs a floor (T4 above). R1's own anchor becomes the floor once it is indexed |
 
 R3 (override with the flag) needs no new row: its WARN names either the FOUND tx or an exhausted scan without a floor.
+
+### 11.11 Callers as built (T3, 18cb100), 2026-11-17
+
+Append-only, like §11 and §11.10. Like §11.10, this section prevails over the corresponding sentence of §4. Its basis is the two callers as T3 shipped them (`18cb100`): the exit-code tables at the top of `scripts/run-testnet-rehearsal.sh` and `scripts/sign-anchor-event.sh`. Two rulings of T3's supervisor, taken up by the general supervisor:
+
+1. **The last sentence of §4's "`run-testnet-rehearsal.sh` mapping" ("Other failures stay `fail()` = 1") is read as follows.** When the wrapper does not exit 0 with exactly one 64-hex tx id on its stdout, or exits with a code not in the mapping (an interrupt, for example), the rehearsal exits **9** (OUTCOME UNKNOWN), not 1. This is the same strict side as the mapping of `scripts/sign-anchor-event.sh`. Exit 1 remains for: a pre-check or usage error before the push; a wrapper refusal or a chain rejection (wrapper 2 to 8, where nothing lands); and a failure of a step after the broadcast (steps 8 and 9 of the rehearsal), as in the table of the shipped script.
+2. **The rehearsal's token path has the same definition as the wrapper's.** It is the value of `FYD_BROADCAST_TOKEN_FILE`, or, when that is unset, the wrapper's own default. The two scripts do not each keep a path of their own, so a path chosen in the environment reaches both.
