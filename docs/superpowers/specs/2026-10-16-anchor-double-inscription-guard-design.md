@@ -581,3 +581,28 @@ status=0
 
 - **J1** — §11.3: check A's "absent" requires the floor (a), or stays as §3 (b). Recommended (a). Blocks T2 and T4, not T1.
 - **J2** — §11.5: no off switch for the guard; removal by revert. Recommended yes. Blocks nothing.
+
+### 11.10 Operator decisions 2026-11-17
+
+Append-only, like §11. It answers the two questions §11.9 left open. T2, T4 and T5 take this section as their source; where a line of §8 or §11.3 reads differently, this section prevails.
+
+- **J1 = (a).** The operator answered "推奨で" (2026-11-17 13:4x, chat). The recommended option of §11.3 is (a).
+- **J2 = yes.** Same words, same time. The recommended option of §11.5 is "no off switch; removal by revert".
+
+So §11.3 (a) and §11.5's no-off-switch become the design: check A says CLEAR only when the same answer shows the previous cycle's anchor (the floor); on mainnet an exhausted scan without a floor is UNREADABLE and ends in wrapper 12; on testnet the existing `--allow-existing-cycle-anchor` also accepts an exhausted scan without a floor, with a WARN. No new flag and no new configuration key is added. To take the guard out, revert the tasks newest first (§11.5).
+
+**Where each task lands (the last paragraph of §11.3).**
+- **T1** does not change. Its verdict already carries `floor`, and `floor: null` means an exhausted scan without a floor (§11.6).
+- **T2** gains two rules. Property A3 gains "an exhausted scan without a floor → 12 on mainnet". A8's testnet case gains the path "an exhausted scan without a floor → pass with a WARN that names the missing floor" when `--allow-existing-cycle-anchor` is given.
+- **T4** exits 0 only when a floor is seen and the prefix is absent (and, with `--not-before`, E is irreversibly past). An exhausted scan without a floor is never 0 on any chain. The checker has no flag (J1 adds none), so that case exits 3 (§6: history unreadable or stale). Reading: from J1 (a) and "no new flag"; the T4 supervisor confirms it.
+- **T5** writes the runbooks to the table below. The absence check is "absent" only with the floor, so the runbook never says "absent" from an empty history alone.
+
+**§8 under J1 (a).** The testnet base does not hold the rehearsal actor's history today (§11.3), so the middle column assumes that state; the last line of each cell says what changes when the base holds it.
+
+| Scenario | §8 as written | Under J1 (a) | Why |
+|---|---|---|---|
+| R1 | First run for `<N+1>` → `BROADCAST OK`, audit pre line with `expiration` and `memo_prefix`. A prefix already on testnet → exit 10 (R2b's evidence), then R3 | Run 1, without the flag: the base shows no history for the actor, so no floor is seen → wrapper 12 → rehearsal 11, nothing sent. This is a live refusal of J1, one proof. Then, on the operator's new instruction to run, with `--allow-existing-cycle-anchor` → it sends, with a WARN naming the exhausted scan without a floor (`BROADCAST OK`, audit pre line with `expiration` and `memo_prefix`). If the base already shows an `<N+1>` prefix (an earlier dress run) → 10 (R2b's evidence) → R3. If the base shows a floor → `BROADCAST OK` without the flag, as §8 says | Without a floor an empty history cannot tell "never inscribed" from "history lost" (§11.3). The flag is the testnet-only way through, and it is used only after the refusal has been seen |
+| R2b | After E and the LIB lag, re-run without the flag → wrapper 11 → rehearsal 10, with R1's tx_id | After E and the LIB lag, re-run without the flag. If the base indexed R1's tx → wrapper 11 → rehearsal 10, as §8 says. If it did not → an exhausted scan without a floor → wrapper 12 → rehearsal 11, nothing sent; R2b's evidence was not obtained, and that is recorded. It is not retaken with the flag (§11.8: the base's indexing of new actions is UNVERIFIED) | Check A can only report what the base shows. A tx the base never indexed is the §11.3 case again |
+| R5 | The checker for R1's prefix with `--not-before=<E>` → 10 with R1's tx; the next unused prefix → 0 | R1's prefix: 10 if the base indexed R1's tx, else 3 (the T4 reading above). The next unused prefix: 0 only when R1's anchor is visible as the floor; otherwise 3. §8's "0" is the expectation under (b) | Exit 0 needs a floor (T4 above). R1's own anchor becomes the floor once it is indexed |
+
+R3 (override with the flag) needs no new row: its WARN names either the FOUND tx or an exhausted scan without a floor.
