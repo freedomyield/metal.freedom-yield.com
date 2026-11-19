@@ -18,6 +18,9 @@
 set -u
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# Fake anchor account (EOSIO name shape, 12 chars). Used wherever the heredoc
+# expands variables; the quoted heredocs further down keep it as literal text.
+FAKE_ANCHOR_ACCOUNT=fakeanchor12
 # shellcheck source=tests/lib/assert.sh
 . "$REPO_ROOT/tests/lib/assert.sh"
 # The shared harness gives us sbh_tree (a minimal repo tree around a copy of the
@@ -149,8 +152,8 @@ FIXTURE_DIR="$(mktemp -d -t safe-bcast-fixtures.XXXXXX)"
 R16_RESOLVABLE_TXID="1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
 cat > "$FIXTURE_DIR/r16.json" <<JSON
 {"id":"${R16_RESOLVABLE_TXID}","block_num":123456,"traces":[
-	{"act":{"account":"eosio.token","name":"transfer","authorization":[{"actor":"metalfreedom","permission":"anchor"}],"data":{"memo":"fya1c3-test"}}},
-	{"act":{"account":"eosio.token","name":"transfer","authorization":[{"actor":"metalfreedom","permission":"anchor"}],"data":{"memo":"fya1c3-test"}}}
+	{"act":{"account":"eosio.token","name":"transfer","authorization":[{"actor":"${FAKE_ANCHOR_ACCOUNT}","permission":"anchor"}],"data":{"memo":"fya1c3-test"}}},
+	{"act":{"account":"eosio.token","name":"transfer","authorization":[{"actor":"${FAKE_ANCHOR_ACCOUNT}","permission":"anchor"}],"data":{"memo":"fya1c3-test"}}}
 ]}
 JSON
 
@@ -161,8 +164,8 @@ JSON
 CYCLE2_EVIDENCE_TXID="$(printf 'aaaa2222%.0s' 1 2 3 4 5 6 7 8)"
 cat > "$FIXTURE_DIR/cycle2.json" <<JSON
 {"id":"${CYCLE2_EVIDENCE_TXID}","block_num":222222,"traces":[
-	{"act":{"account":"eosio.token","name":"transfer","authorization":[{"actor":"metalfreedom","permission":"anchor"}],"data":{"memo":"fya1c2-test"}}},
-	{"act":{"account":"eosio.token","name":"transfer","authorization":[{"actor":"metalfreedom","permission":"anchor"}],"data":{"memo":"fya1c2-test"}}}
+	{"act":{"account":"eosio.token","name":"transfer","authorization":[{"actor":"${FAKE_ANCHOR_ACCOUNT}","permission":"anchor"}],"data":{"memo":"fya1c2-test"}}},
+	{"act":{"account":"eosio.token","name":"transfer","authorization":[{"actor":"${FAKE_ANCHOR_ACCOUNT}","permission":"anchor"}],"data":{"memo":"fya1c2-test"}}}
 ]}
 JSON
 
@@ -173,9 +176,9 @@ JSON
 CYCLE4_EVIDENCE_TXID="$(printf 'bbbb4444%.0s' 1 2 3 4 5 6 7 8)"
 cat > "$FIXTURE_DIR/cycle4.json" <<JSON
 {"id":"${CYCLE4_EVIDENCE_TXID}","block_num":444444,"traces":[
-	{"act":{"account":"eosio.token","name":"transfer","authorization":[{"actor":"metalfreedom","permission":"anchor"}],"data":{"memo":"fya1c4-test"}}},
-	{"act":{"account":"eosio.token","name":"transfer","authorization":[{"actor":"metalfreedom","permission":"anchor"}],"data":{"memo":"fya1c4-test"}}},
-	{"act":{"account":"eosio.token","name":"transfer","authorization":[{"actor":"metalfreedom","permission":"anchor"}],"data":{"memo":"fya1c4-test"}}}
+	{"act":{"account":"eosio.token","name":"transfer","authorization":[{"actor":"${FAKE_ANCHOR_ACCOUNT}","permission":"anchor"}],"data":{"memo":"fya1c4-test"}}},
+	{"act":{"account":"eosio.token","name":"transfer","authorization":[{"actor":"${FAKE_ANCHOR_ACCOUNT}","permission":"anchor"}],"data":{"memo":"fya1c4-test"}}},
+	{"act":{"account":"eosio.token","name":"transfer","authorization":[{"actor":"${FAKE_ANCHOR_ACCOUNT}","permission":"anchor"}],"data":{"memo":"fya1c4-test"}}}
 ]}
 JSON
 
@@ -186,7 +189,7 @@ JSON
 # (not `.traces[]`) so that branch of the extraction is also exercised.
 UPDATEAUTH_SAME_TXID="$(printf 'cccc5555%.0s' 1 2 3 4 5 6 7 8)"
 cat > "$FIXTURE_DIR/updateauth-same.json" <<JSON
-{"id":"${UPDATEAUTH_SAME_TXID}","block_num":555555,"actions":[{"act":{"account":"eosio","name":"updateauth","authorization":[{"actor":"metalfreedom","permission":"active"}],"data":{}}}]}
+{"id":"${UPDATEAUTH_SAME_TXID}","block_num":555555,"actions":[{"act":{"account":"eosio","name":"updateauth","authorization":[{"actor":"${FAKE_ANCHOR_ACCOUNT}","permission":"active"}],"data":{}}}]}
 JSON
 
 # UPDATEAUTH_DIFF_TXID: single eosio.token::transfer (memo fya1c4-test) —
@@ -196,7 +199,7 @@ JSON
 # wrapper) so that branch is also exercised.
 UPDATEAUTH_DIFF_TXID="$(printf 'dddd6666%.0s' 1 2 3 4 5 6 7 8)"
 cat > "$FIXTURE_DIR/updateauth-diff.json" <<JSON
-{"id":"${UPDATEAUTH_DIFF_TXID}","block_num":666666,"trx":{"trx":{"actions":[{"account":"eosio.token","name":"transfer","authorization":[{"actor":"metalfreedom","permission":"anchor"}],"data":{"memo":"fya1c4-test"}}]}}}
+{"id":"${UPDATEAUTH_DIFF_TXID}","block_num":666666,"trx":{"trx":{"actions":[{"account":"eosio.token","name":"transfer","authorization":[{"actor":"${FAKE_ANCHOR_ACCOUNT}","permission":"anchor"}],"data":{"memo":"fya1c4-test"}}]}}}
 JSON
 
 # NO_ACTIONS_TXID: resolves (has a matching .id) but carries NO action data
@@ -284,8 +287,8 @@ cat > "$TEST_TX_VALID" <<'JSON'
     {
       "account": "eosio.token",
       "name": "transfer",
-      "authorization": [{"actor": "metalfreedom", "permission": "anchor"}],
-      "data": {"from": "metalfreedom", "to": "fyhistory", "quantity": "0.0001 XPR", "memo": "fya1c3-test"}
+      "authorization": [{"actor": "fakeanchor12", "permission": "anchor"}],
+      "data": {"from": "fakeanchor12", "to": "fakesink1", "quantity": "0.0001 XPR", "memo": "fya1c3-test"}
     }
   ]
 }
@@ -320,8 +323,8 @@ cat > "$TEST_TX_CYCLE4" <<'JSON'
     {
       "account": "eosio.token",
       "name": "transfer",
-      "authorization": [{"actor": "metalfreedom", "permission": "anchor"}],
-      "data": {"from": "metalfreedom", "to": "fyhistory", "quantity": "0.0001 XPR", "memo": "fya1c4-test"}
+      "authorization": [{"actor": "fakeanchor12", "permission": "anchor"}],
+      "data": {"from": "fakeanchor12", "to": "fakesink1", "quantity": "0.0001 XPR", "memo": "fya1c4-test"}
     }
   ]
 }
@@ -355,8 +358,8 @@ cat > "$TEST_TX_UPDATEAUTH" <<'JSON'
     {
       "account": "eosio",
       "name": "updateauth",
-      "authorization": [{"actor": "metalfreedom", "permission": "active"}],
-      "data": {"account": "metalfreedom", "permission": "anchor", "parent": "active", "auth": {"threshold": 1, "keys": [], "accounts": [], "waits": []}}
+      "authorization": [{"actor": "fakeanchor12", "permission": "active"}],
+      "data": {"account": "fakeanchor12", "permission": "anchor", "parent": "active", "auth": {"threshold": 1, "keys": [], "accounts": [], "waits": []}}
     }
   ]
 }
@@ -373,7 +376,7 @@ cat > "$TEST_TX_HEXDATA" <<'JSON'
     {
       "account": "eosio.token",
       "name": "transfer",
-      "authorization": [{"actor": "metalfreedom", "permission": "anchor"}],
+      "authorization": [{"actor": "fakeanchor12", "permission": "anchor"}],
       "data": "0011deadbeef"
     }
   ]

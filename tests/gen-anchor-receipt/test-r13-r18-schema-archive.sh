@@ -62,7 +62,7 @@ OB_ROOT="c2f5fb3e78a0527aa993a1beaa601a1acf4bc74c80a1f08a22aee47e44306c49"
 AR_ROOT="8ad3a424779b937615987a7ea7a384b32cda6dfbe778f220c8da7ce6a9b4b84f"
 DAG_ROOT="168a3abd5f657b639dd095b228cc5fc62e5a3c7c1fa3559c20669048d2a54511"
 TX_ID="d1f94312e950b813f4f52476027340e442665a92cc4a80971086feb5c8768fc9"
-ACTOR="metalfreedom"
+ACTOR="fakeanchor12"
 PERMISSION="anchor"
 MEMO_PREFIX="fya1c9"
 
@@ -83,7 +83,7 @@ cat > "$INPUT_JSON" <<EOF
     {"branch": "dag_root_summary", "memo": "${MEMO_PREFIX}:${DAG_ROOT}", "root_hex": "$DAG_ROOT"}
   ],
   "authorization": {"actor": "$ACTOR", "permission": "$PERMISSION"},
-  "sink": "fyhistory",
+  "sink": "fakesink1",
   "quantity": "0.0001 XPR"
 }
 EOF

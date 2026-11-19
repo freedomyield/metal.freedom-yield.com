@@ -18,6 +18,8 @@
 set -u
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# Fake anchor account for the synthetic fixtures (EOSIO name shape, 12 chars).
+FAKE_ANCHOR_ACCOUNT=fakeanchor12
 ARCHIVER="${ARCHIVER:-${REPO_ROOT}/scripts/archive-legacy-anchors.sh}"
 VERIFIER="${VERIFIER:-${REPO_ROOT}/scripts/verify-legacy-anchor-archive.sh}"
 
@@ -46,12 +48,12 @@ mk_tx() { # <idx> <tx_id> <block_num> <prefix>
 	bid="$(printf 'block%s' "$bn" | H)"
 	local memos=("${p}-id:${id}" "${p}-ob:${ob}" "${p}-ar:${ar}" "${p}:${dg}") acts="" m
 	for m in "${memos[@]}"; do
-		acts="${acts}${acts:+,}{\"act\":{\"account\":\"eosio.token\",\"name\":\"transfer\",\"authorization\":[{\"actor\":\"metalfreedom\",\"permission\":\"anchor\"}],\"data\":{\"memo\":\"$m\"}},\"trx_id\":\"$tx\",\"block_num\":$bn,\"block_id\":\"$bid\",\"@timestamp\":\"2026-08-04T04:00:00.000\"}"
+		acts="${acts}${acts:+,}{\"act\":{\"account\":\"eosio.token\",\"name\":\"transfer\",\"authorization\":[{\"actor\":\"${FAKE_ANCHOR_ACCOUNT}\",\"permission\":\"anchor\"}],\"data\":{\"memo\":\"$m\"}},\"trx_id\":\"$tx\",\"block_num\":$bn,\"block_id\":\"$bid\",\"@timestamp\":\"2026-08-04T04:00:00.000\"}"
 	done
 	# deliberately non-canonical whitespace: verbatim storage must survive it
 	printf '{ "query_time_ms": 1.5,  "executed": true, "trx_id": "%s", "lib": 999,\n "actions": [%s] }\n' "$tx" "$acts" > "$FX/hist-$tx.json"
 	printf '{"id":"%s","block_num":%s,"timestamp":"2026-08-04T04:00:00.000"}' "$bid" "$bn" > "$FX/block-$bn.json"
-	printf '{"schema_version":2,"event_type":"cyclestart","dag_root_hash":"%s","memo_prefix":"%s","network":"xpr-mainnet","chain":"metal-a-chain","tx_id":"%s","block_num":%s,"block_time":"2026-08-04T04:00:00Z","signing_actor":"metalfreedom","signing_permission":"anchor"}\n' "$dg" "$p" "$tx" "$bn" >> "$FX/history.jsonl"
+	printf '{"schema_version":2,"event_type":"cyclestart","dag_root_hash":"%s","memo_prefix":"%s","network":"xpr-mainnet","chain":"metal-a-chain","tx_id":"%s","block_num":%s,"block_time":"2026-08-04T04:00:00Z","signing_actor":"%s","signing_permission":"anchor"}\n' "$dg" "$p" "$tx" "$bn" "$FAKE_ANCHOR_ACCOUNT" >> "$FX/history.jsonl"
 	mkdir -p "$FX/receipts"
 	jq -n --arg tx "$tx" --argjson bn "$bn" --argjson m "$(printf '%s\n' "${memos[@]}" | jq -R . | jq -s .)" \
 		'{anchor:{tx_id:$tx, block_num:$bn, actions:($m | map({memo:.}))}}' > "$FX/receipts/anchor-receipt-$tx.json"
