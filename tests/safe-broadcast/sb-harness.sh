@@ -76,6 +76,8 @@
 SBH_TXID="f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000f00d0000"
 SBH_XPR_MAIN_CID="384da888112027f0321850a169f737c33e53b388aad48b5adace4bab97f437e0"
 SBH_XPR_TEST_CID="71ee83bcf52142d61019d95f9cc5427ba6a0d7ff8accd9e2088ae2abeaf3d3dd"
+SBH_FAKE_ANCHOR_ACCOUNT="fakeanchor12"
+SBH_FAKE_ANCHOR_SINK="fakesink1"
 SBH_R16="1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
 SBH_CYCLE2="$(printf 'aaaa2222%.0s' 1 2 3 4 5 6 7 8)"
 SBH_CYCLE4="$(printf 'bbbb4444%.0s' 1 2 3 4 5 6 7 8)"
@@ -293,12 +295,12 @@ STUB
 
 	# ---- tx fixtures ----
 	sbh_tx() { # <file> <account> <name> <data-json>
-		printf '{"actions":[{"account":"%s","name":"%s","authorization":[{"actor":"metalfreedom","permission":"anchor"}],"data":%s}]}\n' \
-			"$2" "$3" "$4" > "$SBH_T/$1"
+		printf '{"actions":[{"account":"%s","name":"%s","authorization":[{"actor":"%s","permission":"anchor"}],"data":%s}]}\n' \
+			"$2" "$3" "$SBH_FAKE_ANCHOR_ACCOUNT" "$4" > "$SBH_T/$1"
 	}
-	sbh_tx tx-c3.json  eosio.token transfer '{"from":"metalfreedom","to":"fyhistory","quantity":"0.0001 XPR","memo":"fya1c3-test"}'
-	sbh_tx tx-c4.json  eosio.token transfer '{"from":"metalfreedom","to":"fyhistory","quantity":"0.0001 XPR","memo":"fya1c4-test"}'
-	sbh_tx tx-upd.json eosio       updateauth '{"account":"metalfreedom","permission":"anchor","parent":"active"}'
+	sbh_tx tx-c3.json  eosio.token transfer '{"from":"'"$SBH_FAKE_ANCHOR_ACCOUNT"'","to":"'"$SBH_FAKE_ANCHOR_SINK"'","quantity":"0.0001 XPR","memo":"fya1c3-test"}'
+	sbh_tx tx-c4.json  eosio.token transfer '{"from":"'"$SBH_FAKE_ANCHOR_ACCOUNT"'","to":"'"$SBH_FAKE_ANCHOR_SINK"'","quantity":"0.0001 XPR","memo":"fya1c4-test"}'
+	sbh_tx tx-upd.json eosio       updateauth '{"account":"'"$SBH_FAKE_ANCHOR_ACCOUNT"'","permission":"anchor","parent":"active"}'
 	sbh_tx tx-hex.json eosio.token transfer '"0011deadbeef"'
 	echo '{}' > "$SBH_T/tx-empty.json"
 	printf '{"dry_run":true,"target_chain":"mainnet-a","memo_prefix":"fya1c3"}\n' > "$SBH_T/dry-c3.json"

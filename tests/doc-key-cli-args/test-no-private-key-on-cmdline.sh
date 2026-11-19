@@ -30,7 +30,7 @@ BT='`'
 # --- self-check: every argument shape is caught, every no-argument form passes ---
 P='HOME=~/.metal-fy-proton proton'
 for line in \
-	"HOME=~/.metal-fy-proton-test proton key:add <frdomyieltst active/owner PVT>" \
+	"HOME=~/.metal-fy-proton-test proton key:add <fakeanchtest active/owner PVT>" \
 	"$P key:remove <old PVT>" \
 	"$P key:add ${FAKE_PVT}" \
 	"$P key:add ${FAKE_WIF}" \

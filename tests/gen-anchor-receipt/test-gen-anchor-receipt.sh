@@ -87,8 +87,8 @@ cat > "$GOOD_INPUT" <<'JSON'
     {"branch": "artifacts", "memo": "fya1c2-ar:cccc", "root_hex": "3784dbcd1316755bce7ebfb1372f87d8e489538dc423aaf15125c0d38c48bbe9"},
     {"branch": "dag_root_summary", "memo": "fya1c2:efd1", "root_hex": "efd1bd78dc20c7ba3b9e3838679f38757ce5273ed1f2d66f383943ef83ea329a"}
   ],
-  "authorization": {"actor": "metalfreedom", "permission": "anchor"},
-  "sink": "fyhistory",
+  "authorization": {"actor": "fakeanchor12", "permission": "anchor"},
+  "sink": "fakesink1",
   "quantity": "0.0001 XPR"
 }
 JSON
