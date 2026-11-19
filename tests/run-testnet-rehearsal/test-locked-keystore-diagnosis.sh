@@ -88,7 +88,7 @@ trap cleanup EXIT
 CFG_DIR="${WORK}/~${BOGUS_USER}/freedom-yield-rehearsal-config"
 mkdir -p "$CFG_DIR"
 printf '%s' "$FAKE_ACCOUNT"  > "${CFG_DIR}/xpr-account"
-printf 'fyhistorystub'       > "${CFG_DIR}/anchor-sink"
+printf 'fakesink1stub'       > "${CFG_DIR}/anchor-sink"
 printf 'proton-test'         > "${CFG_DIR}/xpr-chain"
 
 # ---- synthetic key material (fabricated bytes; never real key material) ----

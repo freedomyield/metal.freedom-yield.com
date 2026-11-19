@@ -70,7 +70,7 @@ trap cleanup EXIT
 CFG_DIR="${WORK}/~${BOGUS_USER}/freedom-yield-rehearsal-config"
 mkdir -p "$CFG_DIR"
 printf '%s' "$FAKE_ACCOUNT" > "${CFG_DIR}/xpr-account"
-printf 'fyhistorystub'      > "${CFG_DIR}/anchor-sink"
+printf 'fakesink1stub'      > "${CFG_DIR}/anchor-sink"
 printf '%s' "$TESTNET_NET"  > "${CFG_DIR}/xpr-chain"
 
 SYNTH_CHAIN_PUB="$(node -e '
