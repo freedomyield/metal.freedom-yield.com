@@ -16,18 +16,18 @@
 		"inscribe_action": {
 			"account": "eosio.token",
 			"name": "transfer",
-			"from": "metalfreedom",
-			"to": "fyhistory",
+			"from": "fakeanchor12",
+			"to": "fakesink1",
 			"quantity": "0.0001 XPR",
 			"memo": "fyid1:aaaa000000000000000000000000000000000000000000000000000000000001",
-			"permission": {"actor": "metalfreedom", "permission": "anchor"}
+			"permission": {"actor": "fakeanchor12", "permission": "anchor"}
 		}
 	},
 	"cycles_history_url": "https://metal.freedom-yield.com/api/cycles-history.json",
 	"identity_url": "https://metal.freedom-yield.com/api/identity.json",
 	"trigger_event": "cycle_start",
 	"trigger_reference": {"cycle_n": 3},
-	"signing_actor": "metalfreedom",
+	"signing_actor": "fakeanchor12",
 	"signing_permission": "anchor",
 	"verification_status": "live",
 	"generated_at": "2026-07-04T04:00:30Z"

@@ -40,8 +40,8 @@ fail() { printf 'FAIL  %-70s\n' "$1" >&2; FAIL=$((FAIL + 1)); }
 
 # --- isolated config dir (never touch /etc/freedom-yield) ---
 CFG="$(mktemp -d -t fya-signhost-cfg.XXXXXX)"
-echo "metalfreedom" > "$CFG/xpr-account"
-echo "fyhistory"    > "$CFG/anchor-sink"
+echo "fakeanchor12" > "$CFG/xpr-account"
+echo "fakesink1"    > "$CFG/anchor-sink"
 echo "0.0001 XPR"   > "$CFG/xpr-quantity"
 
 # --- isolate the --output default path (never touch the real /tmp default) ---

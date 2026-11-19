@@ -20,6 +20,7 @@ set -u
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 SCRIPT="${REPO_ROOT}/scripts/sign-anchor-event.sh"
+FAKE_ANCHOR_ACCOUNT="fakeanchor12"   # fake mainnet anchor name; the one place it is set in this file
 
 if [ ! -x "$SCRIPT" ]; then
 	echo "FATAL: sign-anchor-event.sh not executable at $SCRIPT" >&2
@@ -32,8 +33,8 @@ TMP_ANCHOR_BAD_DAG="$(mktemp -t fya-sign-anchor.XXXXXX).json"
 TMP_ANCHOR_MISSING_CYCLE="$(mktemp -t fya-sign-anchor.XXXXXX).json"
 export FY_CONFIG_DIR="$TMP_CFG"
 
-echo "metalfreedom" > "$TMP_CFG/xpr-account"
-echo "fyhistory"    > "$TMP_CFG/anchor-sink"
+echo "${FAKE_ANCHOR_ACCOUNT}" > "$TMP_CFG/xpr-account"
+echo "fakesink1"    > "$TMP_CFG/anchor-sink"
 echo "0.0001 XPR"   > "$TMP_CFG/xpr-quantity"
 
 # Bad-dag anchor-source: valid shape but dag_root_computed does not match
@@ -165,8 +166,8 @@ check_structure "structure: dag_root_summary memo has no branch suffix" "true" \
 	"$(echo "$DRY_OUT" | jq -r '.composed_memos.dag_root_summary | test("^fya1c2:[0-9a-f]{64}$")')"
 check_structure "structure: all 4 actions target eosio.token::transfer" "true" \
 	"$(echo "$DRY_OUT" | jq -r '[.tx.actions[] | (.account == "eosio.token" and .name == "transfer")] | all')"
-check_structure "structure: all 4 actions authorized by metalfreedom@anchor" "true" \
-	"$(echo "$DRY_OUT" | jq -r '[.tx.actions[] | (.authorization[0].actor == "metalfreedom" and .authorization[0].permission == "anchor")] | all')"
+check_structure "structure: all 4 actions authorized by ${FAKE_ANCHOR_ACCOUNT}@anchor" "true" \
+	"$(echo "$DRY_OUT" | jq -r --arg anchor "${FAKE_ANCHOR_ACCOUNT}" '[.tx.actions[] | (.authorization[0].actor == $anchor and .authorization[0].permission == "anchor")] | all')"
 
 # ---- --output=<file>: JSON fragment is also written to file (2026-08-04) ----
 # Regression coverage for the "receipt fragment only ever went to stdout"

@@ -46,10 +46,10 @@ trap 'rm -rf "${TMP}"' EXIT
 
 CONFIG_DIR="${TMP}/etc"
 mkdir -p "${CONFIG_DIR}"
-# audit-C/F-E2: xpr-account is now a required config (no 'metalfreedom'
+# audit-C/F-E2: xpr-account is now a required config (no 'fakeanchor12'
 # default). Use a synthetic test account for this regression suite.
 printf '%s' 'fytest1'     > "${CONFIG_DIR}/xpr-account"
-printf '%s' 'fyhistory'    > "${CONFIG_DIR}/anchor-sink"
+printf '%s' 'fakesink1'    > "${CONFIG_DIR}/anchor-sink"
 printf '%s' 'proton-test' > "${CONFIG_DIR}/xpr-chain"
 
 STUB_BIN="${TMP}/bin"
