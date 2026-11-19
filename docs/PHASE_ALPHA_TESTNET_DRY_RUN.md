@@ -43,6 +43,8 @@
 
 ## What this rehearses
 
+Placeholders: `<anchor-account>` / `<rehearsal-anchor-account>` / `<rehearsal-anchor-sink>` stand for the values in the local config files `${FY_CONFIG_DIR:-/etc/freedom-yield}/xpr-account` and `anchor-sink` (the testnet rehearsal values on testnet); read them from there.
+
 `scripts/run-testnet-rehearsal.sh` runs the full anchor pipeline
 end-to-end against XPR testnet:
 
@@ -65,8 +67,8 @@ The account that signs (`<account>@anchor`) and the sink account are read
 from the operator-local rehearsal config directory
 (`~/freedom-yield-rehearsal-config/{xpr-account,anchor-sink,xpr-chain}`),
 never from a hardcoded name in the script. By convention on this project
-the rehearsal actor is the testnet account `frdomyieltst`, signing with
-its `anchor` permission, transferring to sink account `fyhistorytst`
+the rehearsal actor is the testnet account `<rehearsal-anchor-account>`, signing with
+its `anchor` permission, transferring to sink account `<rehearsal-anchor-sink>`
 (both are public testnet account names already referenced throughout this
 repo — see `docs/ANCHOR_ACCOUNT_KEY_ROTATION.md`).
 
@@ -91,8 +93,8 @@ be, different:
 |---|---|---|
 | keystore `HOME` | `~/.metal-fy-proton-test` | `~/.metal-fy-proton` |
 | chain (`--chain=`) | `testnet-a` | `mainnet-a` |
-| actor account | `frdomyieltst` | the mainnet operator account |
-| sink account | `fyhistorytst` | the mainnet anchor-history sink |
+| actor account | `<rehearsal-anchor-account>` | the mainnet operator account |
+| sink account | `<rehearsal-anchor-sink>` | the mainnet anchor-history sink |
 | chain RPC | `rpc.api.testnet.metalx.com` (step 3), `test.proton.eosusa.io` (step 9) | separate mainnet endpoints |
 | chain_id (gate 3) | `bin/safe-broadcast`'s `testnet-a` `EXPECTED_CHAIN_ID` | `bin/safe-broadcast`'s `mainnet-a` `EXPECTED_CHAIN_ID` (a **different** constant — gate 3 fails closed on any mismatch, by design; see that script for the literal values rather than duplicating them here where they could drift out of sync) |
 | cycle number rehearsed | whatever `--expect-cycle=<N>` names for THIS run | the mainnet cycle the testnet run is meant to gate — MUST be the same `N` (see "Cycle number must match the target mainnet cycle" below) |
@@ -206,7 +208,7 @@ partial run as a passed rehearsal.
   `gtimeout` by default — confirm plain `timeout` itself resolves
   (`command -v timeout`), not just `gtimeout`.
 - The testnet proton-cli keystore (`HOME=~/.metal-fy-proton-test`) holds
-  the CURRENT `frdomyieltst@anchor` private key, and is **unlocked**
+  the CURRENT `<rehearsal-anchor-account>@anchor` private key, and is **unlocked**
   before running the rehearsal:
   ```
   HOME=~/.metal-fy-proton-test proton key:unlock
@@ -219,7 +221,7 @@ partial run as a passed rehearsal.
   document MUST carry the `HOME=~/.metal-fy-proton-test` prefix — never
   a bare `proton …` against the default shared keystore).
 - `~/freedom-yield-rehearsal-config/` exists with three files:
-  `xpr-account` (`frdomyieltst`), `anchor-sink` (`fyhistorytst`),
+  `xpr-account` (`<rehearsal-anchor-account>`), `anchor-sink` (`<rehearsal-anchor-sink>`),
   `xpr-chain` (`proton-test`). These are operator-local paths, resolved
   independent of the keystore-scoped `$HOME` (see
   `scripts/lib/require-keystore-home.sh`'s `fyd_login_home` for why).
@@ -230,7 +232,7 @@ partial run as a passed rehearsal.
 
 ## Rotation resilience (why there is no key/account pin in this doc)
 
-The rehearsal script verifies the `frdomyieltst@anchor` key dynamically:
+The rehearsal script verifies the `<rehearsal-anchor-account>@anchor` key dynamically:
 it fetches the account's CURRENT on-chain permission structure via a
 read-only testnet RPC call (`POST
 https://rpc.api.testnet.metalx.com/v1/chain/get_account`) and checks that
@@ -249,7 +251,7 @@ CURRENTLY on-chain. (Prior to 2026-07-31 the script instead hardcoded
 three specific `PUB_K1_...` public keys — one per `owner`/`active`/
 `anchor` permission. Live `get_account` (2026-07-31) shows the 2026-07-10
 key rotation only actually replaced the **`active`** permission's key on
-`frdomyieltst`; the `owner` and `anchor` pins were, and still are,
+`<rehearsal-anchor-account>`; the `owner` and `anchor` pins were, and still are,
 byte-identical to their current on-chain keys. Step 1 was therefore
 failing on the single stale `active` pin, not all three. The fix does
 not re-verify all three permissions — it checks exactly the `anchor`
@@ -498,9 +500,9 @@ broadcast is authorized. Full context: `docs/CYCLE_GATE.md` step 7b.
 
 ## Phase β note
 
-When Phase β is activated (the `metalfreedom::inscribe` smart-contract
+When Phase β is activated (the `<anchor-account>::inscribe` smart-contract
 action is deployed per
-`scripts/operator-local/contract/metalfreedom-anchor.spec.md`), this
+`scripts/operator-local/contract/anchor-contract.spec.md`), this
 rehearsal is expected to gain a step exercising that SC action directly,
 with the resulting receipt's `anchor.method ==
 "phase_beta_sc_inscribe"`. Not yet implemented; the v2 Phase α steps
@@ -515,7 +517,7 @@ above remain the current rehearsal path.
   `--chain=mainnet-a` dry run that actually feeds the mainnet gate 4 (see
   "After PASS" above); NOT this rehearsal's own testnet-side dry-run log.
 - `docs/ANCHOR_ACCOUNT_KEY_ROTATION.md` — how to rotate the
-  `frdomyieltst`/`metalfreedom` account keys (testnet-first, same as
+  `<rehearsal-anchor-account>`/`<anchor-account>` account keys (testnet-first, same as
   every other broadcast).
 - `docs/CONSTITUTION.md` — PRIME DIRECTIVE (§3.4) and keystore separation
   (§3.5).

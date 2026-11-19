@@ -1,5 +1,7 @@
 # Operator identity key — setup runbook (Phase 5 + Phase α)
 
+Placeholders: `<anchor-account>` stands for the value in the local config file `${FY_CONFIG_DIR:-/etc/freedom-yield}/xpr-account`; read it from there.
+
 > **Status note (2026-06-21)**: this document teaches the off-chain
 > ed25519 operator-identity flow originally introduced as Phase 5.
 > The downstream **chain anchor** was redesigned 2026-06-20 / 21:
@@ -15,7 +17,7 @@
 > as the current **v2 anchor pipeline** (2026-07-01 design revision):
 > the anchor content (`/api/anchor-source.json`) is composed on the
 > validator host, the transaction is **signed on the operator's local
-> Mac** (`scripts/sign-anchor-event.sh` with `metalfreedom@anchor`),
+> Mac** (`scripts/sign-anchor-event.sh` with `<anchor-account>@anchor`),
 > and the receipt is written back and published. The validator host
 > does **NOT** broadcast — its `scripts/watch-anchor-events.sh` monitor
 > is **alert-only** (installed by
@@ -141,7 +143,7 @@ That design was retired 2026-06-20 — Metal mainnet Durango forbids
 non-empty memos on AddPermissionlessValidatorTx. The replacement is
 the Phase α A-chain Merkle DAG anchor (= the v2 HC-single 4-action pack
 with summary memo `fya<S>c<N>:<dag_root_computed>` on
-`eosio.token::transfer` signed by `metalfreedom@anchor`; the retired
+`eosio.token::transfer` signed by `<anchor-account>@anchor`; the retired
 `fyid1:<dag_root_hash>` single-action shape it replaced is described in
 the banner above), which commits to `anchor-source.json.dag_root_computed`
 — a 3-branch Merkle DAG over the identity, observations, and artifacts
@@ -554,7 +556,7 @@ no `OBSOLETE` line appears at all and the checker exits 6 and pushes on four
 > Antelope/EOSIO-family chain reached at XPR Network endpoints),
 > different key family (EOSIO K1 secp256k1 +
 > WebAuth P-256), different tooling (`proton-cli` / webauth.com). The
-> `metalfreedom` XPR account is the on-chain anchor for the Merkle DAG
+> `<anchor-account>` XPR account is the on-chain anchor for the Merkle DAG
 > identity model; permission structure follows the design in
 > `project_merkle_dag_identity_anchor_design.md`.
 >
@@ -566,11 +568,11 @@ no `OBSOLETE` line appears at all and the checker exits 6 and pushes on four
 
 Read-only verification via the public chain RPC
 (`https://api-xprnetwork-main.saltant.io/v1/chain/get_account` with
-`{"account_name":"metalfreedom"}`) returns:
+`{"account_name":"<anchor-account>"}`) returns:
 
 | field | value |
 | --- | --- |
-| `account_name` | `metalfreedom` |
+| `account_name` | `<anchor-account>` |
 | `created` | `2026-04-09T05:43:36 UTC` |
 | `owner` permission | threshold=1, keys=[`EOS6w1ufdiYuZs9Q...` (K1)] |
 | `active` permission | threshold=1, keys=[`EOS6w1ufdiYuZs9Q...` (K1), `PUB_WA_3hftgAoXi...` (WebAuth)], parent=`owner` |
@@ -584,7 +586,7 @@ the corresponding private key is a coord-log Decision (see
 ## A2. Target state (Phase α minimal)
 
 ```
-metalfreedom
+<anchor-account>
 ├── owner    (unchanged from A1; rotation deferred to Phase β)
 ├── active   (unchanged from A1)
 └── anchor   (NEW, parent=active, threshold=1,
@@ -600,7 +602,7 @@ Rationale:
   without touching the owner permission.
 - Narrowing `anchor` via `linkauth` to `eosio.token::transfer` limits
   the blast radius if the validator-host-stored `anchor` private key
-  is compromised: it can sign transfers from `metalfreedom`, but
+  is compromised: it can sign transfers from `<anchor-account>`, but
   cannot change permissions, deploy contracts, or sign other system
   actions.
 - Owner rotation to WebAuth-only and any active-permission tightening
@@ -610,7 +612,7 @@ Rationale:
 
 - `proton-cli` 0.1.98+ installed on the operator Mac
   (verify: `proton --version`).
-- `metalfreedom@active` signing capability — one of:
+- `<anchor-account>@active` signing capability — one of:
   - WebAuth biometric via `webauth.com` or Proton wallet app (uses
     the existing `PUB_WA_3hftgAo...` credential on `active`). No
     K1 private key required.
@@ -632,7 +634,7 @@ Rationale:
 ## A4. Generate the anchor K1 keypair (operator Mac, offline)
 
 The `anchor` key is a fresh K1 (secp256k1) keypair, NOT WebAuth and
-NOT reused from any existing key on `metalfreedom`.
+NOT reused from any existing key on `<anchor-account>`.
 
 ```sh
 HOME=~/.metal-fy-proton proton key:generate
@@ -680,7 +682,7 @@ The testnet PASS is part of the IC-2 deliverable (C3 → C1 by
 
 ## A6. Add the `anchor` permission as a child of `active`
 
-This action requires `metalfreedom@active`. The current active has
+This action requires `<anchor-account>@active`. The current active has
 both a K1 key and a WebAuth credential; either is sufficient (single
 key threshold).
 
@@ -698,7 +700,7 @@ in the local `proton-cli` keystore (`HOME=~/.metal-fy-proton proton key:add` fir
 
 ```sh
 HOME=~/.metal-fy-proton proton action eosio updateauth '{
-  "account": "metalfreedom",
+  "account": "<anchor-account>",
   "permission": "anchor",
   "parent": "active",
   "auth": {
@@ -709,27 +711,27 @@ HOME=~/.metal-fy-proton proton action eosio updateauth '{
     "accounts": [],
     "waits": []
   }
-}' metalfreedom@active
+}' <anchor-account>@active
 ```
 
 Expected: the CLI returns the transaction id; the chain accepts the
-action; the new `anchor` permission appears under `metalfreedom` in
+action; the new `anchor` permission appears under `<anchor-account>` in
 the next account read.
 
 ## A7. Link the `anchor` permission to `eosio.token::transfer`
 
 ```sh
 HOME=~/.metal-fy-proton proton action eosio linkauth '{
-  "account": "metalfreedom",
+  "account": "<anchor-account>",
   "code": "eosio.token",
   "type": "transfer",
   "requirement": "anchor"
-}' metalfreedom@active
+}' <anchor-account>@active
 ```
 
-Effect: for actions where `from = metalfreedom` on `eosio.token::transfer`,
-the chain accepts `metalfreedom@anchor` as sufficient authorization
-(in addition to the default `metalfreedom@active`). No other
+Effect: for actions where `from = <anchor-account>` on `eosio.token::transfer`,
+the chain accepts `<anchor-account>@anchor` as sufficient authorization
+(in addition to the default `<anchor-account>@active`). No other
 `eosio.token` action and no other contract action is reached by this
 linkauth.
 
@@ -738,11 +740,11 @@ would link `anchor` to ALL actions of `eosio.token`, which would
 unnecessarily widen `anchor`'s authority.
 
 **Phase β preview** (not executed in Phase α): when the
-`metalfreedom::inscribe` action is deployed (T-4 SC spec), an
+`<anchor-account>::inscribe` action is deployed (T-4 SC spec), an
 additional `linkauth` will be issued:
 
 ```
-{"account":"metalfreedom","code":"metalfreedom",
+{"account":"<anchor-account>","code":"<anchor-account>",
  "type":"inscribe","requirement":"anchor"}
 ```
 
@@ -754,10 +756,10 @@ this Phase α step.
 
 ```sh
 # Re-read the account; expect the new `anchor` permission to appear
-# under `metalfreedom.permissions`, parent=active, with the
+# under `<anchor-account>.permissions`, parent=active, with the
 # <anchor_pubkey> from A4 as the sole key.
 curl -sS -X POST -H 'Content-Type: application/json' \
-  --data '{"json":true,"account_name":"metalfreedom"}' \
+  --data '{"json":true,"account_name":"<anchor-account>"}' \
   https://api-xprnetwork-main.saltant.io/v1/chain/get_account \
   | jq '.permissions[] | select(.perm_name=="anchor")'
 
@@ -766,15 +768,15 @@ curl -sS -X POST -H 'Content-Type: application/json' \
 # confirmed sink name; <root_hash> is any 64-hex placeholder for the
 # verification dry-run).
 HOME=~/.metal-fy-proton proton action eosio.token transfer '{
-  "from": "metalfreedom",
+  "from": "<anchor-account>",
   "to": "<sink_account>",
   "quantity": "0.0001 XPR",
   "memo": "fya<S>c<N>:<root_hash>"
-}' metalfreedom@anchor --dry-run
+}' <anchor-account>@anchor --dry-run
 ```
 
 Expected: the dry-run reports the action as well-formed and accepts
-`metalfreedom@anchor` as the required authorization. No actual
+`<anchor-account>@anchor` as the required authorization. No actual
 broadcast occurs with `--dry-run`.
 
 The corresponding live broadcast is the Phase α anchor path. Under the
@@ -798,11 +800,10 @@ attention later.
 - **Active tightening**: if the K1 `EOS6w1u...` on active is no
   longer needed after owner rotation, remove it from active so the
   only active signer is the WebAuth credential.
-- **SC deploy on `metalfreedom`**: the contract spec is C3 T-4
-  deliverable (`scripts/operator-local/contract/`
-  `metalfreedom-anchor.spec.md`). Deploy is Phase β; the contract is
-  NOT deployed during Phase α.
-- **Additional linkauth for `metalfreedom::inscribe`**: see A7
+- **SC deploy on `<anchor-account>`**: the contract spec is C3 T-4
+  deliverable (`scripts/operator-local/contract/anchor-contract.spec.md`).
+  Deploy is Phase β; the contract is NOT deployed during Phase α.
+- **Additional linkauth for `<anchor-account>::inscribe`**: see A7
   Phase β preview block.
 - **Optional sink-account hardening**: e.g. multisig on the sink, a
   no-op contract on the sink that ignores or logs incoming transfers,
@@ -1033,8 +1034,8 @@ When `proton key:add` (B4) runs for the first time, the operator must:
 3. Re-enter the password at the confirmation prompt.
 4. Save the password to Dashlane immediately, under a distinct entry
    name from the `PVT_K1_…` entry. Suggested entry names:
-   - K1 private key: `metalfreedom anchor K1 (PVT_K1_)`
-   - Wallet keystore password: `metalfreedom anchor wallet (32-char keystore)`
+   - K1 private key: `<anchor-account> anchor K1 (PVT_K1_)`
+   - Wallet keystore password: `<anchor-account> anchor wallet (32-char keystore)`
 
 ### Why two separate Dashlane entries
 
@@ -1063,16 +1064,16 @@ which case applies before cycle day is mandatory.
 ```sh
 ssh "${VALIDATOR_SSH_HOST}" 'sudo -u <deploy_user> bash -c "
   HOME=~/.metal-fy-proton proton action eosio.token transfer '\''{
-    \"from\": \"metalfreedom\",
+    \"from\": \"<anchor-account>\",
     \"to\": \"<sink_account>\",
     \"quantity\": \"0.0001 XPR\",
     \"memo\": \"fya1c0:0000000000000000000000000000000000000000000000000000000000000000\"
-  }'\'' metalfreedom@anchor --dry-run
+  }'\'' <anchor-account>@anchor --dry-run
 "'
 ```
 
 Expected: the dry-run reports the action as well-formed and accepts
-`metalfreedom@anchor` as the required authorization. No actual
+`<anchor-account>@anchor` as the required authorization. No actual
 broadcast occurs.
 
 If the dry-run fails with "permission not found" or "missing required
@@ -1240,7 +1241,7 @@ ssh -t "${VALIDATOR_SSH_HOST}" 'sudo -u <deploy_user> HOME=~/.metal-fy-proton pr
 #    duplicate `fyid1:<dag_root_hash>` memo. Check first:
 ssh "${VALIDATOR_SSH_HOST}" "curl -sS -X POST \"\${XPR_RPC_BASE:-https://proton.eosusa.io}/v1/history/get_actions\" \
     -H 'Content-Type: application/json' \
-    -d '{\"account_name\":\"metalfreedom\",\"pos\":-1,\"offset\":-50}' \
+    -d '{\"account_name\":\"<anchor-account>\",\"pos\":-1,\"offset\":-50}' \
     | jq '[.actions[] | select(.action_trace.act.data.memo // \"\" | startswith(\"fyid1:\"))] | .[0:5] | .[] | {tx: .action_trace.trx_id, memo: .action_trace.act.data.memo, time: .block_time}'"
 # If the table above already contains a row whose memo matches the
 # expected `fyid1:<dag_root_hash>` of THIS cycle, the broadcast
@@ -1292,11 +1293,11 @@ or in response to a suspected exposure), the procedure is:
 HOME=~/.metal-fy-proton proton key:generate    # captures PUB_K1_<new>; PVT_K1_<new> to Dashlane
 
 # 2. From the operator Mac, sign updateauth replacing the old pubkey
-#    on the metalfreedom@anchor permission. Either signing path
-#    (WebAuth or K1) from A6 may be used; metalfreedom@active is the
+#    on the <anchor-account>@anchor permission. Either signing path
+#    (WebAuth or K1) from A6 may be used; <anchor-account>@active is the
 #    required authorization.
 HOME=~/.metal-fy-proton proton action eosio updateauth '{
-  "account": "metalfreedom",
+  "account": "<anchor-account>",
   "permission": "anchor",
   "parent": "active",
   "auth": {
@@ -1305,11 +1306,11 @@ HOME=~/.metal-fy-proton proton action eosio updateauth '{
     "accounts": [],
     "waits": []
   }
-}' metalfreedom@active
+}' <anchor-account>@active
 
 # 3. Verify on chain that anchor.keys[] now contains only PUB_K1_<new>.
 curl -sS -X POST -H 'Content-Type: application/json' \
-  --data '{"json":true,"account_name":"metalfreedom"}' \
+  --data '{"json":true,"account_name":"<anchor-account>"}' \
   https://api-xprnetwork-main.saltant.io/v1/chain/get_account \
   | jq '.permissions[] | select(.perm_name=="anchor")'
 
@@ -1388,10 +1389,11 @@ Recovery scenarios:
   clean machine. Execute B6 (rotation) immediately on a clean device
   with a fresh proton-cli keystore; assume the old anchor key is in
   adversary hands and the linkauth scope (= eosio.token::transfer with
-  `from = metalfreedom`) is exploitable until the rotation lands.
+  `from = <anchor-account>`) is exploitable until the rotation lands.
   Note that the linkauth scope is intentionally narrow: the
-  adversary cannot move tokens out of `metalfreedom` arbitrarily,
-  cannot change permissions, and cannot deploy contracts. After
+  adversary can sign transfers out of `<anchor-account>` (its balance
+  is exposed), but cannot change permissions, cannot deploy
+  contracts, and cannot sign other system actions. After
   rotation, generate a new 32-character wallet password (per B4.5) and
   save it to the new Dashlane account; do not reuse the compromised
   password.
@@ -1402,7 +1404,7 @@ Recovery scenarios:
   (= Phase 5 / Phase 6 key, used for `ssh-keygen -Y sign` on
   `identity.json`) is untouched.
 - The validator's `staker.key` and BLS `signer.key` are untouched.
-- The `metalfreedom@owner` and `metalfreedom@active` permissions on
+- The `<anchor-account>@owner` and `<anchor-account>@active` permissions on
   XPR mainnet are untouched (Phase β work; see A9).
 - The web host has no awareness of the anchor key and never receives
   it (per Constitution §5: unidirectional data flow validator → web).

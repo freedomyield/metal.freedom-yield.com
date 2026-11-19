@@ -6,6 +6,8 @@ The Phase α work is split across three Claude sessions per [`project_phase_alph
 
 ## Status
 
+Placeholders: `<anchor-account>` / `<anchor-sink>` (and `<rehearsal-anchor-sink>` on testnet) stand for the values in the local config files `${FY_CONFIG_DIR:-/etc/freedom-yield}/xpr-account` and `anchor-sink`; read them from there.
+
 **Delivered (= auditable now):**
 
 - Byte-level Merkle DAG specification
@@ -18,7 +20,7 @@ The Phase α work is split across three Claude sessions per [`project_phase_alph
 
 - Live runtime `/api/identity.json` carrying a real `dag_root_hash` (gated on C1 extending `gen-identity.sh`)
 - Live runtime `/api/anchor-receipt.json` carrying a real A-chain transaction id (gated on C3's signer + permission setup AND on the first inscription event at cycle 3 start)
-- A-chain `metalfreedom@anchor` permission deployed on XPR mainnet (gated on C3 + operator)
+- A-chain `<anchor-account>@anchor` permission deployed on XPR mainnet (gated on C3 + operator)
 - Sink-account name for Phase α `eosio.token::transfer` `to` field (gated on operator judgment per [`project_phase_alpha_coordination_log`](<operator-memory>/project_phase_alpha_coordination_log.md) judgment #1)
 
 ## What an auditor can do today
@@ -107,8 +109,8 @@ The following can only be verified after Phase α activates (= first inscription
 - The presence of `dag_root_hash` in the live `/api/identity.json`.
 - The existence of `/api/anchor-receipt.json` with a real XPRNetwork `tx_id`.
 - The on-chain inscription's `memo == "fyid1:<dag_root_hash>"` invariant on a public XPRNetwork explorer.
-- The `metalfreedom@anchor` permission's actual deployed scope (= `linkauth` to inscribe-class actions only).
-- The choice of sink account for Phase α `eosio.token::transfer` `to` (= confirmed as `fyhistory` on Metal A-chain mainnet, 2026-06-22; testnet rehearsal sink is `fyhistorytst`).
+- The `<anchor-account>@anchor` permission's actual deployed scope (= `linkauth` to `eosio.token::transfer` only; a compromised anchor key can sign transfers out of the anchor account, but cannot change permissions, deploy contracts, or sign other system actions).
+- The choice of sink account for Phase α `eosio.token::transfer` `to` (= confirmed as `<anchor-sink>` on Metal A-chain mainnet, 2026-06-22; testnet rehearsal sink is `<rehearsal-anchor-sink>`).
 
 The auditor MAY register these as open items to re-check after activation.
 
@@ -171,14 +173,14 @@ These are the areas C2 considers most likely to surface a finding:
 
 4. **Empty-branch sentinel** — spec §5 chooses `SHA-256("") = e3b0c44…b855` as the sentinel for a branch with zero leaves. This is conventional but not the only possible choice; an auditor MAY register that they confirmed this convention is used consistently (= test vector `v04-empty-branch` covers it).
 
-5. **Permission narrowness** — `anchor-receipt.json.anchor.inscribe_action.permission` is fixed to `{ actor: "metalfreedom", permission: "anchor" }`. An auditor verifying a live inscription should confirm that the on-chain action was actually signed by this narrow permission and not by `metalfreedom@active` or `metalfreedom@owner`. If the actual on-chain signer is broader than the receipt declares, that is a finding.
+5. **Permission narrowness** — `anchor-receipt.json.anchor.inscribe_action.permission` is fixed to `{ actor: "<anchor-account>", permission: "anchor" }`. An auditor verifying a live inscription should confirm that the on-chain action was actually signed by this narrow permission and not by `<anchor-account>@active` or `<anchor-account>@owner`. If the actual on-chain signer is broader than the receipt declares, that is a finding.
 
 6. **Schema additive policy** — both `identity.schema.v1.json` and `cycle-history.schema.v1.json` were extended additively. An auditor MAY confirm that no field was removed, no `required` list was extended, no type/pattern was narrowed, and no `const` value was changed. The 2026-06-21 changelog entry in `docs/IDENTITY_SCHEMA_CHANGELOG.md` makes this claim explicitly.
 
 ## Out of scope for this audit handoff
 
 - The off-chain ed25519 signing key generation, holding, and rotation runbook (= `docs/OPERATOR_IDENTITY_SETUP.md`).
-- The on-chain `metalfreedom@anchor` permission deployment and key custody (= C3 deliverable, separate handoff at IC-2 deadline 2026-06-30).
+- The on-chain `<anchor-account>@anchor` permission deployment and key custody (= C3 deliverable, separate handoff at IC-2 deadline 2026-06-30).
 - The integration of the new schemas into `scripts/operator-local/gen-identity.sh` and the new `scripts/post-anchor-event.sh` (= C1 deliverable, gated on C1 role assignment per coord-log judgment #4).
 - The metal-watch-validators cron hook (= C1 deliverable).
 - Any validator-host or web-host operational state — the C2 work touches only the schema / spec / vector artifacts and the docs that describe them.

@@ -18,7 +18,7 @@ For both keys, specifically:
 - The signing key is **not** any private key used by the `metalgo` process.
 - The operator identity key is generated, held, and rotated on the operator's local Mac — not on the validator host or the web host. CI never receives the private key.
 
-A separate `<xpr-account>@anchor` key (XPRNetwork K1 / EOSIO format) lives on the operator's signing machine and signs A-chain inscriptions only. It is scoped via `linkauth` to inscribe-class actions, so a compromise of the anchor key cannot move tokens, change permissions, or deploy contracts. The signing key and the anchor key are independent; the chain of trust binds them through `identity.json`'s `operator_identity_pubkey_fingerprint` (signed by the operator identity key) and the on-chain anchor action's signer permission (`<xpr-account>@anchor`).
+A separate `<xpr-account>@anchor` key (XPRNetwork K1 / EOSIO format) lives on the operator's signing machine and signs A-chain inscriptions only. It is linked via `linkauth` to `eosio.token::transfer` only. A compromise of the anchor key can therefore sign token transfers out of the anchor account (its balance is exposed), but cannot change permissions, deploy contracts, or sign other system actions. The signing key and the anchor key are independent; the chain of trust binds them through `identity.json`'s `operator_identity_pubkey_fingerprint` (signed by the operator identity key) and the on-chain anchor action's signer permission (`<xpr-account>@anchor`).
 
 This separation is intentional. Each key has one job; reuse for off-chain manifest signing or for unrelated on-chain actions is excluded by design.
 
