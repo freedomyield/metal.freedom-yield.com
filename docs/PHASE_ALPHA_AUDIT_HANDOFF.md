@@ -109,7 +109,7 @@ The following can only be verified after Phase α activates (= first inscription
 - The presence of `dag_root_hash` in the live `/api/identity.json`.
 - The existence of `/api/anchor-receipt.json` with a real XPRNetwork `tx_id`.
 - The on-chain inscription's `memo == "fyid1:<dag_root_hash>"` invariant on a public XPRNetwork explorer.
-- The `<anchor-account>@anchor` permission's actual deployed scope (= `linkauth` to inscribe-class actions only).
+- The `<anchor-account>@anchor` permission's actual deployed scope (= `linkauth` to `eosio.token::transfer` only; a compromised anchor key can sign transfers out of the anchor account, but cannot change permissions, deploy contracts, or sign other system actions).
 - The choice of sink account for Phase α `eosio.token::transfer` `to` (= confirmed as `<anchor-sink>` on Metal A-chain mainnet, 2026-06-22; testnet rehearsal sink is `<rehearsal-anchor-sink>`).
 
 The auditor MAY register these as open items to re-check after activation.

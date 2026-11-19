@@ -1391,8 +1391,9 @@ Recovery scenarios:
   adversary hands and the linkauth scope (= eosio.token::transfer with
   `from = <anchor-account>`) is exploitable until the rotation lands.
   Note that the linkauth scope is intentionally narrow: the
-  adversary cannot move tokens out of `<anchor-account>` arbitrarily,
-  cannot change permissions, and cannot deploy contracts. After
+  adversary can sign transfers out of `<anchor-account>` (its balance
+  is exposed), but cannot change permissions, cannot deploy
+  contracts, and cannot sign other system actions. After
   rotation, generate a new 32-character wallet password (per B4.5) and
   save it to the new Dashlane account; do not reuse the compromised
   password.
