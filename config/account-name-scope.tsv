@@ -1,0 +1,30 @@
+# account-name-scope.tsv - where each of the four on-chain account names may still appear.
+# Read by scripts/check-account-name-scope.sh (the gate). Tracked and public.
+#
+# The names themselves are NEVER written here (or anywhere in the tree): a name is identified
+# only by name_sha256 = sha256(lower-cased word), the same way layer B of
+# scripts/publish-guard.sh holds its forbidden words. Do not "improve" a row by adding the name.
+#
+# Format (tab-separated; lines starting with # and empty lines are ignored):
+#   1st non-comment line:  enabled<TAB>1      (1 = the gate judges, 0 = the gate prints DISABLED and passes)
+#   then one row per (name, place):
+#   name_sha256<TAB>role<TAB>allowed_path_glob<TAB>until<TAB>reason
+#     role   anchor-account | anchor-sink | rehearsal-anchor-account | rehearsal-anchor-sink (display only)
+#     glob   path from the repository root; the only wildcard is * (it does not cross /)
+#     until  - (no end) or a real YYYY-MM-DD (UTC); a row past its date allows nothing (EXPIRED)
+#     reason a non-empty sentence
+#
+# Adding or removing an exception is adding or removing a row; the script is never edited.
+# A row whose glob matches no file that contains the name is reported OBSOLETE: delete it.
+# To switch the gate off: set the first row to enabled<TAB>0 (remove the three files to drop it).
+enabled	1
+383c42c1d5f9492b1df490eadb2ff3f3447c5eca33e59760c550d9f2fd8dffd4	anchor-account	public/verify/index.html	-	the verify page (Constitution exception)
+383c42c1d5f9492b1df490eadb2ff3f3447c5eca33e59760c550d9f2fd8dffd4	anchor-account	public/ja/verify/index.html	-	the verify page (Constitution exception)
+383c42c1d5f9492b1df490eadb2ff3f3447c5eca33e59760c550d9f2fd8dffd4	anchor-account	public/api/legacy-a-chain/*.json	-	raw chain responses whose sha256 the verifier checks
+f66a48c33fa5f120442d04feae02cf5f9ea0e68a8926fca27fb4ef9be6fa9bd2	anchor-sink	public/api/legacy-a-chain/*.json	-	raw chain responses whose sha256 the verifier checks
+383c42c1d5f9492b1df490eadb2ff3f3447c5eca33e59760c550d9f2fd8dffd4	anchor-account	scripts/preview-cycle-anchor-broadcast.sh	2026-12-08	frozen until the 12/7 transition (L5)
+f66a48c33fa5f120442d04feae02cf5f9ea0e68a8926fca27fb4ef9be6fa9bd2	anchor-sink	scripts/preview-cycle-anchor-broadcast.sh	2026-12-08	frozen until the 12/7 transition (L5)
+383c42c1d5f9492b1df490eadb2ff3f3447c5eca33e59760c550d9f2fd8dffd4	anchor-account	scripts/sign-anchor-event.sh	2026-12-08	frozen until the 12/7 transition (L5)
+4d152202c32e7468c36b81247a172f5689f7d13bbe90b5c45a4372f9d61b2de6	rehearsal-anchor-account	scripts/run-testnet-rehearsal.sh	2026-12-08	frozen until the 12/7 transition (L5)
+aa4f98a4484d1bffd6f11b2b5c9eafe3ddd86da94eabffeb328b01dc641acbdb	rehearsal-anchor-sink	scripts/run-testnet-rehearsal.sh	2026-12-08	frozen until the 12/7 transition (L5)
+4d152202c32e7468c36b81247a172f5689f7d13bbe90b5c45a4372f9d61b2de6	rehearsal-anchor-account	scripts/lib/eosio-pubkey-raw-hex.js	2026-12-08	frozen until the 12/7 transition (L5)
