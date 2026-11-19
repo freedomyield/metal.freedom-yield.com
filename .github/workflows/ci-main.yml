@@ -46,7 +46,7 @@ jobs:
   tests:
     name: repo test suites (unconditional main push, no paths-ignore)
     runs-on: ubuntu-26.04  # 2026-10-16: a runner-like docker run confirmed no suite fails only on 26.04; this job is the real-runner check. deploy stays on 24.04 so a red here cannot block deploys. Revert = this one line
-    timeout-minutes: 20  # 2026-10-05: suite grew past 10 min (stress loops); cancelled != green
+    timeout-minutes: 30  # 2026-11-19: suite grew past 20 min after the double-inscription guard (909ffa9 cancelled at 20 min with 133 PASS / 0 FAIL); cancelled != green
     steps:
       - uses: actions/checkout@v7
       - name: Record runner locale and tool versions
