@@ -30,6 +30,8 @@ GITQ=(-c user.email=t@t -c user.name=t -c commit.gpgsign=false)
 # The fake names (one variable each). Never real values.
 FAKE_ACCOUNT="fakeanchor12"
 FAKE_SINK="fakesink1"
+# A fifth fake name used by the longest-match cases only: it contains FAKE_SINK whole.
+FAKE_REH_SINK="fakesink1tst"
 
 PASS=0
 FAIL=0
@@ -43,6 +45,7 @@ trap cleanup EXIT
 sha_of() { perl -MDigest::SHA=sha256_hex -e 'print sha256_hex(lc $ARGV[0])' "$1"; }
 H_ACC="$(sha_of "$FAKE_ACCOUNT")"
 H_SINK="$(sha_of "$FAKE_SINK")"
+H_REH_SINK="$(sha_of "$FAKE_REH_SINK")"
 TAB=$'\t'
 
 OUT=""; ERR=""; RC=0
@@ -92,7 +95,7 @@ run_gate() {
 }
 
 has_line() { printf '%s\n' "$OUT" | grep -qxF -- "$1"; }
-no_leak() { ! printf '%s\n%s\n' "$OUT" "$ERR" | grep -qiF -e "$FAKE_ACCOUNT" -e "$FAKE_SINK"; }
+no_leak() { ! printf '%s\n%s\n' "$OUT" "$ERR" | grep -qiF -e "$FAKE_ACCOUNT" -e "$FAKE_SINK" -e "$FAKE_REH_SINK"; }
 
 # expect <name> <rc> [exact stdout line]...
 expect() {
@@ -332,6 +335,32 @@ run_gate; expect_only "obsolete: judged per name (two rows with one glob, only t
 mkrepo; seed_ok
 put public/api/legacy/deep/y.json "${FAKE_SINK}\n"; ( cd "$R" && git rm -q -f public/api/legacy/x.json >/dev/null 2>&1 ); commit deepunder
 run_gate; expect "glob: * does not cross a slash (a name one directory deeper is a VIOLATION)" 1 "VIOLATION public/api/legacy/deep/y.json:1 anchor-sink"
+
+# ---- longest match: a short name inside a longer name counts for the longer one only ----
+REH_ROW="$(row "$H_REH_SINK" rehearsal-anchor-sink 'docs/rehearsal/*.sh' - 'rehearsal script')"
+longest_cfg() { write_cfg "enabled${TAB}1" "$ACC_ROW_VERIFY" "$ACC_ROW_FROZEN" "$SINK_ROW_LEGACY" "$REH_ROW"; }
+mkrepo; seed_ok; longest_cfg
+put src/alone.txt "to ${FAKE_SINK}\n"; commit alone
+run_gate; expect_only "longest: (a) the production sink name alone is anchor-sink" 1 "VIOLATION src/alone.txt:1 anchor-sink" "OBSOLETE rehearsal-anchor-sink docs/rehearsal/*.sh"
+mkrepo; seed_ok; longest_cfg
+put src/glued.txt "a ${FAKE_SINK}stub b x${FAKE_SINK}\n"; commit glued
+run_gate; expect_only "longest: (b) the production sink name with letters glued on or before is anchor-sink" 1 "VIOLATION src/glued.txt:1 anchor-sink" "OBSOLETE rehearsal-anchor-sink docs/rehearsal/*.sh"
+mkrepo; seed_ok; longest_cfg
+put docs/rehearsal/r.sh "# ${FAKE_REH_SINK}\n"; commit reh
+run_gate; expect_only "longest: (c) the rehearsal sink name in its own glob is OK, no anchor-sink hit" 0 "OK 5 files"
+mkrepo; seed_ok; longest_cfg
+put docs/rehearsal/r.sh "# ${FAKE_REH_SINK}\n# ${FAKE_SINK}\n"; commit reh2
+run_gate; expect_only "longest: (c) a bare production sink name in the same file is still an anchor-sink VIOLATION" 1 "VIOLATION docs/rehearsal/r.sh:2 anchor-sink"
+mkrepo; seed_ok; longest_cfg
+put src/leak2.txt "${FAKE_REH_SINK}\n"; commit reh3
+run_gate; expect_only "longest: the rehearsal sink name outside its glob is rehearsal-anchor-sink only" 1 "VIOLATION src/leak2.txt:1 rehearsal-anchor-sink" "OBSOLETE rehearsal-anchor-sink docs/rehearsal/*.sh"
+mkrepo; seed_ok; longest_cfg
+put "docs/rehearsal/${FAKE_REH_SINK}.sh" "clean\n"; commit rehpath
+run_gate; expect_only "longest: a path holding the rehearsal name is redacted by the longer role, no name left" 1 "VIOLATION docs/rehearsal/<rehearsal-anchor-sink>.sh:path rehearsal-anchor-sink" "OBSOLETE rehearsal-anchor-sink docs/rehearsal/*.sh"
+mkrepo; seed_ok; longest_cfg
+base="$(cd "$R" && git rev-parse HEAD)"; put src/ok.txt "fine\n"; commit "note ${FAKE_REH_SINK}"
+head12="$(cd "$R" && git rev-parse HEAD | cut -c1-12)"
+run_gate --messages="$base"; expect_only "longest: a commit message holding the rehearsal name is the rehearsal role only" 1 "VIOLATION commit:${head12} rehearsal-anchor-sink" "OBSOLETE rehearsal-anchor-sink docs/rehearsal/*.sh"
 
 # ---- enabled 0 ---------------------------------------------------------------------------
 mkrepo; seed_ok

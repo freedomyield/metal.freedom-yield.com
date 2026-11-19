@@ -19,7 +19,9 @@
 #
 # A name is found as a SUBSTRING, whatever letter case, with no word boundary: every run of
 # [A-Za-z0-9_] of 3 or more bytes (binary content is cut the same way) is lower-cased and
-# every part of it of 3 to 12 bytes is hashed and looked up. Looked at: every tracked blob's content, every tracked path,
+# every part of it of 3 to 12 bytes is hashed and looked up. Where a short name lies wholly
+# inside a longer name in the same word, only the longer name's role is counted (longest
+# match); a short name outside it still counts for itself. Looked at: every tracked blob's content, every tracked path,
 # and with --messages every commit message. A gitlink (mode 160000) is never read, only its
 # path is looked at.
 #
@@ -96,7 +98,9 @@ sub ans_load_rows {
 # The one counting rule (substring, case-blind, no word boundary): a name is found anywhere
 # inside a run of [A-Za-z0-9_] — the run is lower-cased and every part of it of 3 to 12
 # bytes (an XPR name is at most 12 long) is hashed and looked up. Content, paths and commit
-# messages all go through ans_name_hashes; ans_redact uses the same cut.
+# messages all go through ans_name_hashes; ans_redact uses the same cut. Both read
+# ans_name_spans, which keeps only the longest match: a name lying wholly inside a longer
+# name's place counts for the longer name's role only.
 my %ANS_HASH_CACHE;
 sub ans_cached_hash { my ($w) = @_; return exists $ANS_HASH_CACHE{$w} ? $ANS_HASH_CACHE{$w} : ($ANS_HASH_CACHE{$w} = ans_hash($w)); }
 # ans_name_spans(text, role_of) -> ([start, length, hash]...) for every known name inside text
@@ -113,7 +117,9 @@ sub ans_name_spans {
 			}
 		}
 	}
-	return @spans;
+	# Longest match: a name whose place lies wholly inside the place of a longer name is
+	# not counted (it counts for the longer name only). Names that stick out are kept.
+	return grep { my $s = $_; !grep { $_->[1] > $s->[1] && $_->[0] <= $s->[0] && $_->[0] + $_->[1] >= $s->[0] + $s->[1] } @spans; } @spans;
 }
 # ans_name_hashes(text, role_of) -> the distinct hashes of the known names found inside text
 sub ans_name_hashes { my ($t, $role_of) = @_; my %u; return grep { !$u{$_}++ } map { $_->[2] } ans_name_spans($t, $role_of); }
