@@ -195,7 +195,7 @@ The on-chain anchor receipt (`/api/anchor-receipt.json`) and the corresponding M
 
 - The runtime `/api/anchor-receipt.json` URL is intentionally absent (= verifier recipe step 5 returns 404 by design).
 - The selection-evidence page labels this as `scheduled (anchor)` to set expectations correctly.
-- The `metalfreedom@anchor` permission is already deployed on Metal A-chain (= test broadcasts `94446328…` and `e67f385b…` verified on explorer).
+- The `<anchor-account>@anchor` permission is already deployed on Metal A-chain (= test broadcasts `94446328…` and `e67f385b…` verified on explorer).
 
 ## 8. Open items (= surfaced and deferred; remain open at the time of this report)
 

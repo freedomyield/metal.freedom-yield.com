@@ -312,20 +312,20 @@ of the Phase 5 execution plan:
 None. These are pre-Phase-5 doc + .gitignore hardening; no live
 artifact references any of the changed text.
 
-## 2026-06-22 — Production account names confirmed: operator `metalfreedom` + sink `fyhistory`
+## 2026-06-22 — Production account names confirmed: operator `<anchor-account>` + sink `<anchor-sink>`
 
 ### Summary
 
 Two related renames were applied in one revision:
 
 1. **Operator XPR account**: in-repo references renamed from
-   `freedomyield` to `metalfreedom`. The operator decided the
+   `freedomyield` to `<anchor-account>`. The operator decided the
    production account name during the Phase α mainnet rollout
    (2026-06-22); the previous identifier `freedomyield` was held by
    an unrelated project.
 2. **Sink account name** (Phase α `eosio.token::transfer` `to`):
    placeholder `fyldsink` reconciled to the confirmed mainnet sink
-   `fyhistory` (testnet rehearsal sink remains `fyhistorytst`).
+   `<anchor-sink>` (testnet rehearsal sink remains `<rehearsal-anchor-sink>`).
    Operator judgment #1 (sink name choice) is now resolved; the
    `_comment` in `anchor-receipt.example.json` no longer describes
    the sink as "candidate under operator judgment."
@@ -334,7 +334,7 @@ Two related renames were applied in one revision:
 `actor` / `from` / `to` fields had already been generalized to the
 XPR account name pattern (`^[a-z1-5.]{1,12}$`) by the audit-C/F-E2
 revision, so all forms (old `freedomyield`/`fyldsink`, new
-`metalfreedom`/`fyhistory`) validate. This entry is recorded for
+`<anchor-account>`/`<anchor-sink>`) validate. This entry is recorded for
 traceability only.
 
 ### What changed
@@ -346,7 +346,7 @@ traceability only.
 | `public/api/anchor-receipt.phase-beta.example.json` | example `account`/`actor` values |
 | `public/selection-evidence/index.html` (en + ja) | permission reference text |
 | `scripts/sign-anchor-event.sh` | header comments only (code already reads xpr-account config) |
-| `scripts/operator-local/contract/freedomyield-anchor.spec.md` | **file renamed** → `metalfreedom-anchor.spec.md`; Phase β contract namespace `freedomyield::inscribe` → `metalfreedom::inscribe` |
+| `scripts/operator-local/contract/freedomyield-anchor.spec.md` | **file renamed** → `<anchor-account>-anchor.spec.md`; Phase β contract namespace `freedomyield::inscribe` → `<anchor-account>::inscribe` |
 | `tests/post-anchor-event/fixtures/stub-signer.sh` | test fixture `actor` + `to` values |
 | `tests/sign-anchor-event/test-xpr-account-config.sh` | test case names + assertion strings + sink config |
 | `tests/sign-anchor-event/test-block-time-failclosed.sh` | comment + sink config |
@@ -364,7 +364,7 @@ traceability only.
 - GitHub org `freedomyield` and repository path
   `freedomyield/metal.freedom-yield.com`
 - Schema constraints (pattern `^[a-z1-5.]{1,12}$` accepted both
-  `freedomyield` and `metalfreedom`)
+  `freedomyield` and `<anchor-account>`)
 - Schema `$id`, `schema_version`, `x-stability`,
   `x-baseline-revision`
 - `anchor.inscribe_action.permission.permission` const value
@@ -374,16 +374,16 @@ traceability only.
 
 None at the data layer. Any anchor receipt or identity manifest
 parser that pinned `actor == "freedomyield"` or `to == "fyldsink"`
-(off-schema) needs to update its expected values to `metalfreedom`
-and `fyhistory` respectively. The schema-conformant path (pattern
+(off-schema) needs to update its expected values to `<anchor-account>`
+and `<anchor-sink>` respectively. The schema-conformant path (pattern
 check) was unaffected.
 
 ### Rationale
 
 XPR account names on Metal A-chain mainnet are operator choices and
 are publicly visible on every anchor inscription. Both names are now
-the production reality (operator-controlled `metalfreedom` and
-receive-only sink `fyhistory`, both created 2026-06-22). The in-repo
+the production reality (operator-controlled `<anchor-account>` and
+receive-only sink `<anchor-sink>`, both created 2026-06-22). The in-repo
 design documents are aligned to reflect that production reality;
 the placeholder language ("candidate", "pending") that was
 appropriate during pre-rollout design is now retired.
@@ -471,7 +471,7 @@ sink account at first inscription.
 ### IC-3 incorporation (anchor-receipt Phase β shape, same-day extension)
 
 After the initial publication of `anchor-receipt.schema.v1.json`, the
-IC-3 deliverable from the on-chain track (= `scripts/operator-local/contract/metalfreedom-anchor.spec.md`
+IC-3 deliverable from the on-chain track (= `scripts/operator-local/contract/<anchor-account>-anchor.spec.md`
 §8 ABI fragment, lives on `phase-alpha-onchain`) landed. The
 anchor-receipt schema was extended in-place (same baseline revision,
 no x-issued-at change) with:
@@ -483,7 +483,7 @@ no x-issued-at change) with:
     spec.
   - `authorization` — Antelope action.authorization array of
     `{actor, permission}` pairs (Phase β uses
-    `authorization[0] = {actor: 'metalfreedom', permission: 'anchor'}`).
+    `authorization[0] = {actor: '<anchor-account>', permission: 'anchor'}`).
 - Method-discriminated `if/then/else` blocks at the `anchor` object
   level that re-add the Phase α required list
   (`from`/`to`/`quantity`/`memo`/`permission`) when
@@ -514,9 +514,9 @@ requirement (verified at commit time).
 - `docs/MERKLE_DAG_SPEC.md` — canonical spec for the two-branch
   Merkle DAG, leaf canonical encoding, tree construction, and
   A-chain memo binding (`fyid1:<dag_root_hash>`).
-- `scripts/operator-local/contract/metalfreedom-anchor.spec.md`
+- `scripts/operator-local/contract/<anchor-account>-anchor.spec.md`
   (lives on `phase-alpha-onchain` branch as of 2026-06-21) —
-  Phase β `metalfreedom::inscribe` action specification whose §8
+  Phase β `<anchor-account>::inscribe` action specification whose §8
   ABI fragment is the source for the `anchor.inscribe_action.data`
   structure in the IC-3 extension above.
 - `project_merkle_dag_identity_anchor_design` memory — Phase α / β

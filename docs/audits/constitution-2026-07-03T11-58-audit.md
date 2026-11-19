@@ -43,7 +43,7 @@
 - 実 `proton (transaction:push|action)` 呼び出し site を 全 tracked file grep した 結果、executable な mainnet-capable broadcast 呼び出し は `bin/safe-broadcast:255,261` (`PROTON_ARGS=(transaction:push …)`) の 1 箇所 のみ.
 - `scripts/sign-anchor-event.sh`: 直接 `proton` invocation なし、`bin/safe-broadcast` に delegate (`sign-anchor-event.sh:311-323`). header marker (`sign-anchor-event.sh:3-9`) に `# CHAIN:` + `# PRIME_DIRECTIVE: TESTNET-FIRST` embed 済.
 - `scripts/run-testnet-rehearsal.sh`: broadcast は `bin/safe-broadcast --chain=testnet-a` に delegate (`run-testnet-rehearsal.sh:182`)、直接 proton は `chain:set`/`chain:info` の read-only preflight のみ. header marker embed 済 (`run-testnet-rehearsal.sh:3-11`).
-- `scripts/install-tier1-hook.sh:134` + `scripts/operator-local/contract/metalfreedom-anchor.spec.md:232` の `proton …` 出現 は それぞれ test 入力 string / doc spec で、実 invocation では ない.
+- `scripts/install-tier1-hook.sh:134` + `scripts/operator-local/contract/<anchor-account>-anchor.spec.md:232` の `proton …` 出現 は それぞれ test 入力 string / doc spec で、実 invocation では ない.
 
 **Evidence — test suite 実測 (fabrication なし、実 invoke output)**:
 - `tests/broadcast-guard/test-broadcast-guard.sh`: **PASS=25 FAIL=0** (block 13 shape + allow 8 benign + token override 2 + audit-log 2-line + expired-token block). 実 invoke exit 0.
