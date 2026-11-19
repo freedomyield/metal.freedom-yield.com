@@ -325,13 +325,13 @@ HOME=~/.metal-fy-proton-test proton key:lock
 
 **目的**: 読み取りの checker が、同じ状態を、wrapper と同じ読みで答えること。
 
-打つ人: AI（読み取りだけ）。repo の root で。
+打つ人: AI（読み取りの checker を走らせ、出力を稽古の一時のファイル `$RH_LOGS/r5-*.out`・`.err` に書く）。repo の root で。
 
 ```
 . "$RH_LOGS/rh-vars.sh" && FY_CONFIG_DIR="$CFG" bash scripts/check-cycle-anchor-absent.sh --chain=testnet-a --anchor-source=public/api/anchor-source.json --not-before=<E> > "$RH_LOGS/r5-this.out" 2> "$RH_LOGS/r5-this.err"; echo "rc=$?"; cut -d' ' -f1-4 "$RH_LOGS/r5-this.out"
 ```
 
-打つ人: AI（読み取りだけ）。repo の root で。
+打つ人: AI（読み取りの checker を走らせ、出力を稽古の一時のファイル `$RH_LOGS/r5-*.out`・`.err` に書く）。repo の root で。
 
 ```
 . "$RH_LOGS/rh-vars.sh" && FY_CONFIG_DIR="$CFG" bash scripts/check-cycle-anchor-absent.sh --chain=testnet-a --memo-prefix="$NEXT" > "$RH_LOGS/r5-next.out" 2> "$RH_LOGS/r5-next.err"; echo "rc=$?"; cut -d' ' -f1-4 "$RH_LOGS/r5-next.out"
