@@ -18,7 +18,7 @@
 | # | 設計書 §8（と §11.10 の表） | この文書 | 理由（実物の行） |
 |---|---|---|---|
 | D1 | R1 は `--expect-cycle=<N+1>`（まだ刻んでいない次の cycle） | `--expect-cycle=<C>`。C は当日の正本 `public/api/anchor-source.json` の `observations_branch.cycle_number_observed`（既に刻んだ cycle の稽古＝DRESS。9/1 と同じ） | 稽古は `--expect-cycle` が正本の値と違えば step 1/10 で止まる（`c46894b:scripts/run-testnet-rehearsal.sh:343-346`）。`--source=` の見本の file は `--allow-fixture` が要り、gate 1 の証拠にならない（同 `:306-318`） |
-| D2 | R3（旗つきの再実行）が R1 と別 | R1 の 2 回目（旗つき）が R3 を兼ねる。R3 を別に打たない | DRESS では、旗なしで送れる道が無い（§3.1 の表の分岐。`docs/superpowers/specs/…-design.md` §11.10 の表） |
+| D2 | R3（旗つきの再実行）が R1 と別 | R1 の 2 回目（旗つき）が R3 を兼ねる。R3 を別に打たない | DRESS では、旗なしで送るのは §3.1 の表の「床だけ見える」の時だけで、それ以外の状態は何も送らない（§3.1 の表の分岐。`docs/superpowers/specs/…-design.md` §11.10 の表） |
 | D3 | （R2a の旗の有無は書かれていない） | R2a は**旗なし** | 呼ぶ順は journal が先、check A が後（`beb5061:bin/safe-broadcast:1659-1660`、2 回目は `:1720-1722`）。旗なしでも journal の断り（wrapper 13）が先に出る。旗をつけると、有効期限 E が過ぎた後に打った時に check A の「見つかった」を旗が通し、送らないはずの run が送ってしまう |
 | D4 | R4 は「設定の `anchor-sink` を存在しない口座にした設定」で稽古を走らせる | **行わない**（2026-11-17 総監督の決定。経営者の指摘による） | ― |
 
@@ -39,7 +39,7 @@ git log -1 --format=%h && git status --short | wc -l && test -f scripts/check-cy
 
 ### 1.2 AI の読み取りの共通の定義（一度だけ作る。値は保存しない）
 
-打つ人: AI（読み取りだけ）。`$RH_LOGS` は、当日のセッションの一時の置き場の中の稽古用のフォルダ（絶対 path はこの文書に書かない）。
+打つ人: AI（稽古の一時の定義のファイル `$RH_LOGS/rh-vars.sh` を作る 1 行。外には何も書かない）。`$RH_LOGS` は、当日のセッションの一時の置き場の中の稽古用のフォルダ（絶対 path はこの文書に書かない）。
 
 ```
 mkdir -p "$RH_LOGS" && cat > "$RH_LOGS/rh-vars.sh" <<'EOF'
@@ -137,7 +137,7 @@ grep -F 'phase=' "$AUDIT_LOG" | tail -n 6 | awk -F'\t' '{printf "%s", $1; for (i
 
 ### 3.1 R1（1 回目: 旗なし）— 守りの断りを live で 1 回見る
 
-**目的**: 旗なしで走らせ、床の無い・または既に在る cycle を wrapper が断ることを見る。何も送らない。
+**目的**: 旗なしで走らせ、床の無い・または既に在る cycle を wrapper が断ることを見る。旗なしで送るのは「床だけ見える」の時だけで、それ以外は何も送らない。
 
 打つ人: 経営者
 
@@ -162,7 +162,7 @@ HOME=~/.metal-fy-proton-test proton key:lock
 - `<C>` は §1.2 で読んだ値（AI が依頼に書く）。`--source=` と `--allow-fixture` は使わない。
 - **目視するもの（この順で）**: `step 1/10` の `cycle_number_observed:` が C、`derived memo_prefix:` が P、`expect-cycle:` の行が `(matches — OK)` → `step 3/10` の `present: … (matches current on-chain key)`。
 
-**期待（どれも何も送らない）**
+**期待（「床だけ見える」の行だけ送る。それ以外は何も送らない）**
 
 | 状態（§1.4） | 稽古の終了コード | 画面の要点 | wrapper の終了コード |
 |---|---|---|---|
@@ -353,7 +353,7 @@ HOME=~/.metal-fy-proton-test proton key:lock
 - **0 と 10 以外も止める条件にしない**（3 と 4 は §11.10 の期待の内）。ただし終了コード 2・1 は**止める**（checker の設定か使い方の誤り）。
 - 稽古が全部終わったら、AI は共通の定義の file を消す（実値は入っていないが、残さない）。
 
-打つ人: AI（読み取りだけ）。
+打つ人: AI（稽古の一時の定義のファイル `$RH_LOGS/rh-vars.sh` を消す 1 行）。
 
 ```
 rm -f "$RH_LOGS/rh-vars.sh"

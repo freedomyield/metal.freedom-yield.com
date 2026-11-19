@@ -1287,7 +1287,7 @@ the values to pass on a given day are in the day-of value sheet above):
    認可の**性質**の説明であって手順ではない。当日の唯一の不可逆な承認なので、
    ここで手順として書き下す:
 
-   - **AI が提示するもの (5 点)** — いずれも `bin/safe-broadcast:1072-1094` の
+   - **AI が提示するもの (5 点)** — いずれも `bin/safe-broadcast:1685-1707` の
      `BROADCAST CONFIRMATION` ブロックと 7b の出力から取る、**AI の要約では
      なく実出力**: ① `chain:` (= `mainnet-a`)、② `token binding:`
      (`chain=…, tx_sha256=…` — R16 の content binding)、③ `action count:` と
@@ -1308,7 +1308,7 @@ the values to pass on a given day are in the day-of value sheet above):
      (復唱が PRIME DIRECTIVE gate 2 の実体)。認可が成立して初めて AI は
      上の `sign-anchor-event.sh` を実行してよい。実行すると
      `bin/safe-broadcast` が対話プロンプトを出し、確認フレーズは
-     **`BROADCAST mainnet-a` の完全一致**である (`bin/safe-broadcast:1088-1093`)。
+     **`BROADCAST mainnet-a` の完全一致**である (`bin/safe-broadcast:1701-1706`)。
    - **中止の言い方** — chat で「**中止**」または「**止めて**」の一言で足りる。
      理由の説明は要らないし、求められない。プロンプトまで進んでいた場合は
      **確認フレーズ以外の任意の入力**が abort になる (exit 5)。中止で失われる
