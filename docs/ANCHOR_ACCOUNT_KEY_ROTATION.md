@@ -1,6 +1,8 @@
 # Anchor account (proton A-chain) key rotation runbook
 
-metalfreedom / frdomyieltst など **proton (Metal A-chain) account の permission 公開鍵**を
+Placeholders: `<anchor-account>` / `<anchor-sink>` (and `<rehearsal-anchor-account>` / `<rehearsal-anchor-sink>` on testnet) stand for the values in the local config files `${FY_CONFIG_DIR:-/etc/freedom-yield}/xpr-account` and `anchor-sink`; read them from there.
+
+`<anchor-account>` / `<rehearsal-anchor-account>` など **proton (Metal A-chain) account の permission 公開鍵**を
 `updateauth` で差し替える手順。metalgo の staking 鍵 (`staker.key`/`signer.key`) の
 ローテーションは別物 — それは [`KEY_ROTATION.md`](KEY_ROTATION.md) を参照。
 
@@ -20,14 +22,14 @@ metalfreedom / frdomyieltst など **proton (Metal A-chain) account の permissi
 
 | account | net | owner | active | anchor |
 |---|---|---|---|---|
-| metalfreedom | mainnet | 旧74Ec (owner=active 共有) | 旧74Ec | 旧5MMA |
-| frdomyieltst | testnet | 旧8fLk (owner=active 共有) | 旧8fLk | 旧6crX |
+| `<anchor-account>` | mainnet | 旧74Ec (owner=active 共有) | 旧74Ec | 旧5MMA |
+| `<rehearsal-anchor-account>` | testnet | 旧8fLk (owner=active 共有) | 旧8fLk | 旧6crX |
 
-resource: metalfreedom は CPU/NET/RAM とも潤沢 → updateauth のチャージ不要。
+resource: `<anchor-account>` は CPU/NET/RAM とも潤沢 → updateauth のチャージ不要。
 
 ## 到達目標 (owner/active/anchor を全て別鍵に・両ネット構造一致)
 
-各 account で **3 permission = 3 別鍵**。sink 用 account (fyhistory / fyhistorytst) は
+各 account で **3 permission = 3 別鍵**。sink 用 account (`<anchor-sink>` / `<rehearsal-anchor-sink>`) は
 **秘密鍵が露出していないので据置** (回さない)。
 
 **鍵の生成元と保管 (重要)**:
@@ -62,9 +64,9 @@ active を差し替える例 (owner 権限で署名):
 ```json
 {"actions":[{
   "account":"eosio","name":"updateauth",
-  "authorization":[{"actor":"metalfreedom","permission":"owner"}],
+  "authorization":[{"actor":"<anchor-account>","permission":"owner"}],
   "data":{
-    "account":"metalfreedom","permission":"active","parent":"owner",
+    "account":"<anchor-account>","permission":"active","parent":"owner",
     "auth":{"threshold":1,"keys":[{"key":"<NEW_ACTIVE_PUB>","weight":1}],"accounts":[],"waits":[]}
   }
 }]}
@@ -72,7 +74,7 @@ active を差し替える例 (owner 権限で署名):
 
 - anchor: `"permission":"anchor","parent":"active"` に変え、key を `<NEW_ANCHOR_PUB>`。
 - owner: `"permission":"owner","parent":""` に変え、key を `<NEW_OWNER_PUB>`。**最後**。
-- testnet は `actor`/`account` を `frdomyieltst`、chain を `testnet-a` にする。
+- testnet は `actor`/`account` を `<rehearsal-anchor-account>`、chain を `testnet-a` にする。
 
 ## Phase 0 — 新鍵生成 (broadcast なし・operator)
 
@@ -91,12 +93,12 @@ permission ごとに生成元が違う。**owner は WebAuth (新 12word 派生)
 > vault のラベルは既存流儀 (`Owner/active/anchor × Main/testNet`) に合わせ、
 > 「(rotated 2026-07-10)」等で新旧を区別。
 
-## Phase 1 — testnet (frdomyieltst) を先に完走 = gate1 + testnet 構成完成
+## Phase 1 — testnet (`<rehearsal-anchor-account>`) を先に完走 = gate1 + testnet 構成完成
 
-1. **frdomyieltst の active/owner 秘密鍵を復元** (現 testnet keystore は anchor しか無い)。
-   vault の frdomyieltst 12word を wallet で開いて active/owner の PVT を取り出し:
+1. **`<rehearsal-anchor-account>` の active/owner 秘密鍵を復元** (現 testnet keystore は anchor しか無い)。
+   vault の `<rehearsal-anchor-account>` 12word を wallet で開いて active/owner の PVT を取り出し:
    ```bash
-   HOME=~/.metal-fy-proton-test proton key:add   # prompt に frdomyieltst active/owner PVT を貼る
+   HOME=~/.metal-fy-proton-test proton key:add   # prompt に <rehearsal-anchor-account> active/owner PVT を貼る
    ```
    > **秘密鍵はコマンドの引数に書かない。** 引数に書くと shell history (`~/.zsh_history`) と
    > `ps` に平文で残る。
@@ -114,12 +116,12 @@ permission ごとに生成元が違う。**owner は WebAuth (新 12word 派生)
 3. 各段後に検証:
    ```bash
    curl -s -X POST https://rpc.api.testnet.metalx.com/v1/chain/get_account \
-     -H 'content-type: application/json' -d '{"account_name":"frdomyieltst"}' \
+     -H 'content-type: application/json' -d '{"account_name":"<rehearsal-anchor-account>"}' \
      | jq '.permissions[]|{name:.perm_name,keys:[.required_auth.keys[].key]}'
    ```
 4. 3 permission が新鍵になれば testnet 完成。**各 tx_id を控える** (mainnet gate1 で使用)。
 
-## Phase 2 — mainnet (metalfreedom) 差し替え (operator broadcast・owner 最後)
+## Phase 2 — mainnet (`<anchor-account>`) 差し替え (operator broadcast・owner 最後)
 
 順序: **2a active → 2b anchor → 2c owner**。各回:
 
@@ -132,7 +134,7 @@ permission ごとに生成元が違う。**owner は WebAuth (新 12word 派生)
        --testnet-tx-id=<Phase1 active の testnet tx_id> \
        --dry-run-log=<dry-run ログ path>
    ```
-4. `get_account metalfreedom` で着地検証してから次へ。
+4. `get_account <anchor-account>` で着地検証してから次へ。
 
 **owner (2c) の前に安全確認**:
 - 2c の署名は **旧 owner (74Ec)** で行う (今の proton keystore にある旧鍵で署名し、新 owner 公開鍵を据える)。
@@ -149,20 +151,20 @@ mv ~/.metal-fy-proton ~/.metal-fy-proton-PRE-ROTATE
 HOME=~/.metal-fy-proton proton chain:set proton
 HOME=~/.metal-fy-proton proton key:add   # prompt に NEW active PVT を貼る
 HOME=~/.metal-fy-proton proton key:add   # prompt に NEW anchor PVT を貼る
-HOME=~/.metal-fy-proton proton key:add   # prompt に fyhistory PVT (据置・MainNet) を貼る
+HOME=~/.metal-fy-proton proton key:add   # prompt に <anchor-sink> PVT (据置・MainNet) を貼る
 # owner は追加しない — root 鍵を日常署名面から外す
 chmod 600 ~/.metal-fy-proton/Library/Preferences/@proton/cli-nodejs/proton-cli.json
-HOME=~/.metal-fy-proton proton key:list   # 公開のみ。active/anchor/fyhistory を確認
+HOME=~/.metal-fy-proton proton key:list   # 公開のみ。active/anchor/<anchor-sink> を確認
 HOME=~/.metal-fy-proton proton key:lock
 ```
 
-testnet keystore も同様 (active/anchor/fyhistorytst のみ、owner は WebAuth cold)。
+testnet keystore も同様 (active/anchor/`<rehearsal-anchor-sink>` のみ、owner は WebAuth cold)。
 
 ## Phase 4 — 事後検証
 
-- `get_account` で metalfreedom / frdomyieltst の 3 permission が全て新鍵・旧鍵消滅を確認。
+- `get_account` で `<anchor-account>` / `<rehearsal-anchor-account>` の 3 permission が全て新鍵・旧鍵消滅を確認。
 - `key:list` (公開のみ) が新 active/anchor と一致 (owner は keystore に無いのが正)。
-- **WebAuth で新 owner の 12word を開き、metalfreedom / frdomyieltst が正しく見える・管理できる**ことを確認
+- **WebAuth で新 owner の 12word を開き、`<anchor-account>` / `<rehearsal-anchor-account>` が正しく見える・管理できる**ことを確認
   (owner を WebAuth 由来にした狙いはこの管理/復旧線の維持)。
 - **新 anchor 鍵で testnet-first anchor を 1 本署名**し、anchor pipeline が新鍵で通ることを実証。
 - 旧 keystore 退避物 (`*-PRE-ROTATE`) は、上記確認後に operator 判断で破棄。旧鍵は on-chain で
