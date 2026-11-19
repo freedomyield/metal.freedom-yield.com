@@ -261,6 +261,15 @@ base2="$(cd "$R" && git rev-parse HEAD)"; put src/more.txt "fine\n"; commit "cle
 run_gate --messages="$base2"; expect_only "messages: a name in a commit at or before the base is not looked at" 0 "OK 6 files"
 put src/leak2.txt "${FAKE_SINK}\n"; commit "clean again"
 run_gate --messages="$base2"; expect "messages: the tree is still checked in --messages mode" 1 "VIOLATION src/leak2.txt:1 anchor-sink"
+# the scan of the commit messages dies after it started: a perl shim that exits 0 and prints
+# nothing only for the commit-message program (found by a string only that program holds; the tree scan and the judge run on the real perl)
+mkrepo; seed_ok
+base3="$(cd "$R" && git rev-parse HEAD)"; put src/more.txt "fine\n"; commit "clean message"
+mkdir -p "$WORK/shim"; REAL_PERL="$(command -v perl)"
+printf '#!/bin/sh\ncase "$2" in *"a commit record could not be read"*) exit 0 ;; esac\nexec %s "$@"\n' "$REAL_PERL" > "$WORK/shim/perl"; chmod +x "$WORK/shim/perl"
+PATH_OVERRIDE="$WORK/shim:$PATH"; run_gate --messages="$base3"
+expect "scan-died: the commit-message scan prints no completion mark (exit 0, no output) is 2, no verdict" 2
+PATH_OVERRIDE=""; run_gate --messages="$base3"; expect_only "scan-died: the same repository with the real perl is OK (the shim was the only cause)" 0 "OK 5 files"
 
 # ---- --index ---------------------------------------------------------------------------
 mkrepo; seed_ok
@@ -291,6 +300,10 @@ run_gate; expect "obsolete: a glob that matches files but none with the name ins
 mkrepo; seed_ok
 ( cd "$R" && git rm -q -f public/api/legacy/x.json >/dev/null 2>&1 ); commit nolegacy
 run_gate; expect "obsolete: the same on the sink row after its file is removed" 1 "OBSOLETE anchor-sink public/api/legacy/*.json"
+mkrepo; seed_ok
+SINK_ROW_VERIFY="$(row "$H_SINK" anchor-sink public/verify/index.html - 'same glob as the account row')"
+write_cfg "enabled${TAB}1" "$ACC_ROW_VERIFY" "$SINK_ROW_VERIFY" "$ACC_ROW_FROZEN" "$SINK_ROW_LEGACY"
+run_gate; expect_only "obsolete: judged per name (two rows with one glob, only the account name is in the file: the sink row is OBSOLETE)" 1 "OBSOLETE anchor-sink public/verify/index.html"
 mkrepo; seed_ok
 put public/api/legacy/deep/y.json "${FAKE_SINK}\n"; ( cd "$R" && git rm -q -f public/api/legacy/x.json >/dev/null 2>&1 ); commit deepunder
 run_gate; expect "glob: * does not cross a slash (a name one directory deeper is a VIOLATION)" 1 "VIOLATION public/api/legacy/deep/y.json:1 anchor-sink"
