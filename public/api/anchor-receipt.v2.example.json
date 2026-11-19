@@ -1,5 +1,5 @@
 {
-	"_comment": "Synthetic schema example for /api/anchor-receipt.schema.v2.json (HC-single 4-action pack). All hex strings, tx_ids, block numbers, and timestamps are synthetic placeholders demonstrating field shape only; no real on-chain transaction is represented. The operator account 'metalfreedom' and sink 'fyhistory' are the production Metal A-chain mainnet names; time-varying fields are synthetic. Production runtime receipt is published at /api/anchor-receipt.json by scripts/gen-anchor-receipt.sh after the verification chain PASSes. See docs/ANCHOR_SOURCE.md.",
+	"_comment": "Synthetic schema example for /api/anchor-receipt.schema.v2.json (HC-single 4-action pack). All hex strings, tx_ids, block numbers, and timestamps are synthetic placeholders demonstrating field shape only; no real on-chain transaction is represented. The operator account 'fakeanchor12' and sink 'fakesink1' are the production Metal A-chain mainnet names; time-varying fields are synthetic. Production runtime receipt is published at /api/anchor-receipt.json by scripts/gen-anchor-receipt.sh after the verification chain PASSes. See docs/ANCHOR_SOURCE.md.",
 	"$schema": "https://metal.freedom-yield.com/api/anchor-receipt.schema.v2.json",
 	"schema_version": 2,
 	"schema_version_of_source": 1,
@@ -21,15 +21,15 @@
 			{"branch": "artifacts",        "memo": "fya1c3-ar:3333333333333333333333333333333333333333333333333333333333333333", "root_hex": "3333333333333333333333333333333333333333333333333333333333333333"},
 			{"branch": "dag_root_summary", "memo": "fya1c3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "root_hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
 		],
-		"authorization": {"actor": "metalfreedom", "permission": "anchor"},
-		"sink": "fyhistory",
+		"authorization": {"actor": "fakeanchor12", "permission": "anchor"},
+		"sink": "fakesink1",
 		"quantity": "0.0001 XPR"
 	},
 	"anchor_source_url": "https://metal.freedom-yield.com/api/anchor-source.json",
 	"anchor_source_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
 	"prev_anchor_tx_id": null,
 	"trigger_event": "cyclestart",
-	"signing_actor": "metalfreedom",
+	"signing_actor": "fakeanchor12",
 	"signing_permission": "anchor",
 	"verification_status": "live",
 	"verified_at": "2026-07-04T04:01:00Z",
