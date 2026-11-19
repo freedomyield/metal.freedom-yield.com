@@ -111,7 +111,7 @@
 
 ### F1 (🟡) — Phase β contract spec に v2 未伝播の stale 記述
 
-**Evidence**: `scripts/operator-local/contract/metalfreedom-anchor.spec.md:4-5` — 「The Phase α anchor **uses** `eosio.token::transfer` with a memo of the form `fyid1:<dag_root_hash>`」と現在形で記述。一方 `docs/MERKLE_DAG_SPEC.md:7` は fyid1 2-branch model を **retired** と宣言し、現行 memo family は `fya<S>c<N>:` (2026-07-04 cycle-3 実 broadcast も `fya1c3:` 系)。同 file L53/L66 の `root_hash` 説明も旧 spec 参照のまま。③ doc propagation (f2e9b17/72148f8/a568b93) がこの file に届いていない。
+**Evidence**: `scripts/operator-local/contract/<anchor-account>-anchor.spec.md:4-5` — 「The Phase α anchor **uses** `eosio.token::transfer` with a memo of the form `fyid1:<dag_root_hash>`」と現在形で記述。一方 `docs/MERKLE_DAG_SPEC.md:7` は fyid1 2-branch model を **retired** と宣言し、現行 memo family は `fya<S>c<N>:` (2026-07-04 cycle-3 実 broadcast も `fya1c3:` 系)。同 file L53/L66 の `root_hash` 説明も旧 spec 参照のまま。③ doc propagation (f2e9b17/72148f8/a568b93) がこの file に届いていない。
 
 **Suggested fix (指摘のみ)**: 冒頭 blockquote の Phase α 記述を v2 (fya memo family、anchor-source `dag_root_computed`) に更新するか、file 冒頭に「Phase α 記述は歴史的 (fyid1 は退役済)」の 1 行 note を追加。
 
