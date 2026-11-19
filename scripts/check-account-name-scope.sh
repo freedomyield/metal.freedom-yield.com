@@ -17,8 +17,9 @@
 #     --messages=<base>   the tree of HEAD, plus the messages of the commits <base>..HEAD
 #   --index and --messages cannot be combined (exit 2).
 #
-# A "word" is a run of [A-Za-z0-9_] of 3 or more bytes (binary content is cut the same way);
-# it is lower-cased and hashed. Looked at: every tracked blob's content, every tracked path,
+# A name is found as a SUBSTRING, whatever letter case, with no word boundary: every run of
+# [A-Za-z0-9_] of 3 or more bytes (binary content is cut the same way) is lower-cased and
+# every part of it of 3 to 12 bytes is hashed and looked up. Looked at: every tracked blob's content, every tracked path,
 # and with --messages every commit message. A gitlink (mode 160000) is never read, only its
 # path is looked at.
 #
@@ -57,7 +58,7 @@ ANS_CONFIG="config/account-name-scope.tsv"
 ANS_NAME="check-account-name-scope"
 
 ans_die() { echo "${ANS_NAME}: $*" >&2; exit 2; }
-ans_usage() { sed -n '/^# Usage:/,/^# A "word"/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
+ans_usage() { sed -n '/^# Usage:/,/^# A name is found/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
 
 # ---- perl: the pieces shared by the three scans and the judge (one place for the word cut,
 # the hash and the date rule) ---------------------------------------------------------------
@@ -92,11 +93,44 @@ sub ans_load_rows {
 	}
 	return (\@rows, \%role_of);
 }
-sub ans_words { my ($t) = @_; my @w; while ($t =~ /([A-Za-z0-9_]{3,})/g) { push @w, $1 } return @w; }
-# ans_redact(text, role_of) -> the text with every known name replaced by <role>
+# The one counting rule (substring, case-blind, no word boundary): a name is found anywhere
+# inside a run of [A-Za-z0-9_] — the run is lower-cased and every part of it of 3 to 12
+# bytes (an XPR name is at most 12 long) is hashed and looked up. Content, paths and commit
+# messages all go through ans_name_hashes; ans_redact uses the same cut.
+my %ANS_HASH_CACHE;
+sub ans_cached_hash { my ($w) = @_; return exists $ANS_HASH_CACHE{$w} ? $ANS_HASH_CACHE{$w} : ($ANS_HASH_CACHE{$w} = ans_hash($w)); }
+# ans_name_spans(text, role_of) -> ([start, length, hash]...) for every known name inside text
+sub ans_name_spans {
+	my ($t, $role_of) = @_;
+	my @spans;
+	while ($t =~ /([A-Za-z0-9_]{3,})/g) {
+		my ($run, $base) = (lc $1, $-[1]);
+		my $n = length $run;
+		for my $len (3 .. ($n < 12 ? $n : 12)) {
+			for my $i (0 .. $n - $len) {
+				my $h = ans_cached_hash(substr($run, $i, $len));
+				push @spans, [$base + $i, $len, $h] if exists $role_of->{$h};
+			}
+		}
+	}
+	return @spans;
+}
+# ans_name_hashes(text, role_of) -> the distinct hashes of the known names found inside text
+sub ans_name_hashes { my ($t, $role_of) = @_; my %u; return grep { !$u{$_}++ } map { $_->[2] } ans_name_spans($t, $role_of); }
+# ans_redact(text, role_of) -> the text with every known name replaced by <role> (again until none is left)
 sub ans_redact {
 	my ($t, $role_of) = @_;
-	$t =~ s/([A-Za-z0-9_]{3,})/exists $role_of->{ans_hash($1)} ? '<' . $role_of->{ans_hash($1)} . '>' : $1/ge;
+	for (1 .. 20) {
+		my @spans = sort { $a->[0] <=> $b->[0] || $b->[1] <=> $a->[1] } ans_name_spans($t, $role_of);
+		last unless @spans;
+		my ($out, $pos) = ('', 0);
+		for my $s (@spans) {
+			next if $s->[0] < $pos;
+			$out .= substr($t, $pos, $s->[0] - $pos) . '<' . $role_of->{$s->[2]} . '>';
+			$pos = $s->[0] + $s->[1];
+		}
+		$t = $out . substr($t, $pos);
+	}
 	return $t;
 }
 PERLEOF
@@ -152,8 +186,7 @@ open(my $o, '>>', $out_file) or ans_fail("cannot write the hit list");
 my $pid = open2(my $cf_out, my $cf_in, 'git', 'cat-file', '--batch');
 binmode $cf_out; binmode $cf_in;
 { my $old = select($cf_in); $| = 1; select($old); }
-my ($nfiles, %cache, %seen) = (0);
-my $hash_of = sub { my ($w) = @_; return exists $cache{$w} ? $cache{$w} : ($cache{$w} = ans_hash($w)); };
+my ($nfiles, %seen) = (0);
 local $/ = "\0";
 while (defined(my $rec = <$ef>)) {
 	chomp $rec;
@@ -163,9 +196,8 @@ while (defined(my $rec = <$ef>)) {
 	ans_fail("an entry of the tree could not be read") unless defined $path;
 	ans_fail("a tracked path holds a tab or a newline") if $path =~ /[\t\n]/;
 	$nfiles++;
-	for my $w (ans_words($path)) {
-		my $h = $hash_of->($w);
-		print $o "P\t$h\t$path\n" if exists $role_of->{$h} && !$seen{"P\t$h\t$path"}++;
+	for my $h (ans_name_hashes($path, $role_of)) {
+		print $o "P\t$h\t$path\n" if !$seen{"P\t$h\t$path"}++;
 	}
 	next if $mode eq '160000';
 	print $cf_in "$sha\n";
@@ -182,9 +214,8 @@ while (defined(my $rec = <$ef>)) {
 	my $lineno = 0;
 	for my $line (split /\n/, $buf, -1) {
 		$lineno++;
-		for my $w (ans_words($line)) {
-			my $h = $hash_of->($w);
-			print $o "C\t$h\t$path\t$lineno\n" if exists $role_of->{$h} && !$seen{"C\t$h\t$path\t$lineno"}++;
+		for my $h (ans_name_hashes($line, $role_of)) {
+			print $o "C\t$h\t$path\t$lineno\n" if !$seen{"C\t$h\t$path\t$lineno"}++;
 		}
 	}
 }
@@ -207,9 +238,8 @@ while (defined(my $rec = <$lf>)) {
 	chomp $rec;
 	my ($sha, $body) = $rec =~ /\A([0123456789abcdef]{40,64})\n(.*)\z/s;
 	ans_fail("a commit record could not be read") unless defined $sha;
-	for my $w (ans_words($body)) {
-		my $h = ans_hash($w);
-		print $o "M\t$h\t" . substr($sha, 0, 12) . "\n" if exists $role_of->{$h} && !$seen{"$h\t$sha"}++;
+	for my $h (ans_name_hashes($body, $role_of)) {
+		print $o "M\t$h\t" . substr($sha, 0, 12) . "\n" if !$seen{"$h\t$sha"}++;
 	}
 }
 print $o "ANS_MSG_DONE\t1\n";

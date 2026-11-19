@@ -221,7 +221,32 @@ put src/Upper.txt "NOTE: $(printf "%s" "$FAKE_ACCOUNT" | tr a-z A-Z)\n"; commit 
 run_gate; expect "case: an upper-case name in content is found (lower-cased before hashing)" 1 "VIOLATION src/Upper.txt:1 anchor-account"
 mkrepo; seed_ok
 put src/near.txt "x${FAKE_ACCOUNT} ${FAKE_ACCOUNT}_suffix ${FAKE_ACCOUNT}9 prefix_${FAKE_ACCOUNT}\n"; commit near
-run_gate; expect_only "word rule: the name glued to word characters is another word, not a hit" 0 "OK 5 files"
+run_gate; expect_only "substring rule: the name glued to word characters is still a hit (no word boundary is looked at)" 1 "VIOLATION src/near.txt:1 anchor-account"
+mkrepo; seed_ok
+put src/glued1.txt "a ${FAKE_SINK}stub b\n"; commit glued1
+run_gate; expect_only "substring rule: content - the name followed by letters is a VIOLATION" 1 "VIOLATION src/glued1.txt:1 anchor-sink"
+mkrepo; seed_ok
+put src/glued2.txt "a x${FAKE_ACCOUNT} b\n"; commit glued2
+run_gate; expect_only "substring rule: content - the name preceded by a letter is a VIOLATION" 1 "VIOLATION src/glued2.txt:1 anchor-account"
+mkrepo; seed_ok
+put "src/${FAKE_SINK}stub.txt" "clean\n"; commit gluedpath
+run_gate; expect_only "substring rule: path - the name followed by letters is a VIOLATION (redacted, no name left)" 1 "VIOLATION src/<anchor-sink>stub.txt:path anchor-sink"
+mkrepo; seed_ok
+base="$(cd "$R" && git rev-parse HEAD)"; put src/ok.txt "fine\n"; commit "note x${FAKE_ACCOUNT}stub"
+head12="$(cd "$R" && git rev-parse HEAD | cut -c1-12)"
+run_gate --messages="$base"; expect_only "substring rule: commit message - the name inside a longer word is a VIOLATION" 1 "VIOLATION commit:${head12} anchor-account"
+mkrepo; seed_ok
+put src/mixed.txt "Mixed $(printf '%s' "$FAKE_SINK" | sed 's/^f/F/; s/s/S/') here\n"; commit mixed
+run_gate; expect_only "substring rule: a mixed-case name (FakeSink1 form) is a VIOLATION" 1 "VIOLATION src/mixed.txt:1 anchor-sink"
+mkrepo; seed_ok
+put src/mixed2.txt "GLUED_$(printf '%s' "$FAKE_ACCOUNT" | tr a-z A-Z)STUB\n"; commit mixed2
+run_gate; expect_only "substring rule: upper-case name inside a longer upper-case word is a VIOLATION" 1 "VIOLATION src/mixed2.txt:1 anchor-account"
+mkrepo; seed_ok
+put docs/frozen/glued.sh "# ${FAKE_ACCOUNT}stub and x${FAKE_ACCOUNT}\n"; commit gluedallowed
+run_gate; expect_only "substring rule: a glued name inside an allowed glob is OK (allowed place stays allowed)" 0 "OK 5 files"
+mkrepo; seed_ok
+put "docs/frozen/${FAKE_ACCOUNT}stub.sh" "clean\n"; commit gluedfrozenpath
+run_gate; expect_only "substring rule: redaction leaves no name in the output when the name sits in a glued path word" 1 "VIOLATION docs/frozen/<anchor-account>stub.sh:path anchor-account"
 mkrepo; seed_ok
 put src/punct.txt "a.${FAKE_ACCOUNT}.b (${FAKE_SINK}) \"${FAKE_ACCOUNT}\"\n"; commit punct
 run_gate; expect "word rule: the name between punctuation is a hit (two names, one line each role)" 1 "VIOLATION src/punct.txt:1 anchor-account" "VIOLATION src/punct.txt:1 anchor-sink"
