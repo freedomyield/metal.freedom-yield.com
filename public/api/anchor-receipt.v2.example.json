@@ -1,5 +1,5 @@
 {
-	"_comment": "Synthetic schema example for /api/anchor-receipt.schema.v2.json (HC-single 4-action pack). All hex strings, tx_ids, block numbers, and timestamps are synthetic placeholders demonstrating field shape only; no real on-chain transaction is represented. The operator account 'fakeanchor12' and sink 'fakesink1' are the production Metal A-chain mainnet names; time-varying fields are synthetic. Production runtime receipt is published at /api/anchor-receipt.json by scripts/gen-anchor-receipt.sh after the verification chain PASSes. See docs/ANCHOR_SOURCE.md.",
+	"_comment": "Synthetic schema example for /api/anchor-receipt.schema.v2.json (HC-single 4-action pack). All hex strings, tx_ids, block numbers, and timestamps are synthetic placeholders demonstrating field shape only; no real on-chain transaction is represented. The operator account 'fakeanchor12' and sink 'fakesink1' are illustrative placeholder names, not production values (the anchor account's real value is published on /verify/); time-varying fields are synthetic. Production runtime receipt is published at /api/anchor-receipt.json by scripts/gen-anchor-receipt.sh after the verification chain PASSes. See docs/ANCHOR_SOURCE.md.",
 	"$schema": "https://metal.freedom-yield.com/api/anchor-receipt.schema.v2.json",
 	"schema_version": 2,
 	"schema_version_of_source": 1,
