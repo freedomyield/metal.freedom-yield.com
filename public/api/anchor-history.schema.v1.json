@@ -129,7 +129,7 @@
 		"signing_actor": {
 			"type": "string",
 			"pattern": "^[a-z1-5.]{1,12}$",
-			"description": "Antelope/EOSIO account that signed the inscribing action. For production mainnet entries this is always 'metalfreedom'. Equals anchor-receipt.signing_actor at the moment the history line was appended."
+			"description": "Antelope/EOSIO account that signed the inscribing action. For production mainnet entries this is always the anchor account (its value is published on /verify/). Equals anchor-receipt.signing_actor at the moment the history line was appended."
 		},
 		"signing_permission": {
 			"type": "string",
