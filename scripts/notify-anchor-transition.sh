@@ -3,7 +3,7 @@
 #
 # On a validator presence transition (cyclestart / cycleend), fires an ntfy push
 # telling the operator to run the MANUAL anchor from their Mac. This is the correct
-# driver under Mac-only signing: the metalfreedom@anchor key is NOT on this validator
+# driver under Mac-only signing: the <anchor-account>@anchor key is NOT on this validator
 # host, so anchors are composed here but SIGNED + BROADCAST from the operator's Mac.
 #
 # BROADCASTS NOTHING. Invokes no sign-anchor-event / safe-broadcast / proton. Writes

@@ -81,7 +81,7 @@ cat > "$TMP" <<EOF
 # Polls metalgo for our NodeID validator-presence flag every 5 min. On a
 # transition (cyclestart / cycleend) it dispatches to notify-anchor-transition.sh,
 # which fires an ntfy push telling the operator to run the MANUAL anchor from the
-# Mac. BROADCASTS NOTHING from this host — metalfreedom@anchor key is Mac-only.
+# Mac. BROADCASTS NOTHING from this host — <anchor-account>@anchor key is Mac-only.
 # State file: /var/lib/freedom-yield/anchor-watcher-state.json
 #
 # Log path is project-local (logs/), not /var/log/ — see docs/CRON_CONVENTIONS.md.
