@@ -32,6 +32,9 @@ FAKE_ACCOUNT="fakeanchor12"
 FAKE_SINK="fakesink1"
 # A fifth fake name used by the longest-match cases only: it contains FAKE_SINK whole.
 FAKE_REH_SINK="fakesink1tst"
+# A sixth fake name used by the partial-overlap case only: longer than FAKE_SINK, and it starts with the last
+# four letters of FAKE_SINK, so "fakesink1" + "overlap" holds both names with only a part of the shorter one shared.
+FAKE_OVERLAP="ink1overlap"
 
 PASS=0
 FAIL=0
@@ -46,6 +49,7 @@ sha_of() { perl -MDigest::SHA=sha256_hex -e 'print sha256_hex(lc $ARGV[0])' "$1"
 H_ACC="$(sha_of "$FAKE_ACCOUNT")"
 H_SINK="$(sha_of "$FAKE_SINK")"
 H_REH_SINK="$(sha_of "$FAKE_REH_SINK")"
+H_OVERLAP="$(sha_of "$FAKE_OVERLAP")"
 TAB=$'\t'
 
 OUT=""; ERR=""; RC=0
@@ -95,7 +99,7 @@ run_gate() {
 }
 
 has_line() { printf '%s\n' "$OUT" | grep -qxF -- "$1"; }
-no_leak() { ! printf '%s\n%s\n' "$OUT" "$ERR" | grep -qiF -e "$FAKE_ACCOUNT" -e "$FAKE_SINK" -e "$FAKE_REH_SINK"; }
+no_leak() { ! printf '%s\n%s\n' "$OUT" "$ERR" | grep -qiF -e "$FAKE_ACCOUNT" -e "$FAKE_SINK" -e "$FAKE_REH_SINK" -e "$FAKE_OVERLAP"; }
 
 # expect <name> <rc> [exact stdout line]...
 expect() {
@@ -361,6 +365,10 @@ mkrepo; seed_ok; longest_cfg
 base="$(cd "$R" && git rev-parse HEAD)"; put src/ok.txt "fine\n"; commit "note ${FAKE_REH_SINK}"
 head12="$(cd "$R" && git rev-parse HEAD | cut -c1-12)"
 run_gate --messages="$base"; expect_only "longest: a commit message holding the rehearsal name is the rehearsal role only" 1 "VIOLATION commit:${head12} rehearsal-anchor-sink" "OBSOLETE rehearsal-anchor-sink docs/rehearsal/*.sh"
+mkrepo; seed_ok
+write_cfg "enabled${TAB}1" "$ACC_ROW_VERIFY" "$ACC_ROW_FROZEN" "$SINK_ROW_LEGACY" "$(row "$H_OVERLAP" rehearsal-anchor-account 'docs/rehearsal/*.sh' - 'overlap script')"
+put src/part.txt "x ${FAKE_SINK}overlap y\n"; commit part
+run_gate; expect "longest: (d) two names sharing only a part keep both roles (the shorter one is not dropped)" 1 "VIOLATION src/part.txt:1 anchor-sink" "VIOLATION src/part.txt:1 rehearsal-anchor-account"
 
 # ---- enabled 0 ---------------------------------------------------------------------------
 mkrepo; seed_ok
