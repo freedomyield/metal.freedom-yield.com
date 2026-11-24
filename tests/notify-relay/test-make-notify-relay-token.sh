@@ -30,7 +30,7 @@ run_tool() {
   local dir=$1 out=$2 err=$3; shift 3
   FYD_RELAY_TOKEN_DIR="$dir" bash "$TOOL_PATH" "$@" >"$out" 2>"$err"
 }
-mode_of() { stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1"; }
+mode_of() { stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1"; }
 sha_of_file_content() { # sha256 of the token without its newline
   printf '%s' "$(head -n 1 "$1")" | shasum -a 256 | cut -d' ' -f1
 }
