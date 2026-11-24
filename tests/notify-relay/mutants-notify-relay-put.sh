@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2016  # sed expressions are literal on purpose
 # tests/notify-relay/mutants-notify-relay-put.sh — mutation net for scripts/notify-relay-put.sh (P1, tier 3).
-# What: breaks a temp copy of P1 one way at a time (20 ways) and runs test-notify-relay-put.sh on it; every break must make it FAIL.
+# What: breaks a temp copy of P1 one way at a time (25 ways) and runs test-notify-relay-put.sh on it; every break must make it FAIL.
 # Gate: run `bash tests/notify-relay/mutants-notify-relay-put.sh` by hand before merging and see PASS (a pre-merge gate, not a unit test).
 # Not in CI: the name is not test-*.sh so tests/run-all-tests.sh skips it; one run takes about 7 minutes.
 # CHAIN: none.
@@ -70,6 +70,11 @@ mutant "token newline strip loosened"     's/RELAY_VALUE="\${raw%\$.\\n.}"/RELAY
 mutant "success quiet flag ignored"       's/!= "\$RELAY_STRICT_QUIET_VALUE"/!= "never"/'
 mutant "other code passed as success"     's/relay_put_fail "http_\$RELAY_HTTP_CODE"; return 1; fi/return 0; fi/'
 mutant "notify.sh missing exit code 0"    's/relay_put_log "\$RELAY_LOG_TAG: fallback no_notify_sh"/relay_put_log "$RELAY_LOG_TAG: fallback no_notify_sh"; exit 0/'
+mutant "perm term -0040 removed"          's/ -o -perm -0040//'
+mutant "perm term -0020 removed"          's/ -o -perm -0020//'
+mutant "perm term -0004 removed"          's/ -o -perm -0004//'
+mutant "perm term -0002 removed"          's/ -o -perm -0002//'
+mutant "size check against NUL removed"   's/\[ "\$((size + 0))" -eq "\${#raw}" \] || return 3/:/'
 
 echo "SUMMARY: $KILLED killed, $SURVIVED survived, $NOOP no-op"
 if [ "$SURVIVED" -eq 0 ] && [ "$NOOP" -eq 0 ]; then
