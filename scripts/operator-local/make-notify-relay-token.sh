@@ -13,7 +13,8 @@
 # Exit: 0 ok / 1 usage or unknown sender / 2 token file already exists (never overwritten)
 #       / 3 generated token has the wrong form (not retried) / 4 environment problem.
 #
-# Where to connect: the operator pastes the JSON line into the relay's token table (P3 installer).
+# Where to connect: the JSON line is added to the ops-side token table (notify side, by hand).
+#   The raw token goes to the validator host via P3 --install-secrets on stdin.
 # How to remove: delete this file and its test; nothing else reads it.
 
 # --- definition table
