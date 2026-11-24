@@ -11,6 +11,8 @@
 # and tests/notify-relay/test-notify-text.sh runs the real notify.sh beside it
 # and fails if the two ever differ (design doc 7.6 / 13-8).
 #
+# Body rule follows notify.sh's `shift 2 || true` behaviour (one argument = the body is that argument).
+#
 # Where to connect: P1 sources this file and calls fyd_relay_render_text.
 # How to remove: delete this file and its test; notify.sh is unaffected.
 
@@ -87,11 +89,10 @@ fyd_relay_render_text() {
   [ "$#" -gt 0 ] && shift
   priority_word="$(fyd_relay_priority_word "${1:-default}")"
   title_text="${2:-$FYD_NOTIFY_TITLE_DEFAULT}"
-  body_text=""
-  if [ "$#" -ge 3 ]; then
-    shift 2
-    body_text="$*"
-  fi
+  # Same as notify.sh's `shift 2 || true; MSG="${*:-...}"`: with exactly one
+  # argument the shift fails and the body is that argument itself.
+  if [ "$#" -ge 2 ]; then shift 2; fi
+  body_text="$*"
   [ -n "$body_text" ] || body_text="$FYD_NOTIFY_MESSAGE_DEFAULT"
   footer_text="$(fyd_notify_uptime_footer "$repo_root")"
   printf -v FYD_RELAY_TEXT '【%s】%s\n%s' "$priority_word" "$title_text" "$body_text"

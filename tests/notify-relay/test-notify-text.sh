@@ -65,6 +65,7 @@ fyd_relay_render_text "$ROOT" high "題" "本文 1" "本文 2"; eq "no footer: e
 printf '{broken' > "$ROOT/public/api/validator.json"
 fyd_relay_render_text "$ROOT" high "題" "本文 1" "本文 2"; eq "no footer: broken json" "$want_plain" "$FYD_RELAY_TEXT"
 rm -f "$ROOT/public/api/validator.json"
+fyd_relay_render_text "$ROOT" high; eq "one arg: body is the arg" "【高】Freedom Yield ops${NL}high" "$FYD_RELAY_TEXT"
 fyd_relay_render_text "$ROOT"; eq "zero args" "【通常】Freedom Yield ops${NL}(no message)" "$FYD_RELAY_TEXT"
 fyd_relay_render_text "$ROOT" low ""  "x"; eq "empty title -> default" "【低】Freedom Yield ops${NL}x" "$FYD_RELAY_TEXT"
 fyd_relay_render_text "$ROOT" low "T" $'行\n'; eq "trailing newline kept" "【低】T${NL}行${NL}" "$FYD_RELAY_TEXT"
@@ -140,6 +141,7 @@ write_eq
 NOTIFY_UPTIME_SUFFIX=' (予定 87.40%)' check_equal "suffix" high "T" "b"
 check_equal "no args"
 check_equal "title only" high "題だけ"
+check_equal "one arg" high
 
 # --- default path text equals notify.sh's
 notify_default="$(sed -n 's/.*NTFY_TOPIC_FILE:-\([^}]*\)}.*/\1/p' "$REPO_ROOT/$NOTIFY_SH_REL" | head -1)"
