@@ -1340,6 +1340,19 @@ the values to pass on a given day are in the day-of value sheet above):
      へ。0 → 無い・E も確定済み。AI は結果を報告し、次の「再実行を検討して
      よい条件」の (2)(3) へ。the absence check のそれ以外の exit (2・1・表に
      無いもの) は 3 と同じ。
+     - **注記 (2026-11-24・12/7 の転換だけ。判定の直しが入ったら外す)**:
+       2026-12-07 の転換の 7c は、送信がチェーンに載っても exit 9 で終わる見込み。
+       原因は、proton CLI (@proton/js 27.13.0・cli 0.1.98) が push の stdout に
+       JSON の前の行 `get abi for <口座>` を出し、`bin/safe-broadcast` の
+       executed の判定 (`sb_receipt_is_executed`) が読めず unknown に倒れること
+       (安全な側)。2026-11-20 の testnet 稽古の R1 の 2 回目で実際に起きた
+       (tx `4bf9536f…` は block 417296643 で executed だったが、wrapper は exit 10
+       OUTCOME UNKNOWN・稽古は exit 9。詳しくは `docs/REHEARSAL_2026-11-20.md` §5)。
+       当日は慌てず、すぐ上の exit 9 の道 (認可を求めない・再実行しない・
+       `--not-before=<E>` で the absence check を走らせる → 10 なら刻まれている →
+       step 8 へ) をそのまま進む。二重刻印は journal と check A が防ぐ (稽古の
+       R2a・R2b で確かめた)。step 8 は E の確定待ちで 10〜13 分ほど遅れる見込み。
+       判定の直しは 12/7 の後 (段 3・testnet の稽古をもう一度)。直しが入ったらこの注記を外す。
    - **exit 10** = 既に刻まれている。その日の刻印を止め、印字された trx_id を
      operator に示し、step 8 の照合へ。
    - **exit 11** = 何も送っていない (無いと証明できない、または前の試行が
