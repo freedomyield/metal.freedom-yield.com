@@ -110,16 +110,22 @@ printf 'NTFY_TOPIC_FILE=/x/topic\n%s\n' "$HC" > "$CRON/metal-topic"
 printf '%s\n*/5 * * * * www-data /srv/b.sh\n' "$HC" > "$CRON/metal-user"
 printf '@reboot www-data /srv/b.sh\n' > "$CRON/metal-user2"
 printf '# only comments\nSHELL=/bin/bash\n' > "$CRON/metal-nocmd"
+printf 'NOTIFY = /x\n%s\n' "$HC" > "$CRON/metal-sp1"
+printf '  FYD_NOTIFY=/other/place.sh\n%s\n' "$HC" > "$CRON/metal-sp2"
+printf '  NTFY_TOPIC_FILE =/y\n%s\n' "$HC" > "$CRON/metal-sp3"
+printf 'ntfy_topic_file = /z\nSHELL = /bin/bash\n%s\n' "$HC" > "$CRON/metal-lower"
 snap
 run --enable-cron
 eq "4 rc" 0 "$RC"
-for n in metal-d1 metal-d2 metal-d3 metal-d4 metal-topic metal-user metal-user2 metal-nocmd; do
+for n in metal-d1 metal-d2 metal-d3 metal-d4 metal-topic metal-user metal-user2 metal-nocmd metal-sp1 metal-sp2 metal-sp3; do
   same "4 $n bytes same" "$TMP_ROOT/snap/$n" "$CRON/$n"
 done
 for pair in metal-d1:other_delegate metal-d2:other_delegate metal-d3:other_delegate metal-d4:other_delegate \
-            metal-topic:own_topic_file metal-user:non_root_user metal-user2:non_root_user metal-nocmd:no_commands; do
+            metal-topic:own_topic_file metal-user:non_root_user metal-user2:non_root_user metal-nocmd:no_commands metal-sp1:other_delegate metal-sp2:other_delegate metal-sp3:own_topic_file; do
   chk "4 word ${pair}" grep -qxF "excluded: ${pair%%:*} (${pair#*:})" "$OUT"
 done
+eq "4 lowercase name is no alias: relay line added" 1 "$(count_lines "$CRON/metal-lower")"
+eq "4 lowercase: line is just before the command" "$HC" "$(grep -xF -A1 "$LINE" "$CRON/metal-lower" | tail -n 1)"
 # disable must remove only the relay line, never another delegate's line
 printf '%s\nANCHOR_NOTIFY=/x/y.sh\nWATCH_NOTIFY=/x/y.sh\nNOTIFY=/x/y.sh\nFYD_NOTIFY=/other/place.sh\n%s\n' "$LINE" "$HC" > "$CRON/metal-mix"
 snap

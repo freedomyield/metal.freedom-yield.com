@@ -33,6 +33,7 @@ RELAY_CRON_USER='root'
 RELAY_NOTIFY_ENV_NAME='FYD_NOTIFY'
 RELAY_PUT_SCRIPT_REL='scripts/notify-relay-put.sh'
 RELAY_OWN_TOPIC_ENV_NAME='NTFY_TOPIC_FILE'
+RELAY_ENV_LINE_PATTERN='^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*='
 RELAY_DIR_MODE='700'
 RELAY_FILE_MODE='600'
 RELAY_CRON_FILE_MODE='644'
@@ -160,14 +161,14 @@ relay_install_run_uninstall_secrets() {
 
 # relay_install_command_lines <file> — "<lineno> <user>" for each command line.
 relay_install_command_lines() {
-	awk '
+	awk -v envpat="$RELAY_ENV_LINE_PATTERN" '
 		/^[[:space:]]*(#|$)/ { next }
-		/^[A-Z_]+=/ { next }
+		$0 ~ envpat { next }
 		{ u = ($1 ~ /^@/) ? $2 : $6; print NR, u }
 	' "$1"
 }
 
-relay_install_has_env_line() { grep -qE "^$2=" "$1"; }
+relay_install_has_env_line() { grep -qE "^[[:space:]]*$2[[:space:]]*=" "$1"; }
 
 relay_install_has_delegate_env() {
 	local var
