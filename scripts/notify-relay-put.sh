@@ -64,7 +64,8 @@ relay_put_is_loose() {
 relay_put_read_value() {
   local raw size
   { [ -f "$1" ] && [ -r "$1" ]; } || return 1
-  raw="$(cat "$1"; printf x)" || return 1
+  # braces + 2>/dev/null: bash 5 warns on stderr about a NUL byte here; stderr must stay one fixed line
+  { raw="$(cat "$1"; printf x)"; } 2>/dev/null || return 1
   raw="${raw%x}"
   [ -n "$raw" ] || return 2
   size="$(LC_ALL=C wc -c < "$1")" || return 1
