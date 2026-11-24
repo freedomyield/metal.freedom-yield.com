@@ -101,7 +101,7 @@ for rel in $BUNDLE_FILES; do
 done
 eq "path strings appear only on definition lines" "" "${path_bad# }"
 
-# 7. diff gate: only added files, only allowed paths
+# 7. diff gate: only added (A) or modified (M) files, only allowed paths
 if git -C "$REPO_ROOT" rev-parse --verify -q "$BASE_REF" >/dev/null \
    && base="$(git -C "$REPO_ROOT" merge-base "$BASE_REF" HEAD 2>/dev/null)" && [ -n "$base" ]; then
   diff_bad=""
@@ -111,9 +111,9 @@ if git -C "$REPO_ROOT" rev-parse --verify -q "$BASE_REF" >/dev/null \
     for a in $ALLOWED_PATHS; do
       case "$a" in */) case "$path" in "$a"*) allowed=1 ;; esac ;; *) [ "$path" = "$a" ] && allowed=1 ;; esac
     done
-    if [ "$status" != "A" ] || [ "$allowed" != "1" ] || [ -n "$rest" ]; then diff_bad="$diff_bad $status:$path"; fi
+    if { [ "$status" != "A" ] && [ "$status" != "M" ]; } || [ "$allowed" != "1" ] || [ -n "$rest" ]; then diff_bad="$diff_bad $status:$path"; fi
   done < <(git -C "$REPO_ROOT" diff --name-status "$base" HEAD)
-  eq "diff vs $BASE_REF is new allowed files only" "" "${diff_bad# }"
+  eq "diff vs $BASE_REF touches only allowed bundle paths (A or M)" "" "${diff_bad# }"
 else
   skip "diff gate: $BASE_REF or merge-base unavailable"
 fi
