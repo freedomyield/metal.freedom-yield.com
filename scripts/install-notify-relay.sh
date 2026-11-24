@@ -4,7 +4,8 @@
 #
 # One mode per call:
 #   --install-secrets    read the token (line 1) and the URL (line 2) from stdin;
-#                        write <relay dir>/token and <relay dir>/url (600, dir 700)
+#                        write <relay dir>/token and <relay dir>/url (640, dir 750,
+#                        owner 0, group = group of the default topic file)
 #   --uninstall-secrets  remove token and url (and the dir when empty)
 #   --enable-cron        add one FYD_NOTIFY=<repo>/scripts/notify-relay-put.sh line to
 #                        each eligible cron file, just before its first command line
@@ -19,8 +20,9 @@
 # relay dir). The root requirement is waived only when the matching variable
 # is set and not empty.
 #
-# Exit codes: 0 ok / 1 usage / 2 not root / 3 post-edit check failed (restored) /
-#             4 token or URL malformed (nothing written)
+# Exit codes: 0 ok / 1 usage / 2 not root / 3 post-edit or chown check failed (restored) /
+#             4 token or URL malformed (nothing written) /
+#             5 topic file group unusable (missing, unreadable or root; nothing written)
 
 set -euo pipefail
 
@@ -34,8 +36,9 @@ RELAY_NOTIFY_ENV_NAME='FYD_NOTIFY'
 RELAY_PUT_SCRIPT_REL='scripts/notify-relay-put.sh'
 RELAY_OWN_TOPIC_ENV_NAME='NTFY_TOPIC_FILE'
 RELAY_ENV_LINE_PATTERN='^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*='
-RELAY_DIR_MODE='700'
-RELAY_FILE_MODE='600'
+RELAY_DIR_MODE='750'
+RELAY_FILE_MODE='640'
+RELAY_OWNER_UID='0'
 RELAY_CRON_FILE_MODE='644'
 
 RELAY_SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
@@ -59,6 +62,8 @@ RELAY_COUNT_SKIPPED=0
 RELAY_TMP_PATH=''
 RELAY_TOKEN_VALUE=''
 RELAY_URL_VALUE=''
+RELAY_GROUP_ID=''
+RELAY_DIR_CREATED=0
 
 relay_install_usage() { sed -n '2,20p' "$0" | sed 's/^# \?//'; }
 relay_install_fail() { echo "ERROR: $2" >&2; exit "$1"; }
@@ -96,7 +101,54 @@ relay_install_mode_of() {
 	stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1"
 }
 
+# relay_install_topic_file_path — the default topic file (same rule as fyd_relay_dir).
+relay_install_topic_file_path() { printf '%s' "${NTFY_TOPIC_FILE:-$FYD_NTFY_TOPIC_FILE_DEFAULT}"; }
+
+# relay_install_load_group — sets RELAY_GROUP_ID to the numeric gid of the topic file,
+# or leaves it empty (file missing, unreadable, malformed, or root group 0). Safe side: empty.
+relay_install_load_group() {
+	local path pair gid
+	RELAY_GROUP_ID=''
+	path="$(relay_install_topic_file_path)"
+	[ -e "$path" ] || return 0
+	pair="$(stat -c '%u %g' -- "$path" 2>/dev/null || stat -f '%u %g' -- "$path" 2>/dev/null)" || return 0
+	[[ "$pair" =~ ^[0-9]+\ [0-9]+$ ]] || return 0
+	gid="${pair##* }"
+	if [ "$gid" -ne 0 ]; then RELAY_GROUP_ID="$gid"; fi
+}
+
+# relay_install_user_in_group <user> — 0 only when id lists the topic file group for that user.
+relay_install_user_in_group() {
+	local gids g
+	[ -n "$RELAY_GROUP_ID" ] || return 1
+	gids="$(id -G -- "$1" 2>/dev/null)" || return 1
+	for g in $gids; do
+		if [ "$g" = "$RELAY_GROUP_ID" ]; then return 0; fi
+	done
+	return 1
+}
+
 # ---------------------------------------------------------------- secrets
+
+# relay_install_give_group <path> — owner 0, group = topic file group; exit 3 (undo) on failure.
+relay_install_give_group() {
+	if ! chown "${RELAY_OWNER_UID}:${RELAY_GROUP_ID}" "$1" 2>/dev/null; then
+		relay_install_undo_created
+		relay_install_fail 3 "chown failed — nothing left behind"
+	fi
+}
+
+# relay_install_undo_created — remove what this run created (temp file, and a new dir with its files).
+relay_install_undo_created() {
+	local dir
+	relay_install_cleanup
+	RELAY_TMP_PATH=''
+	if [ "$RELAY_DIR_CREATED" -eq 1 ]; then
+		dir="$(fyd_relay_dir)"
+		rm -f "${dir:?}/${RELAY_TOKEN_FILE_NAME:?}" "${dir:?}/${RELAY_URL_FILE_NAME:?}"
+		rmdir "$dir" 2>/dev/null || true
+	fi
+}
 
 # relay_install_read_stdin — sets RELAY_TOKEN_VALUE and RELAY_URL_VALUE or exits 4 (nothing written).
 relay_install_read_stdin() {
@@ -116,6 +168,7 @@ relay_install_place_secret() {
 	local dir="$1" name="$2" value="$3"
 	RELAY_TMP_PATH="$(umask 077; mktemp "${dir}/.install.XXXXXX")"
 	printf '%s\n' "$value" > "$RELAY_TMP_PATH"
+	relay_install_give_group "$RELAY_TMP_PATH"
 	chmod "$RELAY_FILE_MODE" "$RELAY_TMP_PATH"
 	mv "$RELAY_TMP_PATH" "${dir}/${name}"
 	RELAY_TMP_PATH=''
@@ -126,13 +179,17 @@ relay_install_run_install_secrets() {
 	local dir
 	relay_install_require_root_unless_set "${NTFY_TOPIC_FILE:-}" "the secret directory"
 	relay_install_read_stdin
+	relay_install_load_group
+	[ -n "$RELAY_GROUP_ID" ] || relay_install_fail 5 "topic file group unusable"
 	dir="$(fyd_relay_dir)"
 	if [ "$RELAY_DRY_RUN" -eq 1 ]; then
 		echo "would install: ${RELAY_TOKEN_FILE_NAME} (${RELAY_FILE_MODE})"
 		echo "would install: ${RELAY_URL_FILE_NAME} (${RELAY_FILE_MODE})"
 		return 0
 	fi
+	if [ ! -d "$dir" ]; then RELAY_DIR_CREATED=1; fi
 	(umask 077; mkdir -p "$dir")
+	relay_install_give_group "$dir"
 	chmod "$RELAY_DIR_MODE" "$dir"
 	relay_install_place_secret "$dir" "$RELAY_TOKEN_FILE_NAME" "$RELAY_TOKEN_VALUE"
 	relay_install_place_secret "$dir" "$RELAY_URL_FILE_NAME" "$RELAY_URL_VALUE"
@@ -181,7 +238,8 @@ relay_install_has_delegate_env() {
 relay_install_has_non_root_user() {
 	local user
 	while read -r _ user; do
-		[ "$user" = "$RELAY_CRON_USER" ] || return 0
+		[ "$user" = "$RELAY_CRON_USER" ] && continue
+		relay_install_user_in_group "$user" || return 0
 	done < <(relay_install_command_lines "$1")
 	return 1
 }
@@ -304,6 +362,7 @@ relay_install_prepare_cron() {
 	local stamp
 	if [ -n "${FYD_CRON_DIR:-}" ]; then RELAY_CRON_DIR="$FYD_CRON_DIR"; else RELAY_CRON_DIR="$RELAY_CRON_DIR_DEFAULT"; fi
 	relay_install_require_root_unless_set "${FYD_CRON_DIR:-}" "$RELAY_CRON_DIR_DEFAULT"
+	relay_install_load_group
 	stamp="$(date -u +%Y%m%d-%H%M%S)"
 	if [ -n "${FYD_BACKUP_DIR:-}" ]; then RELAY_BACKUP_DIR="$FYD_BACKUP_DIR"; else RELAY_BACKUP_DIR="${RELAY_BACKUP_DIR_PREFIX}${stamp}"; fi
 }

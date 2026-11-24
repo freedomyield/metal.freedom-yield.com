@@ -43,6 +43,26 @@ run_in() { # stdin_text args...
   RC=$?
 }
 
+# Fake chown/stat in front of PATH: a non-root test user cannot chown to 0.
+FAKEBIN="$TMP_ROOT/fakebin"; mkdir -p "$FAKEBIN"
+REAL_STAT="$(command -v stat)"
+CHOWN_LOG="$TMP_ROOT/chown.log"
+cat > "$FAKEBIN/chown" <<'FAKE'
+#!/usr/bin/env bash
+echo "$*" >> "$CHOWN_LOG"
+[ -z "${CHOWN_FAIL:-}" ]
+FAKE
+cat > "$FAKEBIN/stat" <<FAKE
+#!/usr/bin/env bash
+if [ -n "\${STAT_GID0:-}" ] && [ "\${2:-}" = '%u %g' ]; then echo "0 0"; exit 0; fi
+exec "$REAL_STAT" "\$@"
+FAKE
+chmod +x "$FAKEBIN/chown" "$FAKEBIN/stat"
+export CHOWN_LOG PATH="$FAKEBIN:$PATH"
+TOPIC_FILE="$SECRET_PARENT/ntfy-topic"
+GID_G="$(stat -c '%g' "$TMP_ROOT" 2>/dev/null || stat -f '%g' "$TMP_ROOT")"
+fresh_secret_parent() { rm -rf "${SECRET_PARENT:?}"; mkdir -p "$SECRET_PARENT"; : > "$TOPIC_FILE"; : > "$CHOWN_LOG"; }
+
 reset_cron() {
   rm -rf "${CRON:?}" "${BACKUP:?}"
   mkdir -p "$CRON"
@@ -144,7 +164,7 @@ chk "5 skipped word" grep -q '^skipped (not a cron-executed filename): metal-x.b
 
 # --- 6 dry-run writes nothing
 make_files; snap
-rm -rf "${BACKUP:?}" "${SECRET_PARENT:?}"; mkdir -p "$SECRET_PARENT"
+rm -rf "${BACKUP:?}"; fresh_secret_parent
 stamp="$TMP_ROOT/stamp"; : > "$stamp"; sleep 1
 before="$(find "$TMP_ROOT" -not -path "$TMP_ROOT/out" -not -path "$TMP_ROOT/err" | sort | wc -l)"
 run --enable-cron --dry-run
@@ -156,6 +176,7 @@ $URL
 " --install-secrets --dry-run
 eq "6 install dry rc" 0 "$RC"
 run --uninstall-secrets --dry-run
+eq "6 dry-run never calls chown" 0 "$(wc -l < "$CHOWN_LOG" | tr -d ' ')"
 after="$(find "$TMP_ROOT" -not -path "$TMP_ROOT/out" -not -path "$TMP_ROOT/err" | sort | wc -l)"
 eq "6 no new paths" "$before" "$after"
 eq "6 nothing newer than the stamp in cron/backup/secret dirs" 0 \
@@ -169,21 +190,25 @@ chk "6 disable dry: no backup dir" [ ! -e "$BACKUP" ]
 eq "6 disable dry: line still there" 1 "$(count_lines "$CRON/metal-line")"
 
 # --- 7 install-secrets
-rm -rf "${SECRET_PARENT:?}"; mkdir -p "$SECRET_PARENT"
+fresh_secret_parent
 RDIR="$SECRET_PARENT/notify-relay"
 run_in "$TOKEN
 $URL
 " --install-secrets
 eq "7 rc" 0 "$RC"
-eq "7 dir mode" 700 "$(stat -c '%a' "$RDIR" 2>/dev/null || stat -f '%Lp' "$RDIR")"
-eq "7 token mode" 600 "$(stat -c '%a' "$RDIR/token" 2>/dev/null || stat -f '%Lp' "$RDIR/token")"
-eq "7 url mode" 600 "$(stat -c '%a' "$RDIR/url" 2>/dev/null || stat -f '%Lp' "$RDIR/url")"
+eq "7 dir mode" 750 "$(stat -c '%a' "$RDIR" 2>/dev/null || stat -f '%Lp' "$RDIR")"
+eq "7 token mode" 640 "$(stat -c '%a' "$RDIR/token" 2>/dev/null || stat -f '%Lp' "$RDIR/token")"
+eq "7 url mode" 640 "$(stat -c '%a' "$RDIR/url" 2>/dev/null || stat -f '%Lp' "$RDIR/url")"
 eq "7 token content" "$TOKEN" "$(cat "$RDIR/token")"
 eq "7 token ends with one newline" 44 "$(wc -c < "$RDIR/token" | tr -d ' ')"
 eq "7 url content" "$URL" "$(cat "$RDIR/url")"
 eq "7 no stray temp files" 2 "$(find "$RDIR" -mindepth 1 | wc -l | tr -d ' ')"
+eq "7 chown called 3 times" 3 "$(wc -l < "$CHOWN_LOG" | tr -d ' ')"
+eq "7 chown always 0:G" 3 "$(grep -c "^0:${GID_G} " "$CHOWN_LOG")"
+chk "7 chown on the dir" grep -qxF "0:${GID_G} ${RDIR}" "$CHOWN_LOG"
+chk "7 stderr empty" [ ! -s "$ERR" ]
 if grep -qF -e "$TOKEN" -e "relay.example.invalid" "$OUT" "$ERR"; then fail "7 output leaks a secret"; else ok "7 output has no token or URL"; fi
-eq "7 output words" "installed: token (600)" "$(sed -n 1p "$OUT")"
+eq "7 output words" "installed: token (640)" "$(sed -n 1p "$OUT")"
 # overwrite replaces
 TOKEN2="$(LC_ALL=C tr -dc 'A-Za-z0-9_-' < /dev/urandom | head -c 43)"
 run_in "$TOKEN2
@@ -192,7 +217,7 @@ $URL
 eq "7 overwrite content" "$TOKEN2" "$(cat "$RDIR/token")"
 # bad inputs: exit 4, nothing written
 bad_case() { # name stdin
-  rm -rf "${SECRET_PARENT:?}"; mkdir -p "$SECRET_PARENT"
+  fresh_secret_parent
   run_in "$2" --install-secrets
   eq "7 $1 rc" 4 "$RC"
   chk "7 $1 wrote nothing" [ ! -e "$RDIR" ]
@@ -216,7 +241,54 @@ $URL
 
 "
 
+# re-run over an old 700/600 install: modes are repaired
+fresh_secret_parent; mkdir -p "$RDIR"; chmod 700 "$RDIR"; echo old > "$RDIR/token"; echo old > "$RDIR/url"; chmod 600 "$RDIR/token" "$RDIR/url"
+run_in "$TOKEN
+$URL
+" --install-secrets
+eq "7b old dir repaired rc" 0 "$RC"
+eq "7b old dir mode" 750 "$(stat -c '%a' "$RDIR" 2>/dev/null || stat -f '%Lp' "$RDIR")"
+eq "7b old token mode" 640 "$(stat -c '%a' "$RDIR/token" 2>/dev/null || stat -f '%Lp' "$RDIR/token")"
+eq "7b old url mode" 640 "$(stat -c '%a' "$RDIR/url" 2>/dev/null || stat -f '%Lp' "$RDIR/url")"
+eq "7b old dir chown'd" 1 "$(grep -cxF "0:${GID_G} ${RDIR}" "$CHOWN_LOG")"
+# topic file missing -> exit 5, nothing written
+fresh_secret_parent; rm -f "$TOPIC_FILE"
+run_in "$TOKEN
+$URL
+" --install-secrets
+eq "7c no topic file rc" 5 "$RC"
+chk "7c wrote nothing" [ ! -e "$RDIR" ]
+eq "7c one fixed stderr line" "ERROR: topic file group unusable" "$(cat "$ERR")"
+# group 0 -> exit 5, nothing written, no chown
+fresh_secret_parent
+STAT_GID0=1 run_in "$TOKEN
+$URL
+" --install-secrets
+eq "7d group 0 rc" 5 "$RC"
+chk "7d wrote nothing" [ ! -e "$RDIR" ]
+eq "7d no chown" 0 "$(wc -l < "$CHOWN_LOG" | tr -d ' ')"
+# group 0 also stops a dry run
+STAT_GID0=1 run_in "$TOKEN
+$URL
+" --install-secrets --dry-run
+eq "7d dry group 0 rc" 5 "$RC"
+# chown fails -> exit 3, nothing left
+fresh_secret_parent
+CHOWN_FAIL=1 run_in "$TOKEN
+$URL
+" --install-secrets
+eq "7e chown fail rc" 3 "$RC"
+chk "7e nothing left (new dir)" [ ! -e "$RDIR" ]
+fresh_secret_parent; mkdir -p "$RDIR"
+CHOWN_FAIL=1 run_in "$TOKEN
+$URL
+" --install-secrets
+eq "7e chown fail rc (existing dir)" 3 "$RC"
+eq "7e no stray files (existing dir)" 0 "$(find "$RDIR" -mindepth 1 | wc -l | tr -d ' ')"
+if grep -qF -e "$TOKEN" "$OUT" "$ERR"; then fail "7e leaks"; else ok "7e no leak"; fi
+
 # --- 8 uninstall
+fresh_secret_parent
 run_in "$TOKEN
 $URL
 " --install-secrets
@@ -247,6 +319,34 @@ else
   FYD_CRON_DIR='' NTFY_TOPIC_FILE='' bash "$INSTALLER" --enable-cron > "$OUT" 2> "$ERR" < /dev/null; eq "10 empty FYD_CRON_DIR" 2 "$?"
   FYD_CRON_DIR='' NTFY_TOPIC_FILE='' bash "$INSTALLER" --uninstall-secrets > "$OUT" 2> "$ERR" < /dev/null; eq "10 empty NTFY_TOPIC_FILE" 2 "$?"
 fi
+
+# --- 11 enable-cron: a cron user is eligible only when root or in the topic file group
+ME="$(id -un)"
+fresh_secret_parent
+reset_cron
+printf '%s*/5 * * * * root /srv/a.sh\n*/5 * * * * %s /srv/a.sh\n' "$HDR" "$ME" > "$CRON/metal-grp"
+printf '%s*/5 * * * * nobody /srv/a.sh\n' "$HDR" > "$CRON/metal-nobody"
+printf '%s*/5 * * * * no_such_user_zz /srv/a.sh\n' "$HDR" > "$CRON/metal-nouser"
+printf '%s*/5 * * * * root /srv/a.sh\n' "$HDR" > "$CRON/metal-root"
+printf '%s*/5 * * * * root /srv/a.sh\n*/5 * * * * nobody /srv/a.sh\n' "$HDR" > "$CRON/metal-mixed"
+snap
+run --enable-cron
+eq "11 rc" 0 "$RC"
+eq "11 group member + root: added" 1 "$(count_lines "$CRON/metal-grp")"
+chk "11 root only: added" grep -qxF "added:   metal-root" "$OUT"
+chk "11 nobody: non_root_user" grep -qxF "excluded: metal-nobody (non_root_user)" "$OUT"
+chk "11 missing user: non_root_user" grep -qxF "excluded: metal-nouser (non_root_user)" "$OUT"
+chk "11 one outsider line excludes the file" grep -qxF "excluded: metal-mixed (non_root_user)" "$OUT"
+same "11 nobody bytes same" "$TMP_ROOT/snap/metal-nobody" "$CRON/metal-nobody"
+same "11 mixed bytes same" "$TMP_ROOT/snap/metal-mixed" "$CRON/metal-mixed"
+# group unreadable (no topic file) or 0: root-only files only
+for mode in nofile gid0; do
+  fresh_secret_parent; [ "$mode" = nofile ] && rm -f "$TOPIC_FILE"
+  rm -rf "${BACKUP:?}"; cp -p "$TMP_ROOT/snap"/* "$CRON/"
+  if [ "$mode" = gid0 ]; then STAT_GID0=1 run --enable-cron; else run --enable-cron; fi
+  chk "11 $mode: member file excluded" grep -qxF "excluded: metal-grp (non_root_user)" "$OUT"
+  chk "11 $mode: root-only file added" grep -qxF "added:   metal-root" "$OUT"
+done
 
 echo "SUMMARY: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
