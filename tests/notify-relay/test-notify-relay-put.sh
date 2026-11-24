@@ -258,6 +258,33 @@ fresh; FAKE_LOGGER_RC=1; FAKE_CURL_CODE=503; set_args 2
 problems="$(fallback_run_one http_503 3)"
 check "logger fails: fallback path same" "$([ -z "$problems" ]; echo $?)" "$problems"
 
+# ---- 14. CDPATH set + relative path: same behaviour (204 and fallback)
+cdpath_run() { # sets P1_RC; CDPATH points at a decoy dir that also has a scripts/ dir
+  local decoy="$TMP_ROOT/decoy"
+  mkdir -p "$decoy/scripts"
+  relay_fake_reset_rec
+  (cd "$FAKE_DIR" && env CDPATH="$decoy" PATH="$(relay_fake_path default)" NTFY_TOPIC_FILE="$FAKE_TOPIC_FILE" scripts/notify-relay-put.sh high t msg > "$FAKE_REC/p1.out" 2> "$FAKE_REC/p1.err")
+  P1_RC=$?
+}
+fresh; cdpath_run
+check "CDPATH + relative path: 204 same" "$([ "$P1_RC" -eq 0 ] && [ "$(cat "$FAKE_REC/p1.out")" = 'relay PUT: 204' ] && [ "$(cat "$FAKE_REC/p1.err")" = 'notify-relay: put 204' ]; echo $?)" "rc=$P1_RC out=$(cat "$FAKE_REC/p1.out")"
+fresh; FAKE_CURL_CODE=503; FAKE_NOTIFY_RC=3; cdpath_run
+check "CDPATH + relative path: fallback same" "$([ "$P1_RC" -eq 3 ] && [ "$(cat "$FAKE_REC/p1.err")" = 'notify-relay: fallback http_503' ] && [ "$(count_lines "$FAKE_REC/notify.count")" = 1 ]; echo $?)" "rc=$P1_RC"
+
+# ---- 15. cd into the script dir fails: still the fixed fallback line, not a silent exit
+fresh
+relay_fake_reset_rec
+bash -c "$(cat "$FAKE_P1")" "$FAKE_DIR/gone/notify-relay-put.sh" high t msg > "$FAKE_REC/p1.out" 2> "$FAKE_REC/p1.err"
+P1_RC=$?
+check "cd fails: exit 1 with the fixed no_notify_sh line" "$([ "$P1_RC" -eq 1 ] && [ "$(cat "$FAKE_REC/p1.err")" = 'notify-relay: fallback no_notify_sh' ]; echo $?)" "rc=$P1_RC err=$(cat "$FAKE_REC/p1.err")"
+
+# ---- 16. lib loads but fyd_relay_dir fails -> no_relay_dir (never an empty reason)
+fresh
+printf '%s\n' 'fyd_relay_render_text() { :; }' 'fyd_relay_dir() { return 1; }' > "$FAKE_DIR/scripts/lib/notify-text.sh"
+set_args 3
+problems="$(fallback_run_one no_relay_dir 1)"
+check "fyd_relay_dir fails -> no_relay_dir" "$([ -z "$problems" ] && [ ! -f "$FAKE_REC/curl.count" ]; echo $?)" "$problems"
+
 # ---- 13. direct execution (external watch runs it without `bash`)
 check "repo P1 is executable" "$([ -x "$REPO_ROOT/scripts/notify-relay-put.sh" ]; echo $?)"
 check "repo P1 shebang is bash" "$([ "$(head -1 "$REPO_ROOT/scripts/notify-relay-put.sh")" = '#!/usr/bin/env bash' ]; echo $?)"

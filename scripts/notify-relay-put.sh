@@ -94,7 +94,7 @@ relay_put_load_lib() {
 
 relay_put_check_dir() {
   local relay_dir
-  relay_dir="$(fyd_relay_dir)" || return 1
+  relay_dir="$(fyd_relay_dir)" || { relay_put_fail no_relay_dir; return 1; }
   { [ -d "$relay_dir" ] && [ -r "$relay_dir" ] && [ -x "$relay_dir" ]; } || { relay_put_fail no_relay_dir; return 1; }
   if relay_put_is_loose "$relay_dir"; then relay_put_fail bad_token_perms; return 1; fi
   RELAY_DIR="$relay_dir"
@@ -200,7 +200,7 @@ relay_put_try() {
 }
 
 relay_put_main() {
-  RELAY_SELF_DIR="$(cd "$(dirname "$0")" && pwd)" || exit 1
+  RELAY_SELF_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" 2>/dev/null && pwd)" || RELAY_SELF_DIR="$(dirname -- "$0")"
   RELAY_REPO_ROOT="$RELAY_SELF_DIR/.."
   if relay_put_try "$@"; then
     relay_put_log "$RELAY_LOG_TAG: put $RELAY_SUCCESS_HTTP_CODE"
