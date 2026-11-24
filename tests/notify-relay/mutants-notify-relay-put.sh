@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2016  # sed expressions are literal on purpose
-# tests/notify-relay/test-notify-relay-mutants.sh — mutation net for scripts/notify-relay-put.sh (P1, tier 3).
+# tests/notify-relay/mutants-notify-relay-put.sh — mutation net for scripts/notify-relay-put.sh (P1, tier 3).
+# What: breaks a temp copy of P1 one way at a time (20 ways) and runs test-notify-relay-put.sh on it; every break must make it FAIL.
+# Gate: run `bash tests/notify-relay/mutants-notify-relay-put.sh` by hand before merging and see PASS (a pre-merge gate, not a unit test).
+# Not in CI: the name is not test-*.sh so tests/run-all-tests.sh skips it; one run takes about 7 minutes.
 # CHAIN: none.
 # PRIME_DIRECTIVE: TESTNET-FIRST — safe. Edits only temp copies; runs the P1 test against each.
 # PASS = every mutant makes test-notify-relay-put.sh FAIL, and every sed really changed the copy.
