@@ -22,7 +22,7 @@ RELAY_PUT_SCHEMA_VERSION=1
 RELAY_SUCCESS_HTTP_CODE='204'
 RELAY_LOG_TAG='notify-relay'
 # shellcheck disable=SC2034  # documentation of the closed set of reasons
-RELAY_FALLBACK_REASONS='no_lib no_relay_dir no_token bad_token bad_token_perms no_url bad_url bad_url_perms no_curl no_jq bad_text too_long http_<3 digits> curl_<number>'
+RELAY_FALLBACK_REASONS='no_lib no_relay_dir no_token bad_token bad_token_perms no_url bad_url bad_url_perms no_topic_file no_curl no_jq bad_text too_long http_<3 digits> curl_<number>'
 RELAY_NOTIFY_SH_NAME='notify.sh'
 RELAY_LIB_REL_PATH='lib/notify-text.sh'
 RELAY_STDOUT_LINE='relay PUT: 204'
@@ -32,6 +32,7 @@ RELAY_SELF_DIR=''
 RELAY_REPO_ROOT=''
 RELAY_FAIL_REASON=''
 RELAY_DIR=''
+RELAY_TOPIC_GID=''
 RELAY_VALUE=''
 RELAY_TOKEN=''
 RELAY_URL=''
@@ -52,11 +53,21 @@ relay_put_log() {
   return 0
 }
 
-# relay_put_is_loose <path> — 0 when group/other can read or write it (also when find fails).
-relay_put_is_loose() {
-  local found
-  found="$(find "$1" -prune \( -perm -0040 -o -perm -0020 -o -perm -0004 -o -perm -0002 \) -print 2>/dev/null)" || return 0
-  [ -n "$found" ]
+# relay_put_perms_ok <path> — 0 only when ALL hold: owner uid 0; no other read/write; no group write;
+# group read only when the path's gid equals RELAY_TOPIC_GID. Any stat/find failure = not ok.
+relay_put_perms_ok() {
+  local ug uid gid found
+  ug="$(fyd_relay_owner_group "$1")" || return 1
+  uid="${ug% *}"
+  gid="${ug#* }"
+  [ "$uid" = 0 ] || return 1
+  found="$(find "$1" -prune \( -perm -0004 -o -perm -0002 -o -perm -0020 \) -print 2>/dev/null)" || return 1
+  [ -z "$found" ] || return 1
+  found="$(find "$1" -prune -perm -0040 -print 2>/dev/null)" || return 1
+  if [ -n "$found" ]; then
+    [ "$gid" = "$RELAY_TOPIC_GID" ] || return 1
+  fi
+  return 0
 }
 
 # relay_put_read_value <file> — RELAY_VALUE = content minus exactly one trailing newline.
@@ -97,7 +108,9 @@ relay_put_check_dir() {
   local relay_dir
   relay_dir="$(fyd_relay_dir)" || { relay_put_fail no_relay_dir; return 1; }
   { [ -d "$relay_dir" ] && [ -r "$relay_dir" ] && [ -x "$relay_dir" ]; } || { relay_put_fail no_relay_dir; return 1; }
-  if relay_put_is_loose "$relay_dir"; then relay_put_fail bad_token_perms; return 1; fi
+  RELAY_TOPIC_GID="$(fyd_relay_owner_group "$(fyd_relay_topic_file)")" || { relay_put_fail no_topic_file; return 1; }
+  RELAY_TOPIC_GID="${RELAY_TOPIC_GID#* }"
+  relay_put_perms_ok "$relay_dir" || { relay_put_fail bad_token_perms; return 1; }
   RELAY_DIR="$relay_dir"
   return 0
 }
@@ -112,7 +125,7 @@ relay_put_load_token() {
     *) relay_put_fail bad_token; return 1 ;;
   esac
   relay_put_token_ok "$RELAY_VALUE" || { relay_put_fail bad_token; return 1; }
-  if relay_put_is_loose "$token_path"; then relay_put_fail bad_token_perms; return 1; fi
+  relay_put_perms_ok "$token_path" || { relay_put_fail bad_token_perms; return 1; }
   RELAY_TOKEN="$RELAY_VALUE"
   return 0
 }
@@ -127,7 +140,7 @@ relay_put_load_url() {
     *) relay_put_fail bad_url; return 1 ;;
   esac
   relay_put_url_ok "$RELAY_VALUE" || { relay_put_fail bad_url; return 1; }
-  if relay_put_is_loose "$url_path"; then relay_put_fail bad_url_perms; return 1; fi
+  relay_put_perms_ok "$url_path" || { relay_put_fail bad_url_perms; return 1; }
   RELAY_URL="$RELAY_VALUE"
   return 0
 }

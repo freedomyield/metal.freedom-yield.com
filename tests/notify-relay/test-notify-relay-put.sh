@@ -150,7 +150,15 @@ scenario "relay dir missing" no_relay_dir 'rm -rf "$FAKE_RELAY_DIR"'
 scenario "relay dir is a file" no_relay_dir 'rm -rf "$FAKE_RELAY_DIR"; : > "$FAKE_RELAY_DIR"'
 scenario "relay dir unreadable" no_relay_dir 'chmod 000 "$FAKE_RELAY_DIR"'
 scenario "relay dir 755" bad_token_perms 'chmod 755 "$FAKE_RELAY_DIR"'
-scenario "relay dir 750" bad_token_perms 'chmod 750 "$FAKE_RELAY_DIR"'
+scenario "relay dir 750, gid differs" bad_token_perms 'chmod 750 "$FAKE_RELAY_DIR"; FAKE_STAT_GID_DIR=99999'
+scenario "relay dir 700, owner not root" bad_token_perms 'FAKE_STAT_UID_REAL=dir'
+scenario "relay dir 770 (group write)" bad_token_perms 'chmod 770 "$FAKE_RELAY_DIR"'
+scenario "topic file missing" no_topic_file 'rm "$FAKE_TOPIC_FILE"'
+scenario "token file 640, gid differs" bad_token_perms 'chmod 640 "$FAKE_RELAY_DIR/token"; FAKE_STAT_GID_TOKEN=99999'
+scenario "url file 640, gid differs" bad_url_perms 'chmod 640 "$FAKE_RELAY_DIR/url"; FAKE_STAT_GID_URL=99999'
+scenario "token file 600, owner not root" bad_token_perms 'FAKE_STAT_UID_REAL=token'
+scenario "url file 600, owner not root" bad_url_perms 'FAKE_STAT_UID_REAL=url'
+scenario "token file 660 (group write)" bad_token_perms 'chmod 660 "$FAKE_RELAY_DIR/token"'
 scenario "relay dir 702" bad_token_perms 'chmod 702 "$FAKE_RELAY_DIR"'
 scenario "token missing" no_token 'rm "$FAKE_RELAY_DIR/token"'
 scenario "token empty" no_token ': > "$FAKE_RELAY_DIR/token"'
@@ -181,6 +189,12 @@ scenario "token with a NUL byte" bad_token 'printf "%s\0\n" "$FAKE_TOKEN" > "$FA
 scenario "url with a NUL byte" bad_url 'printf "%s\0\n" "$FAKE_URL" > "$FAKE_RELAY_DIR/url"'
 scenario "no curl on PATH" no_curl 'PATH_MODE=nocurl'
 scenario "no jq on PATH" no_jq 'PATH_MODE=nojq'
+
+# ---- 5b. group read is allowed (750 dir / 640 files) only with the topic file's gid
+fresh; chmod 750 "$FAKE_RELAY_DIR"; chmod 640 "$FAKE_RELAY_DIR/token" "$FAKE_RELAY_DIR/url"; set_args 2; run_p1
+check "750/640 same gid: put sent" "$([ "$P1_RC" -eq 0 ] && [ "$(count_lines "$FAKE_REC/curl.count")" = 1 ] && [ ! -f "$FAKE_REC/notify.count" ]; echo $?)" "rc=$P1_RC err=$(cat "$FAKE_REC/p1.err")"
+fresh; set_args 2; run_p1
+check "700/600 still sent" "$([ "$P1_RC" -eq 0 ] && [ "$(count_lines "$FAKE_REC/curl.count")" = 1 ]; echo $?)"
 
 # ---- 6. 43 chars + one newline is accepted; 8. body shape
 fresh; set_args 2; run_p1

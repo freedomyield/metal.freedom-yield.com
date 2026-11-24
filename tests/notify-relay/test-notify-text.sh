@@ -75,6 +75,16 @@ eq "trailing newline literal" "$want_nl" "$FYD_RELAY_TEXT"
 # --- dir
 eq "relay_dir unset" /etc/freedom-yield/notify-relay "$(fyd_relay_dir)"
 eq "relay_dir empty" /etc/freedom-yield/notify-relay "$(NTFY_TOPIC_FILE='' fyd_relay_dir)"
+eq "topic_file unset" /etc/freedom-yield/ntfy-topic "$(fyd_relay_topic_file)"
+eq "topic_file empty" /etc/freedom-yield/ntfy-topic "$(NTFY_TOPIC_FILE='' fyd_relay_topic_file)"
+eq "topic_file custom" "$TMP_ROOT/a/topic" "$(NTFY_TOPIC_FILE="$TMP_ROOT/a/topic" fyd_relay_topic_file)"
+: > "$TMP_ROOT/og"
+og_real="$(stat -c '%u %g' "$TMP_ROOT/og" 2>/dev/null || stat -f '%u %g' "$TMP_ROOT/og")"
+eq "owner_group of a real file" "$og_real" "$(fyd_relay_owner_group "$TMP_ROOT/og")"
+eq "owner_group is two numbers" 1 "$([[ "$(fyd_relay_owner_group "$TMP_ROOT/og")" =~ ^[0-9]+\ [0-9]+$ ]] && echo 1 || echo 0)"
+og_out="$(fyd_relay_owner_group "$TMP_ROOT/none")"; og_rc=$?
+eq "owner_group missing: rc 1" 1 "$og_rc"
+eq "owner_group missing: no output" "" "$og_out"
 eq "relay_dir custom" "$TMP_ROOT/a/notify-relay" "$(NTFY_TOPIC_FILE="$TMP_ROOT/a/topic" fyd_relay_dir)"
 
 # --- url

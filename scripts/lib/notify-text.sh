@@ -63,10 +63,24 @@ fyd_notify_uptime_footer() {
   return 0
 }
 
+# fyd_relay_topic_file — path of the ntfy topic file (NTFY_TOPIC_FILE, else the default).
+fyd_relay_topic_file() {
+  printf '%s' "${NTFY_TOPIC_FILE:-$FYD_NTFY_TOPIC_FILE_DEFAULT}"
+}
+
 # fyd_relay_dir — directory of the relay's token/url files.
 fyd_relay_dir() {
-  local topic_file_path="${NTFY_TOPIC_FILE:-$FYD_NTFY_TOPIC_FILE_DEFAULT}"
+  local topic_file_path
+  topic_file_path="$(fyd_relay_topic_file)"
   printf '%s/%s' "$(dirname "$topic_file_path")" "$RELAY_DIR_NAME"
+}
+
+# fyd_relay_owner_group <path> — prints "<uid> <gid>" (numbers); rc 1 and no output when unreadable.
+fyd_relay_owner_group() {
+  local out
+  out="$(stat -c '%u %g' "${1:-}" 2>/dev/null)" || out="$(stat -f '%u %g' "${1:-}" 2>/dev/null)" || return 1
+  [[ "$out" =~ ^[0-9]+\ [0-9]+$ ]] || return 1
+  printf '%s' "$out"
 }
 
 # fyd_relay_url_is_valid <url> — 0 only for the two allowed URL shapes.

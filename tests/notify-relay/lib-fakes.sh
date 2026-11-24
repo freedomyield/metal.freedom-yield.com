@@ -9,7 +9,7 @@
 #   $FAKE_DIR/etc/{ntfy-topic, notify-relay/{token,url}}   $FAKE_DIR/rec/  (what the fakes recorded)
 # Fakes read: FAKE_REC, FAKE_CURL_CODE(204) FAKE_CURL_RC(0) FAKE_NOTIFY_RC(0) FAKE_LOGGER_RC(0).
 
-FAKE_TOOL_NAMES='bash cat find wc dirname env tr'
+FAKE_TOOL_NAMES='bash cat find wc dirname env tr stat'
 
 # relay_fake_random_token — 43 chars of [A-Za-z0-9_-] from /dev/urandom.
 relay_fake_random_token() {
@@ -54,6 +54,32 @@ FAKE
   chmod +x "$FAKE_BIN/logger"
 }
 
+# relay_fake_write_stat — fake stat: for "%u %g" queries on files under the secret dir, owner uid is 0
+# (a non-root test user cannot chown); FAKE_STAT_UID_REAL="dir token url" (any subset) passes the real uid for those; FAKE_STAT_GID_{DIR,TOKEN,URL}
+# override the gid. Every other query goes to the real stat.
+relay_fake_write_stat() {
+  cat > "$FAKE_STATBIN/stat" <<'FAKE'
+#!/bin/bash
+if [ "$#" -eq 3 ] && { [ "$1" = -c ] || [ "$1" = -f ]; } && [ "$2" = '%u %g' ]; then
+  out="$("$FAKE_REAL_STAT" "$@")" || exit $?
+  uid="${out% *}"; gid="${out#* }"
+  case "$3" in
+    "$FAKE_RELAY_DIR"|"$FAKE_RELAY_DIR"/*)
+      case "$3" in
+        */token) kind=token; [ -z "${FAKE_STAT_GID_TOKEN-}" ] || gid="$FAKE_STAT_GID_TOKEN" ;;
+        */url) kind=url; [ -z "${FAKE_STAT_GID_URL-}" ] || gid="$FAKE_STAT_GID_URL" ;;
+        *) kind=dir; [ -z "${FAKE_STAT_GID_DIR-}" ] || gid="$FAKE_STAT_GID_DIR" ;;
+      esac
+      case " ${FAKE_STAT_UID_REAL-} " in *" $kind "*) ;; *) uid=0 ;; esac ;;
+  esac
+  printf '%s %s' "$uid" "$gid"
+  exit 0
+fi
+exec "$FAKE_REAL_STAT" "$@"
+FAKE
+  chmod +x "$FAKE_STATBIN/stat"
+}
+
 relay_fake_write_notify() {
   cat > "$FAKE_DIR/scripts/notify.sh" <<'FAKE'
 #!/bin/bash
@@ -78,13 +104,14 @@ relay_fake_setup() {
   local parent="$1" p1_src="${2:-$REPO_ROOT/scripts/notify-relay-put.sh}"
   FAKE_DIR="$(mktemp -d "$parent/relay-fake.XXXXXX")"
   FAKE_BIN="$FAKE_DIR/bin"
+  FAKE_STATBIN="$FAKE_DIR/statbin"
   FAKE_TOOLS="$FAKE_DIR/tools"
   FAKE_TOOLS_NOJQ="$FAKE_DIR/tools-nojq"
   FAKE_REC="$FAKE_DIR/rec"
   FAKE_RELAY_DIR="$FAKE_DIR/etc/notify-relay"
   FAKE_TOPIC_FILE="$FAKE_DIR/etc/ntfy-topic"
   FAKE_P1="$FAKE_DIR/scripts/notify-relay-put.sh"
-  mkdir -p "$FAKE_DIR/scripts/lib" "$FAKE_BIN" "$FAKE_REC" "$FAKE_RELAY_DIR"
+  mkdir -p "$FAKE_DIR/scripts/lib" "$FAKE_BIN" "$FAKE_STATBIN" "$FAKE_REC" "$FAKE_RELAY_DIR"
   chmod 700 "$FAKE_DIR/etc" "$FAKE_RELAY_DIR"
   cp "$p1_src" "$FAKE_P1"
   chmod 755 "$FAKE_P1"
@@ -92,11 +119,16 @@ relay_fake_setup() {
   relay_fake_write_curl
   relay_fake_write_logger
   relay_fake_write_notify
+  relay_fake_write_stat
+  FAKE_REAL_STAT="$(command -v stat)"
+  export FAKE_REAL_STAT FAKE_RELAY_DIR
   relay_fake_link_tools "$FAKE_TOOLS" 1
   relay_fake_link_tools "$FAKE_TOOLS_NOJQ" 0
   FAKE_TOKEN="$(relay_fake_random_token)"
   FAKE_URL="http://127.0.0.1:$((20000 + RANDOM % 20000))/notify-relay/put"
   printf '%s\n' 'fake-topic' > "$FAKE_TOPIC_FILE"
+  FAKE_STAT_UID_REAL=''; FAKE_STAT_GID_DIR=''; FAKE_STAT_GID_TOKEN=''; FAKE_STAT_GID_URL=''
+  export FAKE_STAT_UID_REAL FAKE_STAT_GID_DIR FAKE_STAT_GID_TOKEN FAKE_STAT_GID_URL
   relay_fake_write_secrets
 }
 
@@ -110,9 +142,9 @@ relay_fake_write_secrets() {
 # relay_fake_path <default|nojq|nocurl> — PATH value for running P1.
 relay_fake_path() {
   case "$1" in
-    nojq) printf '%s' "$FAKE_BIN:$FAKE_TOOLS_NOJQ" ;;
-    nocurl) printf '%s' "$FAKE_TOOLS" ;;
-    *) printf '%s' "$FAKE_BIN:$FAKE_TOOLS" ;;
+    nojq) printf '%s' "$FAKE_BIN:$FAKE_STATBIN:$FAKE_TOOLS_NOJQ" ;;
+    nocurl) printf '%s' "$FAKE_STATBIN:$FAKE_TOOLS" ;;
+    *) printf '%s' "$FAKE_BIN:$FAKE_STATBIN:$FAKE_TOOLS" ;;
   esac
 }
 
