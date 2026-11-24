@@ -55,12 +55,23 @@ FAKE
 cat > "$FAKEBIN/stat" <<FAKE
 #!/usr/bin/env bash
 if [ -n "\${STAT_GID0:-}" ] && [ "\${2:-}" = '%u %g' ]; then echo "0 0"; exit 0; fi
+if [ -n "\${TOPIC_GID_FAKE:-}" ] && [ "\${2:-}" = '%u %g' ] && [ "\${@: -1}" = "\${NTFY_TOPIC_FILE:-}" ]; then echo "0 \$TOPIC_GID_FAKE"; exit 0; fi
 exec "$REAL_STAT" "\$@"
 FAKE
 chmod +x "$FAKEBIN/chown" "$FAKEBIN/stat"
 export CHOWN_LOG PATH="$FAKEBIN:$PATH"
 TOPIC_FILE="$SECRET_PARENT/ntfy-topic"
-GID_G="$(stat -c '%g' "$TMP_ROOT" 2>/dev/null || stat -f '%g' "$TMP_ROOT")"
+# <G>: a supplementary group of the runner that is neither the primary group, 0, nor a group of user nobody,
+# so reading <G> from anywhere but the topic file changes the results. No such group -> every group scene FAILs.
+RUN_GID="$(id -g)"
+GID_G=''
+for g in $(id -G); do
+  [ "$g" != "$RUN_GID" ] && [ "$g" != 0 ] || continue
+  case " $(id -G nobody 2>/dev/null) " in *" $g "*) continue ;; esac
+  GID_G="$g"; break
+done
+if [ -n "$GID_G" ]; then ok "0 fake topic group $GID_G differs from primary $RUN_GID"; else fail "0 no supplementary group usable as <G> (scenes below FAIL)"; GID_G=999999; fi
+export TOPIC_GID_FAKE="$GID_G"
 fresh_secret_parent() { rm -rf "${SECRET_PARENT:?}"; mkdir -p "$SECRET_PARENT"; : > "$TOPIC_FILE"; : > "$CHOWN_LOG"; }
 
 reset_cron() {

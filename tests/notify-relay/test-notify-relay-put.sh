@@ -193,6 +193,10 @@ scenario "no jq on PATH" no_jq 'PATH_MODE=nojq'
 # ---- 5b. group read is allowed (750 dir / 640 files) only with the topic file's gid
 fresh; chmod 750 "$FAKE_RELAY_DIR"; chmod 640 "$FAKE_RELAY_DIR/token" "$FAKE_RELAY_DIR/url"; set_args 2; run_p1
 check "750/640 same gid: put sent" "$([ "$P1_RC" -eq 0 ] && [ "$(count_lines "$FAKE_REC/curl.count")" = 1 ] && [ ! -f "$FAKE_REC/notify.count" ]; echo $?)" "rc=$P1_RC err=$(cat "$FAKE_REC/p1.err")"
+check "5b topic file group is a supplementary group, not the primary one" "$([ -n "$FAKE_TOPIC_GID" ] && [ "$FAKE_TOPIC_GID" != "$(id -g)" ]; echo $?)" "gid=[$FAKE_TOPIC_GID]"
+fresh; chmod 750 "$FAKE_RELAY_DIR"; chmod 640 "$FAKE_RELAY_DIR/token" "$FAKE_RELAY_DIR/url"; FAKE_STAT_GID_TOKEN="$(id -g)"; set_args 2
+problems="$(fallback_run_one bad_token_perms 1)"
+check "640 with the runner's primary gid (not the topic group) falls back" "$([ -z "$problems" ]; echo $?)" "$problems"
 fresh; set_args 2; run_p1
 check "700/600 still sent" "$([ "$P1_RC" -eq 0 ] && [ "$(count_lines "$FAKE_REC/curl.count")" = 1 ]; echo $?)"
 

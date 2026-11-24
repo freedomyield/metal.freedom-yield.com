@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2016  # sed expressions are literal on purpose
 # tests/notify-relay/mutants-notify-relay-put.sh — mutation net for scripts/notify-relay-put.sh (P1, tier 3).
-# What: breaks a temp copy of P1 one way at a time (32 ways) and runs test-notify-relay-put.sh on it; every break must make it FAIL.
+# What: breaks a temp copy of P1 one way at a time (33 ways) and runs test-notify-relay-put.sh on it; every break must make it FAIL.
 # Gate: run `bash tests/notify-relay/mutants-notify-relay-put.sh` by hand before merging and see PASS (a pre-merge gate, not a unit test).
 # Not in CI: the name is not test-*.sh so tests/run-all-tests.sh skips it; a run takes minutes (mutants run in parallel, RELAY_MUTANT_JOBS=8).
 # CHAIN: none.
@@ -17,11 +17,13 @@ trap 'rm -rf "$WORK"' EXIT
 
 MUTANT_JOBS="${RELAY_MUTANT_JOBS:-8}"
 MUTANT_INDEX=0
+MUTANT_ONLY="${RELAY_MUTANT_ONLY:-}"   # a mutant name: run only that one (empty = all)
 
 # mutant <name> <sed expression> — applies the expression to a copy and runs the P1 test on it.
 # Mutants run in parallel (up to MUTANT_JOBS); each writes its verdict to $WORK/res-<n>, summed after `wait`.
 mutant() {
   local name="$1" expr="$2" index
+  if [ -n "$MUTANT_ONLY" ] && [ "$name" != "$MUTANT_ONLY" ]; then return 0; fi
   MUTANT_INDEX=$((MUTANT_INDEX + 1))
   index="$MUTANT_INDEX"
   while [ "$(jobs -rp | wc -l | tr -d ' ')" -ge "$MUTANT_JOBS" ]; do sleep 1; done
@@ -84,6 +86,7 @@ mutant "perm term -0004 removed"          's/-perm -0004 -o //'
 mutant "perm term -0002 removed"          's/ -o -perm -0002//'
 mutant "perm term -0020 (group write) removed" 's/ -o -perm -0020//'
 mutant "group gid compare always true"    's/\[ "\$gid" = "\$RELAY_TOPIC_GID" \] || return 1/:/'
+mutant "group compare uses runner gid"    's/\[ "\$gid" = "\$RELAY_TOPIC_GID" \] || return 1/[ "$gid" = "$(id -g)" ] || return 1/'
 mutant "group read gate removed"          's/^  if \[ -n "\$found" \]; then$/  if false; then/'
 mutant "owner check removed"              's/\[ "\$uid" = 0 \] || return 1/:/'
 mutant "owner compare always true"        's/"\$uid" = 0 \]/"$uid" = "$uid" ]/'

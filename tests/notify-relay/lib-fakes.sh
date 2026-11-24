@@ -56,7 +56,16 @@ FAKE
 
 # relay_fake_write_stat — fake stat: for "%u %g" queries on files under the secret dir, owner uid is 0
 # (a non-root test user cannot chown); FAKE_STAT_UID_REAL="dir token url" (any subset) passes the real uid for those; FAKE_STAT_GID_{DIR,TOKEN,URL}
-# override the gid. Every other query goes to the real stat.
+# override the gid. The topic file and (by default) the secret files report FAKE_TOPIC_GID (see relay_fake_pick_group). Every other query goes to the real stat.
+# relay_fake_pick_group — prints a supplementary group of the runner that is not the primary group and not 0
+# (empty when there is none): the topic file group <G> must differ from `id -g` so a wrong source of <G> shows.
+relay_fake_pick_group() {
+  local g
+  for g in $(id -G); do
+    if [ "$g" != "$(id -g)" ] && [ "$g" != 0 ]; then printf '%s' "$g"; return 0; fi
+  done
+}
+
 relay_fake_write_stat() {
   cat > "$FAKE_STATBIN/stat" <<'FAKE'
 #!/bin/bash
@@ -64,7 +73,9 @@ if [ "$#" -eq 3 ] && { [ "$1" = -c ] || [ "$1" = -f ]; } && [ "$2" = '%u %g' ]; 
   out="$("$FAKE_REAL_STAT" "$@")" || exit $?
   uid="${out% *}"; gid="${out#* }"
   case "$3" in
+    "$FAKE_TOPIC_FILE") [ -z "${FAKE_TOPIC_GID-}" ] || gid="$FAKE_TOPIC_GID" ;;
     "$FAKE_RELAY_DIR"|"$FAKE_RELAY_DIR"/*)
+      [ -z "${FAKE_TOPIC_GID-}" ] || gid="$FAKE_TOPIC_GID"
       case "$3" in
         */token) kind=token; [ -z "${FAKE_STAT_GID_TOKEN-}" ] || gid="$FAKE_STAT_GID_TOKEN" ;;
         */url) kind=url; [ -z "${FAKE_STAT_GID_URL-}" ] || gid="$FAKE_STAT_GID_URL" ;;
@@ -121,7 +132,8 @@ relay_fake_setup() {
   relay_fake_write_notify
   relay_fake_write_stat
   FAKE_REAL_STAT="$(command -v stat)"
-  export FAKE_REAL_STAT FAKE_RELAY_DIR
+  FAKE_TOPIC_GID="$(relay_fake_pick_group)"
+  export FAKE_REAL_STAT FAKE_RELAY_DIR FAKE_TOPIC_FILE FAKE_TOPIC_GID
   relay_fake_link_tools "$FAKE_TOOLS" 1
   relay_fake_link_tools "$FAKE_TOOLS_NOJQ" 0
   FAKE_TOKEN="$(relay_fake_random_token)"
