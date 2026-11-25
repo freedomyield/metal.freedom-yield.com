@@ -153,6 +153,7 @@ fi
 # competing root. See docs/IDENTITY_SCHEMA_CHANGELOG.md.
 echo
 echo "=== 3.6. assert anchor_receipt_url present + dag_root_hash/cycles_history_url retired ==="
+# shellcheck disable=SC2043  # one-item list kept as the extension point for future required fields
 for field in anchor_receipt_url; do
 	val="$(jq -r --arg f "${field}" '.[$f] // ""' "${OUT_JSON}")"
 	if [ -n "${val}" ]; then
