@@ -65,6 +65,7 @@ mutant "permission check removed"         's/^relay_put_perms_ok() {$/relay_put_
 mutant "url shape check always true"      's/^relay_put_url_ok() {$/relay_put_url_ok() { return 0;/'
 mutant "token shape check always true"    's/^relay_put_token_ok() {$/relay_put_token_ok() { return 0;/'
 mutant "char limit 2001"                  's/^RELAY_TEXT_MAX_CHARS=2000$/RELAY_TEXT_MAX_CHARS=2001/'
+mutant "body not compact (-c removed)"    's/jq -njc --arg p/jq -nj --arg p/'
 mutant "project value changed"            "s/^RELAY_PUT_PROJECT='Metal'\$/RELAY_PUT_PROJECT='Other'/"
 mutant "title and body swapped"           's/--arg t "\$FYD_RELAY_TITLE" --arg b "\$FYD_RELAY_BODY" .{project/--arg t "$FYD_RELAY_BODY" --arg b "$FYD_RELAY_TITLE" '"'"'{project/'
 mutant "key body renamed to text"         's/body:\$b}/text:$b}/'

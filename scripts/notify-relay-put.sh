@@ -153,7 +153,7 @@ relay_put_check_tools() {
 relay_put_build_body() {
   local built back_project back_title back_body
   fyd_relay_render_text "$RELAY_REPO_ROOT" "$@" || { relay_put_fail bad_text; return 1; }
-  built="$(jq -nj --arg p "$RELAY_PUT_PROJECT" --arg t "$FYD_RELAY_TITLE" --arg b "$FYD_RELAY_BODY" '{project:$p,title:$t,body:$b}' && printf x)" || { relay_put_fail bad_text; return 1; }
+  built="$(jq -njc --arg p "$RELAY_PUT_PROJECT" --arg t "$FYD_RELAY_TITLE" --arg b "$FYD_RELAY_BODY" '{project:$p,title:$t,body:$b}' && printf x)" || { relay_put_fail bad_text; return 1; }
   RELAY_BODY="${built%x}"
   back_project="$(printf '%s' "$RELAY_BODY" | jq -j '.project' && printf x)" || { relay_put_fail bad_text; return 1; }
   back_title="$(printf '%s' "$RELAY_BODY" | jq -j '.title' && printf x)" || { relay_put_fail bad_text; return 1; }
