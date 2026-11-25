@@ -198,10 +198,10 @@ fi
 # clobbering re-run that deleted the publish-guard entries still printed
 # PASS. See history note above.)
 if command -v jq >/dev/null 2>&1; then
-	BASH_CMDS="$(jq -r '.hooks.PreToolUse[]? | select(.matcher=="Bash") | .hooks[]?.command // empty' "${SETTINGS_FILE}")"
+	HOOK_BASH_CMDS="$(jq -r '.hooks.PreToolUse[]? | select(.matcher=="Bash") | .hooks[]?.command // empty' "${SETTINGS_FILE}")"
 	WRITE_CMDS="$(jq -r --arg m "${WRITE_MATCHER}" '.hooks.PreToolUse[]? | select(.matcher==$m) | .hooks[]?.command // empty' "${SETTINGS_FILE}")"
 
-	case "${BASH_CMDS}" in
+	case "${HOOK_BASH_CMDS}" in
 		*broadcast-guard.sh*)
 			echo "PASS 3/7: Bash-matcher hooks reference broadcast-guard.sh"
 			;;
@@ -211,7 +211,7 @@ if command -v jq >/dev/null 2>&1; then
 			;;
 	esac
 
-	case "${BASH_CMDS}" in
+	case "${HOOK_BASH_CMDS}" in
 		*publish-guard.sh*)
 			echo "PASS 4/7: Bash-matcher hooks reference publish-guard.sh"
 			;;

@@ -5,6 +5,8 @@
 # Must stay bash 3.2 compatible (macOS /bin/bash).
 # CHAIN: none. PRIME_DIRECTIVE: TESTNET-FIRST — no broadcast pathway.
 
+# shellcheck disable=SC2034  # sourced library: these constants are read by the scripts and tests that source it
+
 # ML-DSA-87: the highest ML-DSA level and the level NSA CNSA 2.0 specifies for
 # all classification levels. Change only if NIST / CNSA guidance changes or a
 # weakness in ML-DSA-87 is published; a change is a normal key rotation (spec

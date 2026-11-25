@@ -277,9 +277,9 @@ g3_build_farm() { # name excluded-name-regex
 #               G3_R_ARGS (array) G3_R_ENV (array) G3_R_OUTFILES (array)
 # Writes into $1: rc, stdout, stderr, files/<path>
 g3_run() { # outdir
-	local out="$1" t="$G3_T" runpath c expected got wdrc child
+	local out="$1" t="${G3_T:?}" runpath c expected got wdrc child
 	mkdir -p "$out/files"
-	rm -rf "$t/tree" "$t/fx" "$t/home" "$t/tmp" "$t/calls.log" "$t/stubs/ajv" "$t/pg-started" "$t/timed-out"
+	rm -rf "$t/tree" "$t/fx" "${t:?}/home" "$t/tmp" "$t/calls.log" "$t/stubs/ajv" "$t/pg-started" "$t/timed-out"
 	git worktree add --detach --quiet "$t/tree" "$G3_R_COMMIT" >/dev/null 2>&1 || g3_die "git worktree add failed for $G3_R_COMMIT"
 	mkdir -p "$t/fx" "$t/home" "$t/tmp"
 	: > "$t/calls.log"
@@ -498,7 +498,7 @@ g3_cases_mode() {
 		g3_split_row "$i"
 		G3_R_ID="$id"
 		G3_R_COMMIT="$G3_BASEC"; G3_R_SIDE=base; g3_run "$B"
-		G3_R_COMMIT="$G3_HEADC"; G3_R_SIDE=head; g3_run "$H"
+		G3_R_COMMIT="$G3_HEADC"; G3_R_SIDE="head"; g3_run "$H"
 
 		if [ "${ROW_NORM[$i]}" != "-" ]; then
 			g3_normalize "$B/stdout" "${ROW_NORM[$i]}"; g3_normalize "$H/stdout" "${ROW_NORM[$i]}"
@@ -620,7 +620,7 @@ g3_suite_mode() {
 		if [ "$brc" != "0" ] || [ "$bf" != "0" ]; then
 			g3_die "$id: base is red (rc=$brc, fail cases=$bf): cannot prove equivalence"
 		fi
-		G3_R_COMMIT="$G3_HEADC"; G3_R_SIDE=head; g3_run "$H"
+		G3_R_COMMIT="$G3_HEADC"; G3_R_SIDE="head"; g3_run "$H"
 		g3_extract_cases "$H/stdout" "$H/stderr" "$H/ncolon" | LC_ALL=C sort > "$H/cases"
 		bc="$(wc -l < "$B/cases" | tr -d ' ')"; hc="$(wc -l < "$H/cases" | tr -d ' ')"
 		[ "$bc" -gt 0 ] || g3_die "$id: no case lines at base (cannot compare)"

@@ -213,7 +213,6 @@ NOW_ISO="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 GIT_COMMIT="$(cd "$ROOT" && git rev-parse HEAD 2>/dev/null || echo "0000000000000000000000000000000000000000")"
 
 # ---- identity_branch -------------------------------------------------
-PLACEHOLDER_HASH="0000000000000000000000000000000000000000000000000000000000000000"
 
 # operator_ed25519_pubkey_sha256_hex (semantic C):
 # authoritative source is the public pubkey URL. The evaluator can

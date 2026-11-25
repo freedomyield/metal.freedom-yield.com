@@ -53,9 +53,9 @@ if [ -n "${FY_PQ_PASSIN:-}" ]; then
 		*) echo "ERROR: FY_PQ_PASSIN accepts only file:<absolute path> (tests only); refusing." >&2; exit 4 ;;
 	esac
 fi
-PASSIN_ARGS=(); PASSOUT_ARGS=()
+PASSIN_ARGS=()
 if [ -n "${FY_PQ_PASSIN:-}" ]; then
-	PASSIN_ARGS=(-passin "$FY_PQ_PASSIN"); PASSOUT_ARGS=(-passout "$FY_PQ_PASSIN")
+	PASSIN_ARGS=(-passin "$FY_PQ_PASSIN")
 fi
 umask 077
 

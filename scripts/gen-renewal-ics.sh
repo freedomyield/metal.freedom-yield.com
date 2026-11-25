@@ -208,7 +208,8 @@ gen_cycle() {
 
   local event_start=$((cycle_end - 300))
   local event_end=$((cycle_end + 3600))
-  local cycle_end_h=$(fmt_human "$cycle_end")
+  local cycle_end_h
+  cycle_end_h=$(fmt_human "$cycle_end")
 
   cat <<EOF
 BEGIN:VEVENT

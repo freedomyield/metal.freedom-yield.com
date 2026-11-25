@@ -211,6 +211,7 @@
 # assertions are not tautologies.
 
 FYC_CYCLE_CONTEXT_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC2034  # library variable for sourcing scripts
 FYC_REPO_ROOT="$(cd "${FYC_CYCLE_CONTEXT_LIB_DIR}/../.." && pwd)"
 
 FYC_USAGE_RC=64
