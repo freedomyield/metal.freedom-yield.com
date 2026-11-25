@@ -1060,7 +1060,7 @@ the values to pass on a given day are in the day-of value sheet above):
    step 5/10 と同じ compose を先に走らせ、§3.4 (a) の値を chat に出す:
 
    ```sh
-   FY_CONFIG_DIR=$HOME/freedom-yield-rehearsal-config HOME=~/.metal-fy-proton-test bash scripts/sign-anchor-event.sh --chain=testnet-a --anchor-source=public/api/anchor-source.json --dry-run --output=/tmp/fya-7a-preview.json | jq '{target_chain, authorization, sink, quantity, composed_memos}'
+   FY_CONFIG_DIR=$HOME/.config/metal.freedom-yield.com/key/rehearsal HOME=~/.config/metal.freedom-yield.com/key/testnet bash scripts/sign-anchor-event.sh --chain=testnet-a --anchor-source=public/api/anchor-source.json --dry-run --output=/tmp/fya-7a-preview.json | jq '{target_chain, authorization, sink, quantity, composed_memos}'
    ```
 
    出力の `target_chain` が `testnet-a`、`composed_memos` の prefix が
@@ -1070,8 +1070,8 @@ the values to pass on a given day are in the day-of value sheet above):
 
 
    ```sh
-   HOME=~/.metal-fy-proton-test proton key:unlock
-   HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh --expect-cycle=<N+1>
+   HOME=~/.config/metal.freedom-yield.com/key/testnet proton key:unlock
+   HOME=~/.config/metal.freedom-yield.com/key/testnet bash scripts/run-testnet-rehearsal.sh --expect-cycle=<N+1>
    ```
 
    - **目視するもの (この順で)**: ① `step 1/10` の `cycle_number_observed:` と
@@ -1115,7 +1115,7 @@ the values to pass on a given day are in the day-of value sheet above):
      には付けず、待ってから operator の指示を取る。**後の cycle の刻印の
      exit 10 は、この旗でも通らない。止めて報告する。**
      testnet での命令の形 (書くだけ。ここで走らせない):
-     `HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh --expect-cycle=<N+1> --allow-existing-cycle-anchor`
+     `HOME=~/.config/metal.freedom-yield.com/key/testnet bash scripts/run-testnet-rehearsal.sh --expect-cycle=<N+1> --allow-existing-cycle-anchor`
    - **誰が起動し、何が認可か**: 起動は AI@Mac、認可は chat での operator の
      明示的な実行指示 (上の「実行者と実行場所」節の引用ブロック、2026-10-07
      operator 決定)。
@@ -1167,7 +1167,7 @@ the values to pass on a given day are in the day-of value sheet above):
    **7b — gate-4 material (mainnet dry run).** One path only: on the Mac,
    from the already-committed `anchor-source.json`, with **no recompose**:
    ```sh
-   FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton \
+   FY_CONFIG_DIR=$HOME/.config/metal.freedom-yield.com/key/broadcast/config HOME=~/.config/metal.freedom-yield.com/key/mainnet \
      bash scripts/preview-cycle-anchor-broadcast.sh \
        --source=public/api/anchor-source.json \
        --testnet-tx-id=<rehearsal tx id>
@@ -1190,7 +1190,7 @@ the values to pass on a given day are in the day-of value sheet above):
      artifacts branch hashes live feeds that the 5-minute crons rewrite.
    - The equivalent bare form, if you want the log without the pre-checks:
      ```sh
-     FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton \
+     FY_CONFIG_DIR=$HOME/.config/metal.freedom-yield.com/key/broadcast/config HOME=~/.config/metal.freedom-yield.com/key/mainnet \
        bash scripts/sign-anchor-event.sh --chain=mainnet-a \
          --anchor-source=public/api/anchor-source.json \
          --dry-run > /tmp/fya-mainnet-dryrun.json
@@ -1237,7 +1237,7 @@ the values to pass on a given day are in the day-of value sheet above):
    `--testnet-tx-id` / `--dry-run-log`.
 
    **この code block は 2 人で分担する**: **1 行目
-   (`HOME=~/.metal-fy-proton proton key:unlock`) は operator@TTY** — 32 文字 password を打つのは operator。**2 行目以降
+   (`HOME=~/.config/metal.freedom-yield.com/key/mainnet proton key:unlock`) は operator@TTY** — 32 文字 password を打つのは operator。**2 行目以降
    (`sign-anchor-event.sh` の呼び出し) は AI@Mac** — ただし実行は下の
    「per-invocation 認可の手順」が済んでから。
    unlock の **目視するもの**: エラーなくシェルに戻ること。
@@ -1245,8 +1245,8 @@ the values to pass on a given day are in the day-of value sheet above):
    (やり直せる)。**Dashlane entry 名はこの repo には書かない** — ピング時に
    AI が添える。
    ```sh
-   HOME=~/.metal-fy-proton proton key:unlock
-   FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton \
+   HOME=~/.config/metal.freedom-yield.com/key/mainnet proton key:unlock
+   FY_CONFIG_DIR=$HOME/.config/metal.freedom-yield.com/key/broadcast/config HOME=~/.config/metal.freedom-yield.com/key/mainnet \
      bash scripts/sign-anchor-event.sh --chain=mainnet-a \
        --anchor-source=public/api/anchor-source.json \
        --testnet-tx-id=<rehearsal tx id> \
@@ -1257,7 +1257,7 @@ the values to pass on a given day are in the day-of value sheet above):
    env-prefix lines. Mechanism (measured 2026-07-31): **zsh** — the
    operator's login shell — applies command-prefix assignments left to
    right and makes each visible to the *next* assignment's expansion, so
-   `HOME=~/.metal-fy-proton` first makes `$HOME` in
+   `HOME=~/.config/metal.freedom-yield.com/key/mainnet` first makes `$HOME` in
    `FY_CONFIG_DIR=$HOME/…` resolve to the keystore dir, silently pointing
    the config dir inside the keystore. bash expands the prefix assignments
    of a *simple* command against the pre-command environment, so both
@@ -1265,7 +1265,7 @@ the values to pass on a given day are in the day-of value sheet above):
    forks a subshell and behaves like zsh. Write the order that is correct
    in every shell.
    One more `FY_CONFIG_DIR` pitfall, distinct from the ordering rule
-   above: **do not quote the tilde.** `FY_CONFIG_DIR="~/.fy-mainnet-broadcast/config"`
+   above: **do not quote the tilde.** `FY_CONFIG_DIR="~/.config/metal.freedom-yield.com/key/broadcast/config"`
    does not expand at all — a quoted `~` is left as a literal `~` by the
    shell — producing a path that doesn't exist and fails with **exit 3**
    (config dir not readable). With the ordering rule above followed and
@@ -1273,14 +1273,14 @@ the values to pass on a given day are in the day-of value sheet above):
    all four zsh/bash × correct/incorrect-order permutations) — there is
    no separate tilde-vs-`$HOME` divergence to worry about. For
    robustness, an **absolute path** (e.g.
-   `FY_CONFIG_DIR=/Users/<user>/.fy-mainnet-broadcast/config`) is still
+   `FY_CONFIG_DIR=/Users/<user>/.config/metal.freedom-yield.com/key/broadcast/config`) is still
    the simplest choice: it sidesteps both the quoting pitfall above and
    the ordering rule entirely.
    Routed through `bin/safe-broadcast`'s 4-gate discipline (testnet-first,
    per-invocation operator authorization naming chain / actor / permission
    / action / memo / quantity, chain-info verify, dry-run exhaustion — PRIME
    DIRECTIVE). Testnet and mainnet are **two distinct keystores**
-   (`HOME=~/.metal-fy-proton-test` / `HOME=~/.metal-fy-proton`) — never
+   (`HOME=~/.config/metal.freedom-yield.com/key/testnet` / `HOME=~/.config/metal.freedom-yield.com/key/mainnet`) — never
    interchangeable (Constitution §3.5).
 
    **per-invocation 認可の手順 (当日 operator が実際にやること)。** 上の段落は
@@ -1374,7 +1374,7 @@ the values to pass on a given day are in the day-of value sheet above):
    は手で書かず、`--anchor-source` の file から script が導く:
 
    ```sh
-   FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config bash scripts/check-cycle-anchor-absent.sh --chain=mainnet-a --anchor-source=public/api/anchor-source.json --not-before=<E>
+   FY_CONFIG_DIR=$HOME/.config/metal.freedom-yield.com/key/broadcast/config bash scripts/check-cycle-anchor-absent.sh --chain=mainnet-a --anchor-source=public/api/anchor-source.json --not-before=<E>
    ```
 
    - exit は設計書 §6 のとおり。**0** = 無い (前の cycle の刻印が同じ答えの中に
@@ -1403,7 +1403,7 @@ the values to pass on a given day are in the day-of value sheet above):
    `--input=` value below — step 7.5, immediately following, is that
    transfer.
    **後操作 (operator@TTY) — mainnet keystore を re-lock する。**
-   `HOME=~/.metal-fy-proton proton key:lock`。
+   `HOME=~/.config/metal.freedom-yield.com/key/mainnet proton key:lock`。
 
    - **打つ人**: **operator 自身** (password を打つため)。
    - **目視するもの**: プロンプト `Enter 32 character password (leave empty to
@@ -1414,7 +1414,7 @@ the values to pass on a given day are in the day-of value sheet above):
      (Constitution §3.5)。
 
    **後操作 2 (operator@TTY) — testnet keystore も re-lock する。**
-   `HOME=~/.metal-fy-proton-test proton key:lock`。
+   `HOME=~/.config/metal.freedom-yield.com/key/testnet proton key:lock`。
 
    - **いつ**: **7a の直後が既定** (testnet keystore の最後の利用は 7a。
      7a の「後操作」)。7a の直後に済ませていれば、ここでは locked であることを

@@ -65,7 +65,7 @@ public/api/anchor-source.json (identity + observations + artifacts branch roots)
 
 The account that signs (`<account>@anchor`) and the sink account are read
 from the operator-local rehearsal config directory
-(`~/freedom-yield-rehearsal-config/{xpr-account,anchor-sink,xpr-chain}`),
+(`~/.config/metal.freedom-yield.com/key/rehearsal/{xpr-account,anchor-sink,xpr-chain}`),
 never from a hardcoded name in the script. By convention on this project
 the rehearsal actor is the testnet account `<rehearsal-anchor-account>`, signing with
 its `anchor` permission, transferring to sink account `<rehearsal-anchor-sink>`
@@ -91,7 +91,7 @@ be, different:
 
 | | testnet | mainnet |
 |---|---|---|
-| keystore `HOME` | `~/.metal-fy-proton-test` | `~/.metal-fy-proton` |
+| keystore `HOME` | `~/.config/metal.freedom-yield.com/key/testnet` | `~/.config/metal.freedom-yield.com/key/mainnet` |
 | chain (`--chain=`) | `testnet-a` | `mainnet-a` |
 | actor account | `<rehearsal-anchor-account>` | the mainnet operator account |
 | sink account | `<rehearsal-anchor-sink>` | the mainnet anchor-history sink |
@@ -136,14 +136,14 @@ holds even though the target is testnet, not mainnet.
 Concretely, as of this document's last line-by-line reconciliation
 against `scripts/run-testnet-rehearsal.sh` (2026-08-14, current `main`):
 
-- **Steps 1–3 were actually executed** (`HOME=~/.metal-fy-proton-test
+- **Steps 1–3 were actually executed** (`HOME=~/.config/metal.freedom-yield.com/key/testnet
   bash scripts/run-testnet-rehearsal.sh --expect-cycle=4`, real config,
   real canonical `anchor-source.json`, a real read-only RPC call to
   `rpc.api.testnet.metalx.com`): anchor-source selection, `--expect-cycle`
   enforcement, rehearsal-config read, and the chain-derived `anchor`
   pubkey check all completed correctly and printed the expected fields.
   The run then correctly halted at step 3/10 with exit 2 ("keystore is
-  LOCKED … Run in a separate terminal: `HOME=~/.metal-fy-proton-test
+  LOCKED … Run in a separate terminal: `HOME=~/.config/metal.freedom-yield.com/key/testnet
   proton key:unlock`") — the AI session cannot unlock the keystore (no
   passphrase), so this is the actual, expected stopping point, not a
   workaround.
@@ -207,20 +207,20 @@ partial run as a passed rehearsal.
   from Homebrew (`brew install coreutils`), which installs it as
   `gtimeout` by default — confirm plain `timeout` itself resolves
   (`command -v timeout`), not just `gtimeout`.
-- The testnet proton-cli keystore (`HOME=~/.metal-fy-proton-test`) holds
+- The testnet proton-cli keystore (`HOME=~/.config/metal.freedom-yield.com/key/testnet`) holds
   the CURRENT `<rehearsal-anchor-account>@anchor` private key, and is **unlocked**
   before running the rehearsal:
   ```
-  HOME=~/.metal-fy-proton-test proton key:unlock
+  HOME=~/.config/metal.freedom-yield.com/key/testnet proton key:unlock
   ```
   Non-interactive shells (the rehearsal script itself) cannot unlock a
   locked keystore — a locked keystore causes `proton` to hang
   indefinitely on any signing-adjacent call. Unlock first, in a separate
   terminal, THEN run the rehearsal script (per Constitution §3.5, the
   unlock command above and every other `proton` invocation in this
-  document MUST carry the `HOME=~/.metal-fy-proton-test` prefix — never
+  document MUST carry the `HOME=~/.config/metal.freedom-yield.com/key/testnet` prefix — never
   a bare `proton …` against the default shared keystore).
-- `~/freedom-yield-rehearsal-config/` exists with three files:
+- `~/.config/metal.freedom-yield.com/key/rehearsal/` exists with three files:
   `xpr-account` (`<rehearsal-anchor-account>`), `anchor-sink` (`<rehearsal-anchor-sink>`),
   `xpr-chain` (`proton-test`). These are operator-local paths, resolved
   independent of the keystore-scoped `$HOME` (see
@@ -292,7 +292,7 @@ For an **exploratory / pipeline-health** run (not gating any specific
 mainnet broadcast), the canonical anchor-source is selected by default:
 
 ```
-HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh
+HOME=~/.config/metal.freedom-yield.com/key/testnet bash scripts/run-testnet-rehearsal.sh
 ```
 
 For the **day-of, real gate-1-evidence** run, `--expect-cycle=<N>` is
@@ -301,7 +301,7 @@ rehearsal is meant to gate — see "Cycle number must match the target
 mainnet cycle" above):
 
 ```
-HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh --expect-cycle=<N>
+HOME=~/.config/metal.freedom-yield.com/key/testnet bash scripts/run-testnet-rehearsal.sh --expect-cycle=<N>
 ```
 
 Step 1/10 prints the selected source's path, cycle number, and derived
@@ -315,7 +315,7 @@ any target cycle.
 To point at a different (still real, non-fixture) anchor-source file:
 
 ```
-HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh \
+HOME=~/.config/metal.freedom-yield.com/key/testnet bash scripts/run-testnet-rehearsal.sh \
     --source=/path/to/anchor-source.json
 ```
 
@@ -325,7 +325,7 @@ placeholder-hash files frozen at whatever cycle they were last hand-built
 for. They are refused unless you pass `--allow-fixture` explicitly:
 
 ```
-HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh \
+HOME=~/.config/metal.freedom-yield.com/key/testnet bash scripts/run-testnet-rehearsal.sh \
     --source=public/api/anchor-source.example.json --allow-fixture
 ```
 
@@ -348,7 +348,7 @@ harmless — a non-fatal warning is printed, since the flag had no effect.)
    `--expect-cycle=<N>` was given and does not match; print a non-fatal
    warning if `identity_branch`/`artifacts_branch` still hold placeholder
    (`0000…`) hashes.
-2. **Rehearsal config** — read `~/freedom-yield-rehearsal-config/`
+2. **Rehearsal config** — read `~/.config/metal.freedom-yield.com/key/rehearsal/`
    (actor account, sink, chain).
 3. **Chain-derived key check** — the rotation-resilient verification
    described above. Because this step calls `proton key:list` before
@@ -359,7 +359,7 @@ harmless — a non-fatal warning is printed, since the flag had no effect.)
    `proton chain:set proton-test` + `chain:info` calls, then a
    fast-timeout read of the actor account to detect a locked keystore.
    Those two (like the `proton key:list` named in step 3) are
-   **script-internal**: they inherit the `HOME=~/.metal-fy-proton-test`
+   **script-internal**: they inherit the `HOME=~/.config/metal.freedom-yield.com/key/testnet`
    prefix the script was invoked with, so they are already keystore-
    scoped. They are **not** commands to type by hand — a bare
    `proton …` at the shell would hit the default shared keystore and is
@@ -420,7 +420,7 @@ testnet RPC itself before accepting it (its own gate 1) — the rehearsal
 output is evidence, not a bypassable token.
 
 **The rehearsal's own dry-run log does NOT feed the mainnet wrapper's
-gate 4.** `~/.fya-testnet-dryrun-log.json` (printed at step 10/10)
+gate 4.** `~/.config/metal.freedom-yield.com/backup/.fya-testnet-dryrun-log.json` (printed at step 10/10)
 records `target_chain: "testnet-a"` — under the hardened mainnet gate 4,
 `bin/safe-broadcast --chain=mainnet-a` refuses a `--dry-run-log=<file>`
 whose own recorded `target_chain` does not match `--chain`. The testnet
@@ -434,7 +434,7 @@ already-committed `anchor-source.json` (no recompose), targeting the
 mainnet account for the same cycle:
 
 ```
-FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton \
+FY_CONFIG_DIR=$HOME/.config/metal.freedom-yield.com/key/broadcast/config HOME=~/.config/metal.freedom-yield.com/key/mainnet \
   bash scripts/preview-cycle-anchor-broadcast.sh \
     --source=public/api/anchor-source.json \
     --testnet-tx-id=<this rehearsal's tx id>
@@ -450,7 +450,7 @@ broadcast is authorized. Full context: `docs/CYCLE_GATE.md` step 7b.
 
 - **Step 3/10 exits 2 with a keystore-locked warning** (`proton key:list
   timed out` / `proton key:list failed (rc=…)`) — the keystore is
-  **locked**, not missing a key. Run `HOME=~/.metal-fy-proton-test proton
+  **locked**, not missing a key. Run `HOME=~/.config/metal.freedom-yield.com/key/testnet proton
   key:unlock` in a separate terminal, then re-run the rehearsal script.
   Step 3 runs `proton key:list` *before* step 4's unlock probe, so a
   locked keystore surfaces here first; until 2026-07-31 it was
@@ -463,7 +463,7 @@ broadcast is authorized. Full context: `docs/CYCLE_GATE.md` step 7b.
   Either the key was never imported, or it was rotated on-chain since the
   keystore was last updated. See `docs/ANCHOR_ACCOUNT_KEY_ROTATION.md` to
   import the matching private key (with the
-  `HOME=~/.metal-fy-proton-test` prefix), then re-run.
+  `HOME=~/.config/metal.freedom-yield.com/key/testnet` prefix), then re-run.
 - **Step 3/10 fails "listed no public keys"** — `key:list` succeeded but
   the keystore is empty. Confirm the unlock first (a locked keystore can
   also list nothing); if it is unlocked, import the key per
@@ -474,7 +474,7 @@ broadcast is authorized. Full context: `docs/CYCLE_GATE.md` step 7b.
 - **Step 4/10 exits 2 with a keystore-locked warning** — same remedy as
   the step 3/10 lock case above: unlock in a separate terminal, re-run.
 - **Guard exits 8 (`ERROR (keystore guard, Constitution §3.5)`)** — the
-  script was invoked without the `HOME=~/.metal-fy-proton-test` prefix
+  script was invoked without the `HOME=~/.config/metal.freedom-yield.com/key/testnet` prefix
   (or with `HOME` unset). Re-invoke exactly as shown under "Running the
   rehearsal" above.
 - **Step 9/10 (`gen-anchor-receipt.sh`) exits 3** — gate 1 (tx

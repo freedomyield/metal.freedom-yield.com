@@ -19,10 +19,10 @@
 
 # --- definition table
 RELAY_TOKEN_SENDERS='metal-validator metal-external-watch'
-RELAY_TOKEN_DIR_DEFAULT_NAME='.metal-fy-notify-relay'
 RELAY_TOKEN_RANDOM_BYTES=32
 RELAY_TOKEN_FILE_SUFFIX='.token'
 RELAY_TOKEN_TEXT_LIB_REL='../lib/notify-text.sh'
+RELAY_TOKEN_OPERATOR_PATHS_LIB_REL='../lib/operator-paths.sh'
 
 set -uo pipefail
 umask 077
@@ -30,6 +30,9 @@ umask 077
 # shellcheck source=scripts/lib/notify-text.sh
 # shellcheck source-path=SCRIPTDIR/../..
 . "$(dirname "$0")/$RELAY_TOKEN_TEXT_LIB_REL" || exit 4
+# shellcheck source=scripts/lib/operator-paths.sh
+# shellcheck source-path=SCRIPTDIR/../..
+. "$(dirname "$0")/$RELAY_TOKEN_OPERATOR_PATHS_LIB_REL" || exit 4
 
 # relay_token_sender_is_known <sender>
 relay_token_sender_is_known() {
@@ -45,7 +48,7 @@ relay_token_resolve_dir() {
   if [ -n "${FYD_RELAY_TOKEN_DIR:-}" ]; then
     printf '%s' "$FYD_RELAY_TOKEN_DIR"
   elif [ -n "${HOME:-}" ]; then
-    printf '%s/%s' "$HOME" "$RELAY_TOKEN_DIR_DEFAULT_NAME"
+    printf '%s/%s' "$HOME" "$FYD_NOTIFY_RELAY_DIR_REL"
   else
     return 1
   fi

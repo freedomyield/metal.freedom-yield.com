@@ -93,7 +93,7 @@
 #   BACKUP_DROPBOX_DIR      off-site copy dir (default: $HOME/Dropbox/metal-validator-backup)
 #   BACKUP_IDENTITY         --restore-drill only: the age identity (private key)
 #                           file (default: BACKUP_RECIPIENT_PUBKEY minus ".pub")
-#   BACKUP_DRILL_LOG        --restore-drill only: the log (default: $HOME/fy-restore-drill.log)
+#   BACKUP_DRILL_LOG        --restore-drill only: the log (default: $HOME/.config/metal.freedom-yield.com/backup/fy-restore-drill.log)
 #
 # Exit codes:
 #   0  success
@@ -106,6 +106,9 @@
 # shellcheck disable=SC2001  # sed indents multi-line name lists
 set -euo pipefail
 umask 077
+# The drill log's name comes from the one definition file.
+# shellcheck source=scripts/lib/operator-paths.sh
+. "$(dirname "$0")/../lib/operator-paths.sh"
 
 CONFIG_PARENT="/etc"
 CONFIG_NAME="freedom-yield"
@@ -199,7 +202,7 @@ fi
 # `age -d -i`; age asks for the passphrase on the terminal, never this script.
 if [ "$MODE" = "restore-drill" ]; then
 	DRILL_OUT_DIR="${BACKUP_OUT_DIR:-$HOME}"
-	DRILL_LOG="${BACKUP_DRILL_LOG:-$HOME/fy-restore-drill.log}"
+	DRILL_LOG="${BACKUP_DRILL_LOG:-$HOME/${FYD_RESTORE_DRILL_LOG_REL}}"
 	DRILL_IDENTITY="${BACKUP_IDENTITY:-${RECIPIENT%.pub}}"
 	if [ -z "$DRILL_FILE" ]; then
 		# the glob expands in name order: the last match is the newest date

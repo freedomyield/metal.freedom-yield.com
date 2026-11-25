@@ -189,6 +189,43 @@ run_case "block: safe-broadcast marker + expired token → block" 2 \
 	'{"tool_name":"Bash","tool_input":{"command":"proton transaction:push arg"}}'
 unset FYD_SAFE_BROADCAST
 
+# ---- the definition file is missing: refusals are exactly as before ----
+# A copy of the guard with no scripts/lib/operator-paths.sh next to it. The
+# guard reads that file only for the audit log's fallback name; a missing file
+# must not end the hook early (any exit but 2 lets the tool call through).
+# GUARD_UNDER_TEST_NODEF=<path> runs these cases against another copy (mutants).
+NODEF_TREE="$(mktemp -d -t fyd-guard-nodef.XXXXXX)"
+mkdir -p "$NODEF_TREE/scripts" "$NODEF_TREE/home"
+cp "$GUARD" "$NODEF_TREE/scripts/broadcast-guard.sh"
+GUARD_REAL="$GUARD"
+GUARD="${GUARD_UNDER_TEST_NODEF:-$NODEF_TREE/scripts/broadcast-guard.sh}"
+rm -f "$TEST_TOKEN"
+run_case "no definition file: block: proton action" 2 \
+	'{"tool_name":"Bash","tool_input":{"command":"proton action eosio.token transfer arg"}}'
+touch "$TEST_TOKEN"
+run_case "no definition file: block: transaction:push WITH fresh token, no marker" 2 \
+	'{"tool_name":"Bash","tool_input":{"command":"proton transaction:push arg"}}'
+# Sanctioned path with an unwritable primary log: allowed as today (the log
+# write only warns), and the unread fallback name leaves HOME itself as the
+# target, so no new file appears in HOME.
+export FYD_SAFE_BROADCAST=1
+printf '{"chain":"mainnet-a"}' > "$TEST_TOKEN"
+SAVED_AUDIT_LOG="$FYD_BROADCAST_AUDIT_LOG"; SAVED_HOME="$HOME"
+export FYD_BROADCAST_AUDIT_LOG="$NODEF_TREE/no-such-dir/audit.log" HOME="$NODEF_TREE/home"
+run_case "no definition file: allow: marker + BOUND token, log unwritable" 0 \
+	'{"tool_name":"Bash","tool_input":{"command":"proton transaction:push arg"}}'
+export FYD_BROADCAST_AUDIT_LOG="$SAVED_AUDIT_LOG" HOME="$SAVED_HOME"
+unset FYD_SAFE_BROADCAST
+if [ -z "$(ls -A "$NODEF_TREE/home")" ]; then
+	printf 'PASS  %-60s\n' "no definition file: no new file in HOME"
+	PASS=$((PASS + 1))
+else
+	printf 'FAIL  %-60s (found: %s)\n' "no definition file: no new file in HOME" "$(ls -A "$NODEF_TREE/home" | tr '\n' ' ')" >&2
+	FAIL=$((FAIL + 1))
+fi
+GUARD="$GUARD_REAL"
+rm -rf "$NODEF_TREE"
+
 # ---- Summary ----
 echo
 echo "----------------------------------------"

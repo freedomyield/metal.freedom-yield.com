@@ -44,7 +44,7 @@
 # WHERE IT RUNS: the operator's MAC, after step 6 of docs/CYCLE_GATE.md's
 # runbook has committed + pushed the day's anchor-source.json. It is NOT run
 # on the validator host: the §3.5 keystore guard below requires
-# HOME=~/.metal-fy-proton, which a `sudo -u <deploy_user> …` host invocation cannot
+# HOME=~/.config/metal.freedom-yield.com/key/mainnet, which a `sudo -u <deploy_user> …` host invocation cannot
 # satisfy (it refuses with exit 8 against the <deploy_user> login home).
 #
 # STAGE 2 (the actual broadcast) is a SEPARATE, operator-authorized step
@@ -53,7 +53,7 @@
 # signing host; see the signing-host assertion in sign-anchor-event.sh).
 #
 # Usage (on the operator's Mac, from the repo root):
-#   FY_CONFIG_DIR=$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton \
+#   FY_CONFIG_DIR=$HOME/.config/metal.freedom-yield.com/key/broadcast/config HOME=~/.config/metal.freedom-yield.com/key/mainnet \
 #     bash scripts/preview-cycle-anchor-broadcast.sh \
 #       --source=public/api/anchor-source.json \
 #       --testnet-tx-id=<64-hex>
@@ -409,7 +409,7 @@ done
 if [ -n "$MISSING_CFG" ]; then
 	echo "ERROR: broadcast config incomplete in ${CONFIG_DIR} — missing:${MISSING_CFG}" >&2
 	echo "       Re-invoke with the mainnet config dir, e.g.:" >&2
-	echo "         FY_CONFIG_DIR=\$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton \\" >&2
+	echo "         FY_CONFIG_DIR=\$HOME/${FYD_BROADCAST_CONFIG_REL} HOME=~/${FYD_KEYSTORE_MAINNET_REL} \\" >&2
 	echo "           bash scripts/preview-cycle-anchor-broadcast.sh --source=${SOURCE_PATH} --testnet-tx-id=${TESTNET_TX_ID}" >&2
 	echo "       (FY_CONFIG_DIR must come BEFORE HOME= on that line — see docs/CYCLE_GATE.md step 7.)" >&2
 	exit 3
@@ -485,8 +485,8 @@ cat <<CMD
     printf '{"chain":"mainnet-a","tx_sha256":"%s"}' "$TOKEN_TX_SHA256" > /tmp/fyd-broadcast-token
                                              # gate-2/2b (R16), valid 5 min (300s TTL) from now.
                                              # chain+tx-bound; a bare touch is REFUSED for mainnet.
-    HOME=~/.metal-fy-proton proton key:unlock
-    FY_CONFIG_DIR=\$HOME/.fy-mainnet-broadcast/config HOME=~/.metal-fy-proton \\
+    HOME=~/${FYD_KEYSTORE_MAINNET_REL} proton key:unlock
+    FY_CONFIG_DIR=\$HOME/${FYD_BROADCAST_CONFIG_REL} HOME=~/${FYD_KEYSTORE_MAINNET_REL} \\
       bash scripts/sign-anchor-event.sh \\
         --chain=mainnet-a \\
         --anchor-source=$SOURCE_PATH \\

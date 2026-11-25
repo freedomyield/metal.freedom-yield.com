@@ -28,7 +28,7 @@
 #             readiness only: resolves the source, checks docker + image,
 #             boots metalgo on the local network with THROWAWAY ephemeral
 #             keys and checks info.getNodeID answers. No key material touched.
-# Env:    ENCRYPTED_BACKUP  (default: newest ~/staker-backup-*.tar.gz.enc)
+# Env:    ENCRYPTED_BACKUP  (default: newest ~/.config/metal.freedom-yield.com/backup/staker-backup-*.tar.gz.enc)
 #         EXPECTED_NODEID   (default: NodeID-yyPvtQHTA4FZU5cJtjWZa7RVBpWU3i5v)
 #         METALGO_IMAGE     (default: metalblockchain/metalgo:v1.13.5 — the
 #                            production version; bump together with production)
@@ -36,6 +36,10 @@
 #                           (default: the recorded originals below)
 #         DR_DRILL_BOOT_TIMEOUT  seconds to wait for the info API (default: 60)
 set -euo pipefail
+
+# The backup dir's name comes from the one definition file.
+# shellcheck source=scripts/lib/operator-paths.sh
+. "$(dirname "$0")/lib/operator-paths.sh"
 
 MODE="drill"
 SOURCE="encrypted"
@@ -52,11 +56,11 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-# newest_staker_backup — newest ~/staker-backup-*.tar.gz.enc by name (the
+# newest_staker_backup — newest ~/<backup dir>/staker-backup-*.tar.gz.enc by name (the
 # names carry yyyymmdd, so lexical order is date order). Empty if none.
 newest_staker_backup() {
   local f newest=""
-  for f in "$HOME"/staker-backup-*.tar.gz.enc; do
+  for f in "$HOME/${FYD_BACKUP_DIR_REL}"/staker-backup-*.tar.gz.enc; do
     [ -f "$f" ] && [ ! -L "$f" ] || continue
     if [ -z "$newest" ] || [[ "$f" > "$newest" ]]; then newest="$f"; fi
   done
@@ -174,7 +178,7 @@ if [ "$SOURCE" = "plaintext" ]; then
   echo "  source: $PLAIN_DIR (plaintext, FileVault-protected; copied, never modified)"
 else
   command -v openssl >/dev/null 2>&1 || fail "openssl not found"
-  [ -n "$ENCRYPTED_BACKUP" ] || fail "no ~/staker-backup-*.tar.gz.enc found (set ENCRYPTED_BACKUP)"
+  [ -n "$ENCRYPTED_BACKUP" ] || fail "no ~/${FYD_BACKUP_DIR_REL}/staker-backup-*.tar.gz.enc found (set ENCRYPTED_BACKUP)"
   [ -f "$ENCRYPTED_BACKUP" ] || fail "encrypted backup not found at $ENCRYPTED_BACKUP"
   echo "  backup: $ENCRYPTED_BACKUP ($(wc -c <"$ENCRYPTED_BACKUP" | tr -d ' ') bytes)"
 fi

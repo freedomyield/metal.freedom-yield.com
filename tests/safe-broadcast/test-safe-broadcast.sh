@@ -245,7 +245,7 @@ export PATH="$STUB_DIR:$PATH"
 # user's default home, before its first real proton invocation (gate 3).
 # None of the scenarios below touch a real keystore (proton is stubbed
 # above), so scoping HOME to a throwaway fixture dir for the WHOLE suite is
-# exactly what a real operator invocation looks like (HOME=~/.metal-fy-proton*)
+# exactly what a real operator invocation looks like (HOME=~/.config/metal.freedom-yield.com/key/*)
 # and lets every pre-existing gate-3/gate-2b "reaches gate 3" scenario keep
 # exercising gate 3 itself, rather than being intercepted by the new guard.
 LOGIN_HOME="$(eval echo "~$(id -un)" 2>/dev/null || true)"
@@ -807,7 +807,7 @@ fi
 
 # ---- keystore guard (§3.5): pass through when $HOME is a project fixture ----
 # HOME is already scoped to $TEST_HOME (a throwaway temp dir, standing in for
-# a real ~/.metal-fy-proton-test) for the whole suite (see the export near
+# a real ~/.config/metal.freedom-yield.com/key/testnet) for the whole suite (see the export near
 # the top of this file). This case shows that explicitly: the guard does
 # NOT fire, and execution proceeds to gate 3, where the hermetic proton stub
 # (testnet chain_id) matches the default expected testnet chain_id → the
@@ -920,26 +920,42 @@ fi
 # home, not a keystore-scoped $HOME ----
 # bin/safe-broadcast computes AUDIT_LOG_FALLBACK via fyd_login_home()
 # (scripts/lib/require-keystore-home.sh) rather than reading $HOME
-# directly, so that a §3.5-compliant HOME=~/.metal-fy-proton[-test]
-# invocation does not relocate the fallback audit log into the keystore
-# dir and split it from the canonical ~/.fyd-broadcast-audit.log history.
-# Reproduce the EXACT expression bin/safe-broadcast uses (see the
-# AUDIT_LOG_FALLBACK assignment near its top) in a fresh subshell with
-# HOME scoped to a throwaway keystore fixture dir — exactly how a real
-# operator invocation sets it — and assert the result resolves under the
-# real LOGIN home, not the fixture. This never invokes proton, writes no
-# file, and does not touch the real login home directory; it only checks
-# the computed PATH STRING.
+# directly, so that a §3.5-compliant
+# HOME=~/.config/metal.freedom-yield.com/key/{mainnet,testnet} invocation
+# does not relocate the fallback audit log into the keystore dir and split it
+# from the canonical ~/.config/metal.freedom-yield.com/backup/.fyd-broadcast-audit.log
+# history. The block is READ FROM bin/safe-broadcast itself (from the
+# _AUDIT_LOG_LOGIN_HOME= line to the closing fi) and run in a fresh subshell
+# with HOME scoped to a throwaway keystore fixture dir, so a change to the
+# wrapper's own expression is what this measures. Two shapes: the login home
+# resolves (→ <login home>/${FYD_BROADCAST_AUDIT_LOG_REL}), and it does not
+# (→ /tmp/${FYD_BROADCAST_AUDIT_LOG_BASENAME}, never /tmp/.config/...). This
+# never invokes proton, writes no file, and does not touch the real login home
+# directory; it only checks the computed PATH STRING.
+# shellcheck source=scripts/lib/operator-paths.sh
+. "${REPO_ROOT}/scripts/lib/operator-paths.sh"
+FALLBACK_BLOCK="$(sed -n '/^_AUDIT_LOG_LOGIN_HOME=/,/^fi$/p' "${REPO_ROOT}/bin/safe-broadcast")"
+case "$FALLBACK_BLOCK" in
+	*AUDIT_LOG_FALLBACK=*) t_pass "$(printf '%-70s' "audit log fallback: block found in bin/safe-broadcast")" ;;
+	*) t_fail "$(printf '%-70s' "audit log fallback: block found in bin/safe-broadcast")" ;;
+esac
+# sb_probe_fallback <login-home-override|-> — prints the wrapper's fallback.
+sb_probe_fallback() {
+	local probe resolved
+	probe="$(mktemp -t safe-bcast-fallback-probe.XXXXXX)"
+	{
+		printf '. "%s"\n' "${REPO_ROOT}/scripts/lib/require-keystore-home.sh"
+		[ "$1" = "-" ] || printf 'fyd_login_home() { printf "%%s" "%s"; }\n' "$1"
+		printf '%s\n' "$FALLBACK_BLOCK"
+		printf 'printf "%%s" "$AUDIT_LOG_FALLBACK"\n'
+	} > "$probe"
+	resolved="$(HOME="$TEST_HOME" bash "$probe")"
+	rm -f "$probe"
+	printf '%s' "$resolved"
+}
 if [ -n "$LOGIN_HOME" ]; then
-	FALLBACK_PROBE="$(mktemp -t safe-bcast-fallback-probe.XXXXXX)"
-	cat > "$FALLBACK_PROBE" <<PROBE
-. "${REPO_ROOT}/scripts/lib/require-keystore-home.sh"
-_login_home="\$(fyd_login_home || true)"
-printf '%s' "\${_login_home:-/tmp}/.fyd-broadcast-audit.log"
-PROBE
-	RESOLVED_FALLBACK="$(HOME="$TEST_HOME" bash "$FALLBACK_PROBE")"
-	rm -f "$FALLBACK_PROBE"
-	EXPECTED_FALLBACK="${LOGIN_HOME}/.fyd-broadcast-audit.log"
+	RESOLVED_FALLBACK="$(sb_probe_fallback -)"
+	EXPECTED_FALLBACK="${LOGIN_HOME}/${FYD_BROADCAST_AUDIT_LOG_REL}"
 	if [ "$RESOLVED_FALLBACK" = "$EXPECTED_FALLBACK" ]; then
 		t_pass "$(printf '%-70s (%s)' "audit log fallback: HOME=keystore fixture → resolves under LOGIN home" "$RESOLVED_FALLBACK")"
 	else
@@ -956,6 +972,12 @@ PROBE
 else
 	printf 'SKIP  %-70s (login home not resolvable in this environment)\n' "audit log fallback: HOME=keystore fixture → resolves under LOGIN home"
 	printf 'SKIP  %-70s (login home not resolvable in this environment)\n' "audit log fallback: does NOT relocate into the keystore dir"
+fi
+RESOLVED_TMP_FALLBACK="$(sb_probe_fallback "")"
+if [ "$RESOLVED_TMP_FALLBACK" = "/tmp/${FYD_BROADCAST_AUDIT_LOG_BASENAME}" ]; then
+	t_pass "$(printf '%-70s (%s)' "audit log fallback: no login home → /tmp/<basename>" "$RESOLVED_TMP_FALLBACK")"
+else
+	t_fail "$(printf '%-70s (got [%s], expected [%s])' "audit log fallback: no login home → /tmp/<basename>" "$RESOLVED_TMP_FALLBACK" "/tmp/${FYD_BROADCAST_AUDIT_LOG_BASENAME}")"
 fi
 
 # ---- Summary ----

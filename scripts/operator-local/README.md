@@ -80,7 +80,7 @@ Post-quantum (FIPS 204) signing key for the identity manifest. Spec:
   public key (exit 5). Run it yourself: `bash scripts/operator-local/pq-identity-unlock.sh`.
 - `pq-identity-lock.sh` — deletes the unlocked file. Idempotent.
 
-Key directory: `~/.freedom-yield-identity/` (outside the repo, mode 700).
+Key directory: `~/.config/metal.freedom-yield.com/key/identity/` (outside the repo, mode 700).
 `gen-identity.sh` deletes the unlocked key itself right after signing
 (auto-lock); an unlocked key older than 2 hours is refused. The passphrase
 is never seen by the AI. Dashlane entry: named in the AI's ping, never in

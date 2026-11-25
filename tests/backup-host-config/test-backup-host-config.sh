@@ -65,6 +65,8 @@ set -uo pipefail
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 REAL_SCRIPT="$REPO/scripts/operator-local/backup-host-config.sh"
+# shellcheck source=../../scripts/lib/operator-paths.sh
+. "$REPO/scripts/lib/operator-paths.sh"
 SCRIPT="${BACKUP_SCRIPT_UNDER_TEST:-$REAL_SCRIPT}"
 ONLY="${BACKUP_TEST_ONLY:-}"
 TMP="$(mktemp -d)"
@@ -198,7 +200,7 @@ chmod +x "$BIN/age"
 # --- runner -------------------------------------------------------------------
 RC=0; OUT=""; ERR=""
 reset_env() {
-	rm -rf "${TMP:?}/home" "${LOGS:?}"/*; mkdir -p "$TMP/home/tmp" "$TMP/home/.ssh" "$TMP/home/Dropbox/metal-validator-backup"
+	rm -rf "${TMP:?}/home" "${LOGS:?}"/*; mkdir -p "$TMP/home/tmp" "$TMP/home/.ssh" "$TMP/home/Dropbox/metal-validator-backup" "$TMP/home/$(dirname "$FYD_RESTORE_DRILL_LOG_REL")"
 	: >"$TMP/home/.ssh/id_test"; : >"$CALLS"; : >"$LOGS/poll-hits"
 }
 start_poller() {
@@ -424,7 +426,7 @@ fi
 # nothing is typed). The drill makes plaintext by design, so run_case (whose
 # poller hunts plaintext under HOME) is NOT used: TMPDIR is outside HOME, and
 # the checks are "nothing is left" instead.
-DRILL_LOGFILE="$TMP/home/fy-restore-drill.log"
+DRILL_LOGFILE="$TMP/home/${FYD_RESTORE_DRILL_LOG_REL}"
 DS="$TMP/dscratch"; DTMP="$TMP/drilltmp"; DBIN="$TMP/dbin"; OUTSIDE="$TMP/outside"
 DBK="$TMP/home/fy-host-config-backup-20260101.tar.age"
 KEYPATH="$KEYS/id_ed25519"
@@ -758,9 +760,11 @@ fi
 # Not mutated: --restore-help and --help (print text only; their assertions are the check).
 if [ -z "$ONLY" ] && [ -z "${BACKUP_SCRIPT_UNDER_TEST:-}" ]; then
 	echo "== break-the-property (each mutant must make its case fail) =="
-	MUT="$TMP/mutants"; mkdir -p "$MUT"
+	# Mutants sit in a scripts/operator-local/ mirror so they find ../lib/operator-paths.sh.
+	MUT="$TMP/mutants"; mkdir -p "$MUT/scripts/operator-local" "$MUT/scripts/lib"
+	cp "$REPO/scripts/lib/operator-paths.sh" "$MUT/scripts/lib/"
 	mutate() { # $1 name, $2 case, $3 perl substitution, $4 expected failing assertion
-		local m="$MUT/$1.sh"
+		local m="$MUT/scripts/operator-local/$1.sh"
 		perl -0pe "$3" "$REAL_SCRIPT" >"$m"
 		if cmp -s "$m" "$REAL_SCRIPT"; then bad "mutant $1" "substitution did not apply"; return; fi
 		if BACKUP_SCRIPT_UNDER_TEST="$m" BACKUP_TEST_ONLY="$2" bash "$0" >"$MUT/$1.out" 2>&1; then

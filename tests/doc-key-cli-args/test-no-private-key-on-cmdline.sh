@@ -28,9 +28,9 @@ FAKE_WIF="5K$(printf '1%.0s' $(seq 1 49))"
 BT='`'
 
 # --- self-check: every argument shape is caught, every no-argument form passes ---
-P='HOME=~/.metal-fy-proton proton'
+P='HOME=~/.config/metal.freedom-yield.com/key/mainnet proton'
 for line in \
-	"HOME=~/.metal-fy-proton-test proton key:add <fakeanchtest active/owner PVT>" \
+	"HOME=~/.config/metal.freedom-yield.com/key/testnet proton key:add <fakeanchtest active/owner PVT>" \
 	"$P key:remove <old PVT>" \
 	"$P key:add ${FAKE_PVT}" \
 	"$P key:add ${FAKE_WIF}" \
@@ -40,7 +40,7 @@ for line in \
 	"$P key:add \"\$KEY\"" \
 	"$P  key:add \${PRIVATE_KEY}" \
 	"$P key:remove PUB_K1_x" \
-	"# 5. Re-execute B4 (HOME=~/.metal-fy-proton proton key:add for the new key)."; do
+	"# 5. Re-execute B4 (HOME=~/.config/metal.freedom-yield.com/key/mainnet proton key:add for the new key)."; do
 	printf '%s\n' "$line" | grep -qE -- "$RE" && pass "S1 caught: $line" || bad "MUTATION NOT CAUGHT: $line"
 done
 for line in \
@@ -49,7 +49,7 @@ for line in \
 	"$P key:remove" \
 	"$P key:list" \
 	"When ${BT}proton key:add${BT} (B4) runs for the first time" \
-	"  HOME=~/.metal-fy-proton proton key:add   " ; do
+	"  HOME=~/.config/metal.freedom-yield.com/key/mainnet proton key:add   " ; do
 	printf '%s\n' "$line" | grep -qE -- "$RE" && bad "FALSE POSITIVE: $line" || pass "S2 allowed: $line"
 done
 

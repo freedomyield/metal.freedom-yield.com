@@ -30,7 +30,7 @@
 3. `RELAY_URL_PATTERN` の具体: `^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/notify-relay/put$` か `^http://127\.0\.0\.1:[0-9]{1,5}/notify-relay/put$`（ERE）
 4. curl は `-q`（`.curlrc` を読まない）を先頭に付け、stderr を捨てる（名前解決の誤りの文に ops の名が出るため）
 5. `notify.sh` の有無は倒れる時にだけ見る（put を先に試し、届けられる道を減らさない）
-6. P4 の札の置き場の既定は `$HOME/.metal-fy-notify-relay/<送り手>.token`（環境変数 `FYD_RELAY_TOKEN_DIR` で差し替え）。sha256 は札の 43 字（改行なし）の 16 進の小文字
+6. P4 の札の置き場の既定は `$HOME/.config/metal.freedom-yield.com/key/notify-relay/<送り手>.token`（環境変数 `FYD_RELAY_TOKEN_DIR` で差し替え）。sha256 は札の 43 字（改行なし）の 16 進の小文字
 
 ## Review Focus
 
@@ -161,8 +161,8 @@ put の形（設計書 5 章）: `curl -q -K <(関数が printf で書く設定)
 
 **Interfaces:**
 - Consumes: Task 1 の `RELAY_TOKEN_PATTERN`・`fyd_relay_token_is_valid`（`$(dirname "$0")/../lib/notify-text.sh` を source）
-- Produces: `make-notify-relay-token.sh <送り手>`。送り手は `metal-validator`・`metal-external-watch` だけ（他は終了 1）。札 = `/dev/urandom` の 32 バイトの base64url（`+/`→`-_`・`=` と改行を消す）43 字。形に合わなければ終了 3（作り直さない）。置き場 `${FYD_RELAY_TOKEN_DIR}`（空・未設定なら `$HOME/.metal-fy-notify-relay`）を 700、ファイル `<送り手>.token` を umask 077 で 600・中身は札＋改行。ファイルが既に在れば終了 2（上書きしない）。stdout はちょうど 1 行 `{"<sha256>":{"sender":"<送り手>","routes":["put"]}}`（sha256 は札 43 字・改行なしの 16 進の小文字。`sha256sum` か `shasum -a 256` の在る方）。stderr は置いたファイルの名だけ（札は出さない）
-- 定数: `RELAY_TOKEN_SENDERS='metal-validator metal-external-watch'`・`RELAY_TOKEN_DIR_DEFAULT_NAME='.metal-fy-notify-relay'`・`RELAY_TOKEN_RANDOM_BYTES=32`
+- Produces: `make-notify-relay-token.sh <送り手>`。送り手は `metal-validator`・`metal-external-watch` だけ（他は終了 1）。札 = `/dev/urandom` の 32 バイトの base64url（`+/`→`-_`・`=` と改行を消す）43 字。形に合わなければ終了 3（作り直さない）。置き場 `${FYD_RELAY_TOKEN_DIR}`（空・未設定なら `$HOME/.config/metal.freedom-yield.com/key/notify-relay`）を 700、ファイル `<送り手>.token` を umask 077 で 600・中身は札＋改行。ファイルが既に在れば終了 2（上書きしない）。stdout はちょうど 1 行 `{"<sha256>":{"sender":"<送り手>","routes":["put"]}}`（sha256 は札 43 字・改行なしの 16 進の小文字。`sha256sum` か `shasum -a 256` の在る方）。stderr は置いたファイルの名だけ（札は出さない）
+- 定数: `RELAY_TOKEN_SENDERS='metal-validator metal-external-watch'`・既定の dir の名は `scripts/lib/operator-paths.sh` の `FYD_NOTIFY_RELAY_DIR_REL`（`.config/metal.freedom-yield.com/key/notify-relay`。2026-11-25 から）・`RELAY_TOKEN_RANDOM_BYTES=32`
 
 - [ ] **Step 1: 試験を書く**: 正しい送り手 → ファイルが 600・dir が 700・中身が形に合う 43 字＋改行・stdout の 1 行が JSON として読めて鍵が札の sha256（試験の側で計算）・`sender` と `routes` が期待どおり・stdout と stderr に札の字が無い／2 回目は終了 2 でファイルが変わらない／知らない送り手・引数 0 個 → 終了 1・何も作らない／2 回作った札が違う（2 つの置き場で）
 - [ ] **Step 2: 落ちるのを見る** → **Step 3: 書く** → **Step 4: 通る・shellcheck 0 件**

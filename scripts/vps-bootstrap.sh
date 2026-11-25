@@ -427,7 +427,7 @@ step_metalgo() {
   if [ ! -f "$STAKING_DIR/staker.crt" ]; then
     echo "WARNING: $STAKING_DIR/staker.crt not found (resolved from the compose /data mount)."
     echo "         Restore from encrypted backup before continuing:"
-    echo "           1. scp ~/staker-backup-<yyyymmdd>.tar.gz.enc (newest on the operator Mac) to this VPS"
+    echo "           1. scp ~/.config/metal.freedom-yield.com/backup/staker-backup-<yyyymmdd>.tar.gz.enc (newest on the operator Mac) to this VPS"
     echo "           2. openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 \\"
     echo "                -in staker-backup-<yyyymmdd>.tar.gz.enc -out /tmp/restore.tar.gz"
     echo "           3. mkdir -p $STAKING_DIR && tar xzf /tmp/restore.tar.gz -C /tmp"

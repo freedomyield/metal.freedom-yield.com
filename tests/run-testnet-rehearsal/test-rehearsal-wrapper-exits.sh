@@ -52,7 +52,7 @@ STUB_STAMP="# T3-STUB-WRAPPER"
 REHEARSAL_SCRIPT_SRC="${REHEARSAL_SCRIPT_SRC:-${REPO_ROOT}/scripts/run-testnet-rehearsal.sh}"
 
 for f in "$REHEARSAL_SCRIPT_SRC" "${REPO_ROOT}/scripts/sign-anchor-event.sh" \
-	"${REPO_ROOT}/scripts/lib/require-keystore-home.sh" "${REPO_ROOT}/scripts/lib/a-chain-profile.sh" \
+	"${REPO_ROOT}/scripts/lib/require-keystore-home.sh" "${REPO_ROOT}/scripts/lib/operator-paths.sh" "${REPO_ROOT}/scripts/lib/a-chain-profile.sh" \
 	"$PUBKEY_HELPER" "$PROFILES" "$ANCHOR_EXAMPLE" "$REAL_WRAPPER"; do
 	[ -r "$f" ] || { echo "FATAL: expected file missing: $f" >&2; exit 1; }
 done
@@ -86,7 +86,7 @@ mkdir -p "${TREE}/scripts/lib" "${TREE}/bin" "${TREE}/config" "$STUB" "$PATHSTUB
 # ---- copy what the rehearsal and sign-anchor-event run, from the real files ----
 cp "$REHEARSAL_SCRIPT_SRC" "${TREE}/scripts/run-testnet-rehearsal.sh"
 cp "${REPO_ROOT}/scripts/sign-anchor-event.sh" "${TREE}/scripts/"
-cp "${REPO_ROOT}/scripts/lib/require-keystore-home.sh" "${REPO_ROOT}/scripts/lib/a-chain-profile.sh" \
+cp "${REPO_ROOT}/scripts/lib/require-keystore-home.sh" "${REPO_ROOT}/scripts/lib/operator-paths.sh" "${REPO_ROOT}/scripts/lib/a-chain-profile.sh" \
 	"$PUBKEY_HELPER" "${TREE}/scripts/lib/"
 cp "$PROFILES" "${TREE}/config/"
 cp "$ANCHOR_EXAMPLE" "${WORK}/src/anchor-source.example.json"
@@ -135,8 +135,12 @@ FAKE_ACCOUNT="fxanchor"
 FAKE_SINK="fxsink"
 TESTNET_CID="$(jq -r '.profiles["xpr-testnet"].chain_id' "$PROFILES")"
 TESTNET_NET="$(jq -r '.profiles["xpr-testnet"].proton_network' "$PROFILES")"
-CFG_DIR="${WORK}/~${BOGUS_USER}/freedom-yield-rehearsal-config"
-mkdir -p "$CFG_DIR"
+# The rehearsal config dir and the dry-run log / receipt dir are the definition's
+# names under the (unresolvable) login home.
+# shellcheck source=scripts/lib/operator-paths.sh
+. "${REPO_ROOT}/scripts/lib/operator-paths.sh"
+CFG_DIR="${WORK}/~${BOGUS_USER}/${FYD_REHEARSAL_CONFIG_REL}"
+mkdir -p "$CFG_DIR" "${WORK}/~${BOGUS_USER}/${FYD_BACKUP_DIR_REL}"
 printf '%s' "$FAKE_ACCOUNT" > "${CFG_DIR}/xpr-account"
 printf '%s' "$FAKE_SINK" > "${CFG_DIR}/anchor-sink"
 printf '%s' "$TESTNET_NET" > "${CFG_DIR}/xpr-chain"

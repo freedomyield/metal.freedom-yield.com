@@ -94,8 +94,8 @@ ERROR (keystore guard, Constitution §3.5): $HOME resolves to the login
                 §3.5 prohibits proton-cli against the default (shared)
                 keystore for this project — fail-closed, no bypass flag.
                 Re-invoke <WRAPPER> with an explicit project keystore prefix:
-                  HOME=~/.metal-fy-proton      <WRAPPER> ...   (mainnet)
-                  HOME=~/.metal-fy-proton-test <WRAPPER> ...   (testnet)
+                  HOME=~/.config/metal.freedom-yield.com/key/mainnet <WRAPPER> ...   (mainnet)
+                  HOME=~/.config/metal.freedom-yield.com/key/testnet <WRAPPER> ...   (testnet)
 --- audit
 --- calls
 === gate 2: token missing

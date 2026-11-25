@@ -67,8 +67,12 @@ CALLS="${WORK}/calls.log"
 cleanup() { rm -rf "$WORK" "$STUB_DIR" "$TEST_HOME"; }
 trap cleanup EXIT
 
-CFG_DIR="${WORK}/~${BOGUS_USER}/freedom-yield-rehearsal-config"
-mkdir -p "$CFG_DIR"
+# The rehearsal config dir and the dry-run log / receipt dir are the definition's
+# names under the (unresolvable) login home.
+# shellcheck source=scripts/lib/operator-paths.sh
+. "${REPO_ROOT}/scripts/lib/operator-paths.sh"
+CFG_DIR="${WORK}/~${BOGUS_USER}/${FYD_REHEARSAL_CONFIG_REL}"
+mkdir -p "$CFG_DIR" "${WORK}/~${BOGUS_USER}/${FYD_BACKUP_DIR_REL}"
 printf '%s' "$FAKE_ACCOUNT" > "${CFG_DIR}/xpr-account"
 printf 'fakesink1stub'      > "${CFG_DIR}/anchor-sink"
 printf '%s' "$TESTNET_NET"  > "${CFG_DIR}/xpr-chain"

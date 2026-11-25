@@ -125,8 +125,8 @@ bash vps-bootstrap.sh
 #   を出して metalgo を起動しない(想定どおり。scripts/vps-bootstrap.sh:372)。鍵は Step 6 の手順で置く
 
 # 4. staker keys を encrypted backup から復旧(Mac 側で。冒頭の関門を通過していること)
-#    (最新の ~/staker-backup-<yyyymmdd>.tar.gz.enc。Dropbox の metal-validator-backup/ にも同じもの)
-scp -i ~/.ssh/<your_validator_host_key> ~/staker-backup-<yyyymmdd>.tar.gz.enc root@<新IP>:/tmp/staker-backup.tar.gz.enc
+#    (最新の ~/.config/metal.freedom-yield.com/backup/staker-backup-<yyyymmdd>.tar.gz.enc。Dropbox の metal-validator-backup/ にも同じもの)
+scp -i ~/.ssh/<your_validator_host_key> ~/.config/metal.freedom-yield.com/backup/staker-backup-<yyyymmdd>.tar.gz.enc root@<新IP>:/tmp/staker-backup.tar.gz.enc
 
 # 5. VPS 側で .env 作成(metalgo 起動より前。metalgo は <deploy_path>/.env を読む)
 #    METAL_NETWORK / METAL_PUBLIC_IP は docker-compose.metalgo.prod.yml の command で
@@ -536,7 +536,7 @@ VALIDATOR_HOST=<validator host> VALIDATOR_SSH_KEY=~/.ssh/<your_validator_host_ke
   bash scripts/operator-local/backup-host-config.sh
 ```
 
-- 暗号化した staker keys backup(`~/staker-backup-<yyyymmdd>.tar.gz.enc`)そのものを確かめる経路(`bash scripts/dr-drill.sh`、パスフレーズを聞く)も残してあるが、定例のドリルではない。
+- 暗号化した staker keys backup(`~/.config/metal.freedom-yield.com/backup/staker-backup-<yyyymmdd>.tar.gz.enc`)そのものを確かめる経路(`bash scripts/dr-drill.sh`、パスフレーズを聞く)も残してあるが、定例のドリルではない。
 - host 設定のバックアップを実際に復号して確かめるには operator identity の秘密鍵が要るので、定例のドリルでは行わない(災害時のみ。上の「戻し方」)。定例では復号しない検証(名前・宛先 tag・大きさ・sha256 manifest)で代える。
 - `dr-drill.sh` が起動する metalgo には必ず `--network-id=local` と空の bootstrap が付き、それが無ければ起動を拒否する(metalgo 自身の既定は mainnet)。本番 validator が動いていても安全。
 - 本番の metalgo の版を上げたら、`dr-drill.sh` の `METALGO_IMAGE` 既定も揃える(env で一時的に上書き可)。
@@ -553,7 +553,7 @@ VALIDATOR_HOST=<validator host> VALIDATOR_SSH_KEY=~/.ssh/<your_validator_host_ke
 3. 委任者には公開アナウンスで NodeID 変更通知(現在 delegator ゼロのため影響なし)
 4. 過去の uptime track record は失われる
 
-→ **これを防ぐため、staker keys は暗号化 backup を Mac(`~/staker-backup-<yyyymmdd>.tar.gz.enc`)と Dropbox(`metal-validator-backup/`)の 2 か所に置き、四半期 DR ドリルで Mac 上の平文コピー(`~/staker-backup-<yyyymmdd>/staking`)から NodeID 再現を確かめる。**
+→ **これを防ぐため、staker keys は暗号化 backup を Mac(`~/.config/metal.freedom-yield.com/backup/staker-backup-<yyyymmdd>.tar.gz.enc`)と Dropbox(`metal-validator-backup/`)の 2 か所に置き、四半期 DR ドリルで Mac 上の平文コピー(`~/staker-backup-<yyyymmdd>/staking`)から NodeID 再現を確かめる。**
 
 ---
 

@@ -39,7 +39,8 @@
 #   FYD_BROADCAST_TOKEN_TTL   — default 300 (seconds)
 #   FYD_BROADCAST_AUDIT_LOG   — default /var/log/fyd-broadcast-audit.log;
 #                               if not writable, falls back to
-#                               $HOME/.fyd-broadcast-audit.log
+#                               $HOME/.config/metal.freedom-yield.com/backup/.fyd-broadcast-audit.log
+#                               (/tmp/.fyd-broadcast-audit.log when HOME is empty)
 #   FYD_SAFE_BROADCAST        — set to "1" by bin/safe-broadcast to mark the
 #                               sanctioned broadcast pathway. Never set this
 #                               by hand to bypass the guard.
@@ -54,7 +55,17 @@ set -u
 TOKEN_FILE="${FYD_BROADCAST_TOKEN_FILE:-/tmp/fyd-broadcast-token}"
 TOKEN_TTL="${FYD_BROADCAST_TOKEN_TTL:-300}"
 AUDIT_LOG_PRIMARY="${FYD_BROADCAST_AUDIT_LOG:-/var/log/fyd-broadcast-audit.log}"
-AUDIT_LOG_FALLBACK="${HOME:-/tmp}/.fyd-broadcast-audit.log"
+# The fallback's name comes from the one definition file. A missing file
+# must not abort this hook under `set -u` (any exit but 2 lets the tool call
+# through), so an unread name is empty: the log write then fails and warns,
+# exactly as for any other unwritable log.
+# shellcheck source=scripts/lib/operator-paths.sh
+. "$(dirname "$0")/lib/operator-paths.sh" 2>/dev/null || true
+if [ -n "${HOME:-}" ]; then
+	AUDIT_LOG_FALLBACK="${HOME}/${FYD_BROADCAST_AUDIT_LOG_REL:-}"
+else
+	AUDIT_LOG_FALLBACK="/tmp/${FYD_BROADCAST_AUDIT_LOG_BASENAME:-}"
+fi
 
 INPUT="$(cat)"
 
@@ -217,7 +228,7 @@ LOG_LINE="$(printf '%s\tinvoker=%s\ttool=%s\tpattern=%s\tcmd=%s' \
 
 AUDIT_TARGET="$AUDIT_LOG_PRIMARY"
 # If primary is not writable (typical on Mac where /var/log needs sudo),
-# fall back to $HOME/.fyd-broadcast-audit.log. Never suppress.
+# fall back to $HOME/.config/metal.freedom-yield.com/backup/.fyd-broadcast-audit.log. Never suppress.
 if ! ( : >> "$AUDIT_TARGET" ) 2>/dev/null; then
 	AUDIT_TARGET="$AUDIT_LOG_FALLBACK"
 fi

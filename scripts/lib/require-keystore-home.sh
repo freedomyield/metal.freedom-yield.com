@@ -7,8 +7,10 @@
 # Constitution §3.5 (docs/CONSTITUTION.md) prohibits using the default
 # (shared) proton-cli keystore for this project under any circumstance,
 # and requires every proton-cli invocation to carry an explicit
-# project-scoped keystore prefix (HOME=~/.metal-fy-proton for mainnet,
-# HOME=~/.metal-fy-proton-test for testnet). This library centralizes the
+# project-scoped keystore prefix (HOME=~/.config/metal.freedom-yield.com/key/mainnet
+# for mainnet, HOME=~/.config/metal.freedom-yield.com/key/testnet for testnet;
+# the names live in scripts/lib/operator-paths.sh, which this file sources
+# from its own directory). This library centralizes the
 # mechanical fail-closed check so every executable script that invokes
 # proton-cli enforces it identically, ahead of that script's first proton
 # invocation.
@@ -67,13 +69,22 @@ fyd_login_home() {
 	eval echo "~$(id -un)" 2>/dev/null
 }
 
+# The keystore names come from the one definition file next to this one.
+# FYD_OPERATOR_PATHS_LOADED is 1 only when that file was read; the guard
+# below refuses (returns 1) otherwise, so a missing definition never opens it.
+FYD_OPERATOR_PATHS_LOADED=0
+# shellcheck source=scripts/lib/operator-paths.sh
+. "$(dirname "${BASH_SOURCE[0]}")/operator-paths.sh" && FYD_OPERATOR_PATHS_LOADED=1
+
 # require_project_keystore_home [<label-for-error-message>]
 #   Returns 0 if $HOME is explicitly set AND is not the login default
 #   home, OR if the login default home could not be determined
 #   (inconclusive → does not block).
 #   Returns 1 and prints a §3.5-citing error (with a corrected invocation
 #   example) to stderr if $HOME is unset/empty, OR if $HOME resolves to
-#   the login default home.
+#   the login default home. Also returns 1, ahead of both, if
+#   scripts/lib/operator-paths.sh could not be read or left the mainnet or
+#   testnet keystore name empty.
 #
 #   The unset/empty case matters on its own: node's `os.homedir()` (what
 #   proton-cli uses under the hood) falls back to a passwd-database lookup
@@ -86,14 +97,22 @@ require_project_keystore_home() {
 	local caller="${1:-$0}"
 	local login_home
 	login_home="$(fyd_login_home || true)"
+	if [ "${FYD_OPERATOR_PATHS_LOADED:-0}" != "1" ] || [ -z "${FYD_KEYSTORE_MAINNET_REL:-}" ] || [ -z "${FYD_KEYSTORE_TESTNET_REL:-}" ]; then
+		echo "ERROR (keystore guard, Constitution §3.5): the project keystore names could not be" >&2
+		echo "                read from scripts/lib/operator-paths.sh next to this guard." >&2
+		echo "                §3.5 prohibits proton-cli against the default (shared)" >&2
+		echo "                keystore for this project — fail-closed, no bypass flag." >&2
+		echo "                Restore that file, then re-invoke ${caller}." >&2
+		return 1
+	fi
 	if [ -z "${HOME:-}" ]; then
 		echo "ERROR (keystore guard, Constitution §3.5): \$HOME must be explicitly set to a" >&2
 		echo "                project keystore (it is currently unset or empty)." >&2
 		echo "                §3.5 prohibits proton-cli against the default (shared)" >&2
 		echo "                keystore for this project — fail-closed, no bypass flag." >&2
 		echo "                Re-invoke ${caller} with an explicit project keystore prefix:" >&2
-		echo "                  HOME=~/.metal-fy-proton      ${caller} ...   (mainnet)" >&2
-		echo "                  HOME=~/.metal-fy-proton-test ${caller} ...   (testnet)" >&2
+		echo "                  HOME=~/${FYD_KEYSTORE_MAINNET_REL} ${caller} ...   (mainnet)" >&2
+		echo "                  HOME=~/${FYD_KEYSTORE_TESTNET_REL} ${caller} ...   (testnet)" >&2
 		return 1
 	fi
 	if [ -n "$login_home" ] && [ "${HOME:-}" = "$login_home" ]; then
@@ -102,8 +121,8 @@ require_project_keystore_home() {
 		echo "                §3.5 prohibits proton-cli against the default (shared)" >&2
 		echo "                keystore for this project — fail-closed, no bypass flag." >&2
 		echo "                Re-invoke ${caller} with an explicit project keystore prefix:" >&2
-		echo "                  HOME=~/.metal-fy-proton      ${caller} ...   (mainnet)" >&2
-		echo "                  HOME=~/.metal-fy-proton-test ${caller} ...   (testnet)" >&2
+		echo "                  HOME=~/${FYD_KEYSTORE_MAINNET_REL} ${caller} ...   (mainnet)" >&2
+		echo "                  HOME=~/${FYD_KEYSTORE_TESTNET_REL} ${caller} ...   (testnet)" >&2
 		return 1
 	fi
 	return 0

@@ -45,15 +45,20 @@ set -u
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 LIB="${REPO_ROOT}/scripts/lib/require-keystore-home.sh"
+PATHS_LIB="${REPO_ROOT}/scripts/lib/operator-paths.sh"
 REHEARSAL_SCRIPT="${REPO_ROOT}/scripts/run-testnet-rehearsal.sh"
 PREVIEW_SCRIPT="${REPO_ROOT}/scripts/preview-cycle-anchor-broadcast.sh"
 
-for f in "$LIB" "$REHEARSAL_SCRIPT" "$PREVIEW_SCRIPT"; do
+for f in "$LIB" "$PATHS_LIB" "$REHEARSAL_SCRIPT" "$PREVIEW_SCRIPT"; do
 	if [ ! -r "$f" ]; then
 		echo "FATAL: expected file missing: $f" >&2
 		exit 1
 	fi
 done
+
+# The expected keystore / operator-local names come from the one definition file.
+# shellcheck source=scripts/lib/operator-paths.sh
+. "$PATHS_LIB"
 
 LOGIN_HOME="$(eval echo "~$(id -un)" 2>/dev/null || true)"
 TEST_HOME="$(mktemp -d -t keystore-guard-home.XXXXXX)"
@@ -118,8 +123,8 @@ if [ -n "$LOGIN_HOME" ]; then
 	# 1c. Corrected-invocation examples are present (both mainnet + testnet
 	# keystore paths), so an operator reading the error knows exactly what
 	# to re-run.
-	if printf '%s' "$STDERR_OUT" | grep -q 'HOME=~/.metal-fy-proton ' \
-	   && printf '%s' "$STDERR_OUT" | grep -q 'HOME=~/.metal-fy-proton-test '; then
+	if printf '%s' "$STDERR_OUT" | grep -qF "HOME=~/${FYD_KEYSTORE_MAINNET_REL} " \
+	   && printf '%s' "$STDERR_OUT" | grep -qF "HOME=~/${FYD_KEYSTORE_TESTNET_REL} "; then
 		pass "lib: refusal message shows both mainnet + testnet corrected examples"
 	else
 		fail_case "lib: refusal message shows both mainnet + testnet corrected examples"
@@ -178,6 +183,30 @@ else
 	fail_case "lib: HOME=\"\" (empty) → returns 1, message says HOME must be explicitly set" "rc=${EMPTY_RC:-?}"
 fi
 
+# 1g. The definition file cannot be read (a copy of the guard with no
+# operator-paths.sh next to it) → returns 1 even for a project HOME.
+# 1h. The definition file is read but leaves a keystore name empty → 1.
+NODEF_DIR="${TEST_HOME}/nodef/scripts/lib"
+EMPTYDEF_DIR="${TEST_HOME}/emptydef/scripts/lib"
+mkdir -p "$NODEF_DIR" "$EMPTYDEF_DIR" "${TEST_HOME}/proj-home"
+cp "$LIB" "$NODEF_DIR/require-keystore-home.sh"
+cp "$LIB" "$EMPTYDEF_DIR/require-keystore-home.sh"
+sed 's|^FYD_KEYSTORE_MAINNET_REL=.*$|FYD_KEYSTORE_MAINNET_REL=""|' "$PATHS_LIB" > "$EMPTYDEF_DIR/operator-paths.sh"
+for c in "nodef|definition file missing" "emptydef|mainnet keystore name empty"; do
+	d="${c%%|*}"; label="${c#*|}"
+	DEF_STDERR="$(
+		HOME="${TEST_HOME}/proj-home" env -u FYD_KEYSTORE_MAINNET_REL -u FYD_KEYSTORE_TESTNET_REL -u FYD_OPERATOR_PATHS_LOADED \
+			bash -c '. "$1"; require_project_keystore_home "unit-test"' _ "${TEST_HOME}/${d}/scripts/lib/require-keystore-home.sh" 2>&1 1>/dev/null
+		echo "RC=$?"
+	)"
+	DEF_RC="$(printf '%s' "$DEF_STDERR" | grep -oE 'RC=[0-9]+' | tail -1 | cut -d= -f2)"
+	if [ "$DEF_RC" = "1" ] && printf '%s' "$DEF_STDERR" | grep -q 'operator-paths.sh'; then
+		pass "lib: ${label} → returns 1 (fail-closed)" "rc=$DEF_RC"
+	else
+		fail_case "lib: ${label} → returns 1 (fail-closed)" "rc=${DEF_RC:-?}"
+	fi
+done
+
 # ============================================================
 # Part 2: scripts/run-testnet-rehearsal.sh integration
 # ============================================================
@@ -203,7 +232,7 @@ fi
 # config) or step 3 (a REAL read-only curl to the testnet chain RPC, added
 # 2026-07-31 to replace the old hardcoded pubkey pins). This case must
 # stay hermetic — no real network I/O — regardless of whether this
-# machine happens to have a real ~/freedom-yield-rehearsal-config
+# machine happens to have a real ~/.config/metal.freedom-yield.com/key/rehearsal
 # (several dev machines do), which would otherwise let the script sail
 # past step 2 and into step 3's live RPC call. Force a deterministic,
 # side-effect-free failure INSIDE step 1 instead, via
@@ -277,7 +306,7 @@ fi
 # The script has three operator-local, non-keystore paths (rehearsal
 # config dir, dry-run log, receipt file) that must stay pinned to the
 # LOGIN home even when $HOME is correctly scoped to a project keystore
-# dir (e.g. HOME=~/.metal-fy-proton-test). Two of the three
+# dir (e.g. HOME=~/.config/metal.freedom-yield.com/key/testnet). Two of the three
 # (REHEARSAL_CFG, DRY_RUN_LOG) are assigned before this script's first
 # proton call, before the guard check, AND before the ANCHOR_SOURCE
 # selection logic — so they are unaffected by the same forced
@@ -298,7 +327,7 @@ if [ -n "$LOGIN_HOME" ]; then
 
 	# 4a. HOME=project fixture dir (not login home) → REHEARSAL_CFG
 	# resolves under LOGIN_HOME, not under $TEST_HOME.
-	if printf '%s' "$REHEARSAL_CFG_LINE" | grep -qF "REHEARSAL_CFG=${LOGIN_HOME}/freedom-yield-rehearsal-config" \
+	if printf '%s' "$REHEARSAL_CFG_LINE" | grep -qF "REHEARSAL_CFG=${LOGIN_HOME}/${FYD_REHEARSAL_CONFIG_REL}" \
 	   && ! printf '%s' "$REHEARSAL_CFG_LINE" | grep -qF "$TEST_HOME"; then
 		pass "run-testnet-rehearsal.sh: HOME=keystore fixture → REHEARSAL_CFG resolves under LOGIN_HOME"
 	else
@@ -306,7 +335,7 @@ if [ -n "$LOGIN_HOME" ]; then
 	fi
 
 	# 4b. Same for DRY_RUN_LOG.
-	if printf '%s' "$DRY_RUN_LOG_LINE" | grep -qF "DRY_RUN_LOG=${LOGIN_HOME}/.fya-testnet-dryrun-log.json" \
+	if printf '%s' "$DRY_RUN_LOG_LINE" | grep -qF "DRY_RUN_LOG=${LOGIN_HOME}/${FYD_TESTNET_DRYRUN_LOG_REL}" \
 	   && ! printf '%s' "$DRY_RUN_LOG_LINE" | grep -qF "$TEST_HOME"; then
 		pass "run-testnet-rehearsal.sh: HOME=keystore fixture → DRY_RUN_LOG resolves under LOGIN_HOME"
 	else
@@ -322,8 +351,8 @@ fi
 # three assignments may read a bare $HOME/{...} path (which is exactly
 # the bug this task fixes — a keystore-scoped HOME silently relocating
 # these operator-local paths into the keystore dir).
-if grep -qE '^RECEIPT_OUT="\$\{LOGIN_HOME\}/\.fya-testnet-receipt\.json"' "$REHEARSAL_SCRIPT" \
-   && ! grep -qE '\$\{?HOME\}?/(freedom-yield-rehearsal-config|\.fya-testnet-(dryrun-log|receipt)\.json)' "$REHEARSAL_SCRIPT"; then
+if grep -qE '^RECEIPT_OUT="\$\{LOGIN_HOME\}/\$\{FYD_TESTNET_RECEIPT_REL\}"' "$REHEARSAL_SCRIPT" \
+   && ! grep -qE '\$\{?HOME\}?/\$\{(FYD_REHEARSAL_CONFIG_REL|FYD_TESTNET_DRYRUN_LOG_REL|FYD_TESTNET_RECEIPT_REL)\}' "$REHEARSAL_SCRIPT"; then
 	pass "run-testnet-rehearsal.sh: RECEIPT_OUT uses LOGIN_HOME (source-text); no \$HOME/non-keystore-path regressions"
 else
 	fail_case "run-testnet-rehearsal.sh: RECEIPT_OUT uses LOGIN_HOME (source-text); no \$HOME/non-keystore-path regressions"

@@ -98,7 +98,7 @@
 #   OPERATOR_PQ_UNLOCKED_KEY path to the unlocked ML-DSA-87 private key made by
 #                           pq-identity-unlock.sh (default: the library's
 #                           fyipq__unlocked_path, i.e.
-#                           ${FY_PQ_KEY_DIR:-~/.freedom-yield-identity}/operator-identity-mldsa87.unlocked.pem).
+#                           ${FY_PQ_KEY_DIR:-~/.config/metal.freedom-yield.com/key/identity}/operator-identity-mldsa87.unlocked.pem).
 #                           Must carry that basename, sit outside the repo and
 #                           be fresher than FY_PQ_UNLOCK_MAX_AGE_SEC. DELETED
 #                           by this script on every exit once resolved.

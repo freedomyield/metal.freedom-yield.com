@@ -385,7 +385,7 @@ sbh_tree() {
 	mkdir -p "$d/bin" "$d/scripts/lib" "$d/config"
 	cp "$w" "$d/bin/safe-broadcast"
 	chmod +x "$d/bin/safe-broadcast"
-	cp "$root/scripts/lib/require-keystore-home.sh" "$d/scripts/lib/"
+	cp "$root/scripts/lib/require-keystore-home.sh" "$root/scripts/lib/operator-paths.sh" "$d/scripts/lib/"
 	[ -f "$root/scripts/lib/a-chain-profile.sh" ] && cp "$root/scripts/lib/a-chain-profile.sh" "$d/scripts/lib/"
 	[ -f "$root/scripts/lib/url-host.sh" ] && cp "$root/scripts/lib/url-host.sh" "$d/scripts/lib/"
 	sbh_ahr_stub_lib "$d/scripts/lib/anchor-history-read.sh"

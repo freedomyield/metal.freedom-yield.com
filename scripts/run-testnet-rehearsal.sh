@@ -10,7 +10,7 @@
 #                  input for the mainnet gate 1.
 #
 # Runs the full anchor pipeline against XPR testnet, using the
-# operator-local rehearsal config (~/freedom-yield-rehearsal-config)
+# operator-local rehearsal config (~/.config/metal.freedom-yield.com/key/rehearsal)
 # with actor read from that config's xpr-account file (rehearsal
 # convention: frdomyieltst), sink=fyhistorytst, chain=proton-test.
 #
@@ -24,15 +24,15 @@
 #     proton keystore. This is verified dynamically against the live
 #     testnet chain (step 3 below) — NOT against a hardcoded pin, so it
 #     stays correct across future key rotations without a script edit.
-#   - Rehearsal config dir at ~/freedom-yield-rehearsal-config
+#   - Rehearsal config dir at ~/.config/metal.freedom-yield.com/key/rehearsal
 #   - jq + curl + sha256sum/shasum in PATH
 #   - timeout(1) (GNU coreutils) in PATH — bounds the locked-keystore probes
 #     in steps 3/10 and 4/10.
 #
 # Prerequisites the OPERATOR provides interactively:
-#   - `HOME=~/.metal-fy-proton-test proton key:unlock` — proton-cli keystore
+#   - `HOME=~/.config/metal.freedom-yield.com/key/testnet proton key:unlock` — proton-cli keystore
 #     must be unlocked BEFORE running this script (and this script itself
-#     must be invoked with the same HOME=~/.metal-fy-proton-test prefix, per
+#     must be invoked with the same HOME=~/.config/metal.freedom-yield.com/key/testnet prefix, per
 #     Constitution §3.5). Non-interactive shells (this script) cannot
 #     unlock; a locked keystore causes proton to hang indefinitely (see
 #     reference_proton_cli_keystore_lock_quirk). Both step 3/10 and step
@@ -50,7 +50,7 @@
 #     Operator decision 2026-10-07; canon = docs/CYCLE_GATE.md actor section.
 #
 # Usage:
-#   HOME=~/.metal-fy-proton-test bash scripts/run-testnet-rehearsal.sh \
+#   HOME=~/.config/metal.freedom-yield.com/key/testnet bash scripts/run-testnet-rehearsal.sh \
 #       [--source=<path>] [--allow-fixture] [--expect-cycle=<N>] \
 #       [--allow-existing-cycle-anchor]
 #
@@ -154,7 +154,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # and receipt file are operator-local paths that have nothing to do with
 # the proton-cli keystore. They must keep resolving under the login home
 # even when this script is (correctly, per §3.5) invoked with
-# HOME=~/.metal-fy-proton-test — otherwise they'd silently relocate into
+# HOME=~/.config/metal.freedom-yield.com/key/testnet — otherwise they'd silently relocate into
 # the keystore dir and break (e.g. step 2's config-file check). Resolve
 # them from LOGIN_HOME (via the shared fyd_login_home helper), not $HOME.
 LOGIN_HOME="$(fyd_login_home)"
@@ -164,7 +164,7 @@ LOGIN_HOME="$(fyd_login_home)"
 # string, so this line is not reachable in practice. Kept in case that
 # resolution behavior ever changes.
 [ -n "$LOGIN_HOME" ] || LOGIN_HOME="$HOME"
-REHEARSAL_CFG="${LOGIN_HOME}/freedom-yield-rehearsal-config"
+REHEARSAL_CFG="${LOGIN_HOME}/${FYD_REHEARSAL_CONFIG_REL}"
 
 # ---- anchor-source selection (arg parse only here; validated + printed in
 # step 1/10 below, which is where the fixture gate lives) ----
@@ -227,7 +227,7 @@ fi
 #                          reachability check and the step 9/10 receipt both
 #                          refuse anything else (the check refuses BEFORE
 #                          the broadcast, which is the point).
-DRY_RUN_LOG="${LOGIN_HOME}/.fya-testnet-dryrun-log.json"
+DRY_RUN_LOG="${LOGIN_HOME}/${FYD_TESTNET_DRYRUN_LOG_REL}"
 # The token path is bin/safe-broadcast's own definition (same variable, same default),
 # so the file written at step 6/10 is the file the wrapper reads at step 7/10.
 TOKEN_FILE="${FYD_BROADCAST_TOKEN_FILE:-/tmp/fyd-broadcast-token}"
@@ -462,7 +462,7 @@ if [ "$KEYS_RC" -ne 0 ]; then
 	else
 		printf '  WARN: proton key:list failed (rc=%s) — a LOCKED keystore is the usual cause.\n' "$KEYS_RC" >&2
 	fi
-	printf '        Run in a separate terminal:  HOME=~/.metal-fy-proton-test proton key:unlock\n' >&2
+	printf '        Run in a separate terminal:  HOME=~/%s proton key:unlock\n' "$FYD_KEYSTORE_TESTNET_REL" >&2
 	printf '        then re-run this script.\n' >&2
 	printf '        (If it is already unlocked and this persists, the key may never have been\n' >&2
 	printf '         imported into this keystore — see docs/ANCHOR_ACCOUNT_KEY_ROTATION.md.)\n' >&2
@@ -470,7 +470,7 @@ if [ "$KEYS_RC" -ne 0 ]; then
 fi
 CANDIDATES="$(printf '%s' "$KEYS_JSON" | grep -oE '(PUB_K1_|EOS)[1-9A-HJ-NP-Za-km-z]+' | sort -u || true)"
 if [ -z "$CANDIDATES" ]; then
-	fail "'proton key:list' succeeded but listed no public keys. First confirm the keystore is UNLOCKED (in a separate terminal: HOME=~/.metal-fy-proton-test proton key:unlock) — a locked keystore can also list nothing. If it IS unlocked, the ${XPR_ACCOUNT}@anchor key was never imported into this keystore — see docs/ANCHOR_ACCOUNT_KEY_ROTATION.md and docs/PHASE_ALPHA_TESTNET_DRY_RUN.md."
+	fail "'proton key:list' succeeded but listed no public keys. First confirm the keystore is UNLOCKED (in a separate terminal: HOME=~/${FYD_KEYSTORE_TESTNET_REL} proton key:unlock) — a locked keystore can also list nothing. If it IS unlocked, the ${XPR_ACCOUNT}@anchor key was never imported into this keystore — see docs/ANCHOR_ACCOUNT_KEY_ROTATION.md and docs/PHASE_ALPHA_TESTNET_DRY_RUN.md."
 fi
 
 MATCH_FOUND=0
@@ -524,7 +524,7 @@ fi
 # Fast timeout because a locked keystore hangs on any signing-adjacent op.
 if ! timeout 5 proton account "$XPR_ACCOUNT" >/dev/null 2>&1; then
 	printf '  WARN: proton account %s timed out; keystore may be locked.\n' "$XPR_ACCOUNT"
-	printf '        Run in a separate terminal:  HOME=~/.metal-fy-proton-test proton key:unlock\n'
+	printf '        Run in a separate terminal:  HOME=~/%s proton key:unlock\n' "$FYD_KEYSTORE_TESTNET_REL"
 	printf '        then re-run this script.\n' >&2
 	exit 2
 fi
@@ -643,7 +643,7 @@ jq --arg tx_id "$TX_ID" '
 
 # ---- step 9: gen-anchor-receipt 7-gate verify chain ----
 step "9/10 gen-anchor-receipt 7-gate verify against $TESTNET_RPC"
-RECEIPT_OUT="${LOGIN_HOME}/.fya-testnet-receipt.json"
+RECEIPT_OUT="${LOGIN_HOME}/${FYD_TESTNET_RECEIPT_REL}"
 bash "${REPO_ROOT}/scripts/gen-anchor-receipt.sh" \
 	--input="$SIGN_JSON" \
 	--anchor-source="$ANCHOR_SOURCE" \

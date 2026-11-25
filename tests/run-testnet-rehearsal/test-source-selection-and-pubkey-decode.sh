@@ -22,7 +22,7 @@
 #        network stack for real.
 #
 # How determinism is achieved WITHOUT touching the operator's real
-# ~/freedom-yield-rehearsal-config (which exists on this development
+# ~/.config/metal.freedom-yield.com/key/rehearsal (which exists on this development
 # machine — see w3-report.md): scripts/lib/require-keystore-home.sh's
 # fyd_login_home() resolves the login home via `id -un` + `eval echo
 # ~<user>`, independent of $HOME (by design, so it can't be spoofed via
@@ -30,7 +30,7 @@
 # a STUB `id` on PATH (ahead of the real one) that always prints a
 # guaranteed-nonexistent username. `eval echo "~<bogus-user>"` then
 # resolves to the LITERAL, non-existent path
-# "~<bogus-user>/freedom-yield-rehearsal-config" (verified empirically —
+# "~<bogus-user>/.config/metal.freedom-yield.com/key/rehearsal" (verified empirically —
 # see w3-report.md), so run-testnet-rehearsal.sh's step 2 (config check)
 # fails deterministically and instantly on EVERY case below, on ANY
 # machine, real rehearsal config or not. This never reads, writes, or

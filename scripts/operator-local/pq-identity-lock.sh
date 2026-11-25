@@ -17,7 +17,7 @@ if [ -e "$UNL" ]; then
 else
 	echo "already locked: $UNL"
 fi
-# The lock resolves ${HOME}/.freedom-yield-identity unless FY_PQ_KEY_DIR is set,
+# The lock resolves ${HOME}/.config/metal.freedom-yield.com/key/identity unless FY_PQ_KEY_DIR is set,
 # so under a different HOME it can look in the wrong place and report
 # "already locked" about a directory that never held the key. A directory with
 # no encrypted ML-DSA key is not the PQ key dir: say so, loudly.

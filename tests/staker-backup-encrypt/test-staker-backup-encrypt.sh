@@ -35,8 +35,11 @@ ok() { t_pass "$1"; }
 bad() { t_fail "$1" "$2"; }
 
 PP="encrypt-test-passphrase-0123"
+# shellcheck source=../../scripts/lib/operator-paths.sh
+. "$REPO/scripts/lib/operator-paths.sh"
+BK="$FYD_BACKUP_DIR_REL"   # the .enc lands here under each test HOME
 setup() {
-	H="$TMP/$1"; mkdir -p "$H/staker-backup-20260518/staking"
+	H="$TMP/$1"; mkdir -p "$H/staker-backup-20260518/staking" "$H/$BK"
 	printf 'fake-crt-%s\n' "$1" >"$H/staker-backup-20260518/staking/staker.crt"
 	printf 'fake-key-%s\n' "$1" >"$H/staker-backup-20260518/staking/staker.key"
 	printf 'fake-bls-%s\n' "$1" >"$H/staker-backup-20260518/staking/signer.key"
@@ -52,7 +55,7 @@ run "$TMP/e1" "$PP"$'\n'"$PP"$'\n'; rc=$?
 [ "$rc" = 0 ] && ok "E1 exit 0" || bad "E1 exit 0" "rc=$rc $(tail -2 "$TMP/e1.out")"
 mkdir -p "$TMP/e1x"
 if X="$PP" openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass env:X \
-	-in "$TMP/e1/$OUTNAME" -out "$TMP/e1x/r.tar.gz" 2>/dev/null \
+	-in "$TMP/e1/$BK/$OUTNAME" -out "$TMP/e1x/r.tar.gz" 2>/dev/null \
 	&& tar xzf "$TMP/e1x/r.tar.gz" -C "$TMP/e1x"; then
 	same=1
 	for f in staker.crt staker.key signer.key; do
@@ -63,40 +66,42 @@ if X="$PP" openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass env:X \
 else
 	bad "E1 opens with the drill cipher" "decrypt or extract failed"
 fi
-( cd "$TMP/e1" && shasum -a 256 -c "$OUTNAME.sha256" >/dev/null 2>&1 ) \
+( cd "$TMP/e1/$BK" && shasum -a 256 -c "$OUTNAME.sha256" >/dev/null 2>&1 ) \
 	&& ok "E5 .sha256 matches" || bad "E5 .sha256 matches" "missing or wrong"
 # GNU stat first: on Linux `stat -f` is filesystem status and succeeds with other output
-[ "$(stat -c '%a' "$TMP/e1/$OUTNAME" 2>/dev/null || stat -f '%Lp' "$TMP/e1/$OUTNAME")" = 600 ] \
+[ "$(stat -c '%a' "$TMP/e1/$BK/$OUTNAME" 2>/dev/null || stat -f '%Lp' "$TMP/e1/$BK/$OUTNAME")" = 600 ] \
 	&& ok "E5 mode 600" || bad "E5 mode 600" "other mode"
 
 # E2
 setup e2
 run "$TMP/e2" "$PP"$'\n'"${PP}x"$'\n'; rc=$?
-[ "$rc" != 0 ] && [ ! -e "$TMP/e2/$OUTNAME" ] && [ ! -e "$TMP/e2/$OUTNAME.partial" ] \
+[ "$rc" != 0 ] && [ ! -e "$TMP/e2/$BK/$OUTNAME" ] && [ ! -e "$TMP/e2/$BK/$OUTNAME.partial" ] \
 	&& ok "E2 confirm mismatch -> refused, nothing written" || bad "E2 confirm mismatch" "rc=$rc"
 
 # E3
 setup e3
-printf 'existing' >"$TMP/e3/$OUTNAME"
+printf 'existing' >"$TMP/e3/$BK/$OUTNAME"
 run "$TMP/e3" "$PP"$'\n'"$PP"$'\n'; rc=$?
-[ "$rc" != 0 ] && [ "$(cat "$TMP/e3/$OUTNAME")" = existing ] \
+[ "$rc" != 0 ] && [ "$(cat "$TMP/e3/$BK/$OUTNAME")" = existing ] \
 	&& ok "E3 existing output not overwritten" || bad "E3 existing output not overwritten" "rc=$rc"
 
 # E4
 setup e4
 run "$TMP/e4" "short"$'\n'"short"$'\n'; rc=$?
-[ "$rc" != 0 ] && [ ! -e "$TMP/e4/$OUTNAME" ] && [ ! -e "$TMP/e4/$OUTNAME.partial" ] \
+[ "$rc" != 0 ] && [ ! -e "$TMP/e4/$BK/$OUTNAME" ] && [ ! -e "$TMP/e4/$BK/$OUTNAME.partial" ] \
 	&& ok "E4 short passphrase -> refused, nothing written" || bad "E4 short passphrase" "rc=$rc"
 
 echo
 
 # --- mutants: each breaks one claim; the suite must fail on it ---------------
 if [ -z "${SCRIPT_UNDER_TEST:-}" ]; then
-	M="$TMP/mut"; mkdir -p "$M"
+	# Mutants sit in a scripts/operator-local/ mirror so they find ../lib/operator-paths.sh.
+	M="$TMP/mut"; mkdir -p "$M/scripts/operator-local" "$M/scripts/lib"
+	cp "$REPO/scripts/lib/operator-paths.sh" "$M/scripts/lib/"
 	mutant() { # mutant <name> <perl substitution>
-		perl -0pe "$2" "$REAL" >"$M/$1.sh"
-		if cmp -s "$REAL" "$M/$1.sh"; then bad "mutant $1 applies" "substitution matched nothing"; return; fi
-		if SCRIPT_UNDER_TEST="$M/$1.sh" bash "$0" >"$M/$1.out" 2>&1; then
+		perl -0pe "$2" "$REAL" >"$M/scripts/operator-local/$1.sh"
+		if cmp -s "$REAL" "$M/scripts/operator-local/$1.sh"; then bad "mutant $1 applies" "substitution matched nothing"; return; fi
+		if SCRIPT_UNDER_TEST="$M/scripts/operator-local/$1.sh" bash "$0" >"$M/$1.out" 2>&1; then
 			bad "mutant $1 is caught" "suite passed on the mutant"
 		else
 			ok "mutant $1 is caught"

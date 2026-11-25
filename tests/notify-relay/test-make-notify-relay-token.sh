@@ -78,5 +78,15 @@ run_tool "$D3" "$TMP_ROOT/o6" "$TMP_ROOT/e6" "$SENDER_A" extra; rc=$?
 eq "extra arg exits 1" 1 "$rc"
 if [ -e "$D3" ]; then fail "bad sender created the dir"; else ok "bad sender creates nothing"; fi
 
+# default dir: no FYD_RELAY_TOKEN_DIR -> under HOME at the definition's place.
+# The expected place is spelled out (not read from the definition), so a change
+# of the definition or of the tool's default is what this catches.
+DEFAULT_RELAY_DIR_REL='.config/metal.freedom-yield.com/key/notify-relay'
+H5="$TMP_ROOT/h5"; mkdir "$H5"
+env -u FYD_RELAY_TOKEN_DIR HOME="$H5" bash "$TOOL_PATH" "$SENDER_A" >"$TMP_ROOT/o7" 2>"$TMP_ROOT/e7"; rc=$?
+eq "default dir: exits 0" 0 "$rc"
+if [ -f "$H5/$DEFAULT_RELAY_DIR_REL/$SENDER_A.token" ]; then ok "default dir: token under HOME/$DEFAULT_RELAY_DIR_REL"; else fail "default dir: token under HOME/$DEFAULT_RELAY_DIR_REL"; fi
+eq "default dir: nothing else at HOME's top" "$(basename "${DEFAULT_RELAY_DIR_REL%%/*}")" "$(ls -A "$H5" | tr '\n' ' ' | sed 's/ $//')"
+
 echo "SUMMARY: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

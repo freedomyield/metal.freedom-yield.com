@@ -915,12 +915,13 @@ fi
 SELFDIR_USES="$(grep -nE 'FYCT_SELF_DIR' "$ORCH" | grep -vE '^[0-9]+:#' | sed 's/^[0-9]*://' | sed 's/^[[:space:]]*//' | sort)"
 SELFDIR_EXPECTED="$(printf '%s\n' \
 	'. "${FYCT_SELF_DIR}/lib/cycle-context.sh"' \
+	'. "${FYCT_SELF_DIR}/lib/operator-paths.sh"' \
 	'. "${FYCT_SELF_DIR}/lib/side-effects.sh"' \
 	'FYCT_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"' \
 	'git -C "$FYCT_SELF_DIR" show HEAD:public/api/anchor-source.json > "$head_f" 2>/dev/null || rm -f "$head_f"' \
 	| sort)"
 if [ "$SELFDIR_USES" = "$SELFDIR_EXPECTED" ]; then
-	ok "the orchestrator's only path root is used in exactly 4 sanctioned ways (2 library sources, its own definition, one read-only git show)"
+	ok "the orchestrator's only path root is used in exactly 5 sanctioned ways (3 library sources, its own definition, one read-only git show)"
 else
 	bad "FYCT_SELF_DIR is used in a way this suite has not sanctioned:"
 	comm -13 <(printf '%s\n' "$SELFDIR_EXPECTED") <(printf '%s\n' "$SELFDIR_USES") | head -3 | sed 's/^/        /'
@@ -936,13 +937,14 @@ else
 fi
 
 # J4. `eval` / `source` / `.` are shell BUILTINS, so no PATH stub can see them.
-# Pin them to the two library sources and nothing else.
+# Pin them to the three library sources and nothing else.
 BUILTIN_USES="$(grep -nE '^[[:space:]]*(eval|source|\.)[[:space:]]' "$ORCH" | sed 's/^[0-9]*://' | sed 's/^[[:space:]]*//' | sort)"
 BUILTIN_EXPECTED="$(printf '%s\n' \
 	'. "${FYCT_SELF_DIR}/lib/cycle-context.sh"' \
+	'. "${FYCT_SELF_DIR}/lib/operator-paths.sh"' \
 	'. "${FYCT_SELF_DIR}/lib/side-effects.sh"' | sort)"
 if [ "$BUILTIN_USES" = "$BUILTIN_EXPECTED" ]; then
-	ok "eval / source / . appear only as the two sanctioned library sources"
+	ok "eval / source / . appear only as the three sanctioned library sources"
 else
 	bad "an unsanctioned eval/source/. statement is present: $(printf '%s' "$BUILTIN_USES" | head -1)"
 fi
@@ -1923,7 +1925,9 @@ if [ -n "$PREVIEW_7C" ] && ! printf '%s' "$PREVIEW_7C" | grep -qF -- '--output='
 else
 	bad "unit 7b's printed 7c command now carries --output= — the plan's warning may be stale"
 fi
-if grep -qF 'FY_CONFIG_DIR=\$HOME/.fy-mainnet-broadcast/config' "$PREVIEW_SH"; then
+# The printed form is \$HOME/ + the definition's name (scripts/lib/operator-paths.sh),
+# so the source text carries the variable, not a spelled-out path.
+if grep -qF 'FY_CONFIG_DIR=\$HOME/${FYD_BROADCAST_CONFIG_REL}' "$PREVIEW_SH"; then
 	ok "measured: unit 7b's printed 7c command really does write FY_CONFIG_DIR home-relative"
 else
 	bad "unit 7b's printed 7c command no longer writes FY_CONFIG_DIR home-relative — re-check the plan's warning"

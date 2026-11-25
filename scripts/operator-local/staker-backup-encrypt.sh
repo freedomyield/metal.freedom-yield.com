@@ -16,20 +16,24 @@
 #      to <out>.partial
 #   4. decrypt <out>.partial again, extract, and compare the SHA-256 of all three
 #      files with the source; any difference -> stop, delete .partial, exit 1
-#   5. rename to ~/staker-backup-<yyyymmdd>.tar.gz.enc (mode 600) and write its
+#   5. rename to ~/.config/metal.freedom-yield.com/backup/staker-backup-<yyyymmdd>.tar.gz.enc (mode 600) and write its
 #      SHA-256 next to it (<out>.sha256)
 #
 # Afterwards prove the SAVED passphrase opens it (guarantee b):
 #   bash scripts/dr-drill.sh        (asks the passphrase once)
 #
 # Usage:  bash scripts/operator-local/staker-backup-encrypt.sh [<staking dir>]
-# Env:    STAKER_BACKUP_OUT_DIR  where the .enc is written (default: $HOME)
+# Env:    STAKER_BACKUP_OUT_DIR  where the .enc is written (default: $HOME/.config/metal.freedom-yield.com/backup)
 #         STAKER_BACKUP_DATE     yyyymmdd in the name (default: today)
 # Exit:   0 written and verified / 1 failed (nothing written) / 2 refused
 set -euo pipefail
 
+# The backup dir's name comes from the one definition file.
+# shellcheck source=scripts/lib/operator-paths.sh
+. "$(dirname "$0")/../lib/operator-paths.sh"
+
 KEY_FILES=(staker.crt staker.key signer.key)
-OUT_DIR="${STAKER_BACKUP_OUT_DIR:-$HOME}"
+OUT_DIR="${STAKER_BACKUP_OUT_DIR:-$HOME/${FYD_BACKUP_DIR_REL}}"
 DAY="${STAKER_BACKUP_DATE:-$(date +%Y%m%d)}"
 MIN_LEN=16
 

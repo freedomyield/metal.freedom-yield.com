@@ -110,7 +110,7 @@ Severity model: **CRITICAL** = unknown key guarded by a default (`// ""`, `|| "â
 **Frequency:** quarterly; untested backups aren't backups.
 
 ### `scripts/operator-local/staker-backup-encrypt.sh`
-**Purpose:** Make the encrypted staker key backup (`~/staker-backup-<yyyymmdd>.tar.gz.enc`) from the disk-encrypted plaintext copy, in the layout `dr-drill.sh` expects. In the same run it opens the new file again and compares the SHA-256 of all three key files with the source; any difference deletes the partial file and exits non-zero. Writes `<file>.sha256` next to it. The operator runs it in a terminal (new passphrase, typed then confirmed); afterwards `bash scripts/dr-drill.sh` proves the saved passphrase opens it.
+**Purpose:** Make the encrypted staker key backup (`~/.config/metal.freedom-yield.com/backup/staker-backup-<yyyymmdd>.tar.gz.enc`) from the disk-encrypted plaintext copy, in the layout `dr-drill.sh` expects. In the same run it opens the new file again and compares the SHA-256 of all three key files with the source; any difference deletes the partial file and exits non-zero. Writes `<file>.sha256` next to it. The operator runs it in a terminal (new passphrase, typed then confirmed); afterwards `bash scripts/dr-drill.sh` proves the saved passphrase opens it.
 **Dependencies:** `openssl`, `tar`, `shasum`.
 
 ---

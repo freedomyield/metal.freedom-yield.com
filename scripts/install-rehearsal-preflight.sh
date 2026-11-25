@@ -104,7 +104,7 @@
 # ---------------------------------------------------------------------------
 # USAGE
 # ---------------------------------------------------------------------------
-#   HOME=~/.metal-fy-proton-test bash scripts/install-rehearsal-preflight.sh \
+#   HOME=~/.config/metal.freedom-yield.com/key/testnet bash scripts/install-rehearsal-preflight.sh \
 #       --expect-cycle=<M> [--source=<path>]
 #
 # The HOME prefix is MANDATORY (Constitution §3.5) and is checked before any
@@ -276,17 +276,17 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOGIN_HOME="$(fyd_login_home)"
 [ -n "$LOGIN_HOME" ] || LOGIN_HOME="$HOME"
 
-REHEARSAL_CFG="${FYP_REHEARSAL_CFG:-${LOGIN_HOME}/freedom-yield-rehearsal-config}"
-MAINNET_CFG="${FYP_MAINNET_CFG:-${LOGIN_HOME}/.fy-mainnet-broadcast/config}"
+REHEARSAL_CFG="${FYP_REHEARSAL_CFG:-${LOGIN_HOME}/${FYD_REHEARSAL_CONFIG_REL}}"
+MAINNET_CFG="${FYP_MAINNET_CFG:-${LOGIN_HOME}/${FYD_BROADCAST_CONFIG_REL}}"
 IDENTITY_KEY="${FYP_IDENTITY_KEY:-${LOGIN_HOME}/.ssh/freedom-yield-operator-identity}"
 # The ML-DSA identity key directory must resolve under the LOGIN home for the
 # same reason (this script runs with HOME=<testnet keystore>); the library's
 # default is ${HOME}/..., so the login-home default is set explicitly here.
-FY_PQ_KEY_DIR="${FYP_PQ_KEY_DIR:-${FY_PQ_KEY_DIR:-${LOGIN_HOME}/.freedom-yield-identity}}"
+FY_PQ_KEY_DIR="${FYP_PQ_KEY_DIR:-${FY_PQ_KEY_DIR:-${LOGIN_HOME}/${FYD_IDENTITY_KEY_DIR_REL}}}"
 export FY_PQ_KEY_DIR
 PQ_PUB="${FYP_PQ_PUB:-${REPO_ROOT}/${FYIPQ_PUB_REL}}"
-KEYSTORE_TESTNET="${FYP_KEYSTORE_TESTNET:-${LOGIN_HOME}/.metal-fy-proton-test}"
-KEYSTORE_MAINNET="${FYP_KEYSTORE_MAINNET:-${LOGIN_HOME}/.metal-fy-proton}"
+KEYSTORE_TESTNET="${FYP_KEYSTORE_TESTNET:-${LOGIN_HOME}/${FYD_KEYSTORE_TESTNET_REL}}"
+KEYSTORE_MAINNET="${FYP_KEYSTORE_MAINNET:-${LOGIN_HOME}/${FYD_KEYSTORE_MAINNET_REL}}"
 
 # TESTNET_CHAIN_RPC's default is resolved from the chain profile below, once
 # $WORK exists (see "Chain values from the committed profile").
@@ -381,7 +381,7 @@ if [ "$HOME_REAL" != "$KEYSTORE_TESTNET_REAL" ]; then
 		echo "                failure this script exists to prevent." >&2
 	fi
 	echo "                Re-invoke as:" >&2
-	echo "                  HOME=~/.metal-fy-proton-test bash $0 --expect-cycle=${EXPECT_CYCLE}" >&2
+	echo "                  HOME=~/${FYD_KEYSTORE_TESTNET_REL} bash $0 --expect-cycle=${EXPECT_CYCLE}" >&2
 	exit 8
 fi
 
@@ -1058,7 +1058,7 @@ else
 	case "$KEY_CODE" in
 		7) chk_fail 9 7 "keystore not usable for signing — check could not be made" "$KEY_PROBLEMS" \
 			"Operator action, in a separate terminal, one line:" \
-			"  HOME=~/.metal-fy-proton-test proton key:unlock" \
+			"  HOME=~/${FYD_KEYSTORE_TESTNET_REL} proton key:unlock" \
 			"then re-run this pre-flight. Do NOT follow the key-rotation runbook for this;" \
 			"a locked keystore misdiagnosed as a missing key is the 2026-07-31 audit finding." ;;
 		4) chk_fail 9 4 "current on-chain anchor key NOT in the testnet keystore" "$KEY_PROBLEMS" \
@@ -1491,12 +1491,12 @@ else
 		"chain's stanza (verified: resetEndpoint() filters by this.chain) — running it while" \
 		"on the wrong chain prints \"Success: Endpoints restored to default\" and changes" \
 		"nothing, leaving this exact red. Run PER NAMED CHAIN, in a separate terminal:" \
-		"  HOME=~/.metal-fy-proton-test proton chain:set <named-chain>" \
-		"  HOME=~/.metal-fy-proton-test proton endpoint:default" \
+		"  HOME=~/${FYD_KEYSTORE_TESTNET_REL} proton chain:set <named-chain>" \
+		"  HOME=~/${FYD_KEYSTORE_TESTNET_REL} proton endpoint:default" \
 		"then, if <named-chain> was not proton-test, switch back — this keystore's" \
 		"currentChain must stay proton-test:" \
-		"  HOME=~/.metal-fy-proton-test proton chain:set proton-test" \
-		"(mainnet-keystore equivalent, HOME=~/.metal-fy-proton, if that leg names a chain)." \
+		"  HOME=~/${FYD_KEYSTORE_TESTNET_REL} proton chain:set proton-test" \
+		"(mainnet-keystore equivalent, HOME=~/${FYD_KEYSTORE_MAINNET_REL}, if that leg names a chain)." \
 		"Do NOT hand-edit the config file to fix this." \
 		"If the problem is 'XPR_TESTNET_RPC-rejected:…': the value must EXACTLY equal one" \
 		"of the testnet profile's history_bases (no trailing '/', same case) — the" \

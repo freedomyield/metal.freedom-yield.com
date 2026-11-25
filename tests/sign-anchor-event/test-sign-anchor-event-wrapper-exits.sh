@@ -34,6 +34,7 @@ set -u
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 SCRIPT_SRC="${REPO_ROOT}/scripts/sign-anchor-event.sh"
 KEYSTORE_LIB_SRC="${REPO_ROOT}/scripts/lib/require-keystore-home.sh"
+OPERATOR_PATHS_LIB_SRC="${REPO_ROOT}/scripts/lib/operator-paths.sh"
 WRAPPER_SRC="${REPO_ROOT}/bin/safe-broadcast"
 ANCHOR_SOURCE="${REPO_ROOT}/public/api/anchor-source.example.json"
 PROFILES="${REPO_ROOT}/config/a-chain-profiles.json"
@@ -65,6 +66,7 @@ trap cleanup EXIT
 mkdir -p "${TREE}/scripts/lib" "${TREE}/bin" "$STUB"
 cp "$SCRIPT_SRC" "${TREE}/scripts/sign-anchor-event.sh"
 cp "$KEYSTORE_LIB_SRC" "${TREE}/scripts/lib/require-keystore-home.sh"
+cp "$OPERATOR_PATHS_LIB_SRC" "${TREE}/scripts/lib/operator-paths.sh"
 chmod 755 "${TREE}/scripts/sign-anchor-event.sh"
 
 # the stub wrapper: records its arguments (TAB separated), answers from the stub dir

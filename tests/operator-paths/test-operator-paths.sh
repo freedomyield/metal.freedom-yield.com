@@ -1,0 +1,202 @@
+#!/usr/bin/env bash
+# tests/operator-paths/test-operator-paths.sh — scripts/lib/operator-paths.sh is
+# the one place that names this project's operator-local places, and the
+# scripts read it from there.
+#
+# CHAIN: none. PRIME_DIRECTIVE: TESTNET-FIRST — safe, no broadcast pathway.
+# Never runs proton. Every HOME is a temp dir. Two cases (P2 and P8) run the
+# pre-flight WITHOUT FYP_KEYSTORE_*, so its default keystore paths name the
+# real login home; the pre-flight stops at its HOME check with exit 8 before it
+# reads anything, and its only contact with those paths is the `cd` inside
+# fyp_realpath. Every other override the pre-flight has (FYP_PQ_KEY_DIR,
+# FYP_MAINNET_CFG, FYP_REHEARSAL_CFG, FYP_IDENTITY_KEY) points at a temp dir.
+#
+# Cases:
+#   P1  every name in the definition has its value, spelled out here (a change
+#       of the definition fails this on purpose)
+#   P2  the pre-flight's default testnet keystore is <login home>/<definition>
+#   P3  the quoted heredoc of scripts/cycle-transition.sh (fyct__phase_rows)
+#       names the testnet keystore at stop 3 and the mainnet one at stop 4
+#   P4  unit 7a's lines use the testnet name; units 7b and 7c the mainnet one
+#   P5  identity-pq.sh's default key dir is ${HOME}/<definition>
+#   P6  cycle-transition.sh's default config dir is ${HOME}/<definition>
+#   P7  the pre-flight refuses a HOME that is the MAINNET keystore (exit 8)
+#   P8  the pre-flight refuses a HOME named like the former testnet keystore
+#       (no fallback to the former place)
+#   P9  no former place name is left in bin/ or scripts/ code lines
+#
+# Usage: bash tests/operator-paths/test-operator-paths.sh
+# Exit:  0 all pass / 1 any fail
+set -u
+
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+PATHS_LIB="${REPO_ROOT}/scripts/lib/operator-paths.sh"
+PREFLIGHT="${OPERATOR_PATHS_PREFLIGHT_UNDER_TEST:-${REPO_ROOT}/scripts/install-rehearsal-preflight.sh}"
+ORCH="${OPERATOR_PATHS_ORCH_UNDER_TEST:-${REPO_ROOT}/scripts/cycle-transition.sh}"
+IPQ_LIB="${OPERATOR_PATHS_IPQ_UNDER_TEST:-${REPO_ROOT}/scripts/lib/identity-pq.sh}"
+
+PASS=0
+FAIL=0
+ok()  { PASS=$((PASS + 1)); echo "  ok: $1"; }
+bad() { FAIL=$((FAIL + 1)); echo "  FAIL: $1"; }
+
+WORK="$(mktemp -d -t operator-paths-test.XXXXXX)"
+trap 'rm -rf "$WORK"' EXIT
+
+# shellcheck source=scripts/lib/operator-paths.sh
+. "${OPERATOR_PATHS_LIB_UNDER_TEST:-$PATHS_LIB}"
+
+# ---- P1 the values, spelled out --------------------------------------------
+check_value() { # <name> <expected value>
+	local got
+	got="$(eval "printf '%s' \"\${$1-<unset>}\"")"
+	if [ "$got" = "$2" ]; then ok "P1 $1 = $2"; else bad "P1 $1 is [$got], expected [$2]"; fi
+}
+check_value FYD_PROJECT_CONFIG_REL          ".config/metal.freedom-yield.com"
+check_value FYD_KEY_DIR_REL                 ".config/metal.freedom-yield.com/key"
+check_value FYD_KEYSTORE_MAINNET_REL        ".config/metal.freedom-yield.com/key/mainnet"
+check_value FYD_KEYSTORE_TESTNET_REL        ".config/metal.freedom-yield.com/key/testnet"
+check_value FYD_IDENTITY_KEY_DIR_REL        ".config/metal.freedom-yield.com/key/identity"
+check_value FYD_BROADCAST_DIR_REL           ".config/metal.freedom-yield.com/key/broadcast"
+check_value FYD_BROADCAST_CONFIG_REL        ".config/metal.freedom-yield.com/key/broadcast/config"
+check_value FYD_NOTIFY_RELAY_DIR_REL        ".config/metal.freedom-yield.com/key/notify-relay"
+check_value FYD_OWNER_PUBCHECK_REL          ".config/metal.freedom-yield.com/key/owner-pubcheck"
+check_value FYD_REHEARSAL_CONFIG_REL        ".config/metal.freedom-yield.com/key/rehearsal"
+check_value FYD_BACKUP_DIR_REL              ".config/metal.freedom-yield.com/backup"
+check_value FYD_BROADCAST_AUDIT_LOG_BASENAME ".fyd-broadcast-audit.log"
+check_value FYD_BROADCAST_AUDIT_LOG_REL     ".config/metal.freedom-yield.com/backup/.fyd-broadcast-audit.log"
+check_value FYD_TESTNET_RECEIPT_REL         ".config/metal.freedom-yield.com/backup/.fya-testnet-receipt.json"
+check_value FYD_TESTNET_DRYRUN_LOG_REL      ".config/metal.freedom-yield.com/backup/.fya-testnet-dryrun-log.json"
+check_value FYD_RESTORE_DRILL_LOG_REL       ".config/metal.freedom-yield.com/backup/fy-restore-drill.log"
+if [ "$FYD_KEYSTORE_MAINNET_REL" != "$FYD_KEYSTORE_TESTNET_REL" ]; then
+	ok "P1 the mainnet and testnet keystore names differ"
+else
+	bad "P1 the mainnet and testnet keystore names are the same"
+fi
+
+# Read the definition the scripts use (not the one above, which a mutant run
+# may have replaced) for the expectations below.
+DEF_TESTNET="$(bash -c '. "$1"; printf "%s" "$FYD_KEYSTORE_TESTNET_REL"' _ "$PATHS_LIB")"
+DEF_MAINNET="$(bash -c '. "$1"; printf "%s" "$FYD_KEYSTORE_MAINNET_REL"' _ "$PATHS_LIB")"
+DEF_IDENTITY="$(bash -c '. "$1"; printf "%s" "$FYD_IDENTITY_KEY_DIR_REL"' _ "$PATHS_LIB")"
+
+LOGIN_HOME="$(eval echo "~$(id -un)" 2>/dev/null || true)"
+LOGIN_HOME_PHYS="$( (cd "$LOGIN_HOME" 2>/dev/null && pwd -P) || printf '%s' "$LOGIN_HOME")"
+
+# run_preflight <home> <out-file> [VAR=value ...] — exit code of the pre-flight.
+run_preflight() {
+	local home="$1" out="$2"; shift 2
+	env -u FYP_KEYSTORE_TESTNET -u FYP_KEYSTORE_MAINNET -u FY_PQ_KEY_DIR \
+		HOME="$home" \
+		FYP_PQ_KEY_DIR="${WORK}/pq-key-dir" \
+		FYP_MAINNET_CFG="${WORK}/mainnet-cfg" \
+		FYP_REHEARSAL_CFG="${WORK}/rehearsal-cfg" \
+		FYP_IDENTITY_KEY="${WORK}/identity-key" \
+		FY_CONFIG_DIR="${WORK}/fy-config" \
+		FYD_RELAY_TOKEN_DIR="${WORK}/relay" \
+		"$@" bash "$PREFLIGHT" --expect-cycle=1 </dev/null >"$out" 2>&1
+}
+
+# ---- P2 the pre-flight's default testnet keystore ---------------------------
+if [ -n "$LOGIN_HOME" ]; then
+	mkdir -p "${WORK}/plain-home"
+	run_preflight "${WORK}/plain-home" "${WORK}/p2.out"; RC=$?
+	EXPECTED_LINE="$(grep -E '^ +expected: ' "${WORK}/p2.out" | head -1 | sed -E 's/^ +expected: +//')"
+	if [ "$RC" -eq 8 ] && { [ "$EXPECTED_LINE" = "${LOGIN_HOME}/${DEF_TESTNET}" ] || [ "$EXPECTED_LINE" = "${LOGIN_HOME_PHYS}/${DEF_TESTNET}" ]; }; then
+		ok "P2 pre-flight default testnet keystore = <login home>/${DEF_TESTNET} (exit 8)"
+	else
+		bad "P2 pre-flight default testnet keystore is [${EXPECTED_LINE#"$LOGIN_HOME"}] under the login home, rc=$RC (expected /${DEF_TESTNET}, exit 8)"
+	fi
+	if grep -qF "HOME=~/${DEF_TESTNET} bash" "${WORK}/p2.out"; then
+		ok "P2 pre-flight re-invoke hint names HOME=~/${DEF_TESTNET}"
+	else
+		bad "P2 pre-flight re-invoke hint does not name HOME=~/${DEF_TESTNET}"
+	fi
+else
+	bad "P2 the login home cannot be resolved here"
+fi
+
+# ---- P3 the quoted heredoc of fyct__phase_rows ------------------------------
+PHASE_ROWS="$(sed -n "/^	cat <<'FYCT_PHASE_EOF'\$/,/^FYCT_PHASE_EOF\$/p" "$ORCH")"
+STOP3_ROW="$(printf '%s\n' "$PHASE_ROWS" | awk -F'|' '$3 == "3"')"
+STOP4_ROW="$(printf '%s\n' "$PHASE_ROWS" | awk -F'|' '$3 == "4"')"
+case "$STOP3_ROW" in
+	*"(HOME=~/${DEF_TESTNET})"*) ok "P3 phase row of stop 3 names HOME=~/${DEF_TESTNET}" ;;
+	*) bad "P3 phase row of stop 3 does not name HOME=~/${DEF_TESTNET}" ;;
+esac
+case "$STOP3_ROW" in
+	*"HOME=~/${DEF_MAINNET}"*) bad "P3 phase row of stop 3 names the mainnet keystore" ;;
+	*) ok "P3 phase row of stop 3 does not name the mainnet keystore" ;;
+esac
+case "$STOP4_ROW" in
+	*"(HOME=~/${DEF_MAINNET})"*) ok "P3 phase row of stop 4 names HOME=~/${DEF_MAINNET}" ;;
+	*) bad "P3 phase row of stop 4 does not name HOME=~/${DEF_MAINNET}" ;;
+esac
+case "$STOP4_ROW" in
+	*"HOME=~/${DEF_TESTNET}"*) bad "P3 phase row of stop 4 names the testnet keystore" ;;
+	*) ok "P3 phase row of stop 4 does not name the testnet keystore" ;;
+esac
+
+# ---- P4 units 7a / 7b / 7c ------------------------------------------------------
+# unit_block <label> — the source lines of one `<label>)` arm of the unit printer.
+unit_block() { awk -v want="	$1)" '$0 == want {f=1; next} f && /^		;;$/ {exit} f' "$ORCH"; }
+U7A="$(unit_block 7a)"; U7B="$(unit_block 7b)"; U7C="$(unit_block 7c)"
+# shellcheck disable=SC2016  # the variable names are matched as source text
+T_REF='HOME=~/${FYD_KEYSTORE_TESTNET_REL} '
+# shellcheck disable=SC2016
+M_REF='HOME=~/${FYD_KEYSTORE_MAINNET_REL} '
+n7a_t="$(printf '%s\n' "$U7A" | grep -cF "$T_REF")"; n7a_m="$(printf '%s\n' "$U7A" | grep -cF "$M_REF")"
+n7b_t="$(printf '%s\n' "$U7B" | grep -cF "$T_REF")"; n7b_m="$(printf '%s\n' "$U7B" | grep -cF "$M_REF")"
+n7c_t="$(printf '%s\n' "$U7C" | grep -cF "$T_REF")"; n7c_m="$(printf '%s\n' "$U7C" | grep -cF "$M_REF")"
+if [ "$n7a_t" -eq 2 ] && [ "$n7a_m" -eq 0 ]; then ok "P4 unit 7a: 2 testnet lines, 0 mainnet"; else bad "P4 unit 7a keystore lines: testnet=$n7a_t mainnet=$n7a_m (expected 2 / 0)"; fi
+if [ "$n7b_t" -eq 0 ] && [ "$n7b_m" -eq 2 ]; then ok "P4 unit 7b: 0 testnet lines, 2 mainnet"; else bad "P4 unit 7b keystore lines: testnet=$n7b_t mainnet=$n7b_m (expected 0 / 2)"; fi
+if [ "$n7c_t" -eq 0 ] && [ "$n7c_m" -eq 2 ]; then ok "P4 unit 7c: 0 testnet lines, 2 mainnet"; else bad "P4 unit 7c keystore lines: testnet=$n7c_t mainnet=$n7c_m (expected 0 / 2)"; fi
+
+# ---- P5 identity-pq.sh's default key dir -----------------------------------
+mkdir -p "${WORK}/ipq-home"
+IPQ_DIR="$(env -u FY_PQ_KEY_DIR HOME="${WORK}/ipq-home" bash -c '. "$1"; fyipq__key_dir' _ "$IPQ_LIB" 2>/dev/null)"
+if [ "$IPQ_DIR" = "${WORK}/ipq-home/${DEF_IDENTITY}" ]; then
+	ok "P5 fyipq__key_dir default = \${HOME}/${DEF_IDENTITY}"
+else
+	bad "P5 fyipq__key_dir default is [${IPQ_DIR#"${WORK}/ipq-home"}] under HOME (expected /${DEF_IDENTITY})"
+fi
+
+# ---- P6 cycle-transition.sh's default config dir ---------------------------
+# shellcheck disable=SC2016
+if grep -qxF '	CFG="${FY_CONFIG_DIR:-${HOME}/${FYD_BROADCAST_CONFIG_REL}}"' "$ORCH"; then
+	ok "P6 cycle-transition.sh default CFG = \${HOME}/\${FYD_BROADCAST_CONFIG_REL}"
+else
+	bad "P6 cycle-transition.sh default CFG is not \${HOME}/\${FYD_BROADCAST_CONFIG_REL}"
+fi
+
+# ---- P7 the pre-flight refuses the MAINNET keystore as HOME -----------------
+mkdir -p "${WORK}/ks-mainnet" "${WORK}/ks-testnet"
+run_preflight "${WORK}/ks-mainnet" "${WORK}/p7.out" \
+	FYP_KEYSTORE_MAINNET="${WORK}/ks-mainnet" FYP_KEYSTORE_TESTNET="${WORK}/ks-testnet"; RC=$?
+if [ "$RC" -eq 8 ] && grep -qF "That is the MAINNET keystore." "${WORK}/p7.out"; then
+	ok "P7 pre-flight with HOME = mainnet keystore -> exit 8, names the MAINNET keystore"
+else
+	bad "P7 pre-flight with HOME = mainnet keystore -> rc=$RC (expected 8 and the MAINNET keystore line)"
+fi
+
+# ---- P8 no fallback to the former testnet keystore name ---------------------
+mkdir -p "${WORK}/former/.metal-fy-proton-test"
+run_preflight "${WORK}/former/.metal-fy-proton-test" "${WORK}/p8.out"; RC=$?
+if [ "$RC" -eq 8 ]; then
+	ok "P8 pre-flight with HOME named like the former testnet keystore -> exit 8"
+else
+	bad "P8 pre-flight with HOME named like the former testnet keystore -> rc=$RC (expected 8)"
+fi
+
+# ---- P9 no former place name in bin/ or scripts/ code lines -----------------
+FORMER_RE='\.metal-fy-proton|\.metal-fy-notify-relay|\.freedom-yield-identity|\.fy-mainnet-broadcast|\.metal-owner-pubcheck|freedom-yield-rehearsal-config'
+FORMER_HITS="$(git -C "$REPO_ROOT" grep -n -E "$FORMER_RE" -- bin scripts ':!*.md' 2>/dev/null | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' || true)"
+if [ -z "$FORMER_HITS" ]; then
+	ok "P9 no former place name in bin/ or scripts/ code lines"
+else
+	bad "P9 former place names remain in code lines: $(printf '%s\n' "$FORMER_HITS" | cut -d: -f1,2 | tr '\n' ' ')"
+fi
+
+echo "test-operator-paths summary: PASS=$PASS FAIL=$FAIL"
+[ "$FAIL" -eq 0 ] || { echo "RESULT: FAIL"; exit 1; }
+echo "RESULT: PASS"

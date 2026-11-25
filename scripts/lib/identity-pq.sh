@@ -5,6 +5,10 @@
 # Must stay bash 3.2 compatible (macOS /bin/bash).
 # CHAIN: none. PRIME_DIRECTIVE: TESTNET-FIRST — no broadcast pathway.
 
+# The identity key directory's name comes from the one definition file.
+# shellcheck source=scripts/lib/operator-paths.sh
+. "$(dirname "${BASH_SOURCE[0]}")/operator-paths.sh"
+
 # ML-DSA-87: the highest ML-DSA level and the level NSA CNSA 2.0 specifies for
 # all classification levels. Change only if NIST / CNSA guidance changes or a
 # weakness in ML-DSA-87 is published; a change is a normal key rotation (spec
@@ -25,7 +29,7 @@ FYIPQ_ENC_BASENAME="operator-identity-${FYIPQ_FILE_TAG}.enc.pem"
 FYIPQ_UNLOCKED_BASENAME="operator-identity-${FYIPQ_FILE_TAG}.unlocked.pem"
 FYIPQ_UNLOCK_MAX_AGE_SEC_DEFAULT=7200
 
-fyipq__key_dir()       { printf '%s\n' "${FY_PQ_KEY_DIR:-${HOME}/.freedom-yield-identity}"; }
+fyipq__key_dir()       { printf '%s\n' "${FY_PQ_KEY_DIR:-${HOME}/${FYD_IDENTITY_KEY_DIR_REL}}"; }
 fyipq__enc_path()      { printf '%s/%s\n' "$(fyipq__key_dir)" "$FYIPQ_ENC_BASENAME"; }
 fyipq__unlocked_path() { printf '%s/%s\n' "$(fyipq__key_dir)" "$FYIPQ_UNLOCKED_BASENAME"; }
 

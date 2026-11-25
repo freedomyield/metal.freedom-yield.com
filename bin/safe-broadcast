@@ -469,13 +469,18 @@ SB_REFUSED_HEADER_FIELDS=(
 
 # Audit log path (matches broadcast-guard.sh convention). Resolved
 # against the LOGIN home (fyd_login_home, from require-keystore-home.sh
-# above), NOT $HOME — a §3.5-compliant HOME=~/.metal-fy-proton[-test]
+# above), NOT $HOME — a §3.5-compliant HOME=~/.config/metal.freedom-yield.com/key/{mainnet,testnet}
 # invocation would otherwise relocate the audit log into the keystore
-# dir and split it from the canonical ~/.fyd-broadcast-audit.log
+# dir and split it from the canonical
+# ~/.config/metal.freedom-yield.com/backup/.fyd-broadcast-audit.log
 # history. Falls back to /tmp only if the login home is unresolvable.
 AUDIT_LOG_PRIMARY="${FYD_BROADCAST_AUDIT_LOG:-/var/log/fyd-broadcast-audit.log}"
 _AUDIT_LOG_LOGIN_HOME="$(fyd_login_home || true)"
-AUDIT_LOG_FALLBACK="${_AUDIT_LOG_LOGIN_HOME:-/tmp}/.fyd-broadcast-audit.log"
+if [ -n "$_AUDIT_LOG_LOGIN_HOME" ]; then
+	AUDIT_LOG_FALLBACK="${_AUDIT_LOG_LOGIN_HOME}/${FYD_BROADCAST_AUDIT_LOG_REL}"
+else
+	AUDIT_LOG_FALLBACK="/tmp/${FYD_BROADCAST_AUDIT_LOG_BASENAME}"
+fi
 
 # Print the WHOLE header, however long it grows: from line 2 up to the first
 # line that is not a comment. A hardcoded line range silently truncates the

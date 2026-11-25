@@ -85,8 +85,8 @@ permission ごとに生成元が違う。**owner は WebAuth (新 12word 派生)
   **公開鍵を控えて AI に渡す**。生鍵 (`key:generate`) は owner に使わない。proton-cli keystore にも入れない (cold)。
 - **active / anchor (mainnet 用 2 + testnet 用 2)** — proton-cli で生成:
   ```bash
-  HOME=~/.metal-fy-proton      proton key:generate   # ×2 (mainnet active, anchor)
-  HOME=~/.metal-fy-proton-test proton key:generate   # ×2 (testnet active, anchor)
+  HOME=~/.config/metal.freedom-yield.com/key/mainnet      proton key:generate   # ×2 (mainnet active, anchor)
+  HOME=~/.config/metal.freedom-yield.com/key/testnet proton key:generate   # ×2 (testnet active, anchor)
   ```
   出力の Public を控え、Private は vault へ。
 
@@ -98,7 +98,7 @@ permission ごとに生成元が違う。**owner は WebAuth (新 12word 派生)
 1. **`<rehearsal-anchor-account>` の active/owner 秘密鍵を復元** (現 testnet keystore は anchor しか無い)。
    vault の `<rehearsal-anchor-account>` 12word を wallet で開いて active/owner の PVT を取り出し:
    ```bash
-   HOME=~/.metal-fy-proton-test proton key:add   # prompt に <rehearsal-anchor-account> active/owner PVT を貼る
+   HOME=~/.config/metal.freedom-yield.com/key/testnet proton key:add   # prompt に <rehearsal-anchor-account> active/owner PVT を貼る
    ```
    > **秘密鍵はコマンドの引数に書かない。** 引数に書くと shell history (`~/.zsh_history`) と
    > `ps` に平文で残る。
@@ -110,7 +110,7 @@ permission ごとに生成元が違う。**owner は WebAuth (新 12word 派生)
    # token を tx にバインド (scripts/run-testnet-rehearsal.sh のリチュアル参照)
    printf '{"chain":"testnet-a","tx_sha256":"%s"}' \
      "$(jq -c . rotate-fdt-active.json | shasum -a 256 | awk '{print $1}')" > /tmp/fyd-broadcast-token
-   HOME=~/.metal-fy-proton-test \
+   HOME=~/.config/metal.freedom-yield.com/key/testnet \
      bin/safe-broadcast --tx=rotate-fdt-active.json --chain=testnet-a
    ```
 3. 各段後に検証:
@@ -129,7 +129,7 @@ permission ごとに生成元が違う。**owner は WebAuth (新 12word 派生)
 2. token を mainnet-a + tx_sha256 にバインド。
 3. broadcast:
    ```bash
-   HOME=~/.metal-fy-proton \
+   HOME=~/.config/metal.freedom-yield.com/key/mainnet \
      bin/safe-broadcast --tx=rotate-mf-active.json --chain=mainnet-a \
        --testnet-tx-id=<Phase1 active の testnet tx_id> \
        --dry-run-log=<dry-run ログ path>
@@ -147,15 +147,15 @@ permission ごとに生成元が違う。**owner は WebAuth (新 12word 派生)
 **owner は proton keystore に入れない** (WebAuth で cold 保管)。keystore は active/anchor/sink のみ。
 
 ```bash
-mv ~/.metal-fy-proton ~/.metal-fy-proton-PRE-ROTATE
-HOME=~/.metal-fy-proton proton chain:set proton
-HOME=~/.metal-fy-proton proton key:add   # prompt に NEW active PVT を貼る
-HOME=~/.metal-fy-proton proton key:add   # prompt に NEW anchor PVT を貼る
-HOME=~/.metal-fy-proton proton key:add   # prompt に <anchor-sink> PVT (据置・MainNet) を貼る
+mv ~/.config/metal.freedom-yield.com/key/mainnet ~/.config/metal.freedom-yield.com/old/.metal-fy-proton-PRE-ROTATE
+HOME=~/.config/metal.freedom-yield.com/key/mainnet proton chain:set proton
+HOME=~/.config/metal.freedom-yield.com/key/mainnet proton key:add   # prompt に NEW active PVT を貼る
+HOME=~/.config/metal.freedom-yield.com/key/mainnet proton key:add   # prompt に NEW anchor PVT を貼る
+HOME=~/.config/metal.freedom-yield.com/key/mainnet proton key:add   # prompt に <anchor-sink> PVT (据置・MainNet) を貼る
 # owner は追加しない — root 鍵を日常署名面から外す
-chmod 600 ~/.metal-fy-proton/Library/Preferences/@proton/cli-nodejs/proton-cli.json
-HOME=~/.metal-fy-proton proton key:list   # 公開のみ。active/anchor/<anchor-sink> を確認
-HOME=~/.metal-fy-proton proton key:lock
+chmod 600 ~/.config/metal.freedom-yield.com/key/mainnet/Library/Preferences/@proton/cli-nodejs/proton-cli.json
+HOME=~/.config/metal.freedom-yield.com/key/mainnet proton key:list   # 公開のみ。active/anchor/<anchor-sink> を確認
+HOME=~/.config/metal.freedom-yield.com/key/mainnet proton key:lock
 ```
 
 testnet keystore も同様 (active/anchor/`<rehearsal-anchor-sink>` のみ、owner は WebAuth cold)。

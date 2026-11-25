@@ -11,7 +11,7 @@
 # so no real key material or real backup is ever read.
 #
 # Claims, each with a mutant at the bottom that must fail its assertion:
-#   D1 the default backup is the NEWEST ~/staker-backup-*.tar.gz.enc
+#   D1 the default backup is the NEWEST ~/.config/metal.freedom-yield.com/backup/staker-backup-*.tar.gz.enc
 #   D2 every metalgo container gets --network-id=local (never mainnet)
 #   D3 the staking dir is found under the dated top directory of the tarball
 #   D4 the default image is the production pin, not :latest
@@ -54,13 +54,16 @@ want() { [ -z "$ONLY" ] || [ "$ONLY" = "$1" ]; }
 PP="drill-test-passphrase"
 NODEID="NodeID-TestTestTestTestTestTestTestTest"
 HOME_T="$TMP/home"; mkdir -p "$HOME_T"
+# shellcheck source=../../scripts/lib/operator-paths.sh
+. "$REPO/scripts/lib/operator-paths.sh"
+BACKUP_T="$HOME_T/${FYD_BACKUP_DIR_REL}"; mkdir -p "$BACKUP_T"
 
 # --- synthetic staker backup (dated top dir, as the real one is) ------------
 SRC="$TMP/src/staker-backup-20260518/staking"; mkdir -p "$SRC"
 printf 'fake-crt\n' >"$SRC/staker.crt"; printf 'fake-key\n' >"$SRC/staker.key"; printf 'fake-bls\n' >"$SRC/signer.key"
 tar czf "$TMP/src/b.tar.gz" -C "$TMP/src" staker-backup-20260518
-X="$PP" openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt -pass env:X -in "$TMP/src/b.tar.gz" -out "$HOME_T/staker-backup-20260518.tar.gz.enc"
-printf 'older-garbage' >"$HOME_T/staker-backup-20250101.tar.gz.enc"
+X="$PP" openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt -pass env:X -in "$TMP/src/b.tar.gz" -out "$BACKUP_T/staker-backup-20260518.tar.gz.enc"
+printf 'older-garbage' >"$BACKUP_T/staker-backup-20250101.tar.gz.enc"
 SHA_CRT="$(shasum -a 256 "$SRC/staker.crt" | awk '{print $1}')"
 SHA_KEY="$(shasum -a 256 "$SRC/staker.key" | awk '{print $1}')"
 SHA_BLS="$(shasum -a 256 "$SRC/signer.key" | awk '{print $1}')"
@@ -127,7 +130,7 @@ if want newest; then
 	echo "== D1 newest backup is the default =="
 	run_drill "" --dry-run
 	assert_eq "newest: dry-run exit 0" "0" "$RC"
-	assert_contains "newest: picks staker-backup-20260518" "backup: $HOME_T/staker-backup-20260518.tar.gz.enc" "$OUT"
+	assert_contains "newest: picks staker-backup-20260518" "backup: $BACKUP_T/staker-backup-20260518.tar.gz.enc" "$OUT"
 	assert_not_contains "newest: does not decrypt in dry-run" "Decrypt encrypted backup" "$OUT"
 	assert_contains "dry-run: boots with ephemeral keys" "--staking-ephemeral-cert-enabled=true" "$(docker_runs)"
 	assert_contains "dry-run: local network" "--network-id=local" "$(docker_runs)"
@@ -155,11 +158,11 @@ if want failures; then
 	T_NODEID="NodeID-SomeoneElse" run_drill "$PP"
 	assert_eq "nodeid mismatch: exit 1" "1" "$RC"
 	assert_contains "nodeid mismatch: says so" "NodeID mismatch" "$OUT"
-	mv "$HOME_T/staker-backup-20260518.tar.gz.enc" "$TMP/aside1"; mv "$HOME_T/staker-backup-20250101.tar.gz.enc" "$TMP/aside2"
+	mv "$BACKUP_T/staker-backup-20260518.tar.gz.enc" "$TMP/aside1"; mv "$BACKUP_T/staker-backup-20250101.tar.gz.enc" "$TMP/aside2"
 	run_drill "" --dry-run
 	assert_eq "no backup: exit 1" "1" "$RC"
-	assert_contains "no backup: says so" "no ~/staker-backup-*.tar.gz.enc found" "$OUT"
-	mv "$TMP/aside1" "$HOME_T/staker-backup-20260518.tar.gz.enc"; mv "$TMP/aside2" "$HOME_T/staker-backup-20250101.tar.gz.enc"
+	assert_contains "no backup: says so" "no ~/${FYD_BACKUP_DIR_REL}/staker-backup-*.tar.gz.enc found" "$OUT"
+	mv "$TMP/aside1" "$BACKUP_T/staker-backup-20260518.tar.gz.enc"; mv "$TMP/aside2" "$BACKUP_T/staker-backup-20250101.tar.gz.enc"
 fi
 
 if want plaintext; then
@@ -204,9 +207,11 @@ fi
 
 if [ -z "$ONLY" ] && [ -z "${DRILL_SCRIPT_UNDER_TEST:-}" ]; then
 	echo "== break-the-property =="
-	MUT="$TMP/mutants"; mkdir -p "$MUT"
+	# Mutants sit in a scripts/ mirror so they find scripts/lib/operator-paths.sh as the real one does.
+	MUT="$TMP/mutants"; mkdir -p "$MUT/scripts/lib"
+	cp "$REPO/scripts/lib/operator-paths.sh" "$MUT/scripts/lib/"
 	mutate() { # $1 name, $2 case, $3 perl substitution, $4 assertion that must fail
-		local m="$MUT/$1.sh"
+		local m="$MUT/scripts/$1.sh"
 		perl -0pe "$3" "$REAL_SCRIPT" >"$m"
 		if cmp -s "$m" "$REAL_SCRIPT"; then bad "mutant $1" "substitution did not apply"; return; fi
 		if DRILL_SCRIPT_UNDER_TEST="$m" DRILL_TEST_ONLY="$2" bash "$0" >"$MUT/$1.out" 2>&1; then
@@ -237,6 +242,8 @@ if [ -z "$ONLY" ] && [ -z "${DRILL_SCRIPT_UNDER_TEST:-}" ]; then
 		'plaintext: WORKDIR deleted after the run'
 	mutate no-hash-check plaintext 's/\[ "\$ACT_(CRT|KEY|BLS)" = "\$EXPECTED_SHA_\1" \] \|\| fail/true || fail/g' \
 		'plaintext-wrongset: exit 1'
+	mutate enc-at-home-root newest 's/for f in "\$HOME\/\$\{FYD_BACKUP_DIR_REL\}"\/staker-backup-/for f in "\$HOME"\/staker-backup-/' \
+		'newest: picks staker-backup-20260518'
 	mutate image-latest drill 's/metalgo:v1\.13\.5\}/metalgo:latest}/' \
 		'drill: default image is the production pin'
 fi

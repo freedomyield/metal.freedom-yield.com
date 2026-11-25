@@ -29,7 +29,7 @@
 #        terminates it first.
 #
 # HERMETICITY (how the rehearsal config dir is faked without touching the
-# operator's real ~/freedom-yield-rehearsal-config): run-testnet-rehearsal.sh
+# operator's real ~/.config/metal.freedom-yield.com/key/rehearsal): run-testnet-rehearsal.sh
 # resolves REHEARSAL_CFG from fyd_login_home() = `eval echo ~$(id -un)`, NOT
 # from $HOME (that is the point of the §3.5 guard). This suite stubs `id` to
 # print a guaranteed-nonexistent username, so bash's tilde expansion yields
@@ -85,8 +85,12 @@ cleanup() { rm -rf "$WORK" "$STUB_DIR" "$TEST_HOME"; }
 trap cleanup EXIT
 
 # ---- fake rehearsal config dir at the literal relative path ----
-CFG_DIR="${WORK}/~${BOGUS_USER}/freedom-yield-rehearsal-config"
-mkdir -p "$CFG_DIR"
+# The rehearsal config dir and the dry-run log / receipt dir are the definition's
+# names under the (unresolvable) login home.
+# shellcheck source=scripts/lib/operator-paths.sh
+. "${REPO_ROOT}/scripts/lib/operator-paths.sh"
+CFG_DIR="${WORK}/~${BOGUS_USER}/${FYD_REHEARSAL_CONFIG_REL}"
+mkdir -p "$CFG_DIR" "${WORK}/~${BOGUS_USER}/${FYD_BACKUP_DIR_REL}"
 printf '%s' "$FAKE_ACCOUNT"  > "${CFG_DIR}/xpr-account"
 printf 'fakesink1stub'       > "${CFG_DIR}/anchor-sink"
 printf 'proton-test'         > "${CFG_DIR}/xpr-chain"
