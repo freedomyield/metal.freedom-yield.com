@@ -691,7 +691,7 @@ cat > "$CRONBIN/stat" <<FAKESTAT
 #!/bin/bash
 /usr/bin/stat "\$@"; rc=\$?
 if [ -n "\${FAKE_STAT_SWAP_PATH:-}" ] && [ "\${!#}" = "\$FAKE_STAT_SWAP_PATH" ] && [ ! -e "$T/statswap.done" ]; then
-	: > "$T/statswap.done"; rm -f "\$FAKE_STAT_SWAP_PATH"; ln -s "\$FAKE_SWAP_TARGET" "\$FAKE_STAT_SWAP_PATH"
+	: > "$T/statswap.done"; rm -rf "\$FAKE_STAT_SWAP_PATH"; ln -s "\$FAKE_SWAP_TARGET" "\$FAKE_STAT_SWAP_PATH"
 fi
 exit \$rc
 FAKESTAT
@@ -768,6 +768,19 @@ rm -rf "$RD" "$T/statswap.done" "$T/target"; printf 'keep\n' > "$T/target"; chmo
 EXTRA_ENV="$RS_ENV FAKE_STAT_SWAP_PATH=$RD/token FAKE_SWAP_TARGET=$T/target" run --relay-secrets
 check "swap between look and open: exit 11, no chown at all, target untouched" '[ "$RC" -eq 11 ] && [ ! -s "$CHOWN_LOG" ] && [ "$(cat "$T/target")" = keep ] && [ "$(meta "$T/target")" = 600 ]' "rc=$RC"
 rm -rf "$RD" "$T/statswap.done" "$T/target"
+# a FIFO (or a symlink to one) put where root is about to open must never be waited on: bounded run, no chown
+for KIND in token-fifo dir-fifo; do
+	rm -rf "$RD" "$T/statswap.done" "$T/fifo"; mkfifo "$T/fifo"; : > "$CHOWN_LOG"
+	if [ "$KIND" = token-fifo ]; then SWAP_PATH="$RD/token"; else SWAP_PATH="$RD"; fi
+	T0="$(date +%s)"
+	OUT="$(env SKIP_SSH=1 SKIP_SSH_HOME="$H" SKIP_SSH_SELFTEST_PATH="$STUB:/usr/bin:/bin:$JQ_DIR" \
+		WATCH_ACCOUNT="$ME" VALIDATOR_HOST="$VH" FAKE_CRON_STORE="$STORE" FAKE_CRON_WRITES="$WRITES" FAKE_CLIPBOARD="$CLIP" \
+		PATH="$CLIPBIN:$CRONBIN:$PATH" $RS_ENV FAKE_STAT_SWAP_PATH="$SWAP_PATH" FAKE_SWAP_TARGET="$T/fifo" \
+		timeout 20 bash "$INSTALLER" --relay-secrets 2>&1 </dev/null)"; RC=$?
+	printf '%s\n' "$OUT" >> "$ALL_OUT"
+	check "$KIND swapped in before the open: ends within 20 s with exit 11, no chown" '[ "$RC" -eq 11 ] && [ ! -s "$CHOWN_LOG" ] && [ "$(( $(date +%s) - T0 ))" -lt 20 ]' "rc=$RC"
+done
+rm -rf "$RD" "$T/statswap.done" "$T/fifo"
 # a token that is already a symlink to a site file: it is replaced, the target is not written or changed
 mkdir -p "$RD"; printf 'keep\n' > "$T/target"; chmod 600 "$T/target"; ln -s "$T/target" "$RD/token"
 EXTRA_ENV="$RS_ENV" run --relay-secrets

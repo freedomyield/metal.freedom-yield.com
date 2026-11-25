@@ -99,7 +99,8 @@
 #   --relay-secrets  place the relay token and URL in ~WATCH_ACCOUNT/metal-fy-watch/etc/notify-relay/
 #                    (dir 750, files 640; the SITE account writes them, root only hands over
 #                    ownership: owner root, group = the topic file's group, done on open file
-#                    descriptors after checking the opened objects). Needs RELAY_TOKEN_FILE and
+#                    descriptors, opened with O_NOFOLLOW|O_NONBLOCK by perl — needed on the web
+#                    host — after checking the opened objects). Needs RELAY_TOKEN_FILE and
 #                    RELAY_URL_FILE (Mac paths of the two files; the values travel on stdin only
 #                    and are never printed). Add --dry-run to check without writing.
 #
@@ -409,7 +410,6 @@ if [ "$MODE" = relay-secrets ]; then
 	INO_DIR="$(field_of "$(state_of "$RD")" 3)"
 	INO_TOKEN="$(field_of "$(state_of "$RD/token")" 3)"
 	INO_URL="$(field_of "$(state_of "$RD/url")" 3)"
-	exec 7<"$RD/token" 8<"$RD/url" 9<"$RD"
 	# (The mode is not read from the descriptor: some systems report the open mode there. It is checked on the paths at the end.)
 	fd_check() { # fd type inode: the OPENED object, not the path
 		local st
@@ -417,13 +417,38 @@ if [ "$MODE" = relay-secrets ]; then
 		[ "$(field_of "$st" 1)" = "$2" ] && [ "$(field_of "$st" 4)" = "$ACCT_UID" ] && [ "$(field_of "$st" 3)" = "$3" ] \
 			&& { [ "$2" = directory ] || [ "$(field_of "$st" 2)" = 1 ]; }
 	}
-	fd_check 7 "regular file" "$INO_TOKEN" || rs_stop "token is not the regular, single-link, site-owned file just written"
-	fd_check 8 "regular file" "$INO_URL" || rs_stop "url is not the regular, single-link, site-owned file just written"
-	fd_check 9 directory "$INO_DIR" || rs_stop "etc/notify-relay is not the site-owned directory just made"
-	for fd in 7 8 9; do
-		chown "0:$RS_GID" "/dev/fd/$fd" || rs_stop "chown failed"
-	done
-	exec 7<&- 8<&- 9<&-
+	# Root opens the three entries only with O_NOFOLLOW|O_NONBLOCK|O_NOCTTY (the directory also O_DIRECTORY), so a
+	# symlink, a FIFO or a device put there after the look at the path is refused at the open and never waited on or
+	# opened. perl does the open (bash cannot pass these flags) and hands them on as fds 7, 8, 9 to the check below.
+	command -v perl >/dev/null 2>&1 || rs_stop "perl is missing — nothing opened"
+	read -r -d '' RS_PERL_OPEN <<'PERL_EOF' || true
+use strict; use Fcntl; use POSIX ();
+$^F = 255;
+my @want = ([7, $ARGV[0], O_RDONLY|O_NOFOLLOW|O_NONBLOCK|O_NOCTTY],
+            [8, $ARGV[1], O_RDONLY|O_NOFOLLOW|O_NONBLOCK|O_NOCTTY],
+            [9, $ARGV[2], O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_NONBLOCK]);
+my @keep;
+for my $w (@want) {
+	sysopen(my $h, $w->[1], $w->[2]) or exit 11;
+	my $fd = fileno($h);
+	if ($fd == $w->[0]) { push @keep, $h; next; }
+	POSIX::dup2($fd, $w->[0]) or exit 11;
+	close $h;
+}
+splice(@ARGV, 0, 3);
+exec { $ARGV[0] } @ARGV or exit 11;
+PERL_EOF
+	read -r -d '' RS_AFTER_OPEN <<'AFTER_EOF' || true
+fd_check 7 "regular file" "$INO_TOKEN" || rs_stop "token is not the regular, single-link, site-owned file just written"
+fd_check 8 "regular file" "$INO_URL" || rs_stop "url is not the regular, single-link, site-owned file just written"
+fd_check 9 directory "$INO_DIR" || rs_stop "etc/notify-relay is not the site-owned directory just made"
+for fd in 7 8 9; do
+	chown "0:$RS_GID" "/dev/fd/$fd" || rs_stop "chown failed"
+done
+AFTER_EOF
+	export ACCT_UID INO_DIR INO_TOKEN INO_URL RS_GID
+	perl -e "$RS_PERL_OPEN" "$RD/token" "$RD/url" "$RD" bash -c "$(declare -f state_of field_of rs_stop fd_check); $RS_AFTER_OPEN" \
+		|| rs_stop "a relay entry could not be opened safely, or failed the check on the opened object"
 	for spec in "etc/notify-relay:directory:750:$INO_DIR" "etc/notify-relay/token:regular file:640:$INO_TOKEN" "etc/notify-relay/url:regular file:640:$INO_URL"; do
 		st="$(state_of "$W/${spec%%:*}")" || rs_stop "cannot stat ${spec%%:*}"
 		rest="${spec#*:}"; want_type="${rest%%:*}"; rest="${rest#*:}"; want_mode="${rest%%:*}"; want_ino="${rest#*:}"
