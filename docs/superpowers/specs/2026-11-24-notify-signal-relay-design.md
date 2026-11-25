@@ -341,6 +341,7 @@ validator host（cron）
 ### 14.4 12/9 以降
 
 1. 外部の見張り（`metal-external-watch`）: `install-web-host-external-watch.sh` に P1・P2 の同梱と `WATCH_NOTIFY`・見張りの秘密の置き場への札と URL を足す（凍結の外。別の設計の工程）。`metal-validator` が live になって 1 週の後（渡しの節の時期）
+   - 2026-11-25 の決定で 12/7 の前に前倒し（`metal-validator` の live を待たない）。形: `install-web-host-external-watch.sh` の `--notify-relay`（P1 を `bin/`・P2 を `bin/lib/` に同梱し、cron の行に `WATCH_NOTIFY=<bin>/notify-relay-put.sh` を足す。外す時は旗なしで入れ直す）と `--relay-secrets`（P3 の `--install-secrets` を `NTFY_TOPIC_FILE`=見張りの topic のファイルで動かし、`etc/notify-relay/` に札と URL。持ち主 root・group=topic のファイルの group）。使い方は `docs/MONITORING_OPS.md` の 14.5
 2. `notify.sh` を P2 に替え、優先度の寄せと脚注を 1 か所にする（出力がバイトで同じ試験つき。次の転換の稽古の前に）
 3. 封の署名（渡しの節の問い 2）で Metal の側に変更が要るなら、その時に設計する
 

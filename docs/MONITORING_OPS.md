@@ -805,6 +805,26 @@ WEB_HOST=<web host> WEB_HOST_KEY=<path> WATCH_ACCOUNT=<web host account> \
 
 The installer backs up the crontab to `~/metal-fy-watch-crontab.bak-<ts>` in the site account's home (only the newest 3 of those are kept), removes only the marker-delimited block (same byte-identical verification for everything outside it), then removes `metal-fy-watch/`, **including the watch's topic**. A later install generates a new topic, which must be saved and subscribed to again (the old subscription in the ntfy app can be removed).
 
+**Notify relay (optional; `--notify-relay`, `--relay-secrets`)**
+
+The watch can hand each notice to the shared relay (ops) first. Design: `docs/superpowers/specs/2026-11-24-notify-signal-relay-design.md` 14.4. It is off unless asked for, and the watch's own topic stays the fallback (independence is kept).
+
+```bash
+# 1. Place the delegate and arm the cron line with WATCH_NOTIFY (same environment as an install).
+WEB_HOST=<web host> WEB_HOST_KEY=<path> WATCH_ACCOUNT=<web host account> VALIDATOR_HOST=<validator host> \
+  bash scripts/install-web-host-external-watch.sh --notify-relay
+
+# 2. Place the relay token and URL (Mac files; values go on stdin, never printed).
+WEB_HOST=<web host> WEB_HOST_KEY=<path> WATCH_ACCOUNT=<web host account> \
+  RELAY_TOKEN_FILE=<token file> RELAY_URL_FILE=<url file> \
+  bash scripts/install-web-host-external-watch.sh --relay-secrets
+```
+
+- `--notify-relay` adds `bin/notify-relay-put.sh` (700) and `bin/lib/notify-text.sh` (600) and changes the cron line to carry `WATCH_NOTIFY=$HOME/metal-fy-watch/bin/notify-relay-put.sh`. `bin/notify.sh` and `bin/external-watch.sh` are not touched.
+- `--relay-secrets` runs `install-notify-relay.sh --install-secrets` on the web host with `NTFY_TOPIC_FILE` set to the watch's topic file: `etc/notify-relay/` (750) and `token`, `url` (640), owner root, group = the topic file's group (the site account reads them through the group; the delegate refuses anything not owned by root). A symlink at that path is refused. The delegate has no effect until both files exist (it falls back to `bin/notify.sh`).
+- Anything but an HTTP 204 from ops runs `bin/notify.sh` with the same argument list and environment (`NTFY_TOPIC_FILE`, `NOTIFY_STRICT_EXIT`), so the notice goes to the watch's own topic as before and the exit code is notify.sh's.
+- **Switch off:** re-run the install **without** `--notify-relay`: the cron line returns to the plain one (the delegate files stay, unused). `--uninstall` removes everything.
+
 ### 14.6 Backstop and known gap
 
 - **GitHub backstop.** `.github/workflows/uptime.yml` fails when `validator.json` is more than 1 hour stale, except inside the renewal window (where it emits a notice). It is slow (scheduled GitHub runs in practice fire only every few hours) but independent of both hosts and of their provider.

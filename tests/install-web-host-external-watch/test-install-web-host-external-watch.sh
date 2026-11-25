@@ -657,6 +657,98 @@ check "static: the installer has no validator-side ssh at all" \
 	'! grep -nE "VALIDATOR_SSH_KEY\"|VALIDATOR_SSH_USER\}@|validator_run|@\\$\\{?VALIDATOR_HOST" "$INSTALLER"'
 
 # ==============================================================================
+# notify relay for the watch (--notify-relay, --relay-secrets)
+# ==============================================================================
+P1_SRC="$REPO/scripts/notify-relay-put.sh"
+P2_SRC="$REPO/scripts/lib/notify-text.sh"
+# shellcheck disable=SC2016  # literal $HOME is the armed cron line
+CRON_LINE_RELAY='*/5 * * * * WATCH_LIVE=1 WATCH_NOTIFY=$HOME/metal-fy-watch/bin/notify-relay-put.sh /bin/bash $HOME/metal-fy-watch/bin/external-watch.sh >>$HOME/metal-fy-watch/log/cron.err 2>&1'
+CHOWN_LOG="$T/chown.log"
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "%s"\nexit 0\n' "$CHOWN_LOG" > "$CRONBIN/chown"; chmod +x "$CRONBIN/chown"
+
+fresh_fixture; cotenant_crontab; cp "$STORE" "$T/orig"
+run --notify-relay --dry-run
+check "relay dry-run: exit 0, nothing written" '[ "$RC" -eq 0 ] && [ ! -e "$H/metal-fy-watch/bin/notify-relay-put.sh" ] && [ "$(nwrites)" = 0 ]' "rc=$RC"
+run --notify-relay
+W="$H/metal-fy-watch"
+check "relay install exits 0" '[ "$RC" -eq 0 ]' "rc=$RC: $(printf '%s' "$OUT" | tail -5)"
+check "relay: bin/notify-relay-put.sh identical to repo, mode 700" 'cmp -s "$P1_SRC" "$W/bin/notify-relay-put.sh" && [ "$(meta "$W/bin/notify-relay-put.sh")" = 700 ]'
+check "relay: bin/lib/notify-text.sh identical to repo, mode 600, dir 700" 'cmp -s "$P2_SRC" "$W/bin/lib/notify-text.sh" && [ "$(meta "$W/bin/lib/notify-text.sh")" = 600 ] && [ "$(meta "$W/bin/lib")" = 700 ]'
+check "relay: bin/notify.sh and external-watch.sh untouched (still the repo's)" 'cmp -s "$NOTIFY_SRC" "$W/bin/notify.sh" && cmp -s "$WATCH_SRC" "$W/bin/external-watch.sh"'
+check "relay: block is markers + the WATCH_NOTIFY line" 'tail -n 3 "$STORE" | cmp -s - <(printf "%s\n" "$BEGIN_MARK" "$CRON_LINE_RELAY" "$END_MARK")'
+check "relay: co-tenant lines byte-identical" 'outside "$STORE" | cmp -s - "$T/orig"'
+W1="$(nwrites)"; cp "$STORE" "$T/after-relay"
+run --notify-relay
+check "relay re-run: up to date, crontab not rewritten" '[ "$RC" -eq 0 ] && [ "$(nwrites)" = "$W1" ] && printf "%s" "$OUT" | grep -q "already up to date"' "rc=$RC"
+
+# the delegate really falls back to the watch's own notify.sh with the watch's own topic
+RB="$T/rb"; mkdir -p "$RB"
+cat > "$RB/curl" <<'STUBEOF'
+#!/bin/bash
+prev=''; for a in "$@"; do [ "$prev" = -K ] && cat "$a" >> "$RB_LOG"; prev="$a"; done
+printf '%s' "${RB_CODE:-200}"
+exit 0
+STUBEOF
+printf '#!/bin/sh\nexit 0\n' > "$RB/logger"; chmod +x "$RB/curl" "$RB/logger"
+watch_call() { # same shape as external-watch.sh attempt_notify; $1 = delegate, rest = extra env
+	local d="$1"; shift
+	: > "$T/rb.log"
+	env PATH="$RB:$PATH" RB_LOG="$T/rb.log" "$@" NTFY_TOPIC_FILE="$W/etc/ntfy-topic" NOTIFY_STRICT_EXIT=1 "$d" high title body >/dev/null 2>&1
+}
+watch_call "$W/bin/notify-relay-put.sh" X=1; RC=$?
+check "fallback: no relay secrets -> exit 0 via notify.sh" '[ "$RC" -eq 0 ]' "rc=$RC"
+check "fallback: notify.sh got the watch's own topic file (env kept)" 'grep -qF "$(tr -d "[:space:]" < "$W/etc/ntfy-topic")" "$T/rb.log"'
+watch_call "$W/bin/notify-relay-put.sh" RB_CODE=503; RC=$?
+check "fallback: notify.sh's exit code (5 for a 503) comes through unchanged" '[ "$RC" -eq 5 ]' "rc=$RC"
+
+# --relay-secrets: the token and URL placed through install-notify-relay.sh (P3)
+RS_TOKEN="$T/rs-token"; RS_URL="$T/rs-url"
+LC_ALL=C tr -dc 'A-Za-z0-9_-' < /dev/urandom | head -c 43 > "$RS_TOKEN"
+printf 'https://relay.example.invalid/notify-relay/put\n' > "$RS_URL"
+RS_ENV="RELAY_TOKEN_FILE=$RS_TOKEN RELAY_URL_FILE=$RS_URL"
+TOPIC_GID="$(stat -c '%g' "$W/etc/ntfy-topic" 2>/dev/null || stat -f '%g' "$W/etc/ntfy-topic")"
+RD="$W/etc/notify-relay"
+EXTRA_ENV="$RS_ENV" run --relay-secrets --dry-run
+check "relay-secrets dry-run: nothing written" '[ "$RC" -eq 0 ] && [ ! -e "$RD" ]' "rc=$RC"
+run --relay-secrets
+check "relay-secrets without the file variables: exit 2" '[ "$RC" -eq 2 ] && [ ! -e "$RD" ]' "rc=$RC"
+: > "$CHOWN_LOG"
+EXTRA_ENV="$RS_ENV" run --relay-secrets
+check "relay-secrets exits 0" '[ "$RC" -eq 0 ]' "rc=$RC: $(printf '%s' "$OUT" | tail -5)"
+check "relay-secrets: dir 750, token and url 640 with the right content" '[ "$(meta "$RD")" = 750 ] && [ "$(meta "$RD/token")" = 640 ] && [ "$(meta "$RD/url")" = 640 ] && [ "$(cat "$RD/token")" = "$(cat "$RS_TOKEN")" ] && [ "$(cat "$RD/url")" = "$(cat "$RS_URL")" ]'
+check "relay-secrets: owner 0 and the topic file's group given to dir, token, url" '[ "$(grep -c "^0:$TOPIC_GID " "$CHOWN_LOG")" = 3 ]'
+check "relay-secrets: output never shows the token or the URL" '! printf "%s" "$OUT" | grep -qF "$(cat "$RS_TOKEN")" && ! printf "%s" "$OUT" | grep -qF "relay.example.invalid"'
+check "relay-secrets: nothing but token and url left in the dir" '[ "$(ls -A "$RD" | tr "\n" " ")" = "token url " ]'
+check "relay-secrets: the rest of the watch dir untouched" 'cmp -s "$STORE" "$T/after-relay" && [ "$(meta "$W/etc/ntfy-topic")" = 600 ]'
+rm -rf "$RD"
+printf 'short\n' > "$T/rs-bad"
+EXTRA_ENV="RELAY_TOKEN_FILE=$T/rs-bad RELAY_URL_FILE=$RS_URL" run --relay-secrets
+check "relay-secrets: malformed token -> exit 4, nothing written" '[ "$RC" -eq 4 ] && [ ! -e "$RD" ]' "rc=$RC"
+mkdir -p "$T/elsewhere"; ln -s "$T/elsewhere" "$RD"
+EXTRA_ENV="$RS_ENV" run --relay-secrets
+check "relay-secrets: symlink at the secret dir -> exit 5, target untouched" '[ "$RC" -eq 5 ] && [ -z "$(ls -A "$T/elsewhere")" ]' "rc=$RC"
+rm -f "$RD"
+run --relay-secrets --uninstall
+check "--relay-secrets with --uninstall: exit 2" '[ "$RC" -eq 2 ]' "rc=$RC"
+run --notify-relay --uninstall
+check "--notify-relay with --uninstall: exit 2" '[ "$RC" -eq 2 ]' "rc=$RC"
+
+# real mode: the token and the URL travel on stdin, never in argv
+real --notify-relay
+check "real mode --notify-relay: exit 0" '[ "$RC" -eq 0 ]' "rc=$RC: $OUT"
+EXTRA_ENV="$RS_ENV" real --relay-secrets
+check "real mode --relay-secrets: exit 0, one remote call" '[ "$RC" -eq 0 ] && [ "$(grep -c "relay-secrets" "$SSH_LOG")" = 1 ]' "rc=$RC: $OUT"
+check "real mode --relay-secrets: token and URL never in an ssh argv" '! grep -qF "$(cat "$RS_TOKEN")" "$SSH_LOG" && ! grep -qF "relay.example.invalid" "$SSH_LOG"'
+check "real mode --relay-secrets: token is on stdin line 1, URL on line 2" 'f="$(ls "$SSH_STDIN_DIR"/* | tail -1)"; [ "$(sed -n 1p "$f")" = "$(cat "$RS_TOKEN")" ] && [ "$(sed -n 2p "$f")" = "$(cat "$RS_URL")" ]'
+check "real mode --relay-secrets: no clipboard, no validator host" '[ ! -e "$CLIP" ] && ! grep -qF "$VH" "$SSH_LOG"'
+
+# switching it off: install without the flag returns the block (and only the block) to the original
+fresh_fixture; cotenant_crontab; cp "$STORE" "$T/orig"
+run --notify-relay
+run
+check "relay off: re-run without the flag restores the original cron line" '[ "$RC" -eq 0 ] && tail -n 3 "$STORE" | cmp -s - <(printf "%s\n" "$BEGIN_MARK" "$CRON_LINE" "$END_MARK") && outside "$STORE" | cmp -s - "$T/orig"' "rc=$RC"
+
+# ==============================================================================
 # secrets never printed, across every run above
 # ==============================================================================
 check "no run printed the validator host" '! grep -qF "$VH" "$ALL_OUT"'
