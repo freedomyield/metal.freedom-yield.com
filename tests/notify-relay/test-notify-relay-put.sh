@@ -204,9 +204,11 @@ check "700/600 still sent" "$([ "$P1_RC" -eq 0 ] && [ "$(count_lines "$FAKE_REC/
 fresh; set_args 2; run_p1
 check "token 43 chars + newline: put sent" "$([ "$(count_lines "$FAKE_REC/curl.count")" = 1 ] && [ "$P1_RC" -eq 0 ]; echo $?)"
 body="$(cat "$FAKE_REC/curl.stdin")"
-check "body keys are exactly the 3" "$([ "$(printf '%s' "$body" | jq -c 'keys')" = '["schema","schema_version","text"]' ]; echo $?)"
-check "body schema/version" "$([ "$(printf '%s' "$body" | jq -c '[.schema,.schema_version]')" = '["notify.relay.put",1]' ]; echo $?)"
-check "body text is the rendered text" "$([ "$(printf '%s' "$body" | jq -j '.text')" = "$(printf '【高】Freedom Yield ops\nmsg')" ]; echo $?)"
+check "body keys are exactly project/title/body" "$([ "$(printf '%s' "$body" | jq -c 'keys')" = '["body","project","title"]' ]; echo $?)"
+check "body has none of the old keys" "$([ "$(printf '%s' "$body" | jq -c 'has("schema") or has("schema_version") or has("text")')" = false ]; echo $?)"
+check "body project is Metal" "$([ "$(printf '%s' "$body" | jq -j '.project')" = 'Metal' ]; echo $?)"
+check "body title is the rendered title" "$([ "$(printf '%s' "$body" | jq -j '.title')" = '【高】Freedom Yield ops' ]; echo $?)"
+check "body body is the rendered body" "$([ "$(printf '%s' "$body" | jq -j '.body')" = 'msg' ]; echo $?)"
 cfg="$FAKE_REC/curl.config"
 check "config: url line" "$(grep -qFx "url = \"$FAKE_URL\"" "$cfg"; echo $?)"
 check "config: Authorization line" "$(grep -qFx "header = \"Authorization: Bearer $FAKE_TOKEN\"" "$cfg"; echo $?)"
@@ -244,26 +246,40 @@ limit_case() { # name expect(send|too_long) body
     check "limit $1: too_long, no put" "$([ "$(cat "$FAKE_REC/p1.err")" = 'notify-relay: fallback too_long' ] && [ ! -f "$FAKE_REC/curl.count" ] && [ "$(count_lines "$FAKE_REC/notify.count")" = 1 ]; echo $?)" "err=$(cat "$FAKE_REC/p1.err")"
   fi
 }
-limit_case "30 lines" send "$(join_lines 29)"
-limit_case "31 lines" too_long "$(join_lines 30)"
-limit_case "2000 chars (multibyte)" send "$(rep あ 1994)"
-limit_case "2001 chars" too_long "$(rep あ 1995)"
-json_bytes() { printf '%s' "$1" | jq -Rsjc '{schema:"notify.relay.put",schema_version:1,text:.}' | LC_ALL=C wc -c | tr -d ' '; }
+limit_case "31 lines (lines are not limited)" send "$(join_lines 31)"
+limit_case "200 lines" send "$(join_lines 200)"
+# the counted text is 【Metal】<title>\n<body>; title is 【通常】t (5 chars), so 7 + 5 + newline = 13 chars before the body
+limit_case "2000 chars exactly (multibyte)" send "$(rep あ 1987)"
+limit_case "2001 chars" too_long "$(rep あ 1988)"
+json_bytes() { jq -nj --arg p Metal --arg t "$1" --arg b "$2" '{project:$p,title:$t,body:$b}' | LC_ALL=C wc -c | tr -d ' '; }
 ctl="$(printf '\001')"
 base_body="$(rep "$ctl" 1300)"
-base_text="$(printf '【通常】t\n%s' "$base_body")"
-pad=$((8192 - $(json_bytes "$base_text")))
-check "limit setup: padding is positive and chars stay <= 2000" "$([ "$pad" -gt 0 ] && [ $((1300 + pad + 6)) -le 2000 ]; echo $?)" "pad=$pad"
+pad=$((8192 - $(json_bytes '【通常】t' "$base_body")))
+check "limit setup: padding is positive and chars stay <= 2000" "$([ "$pad" -gt 0 ] && [ $((1300 + pad + 13)) -le 2000 ]; echo $?)" "pad=$pad"
 limit_case "8192 bytes exactly" send "$base_body$(rep a "$pad")"
 limit_case "8193 bytes" too_long "$base_body$(rep a $((pad + 1)))"
-fresh; ARGS=("default" "t" "$(join_lines 30)"); relay_fake_reset_rec
+fresh; ARGS=("default" "t" "$(rep あ 1988)"); relay_fake_reset_rec
 problems="$(fallback_run_one too_long 5)"
 check "too_long: notify.sh gets same argv/env/rc" "$([ -z "$problems" ]; echo $?)" "$problems"
+
+# ---- 9b. odd characters survive the JSON (read back with jq = same as the rendered title/body)
+odd_title=$'q"uo\\te\ttab\x01ctl 日本語'
+odd_body=$'行1 "x" \\ back\n\ttab \x01 ctl\n日本語 🍣'
+fresh; ARGS=("high" "$odd_title" "$odd_body"); run_p1
+body="$(cat "$FAKE_REC/curl.stdin")"
+check "odd chars: put sent" "$([ "$P1_RC" -eq 0 ] && [ "$(count_lines "$FAKE_REC/curl.count")" = 1 ]; echo $?)" "rc=$P1_RC err=$(cat "$FAKE_REC/p1.err")"
+check "odd chars: body is valid JSON" "$(printf '%s' "$body" | jq -e . >/dev/null 2>&1; echo $?)"
+check "odd chars: title reads back the same" "$([ "$(printf '%s' "$body" | jq -j '.title' && printf x)" = "【高】${odd_title}x" ]; echo $?)"
+check "odd chars: body reads back the same" "$([ "$(printf '%s' "$body" | jq -j '.body' && printf x)" = "${odd_body}x" ]; echo $?)"
 
 # ---- 10. invalid UTF-8
 fresh; ARGS=("high" "t" $'bad\xffbyte')
 problems="$(fallback_run_one bad_text 3)"
 check "invalid UTF-8 -> bad_text, curl not called, notify args same" "$([ -z "$problems" ] && [ ! -f "$FAKE_REC/curl.count" ]; echo $?)" "$problems"
+
+fresh; ARGS=("high" $'bad\xfftitle' "ok")
+problems="$(fallback_run_one bad_text 3)"
+check "invalid UTF-8 in the title -> bad_text, curl not called" "$([ -z "$problems" ] && [ ! -f "$FAKE_REC/curl.count" ]; echo $?)" "$problems"
 
 # ---- 11. notify.sh missing next to P1
 fresh; rm "$FAKE_DIR/scripts/notify.sh"; FAKE_CURL_CODE=500; set_args 1; run_p1

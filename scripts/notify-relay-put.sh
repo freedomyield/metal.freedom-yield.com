@@ -16,9 +16,7 @@ set -u -o pipefail
 RELAY_PUT_TIMEOUT_SECONDS=10
 RELAY_PUT_MAX_BYTES=8192
 RELAY_TEXT_MAX_CHARS=2000
-RELAY_TEXT_MAX_LINES=30
-RELAY_PUT_SCHEMA='notify.relay.put'
-RELAY_PUT_SCHEMA_VERSION=1
+RELAY_PUT_PROJECT='Metal'
 RELAY_SUCCESS_HTTP_CODE='204'
 RELAY_LOG_TAG='notify-relay'
 # shellcheck disable=SC2034  # documentation of the closed set of reasons
@@ -151,29 +149,29 @@ relay_put_check_tools() {
   return 0
 }
 
-# relay_put_build_body <notify args...> — RELAY_BODY (JSON) from the rendered text, or bad_text.
+# relay_put_build_body <notify args...> — RELAY_BODY (JSON {project,title,body}) from the rendered parts, or bad_text.
 relay_put_build_body() {
-  local built back
+  local built back_project back_title back_body
   fyd_relay_render_text "$RELAY_REPO_ROOT" "$@" || { relay_put_fail bad_text; return 1; }
-  built="$(printf '%s' "$FYD_RELAY_TEXT" | jq -Rsjc --arg s "$RELAY_PUT_SCHEMA" --argjson v "$RELAY_PUT_SCHEMA_VERSION" '{schema:$s,schema_version:$v,text:.}' && printf x)" || { relay_put_fail bad_text; return 1; }
+  built="$(jq -nj --arg p "$RELAY_PUT_PROJECT" --arg t "$FYD_RELAY_TITLE" --arg b "$FYD_RELAY_BODY" '{project:$p,title:$t,body:$b}' && printf x)" || { relay_put_fail bad_text; return 1; }
   RELAY_BODY="${built%x}"
-  back="$(printf '%s' "$RELAY_BODY" | jq -j '.text' && printf x)" || { relay_put_fail bad_text; return 1; }
-  back="${back%x}"
-  relay_put_text_roundtrips "$FYD_RELAY_TEXT" "$back" || { relay_put_fail bad_text; return 1; }
+  back_project="$(printf '%s' "$RELAY_BODY" | jq -j '.project' && printf x)" || { relay_put_fail bad_text; return 1; }
+  back_title="$(printf '%s' "$RELAY_BODY" | jq -j '.title' && printf x)" || { relay_put_fail bad_text; return 1; }
+  back_body="$(printf '%s' "$RELAY_BODY" | jq -j '.body' && printf x)" || { relay_put_fail bad_text; return 1; }
+  relay_put_text_roundtrips "$RELAY_PUT_PROJECT" "${back_project%x}" || { relay_put_fail bad_text; return 1; }
+  relay_put_text_roundtrips "$FYD_RELAY_TITLE" "${back_title%x}" || { relay_put_fail bad_text; return 1; }
+  relay_put_text_roundtrips "$FYD_RELAY_BODY" "${back_body%x}" || { relay_put_fail bad_text; return 1; }
   return 0
 }
 
-# relay_put_check_limits — lines / chars / JSON bytes; never cuts.
+# relay_put_check_limits — ops's sentence "【project】title\nbody" chars (code points) and JSON bytes; never cuts.
 relay_put_check_limits() {
-  local counts lines chars bytes
-  counts="$(printf '%s' "$FYD_RELAY_TEXT" | jq -Rsr '"\(split("\n") | length) \(length)"')" || { relay_put_fail bad_text; return 1; }
-  lines="${counts% *}"
-  chars="${counts#* }"
-  [[ "$lines" =~ ^[0-9]+$ ]] || { relay_put_fail bad_text; return 1; }
+  local chars bytes
+  chars="$(jq -nr --arg p "$RELAY_PUT_PROJECT" --arg t "$FYD_RELAY_TITLE" --arg b "$FYD_RELAY_BODY" '("【" + $p + "】" + $t + "\n" + $b) | length')" || { relay_put_fail bad_text; return 1; }
   [[ "$chars" =~ ^[0-9]+$ ]] || { relay_put_fail bad_text; return 1; }
   bytes="$(printf '%s' "$RELAY_BODY" | LC_ALL=C wc -c)" || { relay_put_fail bad_text; return 1; }
   bytes="$((bytes + 0))"
-  if [ "$lines" -le "$RELAY_TEXT_MAX_LINES" ] && [ "$chars" -le "$RELAY_TEXT_MAX_CHARS" ] && [ "$bytes" -le "$RELAY_PUT_MAX_BYTES" ]; then
+  if [ "$chars" -le "$RELAY_TEXT_MAX_CHARS" ] && [ "$bytes" -le "$RELAY_PUT_MAX_BYTES" ]; then
     return 0
   fi
   relay_put_fail too_long

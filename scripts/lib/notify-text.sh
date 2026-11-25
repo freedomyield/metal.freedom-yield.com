@@ -96,7 +96,7 @@ fyd_relay_token_is_valid() {
 }
 
 # fyd_relay_render_text <repo_root> [prio [title [message...]]]
-# Sets FYD_RELAY_TEXT to "【word】title\nbody[\n\nfooter]" (not printed: $(...) would drop trailing newlines).
+# Sets FYD_RELAY_TITLE to "【word】title" and FYD_RELAY_BODY to "body[\n\nfooter]" (not printed: $(...) would drop trailing newlines).
 fyd_relay_render_text() {
   local repo_root="${1:-}" priority_word title_text body_text footer_text
   local IFS=$' \t\n'
@@ -113,9 +113,11 @@ fyd_relay_render_text() {
     if [[ "$title_text" =~ ^[[:space:]]*$ ]]; then body_text="$FYD_NOTIFY_TITLE_DEFAULT"; else body_text="$title_text"; fi
   fi
   footer_text="$(fyd_notify_uptime_footer "$repo_root")"
-  printf -v FYD_RELAY_TEXT '【%s】%s\n%s' "$priority_word" "$title_text" "$body_text"
+  # shellcheck disable=SC2034  # read by P1 and the tests
+  printf -v FYD_RELAY_TITLE '【%s】%s' "$priority_word" "$title_text"
+  FYD_RELAY_BODY="$body_text"
   if [ -n "$footer_text" ]; then
-    printf -v FYD_RELAY_TEXT '%s\n\n%s' "$FYD_RELAY_TEXT" "$footer_text"
+    printf -v FYD_RELAY_BODY '%s\n\n%s' "$FYD_RELAY_BODY" "$footer_text"
   fi
   return 0
 }

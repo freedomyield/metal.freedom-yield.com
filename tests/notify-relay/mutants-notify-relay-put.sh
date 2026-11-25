@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2016  # sed expressions are literal on purpose
 # tests/notify-relay/mutants-notify-relay-put.sh — mutation net for scripts/notify-relay-put.sh (P1, tier 3).
-# What: breaks a temp copy of P1 one way at a time (33 ways) and runs test-notify-relay-put.sh on it; every break must make it FAIL.
+# What: breaks a temp copy of P1 one way at a time (see the mutant list) and runs test-notify-relay-put.sh on it; every break must make it FAIL.
 # Gate: run `bash tests/notify-relay/mutants-notify-relay-put.sh` by hand before merging and see PASS (a pre-merge gate, not a unit test).
 # Not in CI: the name is not test-*.sh so tests/run-all-tests.sh skips it; a run takes minutes (mutants run in parallel, RELAY_MUTANT_JOBS=8).
 # CHAIN: none.
@@ -64,14 +64,20 @@ mutant "-K replaced by -H in argv"        's/-K <(relay_put_write_config "\$RELA
 mutant "permission check removed"         's/^relay_put_perms_ok() {$/relay_put_perms_ok() { return 0;/'
 mutant "url shape check always true"      's/^relay_put_url_ok() {$/relay_put_url_ok() { return 0;/'
 mutant "token shape check always true"    's/^relay_put_token_ok() {$/relay_put_token_ok() { return 0;/'
-mutant "line limit -le 31"                's/^RELAY_TEXT_MAX_LINES=30$/RELAY_TEXT_MAX_LINES=31/'
 mutant "char limit 2001"                  's/^RELAY_TEXT_MAX_CHARS=2000$/RELAY_TEXT_MAX_CHARS=2001/'
+mutant "project value changed"            "s/^RELAY_PUT_PROJECT='Metal'\$/RELAY_PUT_PROJECT='Other'/"
+mutant "title and body swapped"           's/--arg t "\$FYD_RELAY_TITLE" --arg b "\$FYD_RELAY_BODY" .{project/--arg t "$FYD_RELAY_BODY" --arg b "$FYD_RELAY_TITLE" '"'"'{project/'
+mutant "key body renamed to text"         's/body:\$b}/text:$b}/'
+mutant "key title renamed to subject"     's/title:\$t,/subject:$t,/'
+mutant "char count without the project mark" 's/("【" + \$p + "】" + \$t/(\$t/'
+mutant "char count without the newline"   's/"】" + \$t + "\\n" + \$b/"】" + $t + $b/'
+mutant "title readback check removed"     's/relay_put_text_roundtrips "\$FYD_RELAY_TITLE" "\${back_title%x}" ||/true ||/'
+mutant "body readback check removed"      's/relay_put_text_roundtrips "\$FYD_RELAY_BODY" "\${back_body%x}" ||/true ||/'
 mutant "byte limit 8193"                  's/^RELAY_PUT_MAX_BYTES=8192$/RELAY_PUT_MAX_BYTES=8193/'
 mutant "-L added"                         's/ -sS / -L -sS /'
 mutant "--max-time removed"               's/ --max-time "\$RELAY_PUT_TIMEOUT_SECONDS"//'
 mutant "argv first arg dropped on exec"   's/^  exec bash /  shift; exec bash /'
 mutant "bad_text check removed"           's/^relay_put_text_roundtrips() {$/relay_put_text_roundtrips() { return 0;/'
-mutant "line compare -le -> -lt"          's/"\$lines" -le /"$lines" -lt /'
 mutant "char compare -le -> -lt"          's/"\$chars" -le /"$chars" -lt /'
 mutant "byte compare -le -> -lt"          's/"\$bytes" -le /"$bytes" -lt /'
 mutant "curl exit ignored"                's/-ne 0 \]; then relay_put_fail "curl_\$curl_rc"; return 1; fi/-ne 99 ]; then relay_put_fail "curl_$curl_rc"; return 1; fi/'

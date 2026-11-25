@@ -50,34 +50,38 @@ eq "word min" 最低 "$(fyd_relay_priority_word min)"
 eq "word bogus" 通常 "$(fyd_relay_priority_word bogus)"
 
 # --- render
+render_eq() { # name expected_title expected_body (checks FYD_RELAY_TITLE and FYD_RELAY_BODY)
+  eq "$1: title" "$2" "$FYD_RELAY_TITLE"
+  eq "$1: body" "$3" "$FYD_RELAY_BODY"
+}
 write_uptime 87.31
 fyd_relay_render_text "$ROOT" high "題" "本文 1" "本文 2"
-eq "render with footer" "【高】題${NL}本文 1 本文 2${NL}${NL}[Uptime] 87.31%" "$FYD_RELAY_TEXT"
+render_eq "render with footer" "【高】題" "本文 1 本文 2${NL}${NL}[Uptime] 87.31%"
 NOTIFY_UPTIME_SUFFIX=' (予定 87.40%)' fyd_relay_render_text "$ROOT" high "題" "本文 1" "本文 2"
-eq "render with suffix" "【高】題${NL}本文 1 本文 2${NL}${NL}[Uptime] 87.31% (予定 87.40%)" "$FYD_RELAY_TEXT"
-want_plain="【高】題${NL}本文 1 本文 2"
+render_eq "render with suffix" "【高】題" "本文 1 本文 2${NL}${NL}[Uptime] 87.31% (予定 87.40%)"
 rm -f "$ROOT/public/api/validator.json"
-fyd_relay_render_text "$ROOT" high "題" "本文 1" "本文 2"; eq "no footer: file missing" "$want_plain" "$FYD_RELAY_TEXT"
+fyd_relay_render_text "$ROOT" high "題" "本文 1" "本文 2"; render_eq "no footer: file missing" "【高】題" "本文 1 本文 2"
 write_uptime null
-fyd_relay_render_text "$ROOT" high "題" "本文 1" "本文 2"; eq "no footer: null" "$want_plain" "$FYD_RELAY_TEXT"
+fyd_relay_render_text "$ROOT" high "題" "本文 1" "本文 2"; render_eq "no footer: null" "【高】題" "本文 1 本文 2"
 write_uptime '""'
-fyd_relay_render_text "$ROOT" high "題" "本文 1" "本文 2"; eq "no footer: empty" "$want_plain" "$FYD_RELAY_TEXT"
+fyd_relay_render_text "$ROOT" high "題" "本文 1" "本文 2"; render_eq "no footer: empty" "【高】題" "本文 1 本文 2"
 printf '{broken' > "$ROOT/public/api/validator.json"
-fyd_relay_render_text "$ROOT" high "題" "本文 1" "本文 2"; eq "no footer: broken json" "$want_plain" "$FYD_RELAY_TEXT"
+fyd_relay_render_text "$ROOT" high "題" "本文 1" "本文 2"; render_eq "no footer: broken json" "【高】題" "本文 1 本文 2"
 rm -f "$ROOT/public/api/validator.json"
-fyd_relay_render_text "$ROOT" high; eq "one arg: body is the arg" "【高】Freedom Yield ops${NL}high" "$FYD_RELAY_TEXT"
-fyd_relay_render_text "$ROOT"; eq "zero args" "【通常】Freedom Yield ops${NL}Freedom Yield ops" "$FYD_RELAY_TEXT"
-fyd_relay_render_text "$ROOT" low "T"; eq "title only: body is the title" "【低】T${NL}T" "$FYD_RELAY_TEXT"
-fyd_relay_render_text "$ROOT" low "T" ""; eq "empty body -> title" "【低】T${NL}T" "$FYD_RELAY_TEXT"
-fyd_relay_render_text "$ROOT" low "T" "  "; eq "spaces-only body -> title" "【低】T${NL}T" "$FYD_RELAY_TEXT"
-fyd_relay_render_text "$ROOT" low "T" $'\t\n'; eq "tab/newline-only body -> title" "【低】T${NL}T" "$FYD_RELAY_TEXT"
-fyd_relay_render_text "$ROOT" low "  " "  "; eq "blank title and blank body -> default title body" "【低】  ${NL}Freedom Yield ops" "$FYD_RELAY_TEXT"
-fyd_relay_render_text "$ROOT" low ""; eq "empty title, no body -> default title twice" "【低】Freedom Yield ops${NL}Freedom Yield ops" "$FYD_RELAY_TEXT"
-fyd_relay_render_text "$ROOT" low "T" " x "; eq "body with spaces and text kept" "【低】T${NL} x " "$FYD_RELAY_TEXT"
-fyd_relay_render_text "$ROOT" low ""  "x"; eq "empty title -> default" "【低】Freedom Yield ops${NL}x" "$FYD_RELAY_TEXT"
-fyd_relay_render_text "$ROOT" low "T" $'行\n'; eq "trailing newline kept" "【低】T${NL}行${NL}" "$FYD_RELAY_TEXT"
-printf -v want_nl '【低】T\n行\n'
-eq "trailing newline literal" "$want_nl" "$FYD_RELAY_TEXT"
+fyd_relay_render_text "$ROOT" high; render_eq "one arg: body is the arg" "【高】Freedom Yield ops" "high"
+fyd_relay_render_text "$ROOT"; render_eq "zero args" "【通常】Freedom Yield ops" "Freedom Yield ops"
+fyd_relay_render_text "$ROOT" low "T"; render_eq "title only: body is the title" "【低】T" "T"
+fyd_relay_render_text "$ROOT" low "T" ""; render_eq "empty body -> title" "【低】T" "T"
+fyd_relay_render_text "$ROOT" low "T" "  "; render_eq "spaces-only body -> title" "【低】T" "T"
+fyd_relay_render_text "$ROOT" low "T" $'\t\n'; render_eq "tab/newline-only body -> title" "【低】T" "T"
+fyd_relay_render_text "$ROOT" low "  " "  "; render_eq "blank title and blank body -> default title body" "【低】  " "Freedom Yield ops"
+fyd_relay_render_text "$ROOT" low ""; render_eq "empty title, no body -> default title twice" "【低】Freedom Yield ops" "Freedom Yield ops"
+fyd_relay_render_text "$ROOT" low "T" " x "; render_eq "body with spaces and text kept" "【低】T" " x "
+fyd_relay_render_text "$ROOT" low ""  "x"; render_eq "empty title -> default" "【低】Freedom Yield ops" "x"
+fyd_relay_render_text "$ROOT" low "T" $'行\n'; render_eq "trailing newline kept" "【低】T" "行${NL}"
+printf -v want_nl '行\n'
+eq "trailing newline literal" "$want_nl" "$FYD_RELAY_BODY"
+eq "FYD_RELAY_TEXT is gone" "" "${FYD_RELAY_TEXT:-}"
 
 # --- dir
 eq "relay_dir unset" /etc/freedom-yield/notify-relay "$(fyd_relay_dir)"
@@ -140,7 +144,7 @@ check_equal() { # label then argv...
   rm -f "$out".h "$out".d
   PATH="$EQ/bin:$PATH" FAKE_CURL_OUT="$out" NTFY_TOPIC_FILE="$EQ/topic" bash "$EQ/scripts/notify.sh" "$@" >/dev/null 2>&1
   fyd_relay_render_text "$EQ" "$@"
-  local first="${FYD_RELAY_TEXT%%$'\n'*}" rest="${FYD_RELAY_TEXT#*$'\n'}"
+  local first="$FYD_RELAY_TITLE" rest="$FYD_RELAY_BODY"
   local sent_body; sent_body="$(cat "$out.d"; printf x)"; sent_body="${sent_body%x}"
   local sent_title sent_prio
   sent_title="$(sed -n 's/^Title: //p' "$out.h")"
@@ -166,7 +170,7 @@ check_equal_except_body() { # label expected_notify_body expected_relay_body arg
   rm -f "$out".h "$out".d
   PATH="$EQ/bin:$PATH" FAKE_CURL_OUT="$out" NTFY_TOPIC_FILE="$EQ/topic" bash "$EQ/scripts/notify.sh" "$@" >/dev/null 2>&1
   fyd_relay_render_text "$EQ" "$@"
-  local first="${FYD_RELAY_TEXT%%$'\n'*}" rest="${FYD_RELAY_TEXT#*$'\n'}"
+  local first="$FYD_RELAY_TITLE" rest="$FYD_RELAY_BODY"
   local sent_body; sent_body="$(cat "$out.d"; printf x)"; sent_body="${sent_body%x}"
   eq "differs from notify.sh: notify.sh body: $label" "${want_notify}${NL}${NL}[Uptime] 87.31%" "$sent_body"
   eq "differs from notify.sh: relay body is the title: $label" "${want_body}${NL}${NL}[Uptime] 87.31%" "$rest"

@@ -58,7 +58,7 @@ validator host（後に web host の外部の見張りも）の知らせを、**
 | 憲法 §5 | 単方向・host の変更は 1 つずつ承認 → AI が実行 → AI が確かめる | 14 章の host の手は全て 1 手ずつ |
 | 憲法 §4 | 公開の repo | 0 行目の書かない物。秘密の置き場の場所は `NTFY_TOPIC_FILE` の dir から導き、新しいパスの文字を repo に足さない（7.2） |
 | 憲法 6 章 #21 | 知らせは notify だけで送る | この設計は Metal の知らせを notify（ops の口）へ寄せる工程。`notify.sh` の直の ntfy は「ops に渡らなかった時の予備」として残す（#21 の「既に動いている独自の知らせは…移す順を決める」に当たる） |
-| ops の上限（渡しの節） | 本文 8192 バイト・文 2000 字・30 行 | 6 章で Metal の側の扱いを決める |
+| ops の上限（渡しの節） | 本文（JSON）8192 バイト・ops が組む文 2000 字（行の数の上限は無い） | 6 章で Metal の側の扱いを決める |
 
 ## 4. Approaches（考えた案と選んだ理由）
 
@@ -73,7 +73,7 @@ validator host（後に web host の外部の見張りも）の知らせを、**
 
 - 行き先: `POST <URL>`。URL は ops の名を含むので、host の秘密の置き場の 1 行のファイル（`url`）にだけ置く
 - 見出し: `Authorization: Bearer <札>` と `X-Ops-Token: <札>`（同じ札を両方）・`Content-Type: application/json`
-- 本文: `{"schema":"notify.relay.put","schema_version":1,"text":"<文>"}` の 3 つの鍵だけ。caller は書かない（札が決める）
+- 本文: `{"project":"<名>","title":"<題名>","body":"<内容>"}` の 3 つの鍵だけ（3 つとも空でも空白だけでもない UTF-8 の文字列。`project` は P1 の定数 `RELAY_PUT_PROJECT` = `Metal`、`title` は「【優先度の語】題名」、`body` は本文と脚注）。caller は書かない（札が決める）
 - 答え: **状態の番号だけを読む**。`204` → 終わり（直の ntfy を送らない）。それ以外の全て（4xx・5xx・2xx の 204 以外・3xx・時間切れ・TLS の誤り・接続できない・番号が読めない）→ 今の `notify.sh` で直の ntfy。答えの本文は捨てる（`-o /dev/null`）
 - 締め切り: `RELAY_PUT_TIMEOUT_SECONDS` = 10 秒（curl の `--max-time`）。put は 1 回だけ（P1 の中でやり直さない）
 - 札: 送り手ごとに 1 つ・形 `[A-Za-z0-9_-]{43}`。validator host の札は `metal-validator`、外部の見張りの札は `metal-external-watch`（web host の見張りの秘密の置き場）。共有しない
@@ -92,11 +92,11 @@ validator host（後に web host の外部の見張りも）の知らせを、**
 - Tags（ntfy の絵文字）は文に入れない（Signal に欄が無い）。直の ntfy に倒れた時は `notify.sh` が今どおり付ける
 - Mac の notify の登録の形（`【(?:緊急|高|通常|低|最低)】…`）に合わない文は、notify の側が ntfy へ回す（Metal は形を判断しない。ops の上限だけを 6 章で見る）
 
-## 6. 上限（ops の 8192 バイト・2000 字・30 行に Metal の側でどう合わせるか）
+## 6. 上限（ops の 8192 バイト・2000 字に Metal の側でどう合わせるか。行の数の上限は無い）
 
 - **決定（設計者の判断）: 切らない。上限を超える文は put を送らず、今の `notify.sh` で ntfy だけに送る**
   - 理由: 切った文が Signal に届くと、残りが落ちる（反目標「今なら届いた知らせが届かなくなる」）。ntfy なら全文が今どおり届く。分けて送る形は ops の回数の上限（1 時間 60 通）を食い、順番が崩れる
-  - 確かめる順: (1) 文の行数 ≤ `RELAY_TEXT_MAX_LINES`（30）(2) 文の字数（Unicode の文字の数）≤ `RELAY_TEXT_MAX_CHARS`（2000）(3) 組んだ本文の JSON のバイト数 ≤ `RELAY_PUT_MAX_BYTES`（8192）。1 つでも超えたら、理由の語 `too_long` で直の ntfy
+  - 確かめる順: (1) ops が組む文 `【<project>】<title>\n<body>` の字数（Unicode の文字の数。改行も 1 字）≤ `RELAY_TEXT_MAX_CHARS`（2000）(2) 組んだ本文の JSON のバイト数 ≤ `RELAY_PUT_MAX_BYTES`（8192）。1 つでも超えたら、理由の語 `too_long` で直の ntfy
   - 数え方は jq（`notify.sh` が既に使う道具）で行い、cron の locale に引きずられない（bash の `${#…}` は locale でバイトを数えるので使わない）
   - 毎朝の要約など長い文は、当面 ntfy で届く。どれが超えるかは実装の計画の最初の段で、送り手ごとの文の長さを数える台本で確かめ（手で読み回さない）、超える物が常用の知らせなら経営者に報告する
 - 回数: Metal の側に回数の上限は置かない（ops が 1 時間 60 通で `429` を返し、Metal はそれを「204 以外」として直の ntfy に倒れる。落ちない）
@@ -137,8 +137,7 @@ validator host（後に web host の外部の見張りも）の知らせを、**
 | `RELAY_PUT_TIMEOUT_SECONDS` | 10 | P1 の定数 | P1 |
 | `RELAY_PUT_MAX_BYTES` | 8192 | P1 の定数（渡しの節と同じ値。13 章の試験で照らす） | P1 |
 | `RELAY_TEXT_MAX_CHARS` | 2000 | 同上 | P1 |
-| `RELAY_TEXT_MAX_LINES` | 30 | 同上 | P1 |
-| `RELAY_PUT_SCHEMA`・`RELAY_PUT_SCHEMA_VERSION` | `notify.relay.put`・1 | 同上 | P1 |
+| `RELAY_PUT_PROJECT` | `Metal` | 同上（本文の `project` の値） | P1 |
 | `RELAY_SUCCESS_HTTP_CODE` | `204` | 同上 | P1 |
 | `RELAY_TOKEN_PATTERN` | `^[A-Za-z0-9_-]{43}$` | 同上 | P1・P3・P4 |
 | `RELAY_URL_PATTERN` | `https://` で始まり、host の部分と `/notify-relay/put` で終わる 1 行（空白・引用符・改行・`\` を含まない）。試し台のために `http://127.0.0.1:<port>/notify-relay/put` だけは通す（17 章の 5） | 同上 | P1・P3 |
@@ -209,7 +208,7 @@ validator host（後に web host の外部の見張りも）の知らせを、**
 | URL のファイル | 無い・読めない・空 | 直の ntfy（`no_url`） |
 | URL のファイル | `RELAY_URL_PATTERN` に合わない（http・別の道・引用符・空白・2 行） | 直の ntfy（`bad_url`） |
 | 道具 | `curl` か `jq` が無い | 直の ntfy（`no_curl`・`no_jq`） |
-| 文 | 行数・字数・JSON のバイト数のどれかが上限を超える | 直の ntfy（`too_long`）。切らない |
+| 文 | 字数・JSON のバイト数のどちらかが上限を超える | 直の ntfy（`too_long`）。切らない |
 | 文 | jq が組めない・組んだ文が元の文と同じ中身にならない（不正な UTF-8 など） | 直の ntfy（`bad_text`）。Signal の文と ntfy の文が違う中身になる形を作らない |
 | 答え | `204` | 終わり（終了 0） |
 | 答え | `204` 以外の番号（200・201・202 を含む・3xx・4xx・5xx） | 直の ntfy（`http_<番号>`）。転送に従わない（`-L` を付けない） |
@@ -236,14 +235,14 @@ validator host（後に web host の外部の見張りも）の知らせを、**
 
 - お金: 無し（どの部品もお金を動かさない）
 - 回数: 1 通につき put は 1 回（P1 の中でやり直さない。送り手の今のやり直し（strict の 2・4・5）で P1 がもう 1 回呼ばれると put ももう 1 回）。ops の 1 時間 60 通を超えた物は `429` → 直の ntfy
-- 大きさ: 本文 8192 バイト・2000 字・30 行（6 章。超えたら ntfy だけ）
+- 大きさ: 本文 8192 バイト・2000 字（6 章。超えたら ntfy だけ）
 - 時間: put 10 秒
 
 ### 9.3 許可の一覧
 
 - 行き先: relay の dir の `url` の 1 行だけ（`RELAY_URL_PATTERN` に合う時）
 - 方法・見出し: `POST`・`Authorization`・`X-Ops-Token`・`Content-Type: application/json` だけ
-- 本文の鍵: `schema`・`schema_version`・`text` だけ
+- 本文の鍵: `project`・`title`・`body` だけ
 - 終わる答え: `204` だけ
 - cron の env を書き換える範囲: `RELAY_CRON_FILE_GLOBS` に合い、cron が実行する名のファイルだけ。書く行は `RELAY_CRON_ENV_LINE` の 1 行だけ
 
@@ -303,7 +302,7 @@ validator host（cron）
 3. 偽の curl の型: 503・遅延（`--max-time` で終了 28）・切断（終了 52・56）・TLS（60）・接続できない（7）・番号が読めない（`000`）。全て直の ntfy
 4. 札と URL が、偽の curl の argv にも環境にも現れない（偽の curl が自分の argv を書き出し、43 字の札の並びが無いことを見る。`-K` をやめて `-H` に替えると落ちる）
 5. 文が標準入力で渡り、本文の JSON の鍵がちょうど 3 つ（未知の鍵を足すと落ちる）
-6. 上限: 30 行・2000 字・8192 バイトのちょうどと 1 つ超え（日本語の 3 バイトの字で字数とバイトの差を作る）。超えたら put を送らない（偽の curl が呼ばれない）
+6. 上限: 2000 字・8192 バイトのちょうどと 1 つ超え（行は 31 行以上でも送る）（日本語の 3 バイトの字で字数とバイトの差を作る）。超えたら put を送らない（偽の curl が呼ばれない）
 7. 文の作り方: 5 つの優先度と未知の値・既定の題名と本文・脚注の有無で、期待の文字と一字一句同じ
 8. 等しさ: P2 の脚注・優先度の寄せ・既定の値・topic の既定のパスが、`notify.sh` の中の物と同じ（`notify.sh` を読む試験。P2 の 1 字を変えると落ちる）
 9. 権限: 札のファイルが 644 の時は put を送らない
