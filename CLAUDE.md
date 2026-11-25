@@ -35,7 +35,7 @@ The pattern across all work: **AI proposes, operator approves (per change), the 
 - Inline `style="..."` is forbidden by the site CSP (`style-src 'self'`). Define utility classes in CSS.
 - Headings follow strict `h1 → h2 → h3` nesting; do not skip levels.
 - Per Constitution §3.3, validator private keys, signing keys, mnemonics, and passphrases MUST NOT appear in any commit, encrypted or otherwise. `.gitignore` enforces extension-level blocks.
-- Per Constitution §3.5, any `proton-cli` command MUST carry an explicit project keystore prefix (`HOME=~/.metal-fy-proton` mainnet / `HOME=~/.metal-fy-proton-test` testnet); never present or run a bare `proton …` against the default shared keystore.
+- Per Constitution §3.5, any `proton-cli` command MUST carry an explicit project keystore prefix (`HOME=~/.config/metal.freedom-yield.com/key/mainnet` mainnet / `HOME=~/.config/metal.freedom-yield.com/key/testnet` testnet; the names live in `scripts/lib/operator-paths.sh`); never present or run a bare `proton …` against the default shared keystore.
 - Commits are single-purpose and explain *why*.
 
 ## Working with infrastructure
