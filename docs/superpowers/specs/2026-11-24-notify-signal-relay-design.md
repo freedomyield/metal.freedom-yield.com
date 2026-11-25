@@ -87,7 +87,7 @@ validator host（後に web host の外部の見張りも）の知らせを、**
 ```
 
 - 優先度の語: `urgent` → `緊急`・`high` → `高`・`default` → `通常`・`low` → `低`・`min` → `最低`。それ以外の値は `notify.sh` と同じく `default` に寄せてから引く
-- 題名と本文の既定（引数が欠けた時）は `notify.sh` と同じ（題名 `Freedom Yield ops`・本文 `(no message)`）
+- 題名の既定は `notify.sh` と同じ（`Freedom Yield ops`）。本文の既定は題名と同じ文（notify は空の本文を受けないため）。本文が空・空白だけの時だけ `notify.sh`（`(no message)`・空白のまま）と違う。題名も空・空白だけなら本文は `Freedom Yield ops`
 - 稼働率の脚注（`[Uptime] XX%` と `NOTIFY_UPTIME_SUFFIX`）は、`notify.sh` と同じ `validator.json` を同じ規則で読み、同じ文字で付ける（P2 の 1 か所。7.6）
 - Tags（ntfy の絵文字）は文に入れない（Signal に欄が無い）。直の ntfy に倒れた時は `notify.sh` が今どおり付ける
 - Mac の notify の登録の形（`【(?:緊急|高|通常|低|最低)】…`）に合わない文は、notify の側が ntfy へ回す（Metal は形を判断しない。ops の上限だけを 6 章で見る）
@@ -146,7 +146,7 @@ validator host（後に web host の外部の見張りも）の知らせを、**
 | `RELAY_TOKEN_FILE_NAME`・`RELAY_URL_FILE_NAME` | `token`・`url` | P2 の定数 | P1・P3 |
 | 秘密の置き場（relay の dir） | `NTFY_TOPIC_FILE` の dir（未設定なら `notify.sh` の既定の topic のファイルの dir）の下の `RELAY_DIR_NAME`。dir 700・file 600。**repo に新しいパスの文字を足さない**（`notify.sh` の既定の値を P2 の定数 `FYD_NTFY_TOPIC_FILE_DEFAULT` に写し、13 章の試験で `notify.sh` と一字一句同じことを照らす） | P2 の関数 `fyd_relay_dir` | P1・P3 |
 | `RELAY_PRIORITY_WORDS` | `urgent=緊急 high=高 default=通常 low=低 min=最低` | P2 の定数（表 1 つ） | P1 |
-| `FYD_NOTIFY_TITLE_DEFAULT`・`FYD_NOTIFY_MESSAGE_DEFAULT` | `Freedom Yield ops`・`(no message)` | P2 の定数（`notify.sh` と同じことを試験で照らす） | P1 |
+| `FYD_NOTIFY_TITLE_DEFAULT` | `Freedom Yield ops`（本文が空の時の本文の既定も、題名と同じ文で、題名も空ならこの値） | P2 の定数（題名は `notify.sh` と同じことを試験で照らす。本文が空の時だけ違うことも試験で照らす） | P1 |
 | `RELAY_FALLBACK_REASONS` | `no_relay_dir no_token bad_token bad_token_perms no_url bad_url no_curl no_jq too_long bad_text http_<3 桁> curl_<番号>` | P1 の定数（記録の語の一覧。足すだけ） | P1 |
 | `RELAY_CRON_ENV_LINE` | `FYD_NOTIFY=<repo の checkout>/scripts/notify-relay-put.sh`（`<repo の checkout>` は P3 が自分の位置から決める） | P3 | P3 |
 | `RELAY_CRON_FILE_GLOBS` | `metal-*`・`freedom-yield-*`（`install-cron-env-headers.sh` と同じ範囲） | P3 の定数 | P3 |

@@ -11,7 +11,8 @@
 # and tests/notify-relay/test-notify-text.sh runs the real notify.sh beside it
 # and fails if the two ever differ (design doc 7.6 / 13-8).
 #
-# Body rule follows notify.sh's `shift 2 || true` behaviour (one argument = the body is that argument).
+# Body rule follows notify.sh's `shift 2 || true` behaviour (one argument = the body is that argument),
+# except that an empty/blank body becomes the title (notify.sh sends "(no message)" or the blanks).
 #
 # Where to connect: P1 sources this file and calls fyd_relay_render_text.
 # How to remove: delete this file and its test; notify.sh is unaffected.
@@ -19,7 +20,6 @@
 # --- definition table (values are exact; not readonly so tests can re-source)
 FYD_NTFY_TOPIC_FILE_DEFAULT='/etc/freedom-yield/ntfy-topic'
 FYD_NOTIFY_TITLE_DEFAULT='Freedom Yield ops'
-FYD_NOTIFY_MESSAGE_DEFAULT='(no message)'
 FYD_VALIDATOR_JSON_REL='public/api/validator.json'
 RELAY_DIR_NAME='notify-relay'
 # shellcheck disable=SC2034  # used by P1/P3
@@ -107,7 +107,11 @@ fyd_relay_render_text() {
   # argument the shift fails and the body is that argument itself.
   if [ "$#" -ge 2 ]; then shift 2; fi
   body_text="$*"
-  [ -n "$body_text" ] || body_text="$FYD_NOTIFY_MESSAGE_DEFAULT"
+  # Differs from notify.sh only here: an empty or blank-only body becomes the title
+  # (notify refuses an empty body); a blank title falls back to the default title.
+  if [[ "$body_text" =~ ^[[:space:]]*$ ]]; then
+    if [[ "$title_text" =~ ^[[:space:]]*$ ]]; then body_text="$FYD_NOTIFY_TITLE_DEFAULT"; else body_text="$title_text"; fi
+  fi
   footer_text="$(fyd_notify_uptime_footer "$repo_root")"
   printf -v FYD_RELAY_TEXT '【%s】%s\n%s' "$priority_word" "$title_text" "$body_text"
   if [ -n "$footer_text" ]; then

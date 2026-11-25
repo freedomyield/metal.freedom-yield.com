@@ -66,7 +66,14 @@ printf '{broken' > "$ROOT/public/api/validator.json"
 fyd_relay_render_text "$ROOT" high "題" "本文 1" "本文 2"; eq "no footer: broken json" "$want_plain" "$FYD_RELAY_TEXT"
 rm -f "$ROOT/public/api/validator.json"
 fyd_relay_render_text "$ROOT" high; eq "one arg: body is the arg" "【高】Freedom Yield ops${NL}high" "$FYD_RELAY_TEXT"
-fyd_relay_render_text "$ROOT"; eq "zero args" "【通常】Freedom Yield ops${NL}(no message)" "$FYD_RELAY_TEXT"
+fyd_relay_render_text "$ROOT"; eq "zero args" "【通常】Freedom Yield ops${NL}Freedom Yield ops" "$FYD_RELAY_TEXT"
+fyd_relay_render_text "$ROOT" low "T"; eq "title only: body is the title" "【低】T${NL}T" "$FYD_RELAY_TEXT"
+fyd_relay_render_text "$ROOT" low "T" ""; eq "empty body -> title" "【低】T${NL}T" "$FYD_RELAY_TEXT"
+fyd_relay_render_text "$ROOT" low "T" "  "; eq "spaces-only body -> title" "【低】T${NL}T" "$FYD_RELAY_TEXT"
+fyd_relay_render_text "$ROOT" low "T" $'\t\n'; eq "tab/newline-only body -> title" "【低】T${NL}T" "$FYD_RELAY_TEXT"
+fyd_relay_render_text "$ROOT" low "  " "  "; eq "blank title and blank body -> default title body" "【低】  ${NL}Freedom Yield ops" "$FYD_RELAY_TEXT"
+fyd_relay_render_text "$ROOT" low ""; eq "empty title, no body -> default title twice" "【低】Freedom Yield ops${NL}Freedom Yield ops" "$FYD_RELAY_TEXT"
+fyd_relay_render_text "$ROOT" low "T" " x "; eq "body with spaces and text kept" "【低】T${NL} x " "$FYD_RELAY_TEXT"
 fyd_relay_render_text "$ROOT" low ""  "x"; eq "empty title -> default" "【低】Freedom Yield ops${NL}x" "$FYD_RELAY_TEXT"
 fyd_relay_render_text "$ROOT" low "T" $'行\n'; eq "trailing newline kept" "【低】T${NL}行${NL}" "$FYD_RELAY_TEXT"
 printf -v want_nl '【低】T\n行\n'
@@ -149,9 +156,26 @@ rm -f "$EQ/public/api/validator.json"
 check_equal "no footer" high "T" "b"
 write_eq
 NOTIFY_UPTIME_SUFFIX=' (予定 87.40%)' check_equal "suffix" high "T" "b"
-check_equal "no args"
-check_equal "title only" high "題だけ"
 check_equal "one arg" high
+
+# Only difference from notify.sh: an empty/blank body. notify.sh sends "(no message)";
+# (blank-only body: notify.sh sends the blanks as they are); the relay uses the title (notify no longer accepts an empty body). Title and priority still equal.
+check_equal_except_body() { # label expected_notify_body expected_relay_body argv...
+  local label=$1 want_notify=$2 want_body=$3; shift 3
+  local out="$EQ/out"
+  rm -f "$out".h "$out".d
+  PATH="$EQ/bin:$PATH" FAKE_CURL_OUT="$out" NTFY_TOPIC_FILE="$EQ/topic" bash "$EQ/scripts/notify.sh" "$@" >/dev/null 2>&1
+  fyd_relay_render_text "$EQ" "$@"
+  local first="${FYD_RELAY_TEXT%%$'\n'*}" rest="${FYD_RELAY_TEXT#*$'\n'}"
+  local sent_body; sent_body="$(cat "$out.d"; printf x)"; sent_body="${sent_body%x}"
+  eq "differs from notify.sh: notify.sh body: $label" "${want_notify}${NL}${NL}[Uptime] 87.31%" "$sent_body"
+  eq "differs from notify.sh: relay body is the title: $label" "${want_body}${NL}${NL}[Uptime] 87.31%" "$rest"
+  eq "equal title (body differs): $label" "${first#*】}" "$(sed -n 's/^Title: //p' "$out.h")"
+  eq "equal prio (body differs): $label" "$(fyd_notify_normalize_priority "${1:-default}")" "$(sed -n 's/^Priority: //p' "$out.h")"
+}
+check_equal_except_body "no args (relay: default title)" "(no message)" "Freedom Yield ops"
+check_equal_except_body "title only (relay: title)" "(no message)" "題だけ" high "題だけ"
+check_equal_except_body "blank body (relay: title)" "  " "T" high "T" "  "
 
 # --- default path text equals notify.sh's
 notify_default="$(sed -n 's/.*NTFY_TOPIC_FILE:-\([^}]*\)}.*/\1/p' "$REPO_ROOT/$NOTIFY_SH_REL" | head -1)"
