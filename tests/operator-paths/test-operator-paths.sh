@@ -24,6 +24,12 @@
 #   P8  the pre-flight refuses a HOME named like the former testnet keystore
 #       (no fallback to the former place)
 #   P9  no former place name is left in bin/ or scripts/ code lines
+#   P10 identity-pq.sh stops when the definition cannot be read (fail-closed,
+#       no FY_PQ_KEY_DIR): the three path functions print nothing and return 1,
+#       and pq-identity-lock.sh (the one that deletes) stops with a non-zero
+#       status before touching anything. The tree holds a copy of the
+#       library WITHOUT operator-paths.sh (T3a) or WITH an empty one (T3b);
+#       HOME is a temp dir, the real key places are never named.
 #
 # Usage: bash tests/operator-paths/test-operator-paths.sh
 # Exit:  0 all pass / 1 any fail
@@ -41,6 +47,8 @@ ok()  { PASS=$((PASS + 1)); echo "  ok: $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "  FAIL: $1"; }
 
 WORK="$(mktemp -d -t operator-paths-test.XXXXXX)"
+# An empty WORK would turn every "${WORK}/x" below into "/x": stop instead.
+[ -n "$WORK" ] && [ -d "$WORK" ] || { echo "FATAL: could not create the temp work dir" >&2; exit 1; }
 trap 'rm -rf "$WORK"' EXIT
 
 # shellcheck source=scripts/lib/operator-paths.sh
@@ -196,6 +204,45 @@ if [ -z "$FORMER_HITS" ]; then
 else
 	bad "P9 former place names remain in code lines: $(printf '%s\n' "$FORMER_HITS" | cut -d: -f1,2 | tr '\n' ' ')"
 fi
+
+# ---- P10 an unreadable definition stops the identity key paths --------------
+# mk_ipq_tree <root> <none|empty>: scripts/lib/identity-pq.sh and
+# scripts/operator-local/pq-identity-lock.sh copied in; operator-paths.sh is
+# absent (none) or an empty file (empty).
+mk_ipq_tree() {
+	mkdir -p "$1/scripts/lib" "$1/scripts/operator-local"
+	cp "$IPQ_LIB" "$1/scripts/lib/identity-pq.sh"
+	cp "${REPO_ROOT}/scripts/operator-local/pq-identity-lock.sh" "$1/scripts/operator-local/pq-identity-lock.sh"
+	if [ "$2" = "empty" ]; then : > "$1/scripts/lib/operator-paths.sh"; fi
+}
+mkdir -p "${WORK}/p10-home"
+for KIND in none empty; do
+	TREE="${WORK}/p10-${KIND}"
+	mk_ipq_tree "$TREE" "$KIND"
+	for FN in fyipq__key_dir fyipq__enc_path fyipq__unlocked_path; do
+		# `set -u` like the strict callers: the unset name must not abort with
+		# "unbound variable" — the library's own message must be the one printed.
+		P10_OUT="$(env -u FY_PQ_KEY_DIR HOME="${WORK}/p10-home" bash -u -c '. "$1"; "$2"' _ "${TREE}/scripts/lib/identity-pq.sh" "$FN" 2>"${WORK}/p10.err")"; RC=$?
+		if [ "$RC" -eq 1 ] && [ -z "$P10_OUT" ] && grep -qF 'FYD_IDENTITY_KEY_DIR_REL is unset or empty' "${WORK}/p10.err" && grep -qF 'scripts/lib/operator-paths.sh' "${WORK}/p10.err"; then
+			ok "P10 T1/T2 ($KIND) $FN -> exit 1, stdout empty, the library's own stderr line names the definition file"
+		else
+			bad "P10 T1/T2 ($KIND) $FN -> rc=$RC stdout=[$P10_OUT] stderr=[$(head -c 200 "${WORK}/p10.err")] (expected 1, empty, the definition file named)"
+		fi
+	done
+	# T3: the deleting script must stop non-zero and change nothing.
+	BEFORE="$(find "$WORK" -mindepth 1 -not -name 'p10.err' -not -name 'p10-lock.*' | LC_ALL=C sort)"
+	P10_LOCK_OUT="$(env -u FY_PQ_KEY_DIR HOME="${WORK}/p10-home" bash "${TREE}/scripts/operator-local/pq-identity-lock.sh" 2>&1)"; RC=$?
+	AFTER="$(find "$WORK" -mindepth 1 -not -name 'p10.err' -not -name 'p10-lock.*' | LC_ALL=C sort)"
+	# With an EMPTY definition file the source succeeds, so only the library's
+	# own check can stop the script: its message must be in the output.
+	P10_OWN="ok"
+	if [ "$KIND" = "empty" ] && ! printf '%s' "$P10_LOCK_OUT" | grep -qF 'FYD_IDENTITY_KEY_DIR_REL is unset or empty'; then P10_OWN="missing"; fi
+	if [ "$RC" -ne 0 ] && [ "$BEFORE" = "$AFTER" ] && [ "$P10_OWN" = "ok" ] && ! printf '%s' "$P10_LOCK_OUT" | grep -qE '^(locked|already locked):'; then
+		ok "P10 T3 ($KIND) pq-identity-lock.sh without FY_PQ_KEY_DIR -> exit $RC, no 'locked' line, file list unchanged"
+	else
+		bad "P10 T3 ($KIND) pq-identity-lock.sh -> rc=$RC, listing changed=$([ "$BEFORE" = "$AFTER" ] && echo no || echo yes), output=[$(printf '%s' "$P10_LOCK_OUT" | head -c 200)] (expected non-zero, no 'locked' line, unchanged)"
+	fi
+done
 
 echo "test-operator-paths summary: PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" -eq 0 ] || { echo "RESULT: FAIL"; exit 1; }

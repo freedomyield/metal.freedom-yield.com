@@ -29,9 +29,32 @@ FYIPQ_ENC_BASENAME="operator-identity-${FYIPQ_FILE_TAG}.enc.pem"
 FYIPQ_UNLOCKED_BASENAME="operator-identity-${FYIPQ_FILE_TAG}.unlocked.pem"
 FYIPQ_UNLOCK_MAX_AGE_SEC_DEFAULT=7200
 
-fyipq__key_dir()       { printf '%s\n' "${FY_PQ_KEY_DIR:-${HOME}/${FYD_IDENTITY_KEY_DIR_REL}}"; }
-fyipq__enc_path()      { printf '%s/%s\n' "$(fyipq__key_dir)" "$FYIPQ_ENC_BASENAME"; }
-fyipq__unlocked_path() { printf '%s/%s\n' "$(fyipq__key_dir)" "$FYIPQ_UNLOCKED_BASENAME"; }
+# The key directory: FY_PQ_KEY_DIR when set, else ${HOME}/<definition>. When
+# neither is available (operator-paths.sh unreadable or its name empty) print
+# NOTHING and return 1: a path built from an empty name would point at the
+# root of the home (or of the file system). Callers must not continue.
+fyipq__key_dir() {
+	if [ -n "${FY_PQ_KEY_DIR:-}" ]; then
+		printf '%s\n' "$FY_PQ_KEY_DIR"
+		return 0
+	fi
+	if [ -z "${FYD_IDENTITY_KEY_DIR_REL:-}" ]; then
+		echo "ERROR: the identity key directory name could not be read from scripts/lib/operator-paths.sh (FYD_IDENTITY_KEY_DIR_REL is unset or empty) — fail-closed." >&2
+		return 1
+	fi
+	printf '%s\n' "${HOME}/${FYD_IDENTITY_KEY_DIR_REL}"
+}
+# `local d; d="$(...)"` on purpose: `local d="$(...)"` would hide the failure.
+fyipq__enc_path() {
+	local d
+	d="$(fyipq__key_dir)" || return 1
+	printf '%s/%s\n' "$d" "$FYIPQ_ENC_BASENAME"
+}
+fyipq__unlocked_path() {
+	local d
+	d="$(fyipq__key_dir)" || return 1
+	printf '%s/%s\n' "$d" "$FYIPQ_UNLOCKED_BASENAME"
+}
 
 # OpenSSL (not LibreSSL) >= 3.5 — ML-DSA arrived in 3.5.
 fyipq__openssl_ok() {
