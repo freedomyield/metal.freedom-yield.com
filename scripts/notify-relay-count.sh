@@ -22,7 +22,7 @@ COUNT_SUCCESS_LINE='notify-relay: put 204'
 COUNT_FALLBACK_PREFIX='notify-relay: fallback '
 COUNT_FALLBACK_WORD_PATTERN='^[A-Za-z0-9_]+$'
 COUNT_NOTIFY_ENV_NAME='FYD_NOTIFY'
-COUNT_NAMES_LIST_MAX=10
+COUNT_NAMES_LIST_MAX=20
 
 COUNT_SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 # shellcheck source=SCRIPTDIR/lib/cron-filename-guard.sh
@@ -33,7 +33,7 @@ count_fail() { echo "ERROR: $2" >&2; exit "$1"; }
 # count_read_journal <since> — the journal message lines (no metadata), or exit 1.
 count_read_journal() {
 	local jc="${FYD_JOURNALCTL:-$COUNT_JOURNALCTL_DEFAULT}"
-	"$jc" -t "$COUNT_LOG_TAG" --since "$1" -o cat --no-pager 2>/dev/null \
+	"$jc" -t "$COUNT_LOG_TAG" --since "$1" -o cat -q --no-pager 2>/dev/null \
 		|| count_fail 1 "journal unreadable (journalctl failed; try as a user allowed to read it)"
 }
 
@@ -45,7 +45,11 @@ count_cron_names() {
 		[ -f "$f" ] || continue
 		bn="$(basename "$f")"
 		is_cron_executed_filename "$bn" || continue
-		if grep -qE "^[[:space:]]*${COUNT_NOTIFY_ENV_NAME}[[:space:]]*=" "$f" 2>/dev/null; then echo "$bn"; fi
+		if grep -qE "^[[:space:]]*${COUNT_NOTIFY_ENV_NAME}[[:space:]]*=" "$f" 2>/dev/null; then
+			echo "$bn"
+		else
+			[ "$?" = 1 ] || count_fail 1 "cron file unreadable: ${bn}"
+		fi
 	done | LC_ALL=C sort
 }
 

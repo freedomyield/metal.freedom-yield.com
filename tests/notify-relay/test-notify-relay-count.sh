@@ -29,12 +29,14 @@ cat > "$TMP_ROOT/journalctl" <<'FAKE'
 #!/bin/bash
 printf '%s\n' "$@" > "$FAKE_ARGV"
 if [ "${FAKE_JC_RC:-0}" != 0 ]; then exit "$FAKE_JC_RC"; fi
-cat "$FAKE_JOURNAL"
+quiet=0
+for a in "$@"; do if [ "$a" = "-q" ]; then quiet=1; fi; done
+if [ -s "$FAKE_JOURNAL" ]; then cat "$FAKE_JOURNAL"; elif [ "$quiet" = 0 ]; then echo '-- No entries --'; fi
 FAKE
 chmod +x "$TMP_ROOT/journalctl"
 
 run() { # args...
-  FYD_JOURNALCTL="$TMP_ROOT/journalctl" FYD_CRON_DIR="$CRON" FAKE_ARGV="$ARGV" FAKE_JOURNAL="$JOURNAL" \
+  FYD_JOURNALCTL="$TMP_ROOT/journalctl" FYD_CRON_DIR="${CRON_USE:-$CRON}" FAKE_ARGV="$ARGV" FAKE_JOURNAL="$JOURNAL" \
     bash "$COUNTER" "$@" > "$OUT" 2> "$ERR" < /dev/null
   RC=$?
 }
@@ -92,6 +94,61 @@ has "empty: total zero" "合計｜0" "$OUT"
 FAKE_JC_RC=1 run
 eq "journalctl failure exit 1" 1 "$RC"
 eq "journalctl failure one line" 1 "$(cat "$OUT" "$ERR" | wc -l | tr -d ' ')"
+
+# argv carries -o cat and -q
+has "argv has -o" "-o" "$ARGV"
+eq "argv has cat" 1 "$(grep -cx -- 'cat' "$ARGV")"
+eq "argv has -q" 1 "$(grep -cx -- '-q' "$ARGV")"
+eq "argv has -o line" 1 "$(grep -cx -- '-o' "$ARGV")"
+
+# lines that must all land in "other"
+{
+  echo 'journal-prefix notify-relay: put 204'
+  echo 'notify-relay: put 204 extra'
+  echo 'notify-relay: fallback bad word'
+  echo 'notify-relay: fallback http_503 x'
+  echo 'xnotify-relay: fallback abc'
+} > "$JOURNAL"
+run
+has "lookalikes: put 204 zero" "put 204｜0" "$OUT"
+has "lookalikes: other 5" "その他｜5" "$OUT"
+eq "lookalikes: no fallback row" 0 "$(grep -c '^fallback' "$OUT")"
+
+# sort: a_x x1, z_x x2 => z_x first
+{ echo 'notify-relay: fallback a_x'; echo 'notify-relay: fallback z_x'; echo 'notify-relay: fallback z_x'; } > "$JOURNAL"
+run
+eq "higher count first" "fallback z_x｜2" "$(grep '^fallback' "$OUT" | head -1)"
+
+# comment-only env line is not counted
+mkdir -p "$TMP_ROOT/cron2"
+printf '# FYD_NOTIFY=/x/put.sh
+* * * * * root true
+' > "$TMP_ROOT/cron2/metal-cm"
+echo 'notify-relay: put 204' > "$JOURNAL"
+CRON_USE="$TMP_ROOT/cron2" run
+has "comment line not counted" "FYD_NOTIFY を持つ cron｜0 本" "$OUT"
+
+# 15 files => names listed and still <= 24 lines
+mkdir -p "$TMP_ROOT/cron15"
+for i in 01 02 03 04 05 06 07 08 09 10 11 12 13 14 15; do printf 'FYD_NOTIFY=/x
+' > "$TMP_ROOT/cron15/metal-$i"; done
+CRON_USE="$TMP_ROOT/cron15" run
+has "15 counted" "FYD_NOTIFY を持つ cron｜15 本" "$OUT"
+has "15th name listed" "metal-15" "$OUT"
+if [ "$(wc -l < "$OUT")" -le 24 ]; then ok "15 files fit 24 lines"; else fail "15 files fit 24 lines"; fi
+
+# unreadable cron file => exit 1, one line, no table
+if [ "$(id -u)" != 0 ]; then
+  mkdir -p "$TMP_ROOT/cron3"
+  printf 'FYD_NOTIFY=x
+' > "$TMP_ROOT/cron3/a"
+  chmod 000 "$TMP_ROOT/cron3/a"
+  CRON_USE="$TMP_ROOT/cron3" run
+  eq "unreadable cron file exit 1" 1 "$RC"
+  eq "unreadable cron file one line" 1 "$(cat "$OUT" "$ERR" | wc -l | tr -d ' ')"
+  eq "unreadable cron file no table" 0 "$(grep -c '合計' "$OUT")"
+  chmod 600 "$TMP_ROOT/cron3/a"
+fi
 
 # cron dir missing
 FYD_CRON_DIR="$TMP_ROOT/nope" FYD_JOURNALCTL="$TMP_ROOT/journalctl" FAKE_ARGV="$ARGV" FAKE_JOURNAL="$JOURNAL" \
