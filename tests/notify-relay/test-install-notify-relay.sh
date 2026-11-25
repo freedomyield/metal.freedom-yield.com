@@ -359,5 +359,43 @@ for mode in nofile gid0; do
   chk "11 $mode: root-only file added" grep -qxF "added:   metal-root" "$OUT"
 done
 
+# --- 12 own NTFY_TOPIC_FILE line: not excluded when it is exactly the default topic file
+DEF="$(. "$REPO_ROOT/scripts/lib/notify-text.sh" >/dev/null 2>&1; printf '%s' "$FYD_NTFY_TOPIC_FILE_DEFAULT")"
+chk "12 default constant read from the lib" [ -n "$DEF" ]
+fresh_secret_parent
+reset_cron
+printf 'NTFY_TOPIC_FILE=%s\n%s\n' "$DEF" "$HC" > "$CRON/metal-t-same"
+printf 'NTFY_TOPIC_FILE = %s \n%s\n' "$DEF" "$HC" > "$CRON/metal-t-space"
+printf "NTFY_TOPIC_FILE='%s'\n%s\n" "$DEF" "$HC" > "$CRON/metal-t-sq"
+printf 'NTFY_TOPIC_FILE="%s"\n%s\n' "$DEF" "$HC" > "$CRON/metal-t-dq"
+printf 'NTFY_TOPIC_FILE=/etc/freedom-yield/other-topic\n%s\n' "$HC" > "$CRON/metal-t-other"
+printf 'NTFY_TOPIC_FILE=\n%s\n' "$HC" > "$CRON/metal-t-empty"
+printf 'NTFY_TOPIC_FILE=%s\nNTFY_TOPIC_FILE=%s\n%s\n' "$DEF" "$DEF" "$HC" > "$CRON/metal-t-two"
+# shellcheck disable=SC2016 # the literal $ is the point of this case
+printf 'NTFY_TOPIC_FILE=$X/ntfy-topic\n%s\n' "$HC" > "$CRON/metal-t-var"
+printf 'NTFY_TOPIC_FILE=~/ntfy-topic\n%s\n' "$HC" > "$CRON/metal-t-tilde"
+printf 'NTFY_TOPIC_FILE="%s\n%s\n' "$DEF" "$HC" > "$CRON/metal-t-halfq"
+printf 'NTFY_TOPIC_FILE=%sx\n%s\n' "$DEF" "$HC" > "$CRON/metal-t-longer"
+printf 'NTFY_TOPIC_FILE=%s\n%s\n*/5 * * * * nobody /srv/b.sh\n' "$DEF" "$HC" > "$CRON/metal-t-nonroot"
+snap
+run --enable-cron
+eq "12 rc" 0 "$RC"
+for n in metal-t-same metal-t-space metal-t-sq metal-t-dq; do
+  chk "12 $n added" grep -qxF "added:   $n" "$OUT"
+  eq "12 $n has one relay line" 1 "$(count_lines "$CRON/$n")"
+  eq "12 $n line is just before the command" "$HC" "$(grep -xF -A1 "$LINE" "$CRON/$n" | tail -n 1)"
+  chk "12 $n env line kept" grep -qE '^NTFY_TOPIC_FILE' "$CRON/$n"
+done
+for n in metal-t-other metal-t-empty metal-t-two metal-t-var metal-t-tilde metal-t-halfq metal-t-longer; do
+  chk "12 $n own_topic_file" grep -qxF "excluded: $n (own_topic_file)" "$OUT"
+  same "12 $n bytes same" "$TMP_ROOT/snap/$n" "$CRON/$n"
+done
+chk "12 default value + outsider user: non_root_user" grep -qxF "excluded: metal-t-nonroot (non_root_user)" "$OUT"
+same "12 nonroot bytes same" "$TMP_ROOT/snap/metal-t-nonroot" "$CRON/metal-t-nonroot"
+run --disable-cron
+for n in metal-t-same metal-t-space metal-t-sq metal-t-dq; do
+  same "12 disable restores $n" "$TMP_ROOT/snap/$n" "$CRON/$n"
+done
+
 echo "SUMMARY: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

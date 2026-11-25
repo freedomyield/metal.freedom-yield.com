@@ -227,6 +227,24 @@ relay_install_command_lines() {
 
 relay_install_has_env_line() { grep -qE "^[[:space:]]*$2[[:space:]]*=" "$1"; }
 
+# relay_install_own_topic_is_default <file> — true only when there is exactly one NTFY_TOPIC_FILE line
+# (crontab(5) form: spaces around "=", value optionally in matching '…' or "…") and its value is
+# exactly FYD_NTFY_TOPIC_FILE_DEFAULT. Empty, repeated, "$" or "~" in the value, anything else: false.
+relay_install_own_topic_is_default() {
+	local lines value
+	lines="$(grep -E "^[[:space:]]*${RELAY_OWN_TOPIC_ENV_NAME}[[:space:]]*=" "$1")" || return 1
+	[ "$(printf '%s\n' "$lines" | wc -l | tr -d ' ')" = 1 ] || return 1
+	value="${lines#*=}"
+	value="${value#"${value%%[![:space:]]*}"}"
+	value="${value%"${value##*[![:space:]]}"}"
+	case "$value" in
+		\"*\") value="${value#\"}"; value="${value%\"}" ;;
+		\'*\') value="${value#\'}"; value="${value%\'}" ;;
+	esac
+	case "$value" in ''|*'$'*|*'~'*) return 1 ;; esac
+	[ "$value" = "$FYD_NTFY_TOPIC_FILE_DEFAULT" ]
+}
+
 relay_install_has_delegate_env() {
 	local var
 	for var in $RELAY_CRON_DELEGATE_VARS; do
@@ -248,7 +266,9 @@ relay_install_has_non_root_user() {
 relay_install_exclusion_reason() {
 	local f="$1"
 	if relay_install_has_delegate_env "$f"; then echo other_delegate; return 0; fi
-	if relay_install_has_env_line "$f" "$RELAY_OWN_TOPIC_ENV_NAME"; then echo own_topic_file; return 0; fi
+	if relay_install_has_env_line "$f" "$RELAY_OWN_TOPIC_ENV_NAME" && ! relay_install_own_topic_is_default "$f"; then
+		echo own_topic_file; return 0
+	fi
 	if [ -z "$(relay_install_command_lines "$f")" ]; then echo no_commands; return 0; fi
 	if relay_install_has_non_root_user "$f"; then echo non_root_user; return 0; fi
 }
