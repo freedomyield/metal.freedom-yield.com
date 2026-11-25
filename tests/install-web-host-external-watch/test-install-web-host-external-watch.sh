@@ -657,6 +657,170 @@ check "static: the installer has no validator-side ssh at all" \
 	'! grep -nE "VALIDATOR_SSH_KEY\"|VALIDATOR_SSH_USER\}@|validator_run|@\\$\\{?VALIDATOR_HOST" "$INSTALLER"'
 
 # ==============================================================================
+# notify relay for the watch (--notify-relay, --relay-secrets)
+# ==============================================================================
+P1_SRC="$REPO/scripts/notify-relay-put.sh"
+P2_SRC="$REPO/scripts/lib/notify-text.sh"
+# shellcheck disable=SC2016  # literal $HOME is the armed cron line
+CRON_LINE_RELAY='*/5 * * * * WATCH_LIVE=1 WATCH_NOTIFY=$HOME/metal-fy-watch/bin/notify-relay-put.sh /bin/bash $HOME/metal-fy-watch/bin/external-watch.sh >>$HOME/metal-fy-watch/log/cron.err 2>&1'
+CHOWN_LOG="$T/chown.log"
+# Fake chown (a non-root test user cannot chown to 0): logs its argv. FAKE_CHOWN_SWAP=dir|file: on its FIRST call
+# the site swaps etc/notify-relay (or token in it) for a symlink to FAKE_SWAP_TARGET. A path argument (not /dev/fd/N)
+# is then "followed" like a real chown without -h would be: the object it reaches gets mode 666 as the damage marker.
+cat > "$CRONBIN/chown" <<FAKECHOWN
+#!/bin/sh
+printf '%s\\n' "\$*" >> "$CHOWN_LOG"
+if [ -n "\${FAKE_CHOWN_SWAP:-}" ] && [ ! -e "$T/swap.done" ]; then
+	: > "$T/swap.done"
+	case "\$FAKE_CHOWN_SWAP" in
+		dir)  mv "\$FAKE_SWAP_RD" "\$FAKE_SWAP_RD.moved"; ln -s "\$FAKE_SWAP_TARGET" "\$FAKE_SWAP_RD" ;;
+		file) rm -f "\$FAKE_SWAP_RD/token"; ln -s "\$FAKE_SWAP_TARGET" "\$FAKE_SWAP_RD/token" ;;
+	esac
+fi
+last=""; for a in "\$@"; do last="\$a"; done
+case "\$last" in
+	/dev/fd/*) ;;
+	*) case " \$* " in *" -h "*) ;; *) chmod 0666 "\$last" 2>/dev/null ;; esac ;;
+esac
+exit 0
+FAKECHOWN
+chmod +x "$CRONBIN/chown"
+# Fake stat: the real one, but when asked about FAKE_STAT_SWAP_PATH (once) the site swaps that path for a symlink to
+# FAKE_SWAP_TARGET right after: the swap lands between root's look at the path and root's open of it.
+cat > "$CRONBIN/stat" <<FAKESTAT
+#!/bin/bash
+/usr/bin/stat "\$@"; rc=\$?
+if [ -n "\${FAKE_STAT_SWAP_PATH:-}" ] && [ "\${!#}" = "\$FAKE_STAT_SWAP_PATH" ] && [ ! -e "$T/statswap.done" ]; then
+	: > "$T/statswap.done"; rm -rf "\$FAKE_STAT_SWAP_PATH"
+	if [ "\$FAKE_SWAP_TARGET" = MKFIFO ]; then mkfifo "\$FAKE_STAT_SWAP_PATH"; else ln -s "\$FAKE_SWAP_TARGET" "\$FAKE_STAT_SWAP_PATH"; fi
+fi
+exit \$rc
+FAKESTAT
+chmod +x "$CRONBIN/stat"
+
+fresh_fixture; cotenant_crontab; cp "$STORE" "$T/orig"
+run --notify-relay --dry-run
+check "relay dry-run: exit 0, nothing written" '[ "$RC" -eq 0 ] && [ ! -e "$H/metal-fy-watch/bin/notify-relay-put.sh" ] && [ "$(nwrites)" = 0 ]' "rc=$RC"
+run --notify-relay
+W="$H/metal-fy-watch"
+check "relay install exits 0" '[ "$RC" -eq 0 ]' "rc=$RC: $(printf '%s' "$OUT" | tail -5)"
+check "relay: bin/notify-relay-put.sh identical to repo, mode 700" 'cmp -s "$P1_SRC" "$W/bin/notify-relay-put.sh" && [ "$(meta "$W/bin/notify-relay-put.sh")" = 700 ]'
+check "relay: bin/lib/notify-text.sh identical to repo, mode 600, dir 700" 'cmp -s "$P2_SRC" "$W/bin/lib/notify-text.sh" && [ "$(meta "$W/bin/lib/notify-text.sh")" = 600 ] && [ "$(meta "$W/bin/lib")" = 700 ]'
+check "relay: bin/notify.sh and external-watch.sh untouched (still the repo's)" 'cmp -s "$NOTIFY_SRC" "$W/bin/notify.sh" && cmp -s "$WATCH_SRC" "$W/bin/external-watch.sh"'
+check "relay: block is markers + the WATCH_NOTIFY line" 'tail -n 3 "$STORE" | cmp -s - <(printf "%s\n" "$BEGIN_MARK" "$CRON_LINE_RELAY" "$END_MARK")'
+check "relay: co-tenant lines byte-identical" 'outside "$STORE" | cmp -s - "$T/orig"'
+W1="$(nwrites)"; cp "$STORE" "$T/after-relay"
+run --notify-relay
+check "relay re-run: up to date, crontab not rewritten" '[ "$RC" -eq 0 ] && [ "$(nwrites)" = "$W1" ] && printf "%s" "$OUT" | grep -q "already up to date"' "rc=$RC"
+
+# the delegate really falls back to the watch's own notify.sh with the watch's own topic
+RB="$T/rb"; mkdir -p "$RB"
+cat > "$RB/curl" <<'STUBEOF'
+#!/bin/bash
+prev=''; for a in "$@"; do [ "$prev" = -K ] && cat "$a" >> "$RB_LOG"; prev="$a"; done
+printf '%s' "${RB_CODE:-200}"
+exit 0
+STUBEOF
+printf '#!/bin/sh\nexit 0\n' > "$RB/logger"; chmod +x "$RB/curl" "$RB/logger"
+watch_call() { # same shape as external-watch.sh attempt_notify; $1 = delegate, rest = extra env
+	local d="$1"; shift
+	: > "$T/rb.log"
+	env PATH="$RB:$PATH" RB_LOG="$T/rb.log" "$@" NTFY_TOPIC_FILE="$W/etc/ntfy-topic" NOTIFY_STRICT_EXIT=1 "$d" high title body >/dev/null 2>&1
+}
+watch_call "$W/bin/notify-relay-put.sh" X=1; RC=$?
+check "fallback: no relay secrets -> exit 0 via notify.sh" '[ "$RC" -eq 0 ]' "rc=$RC"
+check "fallback: notify.sh got the watch's own topic file (env kept)" 'grep -qF "$(tr -d "[:space:]" < "$W/etc/ntfy-topic")" "$T/rb.log"'
+watch_call "$W/bin/notify-relay-put.sh" RB_CODE=503; RC=$?
+check "fallback: notify.sh's exit code (5 for a 503) comes through unchanged" '[ "$RC" -eq 5 ]' "rc=$RC"
+
+# --relay-secrets: the token and URL placed through install-notify-relay.sh (P3)
+RS_TOKEN="$T/rs-token"; RS_URL="$T/rs-url"
+LC_ALL=C tr -dc 'A-Za-z0-9_-' < /dev/urandom | head -c 43 > "$RS_TOKEN"
+printf 'https://relay.example.invalid/notify-relay/put\n' > "$RS_URL"
+RS_ENV="RELAY_TOKEN_FILE=$RS_TOKEN RELAY_URL_FILE=$RS_URL"
+TOPIC_GID="$(stat -c '%g' "$W/etc/ntfy-topic" 2>/dev/null || stat -f '%g' "$W/etc/ntfy-topic")"
+RD="$W/etc/notify-relay"
+EXTRA_ENV="$RS_ENV" run --relay-secrets --dry-run
+check "relay-secrets dry-run: nothing written" '[ "$RC" -eq 0 ] && [ ! -e "$RD" ]' "rc=$RC"
+run --relay-secrets
+check "relay-secrets without the file variables: exit 2" '[ "$RC" -eq 2 ] && [ ! -e "$RD" ]' "rc=$RC"
+: > "$CHOWN_LOG"
+EXTRA_ENV="$RS_ENV" run --relay-secrets
+check "relay-secrets exits 0" '[ "$RC" -eq 0 ]' "rc=$RC: $(printf '%s' "$OUT" | tail -5)"
+check "relay-secrets: dir 750, token and url 640 with the right content" '[ "$(meta "$RD")" = 750 ] && [ "$(meta "$RD/token")" = 640 ] && [ "$(meta "$RD/url")" = 640 ] && [ "$(cat "$RD/token")" = "$(cat "$RS_TOKEN")" ] && [ "$(cat "$RD/url")" = "$(cat "$RS_URL")" ]'
+check "relay-secrets: owner 0 and the topic file's group given to dir, token, url" '[ "$(grep -c "^0:$TOPIC_GID " "$CHOWN_LOG")" = 3 ]'
+check "relay-secrets: output never shows the token or the URL" '! printf "%s" "$OUT" | grep -qF "$(cat "$RS_TOKEN")" && ! printf "%s" "$OUT" | grep -qF "relay.example.invalid"'
+check "relay-secrets: nothing but token and url left in the dir" '[ "$(ls -A "$RD" | tr "\n" " ")" = "token url " ]'
+check "relay-secrets: the rest of the watch dir untouched" 'cmp -s "$STORE" "$T/after-relay" && [ "$(meta "$W/etc/ntfy-topic")" = 600 ]'
+# root never writes, chmods or follows paths in the site's tree: swap the dir or the token for a symlink while root chowns
+for KIND in dir file; do
+	rm -rf "$RD" "$RD.moved" "$T/swap.done" "$T/target"
+	if [ "$KIND" = dir ]; then mkdir "$T/target"; chmod 700 "$T/target"; else printf 'keep\n' > "$T/target"; chmod 600 "$T/target"; fi
+	T_BEFORE="$(meta "$T/target")"
+	EXTRA_ENV="$RS_ENV FAKE_CHOWN_SWAP=$KIND FAKE_SWAP_RD=$RD FAKE_SWAP_TARGET=$T/target" run --relay-secrets
+	check "swap ($KIND) during chown: exit non-zero (11)" '[ "$RC" -eq 11 ]' "rc=$RC"
+	check "swap ($KIND) during chown: the symlink target keeps its mode and content" '[ "$(meta "$T/target")" = "$T_BEFORE" ] && { if [ "$KIND" = dir ]; then [ -z "$(ls -A "$T/target")" ]; else [ "$(cat "$T/target")" = keep ]; fi; }'
+	check "swap ($KIND) during chown: every chown went through an open descriptor, none through a path" '! grep -v " /dev/fd/[0-9]*$" "$CHOWN_LOG" | grep -q .'
+done
+rm -rf "$RD" "$RD.moved" "$T/swap.done" "$T/target"
+# the site swaps the token for a symlink after root looked at the path and before root opens it: nothing is chowned
+rm -rf "$RD" "$T/statswap.done" "$T/target"; printf 'keep\n' > "$T/target"; chmod 600 "$T/target"
+: > "$CHOWN_LOG"
+EXTRA_ENV="$RS_ENV FAKE_STAT_SWAP_PATH=$RD/token FAKE_SWAP_TARGET=$T/target" run --relay-secrets
+check "swap between look and open: exit 11, no chown at all, target untouched" '[ "$RC" -eq 11 ] && [ ! -s "$CHOWN_LOG" ] && [ "$(cat "$T/target")" = keep ] && [ "$(meta "$T/target")" = 600 ]' "rc=$RC"
+rm -rf "$RD" "$T/statswap.done" "$T/target"
+# a FIFO (or a symlink to one) put where root is about to open must never be waited on: bounded run, no chown
+for KIND in token-fifo dir-fifo token-realfifo; do
+	rm -rf "$RD" "$T/statswap.done" "$T/fifo"; mkfifo "$T/fifo"; : > "$CHOWN_LOG"
+	SWAP_TARGET="$T/fifo"
+	case "$KIND" in
+		token-fifo) SWAP_PATH="$RD/token" ;;
+		dir-fifo) SWAP_PATH="$RD" ;;
+		token-realfifo) SWAP_PATH="$RD/token"; SWAP_TARGET=MKFIFO ;;  # a real FIFO, not a symlink: only O_NONBLOCK saves the open
+	esac
+	T0="$(date +%s)"
+	OUT="$(env SKIP_SSH=1 SKIP_SSH_HOME="$H" SKIP_SSH_SELFTEST_PATH="$STUB:/usr/bin:/bin:$JQ_DIR" \
+		WATCH_ACCOUNT="$ME" VALIDATOR_HOST="$VH" FAKE_CRON_STORE="$STORE" FAKE_CRON_WRITES="$WRITES" FAKE_CLIPBOARD="$CLIP" \
+		PATH="$CLIPBIN:$CRONBIN:$PATH" $RS_ENV FAKE_STAT_SWAP_PATH="$SWAP_PATH" FAKE_SWAP_TARGET="$SWAP_TARGET" \
+		timeout 20 bash "$INSTALLER" --relay-secrets 2>&1 </dev/null)"; RC=$?
+	printf '%s\n' "$OUT" >> "$ALL_OUT"
+	check "$KIND swapped in before the open: ends within 20 s with exit 11, no chown" '[ "$RC" -eq 11 ] && [ ! -s "$CHOWN_LOG" ] && [ "$(( $(date +%s) - T0 ))" -lt 20 ]' "rc=$RC"
+done
+rm -rf "$RD" "$T/statswap.done" "$T/fifo"
+# a token that is already a symlink to a site file: it is replaced, the target is not written or changed
+mkdir -p "$RD"; printf 'keep\n' > "$T/target"; chmod 600 "$T/target"; ln -s "$T/target" "$RD/token"
+EXTRA_ENV="$RS_ENV" run --relay-secrets
+check "pre-planted token symlink: replaced, target untouched, exit 0" '[ "$RC" -eq 0 ] && [ ! -L "$RD/token" ] && [ "$(cat "$T/target")" = keep ] && [ "$(meta "$T/target")" = 600 ] && [ "$(cat "$RD/token")" = "$(cat "$RS_TOKEN")" ]' "rc=$RC"
+rm -rf "$RD" "$T/target"
+printf 'short\n' > "$T/rs-bad"
+EXTRA_ENV="RELAY_TOKEN_FILE=$T/rs-bad RELAY_URL_FILE=$RS_URL" run --relay-secrets
+check "relay-secrets: malformed token -> exit 4, nothing written" '[ "$RC" -eq 4 ] && [ ! -e "$RD" ]' "rc=$RC"
+mkdir -p "$T/elsewhere"; ln -s "$T/elsewhere" "$RD"
+EXTRA_ENV="$RS_ENV" run --relay-secrets
+check "relay-secrets: symlink at the secret dir -> exit 5, target untouched" '[ "$RC" -eq 5 ] && [ -z "$(ls -A "$T/elsewhere")" ]' "rc=$RC"
+rm -f "$RD"
+run --relay-secrets --uninstall
+check "--relay-secrets with --uninstall: exit 2" '[ "$RC" -eq 2 ]' "rc=$RC"
+run --notify-relay --uninstall
+check "--notify-relay with --uninstall: exit 2" '[ "$RC" -eq 2 ]' "rc=$RC"
+
+# real mode: the token and the URL travel on stdin, never in argv
+real --notify-relay
+check "real mode --notify-relay: exit 0" '[ "$RC" -eq 0 ]' "rc=$RC: $OUT"
+EXTRA_ENV="$RS_ENV" real --relay-secrets
+check "real mode --relay-secrets: exit 0, one remote call" '[ "$RC" -eq 0 ] && [ "$(grep -c "relay-secrets" "$SSH_LOG")" = 1 ]' "rc=$RC: $OUT"
+check "real mode --relay-secrets: token and URL never in an ssh argv" '! grep -qF "$(cat "$RS_TOKEN")" "$SSH_LOG" && ! grep -qF "relay.example.invalid" "$SSH_LOG"'
+check "real mode --relay-secrets: token is on stdin line 1, URL on line 2" 'f="$(ls "$SSH_STDIN_DIR"/* | tail -1)"; [ "$(sed -n 1p "$f")" = "$(cat "$RS_TOKEN")" ] && [ "$(sed -n 2p "$f")" = "$(cat "$RS_URL")" ]'
+check "real mode --relay-secrets: no clipboard, no validator host" '[ ! -e "$CLIP" ] && ! grep -qF "$VH" "$SSH_LOG"'
+
+# switching it off: install without the flag returns the block (and only the block) to the original
+fresh_fixture; cotenant_crontab; cp "$STORE" "$T/orig"
+run --notify-relay
+run
+check "relay off: the notice says so" 'printf "%s" "$OUT" | grep -qF "relay off (cron line returns to the plain one)"'
+check "relay off: re-run without the flag restores the original cron line" '[ "$RC" -eq 0 ] && tail -n 3 "$STORE" | cmp -s - <(printf "%s\n" "$BEGIN_MARK" "$CRON_LINE" "$END_MARK") && outside "$STORE" | cmp -s - "$T/orig"' "rc=$RC"
+
+# ==============================================================================
 # secrets never printed, across every run above
 # ==============================================================================
 check "no run printed the validator host" '! grep -qF "$VH" "$ALL_OUT"'

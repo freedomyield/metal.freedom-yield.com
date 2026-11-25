@@ -229,6 +229,7 @@ validator host（後に web host の外部の見張りも）の知らせを、**
 - validator host は ops に札しか持たない。ops と Mac は validator host への資格を何も持たない（来る向きだけ。条件 2）
 - 札は process の引数に出さない: `curl -K <(printf 'header = "Authorization: Bearer %s"\n…' …)`。printf は bash の組み込みなので、どの process の argv にも札と URL が載らない（`notify.sh` の `ntfy_url_config` と同じ形）。文は標準入力で渡す
 - 札のファイルは root の 600、dir は 700。P1 は権限が緩いと札を使わない（8 章）
+- web host の外部の見張りだけは形が違う: 札と URL は `etc/notify-relay/`（dir 750・ファイル 640・持ち主 root・group は見張りの topic のファイルの group）に置き、site アカウントがその group から読む（site の持ち物の木の中では root の 600 にできず、P1 の判定を満たす最小の形）。置くのは site 自身で、root は最後に `chown 0:G` だけを開いたファイルの記述子に対して行う（root が site の木で path を辿って書く・chmod する・消すことは無い）
 - 封の署名の鍵は持たない（非目標。渡しの節の問い 2）
 
 ### 9.2 上限（額・回数）
@@ -253,6 +254,7 @@ validator host（後に web host の外部の見張りも）の知らせを、**
 | validator host の OS の記録（`logger -t notify-relay`。OS の記録の回し方のまま。新しいファイルを作らない） | P1 の固定の 1 行（`put 204` か `fallback <理由の語>`） | 経営者・総監督。14.2 の V6 で 1 日の数を数える台本が読む（送り手の多くは stderr を捨てるので、cron の log では数えない） |
 | P3 の出力・写しの dir | 変えたファイルの名・写しの場所 | 承認した経営者・実行した AI |
 | ops の記録・Mac の `relay-pull --report` | notify の設計のとおり | notify の側 |
+| web host の外部の見張り（`logger -t notify-relay` と site アカウントの `~/metal-fy-watch/log/cron.err`。P1 の同じ固定の 1 行） | `put 204` か `fallback <理由の語>` | 18 時の点検の監督者（web host の log を読む手は経営者の 1 行の承認の後）。見張りの `log/watch.log` の `pushes=` と合わせて見る |
 
 ### 9.5 人の承認の所
 
@@ -264,6 +266,7 @@ validator host（後に web host の外部の見張りも）の知らせを、**
 - 本番の倒れる確かめ（ntfy に 1 通送る）
 - cron の env に `FYD_NOTIFY` を足す（P3 `--enable-cron`）
 - 外す時の各手（`--disable-cron`・`--uninstall-secrets`）
+- web host の外部の見張り: `install-web-host-external-watch.sh --notify-relay`（P1・P2 の同梱と cron の WATCH_NOTIFY）と `--relay-secrets`（札と URL）は、各 1 手ずつ経営者が打つ（§5 v0.9 の変更ごとの承認。web host は自分の `metal-fy-watch/` と cron のブロックだけ）。外す手は旗なしの入れ直し・`--uninstall`
 
 ## 10. どこで繋ぐか・どう外すか
 
@@ -341,6 +344,7 @@ validator host（cron）
 ### 14.4 12/9 以降
 
 1. 外部の見張り（`metal-external-watch`）: `install-web-host-external-watch.sh` に P1・P2 の同梱と `WATCH_NOTIFY`・見張りの秘密の置き場への札と URL を足す（凍結の外。別の設計の工程）。`metal-validator` が live になって 1 週の後（渡しの節の時期）
+   - 2026-11-25 の決定で 12/7 の前に前倒し（`metal-validator` の live を待たない）。形: `install-web-host-external-watch.sh` の `--notify-relay`（P1 を `bin/`・P2 を `bin/lib/` に同梱し、cron の行に `WATCH_NOTIFY=<bin>/notify-relay-put.sh` を足す。外す時は旗なしで入れ直す）と `--relay-secrets`（P3 は使わない。site アカウントが `etc/notify-relay/` に札と URL を書き、root は開いた記述子へ `chown 0:G` だけ。9.1）。使い方は `docs/MONITORING_OPS.md` の 14.5
 2. `notify.sh` を P2 に替え、優先度の寄せと脚注を 1 か所にする（出力がバイトで同じ試験つき。次の転換の稽古の前に）
 3. 封の署名（渡しの節の問い 2）で Metal の側に変更が要るなら、その時に設計する
 
