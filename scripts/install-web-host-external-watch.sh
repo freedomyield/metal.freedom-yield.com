@@ -97,8 +97,9 @@
 #                    topic stays the fallback). To switch it off: re-run install WITHOUT this
 #                    flag (the cron line returns to the plain one; the files stay, unused).
 #   --relay-secrets  place the relay token and URL in ~WATCH_ACCOUNT/metal-fy-watch/etc/notify-relay/
-#                    through scripts/install-notify-relay.sh --install-secrets (owner root, group =
-#                    the topic file's group, dir 750, files 640). Needs RELAY_TOKEN_FILE and
+#                    (dir 750, files 640; the SITE account writes them, root only hands over
+#                    ownership: owner root, group = the topic file's group, done on open file
+#                    descriptors after checking the opened objects). Needs RELAY_TOKEN_FILE and
 #                    RELAY_URL_FILE (Mac paths of the two files; the values travel on stdin only
 #                    and are never printed). Add --dry-run to check without writing.
 #
@@ -144,9 +145,9 @@
 #   11 installed layout failed mode/owner verification
 #   12 topic hand-over to the clipboard failed (nothing printed; re-run
 #      --copy-topic)
-# --relay-secrets also uses 4 (account/home unusable), 5 (no watch topic
-# installed, or a symlink under etc/notify-relay) and passes through the exit
-# of install-notify-relay.sh (3 chown failed, 4 token/URL malformed).
+# --relay-secrets also uses 4 (account/home unusable; token/URL malformed), 5 (no
+# watch topic installed, or a symlink under etc/notify-relay) and 11 (a placed
+# entry failed the open-descriptor check or the final owner/mode check).
 
 set -euo pipefail
 
@@ -350,17 +351,21 @@ if [ "$MODE" = copy-topic ]; then
 	exit 0
 fi
 
-# ---- mode: relay-secrets (stdin: token, URL, then 3 base64 script lines) ----
-# The files are placed by install-notify-relay.sh --install-secrets (shipped in
-# this session's stdin, run from a temp dir), with NTFY_TOPIC_FILE pointing at
-# the watch's topic file so the secret dir is etc/notify-relay and its group is
-# the topic file's. Root is needed for the chown to uid 0; a planted symlink
-# at the secret dir is refused first (this part runs as root, not the account).
+# ---- mode: relay-secrets (stdin: token, URL, then notify-text.sh base64) ----
+# Who touches what: the SITE account (as_account) creates etc/notify-relay/ and
+# writes token and url with their final modes (dir 750, files 640). Root only
+# hands ownership over (chown 0:<topic file's group>) and never writes, chmods
+# or removes anything inside the site's tree. The path of a site-owned tree can
+# be swapped for a symlink at any moment, so root works on OPEN FILE
+# DESCRIPTORS: it opens the three entries, checks the opened object itself
+# (stat -L on /dev/fd/N: regular file / directory, link count 1 for files,
+# owner = the site account, the inode seen just before), and
+# chowns through /dev/fd/N, which always reaches the checked object. Any
+# mismatch stops (exit 11) and leaves everything as it is (root never deletes
+# there). Last, the three paths are checked the way the delegate checks them.
 if [ "$MODE" = relay-secrets ]; then
 	IFS= read -r RS_TOKEN || true
 	IFS= read -r RS_URL || true
-	IFS= read -r P3_B64 || true
-	IFS= read -r GUARD_B64 || true
 	IFS= read -r TEXT_B64 || true
 	for rel in "" /etc /etc/notify-relay; do
 		if as_account test -L "$W$rel"; then
@@ -370,30 +375,65 @@ if [ "$MODE" = relay-secrets ]; then
 	if ! as_account test -f "$TF"; then
 		echo "ERROR (5): no watch topic installed under $SHOW/etc — run the install first" >&2; exit 5
 	fi
-	mkdir -p "$TMP/p3/lib"
-	printf '%s' "$P3_B64" | base64 -d > "$TMP/p3/install-notify-relay.sh" 2>/dev/null || true
-	printf '%s' "$GUARD_B64" | base64 -d > "$TMP/p3/lib/cron-filename-guard.sh" 2>/dev/null || true
-	printf '%s' "$TEXT_B64" | base64 -d > "$TMP/p3/lib/notify-text.sh" 2>/dev/null || true
-	for f in install-notify-relay.sh lib/cron-filename-guard.sh lib/notify-text.sh; do
-		if [ ! -s "$TMP/p3/$f" ] || ! bash -n "$TMP/p3/$f" 2>/dev/null; then
-			echo "ERROR (2): received $f is empty or fails bash -n" >&2; exit 2
+	mkdir -p "$TMP/lib"
+	printf '%s' "$TEXT_B64" | base64 -d > "$TMP/lib/notify-text.sh" 2>/dev/null || true
+	if [ ! -s "$TMP/lib/notify-text.sh" ] || ! bash -n "$TMP/lib/notify-text.sh" 2>/dev/null; then
+		echo "ERROR (2): received notify-text.sh is empty or fails bash -n" >&2; exit 2
+	fi
+	# shellcheck disable=SC1091  # decoded into $TMP just above
+	. "$TMP/lib/notify-text.sh"
+	fyd_relay_token_is_valid "$RS_TOKEN" || { echo "ERROR (4): line 1 is not a valid token — nothing written" >&2; exit 4; }
+	fyd_relay_url_is_valid "$RS_URL" || { echo "ERROR (4): line 2 is not a valid URL — nothing written" >&2; exit 4; }
+	RS_GID="$(stat -c '%g' "$TF" 2>/dev/null || stat -f '%g' "$TF" 2>/dev/null || true)"
+	if ! [[ "$RS_GID" =~ ^[0-9]+$ ]] || [ "$RS_GID" = 0 ]; then
+		echo "ERROR (5): topic file group unusable — nothing written" >&2; exit 5
+	fi
+	RS_OWNER_UID=0
+	# Test mode only (a fake home is passed only under SKIP_SSH): a non-root test user cannot become owner 0.
+	if [ -n "$HOME_OVERRIDE" ]; then RS_OWNER_UID="$(id -u)"; fi
+	RD="$W/etc/notify-relay"
+	if [ "$DRY_RUN" = 1 ]; then
+		echo "would install: token (640) and url (640) in etc/notify-relay (750), owner $RS_OWNER_UID, group $RS_GID"
+		exit 0
+	fi
+	as_account bash -c 'umask 077; mkdir -p "$1" && chmod 750 "$1"' _ "$RD"
+	printf '%s\n' "$RS_TOKEN" | as_account bash -c 'umask 077; t="$(mktemp "$1/.inst.XXXXXX")" && cat > "$t" && chmod 640 "$t" && mv -f "$t" "$1/token"' _ "$RD"
+	printf '%s\n' "$RS_URL" | as_account bash -c 'umask 077; t="$(mktemp "$1/.inst.XXXXXX")" && cat > "$t" && chmod 640 "$t" && mv -f "$t" "$1/url"' _ "$RD"
+	state_of() { # [-L] path -> "type|links|inode|uid|gid|mode", lower case
+		local follow=""
+		if [ "$1" = -L ]; then follow=-L; shift; fi
+		{ stat $follow -c '%F|%h|%i|%u|%g|%a' "$1" 2>/dev/null || stat $follow -f '%HT|%l|%i|%u|%g|%Lp' "$1" 2>/dev/null; } | tr 'A-Z' 'a-z'
+	}
+	field_of() { printf '%s' "$1" | cut -d'|' -f"$2"; }
+	rs_stop() { echo "ERROR (11): $1 — stopped, nothing removed or changed further" >&2; exit 11; }
+	INO_DIR="$(field_of "$(state_of "$RD")" 3)"
+	INO_TOKEN="$(field_of "$(state_of "$RD/token")" 3)"
+	INO_URL="$(field_of "$(state_of "$RD/url")" 3)"
+	exec 7<"$RD/token" 8<"$RD/url" 9<"$RD"
+	# (The mode is not read from the descriptor: some systems report the open mode there. It is checked on the paths at the end.)
+	fd_check() { # fd type inode: the OPENED object, not the path
+		local st
+		st="$(state_of -L "/dev/fd/$1")" || return 1
+		[ "$(field_of "$st" 1)" = "$2" ] && [ "$(field_of "$st" 4)" = "$ACCT_UID" ] && [ "$(field_of "$st" 3)" = "$3" ] \
+			&& { [ "$2" = directory ] || [ "$(field_of "$st" 2)" = 1 ]; }
+	}
+	fd_check 7 "regular file" "$INO_TOKEN" || rs_stop "token is not the regular, single-link, site-owned file just written"
+	fd_check 8 "regular file" "$INO_URL" || rs_stop "url is not the regular, single-link, site-owned file just written"
+	fd_check 9 directory "$INO_DIR" || rs_stop "etc/notify-relay is not the site-owned directory just made"
+	for fd in 7 8 9; do
+		chown "0:$RS_GID" "/dev/fd/$fd" || rs_stop "chown failed"
+	done
+	exec 7<&- 8<&- 9<&-
+	for spec in "etc/notify-relay:directory:750:$INO_DIR" "etc/notify-relay/token:regular file:640:$INO_TOKEN" "etc/notify-relay/url:regular file:640:$INO_URL"; do
+		st="$(state_of "$W/${spec%%:*}")" || rs_stop "cannot stat ${spec%%:*}"
+		rest="${spec#*:}"; want_type="${rest%%:*}"; rest="${rest#*:}"; want_mode="${rest%%:*}"; want_ino="${rest#*:}"
+		if [ "$(field_of "$st" 1)" != "$want_type" ] || [ "$(field_of "$st" 4)" != "$RS_OWNER_UID" ] \
+			|| [ "$(field_of "$st" 5)" != "$RS_GID" ] || [ "$(field_of "$st" 6)" != "$want_mode" ] \
+			|| [ "$(field_of "$st" 3)" != "$want_ino" ]; then
+			rs_stop "${spec%%:*} is not owner $RS_OWNER_UID group $RS_GID mode $want_mode as placed"
 		fi
 	done
-	P3_ARGS=(--install-secrets)
-	if [ "$DRY_RUN" = 1 ]; then P3_ARGS+=(--dry-run); fi
-	set +e
-	printf '%s\n%s\n' "$RS_TOKEN" "$RS_URL" | NTFY_TOPIC_FILE="$TF" bash "$TMP/p3/install-notify-relay.sh" "${P3_ARGS[@]}"
-	RS_RC=$?
-	set -e
-	[ "$RS_RC" -eq 0 ] || exit "$RS_RC"
-	if [ "$DRY_RUN" != 1 ]; then
-		RD="$W/etc/notify-relay"
-		if [ "$(file_meta "$RD" | cut -d' ' -f1)" != 750 ] || [ "$(file_meta "$RD/token" | cut -d' ' -f1)" != 640 ] \
-			|| [ "$(file_meta "$RD/url" | cut -d' ' -f1)" != 640 ]; then
-			echo "ERROR (11): relay secret modes are not dir 750 / files 640" >&2; exit 11
-		fi
-		echo "modes OK (etc/notify-relay 750, token and url 640; values not shown)"
-	fi
+	echo "installed: token (640), url (640) in etc/notify-relay (750); owner root, group of the topic file (values not shown)"
 	exit 0
 fi
 
@@ -673,6 +713,9 @@ plan_crontab() {
 	if [ "$NB" = 1 ]; then
 		the_block "$TMP/before" > "$TMP/block.before"
 		if cmp -s "$TMP/block" "$TMP/block.before"; then CRON_UP_TO_DATE=1; fi
+		if [ "$RELAY" != 1 ] && grep -q 'WATCH_NOTIFY=' "$TMP/block.before"; then
+			echo "relay off (cron line returns to the plain one)"
+		fi
 		LC_ALL=C awk -v b="$BEGIN_MARK" -v e="$END_MARK" -v blk="$TMP/block" '
 			inb==0 && $0==b { while ((getline l < blk) > 0) print l; inb=1; next }
 			inb==1 { if ($0==e) inb=0; next }
@@ -793,8 +836,6 @@ WATCH_SRC="${REPO_ROOT}/scripts/external-watch.sh"
 NOTIFY_SRC="${REPO_ROOT}/scripts/notify.sh"
 RELAY_P1_SRC="${REPO_ROOT}/scripts/notify-relay-put.sh"
 RELAY_P2_SRC="${REPO_ROOT}/scripts/lib/notify-text.sh"
-RELAY_P3_SRC="${REPO_ROOT}/scripts/install-notify-relay.sh"
-RELAY_GUARD_SRC="${REPO_ROOT}/scripts/lib/cron-filename-guard.sh"
 RELAY_TOKEN_FILE="${RELAY_TOKEN_FILE:-}"
 RELAY_URL_FILE="${RELAY_URL_FILE:-}"
 T_HOME="" T_PATH=""
@@ -849,7 +890,7 @@ if [ "$MODE" = install ]; then
 	done
 fi
 if [ "$RELAY" = 1 ] || [ "$MODE" = relay-secrets ]; then
-	for f in "$RELAY_P1_SRC" "$RELAY_P2_SRC" "$RELAY_P3_SRC" "$RELAY_GUARD_SRC"; do
+	for f in "$RELAY_P1_SRC" "$RELAY_P2_SRC"; do
 		if [ ! -s "$f" ] || ! bash -n "$f" 2>/dev/null; then
 			die2 "relay source script missing or fails bash -n: $(basename "$f")"
 		fi
@@ -958,7 +999,7 @@ if [ "$MODE" = relay-secrets ]; then
 	echo "==> relay secrets (token and URL go on stdin only; never shown)"
 	set +e
 	{ printf '%s\n%s\n' "$(cat "$RELAY_TOKEN_FILE")" "$(cat "$RELAY_URL_FILE")"
-	  for f in "$RELAY_P3_SRC" "$RELAY_GUARD_SRC" "$RELAY_P2_SRC"; do base64 < "$f" | tr -d '\n'; printf '\n'; done
+	  base64 < "$RELAY_P2_SRC" | tr -d '\n'; printf '\n'
 	} | web_run relay-secrets 2>&1 | mask
 	RC="${PIPESTATUS[1]}"
 	set -e

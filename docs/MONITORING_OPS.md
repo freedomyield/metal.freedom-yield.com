@@ -821,9 +821,9 @@ WEB_HOST=<web host> WEB_HOST_KEY=<path> WATCH_ACCOUNT=<web host account> \
 ```
 
 - `--notify-relay` adds `bin/notify-relay-put.sh` (700) and `bin/lib/notify-text.sh` (600) and changes the cron line to carry `WATCH_NOTIFY=$HOME/metal-fy-watch/bin/notify-relay-put.sh`. `bin/notify.sh` and `bin/external-watch.sh` are not touched.
-- `--relay-secrets` runs `install-notify-relay.sh --install-secrets` on the web host with `NTFY_TOPIC_FILE` set to the watch's topic file: `etc/notify-relay/` (750) and `token`, `url` (640), owner root, group = the topic file's group (the site account reads them through the group; the delegate refuses anything not owned by root). A symlink at that path is refused. The delegate has no effect until both files exist (it falls back to `bin/notify.sh`).
+- `--relay-secrets` places `etc/notify-relay/` (750) with `token` and `url` (640), owner root, group = the topic file's group (the site account reads them through the group; the delegate refuses anything not owned by root). The **site account** creates and writes them; root only hands over ownership (`chown 0:<group>`), on open file descriptors, after checking that each opened object is the regular, single-link, site-owned file (or directory) just written. Root never writes, chmods or removes anything in the site's tree. Any mismatch stops with exit 11 and changes nothing further. A symlink at the path is refused up front. The delegate has no effect until both files exist (it falls back to `bin/notify.sh`).
 - Anything but an HTTP 204 from ops runs `bin/notify.sh` with the same argument list and environment (`NTFY_TOPIC_FILE`, `NOTIFY_STRICT_EXIT`), so the notice goes to the watch's own topic as before and the exit code is notify.sh's.
-- **Switch off:** re-run the install **without** `--notify-relay`: the cron line returns to the plain one (the delegate files stay, unused). `--uninstall` removes everything.
+- **Switch off:** re-run the install **without** `--notify-relay` (it prints `relay off (cron line returns to the plain one)`): the cron line returns to the plain one (the delegate files stay, unused). `--uninstall` removes everything.
 
 ### 14.6 Backstop and known gap
 

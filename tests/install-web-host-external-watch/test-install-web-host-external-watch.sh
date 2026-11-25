@@ -664,7 +664,38 @@ P2_SRC="$REPO/scripts/lib/notify-text.sh"
 # shellcheck disable=SC2016  # literal $HOME is the armed cron line
 CRON_LINE_RELAY='*/5 * * * * WATCH_LIVE=1 WATCH_NOTIFY=$HOME/metal-fy-watch/bin/notify-relay-put.sh /bin/bash $HOME/metal-fy-watch/bin/external-watch.sh >>$HOME/metal-fy-watch/log/cron.err 2>&1'
 CHOWN_LOG="$T/chown.log"
-printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "%s"\nexit 0\n' "$CHOWN_LOG" > "$CRONBIN/chown"; chmod +x "$CRONBIN/chown"
+# Fake chown (a non-root test user cannot chown to 0): logs its argv. FAKE_CHOWN_SWAP=dir|file: on its FIRST call
+# the site swaps etc/notify-relay (or token in it) for a symlink to FAKE_SWAP_TARGET. A path argument (not /dev/fd/N)
+# is then "followed" like a real chown without -h would be: the object it reaches gets mode 666 as the damage marker.
+cat > "$CRONBIN/chown" <<FAKECHOWN
+#!/bin/sh
+printf '%s\\n' "\$*" >> "$CHOWN_LOG"
+if [ -n "\${FAKE_CHOWN_SWAP:-}" ] && [ ! -e "$T/swap.done" ]; then
+	: > "$T/swap.done"
+	case "\$FAKE_CHOWN_SWAP" in
+		dir)  mv "\$FAKE_SWAP_RD" "\$FAKE_SWAP_RD.moved"; ln -s "\$FAKE_SWAP_TARGET" "\$FAKE_SWAP_RD" ;;
+		file) rm -f "\$FAKE_SWAP_RD/token"; ln -s "\$FAKE_SWAP_TARGET" "\$FAKE_SWAP_RD/token" ;;
+	esac
+fi
+last=""; for a in "\$@"; do last="\$a"; done
+case "\$last" in
+	/dev/fd/*) ;;
+	*) case " \$* " in *" -h "*) ;; *) chmod 0666 "\$last" 2>/dev/null ;; esac ;;
+esac
+exit 0
+FAKECHOWN
+chmod +x "$CRONBIN/chown"
+# Fake stat: the real one, but when asked about FAKE_STAT_SWAP_PATH (once) the site swaps that path for a symlink to
+# FAKE_SWAP_TARGET right after: the swap lands between root's look at the path and root's open of it.
+cat > "$CRONBIN/stat" <<FAKESTAT
+#!/bin/bash
+/usr/bin/stat "\$@"; rc=\$?
+if [ -n "\${FAKE_STAT_SWAP_PATH:-}" ] && [ "\${!#}" = "\$FAKE_STAT_SWAP_PATH" ] && [ ! -e "$T/statswap.done" ]; then
+	: > "$T/statswap.done"; rm -f "\$FAKE_STAT_SWAP_PATH"; ln -s "\$FAKE_SWAP_TARGET" "\$FAKE_STAT_SWAP_PATH"
+fi
+exit \$rc
+FAKESTAT
+chmod +x "$CRONBIN/stat"
 
 fresh_fixture; cotenant_crontab; cp "$STORE" "$T/orig"
 run --notify-relay --dry-run
@@ -720,7 +751,28 @@ check "relay-secrets: owner 0 and the topic file's group given to dir, token, ur
 check "relay-secrets: output never shows the token or the URL" '! printf "%s" "$OUT" | grep -qF "$(cat "$RS_TOKEN")" && ! printf "%s" "$OUT" | grep -qF "relay.example.invalid"'
 check "relay-secrets: nothing but token and url left in the dir" '[ "$(ls -A "$RD" | tr "\n" " ")" = "token url " ]'
 check "relay-secrets: the rest of the watch dir untouched" 'cmp -s "$STORE" "$T/after-relay" && [ "$(meta "$W/etc/ntfy-topic")" = 600 ]'
-rm -rf "$RD"
+# root never writes, chmods or follows paths in the site's tree: swap the dir or the token for a symlink while root chowns
+for KIND in dir file; do
+	rm -rf "$RD" "$RD.moved" "$T/swap.done" "$T/target"
+	if [ "$KIND" = dir ]; then mkdir "$T/target"; chmod 700 "$T/target"; else printf 'keep\n' > "$T/target"; chmod 600 "$T/target"; fi
+	T_BEFORE="$(meta "$T/target")"
+	EXTRA_ENV="$RS_ENV FAKE_CHOWN_SWAP=$KIND FAKE_SWAP_RD=$RD FAKE_SWAP_TARGET=$T/target" run --relay-secrets
+	check "swap ($KIND) during chown: exit non-zero (11)" '[ "$RC" -eq 11 ]' "rc=$RC"
+	check "swap ($KIND) during chown: the symlink target keeps its mode and content" '[ "$(meta "$T/target")" = "$T_BEFORE" ] && { if [ "$KIND" = dir ]; then [ -z "$(ls -A "$T/target")" ]; else [ "$(cat "$T/target")" = keep ]; fi; }'
+	check "swap ($KIND) during chown: every chown went through an open descriptor, none through a path" '! grep -v " /dev/fd/[0-9]*$" "$CHOWN_LOG" | grep -q .'
+done
+rm -rf "$RD" "$RD.moved" "$T/swap.done" "$T/target"
+# the site swaps the token for a symlink after root looked at the path and before root opens it: nothing is chowned
+rm -rf "$RD" "$T/statswap.done" "$T/target"; printf 'keep\n' > "$T/target"; chmod 600 "$T/target"
+: > "$CHOWN_LOG"
+EXTRA_ENV="$RS_ENV FAKE_STAT_SWAP_PATH=$RD/token FAKE_SWAP_TARGET=$T/target" run --relay-secrets
+check "swap between look and open: exit 11, no chown at all, target untouched" '[ "$RC" -eq 11 ] && [ ! -s "$CHOWN_LOG" ] && [ "$(cat "$T/target")" = keep ] && [ "$(meta "$T/target")" = 600 ]' "rc=$RC"
+rm -rf "$RD" "$T/statswap.done" "$T/target"
+# a token that is already a symlink to a site file: it is replaced, the target is not written or changed
+mkdir -p "$RD"; printf 'keep\n' > "$T/target"; chmod 600 "$T/target"; ln -s "$T/target" "$RD/token"
+EXTRA_ENV="$RS_ENV" run --relay-secrets
+check "pre-planted token symlink: replaced, target untouched, exit 0" '[ "$RC" -eq 0 ] && [ ! -L "$RD/token" ] && [ "$(cat "$T/target")" = keep ] && [ "$(meta "$T/target")" = 600 ] && [ "$(cat "$RD/token")" = "$(cat "$RS_TOKEN")" ]' "rc=$RC"
+rm -rf "$RD" "$T/target"
 printf 'short\n' > "$T/rs-bad"
 EXTRA_ENV="RELAY_TOKEN_FILE=$T/rs-bad RELAY_URL_FILE=$RS_URL" run --relay-secrets
 check "relay-secrets: malformed token -> exit 4, nothing written" '[ "$RC" -eq 4 ] && [ ! -e "$RD" ]' "rc=$RC"
@@ -746,6 +798,7 @@ check "real mode --relay-secrets: no clipboard, no validator host" '[ ! -e "$CLI
 fresh_fixture; cotenant_crontab; cp "$STORE" "$T/orig"
 run --notify-relay
 run
+check "relay off: the notice says so" 'printf "%s" "$OUT" | grep -qF "relay off (cron line returns to the plain one)"'
 check "relay off: re-run without the flag restores the original cron line" '[ "$RC" -eq 0 ] && tail -n 3 "$STORE" | cmp -s - <(printf "%s\n" "$BEGIN_MARK" "$CRON_LINE" "$END_MARK") && outside "$STORE" | cmp -s - "$T/orig"' "rc=$RC"
 
 # ==============================================================================
