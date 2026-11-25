@@ -11,7 +11,7 @@ PATTERNS_PATH="${HYGIENE_PATTERNS_OVERRIDE:-$REPO_ROOT/$PATTERNS_REL}"
 PATTERNS_SHA256="8c03079e6752b816149b467257dd527c34aa0022a235eaf6e385846937a3c53f"
 BASE_REF="main"
 # The four bundle files (single definition point).
-BUNDLE_FILES="scripts/notify-relay-put.sh scripts/lib/notify-text.sh scripts/install-notify-relay.sh scripts/operator-local/make-notify-relay-token.sh"
+BUNDLE_FILES="scripts/notify-relay-put.sh scripts/lib/notify-text.sh scripts/install-notify-relay.sh scripts/operator-local/make-notify-relay-token.sh scripts/notify-relay-count.sh"
 MUTATION_TARGET_REL="scripts/notify-relay-put.sh"
 # Files the bundle may touch (diff gate). Exact paths or directory prefixes ending in "/".
 ALLOWED_PATHS="docs/superpowers/plans/2026-11-24-notify-relay-put.md docs/superpowers/specs/2026-11-24-notify-signal-relay-design.md $BUNDLE_FILES tests/notify-relay/"
