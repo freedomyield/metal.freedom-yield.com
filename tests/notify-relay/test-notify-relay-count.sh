@@ -114,10 +114,12 @@ has "lookalikes: put 204 zero" "put 204｜0" "$OUT"
 has "lookalikes: other 5" "その他｜5" "$OUT"
 eq "lookalikes: no fallback row" 0 "$(grep -c '^fallback' "$OUT")"
 
-# sort: a_x x1, z_x x2 => z_x first
-{ echo 'notify-relay: fallback a_x'; echo 'notify-relay: fallback z_x'; echo 'notify-relay: fallback z_x'; } > "$JOURNAL"
+# sort: a_x x3, b_x x2, c_x x3 => count desc, ties by word: a_x, c_x, b_x
+{
+  for w in b_x c_x a_x c_x b_x a_x c_x a_x; do echo "notify-relay: fallback $w"; done
+} > "$JOURNAL"
 run
-eq "higher count first" "fallback z_x｜2" "$(grep '^fallback' "$OUT" | head -1)"
+eq "fallback order is count desc then word" "fallback a_x｜3 fallback c_x｜3 fallback b_x｜2" "$(grep '^fallback' "$OUT" | tr '\n' ' ' | sed 's/ $//')"
 
 # comment-only env line is not counted
 mkdir -p "$TMP_ROOT/cron2"
