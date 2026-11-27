@@ -142,7 +142,12 @@ MAINNET_CFG="\$\{FYP_MAINNET_CFG:-\$\{LOGIN_HOME\}/\$\{FYD_BROADCAST_CONFIG_REL\
 FY_PQ_KEY_DIR="\$\{FYP_PQ_KEY_DIR:-\$\{FY_PQ_KEY_DIR:-\$\{LOGIN_HOME\}/\$\{FYD_IDENTITY_KEY_DIR_REL\}\}\}"
 KEYSTORE_TESTNET="\$\{FYP_KEYSTORE_TESTNET:-\$\{LOGIN_HOME\}/\$\{FYD_KEYSTORE_TESTNET_REL\}\}"
 KEYSTORE_MAINNET="\$\{FYP_KEYSTORE_MAINNET:-\$\{LOGIN_HOME\}/\$\{FYD_KEYSTORE_MAINNET_REL\}\}"'
+# The loop must see all six patterns: an input that could not be read (no
+# heredoc, an emptied list) is a FAIL, never a silent pass.
+P2_EXPECTED_PATTERNS=6
+P2_SEEN=0
 while IFS= read -r P2_RE; do
+	P2_SEEN=$((P2_SEEN + 1))
 	P2_NAME="${P2_RE%%=*}"
 	P2_N="$(grep -cxE "$P2_RE" "$PREFLIGHT")"
 	if [ "$P2_N" -eq 1 ]; then
@@ -153,6 +158,11 @@ while IFS= read -r P2_RE; do
 done <<P2_EOF
 $P2_LINES
 P2_EOF
+if [ "$P2_SEEN" -eq "$P2_EXPECTED_PATTERNS" ]; then
+	ok "P2 all ${P2_EXPECTED_PATTERNS} source-text patterns were checked"
+else
+	bad "P2 checked $P2_SEEN source-text patterns (expected ${P2_EXPECTED_PATTERNS})"
+fi
 
 # ---- P3 the quoted heredoc of fyct__phase_rows ------------------------------
 PHASE_ROWS="$(sed -n "/^	cat <<'FYCT_PHASE_EOF'\$/,/^FYCT_PHASE_EOF\$/p" "$ORCH")"
@@ -289,23 +299,44 @@ done
 # they do not match their own lines (`hom[e]`, `[[:space:]]`, escaped `$`).
 P11_TESTS_REL="tests"
 P11_FENCE_REL="tests/lib/real-home-fence.sh"
-P11_REAL_DIR="$(eval echo "~$(id -un)" 2>/dev/null)/.config/metal.freedom-yield.com"
-# p11_hits <grep args...> — "<file>:<line>" of each hit under tests/, one per line.
-p11_hits() { (cd "$REPO_ROOT" && grep -rna "$@" -- "$P11_TESTS_REL" 2>/dev/null) | cut -d: -f1,2; }
+# The real dir is built in two lines, so this file does not join the login
+# home lookup to the project config dir on one line (that is what (2) counts).
+P11_ACCOUNT_DIR="$(eval echo "~$(id -un)" 2>/dev/null)"
+P11_REAL_DIR="${P11_ACCOUNT_DIR}/${FYD_PROJECT_CONFIG_REL:-}"
+# p11_lines <grep args...> — every hit under tests/ as "<file>:<line>:<text>".
+# A scan that could not run prints one "<scan failed ...>" line instead, which
+# every part below counts as a hit (never a silent 0).
+p11_lines() {
+	local out rc
+	out="$(cd "$REPO_ROOT" && grep -rna "$@" -- "$P11_TESTS_REL" 2>/dev/null)"; rc=$?
+	case "$rc" in
+		0) printf '%s\n' "$out" ;;
+		1) ;;
+		*) printf '<scan failed rc=%s>\n' "$rc" ;;
+	esac
+}
+p11_loc() { cut -d: -f1,2; }
+# (0) the scan itself works: it must see the fence's own function name
+if [ -n "$(p11_lines -F "run_with_real_login_home" | grep -v '^<scan failed')" ]; then
+	ok "P11-0 the scan of tests/ sees the fence (it reads the files)"
+else
+	bad "P11-0 the scan of tests/ does not see the fence — nothing below would be counted"
+fi
 # (1) the real dir's absolute path, spelled out
 case "$P11_REAL_DIR" in
-	/*) P11_HITS1="$(p11_hits -F "$P11_REAL_DIR")" ;;
-	*)  P11_HITS1="<the login home cannot be resolved here>" ;;
+	/*/.config/*) P11_HITS1="$(p11_lines -F "$P11_REAL_DIR" | p11_loc)" ;;
+	*)            P11_HITS1="<the login home or the definition cannot be resolved here>" ;;
 esac
-# (2) an unescaped $LOGIN_HOME / ${LOGIN_HOME...} or fyd_login_hom[e] joined,
-# on the same line, to a definition name or to the project config dir
-P11_LH_RE='(^|[^\\])\$\{?LOGIN_HOME|fyd_login_hom[e]'
-P11_DEF_RE='FYD_[A-Z_]*_REL|\.config/metal\.freedom-yield\.com'
-P11_HITS2="$( (cd "$REPO_ROOT" && grep -rnaE -- "$P11_LH_RE" "$P11_TESTS_REL" 2>/dev/null) \
-	| grep -aE -- "$P11_DEF_RE" | cut -d: -f1,2)"
-# (3) HOME set to the login home (any *LOGIN_HOME* name, or the lookup itself)
-P11_HOME_RE="(^|[^A-Za-z0-9_])HOME=[\"']?(\\\$\\{?[A-Za-z_]*LOGIN_HOME|[^[:space:]]*(eval[[:space:]]+echo|id[[:space:]]+-un|fyd_login_hom[e]))"
-P11_HITS3="$(p11_hits -E "$P11_HOME_RE" | grep -vF "${P11_FENCE_REL}:" || true)"
+# (2) the login home (an unescaped $LOGIN_HOME / ${LOGIN_HOME...}, or its
+# lookup: fyd_login_hom[e], `eval echo ~`, `id -un`) joined, on the same line,
+# to a definition name or to the project config dir
+P11_LH_RE='(^|[^\\])\$\{?LOGIN_HOME|fyd_login_hom[e]|eval[[:space:]]+echo[[:space:]]+"?~|id[[:space:]]+-un'
+P11_DEF_RE='FYD_[A-Z_]*_REL|\.config/metal\.freedom-yield\.com|^<scan failed'
+P11_HITS2="$(p11_lines -E "$P11_LH_RE" | grep -aE -- "$P11_DEF_RE" | p11_loc)"
+# (3) HOME set to the login home: `HOME=` followed, anywhere later on the line,
+# by a *LOGIN_HOM[E]* name or the lookup itself
+P11_HOME_RE="(^|[^A-Za-z0-9_])HOME=.*(LOGIN_HOM[E]|eval[[:space:]]+echo|id[[:space:]]+-un|fyd_login_hom[e])"
+P11_HITS3="$(p11_lines -E "$P11_HOME_RE" | grep -vF "${P11_FENCE_REL}:" | p11_loc)"
 # p11_report <part> <hits> — ok when empty, else every <file>:<line>.
 p11_report() {
 	if [ -z "$2" ]; then

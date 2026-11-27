@@ -24,7 +24,9 @@
 #            distinct failure — WITHOUT letting either script reach a real
 #            side-effecting operation (gen-anchor-source.sh, a real
 #            keystore read, etc.). See the per-case comments below for how
-#            each pass-through case stays side-effect-free.
+#            each pass-through case stays side-effect-free. For
+#            run-testnet-rehearsal.sh this is a source-order check instead
+#            (case 2b), since 2026-11-27.
 #
 # CHAIN: none — no case in this suite invokes proton for real, reaches
 #        bin/safe-broadcast's actual broadcast step, or writes to this
@@ -84,6 +86,8 @@ SKIP=0
 # traps on PATH; a trap call turns the status into 97, so the case fails).
 # shellcheck source=tests/lib/real-home-fence.sh
 . "${REPO_ROOT}/tests/lib/real-home-fence.sh"
+# shellcheck source=tests/lib/guard-order.sh
+. "${REPO_ROOT}/tests/lib/guard-order.sh"
 pass() { t_pass "$(printf '%-70s%s' "$1" "${2:+ ($2)}")"; }
 fail_case() { t_fail "$(printf '%-70s%s' "$1" "${2:+ ($2)}")"; }
 skip_case() { printf 'SKIP  %-70s%s\n' "$1" "${2:+ ($2)}"; SKIP=$((SKIP + 1)); }
@@ -229,27 +233,22 @@ else
 	skip_case "run-testnet-rehearsal.sh: HOME=login home → refuse" "login home not resolvable"
 fi
 
-# 2b. PASS-THROUGH: HOME=project fixture dir. The script's step 1
-# (anchor-source selection) reads its file BEFORE step 2 (rehearsal
-# config) or step 3 (a REAL read-only curl to the testnet chain RPC, added
-# 2026-07-31 to replace the old hardcoded pubkey pins). This case must
-# stay hermetic — no real network I/O — regardless of whether this
-# machine happens to have a real ~/.config/metal.freedom-yield.com/key/rehearsal
-# (several dev machines do), which would otherwise let the script sail
-# past step 2 and into step 3's live RPC call. Force a deterministic,
-# side-effect-free failure INSIDE step 1 instead, via
-# ANCHOR_SOURCE_OVERRIDE pointing at a path that can never be readable —
-# this fails closed on the script's own pre-existing anchor-source
-# readability check (`fail()`, exit 1) before step 2 is ever reached, a
-# later, distinct failure from the guard's exit 8, with zero file writes
-# and zero network calls. (Verified via a `curl` stub on PATH during this
-# fix: 0 invocations, vs. 2 real invocations before this fix.)
-RC=0
-OUT="$(HOME="$TEST_HOME" ANCHOR_SOURCE_OVERRIDE=/nonexistent/path/anchor-source.json bash "$REHEARSAL_SCRIPT" </dev/null 2>&1)" || RC=$?
-if [ "$RC" -ne 8 ] && ! printf '%s' "$OUT" | grep -q 'keystore guard'; then
-	pass "run-testnet-rehearsal.sh: HOME=project fixture dir → passes guard" "rc=$RC (not 8)"
+# 2b. ORDER (source text, 2026-11-27 L7c): the guard runs before the
+# script's first keystore use. This used to RUN the script with a temp HOME
+# and an unreadable ANCHOR_SOURCE_OVERRIDE so step 1 stopped it; but step 2
+# reads the rehearsal config under the LOGIN home (REHEARSAL_CFG has no
+# override) and step 3 calls the real RPC, so a mutant without step 1's check
+# would have read the real config dir. The script is no longer run here: the
+# top-level guard call must come before the first proton command and the
+# first line that reads a place under a home (REHEARSAL_CFG, ...), functions
+# counted where they are called (tests/lib/guard-order.sh). That the guard
+# lets a non-login HOME through is 1d (the library, with a temp HOME).
+GUARD_ORDER="$(guard_order_lines "$REHEARSAL_SCRIPT")"; GUARD_ORDER_RC=$?
+GUARD_LINE="${GUARD_ORDER%% *}"; FIRST_USE_LINE="${GUARD_ORDER##* }"
+if [ "$GUARD_ORDER_RC" -eq 0 ] && [ "$GUARD_LINE" -lt "$FIRST_USE_LINE" ]; then
+	pass "run-testnet-rehearsal.sh: guard is called before the first proton / home-path use" "guard line $GUARD_LINE < first use line $FIRST_USE_LINE"
 else
-	fail_case "run-testnet-rehearsal.sh: HOME=project fixture dir → passes guard" "rc=$RC"
+	fail_case "run-testnet-rehearsal.sh: guard is called before the first proton / home-path use" "$GUARD_ORDER"
 fi
 
 # ============================================================

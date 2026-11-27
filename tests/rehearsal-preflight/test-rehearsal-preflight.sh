@@ -342,7 +342,11 @@ fi
 # ===========================================================================
 # Part 2 — usage
 # ===========================================================================
+# Every place override points into the fixture (2026-11-27, L7c): a mutant that
+# let this run past its argument check must not reach the login home's places.
 U_OUT="$(env PATH="${STUB}:${PATH}" HOME="${GOOD}/ks-test" FYP_KEYSTORE_TESTNET="${GOOD}/ks-test" \
+	FYP_KEYSTORE_MAINNET="${GOOD}/ks-main" FYP_REHEARSAL_CFG="${GOOD}/none" FYP_MAINNET_CFG="${GOOD}/none" \
+	FYP_IDENTITY_KEY="${GOOD}/none" FYP_PQ_KEY_DIR="${GOOD}/none" \
 	bash "$PREFLIGHT" </dev/null 2>&1)"; U_RC=$?
 if [ "$U_RC" -eq 1 ] && printf '%s' "$U_OUT" | grep -qF -- "--expect-cycle=<M> is required"; then
 	pass "usage: no --expect-cycle -> exit 1"
@@ -413,7 +417,11 @@ fi
 # Part 3 — check 2 / the §3.5 keystore guard (mutations)
 # ===========================================================================
 D="$(fresh home-unset)"
+# Every place override points into the fixture (2026-11-27, L7c): a mutant that
+# let this run past the guard must not reach the login home's places.
 UH_OUT="$(env -u HOME PATH="${STUB}:${PATH}" FYP_KEYSTORE_TESTNET="$D/ks-test" \
+	FYP_KEYSTORE_MAINNET="$D/ks-main" FYP_REHEARSAL_CFG="$D/none" FYP_MAINNET_CFG="$D/none" \
+	FYP_IDENTITY_KEY="$D/none" FYP_PQ_KEY_DIR="$D/none" \
 	bash "$PREFLIGHT" --expect-cycle="$CYCLE" </dev/null 2>&1)"; UH_RC=$?
 if [ "$UH_RC" -eq 8 ] && printf '%s' "$UH_OUT" | grep -qF "§3.5"; then
 	pass "check 2: unset HOME -> exit 8 (§3.5)"
