@@ -58,6 +58,16 @@
 #           transaction_id; chain rejects (now 10); answer without any id (now 10);
 #           mainnet chain rejects (now 10)
 #     audit: log write fails (now 13: the journal cannot be read)
+#   The block "keystore guard: HOME = login home → exit 8" stays in the golden
+#   file unchanged, but since 2026-11-27 (L7c) the wrapper is no longer run
+#   with HOME = the login home: the wrapper uses jq before its guard, so such a
+#   run cannot go through tests/lib/real-home-fence.sh. Instead the guard
+#   library itself is called inside the fence with the wrapper's path as the
+#   caller, and its refusal text must equal that block's "ERROR (keystore
+#   guard" lines byte-for-byte; the block is left out of the whole-file
+#   compare. That the wrapper calls the guard before its first proton / $HOME
+#   use is pinned in test-safe-broadcast.sh (source order). --write-golden
+#   does not write that block: carry it over by hand.
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -70,6 +80,8 @@ WRITE=0
 . "$HERE/sb-harness.sh"
 # shellcheck source=tests/lib/assert.sh
 . "$ROOT/tests/lib/assert.sh"
+# shellcheck source=tests/lib/real-home-fence.sh
+. "$ROOT/tests/lib/real-home-fence.sh"
 sbh_init
 trap 'rm -rf "$SBH_T"' EXIT
 
@@ -139,14 +151,8 @@ sc "arg: -u refused"             ''  '' -- -u
 
 # ---- pre-gate environment checks ----
 sc "env: proton CLI missing"     '' '' "PATH=$SBH_PATH_NOPROTON" -- --tx="$T/tx-c3.json" --chain=testnet-a --non-interactive
-LOGIN_HOME_EQ="$(eval echo "~$(id -un)" 2>/dev/null || true)"
-if [ -n "$LOGIN_HOME_EQ" ] && [ -d "$LOGIN_HOME_EQ" ]; then
-	# The §3.5 guard refuses before gate 3 — i.e. before anything reads the
-	# login home's proton-cli config. Nothing under the login home is read.
-	sc "keystore guard: HOME = login home → exit 8" '' '' "HOME=$LOGIN_HOME_EQ" -- --tx="$T/tx-c3.json" --chain=testnet-a --non-interactive
-else
-	echo "FAIL login home not resolvable — the keystore-guard scenario cannot run here"; exit 1
-fi
+# (the keystore-guard scenario with HOME = the login home: see the header and
+#  the fenced library call just before the whole-file compare below)
 
 # ---- gate 2 ----
 sc "gate 2: token missing"       @none  '' -- --tx="$T/tx-c3.json" --chain=testnet-a --non-interactive
@@ -203,9 +209,41 @@ if [ ! -r "$GOLDEN" ]; then
 	t_summary safe-broadcast-equivalence || true
 	exit 1
 fi
-if diff -u "$GOLDEN" "$OUT" > "$T/diff.txt"; then
+# ---- keystore guard: HOME = login home (the library, inside the fence) ----
+GUARD_BLOCK_NAME="keystore guard: HOME = login home → exit 8"
+# golden_block_stderr_from <name> <first line prefix> — the golden block's
+# stderr lines from the first one that starts with the prefix.
+golden_block_stderr_from() {
+	awk -v name="=== $1" -v pre="$2" '
+		$0 == name { inb = 1; next }
+		inb && /^=== / { exit }
+		inb && $0 == "--- stderr" { ine = 1; next }
+		inb && ine && /^--- / { exit }
+		inb && ine && (on || index($0, pre) == 1) { on = 1; print }' "$GOLDEN"
+}
+GUARD_WANT="$T/guard-want.txt"
+golden_block_stderr_from "$GUARD_BLOCK_NAME" "ERROR (keystore guard" > "$GUARD_WANT"
+GUARD_LIB="$(dirname "$W")/../scripts/lib/require-keystore-home.sh"
+# shellcheck disable=SC2016  # $1 / $2 are the inner shell's arguments
+run_with_real_login_home bash -c '. "$1"; require_project_keystore_home "$2"' _ "$GUARD_LIB" "$W" \
+	</dev/null >/dev/null 2>"$T/guard.err"; GUARD_RC=$?
+sed -e "s#${W}#<WRAPPER>#g" "$T/guard.err" > "$T/guard.err.w"
+sbh_norm "$T/guard.err.w" > "$T/guard-got.txt"
+if [ ! -s "$GUARD_WANT" ]; then
+	t_fail "keystore guard: the golden block '$GUARD_BLOCK_NAME' has no ERROR (keystore guard lines"
+elif [ "$GUARD_RC" -eq 1 ] && cmp -s "$GUARD_WANT" "$T/guard-got.txt"; then
+	t_pass "keystore guard: HOME = login home → the library (in the fence) refuses with the golden block's text, byte-for-byte"
+else
+	t_fail "keystore guard: HOME = login home → the library (in the fence) rc=$GUARD_RC (want 1) or its text differs from the golden block"
+	diff -u "$GUARD_WANT" "$T/guard-got.txt" | sed 's/^/  /' | head -20
+fi
+
+# The whole-file compare leaves the block above out of the golden file.
+GOLDEN_CMP="$T/golden-cmp.txt"
+awk -v name="=== $GUARD_BLOCK_NAME" '$0 == name { skip = 1; next } /^=== / { skip = 0 } !skip' "$GOLDEN" > "$GOLDEN_CMP"
+if diff -u "$GOLDEN_CMP" "$OUT" > "$T/diff.txt"; then
 	t_pass "all $N default-profile scenarios reproduce the pre-profile wrapper byte-for-byte (rc, stdout, stderr, audit, call order)"
-	t_summary safe-broadcast-equivalence
+	t_summary safe-broadcast-equivalence || exit 1
 	exit 0
 fi
 t_fail "default-profile behaviour differs from the pre-profile wrapper:"

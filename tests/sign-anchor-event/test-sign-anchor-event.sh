@@ -53,7 +53,6 @@ jq '.observations_branch.cycle_number_observed = 0' \
 # A hermetic `proton` stub (just enough to satisfy `command -v proton`; it
 # is never actually asked to sign or broadcast anything) plus a project
 # keystore HOME fixture, mirroring tests/safe-broadcast/test-safe-broadcast.sh.
-LOGIN_HOME="$(eval echo "~$(id -un)" 2>/dev/null || true)"
 TEST_HOME="$(mktemp -d -t fya-sign-home.XXXXXX)"
 STUB_DIR="$(mktemp -d -t fya-sign-stub.XXXXXX)"
 cat > "$STUB_DIR/proton" <<'STUB'
@@ -241,17 +240,28 @@ else
 	FAIL=$((FAIL + 1))
 fi
 
-# ---- keystore guard (§3.5): refuse when $HOME resolves to the login home ----
-# Non-dry-run path: the stub `proton` on PATH satisfies the signing-host
-# assertion (command -v proton), so execution reaches the guard just after
-# it. Only assertable when the test runner's login home is resolvable.
-if [ -n "$LOGIN_HOME" ]; then
-	export HOME="$LOGIN_HOME"
-	run_case "keystore guard: HOME=login home → refuse (exit 8)" 8 \
-		--chain=testnet-a --anchor-source="${REPO_ROOT}/public/api/anchor-source.example.json"
-	export HOME="$TEST_HOME"
+# ---- keystore guard (§3.5): the guard runs before the first keystore use ----
+# The script reads the anchor-source with jq before its guard, so a run with
+# HOME = the login home cannot go through tests/lib/real-home-fence.sh (its jq
+# trap stops the run first), and outside the fence a mutant without the guard
+# would hand the login home to bin/safe-broadcast. So the script is never run
+# with the login home (2026-11-27, L7c): this is a SOURCE check that the
+# top-level guard call comes before the first proton command, the first line
+# that names $HOME, and the call of bin/safe-broadcast (which runs proton),
+# functions counted where they are called (tests/lib/guard-order.sh). The
+# guard's own refusal of the login home is run inside the fence by
+# tests/keystore-guard (1b).
+# shellcheck source=tests/lib/guard-order.sh
+. "${REPO_ROOT}/tests/lib/guard-order.sh"
+# shellcheck disable=SC2016  # the wrapper call is matched as source text
+GUARD_ORDER="$(guard_order_lines "$SCRIPT" 'bash "\$SAFE_BROADCAST"')"; GUARD_ORDER_RC=$?
+GUARD_LINE="${GUARD_ORDER%% *}"; FIRST_USE_LINE="${GUARD_ORDER##* }"
+if [ "$GUARD_ORDER_RC" -eq 0 ] && [ "$GUARD_LINE" -lt "$FIRST_USE_LINE" ]; then
+	printf 'PASS  %-70s (guard line %s < first use line %s)\n' "keystore guard: called before the first proton / \$HOME / wrapper use" "$GUARD_LINE" "$FIRST_USE_LINE"
+	PASS=$((PASS + 1))
 else
-	printf 'SKIP  %-70s (login home not resolvable in this environment)\n' "keystore guard: HOME=login home → refuse"
+	printf 'FAIL  %-70s (%s)\n' "keystore guard: called before the first proton / \$HOME / wrapper use" "$GUARD_ORDER" >&2
+	FAIL=$((FAIL + 1))
 fi
 
 # ---- keystore guard (§3.5): pass through when $HOME is a project fixture ----

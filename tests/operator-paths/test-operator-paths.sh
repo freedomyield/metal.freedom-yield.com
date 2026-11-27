@@ -4,17 +4,21 @@
 # scripts read it from there.
 #
 # CHAIN: none. PRIME_DIRECTIVE: TESTNET-FIRST — safe, no broadcast pathway.
-# Never runs proton. Every HOME is a temp dir. Two cases (P2 and P8) run the
-# pre-flight WITHOUT FYP_KEYSTORE_*, so its default keystore paths name the
-# real login home; the pre-flight stops at its HOME check with exit 8 before it
-# reads anything, and its only contact with those paths is the `cd` inside
-# fyp_realpath. Every other override the pre-flight has (FYP_PQ_KEY_DIR,
-# FYP_MAINNET_CFG, FYP_REHEARSAL_CFG, FYP_IDENTITY_KEY) points at a temp dir.
+# Never runs proton. Every HOME is a temp dir, and every run of the pre-flight
+# has ALL its path overrides (FYP_KEYSTORE_TESTNET, FYP_KEYSTORE_MAINNET,
+# FYP_PQ_KEY_DIR, FYP_MAINNET_CFG, FYP_REHEARSAL_CFG, FYP_IDENTITY_KEY, ...)
+# pointed at temp dirs, with the traps of tests/lib/real-home-fence.sh first on
+# PATH (a trap call fails the case). No case reaches the real login home's
+# keystore dirs: the pre-flight's defaults are checked as source text (P2).
+# (Until 2026-11-26, P2 and P8 ran the pre-flight without FYP_KEYSTORE_*; a
+# mutant without the HOME check then read the real keystores' proton-cli.json.)
 #
 # Cases:
 #   P1  every name in the definition has its value, spelled out here (a change
 #       of the definition fails this on purpose)
-#   P2  the pre-flight's default testnet keystore is <login home>/<definition>
+#   P2  the pre-flight's default places are <login home>/<definition name>
+#       (source text: the default lines use ${LOGIN_HOME}/${FYD_..._REL};
+#       the values themselves are P1's)
 #   P3  the quoted heredoc of scripts/cycle-transition.sh (fyct__phase_rows)
 #       names the testnet keystore at stop 3 and the mainnet one at stop 4
 #   P4  unit 7a's lines use the testnet name; units 7b and 7c the mainnet one
@@ -22,7 +26,8 @@
 #   P6  cycle-transition.sh's default config dir is ${HOME}/<definition>
 #   P7  the pre-flight refuses a HOME that is the MAINNET keystore (exit 8)
 #   P8  the pre-flight refuses a HOME named like the former testnet keystore
-#       (no fallback to the former place)
+#       (no fallback to the former place); its re-invoke hint names the
+#       definition's testnet keystore
 #   P9  no former place name is left in bin/ or scripts/ code lines
 #   P10 identity-pq.sh stops when the definition cannot be read (fail-closed,
 #       no FY_PQ_KEY_DIR): the three path functions print nothing and return 1,
@@ -30,6 +35,10 @@
 #       status before touching anything. The tree holds a copy of the
 #       library WITHOUT operator-paths.sh (T3a) or WITH an empty one (T3b);
 #       HOME is a temp dir, the real key places are never named.
+#   P11 no file under tests/ (1) spells the real operator-local dir, (2) joins
+#       the login home to a definition name or to .config/metal.freedom-yield.com
+#       on one line, or (3) sets HOME to the login home outside
+#       tests/lib/real-home-fence.sh
 #
 # Usage: bash tests/operator-paths/test-operator-paths.sh
 # Exit:  0 all pass / 1 any fail
@@ -88,14 +97,27 @@ DEF_TESTNET="$(bash -c '. "$1"; printf "%s" "$FYD_KEYSTORE_TESTNET_REL"' _ "$PAT
 DEF_MAINNET="$(bash -c '. "$1"; printf "%s" "$FYD_KEYSTORE_MAINNET_REL"' _ "$PATHS_LIB")"
 DEF_IDENTITY="$(bash -c '. "$1"; printf "%s" "$FYD_IDENTITY_KEY_DIR_REL"' _ "$PATHS_LIB")"
 
-LOGIN_HOME="$(eval echo "~$(id -un)" 2>/dev/null || true)"
-LOGIN_HOME_PHYS="$( (cd "$LOGIN_HOME" 2>/dev/null && pwd -P) || printf '%s' "$LOGIN_HOME")"
+# The traps of the fence (one trap writer for all tests): a pre-flight run that
+# calls proton, jq, curl, ... got past the check under test.
+# shellcheck source=tests/lib/real-home-fence.sh
+. "${REPO_ROOT}/tests/lib/real-home-fence.sh"
+PF_TRAP_DIR="${WORK}/${FENCE_TRAP_DIR_NAME}"
+PF_TRAP_MARK="${WORK}/${FENCE_TRAP_MARK_NAME}"
+if ! fence_write_traps "$PF_TRAP_DIR" "$PF_TRAP_MARK" || ! fence_traps_first "$PF_TRAP_DIR"; then
+	echo "FATAL: the traps are not first on PATH" >&2; exit 1
+fi
 
-# run_preflight <home> <out-file> [VAR=value ...] — exit code of the pre-flight.
+# run_preflight <home> <out-file> [VAR=value ...] — exit code of the pre-flight,
+# or FENCE_TRAP_EXIT if a trap was called. The keystores are temp dirs unless a
+# VAR=value after them names others (still temp dirs: P7).
 run_preflight() {
-	local home="$1" out="$2"; shift 2
-	env -u FYP_KEYSTORE_TESTNET -u FYP_KEYSTORE_MAINNET -u FY_PQ_KEY_DIR \
+	local home="$1" out="$2" rc; shift 2
+	rm -f "$PF_TRAP_MARK"
+	env -u FY_PQ_KEY_DIR \
 		HOME="$home" \
+		PATH="${PF_TRAP_DIR}:${PATH}" \
+		FYP_KEYSTORE_TESTNET="${WORK}/ks-test" \
+		FYP_KEYSTORE_MAINNET="${WORK}/ks-main" \
 		FYP_PQ_KEY_DIR="${WORK}/pq-key-dir" \
 		FYP_MAINNET_CFG="${WORK}/mainnet-cfg" \
 		FYP_REHEARSAL_CFG="${WORK}/rehearsal-cfg" \
@@ -103,26 +125,34 @@ run_preflight() {
 		FY_CONFIG_DIR="${WORK}/fy-config" \
 		FYD_RELAY_TOKEN_DIR="${WORK}/relay" \
 		"$@" bash "$PREFLIGHT" --expect-cycle=1 </dev/null >"$out" 2>&1
+	rc=$?
+	if [ -e "$PF_TRAP_MARK" ]; then rc="$FENCE_TRAP_EXIT"; fi
+	return "$rc"
 }
 
-# ---- P2 the pre-flight's default testnet keystore ---------------------------
-if [ -n "$LOGIN_HOME" ]; then
-	mkdir -p "${WORK}/plain-home"
-	run_preflight "${WORK}/plain-home" "${WORK}/p2.out"; RC=$?
-	EXPECTED_LINE="$(grep -E '^ +expected: ' "${WORK}/p2.out" | head -1 | sed -E 's/^ +expected: +//')"
-	if [ "$RC" -eq 8 ] && { [ "$EXPECTED_LINE" = "${LOGIN_HOME}/${DEF_TESTNET}" ] || [ "$EXPECTED_LINE" = "${LOGIN_HOME_PHYS}/${DEF_TESTNET}" ]; }; then
-		ok "P2 pre-flight default testnet keystore = <login home>/${DEF_TESTNET} (exit 8)"
+# ---- P2 the pre-flight's default places (source text) -----------------------
+# The pre-flight is NOT run here: its defaults name the real login home. Each
+# default line must build its place as ${LOGIN_HOME}/${FYD_<name>_REL}, and
+# LOGIN_HOME must be fyd_login_home's answer. (The `\$` below are escaped:
+# these are patterns of source text, not paths.)
+# shellcheck disable=SC2016
+P2_LINES='LOGIN_HOME="\$\(fyd_login_home\)"
+REHEARSAL_CFG="\$\{FYP_REHEARSAL_CFG:-\$\{LOGIN_HOME\}/\$\{FYD_REHEARSAL_CONFIG_REL\}\}"
+MAINNET_CFG="\$\{FYP_MAINNET_CFG:-\$\{LOGIN_HOME\}/\$\{FYD_BROADCAST_CONFIG_REL\}\}"
+FY_PQ_KEY_DIR="\$\{FYP_PQ_KEY_DIR:-\$\{FY_PQ_KEY_DIR:-\$\{LOGIN_HOME\}/\$\{FYD_IDENTITY_KEY_DIR_REL\}\}\}"
+KEYSTORE_TESTNET="\$\{FYP_KEYSTORE_TESTNET:-\$\{LOGIN_HOME\}/\$\{FYD_KEYSTORE_TESTNET_REL\}\}"
+KEYSTORE_MAINNET="\$\{FYP_KEYSTORE_MAINNET:-\$\{LOGIN_HOME\}/\$\{FYD_KEYSTORE_MAINNET_REL\}\}"'
+while IFS= read -r P2_RE; do
+	P2_NAME="${P2_RE%%=*}"
+	P2_N="$(grep -cxE "$P2_RE" "$PREFLIGHT")"
+	if [ "$P2_N" -eq 1 ]; then
+		ok "P2 pre-flight source line ${P2_NAME}= has the definition-name form (1 line)"
 	else
-		bad "P2 pre-flight default testnet keystore is [${EXPECTED_LINE#"$LOGIN_HOME"}] under the login home, rc=$RC (expected /${DEF_TESTNET}, exit 8)"
+		bad "P2 pre-flight default ${P2_NAME}: $P2_N lines of the expected source text (expected 1)"
 	fi
-	if grep -qF "HOME=~/${DEF_TESTNET} bash" "${WORK}/p2.out"; then
-		ok "P2 pre-flight re-invoke hint names HOME=~/${DEF_TESTNET}"
-	else
-		bad "P2 pre-flight re-invoke hint does not name HOME=~/${DEF_TESTNET}"
-	fi
-else
-	bad "P2 the login home cannot be resolved here"
-fi
+done <<P2_EOF
+$P2_LINES
+P2_EOF
 
 # ---- P3 the quoted heredoc of fyct__phase_rows ------------------------------
 PHASE_ROWS="$(sed -n "/^	cat <<'FYCT_PHASE_EOF'\$/,/^FYCT_PHASE_EOF\$/p" "$ORCH")"
@@ -188,12 +218,21 @@ else
 fi
 
 # ---- P8 no fallback to the former testnet keystore name ---------------------
-mkdir -p "${WORK}/former/.metal-fy-proton-test"
-run_preflight "${WORK}/former/.metal-fy-proton-test" "${WORK}/p8.out"; RC=$?
+# HOME is named like the former testnet keystore; the keystores are temp dirs
+# (ks-test / ks-main), so the HOME check under test is the only thing that can
+# stop the run, and nothing past it is reachable from here.
+mkdir -p "${WORK}/.metal-fy-proton-test" "${WORK}/ks-test" "${WORK}/ks-main"
+run_preflight "${WORK}/.metal-fy-proton-test" "${WORK}/p8.out" \
+	FYP_KEYSTORE_TESTNET="${WORK}/ks-test" FYP_KEYSTORE_MAINNET="${WORK}/ks-main"; RC=$?
 if [ "$RC" -eq 8 ]; then
 	ok "P8 pre-flight with HOME named like the former testnet keystore -> exit 8"
 else
 	bad "P8 pre-flight with HOME named like the former testnet keystore -> rc=$RC (expected 8)"
+fi
+if grep -qF "HOME=~/${DEF_TESTNET} bash" "${WORK}/p8.out"; then
+	ok "P8 pre-flight re-invoke hint names HOME=~/${DEF_TESTNET}"
+else
+	bad "P8 pre-flight re-invoke hint does not name HOME=~/${DEF_TESTNET}"
 fi
 
 # ---- P9 no former place name in bin/ or scripts/ code lines -----------------
@@ -243,6 +282,41 @@ for KIND in none empty; do
 		bad "P10 T3 ($KIND) pq-identity-lock.sh -> rc=$RC, listing changed=$([ "$BEFORE" = "$AFTER" ] && echo no || echo yes), output=[$(printf '%s' "$P10_LOCK_OUT" | head -c 200)] (expected non-zero, no 'locked' line, unchanged)"
 	fi
 done
+
+# ---- P11 no test names or enters the real operator-local dir -----------------
+# Counts every file under tests/ (tracked or not, text or not). The only file
+# left out, and only of (3), is the fence itself. The patterns are written so
+# they do not match their own lines (`hom[e]`, `[[:space:]]`, escaped `$`).
+P11_TESTS_REL="tests"
+P11_FENCE_REL="tests/lib/real-home-fence.sh"
+P11_REAL_DIR="$(eval echo "~$(id -un)" 2>/dev/null)/.config/metal.freedom-yield.com"
+# p11_hits <grep args...> — "<file>:<line>" of each hit under tests/, one per line.
+p11_hits() { (cd "$REPO_ROOT" && grep -rna "$@" -- "$P11_TESTS_REL" 2>/dev/null) | cut -d: -f1,2; }
+# (1) the real dir's absolute path, spelled out
+case "$P11_REAL_DIR" in
+	/*) P11_HITS1="$(p11_hits -F "$P11_REAL_DIR")" ;;
+	*)  P11_HITS1="<the login home cannot be resolved here>" ;;
+esac
+# (2) an unescaped $LOGIN_HOME / ${LOGIN_HOME...} or fyd_login_hom[e] joined,
+# on the same line, to a definition name or to the project config dir
+P11_LH_RE='(^|[^\\])\$\{?LOGIN_HOME|fyd_login_hom[e]'
+P11_DEF_RE='FYD_[A-Z_]*_REL|\.config/metal\.freedom-yield\.com'
+P11_HITS2="$( (cd "$REPO_ROOT" && grep -rnaE -- "$P11_LH_RE" "$P11_TESTS_REL" 2>/dev/null) \
+	| grep -aE -- "$P11_DEF_RE" | cut -d: -f1,2)"
+# (3) HOME set to the login home (any *LOGIN_HOME* name, or the lookup itself)
+P11_HOME_RE="(^|[^A-Za-z0-9_])HOME=[\"']?(\\\$\\{?[A-Za-z_]*LOGIN_HOME|[^[:space:]]*(eval[[:space:]]+echo|id[[:space:]]+-un|fyd_login_hom[e]))"
+P11_HITS3="$(p11_hits -E "$P11_HOME_RE" | grep -vF "${P11_FENCE_REL}:" || true)"
+# p11_report <part> <hits> — ok when empty, else every <file>:<line>.
+p11_report() {
+	if [ -z "$2" ]; then
+		ok "P11-$1 0 lines under tests/"
+	else
+		bad "P11-$1 $(printf '%s\n' "$2" | grep -c .) line(s): $(printf '%s\n' "$2" | tr '\n' ' ')"
+	fi
+}
+p11_report 1 "$P11_HITS1"
+p11_report 2 "$P11_HITS2"
+p11_report 3 "$P11_HITS3"
 
 echo "test-operator-paths summary: PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" -eq 0 ] || { echo "RESULT: FAIL"; exit 1; }

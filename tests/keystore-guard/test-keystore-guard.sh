@@ -80,6 +80,10 @@ FAIL=0
 SKIP=0
 
 . "${REPO_ROOT}/tests/lib/assert.sh"
+# Every run with HOME = the login home goes through the fence (temp overrides,
+# traps on PATH; a trap call turns the status into 97, so the case fails).
+# shellcheck source=tests/lib/real-home-fence.sh
+. "${REPO_ROOT}/tests/lib/real-home-fence.sh"
 pass() { t_pass "$(printf '%-70s%s' "$1" "${2:+ ($2)}")"; }
 fail_case() { t_fail "$(printf '%-70s%s' "$1" "${2:+ ($2)}")"; }
 skip_case() { printf 'SKIP  %-70s%s\n' "$1" "${2:+ ($2)}"; SKIP=$((SKIP + 1)); }
@@ -108,9 +112,7 @@ if [ -n "$LOGIN_HOME" ]; then
 	# 1b. HOME=login home → function returns 1 and prints a §3.5-citing
 	# message to stderr (no broadcast, no side effect — pure function call).
 	STDERR_OUT="$(
-		set -u
-		. "$LIB"
-		HOME="$LOGIN_HOME" bash -c '. "'"$LIB"'"; require_project_keystore_home "unit-test"' 2>&1 1>/dev/null
+		run_with_real_login_home bash -c '. "$1"; require_project_keystore_home "unit-test"' _ "$LIB" 2>&1 1>/dev/null
 		echo "RC=$?"
 	)"
 	RC="$(printf '%s' "$STDERR_OUT" | grep -oE 'RC=[0-9]+' | tail -1 | cut -d= -f2)"
@@ -217,7 +219,7 @@ if [ -n "$LOGIN_HOME" ]; then
 	# so this is deterministic and side-effect-free regardless of whether a
 	# real proton binary or rehearsal config dir exists on this machine.
 	RC=0
-	OUT="$(HOME="$LOGIN_HOME" bash "$REHEARSAL_SCRIPT" </dev/null 2>&1)" || RC=$?
+	OUT="$(run_with_real_login_home bash "$REHEARSAL_SCRIPT" </dev/null 2>&1)" || RC=$?
 	if [ "$RC" -eq 8 ] && printf '%s' "$OUT" | grep -q '§3.5'; then
 		pass "run-testnet-rehearsal.sh: HOME=login home → refuse (exit 8)" "rc=$RC"
 	else
@@ -259,7 +261,7 @@ if [ -n "$LOGIN_HOME" ]; then
 	# and gen-anchor-source.sh never execute — zero side effects on this
 	# repo's tracked files.
 	RC=0
-	OUT="$(HOME="$LOGIN_HOME" bash "$PREVIEW_SCRIPT" </dev/null 2>&1)" || RC=$?
+	OUT="$(run_with_real_login_home bash "$PREVIEW_SCRIPT" </dev/null 2>&1)" || RC=$?
 	if [ "$RC" -eq 8 ] && printf '%s' "$OUT" | grep -q '§3.5'; then
 		pass "preview-cycle-anchor-broadcast.sh: HOME=login home → refuse (exit 8)" "rc=$RC"
 	else
@@ -306,44 +308,29 @@ fi
 # The script has three operator-local, non-keystore paths (rehearsal
 # config dir, dry-run log, receipt file) that must stay pinned to the
 # LOGIN home even when $HOME is correctly scoped to a project keystore
-# dir (e.g. HOME=~/.config/metal.freedom-yield.com/key/testnet). Two of the three
-# (REHEARSAL_CFG, DRY_RUN_LOG) are assigned before this script's first
-# proton call, before the guard check, AND before the ANCHOR_SOURCE
-# selection logic — so they are unaffected by the same forced
-# ANCHOR_SOURCE_OVERRIDE fast-fail technique as case 2b above (HOME=
-# project fixture dir → guard passes → step 1 fails closed on an
-# unreadable ANCHOR_SOURCE_OVERRIDE path — no hang, no side effect, no
-# network call, <1s), and can be observed via a `bash -x` trace of that
-# same run. The third (RECEIPT_OUT) is only assigned deep into the happy
-# path (step 8, after a real broadcast) and is not reachable hermetically,
-# so it — and a regression guard for all three — is checked statically
-# via source text instead.
+# dir (e.g. HOME=~/.config/metal.freedom-yield.com/key/testnet). They have
+# no override, so a run of the script always names the real operator-local
+# dir under the login home; a mutant that let such a run go one step further
+# would read it. So all three are checked as SOURCE TEXT only (2026-11-27,
+# L7c — this used to be a `bash -x` run of the script): LOGIN_HOME comes
+# from fyd_login_home, and each path is ${LOGIN_HOME}/<its definition name>.
 
-if [ -n "$LOGIN_HOME" ]; then
-	RC=0
-	TRACE_OUT="$(HOME="$TEST_HOME" ANCHOR_SOURCE_OVERRIDE=/nonexistent/path/anchor-source.json timeout 20 bash -x "$REHEARSAL_SCRIPT" </dev/null 2>&1)" || RC=$?
-	REHEARSAL_CFG_LINE="$(printf '%s\n' "$TRACE_OUT" | grep -E 'REHEARSAL_CFG=' | tail -1)"
-	DRY_RUN_LOG_LINE="$(printf '%s\n' "$TRACE_OUT" | grep -E 'DRY_RUN_LOG=' | tail -1)"
-
-	# 4a. HOME=project fixture dir (not login home) → REHEARSAL_CFG
-	# resolves under LOGIN_HOME, not under $TEST_HOME.
-	if printf '%s' "$REHEARSAL_CFG_LINE" | grep -qF "REHEARSAL_CFG=${LOGIN_HOME}/${FYD_REHEARSAL_CONFIG_REL}" \
-	   && ! printf '%s' "$REHEARSAL_CFG_LINE" | grep -qF "$TEST_HOME"; then
-		pass "run-testnet-rehearsal.sh: HOME=keystore fixture → REHEARSAL_CFG resolves under LOGIN_HOME"
-	else
-		fail_case "run-testnet-rehearsal.sh: HOME=keystore fixture → REHEARSAL_CFG resolves under LOGIN_HOME" "line=[${REHEARSAL_CFG_LINE}] rc=$RC"
-	fi
-
-	# 4b. Same for DRY_RUN_LOG.
-	if printf '%s' "$DRY_RUN_LOG_LINE" | grep -qF "DRY_RUN_LOG=${LOGIN_HOME}/${FYD_TESTNET_DRYRUN_LOG_REL}" \
-	   && ! printf '%s' "$DRY_RUN_LOG_LINE" | grep -qF "$TEST_HOME"; then
-		pass "run-testnet-rehearsal.sh: HOME=keystore fixture → DRY_RUN_LOG resolves under LOGIN_HOME"
-	else
-		fail_case "run-testnet-rehearsal.sh: HOME=keystore fixture → DRY_RUN_LOG resolves under LOGIN_HOME" "line=[${DRY_RUN_LOG_LINE}] rc=$RC"
-	fi
+# 4a/4b. LOGIN_HOME is fyd_login_home's answer; REHEARSAL_CFG and
+# DRY_RUN_LOG are built on it from their definition names.
+if grep -qxE 'LOGIN_HOME="\$\(fyd_login_home\)"' "$REHEARSAL_SCRIPT"; then
+	pass "run-testnet-rehearsal.sh: LOGIN_HOME is fyd_login_home's answer (source-text)"
 else
-	skip_case "run-testnet-rehearsal.sh: HOME=keystore fixture → REHEARSAL_CFG resolves under LOGIN_HOME" "login home not resolvable"
-	skip_case "run-testnet-rehearsal.sh: HOME=keystore fixture → DRY_RUN_LOG resolves under LOGIN_HOME" "login home not resolvable"
+	fail_case "run-testnet-rehearsal.sh: LOGIN_HOME is fyd_login_home's answer (source-text)"
+fi
+if grep -qxE 'REHEARSAL_CFG="\$\{LOGIN_HOME\}/\$\{FYD_REHEARSAL_CONFIG_REL\}"' "$REHEARSAL_SCRIPT"; then
+	pass "run-testnet-rehearsal.sh: REHEARSAL_CFG is under LOGIN_HOME (source-text)"
+else
+	fail_case "run-testnet-rehearsal.sh: REHEARSAL_CFG is under LOGIN_HOME (source-text)"
+fi
+if grep -qxE 'DRY_RUN_LOG="\$\{LOGIN_HOME\}/\$\{FYD_TESTNET_DRYRUN_LOG_REL\}"' "$REHEARSAL_SCRIPT"; then
+	pass "run-testnet-rehearsal.sh: DRY_RUN_LOG is under LOGIN_HOME (source-text)"
+else
+	fail_case "run-testnet-rehearsal.sh: DRY_RUN_LOG is under LOGIN_HOME (source-text)"
 fi
 
 # 4c. Static source-text check for RECEIPT_OUT (not reachable via a

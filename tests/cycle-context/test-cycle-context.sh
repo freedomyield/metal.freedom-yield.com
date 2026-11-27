@@ -77,6 +77,10 @@ STEPS_JSON="${REPO_ROOT}/docs/cycle-transition-steps.json"
 
 # shellcheck source=tests/lib/assert.sh
 . "${REPO_ROOT}/tests/lib/assert.sh"
+# The login-home probe of T11b runs inside the fence (temp overrides, traps on
+# PATH; a trap call turns its status into 97 — neither gate, so it fails).
+# shellcheck source=tests/lib/real-home-fence.sh
+. "${REPO_ROOT}/tests/lib/real-home-fence.sh"
 pass() { t_pass "$1"; }
 fail() { t_fail "$1"; }
 
@@ -999,7 +1003,7 @@ for s in preview-cycle-anchor-broadcast.sh run-testnet-rehearsal.sh sign-anchor-
 	# and was simply wrong about the ordering.
 	if [ -n "$LOGIN_HOME_FOR_TEST" ]; then
 		rc=0
-		env "HOME=${LOGIN_HOME_FOR_TEST}" "FY_LIVE=" timeout 30 bash "${SCRIPTS_DIR}/${s}" \
+		run_with_real_login_home env "FY_LIVE=" timeout 30 bash "${SCRIPTS_DIR}/${s}" \
 			--fyc-unrecognized-argument-probe </dev/null >/dev/null 2>&1 || rc=$?
 		case "$rc" in
 			8) pass "T11b $s: login home stopped at the 3.5 guard (rc=8; this script guards before parsing)"

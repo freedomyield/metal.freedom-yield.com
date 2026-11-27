@@ -780,32 +780,32 @@ run_case_grep "gate 4: mainnet, non-anchor (updateauth) outgoing + non-JSON dry-
 	--dry-run-log="$TEST_DRY_LOG_NONJSON" \
 	--non-interactive
 
-# ---- keystore guard (§3.5): refuse when $HOME resolves to the login home ----
-# The guard sits immediately before gate 3 (this wrapper's first real proton
-# invocation). It fires only when $HOME resolves EXACTLY to the login
-# user's default home (via `id -un` + `eval echo ~<user>` — independent of
-# $HOME itself). We can only assert this deterministically when the test
-# runner's login home is resolvable; if not, skip rather than fabricate a
-# result.
-#
-# Reset the token to a bare/legacy (unbound, empty-content) state first: the
-# gate 1/gate 4 shape-binding block above left it CONTENT-bound to
-# "mainnet-a" (R16 gate 2b), which would otherwise make gate 2b itself
-# refuse these testnet-chain cases (a mainnet-bound token cannot authorize
-# testnet either, by design) before ever reaching the guard/gate 3 under
-# test here. A bare legacy token keeps testnet's backward-compat accept path.
-: > "$TEST_TOKEN"
-touch "$TEST_TOKEN"
-if [ -n "$LOGIN_HOME" ]; then
-	export HOME="$LOGIN_HOME"
-	run_case "keystore guard: HOME=login home → refuse (exit 8, before gate 3)" 8 \
-		--tx="$TEST_TX_VALID" --chain=testnet-a --non-interactive
-	export HOME="$TEST_HOME"
+# ---- keystore guard (§3.5): the guard runs before the first keystore use ----
+# The wrapper uses jq long before its guard, so a run with HOME = the login
+# home cannot go through tests/lib/real-home-fence.sh (its jq trap stops the
+# run first), and outside the fence a mutant without the guard would go on to
+# gate 3 under the real login home. So the wrapper is never run with the login
+# home (2026-11-27, L7c): this is a SOURCE check that the top-level guard call
+# comes before the first proton command and the first line that reads under
+# $HOME (proton-cli.json), functions counted where they are called
+# (tests/lib/guard-order.sh). The guard's own refusal of the login home is run
+# inside the fence by tests/keystore-guard (1b).
+# shellcheck source=tests/lib/guard-order.sh
+. "$REPO_ROOT/tests/lib/guard-order.sh"
+GUARD_ORDER="$(guard_order_lines "$SOURCE_WRAPPER")"; GUARD_ORDER_RC=$?
+GUARD_LINE="${GUARD_ORDER%% *}"; FIRST_USE_LINE="${GUARD_ORDER##* }"
+if [ "$GUARD_ORDER_RC" -eq 0 ] && [ "$GUARD_LINE" -lt "$FIRST_USE_LINE" ]; then
+	t_pass "$(printf '%-70s (guard line %s < first use line %s)' "keystore guard: called before the first proton / \$HOME use" "$GUARD_LINE" "$FIRST_USE_LINE")"
 else
-	printf 'SKIP  %-70s (login home not resolvable in this environment)\n' "keystore guard: HOME=login home → refuse"
+	t_fail "$(printf '%-70s' "keystore guard: called before the first proton / \$HOME use")" "$GUARD_ORDER"
 fi
 
 # ---- keystore guard (§3.5): pass through when $HOME is a project fixture ----
+# Reset the token to a bare/legacy (unbound, empty-content) state first: the
+# gate 1/gate 4 shape-binding block above left it CONTENT-bound to
+# "mainnet-a" (R16 gate 2b), which would otherwise make gate 2b itself refuse
+# this testnet-chain case before it reaches the guard and gate 3.
+: > "$TEST_TOKEN"
 # HOME is already scoped to $TEST_HOME (a throwaway temp dir, standing in for
 # a real ~/.config/metal.freedom-yield.com/key/testnet) for the whole suite (see the export near
 # the top of this file). This case shows that explicitly: the guard does
@@ -955,11 +955,19 @@ sb_probe_fallback() {
 }
 if [ -n "$LOGIN_HOME" ]; then
 	RESOLVED_FALLBACK="$(sb_probe_fallback -)"
-	EXPECTED_FALLBACK="${LOGIN_HOME}/${FYD_BROADCAST_AUDIT_LOG_REL}"
-	if [ "$RESOLVED_FALLBACK" = "$EXPECTED_FALLBACK" ]; then
-		t_pass "$(printf '%-70s (%s)' "audit log fallback: HOME=keystore fixture → resolves under LOGIN home" "$RESOLVED_FALLBACK")"
+	# <login home>/<definition>, compared in two halves (the login home is never
+	# joined to a definition name in a test: tests/operator-paths P11) plus the
+	# length, so the two halves together are an exact match.
+	FALLBACK_HEAD_OK=0; FALLBACK_TAIL_OK=0
+	case "$RESOLVED_FALLBACK" in "$LOGIN_HOME"/*) FALLBACK_HEAD_OK=1 ;; esac
+	case "$RESOLVED_FALLBACK" in */"$FYD_BROADCAST_AUDIT_LOG_REL") FALLBACK_TAIL_OK=1 ;; esac
+	FALLBACK_HEAD_LEN="${#LOGIN_HOME}"
+	FALLBACK_TAIL_LEN="${#FYD_BROADCAST_AUDIT_LOG_REL}"
+	if [ "$FALLBACK_HEAD_OK" -eq 1 ] && [ "$FALLBACK_TAIL_OK" -eq 1 ] \
+	   && [ "${#RESOLVED_FALLBACK}" -eq $((FALLBACK_HEAD_LEN + 1 + FALLBACK_TAIL_LEN)) ]; then
+		t_pass "$(printf '%-70s' "audit log fallback: HOME=keystore fixture → resolves under LOGIN home")"
 	else
-		t_fail "$(printf '%-70s (got [%s], expected [%s])' "audit log fallback: HOME=keystore fixture → resolves under LOGIN home" "$RESOLVED_FALLBACK" "$EXPECTED_FALLBACK")"
+		t_fail "$(printf '%-70s (head=%s tail=%s)' "audit log fallback: HOME=keystore fixture → resolves under LOGIN home" "$FALLBACK_HEAD_OK" "$FALLBACK_TAIL_OK")"
 	fi
 	case "$RESOLVED_FALLBACK" in
 		"$TEST_HOME"/*)
